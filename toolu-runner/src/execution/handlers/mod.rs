@@ -1,14 +1,23 @@
 //! Step handler registry and dispatch.
 //!
-//! ## Step 4c stubs
+//! ## Module map
 //!
-//! The real implementations of the script/node/node_exec/composite/docker
-//! handlers land in step 4d. For step 4c the stubs return `Conclusion::Failure`
-//! with a TODO marker so `action_exec` can compile and the build is green.
+//! - [`resolve`] — Pick which handler runs a step based on `runs.using`.
+//! - [`script`] — Built-in `run:` shell handler.
+//! - [`node`] / [`node_exec`] — Built-in Node.js action handler.
+//! - [`composite`] — Built-in composite action handler.
+//! - [`docker`] — Built-in Docker action handler.
+//!
+//! ## Yamless cuts
+//!
+//! `yamless.rs`, `yamless_deploy/`, `yamless_notify.rs`, and
+//! `yamless_test_report/` from the upstream yamless-runner are intentionally
+//! dropped — the `HandlerKind::Yamless` variant and the `runs_using ==
+//! "yamless"` dispatch are also removed. `handler_emit.rs` was dropped along
+//! with its only consumers.
 
 pub mod composite;
 pub mod docker;
-pub mod handler_emit;
 pub mod node;
 pub mod node_exec;
 pub mod resolve;
