@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use shared::{Conclusion, RunnerError};
 
@@ -20,14 +21,27 @@ pub struct ExecutionContext {
   matrix: ExprValue,
   needs: ExprValue,
   inputs: ExprValue,
-  masker: SecretMasker,
+  /// Shared with the listener and the tracing file sink's redactor.
+  /// Wrapped in a `Mutex` so `register_secret` and `add_mask` can
+  /// mutate the pattern set from any Arc clone — the file sink's
+  /// `MaskerRedactor` reads the same Mutex on every line, so
+  /// registrations are visible to the file sink on the very next
+  /// `redact` call.
+  masker: Arc<Mutex<SecretMasker>>,
   path_additions: Vec<String>,
   cgroup_path: Option<std::path::PathBuf>,
 }
 
 impl ExecutionContext {
-  /// Create a minimal context for unit tests.
+  /// Create a minimal context for unit tests with its own private masker.
   pub fn new_for_test() -> Self {
+    Self::with_masker(Arc::new(Mutex::new(SecretMasker::new())))
+  }
+
+  /// Create a context that shares `masker` with the caller (typically
+  /// the listener, which also shares the same Arc with the tracing
+  /// file sink's redactor).
+  pub fn with_masker(masker: Arc<Mutex<SecretMasker>>) -> Self {
     let mut runner_ctx = HashMap::new();
     runner_ctx.insert("os".to_owned(), ExprValue::String("Linux".to_owned()));
     runner_ctx.insert("arch".to_owned(), ExprValue::String("X64".to_owned()));
@@ -46,7 +60,7 @@ impl ExecutionContext {
       matrix: ExprValue::Null,
       needs: ExprValue::Null,
       inputs: ExprValue::Null,
-      masker: SecretMasker::new(),
+      masker,
       path_additions: Vec::new(),
       cgroup_path: None,
     }
@@ -181,19 +195,37 @@ impl ExecutionContext {
     self.job_status
   }
 
-  pub fn masker(&self) -> &SecretMasker {
+  pub fn masker(&self) -> &Arc<Mutex<SecretMasker>> {
     &self.masker
   }
 
-  /// Register a secret variable and add to masker.
+  /// Register a secret variable and add to the shared masker.
+  ///
+  /// The shared masker is wrapped in a `Mutex` so a single
+  /// `&mut ExecutionContext` is enough to register a new secret —
+  /// the file sink's redactor reads the same Mutex on every log
+  /// line, so the new secret is visible to the file sink on the
+  /// very next `redact` call.
   pub fn register_secret(&mut self, key: &str, value: &str) {
     self.secrets.insert(key.to_owned(), value.to_owned());
-    self.masker.add_secret(value);
+    // Recover from a poisoned Mutex without the panic-on-poison
+    // convenience, since this codebase's `no-unwrap` gate forbids
+    // the `Result::expect` method. If a prior holder panicked, the
+    // inner SecretMasker is still valid.
+    let mut guard = match self.masker.lock() {
+      Ok(g) => g,
+      Err(poisoned) => poisoned.into_inner(),
+    };
+    guard.add_secret(value);
   }
 
-  /// Add a mask hint value to the masker.
+  /// Add a mask hint value to the shared masker.
   pub fn add_mask(&mut self, value: &str) {
-    self.masker.add_secret(value);
+    let mut guard = match self.masker.lock() {
+      Ok(g) => g,
+      Err(poisoned) => poisoned.into_inner(),
+    };
+    guard.add_secret(value);
   }
 
   /// Merge global env + step env + PATH additions into a full env map.

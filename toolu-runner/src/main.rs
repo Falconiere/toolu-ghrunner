@@ -27,7 +27,7 @@ use toolu_runner::config::{
   load_config as load_reg_config, load_credentials, resolve_data_dir, resolve_work_dir,
   save_config as save_reg_config, save_credentials,
 };
-use toolu_runner::execution::secret_masker::SecretMasker;
+use toolu_runner::execution::secret_masker::{MaskerRedactor, SecretMasker};
 use toolu_runner::listener::GitHubListener;
 use toolu_runner::lockfile;
 
@@ -212,7 +212,11 @@ async fn probe_jit_endpoint(host: &str) -> Result<(), RunnerError> {
 }
 
 async fn cmd_register(args: RegisterArgs) -> Result<(), Box<dyn std::error::Error>> {
-  startup::init(env!("CARGO_MANIFEST_DIR"), "runner").map_err(|e| format!("startup init: {e}"))?;
+  let masker = Arc::new(std::sync::Mutex::new(SecretMasker::new()));
+  let redactor: Arc<dyn shared::startup::SecretRedactor> =
+    Arc::new(MaskerRedactor(Arc::clone(&masker)));
+  startup::init_with_redactor(env!("CARGO_MANIFEST_DIR"), "runner", redactor)
+    .map_err(|e| format!("startup init: {e}"))?;
 
   let host = parse_and_validate_url(&args.url).map_err(|e| format!("{e}"))?;
   probe_jit_endpoint(&host)
@@ -295,7 +299,11 @@ async fn cmd_register(args: RegisterArgs) -> Result<(), Box<dyn std::error::Erro
 }
 
 async fn cmd_run(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
-  startup::init(env!("CARGO_MANIFEST_DIR"), "runner").map_err(|e| format!("startup init: {e}"))?;
+  let masker = Arc::new(std::sync::Mutex::new(SecretMasker::new()));
+  let redactor: Arc<dyn shared::startup::SecretRedactor> =
+    Arc::new(MaskerRedactor(Arc::clone(&masker)));
+  startup::init_with_redactor(env!("CARGO_MANIFEST_DIR"), "runner", redactor)
+    .map_err(|e| format!("startup init: {e}"))?;
 
   let config_path = args.config.clone().unwrap_or_else(default_config_path);
   if !config_path.exists() {
@@ -335,7 +343,6 @@ async fn cmd_run(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
     workspace_root,
     cgroup_path: None,
   };
-  let masker = Arc::new(SecretMasker::new());
 
   // The JIT config string is loaded from the persisted config. The
   // step-10 live flow will populate this with the real base64 blob;
@@ -392,7 +399,11 @@ async fn cmd_run(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn cmd_remove(args: RemoveArgs) -> Result<(), Box<dyn std::error::Error>> {
-  startup::init(env!("CARGO_MANIFEST_DIR"), "runner").map_err(|e| format!("startup init: {e}"))?;
+  let masker = Arc::new(std::sync::Mutex::new(SecretMasker::new()));
+  let redactor: Arc<dyn shared::startup::SecretRedactor> =
+    Arc::new(MaskerRedactor(Arc::clone(&masker)));
+  startup::init_with_redactor(env!("CARGO_MANIFEST_DIR"), "runner", redactor)
+    .map_err(|e| format!("startup init: {e}"))?;
 
   let config_path = args.config.clone().unwrap_or_else(default_config_path);
   let creds_path = credentials_path_for(&config_path);

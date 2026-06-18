@@ -83,7 +83,7 @@ async fn listener_polls_until_cancellation() {
     .await;
 
   let config = make_config();
-  let masker = Arc::new(SecretMasker::new());
+  let masker = Arc::new(std::sync::Mutex::new(SecretMasker::new()));
   let cancel = CancellationToken::new();
 
   let jit_config = minimal_jit_config_b64(&server.uri(), 42);
@@ -109,20 +109,20 @@ async fn listener_constructs_from_jit_config() {
   // Pure construction smoke test — no network at all.
   let server = MockServer::start().await;
   let config = make_config();
-  let masker = Arc::new(SecretMasker::new());
+  let masker = Arc::new(std::sync::Mutex::new(SecretMasker::new()));
   let jit_config = minimal_jit_config_b64(&server.uri(), 99);
 
   let listener =
     GitHubListener::new(&jit_config, config, masker).expect("listener should construct");
   // The masker is held for future use by log uploaders; just confirm it's
   // retrievable.
-  let _: &Arc<SecretMasker> = listener.masker();
+  let _: &Arc<std::sync::Mutex<SecretMasker>> = listener.masker();
 }
 
 #[tokio::test]
 async fn listener_rejects_invalid_jit_config() {
   let config = make_config();
-  let masker = Arc::new(SecretMasker::new());
+  let masker = Arc::new(std::sync::Mutex::new(SecretMasker::new()));
 
   let result = GitHubListener::new("not-base64-or-json", config, masker);
   assert!(result.is_err(), "expected parse error on garbage input");

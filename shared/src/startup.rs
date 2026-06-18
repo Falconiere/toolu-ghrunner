@@ -174,7 +174,7 @@ where
 pub fn init_with_redactor(
   manifest_dir: &str,
   service: &str,
-  redactor: Box<dyn SecretRedactor>,
+  redactor: Arc<dyn SecretRedactor>,
 ) -> Result<(), crate::RunnerError> {
   load_dotenv(Path::new(manifest_dir));
 
@@ -189,7 +189,7 @@ pub fn init_with_redactor(
 
   let env_filter = build_env_filter();
 
-  let shared_redactor = Arc::from(redactor);
+  let shared_redactor = redactor;
 
   let stderr_layer = tracing_subscriber::fmt::layer()
     .with_writer(RedactingMakeWriter::new(

@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -17,6 +17,12 @@ pub(crate) struct SessionCtx {
   pub(crate) broker_url: String,
   pub(crate) session_id: String,
   pub(crate) config: RunnerConfig,
+  /// Shared with the tracing file sink's redactor and the
+  /// `ExecutionContext` for each acquired job. Registrations from
+  /// `register_secret` / `add_mask` flow through this Mutex to all
+  /// readers, so secrets registered mid-job are redacted in the file
+  /// sink and in the per-line upload channel without further wiring.
+  pub(crate) masker: Arc<Mutex<SecretMasker>>,
   pub(crate) cancel: CancellationToken,
   pub(crate) tx: mpsc::Sender<ListenerEvent>,
 }
@@ -29,7 +35,7 @@ pub struct GitHubListener {
   jit_config: JitConfig,
   client: reqwest::Client,
   config: RunnerConfig,
-  masker: Arc<SecretMasker>,
+  masker: Arc<Mutex<SecretMasker>>,
 }
 
 impl GitHubListener {
@@ -41,7 +47,7 @@ impl GitHubListener {
   pub fn new(
     jit_config_base64: &str,
     config: RunnerConfig,
-    masker: Arc<SecretMasker>,
+    masker: Arc<Mutex<SecretMasker>>,
   ) -> Result<Self, RunnerError> {
     let jit_config = JitConfig::parse(jit_config_base64)?;
     let client = reqwest::Client::builder()
@@ -58,7 +64,7 @@ impl GitHubListener {
   }
 
   /// Borrow the secret masker used to redact log output.
-  pub fn masker(&self) -> &Arc<SecretMasker> {
+  pub fn masker(&self) -> &Arc<Mutex<SecretMasker>> {
     &self.masker
   }
 
@@ -112,6 +118,7 @@ impl GitHubListener {
       broker_url: jit.runner_settings.server_url_v2.clone(),
       session_id: session_response.session_id,
       config: config.clone(),
+      masker: Arc::clone(&self.masker),
       cancel,
       tx,
     };

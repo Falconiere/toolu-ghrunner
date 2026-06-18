@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
@@ -52,7 +53,7 @@ pub(super) async fn execute_with_renewal(
   // The engine owns its own event channel; we get a receiver back and
   // hand it to the forwarder, which derives the conclusion and signals
   // back via the oneshot.
-  let runner = Runner::new(ctx.config.clone());
+  let runner = Runner::new(ctx.config.clone(), Arc::clone(&ctx.masker));
   let engine_rx = runner
     .execute_job(job_msg.clone(), ctx.cancel.clone())
     .await;

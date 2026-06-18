@@ -8,6 +8,33 @@ pub struct SecretMasker {
   patterns: Vec<String>,
 }
 
+/// Bridge into `shared::startup::SecretRedactor` for a `SecretMasker`
+/// wrapped in a `Mutex` and shared across the listener, the per-job
+/// `ExecutionContext`, and the tracing file sink.
+///
+/// The Mutex is the gate for `add_secret`; the inner `mask` call is
+/// `&self` so it doesn't need exclusive access. Each `redact` call
+/// takes the lock briefly to read the current pattern set.
+///
+/// `SecretMasker` (without the Mutex) already implements `SecretRedactor`
+/// directly — see the impl below. Use this wrapper only when the masker
+/// is shared as `Arc<Mutex<SecretMasker>>` across multiple threads and
+/// must implement `SecretRedactor` for the file sink.
+pub struct MaskerRedactor(pub std::sync::Arc<std::sync::Mutex<SecretMasker>>);
+
+impl shared::startup::SecretRedactor for MaskerRedactor {
+  fn redact(&self, line: &str) -> String {
+    // Use `match` to recover from a poisoned Mutex without using
+    // the panic-on-poison convenience. The inner SecretMasker is
+    // still valid even if a prior holder panicked.
+    let guard = match self.0.lock() {
+      Ok(g) => g,
+      Err(poisoned) => poisoned.into_inner(),
+    };
+    guard.mask(line)
+  }
+}
+
 /// Bridge into `shared::startup::SecretRedactor`.
 ///
 /// `SecretMasker` lives in `toolu-runner` but the trait lives in `shared`
