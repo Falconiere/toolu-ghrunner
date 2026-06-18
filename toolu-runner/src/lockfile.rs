@@ -156,11 +156,11 @@ fn handle_contended(path: &Path, body: &LockBody) -> Result<LockGuard, RunnerErr
 
   // Stale lock — remove and retry once.
   let _ = std::fs::remove_file(path);
-  let file = OpenOptions::new()
-    .create(true)
-    .write(true)
-    .truncate(false)
-    .open(path)?;
+  let mut opts = OpenOptions::new();
+  opts.create(true).write(true).truncate(false);
+  #[cfg(unix)]
+  opts.mode(0o600);
+  let file = opts.open(path)?;
   file
     .try_lock_exclusive()
     .map_err(|e| RunnerError::Config(format!("lock acquire after stale-lock removal: {e}")))?;
