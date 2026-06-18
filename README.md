@@ -131,7 +131,7 @@ cargo fmt --all -- --check
 ```
 
 `tools/check.sh` mirrors the yamless backend's check script: rejects
-`.rs` files over 150 lines, rejects `#[allow(..)]` / `#[expect(..)]`
+`.rs` files over 700 lines, rejects `#[allow(..)]` / `#[expect(..)]`
 outside tests, rejects `.unwrap()` / `.expect()` in production code,
 and rejects any `yamless` / `YAMLESS_` reference in source.
 
@@ -189,7 +189,7 @@ that the unit file parses, not end-to-end service bring-up tests.
 | `HOME`                     | —                        | `register` / `run`   | Resolves `~/.toolu-runner/` for the default data dir. |
 | `USERPROFILE`              | —                        | `register` / `run`   | Windows fallback for `HOME`. |
 | `HOSTNAME` / `COMPUTERNAME`| `unknown`                | `register`           | Used by the session registration to identify the runner host. |
-| `YAMLESS_*` (any)          | —                        | all subcommands      | **Not recognized.** The runner prints a `WARN` to stderr for each and ignores. There is no env-var migration path from yamless-runner. |
+| `YAMLESS_*` (any)          | —                        | all subcommands      | **Legacy.** The runner prints `WARN: ignoring legacy env var {key} — toolu-runner has no compatibility layer for the old prefix; use TOOLU_RUNNER_* instead` for each and ignores. |
 
 The spec also lists `TOOLU_RUNNER_CONFIG`, `TOOLU_RUNNER_WORK`, and
 `TOOLU_RUNNER_LABELS` as future env-var overrides for the
@@ -287,7 +287,7 @@ is also tracked as a known gap.
 This is a docs-and-tests-driven project. Before opening a PR:
 
 1. Run `./tools/check.sh all` and ensure it passes.
-2. Run `cargo test --workspace` and ensure all 80 unit tests pass.
+2. Run `cargo test --workspace` and ensure all tests pass (currently 196).
 3. If your change touches the listener or reporting, add a unit test
    in `toolu-runner/tests/` that exercises the new code path.
 4. If your change is public-facing, update `README.md` /
@@ -296,7 +296,7 @@ This is a docs-and-tests-driven project. Before opening a PR:
 The repo is governed by a strict clippy config (see `Cargo.toml`):
 no `unwrap()` / `expect()` outside tests, no `#[allow(..)]` /
 `#[expect(..)]`, no yamless coupling. New files must stay under
-150 lines (enforced by `tools/check.sh`).
+700 lines (enforced by `tools/check.sh`; function-body cap is 150 lines via clippy's `too_many_lines`).
 
 ## License
 

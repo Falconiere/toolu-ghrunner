@@ -22,6 +22,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 
+use fs2::FileExt;
 use shared::startup::scan_legacy_env;
 use toolu_runner::lockfile::{self, LockBody};
 
@@ -114,6 +115,53 @@ fn lock_replaces_stale_lock_when_holder_pid_dead() {
   let body: LockBody =
     serde_json::from_str(&std::fs::read_to_string(&lock_path).expect("read")).expect("parse");
   assert_eq!(body.pid, std::process::id(), "lock body should now be ours");
+}
+
+#[test]
+fn lock_refuses_to_steal_fresh_lock_from_dead_pid() {
+  use std::io::Write;
+
+  let dir = temp_dir("lock-stale-fresh");
+  let lock_path = dir.join(".lock");
+  let cfg_path = dir.join("config.toml");
+
+  // Hold the fs2 lock from this thread so acquire() enters the contended path.
+  let mut held_file = std::fs::OpenOptions::new()
+    .create(true)
+    .write(true)
+    .truncate(true)
+    .open(&lock_path)
+    .expect("open lock file");
+  held_file.lock_exclusive().expect("hold lock");
+
+  // Write a lock body owned by a dead PID (PID 0) but with a fresh mtime
+  // (younger than STALE_LOCK_AGE). Write through the same fd so we don't
+  // need to release the fs2 lock.
+  let fresh_stale = LockBody {
+    pid: 0,
+    started_at: chrono::Utc::now().to_rfc3339(),
+    config_path: cfg_path.to_string_lossy().into_owned(),
+  };
+  held_file.set_len(0).expect("truncate");
+  write!(
+    &held_file,
+    "{}",
+    serde_json::to_string_pretty(&fresh_stale).expect("encode")
+  )
+  .expect("write body");
+  held_file.flush().expect("flush");
+
+  // Now acquire() should find the fs2 lock contended, read the body, see a
+  // dead PID with a fresh mtime (< STALE_LOCK_AGE), and fail closed.
+  let err =
+    lockfile::acquire(&lock_path, &cfg_path).expect_err("should reject fresh lock from dead pid");
+  let msg = format!("{err}");
+  assert!(
+    msg.contains("already running") || msg.contains("held") || msg.contains("LockHeld"),
+    "expected held error, got: {msg}"
+  );
+  // Drop the held_file to release the fs2 lock (not strictly needed but tidy).
+  drop(held_file);
 }
 
 // ─── YAMLESS_* env var warning (spec AC #23) ────────────────────────

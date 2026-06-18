@@ -60,9 +60,10 @@ pub async fn upload_block_blob(
 
   if !response.status().is_success() {
     let body = response.text().await.unwrap_or_default();
-    return Err(RunnerError::Protocol(format!(
-      "block blob upload failed: {body}"
-    )));
+    tracing::debug!(body = %body, "block blob upload failed");
+    return Err(RunnerError::Protocol(
+      "block blob upload failed: see debug log".into(),
+    ));
   }
   Ok(())
 }
@@ -86,9 +87,10 @@ pub async fn upload_log(
 
   if !response.status().is_success() {
     let body = response.text().await.unwrap_or_default();
-    return Err(RunnerError::Protocol(format!(
-      "create append blob failed: {body}"
-    )));
+    tracing::debug!(body = %body, "create append blob failed");
+    return Err(RunnerError::Protocol(
+      "create append blob failed: see debug log".into(),
+    ));
   }
 
   let chunk_size = 4 * 1024 * 1024;
@@ -105,9 +107,10 @@ pub async fn upload_log(
 
     if !response.status().is_success() {
       let body = response.text().await.unwrap_or_default();
-      return Err(RunnerError::Protocol(format!(
-        "append block failed: {body}"
-      )));
+      tracing::debug!(body = %body, "append block failed");
+      return Err(RunnerError::Protocol(
+        "append block failed: see debug log".into(),
+      ));
     }
   }
 

@@ -57,8 +57,8 @@ async fn exchange_token_returns_protocol_error_on_http_failure() {
   let msg = format!("{err}");
   assert!(msg.contains("401"), "expected status in error: {msg}");
   assert!(
-    msg.contains("invalid_client"),
-    "expected body in error: {msg}"
+    msg.contains("see debug log"),
+    "expected redacted body in error: {msg}"
   );
 }
 

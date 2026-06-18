@@ -42,7 +42,7 @@ toolu-ghrunner/                            workspace root
     ├── src/docker/                        bollard wrapper
     ├── src/node/                          Node.js runtime detection + cache
     ├── src/plugin/                        RunnerPlugin trait + registry
-    ├── src/types/                         RunnerConfig (re-exported from shared)
+    ├── src/types/                         RunnerConfig (duplicates shared::RunnerConfig for crate-local imports)
     └── tests/                             5 integration tests (CLI, listener, failure modes, storage)
 ```
 

@@ -136,11 +136,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn default_config_path() -> PathBuf {
-  let home = std::env::var_os("HOME")
-    .map(PathBuf::from)
-    .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))
-    .unwrap_or_else(|| PathBuf::from("/var/lib/toolu-runner"));
-  home.join(".toolu-runner").join("config.toml")
+  shared::paths::expand_tilde(Path::new("~/.toolu-runner/config.toml"))
 }
 
 /// Derive the credentials path from the config path. The credentials

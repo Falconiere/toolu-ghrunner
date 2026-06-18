@@ -147,7 +147,9 @@ async fn dispatch_action(
     },
     RunsUsing::Docker => {
       emit_log(events, &step.id, "  (docker actions not yet supported)").await;
-      Ok(Conclusion::Failure)
+      Err(RunnerError::ActionResolution(
+        "docker actions not yet supported".into(),
+      ))
     },
   }
 }

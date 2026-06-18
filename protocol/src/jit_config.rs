@@ -7,11 +7,21 @@ use shared::RunnerError;
 use super::types::{CredentialData, RsaKeyParams, RunnerSettings};
 
 /// Decoded JIT config — the three base64-encoded blobs.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct JitConfig {
   pub runner_settings: RunnerSettings,
   pub credentials: CredentialData,
   pub rsa_key_params: RsaKeyParams,
+}
+
+impl std::fmt::Debug for JitConfig {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    f.debug_struct("JitConfig")
+      .field("runner_settings", &"<redacted>")
+      .field("credentials", &"<redacted>")
+      .field("rsa_key_params", &"<redacted>")
+      .finish()
+  }
 }
 
 impl JitConfig {
