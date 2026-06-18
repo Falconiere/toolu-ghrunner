@@ -1,0 +1,46 @@
+[Unit]
+Description=toolu-runner — GitHub Actions self-hosted runner
+Documentation=https://github.com/Falconiere/toolu-ghrunner
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=toolu-runner
+Group=toolu-runner
+WorkingDirectory=/var/lib/toolu-runner
+ExecStart=/usr/local/bin/toolu-runner run --config /etc/toolu-runner/config.toml
+Restart=always
+RestartSec=10
+EnvironmentFile=-/etc/toolu-runner/toolu-runner.env
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/toolu-runner /var/log/toolu-runner
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+MemoryDenyWriteExecute=true
+LockPersonality=true
+SystemCallArchitectures=native
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=toolu-runner
+
+# Resource limits
+LimitNOFILE=65536
+TasksMax=infinity
+TimeoutStopSec=30
+KillMode=mixed
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target

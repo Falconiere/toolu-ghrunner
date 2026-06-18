@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>io.toolu-runner</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/toolu-runner</string>
+    <string>run</string>
+    <string>--config</string>
+    <string>/Users/Shared/toolu-runner/config.toml</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/Shared/toolu-runner</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>TOOLU_RUNNER_LOG</key>
+    <string>info</string>
+    <key>PATH</key>
+    <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/Shared/toolu-runner/_diag/launchd-stdout.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/Shared/toolu-runner/_diag/launchd-stderr.log</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+
+  <key>Nice</key>
+  <integer>5</integer>
+</dict>
+</plist>
