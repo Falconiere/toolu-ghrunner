@@ -1,7 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Arc;
-#[cfg(test)]
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
@@ -16,7 +14,6 @@ use super::log_uploader::StreamerConfig;
 use super::setup_step::report_setup_step;
 use super::step_reporter::StepCollector;
 use crate::Runner;
-#[cfg(test)]
 use crate::execution::secret_masker::SecretMasker;
 use crate::reporting::live_log::LiveLogLine;
 use shared::{AgentJobRequestMessage, Conclusion, ListenerEvent, RunnerEvent};
@@ -75,6 +72,7 @@ pub(super) async fn execute_with_renewal(
       job_backend_id: job_backend_id.clone(),
       setup_lines,
       live_log_tx,
+      masker: Arc::clone(&ctx.masker),
     },
     conclusion_tx,
   );
@@ -120,6 +118,15 @@ struct FwdConfig {
   job_backend_id: String,
   setup_lines: Vec<String>,
   live_log_tx: Option<tokio::sync::mpsc::Sender<LiveLogLine>>,
+  /// Shared with the file sink's `MaskerRedactor` (via
+  /// `init_with_redactor`) and the `ExecutionContext::register_secret`
+  /// runtime path. Every `RunnerEvent::Log` line is passed through
+  /// this masker before being pushed to the per-step streamer, the
+  /// combined job log, or the live-log WebSocket. The file sink
+  /// sees the same registration through the same Mutex, so a
+  /// registration made via the runtime path is visible to all
+  /// three downstream consumers on the very next line.
+  masker: Arc<Mutex<SecretMasker>>,
 }
 
 /// Mask a single log line through the shared `SecretMasker`.
@@ -129,10 +136,6 @@ struct FwdConfig {
 /// paths do — by extracting the inner `SecretMasker` via
 /// `into_inner`. Centralized so a single test can pin the masking
 /// contract for the forwarder.
-///
-/// `#[cfg(test)]` in this commit; the next commit wires it into
-/// the production forwarder and un-`cfg(test)`s it.
-#[cfg(test)]
 fn mask_line(masker: &Arc<Mutex<SecretMasker>>, line: &str) -> String {
   match masker.lock() {
     Ok(g) => g.mask(line),
@@ -190,16 +193,22 @@ fn spawn_event_forwarder(
           }
         },
         RunnerEvent::Log { step_id, line, .. } => {
-          all_job_lines.push(line.clone());
+          // Mask the line once and use the masked form for all
+          // downstream consumers (combined job log, per-step
+          // streamer, live-log WebSocket). The file sink's redactor
+          // runs on the same Mutex, so the registration that put
+          // this secret into the masker is visible here too.
+          let masked = mask_line(&cfg.masker, line);
+          all_job_lines.push(masked.clone());
           if let Some(tx) = uploaders.get(step_id) {
-            let _ = tx.send(line.clone()).await;
+            let _ = tx.send(masked.clone()).await;
           }
           // Send to live log WebSocket for real-time UI updates
           if let Some(ref live_tx) = cfg.live_log_tx {
             let _ = live_tx
               .send(LiveLogLine {
                 step_id: step_id.clone(),
-                line: line.clone(),
+                line: masked,
               })
               .await;
           }
