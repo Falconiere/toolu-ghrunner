@@ -2,9 +2,9 @@
 [workspace]
 resolver = "2"
 members = [
-  "crates/toolu-runner-shared",
-  "crates/toolu-runner-protocol",
-  "crates/toolu-runner",
+  "shared",
+  "protocol",
+  "toolu-runner",
 ]
 
 [workspace.package]
@@ -78,10 +78,6 @@ debug = 1
 codegen-units = 256
 
 [profile.dev.package.sha2]
-opt-level = 2
-[profile.dev.package.argon2]
-opt-level = 2
-[profile.dev.package.flate2]
 opt-level = 2
 [profile.dev.package.serde_json]
 opt-level = 2

@@ -7,13 +7,13 @@ pre-commit:
   parallel: true
   commands:
     rust-fmt:
-      glob: "crates/**/*.rs"
+      glob: "{shared,protocol,toolu-runner}/**/*.rs"
       run: cargo fmt --all -- --check
     rust-clippy:
-      glob: "crates/**/*.rs"
+      glob: "{shared,protocol,toolu-runner}/**/*.rs"
       run: cargo clippy --workspace --all-targets -- -D warnings
     no-yamless-coupling:
-      run: ! grep -r 'yamless' crates/ Cargo.toml 2>/dev/null
+      run: ! grep -r 'yamless' shared/ protocol/ toolu-runner/ Cargo.toml 2>/dev/null
 
 pre-push:
   parallel: false

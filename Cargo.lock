@@ -883,6 +883,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "protocol"
+version = "0.1.0"
+dependencies = [
+ "aes",
+ "base64",
+ "cbc",
+ "jsonwebtoken",
+ "num-bigint-dig",
+ "pkcs1",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha1",
+ "sha2",
+ "uuid",
+]
+
+[[package]]
 name = "quote"
 version = "1.0.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1080,6 +1098,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f40ca3c46823713e0d4209592e8d6e826aa57e928f09752619fc696c499637f6"
 dependencies = [
  "lazy_static",
+]
+
+[[package]]
+name = "shared"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -1295,35 +1324,6 @@ dependencies = [
  "rand",
  "tempfile",
  "wiremock",
-]
-
-[[package]]
-name = "toolu-runner-protocol"
-version = "0.1.0"
-dependencies = [
- "aes",
- "base64",
- "cbc",
- "jsonwebtoken",
- "num-bigint-dig",
- "pkcs1",
- "serde",
- "serde_json",
- "serde_yaml",
- "sha1",
- "sha2",
- "uuid",
-]
-
-[[package]]
-name = "toolu-runner-shared"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "thiserror",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]

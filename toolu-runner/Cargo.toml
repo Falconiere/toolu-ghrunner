@@ -14,8 +14,8 @@ name = "toolu_runner"
 path = "src/lib.rs"
 
 # Internal
-toolu-runner-shared = { path = "../toolu-runner-shared" }
-toolu-runner-protocol = { path = "../toolu-runner-protocol" }
+shared = { path = "../shared" }
+protocol = { path = "../protocol" }
 
 # Async runtime
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "net", "io-util", "fs", "signal"] }
