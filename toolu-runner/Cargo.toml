@@ -13,6 +13,7 @@ path = "src/main.rs"
 name = "toolu_runner"
 path = "src/lib.rs"
 
+[dependencies]
 # Internal
 shared = { path = "../shared" }
 protocol = { path = "../protocol" }
