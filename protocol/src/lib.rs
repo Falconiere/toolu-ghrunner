@@ -9,8 +9,19 @@
 
 pub mod auth;
 mod jit_config;
+pub mod messages;
+pub mod session;
 mod types;
+pub mod v1;
 
 pub use auth::{build_jwt, parse_rsa_private_key, AccessToken};
 pub use jit_config::JitConfig;
+pub use messages::{
+  decrypt_message_body, strip_bom, strip_pkcs7_padding, BrokerMessage, BrokerMigrationBody,
+  MessageType, RunnerJobRequestBody,
+};
+pub use session::{
+  build_session_request, AgentInfo, CreateSessionRequest, CreateSessionResponse, EncryptionKey,
+  TaskAgentSession,
+};
 pub use types::{CredentialData, CredentialDataInner, RsaKeyParams, RunnerSettings};

@@ -1,7 +1,7 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Runner registration settings from `.runner` blob.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct RunnerSettings {
   #[serde(deserialize_with = "string_or_i64")]
@@ -45,7 +45,7 @@ fn string_or_i64<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<i6
 }
 
 /// OAuth2 credential data from `.credentials` blob.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct CredentialData {
   pub scheme: String,
@@ -53,7 +53,7 @@ pub struct CredentialData {
 }
 
 /// Inner credential fields.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct CredentialDataInner {
   pub client_id: String,
@@ -63,7 +63,7 @@ pub struct CredentialDataInner {
 /// RSA key parameters from `.credentials_rsaparams` blob.
 /// All fields are base64-encoded big-endian integers.
 /// GitHub sends these in camelCase (e.g. `exponent`, `modulus`, `inverseQ`).
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RsaKeyParams {
   pub exponent: String,
