@@ -59,7 +59,13 @@ async fn build_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
   let path = binary_path();
   let status = Command::new("cargo")
     .args([
-      "build", "-p", "toolu-runner", "--features", "live", "--bin", "toolu-runner",
+      "build",
+      "-p",
+      "toolu-runner",
+      "--features",
+      "live",
+      "--bin",
+      "toolu-runner",
     ])
     .current_dir(workspace_root())
     .stdout(Stdio::null())
@@ -136,18 +142,18 @@ impl LiveHarness {
   /// Build a configured `reqwest::Client`. One client per harness so
   /// the connection pool is reused across the API calls a test makes.
   fn http(&self) -> Result<reqwest::Client, Box<dyn std::error::Error>> {
-    Ok(reqwest::Client::builder()
-      .user_agent(USER_AGENT)
-      .timeout(Duration::from_secs(30))
-      .build()?)
+    Ok(
+      reqwest::Client::builder()
+        .user_agent(USER_AGENT)
+        .timeout(Duration::from_secs(30))
+        .build()?,
+    )
   }
 
   /// POST `/repos/{owner}/{repo}/actions/runners/registration-token`.
   /// Returns the short-lived token GH issues for one-time runner
   /// registration. The token expires in ~1h.
-  pub async fn fetch_registration_token(
-    &self,
-  ) -> Result<String, Box<dyn std::error::Error>> {
+  pub async fn fetch_registration_token(&self) -> Result<String, Box<dyn std::error::Error>> {
     let url = format!(
       "{}/repos/{}/actions/runners/registration-token",
       self.api_base(),
@@ -183,13 +189,28 @@ impl LiveHarness {
       "toolu-runner-live-{}",
       self.repo.replace('/', "-").to_lowercase()
     );
-    let config_path = self.config_path().to_str().ok_or("config path utf-8")?.to_owned();
+    let config_path = self
+      .config_path()
+      .to_str()
+      .ok_or("config path utf-8")?
+      .to_owned();
     let work_path = self.work_dir.to_str().ok_or("work dir utf-8")?.to_owned();
     let status = Command::new(&self.binary_path)
       .args([
-        "register", "--url", &url, "--token", &reg_token, "--name", &runner_name,
-        "--labels", "self-hosted,toolu-runner-v1,linux,x64", "--config", &config_path,
-        "--work", &work_path, "--replace",
+        "register",
+        "--url",
+        &url,
+        "--token",
+        &reg_token,
+        "--name",
+        &runner_name,
+        "--labels",
+        "self-hosted,toolu-runner-v1,linux,x64",
+        "--config",
+        &config_path,
+        "--work",
+        &work_path,
+        "--replace",
       ])
       .status()
       .await?;
@@ -204,7 +225,11 @@ impl LiveHarness {
   /// completes (or fails). Caller is responsible for waiting on the
   /// child and asserting its exit code.
   pub async fn run_once(&self) -> Result<Child, Box<dyn std::error::Error>> {
-    let config_path = self.config_path().to_str().ok_or("config path utf-8")?.to_owned();
+    let config_path = self
+      .config_path()
+      .to_str()
+      .ok_or("config path utf-8")?
+      .to_owned();
     let child = Command::new(&self.binary_path)
       .args(["run", "--once", "--config", &config_path])
       .stdout(Stdio::piped())
@@ -240,7 +265,11 @@ impl LiveHarness {
       .json::<serde_json::Value>()
       .await
       .ok()
-      .and_then(|v| v.get("sha").and_then(serde_json::Value::as_str).map(str::to_owned));
+      .and_then(|v| {
+        v.get("sha")
+          .and_then(serde_json::Value::as_str)
+          .map(str::to_owned)
+      });
 
     let encoded = base64::engine::general_purpose::STANDARD.encode(content.as_bytes());
     let mut body = serde_json::json!({
@@ -269,10 +298,7 @@ impl LiveHarness {
 
   /// Delete a workflow file from the test repo. Best-effort —
   /// returns `Ok` on 404 (file already gone).
-  pub async fn delete_workflow(
-    &self,
-    name: &str,
-  ) -> Result<(), Box<dyn std::error::Error>> {
+  pub async fn delete_workflow(&self, name: &str) -> Result<(), Box<dyn std::error::Error>> {
     let url = format!(
       "{}/repos/{}/contents/.github/workflows/{}",
       self.api_base(),
@@ -319,10 +345,7 @@ impl LiveHarness {
   /// to trigger `name` on the default branch. Returns the run id of
   /// the newly created run (GH returns 204 from dispatch; we list
   /// recent runs to pick the latest one).
-  pub async fn trigger_workflow(
-    &self,
-    name: &str,
-  ) -> Result<u64, Box<dyn std::error::Error>> {
+  pub async fn trigger_workflow(&self, name: &str) -> Result<u64, Box<dyn std::error::Error>> {
     let dispatch_url = format!(
       "{}/repos/{}/actions/workflows/{}/dispatches",
       self.api_base(),
@@ -369,11 +392,13 @@ impl LiveHarness {
         return Ok(id);
       }
     }
-    Err(format!(
-      "could not find a run for {name} after dispatching on {}",
-      self.branch
+    Err(
+      format!(
+        "could not find a run for {name} after dispatching on {}",
+        self.branch
+      )
+      .into(),
     )
-    .into())
   }
 
   /// Poll `GET /repos/{owner}/{repo}/actions/runs/{run_id}` until the
@@ -452,7 +477,11 @@ impl LiveHarness {
     if !self.config_path().exists() {
       return Ok(());
     }
-    let config_path = self.config_path().to_str().ok_or("config path utf-8")?.to_owned();
+    let config_path = self
+      .config_path()
+      .to_str()
+      .ok_or("config path utf-8")?
+      .to_owned();
     let status = Command::new(&self.binary_path)
       .args(["remove", "--config", &config_path])
       .status()
@@ -467,10 +496,7 @@ impl LiveHarness {
   /// files. Called by tests as the final step so subsequent runs
   /// start from a clean GH state. Workflow file list is passed in
   /// because the test knows which files it pushed.
-  pub async fn cleanup(
-    &self,
-    workflows: &[&str],
-  ) -> Result<(), Box<dyn std::error::Error>> {
+  pub async fn cleanup(&self, workflows: &[&str]) -> Result<(), Box<dyn std::error::Error>> {
     let _ = self.remove().await;
     for name in workflows {
       let _ = self.delete_workflow(name).await;

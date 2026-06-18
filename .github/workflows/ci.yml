@@ -21,8 +21,19 @@ jobs:
         run: cargo test --workspace
       - name: No yamless coupling (AC #18, #19)
         run: |
-          ! grep -rn 'yamless\|YAMLESS_' shared/ protocol/ toolu-runner/ Cargo.toml 2>/dev/null
-      - name: Protocol crate has no I/O deps (AC #22)
+          # Enforce via dep tree (the actual coupling) and a source grep
+          # that excludes the AC #23 implementation (which legitimately
+          # detects the deprecated YAMLESS_* env var prefix).
+          if cargo tree --workspace | grep -qE 'yamless-|yamless_'; then
+            echo "ERROR: yamless-* crate found in dependency tree"
+            exit 1
+          fi
+          if grep -rn 'yamless' shared/ protocol/ toolu-runner/ Cargo.toml 2>/dev/null \
+             | grep -v 'YAMLESS_' | grep -v 'tests/live/'; then
+            echo "ERROR: yamless reference in source (excluding AC #23 YAMLESS_ detection)"
+            exit 1
+          fi
+      - name: Protocol crate is sync + I/O-free (AC #22)
         run: |
           if cargo tree -p protocol | grep -qE 'reqwest|tokio|opendal|bollard|axum'; then
             echo "ERROR: protocol crate must not depend on I/O crates"

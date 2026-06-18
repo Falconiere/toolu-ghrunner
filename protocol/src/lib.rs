@@ -14,14 +14,14 @@ pub mod session;
 mod types;
 pub mod v1;
 
-pub use auth::{build_jwt, parse_rsa_private_key, AccessToken};
+pub use auth::{AccessToken, build_jwt, parse_rsa_private_key};
 pub use jit_config::JitConfig;
 pub use messages::{
-  decrypt_message_body, strip_bom, strip_pkcs7_padding, BrokerMessage, BrokerMigrationBody,
-  MessageType, RunnerJobRequestBody,
+  BrokerMessage, BrokerMigrationBody, MessageType, RunnerJobRequestBody, decrypt_message_body,
+  strip_bom, strip_pkcs7_padding,
 };
 pub use session::{
-  build_session_request, AgentInfo, CreateSessionRequest, CreateSessionResponse, EncryptionKey,
-  TaskAgentSession,
+  AgentInfo, CreateSessionRequest, CreateSessionResponse, EncryptionKey, TaskAgentSession,
+  build_session_request,
 };
 pub use types::{CredentialData, CredentialDataInner, RsaKeyParams, RunnerSettings};

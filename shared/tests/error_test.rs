@@ -31,10 +31,7 @@ fn from_serde_json_error() {
 fn workspace_init_preserves_path_and_source() {
   let io = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied");
   let path = std::path::PathBuf::from("/var/lib/toolu-runner");
-  let e: RunnerError = RunnerError::WorkspaceInit {
-    path,
-    source: io,
-  };
+  let e: RunnerError = RunnerError::WorkspaceInit { path, source: io };
   let s = e.to_string();
   assert!(s.contains("/var/lib/toolu-runner"), "got: {s}");
   assert!(s.contains("denied"), "got: {s}");

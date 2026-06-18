@@ -28,7 +28,7 @@ pub use log_upload::{
   append_block_headers, block_blob_headers, create_append_blob_headers, upload_block_blob,
   upload_log,
 };
-pub use messages::{acknowledge_message, poll_message, PollParams};
+pub use messages::{PollParams, acknowledge_message, poll_message};
 pub use results_service::{
   create_job_logs_metadata, create_step_logs_metadata, get_job_logs_signed_blob_url,
   get_step_logs_signed_blob_url, update_workflow_steps, upload_log_blob,

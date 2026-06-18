@@ -58,7 +58,12 @@ pub async fn fetch_timeline(
   token: &str,
   record_id: &str,
 ) -> Result<serde_json::Value, RunnerError> {
-  let url = format!("{}/{}?api-version={}", timeline_url, record_id, protocol::v1::api_versions::DEFAULT);
+  let url = format!(
+    "{}/{}?api-version={}",
+    timeline_url,
+    record_id,
+    protocol::v1::api_versions::DEFAULT
+  );
 
   let response = client
     .get(&url)

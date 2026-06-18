@@ -8,13 +8,9 @@
 //! - [`composite`] — Built-in composite action handler.
 //! - [`docker`] — Built-in Docker action handler.
 //!
-//! ## Yamless cuts
-//!
-//! `yamless.rs`, `yamless_deploy/`, `yamless_notify.rs`, and
-//! `yamless_test_report/` from the upstream yamless-runner are intentionally
-//! dropped — the `HandlerKind::Yamless` variant and the `runs_using ==
-//! "yamless"` dispatch are also removed. `handler_emit.rs` was dropped along
-//! with its only consumers.
+//! Only the four built-in `runs.using` values from upstream GitHub Actions
+//! are dispatched (`script`, `node20`, `composite`, `docker`). Any unknown
+//! `runs.using` fails the step with a clear "unsupported runner type" error.
 
 pub mod composite;
 pub mod docker;

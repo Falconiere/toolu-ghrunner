@@ -8,8 +8,8 @@
 //! - `POST /_apis/.../Timeline` → 200 OK with a timeline record.
 //! - `GET /_apis/.../Timeline/{id}` → 200 OK with a record body.
 
-use serde_json::json;
 use serde_json::Value;
+use serde_json::json;
 use wiremock::matchers::{bearer_token, body_partial_json, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -44,10 +44,9 @@ async fn fetch_connection_data_returns_parsed_connection_data() {
     .await;
 
   let client = reqwest::Client::new();
-  let data =
-    toolu_runner::net::v1::fetch_connection_data(&client, &server.uri(), "ghes-token")
-      .await
-      .expect("fetch connection data");
+  let data = toolu_runner::net::v1::fetch_connection_data(&client, &server.uri(), "ghes-token")
+    .await
+    .expect("fetch connection data");
   assert_eq!(data.instance_id, "instance-1");
   assert_eq!(data.location_service_data.service_definitions.len(), 2);
 }
@@ -104,9 +103,14 @@ async fn post_timeline_record_sends_record_with_bearer_auth() {
 
   let client = reqwest::Client::new();
   let timeline_url = format!("{}/_apis/distributedtask/hubs/Actions/Plans", server.uri());
-  toolu_runner::net::v1::post_timeline_record(&client, &timeline_url, "ghes-timeline-token", &record)
-    .await
-    .expect("post timeline record");
+  toolu_runner::net::v1::post_timeline_record(
+    &client,
+    &timeline_url,
+    "ghes-timeline-token",
+    &record,
+  )
+  .await
+  .expect("post timeline record");
 }
 
 #[tokio::test]
@@ -153,12 +157,16 @@ async fn fetch_timeline_returns_protocol_error_on_404() {
 
   let client = reqwest::Client::new();
   let timeline_url = format!("{}/_apis/distributedtask/hubs/Actions/Plans", server.uri());
-  let err = toolu_runner::net::v1::fetch_timeline(&client, &timeline_url, "ghes-token", "missing-id")
-    .await
-    .expect_err("404 should error");
+  let err =
+    toolu_runner::net::v1::fetch_timeline(&client, &timeline_url, "ghes-token", "missing-id")
+      .await
+      .expect_err("404 should error");
   let msg = format!("{err}");
   assert!(msg.contains("404"), "expected status: {msg}");
-  assert!(msg.contains("not found") || msg.contains("not_found"), "expected body: {msg}");
+  assert!(
+    msg.contains("not found") || msg.contains("not_found"),
+    "expected body: {msg}"
+  );
 }
 
 #[tokio::test]
@@ -173,20 +181,17 @@ async fn ghes_v1_url_resolver_uses_known_guids() {
   let data = ConnectionData {
     instance_id: "instance-x".to_owned(),
     location_service_data: LocationServiceData {
-      service_definitions: vec![
-        ServiceDefinition {
-          identifier: service_guids::TIMELINE.to_owned(),
-          service_type: Some("Timeline".to_owned()),
-          display_name: None,
-          relative_path: Some("/_apis/distributedtask/hubs/Actions/Plans".to_owned()),
-        },
-      ],
+      service_definitions: vec![ServiceDefinition {
+        identifier: service_guids::TIMELINE.to_owned(),
+        service_type: Some("Timeline".to_owned()),
+        display_name: None,
+        relative_path: Some("/_apis/distributedtask/hubs/Actions/Plans".to_owned()),
+      }],
     },
   };
 
-  let url =
-    resolve_service_url("https://ghes.example.com", &data, service_guids::TIMELINE)
-      .expect("timeline resolves");
+  let url = resolve_service_url("https://ghes.example.com", &data, service_guids::TIMELINE)
+    .expect("timeline resolves");
   assert_eq!(
     url,
     "https://ghes.example.com/_apis/distributedtask/hubs/Actions/Plans"

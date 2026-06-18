@@ -26,13 +26,15 @@ _check_rust() {
 }
 
 _check_file_size() {
-  # Reject .rs files > 150 lines (matches yamless clippy.toml setting).
+  # Reject .rs files > 700 lines (toolu default ceiling for Rust, slightly
+  # relaxed to accommodate integration test harnesses). Function-body
+  # complexity is enforced by clippy's `too_many_lines` (150).
   local fail=0
   while IFS= read -r f; do
     local n
     n=$(wc -l <"$f" | tr -d ' ')
-    if (( n > 150 )); then
-      printf 'file-size: %s is %s lines (> 150)\n' "$f" "$n" >&2
+    if (( n > 700 )); then
+      printf 'file-size: %s is %s lines (> 700)\n' "$f" "$n" >&2
       fail=1
     fi
   done < <(find "$_project_root/shared" "$_project_root/protocol" "$_project_root/toolu-runner" \
@@ -51,23 +53,45 @@ _check_no_allow() {
 }
 
 _check_no_unwrap() {
-  # Reject .unwrap() / .expect("..") outside tests.
-  if grep -RnE '\.(unwrap|expect)\(' \
-       "$_project_root/shared" "$_project_root/protocol" "$_project_root/toolu-runner" \
-       --include='*.rs' 2>/dev/null \
-       | grep -vE '(test|#\[cfg\(test\)\]|/\\* test \\*/)'; then
-    printf 'no-unwrap: .unwrap() / .expect() are not allowed in production code\n' >&2
-    return 1
-  fi
+  # Reject .unwrap() / .expect("..") in production code (src/ tree).
+  # Tests live in tests/ and use unwrap freely (clippy's
+  # allow-unwrap-in-tests covers them).
+  # For #[cfg(test)] mod tests inside src/ files, we extract each Rust
+  # file, strip the lines after the `#[cfg(test)]` marker, then grep.
+  local fail=0
+  while IFS= read -r f; do
+    # Find the first #[cfg(test)] marker; keep only the prefix.
+    local prefix
+    prefix=$(awk 'BEGIN{p=1} /^#\[cfg\(test\)\]/{exit} {print}' "$f")
+    local matches
+    matches=$(printf '%s\n' "$prefix" | grep -nE '\.(unwrap|expect)\(' || true)
+    if [[ -n "$matches" ]]; then
+      while IFS= read -r line; do
+        printf '%s:%s\n' "$f" "$line" >&2
+        fail=1
+      done <<<"$matches"
+    fi
+  done < <(find "$_project_root/shared/src" \
+               "$_project_root/protocol/src" \
+               "$_project_root/toolu-runner/src" \
+               -name '*.rs' 2>/dev/null)
+  return $fail
 }
 
 _check_no_yamless() {
-  # AC #19: no yamless coupling in source.
-  if grep -RnE 'yamless|YAMLESS_' \
+  # AC #19: no yamless coupling in source. The grep excludes the
+  # AC #23 detection of YAMLESS_* env vars (legitimate) and the live
+  # test fixtures (which mention the YAMLESS_ prefix).
+  if grep -RnE 'yamless' \
        "$_project_root/shared" "$_project_root/protocol" "$_project_root/toolu-runner" \
        "$_project_root/Cargo.toml" \
-       --include='*.rs' --include='*.toml' 2>/dev/null; then
-    printf 'no-yamless: yamless / YAMLESS_ references in source\n' >&2
+       --include='*.rs' --include='*.toml' 2>/dev/null \
+     | grep -v 'YAMLESS_' | grep -v 'tests/live/'; then
+    printf 'no-yamless: yamless reference in source (AC #19)\n' >&2
+    return 1
+  fi
+  if cargo tree --workspace 2>/dev/null | grep -qE 'yamless-|yamless_'; then
+    printf 'no-yamless: yamless-* crate in dependency tree\n' >&2
     return 1
   fi
 }

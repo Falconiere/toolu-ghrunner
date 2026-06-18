@@ -18,7 +18,6 @@ pub mod context;
 pub mod depth_tracker;
 pub mod docker_cache;
 pub mod expressions;
-mod failure_category;
 pub mod file_commands;
 pub mod handlers;
 pub mod job_runner;

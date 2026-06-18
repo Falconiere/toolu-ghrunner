@@ -34,7 +34,11 @@ fn sample_config() -> RunnerRegistrationConfig {
     runner_name: "storage-test-runner".to_owned(),
     runner_id: 67890,
     auth_token: "ghs_storage_test_token".to_owned(),
-    labels: vec!["self-hosted".to_owned(), "linux".to_owned(), "x64".to_owned()],
+    labels: vec![
+      "self-hosted".to_owned(),
+      "linux".to_owned(),
+      "x64".to_owned(),
+    ],
     runner_group: "Default".to_owned(),
     runtime: RuntimeConfig {
       jit_config: "<base64-jit-blob>".to_owned(),
@@ -186,8 +190,7 @@ fn resolve_work_dir_does_not_create() {
   let dir = temp_dir("resolve-work-dir");
   // Pass a non-tilde path so we don't depend on HOME in this test.
   let target = dir.join("work");
-  let resolved =
-    resolve_work_dir(target.to_str().expect("utf8"));
+  let resolved = resolve_work_dir(target.to_str().expect("utf8"));
   assert_eq!(resolved, target);
   assert!(!resolved.exists(), "resolve_work_dir must not create");
 }
@@ -195,7 +198,11 @@ fn resolve_work_dir_does_not_create() {
 #[test]
 fn resolve_data_dir_expands_tilde() {
   let resolved = resolve_data_dir("~/toolu-runner-tilde-test-target").expect("resolve");
-  assert!(resolved.to_string_lossy().contains("toolu-runner-tilde-test-target"));
+  assert!(
+    resolved
+      .to_string_lossy()
+      .contains("toolu-runner-tilde-test-target")
+  );
   assert!(resolved.exists());
   let _ = std::fs::remove_dir_all(&resolved);
 }

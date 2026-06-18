@@ -14,7 +14,6 @@
 //! - `status` — print `config.toml` and `credentials.json` summary
 //!   (no network).
 
-
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -112,10 +111,10 @@ struct StatusArgs {
 
 #[tokio::main]
 async fn main() {
-  // AC #23: warn at startup for any YAMLESS_* env vars. Done before
-  // clap parsing and before `startup::init` so the warning lands even
-  // for subcommands (like `status`) that don't init tracing.
-  shared::startup::warn_about_yamless_env();
+  // AC #23: warn at startup for any deprecated YAMLESS_* env vars. Done
+  // before clap parsing and before `startup::init` so the warning lands
+  // even for subcommands (like `status`) that don't init tracing.
+  shared::startup::warn_about_legacy_env();
   let cli = Cli::parse();
   let exit_code = match run(cli).await {
     Ok(()) => 0,
@@ -148,9 +147,10 @@ fn default_config_path() -> PathBuf {
 /// file lives next to `config.toml` in the same directory so users
 /// can override `--config` and have both files move together.
 fn credentials_path_for(config_path: &Path) -> PathBuf {
-  config_path
-    .parent()
-    .map_or_else(|| PathBuf::from("credentials.json"), |p| p.join("credentials.json"))
+  config_path.parent().map_or_else(
+    || PathBuf::from("credentials.json"),
+    |p| p.join("credentials.json"),
+  )
 }
 
 fn runner_name_or_hostname(name: Option<String>) -> String {
@@ -171,8 +171,8 @@ fn default_labels() -> Vec<String> {
 }
 
 fn parse_and_validate_url(url: &str) -> Result<String, RunnerError> {
-  let parsed = url::Url::parse(url)
-    .map_err(|e| RunnerError::Config(format!("invalid --url: {e}")))?;
+  let parsed =
+    url::Url::parse(url).map_err(|e| RunnerError::Config(format!("invalid --url: {e}")))?;
   let host = parsed
     .host_str()
     .ok_or_else(|| RunnerError::Config("URL missing host".to_owned()))?
@@ -212,11 +212,12 @@ async fn probe_jit_endpoint(host: &str) -> Result<(), RunnerError> {
 }
 
 async fn cmd_register(args: RegisterArgs) -> Result<(), Box<dyn std::error::Error>> {
-  startup::init(env!("CARGO_MANIFEST_DIR"), "runner")
-    .map_err(|e| format!("startup init: {e}"))?;
+  startup::init(env!("CARGO_MANIFEST_DIR"), "runner").map_err(|e| format!("startup init: {e}"))?;
 
   let host = parse_and_validate_url(&args.url).map_err(|e| format!("{e}"))?;
-  probe_jit_endpoint(&host).await.map_err(|e| format!("{e}"))?;
+  probe_jit_endpoint(&host)
+    .await
+    .map_err(|e| format!("{e}"))?;
 
   let config_path = args.config.clone().unwrap_or_else(default_config_path);
   let creds_path = credentials_path_for(&config_path);
@@ -229,11 +230,13 @@ async fn cmd_register(args: RegisterArgs) -> Result<(), Box<dyn std::error::Erro
 
   // Refuse if a registration already exists with the same name unless --replace.
   if config_path.exists() && !args.replace {
-    return Err(format!(
-      "registration already exists at {} — pass --replace to overwrite",
-      config_path.display()
-    )
-    .into());
+    return Err(
+      format!(
+        "registration already exists at {} — pass --replace to overwrite",
+        config_path.display()
+      )
+      .into(),
+    );
   }
 
   // Steps 3 & 4 (POST to JIT endpoint, exchange JWT for OAuth) are stubbed
@@ -292,24 +295,27 @@ async fn cmd_register(args: RegisterArgs) -> Result<(), Box<dyn std::error::Erro
 }
 
 async fn cmd_run(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
-  startup::init(env!("CARGO_MANIFEST_DIR"), "runner")
-    .map_err(|e| format!("startup init: {e}"))?;
+  startup::init(env!("CARGO_MANIFEST_DIR"), "runner").map_err(|e| format!("startup init: {e}"))?;
 
   let config_path = args.config.clone().unwrap_or_else(default_config_path);
   if !config_path.exists() {
-    return Err(format!(
-      "config not found at {} — run `toolu-runner register` first",
-      config_path.display()
-    )
-    .into());
+    return Err(
+      format!(
+        "config not found at {} — run `toolu-runner register` first",
+        config_path.display()
+      )
+      .into(),
+    );
   }
   let creds_path = credentials_path_for(&config_path);
   if !creds_path.exists() {
-    return Err(format!(
-      "credentials not found at {} — run `toolu-runner register` first",
-      creds_path.display()
-    )
-    .into());
+    return Err(
+      format!(
+        "credentials not found at {} — run `toolu-runner register` first",
+        creds_path.display()
+      )
+      .into(),
+    );
   }
 
   let cfg = load_reg_config(&config_path).map_err(|e| format!("{e}"))?;
@@ -321,8 +327,7 @@ async fn cmd_run(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
 
   // Acquire the single-job file lock — second `run` reads the body,
   // prints the PID, and exits 2. Release on graceful shutdown.
-  let _lock_guard = lockfile::acquire(&lock_path, &config_path)
-    .map_err(|e| format!("{e}"))?;
+  let _lock_guard = lockfile::acquire(&lock_path, &config_path).map_err(|e| format!("{e}"))?;
   tracing::info!(path = %lock_path.display(), "acquired single-job lock");
 
   let runner_cfg = shared::RunnerConfig {
@@ -387,8 +392,7 @@ async fn cmd_run(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn cmd_remove(args: RemoveArgs) -> Result<(), Box<dyn std::error::Error>> {
-  startup::init(env!("CARGO_MANIFEST_DIR"), "runner")
-    .map_err(|e| format!("startup init: {e}"))?;
+  startup::init(env!("CARGO_MANIFEST_DIR"), "runner").map_err(|e| format!("startup init: {e}"))?;
 
   let config_path = args.config.clone().unwrap_or_else(default_config_path);
   let creds_path = credentials_path_for(&config_path);
@@ -408,9 +412,7 @@ async fn cmd_remove(args: RemoveArgs) -> Result<(), Box<dyn std::error::Error>> 
   // the marker and surface a clear message.
   if lock_path.exists() {
     if args.force {
-      tracing::warn!(
-        "force-cancelling in-flight run (stub — live cancellation lands in step 10)"
-      );
+      tracing::warn!("force-cancelling in-flight run (stub — live cancellation lands in step 10)");
     } else {
       let body = std::fs::read_to_string(&lock_path).unwrap_or_default();
       std::fs::write(&pending, body)?;

@@ -116,7 +116,10 @@ fn context_github_resolves_to_object() {
   let ctx = context(&[(
     "github",
     object_from(&[
-      ("repository", ExprValue::String("Falconiere/toolu-ghrunner".to_owned())),
+      (
+        "repository",
+        ExprValue::String("Falconiere/toolu-ghrunner".to_owned()),
+      ),
       ("sha", ExprValue::String("abc123".to_owned())),
     ]),
   )]);
@@ -252,10 +255,13 @@ fn format_function_substitutes_indexed_placeholders() {
       "github",
       object_from(&[("repository", ExprValue::String("owner/repo".to_owned()))]),
     ),
-    ("runner", object_from(&[("os", ExprValue::String("Linux".to_owned()))])),
+    (
+      "runner",
+      object_from(&[("os", ExprValue::String("Linux".to_owned()))]),
+    ),
   ]);
-  let v = evaluator::evaluate("format('{0}/{1}', github.repository, runner.os)", &ctx)
-    .expect("format");
+  let v =
+    evaluator::evaluate("format('{0}/{1}', github.repository, runner.os)", &ctx).expect("format");
   assert_string(&v, "owner/repo/Linux");
 }
 
@@ -310,9 +316,16 @@ fn to_json_serializes_object_to_json_string() {
   let is_string = matches!(v, ExprValue::String(_));
   assert!(is_string, "expected String, got {v:?}");
   // Safe to unwrap because we just asserted `is_string`.
-  let s = if let ExprValue::String(s) = &v { s.clone() } else { String::new() };
+  let s = if let ExprValue::String(s) = &v {
+    s.clone()
+  } else {
+    String::new()
+  };
   let parsed: Value = serde_json::from_str(&s).expect("valid JSON");
-  let repo = parsed.get("repository").and_then(Value::as_str).unwrap_or("");
+  let repo = parsed
+    .get("repository")
+    .and_then(Value::as_str)
+    .unwrap_or("");
   let run_id = parsed.get("run_id").and_then(Value::as_str).unwrap_or("");
   let has_repo = !repo.is_empty();
   let has_run_id = !run_id.is_empty();

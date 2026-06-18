@@ -26,8 +26,10 @@ impl SecretRedactor for LiteralRedactor {
 
 #[test]
 fn fake_log_line_with_secret_is_redacted() {
-  let redactor: Arc<dyn SecretRedactor> =
-    Arc::new(LiteralRedactor { from: "hunter2", to: "***" });
+  let redactor: Arc<dyn SecretRedactor> = Arc::new(LiteralRedactor {
+    from: "hunter2",
+    to: "***",
+  });
 
   let mut writer = RedactingWriter::new(Vec::<u8>::new(), redactor);
 
@@ -59,8 +61,10 @@ fn fake_log_line_with_secret_is_redacted() {
 
 #[test]
 fn secret_split_across_writes_is_redacted() {
-  let redactor: Arc<dyn SecretRedactor> =
-    Arc::new(LiteralRedactor { from: "hunter2", to: "***" });
+  let redactor: Arc<dyn SecretRedactor> = Arc::new(LiteralRedactor {
+    from: "hunter2",
+    to: "***",
+  });
 
   let mut writer = RedactingWriter::new(Vec::<u8>::new(), redactor);
 
@@ -81,8 +85,10 @@ fn secret_split_across_writes_is_redacted() {
 
 #[test]
 fn buffer_with_no_secret_passes_through_untouched() {
-  let redactor: Arc<dyn SecretRedactor> =
-    Arc::new(LiteralRedactor { from: "hunter2", to: "***" });
+  let redactor: Arc<dyn SecretRedactor> = Arc::new(LiteralRedactor {
+    from: "hunter2",
+    to: "***",
+  });
 
   let mut writer = RedactingWriter::new(Vec::<u8>::new(), redactor);
 

@@ -72,7 +72,7 @@ bollard = "0.20"
 # Local HTTP services (artifact / cache / OIDC micro-services)
 axum = "0.8"
 
-# WebSocket (downstream of tokio-tungstenite 0.26 from yamless workspace)
+# WebSocket for the live-log streamer
 tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
 
 # Compression / archive

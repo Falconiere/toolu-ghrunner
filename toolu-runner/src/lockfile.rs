@@ -61,16 +61,18 @@ pub struct LockBody {
 pub struct LockGuard {
   /// Kept alive so the OS advisory lock on the file descriptor stays
   /// held. `Drop` does not need to read it — dropping the `File` is
-  /// what releases the lock.
-  #[allow(dead_code)]
-  file: std::fs::File,
-  #[allow(dead_code)]
+  /// what releases the lock. Underscore-prefixed so the compiler sees
+  /// the field as intentionally retained-for-Drop, not dead code.
+  _file: std::fs::File,
+  /// Cached for [`Debug`] and for stale-lock detection on retry.
   path: PathBuf,
 }
 
 impl std::fmt::Debug for LockGuard {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    f.debug_struct("LockGuard").field("path", &self.path).finish()
+    f.debug_struct("LockGuard")
+      .field("path", &self.path)
+      .finish()
   }
 }
 
@@ -117,7 +119,7 @@ pub fn acquire(path: &Path, config_path: &Path) -> Result<LockGuard, RunnerError
     Ok(()) => {
       write_body(&file, &body)?;
       Ok(LockGuard {
-        file,
+        _file: file,
         path: path.to_path_buf(),
       })
     },
@@ -157,12 +159,12 @@ fn handle_contended(path: &Path, body: &LockBody) -> Result<LockGuard, RunnerErr
     .write(true)
     .truncate(false)
     .open(path)?;
-  file.lock_exclusive().map_err(|e| {
-    RunnerError::Config(format!("lock acquire after stale-lock removal: {e}"))
-  })?;
+  file
+    .lock_exclusive()
+    .map_err(|e| RunnerError::Config(format!("lock acquire after stale-lock removal: {e}")))?;
   write_body(&file, body)?;
   Ok(LockGuard {
-    file,
+    _file: file,
     path: path.to_path_buf(),
   })
 }
@@ -178,9 +180,7 @@ fn write_body(file: &std::fs::File, body: &LockBody) -> Result<(), RunnerError> 
 
 fn read_body(path: &Path) -> Result<LockBody, RunnerError> {
   let raw = std::fs::read_to_string(path)?;
-  serde_json::from_str(&raw).map_err(|e| RunnerError::Config(format!(
-    "lock body parse: {e}"
-    )))
+  serde_json::from_str(&raw).map_err(|e| RunnerError::Config(format!("lock body parse: {e}")))
 }
 
 /// Is `pid` still alive? Uses `sysinfo::System` to check the local

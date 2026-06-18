@@ -5,11 +5,11 @@
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use protocol::v1::{
-  resolve_service_url, service_guids, ConnectionData, LocationServiceData, ServiceDefinition,
+  ConnectionData, LocationServiceData, ServiceDefinition, resolve_service_url, service_guids,
 };
 use protocol::{
-  decrypt_message_body, strip_bom, strip_pkcs7_padding, BrokerMessage, BrokerMigrationBody,
-  JitConfig, MessageType, RsaKeyParams, RunnerJobRequestBody, RunnerSettings,
+  BrokerMessage, BrokerMigrationBody, JitConfig, MessageType, RsaKeyParams, RunnerJobRequestBody,
+  RunnerSettings, decrypt_message_body, strip_bom, strip_pkcs7_padding,
 };
 use serde_json::json;
 
@@ -64,7 +64,10 @@ fn jit_config_roundtrips_synthetic_blob() {
     parsed.credentials.data.authorization_url,
     "https://github.com/login/oauth/access_token"
   );
-  assert_eq!(parsed.rsa_key_params.exponent, BASE64.encode([0x01, 0x00, 0x01]));
+  assert_eq!(
+    parsed.rsa_key_params.exponent,
+    BASE64.encode([0x01, 0x00, 0x01])
+  );
 }
 
 #[test]
@@ -142,7 +145,7 @@ fn aes_cbc_roundtrip_with_pkcs7_stripping() {
   // We can't easily test decrypt_message_body against a real GH payload here,
   // but we can verify the helpers chain together: encrypt with AES-256-CBC +
   // PKCS7 padding, then decrypt + strip, and recover the plaintext.
-  use aes::cipher::{block_padding::Pkcs7, BlockEncryptMut, KeyIvInit};
+  use aes::cipher::{BlockEncryptMut, KeyIvInit, block_padding::Pkcs7};
 
   let key = [0x42u8; 32];
   let iv = [0x24u8; 16];
@@ -151,7 +154,8 @@ fn aes_cbc_roundtrip_with_pkcs7_stripping() {
   let encryptor = cbc::Encryptor::<aes::Aes256>::new_from_slices(&key, &iv).expect("key+iv ok");
   // Allocate a buffer large enough for plaintext + a full PKCS7 block.
   let mut buf = vec![0u8; plaintext.len() + 16];
-  buf.get_mut(..plaintext.len())
+  buf
+    .get_mut(..plaintext.len())
     .expect("buffer sized to fit plaintext")
     .copy_from_slice(plaintext);
   let ciphertext_len = encryptor
@@ -162,7 +166,9 @@ fn aes_cbc_roundtrip_with_pkcs7_stripping() {
   let decrypted = decrypt_message_body(
     &key,
     &iv,
-    buf.get(..ciphertext_len).expect("ciphertext slice in range"),
+    buf
+      .get(..ciphertext_len)
+      .expect("ciphertext slice in range"),
   )
   .expect("decrypt succeeds");
   assert_eq!(decrypted, plaintext);
@@ -217,15 +223,15 @@ fn rsa_key_params_roundtrip_and_discovery_resolves_known_guids() {
   };
 
   let base = "https://ghes.example.com";
-  let timeline = resolve_service_url(base, &data, service_guids::TIMELINE)
-    .expect("TIMELINE resolves");
+  let timeline =
+    resolve_service_url(base, &data, service_guids::TIMELINE).expect("TIMELINE resolves");
   assert_eq!(
     timeline,
     "https://ghes.example.com/_apis/distributedtask/hubs/Actions/Plans"
   );
 
-  let logs = resolve_service_url(base, &data, service_guids::LOG_FILES)
-    .expect("LOG_FILES resolves");
+  let logs =
+    resolve_service_url(base, &data, service_guids::LOG_FILES).expect("LOG_FILES resolves");
   assert_eq!(
     logs,
     "https://ghes.example.com/_apis/distributedtask/hubs/Actions/Logs"

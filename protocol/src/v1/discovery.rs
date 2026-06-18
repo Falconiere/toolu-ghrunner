@@ -3,10 +3,14 @@
 //! The async HTTP fetch (`/_apis/connectionData`) lives in
 //! `toolu-runner::net::v1_discovery` — only the local lookup stays here.
 
-use super::types::{service_guids, ConnectionData};
+use super::types::{ConnectionData, service_guids};
 
 /// Resolve a service URL by matching the GUID against service definitions.
-pub fn resolve_service_url(base_url: &str, data: &ConnectionData, service_guid: &str) -> Option<String> {
+pub fn resolve_service_url(
+  base_url: &str,
+  data: &ConnectionData,
+  service_guid: &str,
+) -> Option<String> {
   let service = data
     .location_service_data
     .service_definitions

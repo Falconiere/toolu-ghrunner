@@ -24,9 +24,7 @@ pub fn pipeline_data_to_expr_value(data: &PipelineContextData) -> ExprValue {
     return ExprValue::Object(map);
   }
   if let Some(arr) = &data.a {
-    return ExprValue::Array(
-      arr.iter().map(pipeline_data_to_expr_value).collect(),
-    );
+    return ExprValue::Array(arr.iter().map(pipeline_data_to_expr_value).collect());
   }
   if let Some(b) = data.b {
     return ExprValue::Bool(b);

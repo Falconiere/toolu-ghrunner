@@ -9,6 +9,6 @@ pub mod types;
 
 pub use discovery::resolve_service_url;
 pub use types::{
-  api_versions, service_guids, ConnectionData, JobEvent, LocationServiceData, LogReference,
-  ServiceDefinition, TimelineRecord, TimelineRecordResult, TimelineRecordState,
+  ConnectionData, JobEvent, LocationServiceData, LogReference, ServiceDefinition, TimelineRecord,
+  TimelineRecordResult, TimelineRecordState, api_versions, service_guids,
 };

@@ -14,8 +14,8 @@ license = "MIT"
 repository = "https://github.com/Falconiere/toolu-ghrunner"
 
 # ── Shared lint configuration ──────────────────────────────────────
-# Matches yamless backend defaults. Strict by design — every error and
-# warning is a code-quality signal we don't want to ship.
+# Strict by design — every error and warning is a code-quality signal we
+# don't want to ship.
 [workspace.lints.clippy]
 unwrap_used = "deny"
 expect_used = "deny"
@@ -68,8 +68,8 @@ unused_must_use = "deny"
 rust_2018_idioms = { level = "warn", priority = -1 }
 
 # ── Shared profile ─────────────────────────────────────────────────
-# Dev profile matches yamless backend — fast incremental compile, full
-# debuginfo on our own crates (line tables only), zero debuginfo on deps.
+# Dev profile: fast incremental compile, full debuginfo on our own crates
+# (line tables only), zero debuginfo on deps.
 [profile.dev]
 opt-level = 0
 incremental = true

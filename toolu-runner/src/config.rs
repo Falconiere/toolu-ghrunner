@@ -109,14 +109,9 @@ pub struct CredentialsFile {
 /// Returns `RunnerError::Config` on missing/unparseable file, and
 /// `RunnerError::Io` on filesystem errors.
 pub fn load_config(path: &Path) -> Result<RunnerRegistrationConfig, RunnerError> {
-  let raw = std::fs::read_to_string(path).map_err(|e| RunnerError::Config(format!(
-    "read {}: {e}",
-    path.display()
-  )))?;
-  toml::from_str(&raw).map_err(|e| RunnerError::Config(format!(
-    "parse {}: {e}",
-    path.display()
-  )))
+  let raw = std::fs::read_to_string(path)
+    .map_err(|e| RunnerError::Config(format!("read {}: {e}", path.display())))?;
+  toml::from_str(&raw).map_err(|e| RunnerError::Config(format!("parse {}: {e}", path.display())))
 }
 
 /// Persist `config` to `path` as TOML, mode 0600 on Unix.
@@ -133,8 +128,8 @@ pub fn save_config(path: &Path, config: &RunnerRegistrationConfig) -> Result<(),
   if let Some(parent) = path.parent() {
     std::fs::create_dir_all(parent)?;
   }
-  let body = toml::to_string_pretty(config)
-    .map_err(|e| RunnerError::Config(format!("toml encode: {e}")))?;
+  let body =
+    toml::to_string_pretty(config).map_err(|e| RunnerError::Config(format!("toml encode: {e}")))?;
   write_secret_file(path, body.as_bytes())
 }
 
@@ -144,14 +139,10 @@ pub fn save_config(path: &Path, config: &RunnerRegistrationConfig) -> Result<(),
 ///
 /// Returns `RunnerError::Config` on missing/unparseable file.
 pub fn load_credentials(path: &Path) -> Result<CredentialsFile, RunnerError> {
-  let raw = std::fs::read_to_string(path).map_err(|e| RunnerError::Config(format!(
-    "read {}: {e}",
-    path.display()
-  )))?;
-  serde_json::from_str(&raw).map_err(|e| RunnerError::Config(format!(
-    "parse {}: {e}",
-    path.display()
-  )))
+  let raw = std::fs::read_to_string(path)
+    .map_err(|e| RunnerError::Config(format!("read {}: {e}", path.display())))?;
+  serde_json::from_str(&raw)
+    .map_err(|e| RunnerError::Config(format!("parse {}: {e}", path.display())))
 }
 
 /// Persist `creds` to `path` as JSON, mode 0600 on Unix.
@@ -178,7 +169,11 @@ fn write_secret_file(path: &Path, body: &[u8]) -> Result<(), RunnerError> {
   let mut opts = OpenOptions::new();
   #[cfg(unix)]
   {
-    opts.create(true).write(true).truncate(true).mode(SECRET_FILE_MODE);
+    opts
+      .create(true)
+      .write(true)
+      .truncate(true)
+      .mode(SECRET_FILE_MODE);
   }
   #[cfg(not(unix))]
   let mut opts = OpenOptions::new();

@@ -44,10 +44,7 @@ fn resolve_expr(
   }
 }
 
-fn resolve_input(
-  parts: &[&str],
-  inputs: &std::collections::HashMap<String, String>,
-) -> String {
+fn resolve_input(parts: &[&str], inputs: &std::collections::HashMap<String, String>) -> String {
   let key = parts.get(1).copied().unwrap_or_default();
   // Try exact match first, then case-insensitive
   if let Some(val) = inputs.get(key) {
@@ -87,10 +84,7 @@ fn resolve_runner(parts: &[&str], temp_dir: &std::path::Path) -> String {
   }
 }
 
-fn resolve_env(
-  parts: &[&str],
-  env_context: &std::collections::HashMap<String, String>,
-) -> String {
+fn resolve_env(parts: &[&str], env_context: &std::collections::HashMap<String, String>) -> String {
   let key = parts.get(1).copied().unwrap_or_default();
   env_context.get(key).cloned().unwrap_or_default()
 }

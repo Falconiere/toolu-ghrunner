@@ -64,10 +64,7 @@ fn extract_tarball(bytes: &[u8], dest: &Path) -> std::io::Result<()> {
   for entry in archive.entries()? {
     let mut entry = entry?;
     let path = entry.path()?;
-    let stripped = path
-      .components()
-      .skip(1)
-      .collect::<std::path::PathBuf>();
+    let stripped = path.components().skip(1).collect::<std::path::PathBuf>();
     if stripped.as_os_str().is_empty() {
       continue;
     }

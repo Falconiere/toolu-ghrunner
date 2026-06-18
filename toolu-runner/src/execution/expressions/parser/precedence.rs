@@ -2,8 +2,8 @@
 
 use shared::RunnerError;
 
-use super::ast::{BinaryOperator, Expr, Parser, UnaryOperator};
 use super::super::lexer::Token;
+use super::ast::{BinaryOperator, Expr, Parser, UnaryOperator};
 
 // ── Precedence climbing ─────────────────────────────────────────────
 

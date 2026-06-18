@@ -59,7 +59,9 @@ pub struct ActionRuns {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RunsUsing {
   /// Node.js action — major version from `runs.using` (e.g. 20, 24).
-  Node { major: u8 },
+  Node {
+    major: u8,
+  },
   Composite,
   Docker,
 }

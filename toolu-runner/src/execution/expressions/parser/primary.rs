@@ -2,9 +2,9 @@
 
 use shared::RunnerError;
 
-use super::ast::{Expr, Parser};
 use super::super::lexer::Token;
 use super::super::types::ExprValue;
+use super::ast::{Expr, Parser};
 
 const CONTEXT_NAMES: &[&str] = &[
   "github", "env", "secrets", "steps", "matrix", "strategy", "needs", "inputs", "runner", "job",

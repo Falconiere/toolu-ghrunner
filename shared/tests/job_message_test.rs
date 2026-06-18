@@ -1,6 +1,4 @@
-use shared::{
-  ActionStep, AgentJobRequestMessage, DictEntry, PipelineContextData, TemplateToken,
-};
+use shared::{ActionStep, AgentJobRequestMessage, DictEntry, PipelineContextData, TemplateToken};
 use std::collections::HashMap;
 
 #[test]
@@ -60,10 +58,7 @@ fn template_token_to_map() {
     m.get("name").and_then(|v| v.to_string_value()),
     Some("alice")
   );
-  assert_eq!(
-    m.get("age").and_then(|v| v.num_val),
-    Some(30.0),
-  );
+  assert_eq!(m.get("age").and_then(|v| v.num_val), Some(30.0),);
 }
 
 #[test]
@@ -183,16 +178,19 @@ fn agent_job_request_message_with_context_data() {
     "messageType".to_owned(),
     serde_json::Value::String("JobRequest".to_owned()),
   );
+  json.insert("plan".to_owned(), serde_json::json!({ "planId": "p" }));
   json.insert(
-    "plan".to_owned(),
-    serde_json::json!({ "planId": "p" }),
+    "jobId".to_owned(),
+    serde_json::Value::String("j".to_owned()),
   );
-  json.insert("jobId".to_owned(), serde_json::Value::String("j".to_owned()));
   json.insert(
     "jobDisplayName".to_owned(),
     serde_json::Value::String("j".to_owned()),
   );
-  json.insert("jobName".to_owned(), serde_json::Value::String("j".to_owned()));
+  json.insert(
+    "jobName".to_owned(),
+    serde_json::Value::String("j".to_owned()),
+  );
   json.insert(
     "contextData".to_owned(),
     serde_json::json!({
@@ -201,10 +199,8 @@ fn agent_job_request_message_with_context_data() {
     }),
   );
 
-  let job: AgentJobRequestMessage = serde_json::from_value(serde_json::Value::Object(
-    json.into_iter().collect(),
-  ))
-  .unwrap();
+  let job: AgentJobRequestMessage =
+    serde_json::from_value(serde_json::Value::Object(json.into_iter().collect())).unwrap();
   let ctx = job.context_data;
   assert_eq!(ctx.len(), 2);
   let github = ctx.get("github").unwrap();

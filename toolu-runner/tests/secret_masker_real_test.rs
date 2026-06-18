@@ -58,7 +58,10 @@ fn multi_line_secret_masks_every_line() {
 
   let line = "DEBUG runner: -----BEGIN FAKE----- appeared in the log";
   let out = masker.mask(line);
-  assert!(!out.contains("-----BEGIN FAKE-----"), "leaked header: {out}");
+  assert!(
+    !out.contains("-----BEGIN FAKE-----"),
+    "leaked header: {out}"
+  );
   assert!(out.contains("***"), "expected marker: {out}");
 }
 
@@ -134,7 +137,10 @@ fn full_pipeline_with_redacting_writer_redacts_real_secrets() {
     !captured.contains("hunter2-token-value-abc123"),
     "leaked through RedactingWriter: {captured}"
   );
-  assert!(captured.contains("HUNTER=***"), "missing marker: {captured}");
+  assert!(
+    captured.contains("HUNTER=***"),
+    "missing marker: {captured}"
+  );
 }
 
 #[test]
@@ -164,5 +170,8 @@ fn matches_recorded_input_fixture_redaction_output() {
   // include_str! includes any trailing newline. Strip it from the
   // expected file so the per-line join comparison is apples-to-apples.
   let expected_trimmed = expected.trim_end_matches('\n');
-  assert_eq!(actual, expected_trimmed, "redaction does not match expected fixture");
+  assert_eq!(
+    actual, expected_trimmed,
+    "redaction does not match expected fixture"
+  );
 }

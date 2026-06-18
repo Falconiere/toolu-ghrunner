@@ -11,7 +11,7 @@
 //! set in the environment.
 
 use toolu_runner::config::{
-  CredentialsFile, RunnerRegistrationConfig, load_credentials, load_config as load_reg_config,
+  CredentialsFile, RunnerRegistrationConfig, load_config as load_reg_config, load_credentials,
 };
 
 use super::harness::LiveHarness;
@@ -54,8 +54,9 @@ async fn register_creates_config_and_credentials() {
     creds_path.display()
   );
 
-  let cfg: RunnerRegistrationConfig =
-    load_reg_config(&cfg_path).map_err(|e| e.to_string()).expect("load config.toml");
+  let cfg: RunnerRegistrationConfig = load_reg_config(&cfg_path)
+    .map_err(|e| e.to_string())
+    .expect("load config.toml");
   assert_eq!(
     cfg.runner_url,
     format!("https://github.com/{}", harness.repo),
@@ -84,8 +85,9 @@ async fn register_creates_config_and_credentials() {
 
   // AC #1b: credentials.json has a non-empty placeholder token and
   // an RFC3339 issued_at. The live JWT-exchange flow lands in step 10.
-  let creds: CredentialsFile =
-    load_credentials(&creds_path).map_err(|e| e.to_string()).expect("load credentials.json");
+  let creds: CredentialsFile = load_credentials(&creds_path)
+    .map_err(|e| e.to_string())
+    .expect("load credentials.json");
   assert!(
     !creds.access_token.is_empty(),
     "access_token should be a non-empty placeholder (live flow is step 10)"
@@ -120,7 +122,10 @@ async fn register_replace_overwrites_existing() {
   // Should succeed and overwrite the first. Without --replace, the
   // second call would exit 2 with "registration already exists".
   tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
-  harness.register().await.expect("second register with --replace");
+  harness
+    .register()
+    .await
+    .expect("second register with --replace");
 
   assert!(
     harness.config_path().exists(),

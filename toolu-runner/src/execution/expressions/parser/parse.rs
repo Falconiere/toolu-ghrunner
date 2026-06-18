@@ -1,7 +1,7 @@
 //! Expression parsing entry point.
 
-use super::ast::{Expr, Parser};
 use super::super::lexer::lex;
+use super::ast::{Expr, Parser};
 use shared::RunnerError;
 
 /// Parse a GitHub Actions expression string into an AST.

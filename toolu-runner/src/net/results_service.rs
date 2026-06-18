@@ -160,7 +160,11 @@ pub async fn upload_log_blob(
   content: Vec<u8>,
   compressed: bool,
 ) -> Result<(), RunnerError> {
-  let content_type = if compressed { "application/gzip" } else { "text/plain" };
+  let content_type = if compressed {
+    "application/gzip"
+  } else {
+    "text/plain"
+  };
   let mut req = client
     .put(sas_url)
     .header(reqwest::header::CONTENT_TYPE, content_type);

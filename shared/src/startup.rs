@@ -1,7 +1,6 @@
 //! Tracing initialization for toolu-runner.
 //!
-//! Replaces `yamless-shared::startup::init` with a slim version: no OTel,
-//! no dotenvy walk, just `tracing-subscriber` + `EnvFilter`.
+//! `tracing-subscriber` + `EnvFilter` only. No OTel, no dotenvy walk.
 //!
 //! Two public entry points:
 //! - [`init`] — plain tracing, no secret redaction.
@@ -61,10 +60,10 @@ fn diag_dir(data_dir: &Path) -> PathBuf {
 /// falling back to `info`.
 ///
 /// Before the tracing layer is attached, scans the process environment for
-/// any `YAMLESS_*` keys and emits a `tracing::warn!` for each. This closes
-/// the AC #23 gap from the design spec — yamless users who re-run their old
-/// shell profile see a clear "this var is no longer recognized" message
-/// instead of silent failure. Does not fail; just warns.
+/// any `YAMLESS_*` keys (the deprecated prefix from a previous runner) and
+/// emits a `tracing::warn!` for each. Users re-running an old shell profile
+/// see a clear "this var is no longer recognized" message instead of silent
+/// failure. Does not fail; just warns.
 ///
 /// Uses `try_init` so duplicate calls (e.g. in tests) are silently ignored.
 ///
@@ -74,7 +73,7 @@ fn diag_dir(data_dir: &Path) -> PathBuf {
 pub fn init(manifest_dir: &str, service: &str) -> Result<(), crate::RunnerError> {
   load_dotenv(Path::new(manifest_dir));
 
-  warn_about_yamless_env();
+  warn_about_legacy_env();
 
   let data_dir = default_data_dir();
   let diag = diag_dir(&data_dir);
@@ -109,10 +108,9 @@ pub fn init(manifest_dir: &str, service: &str) -> Result<(), crate::RunnerError>
   Ok(())
 }
 
-/// Scan the process environment for any `YAMLESS_*` keys and emit a
-/// `tracing::warn!` for each. Yamless users get a clear signal that their
-/// old env vars are no longer recognized (the runner has no env-var
-/// migration path from yamless — re-register with the new CLI).
+/// Scan the process environment for any deprecated `YAMLESS_*` keys and
+/// emit a `tracing::warn!` for each. Users get a clear signal that their
+/// old env vars are no longer recognized (re-register with the new CLI).
 ///
 /// Called from [`init`] / [`init_with_redactor`] before the subscriber is
 /// installed, so the warning still surfaces even if the first `tracing`
@@ -125,20 +123,20 @@ pub fn init(manifest_dir: &str, service: &str) -> Result<(), crate::RunnerError>
 ///
 /// Public so the warning logic is testable in isolation — the canonical
 /// test is in `toolu-runner/tests/failure_modes_test.rs`.
-pub fn warn_about_yamless_env() -> Vec<String> {
-  let yamless_keys = scan_yamless_env(std::env::vars());
-  for key in &yamless_keys {
+pub fn warn_about_legacy_env() -> Vec<String> {
+  let legacy_keys = scan_legacy_env(std::env::vars());
+  for key in &legacy_keys {
     eprintln!(
-      "warning: ignoring yamless env var {key} — toolu-runner has no yamless compatibility layer; use TOOLU_RUNNER_* instead"
+      "warning: ignoring legacy env var {key} — toolu-runner has no compatibility layer for the old prefix; use TOOLU_RUNNER_* instead"
     );
   }
-  yamless_keys
+  legacy_keys
 }
 
 /// Pure scan: return the subset of `env` whose keys start with `YAMLESS_`,
 /// sorted for deterministic output. Extracted so tests can verify the
 /// filter logic without mutating the process environment.
-pub fn scan_yamless_env<I, K, V>(env: I) -> Vec<String>
+pub fn scan_legacy_env<I, K, V>(env: I) -> Vec<String>
 where
   I: IntoIterator<Item = (K, V)>,
   K: AsRef<str>,
@@ -194,13 +192,19 @@ pub fn init_with_redactor(
   let shared_redactor = Arc::from(redactor);
 
   let stderr_layer = tracing_subscriber::fmt::layer()
-    .with_writer(RedactingMakeWriter::new(std::io::stderr, Arc::clone(&shared_redactor)))
+    .with_writer(RedactingMakeWriter::new(
+      std::io::stderr,
+      Arc::clone(&shared_redactor),
+    ))
     .with_target(true)
     .with_thread_names(false)
     .compact();
 
   let file_layer = tracing_subscriber::fmt::layer()
-    .with_writer(RedactingMakeWriter::new(file_appender, Arc::clone(&shared_redactor)))
+    .with_writer(RedactingMakeWriter::new(
+      file_appender,
+      Arc::clone(&shared_redactor),
+    ))
     .with_target(true)
     .with_thread_names(true)
     .json();
@@ -294,7 +298,11 @@ impl<W: Write> Write for RedactingWriter<W> {
 impl<W: Write> RedactingWriter<W> {
   /// Build a redacting writer around `inner`.
   pub fn new(inner: W, redactor: Arc<dyn SecretRedactor>) -> Self {
-    Self { inner, buffer: Vec::new(), redactor }
+    Self {
+      inner,
+      buffer: Vec::new(),
+      redactor,
+    }
   }
 
   /// Drain any buffered partial line and return the inner writer.

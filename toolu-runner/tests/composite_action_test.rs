@@ -160,7 +160,10 @@ fn evaluate_outputs_resolves_step_output_references() {
   child_outputs.insert("greet".to_owned(), greet);
 
   let outputs = execution.evaluate_outputs(&child_outputs);
-  assert_eq!(outputs.get("greeting").map(String::as_str), Some("hello World"));
+  assert_eq!(
+    outputs.get("greeting").map(String::as_str),
+    Some("hello World")
+  );
 }
 
 #[test]

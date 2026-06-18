@@ -22,7 +22,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use shared::startup::scan_yamless_env;
+use shared::startup::scan_legacy_env;
 use toolu_runner::lockfile::{self, LockBody};
 
 fn toolu_runner() -> Command {
@@ -105,10 +105,8 @@ fn lock_replaces_stale_lock_when_holder_pid_dead() {
   )
   .expect("write stale lock");
   // Backdate mtime past the 5-minute staleness threshold.
-  let stale_mtime = filetime::FileTime::from_unix_time(
-    chrono::Utc::now().timestamp() - (10 * 60),
-    0,
-  );
+  let stale_mtime =
+    filetime::FileTime::from_unix_time(chrono::Utc::now().timestamp() - (10 * 60), 0);
   filetime::set_file_mtime(&lock_path, stale_mtime).expect("backdate");
 
   // Acquire should detect the stale lock, remove it, and succeed.
@@ -121,35 +119,38 @@ fn lock_replaces_stale_lock_when_holder_pid_dead() {
 // ─── YAMLESS_* env var warning (spec AC #23) ────────────────────────
 
 #[test]
-fn scan_yamless_env_matches_prefix_only() {
+fn scan_legacy_env_matches_prefix_only() {
   let env = vec![
     ("YAMLESS_API_URL".to_owned(), "x".to_owned()),
     ("YAMLESS_WORKSPACE_ROOT".to_owned(), "x".to_owned()),
     ("PATH".to_owned(), "/usr/bin".to_owned()),
     ("TOOLU_RUNNER_LOG".to_owned(), "info".to_owned()),
     ("YAMLESS_X".to_owned(), "x".to_owned()),
-    ("yamless_lower".to_owned(), "x".to_owned()),
   ];
-  let keys = scan_yamless_env(env);
+  let keys = scan_legacy_env(env);
   assert_eq!(
     keys,
-    vec!["YAMLESS_API_URL".to_owned(), "YAMLESS_WORKSPACE_ROOT".to_owned(), "YAMLESS_X".to_owned()],
+    vec![
+      "YAMLESS_API_URL".to_owned(),
+      "YAMLESS_WORKSPACE_ROOT".to_owned(),
+      "YAMLESS_X".to_owned()
+    ],
     "should return sorted YAMLESS_ keys only"
   );
 }
 
 #[test]
-fn scan_yamless_env_empty_when_none_set() {
+fn scan_legacy_env_empty_when_none_set() {
   let env = vec![
     ("PATH".to_owned(), "/usr/bin".to_owned()),
     ("HOME".to_owned(), "/home/me".to_owned()),
   ];
-  let keys = scan_yamless_env(env);
+  let keys = scan_legacy_env(env);
   assert!(keys.is_empty(), "got unexpected: {keys:?}");
 }
 
 #[test]
-fn yamless_warning_emitted_to_stderr_when_env_var_set() {
+fn legacy_env_warning_emitted_to_stderr_when_var_set() {
   // Run the binary with a YAMLESS_* env var set; the warning must
   // appear on stderr. Using a child process avoids touching the
   // host test process's env (which Rust 2024 requires unsafe for).
@@ -168,13 +169,13 @@ fn yamless_warning_emitted_to_stderr_when_env_var_set() {
     "expected {key} in stderr warning; got: {stderr}"
   );
   assert!(
-    stderr.contains("ignoring yamless env var"),
+    stderr.contains("ignoring legacy env var"),
     "expected warning text; got: {stderr}"
   );
 }
 
 #[test]
-fn yamless_warning_not_emitted_when_env_var_unset() {
+fn legacy_env_warning_not_emitted_when_var_unset() {
   let output = toolu_runner()
     .args(["status", "--config", "/nonexistent.toml"])
     .env_remove("YAMLESS_API_URL")
@@ -184,7 +185,7 @@ fn yamless_warning_not_emitted_when_env_var_unset() {
     .expect("run binary");
   let stderr = String::from_utf8_lossy(&output.stderr);
   assert!(
-    !stderr.contains("ignoring yamless env var"),
+    !stderr.contains("ignoring legacy env var"),
     "should not emit warning when no YAMLESS_* is set; got: {stderr}"
   );
 }

@@ -8,7 +8,6 @@ use serde_json::json;
 use wiremock::matchers::{body_string, header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-
 #[tokio::test]
 async fn exchange_token_posts_form_to_authorization_url() {
   let server = MockServer::start().await;
@@ -50,17 +49,17 @@ async fn exchange_token_returns_protocol_error_on_http_failure() {
     .await;
 
   let client = reqwest::Client::new();
-  let err = toolu_runner::net::exchange_token(
-    &client,
-    &format!("{}/oauth/token", server.uri()),
-    "bad.jwt",
-  )
-  .await
-  .expect_err("should error on 401");
+  let err =
+    toolu_runner::net::exchange_token(&client, &format!("{}/oauth/token", server.uri()), "bad.jwt")
+      .await
+      .expect_err("should error on 401");
 
   let msg = format!("{err}");
   assert!(msg.contains("401"), "expected status in error: {msg}");
-  assert!(msg.contains("invalid_client"), "expected body in error: {msg}");
+  assert!(
+    msg.contains("invalid_client"),
+    "expected body in error: {msg}"
+  );
 }
 
 #[tokio::test]
@@ -77,14 +76,9 @@ async fn acknowledge_message_posts_message_id_to_broker() {
     .await;
 
   let client = reqwest::Client::new();
-  toolu_runner::net::acknowledge_message(
-    &client,
-    &server.uri(),
-    "test-token",
-    42,
-  )
-  .await
-  .expect("ack should succeed");
+  toolu_runner::net::acknowledge_message(&client, &server.uri(), "test-token", 42)
+    .await
+    .expect("ack should succeed");
 }
 
 #[tokio::test]

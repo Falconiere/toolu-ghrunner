@@ -61,7 +61,11 @@ pub async fn acquire_job(
     .await
     .map_err(|e| RunnerError::Protocol(format!("acquire job parse: {e}")))?;
 
-  Ok(AcquireJobResponse { plan_id, body, run_service_token })
+  Ok(AcquireJobResponse {
+    plan_id,
+    body,
+    run_service_token,
+  })
 }
 
 /// Renew a job lock. Called every ~60 seconds during job execution.

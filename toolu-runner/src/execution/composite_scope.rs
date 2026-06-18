@@ -28,9 +28,7 @@ pub struct CompositeOutputs {
 
 impl CompositeOutputs {
   /// Create from the `outputs:` section of an action manifest.
-  pub fn from_manifest(
-    outputs: &HashMap<String, super::actions::manifest::ActionOutput>,
-  ) -> Self {
+  pub fn from_manifest(outputs: &HashMap<String, super::actions::manifest::ActionOutput>) -> Self {
     let expressions = outputs
       .iter()
       .filter_map(|(name, output)| {

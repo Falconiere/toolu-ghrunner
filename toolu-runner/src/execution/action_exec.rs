@@ -9,9 +9,7 @@ use super::action_support::{
   build_composite_inputs, build_node_env, emit_action_header, emit_log, read_manifest,
   resolve_action_dir,
 };
-use super::actions::downloader::{
-  action_cache_dir, download_and_extract_action, is_action_cached,
-};
+use super::actions::downloader::{action_cache_dir, download_and_extract_action, is_action_cached};
 use super::actions::manifest::RunsUsing;
 use super::actions::resolver::{ActionRefKind, parse_action_ref};
 use super::composite_exec::{CompositeParams, execute_composite_action};

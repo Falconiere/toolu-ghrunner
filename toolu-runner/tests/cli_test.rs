@@ -34,7 +34,10 @@ fn register_help_lists_required_flags() {
     .output()
     .expect("should run toolu-runner register --help");
 
-  assert!(output.status.success(), "register --help should exit cleanly");
+  assert!(
+    output.status.success(),
+    "register --help should exit cleanly"
+  );
   let stdout = String::from_utf8_lossy(&output.stdout);
   assert!(stdout.contains("--url"), "missing --url in: {stdout}");
   assert!(stdout.contains("--token"), "missing --token in: {stdout}");

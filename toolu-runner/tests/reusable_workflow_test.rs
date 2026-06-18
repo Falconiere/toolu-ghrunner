@@ -13,7 +13,7 @@
 use std::collections::HashMap;
 
 use toolu_runner::execution::workflow::reusable::{
-  self, InputDef, OutputDef, ReusableWorkflowDef, ResolveContext, SecretDef, SecretMode,
+  self, InputDef, OutputDef, ResolveContext, ReusableWorkflowDef, SecretDef, SecretMode,
   build_caller_context, check_nesting_depth, parse_reusable_ref, resolve_reusable_invocation,
 };
 
@@ -63,8 +63,9 @@ fn parse_reusable_ref_with_nested_path() {
 
 #[test]
 fn parse_reusable_ref_with_sha() {
-  let r = parse_reusable_ref("Falconiere/toolu-ghrunner/.github/workflows/build.yml@abc1234567890abcdef")
-    .expect("parse sha");
+  let r =
+    parse_reusable_ref("Falconiere/toolu-ghrunner/.github/workflows/build.yml@abc1234567890abcdef")
+      .expect("parse sha");
   assert_eq!(r.git_ref, "abc1234567890abcdef");
 }
 
@@ -77,17 +78,23 @@ fn parse_reusable_ref_rejects_missing_at_sign() {
 
 #[test]
 fn parse_reusable_ref_rejects_empty_ref() {
-  let err =
-    parse_reusable_ref("Falconiere/toolu-ghrunner/.github/workflows/reusable.yml@").expect_err("empty @");
+  let err = parse_reusable_ref("Falconiere/toolu-ghrunner/.github/workflows/reusable.yml@")
+    .expect_err("empty @");
   let msg = format!("{err}");
-  assert!(msg.contains("empty ref") || msg.contains("missing @ref"), "got: {msg}");
+  assert!(
+    msg.contains("empty ref") || msg.contains("missing @ref"),
+    "got: {msg}"
+  );
 }
 
 #[test]
 fn parse_reusable_ref_rejects_missing_path() {
   let err = parse_reusable_ref("Falconiere/toolu-ghrunner@main").expect_err("no path");
   let msg = format!("{err}");
-  assert!(msg.contains("missing workflow path") || msg.contains("missing"), "got: {msg}");
+  assert!(
+    msg.contains("missing workflow path") || msg.contains("missing"),
+    "got: {msg}"
+  );
 }
 
 #[test]
@@ -118,7 +125,10 @@ fn resolve_inputs_uses_caller_value_over_default() {
   let def = def_with_inputs(&[("region", false, Some("us-east-1"))]);
   let provided = str_map(&[("region", "eu-west-2")]);
   let resolved = reusable::resolve_inputs(&def.inputs, &provided);
-  assert_eq!(resolved.get("region").map(String::as_str), Some("eu-west-2"));
+  assert_eq!(
+    resolved.get("region").map(String::as_str),
+    Some("eu-west-2")
+  );
 }
 
 #[test]
@@ -126,7 +136,10 @@ fn resolve_inputs_uses_default_when_caller_omits() {
   let def = def_with_inputs(&[("region", false, Some("us-east-1"))]);
   let provided = str_map(&[]);
   let resolved = reusable::resolve_inputs(&def.inputs, &provided);
-  assert_eq!(resolved.get("region").map(String::as_str), Some("us-east-1"));
+  assert_eq!(
+    resolved.get("region").map(String::as_str),
+    Some("us-east-1")
+  );
 }
 
 #[test]
@@ -144,11 +157,16 @@ fn validate_secrets_inherit_passes_through_all_caller_secrets() {
     outputs: HashMap::new(),
     secrets: HashMap::new(),
   };
-  def.secrets.insert("GH_TOKEN".to_owned(), SecretDef { required: true });
+  def
+    .secrets
+    .insert("GH_TOKEN".to_owned(), SecretDef { required: true });
   let provided = str_map(&[("GH_TOKEN", "secret-value")]);
   let resolved =
     reusable::validate_secrets(&SecretMode::Inherit, &def.secrets, &provided).expect("inherit");
-  assert_eq!(resolved.get("GH_TOKEN").map(String::as_str), Some("secret-value"));
+  assert_eq!(
+    resolved.get("GH_TOKEN").map(String::as_str),
+    Some("secret-value")
+  );
 }
 
 #[test]
@@ -158,12 +176,13 @@ fn validate_secrets_explicit_fails_when_required_missing() {
     outputs: HashMap::new(),
     secrets: HashMap::new(),
   };
-  def.secrets.insert("GH_TOKEN".to_owned(), SecretDef { required: true });
+  def
+    .secrets
+    .insert("GH_TOKEN".to_owned(), SecretDef { required: true });
   let provided = str_map(&[]);
   let mapping = HashMap::new();
-  let err =
-    reusable::validate_secrets(&SecretMode::Explicit(mapping), &def.secrets, &provided)
-      .expect_err("missing required");
+  let err = reusable::validate_secrets(&SecretMode::Explicit(mapping), &def.secrets, &provided)
+    .expect_err("missing required");
   let msg = format!("{err}");
   assert!(msg.contains("required secret 'GH_TOKEN'"), "got: {msg}");
 }
@@ -175,12 +194,18 @@ fn validate_secrets_explicit_passes_when_required_provided() {
     outputs: HashMap::new(),
     secrets: HashMap::new(),
   };
-  def.secrets.insert("GH_TOKEN".to_owned(), SecretDef { required: true });
+  def
+    .secrets
+    .insert("GH_TOKEN".to_owned(), SecretDef { required: true });
   let mut mapping = HashMap::new();
   mapping.insert("GH_TOKEN".to_owned(), "secret-value".to_owned());
-  let resolved = reusable::validate_secrets(&SecretMode::Explicit(mapping), &def.secrets, &str_map(&[]))
-    .expect("explicit");
-  assert_eq!(resolved.get("GH_TOKEN").map(String::as_str), Some("secret-value"));
+  let resolved =
+    reusable::validate_secrets(&SecretMode::Explicit(mapping), &def.secrets, &str_map(&[]))
+      .expect("explicit");
+  assert_eq!(
+    resolved.get("GH_TOKEN").map(String::as_str),
+    Some("secret-value")
+  );
 }
 
 #[test]
@@ -228,7 +253,10 @@ fn check_nesting_depth_allows_four_levels() {
 fn check_nesting_depth_rejects_five_levels() {
   let err = check_nesting_depth(5).expect_err("5 is too deep");
   let msg = format!("{err}");
-  assert!(msg.contains("depth") || msg.contains("exceeded"), "got: {msg}");
+  assert!(
+    msg.contains("depth") || msg.contains("exceeded"),
+    "got: {msg}"
+  );
 }
 
 #[test]
@@ -268,7 +296,9 @@ fn resolve_reusable_invocation_happy_path() {
       default: Some("1.0.0".to_owned()),
     },
   );
-  def.secrets.insert("GH_TOKEN".to_owned(), SecretDef { required: true });
+  def
+    .secrets
+    .insert("GH_TOKEN".to_owned(), SecretDef { required: true });
 
   let ctx = ResolveContext {
     call_stack: vec![],
@@ -285,7 +315,10 @@ fn resolve_reusable_invocation_happy_path() {
     &ctx,
   )
   .expect("resolve");
-  assert_eq!(resolved.inputs.get("version").map(String::as_str), Some("2.0.0"));
+  assert_eq!(
+    resolved.inputs.get("version").map(String::as_str),
+    Some("2.0.0")
+  );
   assert_eq!(
     resolved.secrets.get("GH_TOKEN").map(String::as_str),
     Some("real-secret-value"),

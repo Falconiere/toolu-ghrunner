@@ -13,7 +13,19 @@ pre-commit:
       glob: "{shared,protocol,toolu-runner}/**/*.rs"
       run: cargo clippy --workspace --all-targets -- -D warnings
     no-yamless-coupling:
-      run: ! grep -r 'yamless' shared/ protocol/ toolu-runner/ Cargo.toml 2>/dev/null
+      run: |
+        # AC #23 detection of YAMLESS_* env vars is legitimate; the grep
+        # excludes shared/src/startup.rs (the AC #23 impl) and the warning
+        # test fixtures that mention the YAMLESS_ prefix.
+        if grep -rn 'yamless' shared/ protocol/ toolu-runner/ Cargo.toml 2>/dev/null \
+           | grep -v 'YAMLESS_' | grep -v 'tests/live/'; then
+          echo "ERROR: yamless reference in source (AC #19)"
+          exit 1
+        fi
+        if cargo tree --workspace | grep -qE 'yamless-|yamless_'; then
+          echo "ERROR: yamless-* crate found in dependency tree"
+          exit 1
+        fi
 
 pre-push:
   parallel: false

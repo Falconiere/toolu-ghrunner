@@ -9,7 +9,10 @@ fn runner_config_holds_paths() {
     cgroup_path: None,
   };
   assert_eq!(cfg.data_dir, PathBuf::from("/var/lib/toolu-runner"));
-  assert_eq!(cfg.workspace_root, PathBuf::from("/var/lib/toolu-runner/_work"));
+  assert_eq!(
+    cfg.workspace_root,
+    PathBuf::from("/var/lib/toolu-runner/_work")
+  );
   assert!(cfg.cgroup_path.is_none());
 }
 

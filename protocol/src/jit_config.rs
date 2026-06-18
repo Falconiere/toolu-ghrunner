@@ -58,5 +58,6 @@ fn decode_blob<T: serde::de::DeserializeOwned>(
     .decode(encoded)
     .map_err(|e| RunnerError::Protocol(format!("{label} base64 decode failed: {e}")))?;
 
-  serde_json::from_slice(&bytes).map_err(|e| RunnerError::Protocol(format!("{label} JSON parse failed: {e}")))
+  serde_json::from_slice(&bytes)
+    .map_err(|e| RunnerError::Protocol(format!("{label} JSON parse failed: {e}")))
 }
