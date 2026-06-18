@@ -8,6 +8,8 @@
 
 mod config;
 mod error;
+mod events;
 
 pub use config::RunnerConfig;
 pub use error::RunnerError;
+pub use events::{AnnotationLevel, Conclusion, ListenerEvent, LogStream, RunnerEvent};
