@@ -11,6 +11,8 @@ mod error;
 mod events;
 mod job_message;
 
+pub mod startup;
+
 pub use config::RunnerConfig;
 pub use error::RunnerError;
 pub use events::{AnnotationLevel, Conclusion, ListenerEvent, LogStream, RunnerEvent};
