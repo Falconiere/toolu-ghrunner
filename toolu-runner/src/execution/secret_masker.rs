@@ -8,6 +8,18 @@ pub struct SecretMasker {
   patterns: Vec<String>,
 }
 
+/// Bridge into `shared::startup::SecretRedactor`.
+///
+/// `SecretMasker` lives in `toolu-runner` but the trait lives in `shared`
+/// (so `shared` never has to depend on the runner). This impl is the
+/// one-way wiring the runner uses when calling
+/// `shared::startup::init_with_redactor`.
+impl shared::startup::SecretRedactor for SecretMasker {
+  fn redact(&self, line: &str) -> String {
+    self.mask(line)
+  }
+}
+
 impl SecretMasker {
   /// Create a new empty masker.
   pub fn new() -> Self {

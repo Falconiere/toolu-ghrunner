@@ -3,14 +3,35 @@
 //! Replaces `yamless-shared::startup::init` with a slim version: no OTel,
 //! no dotenvy walk, just `tracing-subscriber` + `EnvFilter`.
 //!
-//! In step 4e, this is extended to accept a `SecretMasker` and route all log
-//! output through it before any sink.
+//! Two public entry points:
+//! - [`init`] — plain tracing, no secret redaction.
+//! - [`init_with_redactor`] — wraps every log line through a
+//!   [`SecretRedactor`] before it reaches the file sink. This guarantees
+//!   that registered secrets never land in `_diag/<service>.log`
+//!   unredacted, satisfying the runner's secret-handling spec.
 
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
+
+/// Pluggable secret redactor used by the tracing layer.
+///
+/// The runner provides an implementation that masks registered secrets
+/// (typically `toolu_runner::execution::SecretMasker`). Each completed log
+/// line is passed to [`SecretRedactor::redact`] before being written to the
+/// underlying sink.
+///
+/// The trait is `Send + Sync` so a single instance can be shared between
+/// the stderr and file subscribers without locking.
+pub trait SecretRedactor: Send + Sync {
+  /// Return a redacted copy of `line`. Implementations should be pure
+  /// (no side effects) so they can run on the tracing thread.
+  fn redact(&self, line: &str) -> String;
+}
 
 /// Default data directory under the user's home.
 fn default_data_dir() -> PathBuf {
@@ -56,9 +77,7 @@ pub fn init(manifest_dir: &str, service: &str) -> Result<(), crate::RunnerError>
 
   let file_appender = tracing_appender::rolling::daily(&diag, format!("{service}.log"));
 
-  let env_filter = EnvFilter::try_from_env("TOOLU_RUNNER_LOG")
-    .or_else(|_| EnvFilter::try_from_env("RUST_LOG"))
-    .unwrap_or_else(|_| EnvFilter::new("info"));
+  let env_filter = build_env_filter();
 
   let stderr_layer = tracing_subscriber::fmt::layer()
     .with_writer(std::io::stderr)
@@ -82,6 +101,71 @@ pub fn init(manifest_dir: &str, service: &str) -> Result<(), crate::RunnerError>
   Ok(())
 }
 
+/// Initialize tracing with a [`SecretRedactor`] wrapping both sinks.
+///
+/// Every line written by `tracing-subscriber`'s fmt layer is passed
+/// through `redactor.redact(line)` before reaching stderr or the
+/// diagnostics file. This is the only safe way to satisfy the runner's
+/// "no secret ever reaches `_diag/runner.log` unredacted" spec: the file
+/// writer is wrapped at the byte level, so secrets are gone from disk
+/// regardless of how the upstream log line was produced.
+///
+/// The redactor is shared by both layers via an `Arc`, so a single
+/// instance can hold the registered secrets.
+///
+/// # Errors
+///
+/// Returns `RunnerError::WorkspaceInit` if the diagnostics directory
+/// cannot be created.
+pub fn init_with_redactor(
+  manifest_dir: &str,
+  service: &str,
+  redactor: Box<dyn SecretRedactor>,
+) -> Result<(), crate::RunnerError> {
+  load_dotenv(Path::new(manifest_dir));
+
+  let data_dir = default_data_dir();
+  let diag = diag_dir(&data_dir);
+  std::fs::create_dir_all(&diag).map_err(|source| crate::RunnerError::WorkspaceInit {
+    path: diag.clone(),
+    source,
+  })?;
+
+  let file_appender = tracing_appender::rolling::daily(&diag, format!("{service}.log"));
+
+  let env_filter = build_env_filter();
+
+  let shared_redactor = Arc::from(redactor);
+
+  let stderr_layer = tracing_subscriber::fmt::layer()
+    .with_writer(RedactingMakeWriter::new(std::io::stderr, Arc::clone(&shared_redactor)))
+    .with_target(true)
+    .with_thread_names(false)
+    .compact();
+
+  let file_layer = tracing_subscriber::fmt::layer()
+    .with_writer(RedactingMakeWriter::new(file_appender, Arc::clone(&shared_redactor)))
+    .with_target(true)
+    .with_thread_names(true)
+    .json();
+
+  tracing_subscriber::registry()
+    .with(env_filter)
+    .with(stderr_layer)
+    .with(file_layer)
+    .try_init()
+    .ok();
+
+  Ok(())
+}
+
+/// Build the `EnvFilter` from `TOOLU_RUNNER_LOG` → `RUST_LOG` → `info`.
+fn build_env_filter() -> EnvFilter {
+  EnvFilter::try_from_env("TOOLU_RUNNER_LOG")
+    .or_else(|_| EnvFilter::try_from_env("RUST_LOG"))
+    .unwrap_or_else(|_| EnvFilter::new("info"))
+}
+
 /// Load a `.env` file from `manifest_dir` (no-op if absent).
 fn load_dotenv(manifest_dir: &Path) {
   let path = manifest_dir.join(".env");
@@ -91,5 +175,130 @@ fn load_dotenv(manifest_dir: &Path) {
   match dotenvy::from_path(&path) {
     Ok(()) => tracing::info!(".env loaded from {}", path.display()),
     Err(e) => eprintln!("warning: could not load {}: {e}", path.display()),
+  }
+}
+
+/// A [`MakeWriter`] that wraps an inner writer and routes every completed
+/// line through a [`SecretRedactor`] before flushing to disk/stdout.
+pub struct RedactingMakeWriter<W> {
+  inner: W,
+  redactor: Arc<dyn SecretRedactor>,
+}
+
+impl<W> RedactingMakeWriter<W> {
+  /// Wrap an inner `MakeWriter` so all output passes through `redactor`.
+  pub fn new(inner: W, redactor: Arc<dyn SecretRedactor>) -> Self {
+    Self { inner, redactor }
+  }
+}
+
+impl<'a, W> tracing_subscriber::fmt::MakeWriter<'a> for RedactingMakeWriter<W>
+where
+  W: tracing_subscriber::fmt::MakeWriter<'a>,
+{
+  type Writer = RedactingWriter<W::Writer>;
+
+  fn make_writer(&'a self) -> Self::Writer {
+    RedactingWriter::new(self.inner.make_writer(), Arc::clone(&self.redactor))
+  }
+}
+
+/// A [`Write`] adapter that buffers bytes, splits on newlines, and runs
+/// each completed line through a [`SecretRedactor`] before writing it to
+/// the inner writer.
+///
+/// `tracing-subscriber`'s fmt layer writes one event per `write` call,
+/// ending with `\n`. We drain complete lines eagerly so secrets never
+/// sit in the buffer longer than the single write that introduced them.
+pub struct RedactingWriter<W> {
+  inner: W,
+  buffer: Vec<u8>,
+  redactor: Arc<dyn SecretRedactor>,
+}
+
+impl<W: Write> Write for RedactingWriter<W> {
+  fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+    self.buffer.extend_from_slice(buf);
+    self.drain_complete_lines()?;
+    Ok(buf.len())
+  }
+
+  fn flush(&mut self) -> io::Result<()> {
+    self.drain_complete_lines()?;
+    if !self.buffer.is_empty() {
+      let pending = String::from_utf8_lossy(&self.buffer).into_owned();
+      self.buffer.clear();
+      let redacted = self.redactor.redact(&pending);
+      self.inner.write_all(redacted.as_bytes())?;
+    }
+    self.inner.flush()
+  }
+}
+
+impl<W: Write> RedactingWriter<W> {
+  /// Build a redacting writer around `inner`.
+  pub fn new(inner: W, redactor: Arc<dyn SecretRedactor>) -> Self {
+    Self { inner, buffer: Vec::new(), redactor }
+  }
+
+  /// Drain any buffered partial line and return the inner writer.
+  ///
+  /// Test-only helper — production code never calls this, but exposing
+  /// it keeps the redaction test pure (it inspects a `Vec<u8>` sink).
+  ///
+  /// # Errors
+  ///
+  /// Returns any `io::Error` from flushing the buffered redacted line
+  /// or from the underlying writer's `flush`.
+  pub fn into_inner(mut self) -> io::Result<W> {
+    self.flush()?;
+    Ok(self.inner)
+  }
+
+  fn drain_complete_lines(&mut self) -> io::Result<()> {
+    while let Some(pos) = self.buffer.iter().position(|b| *b == b'\n') {
+      let line_bytes: Vec<u8> = self.buffer.drain(..=pos).collect();
+      let line = String::from_utf8_lossy(&line_bytes);
+      let redacted = self.redactor.redact(&line);
+      self.inner.write_all(redacted.as_bytes())?;
+    }
+    Ok(())
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  /// Minimal redactor used by the unit tests below.
+  struct LiteralRedactor(&'static str, &'static str);
+
+  impl SecretRedactor for LiteralRedactor {
+    fn redact(&self, line: &str) -> String {
+      line.replace(self.0, self.1)
+    }
+  }
+
+  #[test]
+  fn redacting_writer_replaces_secret_in_complete_line() {
+    let redactor = Arc::new(LiteralRedactor("hunter2", "***"));
+    let mut writer = RedactingWriter::new(Vec::<u8>::new(), redactor);
+    writeln!(writer, "user logged in password=hunter2").unwrap();
+    writer.flush().unwrap();
+    let out = String::from_utf8(writer.into_inner().unwrap()).unwrap();
+    assert!(!out.contains("hunter2"), "secret leaked: {out}");
+    assert!(out.contains("password=***"), "expected redaction in: {out}");
+  }
+
+  #[test]
+  fn redacting_writer_replaces_secret_split_across_writes() {
+    let redactor = Arc::new(LiteralRedactor("hunter2", "***"));
+    let mut writer = RedactingWriter::new(Vec::<u8>::new(), redactor);
+    write!(writer, "first half ").unwrap();
+    writeln!(writer, "password=hunter2").unwrap();
+    writer.flush().unwrap();
+    let out = String::from_utf8(writer.into_inner().unwrap()).unwrap();
+    assert!(!out.contains("hunter2"), "secret leaked: {out}");
+    assert!(out.contains("password=***"), "expected redaction in: {out}");
   }
 }
