@@ -11,11 +11,15 @@
 //! - [`lockfile`] — single-job file lock for the `.lock` next to the
 //!   registration config; prevents two `run` processes from sharing one
 //!   registration.
+//! - [`config`] — persisted registration + runtime config (`config.toml`)
+//!   and OAuth credentials (`credentials.json`); matches the
+//!   `~/.toolu-runner/` storage layout from the spec.
 //!
 //! Populated progressively in steps 2–9 per the plan.
 
 #![doc(html_root_url = "https://docs.rs/toolu-runner/0.1.0")]
 
+pub mod config;
 pub mod docker;
 pub mod execution;
 pub mod listener;

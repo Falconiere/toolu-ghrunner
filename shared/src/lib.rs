@@ -10,6 +10,7 @@ mod config;
 mod error;
 mod events;
 mod job_message;
+pub mod paths;
 
 pub mod startup;
 

@@ -1,15 +1,19 @@
 //! `toolu-runner` — standalone GitHub Actions JIT runner CLI.
 //!
 //! Subcommands:
-//! - `register` — validate JIT endpoint, write `config.toml` +
-//!   `credentials.json` (mode 0600). The actual `acquire_job` smoke
-//!   against real GH is step 10; this commit does the validation + write.
+//!
+//! - `register` — validate URL + probe JIT endpoint, write `config.toml`
+//!   and `credentials.json` (mode 0600). The full live registration
+//!   flow (POST to JIT endpoint + JWT exchange) is step 10; this commit
+//!   does the validation and write.
 //! - `run` — load `config.toml`, acquire the `.lock` file lock, run the
 //!   listener loop until SIGINT/SIGTERM.
 //! - `remove` — read `config.toml`, write the `.pending_remove` marker
-//!   if a `run` is in flight, otherwise delete both files.
-//! - `status` — print `config.toml` and `credentials.json` summary (no
-//!   network).
+//!   if a `run` is in flight, otherwise delete both files. The live GH
+//!   unregistration call lands in step 10.
+//! - `status` — print `config.toml` and `credentials.json` summary
+//!   (no network).
+
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -19,6 +23,11 @@ use clap::{Args, Parser, Subcommand};
 use shared::RunnerError;
 use shared::startup;
 use tokio_util::sync::CancellationToken;
+use toolu_runner::config::{
+  CredentialsFile, RunnerRegistrationConfig, RuntimeConfig, jit_endpoint_for_host,
+  load_config as load_reg_config, load_credentials, resolve_data_dir, resolve_work_dir,
+  save_config as save_reg_config, save_credentials,
+};
 use toolu_runner::execution::secret_masker::SecretMasker;
 use toolu_runner::listener::GitHubListener;
 use toolu_runner::lockfile;
@@ -176,11 +185,38 @@ fn parse_and_validate_url(url: &str) -> Result<String, RunnerError> {
   Ok(host)
 }
 
+/// Validate that the JIT endpoint for `host` is reachable.
+///
+/// Uses a 5-second HEAD request. Returns `Ok(())` on any 2xx/3xx status;
+/// errors with the response status on 4xx/5xx. Network errors propagate.
+async fn probe_jit_endpoint(host: &str) -> Result<(), RunnerError> {
+  let endpoint = jit_endpoint_for_host(host);
+  let client = reqwest::Client::builder()
+    .timeout(Duration::from_secs(5))
+    .build()
+    .map_err(|e| RunnerError::Network(format!("HTTP client: {e}")))?;
+  let resp = client
+    .head(&endpoint)
+    .send()
+    .await
+    .map_err(|e| RunnerError::Network(format!("JIT endpoint probe failed: {e}")))?;
+  let status = resp.status();
+  if status.is_success() || status.is_redirection() {
+    tracing::info!(endpoint = %endpoint, status = %status, "JIT endpoint reachable");
+    Ok(())
+  } else {
+    Err(RunnerError::Network(format!(
+      "JIT endpoint {endpoint} returned status {status}"
+    )))
+  }
+}
+
 async fn cmd_register(args: RegisterArgs) -> Result<(), Box<dyn std::error::Error>> {
   startup::init(env!("CARGO_MANIFEST_DIR"), "runner")
     .map_err(|e| format!("startup init: {e}"))?;
 
   let host = parse_and_validate_url(&args.url).map_err(|e| format!("{e}"))?;
+  probe_jit_endpoint(&host).await.map_err(|e| format!("{e}"))?;
 
   let config_path = args.config.clone().unwrap_or_else(default_config_path);
   let creds_path = credentials_path_for(&config_path);
@@ -200,34 +236,44 @@ async fn cmd_register(args: RegisterArgs) -> Result<(), Box<dyn std::error::Erro
     .into());
   }
 
-  // Step 8 stub: write a JSON config capturing the registration intent.
-  // Step 9 swaps this for the full TOML layout via `toolu-runner::config`;
-  // step 10 swaps the placeholder token for the real GH registration
-  // response.
+  // Steps 3 & 4 (POST to JIT endpoint, exchange JWT for OAuth) are stubbed
+  // here. The full live registration flow is exercised in step 10. We write
+  // a placeholder auth_token + empty jit_config; `run` will refuse to
+  // start until `register` is re-run with a real token.
   let placeholder_token = format!("ghs_placeholder_{}", short_id_of(&args.token));
 
-  let payload = serde_json::json!({
-    "url": args.url,
-    "host": host,
-    "registration_token_redacted": "***redacted***",
-    "name": runner_name,
-    "labels": labels,
-    "runner_group": args.runner_group,
-    "work": args.work.as_ref().map(|p| p.to_string_lossy().into_owned()),
-    "data_dir": "~/.toolu-runner",
-    "protocol_version": if host.eq_ignore_ascii_case("github.com") { "v2" } else { "v1" },
-    "auth_token_placeholder": placeholder_token,
-    "replace": args.replace,
-  });
+  let runtime = RuntimeConfig {
+    jit_config: String::new(),
+    work_dir: args
+      .work
+      .as_ref()
+      .map(|p| p.to_string_lossy().into_owned())
+      .unwrap_or_else(|| "~/.toolu-runner/_work".to_owned()),
+    data_dir: "~/.toolu-runner".to_owned(),
+    protocol_version: if host.eq_ignore_ascii_case("github.com") {
+      "v2".to_owned()
+    } else {
+      "v1".to_owned()
+    },
+  };
 
-  if let Some(parent) = config_path.parent() {
-    std::fs::create_dir_all(parent)?;
-  }
-  std::fs::write(&config_path, serde_json::to_string_pretty(&payload)?)?;
-  std::fs::write(&creds_path, serde_json::to_string_pretty(&serde_json::json!({
-    "access_token": placeholder_token,
-    "issued_at": chrono::Utc::now().to_rfc3339(),
-  }))?)?;
+  let config = RunnerRegistrationConfig {
+    runner_url: args.url.clone(),
+    runner_name: runner_name.clone(),
+    runner_id: 0,
+    auth_token: placeholder_token.clone(),
+    labels: labels.clone(),
+    runner_group: args.runner_group.clone(),
+    runtime,
+  };
+
+  save_reg_config(&config_path, &config).map_err(|e| format!("save config: {e}"))?;
+  let creds = CredentialsFile {
+    access_token: placeholder_token,
+    issued_at: chrono::Utc::now().to_rfc3339(),
+    expires_at: None,
+  };
+  save_credentials(&creds_path, &creds).map_err(|e| format!("save credentials: {e}"))?;
 
   tracing::info!(
     path = %config_path.display(),
@@ -235,7 +281,7 @@ async fn cmd_register(args: RegisterArgs) -> Result<(), Box<dyn std::error::Erro
     runner = %runner_name,
     host = %host,
     labels = ?labels,
-    "wrote registration stub (step 9 swaps for TOML layout)"
+    "registered runner (stub — live flow is step 10)"
   );
   println!(
     "registered runner '{runner_name}' at {host} (config: {}, creds: {})",
@@ -266,29 +312,31 @@ async fn cmd_run(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
     .into());
   }
 
+  let cfg = load_reg_config(&config_path).map_err(|e| format!("{e}"))?;
+  let _creds = load_credentials(&creds_path).map_err(|e| format!("{e}"))?;
+
+  let data_dir = resolve_data_dir(&cfg.runtime.data_dir).map_err(|e| format!("{e}"))?;
+  let workspace_root = resolve_work_dir(&cfg.runtime.work_dir);
+  let lock_path = data_dir.join(".lock");
+
   // Acquire the single-job file lock — second `run` reads the body,
   // prints the PID, and exits 2. Release on graceful shutdown.
-  let data_dir = config_path
-    .parent()
-    .map_or_else(|| PathBuf::from("/var/lib/toolu-runner"), |p| p.to_path_buf());
-  std::fs::create_dir_all(&data_dir)?;
-  let lock_path = data_dir.join(".lock");
   let _lock_guard = lockfile::acquire(&lock_path, &config_path)
     .map_err(|e| format!("{e}"))?;
   tracing::info!(path = %lock_path.display(), "acquired single-job lock");
 
-  let runner_cfg = build_runner_config(None);
+  let runner_cfg = shared::RunnerConfig {
+    data_dir,
+    workspace_root,
+    cgroup_path: None,
+  };
   let masker = Arc::new(SecretMasker::new());
 
-  // Step 8 stub: read the JSON config we wrote in `register`. Step 9
-  // swaps to `toolu-runner::config::load_config` for the TOML layout.
-  let raw_config = std::fs::read_to_string(&config_path).unwrap_or_default();
-  let parsed: serde_json::Value = serde_json::from_str(&raw_config)?;
-  let jit_config_b64 = parsed
-    .get("jit_config")
-    .and_then(|v| v.as_str())
-    .unwrap_or("")
-    .to_owned();
+  // The JIT config string is loaded from the persisted config. The
+  // step-10 live flow will populate this with the real base64 blob;
+  // until then `register` writes an empty string and `run` will exit
+  // with a clear error from the listener constructor.
+  let jit_config_b64 = cfg.runtime.jit_config.clone();
   if jit_config_b64.is_empty() {
     return Err(
       "config.toml has no JIT config blob — re-run `toolu-runner register` against a live GH repo (step 10 wires the live registration)".into(),
@@ -348,14 +396,12 @@ async fn cmd_remove(args: RemoveArgs) -> Result<(), Box<dyn std::error::Error>> 
     println!("no registration found.");
     return Ok(());
   }
+  let cfg = load_reg_config(&config_path).map_err(|e| format!("{e}"))?;
+  let _ = args.token; // registration token reserved for live GH call in step 10
 
-  let data_dir = config_path
-    .parent()
-    .map_or_else(|| PathBuf::from("/var/lib/toolu-runner"), |p| p.to_path_buf());
-  std::fs::create_dir_all(&data_dir)?;
+  let data_dir = resolve_data_dir(&cfg.runtime.data_dir).map_err(|e| format!("{e}"))?;
   let pending = data_dir.join(".pending_remove");
   let lock_path = data_dir.join(".lock");
-  let _ = args.token; // registration token reserved for live GH call in step 10
 
   // Mid-job: refuse and write the pending marker unless --force. The
   // actual unregistration is wired in step 10; for now we just write
@@ -382,7 +428,8 @@ async fn cmd_remove(args: RemoveArgs) -> Result<(), Box<dyn std::error::Error>> 
   std::fs::remove_file(&creds_path).ok();
   std::fs::remove_file(&pending).ok();
   println!(
-    "unregistered runner (config and credentials removed). Live GH unregistration call lands in step 10."
+    "unregistered runner '{}' (config and credentials removed). Live GH unregistration call lands in step 10.",
+    cfg.runner_name
   );
   Ok(())
 }
@@ -393,36 +440,23 @@ fn cmd_status(args: StatusArgs) -> Result<(), Box<dyn std::error::Error>> {
   if !config_path.exists() {
     return Err(format!("config not found at {}", config_path.display()).into());
   }
-  let raw = std::fs::read_to_string(&config_path)?;
-  let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap_or(serde_json::Value::Null);
+  let cfg = load_reg_config(&config_path).map_err(|e| format!("{e}"))?;
   let creds_summary = if creds_path.exists() {
     "credentials present"
   } else {
     "credentials MISSING"
   };
-  println!("runner:    {}", parsed.get("name").and_then(|v| v.as_str()).unwrap_or("?"));
-  println!("url:       {}", parsed.get("url").and_then(|v| v.as_str()).unwrap_or("?"));
-  println!("host:      {}", parsed.get("host").and_then(|v| v.as_str()).unwrap_or("?"));
-  println!("labels:    {:?}", parsed.get("labels").cloned().unwrap_or(serde_json::Value::Null));
-  println!("group:     {}", parsed.get("runner_group").and_then(|v| v.as_str()).unwrap_or("Default"));
-  println!("protocol:  {}", parsed.get("protocol_version").and_then(|v| v.as_str()).unwrap_or("v2"));
-  println!("work:      {}", parsed.get("work").and_then(|v| v.as_str()).unwrap_or("(default)"));
+  println!("runner:    {}", cfg.runner_name);
+  println!("url:       {}", cfg.runner_url);
+  println!("runner_id: {}", cfg.runner_id);
+  println!("labels:    {:?}", cfg.labels);
+  println!("group:     {}", cfg.runner_group);
+  println!("protocol:  {}", cfg.runtime.protocol_version);
+  println!("data_dir:  {}", cfg.runtime.data_dir);
+  println!("work_dir:  {}", cfg.runtime.work_dir);
+  println!("jit_cfg:   {} bytes", cfg.runtime.jit_config.len());
   println!("creds:     {creds_summary}");
   Ok(())
-}
-
-fn build_runner_config(work: Option<PathBuf>) -> shared::RunnerConfig {
-  let home = std::env::var_os("HOME")
-    .map(PathBuf::from)
-    .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))
-    .unwrap_or_else(|| PathBuf::from("/var/lib/toolu-runner"));
-  let data_dir = home.join(".toolu-runner");
-  let workspace_root = work.unwrap_or_else(|| data_dir.join("_work"));
-  shared::RunnerConfig {
-    data_dir,
-    workspace_root,
-    cgroup_path: None,
-  }
 }
 
 /// Truncate the registration token to a short fingerprint for the
