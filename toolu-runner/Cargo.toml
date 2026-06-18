@@ -43,7 +43,7 @@ sha2 = "0.10"
 base64 = "0.22"
 
 # Storage
-opendal = { version = "0.51", features = ["services-fs"] }
+opendal = { version = "0.51", features = ["services-fs", "services-s3"] }
 
 # Observability (no OTel in v1)
 tracing = "0.1"
@@ -67,6 +67,9 @@ fs2 = "0.4"
 
 # Docker
 bollard = "0.20"
+
+# Local HTTP services (artifact / cache / OIDC micro-services)
+axum = "0.8"
 
 # WebSocket (downstream of tokio-tungstenite 0.26 from yamless workspace)
 tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
