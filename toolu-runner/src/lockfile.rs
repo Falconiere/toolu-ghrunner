@@ -38,6 +38,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use shared::RunnerError;
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
 use sysinfo::{Pid, ProcessesToUpdate, System};
 
 /// Default staleness threshold: if the lock body is older than this AND
@@ -109,11 +111,11 @@ pub fn acquire(path: &Path, config_path: &Path) -> Result<LockGuard, RunnerError
     config_path: config_path.to_string_lossy().into_owned(),
   };
 
-  let file = OpenOptions::new()
-    .create(true)
-    .write(true)
-    .truncate(false)
-    .open(path)?;
+  let mut opts = OpenOptions::new();
+  opts.create(true).write(true).truncate(false);
+  #[cfg(unix)]
+  opts.mode(0o600);
+  let file = opts.open(path)?;
 
   match file.try_lock_exclusive() {
     Ok(()) => {
@@ -160,7 +162,7 @@ fn handle_contended(path: &Path, body: &LockBody) -> Result<LockGuard, RunnerErr
     .truncate(false)
     .open(path)?;
   file
-    .lock_exclusive()
+    .try_lock_exclusive()
     .map_err(|e| RunnerError::Config(format!("lock acquire after stale-lock removal: {e}")))?;
   write_body(&file, body)?;
   Ok(LockGuard {
@@ -174,7 +176,6 @@ fn write_body(file: &std::fs::File, body: &LockBody) -> Result<(), RunnerError> 
   f.set_len(0)?;
   let json = serde_json::to_string_pretty(body)?;
   f.write_all(json.as_bytes())?;
-  f.sync_all()?;
   Ok(())
 }
 
@@ -183,13 +184,14 @@ fn read_body(path: &Path) -> Result<LockBody, RunnerError> {
   serde_json::from_str(&raw).map_err(|e| RunnerError::Config(format!("lock body parse: {e}")))
 }
 
-/// Is `pid` still alive? Uses `sysinfo::System` to check the local
-/// process table. Returns `false` for `0` and unknown PIDs.
+/// Is `pid` still alive? Uses `sysinfo` to check a single PID without
+/// the full-process-table enumeration that the old `refresh_processes(All)`
+/// path did. Returns `false` for `0` and unknown PIDs.
 pub fn is_pid_alive(pid: u32) -> bool {
   if pid == 0 {
     return false;
   }
   let mut sys = System::new();
-  sys.refresh_processes(ProcessesToUpdate::All, true);
+  sys.refresh_processes(ProcessesToUpdate::Some(&[Pid::from_u32(pid)]), true);
   sys.process(Pid::from_u32(pid)).is_some()
 }

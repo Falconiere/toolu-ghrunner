@@ -5,7 +5,8 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
-use crate::reporting::{ReportConclusion, Status, StepResult};
+use super::helpers::map_conclusion;
+use crate::reporting::{Status, StepResult};
 use shared::RunnerEvent;
 
 /// Per-step metadata captured from StepStarted.
@@ -108,14 +109,5 @@ impl StepCollector {
   /// Return all collected step results.
   pub(super) async fn collected_results(&self) -> Vec<StepResult> {
     self.state.lock().await.results.clone()
-  }
-}
-
-fn map_conclusion(c: shared::Conclusion) -> ReportConclusion {
-  match c {
-    shared::Conclusion::Success => ReportConclusion::Success,
-    shared::Conclusion::Failure => ReportConclusion::Failure,
-    shared::Conclusion::Cancelled => ReportConclusion::Cancelled,
-    shared::Conclusion::Skipped => ReportConclusion::Skipped,
   }
 }

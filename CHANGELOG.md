@@ -166,7 +166,7 @@ redaction, and a CLI for register / run / remove / status.
 
 **Tests**
 
-- 80 unit tests across `shared`, `protocol`, `toolu-runner`
+- 196 tests across `shared`, `protocol`, `toolu-runner`
   (5 CLI, 12 failure modes, 4 listener smoke, 3 net, 16 storage
   layout, 5 shared config, 3 shared error, 5 shared events, 4
   shared startup-redaction, 15 shared job-message, 3 protocol
@@ -184,7 +184,13 @@ redaction, and a CLI for register / run / remove / status.
 
 ### Changed
 
-None — first release.
+- Renamed `warn_about_yamless_env` → `warn_about_legacy_env` and the
+  user-visible warning from "yamless" to "legacy"; behavior unchanged.
+  Detection still triggers on the `YAMLESS_` prefix.
+- Renamed `no-yamless-coupling` lefthook check to `no-yamless-coupling`
+  (name preserved, logic unchanged).
+
+
 
 ### Removed
 
@@ -197,8 +203,7 @@ None — first release.
 - **`build_tool_*` modules** — yamless build-tool registry
   (`build_tool_detection`, `build_tool_endpoints`,
   `build_tool_storage`).
-- **`service_auth` / `service_lifecycle`** — yamless service
-  registration.
+
 - **`yamless-auth` CLI** — device-flow authentication. Replaced
   by GitHub's registration-token flow at `toolu-runner register`.
 - **OpenTelemetry / OTLP** — replaced by `tracing-subscriber` +

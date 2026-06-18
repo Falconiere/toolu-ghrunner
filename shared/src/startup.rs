@@ -13,6 +13,22 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
+/// Set 0o700 permissions on `path`. Failure is non-fatal (logged as warn).
+/// Used after creating data directories to prevent other local users
+/// from reading runner logs and state.
+#[cfg(unix)]
+fn set_dir_perms(path: &std::path::Path) {
+  if let Err(e) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)) {
+    tracing::warn!(error = %e, path = %path.display(), "failed to set 0o700 permissions");
+  }
+}
+
+#[cfg(not(unix))]
+fn set_dir_perms(_path: &std::path::Path) {}
+
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -34,18 +50,39 @@ pub trait SecretRedactor: Send + Sync {
 
 /// Default data directory under the user's home.
 fn default_data_dir() -> PathBuf {
-  if let Some(home) = std::env::var_os("HOME") {
-    return PathBuf::from(home).join(".toolu-runner");
-  }
-  if let Some(profile) = std::env::var_os("USERPROFILE") {
-    return PathBuf::from(profile).join(".toolu-runner");
-  }
-  PathBuf::from("/var/lib/toolu-runner")
+  crate::paths::expand_tilde(Path::new("~/.toolu-runner"))
 }
 
 /// Diagnostics directory: `data_dir/_diag/`.
 fn diag_dir(data_dir: &Path) -> PathBuf {
   data_dir.join("_diag")
+}
+
+/// Delete rolled log files older than 14 days. Failure is non-fatal
+/// (logged as warn). Called on startup after the diag dir is created.
+fn cleanup_old_logs(diag: &Path, service: &str) {
+  let prefix = format!("{service}.log.");
+  let Ok(entries) = std::fs::read_dir(diag) else {
+    return;
+  };
+  for entry in entries.flatten() {
+    let path = entry.path();
+    let fname = match path.file_name().and_then(|n| n.to_str()) {
+      Some(n) if n.starts_with(&prefix) => n,
+      _ => continue,
+    };
+    let Ok(mtime) = entry.metadata().and_then(|m| m.modified()) else {
+      continue;
+    };
+    let Ok(age) = mtime.elapsed() else {
+      continue;
+    };
+    if age > chrono::TimeDelta::days(14).to_std().unwrap_or_default()
+      && let Err(e) = std::fs::remove_file(&path)
+    {
+      tracing::warn!(error = %e, path = %fname, "failed to remove old log");
+    }
+  }
 }
 
 /// Initialize tracing for the runner.
@@ -81,6 +118,9 @@ pub fn init(manifest_dir: &str, service: &str) -> Result<(), crate::RunnerError>
     path: diag.clone(),
     source,
   })?;
+  set_dir_perms(&data_dir);
+  set_dir_perms(&diag);
+  cleanup_old_logs(&diag, service);
 
   let file_appender = tracing_appender::rolling::daily(&diag, format!("{service}.log"));
 
@@ -184,6 +224,8 @@ pub fn init_with_redactor(
     path: diag.clone(),
     source,
   })?;
+  set_dir_perms(&data_dir);
+  set_dir_perms(&diag);
 
   let file_appender = tracing_appender::rolling::daily(&diag, format!("{service}.log"));
 
@@ -220,10 +262,21 @@ pub fn init_with_redactor(
 }
 
 /// Build the `EnvFilter` from `TOOLU_RUNNER_LOG` → `RUST_LOG` → `info`.
+///
+/// By default, the filter is capped at `info` to prevent runaway debug/trace
+/// log output from leaking secrets to the file sink. Set
+/// `TOOLU_RUNNER_ALLOW_VERBOSE=1` to honor the full env-var level.
 fn build_env_filter() -> EnvFilter {
-  EnvFilter::try_from_env("TOOLU_RUNNER_LOG")
-    .or_else(|_| EnvFilter::try_from_env("RUST_LOG"))
-    .unwrap_or_else(|_| EnvFilter::new("info"))
+  if std::env::var("TOOLU_RUNNER_ALLOW_VERBOSE")
+    .map(|v| v == "1")
+    .unwrap_or(false)
+  {
+    EnvFilter::try_from_env("TOOLU_RUNNER_LOG")
+      .or_else(|_| EnvFilter::try_from_env("RUST_LOG"))
+      .unwrap_or_else(|_| EnvFilter::new("info"))
+  } else {
+    EnvFilter::new("info")
+  }
 }
 
 /// Load a `.env` file from `manifest_dir` (no-op if absent).

@@ -16,7 +16,6 @@ pub mod composite_scope;
 pub mod composite_shell;
 pub mod context;
 pub mod depth_tracker;
-pub mod docker_cache;
 pub mod expressions;
 pub mod file_commands;
 pub mod handlers;

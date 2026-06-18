@@ -55,8 +55,9 @@ and no OTel.
   `_diag/runner.log` unredacted.
 - **No daemon mode for `run`.** The CLI blocks until SIGINT / SIGTERM.
   Service files wrap it.
-- **No `build_tool_*`, no `service_auth` / `service_lifecycle`** —
-  yamless-specific modules, cut in the port.
+- **No `build_tool_*`** — yamless build-tool modules, cut in the port.
+  `service_auth` / `service_lifecycle` are kept (they back the
+  OIDC/artifact/cache axum services).
 
 ## Key Modules
 
@@ -188,7 +189,7 @@ and no OTel.
   glue), `cgroup_join` (reserved), `command_parser`,
   `depth_tracker`, `docker_cache`, `failure_category`,
   `file_commands`, `service_auth` / `service_lifecycle`
-  (yamless-cuts, kept for ref but not wired).
+  (back OIDC/artifact/cache axum services).
 - `docker/` — bollard wrapper. `client` (Docker daemon), `services`
   (service container lifecycle), `path_translator` (host ↔
   container path mapping).

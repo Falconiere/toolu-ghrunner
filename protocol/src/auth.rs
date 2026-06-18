@@ -16,11 +16,21 @@ use shared::RunnerError;
 use super::types::RsaKeyParams;
 
 /// OAuth2 token response from GitHub's token endpoint.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct AccessToken {
   pub access_token: String,
   pub expires_in: u64,
   pub token_type: String,
+}
+
+impl std::fmt::Debug for AccessToken {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    f.debug_struct("AccessToken")
+      .field("access_token", &"<redacted>")
+      .field("expires_in", &self.expires_in)
+      .field("token_type", &self.token_type)
+      .finish()
+  }
 }
 
 /// JWT claims for GitHub Actions runner authentication.

@@ -63,7 +63,7 @@ pub struct CredentialDataInner {
 /// RSA key parameters from `.credentials_rsaparams` blob.
 /// All fields are base64-encoded big-endian integers.
 /// GitHub sends these in camelCase (e.g. `exponent`, `modulus`, `inverseQ`).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RsaKeyParams {
   pub exponent: String,
@@ -74,4 +74,19 @@ pub struct RsaKeyParams {
   pub dp: String,
   pub dq: String,
   pub inverse_q: String,
+}
+
+impl std::fmt::Debug for RsaKeyParams {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    f.debug_struct("RsaKeyParams")
+      .field("modulus", &"<redacted>")
+      .field("exponent", &"<redacted>")
+      .field("d", &"<redacted>")
+      .field("p", &"<redacted>")
+      .field("q", &"<redacted>")
+      .field("dp", &"<redacted>")
+      .field("dq", &"<redacted>")
+      .field("inverse_q", &"<redacted>")
+      .finish()
+  }
 }

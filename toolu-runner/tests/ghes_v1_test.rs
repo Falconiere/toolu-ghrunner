@@ -164,8 +164,8 @@ async fn fetch_timeline_returns_protocol_error_on_404() {
   let msg = format!("{err}");
   assert!(msg.contains("404"), "expected status: {msg}");
   assert!(
-    msg.contains("not found") || msg.contains("not_found"),
-    "expected body: {msg}"
+    msg.contains("see debug log"),
+    "expected redacted body msg: {msg}"
   );
 }
 

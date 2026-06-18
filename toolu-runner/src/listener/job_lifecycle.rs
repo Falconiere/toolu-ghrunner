@@ -136,13 +136,28 @@ async fn poll_until_job(ctx: &mut SessionCtx) -> Result<Option<BrokerMessage>, R
           backoff_ms,
           "poll failed — retrying after backoff"
         );
-        if sleep_or_cancel(ctx, backoff).await {
+        let jittered = jittered_backoff(backoff);
+        if sleep_or_cancel(ctx, jittered).await {
           return Ok(None);
         }
         backoff = backoff.saturating_mul(2).min(POLL_BACKOFF_MAX);
       },
     }
   }
+}
+
+/// Apply decorrelated jitter to a backoff duration so concurrent runners
+/// don't synchronize their retries. Returns a duration in
+/// `[backoff/2, backoff)` — half the current backoff plus a random offset.
+fn jittered_backoff(d: Duration) -> Duration {
+  let Ok(half_ms) = u64::try_from(d.as_millis().saturating_div(2)) else {
+    return d;
+  };
+  if half_ms == 0 {
+    return d;
+  }
+  let jitter = fastrand::u64(0..half_ms);
+  Duration::from_millis(half_ms + jitter)
 }
 
 /// Outcome of a single `poll_message` call, classified for the loop.

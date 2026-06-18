@@ -2579,6 +2579,7 @@ dependencies = [
  "cbc",
  "chrono",
  "clap",
+ "fastrand",
  "filetime",
  "flate2",
  "fs2",
