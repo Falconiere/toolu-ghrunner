@@ -223,50 +223,20 @@ mod tests {
   /// padded to a multiple of 512, followed by two zero blocks.
   fn build_tarball_raw(path: &str, body: &[u8]) -> Vec<u8> {
     let mut header = [0_u8; 512];
-    // Path: first 100 bytes, NUL-padded.
+    // Path (first 100 bytes, NUL-padded)
     let path_bytes = path.as_bytes();
     assert!(path_bytes.len() < 100, "test path must fit in 100 bytes");
     header
       .get_mut(..path_bytes.len())
       .expect("path length asserted < 100")
       .copy_from_slice(path_bytes);
-    // Mode (octal, NUL-terminated, 7 chars + NUL).
+    // Mode (8 bytes at 100..108)
     header[100..107].copy_from_slice(b"0000644");
     header[107] = 0;
-    // uid, gid (octal, NUL-terminated, 7 chars + NUL).
+    // uid (8 bytes at 108..116)
     header[108..115].copy_from_slice(b"0000000");
     header[115] = 0;
-    header[116..123].copy_from_slice(b"0000000");
-    header[123] = 0;
-    // Size (octal, 11 chars + NUL).
-    let size_str = format!("{:011o}\0", body.len());
-    header[124..136].copy_from_slice(size_str.as_bytes());
-    // mtime (octal, 11 chars + NUL).
-    header[135] = 0; // overwritten by the next line
-    let mtime_str = format!("{:011o}\0", 0_u64);
-    header[135..147].copy_from_slice(mtime_str.as_bytes());
-    // Wait — size is 124..135 (12 bytes) and mtime starts at 135. The
-    // spec says size is 124..136 (12 bytes). Let me re-check the
-    // header layout: mode 100..108 (8), uid 108..116 (8), gid 116..124
-    // (8), size 124..136 (12), mtime 136..148 (12), checksum
-    // 148..156 (8), typeflag 156 (1), linkname 157..257 (100), magic
-    // 257..265 (8), version 265..273 (8). Total = 273. The remaining
-    // bytes are zeroed. Let me redo:
-    let mut header = [0_u8; 512];
-    // Path
-    let path_bytes = path.as_bytes();
-    assert!(path_bytes.len() < 100);
-    header
-      .get_mut(..path_bytes.len())
-      .expect("path length asserted < 100")
-      .copy_from_slice(path_bytes);
-    // Mode
-    header[100..107].copy_from_slice(b"0000644");
-    header[107] = 0;
-    // uid
-    header[108..115].copy_from_slice(b"0000000");
-    header[115] = 0;
-    // gid
+    // gid (8 bytes at 116..124)
     header[116..123].copy_from_slice(b"0000000");
     header[123] = 0;
     // Size (12 bytes at 124..136)
@@ -275,13 +245,13 @@ mod tests {
     // mtime (12 bytes at 136..148)
     let mtime_str = format!("{:011o}\0", 0_u64);
     header[136..148].copy_from_slice(mtime_str.as_bytes());
-    // Checksum placeholder: 8 spaces (148..156)
+    // Checksum placeholder: 8 spaces (148..156). Real checksum
+    // written below.
     header[148..156].copy_from_slice(b"        ");
-    // Typeflag: '0' = regular file (156)
+    // Typeflag (1 byte at 156): '0' = regular file
     header[156] = b'0';
-    // Magic: "ustar\0" (257..263), then "00" (version at 263..265).
-    // The PAX/USTAR layout actually has magic at 257..265 (8 bytes)
-    // and version at 265..273. Use "ustar  \0" for POSIX.
+    // Magic (8 bytes at 257..265) and version (8 bytes at 265..273).
+    // Use the POSIX "ustar  \0" magic.
     header[257..265].copy_from_slice(b"ustar  \0");
     header[265..267].copy_from_slice(b"00");
 

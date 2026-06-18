@@ -288,17 +288,19 @@ mod tests {
   }
 
   #[test]
-  fn mask_line_recovers_from_poisoned_mutex() {
-    // The `match { Ok(g) => g, Err(poisoned) => poisoned.into_inner() }`
-    // pattern in `mask_line` is defensive — it recovers gracefully
-    // if a previous holder of the masker Mutex panicked. The only
-    // way to actually poison a Mutex is via a `panic!` in another
-    // thread, which the project's clippy config denies workspace-
-    // wide and the `no-allow` gate forbids silencing. The match
-    // arm is verified by code review rather than an automated
-    // test. This test exists so the `tests` module has a single
-    // shared-masker smoke check; the actual recovery path is
-    // exercised by manual review.
+  fn mask_line_redacts_with_shared_masker() {
+    // The forwarder shares a single `Arc<Mutex<SecretMasker>>` with
+    // the file sink's `MaskerRedactor` and the per-job
+    // `ExecutionContext::register_secret` path. This test pins the
+    // contract: a registration through the same Arc that the
+    // forwarder uses is visible to the next `mask_line` call.
+    //
+    // (The `match { Ok(g) => g, Err(poisoned) => poisoned.into_inner() }`
+    // recovery path for a poisoned Mutex is defensive code and
+    // cannot be exercised here — the only way to poison a Mutex is
+    // via a `panic!` in another thread, which the workspace clippy
+    // config denies and the `no-allow` gate forbids silencing. The
+    // arm is verified by code review.)
     let masker = Arc::new(Mutex::new(SecretMasker::new()));
     masker.lock().unwrap().add_secret("shared-secret");
     let result = mask_line(&masker, "value=shared-secret");
