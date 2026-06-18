@@ -123,33 +123,45 @@ async fn dispatch_action(
       execute_node_action(&node_params, events).await
     },
     RunsUsing::Composite => {
-      let step_inputs = build_composite_inputs(step, manifest);
-      emit_log(events, &step.id, "##[endgroup]").await;
-      let params = CompositeParams {
-        manifest,
-        step_inputs: &step_inputs,
-        ctx,
-        events,
-        workspace,
-        config,
-        parent_step_id: &step.id,
-        action_dir,
-      };
-      let result = execute_composite_action(&params).await?;
-      // Propagate env/path changes to parent context
-      for (k, v) in &result.env_additions {
-        ctx.set_env(k, v);
-      }
-      for p in &result.path_additions {
-        ctx.prepend_path(p);
-      }
-      Ok(result.conclusion)
+      run_composite_action(step, ctx, events, workspace, config, resolved).await
     },
     RunsUsing::Docker => {
+      // Fail the step, not the whole job (an `Err` would abort the step loop).
       emit_log(events, &step.id, "  (docker actions not yet supported)").await;
-      Err(RunnerError::ActionResolution(
-        "docker actions not yet supported".into(),
-      ))
+      Ok(Conclusion::Failure)
     },
   }
+}
+
+/// Run a `runs.using: composite` action and propagate its env/path
+/// additions back into the parent context.
+async fn run_composite_action(
+  step: &ActionStep,
+  ctx: &mut ExecutionContext,
+  events: &mpsc::Sender<RunnerEvent>,
+  workspace: &Path,
+  config: &RunnerConfig,
+  resolved: &ResolvedStep,
+) -> Result<Conclusion, RunnerError> {
+  let step_inputs = build_composite_inputs(step, &resolved.manifest);
+  emit_log(events, &step.id, "##[endgroup]").await;
+  let params = CompositeParams {
+    manifest: &resolved.manifest,
+    step_inputs: &step_inputs,
+    ctx,
+    events,
+    workspace,
+    config,
+    parent_step_id: &step.id,
+    action_dir: &resolved.action_dir,
+  };
+  let result = execute_composite_action(&params).await?;
+  // Propagate env/path changes to parent context
+  for (k, v) in &result.env_additions {
+    ctx.set_env(k, v);
+  }
+  for p in &result.path_additions {
+    ctx.prepend_path(p);
+  }
+  Ok(result.conclusion)
 }

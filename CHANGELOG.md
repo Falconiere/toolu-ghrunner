@@ -187,8 +187,8 @@ redaction, and a CLI for register / run / remove / status.
 - Renamed `warn_about_yamless_env` → `warn_about_legacy_env` and the
   user-visible warning from "yamless" to "legacy"; behavior unchanged.
   Detection still triggers on the `YAMLESS_` prefix.
-- Renamed `no-yamless-coupling` lefthook check to `no-yamless-coupling`
-  (name preserved, logic unchanged).
+- Kept the `no-yamless-coupling` lefthook check name (it still greps for
+  the `yamless` / `YAMLESS_` prefix); logic unchanged.
 
 
 

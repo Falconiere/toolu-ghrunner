@@ -226,6 +226,7 @@ pub fn init_with_redactor(
   })?;
   set_dir_perms(&data_dir);
   set_dir_perms(&diag);
+  cleanup_old_logs(&diag, service);
 
   let file_appender = tracing_appender::rolling::daily(&diag, format!("{service}.log"));
 
