@@ -9,7 +9,13 @@
 mod config;
 mod error;
 mod events;
+mod job_message;
 
 pub use config::RunnerConfig;
 pub use error::RunnerError;
 pub use events::{AnnotationLevel, Conclusion, ListenerEvent, LogStream, RunnerEvent};
+pub use job_message::{
+  ActionStep, ActionStepDefinitionReference, AgentJobRequestMessage, DictEntry, JobAuthorization,
+  JobEndpoint, JobResources, MaskHint, PipelineContextData, TaskOrchestrationPlanReference,
+  TemplateToken, VariableValue, WorkspaceOptions,
+};
