@@ -1,1 +1,10 @@
 docs/toolu
+target/
+**/*.rs.bk
+
+# toolu-runner runtime state (per-user install)
+config.toml
+credentials.json
+.lock
+.pending_remove
+_diag/

@@ -1,0 +1,15 @@
+# cargo-deny / cargo-audit configuration.
+#
+# Each entry documents an investigated transitive vulnerability with no
+# available fix, with root cause + impact + upgrade status.
+
+[graph]
+all-features = false
+
+[advisories]
+ignore = [
+  # rsa 0.9.10 — Marvin Attack (PKCS#1 v1.5 decryption timing sidechannel)
+  # Impact: LOW — runner uses RSA only for JWT signing (PS256), not decryption.
+  # Upgrade: No fixed rsa version exists upstream.
+  "RUSTSEC-2023-0071",
+]

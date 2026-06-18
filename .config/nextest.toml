@@ -1,0 +1,6 @@
+[store]
+dir = "target/nextest"
+
+# Default: full parallelism — toolu-runner has no DB-bound crates.
+[profile.default]
+test-threads = "num-cpus"

@@ -1,0 +1,11 @@
+cognitive-complexity-threshold = 20
+allow-expect-in-tests = true
+allow-unwrap-in-tests = true
+too-many-lines-threshold = 150
+too-many-arguments-threshold = 6
+type-complexity-threshold = 250
+msrv = "1.94.1"
+stack-size-threshold = 512000
+allowed-idents-below-min-chars = ["i", "j", "k", "n", "x", "y", "z", "id", "db"]
+avoid-breaking-exported-api = true
+disallowed-methods = []

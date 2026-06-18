@@ -1,0 +1,88 @@
+[package]
+name = "toolu-runner"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "toolu-runner"
+path = "src/main.rs"
+
+[lib]
+name = "toolu_runner"
+path = "src/lib.rs"
+
+# Internal
+toolu-runner-shared = { path = "../toolu-runner-shared" }
+toolu-runner-protocol = { path = "../toolu-runner-protocol" }
+
+# Async runtime
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "net", "io-util", "fs", "signal"] }
+tokio-util = "0.7"
+futures-util = "0.3"
+async-trait = "0.1"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+
+# Web / HTTP
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-native-roots"] }
+
+# Crypto (mirror shared)
+jsonwebtoken = "9"
+pkcs1 = "0.7"
+num-bigint-dig = "0.8"
+aes = "0.8"
+cbc = "0.1"
+sha1 = "0.10"
+sha2 = "0.10"
+base64 = "0.22"
+
+# Storage
+opendal = { version = "0.51", features = ["services-fs"] }
+
+# Observability (no OTel in v1)
+tracing = "0.1"
+
+# CLI
+clap = { version = "4", features = ["derive", "env"] }
+
+# Utilities
+thiserror = "2"
+uuid = { version = "1", features = ["v4", "serde"] }
+url = ">=2, <2.5.8"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
+hostname = "0.4"
+glob = "0.3"
+regex = "1"
+tempfile = "3"
+tar = "0.4"
+flate2 = "1"
+sysinfo = "0.37"
+fs2 = "0.4"
+
+# Docker
+bollard = "0.20"
+
+# WebSocket (downstream of tokio-tungstenite 0.26 from yamless workspace)
+tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
+
+# Compression / archive
+serde_repr = "0.1"
+
+[dev-dependencies]
+wiremock = "0.6"
+tempfile = "3"
+pretty_assertions = "1"
+rand = { version = "0.8", features = ["std_rng"] }
+
+[features]
+e2e = []
+e2e-live = ["e2e"]
+e2e-live-ghes = ["e2e"]
+
+[lints]
+workspace = true
