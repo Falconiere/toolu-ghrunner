@@ -100,6 +100,32 @@ pub(super) fn map_conclusion(c: Conclusion) -> ReportConclusion {
   }
 }
 
+/// Look up the `SystemVssConnection` endpoint's `AccessToken` from a job
+/// request message.
+///
+/// Used by both the live-log WebSocket connection (which authenticates the
+/// streaming channel) and the run-service token exchange (which authenticates
+/// the Twirp RPCs). Both sites must agree on which endpoint supplies the
+/// bearer token; this helper is the single chokepoint that picks the
+/// `SystemVssConnection` endpoint case-insensitively and reads the
+/// `AccessToken` parameter case-insensitively.
+///
+/// Returns `None` if no such endpoint or parameter is present.
+pub(super) fn system_vss_access_token(job_msg: &AgentJobRequestMessage) -> Option<String> {
+  job_msg
+    .resources
+    .endpoints
+    .iter()
+    .find(|e| e.name.eq_ignore_ascii_case("SystemVssConnection"))
+    .and_then(|e| e.authorization.as_ref())
+    .and_then(|a| {
+      a.parameters
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("AccessToken"))
+        .map(|(_, v)| v.clone())
+    })
+}
+
 pub(super) async fn cleanup_session(ctx: &SessionCtx) {
   tokio::time::sleep(std::time::Duration::from_secs(5)).await;
   let _ = delete_session(&ctx.client, &ctx.broker_url, &ctx.token, &ctx.session_id).await;
@@ -203,5 +229,72 @@ fn build_step_entry(
     | RunnerEvent::Log { .. }
     | RunnerEvent::LogGroup { .. }
     | RunnerEvent::Annotation { .. } => None,
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  /// Build an `AgentJobRequestMessage` with a single endpoint carrying one
+  /// authorization parameter. Uses JSON as the construction surface so the
+  /// test only depends on the public wire shape, not on internal struct
+  /// fields.
+  fn job_msg_with_endpoint(name: &str, key: &str, value: &str) -> AgentJobRequestMessage {
+    let json = format!(
+      r#"{{
+        "messageType": "JobRequest",
+        "plan": {{ "planId": "p1" }},
+        "jobId": "1",
+        "jobDisplayName": "test",
+        "jobName": "test",
+        "resources": {{
+          "endpoints": [{{
+            "name": {name:?},
+            "authorization": {{
+              "scheme": "OAuth",
+              "parameters": {{ {key:?}: {value:?} }}
+            }}
+          }}]
+        }}
+      }}"#,
+    );
+    serde_json::from_str(&json).expect("valid job message")
+  }
+
+  #[test]
+  fn lookup_finds_canonical_casing() {
+    let msg = job_msg_with_endpoint("SystemVssConnection", "AccessToken", "tok-1");
+    assert_eq!(system_vss_access_token(&msg).as_deref(), Some("tok-1"));
+  }
+
+  #[test]
+  fn lookup_finds_lowercase_name() {
+    let msg = job_msg_with_endpoint("systemvssconnection", "AccessToken", "tok-2");
+    assert_eq!(system_vss_access_token(&msg).as_deref(), Some("tok-2"));
+  }
+
+  #[test]
+  fn lookup_finds_uppercase_name() {
+    let msg = job_msg_with_endpoint("SYSTEMVSSCONNECTION", "AccessToken", "tok-3");
+    assert_eq!(system_vss_access_token(&msg).as_deref(), Some("tok-3"));
+  }
+
+  #[test]
+  fn lookup_finds_lowercase_key() {
+    let msg = job_msg_with_endpoint("SystemVssConnection", "accesstoken", "tok-4");
+    assert_eq!(system_vss_access_token(&msg).as_deref(), Some("tok-4"));
+  }
+
+  #[test]
+  fn lookup_returns_none_for_missing_endpoint() {
+    let msg = job_msg_with_endpoint("SomeOtherEndpoint", "AccessToken", "tok-5");
+    assert_eq!(system_vss_access_token(&msg), None);
+  }
+
+  #[test]
+  fn lookup_returns_none_for_missing_key() {
+    let msg = job_msg_with_endpoint("SystemVssConnection", "DifferentKey", "tok-6");
+    assert_eq!(system_vss_access_token(&msg), None);
   }
 }

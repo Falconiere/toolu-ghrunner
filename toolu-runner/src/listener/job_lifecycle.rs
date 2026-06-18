@@ -209,7 +209,6 @@ async fn sleep_or_cancel(ctx: &SessionCtx, duration: Duration) -> bool {
 fn parse_job_request_body(
   msg: &BrokerMessage,
 ) -> Result<protocol::messages::RunnerJobRequestBody, RunnerError> {
-  tracing::debug!(body = %msg.body, iv = ?msg.iv, "raw broker message body");
   serde_json::from_str(&msg.body)
     .map_err(|e| RunnerError::Protocol(format!("job request body parse: {e}")))
 }
@@ -221,15 +220,8 @@ async fn connect_live_log(
   fallback_token: &str,
 ) -> Option<tokio::sync::mpsc::Sender<crate::reporting::live_log::LiveLogLine>> {
   let url = job_msg.feed_stream_url()?;
-  let ws_token = job_msg
-    .resources
-    .endpoints
-    .iter()
-    .find(|e| e.name == "SystemVssConnection")
-    .and_then(|e| e.authorization.as_ref())
-    .and_then(|a| a.parameters.get("AccessToken"))
-    .map(String::as_str)
-    .unwrap_or(fallback_token);
+  let token = super::helpers::system_vss_access_token(job_msg);
+  let ws_token = token.as_deref().unwrap_or(fallback_token);
   let (tx, handle) = LiveLogStreamer::connect(&url, ws_token).await?;
   // Detach — handle completes when tx is dropped.
   tokio::spawn(async move {
@@ -242,20 +234,13 @@ async fn connect_live_log(
 
 /// Extract the SystemVssConnection AccessToken from job message endpoints.
 fn extract_system_token(job_msg: &AgentJobRequestMessage) -> Option<String> {
-  let endpoint = job_msg
-    .resources
-    .endpoints
-    .iter()
-    .find(|e| e.name.eq_ignore_ascii_case("SystemVssConnection"));
-  let token = endpoint
-    .and_then(|e| e.authorization.as_ref())
-    .and_then(|a| {
-      a.parameters
-        .iter()
-        .find(|(k, _)| k.eq_ignore_ascii_case("AccessToken"))
-        .map(|(_, v)| v.clone())
-    });
+  let token = super::helpers::system_vss_access_token(job_msg);
   if token.is_none() {
+    let endpoint = job_msg
+      .resources
+      .endpoints
+      .iter()
+      .find(|e| e.name.eq_ignore_ascii_case("SystemVssConnection"));
     let auth_keys: Vec<&str> = endpoint
       .and_then(|e| e.authorization.as_ref())
       .map(|a| a.parameters.keys().map(String::as_str).collect())

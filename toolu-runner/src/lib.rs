@@ -30,6 +30,7 @@ pub mod plugin;
 pub mod reporting;
 
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use shared::{AgentJobRequestMessage, Conclusion, RunnerConfig, RunnerEvent};
 use tokio::sync::mpsc;
@@ -41,12 +42,20 @@ pub use shared::RunnerConfig as Config;
 #[derive(Debug, Clone)]
 pub struct Runner {
   config: RunnerConfig,
+  /// Shared with the listener and the tracing file sink's redactor.
+  /// The `ExecutionContext` for each job receives the same Arc, so
+  /// `register_secret` and `add_mask` propagate to all readers on the
+  /// next call.
+  masker: Arc<Mutex<execution::secret_masker::SecretMasker>>,
 }
 
 impl Runner {
-  /// Create a runner bound to a config.
-  pub fn new(config: RunnerConfig) -> Self {
-    Self { config }
+  /// Create a runner bound to a config and a shared secret masker.
+  pub fn new(
+    config: RunnerConfig,
+    masker: Arc<Mutex<execution::secret_masker::SecretMasker>>,
+  ) -> Self {
+    Self { config, masker }
   }
 
   /// Execute a single job. Returns a receiver for the event stream.
@@ -60,9 +69,12 @@ impl Runner {
   ) -> mpsc::Receiver<RunnerEvent> {
     let (tx, rx) = mpsc::channel(1024);
     let config = self.config.clone();
+    let masker = Arc::clone(&self.masker);
 
     tokio::spawn(async move {
-      if let Err(err) = execution::job_runner::run_job(job, &config, cancel, tx.clone()).await {
+      if let Err(err) =
+        execution::job_runner::run_job(job, &config, cancel, tx.clone(), masker).await
+      {
         tracing::error!(error = %err, "job execution failed");
         let _ = tx
           .send(RunnerEvent::JobCompleted {
@@ -80,5 +92,10 @@ impl Runner {
   /// Borrow the runner's config.
   pub fn config(&self) -> &RunnerConfig {
     &self.config
+  }
+
+  /// Borrow the shared secret masker.
+  pub fn masker(&self) -> &Arc<Mutex<execution::secret_masker::SecretMasker>> {
+    &self.masker
   }
 }

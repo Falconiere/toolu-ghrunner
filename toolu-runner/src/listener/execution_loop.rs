@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
@@ -13,6 +14,7 @@ use super::log_uploader::StreamerConfig;
 use super::setup_step::report_setup_step;
 use super::step_reporter::StepCollector;
 use crate::Runner;
+use crate::execution::secret_masker::SecretMasker;
 use crate::reporting::live_log::LiveLogLine;
 use shared::{AgentJobRequestMessage, Conclusion, ListenerEvent, RunnerEvent};
 
@@ -52,7 +54,7 @@ pub(super) async fn execute_with_renewal(
   // The engine owns its own event channel; we get a receiver back and
   // hand it to the forwarder, which derives the conclusion and signals
   // back via the oneshot.
-  let runner = Runner::new(ctx.config.clone());
+  let runner = Runner::new(ctx.config.clone(), Arc::clone(&ctx.masker));
   let engine_rx = runner
     .execute_job(job_msg.clone(), ctx.cancel.clone())
     .await;
@@ -70,6 +72,7 @@ pub(super) async fn execute_with_renewal(
       job_backend_id: job_backend_id.clone(),
       setup_lines,
       live_log_tx,
+      masker: Arc::clone(&ctx.masker),
     },
     conclusion_tx,
   );
@@ -115,6 +118,29 @@ struct FwdConfig {
   job_backend_id: String,
   setup_lines: Vec<String>,
   live_log_tx: Option<tokio::sync::mpsc::Sender<LiveLogLine>>,
+  /// Shared with the file sink's `MaskerRedactor` (via
+  /// `init_with_redactor`) and the `ExecutionContext::register_secret`
+  /// runtime path. Every `RunnerEvent::Log` line is passed through
+  /// this masker before being pushed to the per-step streamer, the
+  /// combined job log, or the live-log WebSocket. The file sink
+  /// sees the same registration through the same Mutex, so a
+  /// registration made via the runtime path is visible to all
+  /// three downstream consumers on the very next line.
+  masker: Arc<Mutex<SecretMasker>>,
+}
+
+/// Mask a single log line through the shared `SecretMasker`.
+///
+/// Recovered from a poisoned Mutex the same way the production
+/// `ExecutionContext::register_secret` and `MaskerRedactor::redact`
+/// paths do — by extracting the inner `SecretMasker` via
+/// `into_inner`. Centralized so a single test can pin the masking
+/// contract for the forwarder.
+fn mask_line(masker: &Arc<Mutex<SecretMasker>>, line: &str) -> String {
+  match masker.lock() {
+    Ok(g) => g.mask(line),
+    Err(poisoned) => poisoned.into_inner().mask(line),
+  }
 }
 
 fn spawn_event_forwarder(
@@ -167,16 +193,22 @@ fn spawn_event_forwarder(
           }
         },
         RunnerEvent::Log { step_id, line, .. } => {
-          all_job_lines.push(line.clone());
+          // Mask the line once and use the masked form for all
+          // downstream consumers (combined job log, per-step
+          // streamer, live-log WebSocket). The file sink's redactor
+          // runs on the same Mutex, so the registration that put
+          // this secret into the masker is visible here too.
+          let masked = mask_line(&cfg.masker, line);
+          all_job_lines.push(masked.clone());
           if let Some(tx) = uploaders.get(step_id) {
-            let _ = tx.send(line.clone()).await;
+            let _ = tx.send(masked.clone()).await;
           }
           // Send to live log WebSocket for real-time UI updates
           if let Some(ref live_tx) = cfg.live_log_tx {
             let _ = live_tx
               .send(LiveLogLine {
                 step_id: step_id.clone(),
-                line: line.clone(),
+                line: masked,
               })
               .await;
           }
@@ -234,4 +266,63 @@ fn spawn_event_forwarder(
     });
     let _ = conclusion_tx.send(final_conclusion);
   })
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn mask_line_passes_through_when_no_secrets_registered() {
+    let masker = Arc::new(Mutex::new(SecretMasker::new()));
+    assert_eq!(mask_line(&masker, "hello world"), "hello world");
+  }
+
+  #[test]
+  fn mask_line_replaces_registered_secret() {
+    let masker = Arc::new(Mutex::new(SecretMasker::new()));
+    masker.lock().unwrap().add_secret("hunter2");
+    let result = mask_line(&masker, "password=hunter2 leaked");
+    assert!(!result.contains("hunter2"), "secret leaked: {result}");
+    assert!(result.contains("password=***"));
+  }
+
+  #[test]
+  fn mask_line_redacts_with_shared_masker() {
+    // The forwarder shares a single `Arc<Mutex<SecretMasker>>` with
+    // the file sink's `MaskerRedactor` and the per-job
+    // `ExecutionContext::register_secret` path. This test pins the
+    // contract: a registration through the same Arc that the
+    // forwarder uses is visible to the next `mask_line` call.
+    //
+    // (The `match { Ok(g) => g, Err(poisoned) => poisoned.into_inner() }`
+    // recovery path for a poisoned Mutex is defensive code and
+    // cannot be exercised here — the only way to poison a Mutex is
+    // via a `panic!` in another thread, which the workspace clippy
+    // config denies and the `no-allow` gate forbids silencing. The
+    // arm is verified by code review.)
+    let masker = Arc::new(Mutex::new(SecretMasker::new()));
+    masker.lock().unwrap().add_secret("shared-secret");
+    let result = mask_line(&masker, "value=shared-secret");
+    assert!(!result.contains("shared-secret"));
+    assert!(result.contains("value=***"));
+  }
+
+  #[test]
+  fn mask_line_handles_multiple_lines() {
+    // The forwarder calls mask_line on every RunnerEvent::Log, one
+    // line at a time. A masker that knows about one secret should
+    // scrub it from every line in sequence.
+    let masker = Arc::new(Mutex::new(SecretMasker::new()));
+    masker.lock().unwrap().add_secret("s3cr3t");
+    let inputs = [
+      "first s3cr3t line",
+      "second line, no secret",
+      "third s3cr3t value",
+    ];
+    for line in &inputs {
+      let result = mask_line(&masker, line);
+      assert!(!result.contains("s3cr3t"), "leak: {result}");
+    }
+  }
 }

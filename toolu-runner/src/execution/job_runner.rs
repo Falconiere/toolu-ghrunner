@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use shared::{AgentJobRequestMessage, Conclusion, RunnerConfig, RunnerError, RunnerEvent};
 use tokio::sync::mpsc;
@@ -9,6 +10,7 @@ use super::cache::backend::LocalDiskBackend;
 use super::cache::service::CacheService;
 use super::context::ExecutionContext;
 use super::expressions::context_data::pipeline_data_to_expr_value;
+use super::secret_masker::SecretMasker;
 use super::steps_runner::run_steps;
 
 /// Default cache size limit: 10 GB.
@@ -26,6 +28,7 @@ pub async fn run_job(
   config: &RunnerConfig,
   cancel: CancellationToken,
   events: mpsc::Sender<RunnerEvent>,
+  masker: Arc<Mutex<SecretMasker>>,
 ) -> Result<(), RunnerError> {
   let workspace = config.workspace_root.join(&msg.job_id);
   std::fs::create_dir_all(&workspace)?;
@@ -37,7 +40,7 @@ pub async fn run_job(
     "cache service started for job"
   );
 
-  let mut ctx = build_context(&msg, config);
+  let mut ctx = build_context(&msg, config, masker);
   ctx.set_env("ACTIONS_CACHE_URL", cache_service.base_url());
   ctx.set_env("ACTIONS_RUNTIME_TOKEN", &cache_token);
 
@@ -93,8 +96,12 @@ async fn start_cache_service(config: &RunnerConfig) -> Result<(CacheService, Str
   Ok((service, token))
 }
 
-fn build_context(msg: &AgentJobRequestMessage, config: &RunnerConfig) -> ExecutionContext {
-  let mut ctx = ExecutionContext::new_for_test();
+fn build_context(
+  msg: &AgentJobRequestMessage,
+  config: &RunnerConfig,
+  masker: Arc<Mutex<SecretMasker>>,
+) -> ExecutionContext {
+  let mut ctx = ExecutionContext::with_masker(masker);
 
   // In Serve mode this carries the per-job cgroup so spawned steps are moved
   // into it for CPU/memory enforcement; `None` in listener/JIT mode.
