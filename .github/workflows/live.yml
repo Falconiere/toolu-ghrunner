@@ -1,0 +1,26 @@
+name: live
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * *'
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.94.1
+        with:
+          components: rustfmt, clippy
+      - name: Build with --features live
+        run: cargo build -p toolu-runner --features live --tests
+      - name: Live tests (github.com)
+        if: ${{ env.TOOLU_RUNNER_LIVE_TOKEN != '' }}
+        env:
+          TOOLU_RUNNER_LIVE_TOKEN: ${{ secrets.TOOLU_RUNNER_LIVE_TOKEN }}
+          TOOLU_RUNNER_LIVE_REPO: ${{ vars.TOOLU_RUNNER_LIVE_REPO || 'Falconiere/toolu-runner-test' }}
+        run: cargo test -p toolu-runner --features live -- --ignored --test-threads=1
+      - name: Live tests skipped (no token)
+        if: ${{ env.TOOLU_RUNNER_LIVE_TOKEN == '' }}
+        run: echo "::warning::TOOLU_RUNNER_LIVE_TOKEN is not set; skipping live tests"

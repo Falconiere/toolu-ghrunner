@@ -1,0 +1,30 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.94.1
+        with:
+          components: rustfmt, clippy
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --workspace
+      - name: No yamless coupling (AC #18, #19)
+        run: |
+          ! grep -rn 'yamless\|YAMLESS_' shared/ protocol/ toolu-runner/ Cargo.toml 2>/dev/null
+      - name: Protocol crate has no I/O deps (AC #22)
+        run: |
+          if cargo tree -p protocol | grep -qE 'reqwest|tokio|opendal|bollard|axum'; then
+            echo "ERROR: protocol crate must not depend on I/O crates"
+            exit 1
+          fi

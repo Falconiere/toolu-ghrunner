@@ -1,0 +1,24 @@
+name: live-ghes
+on:
+  workflow_dispatch:
+
+jobs:
+  live-ghes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.94.1
+        with:
+          components: rustfmt, clippy
+      - name: Build with --features live-ghes
+        run: cargo build -p toolu-runner --features live-ghes --tests
+      - name: Live tests (GHES)
+        if: ${{ env.TOOLU_RUNNER_LIVE_GHES_TOKEN != '' && env.TOOLU_RUNNER_LIVE_GHES_URL != '' }}
+        env:
+          TOOLU_RUNNER_LIVE_GHES_TOKEN: ${{ secrets.TOOLU_RUNNER_LIVE_GHES_TOKEN }}
+          TOOLU_RUNNER_LIVE_GHES_URL: ${{ secrets.TOOLU_RUNNER_LIVE_GHES_URL }}
+          TOOLU_RUNNER_LIVE_GHES_REPO: ${{ vars.TOOLU_RUNNER_LIVE_GHES_REPO || 'owner/test-repo' }}
+        run: cargo test -p toolu-runner --features live-ghes -- --ignored --test-threads=1
+      - name: Live tests skipped (no secrets)
+        if: ${{ env.TOOLU_RUNNER_LIVE_GHES_TOKEN == '' || env.TOOLU_RUNNER_LIVE_GHES_URL == '' }}
+        run: echo "::warning::TOOLU_RUNNER_LIVE_GHES_TOKEN or TOOLU_RUNNER_LIVE_GHES_URL is not set; skipping GHES live tests"
