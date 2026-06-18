@@ -4,4 +4,10 @@
 //! tracing init. No async, no I/O beyond local file paths in the startup
 //! module.
 
-#![doc(html_root_url = "https://docs.rs/toolu-runner-shared/0.1.0")]
+#![doc(html_root_url = "https://docs.rs/shared/0.1.0")]
+
+mod config;
+mod error;
+
+pub use config::RunnerConfig;
+pub use error::RunnerError;
