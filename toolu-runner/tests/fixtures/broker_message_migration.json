@@ -1,0 +1,6 @@
+{
+  "messageId": 100,
+  "messageType": "BrokerMigration",
+  "body": "eyJicm9rZXJCYXNlVXJsIjogImh0dHBzOi8vYnJva2VyLTIuZXhhbXBsZS5jb20ifQ==",
+  "iv": "MTIzNDU2Nzg5MDEyMzQ1Ng=="
+}

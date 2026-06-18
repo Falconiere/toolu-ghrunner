@@ -1,0 +1,22 @@
+name: multistep
+on:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: [self-hosted, toolu-runner-v1]
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+      - name: set up node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: pull alpine container
+        uses: docker://alpine:3.19
+        with:
+          args: echo hello from alpine
+      - name: greet
+        run: |
+          echo "hello from a multi-step run"
+          echo "REPO=$GITHUB_REPOSITORY"
+          echo "SHA=$GITHUB_SHA"

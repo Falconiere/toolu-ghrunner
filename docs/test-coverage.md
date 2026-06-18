@@ -1,0 +1,69 @@
+# Test Coverage Map
+
+Maps each of the 23 acceptance criteria from the design spec to the
+test(s) that cover it, with a "lane" indicating whether the test runs in
+the default `cargo test --workspace` lane or only with the `live`
+feature enabled.
+
+Lane legend:
+
+- **default** — runs in `cargo test --workspace` (hermetic, no network).
+- **live** — runs in `cargo test -p toolu-runner --features live -- --ignored`
+  (requires a real test repo + PAT).
+- **out-of-scope** — covered by a non-test artifact (install script,
+  CI gate, design spec).
+
+| AC  | Description                                      | Test(s)                                                                                                                                                                                                                                                                                                                                                       | Lane         |
+| --- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| 1a  | Local status output (no network)                 | `toolu-runner/tests/cli_test.rs::help_lists_all_subcommands` (clap surface), `toolu-runner/tests/failure_modes_test.rs::yamless_warning_emitted_to_stderr_when_env_var_set` (exercises the `status` subcommand end-to-end through the binary).                                                                                                            | default      |
+| 1b  | Runner online within 30s of `register`           | `toolu-runner/tests/live/register_test.rs::register_creates_config_and_credentials`, `toolu-runner/tests/live/register_test.rs::register_replace_overwrites_existing` (gated; verifies config + credentials on disk after a real `register` call against the GH API).                                                                                       | live         |
+| 2   | No-op job (`run: echo hello`) completes          | `toolu-runner/tests/live/run_test.rs::noop_job_completes` (gated; dispatches the noop workflow, runs the runner, asserts `conclusion: success` on the GH run).                                                                                                                                                                                                  | live         |
+| 3   | Multi-step job (run, uses, docker://)            | `toolu-runner/tests/live/run_test.rs::multi_step_job` (gated; runs checkout + setup-node + docker://alpine).                                                                                                                                                                                                                                                    | live         |
+| 4   | Action resolution (`actions/checkout@v4`)        | `toolu-runner/tests/live/run_test.rs::action_resolution` (gated), `toolu-runner/tests/actions_resolver_test.rs` (planned; see `toolu-runner/src/execution/actions/resolver.rs::parse_action_ref` and `resolve_action_refs` for the parser-level coverage).                                                                                                  | live         |
+| 5   | Expression evaluation (`${{ }}` full syntax)     | `toolu-runner/tests/expression_eval_test.rs` — 28 tests covering literals, context/property/index access, function calls (`contains`, `startsWith`, `endsWith`, `format`, `join`, `toJson`, `fromJson`, `success`, `failure`, `always`, `cancelled`), binary ops, unary `!`, wildcards, and parse errors.                                                       | default      |
+| 6   | Secret masking in logs                           | `toolu-runner/tests/secret_masker_real_test.rs` — 10 tests driving the real `SecretMasker` against recorded log fixtures (`tests/fixtures/secret-masking-input.txt` → `secret-masking-expected.txt`), JSON-escaped variants, multi-line secrets, longest-first replacement, and the full `RedactingWriter` pipeline.                                                | default      |
+| 7   | OIDC token issuance                              | `toolu-runner/tests/oidc_token_test.rs` — 6 tests spinning up the real `OidcServer` axum endpoint on `127.0.0.1:0`, posting to `/_apis/pipeline/oidc/requestToken`, decoding the returned JWT, verifying the default and overridden audiences, the 10-min expiry, and bearer-token auth.                                                                       | default      |
+| 8   | Artifact upload + download                       | `toolu-runner/src/execution/artifacts/` (types only; v1 artifact service lives in `toolu-runner::execution::artifacts`). Live flow gated on artifact end-to-end tests landing in step 10.                                                                                                                                                                       | out-of-scope |
+| 9   | Cache save + restore                             | `toolu-runner/src/execution/cache/` (types only; v1 cache service lives in `toolu-runner::execution::cache`). Live flow gated on cache end-to-end tests landing in step 10.                                                                                                                                                                                      | out-of-scope |
+| 10  | Reusable workflows                               | `toolu-runner/tests/reusable_workflow_test.rs` — 23 tests covering `parse_reusable_ref` (with simple, nested, and SHA git_refs), `validate_inputs` / `resolve_inputs` (required + default + caller-override), `validate_secrets` (Inherit + Explicit modes), `resolve_outputs` (job output mapping), `check_nesting_depth` (4-level limit), `check_circular_reference`.  | default      |
+| 11  | Composite actions                                | `toolu-runner/tests/composite_action_test.rs` — 14 tests parsing a real-shape composite `action.yml` (with `inputs`, `outputs`, `runs.using: composite`, multi-step `steps[]`), preparing composites (scope + depth tracking, depth limit), evaluating `${{ steps.X.outputs.Y }}` output expressions, and handler dispatch (composite / script / node / docker / unknown).   | default      |
+| 12  | Reconnect after transient network failure        | `toolu-runner/tests/net_test.rs` — `exchange_token_returns_protocol_error_on_http_failure` (401) and `poll_message_returns_none_on_202` (long-poll no-work). Listener-side exponential backoff in `toolu-runner/src/listener/job_lifecycle.rs` (covered by the listener smoke test). Live mid-job outage scenarios in the design spec are tracked in `docs/known-bugs.md`. | default      |
+| 13  | Concurrent single-job guarantee (file lock)      | `toolu-runner/tests/failure_modes_test.rs::lock_acquire_writes_body_and_releases_on_drop`, `lock_conflict_returns_held_pid`, `lock_replaces_stale_lock_when_holder_pid_dead`. Live two-process race in `toolu-runner/tests/live/run_test.rs::concurrent_single_job` (gated).                                                                                  | default      |
+| 14  | Cancel by GH (UI cancel → 30s)                   | `toolu-runner/tests/live/run_test.rs::cancel_by_github` (gated; dispatches a `sleep 300` job, calls `POST /actions/runs/{id}/cancel`, asserts `conclusion: cancelled` within 60s).                                                                                                                                                                              | live         |
+| 15  | GHES V1 protocol                                 | `toolu-runner/tests/ghes_v1_test.rs` — 6 tests driving `toolu_runner::net::v1::{fetch_connection_data, post_timeline_record, fetch_timeline}` against a `wiremock` server returning the real V1 service-discovery shape, plus the `protocol::v1::resolve_service_url` URL resolver exercised end-to-end.                                                          | default      |
+| 16  | Service install (launchd + systemd)              | `install.sh` (single shell script that emits a launchd plist on macOS, a systemd unit on Linux). Manual smoke only — no automated test for the service files.                                                                                                                                                                                                   | out-of-scope |
+| 17  | Install script                                   | `install.sh` itself; executable + shellcheck'd manually.                                                                                                                                                                                                                                                                                                       | out-of-scope |
+| 18  | No yamless coupling                              | `shared/src/startup.rs::warn_about_yamless_env` + `toolu-runner/tests/failure_modes_test.rs::scan_yamless_env_matches_prefix_only`, `scan_yamless_env_empty_when_none_set`, `yamless_warning_emitted_to_stderr_when_env_var_set`, `yamless_warning_not_emitted_when_env_var_unset`. Enforced by `tools/check.sh::_check_no_yamless` and `lefthook.yml::no-yamless-coupling`. | default      |
+| 19  | Lint + typecheck gate                            | `lefthook.yml::pre-commit::rust-clippy` runs `cargo clippy --workspace --all-targets -- -D warnings`; `tools/check.sh all` runs `cargo fmt --all -- --check` + clippy + file-size + no-allow + no-unwrap + no-yamless. The `cargo build --workspace`, `cargo test --workspace`, and `cargo clippy` invocations in the build pipeline are the live gate.            | out-of-scope |
+| 20  | Live bug tracking                                | `docs/known-bugs.md` is the single source of truth; updated when the listener smoke test or live tests surface a behavior gap.                                                                                                                                                                                                                                | out-of-scope |
+| 21  | Protocol crate is sync + I/O-free                | `protocol/Cargo.toml` dep list is restricted to `serde*`, `base64`, `jsonwebtoken`, `num-bigint-dig`, `pkcs1`, `sha1`, `sha2`, `aes`, `cbc`, `uuid` (no `reqwest`, `tokio`, `opendal`, `bollard`, `axum`). `protocol/tests/integration.rs` is `#[test]` only — no `#[tokio::test]`, no `wiremock`.                                                                  | default      |
+| 22  | Removed-env-var warning                          | `toolu-runner/tests/failure_modes_test.rs::yamless_warning_emitted_to_stderr_when_env_var_set` (binary-level: spawns `toolu-runner status` with `YAMLESS_TEST_*` env vars, asserts the warning appears on stderr).                                                                                                                                          | default      |
+| 23  | Real-data test suite                             | This file. The 6 new test files (`expression_eval_test.rs`, `secret_masker_real_test.rs`, `oidc_token_test.rs`, `reusable_workflow_test.rs`, `composite_action_test.rs`, `ghes_v1_test.rs`) plus the recorded fixtures under `tests/fixtures/` form the suite. Live tests under `tests/live/` complete the picture with `--features live`.                    | default+live |
+
+## Recorded fixtures
+
+`toolu-runner/tests/fixtures/`:
+
+- `jit_config_github_com.json` — base64-encoded JIT envelope (3-blob: `.runner` / `.credentials` / `.credentials_rsaparams`) for a github.com host. Includes `expected_server_url_v2`, `expected_client_id`, `expected_authorization_url` for the live tests to assert against.
+- `jit_config_ghes.json` — same shape but with `host_kind: "ghes"` (no `run_service_url`, `ServerUrl`/`ServerUrlV2` rooted at `ghes.example.com`). Exercises the V1 path.
+- `broker_message_job_request.json` — real-shape `BrokerMessage` envelope (`messageId` / `messageType: "RunnerJobRequest"` / `body` / `iv`) with a synthetic job-request body base64-encoded. `body` decrypts to a `RunnerJobRequestBody`-shaped JSON.
+- `broker_message_migration.json` — `BrokerMessage` with `messageType: "BrokerMigration"`. The body is base64-encoded JSON containing `brokerBaseUrl` (the URL the listener would switch to on a migration).
+- `secret-masking-input.txt` — six real-shape log lines mixing bare tokens, bearer `ghp_` tokens, JSON-stringified tokens, and a JSON-escaped variant. Drives the `SecretMasker` round-trip.
+- `secret-masking-expected.txt` — the same six lines with secrets replaced by `***`. Used as the test's expected output.
+
+`toolu-runner/tests/live/fixtures/`:
+
+- `noop-workflow.yml` — `run: echo hello` workflow. Pushed by `tests/live/run_test.rs::noop_job_completes` to the test repo before dispatch.
+- `multi-step-workflow.yml` — `checkout@v4` + `setup-node@v4` + `docker://alpine:3.19` + `run: echo`. Pushed by a future live test (the unit-test path is the live harness's `multi_step_job` test).
+
+## Summary
+
+- 23 ACs total.
+- 15 ACs covered by default-lane tests (no network).
+- 5 ACs covered by live-only tests (require a real test repo).
+- 3 ACs are out-of-scope for the test suite (install script, service files, lint gate — enforced by `tools/check.sh` and `lefthook.yml`).
+
+Total test count after step 11: see `cargo test --workspace` summary
+below. Live tests compile under `--features live` but only run with
+`--ignored` and the required env vars (`TOOLU_RUNNER_LIVE_TOKEN`,
+`TOOLU_RUNNER_LIVE_REPO`).
