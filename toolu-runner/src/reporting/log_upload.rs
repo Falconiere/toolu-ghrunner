@@ -1,4 +1,4 @@
-use reqwest::header::{HeaderMap, HeaderValue};
+use reqwest::header::HeaderMap;
 
 use shared::RunnerError;
 
@@ -40,108 +40,25 @@ impl LogUploader {
     content: &[u8],
   ) -> Result<(), RunnerError> {
     match UploadMode::for_content(content.len()) {
-      UploadMode::BlockBlob => upload_block(client, signed_url, content).await,
-      UploadMode::AppendBlob => upload_append(client, signed_url, content).await,
+      UploadMode::BlockBlob => crate::net::upload_block_blob(client, signed_url, content).await,
+      UploadMode::AppendBlob => crate::net::upload_log(client, signed_url, content).await,
     }
   }
 
   /// Headers for a BlockBlob PUT request.
   pub fn block_blob_headers() -> HeaderMap {
-    let mut headers = HeaderMap::new();
-    headers.insert("x-ms-blob-type", HeaderValue::from_static("BlockBlob"));
-    headers.insert(
-      "Content-Type",
-      HeaderValue::from_static("application/octet-stream"),
-    );
-    headers
+    crate::net::block_blob_headers()
   }
 
   /// Headers for creating an AppendBlob (empty body).
   pub fn create_append_blob_headers() -> HeaderMap {
-    let mut headers = HeaderMap::new();
-    headers.insert("x-ms-blob-type", HeaderValue::from_static("AppendBlob"));
-    headers.insert("Content-Length", HeaderValue::from_static("0"));
-    headers
+    crate::net::create_append_blob_headers()
   }
 
   /// Headers for an AppendBlock request.
   pub fn append_block_headers(content_length: usize) -> HeaderMap {
-    let mut headers = HeaderMap::new();
-    headers.insert(
-      "Content-Type",
-      HeaderValue::from_static("application/octet-stream"),
-    );
-    if let Ok(val) = HeaderValue::from_str(&content_length.to_string()) {
-      headers.insert("Content-Length", val);
-    }
-    headers
+    crate::net::append_block_headers(content_length)
   }
-}
-
-async fn upload_block(
-  client: &reqwest::Client,
-  signed_url: &str,
-  content: &[u8],
-) -> Result<(), RunnerError> {
-  let response = client
-    .put(signed_url)
-    .headers(LogUploader::block_blob_headers())
-    .body(content.to_vec())
-    .send()
-    .await
-    .map_err(|e| RunnerError::Protocol(format!("block blob upload: {e}")))?;
-
-  if !response.status().is_success() {
-    let body = response.text().await.unwrap_or_default();
-    return Err(RunnerError::Protocol(format!(
-      "block blob upload failed: {body}"
-    )));
-  }
-  Ok(())
-}
-
-async fn upload_append(
-  client: &reqwest::Client,
-  signed_url: &str,
-  content: &[u8],
-) -> Result<(), RunnerError> {
-  // Create the append blob
-  let response = client
-    .put(signed_url)
-    .headers(LogUploader::create_append_blob_headers())
-    .send()
-    .await
-    .map_err(|e| RunnerError::Protocol(format!("create append blob: {e}")))?;
-
-  if !response.status().is_success() {
-    let body = response.text().await.unwrap_or_default();
-    return Err(RunnerError::Protocol(format!(
-      "create append blob failed: {body}"
-    )));
-  }
-
-  // Append content in chunks
-  let chunk_size = 4 * 1024 * 1024;
-  let append_url = format!("{signed_url}&comp=appendblock");
-
-  for chunk in content.chunks(chunk_size) {
-    let response = client
-      .put(&append_url)
-      .headers(LogUploader::append_block_headers(chunk.len()))
-      .body(chunk.to_vec())
-      .send()
-      .await
-      .map_err(|e| RunnerError::Protocol(format!("append block: {e}")))?;
-
-    if !response.status().is_success() {
-      let body = response.text().await.unwrap_or_default();
-      return Err(RunnerError::Protocol(format!(
-        "append block failed: {body}"
-      )));
-    }
-  }
-
-  Ok(())
 }
 
 /// Format log lines with timestamps for upload.

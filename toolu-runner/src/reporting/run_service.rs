@@ -61,47 +61,7 @@ pub async fn acquire_job(
   token: &str,
   request: &AcquireJobRequest,
 ) -> Result<AcquireJobResponse, RunnerError> {
-  let url = format!("{run_service_url}/acquirejob");
-
-  let response = client
-    .post(&url)
-    .bearer_auth(token)
-    .json(request)
-    .send()
-    .await
-    .map_err(|e| RunnerError::Protocol(format!("acquire job failed: {e}")))?;
-
-  let status = response.status();
-  if !status.is_success() {
-    let body = response.text().await.unwrap_or_default();
-    return Err(RunnerError::Protocol(format!(
-      "acquire job status {status}: {body}"
-    )));
-  }
-
-  let plan_id = response
-    .headers()
-    .get("x-plan-id")
-    .and_then(|v| v.to_str().ok())
-    .unwrap_or_default()
-    .to_owned();
-
-  let run_service_token = response
-    .headers()
-    .get("x-actions-results-token")
-    .and_then(|v| v.to_str().ok())
-    .map(ToOwned::to_owned);
-
-  let body = response
-    .json::<serde_json::Value>()
-    .await
-    .map_err(|e| RunnerError::Protocol(format!("acquire job parse: {e}")))?;
-
-  Ok(AcquireJobResponse {
-    plan_id,
-    body,
-    run_service_token,
-  })
+  crate::net::acquire_job(client, run_service_url, token, request).await
 }
 
 /// Renew a job lock. Call every 60 seconds.
@@ -115,28 +75,7 @@ pub async fn renew_job(
   token: &str,
   request: &RenewJobRequest,
 ) -> Result<RenewJobResponse, RunnerError> {
-  let url = format!("{run_service_url}/renewjob");
-
-  let response = client
-    .post(&url)
-    .bearer_auth(token)
-    .json(request)
-    .send()
-    .await
-    .map_err(|e| RunnerError::Protocol(format!("renew job failed: {e}")))?;
-
-  let status = response.status();
-  if !status.is_success() {
-    let body = response.text().await.unwrap_or_default();
-    return Err(RunnerError::Protocol(format!(
-      "renew job status {status}: {body}"
-    )));
-  }
-
-  response
-    .json::<RenewJobResponse>()
-    .await
-    .map_err(|e| RunnerError::Protocol(format!("renew job parse: {e}")))
+  crate::net::renew_job(client, run_service_url, token, request).await
 }
 
 /// Complete a job with final conclusion and step results.
@@ -150,23 +89,5 @@ pub async fn complete_job(
   token: &str,
   request: &CompleteJobRequest,
 ) -> Result<(), RunnerError> {
-  let url = format!("{run_service_url}/completejob");
-
-  let response = client
-    .post(&url)
-    .bearer_auth(token)
-    .json(request)
-    .send()
-    .await
-    .map_err(|e| RunnerError::Protocol(format!("complete job failed: {e}")))?;
-
-  let status = response.status();
-  if !status.is_success() {
-    let body = response.text().await.unwrap_or_default();
-    return Err(RunnerError::Protocol(format!(
-      "complete job status {status}: {body}"
-    )));
-  }
-
-  Ok(())
+  crate::net::complete_job(client, run_service_url, token, request).await
 }
