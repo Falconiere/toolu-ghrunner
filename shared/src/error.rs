@@ -44,6 +44,12 @@ pub enum RunnerError {
     path: std::path::PathBuf,
     source: std::io::Error,
   },
+  #[error("runner is already running as PID {pid} (started {started_at}) — exiting")]
+  LockHeld {
+    pid: u32,
+    started_at: String,
+    config_path: String,
+  },
   #[error("job cancelled")]
   Cancelled,
   #[error("IO error: {0}")]

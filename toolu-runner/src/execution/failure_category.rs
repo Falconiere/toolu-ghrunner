@@ -59,6 +59,7 @@ pub(super) fn category_from_runner_error(err: &RunnerError) -> FailureCategory {
     | RunnerError::ReusableWorkflow(_)
     | RunnerError::Reporting(_)
     | RunnerError::Config(_)
+    | RunnerError::LockHeld { .. }
     | RunnerError::Cancelled
     | RunnerError::Json(_) => FailureCategory::Internal,
   }

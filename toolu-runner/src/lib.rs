@@ -8,6 +8,9 @@
 //! - [`docker`] — bollard wrapper, service containers, path translation.
 //! - [`node`] — Node.js runtime detection and caching.
 //! - [`plugin`] — `RunnerPlugin` trait and registry.
+//! - [`lockfile`] — single-job file lock for the `.lock` next to the
+//!   registration config; prevents two `run` processes from sharing one
+//!   registration.
 //!
 //! Populated progressively in steps 2–9 per the plan.
 
@@ -16,6 +19,7 @@
 pub mod docker;
 pub mod execution;
 pub mod listener;
+pub mod lockfile;
 pub mod net;
 pub mod node;
 pub mod plugin;

@@ -60,6 +60,12 @@ fn diag_dir(data_dir: &Path) -> PathBuf {
 /// `EnvFilter` is built from `RUST_LOG` first, then `TOOLU_RUNNER_LOG`,
 /// falling back to `info`.
 ///
+/// Before the tracing layer is attached, scans the process environment for
+/// any `YAMLESS_*` keys and emits a `tracing::warn!` for each. This closes
+/// the AC #23 gap from the design spec — yamless users who re-run their old
+/// shell profile see a clear "this var is no longer recognized" message
+/// instead of silent failure. Does not fail; just warns.
+///
 /// Uses `try_init` so duplicate calls (e.g. in tests) are silently ignored.
 ///
 /// # Errors
@@ -67,6 +73,8 @@ fn diag_dir(data_dir: &Path) -> PathBuf {
 /// Returns `RunnerError::Io` if the diagnostics directory cannot be created.
 pub fn init(manifest_dir: &str, service: &str) -> Result<(), crate::RunnerError> {
   load_dotenv(Path::new(manifest_dir));
+
+  warn_about_yamless_env();
 
   let data_dir = default_data_dir();
   let diag = diag_dir(&data_dir);
@@ -99,6 +107,54 @@ pub fn init(manifest_dir: &str, service: &str) -> Result<(), crate::RunnerError>
     .ok();
 
   Ok(())
+}
+
+/// Scan the process environment for any `YAMLESS_*` keys and emit a
+/// `tracing::warn!` for each. Yamless users get a clear signal that their
+/// old env vars are no longer recognized (the runner has no env-var
+/// migration path from yamless — re-register with the new CLI).
+///
+/// Called from [`init`] / [`init_with_redactor`] before the subscriber is
+/// installed, so the warning still surfaces even if the first `tracing`
+/// event would otherwise be lost. Each key is written to stderr directly
+/// (via `eprintln!`) so the warning is visible whether or not the
+/// subscriber attaches successfully.
+///
+/// Returns the list of keys that were warned about — tests can assert
+/// the result directly without depending on capturing stderr.
+///
+/// Public so the warning logic is testable in isolation — the canonical
+/// test is in `toolu-runner/tests/failure_modes_test.rs`.
+pub fn warn_about_yamless_env() -> Vec<String> {
+  let yamless_keys = scan_yamless_env(std::env::vars());
+  for key in &yamless_keys {
+    eprintln!(
+      "warning: ignoring yamless env var {key} — toolu-runner has no yamless compatibility layer; use TOOLU_RUNNER_* instead"
+    );
+  }
+  yamless_keys
+}
+
+/// Pure scan: return the subset of `env` whose keys start with `YAMLESS_`,
+/// sorted for deterministic output. Extracted so tests can verify the
+/// filter logic without mutating the process environment.
+pub fn scan_yamless_env<I, K, V>(env: I) -> Vec<String>
+where
+  I: IntoIterator<Item = (K, V)>,
+  K: AsRef<str>,
+{
+  let mut keys: Vec<String> = env
+    .into_iter()
+    .filter_map(|(k, _)| {
+      if k.as_ref().starts_with("YAMLESS_") {
+        Some(k.as_ref().to_owned())
+      } else {
+        None
+      }
+    })
+    .collect();
+  keys.sort();
+  keys
 }
 
 /// Initialize tracing with a [`SecretRedactor`] wrapping both sinks.

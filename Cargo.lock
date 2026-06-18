@@ -2175,6 +2175,7 @@ dependencies = [
 name = "shared"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "dotenvy",
  "serde",
  "serde_json",
@@ -2528,6 +2529,7 @@ dependencies = [
  "cbc",
  "chrono",
  "clap",
+ "filetime",
  "flate2",
  "fs2",
  "futures-util",

@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use super::SessionCtx;
 use super::execution_loop::execute_with_renewal;
 use super::helpers::map_conclusion;
@@ -9,6 +11,11 @@ use crate::reporting::run_service::{
 };
 use protocol::messages::{BrokerMessage, BrokerMigrationBody, MessageType};
 use shared::{AgentJobRequestMessage, Conclusion, ListenerEvent, RunnerError};
+
+/// Starting backoff for a network error during the poll loop.
+const POLL_BACKOFF_START: Duration = Duration::from_secs(1);
+/// Cap on the exponential backoff between poll retries.
+const POLL_BACKOFF_MAX: Duration = Duration::from_secs(60);
 
 pub(super) async fn poll_and_execute(ctx: &mut SessionCtx) -> Result<(), RunnerError> {
   let Some(msg) = poll_until_job(ctx).await? else {
@@ -107,36 +114,95 @@ async fn run_acquired_job(
 }
 
 async fn poll_until_job(ctx: &mut SessionCtx) -> Result<Option<BrokerMessage>, RunnerError> {
+  let mut backoff = POLL_BACKOFF_START;
   loop {
-    let params = PollParams {
-      client: &ctx.client,
-      server_url_v2: &ctx.broker_url,
-      token: &ctx.token,
-      session_id: &ctx.session_id,
-      runner_version: "3.0.0",
-      os: std::env::consts::OS,
-      architecture: std::env::consts::ARCH,
-    };
-
-    let poll_fut = poll_message(&params);
-    tokio::select! {
-      biased;
-      () = ctx.cancel.cancelled() => return Ok(None),
-      result = poll_fut => {
-        match result? {
-          None => continue,
-          Some(msg) => match msg.message_type {
-            MessageType::BrokerMigration => {
-              let migration: BrokerMigrationBody = serde_json::from_str(&msg.body)
-                .map_err(|e| RunnerError::Protocol(format!("migration parse: {e}")))?;
-              tracing::info!(new_url = %migration.broker_base_url, "broker migration");
-              ctx.broker_url = migration.broker_base_url;
-            },
-            MessageType::RunnerJobRequest => return Ok(Some(msg)),
-          },
+    let result = poll_once(ctx).await;
+    match result {
+      PollOutcome::Cancelled => return Ok(None),
+      PollOutcome::NoWork => {
+        backoff = POLL_BACKOFF_START;
+        continue;
+      },
+      PollOutcome::Migrated(new_url) => {
+        ctx.broker_url = new_url;
+        backoff = POLL_BACKOFF_START;
+        continue;
+      },
+      PollOutcome::Job(msg) => return Ok(Some(msg)),
+      PollOutcome::NetworkError(e) => {
+        let backoff_ms = u64::try_from(backoff.as_millis()).unwrap_or(u64::MAX);
+        tracing::warn!(
+          error = %e,
+          backoff_ms,
+          "poll failed — retrying after backoff"
+        );
+        if sleep_or_cancel(ctx, backoff).await {
+          return Ok(None);
         }
+        backoff = backoff.saturating_mul(2).min(POLL_BACKOFF_MAX);
       },
     }
+  }
+}
+
+/// Outcome of a single `poll_message` call, classified for the loop.
+enum PollOutcome {
+  /// Long-poll returned 202 — broker accepted the connection but had
+  /// no work.
+  NoWork,
+  /// Long-poll returned a `BrokerMigration` message; carries the new
+  /// broker URL.
+  Migrated(String),
+  /// Long-poll returned a `RunnerJobRequest` — caller should acquire.
+  Job(BrokerMessage),
+  /// Network/HTTP failure — caller should back off and retry.
+  NetworkError(RunnerError),
+  /// Cancellation token tripped during the poll — caller should exit.
+  Cancelled,
+}
+
+async fn poll_once(ctx: &SessionCtx) -> PollOutcome {
+  let params = PollParams {
+    client: &ctx.client,
+    server_url_v2: &ctx.broker_url,
+    token: &ctx.token,
+    session_id: &ctx.session_id,
+    runner_version: "3.0.0",
+    os: std::env::consts::OS,
+    architecture: std::env::consts::ARCH,
+  };
+
+  let poll_fut = poll_message(&params);
+  tokio::select! {
+    biased;
+    () = ctx.cancel.cancelled() => PollOutcome::Cancelled,
+    result = poll_fut => match result {
+      Ok(None) => PollOutcome::NoWork,
+      Ok(Some(msg)) => match msg.message_type {
+        MessageType::BrokerMigration => match parse_migration(&msg.body) {
+          Ok(new_url) => PollOutcome::Migrated(new_url),
+          Err(e) => PollOutcome::NetworkError(e),
+        },
+        MessageType::RunnerJobRequest => PollOutcome::Job(msg),
+      },
+      Err(e) => PollOutcome::NetworkError(e),
+    },
+  }
+}
+
+fn parse_migration(body: &str) -> Result<String, RunnerError> {
+  let migration: BrokerMigrationBody = serde_json::from_str(body)
+    .map_err(|e| RunnerError::Protocol(format!("migration parse: {e}")))?;
+  tracing::info!(new_url = %migration.broker_base_url, "broker migration");
+  Ok(migration.broker_base_url)
+}
+
+/// Sleep for `duration`, returning `true` if cancellation fired first.
+async fn sleep_or_cancel(ctx: &SessionCtx, duration: Duration) -> bool {
+  tokio::select! {
+    biased;
+    () = ctx.cancel.cancelled() => true,
+    () = tokio::time::sleep(duration) => false,
   }
 }
 
@@ -205,4 +271,32 @@ fn extract_system_token(job_msg: &AgentJobRequestMessage) -> Option<String> {
     );
   }
   token
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  /// Verifies the backoff schedule required by the failure-mode spec:
+  /// doubles on each failure and caps at 60s.
+  #[test]
+  fn poll_backoff_doubles_and_caps_at_60s() {
+    let mut backoff = POLL_BACKOFF_START;
+    // Doubling sequence: 1, 2, 4, 8, 16, 32, 60, 60, 60…
+    let expected = [
+      Duration::from_secs(1),
+      Duration::from_secs(2),
+      Duration::from_secs(4),
+      Duration::from_secs(8),
+      Duration::from_secs(16),
+      Duration::from_secs(32),
+      Duration::from_secs(60),
+      Duration::from_secs(60),
+      Duration::from_secs(60),
+    ];
+    for want in expected {
+      assert_eq!(backoff, want, "backoff schedule drift");
+      backoff = backoff.saturating_mul(2).min(POLL_BACKOFF_MAX);
+    }
+  }
 }
