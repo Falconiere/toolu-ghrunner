@@ -90,6 +90,15 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 e2e = []
 e2e-live = ["e2e"]
 e2e-live-ghes = ["e2e"]
+# `live` gates the integration tests in `tests/live/`. They hit the real
+# GitHub API (POST registration-token, dispatch workflows, etc.) and are
+# only meaningful when run against a real test repo + PAT. Default builds
+# (no feature flag) skip them entirely so `cargo test --workspace` is
+# hermetic. Use `cargo test -p toolu-runner --features live` to enable
+# the harness and `cargo test -p toolu-runner --features live -- --ignored`
+# to actually execute the live tests.
+live = []
+live-ghes = ["live"]
 
 [lints]
 workspace = true
