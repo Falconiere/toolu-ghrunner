@@ -8,7 +8,6 @@
 //! - [`docker`] — bollard wrapper, service containers, path translation.
 //! - [`node`] — Node.js runtime detection and caching.
 //! - [`plugin`] — `RunnerPlugin` trait and registry.
-//! - [`types`] — `RunnerConfig`, `RunnerError`, `RunnerEvent`, message types.
 //!
 //! Populated progressively in steps 2–9 per the plan.
 
@@ -21,4 +20,57 @@ pub mod net;
 pub mod node;
 pub mod plugin;
 pub mod reporting;
-pub mod types;
+
+use std::collections::HashMap;
+
+use shared::{AgentJobRequestMessage, Conclusion, RunnerConfig, RunnerEvent};
+use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
+
+pub use shared::RunnerConfig as Config;
+
+/// Reusable execution engine. Spawns job work and returns an event stream.
+#[derive(Debug, Clone)]
+pub struct Runner {
+  config: RunnerConfig,
+}
+
+impl Runner {
+  /// Create a runner bound to a config.
+  pub fn new(config: RunnerConfig) -> Self {
+    Self { config }
+  }
+
+  /// Execute a single job. Returns a receiver for the event stream.
+  ///
+  /// The job runs in a background task. Events are emitted as the job
+  /// progresses. The stream closes when the job completes.
+  pub async fn execute_job(
+    &self,
+    job: AgentJobRequestMessage,
+    cancel: CancellationToken,
+  ) -> mpsc::Receiver<RunnerEvent> {
+    let (tx, rx) = mpsc::channel(1024);
+    let config = self.config.clone();
+
+    tokio::spawn(async move {
+      if let Err(err) = execution::job_runner::run_job(job, &config, cancel, tx.clone()).await {
+        tracing::error!(error = %err, "job execution failed");
+        let _ = tx
+          .send(RunnerEvent::JobCompleted {
+            job_id: String::new(),
+            conclusion: Conclusion::Failure,
+            outputs: HashMap::new(),
+          })
+          .await;
+      }
+    });
+
+    rx
+  }
+
+  /// Borrow the runner's config.
+  pub fn config(&self) -> &RunnerConfig {
+    &self.config
+  }
+}
