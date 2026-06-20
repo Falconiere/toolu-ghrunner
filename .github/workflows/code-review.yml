@@ -1,0 +1,26 @@
+name: Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  security-events: write # upload the gitleaks/opengrep SARIF to the Code Scanning tab
+
+concurrency:
+  group: code-review-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history so the merge-base resolves without deepening
+      - uses: falconiere/toolu-ghactions/code-review@v3
+        with:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
