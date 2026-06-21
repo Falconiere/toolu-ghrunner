@@ -147,7 +147,11 @@ fn decrypt_broker_body_encrypted_key_end_to_end() {
     false,
   )
   .expect("decrypt_broker_body");
-  assert_eq!(recovered, plaintext, "end-to-end encrypted body mismatch");
+  assert_eq!(
+    recovered.as_slice(),
+    plaintext.as_slice(),
+    "end-to-end encrypted body mismatch"
+  );
 }
 
 #[test]
@@ -171,7 +175,11 @@ fn decrypt_broker_body_raw_key_skips_rsa() {
     false,
   )
   .expect("decrypt_broker_body raw");
-  assert_eq!(recovered, plaintext, "raw-key path mismatch");
+  assert_eq!(
+    recovered.as_slice(),
+    plaintext.as_slice(),
+    "raw-key path mismatch"
+  );
 }
 
 #[test]
