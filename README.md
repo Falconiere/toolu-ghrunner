@@ -3,11 +3,12 @@
 Standalone self-hosted GitHub Actions runner written in Rust. Runs real jobs
 against github.com and GHES, with no orchestrator service in the loop.
 
-> **Status: pre-alpha.** v0.1.0 is the first release. The full live smoke
-> (register → run → execute → report against a real repo) is gated on
-> step 10 of the build plan, which requires a registration token from a
-> test repo. Until then, `register` validates the URL and writes a
-> placeholder config; `run` requires a live JIT config to actually poll.
+> **Status: pre-alpha.** v0.1.0 is the first release. As of the E0–E3
+> GitHub-compatibility work, `register` now performs the live JIT mint
+> (POST `generate-jitconfig`) and persists the real JIT config +
+> `runner_id`. The full live smoke (register → run → execute → report
+> against a real repo) still requires a registration token from a test
+> repo and has not yet been run end-to-end.
 
 ## Quick start
 
@@ -217,7 +218,17 @@ jit_config       = "<base64 blob from GH>"   # populated by `register`
 work_dir         = "~/.toolu-runner/_work"
 data_dir         = "~/.toolu-runner"
 protocol_version = "v2"                       # "v1" for GHES
+
+[services]
+mode = "forwarder"   # "forwarder" (default) | "offline"
 ```
+
+`[services] mode` selects where step-level artifacts / cache / OIDC go.
+In `forwarder` mode (the default) the runner injects the real GitHub
+service URLs + runtime token (from the job message) into step env, so
+GitHub-hosted `upload-artifact@v4` / `cache@v4` / OIDC talk to real
+GitHub. In `offline` mode the runner hosts the local fake services for
+airgapped use.
 
 ```json
 // ~/.toolu-runner/credentials.json
@@ -257,10 +268,12 @@ older than 5 min) is removed and re-acquired by the next `run`.
 ## Known bugs
 
 See [docs/known-bugs.md](docs/known-bugs.md) for the current list. The
-short version: the live `register` POST and live `remove` unregister
-call are stubbed pending step 10 (live smoke against a test repo).
-The 5-min cancellation watchdog on prolonged mid-job network outages
-is also tracked as a known gap.
+short version: the live `register` POST is now implemented (B-003
+resolved, `net/register.rs`), but the end-to-end live smoke against a
+test repo has not yet been run (token-gated). The live `remove`
+unregister call is still stubbed (B-002), and the 5-min cancellation
+watchdog on prolonged mid-job network outages is tracked as a known
+gap (B-001).
 
 ## Troubleshooting
 

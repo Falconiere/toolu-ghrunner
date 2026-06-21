@@ -1,42 +1,19 @@
 //! Persisted registration + runtime configuration.
 //!
-//! The runner's `register` subcommand writes a [`RunnerRegistrationConfig`]
-//! to `~/.toolu-runner/config.toml` (mode 0600 on Unix) and a matching
-//! [`CredentialsFile`] to `~/.toolu-runner/credentials.json` (mode 0600).
-//! The `run` / `status` / `remove` subcommands read these back.
-//!
-//! ## Layout
-//!
-//! ```toml
-//! runner_url   = "https://github.com/owner/repo"
-//! runner_name  = "my-runner"
-//! runner_id    = 12345
-//! auth_token   = "ghs_..."
-//! labels       = ["self-hosted", "linux", "x64"]
-//! runner_group = "Default"
-//!
-//! [runtime]
-//! jit_config        = "<base64 blob>"
-//! work_dir          = "~/.toolu-runner/_work"
-//! data_dir          = "~/.toolu-runner"
-//! protocol_version  = "v2"   # or "v1" for GHES
-//! ```
-//!
-//! Files are written with explicit 0600 mode on Unix via
-//! `OpenOptions::mode(0o600)` so the default 0644 never applies.
-//!
-//! ## Tilde expansion
-//!
-//! `work_dir` and `data_dir` are stored with the `~` they came in with
-//! (so a moved home dir keeps working). [`shared::paths::expand_tilde`]
-//! resolves them at load time.
+//! `register` writes [`RunnerRegistrationConfig`] to
+//! `~/.toolu-runner/config.toml` and [`CredentialsFile`] to
+//! `credentials.json` (both 0600 on Unix); `run`/`status`/`remove` read them
+//! back. The `[runtime]` section holds paths + JIT blob + protocol version;
+//! the optional `[services]` section selects forwarder vs offline mode.
+//! `work_dir`/`data_dir` keep their `~` and resolve via
+//! [`shared::paths::expand_tilde`] at load time.
 
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use shared::{RunnerError, paths};
+use shared::{RunnerError, ServicesMode, paths};
 
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
@@ -65,6 +42,54 @@ pub struct RunnerRegistrationConfig {
   pub runner_group: String,
   /// Runtime section: paths + JIT config + protocol version.
   pub runtime: RuntimeConfig,
+  /// `[services]` section: artifact/cache/OIDC serving mode.
+  #[serde(default)]
+  pub services: ServicesSection,
+}
+
+impl RunnerRegistrationConfig {
+  /// Resolve the artifact/cache/OIDC serving mode (`forwarder` default).
+  pub fn services_mode(&self) -> ServicesMode {
+    self.services.resolve()
+  }
+}
+
+/// `[services]` config section selecting how artifacts/cache/OIDC are served.
+///
+/// `mode = "forwarder"` (default) forwards real GitHub service URLs from the
+/// job message; `mode = "offline"` hosts local services for hermetic runs.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ServicesSection {
+  /// `"forwarder"` (default) or `"offline"`.
+  #[serde(default = "default_services_mode")]
+  pub mode: String,
+}
+
+impl Default for ServicesSection {
+  fn default() -> Self {
+    Self {
+      mode: default_services_mode(),
+    }
+  }
+}
+
+impl ServicesSection {
+  /// Map the `mode` string to [`ServicesMode`]; unknown values fall back to
+  /// `forwarder` with a `WARN` (a typo must not silently host local services).
+  fn resolve(&self) -> ServicesMode {
+    match self.mode.trim().to_ascii_lowercase().as_str() {
+      "offline" => ServicesMode::Offline,
+      "forwarder" => ServicesMode::Forwarder,
+      other => {
+        tracing::warn!(mode = other, "unknown [services] mode; using forwarder");
+        ServicesMode::Forwarder
+      },
+    }
+  }
+}
+
+fn default_services_mode() -> String {
+  "forwarder".to_owned()
 }
 
 /// Runtime sub-section: paths, JIT config blob, protocol version.

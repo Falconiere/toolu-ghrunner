@@ -69,14 +69,18 @@ async fn acknowledge_message_posts_message_id_to_broker() {
   Mock::given(method("POST"))
     .and(path("/acknowledge"))
     .and(header("authorization", "Bearer test-token"))
-    .and(body_string(r#"{"messageId":42}"#))
+    // The broker keys the ack on runnerRequestId + a non-empty runner status
+    // (live-discovered 400s "Missing runnerRequestId" / "invalid runner status").
+    .and(query_param("runnerRequestId", "req-uuid-42"))
+    .and(query_param("status", "Online"))
+    .and(body_string(r#"{"runnerRequestId":"req-uuid-42"}"#))
     .respond_with(ResponseTemplate::new(200))
     .expect(1)
     .mount(&server)
     .await;
 
   let client = reqwest::Client::new();
-  toolu_runner::net::acknowledge_message(&client, &server.uri(), "test-token", 42)
+  toolu_runner::net::acknowledge_message(&client, &server.uri(), "test-token", "req-uuid-42")
     .await
     .expect("ack should succeed");
 }
@@ -102,6 +106,7 @@ async fn poll_message_returns_none_on_202() {
     runner_version: "3.0.0",
     os: "linux",
     architecture: "x64",
+    last_message_id: 0,
   };
 
   let msg = toolu_runner::net::poll_message(&params)

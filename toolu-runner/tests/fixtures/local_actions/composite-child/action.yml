@@ -1,0 +1,10 @@
+name: 'composite-child'
+description: 'Local composite (level 2) that runs a shell step then a nested grandchild composite.'
+runs:
+  using: 'composite'
+  steps:
+    - name: child run step
+      shell: bash
+      run: echo "child-run" >> "$MARKER_FILE"
+    - name: nested composite grandchild
+      uses: ./composite-grandchild

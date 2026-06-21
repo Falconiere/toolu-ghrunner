@@ -34,6 +34,11 @@ pub struct CreateSessionResponse {
   pub owner_name: String,
   pub agent: Option<AgentInfo>,
   pub encryption_key: Option<EncryptionKey>,
+  /// Whether the session uses FIPS-compliant encryption. When true the
+  /// wrapped AES key uses RSA-OAEP-SHA256; otherwise OAEP-SHA1. Absent on
+  /// github.com (defaults to non-FIPS).
+  #[serde(default)]
+  pub use_fips_encryption: bool,
 }
 
 /// Encryption key returned by session creation.

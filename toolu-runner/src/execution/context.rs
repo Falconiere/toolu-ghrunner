@@ -3,6 +3,9 @@ use std::sync::{Arc, Mutex};
 
 use shared::{Conclusion, RunnerError};
 
+use super::context_build::{
+  build_strategy, default_strategy, runner_arch, runner_debug_on, runner_os,
+};
 use super::expressions::evaluator::{EvalContext, JobStatus, evaluate};
 use super::expressions::template::interpolate;
 use super::expressions::types::ExprValue;
@@ -18,9 +21,13 @@ pub struct ExecutionContext {
   runner_context: HashMap<String, ExprValue>,
   job_status: JobStatus,
   secrets: HashMap<String, String>,
+  /// Repo/org/env configuration variables — the `vars.*` context.
+  vars: HashMap<String, String>,
   matrix: ExprValue,
   needs: ExprValue,
   inputs: ExprValue,
+  /// `strategy.*` context (job-index/total, fail-fast, max-parallel).
+  strategy: HashMap<String, ExprValue>,
   /// Shared with the listener and the tracing file sink's redactor.
   /// Wrapped in a `Mutex` so `register_secret` and `add_mask` can
   /// mutate the pattern set from any Arc clone — the file sink's
@@ -43,11 +50,10 @@ impl ExecutionContext {
   /// file sink's redactor).
   pub fn with_masker(masker: Arc<Mutex<SecretMasker>>) -> Self {
     let mut runner_ctx = HashMap::new();
-    runner_ctx.insert("os".to_owned(), ExprValue::String("Linux".to_owned()));
-    runner_ctx.insert("arch".to_owned(), ExprValue::String("X64".to_owned()));
+    runner_ctx.insert("os".to_owned(), ExprValue::String(runner_os().to_owned()));
     runner_ctx.insert(
-      "name".to_owned(),
-      ExprValue::String("test-runner".to_owned()),
+      "arch".to_owned(),
+      ExprValue::String(runner_arch().to_owned()),
     );
 
     Self {
@@ -57,9 +63,11 @@ impl ExecutionContext {
       runner_context: runner_ctx,
       job_status: JobStatus::Success,
       secrets: HashMap::new(),
+      vars: HashMap::new(),
       matrix: ExprValue::Null,
       needs: ExprValue::Null,
       inputs: ExprValue::Null,
+      strategy: default_strategy(),
       masker,
       path_additions: Vec::new(),
       cgroup_path: None,
@@ -88,6 +96,76 @@ impl ExecutionContext {
     self.github.insert(key.to_owned(), value);
   }
 
+  /// Populate the host/config-derived `runner.*` context and mirror it to env.
+  ///
+  /// `os`/`arch` come from the host (Linux target only — see non-goals);
+  /// `name` is the registered runner name (falling back to the message's
+  /// runner dict, then hostname); `temp`/`tool_cache` are pinned to
+  /// `data_dir/_temp` and `data_dir/_tool` (Open Q6) and created if absent;
+  /// `debug` is `"1"` when step-debug is on, else unset. Mirrors
+  /// `RUNNER_OS`/`RUNNER_ARCH`/`RUNNER_NAME`/`RUNNER_TEMP`/`RUNNER_TOOL_CACHE`.
+  ///
+  /// # Errors
+  /// Returns `RunnerError::Io` if `temp`/`tool_cache` cannot be created.
+  pub fn set_runner_context(
+    &mut self,
+    name: &str,
+    data_dir: &std::path::Path,
+  ) -> Result<(), RunnerError> {
+    let temp = data_dir.join("_temp");
+    let tool_cache = data_dir.join("_tool");
+    std::fs::create_dir_all(&temp)?;
+    std::fs::create_dir_all(&tool_cache)?;
+    let temp = temp.to_string_lossy().into_owned();
+    let tool_cache = tool_cache.to_string_lossy().into_owned();
+
+    let os = runner_os().to_owned();
+    let arch = runner_arch().to_owned();
+    self.set_runner_value("os", &os);
+    self.set_runner_value("arch", &arch);
+    self.set_runner_value("name", name);
+    self.set_runner_value("temp", &temp);
+    self.set_runner_value("tool_cache", &tool_cache);
+
+    self.set_env("RUNNER_OS", &os);
+    self.set_env("RUNNER_ARCH", &arch);
+    self.set_env("RUNNER_NAME", name);
+    self.set_env("RUNNER_TEMP", &temp);
+    self.set_env("RUNNER_TOOL_CACHE", &tool_cache);
+
+    if runner_debug_on() {
+      self.set_runner_value("debug", "1");
+      self.set_env("RUNNER_DEBUG", "1");
+    }
+    Ok(())
+  }
+
+  fn set_runner_value(&mut self, key: &str, value: &str) {
+    self
+      .runner_context
+      .insert(key.to_owned(), ExprValue::String(value.to_owned()));
+  }
+
+  /// Set a repo/org/env configuration variable (`vars.*`).
+  pub fn set_var(&mut self, key: &str, value: &str) {
+    self.vars.insert(key.to_owned(), value.to_owned());
+  }
+
+  /// Populate the `strategy.*` context (job-index/total, fail-fast,
+  /// max-parallel). Absent matrix/strategy keeps the single-job defaults.
+  pub fn set_strategy(
+    &mut self,
+    job_index: u64,
+    job_total: u64,
+    fail_fast: bool,
+    max_parallel: Option<u64>,
+  ) {
+    self.strategy = build_strategy(job_index, job_total, fail_fast, max_parallel);
+  }
+}
+
+/// Context snapshot + expression evaluation + env accessors.
+impl ExecutionContext {
   /// Get a string value from the github context.
   pub fn github_context(&self, key: &str) -> Option<&str> {
     match self.github.get(key) {
@@ -125,25 +203,45 @@ impl ExecutionContext {
       ExprValue::Object(self.runner_context.clone()),
     );
 
-    // secrets context
-    let secrets_obj: HashMap<String, ExprValue> = self
-      .secrets
-      .iter()
-      .map(|(k, v)| (k.clone(), ExprValue::String(v.clone())))
-      .collect();
-    contexts.insert("secrets".to_owned(), ExprValue::Object(secrets_obj));
+    // secrets context (from job Variables where is_secret == true)
+    contexts.insert(
+      "secrets".to_owned(),
+      ExprValue::Object(string_map_to_obj(&self.secrets)),
+    );
+
+    // vars context (repo/org/env configuration variables)
+    contexts.insert(
+      "vars".to_owned(),
+      ExprValue::Object(string_map_to_obj(&self.vars)),
+    );
 
     // matrix, needs, inputs, job, strategy
     contexts.insert("matrix".to_owned(), self.matrix.clone());
     contexts.insert("needs".to_owned(), self.needs.clone());
     contexts.insert("inputs".to_owned(), self.inputs.clone());
-    contexts.insert("job".to_owned(), ExprValue::Object(HashMap::new()));
-    contexts.insert("strategy".to_owned(), ExprValue::Object(HashMap::new()));
+    contexts.insert("job".to_owned(), ExprValue::Object(self.job_context()));
+    contexts.insert(
+      "strategy".to_owned(),
+      ExprValue::Object(self.strategy.clone()),
+    );
 
     EvalContext {
       contexts,
       job_status: self.job_status,
     }
+  }
+
+  /// Build the `job.*` context: a real `status` plus empty container/services
+  /// (no-container jobs are in scope; container objects stay null).
+  fn job_context(&self) -> HashMap<String, ExprValue> {
+    let mut job = HashMap::new();
+    job.insert(
+      "status".to_owned(),
+      ExprValue::String(job_status_str(self.job_status).to_owned()),
+    );
+    job.insert("container".to_owned(), ExprValue::Null);
+    job.insert("services".to_owned(), ExprValue::Object(HashMap::new()));
+    job
   }
 
   /// # Errors
@@ -157,44 +255,81 @@ impl ExecutionContext {
   pub fn interpolate_string(&self, input: &str) -> Result<String, RunnerError> {
     interpolate(input, &self.eval_context())
   }
+  /// Set (or overwrite) a global environment variable for later steps.
   pub fn set_env(&mut self, key: &str, value: &str) {
     self.env.insert(key.to_owned(), value.to_owned());
   }
 
+  /// Read a job-level environment variable (e.g. a job-hook script path).
+  pub fn env_var(&self, key: &str) -> Option<String> {
+    self.env.get(key).cloned()
+  }
+
+  /// Prepend a directory to `PATH` for subsequent steps.
   pub fn prepend_path(&mut self, dir: &str) {
     self.path_additions.push(dir.to_owned());
   }
+}
 
+/// Per-step output / state / conclusion recording.
+impl ExecutionContext {
+  /// Record an output value for a step (`set-output` / `$GITHUB_OUTPUT`).
   pub fn set_step_output(&mut self, step_id: &str, key: &str, value: &str) {
-    let state = self
-      .steps
-      .entry(step_id.to_owned())
-      .or_insert_with(|| StepState {
-        outputs: HashMap::new(),
-        outcome: None,
-      });
+    let state = self.steps.entry(step_id.to_owned()).or_default();
     state.outputs.insert(key.to_owned(), value.to_owned());
   }
 
-  pub fn set_step_conclusion(&mut self, step_id: &str, conclusion: Conclusion) {
-    let state = self
-      .steps
-      .entry(step_id.to_owned())
-      .or_insert_with(|| StepState {
-        outputs: HashMap::new(),
-        outcome: None,
-      });
-    state.outcome = Some(conclusion);
+  /// Record a `save-state` value for a step, surfaced to its post step.
+  pub fn set_step_state(&mut self, step_id: &str, key: &str, value: &str) {
+    let state = self.steps.entry(step_id.to_owned()).or_default();
+    state.state.insert(key.to_owned(), value.to_owned());
   }
 
+  /// Read the recorded outputs map for a step (empty if none).
+  pub fn step_outputs(&self, step_id: &str) -> HashMap<String, String> {
+    self
+      .steps
+      .get(step_id)
+      .map(|s| s.outputs.clone())
+      .unwrap_or_default()
+  }
+
+  /// Read the recorded `save-state` map for a step, surfaced as `STATE_*`
+  /// to that same step's pre/main/post stages (empty if none).
+  pub fn step_state(&self, step_id: &str) -> HashMap<String, String> {
+    self
+      .steps
+      .get(step_id)
+      .map(|s| s.state.clone())
+      .unwrap_or_default()
+  }
+
+  /// Record a step's REAL result (`steps.<id>.outcome`), before any
+  /// `continue-on-error` adjustment.
+  pub fn set_step_outcome(&mut self, step_id: &str, outcome: Conclusion) {
+    let state = self.steps.entry(step_id.to_owned()).or_default();
+    state.outcome = Some(outcome);
+  }
+
+  /// Record a step's effective result (`steps.<id>.conclusion`), after
+  /// `continue-on-error` (equals the outcome unless the step failed with
+  /// `continue-on-error: true`).
+  pub fn set_step_conclusion(&mut self, step_id: &str, conclusion: Conclusion) {
+    let state = self.steps.entry(step_id.to_owned()).or_default();
+    state.conclusion = Some(conclusion);
+  }
+
+  /// Mark the overall job status as failed (for `failure()` conditions).
   pub fn record_step_failure(&mut self) {
     self.job_status = JobStatus::Failure;
   }
 
+  /// Current aggregate job status used by step-condition functions.
   pub fn job_status(&self) -> JobStatus {
     self.job_status
   }
 
+  /// Borrow the shared secret masker (same `Arc` as the tracing redactor).
   pub fn masker(&self) -> &Arc<Mutex<SecretMasker>> {
     &self.masker
   }
@@ -217,6 +352,13 @@ impl ExecutionContext {
       Err(poisoned) => poisoned.into_inner(),
     };
     guard.add_secret(value);
+  }
+
+  /// Register a value with the shared masker only, without exposing it in the
+  /// `secrets.*` context. Used for the auto github token, which is masked but
+  /// surfaced as `github.token` (matches actions/runner's exclusion).
+  pub fn register_secret_masked(&mut self, value: &str) {
+    self.add_mask(value);
   }
 
   /// Add a mask hint value to the shared masker.
@@ -249,5 +391,22 @@ impl ExecutionContext {
     }
 
     result
+  }
+}
+
+/// Map a `String → String` table to an `ExprValue::Object` of strings.
+fn string_map_to_obj(map: &HashMap<String, String>) -> HashMap<String, ExprValue> {
+  map
+    .iter()
+    .map(|(k, v)| (k.clone(), ExprValue::String(v.clone())))
+    .collect()
+}
+
+/// `job.status` string form of the current aggregate job status.
+fn job_status_str(status: JobStatus) -> &'static str {
+  match status {
+    JobStatus::Success => "success",
+    JobStatus::Failure => "failure",
+    JobStatus::Cancelled => "cancelled",
   }
 }

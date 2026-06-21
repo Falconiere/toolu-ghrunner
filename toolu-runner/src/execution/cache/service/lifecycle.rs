@@ -48,11 +48,11 @@ impl CacheService {
         post(handlers::handle_reserve),
       )
       .route(
-        "/_apis/artifactcache/caches/:cache_id",
+        "/_apis/artifactcache/caches/{cache_id}",
         post(handlers::handle_finalize).patch(handlers::handle_upload_chunk),
       )
       .route(
-        "/_apis/artifactcache/download/:cache_id",
+        "/_apis/artifactcache/download/{cache_id}",
         get(handlers::handle_download),
       )
       .with_state(state);

@@ -1,0 +1,10 @@
+name: 'node-leaf'
+description: 'Local node action invoked via uses: ./node-leaf — writes a marker so the test can assert its main ran.'
+inputs:
+  marker:
+    description: 'value written to MARKER_FILE'
+    required: false
+    default: 'node-leaf-main'
+runs:
+  using: 'node20'
+  main: 'main.js'

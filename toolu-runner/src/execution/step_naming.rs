@@ -1,21 +1,31 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 use shared::ActionStep;
 
+use super::actions::manifest::ActionDefinition;
+
 // ── Post-step types ─────────────────────────────────────────────────
 
 /// A registered post-step to execute after main steps complete (LIFO).
+///
+/// Carries everything needed to re-run the action's `post` node entrypoint in
+/// the same step scope at job end. `STATE_*` is *not* snapshotted here — it is
+/// read fresh from the live context at drain time so `post` sees whatever
+/// `main` saved.
 #[derive(Debug, Clone)]
 pub struct PostStep {
-  pub step_id: String,
+  /// The originating action step (same id/scope as `main`).
+  pub step: ActionStep,
+  /// Human-readable action name (for the `Post <name>` step header).
   pub action_name: String,
+  /// Resolved on-disk action directory (the cached action root).
   pub action_dir: PathBuf,
-  pub script: String,
+  /// Parsed action manifest (carries the `post` entrypoint + inputs).
+  pub manifest: ActionDefinition,
+  /// Node major version (`runs.using: node20` → 20).
+  pub major: u8,
+  /// Explicit `post-if`, if any; otherwise the effective default applies.
   pub condition: Option<String>,
-  pub inputs: HashMap<String, String>,
-  pub state: HashMap<String, String>,
-  pub using: String,
 }
 
 impl PostStep {
@@ -32,6 +42,7 @@ pub struct PostStepQueue {
 }
 
 impl PostStepQueue {
+  /// Create an empty post-step queue.
   pub fn new() -> Self {
     Self::default()
   }

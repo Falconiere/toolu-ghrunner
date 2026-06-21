@@ -90,6 +90,7 @@ pretty_assertions = "1"
 rand = { version = "0.8", features = ["std_rng"] }
 filetime = "0.2"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+rsa = "0.9"
 
 [features]
 e2e = []

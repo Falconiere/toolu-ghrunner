@@ -16,10 +16,12 @@ pub fn determine_script(def: &ActionDefinition, stage: &str) -> Option<String> {
 
 /// Convert an input name to its environment variable key.
 ///
-/// GitHub Actions convention: `INPUT_{NAME}` where name is uppercased.
-/// Hyphens are preserved (NOT replaced with underscores).
+/// GitHub Actions convention (matches the official runner): `INPUT_{NAME}`
+/// where each run of whitespace in the name collapses to a single `_` and the
+/// result is uppercased. Hyphens are preserved (NOT replaced).
 pub fn input_env_key(name: &str) -> String {
-  format!("INPUT_{}", name.to_uppercase())
+  let collapsed = name.split_whitespace().collect::<Vec<_>>().join("_");
+  format!("INPUT_{}", collapsed.to_uppercase())
 }
 
 /// Build the environment variables for a Node.js action step.

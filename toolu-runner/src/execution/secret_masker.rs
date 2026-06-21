@@ -3,6 +3,10 @@
 /// Secrets are registered upfront (from job Variables with `IsSecret=true`
 /// and `MaskHints`). Each secret is also split on newlines and each line
 /// registered separately. JSON-escaped variants are auto-registered.
+///
+/// `patterns` is held sorted longest-first as an invariant (maintained by
+/// `add_pattern`), so the per-line `mask` hot path does no per-call sort or
+/// allocation — it just runs the replace passes in order.
 #[derive(Debug, Clone)]
 pub struct SecretMasker {
   patterns: Vec<String>,
@@ -77,25 +81,22 @@ impl SecretMasker {
 
   /// Replace all registered secret patterns with `***`.
   ///
-  /// Patterns are replaced longest-first to avoid partial matches.
+  /// `patterns` is kept sorted longest-first (see `insert_pattern`), so a
+  /// longer secret is replaced before any shorter substring of it — no
+  /// per-call sort or allocation on this hot path.
   pub fn mask(&self, input: &str) -> String {
     if self.patterns.is_empty() {
       return input.to_owned();
     }
     let mut result = input.to_owned();
-    let mut sorted: Vec<&str> = self.patterns.iter().map(String::as_str).collect();
-    sorted.sort_by_key(|s| std::cmp::Reverse(s.len()));
-    for pattern in sorted {
+    for pattern in &self.patterns {
       result = result.replace(pattern, "***");
     }
     result
   }
 
   fn add_pattern(&mut self, value: &str) {
-    if self.patterns.iter().any(|p| p == value) {
-      return;
-    }
-    self.patterns.push(value.to_owned());
+    self.insert_pattern(value.to_owned());
 
     let json_escaped = value
       .replace('\\', "\\\\")
@@ -103,9 +104,19 @@ impl SecretMasker {
       .replace('\n', "\\n")
       .replace('\r', "\\r")
       .replace('\t', "\\t");
-    if json_escaped != value && !self.patterns.iter().any(|p| p == &json_escaped) {
-      self.patterns.push(json_escaped);
+    if json_escaped != value {
+      self.insert_pattern(json_escaped);
     }
+  }
+
+  /// Insert one pattern keeping `patterns` sorted longest-first; a duplicate
+  /// is ignored. Maintained as an invariant so `mask` never sorts.
+  fn insert_pattern(&mut self, pattern: String) {
+    if self.patterns.contains(&pattern) {
+      return;
+    }
+    let pos = self.patterns.partition_point(|p| p.len() >= pattern.len());
+    self.patterns.insert(pos, pattern);
   }
 }
 

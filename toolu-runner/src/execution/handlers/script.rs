@@ -1,12 +1,15 @@
 use std::collections::HashMap;
 use std::path::Path;
 use std::process::Stdio;
+use std::time::Duration;
 
 use shared::{Conclusion, LogStream, RunnerError, RunnerEvent};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 
 use crate::execution::cgroup_join::spawn_in_cgroup;
+use crate::execution::step_timeout::{WaitOutcome, wait_bounded};
 
 /// Parameters for script execution.
 pub struct ScriptParams<'a> {
@@ -17,17 +20,27 @@ pub struct ScriptParams<'a> {
   pub step_id: &'a str,
   /// Per-job cgroup directory to move the spawned step into (`None` = no isolation).
   pub cgroup_path: Option<&'a Path>,
+  /// `timeout-minutes` bound for the child wait (`None` = unbounded).
+  pub timeout: Option<Duration>,
+  /// In-flight cancellation: a fired token kills the child mid-run.
+  pub cancel: &'a CancellationToken,
 }
 
 /// Executes `run:` step scripts as shell processes.
 pub struct ScriptHandler;
 
 impl ScriptHandler {
+  /// Create a new script handler.
   pub fn new() -> Self {
     Self
   }
 
   /// Execute a script string in a shell process.
+  ///
+  /// Stdout is streamed line-by-line onto `stdout_tx` as the child produces it,
+  /// so the caller can dispatch workflow commands and emit `Log` events in
+  /// realtime (with `&mut ExecutionContext`). Stderr is streamed live as `Log`
+  /// events. Returns the exit conclusion.
   ///
   /// # Errors
   ///
@@ -36,11 +49,11 @@ impl ScriptHandler {
     &self,
     params: &ScriptParams<'_>,
     events: &mpsc::Sender<RunnerEvent>,
-  ) -> Result<Conclusion, RunnerError> {
+    stdout_tx: mpsc::Sender<String>,
+  ) -> Result<ScriptOutput, RunnerError> {
     let shell_name = params.shell.unwrap_or("bash");
     let script_file = write_script_file(params.script, shell_name)?;
     let script_path = script_file.path().to_string_lossy().to_string();
-
     let (program, args) = build_shell_args(shell_name, &script_path);
 
     let mut cmd = tokio::process::Command::new(program);
@@ -54,32 +67,103 @@ impl ScriptHandler {
 
     let mut child = spawn_in_cgroup(&mut cmd, params.cgroup_path).await?;
 
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
+    let stdout_handle = forward_lines(child.stdout.take(), stdout_tx);
+    let stderr_handle = stream_output(
+      child.stderr.take(),
+      params.step_id,
+      LogStream::Stderr,
+      events,
+    );
 
-    let stdout_handle = stream_output(stdout, params.step_id, LogStream::Stdout, events);
-    let stderr_handle = stream_output(stderr, params.step_id, LogStream::Stderr, events);
+    let outcome = wait_bounded(
+      &mut child,
+      params.timeout,
+      params.cancel,
+      RunnerError::ScriptHandler,
+    )
+    .await?;
+    let conclusion = match outcome {
+      WaitOutcome::Exited(status) => conclusion_for(status.success()),
+      WaitOutcome::TimedOut => {
+        emit_timeout(events, params.step_id, params.timeout).await;
+        Conclusion::Failure
+      },
+      WaitOutcome::Cancelled => Conclusion::Cancelled,
+    };
 
-    let status = child
-      .wait()
-      .await
-      .map_err(|e| RunnerError::ScriptHandler(format!("wait failed: {e}")))?;
-
-    // Wait for output tasks to finish before returning — ensures all log
-    // lines are emitted before StepCompleted.
-    if let Some(h) = stdout_handle {
-      let _ = h.await;
-    }
-    if let Some(h) = stderr_handle {
-      let _ = h.await;
-    }
-
-    if status.success() {
-      Ok(Conclusion::Success)
-    } else {
-      Ok(Conclusion::Failure)
-    }
+    finish_streams(stdout_handle, stderr_handle).await;
+    Ok(ScriptOutput { conclusion })
   }
+}
+
+/// Grace period to drain already-buffered output AFTER the child exits, before
+/// aborting a reader that is still blocked on the pipe. A grandchild that
+/// inherited the pipe (e.g. a backgrounded process, a build-script / rustc
+/// proc-macro server) keeps it open past the child's exit, so the read never
+/// hits EOF; once this elapses we abort the reader so its `Sender` drops and
+/// the downstream `recv()` loop closes, completing the step.
+pub(crate) const DRAIN_GRACE: Duration = Duration::from_secs(2);
+
+/// Emit the standard "timed out" log line so the cause is visible in the UI.
+///
+/// Shared with the node-action handler (`handlers::node_exec`) so both child
+/// runners emit an identical timeout line.
+pub(crate) async fn emit_timeout(
+  events: &mpsc::Sender<RunnerEvent>,
+  step_id: &str,
+  timeout: Option<Duration>,
+) {
+  let secs = timeout.map(|d| d.as_secs()).unwrap_or(0);
+  let _ = events
+    .send(RunnerEvent::Log {
+      step_id: step_id.to_owned(),
+      line: format!("##[error]The step exceeded its timeout of {secs}s and was terminated."),
+      stream: LogStream::Stderr,
+    })
+    .await;
+}
+
+/// Settle the live stdout/stderr forwarders before the caller reports
+/// `StepCompleted`. Each forwarder is given a bounded grace period to finish
+/// reading already-buffered lines; if it is still blocked on the pipe (a
+/// grandchild holds it open past the child's exit), it is aborted so its
+/// `Sender` drops, closing the downstream channel and unblocking the step.
+async fn finish_streams(
+  stdout_handle: Option<tokio::task::JoinHandle<()>>,
+  stderr_handle: Option<tokio::task::JoinHandle<()>>,
+) {
+  bounded_drain(stdout_handle).await;
+  bounded_drain(stderr_handle).await;
+}
+
+/// Wait up to [`DRAIN_GRACE`] for a reader task to finish, then abort it.
+///
+/// Aborting (not merely dropping the `JoinHandle`) is what frees the task's
+/// `Sender`: a dropped handle leaves the task running, so the channel would
+/// never close. The grace period lets a well-behaved child's
+/// already-written-but-unread lines (e.g. `::set-output::`) drain first.
+pub(crate) async fn bounded_drain(handle: Option<tokio::task::JoinHandle<()>>) {
+  let Some(mut h) = handle else { return };
+  // Borrow the handle so it survives a timeout and can still be aborted.
+  if tokio::time::timeout(DRAIN_GRACE, &mut h).await.is_err() {
+    h.abort();
+    // Reap the aborted task so its `Sender` is dropped before we return.
+    let _ = h.await;
+  }
+}
+
+fn conclusion_for(success: bool) -> Conclusion {
+  if success {
+    Conclusion::Success
+  } else {
+    Conclusion::Failure
+  }
+}
+
+/// Result of running a script step: its exit conclusion. Stdout is streamed to
+/// the caller line-by-line during the run, not returned here.
+pub struct ScriptOutput {
+  pub conclusion: Conclusion,
 }
 
 impl Default for ScriptHandler {
@@ -126,7 +210,12 @@ fn build_shell_args(shell: &str, script_path: &str) -> (&'static str, Vec<String
   }
 }
 
-fn stream_output<R: tokio::io::AsyncRead + Unpin + Send + 'static>(
+/// Spawn a task that forwards every line read from `reader` as a `Log` event
+/// on `stream`. Returns `None` when the child gave no pipe for that stream.
+///
+/// Shared with the node-action handler (`handlers::node_exec`) for streaming
+/// a child's stderr.
+pub(crate) fn stream_output<R: tokio::io::AsyncRead + Unpin + Send + 'static>(
   reader: Option<R>,
   step_id: &str,
   stream: LogStream,
@@ -146,6 +235,26 @@ fn stream_output<R: tokio::io::AsyncRead + Unpin + Send + 'static>(
           stream,
         })
         .await;
+    }
+  }))
+}
+
+/// Forward every stdout line onto `tx` as the child produces it, so the caller
+/// can dispatch workflow commands and emit `Log` events in realtime (the
+/// consumer owns `&mut ExecutionContext`, unavailable inside this task). The
+/// channel closes when the child's stdout reaches EOF.
+pub(crate) fn forward_lines<R: tokio::io::AsyncRead + Unpin + Send + 'static>(
+  reader: Option<R>,
+  tx: mpsc::Sender<String>,
+) -> Option<tokio::task::JoinHandle<()>> {
+  let r = reader?;
+  Some(tokio::spawn(async move {
+    let buf = BufReader::new(r);
+    let mut lines = buf.lines();
+    while let Ok(Some(line)) = lines.next_line().await {
+      if tx.send(line).await.is_err() {
+        break;
+      }
     }
   }))
 }

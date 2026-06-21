@@ -14,7 +14,7 @@ pub mod paths;
 
 pub mod startup;
 
-pub use config::RunnerConfig;
+pub use config::{RunnerConfig, ServicesMode};
 pub use error::RunnerError;
 pub use events::{AnnotationLevel, Conclusion, ListenerEvent, LogStream, RunnerEvent};
 pub use job_message::{

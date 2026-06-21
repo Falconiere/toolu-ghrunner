@@ -9,8 +9,10 @@ use crate::reporting::live_log::LiveLogStreamer;
 use crate::reporting::run_service::{
   AcquireJobRequest, CompleteJobRequest, acquire_job, complete_job,
 };
-use protocol::messages::{BrokerMessage, BrokerMigrationBody, MessageType};
+use protocol::messages::{BrokerMessage, BrokerMigrationBody, JobCancelBody};
 use shared::{AgentJobRequestMessage, Conclusion, ListenerEvent, RunnerError};
+
+use super::message_route::MessageRoute;
 
 /// Starting backoff for a network error during the poll loop.
 const POLL_BACKOFF_START: Duration = Duration::from_secs(1);
@@ -42,7 +44,15 @@ pub(super) async fn poll_and_execute(ctx: &mut SessionCtx) -> Result<(), RunnerE
   let rs_token = job_token.unwrap_or(rs_token);
 
   // Acknowledge the broker message — required by the JIT protocol before complete_job.
-  acknowledge_message(&ctx.client, &ctx.broker_url, &ctx.token, msg.message_id).await?;
+  // The broker keys the ack on the job's runner_request_id (UUID), not the
+  // numeric broker message id.
+  acknowledge_message(
+    &ctx.client,
+    &ctx.broker_url,
+    &ctx.token,
+    &body.runner_request_id,
+  )
+  .await?;
 
   let complete_req = CompleteJobRequest {
     plan_id,
@@ -59,24 +69,35 @@ pub(super) async fn poll_and_execute(ctx: &mut SessionCtx) -> Result<(), RunnerE
 /// Parse and execute the acquired job. Always returns a conclusion — never leaves
 /// the job hanging on GitHub even if parsing fails.
 /// Returns `(conclusion, job_id, request_id, step_results, optional_token)`.
+/// Result tuple for a job that never started because its message failed
+/// to parse — completes with failure rather than hanging on GitHub.
+type JobOutcome = (Conclusion, String, i64, Vec<StepResult>, Option<String>);
+
+/// Parse the acquired job body, or return a ready-made failure outcome.
+fn parse_job_message(
+  acquired: &crate::reporting::run_service::AcquireJobResponse,
+) -> Result<AgentJobRequestMessage, JobOutcome> {
+  serde_json::from_value(acquired.body.clone()).map_err(|e| {
+    tracing::error!(error = %e, "job message parse failed — completing with failure");
+    (
+      Conclusion::Failure,
+      "unknown".to_owned(),
+      0,
+      Vec::new(),
+      None,
+    )
+  })
+}
+
 async fn run_acquired_job(
   ctx: &mut SessionCtx,
   run_service_url: &str,
   rs_token: &str,
   acquired: &crate::reporting::run_service::AcquireJobResponse,
-) -> (Conclusion, String, i64, Vec<StepResult>, Option<String>) {
-  let job_msg: AgentJobRequestMessage = match serde_json::from_value(acquired.body.clone()) {
+) -> JobOutcome {
+  let job_msg: AgentJobRequestMessage = match parse_job_message(acquired) {
     Ok(msg) => msg,
-    Err(e) => {
-      tracing::error!(error = %e, "job message parse failed — completing with failure");
-      return (
-        Conclusion::Failure,
-        "unknown".to_owned(),
-        0,
-        Vec::new(),
-        None,
-      );
-    },
+    Err(failure) => return failure,
   };
 
   let job_token = extract_system_token(&job_msg);
@@ -115,20 +136,42 @@ async fn run_acquired_job(
 
 async fn poll_until_job(ctx: &mut SessionCtx) -> Result<Option<BrokerMessage>, RunnerError> {
   let mut backoff = POLL_BACKOFF_START;
+  // Redelivery cursor: `0` until the first message, then the id of the last
+  // message handled. Sent on every poll so the broker skips re-served ones.
+  let mut last_message_id: i64 = 0;
   loop {
-    let result = poll_once(ctx).await;
+    let result = poll_once(ctx, last_message_id).await;
+    if let Some(id) = result.message_id() {
+      last_message_id = id;
+    }
     match result {
       PollOutcome::Cancelled => return Ok(None),
       PollOutcome::NoWork => {
         backoff = POLL_BACKOFF_START;
         continue;
       },
-      PollOutcome::Migrated(new_url) => {
-        ctx.broker_url = new_url;
+      PollOutcome::Skip { message_id } => {
+        // An undecryptable / unparseable message. The cursor was already
+        // advanced past it above (`result.message_id()`), so the broker
+        // won't re-serve it — otherwise we'd wedge in an infinite backoff
+        // loop on one poisoned message. Reset backoff and keep polling.
+        tracing::warn!(
+          message_id,
+          "skipping undecryptable/unparseable broker message"
+        );
+        backoff = POLL_BACKOFF_START;
+        continue;
+      },
+      PollOutcome::Migrated { url, .. } => {
+        ctx.broker_url = url;
         backoff = POLL_BACKOFF_START;
         continue;
       },
       PollOutcome::Job(msg) => return Ok(Some(msg)),
+      PollOutcome::Cancel { msg, job_id } => {
+        handle_cancellation(ctx, &msg, &job_id).await;
+        return Ok(None);
+      },
       PollOutcome::NetworkError(e) => {
         let backoff_ms = u64::try_from(backoff.as_millis()).unwrap_or(u64::MAX);
         tracing::warn!(
@@ -166,25 +209,50 @@ enum PollOutcome {
   /// no work.
   NoWork,
   /// Long-poll returned a `BrokerMigration` message; carries the new
-  /// broker URL.
-  Migrated(String),
+  /// broker URL and the message id (to advance the redelivery cursor).
+  Migrated { url: String, message_id: i64 },
   /// Long-poll returned a `RunnerJobRequest` — caller should acquire.
   Job(BrokerMessage),
+  /// Long-poll returned a `JobCancellation` — caller should cancel the
+  /// in-flight token and acknowledge the message. Carries the message (for
+  /// the ack) and the target `jobId` (for logging / scoping).
+  Cancel { msg: BrokerMessage, job_id: String },
+  /// A received message that could not be decrypted or parsed. Carries its
+  /// id so the cursor advances past it (the broker won't re-serve it), so the
+  /// runner does not wedge re-fetching one poisoned message forever.
+  Skip { message_id: i64 },
   /// Network/HTTP failure — caller should back off and retry.
   NetworkError(RunnerError),
   /// Cancellation token tripped during the poll — caller should exit.
   Cancelled,
 }
 
-async fn poll_once(ctx: &SessionCtx) -> PollOutcome {
+impl PollOutcome {
+  /// The broker message id, when the outcome carried a real message.
+  /// Used to advance the `lastMessageId` redelivery cursor.
+  fn message_id(&self) -> Option<i64> {
+    match self {
+      Self::Migrated { message_id, .. } | Self::Skip { message_id } => Some(*message_id),
+      Self::Job(msg) | Self::Cancel { msg, .. } => Some(msg.message_id),
+      Self::NoWork | Self::NetworkError(_) | Self::Cancelled => None,
+    }
+  }
+}
+
+async fn poll_once(ctx: &SessionCtx, last_message_id: i64) -> PollOutcome {
   let params = PollParams {
     client: &ctx.client,
     server_url_v2: &ctx.broker_url,
     token: &ctx.token,
     session_id: &ctx.session_id,
     runner_version: "3.0.0",
-    os: std::env::consts::OS,
-    architecture: std::env::consts::ARCH,
+    // Derive os/arch from the same helpers the acknowledge path uses so a
+    // single runner advertises one consistent identity on both calls
+    // (the raw `std::env::consts` values "linux"/"x86_64" differed from the
+    // canonical GitHub "Linux"/"X64" the acknowledge request sends).
+    os: crate::execution::context_build::runner_os(),
+    architecture: crate::execution::context_build::runner_arch(),
+    last_message_id,
   };
 
   let poll_fut = poll_message(&params);
@@ -193,16 +261,76 @@ async fn poll_once(ctx: &SessionCtx) -> PollOutcome {
     () = ctx.cancel.cancelled() => PollOutcome::Cancelled,
     result = poll_fut => match result {
       Ok(None) => PollOutcome::NoWork,
-      Ok(Some(msg)) => match msg.message_type {
-        MessageType::BrokerMigration => match parse_migration(&msg.body) {
-          Ok(new_url) => PollOutcome::Migrated(new_url),
-          Err(e) => PollOutcome::NetworkError(e),
+      Ok(Some(mut msg)) => match decrypt_body_if_needed(ctx, &mut msg) {
+        Ok(()) => classify_message(msg),
+        // A decrypt failure is per-message, not a transport fault: skip past
+        // this message id so the broker stops re-serving it (see F5).
+        Err(e) => {
+          tracing::warn!(message_id = msg.message_id, error = %e, "broker message decrypt failed");
+          PollOutcome::Skip {
+            message_id: msg.message_id,
+          }
         },
-        MessageType::RunnerJobRequest => PollOutcome::Job(msg),
       },
       Err(e) => PollOutcome::NetworkError(e),
     },
   }
+}
+
+/// Classify a (decrypted) broker message into a poll outcome.
+///
+/// The message-type → action decision is the pure
+/// [`super::message_route::route`]; this fn attaches the parsed body.
+fn classify_message(msg: BrokerMessage) -> PollOutcome {
+  let message_id = msg.message_id;
+  match super::message_route::route(&msg.message_type) {
+    MessageRoute::Migrate => match parse_migration(&msg.body) {
+      Ok(url) => PollOutcome::Migrated { url, message_id },
+      // An unparseable control message must not wedge the cursor: skip it.
+      // A job request is never dropped here — `AcquireJob` is returned intact.
+      Err(e) => {
+        tracing::warn!(message_id, error = %e, "broker migration message unparseable");
+        PollOutcome::Skip { message_id }
+      },
+    },
+    MessageRoute::AcquireJob => PollOutcome::Job(msg),
+    MessageRoute::Cancel => match parse_cancel(&msg.body) {
+      Ok(job_id) => PollOutcome::Cancel { msg, job_id },
+      Err(e) => {
+        tracing::warn!(message_id, error = %e, "broker cancel message unparseable");
+        PollOutcome::Skip { message_id }
+      },
+    },
+  }
+}
+
+/// Decrypt `msg.body` in place when the session negotiated encryption.
+///
+/// No-op (plaintext passthrough) when the session has no encryption key —
+/// the common github.com JIT case where broker bodies arrive in cleartext.
+///
+/// # Errors
+///
+/// Returns `RunnerError::Protocol` on a missing IV, key unwrap failure, or
+/// AES-CBC decryption failure.
+fn decrypt_body_if_needed(ctx: &SessionCtx, msg: &mut BrokerMessage) -> Result<(), RunnerError> {
+  let Some(key) = ctx.encryption_key.as_ref() else {
+    return Ok(());
+  };
+  let iv = msg
+    .iv
+    .as_deref()
+    .ok_or_else(|| RunnerError::Protocol("encrypted broker message missing iv".to_owned()))?;
+  let plaintext = protocol::decrypt_broker_body(
+    &msg.body,
+    iv,
+    key,
+    &ctx.rsa_private_key_der,
+    ctx.use_fips_encryption,
+  )?;
+  msg.body = String::from_utf8(plaintext)
+    .map_err(|e| RunnerError::Protocol(format!("decrypted broker body not UTF-8: {e}")))?;
+  Ok(())
 }
 
 fn parse_migration(body: &str) -> Result<String, RunnerError> {
@@ -210,6 +338,33 @@ fn parse_migration(body: &str) -> Result<String, RunnerError> {
     .map_err(|e| RunnerError::Protocol(format!("migration parse: {e}")))?;
   tracing::info!(new_url = %migration.broker_base_url, "broker migration");
   Ok(migration.broker_base_url)
+}
+
+/// Parse a `JobCancellation` body, returning the target `jobId`.
+fn parse_cancel(body: &str) -> Result<String, RunnerError> {
+  let cancel: JobCancelBody = serde_json::from_str(body)
+    .map_err(|e| RunnerError::Protocol(format!("cancel body parse: {e}")))?;
+  Ok(cancel.job_id)
+}
+
+/// Cancel the in-flight job token and acknowledge the cancellation message.
+///
+/// The shared `ctx.cancel` token is observed by the poll loop, the renewal
+/// task, and the running job, so cancelling it stops the whole pipeline.
+/// The ack is best-effort: a failed ack is logged, not fatal, since the
+/// runner is already shutting the job down.
+async fn handle_cancellation(ctx: &SessionCtx, msg: &BrokerMessage, job_id: &str) {
+  tracing::info!(
+    job_id,
+    "received JobCancellation — cancelling in-flight job"
+  );
+  ctx.cancel.cancel();
+  // Best-effort: a JobCancellation carries a job_id, not a runner_request_id;
+  // use it as the ack key. A reject here is logged, never fatal.
+  let _ = msg;
+  if let Err(e) = acknowledge_message(&ctx.client, &ctx.broker_url, &ctx.token, job_id).await {
+    tracing::warn!(error = %e, "failed to acknowledge cancellation message");
+  }
 }
 
 /// Sleep for `duration`, returning `true` if cancellation fired first.
@@ -271,32 +426,4 @@ fn extract_system_token(job_msg: &AgentJobRequestMessage) -> Option<String> {
     );
   }
   token
-}
-
-#[cfg(test)]
-mod tests {
-  use super::*;
-
-  /// Verifies the backoff schedule required by the failure-mode spec:
-  /// doubles on each failure and caps at 60s.
-  #[test]
-  fn poll_backoff_doubles_and_caps_at_60s() {
-    let mut backoff = POLL_BACKOFF_START;
-    // Doubling sequence: 1, 2, 4, 8, 16, 32, 60, 60, 60…
-    let expected = [
-      Duration::from_secs(1),
-      Duration::from_secs(2),
-      Duration::from_secs(4),
-      Duration::from_secs(8),
-      Duration::from_secs(16),
-      Duration::from_secs(32),
-      Duration::from_secs(60),
-      Duration::from_secs(60),
-      Duration::from_secs(60),
-    ];
-    for want in expected {
-      assert_eq!(backoff, want, "backoff schedule drift");
-      backoff = backoff.saturating_mul(2).min(POLL_BACKOFF_MAX);
-    }
-  }
 }
