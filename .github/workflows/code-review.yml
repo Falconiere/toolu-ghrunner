@@ -23,4 +23,5 @@ jobs:
           fetch-depth: 0 # full history so the merge-base resolves without deepening
       - uses: falconiere/toolu-ghactions/code-review@v5
         with:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          PROVIDER: openrouter
+          API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
