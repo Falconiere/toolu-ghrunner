@@ -21,6 +21,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # full history so the merge-base resolves without deepening
-      - uses: falconiere/toolu-ghactions/code-review@v3
+      - uses: falconiere/toolu-ghactions/code-review@v5
         with:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
