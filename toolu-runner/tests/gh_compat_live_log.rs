@@ -161,7 +161,7 @@ async fn run_burst(step_id: &str, total: usize) -> Result<(Vec<String>, usize), 
   };
   tokio::time::timeout(std::time::Duration::from_secs(10), drain)
     .await
-    .map_err(|_| {
+    .map_err(|_elapsed| {
       format!(
         "timed out waiting for {expected_pre_close} count-threshold flushes, got {}",
         collector.snapshot().len()
