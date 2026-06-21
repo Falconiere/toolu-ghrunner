@@ -77,8 +77,8 @@ impl CommandDispatcher {
   /// lines seen while `stop-commands` is active return `PassThrough`.
   pub fn on_stdout_line(&mut self, line: &str, ctx: &mut ExecutionContext) -> LineDisposition {
     // While suspended, only the exact resume token re-enables processing.
-    if let Some(token) = self.stop_token.clone() {
-      if is_resume_marker(line, &token) {
+    if let Some(token) = self.stop_token.as_deref() {
+      if is_resume_marker(line, token) {
         self.stop_token = None;
         return LineDisposition::Consumed;
       }
