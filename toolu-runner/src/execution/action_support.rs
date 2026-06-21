@@ -11,6 +11,7 @@ use super::actions::manifest::ActionDefinition;
 use super::context::ExecutionContext;
 use super::handlers::node::build_action_env;
 
+/// Build the env map for a Node.js action stage (inputs, `STATE_*`, paths).
 pub(super) fn build_node_env(
   step: &ActionStep,
   ctx: &ExecutionContext,
@@ -19,7 +20,34 @@ pub(super) fn build_node_env(
   workspace: &Path,
   config: &RunnerConfig,
 ) -> HashMap<String, String> {
-  let step_inputs: HashMap<_, _> = step
+  let step_inputs = collect_step_inputs(step);
+
+  // The step's `save-state` values surface as `STATE_*` to its own
+  // pre/main/post stages (keyed by step id), so post can read what main saved.
+  let state = ctx.step_state(&step.id);
+  let mut env = ctx.build_step_env(&HashMap::new());
+  env.extend(build_action_env(
+    manifest,
+    &step_inputs,
+    &action_dir.to_string_lossy(),
+    &state,
+  ));
+
+  // Interpolate ${{ ... }} expressions in INPUT_* values (action.yml defaults)
+  for value in env.values_mut() {
+    if value.contains("${{")
+      && let Ok(interpolated) = ctx.interpolate_string(value)
+    {
+      *value = interpolated;
+    }
+  }
+  apply_runner_paths(&mut env, workspace, config);
+  env
+}
+
+/// Collect a step's `with:` inputs as plain string key/values.
+fn collect_step_inputs(step: &ActionStep) -> HashMap<String, String> {
+  step
     .inputs
     .to_map()
     .into_iter()
@@ -31,24 +59,11 @@ pub(super) fn build_node_env(
           .unwrap_or_default(),
       )
     })
-    .collect();
+    .collect()
+}
 
-  let mut env = ctx.build_step_env(&HashMap::new());
-  env.extend(build_action_env(
-    manifest,
-    &step_inputs,
-    &action_dir.to_string_lossy(),
-    &HashMap::new(),
-  ));
-
-  // Interpolate ${{ ... }} expressions in INPUT_* values (action.yml defaults)
-  for value in env.values_mut() {
-    if value.contains("${{")
-      && let Ok(interpolated) = ctx.interpolate_string(value)
-    {
-      *value = interpolated;
-    }
-  }
+/// Inject `GITHUB_WORKSPACE` / `RUNNER_TEMP` / `RUNNER_TOOL_CACHE`.
+fn apply_runner_paths(env: &mut HashMap<String, String>, workspace: &Path, config: &RunnerConfig) {
   env.insert(
     "GITHUB_WORKSPACE".to_owned(),
     workspace.to_string_lossy().into_owned(),
@@ -65,9 +80,9 @@ pub(super) fn build_node_env(
       .to_string_lossy()
       .into_owned(),
   );
-  env
 }
 
+/// Merge a composite step's `with:` inputs with the manifest's input defaults.
 pub(super) fn build_composite_inputs(
   step: &ActionStep,
   manifest: &ActionDefinition,
@@ -102,6 +117,7 @@ pub(super) fn build_composite_inputs(
   result
 }
 
+/// Resolve the action directory inside its cache dir, honoring a subpath.
 pub(super) fn resolve_action_dir(cache_dir: &Path, subpath: &Option<String>) -> std::path::PathBuf {
   match subpath {
     Some(p) if !p.is_empty() => cache_dir.join(p),
@@ -109,6 +125,7 @@ pub(super) fn resolve_action_dir(cache_dir: &Path, subpath: &Option<String>) -> 
   }
 }
 
+/// Read and parse `action.yml`/`action.yaml` from an action directory.
 pub(super) fn read_manifest(action_dir: &Path) -> Result<ActionDefinition, RunnerError> {
   let yml_path = action_dir.join("action.yml");
   let yaml_path = action_dir.join("action.yaml");

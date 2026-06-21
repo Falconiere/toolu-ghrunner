@@ -1,0 +1,10 @@
+name: 'composite-parent'
+description: 'Local composite that runs a shell step then a nested local composite via uses.'
+runs:
+  using: 'composite'
+  steps:
+    - name: parent run step
+      shell: bash
+      run: echo "parent-run" >> "$MARKER_FILE"
+    - name: nested composite child
+      uses: ./composite-child

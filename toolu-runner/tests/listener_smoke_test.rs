@@ -22,6 +22,7 @@ fn make_config() -> RunnerConfig {
     data_dir: std::env::temp_dir().join("toolu-runner-listener-test-data"),
     workspace_root: std::env::temp_dir().join("toolu-runner-listener-test-work"),
     cgroup_path: None,
+    services_mode: shared::ServicesMode::default(),
   }
 }
 

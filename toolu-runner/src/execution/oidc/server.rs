@@ -130,7 +130,6 @@ async fn handle_oidc_request(
   }
 
   let audience = params.audience.as_deref();
-  let ctx = &state.job_context;
 
   match &state.config.mode {
     OidcMode::GitHub { upstream_url } => {
@@ -146,33 +145,41 @@ async fn handle_oidc_request(
     OidcMode::Local {
       signing_key,
       issuer_url,
-    } => {
-      let subject = format!("repo:{}:ref:{}", ctx.repository, ctx.git_ref);
-      let claims = OidcClaims::new(&OidcClaimsParams {
-        issuer: issuer_url,
-        subject: &subject,
-        audience,
-        repository: &ctx.repository,
-        repository_owner: &ctx.repository_owner,
-        actor: &ctx.actor,
-        event_name: &ctx.event_name,
-        git_ref: &ctx.git_ref,
-        sha: &ctx.sha,
-        workflow: &ctx.workflow,
-        run_id: &ctx.run_id,
-        run_number: &ctx.run_number,
-        run_attempt: &ctx.run_attempt,
-      });
+    } => mint_local_token(&state.job_context, issuer_url, signing_key, audience),
+  }
+}
 
-      match mint_jwt(&claims, signing_key) {
-        Ok(token) => (StatusCode::OK, Json(OidcTokenResponse { value: token })).into_response(),
-        Err(e) => (
-          StatusCode::INTERNAL_SERVER_ERROR,
-          Json(serde_json::json!({"error": format!("JWT signing failed: {e}")})),
-        )
-          .into_response(),
-      }
-    },
+/// Mint a locally-signed OIDC token for the job context.
+fn mint_local_token(
+  ctx: &OidcJobContext,
+  issuer_url: &str,
+  signing_key: &[u8],
+  audience: Option<&str>,
+) -> axum::response::Response {
+  let subject = format!("repo:{}:ref:{}", ctx.repository, ctx.git_ref);
+  let claims = OidcClaims::new(&OidcClaimsParams {
+    issuer: issuer_url,
+    subject: &subject,
+    audience,
+    repository: &ctx.repository,
+    repository_owner: &ctx.repository_owner,
+    actor: &ctx.actor,
+    event_name: &ctx.event_name,
+    git_ref: &ctx.git_ref,
+    sha: &ctx.sha,
+    workflow: &ctx.workflow,
+    run_id: &ctx.run_id,
+    run_number: &ctx.run_number,
+    run_attempt: &ctx.run_attempt,
+  });
+
+  match mint_jwt(&claims, signing_key) {
+    Ok(token) => (StatusCode::OK, Json(OidcTokenResponse { value: token })).into_response(),
+    Err(e) => (
+      StatusCode::INTERNAL_SERVER_ERROR,
+      Json(serde_json::json!({"error": format!("JWT signing failed: {e}")})),
+    )
+      .into_response(),
   }
 }
 
@@ -184,13 +191,8 @@ fn mint_jwt(claims: &OidcClaims, signing_key: &[u8]) -> Result<String, RunnerErr
     .map_err(|e| RunnerError::Oidc(format!("JWT encode failed: {e}")))
 }
 
-/// Proxy an OIDC token request to GitHub's upstream OIDC provider.
-async fn proxy_to_github(
-  upstream_url: &str,
-  headers: &HeaderMap,
-  audience: Option<&str>,
-) -> Result<(StatusCode, Json<serde_json::Value>), RunnerError> {
-  let client = reqwest::Client::new();
+/// Build the upstream OIDC requestToken URL, appending `audience` if given.
+fn oidc_request_url(upstream_url: &str, audience: Option<&str>) -> String {
   let mut url = format!(
     "{}/_apis/pipeline/oidc/requestToken?api-version=1",
     upstream_url.trim_end_matches('/')
@@ -198,9 +200,30 @@ async fn proxy_to_github(
   if let Some(aud) = audience {
     url.push_str(&format!("&audience={aud}"));
   }
+  url
+}
+
+/// Build the timeout-bounded HTTP client used to proxy OIDC requests.
+///
+/// A request timeout so a hung upstream can't block the OIDC handler (and the
+/// requesting action) forever. Propagates the builder error.
+fn oidc_proxy_client() -> Result<reqwest::Client, RunnerError> {
+  reqwest::Client::builder()
+    .timeout(std::time::Duration::from_secs(60))
+    .build()
+    .map_err(|e| RunnerError::Oidc(format!("build HTTP client: {e}")))
+}
+
+/// Proxy an OIDC token request to GitHub's upstream OIDC provider.
+async fn proxy_to_github(
+  upstream_url: &str,
+  headers: &HeaderMap,
+  audience: Option<&str>,
+) -> Result<(StatusCode, Json<serde_json::Value>), RunnerError> {
+  let client = oidc_proxy_client()?;
+  let url = oidc_request_url(upstream_url, audience);
 
   let mut req = client.post(&url);
-
   if let Some(auth) = headers.get("Authorization")
     && let Ok(auth_str) = auth.to_str()
   {

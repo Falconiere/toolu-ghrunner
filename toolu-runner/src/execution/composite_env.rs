@@ -11,12 +11,15 @@ use super::actions::manifest::{ActionDefinition, CompositeStep};
 use super::composite_expr::interpolate_composite_expr;
 use super::context::ExecutionContext;
 use super::file_commands::{parse_env_file, parse_output_file, parse_path_file};
+use super::handlers::node::input_env_key;
 
-/// Bundled parameters for composite action execution.
+/// Bundled (read-only) parameters for composite action execution.
+///
+/// The mutable [`ExecutionContext`] is threaded separately so nested `uses:`
+/// steps can borrow it mutably while this bundle stays shareable.
 pub struct CompositeParams<'a> {
   pub manifest: &'a ActionDefinition,
   pub step_inputs: &'a HashMap<String, String>,
-  pub ctx: &'a ExecutionContext,
   pub events: &'a mpsc::Sender<RunnerEvent>,
   pub workspace: &'a Path,
   pub config: &'a RunnerConfig,
@@ -31,6 +34,8 @@ pub struct CompositeResult {
   pub path_additions: Vec<String>,
 }
 
+/// Decide whether a composite step's `if` condition skips it (best-effort
+/// evaluation of `false` and `runner.os == 'Windows'` style guards).
 pub(super) fn should_skip_step(step: &CompositeStep) -> bool {
   let Some(cond) = &step.condition else {
     return false;
@@ -50,14 +55,17 @@ pub(super) fn should_skip_step(step: &CompositeStep) -> bool {
   false
 }
 
+/// Build the environment for a composite `run:` step: inherited job env plus
+/// the step's own `env`, accumulated path additions, and runner paths.
 pub(super) fn build_step_env(
   params: &CompositeParams<'_>,
+  ctx: &ExecutionContext,
   step: &CompositeStep,
   extra_env: &HashMap<String, String>,
   path_additions: &[String],
 ) -> HashMap<String, String> {
   let temp_dir = params.config.data_dir.join("tmp");
-  let mut env = params.ctx.build_step_env(&HashMap::new());
+  let mut env = ctx.build_step_env(&HashMap::new());
 
   // Inherit system env for PATH, HOME, etc.
   for (k, v) in std::env::vars() {
@@ -66,9 +74,9 @@ pub(super) fn build_step_env(
 
   env.extend(extra_env.clone());
 
-  // INPUT_* vars from step inputs
+  // INPUT_* vars from step inputs (whitespace → `_`, uppercased).
   for (k, v) in params.step_inputs {
-    env.insert(format!("INPUT_{}", k.to_uppercase()), v.clone());
+    env.insert(input_env_key(k), v.clone());
   }
 
   env.insert(
@@ -83,15 +91,7 @@ pub(super) fn build_step_env(
     env.insert(k.clone(), interpolated);
   }
 
-  // Prepend path additions
-  if !path_additions.is_empty() {
-    let existing = env.get("PATH").cloned().unwrap_or_default();
-    let mut parts: Vec<&str> = path_additions.iter().map(String::as_str).collect();
-    if !existing.is_empty() {
-      parts.push(&existing);
-    }
-    env.insert("PATH".to_owned(), parts.join(":"));
-  }
+  prepend_path_additions(&mut env, path_additions);
 
   env.insert(
     "GITHUB_WORKSPACE".to_owned(),
@@ -103,6 +103,19 @@ pub(super) fn build_step_env(
   );
 
   env
+}
+
+/// Prepend composite `GITHUB_PATH` additions ahead of the inherited `PATH`.
+fn prepend_path_additions(env: &mut HashMap<String, String>, path_additions: &[String]) {
+  if path_additions.is_empty() {
+    return;
+  }
+  let existing = env.get("PATH").cloned().unwrap_or_default();
+  let mut parts: Vec<&str> = path_additions.iter().map(String::as_str).collect();
+  if !existing.is_empty() {
+    parts.push(&existing);
+  }
+  env.insert("PATH".to_owned(), parts.join(":"));
 }
 
 pub(super) struct FileCommandPaths {

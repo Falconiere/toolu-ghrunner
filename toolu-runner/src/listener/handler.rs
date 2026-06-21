@@ -25,6 +25,15 @@ pub(crate) struct SessionCtx {
   pub(crate) masker: Arc<Mutex<SecretMasker>>,
   pub(crate) cancel: CancellationToken,
   pub(crate) tx: mpsc::Sender<ListenerEvent>,
+  /// Session AES key for decrypting broker message bodies. `None` when the
+  /// session negotiated no encryption (the common github.com JIT case),
+  /// in which case bodies are plaintext.
+  pub(crate) encryption_key: Option<protocol::EncryptionKey>,
+  /// Whether the session uses FIPS encryption (RSA-OAEP-SHA256 vs SHA1).
+  pub(crate) use_fips_encryption: bool,
+  /// Runner RSA private key (PKCS#1 DER) for unwrapping an encrypted
+  /// session AES key. Reconstructed from the JIT `credentials_rsaparams`.
+  pub(crate) rsa_private_key_der: Vec<u8>,
 }
 
 /// GitHubListener wraps a Runner and handles the full GitHub protocol lifecycle:
@@ -79,12 +88,43 @@ impl GitHubListener {
   ///
   /// Returns `RunnerError::Protocol` on auth or session creation failure.
   pub async fn run(&self, cancel: CancellationToken) -> Result<(), RunnerError> {
-    let (tx, _rx) = mpsc::channel(256);
-    let _der_bytes = parse_rsa_private_key(&self.jit_config.rsa_key_params)?;
+    let (tx, mut rx) = mpsc::channel(256);
+    // Drain the listener-event channel for the lifetime of the run. Nothing
+    // downstream consumes these events in CLI mode, but the forwarder sends one
+    // per log line via a clone of `tx`; if the receiver is never read the
+    // bounded channel fills and the forwarder's `send().await` blocks forever
+    // (a high-output job emits far more than the channel capacity), wedging the
+    // whole job. Draining keeps the producer unblocked. The task ends when all
+    // `tx` clones drop (channel closes).
+    tokio::spawn(async move { while rx.recv().await.is_some() {} });
+    let mut ctx = self.build_session_ctx(cancel, tx).await?;
+
+    let result = job_lifecycle::poll_and_execute(&mut ctx).await;
+    if let Err(ref e) = result {
+      log_job_error(e);
+    }
+
+    super::helpers::cleanup_session(&ctx).await;
+    result
+  }
+
+  /// Authenticate, create the broker session, and assemble the `SessionCtx`.
+  /// Reconstructs the runner RSA key (PKCS#1 DER) so encrypted message
+  /// bodies can be decrypted on the poll path.
+  ///
+  /// # Errors
+  ///
+  /// Returns `RunnerError::Protocol` on key reconstruction, auth, or
+  /// session creation failure.
+  async fn build_session_ctx(
+    &self,
+    cancel: CancellationToken,
+    tx: mpsc::Sender<ListenerEvent>,
+  ) -> Result<SessionCtx, RunnerError> {
+    let rsa_private_key_der = parse_rsa_private_key(&self.jit_config.rsa_key_params)?;
 
     let jit = &self.jit_config;
     let client = &self.client;
-    let config = &self.config;
 
     let token = net::authenticate(
       client,
@@ -112,24 +152,19 @@ impl GitHubListener {
       })
       .await;
 
-    let mut ctx = SessionCtx {
+    Ok(SessionCtx {
       client: client.clone(),
       token: token.access_token,
       broker_url: jit.runner_settings.server_url_v2.clone(),
       session_id: session_response.session_id,
-      config: config.clone(),
+      config: self.config.clone(),
       masker: Arc::clone(&self.masker),
       cancel,
       tx,
-    };
-
-    let result = job_lifecycle::poll_and_execute(&mut ctx).await;
-    if let Err(ref e) = result {
-      log_job_error(e);
-    }
-
-    super::helpers::cleanup_session(&ctx).await;
-    result
+      encryption_key: session_response.encryption_key,
+      use_fips_encryption: session_response.use_fips_encryption,
+      rsa_private_key_der,
+    })
   }
 }
 

@@ -1,0 +1,8 @@
+name: 'composite-grandchild'
+description: 'Local composite (level 3 / deepest) that runs a single shell step.'
+runs:
+  using: 'composite'
+  steps:
+    - name: grandchild run step
+      shell: bash
+      run: echo "grandchild-run" >> "$MARKER_FILE"

@@ -3,6 +3,50 @@
 **Date:** 2026-06-18
 **Status:** Ready for v1.0.0 release. Step 10 (live smoke against github.com + GHES) is BLOCKED on user input (a registration token from a real test repo).
 
+## Update 2026-06-20 — GitHub-compatibility core (E0–E3)
+
+The original status above was over-optimistic. A deep gap analysis
+(`docs/toolu/gh-compat-gap-analysis.md`) found that large parts of the
+execution engine were written-but-unwired *dead code* — present in the
+tree, but never reached on the live job path. The E0–E3 work
+(plan `docs/toolu/plans/2026-06-19-gh-compatibility-core-execution.md`)
+wired them onto the live path and adopted the **forwarder** model for
+artifacts/cache/OIDC.
+
+Now wired onto the live path:
+
+- **Live JIT register** — `net/register.rs` POSTs `generate-jitconfig`
+  and persists the real JIT config + `runner_id` (was a placeholder
+  stub). Resolves B-003.
+- **Message-body decryption** — RSA-OAEP AES-key unwrap + AES-CBC on
+  the poll path; `JobCancellation` routing to the in-flight
+  `CancellationToken`; `lastMessageId` poll cursor.
+- **stdout workflow-command pipeline** — `::set-output::`,
+  `::add-mask::`, `::error::`, `::group::`, `::save-state::`,
+  `::stop-commands::` etc. (was DEAD), with `%XX` unescape and the
+  shared `SecretMasker`.
+- **Pre/post step stages** + `STATE_` persistence; local `./` actions
+  and composite nested `uses:`.
+- **Step semantics** — `timeout-minutes`, `working-directory`,
+  `continue-on-error` (outcome ≠ conclusion), `INPUT_` space→underscore.
+- **Job-level wiring** — `outputs:` → `JobCompleted.outputs`,
+  `defaults.run`, `ACTIONS_RUNNER_HOOK_JOB_STARTED/_COMPLETED`.
+- **Expression context** — real host-derived `runner.*`, full
+  `github.*`, `vars.*`, masked `secrets.*`, `job.*`/`strategy.*`,
+  `steps.*.state`.
+- **Forwarder pivot** — the runner now injects the REAL GitHub service
+  URLs + runtime token (from the job message's SystemVssConnection
+  endpoint) into step env (`ACTIONS_RESULTS_URL`, `ACTIONS_RUNTIME_URL`,
+  `ACTIONS_RUNTIME_TOKEN`, `ACTIONS_CACHE_URL`, `ACTIONS_CACHE_SERVICE_V2`,
+  `ACTIONS_ID_TOKEN_REQUEST_URL`/`_TOKEN`) so GitHub-hosted
+  `upload-artifact@v4` / `cache@v4` / OIDC talk to real GitHub. New
+  config `[services] mode` = `forwarder` (default) or `offline` (hosts
+  the local fake services for airgapped use).
+
+**Still pending:** live end-to-end validation (real-token smoke,
+register → run → execute → report) is token-gated and not yet run
+(tracked by S16). The status below predates this update.
+
 ## What ships in v1.0.0
 
 A self-hosted GitHub Actions runner written in Rust, packaged as a single binary `toolu-runner`. The 3-crate workspace (shared, protocol, runner) implements:

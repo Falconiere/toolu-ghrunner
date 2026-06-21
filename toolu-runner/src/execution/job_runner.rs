@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use shared::{AgentJobRequestMessage, Conclusion, RunnerConfig, RunnerError, RunnerEvent};
+use shared::{
+  AgentJobRequestMessage, Conclusion, RunnerConfig, RunnerError, RunnerEvent, ServicesMode,
+};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
@@ -10,19 +12,25 @@ use super::cache::backend::LocalDiskBackend;
 use super::cache::service::CacheService;
 use super::context::ExecutionContext;
 use super::expressions::context_data::pipeline_data_to_expr_value;
+use super::job_hooks::{JobHookStage, run_job_hook};
+use super::job_spec::{JobSpec, evaluate_job_outputs};
 use super::secret_masker::SecretMasker;
-use super::steps_runner::run_steps;
+use super::service_endpoints::{extract_service_urls, forward_env};
+use super::steps_runner::{JobRun, run_steps};
 
 /// Default cache size limit: 10 GB.
 const DEFAULT_CACHE_MAX_BYTES: u64 = 10 * 1024 * 1024 * 1024;
 
 /// Execute a complete job from an `AgentJobRequestMessage`.
 ///
-/// Starts a local cache service before job steps and shuts it down on completion.
+/// In **forwarder** mode (default) the real GitHub service URLs + runtime token
+/// are copied from the job message into step env; no local services run. In
+/// **offline** mode a local cache service is started and step env points at it.
 ///
 /// # Errors
 ///
-/// Returns `RunnerError` if workspace creation, cache service startup, or execution fails.
+/// Returns `RunnerError` if workspace creation, cache service startup, or
+/// execution fails.
 pub async fn run_job(
   msg: AgentJobRequestMessage,
   config: &RunnerConfig,
@@ -34,18 +42,131 @@ pub async fn run_job(
   std::fs::create_dir_all(&workspace)?;
   std::fs::create_dir_all(&config.data_dir)?;
 
-  let (cache_service, cache_token) = start_cache_service(config).await?;
-  info!(
-    url = cache_service.base_url(),
-    "cache service started for job"
-  );
+  // Offline mode hosts a local cache service; forwarder mode leaves it `None`.
+  let offline_cache = match config.services_mode {
+    ServicesMode::Offline => {
+      let (service, token) = start_cache_service(config).await?;
+      info!(url = service.base_url(), "offline cache service started");
+      Some((service, token))
+    },
+    ServicesMode::Forwarder => None,
+  };
 
   let mut ctx = build_context(&msg, config, masker);
-  ctx.set_env("ACTIONS_CACHE_URL", cache_service.base_url());
-  ctx.set_env("ACTIONS_RUNTIME_TOKEN", &cache_token);
+  setup_job_env(&mut ctx, &msg, config, offline_cache.as_ref())?;
+
+  emit_job_started(&events, &msg.job_id, &msg.job_display_name).await;
+
+  // TODO(S6/Open-Q1): the wire `AgentJobRequestMessage` does not yet carry
+  // typed job `outputs:`/`defaults:`; populate `JobSpec` from it once a live
+  // message is captured. Empty spec is a no-op for both on the live path.
+  let spec = JobSpec::default();
+
+  let body = JobBody {
+    msg: &msg,
+    config,
+    cancel: &cancel,
+    events: &events,
+    workspace: &workspace,
+    spec: &spec,
+  };
+  let (conclusion, outputs) = run_job_body(&body, &mut ctx).await?;
+
+  if let Some((service, _)) = offline_cache {
+    service.shutdown().await;
+  }
+  emit_job_completed(&events, msg.job_id, conclusion, outputs).await;
+
+  Ok(())
+}
+
+/// Borrowed inputs for the hook + step-loop + outputs phase of a job run.
+struct JobBody<'a> {
+  msg: &'a AgentJobRequestMessage,
+  config: &'a RunnerConfig,
+  cancel: &'a CancellationToken,
+  events: &'a mpsc::Sender<RunnerEvent>,
+  workspace: &'a std::path::Path,
+  spec: &'a JobSpec,
+}
+
+/// Run the job-started hook, the step loop, job-output evaluation, and the
+/// job-completed hook. Returns the job conclusion and resolved outputs.
+///
+/// The job-started hook is a hard gate (its failure short-circuits to a failed
+/// job before any step); the job-completed hook is best-effort and never
+/// overrides the conclusion. Job `outputs:` are evaluated after main + post
+/// steps so step outputs are fully recorded.
+async fn run_job_body(
+  body: &JobBody<'_>,
+  ctx: &mut ExecutionContext,
+) -> Result<(Conclusion, HashMap<String, String>), RunnerError> {
+  let JobBody {
+    msg,
+    config,
+    cancel,
+    events,
+    workspace,
+    spec,
+  } = *body;
+
+  // Job-started hook is a hard gate: its failure fails the job before any step.
+  let started = run_job_hook(JobHookStage::Started, ctx, events, workspace, cancel).await?;
+  if matches!(started, Some(Conclusion::Failure | Conclusion::Cancelled)) {
+    return Ok((started.unwrap_or(Conclusion::Failure), HashMap::new()));
+  }
+
+  let run = JobRun {
+    workspace,
+    config,
+    spec,
+  };
+  let conclusion = run_steps(&msg.steps, ctx, events, cancel.clone(), &run).await?;
+
+  // Evaluate job `outputs:` against the final context (after main + post steps).
+  let outputs = evaluate_job_outputs(spec, ctx)?;
+
+  // Job-completed hook runs after post-drain, best-effort (never overrides
+  // the job conclusion): a non-zero exit is logged by the script handler, and a
+  // spawn/read failure is logged here rather than propagated (a `?` would turn a
+  // successful job into an error return, breaking the documented contract).
+  if let Err(e) = run_job_hook(JobHookStage::Completed, ctx, events, workspace, cancel).await {
+    tracing::error!(error = ?e, "job-completed hook failed; preserving job conclusion");
+  }
+
+  Ok((conclusion, outputs))
+}
+
+/// Seed the per-job env every step inherits: the `ACTIONS_*` service vars
+/// (forwarder: real URLs + token from the message; offline: the local cache
+/// service + token), `GITHUB_EVENT_PATH` (written outside the workspace since
+/// checkout wipes it), and a W3C trace context.
+///
+/// This is the central injection point — `ctx.set_env` lands on the global
+/// env that `ExecutionContext::build_step_env` merges into every step.
+fn setup_job_env(
+  ctx: &mut ExecutionContext,
+  msg: &AgentJobRequestMessage,
+  config: &RunnerConfig,
+  offline_cache: Option<&(CacheService, String)>,
+) -> Result<(), RunnerError> {
+  match offline_cache {
+    // Offline: point the toolkit at the local cache service + local token.
+    Some((service, token)) => {
+      ctx.set_env("ACTIONS_CACHE_URL", service.base_url());
+      ctx.set_env("ACTIONS_RUNTIME_TOKEN", token);
+    },
+    // Forwarder: copy the real GitHub service URLs + runtime token from the
+    // message. A `None` URL is omitted (WARN); never an empty var.
+    None => {
+      for (key, value) in forward_env(&extract_service_urls(msg)) {
+        ctx.set_env(&key, &value);
+      }
+    },
+  }
 
   // Write event.json outside workspace (checkout wipes workspace contents).
-  let event_path = write_event_json(&config.data_dir, &msg.job_id, &ctx)?;
+  let event_path = write_event_json(&config.data_dir, &msg.job_id, ctx)?;
   ctx.set_env("GITHUB_EVENT_PATH", &event_path);
 
   // Inject W3C trace context for distributed trace correlation.
@@ -53,14 +174,6 @@ pub async fn run_job(
   let span_id = &trace_id[..16];
   ctx.set_env("TRACEPARENT", &format!("00-{trace_id}-{span_id}-01"));
   ctx.set_env("TRACESTATE", "toolu=true");
-
-  emit_job_started(&events, &msg.job_id, &msg.job_display_name).await;
-
-  let conclusion = run_steps(&msg.steps, &mut ctx, &events, cancel, &workspace, config).await?;
-
-  cache_service.shutdown().await;
-  emit_job_completed(&events, msg.job_id, conclusion).await;
-
   Ok(())
 }
 
@@ -77,12 +190,13 @@ async fn emit_job_completed(
   events: &mpsc::Sender<RunnerEvent>,
   job_id: String,
   conclusion: Conclusion,
+  outputs: HashMap<String, String>,
 ) {
   let _ = events
     .send(RunnerEvent::JobCompleted {
       job_id,
       conclusion,
-      outputs: HashMap::new(),
+      outputs,
     })
     .await;
 }
@@ -96,7 +210,14 @@ async fn start_cache_service(config: &RunnerConfig) -> Result<(CacheService, Str
   Ok((service, token))
 }
 
-fn build_context(
+/// Build the per-job `ExecutionContext` from the job message + runner config.
+///
+/// Populates `runner.*` (host/config), `github.*` and `vars.*` (from the
+/// message `contextData`), `secrets.*` (from `variables` where `is_secret`),
+/// and the secret masker. `pub` so hermetic tests can drive the real
+/// context-assembly path. Best-effort on `runner.*` dir creation: a failure
+/// is logged and the run continues without the env mirror.
+pub fn build_context(
   msg: &AgentJobRequestMessage,
   config: &RunnerConfig,
   masker: Arc<Mutex<SecretMasker>>,
@@ -107,31 +228,78 @@ fn build_context(
   // into it for CPU/memory enforcement; `None` in listener/JIT mode.
   ctx.set_cgroup_path(config.cgroup_path.clone());
 
-  // Register secrets from variables
+  // Variables: secrets (is_secret) → secrets.* + masker; the auto github
+  // token (`system.github.token`) is excluded from secrets.* and routed to
+  // github.token instead (matches actions/runner). Non-secret system vars
+  // become env only — repo config variables arrive via contextData["vars"].
   for (key, var) in &msg.variables {
     if var.is_secret {
-      ctx.register_secret(key, &var.value);
+      ctx.register_secret_masked(&var.value);
+      if let Some(gh_key) = key.strip_prefix("system.github.") {
+        ctx.set_github_context(gh_key, &var.value);
+        ctx.set_env(&github_env_key(gh_key), &var.value);
+      } else {
+        ctx.register_secret(key, &var.value);
+      }
     } else {
       ctx.set_env(key, &var.value);
     }
-
-    // Map system.github.* variables to github context + GITHUB_* env vars
-    if let Some(gh_key) = key.strip_prefix("system.github.") {
-      ctx.set_github_context(gh_key, &var.value);
-      let env_key = format!("GITHUB_{}", gh_key.to_uppercase().replace('.', "_"));
-      ctx.set_env(&env_key, &var.value);
-    }
   }
 
-  // Extract github context from context_data (PipelineContextData dict)
+  // github.* + vars.* from contextData dicts.
   extract_github_context(&msg.context_data, &mut ctx);
+  extract_vars_context(&msg.context_data, &mut ctx);
 
-  // Register mask hints
+  // runner.* from host + config (name falls back to the message runner dict).
+  let runner_name = runner_name(msg);
+  if let Err(e) = ctx.set_runner_context(&runner_name, &config.data_dir) {
+    tracing::warn!(error = %e, "failed to materialize runner.temp/tool_cache dirs");
+  }
+
+  // Mask hints from the job message.
   for hint in &msg.mask {
     ctx.add_mask(&hint.value);
   }
 
   ctx
+}
+
+/// Runner name: the message's `runner.name` context value, else the hostname.
+fn runner_name(msg: &AgentJobRequestMessage) -> String {
+  msg
+    .context_data
+    .get("runner")
+    .and_then(|runner| runner.d.as_ref())
+    .into_iter()
+    .flatten()
+    .find(|entry| entry.key.s.as_deref() == Some("name"))
+    .and_then(|entry| entry.value.s.clone())
+    .unwrap_or_else(fallback_hostname)
+}
+
+/// Hostname for the runner name, or a stable fallback if unavailable.
+fn fallback_hostname() -> String {
+  hostname::get()
+    .ok()
+    .and_then(|h| h.into_string().ok())
+    .unwrap_or_else(|| "toolu-runner".to_owned())
+}
+
+/// Populate `vars.*` from `contextData["vars"]` (repo/org/env config variables).
+fn extract_vars_context(
+  context_data: &HashMap<String, shared::PipelineContextData>,
+  ctx: &mut ExecutionContext,
+) {
+  let Some(vars) = context_data.get("vars") else {
+    return;
+  };
+  let Some(entries) = &vars.d else { return };
+  for entry in entries {
+    let (Some(key), Some(value)) = (&entry.key.s, &entry.value.s) else {
+      continue;
+    };
+    ctx.set_var(key, value);
+  }
 }
 
 /// Write the GitHub event payload to `{data_dir}/events/{job_id}.json`.
@@ -157,6 +325,16 @@ fn write_event_json(
   Ok(event_path.to_string_lossy().into_owned())
 }
 
+/// Canonical `github.<name>` → `GITHUB_<NAME>` env-var key transform.
+///
+/// Uppercases and replaces `.` with `_` (mirroring the `INPUT_` transform), so
+/// a dotted context key like `event.name` becomes a valid `GITHUB_EVENT_NAME`
+/// rather than an invalid `GITHUB_EVENT.NAME`. Used by both the secret
+/// `system.github.*` path and the `contextData["github"]` path so they agree.
+fn github_env_key(name: &str) -> String {
+  format!("GITHUB_{}", name.to_uppercase().replace('.', "_"))
+}
+
 fn extract_github_context(
   context_data: &HashMap<String, shared::PipelineContextData>,
   ctx: &mut ExecutionContext,
@@ -174,8 +352,7 @@ fn extract_github_context(
     // String values → set both github context and GITHUB_* env var
     if let Some(value) = &entry.value.s {
       ctx.set_github_context(key, value);
-      let env_key = format!("GITHUB_{}", key.to_uppercase());
-      ctx.set_env(&env_key, value);
+      ctx.set_env(&github_env_key(key), value);
       continue;
     }
 

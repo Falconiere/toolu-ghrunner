@@ -18,6 +18,7 @@
 pub mod auth;
 pub mod log_upload;
 pub mod messages;
+pub mod register;
 pub mod results_service;
 pub mod run_service;
 pub mod session;
@@ -28,7 +29,8 @@ pub use log_upload::{
   append_block_headers, block_blob_headers, create_append_blob_headers, upload_block_blob,
   upload_log,
 };
-pub use messages::{PollParams, acknowledge_message, poll_message};
+pub use messages::{PollParams, acknowledge_message, build_poll_url, poll_message};
+pub use register::{JitRegistration, RegisterParams, build_request, parse_response, register_jit};
 pub use results_service::{
   create_job_logs_metadata, create_step_logs_metadata, get_job_logs_signed_blob_url,
   get_step_logs_signed_blob_url, update_workflow_steps, upload_log_blob,

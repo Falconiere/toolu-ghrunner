@@ -20,6 +20,10 @@ sha2 = "0.10"
 aes = "0.8"
 cbc = "0.1"
 uuid = { version = "1", features = ["v4", "serde"] }
+rsa = "0.9"
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+rand = "0.8"

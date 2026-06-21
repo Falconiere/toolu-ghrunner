@@ -8,3 +8,7 @@ credentials.json
 .lock
 .pending_remove
 _diag/
+
+# tool session state
+.claude/tmp/
+.serena/
