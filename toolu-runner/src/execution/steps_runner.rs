@@ -78,7 +78,11 @@ pub async fn run_steps(
   // Drain post-steps LIFO AFTER all main steps — including when a prior step
   // failed. Each post-if is evaluated against the live job/steps status, so
   // `always()` posts run on failure while `success()`/`failure()` honor it.
-  drain_post_steps(&mut job_state.posts, ctx, events, &job).await?;
+  // Best-effort: a failing post-step must not overwrite the job's conclusion
+  // (a `Failure` from a main step must survive a post-step error).
+  if let Err(e) = drain_post_steps(&mut job_state.posts, ctx, events, &job).await {
+    tracing::error!(error = ?e, "post-step drain failed; preserving job conclusion");
+  }
 
   Ok(conclusion)
 }
@@ -97,7 +101,10 @@ async fn run_main_steps(
   for (index, step) in steps.iter().enumerate() {
     if cancel.is_cancelled() {
       // Still drain registered post-steps so action cleanup runs on cancel.
-      drain_post_steps(&mut job_state.posts, ctx, events, job).await?;
+      // Best-effort: a failing post-step must not mask the `Cancelled` result.
+      if let Err(e) = drain_post_steps(&mut job_state.posts, ctx, events, job).await {
+        tracing::error!(error = ?e, "post-step drain on cancel failed; still cancelling");
+      }
       return Ok(Conclusion::Cancelled);
     }
 
