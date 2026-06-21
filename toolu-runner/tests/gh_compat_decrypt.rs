@@ -138,7 +138,8 @@ fn runner_rsaparams_reconstruct_then_oaep_unwrap() {
     .expect("wrap key");
   let unwrapped = unwrap_aes_key_rsa_oaep(&wrapped, &der, false).expect("unwrap with runner der");
   assert_eq!(
-    unwrapped, aes_key,
+    unwrapped.as_slice(),
+    aes_key.as_slice(),
     "runner-reconstructed key must unwrap the AES key"
   );
 }
