@@ -25,9 +25,10 @@ and no OTel.
 - **`protocol` crate is strictly sync, no I/O, no network.** Its
   dependency set is restricted to `serde`, `serde_json`,
   `serde_yaml`, `base64`, `jsonwebtoken`, `num-bigint-dig`, `pkcs1`,
-  `sha1`, `sha2`, `aes`, `cbc`, `uuid`. Enforced by
-  `protocol/Cargo.toml` (no `reqwest`, `tokio`, `opendal`, `bollard`,
-  `axum`). `toolu-runner::net` owns all async I/O.
+  `sha1`, `sha2`, `aes`, `cbc`, `rsa`, `uuid` (dev-dep `rand`). `rsa`
+  was added for message-body decryption (RSA-OAEP AES-key unwrap).
+  Enforced by `protocol/Cargo.toml` (no `reqwest`, `tokio`, `opendal`,
+  `bollard`, `axum`). `toolu-runner::net` owns all async I/O.
 - **One-way `protocol` → `toolu-runner` boundary.** `protocol`
   exposes `pub fn` builders and parsers; the async `pub async fn`
   HTTP transport lives in `toolu-runner::net`. Tests against
@@ -49,6 +50,17 @@ and no OTel.
 - **Handler dispatch** (in priority order): plugin → script → node
   → docker → composite. There is **no** `yamless` handler variant —
   it was cut in the port.
+- **Service mode (forwarder vs offline).** Config `[services] mode`
+  selects how artifacts / cache / OIDC reach their backends. In
+  `forwarder` mode (the default), the runner reads the REAL GitHub
+  service URLs + runtime token from the job message's
+  `SystemVssConnection` endpoint and injects them into step env
+  (`ACTIONS_RESULTS_URL`, `ACTIONS_RUNTIME_URL`, `ACTIONS_RUNTIME_TOKEN`,
+  `ACTIONS_CACHE_URL`, `ACTIONS_CACHE_SERVICE_V2`,
+  `ACTIONS_ID_TOKEN_REQUEST_URL` / `_TOKEN`), so GitHub-hosted
+  `upload-artifact@v4` / `cache@v4` / OIDC talk to real GitHub. In
+  `offline` mode the runner hosts the local fake services for
+  airgapped use. Wired in `execution::service_endpoints`.
 - **Secret masking:** `execution::secret_masker::SecretMasker` is
   registered as the tracing `SecretRedactor` so registered
   `secrets.*` values (and their JSON-escaped variants) never reach
@@ -189,7 +201,15 @@ and no OTel.
   glue), `cgroup_join` (reserved), `command_parser`,
   `depth_tracker`, `docker_cache`, `failure_category`,
   `file_commands`, `service_auth` / `service_lifecycle`
-  (back OIDC/artifact/cache axum services).
+  (back OIDC/artifact/cache axum services). E0–E3 wired the live
+  job path: `command_dispatch` (stdout `::workflow-command::`
+  pipeline), `node_stage` / `post_drain` (pre/post step stages +
+  `STATE_`), `composite_uses` (local `./` + composite nested `uses:`),
+  `step_timeout` (`timeout-minutes` / `working-directory`), `job_spec`
+  / `job_hooks` (job `outputs:`, `defaults.run`, job hook env),
+  `context_build` (full `${{ }}` context), `service_endpoints`
+  (forwarder vs offline service-URL injection). The live JIT register
+  POST lives in `net/register.rs` (`generate-jitconfig`).
 - `docker/` — bollard wrapper. `client` (Docker daemon), `services`
   (service container lifecycle), `path_translator` (host ↔
   container path mapping).

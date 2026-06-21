@@ -47,9 +47,15 @@ Tracking format: B-NNN — short title — severity — owner — status.
 
 ## B-003 — Live register POST to JIT endpoint not exercised
 
-- **Severity:** Low (deferred to step 10)
-- **Owner:** step 10
-- **Status:** Blocked on step 10
+- **Severity:** Low
+- **Owner:** E0–E3 (gh-compatibility-core)
+- **Status:** Resolved
+- **Resolution:** Live JIT register implemented in `net/register.rs`
+  (POST `…/repos/{owner}/{repo}/actions/runners/generate-jitconfig` →
+  persists the real `encoded_jit_config` + `runner_id`), replacing the
+  placeholder stub. End-to-end live smoke (real-token register → run)
+  is still pending a registration token from a test repo (tracked by
+  S16).
 - **Trigger:** `toolu-runner register` is called.
 - **Observed:** Step 9 wrote the URL validation and JIT endpoint
   derivation (`jit_endpoint_for_host` returns

@@ -1,18 +1,9 @@
 //! `toolu-runner` — standalone GitHub Actions JIT runner CLI.
 //!
-//! Subcommands:
-//!
-//! - `register` — validate URL + probe JIT endpoint, write `config.toml`
-//!   and `credentials.json` (mode 0600). The full live registration
-//!   flow (POST to JIT endpoint + JWT exchange) is step 10; this commit
-//!   does the validation and write.
-//! - `run` — load `config.toml`, acquire the `.lock` file lock, run the
-//!   listener loop until SIGINT/SIGTERM.
-//! - `remove` — read `config.toml`, write the `.pending_remove` marker
-//!   if a `run` is in flight, otherwise delete both files. The live GH
-//!   unregistration call lands in step 10.
-//! - `status` — print `config.toml` and `credentials.json` summary
-//!   (no network).
+//! Subcommands: `register` (live `generate-jitconfig`, persists real
+//! jit_config + runner_id), `run` (load config, hold `.lock`, run the
+//! listener until SIGINT/SIGTERM), `remove` (delete state or write
+//! `.pending_remove` mid-job), `status` (print config, no network).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -23,7 +14,7 @@ use shared::RunnerError;
 use shared::startup;
 use tokio_util::sync::CancellationToken;
 use toolu_runner::config::{
-  CredentialsFile, RunnerRegistrationConfig, RuntimeConfig, jit_endpoint_for_host,
+  CredentialsFile, RunnerRegistrationConfig, RuntimeConfig, ServicesSection,
   load_config as load_reg_config, load_credentials, resolve_data_dir, resolve_work_dir,
   save_config as save_reg_config, save_credentials,
 };
@@ -181,43 +172,10 @@ fn parse_and_validate_url(url: &str) -> Result<String, RunnerError> {
   Ok(host)
 }
 
-/// Validate that the JIT endpoint for `host` is reachable.
-///
-/// Uses a 5-second HEAD request. Returns `Ok(())` on any 2xx/3xx status;
-/// errors with the response status on 4xx/5xx. Network errors propagate.
-async fn probe_jit_endpoint(host: &str) -> Result<(), RunnerError> {
-  let endpoint = jit_endpoint_for_host(host);
-  let client = reqwest::Client::builder()
-    .timeout(Duration::from_secs(5))
-    .build()
-    .map_err(|e| RunnerError::Network(format!("HTTP client: {e}")))?;
-  let resp = client
-    .head(&endpoint)
-    .send()
-    .await
-    .map_err(|e| RunnerError::Network(format!("JIT endpoint probe failed: {e}")))?;
-  let status = resp.status();
-  if status.is_success() || status.is_redirection() {
-    tracing::info!(endpoint = %endpoint, status = %status, "JIT endpoint reachable");
-    Ok(())
-  } else {
-    Err(RunnerError::Network(format!(
-      "JIT endpoint {endpoint} returned status {status}"
-    )))
-  }
-}
-
 async fn cmd_register(args: RegisterArgs) -> Result<(), Box<dyn std::error::Error>> {
-  let masker = Arc::new(std::sync::Mutex::new(SecretMasker::new()));
-  let redactor: Arc<dyn shared::startup::SecretRedactor> =
-    Arc::new(MaskerRedactor(Arc::clone(&masker)));
-  startup::init_with_redactor(env!("CARGO_MANIFEST_DIR"), "runner", redactor)
-    .map_err(|e| format!("startup init: {e}"))?;
+  init_runner_tracing().map_err(|e| format!("startup init: {e}"))?;
 
   let host = parse_and_validate_url(&args.url).map_err(|e| format!("{e}"))?;
-  probe_jit_endpoint(&host)
-    .await
-    .map_err(|e| format!("{e}"))?;
 
   let config_path = args.config.clone().unwrap_or_else(default_config_path);
   let creds_path = credentials_path_for(&config_path);
@@ -228,8 +186,52 @@ async fn cmd_register(args: RegisterArgs) -> Result<(), Box<dyn std::error::Erro
     args.labels
   };
 
-  // Refuse if a registration already exists with the same name unless --replace.
-  if config_path.exists() && !args.replace {
+  ensure_not_registered(&config_path, args.replace)?;
+
+  let runner_id = register_and_persist(RegisterPersist {
+    url: &args.url,
+    token: &args.token,
+    runner_name: &runner_name,
+    labels: &labels,
+    runner_group: &args.runner_group,
+    work_folder: &work_folder_or_default(args.work.as_ref()),
+    host: &host,
+    config_path: &config_path,
+    creds_path: &creds_path,
+  })
+  .await
+  .map_err(|e| format!("{e}"))?;
+
+  report_registered(
+    &runner_name,
+    runner_id,
+    &host,
+    &config_path,
+    &creds_path,
+    &labels,
+  );
+  Ok(())
+}
+
+/// Register `masker` as the tracing secret-redactor and initialize tracing.
+fn init_tracing_for(masker: &Arc<std::sync::Mutex<SecretMasker>>) -> Result<(), RunnerError> {
+  let redactor: Arc<dyn shared::startup::SecretRedactor> =
+    Arc::new(MaskerRedactor(Arc::clone(masker)));
+  startup::init_with_redactor(env!("CARGO_MANIFEST_DIR"), "runner", redactor)
+    .map_err(|e| RunnerError::Config(format!("startup init: {e}")))
+}
+
+/// Initialize tracing for subcommands that do not run jobs (masker discarded).
+fn init_runner_tracing() -> Result<(), RunnerError> {
+  init_tracing_for(&Arc::new(std::sync::Mutex::new(SecretMasker::new())))
+}
+
+/// Refuse to overwrite an existing registration unless `--replace` was given.
+fn ensure_not_registered(
+  config_path: &Path,
+  replace: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+  if config_path.exists() && !replace {
     return Err(
       format!(
         "registration already exists at {} — pass --replace to overwrite",
@@ -238,93 +240,169 @@ async fn cmd_register(args: RegisterArgs) -> Result<(), Box<dyn std::error::Erro
       .into(),
     );
   }
+  Ok(())
+}
 
-  // Steps 3 & 4 (POST to JIT endpoint, exchange JWT for OAuth) are stubbed
-  // here. The full live registration flow is exercised in step 10. We write
-  // a placeholder auth_token + empty jit_config; `run` will refuse to
-  // start until `register` is re-run with a real token.
-  let placeholder_token = format!("ghs_placeholder_{}", short_id_of(&args.token));
+/// Work-folder string from `--work`, defaulting to `~/.toolu-runner/_work`.
+fn work_folder_or_default(work: Option<&PathBuf>) -> String {
+  work
+    .map(|p| p.to_string_lossy().into_owned())
+    .unwrap_or_else(|| "~/.toolu-runner/_work".to_owned())
+}
 
+/// Log + print the registration result.
+fn report_registered(
+  runner_name: &str,
+  runner_id: i64,
+  host: &str,
+  config_path: &Path,
+  creds_path: &Path,
+  labels: &[String],
+) {
+  tracing::info!(
+    path = %config_path.display(),
+    credentials = %creds_path.display(),
+    runner = %runner_name,
+    runner_id,
+    host = %host,
+    labels = ?labels,
+    "registered runner via generate-jitconfig"
+  );
+  println!(
+    "registered runner '{runner_name}' (id {runner_id}) at {host} (config: {}, creds: {})",
+    config_path.display(),
+    creds_path.display()
+  );
+}
+
+/// Inputs for [`register_and_persist`] — the live register + write step.
+struct RegisterPersist<'a> {
+  url: &'a str,
+  token: &'a str,
+  runner_name: &'a str,
+  labels: &'a [String],
+  runner_group: &'a str,
+  work_folder: &'a str,
+  host: &'a str,
+  config_path: &'a Path,
+  creds_path: &'a Path,
+}
+
+/// POST `generate-jitconfig` for `p` and return the minted registration.
+async fn mint_jit(
+  p: &RegisterPersist<'_>,
+) -> Result<toolu_runner::net::JitRegistration, RunnerError> {
+  let client = reqwest::Client::builder()
+    .timeout(Duration::from_secs(30))
+    .build()
+    .map_err(|e| RunnerError::Network(format!("HTTP client: {e}")))?;
+  toolu_runner::net::register_jit(
+    &client,
+    &toolu_runner::net::RegisterParams {
+      url: p.url,
+      runner_token: p.token,
+      name: p.runner_name,
+      labels: p.labels,
+      runner_group_id: runner_group_id(p.runner_group),
+      work_folder: p.work_folder,
+    },
+  )
+  .await
+}
+
+/// Live JIT registration (all-or-nothing): POST generate-jitconfig, parse
+/// the minted config, then persist real config + credentials. Returns the
+/// assigned runner ID. Any failure returns before touching either file.
+///
+/// The RSA→JWT→OAuth2 chain runs at `run` time from the stored jit_config,
+/// not here. `auth_token` stores the runner's non-secret `client_id`.
+async fn register_and_persist(p: RegisterPersist<'_>) -> Result<i64, RunnerError> {
+  let registration = mint_jit(&p).await?;
+
+  // Decode the minted config to confirm it parses and to lift the
+  // client_id (a stable, non-secret identity) for the auth_token field.
+  let parsed = protocol::JitConfig::parse(&registration.encoded_jit_config)
+    .map_err(|e| RunnerError::Protocol(format!("minted jit_config did not parse: {e}")))?;
+  let client_id = parsed.credentials.data.client_id;
+  let runner_id = registration.runner_id;
+
+  let config = build_registration_config(&p, &client_id, registration);
+
+  // Persist only after the live call + parse both succeed.
+  save_reg_config(p.config_path, &config)?;
+  let creds = CredentialsFile {
+    access_token: client_id,
+    issued_at: chrono::Utc::now().to_rfc3339(),
+    expires_at: None,
+  };
+  // Registration is all-or-nothing: a credentials write failure must not
+  // leave a config without creds (a half-registered state). Roll the config
+  // file back (best-effort) before surfacing the error.
+  if let Err(e) = save_credentials(p.creds_path, &creds) {
+    if let Err(rm) = std::fs::remove_file(p.config_path) {
+      tracing::warn!(error = %rm, "failed to roll back config after credentials write error");
+    }
+    return Err(e);
+  }
+  Ok(runner_id)
+}
+
+/// Assemble the persisted [`RunnerRegistrationConfig`] from the minted
+/// registration. `auth_token` carries the non-secret `client_id`.
+fn build_registration_config(
+  p: &RegisterPersist<'_>,
+  client_id: &str,
+  registration: toolu_runner::net::JitRegistration,
+) -> RunnerRegistrationConfig {
   let runtime = RuntimeConfig {
-    jit_config: String::new(),
-    work_dir: args
-      .work
-      .as_ref()
-      .map(|p| p.to_string_lossy().into_owned())
-      .unwrap_or_else(|| "~/.toolu-runner/_work".to_owned()),
+    jit_config: registration.encoded_jit_config,
+    work_dir: p.work_folder.to_owned(),
     data_dir: "~/.toolu-runner".to_owned(),
-    protocol_version: if host.eq_ignore_ascii_case("github.com") {
+    protocol_version: if p.host.eq_ignore_ascii_case("github.com") {
       "v2".to_owned()
     } else {
       "v1".to_owned()
     },
   };
-
-  let config = RunnerRegistrationConfig {
-    runner_url: args.url.clone(),
-    runner_name: runner_name.clone(),
-    runner_id: 0,
-    auth_token: placeholder_token.clone(),
-    labels: labels.clone(),
-    runner_group: args.runner_group.clone(),
+  RunnerRegistrationConfig {
+    runner_url: p.url.to_owned(),
+    runner_name: p.runner_name.to_owned(),
+    runner_id: registration.runner_id,
+    auth_token: client_id.to_owned(),
+    labels: p.labels.to_vec(),
+    runner_group: p.runner_group.to_owned(),
     runtime,
-  };
+    services: ServicesSection::default(),
+  }
+}
 
-  save_reg_config(&config_path, &config).map_err(|e| format!("save config: {e}"))?;
-  let creds = CredentialsFile {
-    access_token: placeholder_token,
-    issued_at: chrono::Utc::now().to_rfc3339(),
-    expires_at: None,
-  };
-  save_credentials(&creds_path, &creds).map_err(|e| format!("save credentials: {e}"))?;
-
-  tracing::info!(
-    path = %config_path.display(),
-    credentials = %creds_path.display(),
-    runner = %runner_name,
-    host = %host,
-    labels = ?labels,
-    "registered runner (stub — live flow is step 10)"
-  );
-  println!(
-    "registered runner '{runner_name}' at {host} (config: {}, creds: {})",
-    config_path.display(),
-    creds_path.display()
-  );
-  Ok(())
+/// Map a `--runner-group` string to a `generate-jitconfig` group ID.
+///
+/// A numeric value is used directly; non-numeric (e.g. a group name)
+/// yields `None`, which [`net::register_jit`] defaults to `1` (Default).
+/// A non-empty, non-numeric value (a group *name*) is not supported by the
+/// JIT API and is WARNed about so the fallback to Default is not silent.
+fn runner_group_id(group: &str) -> Option<i64> {
+  let trimmed = group.trim();
+  if let Ok(id) = trimmed.parse::<i64>() {
+    return Some(id);
+  }
+  if !trimmed.is_empty() {
+    tracing::warn!(
+      runner_group = trimmed,
+      "runner group names are not supported (a numeric group ID is required); \
+       defaulting to the Default group"
+    );
+  }
+  None
 }
 
 async fn cmd_run(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
   let masker = Arc::new(std::sync::Mutex::new(SecretMasker::new()));
-  let redactor: Arc<dyn shared::startup::SecretRedactor> =
-    Arc::new(MaskerRedactor(Arc::clone(&masker)));
-  startup::init_with_redactor(env!("CARGO_MANIFEST_DIR"), "runner", redactor)
-    .map_err(|e| format!("startup init: {e}"))?;
+  init_tracing_for(&masker).map_err(|e| format!("startup init: {e}"))?;
 
   let config_path = args.config.clone().unwrap_or_else(default_config_path);
-  if !config_path.exists() {
-    return Err(
-      format!(
-        "config not found at {} — run `toolu-runner register` first",
-        config_path.display()
-      )
-      .into(),
-    );
-  }
-  let creds_path = credentials_path_for(&config_path);
-  if !creds_path.exists() {
-    return Err(
-      format!(
-        "credentials not found at {} — run `toolu-runner register` first",
-        creds_path.display()
-      )
-      .into(),
-    );
-  }
-
-  let cfg = load_reg_config(&config_path).map_err(|e| format!("{e}"))?;
-  let _creds = load_credentials(&creds_path).map_err(|e| format!("{e}"))?;
-
+  let cfg = load_run_config(&config_path)?;
   let data_dir = resolve_data_dir(&cfg.runtime.data_dir).map_err(|e| format!("{e}"))?;
   let workspace_root = resolve_work_dir(&cfg.runtime.work_dir);
   let lock_path = data_dir.join(".lock");
@@ -333,21 +411,21 @@ async fn cmd_run(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
   // prints the PID, and exits 2. Release on graceful shutdown.
   let _lock_guard = lockfile::acquire(&lock_path, &config_path).map_err(|e| format!("{e}"))?;
   tracing::info!(path = %lock_path.display(), "acquired single-job lock");
-
   let runner_cfg = shared::RunnerConfig {
     data_dir,
     workspace_root,
     cgroup_path: None,
+    services_mode: cfg.services_mode(),
   };
 
-  // The JIT config string is loaded from the persisted config. The
-  // step-10 live flow will populate this with the real base64 blob;
-  // until then `register` writes an empty string and `run` will exit
-  // with a clear error from the listener constructor.
+  // The JIT config blob comes from the persisted config (written by
+  // `register` via generate-jitconfig). An empty blob means the config
+  // predates live registration — re-run `register`.
   let jit_config_b64 = cfg.runtime.jit_config.clone();
   if jit_config_b64.is_empty() {
     return Err(
-      "config.toml has no JIT config blob — re-run `toolu-runner register` against a live GH repo (step 10 wires the live registration)".into(),
+      "config.toml has no JIT config blob — re-run `toolu-runner register` against a live GH repo"
+        .into(),
     );
   }
 
@@ -355,34 +433,9 @@ async fn cmd_run(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
     .map_err(|e| format!("listener init: {e}"))?;
 
   let cancel = CancellationToken::new();
-  // Bridge SIGINT/SIGTERM to the cancellation token.
-  {
-    let cancel_signal = cancel.clone();
-    tokio::spawn(async move {
-      let Ok(mut sigint) =
-        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
-      else {
-        return;
-      };
-      let Ok(mut sigterm) =
-        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-      else {
-        return;
-      };
-      tokio::select! {
-        _ = sigint.recv() => {},
-        _ = sigterm.recv() => {},
-      }
-      cancel_signal.cancel();
-    });
-  }
-
+  spawn_signal_bridge(cancel.clone());
   if args.once {
-    let cancel_child = cancel.clone();
-    tokio::spawn(async move {
-      tokio::time::sleep(Duration::from_millis(100)).await;
-      cancel_child.cancel();
-    });
+    spawn_once_cancel(cancel.clone());
   }
 
   let result = listener
@@ -392,6 +445,63 @@ async fn cmd_run(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
   // _lock_guard drops here, releasing the lock.
   result?;
   Ok(())
+}
+
+/// Bridge SIGINT/SIGTERM to `cancel` in a background task.
+fn spawn_signal_bridge(cancel: CancellationToken) {
+  tokio::spawn(async move {
+    let Ok(mut sigint) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
+    else {
+      return;
+    };
+    let Ok(mut sigterm) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+    else {
+      return;
+    };
+    tokio::select! {
+      _ = sigint.recv() => {},
+      _ = sigterm.recv() => {},
+    }
+    cancel.cancel();
+  });
+}
+
+/// `--once` test mode: cancel after a 100ms delay so one poll cycle runs.
+fn spawn_once_cancel(cancel: CancellationToken) {
+  tokio::spawn(async move {
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    cancel.cancel();
+  });
+}
+
+/// Load + validate the persisted config and credentials for `run`.
+///
+/// Errors if either file is missing (with a `register` hint) or unparseable.
+fn load_run_config(
+  config_path: &Path,
+) -> Result<RunnerRegistrationConfig, Box<dyn std::error::Error>> {
+  if !config_path.exists() {
+    return Err(
+      format!(
+        "config not found at {} — run `toolu-runner register` first",
+        config_path.display()
+      )
+      .into(),
+    );
+  }
+  let creds_path = credentials_path_for(config_path);
+  if !creds_path.exists() {
+    return Err(
+      format!(
+        "credentials not found at {} — run `toolu-runner register` first",
+        creds_path.display()
+      )
+      .into(),
+    );
+  }
+  let cfg = load_reg_config(config_path).map_err(|e| format!("{e}"))?;
+  let _creds = load_credentials(&creds_path).map_err(|e| format!("{e}"))?;
+  Ok(cfg)
 }
 
 async fn cmd_remove(args: RemoveArgs) -> Result<(), Box<dyn std::error::Error>> {
@@ -466,12 +576,4 @@ fn cmd_status(args: StatusArgs) -> Result<(), Box<dyn std::error::Error>> {
   println!("jit_cfg:   {} bytes", cfg.runtime.jit_config.len());
   println!("creds:     {creds_summary}");
   Ok(())
-}
-
-/// Truncate the registration token to a short fingerprint for the
-/// placeholder OAuth token. The real flow (step 10) replaces this with
-/// the JWT-exchange result.
-fn short_id_of(token: &str) -> String {
-  let len = token.len().min(8);
-  token.get(..len).unwrap_or("").to_owned()
 }

@@ -42,6 +42,13 @@ impl ActionRef {
       api_base, self.owner, self.repo, self.git_ref,
     )
   }
+
+  /// Resolve a local `./path` ref to a directory under `base` (the checked-out
+  /// repo / `GITHUB_WORKSPACE`). Returns `None` for non-local refs.
+  pub fn local_dir(&self, base: &std::path::Path) -> Option<std::path::PathBuf> {
+    let rel = self.local_path.as_deref()?.strip_prefix("./").unwrap_or("");
+    Some(base.join(rel))
+  }
 }
 
 /// Parse a `uses:` string into an `ActionRef`.
@@ -56,14 +63,7 @@ impl ActionRef {
 /// Returns `RunnerError::ActionResolution` on invalid formats.
 pub fn parse_action_ref(uses: &str) -> Result<ActionRef, RunnerError> {
   if uses.starts_with("./") {
-    return Ok(ActionRef {
-      kind: ActionRefKind::Local,
-      owner: String::new(),
-      repo: String::new(),
-      git_ref: String::new(),
-      subpath: None,
-      local_path: Some(uses.to_owned()),
-    });
+    return Ok(local_action_ref(uses));
   }
 
   let Some((path_part, git_ref)) = uses.split_once('@') else {
@@ -103,6 +103,22 @@ pub fn parse_action_ref(uses: &str) -> Result<ActionRef, RunnerError> {
     subpath,
     local_path: None,
   })
+}
+
+/// Build an `ActionRef` for a local `./path` reference.
+///
+/// A local ref carries no `@ref`; a trailing `@` left by callers that
+/// unconditionally append `@{git_ref}` with an empty ref is stripped.
+fn local_action_ref(uses: &str) -> ActionRef {
+  let path = uses.strip_suffix('@').unwrap_or(uses);
+  ActionRef {
+    kind: ActionRefKind::Local,
+    owner: String::new(),
+    repo: String::new(),
+    git_ref: String::new(),
+    subpath: None,
+    local_path: Some(path.to_owned()),
+  }
 }
 
 /// Resolve a batch of `uses:` references.

@@ -117,15 +117,27 @@ pub fn acquire(path: &Path, config_path: &Path) -> Result<LockGuard, RunnerError
   opts.mode(0o600);
   let file = opts.open(path)?;
 
-  match file.try_lock_exclusive() {
-    Ok(()) => {
+  // `try_lock_exclusive` can transiently report contention in the brief
+  // window after another `LockGuard` on the same path is dropped (a flock
+  // release-visibility race, seen on macOS under load). A genuine holder
+  // (live fd) stays contended across all retries → `handle_contended`; a
+  // just-released lock clears within a couple ms → we acquire it.
+  const ACQUIRE_RETRIES: u32 = 10;
+  let retry_delay = std::time::Duration::from_millis(3);
+  let mut attempt: u32 = 0;
+  loop {
+    if file.try_lock_exclusive().is_ok() {
       write_body(&file, &body)?;
-      Ok(LockGuard {
+      return Ok(LockGuard {
         _file: file,
         path: path.to_path_buf(),
-      })
-    },
-    Err(_) => handle_contended(path, &body),
+      });
+    }
+    attempt += 1;
+    if attempt >= ACQUIRE_RETRIES {
+      return handle_contended(path, &body);
+    }
+    std::thread::sleep(retry_delay);
   }
 }
 

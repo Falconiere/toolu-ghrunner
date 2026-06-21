@@ -1,4 +1,4 @@
-use shared::RunnerConfig;
+use shared::{RunnerConfig, ServicesMode};
 use std::path::PathBuf;
 
 #[test]
@@ -7,6 +7,7 @@ fn runner_config_holds_paths() {
     data_dir: PathBuf::from("/var/lib/toolu-runner"),
     workspace_root: PathBuf::from("/var/lib/toolu-runner/_work"),
     cgroup_path: None,
+    services_mode: ServicesMode::default(),
   };
   assert_eq!(cfg.data_dir, PathBuf::from("/var/lib/toolu-runner"));
   assert_eq!(
@@ -14,6 +15,8 @@ fn runner_config_holds_paths() {
     PathBuf::from("/var/lib/toolu-runner/_work")
   );
   assert!(cfg.cgroup_path.is_none());
+  // The default serving mode is the forwarder (real GitHub services).
+  assert_eq!(cfg.services_mode, ServicesMode::Forwarder);
 }
 
 #[test]
@@ -22,6 +25,7 @@ fn runner_config_with_cgroup() {
     data_dir: PathBuf::from("/var/lib/toolu-runner"),
     workspace_root: PathBuf::from("/var/lib/toolu-runner/_work"),
     cgroup_path: Some(PathBuf::from("/sys/fs/cgroup/toolu-runner/job-123")),
+    services_mode: ServicesMode::default(),
   };
   assert_eq!(
     cfg.cgroup_path.as_deref(),
@@ -35,6 +39,7 @@ fn runner_config_clone() {
     data_dir: PathBuf::from("/a"),
     workspace_root: PathBuf::from("/b"),
     cgroup_path: Some(PathBuf::from("/c")),
+    services_mode: ServicesMode::Offline,
   };
   let clone = cfg.clone();
   assert_eq!(clone.data_dir, cfg.data_dir);

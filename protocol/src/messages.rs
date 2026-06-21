@@ -8,10 +8,15 @@ use serde::Deserialize;
 use shared::RunnerError;
 
 /// Message types from the broker long-poll.
+///
+/// Variant names are the wire `messageType` strings verbatim (serde uses
+/// the variant identifier with no rename). `JobCancellation` matches the
+/// C# runner's `JobCancelMessage.MessageType` discriminator.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub enum MessageType {
   RunnerJobRequest,
   BrokerMigration,
+  JobCancellation,
 }
 
 /// Raw message from the broker `GET /message` response.
@@ -38,6 +43,18 @@ pub struct RunnerJobRequestBody {
 #[serde(rename_all = "camelCase")]
 pub struct BrokerMigrationBody {
   pub broker_base_url: String,
+}
+
+/// Body of a `JobCancellation` message.
+///
+/// Mirrors the C# `JobCancelMessage`: the broker sends the `jobId` of the
+/// run to cancel plus a grace `timeout` (a .NET `TimeSpan` string). The
+/// listener cancels the in-flight token when this arrives.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobCancelBody {
+  pub job_id: String,
+  pub timeout: Option<String>,
 }
 
 /// Decrypt a broker message body using AES-256-CBC.

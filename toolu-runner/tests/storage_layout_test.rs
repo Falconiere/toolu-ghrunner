@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use shared::paths::expand_tilde;
 use toolu_runner::config::{
-  CredentialsFile, RunnerRegistrationConfig, RuntimeConfig, jit_endpoint_for_host,
+  CredentialsFile, RunnerRegistrationConfig, RuntimeConfig, ServicesSection, jit_endpoint_for_host,
   load_config as load_reg_config, load_credentials, resolve_data_dir, resolve_work_dir,
   save_config as save_reg_config, save_credentials,
 };
@@ -45,6 +45,9 @@ fn sample_config() -> RunnerRegistrationConfig {
       work_dir: "~/.toolu-runner/_work".to_owned(),
       data_dir: "~/.toolu-runner".to_owned(),
       protocol_version: "v2".to_owned(),
+    },
+    services: ServicesSection {
+      mode: "offline".to_owned(),
     },
   }
 }

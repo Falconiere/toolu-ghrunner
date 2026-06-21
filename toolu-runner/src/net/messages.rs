@@ -17,6 +17,28 @@ pub struct PollParams<'a> {
   pub runner_version: &'a str,
   pub os: &'a str,
   pub architecture: &'a str,
+  /// Redelivery cursor: the id of the last message the runner saw. The
+  /// broker only returns messages newer than this, so a redelivered or
+  /// already-handled message is not re-served. `0` on the first poll.
+  pub last_message_id: i64,
+}
+
+/// Build the broker long-poll URL, including the `lastMessageId` cursor.
+///
+/// Extracted so the query contract (notably the redelivery cursor) can be
+/// asserted without issuing a request.
+pub fn build_poll_url(params: &PollParams<'_>) -> String {
+  format!(
+    "{}/message?sessionId={}&status=Online\
+     &runnerVersion={}&os={}&architecture={}\
+     &lastMessageId={}&disableUpdate=true",
+    params.server_url_v2,
+    params.session_id,
+    params.runner_version,
+    params.os,
+    params.architecture,
+    params.last_message_id
+  )
 }
 
 /// Long-poll the broker for a job assignment.
@@ -32,12 +54,7 @@ pub struct PollParams<'a> {
 pub async fn poll_message(
   params: &PollParams<'_>,
 ) -> Result<Option<protocol::BrokerMessage>, RunnerError> {
-  let url = format!(
-    "{}/message?sessionId={}&status=Online\
-     &runnerVersion={}&os={}&architecture={}\
-     &disableUpdate=true",
-    params.server_url_v2, params.session_id, params.runner_version, params.os, params.architecture
-  );
+  let url = build_poll_url(params);
 
   let response = params
     .client
@@ -74,15 +91,32 @@ pub async fn acknowledge_message(
   client: &reqwest::Client,
   server_url_v2: &str,
   token: &str,
-  message_id: i64,
+  runner_request_id: &str,
 ) -> Result<(), RunnerError> {
   let base = server_url_v2.trim_end_matches('/');
+  // The broker validates the acknowledge request: it needs the runner
+  // `status` (empty → 400 "invalid runner status") and the `runnerRequestId`
+  // of the job request (missing → 400 "Missing runnerRequestId"), plus the
+  // standard runner metadata — matching the poll's `?status=Online` contract
+  // (C# AcknowledgeRunnerRequestAsync sends runnerRequestId/status/os/arch/version).
+  //
+  // os/arch are derived from the same `context_build` helpers the poll path
+  // uses, so a single runner advertises one consistent os/arch on both calls.
   let url = format!("{base}/acknowledge");
-
   let response = client
     .post(&url)
+    .query(&[
+      ("runnerRequestId", runner_request_id),
+      ("status", "Online"),
+      ("os", crate::execution::context_build::runner_os()),
+      (
+        "architecture",
+        crate::execution::context_build::runner_arch(),
+      ),
+      ("runnerVersion", env!("CARGO_PKG_VERSION")),
+    ])
     .bearer_auth(token)
-    .json(&serde_json::json!({ "messageId": message_id }))
+    .json(&serde_json::json!({ "runnerRequestId": runner_request_id }))
     .send()
     .await
     .map_err(|e| RunnerError::Protocol(format!("acknowledge failed: {e}")))?;

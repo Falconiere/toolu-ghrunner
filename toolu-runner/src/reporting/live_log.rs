@@ -10,10 +10,20 @@ use std::time::Duration;
 use futures_util::SinkExt;
 use serde::Serialize;
 use tokio::sync::mpsc;
-use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
+/// Re-export the WebSocket message type so integration tests can build a sink
+/// for [`run_loop`] without depending on `tokio-tungstenite` directly.
+pub use tokio_tungstenite::tungstenite::Message;
+
+/// Wall-clock cap between flushes — a partial batch is sent every 500ms so
+/// in-progress logs render even when lines trickle in slowly (matches the C#
+/// `JobServerQueue` web-console dequeue cadence).
 const FLUSH_INTERVAL: Duration = Duration::from_millis(500);
+/// Line-count flush threshold. A burst of >= this many buffered lines is
+/// flushed immediately (not held for the next timer tick), giving incremental
+/// delivery by count as well as by time. Matches the C# 100-line batch size.
+pub const FLUSH_LINE_THRESHOLD: usize = 100;
 const MIN_ATTEMPTS_BEFORE_THRESHOLD: u32 = 5;
 
 /// Buffered log line with step context for WebSocket delivery.
@@ -23,12 +33,18 @@ pub struct LiveLogLine {
   pub line: String,
 }
 
-/// JSON wrapper matching C# `TimelineRecordFeedLinesWrapper`.
+/// JSON wrapper matching the C# `TimelineRecordFeedLinesWrapper` wire shape
+/// serialized by `VssJsonMediaTypeFormatter` (camelCase). The field names are
+/// load-bearing: GitHub's console reads `value` for the lines and `count` for
+/// the line total — an array under any other key is silently dropped, so the
+/// live view never renders. `startLine` is the 1-based index of the first line
+/// in this batch within the step.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct FeedLinesWrapper {
+  count: u64,
+  value: Vec<String>,
   step_id: String,
-  lines: Vec<String>,
   start_line: u64,
 }
 
@@ -130,8 +146,14 @@ async fn open_websocket(feed_stream_url: &str, access_token: &str) -> Option<WsS
   }
 }
 
-/// Main event loop — buffer lines, flush to WebSocket every 500ms.
-async fn run_loop<S>(mut ws: S, mut rx: mpsc::Receiver<LiveLogLine>)
+/// Main event loop — buffer lines and flush to the WebSocket sink on either a
+/// 500ms timer tick or a [`FLUSH_LINE_THRESHOLD`]-line burst, whichever comes
+/// first. The remainder is flushed when the line channel closes.
+///
+/// Generic over the sink so integration tests can drive the real flush path
+/// with an in-process [`futures_util::Sink`] collector — no live WebSocket
+/// required.
+pub async fn run_loop<S>(mut ws: S, mut rx: mpsc::Receiver<LiveLogLine>)
 where
   S: futures_util::Sink<Message> + Unpin,
   <S as futures_util::Sink<Message>>::Error: std::fmt::Display,
@@ -146,7 +168,15 @@ where
       biased;
       msg = rx.recv() => {
         match msg {
-          Some(line) => buffer.push(line),
+          Some(line) => {
+            buffer.push(line);
+            // Count threshold: flush a full batch immediately instead of
+            // holding it for the next timer tick, so a burst of output
+            // streams to the UI without a 500ms stall.
+            if state.active && buffer.len() >= FLUSH_LINE_THRESHOLD {
+              flush(&mut ws, &mut buffer, &mut state).await;
+            }
+          },
           None => break, // channel closed
         }
       },
@@ -220,8 +250,9 @@ where
 /// Serialize lines into a JSON string, returning None on error.
 fn serialize_wrapper(step_id: &str, lines: Vec<String>, start_line: u64) -> Option<String> {
   let wrapper = FeedLinesWrapper {
+    count: lines.len() as u64,
+    value: lines,
     step_id: step_id.to_owned(),
-    lines,
     start_line,
   };
   match serde_json::to_string(&wrapper) {

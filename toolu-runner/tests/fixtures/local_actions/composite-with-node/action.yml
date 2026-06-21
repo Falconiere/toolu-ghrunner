@@ -1,0 +1,12 @@
+name: 'composite-with-node'
+description: 'Local composite with a run: step AND a nested uses: ./node-leaf local node action.'
+runs:
+  using: 'composite'
+  steps:
+    - name: composite run step
+      shell: bash
+      run: echo "with-node-run" >> "$MARKER_FILE"
+    - name: nested local node action
+      uses: ./node-leaf
+      with:
+        marker: with-node-leaf

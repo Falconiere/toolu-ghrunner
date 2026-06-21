@@ -48,6 +48,16 @@ pub enum WorkflowCommand {
     name: String,
     value: String,
   },
+  AddPath {
+    value: String,
+  },
+  SetEnv {
+    name: String,
+    value: String,
+  },
+  Echo {
+    on: bool,
+  },
   StopCommands {
     token: String,
   },
@@ -86,6 +96,16 @@ pub fn parse_command(line: &str) -> Option<WorkflowCommand> {
     "save-state" => Some(WorkflowCommand::SaveState {
       name: props.get("name").cloned().unwrap_or_default(),
       value: value.to_owned(),
+    }),
+    "add-path" => Some(WorkflowCommand::AddPath {
+      value: value.to_owned(),
+    }),
+    "set-env" => Some(WorkflowCommand::SetEnv {
+      name: props.get("name").cloned().unwrap_or_default(),
+      value: value.to_owned(),
+    }),
+    "echo" => Some(WorkflowCommand::Echo {
+      on: value.trim().eq_ignore_ascii_case("on"),
     }),
     "stop-commands" => Some(WorkflowCommand::StopCommands {
       token: value.to_owned(),
