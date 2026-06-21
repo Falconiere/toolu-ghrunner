@@ -14,7 +14,6 @@
 //! `node` binary into the node cache, so the engine resolves both from disk —
 //! no network, fully hermetic. If no real `node` is on `PATH`, the test skips.
 
-use std::collections::HashMap;
 use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -234,8 +233,9 @@ async fn two_posts_drain_in_reverse_lifo_order() -> TestResult<()> {
 #[tokio::test]
 async fn post_runs_even_when_a_later_step_failed() -> TestResult<()> {
   let mut steps = vec![action_step("a", "act-a")];
-  // A later run step that fails. continue-on-error keeps the loop going, but
-  // the job status flips to failure so `success()` would skip — `always()`
+  // A later run step that fails. The step loop drains posts at job end either
+  // way, so `continue_on_error = false` is what we want: it lets the failure
+  // flip the job status, so `success()` posts would skip while `always()`
   // (the post-if default) must still fire.
   let mut failing = ActionStep::script("boom", "exit 1", "");
   failing.continue_on_error = Some(false);
@@ -266,6 +266,5 @@ fn fixture_declares_all_three_stages() -> TestResult<()> {
     yml.contains("default: 'X'"),
     "marker default must be present"
   );
-  let _ = HashMap::<String, String>::new();
   Ok(())
 }
