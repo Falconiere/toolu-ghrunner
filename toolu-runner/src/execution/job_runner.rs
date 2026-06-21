@@ -112,8 +112,8 @@ async fn run_job_body(
 
   // Job-started hook is a hard gate: its failure fails the job before any step.
   let started = run_job_hook(JobHookStage::Started, ctx, events, workspace, cancel).await?;
-  if started == Some(Conclusion::Failure) {
-    return Ok((Conclusion::Failure, HashMap::new()));
+  if matches!(started, Some(Conclusion::Failure | Conclusion::Cancelled)) {
+    return Ok((started.unwrap_or(Conclusion::Failure), HashMap::new()));
   }
 
   let run = JobRun {
@@ -127,8 +127,12 @@ async fn run_job_body(
   let outputs = evaluate_job_outputs(spec, ctx)?;
 
   // Job-completed hook runs after post-drain, best-effort (never overrides
-  // the job conclusion); a non-zero exit is logged by the script handler.
-  let _ = run_job_hook(JobHookStage::Completed, ctx, events, workspace, cancel).await?;
+  // the job conclusion): a non-zero exit is logged by the script handler, and a
+  // spawn/read failure is logged here rather than propagated (a `?` would turn a
+  // successful job into an error return, breaking the documented contract).
+  if let Err(e) = run_job_hook(JobHookStage::Completed, ctx, events, workspace, cancel).await {
+    tracing::error!(error = ?e, "job-completed hook failed; preserving job conclusion");
+  }
 
   Ok((conclusion, outputs))
 }

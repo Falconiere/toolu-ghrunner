@@ -12,8 +12,6 @@ use std::path::Path;
 use shared::{ActionStep, Conclusion, RunnerConfig, RunnerError, RunnerEvent};
 use tokio::sync::mpsc;
 
-use tokio::sync::mpsc as tokio_mpsc;
-
 use super::action_support::{build_node_env, emit_log};
 use super::actions::manifest::ActionDefinition;
 use super::command_dispatch::stream_dispatch_stdout;
@@ -104,7 +102,7 @@ pub(super) async fn run_node_stage(
   // Stream the action's stdout through the dispatcher as it runs (realtime
   // `Log` events), mirroring the run-step path. `execute_node_action` owns the
   // only producer copy, so the dispatcher's `recv` closes when the child EOFs.
-  let (stdout_tx, mut stdout_rx) = tokio_mpsc::channel::<String>(256);
+  let (stdout_tx, mut stdout_rx) = mpsc::channel::<String>(256);
   let exec = execute_node_action(&node_params, s.events, stdout_tx);
   let dispatch = stream_dispatch_stdout(&s.step.id, &mut stdout_rx, s.ctx, s.events);
   let (output, outputs) = tokio::join!(exec, dispatch);
