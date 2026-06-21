@@ -231,10 +231,24 @@ async fn dispatch_action(
   }
 }
 
+/// RAII guard that exits the composite-action depth level on drop.
+///
+/// A bare `depth.exit()` after the call is skipped if `run_composite_inner`
+/// panics; dropping this guard during unwinding still exits the level, so a
+/// panic cannot leak a depth count.
+struct DepthExitGuard<'a>(&'a mut DepthTracker);
+
+impl Drop for DepthExitGuard<'_> {
+  fn drop(&mut self) {
+    self.0.exit();
+  }
+}
+
 /// Run a composite action and propagate its env/path changes to the parent.
 ///
 /// Enters the depth tracker for the duration so nested `uses:` recursion is
-/// bounded; the level is always exited, even on error.
+/// bounded; the level is always exited via [`DepthExitGuard`] — even on error
+/// or panic.
 async fn run_composite_action(
   step: &ActionStep,
   ctx: &mut ExecutionContext,
@@ -243,13 +257,12 @@ async fn run_composite_action(
   depth: &mut DepthTracker,
 ) -> Result<Conclusion, RunnerError> {
   depth.enter()?;
-  let outcome = run_composite_inner(step, ctx, env, resolved, depth).await;
-  depth.exit();
-  outcome
+  let guard = DepthExitGuard(depth);
+  run_composite_inner(step, ctx, env, resolved, &mut *guard.0).await
 }
 
-/// Body of `run_composite_action`, separated so the caller can always `exit()`
-/// the depth tracker regardless of the result.
+/// Body of `run_composite_action`, separated so the caller's [`DepthExitGuard`]
+/// always exits the depth tracker regardless of the result.
 async fn run_composite_inner(
   step: &ActionStep,
   ctx: &mut ExecutionContext,

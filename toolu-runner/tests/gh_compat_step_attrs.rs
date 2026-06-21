@@ -285,8 +285,8 @@ async fn working_directory_pwd_ends_in_sub() -> TestResult<()> {
   let step = script_step("s1", "pwd", Some("sub"));
   let result = run_steps_collect(vec![step], |ws| std::fs::create_dir_all(ws.join("sub"))).await?;
 
-  let pwd_line = steps_field(&result.ctx, "s1", "outcome");
-  assert_eq!(pwd_line.as_deref(), Some("success"));
+  let outcome = steps_field(&result.ctx, "s1", "outcome");
+  assert_eq!(outcome.as_deref(), Some("success"));
   let logs = step_logs(&result.events, "s1");
   let pwd = logs
     .iter()
