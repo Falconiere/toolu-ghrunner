@@ -146,10 +146,27 @@ async fn run_burst(step_id: &str, total: usize) -> Result<(Vec<String>, usize), 
   let collector = sink.clone();
   let handle = tokio::spawn(run_loop(sink, rx));
 
-  // Let the actor drain the queued lines (biased select drains rx first).
-  for _ in 0..=total {
-    tokio::task::yield_now().await;
-  }
+  // Wait for the actor's incremental count-threshold flushes. Each fires while
+  // `tx` is still open (the remainder is flushed only after `drop(tx)` below),
+  // so a full burst of `total` lines yields exactly `total / FLUSH_LINE_THRESHOLD`
+  // pre-close frames. A fixed `yield_now` count races the spawned actor and reads
+  // 0 frames on a loaded runner; poll the collected frames against the
+  // deterministic expected count instead, bounded by a timeout so a genuine flush
+  // regression fails fast rather than hanging.
+  let expected_pre_close = total / FLUSH_LINE_THRESHOLD;
+  let drain = async {
+    while collector.snapshot().len() < expected_pre_close {
+      tokio::task::yield_now().await;
+    }
+  };
+  tokio::time::timeout(std::time::Duration::from_secs(10), drain)
+    .await
+    .map_err(|_| {
+      format!(
+        "timed out waiting for {expected_pre_close} count-threshold flushes, got {}",
+        collector.snapshot().len()
+      )
+    })?;
   let frames_before_close = collector.snapshot().len();
 
   // Close the channel; the shutdown path flushes the remainder.
