@@ -57,9 +57,10 @@ pub async fn run_job(
 
   emit_job_started(&events, &msg.job_id, &msg.job_display_name).await;
 
-  // TODO(S6/Open-Q1): the wire `AgentJobRequestMessage` does not yet carry
-  // typed job `outputs:`/`defaults:`; populate `JobSpec` from it once a live
-  // message is captured. Empty spec is a no-op for both on the live path.
+  // TODO: the wire `AgentJobRequestMessage` does not yet carry typed job
+  // `outputs:`/`defaults:`; populate `JobSpec` from the message once its wire
+  // shape is confirmed from a captured live job. Empty spec is a no-op for
+  // both on the live path.
   let spec = JobSpec::default();
 
   let body = JobBody {
@@ -126,15 +127,30 @@ async fn run_job_body(
   // Evaluate job `outputs:` against the final context (after main + post steps).
   let outputs = evaluate_job_outputs(spec, ctx)?;
 
-  // Job-completed hook runs after post-drain, best-effort (never overrides
-  // the job conclusion): a non-zero exit is logged by the script handler, and a
-  // spawn/read failure is logged here rather than propagated (a `?` would turn a
-  // successful job into an error return, breaking the documented contract).
-  if let Err(e) = run_job_hook(JobHookStage::Completed, ctx, events, workspace, cancel).await {
-    tracing::error!(error = ?e, "job-completed hook failed; preserving job conclusion");
-  }
+  run_completed_hook_best_effort(ctx, events, workspace, cancel).await;
 
   Ok((conclusion, outputs))
+}
+
+/// Run the job-completed hook best-effort (never overrides the job
+/// conclusion): a non-success hook conclusion and a spawn/read failure are
+/// both logged rather than propagated (a `?` would turn a successful job into
+/// an error return, breaking the documented contract).
+async fn run_completed_hook_best_effort(
+  ctx: &ExecutionContext,
+  events: &mpsc::Sender<RunnerEvent>,
+  workspace: &std::path::Path,
+  cancel: &CancellationToken,
+) {
+  match run_job_hook(JobHookStage::Completed, ctx, events, workspace, cancel).await {
+    Ok(Some(c)) if c != Conclusion::Success => {
+      tracing::warn!(conclusion = ?c, "job-completed hook did not succeed; preserving job conclusion");
+    },
+    Ok(_) => {},
+    Err(e) => {
+      tracing::error!(error = ?e, "job-completed hook failed; preserving job conclusion");
+    },
+  }
 }
 
 /// Seed the per-job env every step inherits: the `ACTIONS_*` service vars

@@ -115,6 +115,12 @@ async fn run_main_steps(
     if step_conclusion == Conclusion::Failure {
       job_conclusion = Conclusion::Failure;
     }
+    // A `Cancelled` step conclusion only arises when the job cancel token
+    // fired mid-step (its child was killed); surface it without waiting for
+    // the next-iteration token check. Post-steps are drained by the caller.
+    if step_conclusion == Conclusion::Cancelled {
+      return Ok(Conclusion::Cancelled);
+    }
   }
   Ok(job_conclusion)
 }

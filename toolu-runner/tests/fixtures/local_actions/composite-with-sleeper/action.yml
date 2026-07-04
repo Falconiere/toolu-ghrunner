@@ -1,0 +1,10 @@
+name: 'composite-with-sleeper'
+description: 'Local composite with a nested uses: ./node-sleeper followed by a run: step that must not run once the job is cancelled.'
+runs:
+  using: 'composite'
+  steps:
+    - name: nested sleeper
+      uses: ./node-sleeper
+    - name: after sleeper
+      shell: bash
+      run: echo "after-sleeper" >> "$MARKER_FILE"
