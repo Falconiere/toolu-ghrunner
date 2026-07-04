@@ -148,8 +148,9 @@ async fn run_burst(step_id: &str, total: usize) -> Result<(Vec<String>, usize), 
 
   // Wait for the actor's incremental count-threshold flushes. Each fires while
   // `tx` is still open (the remainder is flushed only after `drop(tx)` below),
-  // so a full burst of `total` lines yields exactly `total / FLUSH_LINE_THRESHOLD`
-  // pre-close frames. A fixed `yield_now` count races the spawned actor and reads
+  // so a burst of `total` lines yields `total / FLUSH_LINE_THRESHOLD` (integer
+  // division — any final partial batch flushes only on close) pre-close
+  // frames. A fixed `yield_now` count races the spawned actor and reads
   // 0 frames on a loaded runner; poll the collected frames against the
   // deterministic expected count instead, bounded by a timeout so a genuine flush
   // regression fails fast rather than hanging.

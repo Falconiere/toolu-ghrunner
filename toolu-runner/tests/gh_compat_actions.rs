@@ -103,6 +103,17 @@ async fn drive(
   data_dir: &Path,
   marker_file: &Path,
 ) -> TestResult<Conclusion> {
+  drive_with_cancel(steps, data_dir, marker_file, CancellationToken::new()).await
+}
+
+/// [`drive`] with an externally held cancel token, so a test can fire a
+/// job-level cancel while a step is in flight.
+async fn drive_with_cancel(
+  steps: &[ActionStep],
+  data_dir: &Path,
+  marker_file: &Path,
+  cancel: CancellationToken,
+) -> TestResult<Conclusion> {
   let config = config_in(data_dir);
   let workspace = PathBuf::from(FIXTURE_DIR);
 
@@ -124,7 +135,7 @@ async fn drive(
     steps,
     &mut ctx,
     &tx,
-    CancellationToken::new(),
+    cancel,
     &toolu_runner::execution::steps_runner::JobRun {
       workspace: &workspace,
       config: &config,
@@ -203,6 +214,69 @@ async fn local_node_action_via_uses_runs_main() -> TestResult<()> {
     lines,
     vec!["node-leaf-main".to_owned()],
     "local node action main.js must run; got: {lines:?}"
+  );
+  Ok(())
+}
+
+/// Fire `cancel` once the sleeper's start marker is on disk, so the kill
+/// exercises a live child rather than racing the spawn. The 10s ceiling turns
+/// a stuck spawn into an assertion failure instead of a suite hang.
+fn cancel_when_sleeper_starts(
+  cancel: CancellationToken,
+  marker: PathBuf,
+) -> tokio::task::JoinHandle<()> {
+  tokio::spawn(async move {
+    let started = async {
+      while !std::fs::read_to_string(&marker)
+        .unwrap_or_default()
+        .contains("sleeper-start")
+      {
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+      }
+    };
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(10), started).await;
+    cancel.cancel();
+  })
+}
+
+#[tokio::test]
+async fn top_level_cancel_kills_nested_node_action_in_composite() -> TestResult<()> {
+  let Some(node) = system_node() else {
+    eprintln!("skipping: no real `node` on PATH");
+    return Ok(());
+  };
+
+  let tmp = tempfile::tempdir()?;
+  let data_dir = tmp.path().join("data");
+  std::fs::create_dir_all(&data_dir)?;
+  seed_node(&data_dir, &node)?;
+  let marker_file = tmp.path().join("markers.txt");
+
+  let cancel = CancellationToken::new();
+  let canceller = cancel_when_sleeper_starts(cancel.clone(), marker_file.clone());
+
+  // Composite: nested `uses: ./node-sleeper` (30s) then a run: step.
+  let steps = vec![local_action_step("sleeper", "composite-with-sleeper")];
+  let started_at = std::time::Instant::now();
+  let conclusion = drive_with_cancel(&steps, &data_dir, &marker_file, cancel).await?;
+  let elapsed = started_at.elapsed();
+  canceller.await?;
+
+  assert_eq!(
+    conclusion,
+    Conclusion::Cancelled,
+    "a job cancel during a nested `uses:` step must surface Cancelled"
+  );
+  assert!(
+    elapsed < std::time::Duration::from_secs(15),
+    "cancel must kill the nested 30s sleeper promptly; took {elapsed:?}"
+  );
+  let lines = markers(&marker_file);
+  assert_eq!(
+    lines,
+    vec!["sleeper-start".to_owned()],
+    "the killed sleeper must not write its done marker, and the composite \
+     must not run steps after the cancelled nested step; got: {lines:?}"
   );
   Ok(())
 }

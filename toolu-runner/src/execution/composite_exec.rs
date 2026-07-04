@@ -58,6 +58,11 @@ pub async fn execute_composite_action(
     if conclusion == Conclusion::Failure && !step.continue_on_error {
       return Ok(state.into_result(Conclusion::Failure));
     }
+    // A cancelled nested step means the job cancel token fired: stop the
+    // composite and surface `Cancelled` so the parent stops too.
+    if conclusion == Conclusion::Cancelled {
+      return Ok(state.into_result(Conclusion::Cancelled));
+    }
   }
 
   Ok(state.into_result(Conclusion::Success))
@@ -185,6 +190,7 @@ async fn run_uses_step(
     config: params.config,
     depth,
     temp_dir: run.temp_dir,
+    cancel: params.cancel,
   };
   run_nested_uses_step(nested, skip).await
 }

@@ -44,6 +44,8 @@ pub struct NestedUsesParams<'a> {
   pub depth: &'a mut DepthTracker,
   /// Temp dir for `${{ runner.temp }}` expansion in `with:` values.
   pub temp_dir: &'a Path,
+  /// Job-level cancellation token; nested actions must stop on SIGINT/SIGTERM.
+  pub cancel: &'a CancellationToken,
 }
 
 /// Resolve and run a composite `uses:` step recursively.
@@ -83,11 +85,9 @@ pub async fn run_nested_uses_step(
 
   // Recursive call: a nested composite re-enters `execute_action`, which
   // enters the depth tracker again, so the chain is bounded by `MAX_COMPOSITE_DEPTH`.
-  // The nested step's own `timeout-minutes` bounds its node children. TODO: the
-  // parent cancel token is not yet threaded through composite scope, so a fresh
-  // (never-cancelled) token is used here; top-level cancel still kills between
-  // top-level steps.
-  let bounds = StepBounds::new(synthetic.timeout_in_minutes, CancellationToken::new());
+  // The nested step's own `timeout-minutes` bounds its node children; the job
+  // cancel token is shared so a top-level cancel kills the nested action too.
+  let bounds = StepBounds::new(synthetic.timeout_in_minutes, params.cancel.clone());
   let run = super::action_exec::ActionRun {
     events: params.events,
     workspace: params.workspace,

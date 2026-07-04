@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use shared::{Conclusion, RunnerConfig, RunnerError, RunnerEvent};
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 
 use super::actions::manifest::{ActionDefinition, CompositeStep};
 use super::composite_expr::interpolate_composite_expr;
@@ -25,6 +26,9 @@ pub struct CompositeParams<'a> {
   pub config: &'a RunnerConfig,
   pub parent_step_id: &'a str,
   pub action_dir: &'a Path,
+  /// Job-level cancellation token, threaded to nested `uses:` steps so a
+  /// top-level cancel interrupts actions running inside a composite.
+  pub cancel: &'a CancellationToken,
 }
 
 /// Result of composite execution including side effects (env/path changes).
@@ -118,12 +122,14 @@ fn prepend_path_additions(env: &mut HashMap<String, String>, path_additions: &[S
   env.insert("PATH".to_owned(), parts.join(":"));
 }
 
+/// Per-step `GITHUB_OUTPUT` / `GITHUB_ENV` / `GITHUB_PATH` file locations.
 pub(super) struct FileCommandPaths {
   pub(super) output: PathBuf,
   pub(super) env: PathBuf,
   pub(super) path: PathBuf,
 }
 
+/// Create empty file-command files for a composite step under `temp_dir`.
 pub(super) fn create_file_command_files(
   temp_dir: &Path,
   step_id: &str,
@@ -139,6 +145,7 @@ pub(super) fn create_file_command_files(
   Ok(paths)
 }
 
+/// Read back a step's file commands into outputs / env / path accumulators.
 pub(super) fn process_file_commands(
   files: &FileCommandPaths,
   step_id: &str,

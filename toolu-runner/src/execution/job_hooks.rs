@@ -83,12 +83,16 @@ pub async fn run_job_hook(
   let script = std::fs::read_to_string(&script_path)
     .map_err(|e| RunnerError::ScriptHandler(format!("read hook script '{script_path}': {e}")))?;
 
+  // Group header carries the label; the hook's script path is echoed inside
+  // the group (mirroring the step path, where the command echo is grouped and
+  // the script's own output follows ungrouped).
   emit_log(
     events,
     stage.step_id(),
     &format!("##[group]{}", stage.label()),
   )
   .await;
+  emit_log(events, stage.step_id(), &script_path).await;
   emit_log(events, stage.step_id(), "##[endgroup]").await;
 
   let params = ScriptParams {

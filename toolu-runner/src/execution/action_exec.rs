@@ -280,6 +280,7 @@ async fn run_composite_inner(
     config: env.config,
     parent_step_id: &step.id,
     action_dir: &resolved.action_dir,
+    cancel: &env.bounds.cancel,
   };
   let result = execute_composite_action(&params, ctx, depth).await?;
   for (k, v) in &result.env_additions {

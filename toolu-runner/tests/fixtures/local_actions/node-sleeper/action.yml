@@ -1,0 +1,5 @@
+name: 'node-sleeper'
+description: 'Local node action that signals start then sleeps 30s — only a job-cancel kill ends it before the done marker is written.'
+runs:
+  using: 'node20'
+  main: 'main.js'
