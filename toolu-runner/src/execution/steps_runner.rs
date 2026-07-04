@@ -73,10 +73,12 @@ pub async fn run_steps(
     depth: DepthTracker::new(),
   };
 
-  let conclusion = run_main_steps(steps, ctx, events, &cancel, &job, &mut job_state).await?;
+  let conclusion = run_main_steps(steps, ctx, events, &cancel, &job, &mut job_state).await;
 
   // Drain post-steps LIFO AFTER all main steps — including when a prior step
-  // failed. Each post-if is evaluated against the live job/steps status, so
+  // failed or the loop returned a hard `Err` (a spawn/I-O error must not
+  // abandon registered posts, so the drain runs before `?` propagates it).
+  // Each post-if is evaluated against the live job/steps status, so
   // `always()` posts run on failure while `success()`/`failure()` honor it.
   // Best-effort: a failing post-step must not overwrite the job's conclusion
   // (a `Failure` from a main step must survive a post-step error).
@@ -84,7 +86,7 @@ pub async fn run_steps(
     tracing::error!(error = ?e, "post-step drain failed; preserving job conclusion");
   }
 
-  Ok(conclusion)
+  conclusion
 }
 
 /// Run the main step loop, draining posts on cancel. Returns the aggregate
