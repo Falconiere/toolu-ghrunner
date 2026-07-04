@@ -268,3 +268,87 @@ fn fixture_declares_all_three_stages() -> TestResult<()> {
   );
   Ok(())
 }
+
+/// `drive`, but returning the raw `run_steps` `Result` (for error-path tests
+/// where the step loop is expected to surface a hard `Err`).
+async fn drive_raw(
+  steps: &[ActionStep],
+  workspace: &Path,
+  config: &RunnerConfig,
+  marker_file: &Path,
+) -> TestResult<Result<shared::Conclusion, shared::RunnerError>> {
+  let masker = Arc::new(Mutex::new(SecretMasker::new()));
+  let mut ctx = ExecutionContext::with_masker(Arc::clone(&masker));
+  ctx.set_env("MARKER_FILE", &marker_file.to_string_lossy());
+
+  let (tx, mut rx) = mpsc::channel::<RunnerEvent>(1024);
+  let collector = tokio::spawn(async move { while rx.recv().await.is_some() {} });
+
+  let spec = toolu_runner::execution::job_spec::JobSpec::default();
+  let result = run_steps(
+    steps,
+    &mut ctx,
+    &tx,
+    CancellationToken::new(),
+    &toolu_runner::execution::steps_runner::JobRun {
+      workspace,
+      config,
+      spec: &spec,
+    },
+  )
+  .await;
+  drop(tx);
+  collector.await?;
+  Ok(result)
+}
+
+/// 3b: posts still drain when a later step returns a hard `Err` (action
+/// resolution failure), not just a `Failure` conclusion — the drain must run
+/// before the error propagates out of `run_steps`.
+#[tokio::test]
+async fn post_drains_even_when_a_later_step_errors_hard() -> TestResult<()> {
+  let Some(node) = system_node() else {
+    eprintln!("SKIP: no system `node` on PATH; pre/post test needs a real node runtime");
+    return Ok(());
+  };
+
+  let dir = tempfile::tempdir()?;
+  let (workspace, data_dir) = (dir.path().join("work"), dir.path().join("data"));
+  std::fs::create_dir_all(&workspace)?;
+  std::fs::create_dir_all(&data_dir)?;
+  let config = RunnerConfig {
+    data_dir: data_dir.clone(),
+    workspace_root: workspace.clone(),
+    cgroup_path: None,
+    services_mode: shared::ServicesMode::default(),
+  };
+  seed_node(&data_dir, &node)?;
+  seed_action(&data_dir, "act-a", "A")?;
+  let marker_file = data_dir.join("markers.txt");
+  std::fs::write(&marker_file, "")?;
+
+  // Step 2 references a local action dir that does not exist, so the step
+  // loop hits a hard resolution `Err` (not a `Failure` conclusion).
+  let mut broken = ActionStep::with_ref_type("broken", "repository");
+  broken.reference.name = Some("./does-not-exist".to_owned());
+  broken.reference.git_ref = None;
+  let steps = vec![action_step("a", "act-a"), broken];
+
+  let result = drive_raw(&steps, &workspace, &config, &marker_file).await?;
+  assert!(
+    result.is_err(),
+    "an unresolvable action must surface a hard Err from run_steps; got {result:?}"
+  );
+
+  let lines: Vec<String> = std::fs::read_to_string(&marker_file)?
+    .lines()
+    .map(ToOwned::to_owned)
+    .collect();
+  let post = lines.iter().find(|l| l.starts_with("A:post:"));
+  assert_eq!(
+    post.map(String::as_str),
+    Some("A:post:STATE_k=A-state"),
+    "post must drain even when a later step errors hard; markers={lines:?}"
+  );
+  Ok(())
+}

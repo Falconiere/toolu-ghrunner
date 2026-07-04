@@ -116,6 +116,8 @@ impl ExecutionContext {
     let tool_cache = data_dir.join("_tool");
     std::fs::create_dir_all(&temp)?;
     std::fs::create_dir_all(&tool_cache)?;
+    restrict_dir_permissions(&temp)?;
+    restrict_dir_permissions(&tool_cache)?;
     let temp = temp.to_string_lossy().into_owned();
     let tool_cache = tool_cache.to_string_lossy().into_owned();
 
@@ -162,6 +164,22 @@ impl ExecutionContext {
   ) {
     self.strategy = build_strategy(job_index, job_total, fail_fast, max_parallel);
   }
+}
+
+/// Restrict a runner-owned directory to the runner user (`0o700`): `_temp`
+/// holds step scripts and event payloads that can embed secrets, so it must
+/// not be world-readable under a permissive umask. No-op on non-Unix targets.
+fn restrict_dir_permissions(dir: &std::path::Path) -> std::io::Result<()> {
+  #[cfg(unix)]
+  {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+  }
+  #[cfg(not(unix))]
+  {
+    let _ = dir;
+  }
+  Ok(())
 }
 
 /// Context snapshot + expression evaluation + env accessors.

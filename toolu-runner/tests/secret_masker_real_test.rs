@@ -175,3 +175,45 @@ fn matches_recorded_input_fixture_redaction_output() {
     "redaction does not match expected fixture"
   );
 }
+
+#[test]
+fn late_registration_through_shared_arc_masks_subsequent_lines() {
+  // The listener's event forwarder (`execution_loop::mask_line`) and the
+  // per-job `ExecutionContext` share one `Arc<Mutex<SecretMasker>>` — the
+  // same instance wired into the `_diag` file-sink redactor. This pins the
+  // contract: a secret registered mid-job (e.g. via `::add-mask::`) is
+  // masked in every line processed through the shared handle afterwards.
+  use std::sync::{Arc, Mutex};
+  let masker = Arc::new(Mutex::new(SecretMasker::new()));
+
+  let mask = |line: &str| -> String {
+    match masker.lock() {
+      Ok(g) => g.mask(line),
+      Err(poisoned) => poisoned.into_inner().mask(line),
+    }
+  };
+
+  assert_eq!(
+    mask("hello world"),
+    "hello world",
+    "no-secret line must pass through untouched"
+  );
+
+  {
+    let mut guard = match masker.lock() {
+      Ok(g) => g,
+      Err(poisoned) => poisoned.into_inner(),
+    };
+    guard.add_secret("shared-arc-secret-0123456789");
+  }
+
+  let out = mask("value=shared-arc-secret-0123456789 tail");
+  assert!(
+    !out.contains("shared-arc-secret-0123456789"),
+    "secret leaked through shared handle: {out}"
+  );
+  assert_eq!(
+    out, "value=*** tail",
+    "line must be masked exactly, preserving surrounding text"
+  );
+}
