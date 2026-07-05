@@ -1,0 +1,14 @@
+
+name: multistep
+on:
+  workflow_dispatch:
+jobs:
+  hello:
+    runs-on: [self-hosted, toolu-runner-v1]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: alpine via docker
+        run: echo "hello from a step that pulls docker://alpine:3.19"
