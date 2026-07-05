@@ -172,11 +172,9 @@ async fn poll_until_job(ctx: &mut SessionCtx) -> Result<Option<BrokerMessage>, R
         handle_cancellation(ctx, &job_id);
         return Ok(None);
       },
-      PollOutcome::NetworkError(e) => {
-        match backoff_after_poll_error(ctx, &e, backoff).await {
-          Some(next) => backoff = next,
-          None => return Ok(None),
-        }
+      PollOutcome::NetworkError(e) => match backoff_after_poll_error(ctx, &e, backoff).await {
+        Some(next) => backoff = next,
+        None => return Ok(None),
       },
     }
   }
