@@ -1,0 +1,22 @@
+
+name: expression
+on:
+  workflow_dispatch:
+    inputs:
+      who:
+        description: 'Who to greet'
+        required: true
+        default: 'world'
+jobs:
+  greet:
+    runs-on: [self-hosted, toolu-runner-v1]
+    steps:
+      - name: echo interpolated values
+        env:
+          WHO: ${{ inputs.who }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          echo "hello $WHO from $REPO @ $SHA"
+          test -n "$REPO"
+          test -n "$SHA"
