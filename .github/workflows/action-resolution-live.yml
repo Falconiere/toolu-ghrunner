@@ -1,0 +1,14 @@
+
+name: action-resolution
+on:
+  workflow_dispatch:
+jobs:
+  resolve:
+    runs-on: [self-hosted, toolu-runner-v1]
+    steps:
+      - name: checkout via actions/checkout
+        uses: actions/checkout@v4
+      - name: verify checkout succeeded
+        run: |
+          test -f README.md || test -f readme.md || test -d .git
+          echo "checkout step ran"
