@@ -54,18 +54,8 @@ impl ScriptHandler {
     let shell_name = params.shell.unwrap_or("bash");
     let script_file = write_script_file(params.script, shell_name)?;
     let script_path = script_file.path().to_string_lossy().to_string();
-    let (program, args) = build_shell_args(shell_name, &script_path);
 
-    let mut cmd = tokio::process::Command::new(program);
-    cmd
-      .args(&args)
-      .current_dir(params.working_dir)
-      .envs(std::env::vars())
-      .envs(params.env)
-      .stdout(Stdio::piped())
-      .stderr(Stdio::piped());
-
-    let mut child = spawn_in_cgroup(&mut cmd, params.cgroup_path).await?;
+    let mut child = spawn_step_shell(params, shell_name, &script_path).await?;
 
     let stdout_handle = forward_lines(child.stdout.take(), stdout_tx);
     let stderr_handle = stream_output(
@@ -185,6 +175,34 @@ fn write_script_file(script: &str, shell: &str) -> Result<tempfile::NamedTempFil
   std::io::Write::write_all(&mut file, script.as_bytes())
     .map_err(|e| RunnerError::ScriptHandler(format!("write script: {e}")))?;
   Ok(file)
+}
+
+/// Build the shell command for a step script and spawn it, mapping a
+/// spawn failure to a `ScriptHandler` error that names the program and
+/// working directory (a bare `Io` ENOENT is undiagnosable — it names
+/// neither the missing executable nor the missing cwd).
+async fn spawn_step_shell(
+  params: &ScriptParams<'_>,
+  shell_name: &str,
+  script_path: &str,
+) -> Result<tokio::process::Child, RunnerError> {
+  let (program, args) = build_shell_args(shell_name, script_path);
+  let mut cmd = tokio::process::Command::new(program);
+  cmd
+    .args(&args)
+    .current_dir(params.working_dir)
+    .envs(std::env::vars())
+    .envs(params.env)
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped());
+  spawn_in_cgroup(&mut cmd, params.cgroup_path)
+    .await
+    .map_err(|e| {
+      RunnerError::ScriptHandler(format!(
+        "spawning step shell '{program}' (cwd: {}): {e}",
+        params.working_dir.display()
+      ))
+    })
 }
 
 fn build_shell_args(shell: &str, script_path: &str) -> (&'static str, Vec<String>) {

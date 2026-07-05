@@ -2,9 +2,10 @@
 
 use std::collections::HashMap;
 
-use shared::{ActionStep, RunnerError};
+use shared::{ActionStep, RunnerError, TemplateToken};
 
 use super::context::ExecutionContext;
+use super::expressions::types::ExprValue;
 use super::file_commands::FileCommandManager;
 
 /// Extract step-level environment from the `environment` token.
@@ -21,11 +22,41 @@ pub(super) fn resolve_step_env(
     let Some(key) = entry.key.to_string_value() else {
       continue;
     };
-    let raw = entry.value.to_string_value().unwrap_or_default();
-    let value = ctx.interpolate_string(raw)?;
+    let value = env_token_to_string(&entry.value, ctx)?;
     result.insert(key.to_owned(), value);
   }
   Ok(result)
+}
+
+/// Render a scalar env-value token to its final string.
+///
+/// GitHub serializes `KEY: ${{ expr }}` as an expression token (type 3),
+/// not a literal — reading only `to_string_value()` silently turned every
+/// such value into `""` (live bug: `WHO=${{ inputs.who }}` came out
+/// empty). Literals still pass through `interpolate_string` so an inline
+/// `${{ }}` inside a literal keeps working; expressions are evaluated
+/// with GitHub's string coercion.
+fn env_token_to_string(
+  token: &TemplateToken,
+  ctx: &ExecutionContext,
+) -> Result<String, RunnerError> {
+  match token.token_type {
+    0 => ctx.interpolate_string(token.lit.as_deref().unwrap_or_default()),
+    3 => {
+      let expr = token.expr.as_deref().unwrap_or_default();
+      Ok(ctx.evaluate_expression(expr)?.coerce_to_string())
+    },
+    5 => Ok(ExprValue::Bool(token.bool_val.unwrap_or_default()).coerce_to_string()),
+    6 => Ok(ExprValue::Number(token.num_val.unwrap_or_default()).coerce_to_string()),
+    7 => Ok(String::new()),
+    other => {
+      tracing::warn!(
+        token_type = other,
+        "unsupported step env value token type — using empty string"
+      );
+      Ok(String::new())
+    },
+  }
 }
 
 /// Process file commands after step execution; returns GITHUB_OUTPUT values.
