@@ -395,9 +395,18 @@ impl ExecutionContext {
     let mut result = self.env.clone();
     result.extend(step_env.clone());
 
-    // Prepend path additions (reverse order) to existing PATH
+    // Prepend path additions (reverse order) to existing PATH. The job env
+    // rarely carries PATH itself, so fall back to the process PATH — without
+    // it the step env's PATH would be ONLY the additions, the spawn-time env
+    // override would clobber the inherited PATH, and the step shell (`bash`)
+    // becomes unresolvable (live bug: every run-step after setup-node
+    // failed with ENOENT).
     if !self.path_additions.is_empty() {
-      let existing = result.get("PATH").cloned().unwrap_or_default();
+      let existing = result
+        .get("PATH")
+        .cloned()
+        .or_else(|| std::env::var("PATH").ok())
+        .unwrap_or_default();
       let mut new_path: Vec<&str> = self
         .path_additions
         .iter()
