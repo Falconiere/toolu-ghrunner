@@ -1,10 +1,17 @@
 # Gitleaks config: keep the default ruleset, allowlist the committed
 # synthetic test fixtures (ghs_EXAMPLE… tokens used to verify secret
-# masking — flagged as github-app-token on every scan otherwise).
+# masking — flagged as github-app-token otherwise).
+#
+# NOTE: this file governs LOCAL `gitleaks detect` runs (auto-detected at the
+# repo root). The CI review action pins its own config via
+# `--config $GITHUB_ACTION_PATH/gitleaks.toml`, so CI suppression for the
+# JSON fixtures (which cannot carry inline `gitleaks:allow` comments) must
+# live in falconiere/toolu-ghactions' gitleaks.toml.
 [extend]
 useDefault = true
 
-[allowlist]
+# `paths` entries are RE2 regexes (triple-quoted per the gitleaks docs).
+[[allowlists]]
 description = "Synthetic secret-masking test fixtures — not real credentials"
 paths = [
   '''toolu-runner/tests/fixtures/job_message\.json''',

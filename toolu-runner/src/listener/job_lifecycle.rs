@@ -226,8 +226,9 @@ enum PollOutcome {
   /// Long-poll returned a `RunnerJobRequest` — caller should acquire.
   Job(BrokerMessage),
   /// Long-poll returned a `JobCancellation` — caller should cancel the
-  /// in-flight token and acknowledge the message. Carries the message (for
-  /// the ack) and the target `jobId` (for logging / scoping).
+  /// in-flight token. No broker ack is sent (a cancel body carries no
+  /// `runner_request_id`); the message is carried so `message_id()` advances
+  /// the redelivery cursor, plus the target `jobId` for logging / scoping.
   Cancel { msg: BrokerMessage, job_id: String },
   /// A received message that could not be decrypted or parsed. Carries its
   /// id so the cursor advances past it (the broker won't re-serve it), so the
