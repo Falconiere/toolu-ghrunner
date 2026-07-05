@@ -1,0 +1,9 @@
+name: noop
+on:
+  workflow_dispatch:
+jobs:
+  hello:
+    runs-on: [self-hosted, toolu-runner-v1]
+    steps:
+      - name: say hello
+        run: echo hello
