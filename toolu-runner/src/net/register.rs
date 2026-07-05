@@ -93,13 +93,22 @@ pub fn build_request(
 
 /// Resolve the repo-scoped `generate-jitconfig` endpoint from a repo URL.
 ///
+/// # Errors
+///
+/// `RunnerError::Config` when `url` lacks a host or `owner/repo` path.
+fn resolve_endpoint(url: &str) -> Result<String, RunnerError> {
+  Ok(format!("{}/generate-jitconfig", resolve_runners_base(url)?))
+}
+
+/// Resolve the repo-scoped `…/actions/runners` API base from a repo URL.
+///
 /// github.com routes through `api.github.com`; other hosts keep the input
 /// scheme + authority and add `/api/v3`. A trailing `.git` is stripped.
 ///
 /// # Errors
 ///
 /// `RunnerError::Config` when `url` lacks a host or `owner/repo` path.
-fn resolve_endpoint(url: &str) -> Result<String, RunnerError> {
+fn resolve_runners_base(url: &str) -> Result<String, RunnerError> {
   let parsed =
     url::Url::parse(url).map_err(|e| RunnerError::Config(format!("invalid --url: {e}")))?;
   let host = parsed
@@ -127,9 +136,7 @@ fn resolve_endpoint(url: &str) -> Result<String, RunnerError> {
     };
     format!("{}://{authority}/api/v3", parsed.scheme())
   };
-  Ok(format!(
-    "{api_base}/repos/{owner}/{repo}/actions/runners/generate-jitconfig"
-  ))
+  Ok(format!("{api_base}/repos/{owner}/{repo}/actions/runners"))
 }
 
 /// Parse GitHub's `generate-jitconfig` JSON response body.
@@ -161,7 +168,10 @@ pub fn parse_response(body: &str, runner_name: &str) -> Result<JitRegistration, 
 pub struct RegisterParams<'a> {
   /// Repo URL (`https://<host>/<owner>/<repo>`).
   pub url: &'a str,
-  /// Short-lived registration token (sent as `Authorization: Bearer …`).
+  /// API token with `administration:write` on the repo (PAT or App
+  /// installation token), sent as `Authorization: Bearer …`. NOT the
+  /// classic runner registration token — `generate-jitconfig` is a
+  /// plain REST endpoint and rejects registration tokens with 401.
   pub runner_token: &'a str,
   /// Runner display name.
   pub name: &'a str,
@@ -171,12 +181,145 @@ pub struct RegisterParams<'a> {
   pub runner_group_id: Option<i64>,
   /// Work folder name GitHub records in `.runner`.
   pub work_folder: &'a str,
+  /// On 409 (name taken), delete the same-name runner and retry once.
+  pub replace: bool,
+}
+
+/// POST the built `generate-jitconfig` request; return status + body.
+async fn send_generate(
+  client: &reqwest::Client,
+  request: &RegisterRequest,
+  token: &str,
+) -> Result<(reqwest::StatusCode, String), RunnerError> {
+  let response = client
+    .post(&request.url)
+    .bearer_auth(token)
+    .header("Accept", "application/vnd.github+json")
+    .header("X-GitHub-Api-Version", "2022-11-28")
+    // GitHub's REST API rejects requests without a User-Agent (403).
+    .header(
+      "User-Agent",
+      concat!("toolu-runner/", env!("CARGO_PKG_VERSION")),
+    )
+    .json(&request.body)
+    .send()
+    .await
+    .map_err(|e| RunnerError::Network(format!("generate-jitconfig request failed: {e}")))?;
+
+  let status = response.status();
+  let text = response
+    .text()
+    .await
+    .map_err(|e| RunnerError::Network(format!("reading generate-jitconfig body failed: {e}")))?;
+  Ok((status, text))
+}
+
+/// Look up the id of the runner registered under `name`, if any.
+///
+/// Uses the `?name=` filter on the list-runners endpoint and still
+/// re-checks the echoed name for an exact match.
+async fn find_runner_id_by_name(
+  client: &reqwest::Client,
+  runners_base: &str,
+  token: &str,
+  name: &str,
+) -> Result<Option<i64>, RunnerError> {
+  let response = client
+    .get(format!("{runners_base}?name={name}"))
+    .bearer_auth(token)
+    .header("Accept", "application/vnd.github+json")
+    .header("X-GitHub-Api-Version", "2022-11-28")
+    .header(
+      "User-Agent",
+      concat!("toolu-runner/", env!("CARGO_PKG_VERSION")),
+    )
+    .send()
+    .await
+    .map_err(|e| RunnerError::Network(format!("list-runners request failed: {e}")))?;
+  let status = response.status();
+  let body: serde_json::Value = response
+    .json()
+    .await
+    .map_err(|e| RunnerError::Network(format!("reading list-runners body failed: {e}")))?;
+  if !status.is_success() {
+    return Err(RunnerError::Auth(format!(
+      "list-runners failed with status {status}: {body}"
+    )));
+  }
+  Ok(
+    body
+      .get("runners")
+      .and_then(serde_json::Value::as_array)
+      .into_iter()
+      .flatten()
+      .find(|r| r.get("name").and_then(serde_json::Value::as_str) == Some(name))
+      .and_then(|r| r.get("id"))
+      .and_then(serde_json::Value::as_i64),
+  )
+}
+
+/// DELETE the runner with `id` from the repo.
+async fn delete_runner(
+  client: &reqwest::Client,
+  runners_base: &str,
+  token: &str,
+  id: i64,
+) -> Result<(), RunnerError> {
+  let response = client
+    .delete(format!("{runners_base}/{id}"))
+    .bearer_auth(token)
+    .header("Accept", "application/vnd.github+json")
+    .header("X-GitHub-Api-Version", "2022-11-28")
+    .header(
+      "User-Agent",
+      concat!("toolu-runner/", env!("CARGO_PKG_VERSION")),
+    )
+    .send()
+    .await
+    .map_err(|e| RunnerError::Network(format!("delete-runner request failed: {e}")))?;
+  let status = response.status();
+  if !status.is_success() {
+    let text = response.text().await.unwrap_or_default();
+    return Err(RunnerError::Auth(format!(
+      "delete-runner {id} failed with status {status}: {text}"
+    )));
+  }
+  Ok(())
+}
+
+/// Delete the same-name runner blocking a 409, so the retry can mint.
+///
+/// # Errors
+///
+/// Surfaces the lookup / delete error, or `RunnerError::Auth` when no
+/// same-name runner exists (the 409 must then have another cause).
+async fn replace_existing(
+  client: &reqwest::Client,
+  params: &RegisterParams<'_>,
+) -> Result<(), RunnerError> {
+  let runners_base = resolve_runners_base(params.url)?;
+  let id = find_runner_id_by_name(client, &runners_base, params.runner_token, params.name)
+    .await?
+    .ok_or_else(|| {
+      RunnerError::Auth(format!(
+        "generate-jitconfig returned 409 but no runner named '{}' was found to replace",
+        params.name
+      ))
+    })?;
+  tracing::info!(
+    runner_id = id,
+    name = params.name,
+    "replacing existing runner registration"
+  );
+  delete_runner(client, &runners_base, params.runner_token, id).await
 }
 
 /// Mint a JIT runner config via `POST …/generate-jitconfig`.
 ///
 /// All-or-nothing: any failure surfaces GitHub's response body as an
-/// `Err` and the caller writes no partial config.
+/// `Err` and the caller writes no partial config. With `replace` set,
+/// a 409 (runner name taken) deletes the existing same-name runner and
+/// retries the mint once.
 ///
 /// # Errors
 ///
@@ -195,32 +338,23 @@ pub async fn register_jit(
     params.work_folder,
   )?;
 
-  let response = client
-    .post(&request.url)
-    .bearer_auth(params.runner_token)
-    .header("Accept", "application/vnd.github+json")
-    .header("X-GitHub-Api-Version", "2022-11-28")
-    // GitHub's REST API rejects requests without a User-Agent (403).
-    .header(
-      "User-Agent",
-      concat!("toolu-runner/", env!("CARGO_PKG_VERSION")),
-    )
-    .json(&request.body)
-    .send()
-    .await
-    .map_err(|e| RunnerError::Network(format!("generate-jitconfig request failed: {e}")))?;
+  let (status, text) = send_generate(client, &request, params.runner_token).await?;
+  if status.is_success() {
+    return parse_response(&text, params.name);
+  }
 
-  let status = response.status();
-  let text = response
-    .text()
-    .await
-    .map_err(|e| RunnerError::Network(format!("reading generate-jitconfig body failed: {e}")))?;
-
-  if !status.is_success() {
+  if status == reqwest::StatusCode::CONFLICT && params.replace {
+    replace_existing(client, params).await?;
+    let (status, text) = send_generate(client, &request, params.runner_token).await?;
+    if status.is_success() {
+      return parse_response(&text, params.name);
+    }
     return Err(RunnerError::Auth(format!(
-      "generate-jitconfig failed with status {status}: {text}"
+      "generate-jitconfig failed after --replace retry with status {status}: {text}"
     )));
   }
 
-  parse_response(&text, params.name)
+  Err(RunnerError::Auth(format!(
+    "generate-jitconfig failed with status {status}: {text}"
+  )))
 }

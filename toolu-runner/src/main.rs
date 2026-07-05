@@ -47,7 +47,8 @@ struct RegisterArgs {
   /// Repository or organization URL (e.g. https://github.com/owner/repo).
   #[arg(long)]
   url: String,
-  /// Short-lived registration token from GitHub.
+  /// GitHub API token with repo admin rights (PAT or App installation
+  /// token) — used for the `generate-jitconfig` REST call.
   #[arg(long)]
   token: String,
   /// Runner name (defaults to the hostname).
@@ -75,7 +76,9 @@ struct RunArgs {
   /// Path to the runner config file.
   #[arg(long)]
   config: Option<PathBuf>,
-  /// Exit after the first job completes (test mode).
+  /// Exit after the first job completes. Currently the default: a JIT
+  /// registration is single-use, so the listener always exits after one
+  /// job. Kept as an explicit flag for scripts and future daemon mode.
   #[arg(long)]
   once: bool,
 }
@@ -198,6 +201,7 @@ async fn cmd_register(args: RegisterArgs) -> Result<(), Box<dyn std::error::Erro
     host: &host,
     config_path: &config_path,
     creds_path: &creds_path,
+    replace: args.replace,
   })
   .await
   .map_err(|e| format!("{e}"))?;
@@ -286,6 +290,7 @@ struct RegisterPersist<'a> {
   host: &'a str,
   config_path: &'a Path,
   creds_path: &'a Path,
+  replace: bool,
 }
 
 /// POST `generate-jitconfig` for `p` and return the minted registration.
@@ -305,6 +310,7 @@ async fn mint_jit(
       labels: p.labels,
       runner_group_id: runner_group_id(p.runner_group),
       work_folder: p.work_folder,
+      replace: p.replace,
     },
   )
   .await
@@ -450,9 +456,11 @@ async fn cmd_run(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
 
   let cancel = CancellationToken::new();
   spawn_signal_bridge(cancel.clone());
-  if args.once {
-    spawn_once_cancel(cancel.clone());
-  }
+  // `--once` needs no special wiring: the JIT session is single-use, so
+  // the listener exits after the first job completes. (An earlier stub
+  // cancelled after 100ms here, which killed the poll loop before any
+  // job could arrive.)
+  let _ = args.once;
 
   let result = listener
     .run(cancel)
@@ -478,14 +486,6 @@ fn spawn_signal_bridge(cancel: CancellationToken) {
       _ = sigint.recv() => {},
       _ = sigterm.recv() => {},
     }
-    cancel.cancel();
-  });
-}
-
-/// `--once` test mode: cancel after a 100ms delay so one poll cycle runs.
-fn spawn_once_cancel(cancel: CancellationToken) {
-  tokio::spawn(async move {
-    tokio::time::sleep(Duration::from_millis(100)).await;
     cancel.cancel();
   });
 }
