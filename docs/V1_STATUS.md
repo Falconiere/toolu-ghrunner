@@ -80,7 +80,7 @@ Three known bugs in `docs/known-bugs.md`, all blocked on the user providing a re
 - **B-002** — `toolu-runner remove` doesn't call the GH unregistration endpoint (low, deferred to step 10).
 - **B-003** — `toolu-runner register` writes a placeholder `auth_token` and empty `jit_config`; the live flow (POST to JIT endpoint, RSA → JWT → OAuth2 exchange) is stubbed (low, deferred to step 10).
 
-The harness is built (`toolu-runner/tests/live/`) and compiles. It will run the moment the user supplies `TOOLU_RUNNER_LIVE_TOKEN` and a test repo name.
+The harness is built (`toolu-runner/tests/live_e2e.rs (harness: tests/helpers/)`) and compiles. It will run the moment the user supplies `TOOLU_RUNNER_LIVE_TOKEN` and a test repo name.
 
 ## Quality gates (all green at HEAD)
 
