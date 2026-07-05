@@ -1,5 +1,7 @@
 use std::time::Duration;
 
+use tokio_util::sync::CancellationToken;
+
 use super::SessionCtx;
 use super::execution_loop::execute_with_renewal;
 use super::helpers::map_conclusion;
@@ -40,7 +42,7 @@ pub(super) async fn poll_and_execute(ctx: &mut SessionCtx) -> Result<(), RunnerE
   let plan_id = acquired.plan_id.clone();
 
   let (conclusion, job_id, request_id, step_results, job_token) =
-    run_acquired_job(ctx, &body.run_service_url, &rs_token, &acquired).await;
+    run_job_with_cancel_watch(ctx, &body.run_service_url, &rs_token, &acquired).await;
   let rs_token = job_token.unwrap_or(rs_token);
 
   // Acknowledge the broker message — required by the JIT protocol before complete_job.
@@ -89,11 +91,114 @@ fn parse_job_message(
   })
 }
 
-async fn run_acquired_job(
-  ctx: &mut SessionCtx,
+/// Run the acquired job while a sidecar future keeps polling the broker
+/// for a mid-job `JobCancellation` (the C# runner's listener does the
+/// same while its worker executes). The watcher trips `job_cancel` — a
+/// child of the session token, so SIGINT/SIGTERM still propagates — and
+/// the engine winds the job down; the normal completion path then
+/// reports `cancelled` to GitHub.
+async fn run_job_with_cancel_watch(
+  ctx: &SessionCtx,
   run_service_url: &str,
   rs_token: &str,
   acquired: &crate::reporting::run_service::AcquireJobResponse,
+) -> JobOutcome {
+  let job_cancel = ctx.cancel.child_token();
+  let exec = run_acquired_job(ctx, run_service_url, rs_token, acquired, &job_cancel);
+  tokio::pin!(exec);
+  let watch = watch_for_gh_cancel(ctx, &job_cancel);
+  tokio::pin!(watch);
+  tokio::select! {
+    outcome = &mut exec => outcome,
+    // The watcher pends forever after signalling, so this arm only
+    // fires if it somehow returns — finish the job either way.
+    () = &mut watch => (&mut exec).await,
+  }
+}
+
+/// Poll the broker for a `JobCancellation` while a job is in flight.
+///
+/// On a cancel message: trip `job_cancel` and go dormant (the caller's
+/// select! keeps driving only the job). Anything else is skipped with
+/// the cursor advanced so the broker does not re-serve it after the
+/// job completes. Never returns; the caller drops this future when the
+/// job finishes.
+async fn watch_for_gh_cancel(ctx: &SessionCtx, job_cancel: &CancellationToken) {
+  let mut last_message_id: i64 = 0;
+  let mut backoff = POLL_BACKOFF_START;
+  loop {
+    let outcome = poll_once(ctx, last_message_id).await;
+    if let Some(id) = outcome.message_id() {
+      last_message_id = id;
+    }
+    match watch_step(ctx, job_cancel, outcome, backoff).await {
+      Some(next) => backoff = next,
+      None => return std::future::pending::<()>().await,
+    }
+  }
+}
+
+/// React to one mid-job poll outcome. Returns the next backoff, or
+/// `None` when the watcher should go dormant (cancellation signalled,
+/// session token tripped, or backoff interrupted by shutdown).
+async fn watch_step(
+  ctx: &SessionCtx,
+  job_cancel: &CancellationToken,
+  outcome: PollOutcome,
+  backoff: Duration,
+) -> Option<Duration> {
+  match outcome {
+    PollOutcome::Cancel { job_id, .. } => {
+      note_cancel_mid_job(&job_id);
+      job_cancel.cancel();
+      None
+    },
+    // Session token tripped (SIGINT/SIGTERM): `job_cancel` is a child
+    // token, so the job is already winding down — just go dormant.
+    PollOutcome::Cancelled => None,
+    PollOutcome::NetworkError(e) => backoff_after_poll_error(ctx, &e, backoff).await,
+    PollOutcome::NoWork | PollOutcome::Skip { .. } => Some(POLL_BACKOFF_START),
+    PollOutcome::Migrated { url, .. } => {
+      note_migration_mid_job(&url);
+      Some(POLL_BACKOFF_START)
+    },
+    PollOutcome::Job(msg) => {
+      note_unexpected_job_mid_job(msg.message_id);
+      Some(POLL_BACKOFF_START)
+    },
+  }
+}
+
+/// Log a mid-job `JobCancellation` before tripping the job token.
+fn note_cancel_mid_job(job_id: &str) {
+  tracing::info!(
+    job_id,
+    "JobCancellation received mid-job — cancelling in-flight job"
+  );
+}
+
+/// Log a broker migration that arrived while a job is in flight. The
+/// watcher keeps polling the old URL; the main loop applies the new one
+/// after the job completes.
+fn note_migration_mid_job(url: &str) {
+  tracing::warn!(new_url = %url, "broker migration mid-job — watcher keeps polling the old URL");
+}
+
+/// Log (and skip) a job message that arrived while a job is in flight —
+/// a single-job runner never takes a second job.
+fn note_unexpected_job_mid_job(message_id: i64) {
+  tracing::warn!(
+    message_id,
+    "unexpected job message while a job is in flight — skipped"
+  );
+}
+
+async fn run_acquired_job(
+  ctx: &SessionCtx,
+  run_service_url: &str,
+  rs_token: &str,
+  acquired: &crate::reporting::run_service::AcquireJobResponse,
+  job_cancel: &CancellationToken,
 ) -> JobOutcome {
   let job_msg: AgentJobRequestMessage = match parse_job_message(acquired) {
     Ok(msg) => msg,
@@ -116,15 +221,13 @@ async fn run_acquired_job(
   // Connect live log WebSocket for real-time log streaming to GitHub UI.
   let live_log_tx = connect_live_log(&job_msg, effective_token).await;
 
-  let (conclusion, step_results) = execute_with_renewal(
-    ctx,
+  let route = super::execution_loop::JobRoute {
     run_service_url,
-    effective_token,
-    &acquired.plan_id,
-    &job_msg,
-    live_log_tx,
-  )
-  .await;
+    rs_token: effective_token,
+    plan_id: &acquired.plan_id,
+  };
+  let (conclusion, step_results) =
+    execute_with_renewal(ctx, &route, &job_msg, live_log_tx, job_cancel).await;
   (
     conclusion,
     job_msg.job_id,

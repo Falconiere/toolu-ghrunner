@@ -18,14 +18,26 @@ use crate::execution::secret_masker::SecretMasker;
 use crate::reporting::live_log::LiveLogLine;
 use shared::{AgentJobRequestMessage, Conclusion, ListenerEvent, RunnerEvent};
 
+/// Per-job addressing for the Run / Results services: where to renew
+/// and report, with which token, under which plan.
+pub(super) struct JobRoute<'a> {
+  pub(super) run_service_url: &'a str,
+  pub(super) rs_token: &'a str,
+  pub(super) plan_id: &'a str,
+}
+
 pub(super) async fn execute_with_renewal(
   ctx: &SessionCtx,
-  run_service_url: &str,
-  rs_token: &str,
-  plan_id: &str,
+  route: &JobRoute<'_>,
   job_msg: &AgentJobRequestMessage,
   live_log_tx: Option<tokio::sync::mpsc::Sender<LiveLogLine>>,
+  job_cancel: &CancellationToken,
 ) -> (Conclusion, Vec<crate::reporting::StepResult>) {
+  let JobRoute {
+    run_service_url,
+    rs_token,
+    plan_id,
+  } = *route;
   let renewal_cancel = CancellationToken::new();
   let renewal_handle = start_renewal(
     ctx,
@@ -47,7 +59,7 @@ pub(super) async fn execute_with_renewal(
   }
   let cfg = build_fwd_config(ctx, rs_token, plan_id, job_msg, setup_lines, live_log_tx);
 
-  let conclusion = run_forwarded_job(ctx, job_msg, &collector, cfg).await;
+  let conclusion = run_forwarded_job(ctx, job_msg, &collector, cfg, job_cancel).await;
   renewal_cancel.cancel();
   let _ = renewal_handle.await;
 
@@ -91,10 +103,13 @@ async fn run_forwarded_job(
   job_msg: &AgentJobRequestMessage,
   collector: &StepCollector,
   cfg: FwdConfig,
+  job_cancel: &CancellationToken,
 ) -> Conclusion {
   let runner = Runner::new(ctx.config.clone(), Arc::clone(&ctx.masker));
   let engine_rx = runner
-    .execute_job(job_msg.clone(), ctx.cancel.clone())
+    // The per-job token (child of the session token) so a mid-job
+    // `JobCancellation` from the broker winds the engine down too.
+    .execute_job(job_msg.clone(), job_cancel.clone())
     .await;
 
   let (conclusion_tx, conclusion_rx) = oneshot::channel::<Conclusion>();
@@ -333,6 +348,12 @@ async fn report_step(state: &mut ForwarderState, cfg: &FwdConfig, event: &Runner
 /// Drain the in-flight per-step uploads (backfilling each step's log
 /// URL) and upload the combined job-level log blob.
 async fn finalize_job_logs(state: &mut ForwarderState, cfg: &FwdConfig, collector: &StepCollector) {
+  // Drop every per-step line sender FIRST. A step whose `StepCompleted`
+  // never arrived (engine error mid-step) still has its sender parked in
+  // `uploaders`, and its streamer task only finishes when that sender
+  // drops — joining below without this clear deadlocks the forwarder
+  // (live hang: job failed mid-step, runner never exited).
+  state.uploaders.clear();
   // Drain UNCONDITIONALLY. A step that logged zero lines makes its uploader
   // return `Ok(None)`, and a panicked upload returns `Err(JoinError)` — both
   // must keep the loop going. A refutable `while let Some(Ok(Some(..)))` would
