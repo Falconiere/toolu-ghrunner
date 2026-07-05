@@ -302,3 +302,22 @@ async fn save_state_does_not_leak_into_outputs() -> TestResult<()> {
   assert!(completed, "step s9 should complete successfully");
   Ok(())
 }
+
+#[tokio::test]
+async fn reserved_stop_commands_token_is_ignored() -> TestResult<()> {
+  // Upstream rejects a stop token equal to a registered command name (or
+  // `pause-logging`) — it must NOT suspend processing, so the following
+  // ::set-output:: is applied even though no resume marker ever appears.
+  let script = "\
+echo \"::stop-commands::endgroup\"
+echo \"::set-output name=k::still_processed\"";
+  let step = ActionStep::script("s10", script, "");
+  let (events, _masker) = run_steps_collect(vec![step]).await?;
+  let outputs = step_outputs(&events, "s10");
+  assert_eq!(
+    outputs.get("k").map(String::as_str),
+    Some("still_processed"),
+    "a reserved stop token must not suspend command processing; outputs={outputs:?}"
+  );
+  Ok(())
+}

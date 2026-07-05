@@ -38,9 +38,7 @@ pub async fn run_job(
   events: mpsc::Sender<RunnerEvent>,
   masker: Arc<Mutex<SecretMasker>>,
 ) -> Result<(), RunnerError> {
-  let workspace = config.workspace_root.join(&msg.job_id);
-  std::fs::create_dir_all(&workspace)?;
-  std::fs::create_dir_all(&config.data_dir)?;
+  let workspace = prepare_job_dirs(config, &msg.job_id)?;
 
   // Offline mode hosts a local cache service; forwarder mode leaves it `None`.
   let offline_cache = match config.services_mode {
@@ -79,6 +77,20 @@ pub async fn run_job(
   emit_job_completed(&events, msg.job_id, conclusion, outputs).await;
 
   Ok(())
+}
+
+/// Create the per-job workspace and the data dir, restricting the data dir
+/// to the runner user (0o700 — it holds credentials, caches, and `_temp`
+/// step payloads; a permissive umask must not leave it world-readable).
+fn prepare_job_dirs(
+  config: &RunnerConfig,
+  job_id: &str,
+) -> Result<std::path::PathBuf, RunnerError> {
+  let workspace = config.workspace_root.join(job_id);
+  std::fs::create_dir_all(&workspace)?;
+  std::fs::create_dir_all(&config.data_dir)?;
+  super::context::restrict_dir_permissions(&config.data_dir)?;
+  Ok(workspace)
 }
 
 /// Borrowed inputs for the hook + step-loop + outputs phase of a job run.

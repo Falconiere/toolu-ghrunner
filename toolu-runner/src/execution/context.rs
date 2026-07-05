@@ -168,8 +168,10 @@ impl ExecutionContext {
 
 /// Restrict a runner-owned directory to the runner user (`0o700`): `_temp`
 /// holds step scripts and event payloads that can embed secrets, so it must
-/// not be world-readable under a permissive umask. No-op on non-Unix targets.
-fn restrict_dir_permissions(dir: &std::path::Path) -> std::io::Result<()> {
+/// not be world-readable under a permissive umask. Also applied to the
+/// enclosing `data_dir` by `job_runner` so the leaf tightening is not undone
+/// by a world-readable parent. No-op on non-Unix targets.
+pub(crate) fn restrict_dir_permissions(dir: &std::path::Path) -> std::io::Result<()> {
   #[cfg(unix)]
   {
     use std::os::unix::fs::PermissionsExt;

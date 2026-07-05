@@ -1,0 +1,12 @@
+# Gitleaks config: keep the default ruleset, allowlist the committed
+# synthetic test fixtures (ghs_EXAMPLE… tokens used to verify secret
+# masking — flagged as github-app-token on every scan otherwise).
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Synthetic secret-masking test fixtures — not real credentials"
+paths = [
+  '''toolu-runner/tests/fixtures/job_message\.json''',
+  '''toolu-runner/tests/gh_compat_context\.rs''',
+]

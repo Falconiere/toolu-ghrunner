@@ -159,12 +159,7 @@ impl CommandDispatcher {
       },
       WorkflowCommand::Echo { on } => self.echo_on = on,
       WorkflowCommand::StopCommands { token } => {
-        // The upstream runner ignores an empty/zero-length stop token: a
-        // stray `::stop-commands::` must not suspend command + mask
-        // processing for the rest of the step.
-        if !token.is_empty() {
-          self.stop_token = Some(token);
-        }
+        self.stop_token = validated_stop_token(token, &self.step_id);
       },
       // `::<token>::` only matters while suspended; if processing is live it
       // is treated as a no-op command (matches the C# runner: a stray resume
@@ -252,6 +247,44 @@ impl CommandDispatcher {
       stream: shared::LogStream::Stdout,
     }
   }
+}
+
+/// Validate a `::stop-commands::` token, `None` when it must be ignored.
+///
+/// The upstream runner rejects a token that is empty, a registered command
+/// name, or `pause-logging` — such a token would make the resume marker
+/// `::<token>::` ambiguous with a real command line. Upstream fails the step
+/// outright; this runner warns and ignores so a stray marker cannot take down
+/// an otherwise-healthy step.
+fn validated_stop_token(token: String, step_id: &str) -> Option<String> {
+  if token.is_empty() || is_reserved_stop_token(&token) {
+    tracing::warn!(step_id, "ignoring invalid stop-commands token");
+    return None;
+  }
+  Some(token)
+}
+
+/// A stop token the upstream runner rejects: any registered workflow-command
+/// name (the resume marker would parse as that command) plus `pause-logging`
+/// (a legacy alias). Case-insensitive, matching `ValidateStopToken`.
+fn is_reserved_stop_token(token: &str) -> bool {
+  const RESERVED: [&str; 14] = [
+    "error",
+    "warning",
+    "notice",
+    "debug",
+    "group",
+    "endgroup",
+    "set-output",
+    "add-mask",
+    "save-state",
+    "add-path",
+    "set-env",
+    "echo",
+    "stop-commands",
+    "pause-logging",
+  ];
+  RESERVED.iter().any(|r| token.eq_ignore_ascii_case(r))
 }
 
 /// A line is the resume marker for `token` if, ignoring surrounding

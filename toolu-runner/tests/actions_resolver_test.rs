@@ -60,3 +60,34 @@ fn rejects_missing_ref() {
   let msg = format!("{err}");
   assert!(msg.contains("missing @ref"), "expected error msg: {msg}");
 }
+
+#[test]
+fn local_dir_rejects_parent_traversal() {
+  let ar = parse_action_ref("./../outside").expect("parses as a local ref");
+  assert_eq!(ar.kind, ActionRefKind::Local);
+  assert_eq!(
+    ar.local_dir(std::path::Path::new("/workspace")),
+    None,
+    "a local ref with `..` segments must not resolve outside the workspace"
+  );
+}
+
+#[test]
+fn local_dir_rejects_embedded_parent_traversal() {
+  let ar = parse_action_ref("./actions/../../outside").expect("parses as a local ref");
+  assert_eq!(
+    ar.local_dir(std::path::Path::new("/workspace")),
+    None,
+    "embedded `..` segments must also be rejected"
+  );
+}
+
+#[test]
+fn local_dir_resolves_plain_relative_path() {
+  let ar = parse_action_ref("./.github/actions/local").expect("valid local ref");
+  assert_eq!(
+    ar.local_dir(std::path::Path::new("/workspace")),
+    Some(std::path::PathBuf::from("/workspace/.github/actions/local")),
+    "a traversal-free local ref must resolve under the workspace"
+  );
+}
