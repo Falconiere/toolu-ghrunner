@@ -117,6 +117,10 @@ impl SecretMasker {
     }
     let pos = self.patterns.partition_point(|p| p.len() >= pattern.len());
     self.patterns.insert(pos, pattern);
+    debug_assert!(
+      self.patterns.is_sorted_by(|a, b| a.len() >= b.len()),
+      "patterns must stay sorted longest-first (partition_point relies on it)"
+    );
   }
 }
 

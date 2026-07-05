@@ -154,6 +154,26 @@ async fn drive(
   config: &RunnerConfig,
   marker_file: &Path,
 ) -> TestResult<Vec<RunnerEvent>> {
+  let (_conclusion, events) = drive_with_cancel(
+    steps,
+    workspace,
+    config,
+    marker_file,
+    CancellationToken::new(),
+  )
+  .await?;
+  Ok(events)
+}
+
+/// [`drive`] with an externally held cancel token, returning the job
+/// conclusion too (for cancel-path tests).
+async fn drive_with_cancel(
+  steps: &[ActionStep],
+  workspace: &Path,
+  config: &RunnerConfig,
+  marker_file: &Path,
+  cancel: CancellationToken,
+) -> TestResult<(shared::Conclusion, Vec<RunnerEvent>)> {
   let masker = Arc::new(Mutex::new(SecretMasker::new()));
   let mut ctx = ExecutionContext::with_masker(Arc::clone(&masker));
   ctx.set_env("MARKER_FILE", &marker_file.to_string_lossy());
@@ -168,11 +188,11 @@ async fn drive(
   });
 
   let spec = toolu_runner::execution::job_spec::JobSpec::default();
-  run_steps(
+  let conclusion = run_steps(
     steps,
     &mut ctx,
     &tx,
-    CancellationToken::new(),
+    cancel,
     &toolu_runner::execution::steps_runner::JobRun {
       workspace,
       config,
@@ -181,7 +201,7 @@ async fn drive(
   )
   .await?;
   drop(tx);
-  Ok(collector.await?)
+  Ok((conclusion, collector.await?))
 }
 
 /// 1 + 4: a single action's post runs at job end and sees its main's STATE_k.
@@ -349,6 +369,105 @@ async fn post_drains_even_when_a_later_step_errors_hard() -> TestResult<()> {
     post.map(String::as_str),
     Some("A:post:STATE_k=A-state"),
     "post must drain even when a later step errors hard; markers={lines:?}"
+  );
+  Ok(())
+}
+
+/// A slow `main` for the cancel test: signals start, then stays alive far
+/// longer than the test budget — only the job-cancel kill ends it before the
+/// done marker is written.
+const SLOW_MAIN_JS: &str = "\
+const fs = require('fs');
+const file = process.env.MARKER_FILE;
+if (file) fs.appendFileSync(file, 'A:main-start\\n');
+setTimeout(() => {
+  if (file) fs.appendFileSync(file, 'A:main-done\\n');
+}, 30000);
+";
+
+/// Fire `cancel` once the slow main's start marker is on disk, so the kill
+/// hits a live child. The 10s ceiling turns a stuck spawn into assertion
+/// failures instead of a suite hang.
+fn cancel_when_main_starts(
+  cancel: CancellationToken,
+  marker: std::path::PathBuf,
+) -> tokio::task::JoinHandle<()> {
+  tokio::spawn(async move {
+    let started = async {
+      while !std::fs::read_to_string(&marker)
+        .unwrap_or_default()
+        .contains("A:main-start")
+      {
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+      }
+    };
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(10), started).await;
+    cancel.cancel();
+  })
+}
+
+/// A cancelled job still drains its posts: the cancel kills the slow `main`
+/// promptly, and the `post` stage then runs under the cancel-grace bounds
+/// (a fresh token) instead of being killed by the already-fired job token.
+#[tokio::test]
+async fn post_drains_with_grace_when_job_is_cancelled() -> TestResult<()> {
+  let Some(node) = system_node() else {
+    eprintln!("SKIP: no system `node` on PATH; pre/post test needs a real node runtime");
+    return Ok(());
+  };
+
+  let dir = tempfile::tempdir()?;
+  let (workspace, data_dir) = (dir.path().join("work"), dir.path().join("data"));
+  std::fs::create_dir_all(&workspace)?;
+  std::fs::create_dir_all(&data_dir)?;
+  let config = RunnerConfig {
+    data_dir: data_dir.clone(),
+    workspace_root: workspace.clone(),
+    cgroup_path: None,
+    services_mode: shared::ServicesMode::default(),
+  };
+  seed_node(&data_dir, &node)?;
+  seed_action(&data_dir, "act-a", "A")?;
+  // Swap the cached main for the slow variant AFTER seeding; pre/post stay real.
+  let cache_dir = action_cache_dir(&data_dir, "toolu/act-a/v1");
+  std::fs::write(cache_dir.join("main.js"), SLOW_MAIN_JS)?;
+  let marker_file = data_dir.join("markers.txt");
+  std::fs::write(&marker_file, "")?;
+
+  let cancel = CancellationToken::new();
+  let canceller = cancel_when_main_starts(cancel.clone(), marker_file.clone());
+
+  let steps = vec![action_step("a", "act-a")];
+  let started_at = std::time::Instant::now();
+  let (conclusion, _events) =
+    drive_with_cancel(&steps, &workspace, &config, &marker_file, cancel).await?;
+  let elapsed = started_at.elapsed();
+  canceller.await?;
+
+  assert_eq!(
+    conclusion,
+    shared::Conclusion::Cancelled,
+    "cancel during main must surface Cancelled"
+  );
+  assert!(
+    elapsed < std::time::Duration::from_secs(15),
+    "cancel must kill the 30s main promptly; took {elapsed:?}"
+  );
+  let lines: Vec<String> = std::fs::read_to_string(&marker_file)?
+    .lines()
+    .map(ToOwned::to_owned)
+    .collect();
+  assert!(
+    lines.iter().any(|l| l == "A:main-start"),
+    "slow main must have started before the cancel; markers={lines:?}"
+  );
+  assert!(
+    !lines.iter().any(|l| l == "A:main-done"),
+    "the cancel must kill main before its done marker; markers={lines:?}"
+  );
+  assert!(
+    lines.iter().any(|l| l.starts_with("A:post:")),
+    "the post must still run after a job cancel (cancel-grace bounds); markers={lines:?}"
   );
   Ok(())
 }
