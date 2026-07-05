@@ -203,15 +203,22 @@ fn oidc_request_url(upstream_url: &str, audience: Option<&str>) -> String {
   url
 }
 
-/// Build the timeout-bounded HTTP client used to proxy OIDC requests.
+/// The timeout-bounded HTTP client used to proxy OIDC requests, built once
+/// and reused (connection pool + TLS session reuse across token requests).
 ///
 /// A request timeout so a hung upstream can't block the OIDC handler (and the
 /// requesting action) forever. Propagates the builder error.
-fn oidc_proxy_client() -> Result<reqwest::Client, RunnerError> {
-  reqwest::Client::builder()
+fn oidc_proxy_client() -> Result<&'static reqwest::Client, RunnerError> {
+  static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+  if let Some(client) = CLIENT.get() {
+    return Ok(client);
+  }
+  let built = reqwest::Client::builder()
     .timeout(std::time::Duration::from_secs(60))
     .build()
-    .map_err(|e| RunnerError::Oidc(format!("build HTTP client: {e}")))
+    .map_err(|e| RunnerError::Oidc(format!("build HTTP client: {e}")))?;
+  // A concurrent first call may have won the race; the extra client is dropped.
+  Ok(CLIENT.get_or_init(|| built))
 }
 
 /// Proxy an OIDC token request to GitHub's upstream OIDC provider.

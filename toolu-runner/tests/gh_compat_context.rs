@@ -142,7 +142,7 @@ fn secrets_context_resolves_and_value_is_masked() -> TestResult<()> {
   );
   assert_eq!(
     eval(&ctx, "${{ github.token }}")?,
-    "ghs_EXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLE0000"
+    "ghs_EXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLE0000" // gitleaks:allow — synthetic fixture
   );
 
   // The secret value is masked in a log line by the SAME shared masker that
