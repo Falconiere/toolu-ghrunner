@@ -1,0 +1,14 @@
+name: proof
+on:
+  workflow_dispatch:
+jobs:
+  fingerprint:
+    runs-on: [self-hosted, proof]
+    steps:
+      - name: fingerprint this machine
+        run: |
+          echo "hostname=$(hostname)"
+          echo "uname=$(uname -a)"
+          echo "user=$(whoami)"
+          echo "home=$HOME"
+          printf 'job ran at %s on %s\n' "$(date)" "$(hostname)" > /private/tmp/toolu-proof-job.txt
