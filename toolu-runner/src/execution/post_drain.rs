@@ -10,6 +10,7 @@
 
 use shared::{Conclusion, RunnerError, RunnerEvent};
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 
 use super::actions::manifest::RunsUsing;
 use super::context::ExecutionContext;
@@ -72,7 +73,7 @@ async fn run_one_post(
   };
 
   emit_post_header(events, &step_id, &post.action_name).await;
-  let bounds = StepBounds::new(post.step.timeout_in_minutes, job.cancel.clone());
+  let bounds = post_bounds(post, job);
   let conclusion = run_post_node_stage(post, ctx, events, job, client, &bounds).await?;
 
   ctx.set_step_outcome(&step_id, conclusion);
@@ -88,6 +89,31 @@ async fn run_one_post(
     })
     .await;
   Ok(())
+}
+
+/// Cleanup grace budget for post-steps draining after a job cancel.
+const CANCELLED_POST_GRACE_MINUTES: u32 = 5;
+
+/// Bounds for one post-step run.
+///
+/// A cancelled job still runs its cleanup posts (matching the upstream
+/// runner's cancel-grace behavior): the fired job token would kill the post
+/// child the instant it spawned, so a cancelled drain runs each post under a
+/// FRESH token bounded by [`CANCELLED_POST_GRACE_MINUTES`] (or the step's own
+/// tighter `timeout-minutes`). An uncancelled drain keeps the live job token
+/// so SIGINT/SIGTERM still interrupts posts normally.
+fn post_bounds(post: &PostStep, job: &JobCtx<'_>) -> StepBounds {
+  if !job.cancel.is_cancelled() {
+    return StepBounds::new(post.step.timeout_in_minutes, job.cancel.clone());
+  }
+  let grace = post
+    .step
+    .timeout_in_minutes
+    .filter(|&t| t > 0)
+    .map_or(CANCELLED_POST_GRACE_MINUTES, |t| {
+      t.min(CANCELLED_POST_GRACE_MINUTES)
+    });
+  StepBounds::new(Some(grace), CancellationToken::new())
 }
 
 /// Run the `post` node entrypoint in the originating step's scope.
