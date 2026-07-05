@@ -44,12 +44,15 @@ impl ActionRef {
   }
 
   /// Resolve a local `./path` ref to a directory under `base` (the checked-out
-  /// repo / `GITHUB_WORKSPACE`). Returns `None` for non-local refs, and for
-  /// refs with `..` traversal segments: a local `uses:` must stay inside the
-  /// workspace (defense-in-depth — the resolver must not read action
-  /// manifests outside the repo, e.g. via `./../outside`).
+  /// repo / `GITHUB_WORKSPACE`). Returns `None` for non-local refs, for a
+  /// local path missing its `./` prefix (`parse_action_ref` never produces
+  /// one, but this method is `pub` — a hand-built ref must not silently
+  /// resolve to the workspace root), and for refs with `..` traversal
+  /// segments: a local `uses:` must stay inside the workspace
+  /// (defense-in-depth — the resolver must not read action manifests outside
+  /// the repo, e.g. via `./../outside`).
   pub fn local_dir(&self, base: &std::path::Path) -> Option<std::path::PathBuf> {
-    let rel = self.local_path.as_deref()?.strip_prefix("./").unwrap_or("");
+    let rel = self.local_path.as_deref()?.strip_prefix("./")?;
     let escapes = std::path::Path::new(rel)
       .components()
       .any(|c| matches!(c, std::path::Component::ParentDir));

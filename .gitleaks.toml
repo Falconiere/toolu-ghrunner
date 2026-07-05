@@ -8,5 +8,6 @@ useDefault = true
 description = "Synthetic secret-masking test fixtures — not real credentials"
 paths = [
   '''toolu-runner/tests/fixtures/job_message\.json''',
+  '''toolu-runner/tests/fixtures/generate_jitconfig_response\.json''',
   '''toolu-runner/tests/gh_compat_context\.rs''',
 ]

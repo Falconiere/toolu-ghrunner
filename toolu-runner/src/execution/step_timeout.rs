@@ -88,16 +88,30 @@ pub async fn wait_bounded(
 }
 
 /// Kill the child and reap it so no zombie is left behind.
+///
+/// The reap itself is bounded: a SIGKILLed process normally exits
+/// immediately, but one stuck in uninterruptible sleep (D state — NFS, dead
+/// device) would block `wait()` forever and hang the job. After the grace
+/// period the zombie is abandoned with a warning rather than wedging the
+/// runner.
 async fn kill_and_reap(
   child: &mut Child,
   err: &impl Fn(String) -> RunnerError,
 ) -> Result<(), RunnerError> {
+  const REAP_GRACE: Duration = Duration::from_secs(10);
   // `start_kill` sends SIGKILL; an already-exited child yields an error we
   // can safely ignore, since the goal is just to ensure it is not running.
   let _ = child.start_kill();
-  child
-    .wait()
-    .await
-    .map_err(|e| err(format!("reap after kill failed: {e}")))?;
+  match tokio::time::timeout(REAP_GRACE, child.wait()).await {
+    Ok(status) => {
+      status.map_err(|e| err(format!("reap after kill failed: {e}")))?;
+    },
+    Err(_elapsed) => {
+      tracing::warn!(
+        "child did not exit within {REAP_GRACE:?} of SIGKILL (uninterruptible \
+         sleep?); abandoning reap"
+      );
+    },
+  }
   Ok(())
 }

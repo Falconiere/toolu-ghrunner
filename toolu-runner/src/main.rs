@@ -328,6 +328,11 @@ async fn register_and_persist(p: RegisterPersist<'_>) -> Result<i64, RunnerError
 
   let config = build_registration_config(&p, &client_id, registration);
 
+  // Snapshot any pre-existing config BEFORE overwriting so a rollback can
+  // restore it — re-registration must not destroy the previous registration
+  // when the credentials write fails.
+  let previous_config = std::fs::read(p.config_path).ok();
+
   // Persist only after the live call + parse both succeed.
   save_reg_config(p.config_path, &config)?;
   let creds = CredentialsFile {
@@ -339,12 +344,23 @@ async fn register_and_persist(p: RegisterPersist<'_>) -> Result<i64, RunnerError
   // leave a config without creds (a half-registered state). Roll the config
   // file back (best-effort) before surfacing the error.
   if let Err(e) = save_credentials(p.creds_path, &creds) {
-    if let Err(rm) = std::fs::remove_file(p.config_path) {
-      tracing::warn!(error = %rm, "failed to roll back config after credentials write error");
-    }
+    roll_back_config(p.config_path, previous_config.as_deref());
     return Err(e);
   }
   Ok(runner_id)
+}
+
+/// Best-effort rollback of the config file after a failed registration:
+/// restore the pre-existing bytes when there were any (the overwrite keeps
+/// the file's 0600 mode), otherwise remove the newly created file.
+fn roll_back_config(path: &std::path::Path, previous: Option<&[u8]>) {
+  let result = match previous {
+    Some(bytes) => std::fs::write(path, bytes),
+    None => std::fs::remove_file(path),
+  };
+  if let Err(e) = result {
+    tracing::warn!(error = %e, "failed to roll back config after credentials write error");
+  }
 }
 
 /// Assemble the persisted [`RunnerRegistrationConfig`] from the minted

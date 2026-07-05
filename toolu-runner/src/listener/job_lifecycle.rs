@@ -168,25 +168,39 @@ async fn poll_until_job(ctx: &mut SessionCtx) -> Result<Option<BrokerMessage>, R
         continue;
       },
       PollOutcome::Job(msg) => return Ok(Some(msg)),
-      PollOutcome::Cancel { msg, job_id } => {
-        handle_cancellation(ctx, &msg, &job_id).await;
+      PollOutcome::Cancel { msg: _, job_id } => {
+        handle_cancellation(ctx, &job_id);
         return Ok(None);
       },
       PollOutcome::NetworkError(e) => {
-        let backoff_ms = u64::try_from(backoff.as_millis()).unwrap_or(u64::MAX);
-        tracing::warn!(
-          error = %e,
-          backoff_ms,
-          "poll failed — retrying after backoff"
-        );
-        let jittered = jittered_backoff(backoff);
-        if sleep_or_cancel(ctx, jittered).await {
-          return Ok(None);
+        match backoff_after_poll_error(ctx, &e, backoff).await {
+          Some(next) => backoff = next,
+          None => return Ok(None),
         }
-        backoff = backoff.saturating_mul(2).min(POLL_BACKOFF_MAX);
       },
     }
   }
+}
+
+/// Warn about a failed poll and sleep out the jittered backoff. Returns the
+/// doubled (capped) backoff for the next attempt, or `None` when cancellation
+/// fired during the sleep and the poll loop must exit.
+async fn backoff_after_poll_error(
+  ctx: &SessionCtx,
+  e: &RunnerError,
+  backoff: Duration,
+) -> Option<Duration> {
+  let backoff_ms = u64::try_from(backoff.as_millis()).unwrap_or(u64::MAX);
+  tracing::warn!(
+    error = %e,
+    backoff_ms,
+    "poll failed — retrying after backoff"
+  );
+  let jittered = jittered_backoff(backoff);
+  if sleep_or_cancel(ctx, jittered).await {
+    return None;
+  }
+  Some(backoff.saturating_mul(2).min(POLL_BACKOFF_MAX))
 }
 
 /// Apply decorrelated jitter to a backoff duration so concurrent runners
@@ -347,24 +361,20 @@ fn parse_cancel(body: &str) -> Result<String, RunnerError> {
   Ok(cancel.job_id)
 }
 
-/// Cancel the in-flight job token and acknowledge the cancellation message.
+/// Cancel the in-flight job token.
 ///
 /// The shared `ctx.cancel` token is observed by the poll loop, the renewal
 /// task, and the running job, so cancelling it stops the whole pipeline.
-/// The ack is best-effort: a failed ack is logged, not fatal, since the
-/// runner is already shutting the job down.
-async fn handle_cancellation(ctx: &SessionCtx, msg: &BrokerMessage, job_id: &str) {
+/// No broker ack is sent: `acknowledge` validates `runnerRequestId` (the
+/// job request's UUID) and a `JobCancellation` body carries only a `jobId`,
+/// so an ack keyed by it is always rejected with a 400. Redelivery is
+/// prevented by the poll's `lastMessageId` cursor advancing past the message.
+fn handle_cancellation(ctx: &SessionCtx, job_id: &str) {
   tracing::info!(
     job_id,
     "received JobCancellation — cancelling in-flight job"
   );
   ctx.cancel.cancel();
-  // Best-effort: a JobCancellation carries a job_id, not a runner_request_id;
-  // use it as the ack key. A reject here is logged, never fatal.
-  let _ = msg;
-  if let Err(e) = acknowledge_message(&ctx.client, &ctx.broker_url, &ctx.token, job_id).await {
-    tracing::warn!(error = %e, "failed to acknowledge cancellation message");
-  }
 }
 
 /// Sleep for `duration`, returning `true` if cancellation fired first.

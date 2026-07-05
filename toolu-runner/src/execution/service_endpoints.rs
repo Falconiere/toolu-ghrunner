@@ -41,8 +41,8 @@ pub struct ServiceUrls {
 /// `authorization.parameters["AccessToken"]`→token, and the
 /// `ACTIONS_CACHE_SERVICE_V2` variable.
 ///
-/// TODO(S6): confirm these exact spellings + the cache-v2 flag location (job
-/// `Variables` vs endpoint `data`) against a live capture (Open Q1/Q2).
+/// TODO: confirm these exact key spellings and where the cache-v2 flag lives
+/// (job `Variables` vs endpoint `data`) against a captured live job message.
 pub fn extract_service_urls(msg: &AgentJobRequestMessage) -> ServiceUrls {
   let endpoint = msg
     .resources
