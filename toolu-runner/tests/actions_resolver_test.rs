@@ -4,7 +4,7 @@
 //!
 //! Uses real-shape ref strings (no mock data).
 
-use toolu_runner::execution::actions::resolver::{ActionRefKind, parse_action_ref};
+use toolu_runner::execution::actions::resolver::{ActionRef, ActionRefKind, parse_action_ref};
 
 #[test]
 fn parses_remote_action_with_tag() {
@@ -89,5 +89,25 @@ fn local_dir_resolves_plain_relative_path() {
     ar.local_dir(std::path::Path::new("/workspace")),
     Some(std::path::PathBuf::from("/workspace/.github/actions/local")),
     "a traversal-free local ref must resolve under the workspace"
+  );
+}
+
+#[test]
+fn local_dir_rejects_missing_dot_slash_prefix() {
+  // `parse_action_ref` never produces a Local ref without the `./` prefix,
+  // but `local_dir` is `pub`: a hand-built ref must resolve to None, not
+  // silently to the workspace root.
+  let ar = ActionRef {
+    kind: ActionRefKind::Local,
+    owner: String::new(),
+    repo: String::new(),
+    git_ref: String::new(),
+    subpath: None,
+    local_path: Some("no-prefix".to_owned()),
+  };
+  assert_eq!(
+    ar.local_dir(std::path::Path::new("/workspace")),
+    None,
+    "a local path without the ./ prefix must not resolve"
   );
 }

@@ -396,9 +396,11 @@ pub async fn stream_dispatch_stdout(
         .await;
     }
   }
-  // Return only the `set-output` values this run produced (emission order →
-  // last-writer-wins on merge), not `ctx.step_outputs` (which also carries
-  // prior-stage + `$GITHUB_OUTPUT` outputs).
+  // Return only the `set-output` values this run produced, not
+  // `ctx.step_outputs` (which also carries prior-stage + `$GITHUB_OUTPUT`
+  // outputs). Collecting the emission-ordered vec into a map inserts in that
+  // order, so a duplicate key keeps its LAST emitted value (order itself is
+  // not preserved — only last-writer-wins matters to consumers).
   dispatcher.take_set_outputs().into_iter().collect()
 }
 

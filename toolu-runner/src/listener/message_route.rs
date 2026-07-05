@@ -12,7 +12,8 @@ pub enum MessageRoute {
   AcquireJob,
   /// `BrokerMigration` — switch to the new broker URL and keep polling.
   Migrate,
-  /// `JobCancellation` — cancel the in-flight token and acknowledge.
+  /// `JobCancellation` — cancel the in-flight token (no broker ack: the
+  /// poll's `lastMessageId` cursor prevents redelivery).
   Cancel,
 }
 
