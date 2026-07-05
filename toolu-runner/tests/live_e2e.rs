@@ -1,6 +1,7 @@
-//! Live tests for the `run --once` flow (AC #2, #3, #4, #5, #13, #14).
+//! Live end-to-end tests: `register` flow (AC #1a, #1b) and the
+//! `run --once` flow (AC #2–#5, #13, #14).
 //!
-//! Each test pushes a workflow YAML to the test repo, triggers it,
+//! Each run test pushes a workflow YAML to the test repo, triggers it,
 //! spawns `toolu-runner run --once` in a child process, and asserts on
 //! the resulting GitHub Actions run's `conclusion` field. The runner
 //! pulls jobs, executes them, and reports the conclusion back to GH —
@@ -13,11 +14,46 @@
 //! execute, with `TOOLU_RUNNER_LIVE_TOKEN` and `TOOLU_RUNNER_LIVE_REPO`
 //! set in the environment.
 
+#![cfg(feature = "live")]
+
 use std::time::Duration;
 
-use super::harness::LiveHarness;
+use toolu_runner::config::{
+  CredentialsFile, RunnerRegistrationConfig, load_config as load_reg_config, load_credentials,
+};
+
+#[path = "helpers/live_harness.rs"]
+mod harness;
+
+use harness::LiveHarness;
 
 const NOOP_FIXTURE: &str = include_str!("fixtures/noop-workflow.yml");
+
+/// Workflow for the expression test: interpolates `inputs.*` and
+/// `github.*` contexts into step env and asserts they are non-empty.
+const EXPRESSION_YAML: &str = r#"
+name: expression
+on:
+  workflow_dispatch:
+    inputs:
+      who:
+        description: 'Who to greet'
+        required: true
+        default: 'world'
+jobs:
+  greet:
+    runs-on: [self-hosted, toolu-runner-v1]
+    steps:
+      - name: echo interpolated values
+        env:
+          WHO: ${{ inputs.who }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          echo "hello $WHO from $REPO @ $SHA"
+          test -n "$REPO"
+          test -n "$SHA"
+"#;
 
 /// Skip the test with a clear message if the live env vars are missing.
 macro_rules! require_live_env {
@@ -39,6 +75,132 @@ macro_rules! require_live_env {
 /// or `None` if the child is already gone (treated as success).
 async fn wait_child(mut child: tokio::process::Child) -> Option<std::process::ExitStatus> {
   child.wait().await.ok()
+}
+
+/// AC #1a assertions: the persisted `config.toml` carries the repo URL,
+/// derived runner name, matchable labels, and the v2 protocol.
+fn assert_config_shape(cfg: &RunnerRegistrationConfig, repo: &str) {
+  assert_eq!(
+    cfg.runner_url,
+    format!("https://github.com/{repo}"),
+    "runner_url should be the test repo URL"
+  );
+  assert!(
+    cfg.runner_name.starts_with("toolu-runner-live-"),
+    "runner_name should be derived from the repo: {}",
+    cfg.runner_name
+  );
+  assert!(
+    cfg.labels.contains(&"self-hosted".to_owned()),
+    "labels should include 'self-hosted': {:?}",
+    cfg.labels
+  );
+  assert!(
+    cfg.labels.contains(&"toolu-runner-v1".to_owned()),
+    "labels should include 'toolu-runner-v1' so workflow `runs-on` matches: {:?}",
+    cfg.labels
+  );
+  assert_eq!(
+    cfg.runtime.protocol_version, "v2",
+    "github.com should pick v2 protocol; got {}",
+    cfg.runtime.protocol_version
+  );
+}
+
+/// AC #1b assertions: `credentials.json` stores the runner's client_id
+/// (a UUID — the stable, non-secret identity lifted from the minted JIT
+/// config; the real OAuth token is exchanged at `run` time) and an
+/// RFC3339 `issued_at`.
+fn assert_credentials_shape(creds: &CredentialsFile) {
+  assert!(
+    uuid::Uuid::parse_str(&creds.access_token).is_ok(),
+    "access_token should be the client_id UUID from the JIT config; got prefix: {}",
+    creds.access_token.get(..16).unwrap_or("?")
+  );
+  assert!(
+    !creds.issued_at.is_empty(),
+    "issued_at should be an RFC3339 timestamp"
+  );
+}
+
+#[tokio::test]
+#[ignore = "live test — requires TOOLU_RUNNER_LIVE_TOKEN"]
+async fn register_creates_config_and_credentials() {
+  require_live_env!();
+  let harness = LiveHarness::new().await.expect("harness init");
+
+  // Register against the test repo. The harness always passes
+  // `--replace` so re-runs are idempotent.
+  harness.register().await.expect("register");
+
+  let cfg_path = harness.config_path();
+  let creds_path = harness.credentials_path();
+  assert!(
+    cfg_path.exists(),
+    "config.toml was not written to {}",
+    cfg_path.display()
+  );
+  assert!(
+    creds_path.exists(),
+    "credentials.json was not written to {}",
+    creds_path.display()
+  );
+
+  let cfg: RunnerRegistrationConfig = load_reg_config(&cfg_path)
+    .map_err(|e| e.to_string())
+    .expect("load config.toml");
+  assert_config_shape(&cfg, &harness.repo);
+
+  let creds: CredentialsFile = load_credentials(&creds_path)
+    .map_err(|e| e.to_string())
+    .expect("load credentials.json");
+  assert_credentials_shape(&creds);
+
+  // Teardown.
+  let _ = harness.remove().await;
+}
+
+#[tokio::test]
+#[ignore = "live test — requires TOOLU_RUNNER_LIVE_TOKEN"]
+async fn register_replace_overwrites_existing() {
+  require_live_env!();
+  let harness = LiveHarness::new().await.expect("harness init");
+
+  // First registration.
+  harness.register().await.expect("first register");
+  let first_mtime = std::fs::metadata(harness.config_path())
+    .and_then(|m| m.modified())
+    .ok();
+
+  // Second registration with --replace (which the harness always passes).
+  // Should succeed and overwrite the first. Without --replace, the
+  // second call would exit 2 with "registration already exists".
+  tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+  harness
+    .register()
+    .await
+    .expect("second register with --replace");
+
+  assert!(
+    harness.config_path().exists(),
+    "config.toml should still exist after replace"
+  );
+  let second_mtime = std::fs::metadata(harness.config_path())
+    .and_then(|m| m.modified())
+    .ok();
+  if let (Some(a), Some(b)) = (first_mtime, second_mtime) {
+    assert!(
+      b > a,
+      "config.toml mtime should advance after replace (first={a:?}, second={b:?})"
+    );
+  }
+  // The configs should both be valid TOML and parse successfully.
+  let _: RunnerRegistrationConfig = load_reg_config(&harness.config_path())
+    .map_err(|e| e.to_string())
+    .expect("second config parses");
+
+  // Teardown.
+  let _ = harness.remove().await;
 }
 
 #[tokio::test]
@@ -189,31 +351,8 @@ async fn expression_evaluation() {
   let _cleanup = harness.cleanup(&[workflow]).await;
 
   harness.register().await.expect("register");
-  let yaml = r#"
-name: expression
-on:
-  workflow_dispatch:
-    inputs:
-      who:
-        description: 'Who to greet'
-        required: true
-        default: 'world'
-jobs:
-  greet:
-    runs-on: [self-hosted, toolu-runner-v1]
-    steps:
-      - name: echo interpolated values
-        env:
-          WHO: ${{ inputs.who }}
-          REPO: ${{ github.repository }}
-          SHA: ${{ github.sha }}
-        run: |
-          echo "hello $WHO from $REPO @ $SHA"
-          test -n "$REPO"
-          test -n "$SHA"
-"#;
   harness
-    .push_workflow(workflow, yaml)
+    .push_workflow(workflow, EXPRESSION_YAML)
     .await
     .expect("push expression workflow");
 
@@ -294,8 +433,8 @@ async fn concurrent_single_job() {
 
   harness.register().await.expect("register");
 
-  // Start the first `run` (no --once; it polls indefinitely).
-  let first = harness.run_once().await.expect("spawn first run --once");
+  // Start the first `run --once`; it polls until a job arrives.
+  let mut first = harness.run_once().await.expect("spawn first run --once");
 
   // Give the first process a moment to acquire the .lock.
   tokio::time::sleep(Duration::from_secs(2)).await;
@@ -315,10 +454,10 @@ async fn concurrent_single_job() {
     .await
     .expect("spawn second run --once");
 
-  // The first run will exit on its own once `--once` triggers
-  // (100ms delayed cancel). Wait for it so the test doesn't leave
-  // the runner child dangling.
-  let _ = wait_child(first).await;
+  // The first run polls until a job arrives (there is none in this
+  // test), so kill it explicitly rather than waiting for a natural
+  // exit that would never come.
+  let _ = first.kill().await;
 
   assert_eq!(
     output.status.code(),
@@ -328,7 +467,7 @@ async fn concurrent_single_job() {
   );
   let stderr = String::from_utf8_lossy(&output.stderr);
   assert!(
-    stderr.contains("in flight") || stderr.contains(".lock") || stderr.contains("lock"),
-    "second run's stderr should mention the held lock; got: {stderr}"
+    stderr.contains("already running as PID") || stderr.contains("lock"),
+    "second run's stderr should say another runner holds the lock; got: {stderr}"
   );
 }
