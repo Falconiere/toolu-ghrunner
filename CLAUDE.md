@@ -42,8 +42,9 @@ and no OTel.
 - **Cancellation token wiring.** `toolu-runner run` builds a
   `tokio_util::sync::CancellationToken` and bridges SIGINT / SIGTERM
   to it. The poll loop, the renewal task, and the in-flight job all
-  listen to it. `--once` triggers a 100ms delayed cancel for test
-  mode.
+  listen to it. `--once` exits after the first job completes —
+  currently also the default behavior, since a JIT registration is
+  single-use.
 - **JIT config protocol version:** `v2` for github.com, `v1` for
   GHES. Selected automatically by host at `register` time; the
   `feature_detection` module handles the wire-shape difference.

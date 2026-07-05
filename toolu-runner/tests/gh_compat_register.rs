@@ -10,12 +10,12 @@
 //!    success parses; a non-2xx surfaces GitHub's body and yields `Err`.
 //!
 //! Live end-to-end validation (AC-1) is gated on `TOOLU_RUNNER_LIVE_TOKEN`
-//! and lives in `tests/live/` — it is NOT exercised here.
+//! and lives in `tests/live_e2e.rs` — it is NOT exercised here.
 
 use serde_json::Value;
 use shared::RunnerError;
 use toolu_runner::net::{RegisterParams, build_request, parse_response, register_jit};
-use wiremock::matchers::{body_json, header, method, path};
+use wiremock::matchers::{body_json, header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 /// Committed real-shaped `generate-jitconfig` 200 response. Its
@@ -142,6 +142,28 @@ fn stub_repo_url(server: &MockServer) -> String {
 /// The api/v3 path `build_request` derives for `octo-org/octo-repo`.
 const STUB_PATH: &str = "/api/v3/repos/octo-org/octo-repo/actions/runners/generate-jitconfig";
 
+/// The api/v3 runners collection path for `octo-org/octo-repo` (list /
+/// delete during `--replace`).
+const STUB_RUNNERS_PATH: &str = "/api/v3/repos/octo-org/octo-repo/actions/runners";
+
+/// `RegisterParams` for the stub repo with the fixed test identity.
+fn params_for<'a>(
+  url: &'a str,
+  token: &'a str,
+  labels: &'a [String],
+  replace: bool,
+) -> RegisterParams<'a> {
+  RegisterParams {
+    url,
+    runner_token: token,
+    name: "runner-1",
+    labels,
+    runner_group_id: None,
+    work_folder: "_work",
+    replace,
+  }
+}
+
 #[tokio::test]
 async fn register_jit_posts_bearer_body_and_parses_success() {
   let server = MockServer::start().await;
@@ -174,19 +196,9 @@ async fn register_jit_posts_bearer_body_and_parses_success() {
   let client = reqwest::Client::new();
   let url = stub_repo_url(&server);
   let labels = ["self-hosted".to_owned(), "linux".to_owned()];
-  let reg = register_jit(
-    &client,
-    &RegisterParams {
-      url: &url,
-      runner_token: "reg-token-xyz",
-      name: "runner-1",
-      labels: &labels,
-      runner_group_id: None,
-      work_folder: "_work",
-    },
-  )
-  .await
-  .expect("register_jit should succeed and parse the stubbed response");
+  let reg = register_jit(&client, &params_for(&url, "reg-token-xyz", &labels, false))
+    .await
+    .expect("register_jit should succeed and parse the stubbed response");
 
   assert_eq!(reg.runner_id, FIXTURE_RUNNER_ID);
   assert_eq!(reg.runner_name, "runner-1");
@@ -212,19 +224,9 @@ async fn register_jit_is_all_or_nothing_on_non_2xx() {
   let client = reqwest::Client::new();
   let url = stub_repo_url(&server);
   let labels = ["self-hosted".to_owned()];
-  let err = register_jit(
-    &client,
-    &RegisterParams {
-      url: &url,
-      runner_token: "bad-token",
-      name: "runner-1",
-      labels: &labels,
-      runner_group_id: None,
-      work_folder: "_work",
-    },
-  )
-  .await
-  .expect_err("a 403 must yield an Err (all-or-nothing)");
+  let err = register_jit(&client, &params_for(&url, "bad-token", &labels, false))
+    .await
+    .expect_err("a 403 must yield an Err (all-or-nothing)");
 
   let msg = format!("{err}");
   assert!(
@@ -234,6 +236,88 @@ async fn register_jit_is_all_or_nothing_on_non_2xx() {
   assert!(msg.contains("403"), "status surfaced: {msg}");
   assert!(
     msg.contains("admin rights"),
+    "GitHub's body surfaced: {msg}"
+  );
+}
+
+/// Mount the `--replace` stub choreography: first mint 409s, the runner
+/// list yields the same-name runner, its DELETE succeeds, and the retry
+/// mint 201s with `response_json` (the real-shaped fixture). Each mock's
+/// `expect` makes the mount assert the step actually ran.
+async fn mount_replace_flow(server: &MockServer, response_json: Value) {
+  Mock::given(method("POST"))
+    .and(path(STUB_PATH))
+    .respond_with(ResponseTemplate::new(409).set_body_string(
+      r#"{"message":"Already exists - A runner with the name runner-1 already exists."}"#,
+    ))
+    .up_to_n_times(1)
+    .expect(1)
+    .mount(server)
+    .await;
+  Mock::given(method("GET"))
+    .and(path(STUB_RUNNERS_PATH))
+    .and(query_param("name", "runner-1"))
+    .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+      "total_count": 1,
+      "runners": [{"id": 42, "name": "runner-1", "os": "linux", "status": "offline"}],
+    })))
+    .expect(1)
+    .mount(server)
+    .await;
+  Mock::given(method("DELETE"))
+    .and(path(format!("{STUB_RUNNERS_PATH}/42")))
+    .respond_with(ResponseTemplate::new(204))
+    .expect(1)
+    .mount(server)
+    .await;
+  Mock::given(method("POST"))
+    .and(path(STUB_PATH))
+    .respond_with(ResponseTemplate::new(201).set_body_json(response_json))
+    .expect(1)
+    .mount(server)
+    .await;
+}
+
+#[tokio::test]
+async fn register_jit_replaces_same_name_runner_on_409() {
+  let server = MockServer::start().await;
+  let response_json: Value = serde_json::from_str(RESPONSE_FIXTURE).expect("fixture is valid JSON");
+  mount_replace_flow(&server, response_json).await;
+
+  let client = reqwest::Client::new();
+  let url = stub_repo_url(&server);
+  let labels = ["self-hosted".to_owned()];
+  let reg = register_jit(&client, &params_for(&url, "reg-token-xyz", &labels, true))
+    .await
+    .expect("409 with replace should delete the same-name runner and retry");
+
+  assert_eq!(reg.runner_id, FIXTURE_RUNNER_ID);
+  assert_eq!(reg.runner_name, "runner-1");
+}
+
+#[tokio::test]
+async fn register_jit_surfaces_409_without_replace() {
+  let server = MockServer::start().await;
+  Mock::given(method("POST"))
+    .and(path(STUB_PATH))
+    .respond_with(ResponseTemplate::new(409).set_body_string(
+      r#"{"message":"Already exists - A runner with the name runner-1 already exists."}"#,
+    ))
+    .expect(1)
+    .mount(&server)
+    .await;
+
+  let client = reqwest::Client::new();
+  let url = stub_repo_url(&server);
+  let labels = ["self-hosted".to_owned()];
+  let err = register_jit(&client, &params_for(&url, "reg-token-xyz", &labels, false))
+    .await
+    .expect_err("a 409 without replace must surface as an error");
+
+  let msg = format!("{err}");
+  assert!(msg.contains("409"), "status surfaced: {msg}");
+  assert!(
+    msg.contains("Already exists"),
     "GitHub's body surfaced: {msg}"
   );
 }
