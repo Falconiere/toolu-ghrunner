@@ -472,9 +472,11 @@ async fn concurrent_single_job() {
     "second run should exit 2 because .lock is held; got {:?}",
     output.status.code()
   );
+  // `RunnerError::LockHeld`'s Display is deterministic ("runner is
+  // already running as PID {pid} …"), so no looser fallback is needed.
   let stderr = String::from_utf8_lossy(&output.stderr);
   assert!(
-    stderr.contains("already running as PID") || stderr.contains(".lock"),
+    stderr.contains("already running as PID"),
     "second run's stderr should say another runner holds the lock; got: {stderr}"
   );
 }
