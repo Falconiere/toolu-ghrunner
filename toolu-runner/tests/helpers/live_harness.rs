@@ -5,9 +5,8 @@
 //! `~/.toolu-runner` stand-in and a built `toolu-runner` binary.
 //!
 //! Included via `#[path = "helpers/live_harness.rs"] mod harness;` by
-//! the live test entries `tests/live_register.rs` and
-//! `tests/live_run.rs` — Cargo does not compile `tests/helpers/**`
-//! as a test target of its own. The GitHub REST helpers (workflow
+//! the live test entry `tests/live_e2e.rs` — Cargo does not compile
+//! `tests/helpers/**` as a test target of its own. The GitHub REST helpers (workflow
 //! push/delete, dispatch, run polling, teardown) live in the child
 //! module [`api`] (`live_harness_api.rs`).
 //!

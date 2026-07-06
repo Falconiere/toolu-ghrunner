@@ -225,7 +225,8 @@ async fn find_runner_id_by_name(
   name: &str,
 ) -> Result<Option<i64>, RunnerError> {
   let response = client
-    .get(format!("{runners_base}?name={name}"))
+    .get(runners_base)
+    .query(&[("name", name)])
     .bearer_auth(token)
     .header("Accept", "application/vnd.github+json")
     .header("X-GitHub-Api-Version", "2022-11-28")
