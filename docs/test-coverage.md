@@ -54,8 +54,9 @@ Lane legend:
 
 `toolu-runner/tests/fixtures/`:
 
-- `noop-workflow.yml` — `run: echo hello` workflow. Pushed by `tests/live_e2e.rs::noop_job_completes` to the test repo before dispatch.
-- `multi-step-workflow.yml` — `checkout@v4` + `setup-node@v4` + `docker://alpine:3.19` + `run: echo`. Pushed by a future live test (the unit-test path is the live harness's `multi_step_job` test).
+- `noop-workflow.yml` — `run: echo hello` workflow. Pushed by `toolu-runner/tests/live_e2e.rs::noop_job_completes` to the test repo before dispatch.
+
+(The multi-step workflow — `checkout@v4` + `setup-node@v4` + a docker-pull step — is embedded inline in `toolu-runner/tests/live_e2e.rs::multi_step_job`, not a fixture file.)
 
 ## Summary
 
