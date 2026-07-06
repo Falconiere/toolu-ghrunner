@@ -35,7 +35,9 @@ pub(super) fn resolve_step_env(
 /// such value into `""` (live bug: `WHO=${{ inputs.who }}` came out
 /// empty). Literals still pass through `interpolate_string` so an inline
 /// `${{ }}` inside a literal keeps working; expressions are evaluated
-/// with GitHub's string coercion.
+/// with GitHub's string coercion. Bare scalars follow the same coercion
+/// rules: booleans (type 5) render lowercase, numbers (type 6) drop a
+/// trailing `.0`, and null (type 7) is the empty string.
 fn env_token_to_string(
   token: &TemplateToken,
   ctx: &ExecutionContext,
