@@ -76,9 +76,10 @@ struct RunArgs {
   /// Path to the runner config file.
   #[arg(long)]
   config: Option<PathBuf>,
-  /// Exit after the first job completes. Currently the default: a JIT
+  /// Exit after the first job completes. Currently a no-op: a JIT
   /// registration is single-use, so the listener always exits after one
-  /// job. Kept as an explicit flag for scripts and future daemon mode.
+  /// job with or without this flag. Kept for scripts and a future
+  /// daemon mode, where omitting it would mean "keep listening".
   #[arg(long)]
   once: bool,
 }

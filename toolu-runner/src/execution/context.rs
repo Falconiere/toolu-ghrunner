@@ -400,7 +400,9 @@ impl ExecutionContext {
     // it the step env's PATH would be ONLY the additions, the spawn-time env
     // override would clobber the inherited PATH, and the step shell (`bash`)
     // becomes unresolvable (live bug: every run-step after setup-node
-    // failed with ENOENT).
+    // failed with ENOENT). The fallback is read lazily per step; steps
+    // run as child processes and cannot mutate this process's PATH, so
+    // it is stable for the life of the (single-job) run.
     if !self.path_additions.is_empty() {
       let existing = result
         .get("PATH")
