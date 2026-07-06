@@ -420,6 +420,22 @@ fn runner_group_id(group: &str) -> Option<i64> {
   None
 }
 
+/// Lift the JIT config blob out of the persisted config (written by
+/// `register` via generate-jitconfig). An empty blob means the config
+/// predates live registration — re-run `register`.
+fn require_jit_config(
+  cfg: &RunnerRegistrationConfig,
+) -> Result<String, Box<dyn std::error::Error>> {
+  let blob = cfg.runtime.jit_config.clone();
+  if blob.is_empty() {
+    return Err(
+      "config.toml has no JIT config blob — re-run `toolu-runner register` against a live GH repo"
+        .into(),
+    );
+  }
+  Ok(blob)
+}
+
 async fn cmd_run(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
   let masker = Arc::new(std::sync::Mutex::new(SecretMasker::new()));
   init_tracing_for(&masker).map_err(|e| format!("startup init: {e}"))?;
@@ -441,17 +457,7 @@ async fn cmd_run(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
     services_mode: cfg.services_mode(),
   };
 
-  // The JIT config blob comes from the persisted config (written by
-  // `register` via generate-jitconfig). An empty blob means the config
-  // predates live registration — re-run `register`.
-  let jit_config_b64 = cfg.runtime.jit_config.clone();
-  if jit_config_b64.is_empty() {
-    return Err(
-      "config.toml has no JIT config blob — re-run `toolu-runner register` against a live GH repo"
-        .into(),
-    );
-  }
-
+  let jit_config_b64 = require_jit_config(&cfg)?;
   let listener = GitHubListener::new(&jit_config_b64, runner_cfg, masker)
     .map_err(|e| format!("listener init: {e}"))?;
 
@@ -461,7 +467,9 @@ async fn cmd_run(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
   // the listener exits after the first job completes. (An earlier stub
   // cancelled after 100ms here, which killed the poll loop before any
   // job could arrive.)
-  let _ = args.once;
+  if args.once {
+    tracing::info!("--once is currently the default: the listener exits after the first job");
+  }
 
   let result = listener
     .run(cancel)

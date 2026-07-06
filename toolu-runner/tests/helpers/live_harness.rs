@@ -12,8 +12,10 @@
 //!
 //! ## Env contract
 //!
-//! - `TOOLU_RUNNER_LIVE_TOKEN` — GitHub PAT with `repo` + `workflow`
-//!   scopes on the test repo.
+//! - `TOOLU_RUNNER_LIVE_TOKEN` — GitHub classic PAT with `repo` +
+//!   `workflow` scopes on the test repo. Classic `repo` includes
+//!   repository administration, which `generate-jitconfig` requires;
+//!   a fine-grained token needs explicit `administration:write`.
 //! - `TOOLU_RUNNER_LIVE_REPO` — `owner/name` of the test repo.
 //! - `TOOLU_RUNNER_LIVE_BRANCH` — optional, defaults to `main`.
 //!
@@ -167,9 +169,10 @@ impl LiveHarness {
   ///
   /// The PAT is passed straight through as `--token`:
   /// `generate-jitconfig` is a plain REST endpoint that authenticates
-  /// with a PAT / App token (`administration:write`) — the classic
-  /// `registration-token` exchange is a different (non-JIT) flow and
-  /// yields 401 here.
+  /// with a PAT / App token holding repository administration (the
+  /// classic `repo` scope covers it; fine-grained tokens need
+  /// `administration:write`) — the `registration-token` exchange is a
+  /// different (non-JIT) flow and yields 401 here.
   pub async fn register(&self) -> Result<(), Box<dyn std::error::Error>> {
     let url = format!("https://github.com/{}", self.repo);
     let runner_name = format!(
