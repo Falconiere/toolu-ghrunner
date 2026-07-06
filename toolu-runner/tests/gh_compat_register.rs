@@ -240,11 +240,11 @@ async fn register_jit_is_all_or_nothing_on_non_2xx() {
   );
 }
 
-/// Mount the `--replace` stub choreography: first mint 409s, the runner
-/// list yields the same-name runner, its DELETE succeeds, and the retry
-/// mint 201s with `response_json` (the real-shaped fixture). Each mock's
-/// `expect` makes the mount assert the step actually ran.
-async fn mount_replace_flow(server: &MockServer, response_json: Value) {
+/// Mount the shared `--replace` prelude: the first mint 409s, the
+/// runner list yields the same-name runner (id 42), and its DELETE
+/// succeeds. Each test mounts its own retry-mint response on top.
+/// Each mock's `expect` makes the mount assert the step actually ran.
+async fn mount_replace_prelude(server: &MockServer) {
   Mock::given(method("POST"))
     .and(path(STUB_PATH))
     .respond_with(ResponseTemplate::new(409).set_body_string(
@@ -270,6 +270,12 @@ async fn mount_replace_flow(server: &MockServer, response_json: Value) {
     .expect(1)
     .mount(server)
     .await;
+}
+
+/// Mount the full happy-path `--replace` choreography: the prelude plus
+/// a retry mint that 201s with `response_json` (the real-shaped fixture).
+async fn mount_replace_flow(server: &MockServer, response_json: Value) {
+  mount_replace_prelude(server).await;
   Mock::given(method("POST"))
     .and(path(STUB_PATH))
     .respond_with(ResponseTemplate::new(201).set_body_json(response_json))
@@ -293,6 +299,80 @@ async fn register_jit_replaces_same_name_runner_on_409() {
 
   assert_eq!(reg.runner_id, FIXTURE_RUNNER_ID);
   assert_eq!(reg.runner_name, "runner-1");
+}
+
+#[tokio::test]
+async fn register_jit_surfaces_retry_failure_with_replace_context() {
+  let server = MockServer::start().await;
+  // First mint 409s, the same-name runner is found and deleted, but the
+  // retry mint fails with 403 — the error must carry the retry context.
+  mount_replace_prelude(&server).await;
+  Mock::given(method("POST"))
+    .and(path(STUB_PATH))
+    .respond_with(
+      ResponseTemplate::new(403)
+        .set_body_string(r#"{"message":"Must have admin rights to Repository."}"#),
+    )
+    .expect(1)
+    .mount(&server)
+    .await;
+
+  let client = reqwest::Client::new();
+  let url = stub_repo_url(&server);
+  let labels = ["self-hosted".to_owned()];
+  let err = register_jit(&client, &params_for(&url, "reg-token-xyz", &labels, true))
+    .await
+    .expect_err("a non-2xx on the retry mint must yield an Err");
+
+  let msg = format!("{err}");
+  assert!(
+    msg.contains("after --replace retry"),
+    "retry context surfaced: {msg}"
+  );
+  assert!(msg.contains("403"), "retry status surfaced: {msg}");
+  assert!(
+    msg.contains("admin rights"),
+    "GitHub's retry body surfaced: {msg}"
+  );
+}
+
+#[tokio::test]
+async fn register_jit_replace_errors_when_no_same_name_runner() {
+  let server = MockServer::start().await;
+  // 409 on the mint, but the runner list has no same-name runner — the
+  // 409 must then have another cause, so replace fails loudly instead
+  // of deleting nothing and retrying into the same 409.
+  Mock::given(method("POST"))
+    .and(path(STUB_PATH))
+    .respond_with(ResponseTemplate::new(409).set_body_string(
+      r#"{"message":"Already exists - A runner with the name runner-1 already exists."}"#,
+    ))
+    .expect(1)
+    .mount(&server)
+    .await;
+  Mock::given(method("GET"))
+    .and(path(STUB_RUNNERS_PATH))
+    .and(query_param("name", "runner-1"))
+    .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+      "total_count": 0,
+      "runners": [],
+    })))
+    .expect(1)
+    .mount(&server)
+    .await;
+
+  let client = reqwest::Client::new();
+  let url = stub_repo_url(&server);
+  let labels = ["self-hosted".to_owned()];
+  let err = register_jit(&client, &params_for(&url, "reg-token-xyz", &labels, true))
+    .await
+    .expect_err("409 with no same-name runner to replace must error");
+
+  let msg = format!("{err}");
+  assert!(
+    msg.contains("no runner named 'runner-1'"),
+    "missing-runner cause surfaced: {msg}"
+  );
 }
 
 #[tokio::test]
