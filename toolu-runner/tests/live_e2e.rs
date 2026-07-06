@@ -18,6 +18,10 @@
 
 use std::time::Duration;
 
+// White-box on purpose: AC #1 asserts the exact persisted shapes of
+// `config.toml` / `credentials.json`, so this test deserializes them
+// with the same lib types `register` writes them with. All
+// process-level interaction still goes through `LiveHarness`.
 use toolu_runner::config::{
   CredentialsFile, RunnerRegistrationConfig, load_config as load_reg_config, load_credentials,
 };
@@ -85,10 +89,13 @@ fn assert_config_shape(cfg: &RunnerRegistrationConfig, repo: &str) {
     format!("https://github.com/{repo}"),
     "runner_url should be the test repo URL"
   );
-  assert!(
-    cfg.runner_name.starts_with("toolu-runner-live-"),
-    "runner_name should be derived from the repo: {}",
-    cfg.runner_name
+  assert_eq!(
+    cfg.runner_name,
+    format!(
+      "toolu-runner-live-{}",
+      repo.replace('/', "-").to_lowercase()
+    ),
+    "runner_name should be the harness's deterministic derivation from the repo"
   );
   assert!(
     cfg.labels.contains(&"self-hosted".to_owned()),
@@ -113,8 +120,8 @@ fn assert_config_shape(cfg: &RunnerRegistrationConfig, repo: &str) {
 /// RFC3339 `issued_at`.
 fn assert_credentials_shape(creds: &CredentialsFile) {
   assert!(
-    uuid::Uuid::parse_str(&creds.access_token).is_ok(),
-    "access_token should be the client_id UUID from the JIT config; got prefix: {}",
+    uuid::Uuid::parse_str(&creds.access_token).is_ok_and(|id| !id.is_nil()),
+    "access_token should be the non-nil client_id UUID from the JIT config; got prefix: {}",
     creds.access_token.get(..16).unwrap_or("?")
   );
   assert!(
@@ -467,7 +474,7 @@ async fn concurrent_single_job() {
   );
   let stderr = String::from_utf8_lossy(&output.stderr);
   assert!(
-    stderr.contains("already running as PID") || stderr.contains("lock"),
+    stderr.contains("already running as PID") || stderr.contains(".lock"),
     "second run's stderr should say another runner holds the lock; got: {stderr}"
   );
 }
