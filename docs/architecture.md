@@ -461,6 +461,40 @@ lock (holder PID dead AND mtime > 5 min) is removed and re-acquired
 by the next `run`. The watcher is intentionally simple — there is no
 forked watcher task; recovery happens at the next acquire attempt.
 
+## Release pipeline
+
+Releases are cut by `.github/workflows/release.yml`, triggered on a
+`v*` tag push. The workflow reads the repo and never writes to it —
+the version is human-authored in `Cargo.toml` + `CHANGELOG.md` before
+tagging.
+
+```
+push tag vX.Y.Z
+      │
+      ▼
+verify (ubuntu)      scripts/assert-version.sh — tag must equal the
+      │              [workspace.package] version, else fail fast; then
+      │              cargo fmt / clippy / test (the ci.yml gate).
+      ▼
+build (matrix ×4)    native runners, no cross: darwin/arm64 (macos-14),
+      │              darwin/amd64 (macos-15-intel), linux/amd64
+      │              (ubuntu-24.04), linux/arm64 (ubuntu-24.04-arm).
+      │              cargo build --release --locked, then
+      │              scripts/package-release.sh assembles
+      │              toolu-runner-<os>-<arch>.tar.gz (binary + scripts/).
+      ▼
+publish (ubuntu)     sha256sum → SHA256SUMS; scripts/changelog-extract.sh
+                     → release notes; gh release create (contents: write,
+                     --prerelease iff the tag contains '-').
+```
+
+The asset names + tarball layout are the contract `install.sh`
+consumes (`toolu-runner-<os>-<arch>.tar.gz`, binary at root, service
+files under `scripts/`). glibc-dynamic only — a static musl build is
+deferred because `tokio-tungstenite` pulls `native-tls` → openssl-sys.
+The four release scripts are unit-tested against real repo files under
+`scripts/test/` and run in `ci.yml`.
+
 ## Failure modes
 
 The following are the v1 failure paths. Anything not listed is

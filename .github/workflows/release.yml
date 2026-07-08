@@ -1,0 +1,102 @@
+name: release
+
+# Tag-driven release: push vX.Y.Z -> verify tag==Cargo version -> gate ->
+# build 4 native targets -> package tarballs (install.sh layout) + SHA256SUMS
+# -> publish a GitHub Release with CHANGELOG-derived notes. The workflow reads
+# the repo, never writes to it. See docs/toolu/specs/2026-07-08-release-automation-design.md
+on:
+  push:
+    tags: ['v*']
+
+# Least privilege by default; only `publish` is granted write to cut the release.
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assert tag matches Cargo version
+        run: bash scripts/assert-version.sh "${GITHUB_REF_NAME}"
+      - uses: dtolnay/rust-toolchain@1.94.1
+        with:
+          components: rustfmt, clippy
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --workspace
+
+  build:
+    needs: verify
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - runner: macos-14
+            os: darwin
+            arch: arm64
+          - runner: macos-15-intel
+            os: darwin
+            arch: amd64
+          - runner: ubuntu-24.04
+            os: linux
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            os: linux
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.94.1
+      # Native host build (no --target): each runner's host triple IS the
+      # release target. --locked pins the committed Cargo.lock.
+      - name: Build release binary
+        run: cargo build --release --locked --bin toolu-runner
+      - name: Package tarball
+        run: bash scripts/package-release.sh "${{ matrix.os }}" "${{ matrix.arch }}" target/release/toolu-runner dist
+      - name: Upload tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: toolu-runner-${{ matrix.os }}-${{ matrix.arch }}
+          path: dist/toolu-runner-${{ matrix.os }}-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # create the release + upload assets
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download all tarballs
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Compute SHA256SUMS
+        working-directory: dist
+        run: sha256sum -- *.tar.gz > SHA256SUMS
+      - name: Extract release notes from CHANGELOG
+        run: bash scripts/changelog-extract.sh "${GITHUB_REF_NAME}" > release-notes.md
+      - name: Determine prerelease flag
+        id: pre
+        # A tag containing '-' (e.g. v0.2.0-rc.1) is a prerelease, keeping
+        # GitHub's `latest` (which install.sh resolves) stable-only.
+        run: |
+          if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
+            echo "flag=--prerelease" >> "$GITHUB_OUTPUT"
+          else
+            echo "flag=" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            dist/toolu-runner-*.tar.gz dist/SHA256SUMS \
+            --title "${GITHUB_REF_NAME}" \
+            --notes-file release-notes.md \
+            ${{ steps.pre.outputs.flag }}

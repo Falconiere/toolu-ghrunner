@@ -180,6 +180,33 @@ Service test scripts live at `scripts/test/plist_test.sh` (macOS)
 and `scripts/test/systemd_test.sh` (Linux). They are smoke checks
 that the unit file parses, not end-to-end service bring-up tests.
 
+## Releasing
+
+Releases are automated by
+[`.github/workflows/release.yml`](.github/workflows/release.yml). The
+workflow reads the repo and never writes to it — the version is
+human-authored. To cut a release:
+
+1. In a PR, bump `[workspace.package] version` in `Cargo.toml` and move
+   the `CHANGELOG.md` `[Unreleased]` section to `[X.Y.Z]`. Merge it.
+2. Tag the merge commit and push:
+
+   ```sh
+   git tag vX.Y.Z
+   git push origin vX.Y.Z
+   ```
+
+The tag push triggers `release.yml`, which asserts the tag matches the
+`Cargo.toml` version (`scripts/assert-version.sh`), runs the
+fmt/clippy/test gate, builds on four native runners (`darwin` / `linux`
+× `amd64` / `arm64`), packages one `toolu-runner-<os>-<arch>.tar.gz` per
+target (binary + `scripts/` service files, via
+`scripts/package-release.sh`), computes `SHA256SUMS`, and publishes a
+GitHub Release with notes from that version's `CHANGELOG.md` section
+(`scripts/changelog-extract.sh`). Tags containing a `-` (e.g.
+`v0.2.0-rc.1`) publish as prereleases, so `install.sh`'s "latest" stays
+on stable.
+
 ## Environment variables
 
 | Variable                   | Default                  | Used by              | Description |

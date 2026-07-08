@@ -39,3 +39,10 @@ jobs:
             echo "ERROR: protocol crate must not depend on I/O crates"
             exit 1
           fi
+      - name: Run release-script tests
+        # Explicit list, not a scripts/test/*.sh glob — the plist/systemd tests
+        # there are macOS-only and would fail on ubuntu.
+        run: |
+          for t in assert_version changelog_extract package_release release_workflow; do
+            bash "scripts/test/${t}_test.sh"
+          done
