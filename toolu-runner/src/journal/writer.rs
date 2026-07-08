@@ -156,9 +156,9 @@ impl Writer {
 
   /// Serialize, mask, and append one line.
   async fn write_event(&mut self, ts: String, event: JournalEvent) {
-    let Some(file) = self.file.as_mut() else {
+    if self.file.is_none() {
       return;
-    };
+    }
     let line = JournalLine {
       v: JOURNAL_VERSION,
       seq: self.seq,
@@ -172,12 +172,22 @@ impl Writer {
         return;
       },
     };
-    // Recover a poisoned masker lock — redaction state is still valid.
-    let masked = self
-      .masker
-      .lock()
-      .unwrap_or_else(std::sync::PoisonError::into_inner)
-      .mask(&json);
+    // Mask before touching the file. A poisoned masker means a holder
+    // panicked mid-mutation, so its secret set may be incomplete and
+    // redaction can no longer be trusted — fail CLOSED (stop journaling)
+    // rather than risk writing an unmasked secret. Bind to an `Option` so
+    // the guard (and the `PoisonError` on the error path) drops before the
+    // `&mut self` calls below.
+    let masked = self.masker.lock().ok().map(|guard| guard.mask(&json));
+    let Some(masked) = masked else {
+      self.fail_closed(
+        "journal: secret masker lock poisoned; journaling disabled to avoid leaking a secret",
+      );
+      return;
+    };
+    let Some(file) = self.file.as_mut() else {
+      return;
+    };
     if let Err(e) = file.write_all(masked.as_bytes()).await {
       self.fail_once(
         &e,
@@ -211,6 +221,15 @@ impl Writer {
   fn fail_once(&mut self, e: &std::io::Error, msg: &'static str) {
     if !self.failed {
       tracing::warn!(error = %e, "{msg}");
+    }
+    self.failed = true;
+    self.file = None;
+  }
+
+  /// Like `fail_once` but for a non-I/O reason (e.g. a poisoned masker).
+  fn fail_closed(&mut self, msg: &'static str) {
+    if !self.failed {
+      tracing::warn!("{msg}");
     }
     self.failed = true;
     self.file = None;
