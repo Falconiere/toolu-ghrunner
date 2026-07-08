@@ -288,7 +288,7 @@ install_service() {
       local plist_dst="$HOME/Library/LaunchAgents/io.$BIN_NAME.plist"
       if [[ ! -f "$plist_src" ]]; then
         err "--service requested but $plist_src was not found in the release tarball"
-        err "service files ship in step 14; install the binary without --service for now"
+        err "the tarball may be too old or corrupt; re-download, or install without --service"
         return 1
       fi
       mkdir -p "$(dirname "$plist_dst")"
@@ -307,7 +307,7 @@ install_service() {
       local unit_dst="/etc/systemd/system/$BIN_NAME.service"
       if [[ ! -f "$unit_src" ]]; then
         err "--service requested but $unit_src was not found in the release tarball"
-        err "service files ship in step 14; install the binary without --service for now"
+        err "the tarball may be too old or corrupt; re-download, or install without --service"
         return 1
       fi
       if [[ $EUID -ne 0 ]]; then

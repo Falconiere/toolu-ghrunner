@@ -164,6 +164,25 @@ redaction, and a CLI for register / run / remove / status.
 - `lefthook.yml` — `pre-commit` runs fmt + clippy + yamless
   coupling check; `pre-push` runs `./tools/check.sh all`.
 
+**Release automation**
+
+- `.github/workflows/release.yml` — tag-driven release automation. On
+  a `v*` tag push: asserts the tag matches the `Cargo.toml` version,
+  runs the fmt/clippy/test gate, builds on four native runners
+  (`darwin` / `linux` × `amd64` / `arm64`), packages one
+  `toolu-runner-<os>-<arch>.tar.gz` per target (binary + `scripts/`
+  service files), computes `SHA256SUMS`, and publishes a GitHub
+  Release with notes from this file's matching section. Tags with a
+  `-` publish as prereleases. The workflow never writes to the repo.
+- `scripts/assert-version.sh` — asserts a release tag matches the
+  `[workspace.package]` version.
+- `scripts/package-release.sh` — assembles the per-target tarball in
+  the exact layout `install.sh` expects.
+- `scripts/changelog-extract.sh` — extracts a version's section from
+  this file for the GitHub Release notes.
+- `scripts/test/{assert_version,changelog_extract,package_release,release_workflow}_test.sh`
+  — real-data tests for the release scripts + workflow, run in CI.
+
 **Tests**
 
 - 196 tests across `shared`, `protocol`, `toolu-runner`
