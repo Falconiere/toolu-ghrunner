@@ -1,33 +1,29 @@
 //! GitHub Actions JIT listener, execution engine, and CLI binary.
-//!
-//! Module map:
-//! - [`net`] — async network layer (token exchange, session, job lifecycle).
-//! - [`listener`] — GitHub JIT lifecycle (handler, job execution loop).
-//! - [`reporting`] — run service, results service, log upload, timeline.
-//! - [`execution`] — job execution engine (context, steps runner, handlers).
-//! - [`docker`] — bollard wrapper, service containers, path translation.
-//! - [`node`] — Node.js runtime detection and caching.
-//! - [`plugin`] — `RunnerPlugin` trait and registry.
-//! - [`lockfile`] — single-job file lock for the `.lock` next to the
-//!   registration config; prevents two `run` processes from sharing one
-//!   registration.
-//! - [`config`] — persisted registration + runtime config (`config.toml`)
-//!   and OAuth credentials (`credentials.json`); matches the
-//!   `~/.toolu-runner/` storage layout from the spec.
-//!
-//! Populated progressively in steps 2–9 per the plan.
 
 #![doc(html_root_url = "https://docs.rs/toolu-runner/0.1.0")]
 
+/// Persisted registration/runtime config (`config.toml`) + OAuth credentials.
 pub mod config;
+/// Bollard wrapper: daemon client, service containers, path translation.
 pub mod docker;
+/// Job execution engine (context, steps runner, handlers, expressions).
 pub mod execution;
+/// Per-job JSONL event journal under `_diag/jobs/`; read by `watch`.
+pub mod journal;
+/// GitHub JIT lifecycle: handler, poll loop, execution loop.
 pub mod listener;
+/// Single-job `.lock` file preventing two `run` processes per registration.
 pub mod lockfile;
+/// Async network layer: token exchange, session, messages, run service.
 pub mod net;
+/// Node.js runtime detection, download, and caching.
 pub mod node;
+/// `RunnerPlugin` trait and registry.
 pub mod plugin;
+/// Run service / results service domain types and async wrappers.
 pub mod reporting;
+/// `watch` subcommand: TUI over the job journal (history + live tail).
+pub mod watch;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

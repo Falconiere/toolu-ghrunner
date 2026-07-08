@@ -31,7 +31,7 @@ toolu-ghrunner/                            workspace root
 │   ├── v1/                                GHES V1 types + resolve_service_url
 │   └── tests/integration.rs               sync crypto tests against fixtures
 └── toolu-runner/                          lib + bin (the runner)
-    ├── src/main.rs                        clap CLI: register / run / remove / status
+    ├── src/main.rs                        clap CLI: register / run / remove / status / watch
     ├── src/lib.rs                         Runner struct, execute_job
     ├── src/config.rs                      TOML + JSON config load/save
     ├── src/lockfile.rs                    single-job fs2 lock
@@ -42,6 +42,8 @@ toolu-ghrunner/                            workspace root
     ├── src/docker/                        bollard wrapper
     ├── src/node/                          Node.js runtime detection + cache
     ├── src/plugin/                        RunnerPlugin trait + registry
+    ├── src/journal/                       per-job JSONL event journal (types, writer, reader)
+    ├── src/watch/                         `watch` TUI (state reducer, ratatui ui, input)
     ├── src/types/                         RunnerConfig (duplicates shared::RunnerConfig for crate-local imports)
     └── tests/                             5 integration tests (CLI, listener, failure modes, storage)
 ```
@@ -268,6 +270,33 @@ append-blob; cache with a layered local-disk + remote backend).
 - `plugin` — `RunnerPlugin` trait + `PluginRegistry`. Plugins can
   add custom step types and override behavior.
 
+### `journal/` + `watch/` — local observability
+
+The listener's `ListenerEvent` channel (every `RunnerEvent` plus
+session / acquire / lock events) is sunk by `journal::writer` into
+`data_dir/_diag/jobs/<UTC ts>-<job_id>.jsonl` — one JSON line per
+event, secret-masked through the same `SecretMasker` as the diag log.
+Line contract (v1, `journal::types`):
+
+```json
+{"v":1,"seq":12,"ts":"2026-07-08T12:34:56.789Z","type":"log","step_id":"s1","line":"hello","stream":"stdout"}
+```
+
+Envelope: `v` (contract version), `seq` (0-based, monotonic per file),
+`ts` (RFC3339 UTC), then the flattened event under a snake_case
+`type` tag. Readers skip unparseable / unknown-version lines; a
+partial trailing line is re-read on the next poll. Pre-acquire events
+are buffered (cap 256) until `job_acquired` names the file; the dir
+is pruned to the newest 50 journals; a write failure WARNs once and
+disables journaling without touching the job.
+
+`toolu-runner watch` (`watch/`) is a ratatui TUI over that directory:
+job history list (newest first, conclusion badges), step tree + log
+tail for the opened journal (250 ms poll, 1 s rescan), and `c` →
+confirm → SIGINT to the `.lock` PID (unix only) riding the existing
+graceful-cancel path. Works with no runner running and no config —
+it falls back to `~/.toolu-runner` for pure history browsing.
+
 ## Sequence: register
 
 ```
@@ -442,7 +471,9 @@ warn and returns — the user is expected to restart `run`.
 │       └── <job-id>/
 ├── _diag/                      # log files, diagnostic dumps
 │   ├── runner.log              # JSON, secret-masked, daily-rotated
-│   └── runner.log.YYYY-MM-DD   # rotated archives
+│   ├── runner.log.YYYY-MM-DD   # rotated archives
+│   └── jobs/                   # per-job JSONL event journals (watch TUI)
+│       └── <ts>-<job-id>.jsonl # newest 50 kept, secret-masked
 └── .runner_version             # installed toolu-runner version
 ```
 
