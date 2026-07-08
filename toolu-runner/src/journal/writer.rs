@@ -218,7 +218,11 @@ impl Writer {
 }
 
 /// Delete the oldest `.jsonl` files (lexicographic name order = time order)
-/// so that after the next file is created the dir holds ≤ `JOURNAL_RETAIN`.
+/// so that after the caller creates the next file the dir holds at most
+/// `JOURNAL_RETAIN`. Called before creation: with fewer than `JOURNAL_RETAIN`
+/// files the guard returns early (nothing to prune yet, the new file still
+/// leaves the dir under the cap); at or above it, the `+ 1` prunes down to
+/// `JOURNAL_RETAIN - 1` to make room for the file about to be created.
 async fn prune_jobs_dir(dir: &std::path::Path) {
   let Some(mut names) = list_journals(dir).await else {
     return;

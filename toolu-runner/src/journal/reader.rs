@@ -1,6 +1,7 @@
 //! Incremental journal reader (replay + poll-tail) and the jobs-dir
 //! scanner behind the `watch` job list.
 
+use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
@@ -10,16 +11,23 @@ use super::types::{JOURNAL_VERSION, JournalEvent, JournalLine};
 const SCAN_WINDOW: usize = 8192;
 
 /// Incremental reader: replays a journal from byte 0, then tails it.
+/// Holds the file open across polls (the tail loop runs every ~250 ms on
+/// a single append-only journal), re-opening lazily on the first poll.
 #[derive(Debug)]
 pub struct JournalReader {
   path: PathBuf,
   offset: u64,
+  file: Option<File>,
 }
 
 impl JournalReader {
   /// Reader positioned at the start of `path`.
   pub fn new(path: PathBuf) -> Self {
-    Self { path, offset: 0 }
+    Self {
+      path,
+      offset: 0,
+      file: None,
+    }
   }
 
   /// The journal file this reader tails.
@@ -38,18 +46,29 @@ impl JournalReader {
   ///
   /// Propagates I/O errors from opening or reading the journal file.
   pub fn poll(&mut self) -> std::io::Result<Vec<JournalLine>> {
-    let mut file = std::io::BufReader::new(std::fs::File::open(&self.path)?);
-    file.seek(SeekFrom::Start(self.offset))?;
+    // Lazily open once and keep the handle; `insert` returns `&mut File`
+    // without an unwrap when the slot was empty.
+    let offset = self.offset;
+    let file = match self.file.as_mut() {
+      Some(f) => f,
+      None => self.file.insert(File::open(&self.path)?),
+    };
+    file.seek(SeekFrom::Start(offset))?;
+    // Reads only the bytes appended since `offset`, not the whole file.
     let mut buf = Vec::new();
-    file.read_to_end(&mut buf)?;
+    std::io::BufReader::new(file).read_to_end(&mut buf)?;
     let Some(last_nl) = buf.iter().rposition(|&b| b == b'\n') else {
       return Ok(Vec::new());
     };
-    let Some(complete) = buf.get(..=last_nl) else {
-      return Ok(Vec::new());
-    };
-    self.offset += u64::try_from(last_nl).unwrap_or_default() + 1;
-    let text = String::from_utf8_lossy(complete);
+    // Drop any partial trailing line; keep bytes through the last newline.
+    buf.truncate(last_nl + 1);
+    // usize→u64 is infallible on supported targets; on a hypothetical
+    // failure leave the offset unchanged (re-read next poll) rather than
+    // resetting it.
+    self.offset = self
+      .offset
+      .saturating_add(u64::try_from(buf.len()).unwrap_or(0));
+    let text = String::from_utf8_lossy(&buf);
     Ok(text.lines().filter_map(parse_line).collect())
   }
 }
@@ -164,17 +183,20 @@ fn read_window(path: &Path, tail: bool) -> Option<Vec<u8>> {
   Some(buf)
 }
 
-/// Parse the complete journal lines inside a window. A tail window may
-/// start mid-line, so its first fragment is dropped; a head window may end
-/// mid-line, so its trailing fragment is dropped.
+/// Parse the complete journal lines inside a window.
+///
+/// A tail window can start mid-line, so its first `split` fragment is
+/// dropped. The last `split` fragment is then always dropped too — for a
+/// newline-terminated window it is the trailing empty string, and for a
+/// window that ends mid-line it is the incomplete final fragment; either
+/// way it is not a complete line. This holds for both head and tail
+/// windows (the tail's leading fragment was already removed above).
 fn complete_lines(window: &[u8], tail: bool) -> Vec<JournalLine> {
   let text = String::from_utf8_lossy(window);
   let mut parts: Vec<&str> = text.split('\n').collect();
   if tail && parts.len() > 1 {
     parts.remove(0);
   }
-  // `split` yields a trailing "" for newline-terminated text; dropping the
-  // last part removes either that or an incomplete head fragment.
   parts.pop();
   parts.into_iter().filter_map(parse_line).collect()
 }

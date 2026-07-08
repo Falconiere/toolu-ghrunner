@@ -133,19 +133,29 @@ impl OpenJob {
     }
   }
 
-  /// Flag non-contiguous sequence numbers instead of failing.
+  /// Flag non-contiguous sequence numbers instead of failing. The first
+  /// line is always accepted, whatever its `seq` — only a gap *between*
+  /// consecutive lines trips the warning.
   fn track_seq(&mut self, seq: u64) {
-    let expected = self.last_seq.map_or(0, |s| s + 1);
-    if seq != expected {
+    if let Some(last) = self.last_seq
+      && seq != last + 1
+    {
       self.seq_gap = true;
     }
     self.last_seq = Some(seq);
   }
 
-  /// Insert a step (ordered by number) or refresh an existing row.
+  /// Insert a step (ordered by number) or refresh an existing row. A real
+  /// `StepStarted` (`number > 0`) upgrades a `StepSkipped` placeholder that
+  /// stored `step_id` as its name with `number == 0`.
   fn upsert_step(&mut self, step_id: String, name: String, number: u32, status: StepStatus) {
     if let Some(step) = self.steps.iter_mut().find(|s| s.step_id == step_id) {
       step.status = status;
+      if number > 0 {
+        step.name = name;
+        step.number = number;
+        self.steps.sort_by_key(|s| s.number);
+      }
       return;
     }
     self.steps.push(StepView {
