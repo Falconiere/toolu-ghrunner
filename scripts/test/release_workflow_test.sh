@@ -41,7 +41,7 @@ want "runs cargo test"                 "cargo test --workspace"
 # --- build (4 native targets) ---
 want "macos-14 (darwin arm64)"         "runner: macos-14"
 want "macos-15-intel (darwin amd64)"   "runner: macos-15-intel"
-want "ubuntu-24.04 (linux amd64)"      "runner: ubuntu-24\.04$"
+want "ubuntu-24.04 (linux amd64)"      "runner: ubuntu-24\.04[[:space:]]*$"
 want "ubuntu-24.04-arm (linux arm64)"  "runner: ubuntu-24\.04-arm"
 want "builds with --locked"            "cargo build --release --locked"
 want "packages via package-release.sh" "package-release\.sh"
@@ -53,7 +53,7 @@ want "contents: read default"          "contents: read"
 want "publish grants contents: write"  "contents: write"
 want "computes SHA256SUMS"             "sha256sum -- \*\.tar\.gz > SHA256SUMS"
 want "notes from changelog-extract.sh" "changelog-extract\.sh"
-want "prerelease on tag with '-'"      '\*-\*'
+want "prerelease on tag with '-'"      'GITHUB_REF_NAME.*\*-\*'
 want "passes --prerelease flag"        "flag=--prerelease"
 want "creates the release"             "gh release create"
 
