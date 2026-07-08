@@ -211,7 +211,7 @@ fn step_completed(
 ) -> JournalEvent {
   JournalEvent::StepCompleted {
     step_id: step_id.to_owned(),
-    conclusion: conclusion.to_report_string().to_owned(),
+    conclusion: conclusion_str(conclusion).to_owned(),
     outputs: outputs.clone(),
   }
 }
@@ -230,7 +230,7 @@ fn job_completed(
 ) -> JournalEvent {
   JournalEvent::JobCompleted {
     job_id: job_id.to_owned(),
-    conclusion: conclusion.to_report_string().to_owned(),
+    conclusion: conclusion_str(conclusion).to_owned(),
     outputs: outputs.clone(),
   }
 }

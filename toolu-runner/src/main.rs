@@ -109,8 +109,10 @@ struct StatusArgs {
 
 #[derive(Debug, Args)]
 struct WatchArgs {
-  /// Path to the runner config file. When absent or unreadable, `watch`
-  /// browses the default data dir (`~/.toolu-runner`) read-only.
+  /// Path to the runner config file (default `~/.toolu-runner/config.toml`).
+  /// When the file is absent or unreadable, `watch` falls back to browsing
+  /// the default data dir (`~/.toolu-runner`) read-only — the fallback is in
+  /// `watch::run_watch`.
   #[arg(long)]
   config: Option<PathBuf>,
 }

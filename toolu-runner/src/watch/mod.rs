@@ -206,9 +206,22 @@ fn open_job(app: &mut App, ctx: &mut WatchCtx, idx: usize) {
   app.follow = true;
 }
 
+/// Max bytes read from the `.lock` file. Its body is a tiny JSON object;
+/// the cap bounds memory if the path is replaced with a huge file.
+const LOCK_READ_CAP: u64 = 64 * 1024;
+
+/// Read at most `LOCK_READ_CAP` bytes of the lock file as a string.
+fn read_lock_capped(lock_path: &Path) -> std::io::Result<String> {
+  use std::io::Read;
+  let file = std::fs::File::open(lock_path)?;
+  let mut body = String::new();
+  file.take(LOCK_READ_CAP).read_to_string(&mut body)?;
+  Ok(body)
+}
+
 /// Header line describing the `.lock` holder.
 fn lock_line(lock_path: &Path) -> String {
-  match std::fs::read_to_string(lock_path) {
+  match read_lock_capped(lock_path) {
     Ok(body) => match serde_json::from_str::<crate::lockfile::LockBody>(&body) {
       Ok(lock) if crate::lockfile::is_pid_alive(lock.pid) => {
         format!("running (pid {}, since {})", lock.pid, lock.started_at)
@@ -229,7 +242,7 @@ fn lock_line(lock_path: &Path) -> String {
 /// PID is not running, or signal delivery is refused.
 #[cfg(unix)]
 pub fn send_cancel(lock_path: &Path) -> Result<u32, String> {
-  let body = std::fs::read_to_string(lock_path).map_err(|e| format!("no lock file: {e}"))?;
+  let body = read_lock_capped(lock_path).map_err(|e| format!("no lock file: {e}"))?;
   let lock: crate::lockfile::LockBody =
     serde_json::from_str(&body).map_err(|e| format!("lock body unreadable: {e}"))?;
   let mut sys = sysinfo::System::new();

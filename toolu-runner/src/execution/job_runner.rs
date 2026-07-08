@@ -181,9 +181,10 @@ fn setup_job_env(
   match offline_cache {
     // Offline: point the toolkit at the local cache service + local token.
     Some((service, token)) => {
+      // Register the mask before the token is placed anywhere.
+      ctx.add_mask(token);
       ctx.set_env("ACTIONS_CACHE_URL", service.base_url());
       ctx.set_env("ACTIONS_RUNTIME_TOKEN", token);
-      ctx.add_mask(token);
     },
     // Forwarder: copy the real GitHub service URLs + runtime token from the
     // message. A `None` URL is omitted (WARN); never an empty var.

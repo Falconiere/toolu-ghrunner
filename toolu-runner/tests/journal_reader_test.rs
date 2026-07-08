@@ -135,8 +135,9 @@ fn scan_jobs_summarizes_newest_first() -> TestResult {
   assert_eq!(jobs.len(), 2);
   let newest = jobs.first().ok_or("no jobs scanned")?;
   let oldest = jobs.get(1).ok_or("second job missing")?;
-  assert!(
-    newest.path.to_string_lossy().contains("running"),
+  assert_eq!(
+    newest.path.file_name().and_then(|n| n.to_str()),
+    Some("20260709T000000Z-running.jsonl"),
     "newest journal must come first"
   );
   assert_eq!(newest.conclusion, None, "no job_completed → running");

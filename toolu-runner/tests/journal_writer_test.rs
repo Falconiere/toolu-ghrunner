@@ -215,9 +215,15 @@ async fn retention_prunes_oldest_to_cap() -> TestResult {
     JOURNAL_RETAIN,
     "prune must cap the dir at the limit"
   );
+  // The pre-seeded files are lexicographically ordered by their zero-padded
+  // timestamp; the single oldest (`-old-0`) is the one pruned.
   assert!(
-    !names.iter().any(|n| n.ends_with("-old-0.jsonl")),
-    "oldest file should have been pruned; got {names:?}"
+    !names.contains(&"20200101T000000Z-old-0.jsonl".to_owned()),
+    "the single oldest pre-seeded file must be pruned; got {names:?}"
+  );
+  assert!(
+    names.contains(&"20200101T000001Z-old-1.jsonl".to_owned()),
+    "the second-oldest file must survive; got {names:?}"
   );
   assert!(
     names.last().is_some_and(|n| !n.starts_with("20200101")),
