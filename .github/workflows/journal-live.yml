@@ -1,0 +1,16 @@
+
+name: journal-fixture
+on:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: [self-hosted, toolu-runner-v1]
+    steps:
+      - name: greet
+        run: |
+          echo hello from step one
+          echo "::warning file=demo.txt,line=3::deprecated feature"
+      - name: token probe
+        run: echo "token-probe=[$ACTIONS_RUNTIME_TOKEN]"
+      - name: farewell
+        run: echo done from step two
