@@ -95,7 +95,7 @@ impl GitHubListener {
     // receiver were never read the bounded channel would fill and wedge the
     // job — the writer keeps draining even after a journal I/O failure. The
     // task ends when all `tx` clones drop (channel closes).
-    crate::journal::writer::spawn(
+    let journal = crate::journal::writer::spawn(
       rx,
       crate::journal::writer::jobs_dir_for(&self.config.data_dir),
       Arc::clone(&self.masker),
@@ -108,6 +108,13 @@ impl GitHubListener {
     }
 
     super::helpers::cleanup_session(&ctx).await;
+    // Drop the ctx (and its `tx`) so the journal channel closes, then wait
+    // for the writer to flush the final events (e.g. `job_completed`) before
+    // returning — otherwise a fast `--once` exit could truncate the tail.
+    drop(ctx);
+    if let Err(e) = journal.await {
+      tracing::warn!(error = %e, "journal writer task did not join cleanly");
+    }
     result
   }
 
