@@ -125,7 +125,8 @@ and no OTel.
 
 - `lib.rs` — `Runner` struct (config, `execute_job` returns an
   `mpsc::Receiver<RunnerEvent>`).
-- `main.rs` — clap CLI: `register`, `run`, `remove`, `status`.
+- `main.rs` — clap CLI: `register`, `run`, `remove`, `status`,
+  `watch`.
   `--config` defaults to `~/.toolu-runner/config.toml`. `register`
   validates `--url`, probes the JIT endpoint with a 5s HEAD,
   computes the protocol version from the host, and writes a
@@ -135,7 +136,8 @@ and no OTel.
   `CancellationToken`. `remove` writes `.pending_remove` if
   `.lock` is held, otherwise deletes the persisted state (live
   GH unregister call is step 10). `status` prints the config
-  without network.
+  without network. `watch` opens the journal TUI (no network, no
+  tracing init — logs would corrupt the alternate screen).
 - `config.rs` — `RunnerRegistrationConfig`, `RuntimeConfig`,
   `CredentialsFile`, `load_config` / `save_config` (TOML, 0600),
   `load_credentials` / `save_credentials` (JSON, 0600),
@@ -218,6 +220,27 @@ and no OTel.
   detection, download, cache at `data_dir/_node/<version>`).
 - `plugin/` — `RunnerPlugin` trait + `PluginRegistry`. New
   addition not in upstream `actions/runner`.
+- `journal/` — per-job JSONL event journal, the local observability
+  surface behind `watch`. `types` pins the on-disk line contract
+  (v1: `{"v":1,"seq":N,"ts":"…","type":"<snake_case event>",…}`,
+  decoupled from `shared::events` — internally-tagged serde enum
+  flattened into a version/seq/ts envelope). `writer` replaces the
+  old no-op `ListenerEvent` drain in `listener/handler.rs`: masks
+  every line through the job's `SecretMasker`, buffers pre-acquire
+  events (cap 256), names the file `<UTC ts>-<job_id>.jsonl` under
+  `data_dir/_diag/jobs/`, prunes to the newest 50, and NEVER fails
+  the job (WARN once, keep draining). `reader` is the incremental
+  replay/tail reader (`poll()` advances only past complete lines)
+  plus `scan_jobs` head/tail-window summaries.
+- `watch/` — `toolu-runner watch` ratatui TUI. `state` (pure reducer:
+  journal lines → job list / step tree / bounded 10k log ring /
+  seq-gap flag), `ui` (rendering), `input` (key → `Action`, cancel
+  confirm modal), `mod` (250 ms tick loop, 1 s rescan, terminal
+  lifecycle, `send_cancel` = SIGINT to the `.lock` PID, unix only).
+  Missing config falls back to `~/.toolu-runner` (history browsing).
+  Test fixture: `tests/fixtures/journal/canonical.jsonl`, captured
+  from a real engine run via `JOURNAL_CAPTURE=1 cargo test -p
+  toolu-runner --test journal_writer_test capture_canonical`.
 - `types/` — `RunnerConfig` (re-exported from `shared`).
 
 ## References

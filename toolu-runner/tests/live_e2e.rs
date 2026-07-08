@@ -25,6 +25,7 @@ use std::time::Duration;
 use toolu_runner::config::{
   CredentialsFile, RunnerRegistrationConfig, load_config as load_reg_config, load_credentials,
 };
+use toolu_runner::journal::{JournalEvent, JournalLine};
 
 #[path = "helpers/live_harness.rs"]
 mod harness;
@@ -72,6 +73,27 @@ macro_rules! require_live_env {
     }
   };
 }
+
+/// Workflow for the journal test (AC-1/AC-2): two named steps, a
+/// `::warning::` annotation, and a token-probe step that echoes
+/// `$ACTIONS_RUNTIME_TOKEN` — the journal must show it masked.
+const JOURNAL_YAML: &str = r#"
+name: journal-fixture
+on:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: [self-hosted, toolu-runner-v1]
+    steps:
+      - name: greet
+        run: |
+          echo hello from step one
+          echo "::warning file=demo.txt,line=3::deprecated feature"
+      - name: token probe
+        run: echo "token-probe=[$ACTIONS_RUNTIME_TOKEN]"
+      - name: farewell
+        run: echo done from step two
+"#;
 
 /// Wait for `child` to exit and return its `ExitStatus`. Used after
 /// `run_once` so the child doesn't outlive the test process. The
@@ -299,6 +321,105 @@ jobs:
   assert_eq!(
     conclusion, "success",
     "multistep run should conclude with success; got {conclusion}"
+  );
+}
+
+#[tokio::test]
+#[ignore = "live test — requires TOOLU_RUNNER_LIVE_TOKEN"]
+async fn journal_records_live_job_masked() {
+  require_live_env!();
+  let harness = LiveHarness::new().await.expect("harness init");
+  let workflow = "journal-live.yml";
+  let _cleanup = harness.cleanup(&[workflow]).await;
+
+  harness.register().await.expect("register");
+  harness
+    .push_workflow(workflow, JOURNAL_YAML)
+    .await
+    .expect("push journal workflow");
+
+  let child = harness.run_once().await.expect("spawn run --once");
+  let run_id = harness
+    .trigger_workflow(workflow)
+    .await
+    .expect("trigger workflow");
+  let conclusion = harness
+    .wait_for_run(run_id, Duration::from_secs(300))
+    .await
+    .expect("wait for run");
+  let _ = wait_child(child).await;
+  assert_eq!(conclusion, "success", "journal fixture run should succeed");
+
+  // AC-1: exactly one journal, every line v1, seq strict, full lifecycle.
+  let body = read_single_live_journal(&harness);
+  let lines: Vec<JournalLine> = body
+    .lines()
+    .map(|l| serde_json::from_str::<JournalLine>(l).expect("every journal line parses as v1"))
+    .collect();
+  assert!(!lines.is_empty(), "journal must not be empty");
+  for (i, line) in lines.iter().enumerate() {
+    assert_eq!(line.v, 1, "line {i} contract version");
+    assert_eq!(
+      line.seq,
+      u64::try_from(i).expect("seq index"),
+      "seq must be 0..N strictly increasing"
+    );
+  }
+  assert_journal_lifecycle(&lines);
+
+  // AC-2: the probe output is masked; no JWT-shaped value anywhere.
+  assert!(
+    body.contains("token-probe=[***]"),
+    "runtime token must be masked in the journal"
+  );
+  assert!(
+    !body.contains("eyJ"),
+    "JWT-shaped value leaked into the journal"
+  );
+}
+
+/// Locate the run's `_diag/jobs` dir via the persisted config and return
+/// the single journal's raw body.
+fn read_single_live_journal(harness: &LiveHarness) -> String {
+  let cfg = load_reg_config(&harness.config_dir.path().join("config.toml")).expect("load config");
+  let data_dir =
+    toolu_runner::config::resolve_data_dir(&cfg.runtime.data_dir).expect("resolve data dir");
+  let journals: Vec<_> = std::fs::read_dir(data_dir.join("_diag").join("jobs"))
+    .expect("jobs dir exists after a live run")
+    .filter_map(Result::ok)
+    .map(|e| e.path())
+    .collect();
+  assert_eq!(
+    journals.len(),
+    1,
+    "single-job run writes exactly one journal: {journals:?}"
+  );
+  std::fs::read_to_string(journals.first().expect("journal path")).expect("read journal")
+}
+
+/// AC-1 lifecycle assertions over a parsed live journal.
+fn assert_journal_lifecycle(lines: &[JournalLine]) {
+  let has = |pred: &dyn Fn(&JournalEvent) -> bool| lines.iter().any(|l| pred(&l.event));
+  assert!(has(&|e| matches!(e, JournalEvent::JobAcquired { .. })));
+  assert!(has(&|e| matches!(e, JournalEvent::JobStarted { .. })));
+  assert!(has(&|e| matches!(e, JournalEvent::StepStarted { .. })));
+  assert!(has(&|e| matches!(
+    e,
+    JournalEvent::StepCompleted { conclusion, .. } if conclusion == "success"
+  )));
+  assert!(
+    has(&|e| matches!(
+      e,
+      JournalEvent::Annotation { level, .. } if level == "warning"
+    )),
+    "::warning:: must journal as an annotation"
+  );
+  assert!(
+    matches!(
+      lines.last().map(|l| &l.event),
+      Some(JournalEvent::JobCompleted { conclusion, .. }) if conclusion == "success"
+    ),
+    "journal must end with job_completed success"
   );
 }
 

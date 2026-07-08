@@ -1,0 +1,17 @@
+{"v":1,"seq":0,"ts":"2026-07-08T21:00:44.358Z","type":"session_created","session_id":"00000000-0000-0000-0000-000000000000"}
+{"v":1,"seq":1,"ts":"2026-07-08T21:00:44.359Z","type":"job_acquired","job_id":"0e9d8c7b-3333-4444-8555-666677778888","run_service_url":"https://run.example"}
+{"v":1,"seq":2,"ts":"2026-07-08T21:00:44.359Z","type":"job_started","job_id":"0e9d8c7b-3333-4444-8555-666677778888","job_name":"build"}
+{"v":1,"seq":3,"ts":"2026-07-08T21:00:44.359Z","type":"step_started","step_id":"greet","step_name":"Run echo hello from step one","step_number":2}
+{"v":1,"seq":4,"ts":"2026-07-08T21:00:44.359Z","type":"log","step_id":"greet","line":"##[group]Run echo hello from step one\necho \"::warning file=demo.txt,line=3::deprecated feature\"","stream":"stdout"}
+{"v":1,"seq":5,"ts":"2026-07-08T21:00:44.359Z","type":"log","step_id":"greet","line":"##[endgroup]","stream":"stdout"}
+{"v":1,"seq":6,"ts":"2026-07-08T21:00:44.363Z","type":"log","step_id":"greet","line":"hello from step one","stream":"stdout"}
+{"v":1,"seq":7,"ts":"2026-07-08T21:00:44.363Z","type":"annotation","step_id":"greet","level":"warning","message":"deprecated feature","file":"demo.txt","line":3}
+{"v":1,"seq":8,"ts":"2026-07-08T21:00:44.365Z","type":"log","step_id":"greet","line":"Process completed with exit code 0.","stream":"stdout"}
+{"v":1,"seq":9,"ts":"2026-07-08T21:00:44.365Z","type":"step_completed","step_id":"greet","conclusion":"success","outputs":{}}
+{"v":1,"seq":10,"ts":"2026-07-08T21:00:44.365Z","type":"step_started","step_id":"farewell","step_name":"Run echo done from step two","step_number":3}
+{"v":1,"seq":11,"ts":"2026-07-08T21:00:44.365Z","type":"log","step_id":"farewell","line":"##[group]Run echo done from step two","stream":"stdout"}
+{"v":1,"seq":12,"ts":"2026-07-08T21:00:44.365Z","type":"log","step_id":"farewell","line":"##[endgroup]","stream":"stdout"}
+{"v":1,"seq":13,"ts":"2026-07-08T21:00:44.369Z","type":"log","step_id":"farewell","line":"done from step two","stream":"stdout"}
+{"v":1,"seq":14,"ts":"2026-07-08T21:00:44.370Z","type":"log","step_id":"farewell","line":"Process completed with exit code 0.","stream":"stdout"}
+{"v":1,"seq":15,"ts":"2026-07-08T21:00:44.370Z","type":"step_completed","step_id":"farewell","conclusion":"success","outputs":{}}
+{"v":1,"seq":16,"ts":"2026-07-08T21:00:44.370Z","type":"job_completed","job_id":"0e9d8c7b-3333-4444-8555-666677778888","conclusion":"success","outputs":{}}

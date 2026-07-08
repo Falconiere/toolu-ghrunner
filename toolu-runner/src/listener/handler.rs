@@ -88,15 +88,18 @@ impl GitHubListener {
   ///
   /// Returns `RunnerError::Protocol` on auth or session creation failure.
   pub async fn run(&self, cancel: CancellationToken) -> Result<(), RunnerError> {
-    let (tx, mut rx) = mpsc::channel(256);
-    // Drain the listener-event channel for the lifetime of the run. Nothing
-    // downstream consumes these events in CLI mode, but the forwarder sends one
-    // per log line via a clone of `tx`; if the receiver is never read the
-    // bounded channel fills and the forwarder's `send().await` blocks forever
-    // (a high-output job emits far more than the channel capacity), wedging the
-    // whole job. Draining keeps the producer unblocked. The task ends when all
-    // `tx` clones drop (channel closes).
-    tokio::spawn(async move { while rx.recv().await.is_some() {} });
+    let (tx, rx) = mpsc::channel(256);
+    // Sink the listener-event channel into the per-job journal
+    // (`<data_dir>/_diag/jobs/`). The writer doubles as the drain: the
+    // forwarder sends one event per log line via a clone of `tx`, and if the
+    // receiver were never read the bounded channel would fill and wedge the
+    // job — the writer keeps draining even after a journal I/O failure. The
+    // task ends when all `tx` clones drop (channel closes).
+    crate::journal::writer::spawn(
+      rx,
+      crate::journal::writer::jobs_dir_for(&self.config.data_dir),
+      Arc::clone(&self.masker),
+    );
     let mut ctx = self.build_session_ctx(cancel, tx).await?;
 
     let result = job_lifecycle::poll_and_execute(&mut ctx).await;

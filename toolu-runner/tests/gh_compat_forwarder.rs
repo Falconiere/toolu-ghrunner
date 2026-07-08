@@ -152,6 +152,15 @@ fn forward_env_cache_v2_only_when_true() {
 /// Run a single echo step through the full `run_job` path and return the
 /// concatenated stdout (`Log`) lines.
 async fn run_echo_job(body: &str, mode: ServicesMode) -> TestResult<String> {
+  Ok(run_echo_job_with_masker(body, mode).await?.0)
+}
+
+/// Same as `run_echo_job` but also returns the job's `SecretMasker`, so tests
+/// can assert what the run registered for redaction.
+async fn run_echo_job_with_masker(
+  body: &str,
+  mode: ServicesMode,
+) -> TestResult<(String, Arc<Mutex<SecretMasker>>)> {
   let dir = tempfile::tempdir()?;
   let workspace_root = dir.path().join("work");
   let data_dir = dir.path().join("data");
@@ -186,8 +195,31 @@ async fn run_echo_job(body: &str, mode: ServicesMode) -> TestResult<String> {
     lines
   });
 
-  run_job(msg, &config, CancellationToken::new(), tx, masker).await?;
-  Ok(collector.await?)
+  run_job(
+    msg,
+    &config,
+    CancellationToken::new(),
+    tx,
+    Arc::clone(&masker),
+  )
+  .await?;
+  Ok((collector.await?, masker))
+}
+
+#[tokio::test]
+async fn runtime_token_registered_in_masker() -> TestResult<()> {
+  // AC-2 (local half): setup_job_env must register the forwarded runtime
+  // token with the SecretMasker so no log/journal sink sees it unredacted.
+  let (_, masker) = run_echo_job_with_masker("true", ServicesMode::Forwarder).await?;
+  let redacted = masker
+    .lock()
+    .map_err(|e| format!("masker lock poisoned: {e}"))?
+    .mask(&format!("token is {FIX_TOKEN} here"));
+  assert!(
+    !redacted.contains(FIX_TOKEN),
+    "runtime token was not registered with the masker; mask() output: {redacted}"
+  );
+  Ok(())
 }
 
 #[tokio::test]

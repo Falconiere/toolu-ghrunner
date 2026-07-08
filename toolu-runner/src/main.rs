@@ -3,7 +3,8 @@
 //! Subcommands: `register` (live `generate-jitconfig`, persists real
 //! jit_config + runner_id), `run` (load config, hold `.lock`, run the
 //! listener until SIGINT/SIGTERM), `remove` (delete state or write
-//! `.pending_remove` mid-job), `status` (print config, no network).
+//! `.pending_remove` mid-job), `status` (print config, no network),
+//! `watch` (TUI over the job journal, no network).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -40,6 +41,8 @@ enum Command {
   Remove(RemoveArgs),
   /// Print local config and credential state (no network).
   Status(StatusArgs),
+  /// Watch jobs in a TUI: history, live steps and logs, cancel key.
+  Watch(WatchArgs),
 }
 
 #[derive(Debug, Args)]
@@ -104,6 +107,14 @@ struct StatusArgs {
   config: Option<PathBuf>,
 }
 
+#[derive(Debug, Args)]
+struct WatchArgs {
+  /// Path to the runner config file. When absent or unreadable, `watch`
+  /// browses the default data dir (`~/.toolu-runner`) read-only.
+  #[arg(long)]
+  config: Option<PathBuf>,
+}
+
 #[tokio::main]
 async fn main() {
   // AC #23: warn at startup for any deprecated YAMLESS_* env vars. Done
@@ -127,7 +138,16 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     Command::Run(args) => cmd_run(args).await,
     Command::Remove(args) => cmd_remove(args).await,
     Command::Status(args) => cmd_status(args),
+    Command::Watch(args) => cmd_watch(args),
   }
+}
+
+/// `watch`: TUI over the job journal. Blocks until the user quits; no
+/// tracing init so log output never corrupts the alternate screen.
+fn cmd_watch(args: WatchArgs) -> Result<(), Box<dyn std::error::Error>> {
+  let config_path = args.config.unwrap_or_else(default_config_path);
+  toolu_runner::watch::run_watch(&config_path)?;
+  Ok(())
 }
 
 fn default_config_path() -> PathBuf {
