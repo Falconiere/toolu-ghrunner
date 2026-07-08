@@ -72,26 +72,64 @@ fn send_cancel_without_lock_reports_error() {
   assert!(err.contains("no lock file"), "unexpected error: {err}");
 }
 
+/// Spawn a `/bin/sh` child that traps SIGINT (exit 42) and block until it's
+/// ready. A plain child is NOT named toolu-runner — used to test both real
+/// signal delivery and the identity gate's refusal.
 #[cfg(unix)]
-#[tokio::test]
-async fn send_cancel_delivers_sigint_to_lock_holder() -> TestResult {
-  // AC-9: a live child traps INT and exits 42; the `.lock` body carries
-  // its real PID, exactly as `toolu-runner run` writes it.
-  let mut child = std::process::Command::new("sh")
+fn spawn_trap_child() -> TestResult<std::process::Child> {
+  use std::io::{BufRead, BufReader};
+  let mut child = std::process::Command::new("/bin/sh")
     .arg("-c")
     .arg("trap 'exit 42' INT; echo ready; while :; do sleep 0.05; done")
     .stdout(std::process::Stdio::piped())
     .spawn()?;
-  // Wait for the trap to be installed before signalling, else the raw
-  // SIGINT kills the shell and the exit code never appears.
-  {
-    use std::io::{BufRead, BufReader};
-    let stdout = child.stdout.take().ok_or("child stdout missing")?;
-    let mut line = String::new();
-    BufReader::new(stdout).read_line(&mut line)?;
-    assert_eq!(line.trim(), "ready");
-  }
+  // Wait for the trap to be installed before signalling, else the raw SIGINT
+  // kills the process and the exit code never appears.
+  let stdout = child.stdout.take().ok_or("child stdout missing")?;
+  let mut line = String::new();
+  BufReader::new(stdout).read_line(&mut line)?;
+  assert_eq!(line.trim(), "ready");
+  Ok(child)
+}
 
+/// Wait up to 5s for `child` to exit; returns its status.
+#[cfg(unix)]
+fn wait_for_exit(child: &mut std::process::Child) -> TestResult<std::process::ExitStatus> {
+  let deadline = Instant::now() + Duration::from_secs(5);
+  loop {
+    if let Some(status) = child.try_wait()? {
+      return Ok(status);
+    }
+    if Instant::now() > deadline {
+      return Err("child never exited".into());
+    }
+    std::thread::sleep(Duration::from_millis(50));
+  }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn deliver_sigint_stops_a_running_child() -> TestResult {
+  // AC-9 (delivery): SIGINT reaches the target PID; the child exits via its
+  // INT trap (code 42).
+  let mut child = spawn_trap_child()?;
+  let outcome = (|| {
+    toolu_runner::watch::deliver_sigint(child.id()).map_err(|e| format!("deliver: {e}"))?;
+    let status = wait_for_exit(&mut child)?;
+    assert_eq!(status.code(), Some(42), "child must exit via its INT trap");
+    Ok(())
+  })();
+  let _ = child.kill();
+  let _ = child.wait();
+  outcome
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn send_cancel_refuses_non_runner_pid() -> TestResult {
+  // AC-9 (identity gate): a lock pointing at a live NON-toolu-runner PID
+  // (a plain sh child) is refused — no signal is sent.
+  let mut child = spawn_trap_child()?;
   let dir = tempfile::tempdir()?;
   let lock_path = dir.path().join(".lock");
   let body = serde_json::json!({
@@ -101,20 +139,18 @@ async fn send_cancel_delivers_sigint_to_lock_holder() -> TestResult {
   });
   std::fs::write(&lock_path, serde_json::to_vec(&body)?)?;
 
-  let pid = toolu_runner::watch::send_cancel(&lock_path).map_err(|e| format!("cancel: {e}"))?;
-  assert_eq!(pid, child.id());
-
-  let deadline = Instant::now() + Duration::from_secs(5);
-  let status = loop {
-    if let Some(status) = child.try_wait()? {
-      break status;
-    }
-    if Instant::now() > deadline {
-      child.kill()?;
-      return Err("child never reacted to SIGINT".into());
-    }
-    std::thread::sleep(Duration::from_millis(50));
+  let outcome: TestResult = match toolu_runner::watch::send_cancel(&lock_path) {
+    Ok(_) => Err("send_cancel must refuse a non-runner pid".into()),
+    Err(e) if e.contains("not a toolu-runner process") => Ok(()),
+    Err(e) => Err(format!("unexpected error: {e}").into()),
   };
-  assert_eq!(status.code(), Some(42), "child must exit via its INT trap");
-  Ok(())
+  // The child must still be alive (no signal was sent).
+  let still_running = child.try_wait()?.is_none();
+  let _ = child.kill();
+  let _ = child.wait();
+  assert!(
+    still_running,
+    "refused cancel must not have signalled the child"
+  );
+  outcome
 }

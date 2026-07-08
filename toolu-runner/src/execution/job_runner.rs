@@ -190,9 +190,10 @@ fn setup_job_env(
     // message. A `None` URL is omitted (WARN); never an empty var.
     None => {
       for (key, value) in forward_env(&extract_service_urls(msg)) {
-        // Runtime tokens are credentials — register them with the masker so
-        // they never reach the diag log or the job journal unredacted.
-        if key == "ACTIONS_RUNTIME_TOKEN" || key == "ACTIONS_ID_TOKEN_REQUEST_TOKEN" {
+        // Any `*_TOKEN` var is a credential (runtime token, id-token request
+        // token, and any future one) — register it with the masker before it
+        // is placed in the env so it never reaches the diag log or journal.
+        if key.ends_with("_TOKEN") {
           ctx.add_mask(&value);
         }
         ctx.set_env(&key, &value);

@@ -2,7 +2,7 @@
 //! scanner behind the `watch` job list.
 
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use super::types::{JOURNAL_VERSION, JournalEvent, JournalLine};
@@ -11,13 +11,13 @@ use super::types::{JOURNAL_VERSION, JournalEvent, JournalLine};
 const SCAN_WINDOW: usize = 8192;
 
 /// Incremental reader: replays a journal from byte 0, then tails it.
-/// Holds the file open across polls (the tail loop runs every ~250 ms on
-/// a single append-only journal), re-opening lazily on the first poll.
+/// Holds one buffered reader open across polls (the tail loop runs every
+/// ~250 ms on a single append-only journal), opening lazily on first poll.
 #[derive(Debug)]
 pub struct JournalReader {
   path: PathBuf,
   offset: u64,
-  file: Option<File>,
+  reader: Option<BufReader<File>>,
 }
 
 impl JournalReader {
@@ -26,7 +26,7 @@ impl JournalReader {
     Self {
       path,
       offset: 0,
-      file: None,
+      reader: None,
     }
   }
 
@@ -46,17 +46,18 @@ impl JournalReader {
   ///
   /// Propagates I/O errors from opening or reading the journal file.
   pub fn poll(&mut self) -> std::io::Result<Vec<JournalLine>> {
-    // Lazily open once and keep the handle; `insert` returns `&mut File`
-    // without an unwrap when the slot was empty.
+    // Lazily open once and keep the buffered reader; `insert` returns
+    // `&mut BufReader` without an unwrap when the slot was empty, and the
+    // 8 KiB buffer is reused across polls.
     let offset = self.offset;
-    let file = match self.file.as_mut() {
-      Some(f) => f,
-      None => self.file.insert(File::open(&self.path)?),
+    let reader = match self.reader.as_mut() {
+      Some(r) => r,
+      None => self.reader.insert(BufReader::new(File::open(&self.path)?)),
     };
-    file.seek(SeekFrom::Start(offset))?;
+    reader.seek(SeekFrom::Start(offset))?;
     // Reads only the bytes appended since `offset`, not the whole file.
     let mut buf = Vec::new();
-    std::io::BufReader::new(file).read_to_end(&mut buf)?;
+    reader.read_to_end(&mut buf)?;
     let Some(last_nl) = buf.iter().rposition(|&b| b == b'\n') else {
       return Ok(Vec::new());
     };
@@ -113,8 +114,15 @@ pub struct JobSummary {
 /// individual files are skipped.
 pub fn scan_jobs(jobs_dir: &Path) -> std::io::Result<Vec<JobSummary>> {
   let mut paths: Vec<PathBuf> = std::fs::read_dir(jobs_dir)?
-    .filter_map(Result::ok)
-    .map(|e| e.path())
+    .filter_map(|entry| match entry {
+      Ok(e) => Some(e.path()),
+      // A failed dirent read drops one journal from the list; trace it so a
+      // job silently missing from the TUI is diagnosable.
+      Err(e) => {
+        tracing::debug!(error = %e, "journal: skipping unreadable directory entry");
+        None
+      },
+    })
     .filter(|p| p.extension().is_some_and(|x| x == "jsonl"))
     .collect();
   paths.sort();

@@ -233,18 +233,21 @@ fn lock_line(lock_path: &Path) -> String {
   }
 }
 
-/// Deliver SIGINT to the `.lock` holder (the runner's graceful-cancel
-/// path). Unix only; other platforms report unsupported.
+/// Deliver SIGINT to the `.lock` holder (the runner's graceful-cancel path).
+/// The target's executable name must contain `toolu-runner`, so a tampered
+/// lock file cannot make the TUI signal an unrelated PID. Unix only.
 ///
 /// # Errors
 ///
-/// Returns a message when the lock file is absent/unreadable, the holder
-/// PID is not running, or signal delivery is refused.
+/// Fails when the lock file is absent/unreadable, the PID is not running or
+/// not a toolu-runner process, or signal delivery is refused.
 #[cfg(unix)]
 pub fn send_cancel(lock_path: &Path) -> Result<u32, String> {
   let body = read_lock_capped(lock_path).map_err(|e| format!("no lock file: {e}"))?;
   let lock: crate::lockfile::LockBody =
     serde_json::from_str(&body).map_err(|e| format!("lock body unreadable: {e}"))?;
+  // Guard against signalling an unrelated PID from a tampered or stale
+  // (PID-recycled) lock file: the holder must actually be a toolu-runner.
   let mut sys = sysinfo::System::new();
   sys.refresh_processes(
     sysinfo::ProcessesToUpdate::Some(&[sysinfo::Pid::from_u32(lock.pid)]),
@@ -253,9 +256,48 @@ pub fn send_cancel(lock_path: &Path) -> Result<u32, String> {
   let process = sys
     .process(sysinfo::Pid::from_u32(lock.pid))
     .ok_or_else(|| format!("runner pid {} not running", lock.pid))?;
+  if !is_toolu_runner_process(process) {
+    return Err(format!(
+      "pid {} is not a toolu-runner process; refusing to signal it",
+      lock.pid
+    ));
+  }
+  deliver_sigint(lock.pid).map(|()| lock.pid)
+}
+
+/// Whether `process` names toolu-runner in its name, exe path, or argv[0].
+#[cfg(unix)]
+fn is_toolu_runner_process(process: &sysinfo::Process) -> bool {
+  const NEEDLE: &str = "toolu-runner";
+  process.name().to_string_lossy().contains(NEEDLE)
+    || process
+      .exe()
+      .is_some_and(|p| p.to_string_lossy().contains(NEEDLE))
+    || process
+      .cmd()
+      .first()
+      .is_some_and(|a| a.to_string_lossy().contains(NEEDLE))
+}
+
+/// Deliver SIGINT to `pid` via `sysinfo` (the signal mechanics, without the
+/// identity gate `send_cancel` applies first).
+///
+/// # Errors
+///
+/// Fails when the PID is not running or the signal is refused/unsupported.
+#[cfg(unix)]
+pub fn deliver_sigint(pid: u32) -> Result<(), String> {
+  let mut sys = sysinfo::System::new();
+  sys.refresh_processes(
+    sysinfo::ProcessesToUpdate::Some(&[sysinfo::Pid::from_u32(pid)]),
+    true,
+  );
+  let process = sys
+    .process(sysinfo::Pid::from_u32(pid))
+    .ok_or_else(|| format!("pid {pid} not running"))?;
   match process.kill_with(sysinfo::Signal::Interrupt) {
-    Some(true) => Ok(lock.pid),
-    Some(false) => Err(format!("SIGINT to pid {} refused", lock.pid)),
+    Some(true) => Ok(()),
+    Some(false) => Err(format!("SIGINT to pid {pid} refused")),
     None => Err("SIGINT unsupported on this platform".to_owned()),
   }
 }
