@@ -1,0 +1,60 @@
+name: release-homebrew
+
+# Publishes Formula/toolu-runner.rb to the Falconiere/homebrew-tap repo after
+# a stable release is published. Downloads SHA256SUMS straight from the
+# release (same read-back pattern as release-finalize.yml), renders the
+# formula with scripts/generate-homebrew-formula.sh, and pushes it to the tap
+# with a PAT (the default GITHUB_TOKEN has no access outside this repo).
+# Skipped for prereleases (tag contains '-') — the tap should only ever point
+# at a stable release. Never touches this repo.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-homebrew-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish-formula:
+    if: ${{ !contains(github.event.release.tag_name, '-') }}
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.event.release.tag_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download SHA256SUMS from the release
+        run: gh release download "$TAG" --repo "${{ github.repository }}" -p SHA256SUMS -D dist
+
+      - name: Generate Formula/toolu-runner.rb
+        run: bash scripts/generate-homebrew-formula.sh "$TAG" dist/SHA256SUMS > toolu-runner.rb
+
+      - name: Push formula to homebrew-tap
+        env:
+          # Fine-grained PAT with Contents: read+write on Falconiere/homebrew-tap.
+          # Must be provisioned as a repo secret before this job can succeed;
+          # the default GITHUB_TOKEN is scoped to this repo only.
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [[ -z "$TAP_TOKEN" ]]; then
+            echo "::error::HOMEBREW_TAP_TOKEN secret is not set — see docs/architecture.md § Release pipeline"
+            exit 1
+          fi
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/Falconiere/homebrew-tap.git" tap
+          mkdir -p tap/Formula
+          cp toolu-runner.rb tap/Formula/toolu-runner.rb
+          cd tap
+          git config user.name "toolu-runner release bot"
+          git config user.email "actions@users.noreply.github.com"
+          if git diff --quiet -- Formula/toolu-runner.rb; then
+            echo "::notice::formula unchanged, nothing to push"
+            exit 0
+          fi
+          git add Formula/toolu-runner.rb
+          git commit -m "toolu-runner ${TAG}"
+          git push

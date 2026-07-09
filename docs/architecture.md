@@ -526,6 +526,17 @@ deferred because `tokio-tungstenite` pulls `native-tls` → openssl-sys.
 The four release scripts are unit-tested against real repo files under
 `scripts/test/` and run in `ci.yml`.
 
+Once a stable release is published, `.github/workflows/release-homebrew.yml`
+(`on: release: [published]`, skipped for prerelease tags) downloads
+`SHA256SUMS` back from the release, renders `Formula/toolu-runner.rb`
+via `scripts/generate-homebrew-formula.sh` (an `on_macos`/`on_linux` ×
+`on_arm`/`on_intel` formula selecting one of the four release
+tarballs), and pushes it to the external `Falconiere/homebrew-tap`
+repo using a `HOMEBREW_TAP_TOKEN` fine-grained PAT — the default
+`GITHUB_TOKEN` has no access outside this repo. A no-op push (formula
+unchanged) is a normal outcome, not a failure. Missing the PAT fails
+this workflow only; the GitHub Release is unaffected either way.
+
 ## Failure modes
 
 The following are the v1 failure paths. Anything not listed is
