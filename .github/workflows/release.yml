@@ -2,11 +2,22 @@ name: release
 
 # Tag-driven release: push vX.Y.Z -> verify tag==Cargo version -> gate ->
 # build 4 native targets -> package tarballs (install.sh layout) + SHA256SUMS
-# -> publish a GitHub Release with CHANGELOG-derived notes. The workflow reads
-# the repo, never writes to it. See docs/toolu/specs/2026-07-08-release-automation-design.md
+# -> publish a GitHub Release with CHANGELOG-derived notes -> smoke-test the
+# published assets and push the Homebrew formula. The workflow reads the repo,
+# never writes to it. See docs/toolu/specs/2026-07-08-release-automation-design.md
+#
+# finalize + homebrew are chained here as reusable workflows rather than
+# triggered by `on: release: [published]`: a release created by `gh release
+# create` under the default GITHUB_TOKEN emits no `release` event, so
+# event-triggered versions of them could never fire.
 on:
   push:
     tags: ['v*']
+
+# One release per tag; never cancel a release mid-flight.
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
 
 # Least privilege by default; only `publish` is granted write to cut the release.
 permissions:
@@ -100,3 +111,26 @@ jobs:
             --title "${GITHUB_REF_NAME}" \
             --notes-file release-notes.md \
             ${{ steps.pre.outputs.flag }}
+
+  # Read the uploaded assets back off the release and verify them. Chained,
+  # not event-triggered — see the header note. Assets are attached
+  # synchronously by `gh release create`, so `needs: publish` is sufficient
+  # ordering; there is no upload-visibility race to wait out.
+  finalize:
+    needs: publish
+    permissions:
+      contents: read
+    uses: ./.github/workflows/release-finalize.yml
+
+  # Stable tags only; the callee's own `if:` enforces that. A called workflow
+  # is granted github.token automatically but sees no other secret unless the
+  # caller passes it. Pass HOMEBREW_TAP_TOKEN explicitly, NOT `secrets:
+  # inherit` — inherit would forward every repo secret (RELEASE_PLZ_TOKEN,
+  # OPENROUTER_API_KEY, …) to a workflow that needs exactly one.
+  homebrew:
+    needs: publish
+    permissions:
+      contents: read
+    uses: ./.github/workflows/release-homebrew.yml
+    secrets:
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

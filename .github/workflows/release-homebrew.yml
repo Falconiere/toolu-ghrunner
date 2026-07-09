@@ -1,30 +1,40 @@
 name: release-homebrew
 
 # Publishes Formula/toolu-runner.rb to the Falconiere/homebrew-tap repo after
-# a stable release is published. Downloads SHA256SUMS straight from the
-# release (same read-back pattern as release-finalize.yml), renders the
-# formula with scripts/generate-homebrew-formula.sh, and pushes it to the tap
-# with a PAT (the default GITHUB_TOKEN has no access outside this repo).
-# Skipped for prereleases (tag contains '-') — the tap should only ever point
-# at a stable release. Never touches this repo.
+# a stable release is published. release.yml calls this workflow as a
+# `needs: publish` job. Downloads SHA256SUMS straight from the release (same
+# read-back pattern as release-finalize.yml), renders the formula with
+# scripts/generate-homebrew-formula.sh, and pushes it to the tap with a PAT
+# (the default GITHUB_TOKEN has no access outside this repo). Never touches
+# this repo.
+#
+# Reusable, NOT `on: release: [published]` — a release created by a workflow
+# step using the default GITHUB_TOKEN emits no `release` event, so an
+# event-triggered version of this workflow could never fire. Under
+# `workflow_call` the `github` context is the CALLER's, so `github.ref_name`
+# is the pushed tag and there is no `github.event.release` payload at all.
+# Concurrency is owned by the caller (release.yml), keyed on the same tag.
+#
+# The prerelease skip (tag contains '-') lives here rather than on the caller
+# so the guard travels with the thing it guards: the tap must only ever point
+# at a stable release, whoever calls this.
 on:
-  release:
-    types: [published]
+  workflow_call:
+    secrets:
+      HOMEBREW_TAP_TOKEN:
+        description: Fine-grained PAT, Contents read+write on Falconiere/homebrew-tap.
+        required: true
 
 permissions:
   contents: read
 
-concurrency:
-  group: release-homebrew-${{ github.event.release.tag_name }}
-  cancel-in-progress: false
-
 jobs:
   publish-formula:
-    if: ${{ !contains(github.event.release.tag_name, '-') }}
+    if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-24.04
     env:
       GH_TOKEN: ${{ github.token }}
-      TAG: ${{ github.event.release.tag_name }}
+      TAG: ${{ github.ref_name }}
     steps:
       - uses: actions/checkout@v4
 

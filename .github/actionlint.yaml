@@ -1,0 +1,6 @@
+# actionlint config. Declares the self-hosted runner labels this repo's
+# *-live.yml workflows dispatch onto, so `actionlint` can validate them
+# instead of erroring with `label "toolu-runner-v1" is unknown`.
+self-hosted-runner:
+  labels:
+    - toolu-runner-v1

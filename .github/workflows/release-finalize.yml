@@ -1,24 +1,26 @@
 name: release-finalize
 
-# Post-publish safety net for the tag-driven release in release.yml. Once a
-# GitHub Release is published, download each target's tarball straight back
-# from the release (not the build artifact) and verify it both matches
-# SHA256SUMS and extracts to the layout install.sh expects. This catches
-# upload corruption or a stale SHA256SUMS that `publish` can't see — it only
-# checksums what it's about to upload, never what actually lands on the
-# release after GitHub's asset upload. Read-only: never edits the release or
-# the repo, and never gates the release itself (it already exists by the time
-# this runs).
+# Post-publish safety net for the tag-driven release in release.yml, which
+# calls this workflow as a `needs: publish` job. Once the release exists,
+# download each target's tarball straight back from it (not the build
+# artifact) and verify it both matches SHA256SUMS and extracts to the layout
+# install.sh expects. This catches upload corruption or a stale SHA256SUMS
+# that `publish` can't see — it only checksums what it's about to upload,
+# never what actually lands on the release after GitHub's asset upload.
+# Read-only: never edits the release or the repo, and never gates the release
+# itself (it already exists by the time this runs).
+#
+# Reusable, NOT `on: release: [published]` — a release created by a workflow
+# step using the default GITHUB_TOKEN emits no `release` event, so an
+# event-triggered version of this workflow could never fire. Under
+# `workflow_call` the `github` context is the CALLER's, so `github.ref_name`
+# is the pushed tag and there is no `github.event.release` payload at all.
+# Concurrency is owned by the caller (release.yml), keyed on the same tag.
 on:
-  release:
-    types: [published, prereleased]
+  workflow_call:
 
 permissions:
   contents: read
-
-concurrency:
-  group: release-finalize-${{ github.event.release.tag_name }}
-  cancel-in-progress: false
 
 jobs:
   smoke-test:
@@ -37,8 +39,10 @@ jobs:
           - os: linux
             arch: arm64
     env:
+      # A called workflow is automatically granted github.token; `contents:
+      # read` is enough for `gh release download` on a public repo.
       GH_TOKEN: ${{ github.token }}
-      TAG: ${{ github.event.release.tag_name }}
+      TAG: ${{ github.ref_name }}
       TARBALL: toolu-runner-${{ matrix.os }}-${{ matrix.arch }}.tar.gz
     steps:
       - name: Download tarball + checksums

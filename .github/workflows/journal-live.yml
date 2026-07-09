@@ -13,4 +13,4 @@ jobs:
       - name: token probe
         run: echo "token-probe=[$ACTIONS_RUNTIME_TOKEN]"
       - name: farewell
-        run: echo done from step two
+        run: echo "done from step two"
