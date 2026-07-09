@@ -48,8 +48,20 @@ reject() {
 want "callable as a reusable workflow"  "^  workflow_call:"
 want "reads the tag from the caller"    "TAG: \\\$\{\{ github\.ref_name \}\}"
 # `workflow_call` being present does not mean `release` is absent — a file may
-# declare both, and the event-triggered copy would be just as dead.
-reject "not event-triggered"            "^  release:"
+# declare both, and the event-triggered copy would be just as dead. Scoped to
+# the top-level `on:` block: `jobs:` children share the same 2-space indent, so
+# a bare `^  release:` would also fail a job legitimately named `release`.
+if awk '
+  /^on:[[:space:]]*$/        { in_on = 1; next }
+  in_on && /^[^[:space:]]/   { in_on = 0 }
+  in_on && /^  release:/     { found = 1 }
+  END { exit !found }
+' "$WF"; then
+  echo "FAIL: a 'release:' trigger is declared — this workflow must be chained, not event-triggered" >&2
+  fail=1
+else
+  echo "ok: not event-triggered"
+fi
 # Under workflow_call there is no `release` event payload: any `github.event.release.*`
 # read silently evaluates to "" and `gh release download ""` fails deep in the job.
 # Matches any non-comment line, not just `${{ }}` — `if:` accepts a bare
