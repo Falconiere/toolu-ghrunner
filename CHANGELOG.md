@@ -182,6 +182,12 @@ redaction, and a CLI for register / run / remove / status.
   this file for the GitHub Release notes.
 - `scripts/test/{assert_version,changelog_extract,package_release,release_workflow}_test.sh`
   — real-data tests for the release scripts + workflow, run in CI.
+- `.github/workflows/release-homebrew.yml` — publishes
+  `Formula/toolu-runner.rb` to
+  [`Falconiere/homebrew-tap`](https://github.com/Falconiere/homebrew-tap)
+  after a stable release (skipped for prereleases), via
+  `scripts/generate-homebrew-formula.sh` and a `HOMEBREW_TAP_TOKEN`
+  PAT. Tested by `scripts/test/{generate_homebrew_formula,release_homebrew_workflow}_test.sh`.
 
 **Tests**
 

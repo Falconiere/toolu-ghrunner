@@ -16,6 +16,9 @@ against github.com and GHES, with no orchestrator service in the loop.
 # Install (macOS / Linux)
 curl -fsSL https://raw.githubusercontent.com/Falconiere/toolu-ghrunner/main/install.sh | sh
 
+# ...or via Homebrew (macOS / Linux)
+brew install falconiere/tap/toolu-runner
+
 # Register against a GitHub repo
 toolu-runner register --url https://github.com/owner/repo \
   --token <reg_token> --name my-runner --labels self-hosted,linux,x64
@@ -206,6 +209,17 @@ GitHub Release with notes from that version's `CHANGELOG.md` section
 (`scripts/changelog-extract.sh`). Tags containing a `-` (e.g.
 `v0.2.0-rc.1`) publish as prereleases, so `install.sh`'s "latest" stays
 on stable.
+
+Once a stable release is published,
+[`release-homebrew.yml`](.github/workflows/release-homebrew.yml) runs
+independently and never gates the release itself: it renders
+`Formula/toolu-runner.rb` (`scripts/generate-homebrew-formula.sh`) and
+pushes it to
+[`Falconiere/homebrew-tap`](https://github.com/Falconiere/homebrew-tap).
+The push needs a fine-grained PAT with `Contents: read+write` on that
+tap repo, stored as the `HOMEBREW_TAP_TOKEN` secret on this repo —
+without it, `release-homebrew.yml` fails loudly but the GitHub Release
+itself is unaffected.
 
 ## Environment variables
 
