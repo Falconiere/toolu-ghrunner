@@ -173,21 +173,41 @@ redaction, and a CLI for register / run / remove / status.
   `toolu-runner-<os>-<arch>.tar.gz` per target (binary + `scripts/`
   service files), computes `SHA256SUMS`, and publishes a GitHub
   Release with notes from this file's matching section. Tags with a
-  `-` publish as prereleases. The workflow never writes to the repo.
+  `-` publish as prereleases. A tag-keyed `concurrency` group covers
+  the whole chain. The workflow never writes to the repo.
 - `scripts/assert-version.sh` — asserts a release tag matches the
   `[workspace.package]` version.
 - `scripts/package-release.sh` — assembles the per-target tarball in
   the exact layout `install.sh` expects.
 - `scripts/changelog-extract.sh` — extracts a version's section from
   this file for the GitHub Release notes.
-- `scripts/test/{assert_version,changelog_extract,package_release,release_workflow}_test.sh`
-  — real-data tests for the release scripts + workflow, run in CI.
+- `.github/workflows/release-finalize.yml` — post-publish smoke test.
+  Downloads each target's tarball + `SHA256SUMS` back off the release
+  and verifies the checksum, a size floor, and the `tar` member
+  layout, catching upload corruption that `publish` cannot see.
 - `.github/workflows/release-homebrew.yml` — publishes
   `Formula/toolu-runner.rb` to
   [`Falconiere/homebrew-tap`](https://github.com/Falconiere/homebrew-tap)
   after a stable release (skipped for prereleases), via
   `scripts/generate-homebrew-formula.sh` and a `HOMEBREW_TAP_TOKEN`
-  PAT. Tested by `scripts/test/{generate_homebrew_formula,release_homebrew_workflow}_test.sh`.
+  PAT.
+- Both of the above are `on: workflow_call:` reusable workflows,
+  chained off `publish` with `needs:` rather than triggered by
+  `on: release: [published]`. A release created by a workflow step
+  using the default `GITHUB_TOKEN` emits no `release` event, so the
+  event-triggered form could never fire. A called workflow is granted
+  `github.token` automatically but sees no other secret unless the
+  caller passes it; `release.yml` passes `HOMEBREW_TAP_TOKEN` and
+  nothing else, rather than using `secrets: inherit` (which would
+  forward every repo secret to a workflow that pushes to an external
+  repo).
+- `.github/actionlint.yaml` — declares the `toolu-runner-v1`
+  self-hosted label so `actionlint` validates the `*-live.yml`
+  workflows instead of erroring on an unknown runner label.
+- `scripts/test/{assert_version,changelog_extract,package_release,release_workflow,release_finalize_workflow,generate_homebrew_formula,release_homebrew_workflow}_test.sh`
+  — real-data tests for the release scripts + workflows, run in CI.
+  The workflow tests assert the chained shape and reject any
+  `github.event.release` expression in a reusable workflow.
 
 **Tests**
 

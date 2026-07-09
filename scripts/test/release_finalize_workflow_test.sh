@@ -29,8 +29,29 @@ want() {
   fi
 }
 
+# Asserts a pattern is ABSENT. Guards against a regression re-introducing a
+# construct, which `want` cannot express.
+reject() {
+  local desc="$1" pat="$2"
+  if grep -Eq -- "$pat" "$WF"; then
+    echo "FAIL: $desc — pattern found but must not be: $pat" >&2
+    fail=1
+  else
+    echo "ok: $desc"
+  fi
+}
+
 # --- trigger ---
-want "triggers on release published/prereleased" "types: \[published, prereleased\]"
+# Chained from release.yml, NOT `on: release: [published]` — a release created
+# by a workflow step using the default GITHUB_TOKEN emits no `release` event,
+# so an event-triggered version of this workflow could never fire.
+want "callable as a reusable workflow"  "^  workflow_call:"
+want "reads the tag from the caller"    "TAG: \\\$\{\{ github\.ref_name \}\}"
+# Under workflow_call there is no `release` event payload: any `github.event.release.*`
+# expression silently evaluates to "" and `gh release download ""` fails deep in the job.
+# Matches expression use only, so the header comment explaining this stays legal.
+reject "no release-event payload reads" '\$\{\{[^}]*github\.event\.release'
+reject "caller owns concurrency"        "^concurrency:"
 # --- permissions (read-only: never edits the release or the repo) ---
 want "least-privilege permissions"     "^permissions:"
 want "contents: read only"             "contents: read"

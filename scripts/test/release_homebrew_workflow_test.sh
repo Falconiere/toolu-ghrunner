@@ -29,12 +29,36 @@ want() {
   fi
 }
 
-want "triggers on release published"      "types: \[published\]"
-want "skips prereleases"                  "!contains\(github\.event\.release\.tag_name, '-'\)"
+# Asserts a pattern is ABSENT. Guards against a regression re-introducing a
+# construct, which `want` cannot express.
+reject() {
+  local desc="$1" pat="$2"
+  if grep -Eq -- "$pat" "$WF"; then
+    echo "FAIL: $desc — pattern found but must not be: $pat" >&2
+    fail=1
+  else
+    echo "ok: $desc"
+  fi
+}
+
+# Chained from release.yml, NOT `on: release: [published]` — a release created
+# by a workflow step using the default GITHUB_TOKEN emits no `release` event,
+# so an event-triggered version of this workflow could never fire.
+want "callable as a reusable workflow"    "^  workflow_call:"
+# Declared, not inherited: the caller passes exactly this one secret.
+want "declares the tap token as required" "^      HOMEBREW_TAP_TOKEN:"
+want "tap token is mandatory"             "^        required: true"
+want "skips prereleases"                  "!contains\(github\.ref_name, '-'\)"
+want "reads the tag from the caller"      "TAG: \\\$\{\{ github\.ref_name \}\}"
+# Under workflow_call there is no `release` event payload. Matches expression
+# use only, so the header comment explaining this stays legal.
+reject "no release-event payload reads"   '\$\{\{[^}]*github\.event\.release'
+reject "caller owns concurrency"          "^concurrency:"
 want "least-privilege permissions"        "^permissions:"
 want "contents: read only"                "contents: read"
 want "downloads SHA256SUMS from release"  "gh release download"
 want "generates the formula via script"   "generate-homebrew-formula\.sh"
+# shellcheck disable=SC2016  # single quotes are deliberate: this is a grep pattern, not shell to expand
 want "guards against a missing PAT"       'if \[\[ -z "\$TAP_TOKEN" \]\]'
 want "pushes to the homebrew-tap repo"    "Falconiere/homebrew-tap"
 want "skips an unchanged formula"         "git diff --quiet"

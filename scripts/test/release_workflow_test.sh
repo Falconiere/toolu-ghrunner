@@ -56,6 +56,21 @@ want "notes from changelog-extract.sh" "changelog-extract\.sh"
 want "prerelease on tag with '-'"      'GITHUB_REF_NAME.*\*-\*'
 want "passes --prerelease flag"        "flag=--prerelease"
 want "creates the release"             "gh release create"
+# --- downstream chain (see the workflow header: a GITHUB_TOKEN-created release
+# emits no `release` event, so finalize/homebrew MUST be chained, not triggered) ---
+want "one release per tag"             "^concurrency:"
+want "never cancels a release"         "cancel-in-progress: false"
+want "chains finalize off publish"     "uses: \./\.github/workflows/release-finalize\.yml"
+want "chains homebrew off publish"     "uses: \./\.github/workflows/release-homebrew\.yml"
+# Least privilege: pass the one secret homebrew needs, never `secrets: inherit`
+# (which would forward RELEASE_PLZ_TOKEN, OPENROUTER_API_KEY, … as well).
+want "passes only the tap token"       "HOMEBREW_TAP_TOKEN: \\\$\{\{ secrets\.HOMEBREW_TAP_TOKEN \}\}"
+if grep -Eq -- "secrets: inherit" "$WF"; then
+  echo "FAIL: 'secrets: inherit' forwards every repo secret — pass HOMEBREW_TAP_TOKEN explicitly" >&2
+  fail=1
+else
+  echo "ok: no blanket secrets: inherit"
+fi
 
 # --- exactly 4 matrix targets ---
 n_runners="$(grep -Ec -- "^ +- runner:" "$WF")"
@@ -72,7 +87,7 @@ if python3 -c 'import yaml' >/dev/null 2>&1; then
 import sys, yaml
 wf = yaml.safe_load(open(sys.argv[1]))
 jobs = wf.get("jobs", {})
-assert set(jobs) == {"verify", "build", "publish"}, f"jobs: {list(jobs)}"
+assert set(jobs) == {"verify", "build", "publish", "finalize", "homebrew"}, f"jobs: {list(jobs)}"
 assert jobs["build"]["needs"] == "verify", jobs["build"].get("needs")
 assert jobs["publish"]["needs"] == "build", jobs["publish"].get("needs")
 inc = jobs["build"]["strategy"]["matrix"]["include"]
@@ -80,7 +95,21 @@ got = {(m["os"], m["arch"]) for m in inc}
 exp = {("darwin","arm64"),("darwin","amd64"),("linux","amd64"),("linux","arm64")}
 assert got == exp, f"matrix os/arch: {got}"
 assert jobs["publish"]["permissions"]["contents"] == "write"
-print("ok: PyYAML deep-check (job DAG + 4 os/arch + publish write perm)")
+# The downstream chain: both must run AFTER the release exists, and homebrew
+# needs `secrets: inherit` or HOMEBREW_TAP_TOKEN is invisible to the callee.
+for j in ("finalize", "homebrew"):
+    assert jobs[j]["needs"] == "publish", f"{j} needs: {jobs[j].get('needs')}"
+    assert jobs[j]["permissions"]["contents"] == "read", f"{j} perms"
+assert jobs["finalize"]["uses"].endswith("release-finalize.yml"), jobs["finalize"]["uses"]
+assert jobs["homebrew"]["uses"].endswith("release-homebrew.yml"), jobs["homebrew"]["uses"]
+# Exactly one secret crosses into homebrew. `secrets: inherit` would forward
+# every repo secret to a workflow that pushes to an external repo.
+hb_secrets = jobs["homebrew"].get("secrets")
+assert hb_secrets != "inherit", "homebrew must not inherit all repo secrets"
+assert set(hb_secrets) == {"HOMEBREW_TAP_TOKEN"}, f"homebrew secrets: {hb_secrets}"
+# finalize needs no secret at all: github.token is granted to callees automatically.
+assert "secrets" not in jobs["finalize"], "finalize needs no secrets"
+print("ok: PyYAML deep-check (job DAG + 4 os/arch + publish write perm + chained finalize/homebrew + scoped secret)")
 PY
   then :; else
     echo "FAIL: PyYAML deep-check failed" >&2
