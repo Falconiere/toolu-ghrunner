@@ -526,10 +526,21 @@ deferred because `tokio-tungstenite` pulls `native-tls` → openssl-sys.
 The four release scripts are unit-tested against real repo files under
 `scripts/test/` and run in `ci.yml`.
 
-Once a stable release is published, `.github/workflows/release-homebrew.yml`
-(`on: release: [published]`, skipped for prerelease tags) downloads
-`SHA256SUMS` back from the release, renders `Formula/toolu-runner.rb`
-via `scripts/generate-homebrew-formula.sh` (an `on_macos`/`on_linux` ×
+Once the release is published, two more workflows run independently
+and never gate the release itself. `.github/workflows/release-finalize.yml`
+(`on: release: [published, prereleased]`, `contents: read`) downloads
+each target's tarball + `SHA256SUMS` straight back from the release
+(not the build artifact) and verifies the checksum, a size-sanity
+floor, and the `tar` member layout — catching upload corruption or a
+stale `SHA256SUMS` that `publish` can't see, since `publish` only
+checksums what it's about to upload, never what actually lands. It
+never edits the release or the repo; a failure here is a signal, not
+a rollback.
+
+`.github/workflows/release-homebrew.yml` (`on: release: [published]`,
+skipped for prerelease tags) downloads `SHA256SUMS` the same way,
+renders `Formula/toolu-runner.rb` via
+`scripts/generate-homebrew-formula.sh` (an `on_macos`/`on_linux` ×
 `on_arm`/`on_intel` formula selecting one of the four release
 tarballs), and pushes it to the external `Falconiere/homebrew-tap`
 repo using a `HOMEBREW_TAP_TOKEN` fine-grained PAT — the default
