@@ -41,14 +41,21 @@ jobs:
           # the default GITHUB_TOKEN is scoped to this repo only.
           TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
+          set -euo pipefail
           if [[ -z "$TAP_TOKEN" ]]; then
             echo "::error::HOMEBREW_TAP_TOKEN secret is not set — see docs/architecture.md § Release pipeline"
             exit 1
           fi
-          git clone "https://x-access-token:${TAP_TOKEN}@github.com/Falconiere/homebrew-tap.git" tap
+          # Auth via an extraheader (same technique actions/checkout uses)
+          # instead of embedding the PAT in the remote URL, so it never
+          # appears in `git remote -v` output or clone/push error messages.
+          header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TAP_TOKEN" | base64 -w0)"
+          git -c http.https://github.com/.extraheader="$header" \
+            clone https://github.com/Falconiere/homebrew-tap.git tap
           mkdir -p tap/Formula
           cp toolu-runner.rb tap/Formula/toolu-runner.rb
           cd tap
+          git config http.https://github.com/.extraheader "$header"
           git config user.name "toolu-runner release bot"
           git config user.email "actions@users.noreply.github.com"
           if git diff --quiet -- Formula/toolu-runner.rb; then

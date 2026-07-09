@@ -31,8 +31,8 @@ if [[ ! -f "$sums" ]]; then
   echo "generate-homebrew-formula: sha256sums file '$sums' not found" >&2
   exit 2
 fi
-if [[ "$tag" != v* ]]; then
-  echo "generate-homebrew-formula: tag '$tag' must start with 'v'" >&2
+if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[-a-zA-Z0-9.]+)?$ ]]; then
+  echo "generate-homebrew-formula: tag '$tag' is not a valid vX.Y.Z[-pre] tag" >&2
   exit 2
 fi
 
