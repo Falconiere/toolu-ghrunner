@@ -56,7 +56,8 @@ jobs:
       - name: Verify size sanity
         working-directory: dist
         run: |
-          size="$(stat -c%s "$TARBALL" 2>/dev/null || stat -f%z "$TARBALL")"
+          # runs-on is pinned to ubuntu-24.04 (GNU coreutils) — no macOS fallback needed.
+          size="$(stat -c%s "$TARBALL")"
           if (( size < 1048576 )); then
             echo "::error::$TARBALL is suspiciously small: ${size} bytes"
             exit 1
