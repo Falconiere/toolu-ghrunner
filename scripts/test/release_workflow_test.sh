@@ -65,7 +65,11 @@ want "chains homebrew off publish"     "uses: \./\.github/workflows/release-home
 # Least privilege: pass the one secret homebrew needs, never `secrets: inherit`
 # (which would forward RELEASE_PLZ_TOKEN, OPENROUTER_API_KEY, … as well).
 want "passes only the tap token"       "HOMEBREW_TAP_TOKEN: \\\$\{\{ secrets\.HOMEBREW_TAP_TOKEN \}\}"
-if grep -Eq -- "secrets: inherit" "$WF"; then
+# Anchored to a real YAML pair, not the bare phrase: the workflow's own comment
+# explains why inherit is wrong, and a looser pattern matches that prose too.
+# [[:space:]] rather than \s — \s is a non-POSIX extension, and this file is the
+# one asserting that others are precise.
+if grep -Eq -- "^[[:space:]]+secrets:[[:space:]]+inherit[[:space:]]*$" "$WF"; then
   echo "FAIL: 'secrets: inherit' forwards every repo secret — pass HOMEBREW_TAP_TOKEN explicitly" >&2
   fail=1
 else
