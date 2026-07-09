@@ -1,252 +1,202 @@
+<div align="center">
+
 # toolu-runner
 
-Standalone self-hosted GitHub Actions runner written in Rust. Runs real jobs
-against github.com and GHES, with no orchestrator service in the loop.
+**A self-hosted GitHub Actions runner, rewritten in Rust.**
 
-> **Status: pre-alpha.** v0.1.0 is the first release. As of the E0–E3
-> GitHub-compatibility work, `register` now performs the live JIT mint
-> (POST `generate-jitconfig`) and persists the real JIT config +
-> `runner_id`. The full live smoke (register → run → execute → report
-> against a real repo) still requires a registration token from a test
-> repo and has not yet been run end-to-end.
+One static binary. No .NET. No orchestrator service. No daemon you
+didn't ask for.
+
+[![ci](https://github.com/Falconiere/toolu-ghrunner/actions/workflows/ci.yml/badge.svg)](https://github.com/Falconiere/toolu-ghrunner/actions/workflows/ci.yml)
+[![live](https://github.com/Falconiere/toolu-ghrunner/actions/workflows/live.yml/badge.svg)](https://github.com/Falconiere/toolu-ghrunner/actions/workflows/live.yml)
+[![rust 1.94.1](https://img.shields.io/badge/rust-1.94.1-b7410e.svg)](rust-toolchain.toml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+[Install](#install) · [Quick start](#quick-start) ·
+[Watch a job](#watch-live-jobs-in-your-terminal) ·
+[How it works](#how-it-works) ·
+[vs. `actions/runner`](#vs-actionsrunner) ·
+[Docs](docs/architecture.md)
+
+</div>
+
+---
+
+`toolu-runner` speaks the same JIT listener protocol as GitHub's own
+runner — RSA key reconstruction → PS256 JWT → OAuth2 → broker session →
+long-poll → execute → report. It runs your real workflows: shell steps,
+Node.js actions, Docker actions, composite actions, reusable workflows,
+matrices, `${{ }}` expressions, artifacts, cache, and OIDC.
+
+The nightly [`live`](.github/workflows/live.yml) workflow above is not a
+mock. It dispatches a real job to a real `toolu-runner` on a real repo,
+every morning at 06:00 UTC.
+
+> [!WARNING]
+> **Pre-alpha (v0.1.0).** The live path is green nightly, but rough
+> edges remain: `remove` doesn't yet call GitHub's unregister API, and
+> there is no watchdog for network outages lasting more than 5 minutes
+> mid-job. See [docs/known-bugs.md](docs/known-bugs.md) before you point
+> this at anything you care about.
+
+## Install
+
+```sh
+# macOS / Linux — installs to /usr/local/bin
+curl -fsSL https://raw.githubusercontent.com/Falconiere/toolu-ghrunner/main/install.sh | sh
+
+# ...or Homebrew
+brew install falconiere/tap/toolu-runner
+```
+
+Add `--service` to also install and start the service unit (launchd on
+macOS, systemd on Linux). Pass `--check` to print the plan and exit
+without downloading anything.
+
+Prebuilt for **macOS** (arm64, x86_64) and **Linux** (x86_64, arm64).
 
 ## Quick start
 
-```bash
-# Install (macOS / Linux)
-curl -fsSL https://raw.githubusercontent.com/Falconiere/toolu-ghrunner/main/install.sh | sh
+Grab a registration token from your repo or org's **Settings → Actions →
+Runners → New self-hosted runner** page, then:
 
-# ...or via Homebrew (macOS / Linux)
-brew install falconiere/tap/toolu-runner
+```sh
+# 1. Register (repo URL or org URL both work)
+toolu-runner register \
+  --url https://github.com/owner/repo \
+  --token <reg_token> \
+  --name my-runner \
+  --labels self-hosted,linux,x64
 
-# Register against a GitHub repo
-toolu-runner register --url https://github.com/owner/repo \
-  --token <reg_token> --name my-runner --labels self-hosted,linux,x64
-
-# Run the listener (blocks until SIGINT/SIGTERM)
+# 2. Run the listener — blocks until SIGINT/SIGTERM
 toolu-runner run
 
-# Check local state (no network)
-toolu-runner status
-
-# Unregister
-toolu-runner remove
+# 3. Watch jobs execute, in another terminal
+toolu-runner watch
 ```
 
-The `--url` accepts a repo URL (`https://github.com/owner/repo`) or an
-org URL (`https://github.com/org`). The registration token comes from
-the repo or org's **Settings → Actions → Runners → New self-hosted
-runner** page.
+`status` prints local state without touching the network. `remove`
+unregisters. That's the whole CLI.
 
-See [docs/architecture.md](docs/architecture.md) for the full design
-and [docs/known-bugs.md](docs/known-bugs.md) for the live-smoke
-caveats.
+## Watch live jobs in your terminal
+
+Every job writes a JSONL event journal to disk. `toolu-runner watch` is a
+TUI over that journal — job history, a live step tree, streaming logs,
+and a cancel key. No network, no server, no browser tab.
+
+```
+┌ toolu-runner watch ─────────────────────────────────────────────────────┐
+│ runner: my-runner │ running · pid 48213 │                               │
+└─────────────────────────────────────────────────────────────────────────┘
+┌ jobs ──────────────────────────┐┌ build — running ───────────────────────┐
+│ ● build          10:42:07      ││ ✓  1. Set up job                       │
+│ ✓ test           09:18:22      ││ ✓  2. Checkout                         │
+│ ✗ lint           08:55:01      ││ ●  3. cargo build --release            │
+│ ⊘ deploy         08:31:44      ││ ○  4. Upload artifact                  │
+│ ○ nightly        06:00:12      │└────────────────────────────────────────┘
+│                                │┌ logs (follow) ─────────────────────────┐
+│                                ││    Compiling protocol v0.1.0           │
+│                                ││    Compiling toolu-runner v0.1.0       │
+│                                ││     Finished `release` in 41.20s       │
+└────────────────────────────────┘└────────────────────────────────────────┘
+ q quit │ Tab pane │ ↑↓/jk move │ Enter open │ f follow │ PgUp/PgDn scroll │ c cancel
+```
+
+Logs are masked through the same `SecretMasker` that guards the runner's
+own log file, so `secrets.*` values never land on disk in the clear.
+`watch` also works with no runner running — it browses the last 50 job
+journals under `~/.toolu-runner/_diag/jobs/`.
 
 ## How it works
 
-`toolu-runner` is a single binary that:
+```mermaid
+sequenceDiagram
+    participant R as toolu-runner
+    participant GH as GitHub
+    participant RS as Run / Results Service
 
-1. Registers with GitHub (github.com or GHES) using a short-lived
-   registration token from the repo/org's Runners page. The JIT
-   endpoint is auto-derived from the `--url` host
-   (`pipelinesgh.azureedge.net` for github.com, `pipelines.<host>` for
-   GHES).
-2. Polls the Actions Run Service for job assignments over the JIT
-   protocol. The auth chain is RSA key reconstruction → JWT (PS256) →
-   OAuth2 token exchange → broker session → long-poll message
-   acquisition.
-3. Executes the job locally: shell scripts, Node.js actions
-   (auto-downloaded), Docker actions, composite actions, reusable
-   workflows, artifacts, cache, and OIDC tokens. Step results are
-   reported back through the Results Service (Twirp).
-4. Renews the job lock every 60s and streams step logs to the
-   Results Service as the job runs.
-5. Completes the job with the final conclusion, then loops back to
-   the poll.
-
-The listener is one process. The single-job guarantee is enforced by
-a file lock on `~/.toolu-runner/.lock` (see [Storage layout](#storage-layout)).
-
-## Comparison to upstream `actions/runner`
-
-`actions/runner` is a ~30K-line C# binary that the GitHub team ships.
-`toolu-runner` reimplements the JIT listener subset in Rust, with no
-orchestrator service in the loop:
-
-| Subsystem                       | actions/runner | toolu-runner |
-|---------------------------------|----------------|--------------|
-| JIT config parse + RSA + JWT    | C#             | `protocol::auth` (sync, no I/O) |
-| Token exchange / session        | C#             | `toolu-runner::net` (async reqwest) |
-| Message poll loop               | C#             | `listener::job_lifecycle` |
-| Run service (acquire/renew/complete) | C#        | `reporting::run_service` + `net::run_service` |
-| Results service (Twirp)         | C#             | `reporting::results_service` + `net::results_service` |
-| Expression engine (`${{ }}`)    | C#             | `execution::expressions` |
-| Step handlers                   | C#             | `execution::handlers` (script, node, composite, docker) |
-| Artifacts / cache / OIDC        | C#             | `execution::artifacts` / `cache` / `oidc` |
-| Secret masking                  | C#             | `execution::secret_masker` + tracing layer |
-| Docker integration              | C#             | `docker::client` (bollard) |
-| Node.js auto-download           | C#             | `node::runtime` |
-| Plugin system                   | none           | `plugin::RunnerPlugin` (new) |
-
-**Not ported (out of scope for v1):** the yamless-orchestrator WebSocket
-client, yamless-specific step handlers (`yamless_deploy`,
-`yamless_notify`, `yamless_test_report`), and the OpenTelemetry layer.
-See [docs/known-bugs.md](docs/known-bugs.md) for the live-smoke status.
-
-## Supported platforms
-
-- **macOS** — arm64 (Apple Silicon), x86_64 (Intel)
-- **Linux** — x86_64, arm64
-
-The runner is built and tested against the `stable` Rust toolchain
-(pinned in `rust-toolchain.toml`). It depends on:
-
-- `bollard` (Docker client) — requires a running Docker daemon on the
-  host for Docker actions.
-- `tokio` (async runtime), `reqwest` (HTTP), `axum` (artifact / cache
-  / OIDC micro-services).
-- `tokio-tungstenite` (WebSocket for live log streaming).
-- System `cgroup v2` is *not* required (v1 runs in the user's session;
-  isolation is a v1.1 feature).
-
-## Development
-
-Requires Rust 1.94.1 (pinned in `rust-toolchain.toml`).
-
-```sh
-# Build everything
-cargo build --workspace
-
-# Run all unit tests
-cargo test --workspace
-
-# Run the live smoke (requires a registration token from a test repo)
-TOOLU_RUNNER_LIVE_TOKEN=<ghs_...> \
-  cargo test --workspace --features e2e-live -- --ignored live
-
-# Lint (denies all warnings)
-cargo clippy --workspace --all-targets -- -D warnings
-
-# Format check
-cargo fmt --all -- --check
-
-# Local quality gate (fmt + clippy + file-size + no-allow + no-unwrap + no-yamless)
-./tools/check.sh all
+    R->>GH: register (POST generate-jitconfig)
+    GH-->>R: JIT config (RSA key, client id, urls)
+    Note over R: RSA → PS256 JWT → OAuth2 token
+    R->>GH: create broker session
+    loop until SIGINT
+        R->>GH: long-poll for a message
+        GH-->>R: encrypted job (AES-256-CBC)
+        R->>RS: acquire job
+        Note over R: execute steps locally
+        R->>RS: stream logs + step results
+        R->>RS: renew lock (every 60s)
+        R->>RS: complete job (conclusion)
+    end
 ```
 
-`tools/check.sh` mirrors the yamless backend's check script: rejects
-`.rs` files over 700 lines, rejects `#[allow(..)]` / `#[expect(..)]`
-outside tests, rejects `.unwrap()` / `.expect()` in production code,
-and rejects any `yamless` / `YAMLESS_` reference in source.
+One process, one job at a time. The single-job guarantee is an `fs2`
+file lock on `~/.toolu-runner/.lock` whose body carries the holder's
+PID — a second `run` reads it, prints the PID, and exits `2`. Stale
+locks (dead PID, mtime > 5 min) are reclaimed automatically.
 
-`lefthook` runs `fmt --check`, `clippy`, and the no-yamless-coupling
-check as a `pre-commit` hook:
+`SIGINT`/`SIGTERM` are bridged to a `CancellationToken` that the poll
+loop, the renewal task, and the in-flight job all observe. Nothing is
+left orphaned.
 
-```sh
-lefthook install   # one-time
-lefthook run pre-commit
-```
+### What runs
 
-## Service install
+| | |
+|---|---|
+| **Steps** | `run:` shell, `uses:` Node.js actions (runtime auto-downloaded + cached), Docker actions, composite actions, plugins |
+| **Workflows** | matrices, `needs:` job graphs, reusable workflows, `if:` conditions, `timeout-minutes`, `working-directory`, `defaults.run` |
+| **Expressions** | the full `${{ }}` engine — lexer, parser, evaluator, `hashFiles`, `fromJSON`/`toJSON`, `contains`, `startsWith`, … |
+| **Services** | artifacts, cache, and OIDC — forwarded to real GitHub by default, or hosted locally in `offline` mode |
+| **Safety** | secret masking across logs, stdout, and the journal; strict-mode clippy (no `unwrap`, no `panic`, no `unsafe`) |
 
-The release tarball ships service files at `scripts/`. `install.sh`
-installs them with `--service`.
+### Forwarder vs. offline
 
-**launchd (macOS):** `scripts/io.toolu-runner.plist` lands in
-`~/Library/LaunchAgents/`. Override the `--config` path in the plist
-if you store `config.toml` somewhere other than the default
-(`/Users/Shared/toolu-runner/config.toml`).
+`[services] mode` decides where artifacts, cache, and OIDC go.
 
-```sh
-# After install:
-launchctl load ~/Library/LaunchAgents/io.toolu-runner.plist
-launchctl unload ~/Library/LaunchAgents/io.toolu-runner.plist   # to stop
-```
+- **`forwarder`** (default) — the runner reads the real GitHub service
+  URLs and runtime token out of the job message and injects them into
+  step env, so stock `upload-artifact@v4` / `cache@v4` / OIDC talk
+  straight to GitHub. Drop-in compatible.
+- **`offline`** — the runner hosts local stand-ins for those services.
+  For airgapped hosts.
 
-The plist sets `TOOLU_RUNNER_LOG=info` and pipes `StandardOutPath` /
-`StandardErrorPath` to `/Users/Shared/toolu-runner/_diag/launchd-*.log`.
+## vs. `actions/runner`
 
-**systemd (Linux):** `scripts/toolu-runner.service` lands in
-`/etc/systemd/system/`. It runs as the `toolu-runner` user/group with
-hardened sandboxing (`NoNewPrivileges`, `ProtectSystem=strict`,
-`PrivateTmp`, `ProtectHome`, `MemoryDenyWriteExecute`, etc.) and
-`Restart=always` for crash recovery. Logs go to the journal under
-`SyslogIdentifier=toolu-runner`.
+GitHub's runner is ~30K lines of C#. `toolu-runner` reimplements the JIT
+listener subset in Rust, with a strict `sync protocol` → `async net`
+boundary that keeps the crypto and wire-format code testable without a
+clock, a socket, or tokio.
 
-```sh
-sudo systemctl daemon-reload
-sudo systemctl enable --now toolu-runner
-sudo journalctl -u toolu-runner -f   # follow logs
-```
+| Subsystem | `actions/runner` | `toolu-runner` |
+|---|---|---|
+| JIT config parse + RSA + JWT | C# | `protocol::auth` *(sync, no I/O)* |
+| Token exchange / session | C# | `toolu-runner::net` |
+| Message poll loop | C# | `listener::job_lifecycle` |
+| Run service (acquire/renew/complete) | C# | `reporting::run_service` |
+| Results service (Twirp) | C# | `reporting::results_service` |
+| Expression engine (`${{ }}`) | C# | `execution::expressions` |
+| Step handlers | C# | `execution::handlers` |
+| Artifacts / cache / OIDC | C# | `execution::{artifacts,cache,oidc}` |
+| Secret masking | C# | `execution::secret_masker` + tracing layer |
+| Docker | C# | `docker::client` *(bollard)* |
+| Node.js auto-download | C# | `node::runtime` |
+| Live job TUI | — | **`toolu-runner watch`** |
+| Plugin system | — | **`plugin::RunnerPlugin`** |
 
-Service test scripts live at `scripts/test/plist_test.sh` (macOS)
-and `scripts/test/systemd_test.sh` (Linux). They are smoke checks
-that the unit file parses, not end-to-end service bring-up tests.
+**Deliberately not ported:** OpenTelemetry, and any coupling to the
+`yamless` orchestrator this code was extracted from. Both are rejected
+at CI time.
 
-## Releasing
-
-Releases are automated by
-[`.github/workflows/release.yml`](.github/workflows/release.yml). The
-workflow reads the repo and never writes to it — the version is
-human-authored. To cut a release:
-
-1. In a PR, bump `[workspace.package] version` in `Cargo.toml` and move
-   the `CHANGELOG.md` `[Unreleased]` section to `[X.Y.Z]`. Merge it.
-2. Tag the merge commit and push:
-
-   ```sh
-   git tag vX.Y.Z
-   git push origin vX.Y.Z
-   ```
-
-The tag push triggers `release.yml`, which asserts the tag matches the
-`Cargo.toml` version (`scripts/assert-version.sh`), runs the
-fmt/clippy/test gate, builds on four native runners (`darwin` / `linux`
-× `amd64` / `arm64`), packages one `toolu-runner-<os>-<arch>.tar.gz` per
-target (binary + `scripts/` service files, via
-`scripts/package-release.sh`), computes `SHA256SUMS`, and publishes a
-GitHub Release with notes from that version's `CHANGELOG.md` section
-(`scripts/changelog-extract.sh`). Tags containing a `-` (e.g.
-`v0.2.0-rc.1`) publish as prereleases, so `install.sh`'s "latest" stays
-on stable.
-
-Once a stable release is published,
-[`release-homebrew.yml`](.github/workflows/release-homebrew.yml) runs
-independently and never gates the release itself: it renders
-`Formula/toolu-runner.rb` (`scripts/generate-homebrew-formula.sh`) and
-pushes it to
-[`Falconiere/homebrew-tap`](https://github.com/Falconiere/homebrew-tap).
-The push needs a fine-grained PAT with `Contents: read+write` on that
-tap repo, stored as the `HOMEBREW_TAP_TOKEN` secret on this repo —
-without it, `release-homebrew.yml` fails loudly but the GitHub Release
-itself is unaffected.
-
-## Environment variables
-
-| Variable                   | Default                  | Used by              | Description |
-|----------------------------|--------------------------|----------------------|-------------|
-| `TOOLU_RUNNER_LOG`         | `info` (EnvFilter)       | all subcommands      | tracing log filter. Used first; falls back to `RUST_LOG` then `info`. |
-| `RUST_LOG`                 | (passes through)         | all subcommands      | tracing log filter (standard). |
-| `TOOLU_RUNNER_REPO`        | `Falconiere/toolu-ghrunner` | `install.sh` only | GitHub owner/repo to download the release from. |
-| `HOME`                     | —                        | `register` / `run`   | Resolves `~/.toolu-runner/` for the default data dir. |
-| `USERPROFILE`              | —                        | `register` / `run`   | Windows fallback for `HOME`. |
-| `HOSTNAME` / `COMPUTERNAME`| `unknown`                | `register`           | Used by the session registration to identify the runner host. |
-| `YAMLESS_*` (any)          | —                        | all subcommands      | **Legacy.** The runner prints `WARN: ignoring legacy env var {key} — toolu-runner has no compatibility layer for the old prefix; use TOOLU_RUNNER_* instead` for each and ignores. |
-
-The spec also lists `TOOLU_RUNNER_CONFIG`, `TOOLU_RUNNER_WORK`, and
-`TOOLU_RUNNER_LABELS` as future env-var overrides for the
-`--config` / `--work` / `--labels` flags. **These are not yet
-implemented** — the CLI reads the flags directly. Use the flags
-for v0.1.0.
+**GHES** is supported over the V1 protocol (`connectionData` discovery,
+timeline records); protocol version is auto-selected from the `--url`
+host at `register` time.
 
 ## Configuration
 
-`toolu-runner register` writes a `config.toml` (mode 0600) and a
-`credentials.json` (mode 0600) under `~/.toolu-runner/`. The schema
-mirrors what the code parses in `toolu-runner/src/config.rs`:
+<details>
+<summary><code>~/.toolu-runner/config.toml</code> (mode 0600)</summary>
 
 ```toml
-# ~/.toolu-runner/config.toml
 runner_url   = "https://github.com/owner/repo"
 runner_name  = "my-runner"
 runner_id    = 12345
@@ -255,102 +205,145 @@ labels       = ["self-hosted", "linux", "x64"]
 runner_group = "Default"
 
 [runtime]
-jit_config       = "<base64 blob from GH>"   # populated by `register`
+jit_config       = "<base64 blob from GH>"   # written by `register`
 work_dir         = "~/.toolu-runner/_work"
 data_dir         = "~/.toolu-runner"
-protocol_version = "v2"                       # "v1" for GHES
+protocol_version = "v2"                      # "v1" for GHES
 
 [services]
 mode = "forwarder"   # "forwarder" (default) | "offline"
 ```
 
-`[services] mode` selects where step-level artifacts / cache / OIDC go.
-In `forwarder` mode (the default) the runner injects the real GitHub
-service URLs + runtime token (from the job message) into step env, so
-GitHub-hosted `upload-artifact@v4` / `cache@v4` / OIDC talk to real
-GitHub. In `offline` mode the runner hosts the local fake services for
-airgapped use.
+Credentials live beside it in `credentials.json` (also 0600). Don't
+hand-edit `jit_config` or `auth_token` — re-run `register --replace`.
 
-```json
-// ~/.toolu-runner/credentials.json
-{
-  "access_token": "ghs_...",
-  "issued_at": "2026-06-18T10:00:00Z",
-  "expires_at": null
-}
-```
+</details>
 
-Do not edit `jit_config` or `auth_token` by hand — re-run `register`
-with `--replace` to regenerate them.
-
-### Storage layout
+<details>
+<summary>Storage layout</summary>
 
 ```
 ~/.toolu-runner/
-├── config.toml                 # registration + runtime config (0600)
-├── credentials.json            # long-lived OAuth token (0600)
-├── .lock                       # single-job file lock (0600, JSON body)
-├── .pending_remove             # marker written by `remove` while a run is in flight
-├── _work/                      # per-job workspaces
-│   └── <repo>/
-│       └── <job-id>/
-├── _diag/                      # log files, diagnostic dumps
-│   ├── runner.log              # JSON, secret-masked, daily-rotated
-│   └── runner.log.YYYY-MM-DD   # rotated archives
-└── .runner_version             # installed toolu-runner version
+├── config.toml         # registration + runtime config (0600)
+├── credentials.json    # OAuth token (0600)
+├── .lock               # single-job lock (JSON: pid, started_at, config_path)
+├── .pending_remove     # written by `remove` while a run is in flight
+├── _work/              # per-job workspaces: <repo>/<job-id>/
+├── _diag/
+│   ├── runner.log      # JSON, secret-masked, daily-rotated
+│   └── jobs/           # per-job JSONL journals (newest 50) — what `watch` reads
+└── .runner_version
 ```
 
-The `.lock` body is JSON: `{"pid": 12345, "started_at":
-"2026-06-18T10:00:00Z", "config_path": "/Users/.../config.toml"}`. A
-second `toolu-runner run` that finds the lock held reads the body,
-prints the PID, and exits 2. A stale lock (holder PID dead and mtime
-older than 5 min) is removed and re-acquired by the next `run`.
+</details>
 
-## Known bugs
+<details>
+<summary>Environment variables</summary>
 
-See [docs/known-bugs.md](docs/known-bugs.md) for the current list. The
-short version: the live `register` POST is now implemented (B-003
-resolved, `net/register.rs`), but the end-to-end live smoke against a
-test repo has not yet been run (token-gated). The live `remove`
-unregister call is still stubbed (B-002), and the 5-min cancellation
-watchdog on prolonged mid-job network outages is tracked as a known
-gap (B-001).
+| Variable | Default | Description |
+|---|---|---|
+| `TOOLU_RUNNER_LOG` | `info` | tracing filter. Checked before `RUST_LOG`. |
+| `RUST_LOG` | — | tracing filter (standard fallback). |
+| `TOOLU_RUNNER_REPO` | `Falconiere/toolu-ghrunner` | `install.sh` only — release source. |
+| `HOME` / `USERPROFILE` | — | resolves `~/.toolu-runner/`. |
+| `HOSTNAME` / `COMPUTERNAME` | `unknown` | identifies the runner host at `register`. |
+| `YAMLESS_*` | — | **Legacy.** Warned about, then ignored. No compatibility layer. |
+
+`TOOLU_RUNNER_CONFIG` / `_WORK` / `_LABELS` are specced but **not yet
+implemented** — use the CLI flags.
+
+</details>
+
+<details>
+<summary>Running as a service</summary>
+
+The release tarball ships service files under `scripts/`; `install.sh
+--service` installs them.
+
+**launchd (macOS)** — `scripts/io.toolu-runner.plist` →
+`~/Library/LaunchAgents/`. Logs to
+`/Users/Shared/toolu-runner/_diag/launchd-*.log`.
+
+```sh
+launchctl load   ~/Library/LaunchAgents/io.toolu-runner.plist
+launchctl unload ~/Library/LaunchAgents/io.toolu-runner.plist
+```
+
+**systemd (Linux)** — `scripts/toolu-runner.service` →
+`/etc/systemd/system/`. Runs as the `toolu-runner` user with
+`NoNewPrivileges`, `ProtectSystem=strict`, `PrivateTmp`, `ProtectHome`,
+`MemoryDenyWriteExecute`, and `Restart=always`.
+
+```sh
+sudo systemctl daemon-reload
+sudo systemctl enable --now toolu-runner
+sudo journalctl -u toolu-runner -f
+```
+
+</details>
 
 ## Troubleshooting
 
-- **"config not found at ..."** — `register` first, then `run`.
-- **"registration already exists at ..."** — pass `--replace` to
-  `register` to overwrite.
-- **"another run is in flight"** — another `toolu-runner run` is
-  holding `.lock`. Re-run `remove` with `--force` to cancel it, or
-  wait for the job to finish. The PID and start time are in the
-  error message.
-- **"warning: ignoring yamless env var YAMLESS_*"** — you have a
-  yamless shell profile still set. `toolu-runner` does not read any
-  `YAMLESS_*` variables; remove them from your shell rc.
-- **JIT endpoint probe fails at `register`** — the runner does a HEAD
-  to the JIT endpoint derived from `--url`'s host. Network
-  restrictions or a firewall that blocks `pipelinesgh.azureedge.net`
-  (or `pipelines.<host>` for GHES) will surface here.
-- **"bash -n install.sh" fails** — re-download the install script;
-  older yamless runner install scripts in the wild had a different
-  flag set.
+| Symptom | Fix |
+|---|---|
+| `config not found at ...` | Run `register` before `run`. |
+| `registration already exists at ...` | Pass `--replace` to `register`. |
+| `another run is in flight` | Another `run` holds `.lock`; its PID is in the error. Wait it out, or cancel with `c` in `watch` (sends SIGINT to the holder). |
+| JIT endpoint probe fails at `register` | A firewall is blocking `pipelinesgh.azureedge.net` (github.com) or `pipelines.<host>` (GHES). |
+| `warning: ignoring yamless env var ...` | A stale `YAMLESS_*` var is in your shell rc. Remove it. |
+
+Job not showing up? Check the labels in `runs-on:` match the ones you
+registered with, then `toolu-runner watch` to see what the runner
+actually received.
+
+## Development
+
+Requires Rust 1.94.1 (pinned in `rust-toolchain.toml`).
+
+```sh
+cargo build --workspace
+cargo test  --workspace          # 340 tests, no network required
+
+./tools/check.sh all             # the full local gate
+```
+
+`tools/check.sh` is stricter than clippy: it rejects `.rs` files over
+700 lines, `#[allow(..)]` / `#[expect(..)]` outside tests, `.unwrap()` /
+`.expect()` in production code, and any `yamless` reference in source.
+`lefthook install` wires the same checks to `pre-commit`.
+
+The live suite talks to a real repo and is token-gated:
+
+```sh
+TOOLU_RUNNER_LIVE_TOKEN=<ghs_...> \
+  cargo test --workspace --features e2e-live -- --ignored live
+```
+
+### Workspace
+
+Three crates, one direction of dependency:
+
+- **`shared`** — config, errors, events, job-message types, tracing init.
+  Sync, I/O-free.
+- **`protocol`** — JIT config, RSA/JWT, sessions, message decryption.
+  Sync, I/O-free, **network-free** (no `reqwest`, no `tokio` — enforced
+  by its `Cargo.toml`).
+- **`toolu-runner`** — the lib + bin. Owns every socket, every `.await`.
+
+[docs/architecture.md](docs/architecture.md) has the full design with
+sequence diagrams for register / run / cancel / reconnect.
 
 ## Contributing
 
-This is a docs-and-tests-driven project. Before opening a PR:
+PRs welcome. Before you open one:
 
-1. Run `./tools/check.sh all` and ensure it passes.
-2. Run `cargo test --workspace` and ensure all tests pass (currently 196).
-3. If your change touches the listener or reporting, add a unit test
-   in `toolu-runner/tests/` that exercises the new code path.
-4. If your change is public-facing, update `README.md` /
-   `docs/architecture.md` / `CHANGELOG.md` in the same commit.
+1. `./tools/check.sh all` passes.
+2. `cargo test --workspace` passes.
+3. Listener or reporting change? Add a test under `toolu-runner/tests/`.
+4. User-facing change? Update `README.md`, `docs/architecture.md`, and
+   `CHANGELOG.md` in the same commit.
 
-The repo is governed by a strict clippy config (see `Cargo.toml`):
-no `unwrap()` / `expect()` outside tests, no `#[allow(..)]` /
-`#[expect(..)]`, no yamless coupling. New files must stay under
-700 lines (enforced by `tools/check.sh`; function-body cap is 150 lines via clippy's `too_many_lines`).
+New files stay under 700 lines; function bodies under 150.
 
 ## License
 
