@@ -99,8 +99,9 @@ got = {(m["os"], m["arch"]) for m in inc}
 exp = {("darwin","arm64"),("darwin","amd64"),("linux","amd64"),("linux","arm64")}
 assert got == exp, f"matrix os/arch: {got}"
 assert jobs["publish"]["permissions"]["contents"] == "write"
-# The downstream chain: both must run AFTER the release exists, and homebrew
-# needs `secrets: inherit` or HOMEBREW_TAP_TOKEN is invisible to the callee.
+# The downstream chain: both must run AFTER the release exists. A callee is
+# granted github.token automatically but sees no other secret, so homebrew is
+# passed HOMEBREW_TAP_TOKEN explicitly — never `secrets: inherit`, asserted below.
 for j in ("finalize", "homebrew"):
     assert jobs[j]["needs"] == "publish", f"{j} needs: {jobs[j].get('needs')}"
     assert jobs[j]["permissions"]["contents"] == "read", f"{j} perms"
