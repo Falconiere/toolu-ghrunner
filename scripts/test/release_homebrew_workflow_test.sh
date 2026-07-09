@@ -61,9 +61,14 @@ else
 fi
 want "skips prereleases"                  "!contains\(github\.ref_name, '-'\)"
 want "reads the tag from the caller"      "TAG: \\\$\{\{ github\.ref_name \}\}"
-# Under workflow_call there is no `release` event payload. Matches expression
-# use only, so the header comment explaining this stays legal.
-reject "no release-event payload reads"   '\$\{\{[^}]*github\.event\.release'
+# `workflow_call` being present does not mean `release` is absent — a file may
+# declare both, and the event-triggered copy would be just as dead.
+reject "not event-triggered"              "^  release:"
+# Under workflow_call there is no `release` event payload. Matches any
+# non-comment line, not just `${{ }}` — `if:` accepts a bare expression without
+# the braces, which an expression-only pattern would miss. Header comments,
+# which start with `#`, stay legal.
+reject "no release-event payload reads"   '^[^#]*github\.event\.release'
 reject "caller owns concurrency"          "^concurrency:"
 want "least-privilege permissions"        "^permissions:"
 want "contents: read only"                "contents: read"

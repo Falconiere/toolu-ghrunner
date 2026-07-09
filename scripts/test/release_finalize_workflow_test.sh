@@ -47,10 +47,14 @@ reject() {
 # so an event-triggered version of this workflow could never fire.
 want "callable as a reusable workflow"  "^  workflow_call:"
 want "reads the tag from the caller"    "TAG: \\\$\{\{ github\.ref_name \}\}"
+# `workflow_call` being present does not mean `release` is absent — a file may
+# declare both, and the event-triggered copy would be just as dead.
+reject "not event-triggered"            "^  release:"
 # Under workflow_call there is no `release` event payload: any `github.event.release.*`
-# expression silently evaluates to "" and `gh release download ""` fails deep in the job.
-# Matches expression use only, so the header comment explaining this stays legal.
-reject "no release-event payload reads" '\$\{\{[^}]*github\.event\.release'
+# read silently evaluates to "" and `gh release download ""` fails deep in the job.
+# Matches any non-comment line, not just `${{ }}` — `if:` accepts a bare
+# expression without the braces, which an expression-only pattern would miss.
+reject "no release-event payload reads" '^[^#]*github\.event\.release'
 reject "caller owns concurrency"        "^concurrency:"
 # --- permissions (read-only: never edits the release or the repo) ---
 want "least-privilege permissions"     "^permissions:"
@@ -81,6 +85,9 @@ if python3 -c 'import yaml' >/dev/null 2>&1; then
   if python3 - "$WF" <<'PY'
 import sys, yaml
 wf = yaml.safe_load(open(sys.argv[1]))
+# YAML 1.1 parses the bare `on:` key as the boolean True, not the string "on".
+triggers = wf[True]
+assert set(triggers) == {"workflow_call"}, f"triggers: {list(triggers)}"
 jobs = wf.get("jobs", {})
 assert set(jobs) == {"smoke-test"}, f"jobs: {list(jobs)}"
 inc = jobs["smoke-test"]["strategy"]["matrix"]["include"]
