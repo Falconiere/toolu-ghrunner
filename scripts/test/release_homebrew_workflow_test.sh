@@ -45,9 +45,20 @@ reject() {
 # by a workflow step using the default GITHUB_TOKEN emits no `release` event,
 # so an event-triggered version of this workflow could never fire.
 want "callable as a reusable workflow"    "^  workflow_call:"
-# Declared, not inherited: the caller passes exactly this one secret.
-want "declares the tap token as required" "^      HOMEBREW_TAP_TOKEN:"
-want "tap token is mandatory"             "^        required: true"
+# Declared, not inherited: the caller passes exactly this one secret. Anchored
+# to the HOMEBREW_TAP_TOKEN block — a bare `required: true` match would also be
+# satisfied by that key appearing under some unrelated secret, or in a comment.
+if awk '
+  /^      HOMEBREW_TAP_TOKEN:[[:space:]]*$/ { inblock = 1; next }
+  inblock && /^      [^[:space:]]/          { inblock = 0 }
+  inblock && /^        required:[[:space:]]+true[[:space:]]*$/ { found = 1 }
+  END { exit !found }
+' "$WF"; then
+  echo "ok: tap token declared required under HOMEBREW_TAP_TOKEN"
+else
+  echo "FAIL: no 'required: true' inside the HOMEBREW_TAP_TOKEN secret block" >&2
+  fail=1
+fi
 want "skips prereleases"                  "!contains\(github\.ref_name, '-'\)"
 want "reads the tag from the caller"      "TAG: \\\$\{\{ github\.ref_name \}\}"
 # Under workflow_call there is no `release` event payload. Matches expression
@@ -71,7 +82,16 @@ wf = yaml.safe_load(open(sys.argv[1]))
 jobs = wf.get("jobs", {})
 assert set(jobs) == {"publish-formula"}, f"jobs: {list(jobs)}"
 assert wf["permissions"]["contents"] == "read"
-print("ok: PyYAML deep-check (job set + read-only perm)")
+# YAML 1.1 parses the bare `on:` key as the boolean True, not the string "on".
+triggers = wf[True]
+assert set(triggers) == {"workflow_call"}, f"triggers: {list(triggers)}"
+# Exactly one secret is declared, and it is mandatory. Structural, so a comment
+# or a stray `required: true` elsewhere in the file cannot satisfy it.
+secrets = triggers["workflow_call"]["secrets"]
+assert set(secrets) == {"HOMEBREW_TAP_TOKEN"}, f"workflow_call secrets: {list(secrets)}"
+tap = secrets["HOMEBREW_TAP_TOKEN"]
+assert tap.get("required") is True, f"tap token must be required, got: {tap.get('required')!r}"
+print("ok: PyYAML deep-check (job set + read-only perm + workflow_call declares only a required HOMEBREW_TAP_TOKEN)")
 PY
   then :; else
     echo "FAIL: PyYAML deep-check failed" >&2
