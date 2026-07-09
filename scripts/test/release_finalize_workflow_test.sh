@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# release_finalize_workflow_test.sh — static validation of
+# .github/workflows/release-finalize.yml.
+#
+# A published-release event can't be exercised offline, so this asserts the
+# invariants the finalize contract depends on: trigger, read-only permissions,
+# the 4-target matrix, checksum verification, size sanity, and tarball layout.
+# Uses grep (dependency-free, runs on every runner); if PyYAML is importable
+# it additionally asserts the file parses and the matrix is exactly 4 targets.
+set -uo pipefail
+
+cd "$(dirname "$0")/../.." || exit 1 # repo root
+
+WF=".github/workflows/release-finalize.yml"
+fail=0
+
+if [[ ! -f "$WF" ]]; then
+  echo "FAIL: $WF not found" >&2
+  exit 1
+fi
+
+want() {
+  local desc="$1" pat="$2"
+  if grep -Eq -- "$pat" "$WF"; then
+    echo "ok: $desc"
+  else
+    echo "FAIL: $desc — pattern not found: $pat" >&2
+    fail=1
+  fi
+}
+
+# --- trigger ---
+want "triggers on release published/prereleased" "types: \[published, prereleased\]"
+# --- permissions (read-only: never edits the release or the repo) ---
+want "least-privilege permissions"     "^permissions:"
+want "contents: read only"             "contents: read"
+# --- matrix (4 native targets, same set as release.yml) ---
+want "darwin arm64"                    "os: darwin"
+want "amd64"                           "arch: amd64"
+want "linux"                           "os: linux"
+want "arm64"                           "arch: arm64"
+# --- smoke test steps ---
+want "downloads the published tarball" "gh release download"
+want "downloads SHA256SUMS"            "SHA256SUMS"
+want "verifies checksum"               "sha256sum --ignore-missing -c SHA256SUMS"
+want "verifies size sanity"            "size.*1048576"
+want "verifies binary at tarball root" "toolu-runner scripts/io\.toolu-runner\.plist scripts/toolu-runner\.service"
+
+# --- exactly 4 matrix targets ---
+n_targets="$(grep -Ec -- "^ +- os:" "$WF")"
+if [[ "$n_targets" == "4" ]]; then
+  echo "ok: exactly 4 matrix targets"
+else
+  echo "FAIL: expected 4 matrix targets, found $n_targets" >&2
+  fail=1
+fi
+
+# --- optional: deep parse if PyYAML is available ---
+if python3 -c 'import yaml' >/dev/null 2>&1; then
+  if python3 - "$WF" <<'PY'
+import sys, yaml
+wf = yaml.safe_load(open(sys.argv[1]))
+jobs = wf.get("jobs", {})
+assert set(jobs) == {"smoke-test"}, f"jobs: {list(jobs)}"
+inc = jobs["smoke-test"]["strategy"]["matrix"]["include"]
+got = {(m["os"], m["arch"]) for m in inc}
+exp = {("darwin","arm64"),("darwin","amd64"),("linux","amd64"),("linux","arm64")}
+assert got == exp, f"matrix os/arch: {got}"
+assert wf["permissions"]["contents"] == "read"
+print("ok: PyYAML deep-check (job set + 4 os/arch + read-only perm)")
+PY
+  then :; else
+    echo "FAIL: PyYAML deep-check failed" >&2
+    fail=1
+  fi
+else
+  echo "# PyYAML unavailable — skipped deep parse (grep tier covers invariants)"
+fi
+
+if [[ "$fail" -ne 0 ]]; then
+  echo "release_finalize_workflow_test: FAILED" >&2
+  exit 1
+fi
+echo "release_finalize_workflow_test: all passed"

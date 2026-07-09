@@ -1,0 +1,76 @@
+name: release-finalize
+
+# Post-publish safety net for the tag-driven release in release.yml. Once a
+# GitHub Release is published, download each target's tarball straight back
+# from the release (not the build artifact) and verify it both matches
+# SHA256SUMS and extracts to the layout install.sh expects. This catches
+# upload corruption or a stale SHA256SUMS that `publish` can't see — it only
+# checksums what it's about to upload, never what actually lands on the
+# release after GitHub's asset upload. Read-only: never edits the release or
+# the repo, and never gates the release itself (it already exists by the time
+# this runs).
+on:
+  release:
+    types: [published, prereleased]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-finalize-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  smoke-test:
+    name: smoke-test (${{ matrix.os }}-${{ matrix.arch }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: darwin
+            arch: arm64
+          - os: darwin
+            arch: amd64
+          - os: linux
+            arch: amd64
+          - os: linux
+            arch: arm64
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.event.release.tag_name }}
+      TARBALL: toolu-runner-${{ matrix.os }}-${{ matrix.arch }}.tar.gz
+    steps:
+      - name: Download tarball + checksums
+        run: |
+          gh release download "$TAG" \
+            --repo "${{ github.repository }}" \
+            -p "$TARBALL" \
+            -p SHA256SUMS \
+            -D dist
+
+      - name: Verify checksum against SHA256SUMS
+        working-directory: dist
+        run: sha256sum --ignore-missing -c SHA256SUMS
+
+      - name: Verify size sanity
+        working-directory: dist
+        run: |
+          size="$(stat -c%s "$TARBALL" 2>/dev/null || stat -f%z "$TARBALL")"
+          if (( size < 1048576 )); then
+            echo "::error::$TARBALL is suspiciously small: ${size} bytes"
+            exit 1
+          fi
+          echo "::notice::$TARBALL OK (${size} bytes)"
+
+      - name: Verify tarball layout matches install.sh's extraction probe
+        working-directory: dist
+        run: |
+          listing="$(tar -tzf "$TARBALL")"
+          for member in toolu-runner scripts/io.toolu-runner.plist scripts/toolu-runner.service; do
+            if ! grep -qxF "$member" <<<"$listing"; then
+              echo "::error::$TARBALL missing expected member: $member"
+              exit 1
+            fi
+          done
+          echo "::notice::$TARBALL layout OK"
