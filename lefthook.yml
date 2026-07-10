@@ -7,17 +7,17 @@ pre-commit:
   parallel: true
   commands:
     rust-fmt:
-      glob: "{shared,protocol,toolu-runner}/**/*.rs"
+      glob: "crates/**/*.rs"
       run: cargo fmt --all -- --check
     rust-clippy:
-      glob: "{shared,protocol,toolu-runner}/**/*.rs"
+      glob: "crates/**/*.rs"
       run: cargo clippy --workspace --all-targets -- -D warnings
     no-yamless-coupling:
       run: |
         # AC #23 detection of YAMLESS_* env vars is legitimate; the grep
         # excludes shared/src/startup.rs (the AC #23 impl) and the warning
         # test fixtures that mention the YAMLESS_ prefix.
-        if grep -rn 'yamless' shared/ protocol/ toolu-runner/ Cargo.toml 2>/dev/null \
+        if grep -rn 'yamless' crates/ Cargo.toml 2>/dev/null \
            | grep -v 'YAMLESS_' | grep -v 'tests/live/'; then
           echo "ERROR: yamless reference in source (AC #19)"
           exit 1

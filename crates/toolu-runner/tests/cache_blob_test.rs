@@ -66,7 +66,7 @@ fn staging_path(staging_root: &Path) -> PathBuf {
 
 /// The real bytes of this repo's workspace `Cargo.lock`, used as the payload.
 fn payload() -> TestResult<Vec<u8>> {
-  let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../Cargo.lock");
+  let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Cargo.lock");
   Ok(std::fs::read(path)?)
 }
 

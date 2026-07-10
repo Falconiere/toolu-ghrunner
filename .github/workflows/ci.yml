@@ -28,7 +28,7 @@ jobs:
             echo "ERROR: yamless-* crate found in dependency tree"
             exit 1
           fi
-          if grep -rn 'yamless' shared/ protocol/ toolu-runner/ Cargo.toml 2>/dev/null \
+          if grep -rn 'yamless' crates/ Cargo.toml 2>/dev/null \
              | grep -v 'YAMLESS_' | grep -v 'tests/live/'; then
             echo "ERROR: yamless reference in source (excluding AC #23 YAMLESS_ detection)"
             exit 1

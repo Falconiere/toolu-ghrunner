@@ -72,7 +72,7 @@ async fn l2_mirrors_on_ingest_and_restores_a_cold_l1() -> TestResult<()> {
   let store = CasStore::new(root.clone(), 16384, 1 << 30).with_l2(Some(l2.clone()));
 
   // Real payload: this crate's own Cargo.lock.
-  let lock = Path::new(env!("CARGO_MANIFEST_DIR")).join("../Cargo.lock");
+  let lock = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Cargo.lock");
   let original = std::fs::read(&lock)?;
   assert!(!original.is_empty(), "Cargo.lock should be non-empty");
 

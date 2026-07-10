@@ -1,11 +1,7 @@
 # toolu-runner — unified Rust workspace
 [workspace]
 resolver = "2"
-members = [
-  "shared",
-  "protocol",
-  "toolu-runner",
-]
+members = ["crates/*"]
 
 [workspace.package]
 version = "0.1.0"
