@@ -89,7 +89,22 @@ want "generates the formula via script"   "generate-homebrew-formula\.sh"
 # shellcheck disable=SC2016  # single quotes are deliberate: this is a grep pattern, not shell to expand
 want "guards against a missing PAT"       'if \[\[ -z "\$TAP_TOKEN" \]\]'
 want "pushes to the homebrew-tap repo"    "Falconiere/homebrew-tap"
-want "skips an unchanged formula"         "git diff --quiet"
+# Must stage before comparing: on a first release the formula is untracked, and
+# `git diff` (without --cached) ignores untracked files — it would report "no
+# changes", skip the push, and still exit 0. Assert the --cached form, and
+# reject the bare one so the regression cannot return.
+want "skips an unchanged formula"         "git diff --cached --quiet"
+reject "compares the index, not worktree" "git diff --quiet"
+if awk '
+  /^ *git add Formula\/toolu-runner\.rb$/          { staged = 1 }
+  staged && /git diff --cached --quiet/            { ordered = 1 }
+  END { exit !ordered }
+' "$WF"; then
+  echo "ok: stages the formula before diffing it"
+else
+  echo "FAIL: 'git add' must precede 'git diff --cached' or a new formula is never pushed" >&2
+  fail=1
+fi
 want "commits with the tag in the message" 'git commit -m "toolu-runner \$\{TAG\}"'
 
 if python3 -c 'import yaml' >/dev/null 2>&1; then

@@ -68,10 +68,16 @@ jobs:
           git config http.https://github.com/.extraheader "$header"
           git config user.name "toolu-runner release bot"
           git config user.email "actions@users.noreply.github.com"
-          if git diff --quiet -- Formula/toolu-runner.rb; then
+          # Stage BEFORE comparing. On a first release the formula does not yet
+          # exist in the tap, so it is untracked — and `git diff` ignores
+          # untracked files, reporting "no changes" and skipping the push while
+          # the job still exits 0. `--cached` compares the index against HEAD,
+          # which sees a new file as an addition and an unchanged formula as a
+          # no-op.
+          git add Formula/toolu-runner.rb
+          if git diff --cached --quiet -- Formula/toolu-runner.rb; then
             echo "::notice::formula unchanged, nothing to push"
             exit 0
           fi
-          git add Formula/toolu-runner.rb
           git commit -m "toolu-runner ${TAG}"
           git push
