@@ -16,6 +16,8 @@
 //! transport wrappers.
 
 pub mod auth;
+/// GitHub OAuth device-flow login: request code, poll for token.
+pub mod device_auth;
 pub mod log_upload;
 pub mod messages;
 pub mod register;
@@ -25,6 +27,10 @@ pub mod session;
 pub mod v1;
 
 pub use auth::{authenticate, exchange_token};
+pub use device_auth::{
+  DeviceCodeResponse, DeviceToken, PollOutcome, parse_poll_response, poll_for_token,
+  request_device_code,
+};
 pub use log_upload::{
   append_block_headers, block_blob_headers, create_append_blob_headers, upload_block_blob,
   upload_log,

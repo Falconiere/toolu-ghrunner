@@ -1,0 +1,182 @@
+//! CLI-login token persistence.
+//!
+//! The `login` flow (device-flow OAuth in [`crate::net::device_auth`])
+//! yields a bearer token that later commands reuse. This module hides
+//! *where* that token lives: the OS keyring when one is available, or a
+//! per-host `0600` JSON file under `data_dir` when it is not.
+//!
+//! Token resolution precedence (flag > env > stored) is factored into the
+//! pure [`pick_bearer`] so it can be unit-tested without any I/O, with
+//! [`resolve_bearer`] wiring the three real sources into it.
+
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
+use shared::RunnerError;
+
+/// Keyring service name; the `user` slot holds the GitHub host.
+const KEYRING_SERVICE: &str = "toolu-runner";
+
+/// A persisted login token plus the metadata needed to reuse it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoredToken {
+  /// The bearer token GitHub issued (e.g. a `gho_…` device-flow token).
+  pub access_token: String,
+  /// OAuth scopes the token was granted.
+  pub scope: String,
+  /// GitHub host the token authenticates against (e.g. `github.com`).
+  pub host: String,
+  /// When the token was stored, RFC3339 (`chrono::Utc::now().to_rfc3339()`).
+  pub issued_at: String,
+}
+
+/// Where login tokens are persisted.
+///
+/// [`AuthStore::new`] picks the variant: the OS keyring when reachable,
+/// otherwise a directory of per-host `0600` JSON files.
+pub enum AuthStore {
+  /// The OS secure store (`keyring` crate: macOS Keychain, Windows
+  /// Credential Manager, Linux kernel keyutils).
+  Keyring,
+  /// Fallback: per-host `token-<host>.json` files under this directory.
+  File(PathBuf),
+}
+
+impl AuthStore {
+  /// Choose a backend: prefer the OS keyring, fall back to files.
+  ///
+  /// keyring 3.x has no `NoDefaultStore` variant — it surfaces an
+  /// unavailable secure store as an `Err` from [`keyring::Entry::new`]
+  /// (`PlatformFailure` / `NoStorageAccess`). We probe once here; on any
+  /// construction error we log a one-time WARN and fall back to
+  /// `File(data_dir)`.
+  pub fn new(data_dir: &Path) -> Self {
+    match keyring::Entry::new(KEYRING_SERVICE, "__probe__") {
+      Ok(_) => AuthStore::Keyring,
+      Err(err) => {
+        tracing::warn!(
+          error = %err,
+          "OS keyring unavailable; storing login tokens as 0600 files under data_dir instead"
+        );
+        AuthStore::File(data_dir.to_path_buf())
+      },
+    }
+  }
+
+  /// Persist `token`, keyed by its `host`. Overwrites any existing entry.
+  ///
+  /// # Errors
+  ///
+  /// Returns `RunnerError::Auth` on keyring failures, `RunnerError::Io` /
+  /// `RunnerError::Json` on file-backend failures.
+  pub fn save(&self, token: &StoredToken) -> Result<(), RunnerError> {
+    match self {
+      AuthStore::Keyring => {
+        let json = serde_json::to_string(token)?;
+        keyring_entry(&token.host)?
+          .set_password(&json)
+          .map_err(|e| RunnerError::Auth(format!("keyring write failed for {}: {e}", token.host)))
+      },
+      AuthStore::File(dir) => {
+        std::fs::create_dir_all(dir)?;
+        let path = token_file_path(dir, &token.host);
+        let body = serde_json::to_string_pretty(token)?;
+        crate::config::write_secret_file(&path, body.as_bytes())
+      },
+    }
+  }
+
+  /// Load the token for `host`, or `None` when not logged in.
+  ///
+  /// # Errors
+  ///
+  /// Returns `RunnerError::Auth` on keyring failures other than a missing
+  /// entry, `RunnerError::Io` / `RunnerError::Json` on file-backend failures.
+  pub fn load(&self, host: &str) -> Result<Option<StoredToken>, RunnerError> {
+    match self {
+      AuthStore::Keyring => match keyring_entry(host)?.get_password() {
+        Ok(json) => Ok(Some(serde_json::from_str(&json)?)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(err) => Err(RunnerError::Auth(format!(
+          "keyring read failed for {host}: {err}"
+        ))),
+      },
+      AuthStore::File(dir) => {
+        let path = token_file_path(dir, host);
+        match std::fs::read(&path) {
+          Ok(bytes) => Ok(Some(serde_json::from_slice(&bytes)?)),
+          Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+          Err(e) => Err(RunnerError::Io(e)),
+        }
+      },
+    }
+  }
+
+  /// Delete the token for `host`. Idempotent: a missing entry is `Ok(())`.
+  ///
+  /// # Errors
+  ///
+  /// Returns `RunnerError::Auth` on keyring failures other than a missing
+  /// entry, `RunnerError::Io` on file-backend failures other than a
+  /// missing file.
+  pub fn delete(&self, host: &str) -> Result<(), RunnerError> {
+    match self {
+      AuthStore::Keyring => match keyring_entry(host)?.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(err) => Err(RunnerError::Auth(format!(
+          "keyring delete failed for {host}: {err}"
+        ))),
+      },
+      AuthStore::File(dir) => {
+        let path = token_file_path(dir, host);
+        match std::fs::remove_file(&path) {
+          Ok(()) => Ok(()),
+          Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+          Err(e) => Err(RunnerError::Io(e)),
+        }
+      },
+    }
+  }
+}
+
+/// Build a keyring entry for `host`, mapping construction errors to `Auth`.
+fn keyring_entry(host: &str) -> Result<keyring::Entry, RunnerError> {
+  keyring::Entry::new(KEYRING_SERVICE, host)
+    .map_err(|e| RunnerError::Auth(format!("keyring entry init failed for {host}: {e}")))
+}
+
+/// Path of the per-host token file: `<dir>/token-<host>.json`.
+///
+/// `host` is sanitized (both `/` and `\` replaced) so it is always
+/// filename-safe and cannot escape `dir` via a path separator on any platform.
+fn token_file_path(dir: &Path, host: &str) -> PathBuf {
+  let safe = host.replace(['/', '\\'], "_");
+  dir.join(format!("token-{safe}.json"))
+}
+
+/// Pure precedence resolver: `flag` > `env` > `stored`.
+///
+/// Isolated (no I/O) so the precedence rule is unit-testable.
+pub fn pick_bearer(
+  flag: Option<String>,
+  env: Option<String>,
+  stored: Option<String>,
+) -> Option<String> {
+  flag.or(env).or(stored)
+}
+
+/// Resolve the bearer token for `host`: `flag` > `TOOLU_RUNNER_TOKEN` env >
+/// the stored token. Wires the three sources into [`pick_bearer`].
+///
+/// # Errors
+///
+/// Propagates a `RunnerError` from [`AuthStore::load`].
+pub fn resolve_bearer(
+  store: &AuthStore,
+  host: &str,
+  flag: Option<String>,
+) -> Result<Option<String>, RunnerError> {
+  let env = std::env::var("TOOLU_RUNNER_TOKEN").ok();
+  let stored = store.load(host)?.map(|t| t.access_token);
+  Ok(pick_bearer(flag, env, stored))
+}

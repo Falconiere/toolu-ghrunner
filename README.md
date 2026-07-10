@@ -58,26 +58,36 @@ Prebuilt for **macOS** (arm64, x86_64) and **Linux** (x86_64, arm64).
 
 ## Quick start
 
-Grab a registration token from your repo or org's **Settings → Actions →
-Runners → New self-hosted runner** page, then:
+Log in once — GitHub's device flow opens your browser, no PAT to craft by
+hand. The token is stored in your OS keyring (0600 file fallback where no
+keyring exists):
 
 ```sh
-# 1. Register (repo URL or org URL both work)
+# 1. Authenticate to GitHub
+toolu-runner login
+
+# 2. Register (repo URL or org URL both work) — no --token needed after login
 toolu-runner register \
   --url https://github.com/owner/repo \
-  --token <reg_token> \
   --name my-runner \
   --labels self-hosted,linux,x64
 
-# 2. Run the listener — blocks until SIGINT/SIGTERM
+# 3. Run the listener — blocks until SIGINT/SIGTERM
 toolu-runner run
 
-# 3. Watch jobs execute, in another terminal
+# 4. Watch jobs execute, in another terminal
 toolu-runner watch
 ```
 
-`status` prints local state without touching the network. `remove`
-unregisters. That's the whole CLI.
+Prefer to manage the credential yourself? Pass `--token <pat>` (a PAT or App
+installation token with `administration:write` on the repo/org) or set
+`TOOLU_RUNNER_TOKEN`. Resolution order for `register` is
+`--token` > `TOOLU_RUNNER_TOKEN` > stored login token. For GitHub Enterprise,
+register an OAuth App on that instance and run
+`toolu-runner login --hostname <ghes-host> --client-id <id>`.
+
+`status` prints local state — including login — without touching the network.
+`logout` deletes the stored token. `remove` unregisters. That's the whole CLI.
 
 ## Watch live jobs in your terminal
 

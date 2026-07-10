@@ -132,19 +132,36 @@ and no OTel.
 
 - `lib.rs` — `Runner` struct (config, `execute_job` returns an
   `mpsc::Receiver<RunnerEvent>`).
-- `main.rs` — clap CLI: `register`, `run`, `remove`, `status`,
-  `watch`.
-  `--config` defaults to `~/.toolu-runner/config.toml`. `register`
-  validates `--url`, probes the JIT endpoint with a 5s HEAD,
-  computes the protocol version from the host, and writes a
-  placeholder config (live flow is step 10). `run` loads the
+- `main.rs` — clap CLI: `login`, `logout`, `register`, `run`,
+  `remove`, `status`, `watch`.
+  `--config` defaults to `~/.toolu-runner/config.toml`. `login`
+  runs GitHub OAuth **device flow** (`net/device_auth`) and stores
+  the resulting token via `auth_store` (OS keyring, 0600-file
+  fallback); `logout` deletes it. The device-flow OAuth App
+  `client_id` is a baked-in `const DEVICE_CLIENT_ID` (placeholder
+  until the app is registered); non-`github.com` hosts require
+  `--client-id`. `register` validates `--url`, probes the JIT
+  endpoint with a 5s HEAD, computes the protocol version from the
+  host, and writes a placeholder config (live flow is step 10); its
+  `--token` is now **optional** — the bearer is resolved
+  `--token` > `TOOLU_RUNNER_TOKEN` env > stored login token
+  (`auth_store::resolve_bearer`). `run` loads the
   config + credentials, acquires `.lock`, constructs
   `GitHubListener::new(jit_config, …)`, wires SIGINT/SIGTERM to a
   `CancellationToken`. `remove` writes `.pending_remove` if
   `.lock` is held, otherwise deletes the persisted state (live
   GH unregister call is step 10). `status` prints the config
-  without network. `watch` opens the journal TUI (no network, no
-  tracing init — logs would corrupt the alternate screen).
+  **plus per-host login state** without network. `watch` opens the
+  journal TUI (no network, no tracing init — logs would corrupt the
+  alternate screen).
+- `login_cmd.rs` — `LoginArgs` / `LogoutArgs` + `cmd_login` /
+  `cmd_logout` handlers, browser-open helper, and data-dir
+  resolution (split out of `main.rs` for the 500-line ceiling).
+- `auth_store.rs` — GitHub token persistence. `AuthStore`
+  (`Keyring` via the `keyring` crate / `File(<data_dir>/token-<host>.json)`
+  0600 fallback), `StoredToken`, per-host `save`/`load`/`delete`,
+  pure `pick_bearer` (flag > env > stored) + `resolve_bearer`. Used
+  only for the `generate-jitconfig` bearer — never at runtime.
 - `config.rs` — `RunnerRegistrationConfig`, `RuntimeConfig`,
   `CredentialsFile`, `load_config` / `save_config` (TOML, 0600),
   `load_credentials` / `save_credentials` (JSON, 0600),
@@ -157,7 +174,10 @@ and no OTel.
   + mtime > 5 min.
 - `net/` — async network layer. **One-way dependency on `protocol`**
   (request types from `protocol`, response types in `protocol` or
-  `reporting`). `auth` (token exchange), `session` (create / delete
+  `reporting`). `auth` (token exchange), `device_auth` (GitHub
+  OAuth **device flow** — `request_device_code` / `poll_for_token`
+  / pure `parse_poll_response`; host-relative so GHES works;
+  backs `toolu-runner login`), `session` (create / delete
   session), `messages` (poll + acknowledge), `run_service`
   (acquire / renew / complete), `results_service` (Twirp RPCs:
   `update_workflow_steps`, `create_job_logs_metadata`,
