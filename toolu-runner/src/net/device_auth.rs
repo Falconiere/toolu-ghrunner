@@ -56,20 +56,21 @@ pub enum PollOutcome {
 }
 
 /// Reject a `host` that could alter the request target when interpolated into
-/// the `https://{host}/…` URL: userinfo (`@`), path (`/`), port (`:`),
-/// whitespace, ASCII control chars, or empty. Called first in
-/// [`request_device_code`] and [`poll_for_token`] so a hostile `--hostname`
-/// can never redirect the OAuth requests.
+/// the `https://{host}/…` URL. Called first in [`request_device_code`] and
+/// [`poll_for_token`] so a hostile `--hostname` can never redirect the OAuth
+/// requests. A `:` is allowed so `host:port` and bracketed IPv6 hosts pass.
 ///
 /// # Errors
 ///
-/// Returns `RunnerError::Auth` when `host` is empty or contains any of `/`,
-/// `@`, `:`, whitespace, or an ASCII control char.
+/// `RunnerError::Auth` when `host` is empty, holds `/`, `@`, whitespace, or an
+/// ASCII control char, or carries no ASCII-alphanumeric character (rejecting
+/// degenerate authorities like `::`, `..`, `---` that name no real host).
 pub fn validate_host(host: &str) -> Result<(), RunnerError> {
   if host.is_empty()
     || host
       .chars()
-      .any(|c| matches!(c, '/' | '@' | ':') || c.is_whitespace() || c.is_ascii_control())
+      .any(|c| matches!(c, '/' | '@') || c.is_whitespace() || c.is_ascii_control())
+    || !host.chars().any(|c| c.is_ascii_alphanumeric())
   {
     return Err(RunnerError::Auth(format!("invalid host: {host:?}")));
   }

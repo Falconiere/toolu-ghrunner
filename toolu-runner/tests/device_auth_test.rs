@@ -56,18 +56,25 @@ fn unrecognized_error_carries_the_error_code() {
   );
 }
 
-/// A plain hostname (github.com or a GHES host) passes validation.
+/// A plain hostname (github.com or a GHES host) passes validation, as does a
+/// `host:port` — a colon stays within the authority and is allowed.
 #[test]
 fn validate_host_accepts_plain_hostnames() {
   assert!(validate_host("github.com").is_ok());
   assert!(validate_host("ghe.example.com").is_ok());
+  assert!(validate_host("github.com:443").is_ok());
 }
 
-/// A host carrying userinfo, a path segment, or that is empty is rejected —
-/// otherwise `https://{host}/…` could redirect the OAuth request.
+/// A host carrying userinfo, a path segment, that is empty, or that carries no
+/// alphanumeric (`::`, `..` — degenerate authorities that name no real host)
+/// is rejected — otherwise `https://{host}/…` could redirect the OAuth request.
+/// A real `host:port` still passes: it has alphanumerics.
 #[test]
 fn validate_host_rejects_request_target_smuggling() {
   assert!(validate_host("github.com@evil.com").is_err());
   assert!(validate_host("a/b").is_err());
   assert!(validate_host("").is_err());
+  assert!(validate_host("::").is_err());
+  assert!(validate_host("..").is_err());
+  assert!(validate_host("github.com:443").is_ok());
 }
