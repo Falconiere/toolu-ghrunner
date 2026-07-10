@@ -15,6 +15,13 @@ name: release-plz
 # (the same anti-recursion rule release.yml's header calls out for `gh release
 # create`): a tag pushed under GITHUB_TOKEN would land silently and release.yml
 # would never run. The PAT is a distinct identity, so its tag push does trigger it.
+#
+# Kill-switch: both jobs are gated on `vars.RELEASE_PLZ_ENABLED == 'true'`, so
+# the automation does NOTHING until an operator opts in. This prevents a merge
+# from immediately opening release PRs / cutting a tag — important while
+# DEVICE_CLIENT_ID on main is still the REPLACE_ME placeholder (a release now
+# would ship a broken `login`). To activate: set the `RELEASE_PLZ_ENABLED`
+# repository variable to `true`.
 on:
   push:
     branches: [main]
@@ -27,6 +34,7 @@ jobs:
   # `release`: for a version bump that has already merged to main, push the
   # `vX.Y.Z` tag (under the PAT) that hands off to release.yml.
   release-plz-release:
+    if: ${{ vars.RELEASE_PLZ_ENABLED == 'true' }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write # push the release tag (only perm the `release` command needs)
@@ -46,6 +54,7 @@ jobs:
   # `release-pr`: open/refresh the version-bump + CHANGELOG PR. One in flight at
   # a time on this ref; never cancel a running one (it may be pushing a branch).
   release-plz-pr:
+    if: ${{ vars.RELEASE_PLZ_ENABLED == 'true' }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write # push the release-pr branch

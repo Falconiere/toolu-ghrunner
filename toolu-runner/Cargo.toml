@@ -2,6 +2,7 @@
 name = "toolu-runner"
 version.workspace = true
 edition.workspace = true
+publish = false # never published to crates.io (mirrors release-plz.toml [workspace] publish = false)
 license.workspace = true
 repository.workspace = true
 
