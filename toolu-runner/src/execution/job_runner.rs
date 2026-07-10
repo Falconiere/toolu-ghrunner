@@ -224,6 +224,13 @@ const MAX_GC_HOURS: u64 = 100 * 365 * 24;
 /// GC failure must never fail the job, so an error is logged and the run
 /// continues; the count of pruned directories is logged at INFO.
 fn gc_stale_workspaces(config: &RunnerConfig, keep: &str) {
+  // Zero disables GC. Without this guard `max_age` would be `Duration::ZERO`,
+  // and "prune anything older than zero seconds" sweeps every finished
+  // workspace — including ones created moments ago. Never-prune has two forms:
+  // the explicit `0` off switch here, and the `>= MAX_GC_HOURS` cap below.
+  if config.workspace_gc_hours == 0 {
+    return;
+  }
   let hours = config.workspace_gc_hours.min(MAX_GC_HOURS);
   let max_age = Duration::from_secs(hours * 3600);
   match super::workspace_gc::gc_workspaces(&config.workspace_root, max_age, keep) {

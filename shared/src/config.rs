@@ -48,13 +48,31 @@ pub struct CacheConfig {
   pub l2: Option<L2Config>,
 }
 
+impl CacheConfig {
+  /// Default cache capacity: 100 GiB. Backs the `[cache] max_bytes` TOML
+  /// default in `toolu-runner::config` (`default_cache_max_bytes`) so the two
+  /// sites cannot drift.
+  pub const DEFAULT_MAX_BYTES: u64 = 100 * 1024 * 1024 * 1024;
+  /// Default entry TTL: 7 days (matches GitHub). Backs `default_entry_ttl_days`.
+  pub const DEFAULT_ENTRY_TTL_DAYS: u64 = 7;
+  /// Default FastCDC target average chunk size: 64 KiB. Backs
+  /// `default_chunk_avg_bytes`.
+  pub const DEFAULT_CHUNK_AVG_BYTES: u32 = 64 * 1024;
+  /// Default protected branches a `Trusted` job may write the shared scope for.
+  /// Backs `default_protected_branches`.
+  pub const DEFAULT_PROTECTED_BRANCHES: &'static [&'static str] = &["main", "master"];
+}
+
 impl Default for CacheConfig {
   fn default() -> Self {
     Self {
-      max_bytes: 100 * 1024 * 1024 * 1024,
-      entry_ttl_days: 7,
-      protected_branches: vec!["main".to_owned(), "master".to_owned()],
-      chunk_avg_bytes: 64 * 1024,
+      max_bytes: Self::DEFAULT_MAX_BYTES,
+      entry_ttl_days: Self::DEFAULT_ENTRY_TTL_DAYS,
+      protected_branches: Self::DEFAULT_PROTECTED_BRANCHES
+        .iter()
+        .map(|b| (*b).to_owned())
+        .collect(),
+      chunk_avg_bytes: Self::DEFAULT_CHUNK_AVG_BYTES,
       l2: None,
     }
   }
@@ -84,7 +102,9 @@ pub struct RunnerConfig {
   pub service_bind: String,
   /// Content-addressed cache settings (accelerated mode).
   pub cache: CacheConfig,
-  /// Age in hours after which a finished job's workspace is pruned.
+  /// Age in hours after which a finished job's workspace is pruned. `0`
+  /// disables GC (never prune); a value at or above the 100-year cap also
+  /// means never prune.
   pub workspace_gc_hours: u64,
   /// Whether shadow-mode step observation records (never serves).
   pub shadow_enabled: bool,
@@ -96,6 +116,10 @@ impl RunnerConfig {
   /// Also backs the `[services] bind` TOML default in `toolu-runner::config`
   /// (`default_service_bind`) so the two sites cannot drift.
   pub const DEFAULT_SERVICE_BIND: &'static str = "0.0.0.0";
+  /// Default workspace GC age: 24 hours. Backs the `[workspace] gc_hours` TOML
+  /// default in `toolu-runner::config` (`default_gc_after_hours`) so the two
+  /// sites cannot drift.
+  pub const DEFAULT_WORKSPACE_GC_HOURS: u64 = 24;
 }
 
 impl Default for RunnerConfig {
@@ -107,7 +131,7 @@ impl Default for RunnerConfig {
       services_mode: ServicesMode::default(),
       service_bind: Self::DEFAULT_SERVICE_BIND.to_owned(),
       cache: CacheConfig::default(),
-      workspace_gc_hours: 24,
+      workspace_gc_hours: Self::DEFAULT_WORKSPACE_GC_HOURS,
       shadow_enabled: false,
     }
   }
