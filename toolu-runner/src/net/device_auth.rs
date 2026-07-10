@@ -55,6 +55,27 @@ pub enum PollOutcome {
   Error(String),
 }
 
+/// Reject a `host` that could alter the request target when interpolated into
+/// the `https://{host}/…` URL: userinfo (`@`), path (`/`), port (`:`),
+/// whitespace, ASCII control chars, or empty. Called first in
+/// [`request_device_code`] and [`poll_for_token`] so a hostile `--hostname`
+/// can never redirect the OAuth requests.
+///
+/// # Errors
+///
+/// Returns `RunnerError::Auth` when `host` is empty or contains any of `/`,
+/// `@`, `:`, whitespace, or an ASCII control char.
+pub fn validate_host(host: &str) -> Result<(), RunnerError> {
+  if host.is_empty()
+    || host
+      .chars()
+      .any(|c| matches!(c, '/' | '@' | ':') || c.is_whitespace() || c.is_ascii_control())
+  {
+    return Err(RunnerError::Auth(format!("invalid host: {host:?}")));
+  }
+  Ok(())
+}
+
 /// Start the device flow: `POST https://<host>/login/device/code`.
 ///
 /// Sends `client_id` + `scope` as a form; no client secret.
@@ -62,13 +83,15 @@ pub enum PollOutcome {
 /// # Errors
 ///
 /// Returns `RunnerError::Network` on transport failure and
-/// `RunnerError::Auth` on a non-success status or an unparseable body.
+/// `RunnerError::Auth` on an invalid `host`, a non-success status, or an
+/// unparseable body.
 pub async fn request_device_code(
   client: &reqwest::Client,
   host: &str,
   client_id: &str,
   scope: &str,
 ) -> Result<DeviceCodeResponse, RunnerError> {
+  validate_host(host)?;
   let url = format!("https://{host}/login/device/code");
   let response = client
     .post(&url)
@@ -107,23 +130,26 @@ pub async fn request_device_code(
 /// # Errors
 ///
 /// Returns `RunnerError::Network` on transport failure and
-/// `RunnerError::Auth` on denial, expiry, or any terminal error.
+/// `RunnerError::Auth` on an invalid `host`, denial, expiry, or any terminal
+/// error.
 pub async fn poll_for_token(
   client: &reqwest::Client,
   host: &str,
   client_id: &str,
   dc: &DeviceCodeResponse,
 ) -> Result<DeviceToken, RunnerError> {
+  validate_host(host)?;
   let url = format!("https://{host}/login/oauth/access_token");
   let start = std::time::Instant::now();
   let deadline = std::time::Duration::from_secs(dc.expires_in);
   let mut interval = dc.interval;
 
+  // Poll immediately, then sleep between iterations, so a fast approval is
+  // picked up on the first pass instead of waiting a full interval first.
   loop {
     if start.elapsed() >= deadline {
       return Err(RunnerError::Auth("device code expired".to_owned()));
     }
-    tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
 
     let text = send_poll(client, &url, client_id, &dc.device_code).await?;
     match parse_poll_response(&text) {
@@ -140,6 +166,8 @@ pub async fn poll_for_token(
         return Err(RunnerError::Auth(format!("device flow error: {msg}")));
       },
     }
+
+    tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
   }
 }
 

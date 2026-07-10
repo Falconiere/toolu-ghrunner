@@ -5,7 +5,7 @@
 //! flow — real payloads, not mocks. The classifier is pure, so no HTTP
 //! (and no client id) is needed to exercise it.
 
-use toolu_runner::net::device_auth::{PollOutcome, parse_poll_response};
+use toolu_runner::net::device_auth::{PollOutcome, parse_poll_response, validate_host};
 
 #[test]
 fn authorization_pending_maps_to_pending() {
@@ -54,4 +54,20 @@ fn unrecognized_error_carries_the_error_code() {
     matches!(&outcome, PollOutcome::Error(code) if code == "device_flow_disabled"),
     "unknown error should surface its code verbatim; got {outcome:?}"
   );
+}
+
+/// A plain hostname (github.com or a GHES host) passes validation.
+#[test]
+fn validate_host_accepts_plain_hostnames() {
+  assert!(validate_host("github.com").is_ok());
+  assert!(validate_host("ghe.example.com").is_ok());
+}
+
+/// A host carrying userinfo, a path segment, or that is empty is rejected —
+/// otherwise `https://{host}/…` could redirect the OAuth request.
+#[test]
+fn validate_host_rejects_request_target_smuggling() {
+  assert!(validate_host("github.com@evil.com").is_err());
+  assert!(validate_host("a/b").is_err());
+  assert!(validate_host("").is_err());
 }
