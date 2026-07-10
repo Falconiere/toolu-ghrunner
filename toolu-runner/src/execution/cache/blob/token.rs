@@ -16,6 +16,11 @@ use crate::execution::cache::mint_capability_token;
 
 /// Fallback TTL when the requested one overflows `Instant` arithmetic: far
 /// enough out that no real client notices, finite so the entry still ages out.
+///
+/// In the degenerate case where even this cap overflows (an `Instant` within a
+/// day of its maximum — unreachable on real platforms), the expiry falls back
+/// to `now`, deliberately minting an already-expired token: fail closed (every
+/// use resolves to `None`, a 403) rather than panic, with a WARN as the trace.
 const OVERFLOW_TTL_CAP: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// What a minted blob token authorizes.
@@ -170,7 +175,13 @@ impl BlobRegistry {
       let expiry = now
         .checked_add(ttl)
         .or_else(|| now.checked_add(OVERFLOW_TTL_CAP))
-        .unwrap_or(now);
+        .unwrap_or_else(|| {
+          tracing::warn!(
+            "blob token TTL and overflow cap both overflow Instant arithmetic; \
+             minting an already-expired token (fail closed, will 403 on use)"
+          );
+          now
+        });
       map.insert(token.clone(), Entry { target, expiry });
     } else {
       tracing::warn!("blob token registry poisoned; minted token not stored (will 403 on use)");
