@@ -173,10 +173,9 @@ fn secret_in_command_is_masked_in_jsonl() -> TestResult {
   let secret = "supersecrettoken123";
   let shared = masker();
   {
-    let mut guard = match shared.lock() {
-      Ok(g) => g,
-      Err(poisoned) => poisoned.into_inner(),
-    };
+    // Fail-closed like production (shadow/mod.rs): a poisoned masker lock is a
+    // hard error, never silently recovered. The fresh masker never poisons.
+    let mut guard = shared.lock().expect("fresh masker lock is never poisoned");
     guard.add_secret(secret);
   }
 
