@@ -232,23 +232,26 @@ pub struct ShadowSection {
 }
 
 fn default_cache_max_bytes() -> u64 {
-  100 * 1024 * 1024 * 1024
+  CacheConfig::DEFAULT_MAX_BYTES
 }
 
 fn default_entry_ttl_days() -> u64 {
-  7
+  CacheConfig::DEFAULT_ENTRY_TTL_DAYS
 }
 
 fn default_protected_branches() -> Vec<String> {
-  vec!["main".to_owned(), "master".to_owned()]
+  CacheConfig::DEFAULT_PROTECTED_BRANCHES
+    .iter()
+    .map(|b| (*b).to_owned())
+    .collect()
 }
 
 fn default_chunk_avg_bytes() -> u32 {
-  64 * 1024
+  CacheConfig::DEFAULT_CHUNK_AVG_BYTES
 }
 
 fn default_gc_after_hours() -> u64 {
-  24
+  shared::RunnerConfig::DEFAULT_WORKSPACE_GC_HOURS
 }
 
 /// Runtime sub-section: paths, JIT config blob, protocol version.
