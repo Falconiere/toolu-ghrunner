@@ -2,10 +2,13 @@
 //!
 //! No mocks: the "upstream" is a genuine second [`CacheServer`] we control, and
 //! every request is driven with a real `reqwest` client over real TCP sockets.
-//! The three tests pin the load-bearing contract — unmatched paths (and their
-//! `Authorization` header) forward upstream, local routes stay local, and an
-//! unreachable upstream `502`s the proxied call while the local cache keeps
-//! serving.
+//! The four tests pin the load-bearing contract — unmatched paths (and their
+//! `Authorization` header) forward upstream, a compressed upstream body keeps
+//! its `Content-Encoding`, local routes stay local, and an unreachable upstream
+//! `502`s the proxied call while the local cache keeps serving.
+
+use std::io::{Read, Write};
+use std::path::Path;
 
 use axum::body::to_bytes;
 use axum::extract::Request;
@@ -20,6 +23,8 @@ type TestResult<T> = Result<T, Box<dyn std::error::Error>>;
 
 /// A path served by the OTHER Twirp service at this origin — must forward.
 const ARTIFACT_PATH: &str = "/twirp/github.actions.results.api.v1.ArtifactService/CreateArtifact";
+/// A forwarded path whose upstream answers with a gzip-encoded body.
+const GZIP_PATH: &str = "/twirp/github.actions.results.api.v1.ArtifactService/GetSignedArtifactURL";
 /// A cache path the local app owns — must stay local.
 const PING_PATH: &str = "/twirp/github.actions.results.api.v1.CacheService/ping";
 /// Upper bound on the echoed upstream request body.
@@ -51,6 +56,42 @@ async fn echo_artifact(req: Request) -> Response {
   ([(header::CONTENT_TYPE, "application/json")], payload).into_response()
 }
 
+/// The real bytes of this repo's workspace `Cargo.lock`, used as the payload.
+fn payload() -> TestResult<Vec<u8>> {
+  let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../Cargo.lock");
+  Ok(std::fs::read(path)?)
+}
+
+/// Gzip `bytes` with a real deflate stream.
+fn gzip(bytes: &[u8]) -> TestResult<Vec<u8>> {
+  let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+  enc.write_all(bytes)?;
+  Ok(enc.finish()?)
+}
+
+/// Gunzip `bytes`, erroring if the stream is not a valid gzip member.
+fn gunzip(bytes: &[u8]) -> TestResult<Vec<u8>> {
+  let mut out = Vec::new();
+  flate2::read::GzDecoder::new(bytes).read_to_end(&mut out)?;
+  Ok(out)
+}
+
+/// Upstream that compresses despite the proxy stripping `accept-encoding`, and
+/// labels the body `Content-Encoding: gzip` — the header the proxy must relay.
+async fn gzip_artifact() -> Response {
+  let Ok(body) = payload().and_then(|p| gzip(&p)) else {
+    return (StatusCode::INTERNAL_SERVER_ERROR, "gzip payload failed").into_response();
+  };
+  (
+    [
+      (header::CONTENT_TYPE, "application/octet-stream"),
+      (header::CONTENT_ENCODING, "gzip"),
+    ],
+    body,
+  )
+    .into_response()
+}
+
 /// Upstream copy of the cache ping path, returning `500` — so if the proxy ever
 /// forwarded a local path, the test would observe this instead of `200 local`.
 async fn ping_upstream_500() -> Response {
@@ -65,6 +106,7 @@ async fn ping_upstream_500() -> Response {
 fn upstream_router() -> axum::Router {
   axum::Router::new()
     .route(ARTIFACT_PATH, post(echo_artifact))
+    .route(GZIP_PATH, get(gzip_artifact))
     .route(PING_PATH, get(ping_upstream_500))
 }
 
@@ -80,6 +122,55 @@ fn dead_upstream_base() -> TestResult<String> {
   let addr = listener.local_addr()?;
   drop(listener);
   Ok(format!("http://{addr}"))
+}
+
+/// A compressed upstream body keeps its `Content-Encoding` across the proxy.
+///
+/// `reqwest` is built without the decompression features, so the bytes arrive
+/// and leave still gzipped. Dropping the header would hand the client
+/// compressed data labelled as identity; here the client gunzips it back to the
+/// exact upstream payload.
+#[tokio::test]
+async fn forwards_content_encoding_of_a_compressed_upstream_body() -> TestResult<()> {
+  let upstream = CacheServer::start(upstream_router(), "127.0.0.1:0").await?;
+  let client = reqwest::Client::new();
+  let app = proxied_app(
+    local_router(),
+    upstream.base_url().to_owned(),
+    client.clone(),
+  );
+  let proxied = CacheServer::start(app, "127.0.0.1:0").await?;
+
+  let resp = client
+    .get(abs_url(proxied.base_url(), GZIP_PATH))
+    .send()
+    .await?;
+  assert_eq!(resp.status().as_u16(), 200, "gzip artifact call proxied");
+  assert_eq!(
+    resp
+      .headers()
+      .get(header::CONTENT_ENCODING)
+      .and_then(|v| v.to_str().ok()),
+    Some("gzip"),
+    "Content-Encoding must be relayed with the bytes it describes"
+  );
+
+  let relayed = resp.bytes().await?;
+  let expected = payload()?;
+  assert_ne!(
+    relayed.as_ref(),
+    expected.as_slice(),
+    "body should still be compressed on the wire"
+  );
+  assert_eq!(
+    gunzip(&relayed)?,
+    expected,
+    "relayed body must gunzip to the upstream payload"
+  );
+
+  proxied.shutdown().await;
+  upstream.shutdown().await;
+  Ok(())
 }
 
 #[tokio::test]
