@@ -112,10 +112,15 @@ impl ShadowObserver {
   /// Classify `key`: `would_hit` when already seen; `false_hit` when the first
   /// recorded post differs from `post`. Records `key -> post` on first sight,
   /// never overwriting it.
+  ///
+  /// Returns the neutral `(false, false)` (after a WARN) when the `seen` lock
+  /// is poisoned — a panic mid-insert may have left the map incomplete, so the
+  /// diagnostic-only signal is classified as a plain miss (fail closed) rather
+  /// than computed from a possibly inconsistent map.
   fn classify(&self, key: &str, post: [u8; 32]) -> (bool, bool) {
-    let mut seen = match self.seen.lock() {
-      Ok(g) => g,
-      Err(poisoned) => poisoned.into_inner(),
+    let Ok(mut seen) = self.seen.lock() else {
+      tracing::warn!("shadow: seen lock poisoned; step classified as miss (fail closed)");
+      return (false, false);
     };
     // `.copied()` ends the borrow of `seen` before the `else` branch inserts.
     if let Some(prior) = seen.get(key).copied() {

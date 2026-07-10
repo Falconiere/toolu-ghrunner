@@ -11,6 +11,8 @@
 //! failure to upstream yields `502` on the proxied (artifact) call only, while
 //! the local cache routes keep serving from local NVMe.
 
+use std::time::Duration;
+
 use axum::body::Body;
 use axum::extract::Request;
 use axum::http::{HeaderMap, HeaderName, StatusCode, Uri, header};
@@ -22,6 +24,12 @@ use reqwest::Client;
 /// The proxied bodies are small Twirp control JSON — the large artifact bytes
 /// go straight to Azure blob, not through this origin — so buffering is fine.
 const MAX_PROXY_BODY: usize = 64 * 1024 * 1024;
+
+/// Deadline for buffering a proxied request body. Without one, a client that
+/// stalls mid-body holds the connection (and its buffer) open indefinitely.
+/// The proxied bodies are small Twirp control JSON, so 60s is generous
+/// headroom even for a slow sender.
+const PROXY_BODY_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Wrap `local` (the cache app router) so that any request NOT matched by a
 /// local route is forwarded verbatim to `upstream_base` (the real
@@ -43,12 +51,19 @@ pub fn proxied_app(local: axum::Router, upstream_base: String, client: Client) -
 /// Forward `req` to `{upstream_base}{path+query}` and translate the reply back.
 ///
 /// A failure to send the upstream request — or to read either body — becomes a
-/// `502`, so an unreachable upstream never fails the local cache routes.
+/// `502`, so an unreachable upstream never fails the local cache routes. A
+/// client that stalls past [`PROXY_BODY_TIMEOUT`] while sending its body gets
+/// `408` (a client failure, not an upstream one).
 async fn forward(req: Request, upstream_base: &str, client: &Client) -> Response {
   let (parts, body) = req.into_parts();
-  let bytes = match axum::body::to_bytes(body, MAX_PROXY_BODY).await {
-    Ok(bytes) => bytes,
-    Err(e) => return bad_gateway(&format!("read request body: {e}")),
+  let read = tokio::time::timeout(
+    PROXY_BODY_TIMEOUT,
+    axum::body::to_bytes(body, MAX_PROXY_BODY),
+  );
+  let bytes = match read.await {
+    Ok(Ok(bytes)) => bytes,
+    Ok(Err(e)) => return bad_gateway(&format!("read request body: {e}")),
+    Err(_) => return request_timeout("request body read timed out"),
   };
   let url = build_upstream_url(upstream_base, &parts.uri);
   let headers = copy_request_headers(&parts.headers);
@@ -130,4 +145,9 @@ async fn translate_response(resp: reqwest::Response) -> Response {
 /// A `502 Bad Gateway` with a short text body describing the upstream failure.
 fn bad_gateway(msg: &str) -> Response {
   (StatusCode::BAD_GATEWAY, msg.to_owned()).into_response()
+}
+
+/// A `408 Request Timeout` for a client that stalled while sending its body.
+fn request_timeout(msg: &str) -> Response {
+  (StatusCode::REQUEST_TIMEOUT, msg.to_owned()).into_response()
 }

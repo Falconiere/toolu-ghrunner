@@ -18,6 +18,7 @@ mod put_block;
 /// In-memory blob token registry (opaque nonces → upload/download targets).
 pub mod token;
 
+use std::fs::Metadata;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -215,13 +216,29 @@ pub fn sweep_staging(staging_root: &Path, older_than: Duration) -> Result<usize,
   for entry in read {
     let entry = entry.map_err(RunnerError::Io)?;
     let meta = entry.metadata().map_err(RunnerError::Io)?;
-    let modified = meta.modified().map_err(RunnerError::Io)?;
-    if now.duration_since(modified).unwrap_or_default() > older_than {
+    if is_older_than(&entry.path(), &meta, now, older_than) {
       remove_entry(&entry.path(), meta.is_dir())?;
       removed += 1;
     }
   }
   Ok(removed)
+}
+
+/// Whether `metadata`'s mtime is more than `older_than` before `now`.
+///
+/// A mtime at or after `now` — clock skew, or `duration_since` failing on a
+/// future-dated entry — is treated as fresh, so such an entry is never swept.
+/// An unreadable mtime (unsupported platform) is likewise treated as fresh
+/// (never delete when unsure) and logged at DEBUG.
+fn is_older_than(path: &Path, metadata: &Metadata, now: SystemTime, older_than: Duration) -> bool {
+  let Ok(mtime) = metadata.modified() else {
+    tracing::debug!(path = %path.display(), "staging sweep: mtime unavailable, treating entry as fresh");
+    return false;
+  };
+  match now.duration_since(mtime) {
+    Ok(age) => age > older_than,
+    Err(_) => false,
+  }
 }
 
 /// Remove one staging entry (file or directory); a missing entry is a no-op.
