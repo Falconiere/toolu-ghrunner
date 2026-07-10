@@ -92,9 +92,11 @@ fn build_upstream_url(upstream_base: &str, uri: &Uri) -> String {
 /// `Content-Type` reach upstream while `host` / `content-length` / `connection`
 /// are left for `reqwest` to set from the new request.
 ///
-/// `accept-encoding` is also stripped: this proxy passes the upstream body
-/// through verbatim and copies only `Content-Type`, so it must not let upstream
-/// compress a response it would then relay without a `Content-Encoding` header.
+/// `accept-encoding` is also stripped: this proxy relays the upstream body
+/// verbatim (`reqwest` is built without the decompression features), so it does
+/// not invite a compressed response it would have to decode. An upstream that
+/// compresses anyway is still handled — [`translate_response`] forwards the
+/// `Content-Encoding` it labelled the body with.
 fn copy_request_headers(src: &HeaderMap) -> HeaderMap {
   let mut out = HeaderMap::with_capacity(src.len());
   for (name, value) in src {
@@ -124,10 +126,16 @@ fn is_hop_by_hop(name: &HeaderName) -> bool {
 }
 
 /// Translate an upstream `reqwest` reply into an axum response: status,
-/// `Content-Type`, and the buffered body bytes.
+/// `Content-Type`, `Content-Encoding`, and the buffered body bytes.
+///
+/// `Content-Encoding` must ride along with the bytes it describes. `reqwest` is
+/// built without `gzip`/`brotli`/`deflate`, so a compressed upstream body
+/// arrives encoded; relaying those bytes while dropping the header would hand
+/// the client compressed data labelled as identity, which it cannot decode.
 async fn translate_response(resp: reqwest::Response) -> Response {
   let status = resp.status();
   let content_type = resp.headers().get(header::CONTENT_TYPE).cloned();
+  let content_encoding = resp.headers().get(header::CONTENT_ENCODING).cloned();
   let bytes = match resp.bytes().await {
     Ok(bytes) => bytes,
     Err(e) => return bad_gateway(&format!("read upstream body: {e}")),
@@ -135,6 +143,9 @@ async fn translate_response(resp: reqwest::Response) -> Response {
   let mut builder = Response::builder().status(status);
   if let Some(ct) = content_type {
     builder = builder.header(header::CONTENT_TYPE, ct);
+  }
+  if let Some(ce) = content_encoding {
+    builder = builder.header(header::CONTENT_ENCODING, ce);
   }
   match builder.body(Body::from(bytes)) {
     Ok(resp) => resp,

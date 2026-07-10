@@ -158,9 +158,24 @@ impl CasStore {
   }
 
   /// True if a chunk with `id` already exists on disk.
+  ///
+  /// A failed check (permission denied, broken mount) reads as absent — callers
+  /// turn that into a cache miss, which is the safe direction — but it is
+  /// logged, because a miss caused by an unreadable store looks exactly like a
+  /// miss caused by an evicted chunk.
   pub async fn has_chunk(&self, id: &ChunkId) -> bool {
     let path = chunk_io::blob_path(&self.blobs_dir(), &id.to_hex());
-    tokio::fs::try_exists(&path).await.unwrap_or(false)
+    match tokio::fs::try_exists(&path).await {
+      Ok(exists) => exists,
+      Err(e) => {
+        tracing::debug!(
+          error = %e,
+          path = %path.display(),
+          "chunk existence check failed; treating the chunk as absent"
+        );
+        false
+      },
+    }
   }
 
   /// Enumerate every content-addressed chunk id currently on disk.
