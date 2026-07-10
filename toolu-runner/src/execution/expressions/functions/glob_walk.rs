@@ -89,9 +89,8 @@ pub fn walk(
 
     let mut children = read_children(&item)?;
     children.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
-    // `pop()` takes the tail, so push descending to visit ascending.
-    children.reverse();
-    stack.extend(children);
+    // `pop()` takes the tail, so push in descending order to visit ascending.
+    stack.extend(children.into_iter().rev());
   }
 
   Ok(())

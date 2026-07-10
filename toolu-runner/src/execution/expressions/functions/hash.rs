@@ -133,6 +133,12 @@ fn digest_file(path: &Path) -> Result<Option<sha2::digest::Output<Sha256>>, Runn
 }
 
 /// Split a leading `--follow-symbolic-links` off the argument list.
+///
+/// The flag matches case-insensitively and only in the first argument;
+/// any other leading `--` argument is an error. All three behaviors mirror
+/// the runner's `HashFilesFunction.cs`, which compares with
+/// `StringComparison.OrdinalIgnoreCase` and treats a `--` string in any
+/// later parameter as an ordinary pattern.
 fn split_options(args: &[String]) -> Result<(bool, &[String]), RunnerError> {
   let Some(first) = args.first() else {
     return Ok((false, args));

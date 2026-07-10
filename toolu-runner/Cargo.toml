@@ -84,8 +84,10 @@ tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
 # Compression / archive
 serde_repr = "0.1"
 
-# Jitter for poll backoff
+# Jitter for poll backoff (never for secrets)
 fastrand = "2"
+# CSPRNG for blob bearer tokens (also a dev-dep of the crypto tests)
+rand = { version = "0.8", features = ["std_rng"] }
 ratatui = "0.29"
 crossterm = "0.28"
 
@@ -95,7 +97,6 @@ crossterm = "0.28"
 wiremock = "0.6"
 tempfile = "3"
 pretty_assertions = "1"
-rand = { version = "0.8", features = ["std_rng"] }
 filetime = "0.2"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 rsa = "0.9"

@@ -72,7 +72,12 @@ pub struct RunnerConfig {
   /// `None` in v1 (no cgroup isolation — runners run in the user's session).
   /// Reserved for a future v1.1 capability.
   pub cgroup_path: Option<PathBuf>,
-  /// Artifact/cache/OIDC serving mode (`forwarder` default).
+  /// Artifact/cache/OIDC serving mode.
+  ///
+  /// Defaults to [`ServicesMode::Forwarder`] (real GitHub service URLs
+  /// forwarded from the job message) — both here and in
+  /// [`ServicesMode::default`]. See [`ServicesMode`] for the `offline`
+  /// and `accelerated` alternatives.
   pub services_mode: ServicesMode,
   /// Address the accelerated cache server binds. Must not be loopback:
   /// `docker-container` BuildKit reaches it across a network namespace.

@@ -2,8 +2,9 @@
 //! on the CAS. No mocks: a real `CasStore` + `CacheIndex` in a tempdir, the real
 //! workspace `Cargo.lock` uploaded through reserve → PATCH → finalize and read
 //! back byte-for-byte over `reqwest`. Plus a 204 miss, a 401 on a bad/absent
-//! bearer, a rejected-and-unindexed size mismatch, and AC-10 restart safety
-//! (a fresh `CacheIndex` on the same root still finds a finalized entry).
+//! bearer, a rejected-unindexed-and-staging-cleaned size mismatch, and AC-10
+//! restart safety (a fresh `CacheIndex` on the same root still finds a
+//! finalized entry).
 
 use std::path::{Path, PathBuf};
 
@@ -322,6 +323,16 @@ async fn size_mismatch_is_rejected_and_not_indexed() -> TestResult<()> {
   let idx = CacheIndex::new(h.cas_root.clone());
   let hit = idx.lookup(&[SCOPE.to_owned()], VERSION, "deps", &[])?;
   assert!(hit.is_none(), "fresh index must not see the rejected entry");
+
+  // The rejected upload's staging file (staging/<cache_id>, created by
+  // reserve) must be gone: finalize removes it even when it rejects the size.
+  let leftovers: Vec<PathBuf> = std::fs::read_dir(h.cas_root.join("staging"))?
+    .map(|e| e.map(|e| e.path()))
+    .collect::<Result<_, _>>()?;
+  assert!(
+    leftovers.is_empty(),
+    "rejected finalize must clean up staging, found {leftovers:?}"
+  );
   Ok(())
 }
 
