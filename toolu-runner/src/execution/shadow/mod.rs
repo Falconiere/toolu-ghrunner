@@ -179,10 +179,15 @@ impl ShadowObserver {
   }
 }
 
-/// The dedup key for one observation: `cmd \0 env \0 cwd \0 pre-hex`.
+/// The dedup key for one observation: `cmd \0 env \0 len(cwd) : cwd \0 pre-hex`.
+///
+/// `cwd` is the only field with an unconstrained byte range, so it is
+/// length-prefixed: two distinct working directories cannot produce the same
+/// key even if one embeds the `\0` separator.
 fn observe_key(cmd_digest: &str, env_digest: &str, cwd: &str, pre: [u8; 32]) -> String {
   format!(
-    "{cmd_digest}\0{env_digest}\0{cwd}\0{}",
+    "{cmd_digest}\0{env_digest}\0{}:{cwd}\0{}",
+    cwd.len(),
     fingerprint_hex(pre)
   )
 }

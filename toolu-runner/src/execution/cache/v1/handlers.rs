@@ -289,7 +289,7 @@ async fn do_finalize(state: &V1State, cache_id: u64, size: u64) -> Result<bool, 
 ///
 /// Intentionally unauthenticated: real `@actions/cache` / buildx clients GET a
 /// v1 archive URL with no `Authorization` header. The unguessable token in the
-/// path is the capability (see [`super::mint_download_token`]).
+/// path is the capability (see [`crate::execution::cache::mint_capability_token`]).
 pub async fn download(
   State(state): State<Arc<V1State>>,
   headers: HeaderMap,

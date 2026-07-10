@@ -78,10 +78,18 @@ fn str_field(value: &Value, field: &str) -> TestResult<String> {
     .ok_or_else(|| format!("missing string field {field} in {value}").into())
 }
 
+/// Absolute URL for a v1 cache API `path` (no leading `/`) under `base`.
+///
+/// Trims a trailing `/` off `base` and re-adds the separator, so no call site
+/// depends on `CacheServer::base_url`'s trailing-slash convention.
+fn api_url(base: &str, path: &str) -> String {
+  format!("{}/{path}", base.trim_end_matches('/'))
+}
+
 /// `POST /caches` to reserve a cache id for `key`.
 async fn reserve(client: &reqwest::Client, base: &str, key: &str) -> TestResult<u64> {
   let resp = client
-    .post(format!("{base}_apis/artifactcache/caches"))
+    .post(api_url(base, "_apis/artifactcache/caches"))
     .header("authorization", format!("Bearer {BEARER}"))
     .json(&json!({ "key": key, "version": VERSION }))
     .send()
@@ -108,7 +116,10 @@ async fn patch_chunk(
 ) -> TestResult<()> {
   let end = offset + data.len() - 1;
   let resp = client
-    .patch(format!("{base}_apis/artifactcache/caches/{cache_id}"))
+    .patch(api_url(
+      base,
+      &format!("_apis/artifactcache/caches/{cache_id}"),
+    ))
     .header("authorization", format!("Bearer {BEARER}"))
     .header("Content-Range", format!("bytes {offset}-{end}/*"))
     .body(data.to_vec())
@@ -126,7 +137,10 @@ async fn finalize(
   size: usize,
 ) -> TestResult<(u16, Value)> {
   let resp = client
-    .post(format!("{base}_apis/artifactcache/caches/{cache_id}"))
+    .post(api_url(
+      base,
+      &format!("_apis/artifactcache/caches/{cache_id}"),
+    ))
     .header("authorization", format!("Bearer {BEARER}"))
     .json(&json!({ "size": size }))
     .send()
@@ -143,8 +157,9 @@ async fn lookup(
 ) -> TestResult<reqwest::Response> {
   Ok(
     client
-      .get(format!(
-        "{base}_apis/artifactcache/cache?keys={primary}&version={VERSION}"
+      .get(api_url(
+        base,
+        &format!("_apis/artifactcache/cache?keys={primary}&version={VERSION}"),
       ))
       .header("authorization", format!("Bearer {BEARER}"))
       .send()
@@ -347,7 +362,10 @@ async fn patch_raw(
   body: &[u8],
 ) -> TestResult<u16> {
   let mut req = client
-    .patch(format!("{base}_apis/artifactcache/caches/{cache_id}"))
+    .patch(api_url(
+      base,
+      &format!("_apis/artifactcache/caches/{cache_id}"),
+    ))
     .header("authorization", format!("Bearer {BEARER}"))
     .body(body.to_vec());
   if let Some(value) = content_range {

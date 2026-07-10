@@ -52,8 +52,11 @@ async fn setup() -> TestResult<Harness> {
 }
 
 /// The URL for one blob token under this harness's server.
+///
+/// Trims a trailing `/` off `base` and re-adds the separator, so the helper
+/// does not depend on `CacheServer::base_url`'s trailing-slash convention.
 fn blob_url(base: &str, token: &str) -> String {
-  format!("{base}_toolu/blob/{token}")
+  format!("{}/_toolu/blob/{token}", base.trim_end_matches('/'))
 }
 
 /// A fresh, unique staging file path under `cas/staging`.
@@ -176,6 +179,25 @@ async fn single_shot_round_trip() -> TestResult<()> {
   let download = harness
     .registry
     .mint_download(manifest, Duration::from_secs(300));
+  verify_download(&client, &blob_url(&harness.base, &download), &bytes).await?;
+  Ok(())
+}
+
+/// A TTL that overflows `Instant` arithmetic caps at `OVERFLOW_TTL_CAP` rather
+/// than minting an already-expired token: the download still serves its bytes.
+///
+/// The degenerate double-overflow branch (an `Instant` within a day of its
+/// maximum) is unreachable on a real platform, so it cannot be driven here;
+/// this pins the reachable half — overflow never yields an expired token.
+#[tokio::test]
+async fn overflowing_ttl_is_capped_not_expired() -> TestResult<()> {
+  let harness = setup().await?;
+  let bytes = payload()?;
+  let client = reqwest::Client::new();
+
+  let staging = put_single_shot(&harness, &client, &bytes).await?;
+  let manifest = harness.store.ingest(&staging).await?;
+  let download = harness.registry.mint_download(manifest, Duration::MAX);
   verify_download(&client, &blob_url(&harness.base, &download), &bytes).await?;
   Ok(())
 }
