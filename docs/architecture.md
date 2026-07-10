@@ -257,8 +257,11 @@ shape. `reusable/` resolves `uses: org/repo/.github/workflows/x.yml`
 references and propagates outputs back to the caller.
 
 Artifacts (`artifacts/`) and cache (`cache/`) run as in-process
-axum micro-services (artifact upload / download via Azure
-append-blob; cache with a layered local-disk + remote backend).
+axum micro-services: artifact upload / download via Azure
+append-blob, and cache as a content-addressed store (`cache/cas/`,
+FastCDC chunks addressed by BLAKE3) that backs the
+[accelerated mode](#accelerated-mode-cache-acceleration) described
+below.
 
 ### `docker/`, `node/`, `plugin/`
 
@@ -296,6 +299,91 @@ tail for the opened journal (250 ms poll, 1 s rescan), and `c` →
 confirm → SIGINT to the `.lock` PID (unix only) riding the existing
 graceful-cancel path. Works with no runner running and no config —
 it falls back to `~/.toolu-runner` for pure history browsing.
+
+## Accelerated mode (cache acceleration)
+
+`[services] mode = "accelerated"` is `forwarder` plus a local cache
+interception: everything still reaches real GitHub except cache
+traffic, which the runner serves from local NVMe. Because the runner
+owns the process that runs every step, it can host the cache service
+itself and turn a network round-trip into a disk read.
+
+### One store, both protocols
+
+`job_runner` binds a per-job axum app on `[services] bind` (default
+`0.0.0.0`, never loopback — a `docker-container` BuildKit runs in its
+own network namespace and reaches the runner through host networking,
+not `127.0.0.1`). The app fronts a single content-addressed store
+(`cache/cas/`) through three faces:
+
+- **v2 Twirp** — `POST /twirp/github.actions.results.api.v1.CacheService/*`
+  (`CreateCacheEntry` / `FinalizeCacheEntryUpload` /
+  `GetCacheEntryDownloadURL`), JSON only, proto snake_case wire names.
+- **Azure-Blob-compatible endpoint** — `/_toolu/blob/*` (Put Blob /
+  Put Block / Put Block List / HEAD / ranged GET), where blobs stage
+  to a temp file and FastCDC chunking runs at commit.
+- **legacy v1 REST** — the existing `/_apis/artifactcache/*` handlers,
+  re-pointed at the same store, so `actions/cache@v4.0`–`v4.1` (which
+  predate `ACTIONS_CACHE_SERVICE_V2` and speak v1) hit the accelerator
+  rather than silently talking to Azure.
+
+Chunks are FastCDC-split and BLAKE3-addressed; identical archives
+collapse to shared blobs, and each chunk is re-hashed on read so
+corruption can never be served. An optional S3 cold tier
+(`cache/tier/l2.rs`) mirrors immutable chunks and manifests only —
+never the mutable index, which stays L1-local.
+
+### The selective reverse proxy
+
+`ACTIONS_RESULTS_URL` is the origin for two step-facing services:
+`CacheService` and `ArtifactService` (the latter used by
+`upload-artifact@v4` / `download-artifact@v4`). Overriding that
+variable without proxying would break artifact upload, so the app is a
+**selective reverse proxy** (`cache/proxy.rs`): `CacheService/*`,
+`/_apis/artifactcache/*`, and `/_toolu/blob/*` are served locally;
+everything else is forwarded verbatim to the real `ACTIONS_RESULTS_URL`
+with the `Authorization` header passed through untouched. The two
+failure domains are independent — if upstream is unreachable the proxy
+502s artifact calls only, while the local cache keeps serving.
+
+### Trust: read-side global, write-side branch-scoped
+
+Chunk content-verification makes cross-branch chunk sharing safe by
+construction, so **reads are global**: the read ladder searches the
+job's own ref, then the PR base ref, then the default branch. The
+**index** — the mutable `(scope, version, key) → manifest` pointer —
+keeps GitHub's branch isolation: the write scope is the job's own ref,
+and a write to a *protected* branch is refused unless
+`cache/trust.rs::classify_trust` returns `Trusted` (every event arm is
+branch-guarded, so `workflow_dispatch` / `schedule` on a non-protected
+branch cannot write a protected scope). A denied write returns
+`{"ok": false, "message": "cache write denied: …"}` — a soft failure
+that does not fail the job. This defends against accidental
+cross-branch pollution and the network-facing attack; it does **not**
+defend against arbitrary code already running on the runner (same OS
+user — see the spec's threat-model boundary).
+
+### Step env injection
+
+`service_endpoints::forward_env` (via `job_runner::setup_job_env`)
+seeds every step:
+
+- `ACTIONS_RESULTS_URL` → `http://127.0.0.1:<port>` (local Twirp + proxy).
+- `ACTIONS_CACHE_URL` → `http://127.0.0.1:<port>` (local v1 REST).
+  Overriding **both** is what stops v1-only cache clients from silently
+  bypassing the accelerator.
+- `ACTIONS_CACHE_SERVICE_V2 = true` — modern clients prefer v2.
+- `ACTIONS_RUNTIME_TOKEN` — left as the **real GitHub token**, since
+  the proxy forwards it upstream; local auth is a constant-time compare
+  against that same token.
+
+Two adjacent, off-by-default subsystems ride the same config surface:
+`execution/workspace_gc.rs` prunes `workspace_root/<job_id>` older than
+`[workspace] gc_after_hours` (never the running job's), and
+`execution/shadow/` fingerprints each `run:` step's workspace before
+and after to record `would_hit` / `false_hit` to
+`_diag/shadow/<job_id>.jsonl` — observation only, it never serves a
+cached result.
 
 ## Sequence: register
 

@@ -19,6 +19,9 @@ pub struct EvalContext {
   pub contexts: HashMap<String, ExprValue>,
   /// Current job status for status functions.
   pub job_status: JobStatus,
+  /// Job workspace root that `hashFiles()` resolves patterns against.
+  /// `None` outside a job (workflow-level evaluation), where it is an error.
+  pub workspace: Option<std::path::PathBuf>,
 }
 
 /// Evaluate a GitHub Actions expression string against a context.

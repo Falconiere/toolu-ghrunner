@@ -32,6 +32,8 @@ pub mod secret_masker;
 mod service_auth;
 pub mod service_endpoints;
 pub mod service_lifecycle;
+/// Shadow-mode step observation (approach C): records only, never serves.
+pub mod shadow;
 mod step_env;
 pub mod step_host;
 mod step_naming;
@@ -39,3 +41,4 @@ mod step_state;
 pub mod step_timeout;
 pub mod steps_runner;
 pub mod workflow;
+pub mod workspace_gc;

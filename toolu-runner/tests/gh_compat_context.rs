@@ -46,6 +46,7 @@ fn build_ctx(
     workspace_root: data_dir.join("_work"),
     cgroup_path: None,
     services_mode: shared::ServicesMode::default(),
+    ..RunnerConfig::default()
   };
   let masker = Arc::new(Mutex::new(SecretMasker::new()));
   let ctx = build_context(&msg, &config, Arc::clone(&masker));

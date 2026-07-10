@@ -41,6 +41,7 @@ fn context(pairs: &[(&str, ExprValue)]) -> EvalContext {
   EvalContext {
     contexts: map,
     job_status: JobStatus::Success,
+    workspace: None,
   }
 }
 

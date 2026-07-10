@@ -37,6 +37,8 @@ pub struct ExecutionContext {
   masker: Arc<Mutex<SecretMasker>>,
   path_additions: Vec<String>,
   cgroup_path: Option<std::path::PathBuf>,
+  /// Per-job workspace root; `hashFiles()` resolves its patterns against it.
+  workspace: Option<std::path::PathBuf>,
 }
 
 impl ExecutionContext {
@@ -71,7 +73,13 @@ impl ExecutionContext {
       masker,
       path_additions: Vec::new(),
       cgroup_path: None,
+      workspace: None,
     }
+  }
+
+  /// Set the per-job workspace root that `hashFiles()` resolves against.
+  pub fn set_workspace(&mut self, path: Option<std::path::PathBuf>) {
+    self.workspace = path;
   }
 
   /// Set the per-job cgroup-v2 directory that spawned steps are moved into.
@@ -248,6 +256,7 @@ impl ExecutionContext {
     EvalContext {
       contexts,
       job_status: self.job_status,
+      workspace: self.workspace.clone(),
     }
   }
 

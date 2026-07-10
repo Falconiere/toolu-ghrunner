@@ -46,6 +46,12 @@ base64 = "0.22"
 # Storage
 opendal = { version = "0.51", features = ["services-fs", "services-s3"] }
 
+# Content-addressed cache: FastCDC chunking + BLAKE3 chunk ids
+fastcdc = "4"
+blake3 = "1"
+# Azure Blob "Put Block List" XML (promoted from a transitive opendal dep)
+quick-xml = "0.37"
+
 # Observability (no OTel in v1)
 tracing = "0.1"
 

@@ -45,6 +45,7 @@ fn test_config(dir: &std::path::Path) -> TestResult<(RunnerConfig, std::path::Pa
     workspace_root: workspace.clone(),
     cgroup_path: None,
     services_mode: shared::ServicesMode::default(),
+    ..RunnerConfig::default()
   };
   std::fs::create_dir_all(&config.data_dir)?;
   Ok((config, workspace))
@@ -76,6 +77,7 @@ async fn run_steps_bounded(
     workspace: &workspace,
     config: &config,
     spec: &spec,
+    shadow: None,
   };
   let run = run_steps(&steps, &mut ctx, &tx, CancellationToken::new(), &job_run);
   // The whole step run is bounded; a deadlock trips the timeout instead of

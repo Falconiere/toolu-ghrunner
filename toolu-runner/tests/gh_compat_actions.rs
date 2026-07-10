@@ -93,6 +93,7 @@ fn config_in(data_dir: &Path) -> RunnerConfig {
     workspace_root: PathBuf::from(FIXTURE_DIR),
     cgroup_path: None,
     services_mode: shared::ServicesMode::default(),
+    ..RunnerConfig::default()
   }
 }
 
@@ -140,6 +141,7 @@ async fn drive_with_cancel(
       workspace: &workspace,
       config: &config,
       spec: &spec,
+      shadow: None,
     },
   )
   .await?;

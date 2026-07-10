@@ -11,9 +11,10 @@ use std::path::{Path, PathBuf};
 
 use shared::paths::expand_tilde;
 use toolu_runner::config::{
-  CredentialsFile, RunnerRegistrationConfig, RuntimeConfig, ServicesSection, jit_endpoint_for_host,
-  load_config as load_reg_config, load_credentials, resolve_data_dir, resolve_work_dir,
-  save_config as save_reg_config, save_credentials,
+  CacheSection, CredentialsFile, RunnerRegistrationConfig, RuntimeConfig, ServicesSection,
+  ShadowSection, WorkspaceSection, jit_endpoint_for_host, load_config as load_reg_config,
+  load_credentials, resolve_data_dir, resolve_work_dir, save_config as save_reg_config,
+  save_credentials,
 };
 
 fn temp_dir(label: &str) -> PathBuf {
@@ -48,7 +49,11 @@ fn sample_config() -> RunnerRegistrationConfig {
     },
     services: ServicesSection {
       mode: "offline".to_owned(),
+      ..Default::default()
     },
+    cache: CacheSection::default(),
+    workspace: WorkspaceSection::default(),
+    shadow: ShadowSection::default(),
   }
 }
 
