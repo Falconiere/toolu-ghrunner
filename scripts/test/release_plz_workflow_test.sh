@@ -49,6 +49,18 @@ reject() {
 
 # --- workflow: trigger ---
 want "triggers on push to main"          "$WF" "branches: \[main\]"
+# --- workflow: kill-switch (inert until an operator opts in) ---
+# Both jobs gate on the RELEASE_PLZ_ENABLED repo variable so a merge cannot
+# immediately open release PRs / cut a tag until it is set to 'true'.
+want "gated on RELEASE_PLZ_ENABLED var"  "$WF" "vars\.RELEASE_PLZ_ENABLED == 'true'"
+# Count only the job-level gate lines (`if:`), not the header comment.
+n_gates="$(grep -Ec -- "if: .*vars\.RELEASE_PLZ_ENABLED == 'true'" "$WF")"
+if [[ "$n_gates" == "2" ]]; then
+  echo "ok: both jobs gated on the kill-switch"
+else
+  echo "FAIL: expected the kill-switch on both jobs, found $n_gates" >&2
+  fail=1
+fi
 # --- workflow: both release-plz commands ---
 want "runs the release command"          "$WF" "command: release$"
 want "runs the release-pr command"       "$WF" "command: release-pr$"

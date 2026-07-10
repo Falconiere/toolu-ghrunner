@@ -589,6 +589,11 @@ work into a version bump; the **back half**
 binaries. The version is no longer hand-edited — release-plz authors it,
 and the only write it makes to `main` is a pull request a human merges.
 
+The release-plz stage is gated by the `RELEASE_PLZ_ENABLED` repository
+variable (off by default; set it to `true` to activate). Until then both
+release-plz jobs are inert, so merging to `main` opens no release PR and
+cuts no tag.
+
 ```
 merge to main
       │
