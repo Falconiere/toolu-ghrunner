@@ -1,0 +1,67 @@
+name: release-plz
+
+# Front half of the release pipeline; the tag-driven back half is release.yml.
+# On every push to main this runs release-plz twice (config in release-plz.toml):
+#
+#   * release-pr — opens/updates a "release" PR that bumps the workspace version
+#     and rewrites CHANGELOG.md from the conventional commits merged since the
+#     last tag. Nothing ships until a human merges that PR.
+#   * release — once the bump has merged to main, pushes the matching `vX.Y.Z`
+#     git tag. That tag is what fires release.yml (verify -> build -> GitHub
+#     Release -> Homebrew).
+#
+# The token MUST be the RELEASE_PLZ_TOKEN PAT, never the default GITHUB_TOKEN.
+# GitHub suppresses workflow runs for events raised by the built-in GITHUB_TOKEN
+# (the same anti-recursion rule release.yml's header calls out for `gh release
+# create`): a tag pushed under GITHUB_TOKEN would land silently and release.yml
+# would never run. The PAT is a distinct identity, so its tag push does trigger it.
+on:
+  push:
+    branches: [main]
+
+# Least privilege by default; each job widens only what it needs.
+permissions:
+  contents: read
+
+jobs:
+  # `release`: for a version bump that has already merged to main, push the
+  # `vX.Y.Z` tag (under the PAT) that hands off to release.yml.
+  release-plz-release:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # push the release tag (only perm the `release` command needs)
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # release-plz needs full history to find the last tag
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.94.1
+      - name: Run release-plz (release)
+        uses: release-plz/action@v0.5
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+
+  # `release-pr`: open/refresh the version-bump + CHANGELOG PR. One in flight at
+  # a time on this ref; never cancel a running one (it may be pushing a branch).
+  release-plz-pr:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # push the release-pr branch
+      pull-requests: write # open/update the PR
+    concurrency:
+      group: release-plz-pr-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.94.1
+      - name: Run release-plz (release-pr)
+        uses: release-plz/action@v0.5
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}

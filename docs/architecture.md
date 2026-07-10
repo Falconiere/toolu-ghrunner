@@ -582,10 +582,40 @@ forked watcher task; recovery happens at the next acquire attempt.
 
 ## Release pipeline
 
-Releases are cut by `.github/workflows/release.yml`, triggered on a
-`v*` tag push. The workflow reads the repo and never writes to it —
-the version is human-authored in `Cargo.toml` + `CHANGELOG.md` before
-tagging.
+Releases run in two halves. The **front half**
+(`.github/workflows/release-plz.yml` + `release-plz.toml`) turns merged
+work into a version bump; the **back half**
+(`.github/workflows/release.yml`) turns the resulting tag into published
+binaries. The version is no longer hand-edited — release-plz authors it,
+and the only write it makes to `main` is a pull request a human merges.
+
+```
+merge to main
+      │
+      ▼
+release-plz-pr       release-plz (release-pr): opens/updates a "release"
+      │              PR that bumps the [workspace.package] version and
+      │              rewrites CHANGELOG.md from the conventional commits
+      │              since the last tag (feat → Added, fix → Fixed,
+      │              docs → Documentation, refactor/perf → Changed; the
+      │              three crates move in lockstep via one version_group).
+      ▼
+merge the release PR the bump + changelog land on main.
+      │
+      ▼
+release-plz-release  release-plz (release): pushes the matching `vX.Y.Z`
+      │              tag — under RELEASE_PLZ_TOKEN (a PAT), NOT the default
+      │              GITHUB_TOKEN. GitHub suppresses workflow runs for
+      │              events raised by GITHUB_TOKEN, so a tag pushed by it
+      │              would never fire release.yml; the PAT is a distinct
+      │              identity, so its push does. That tag hands off to the
+      │              back half:
+      ▼
+```
+
+The back half is unchanged. It reads the repo and never writes to it;
+by the time it runs, `Cargo.toml` + `CHANGELOG.md` already carry the
+version release-plz wrote.
 
 ```
 push tag vX.Y.Z
