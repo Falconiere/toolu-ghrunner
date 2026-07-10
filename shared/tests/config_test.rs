@@ -8,6 +8,7 @@ fn runner_config_holds_paths() {
     workspace_root: PathBuf::from("/var/lib/toolu-runner/_work"),
     cgroup_path: None,
     services_mode: ServicesMode::default(),
+    ..RunnerConfig::default()
   };
   assert_eq!(cfg.data_dir, PathBuf::from("/var/lib/toolu-runner"));
   assert_eq!(
@@ -26,6 +27,7 @@ fn runner_config_with_cgroup() {
     workspace_root: PathBuf::from("/var/lib/toolu-runner/_work"),
     cgroup_path: Some(PathBuf::from("/sys/fs/cgroup/toolu-runner/job-123")),
     services_mode: ServicesMode::default(),
+    ..RunnerConfig::default()
   };
   assert_eq!(
     cfg.cgroup_path.as_deref(),
@@ -40,6 +42,7 @@ fn runner_config_clone() {
     workspace_root: PathBuf::from("/b"),
     cgroup_path: Some(PathBuf::from("/c")),
     services_mode: ServicesMode::Offline,
+    ..RunnerConfig::default()
   };
   let clone = cfg.clone();
   assert_eq!(clone.data_dir, cfg.data_dir);

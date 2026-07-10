@@ -10,11 +10,13 @@ mod config;
 mod error;
 mod events;
 mod job_message;
+/// Home-directory and tilde path resolution.
 pub mod paths;
 
+/// Tracing initialization and secret redaction.
 pub mod startup;
 
-pub use config::{RunnerConfig, ServicesMode};
+pub use config::{CacheConfig, L2Config, RunnerConfig, ServicesMode};
 pub use error::RunnerError;
 pub use events::{AnnotationLevel, Conclusion, ListenerEvent, LogStream, RunnerEvent};
 pub use job_message::{

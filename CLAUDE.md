@@ -51,17 +51,24 @@ and no OTel.
 - **Handler dispatch** (in priority order): plugin → script → node
   → docker → composite. There is **no** `yamless` handler variant —
   it was cut in the port.
-- **Service mode (forwarder vs offline).** Config `[services] mode`
-  selects how artifacts / cache / OIDC reach their backends. In
-  `forwarder` mode (the default), the runner reads the REAL GitHub
-  service URLs + runtime token from the job message's
-  `SystemVssConnection` endpoint and injects them into step env
-  (`ACTIONS_RESULTS_URL`, `ACTIONS_RUNTIME_URL`, `ACTIONS_RUNTIME_TOKEN`,
-  `ACTIONS_CACHE_URL`, `ACTIONS_CACHE_SERVICE_V2`,
-  `ACTIONS_ID_TOKEN_REQUEST_URL` / `_TOKEN`), so GitHub-hosted
-  `upload-artifact@v4` / `cache@v4` / OIDC talk to real GitHub. In
-  `offline` mode the runner hosts the local fake services for
-  airgapped use. Wired in `execution::service_endpoints`.
+- **Service mode (forwarder / offline / accelerated).** Config
+  `[services] mode` (`ServicesMode` in `shared/src/config.rs`) selects
+  how artifacts / cache / OIDC reach their backends. In `forwarder`
+  mode (the default), the runner reads the REAL GitHub service URLs +
+  runtime token from the job message's `SystemVssConnection` endpoint
+  and injects them into step env (`ACTIONS_RESULTS_URL`,
+  `ACTIONS_RUNTIME_URL`, `ACTIONS_RUNTIME_TOKEN`, `ACTIONS_CACHE_URL`,
+  `ACTIONS_CACHE_SERVICE_V2`, `ACTIONS_ID_TOKEN_REQUEST_URL` /
+  `_TOKEN`), so GitHub-hosted `upload-artifact@v4` / `cache@v4` / OIDC
+  talk to real GitHub. In `offline` mode the runner hosts the local
+  fake services for airgapped use. In `ServicesMode::Accelerated` the
+  runner binds a local content-addressed cache that intercepts BOTH
+  GitHub Actions cache protocols (v2 Twirp `CacheService` via
+  `ACTIONS_RESULTS_URL`, legacy v1 REST via `ACTIONS_CACHE_URL`) and
+  serves them from local NVMe, while a selective reverse proxy forwards
+  `ArtifactService` and everything else to real GitHub — the injected
+  `ACTIONS_RUNTIME_TOKEN` stays the real token. Wired in
+  `execution::service_endpoints`.
 - **Secret masking:** `execution::secret_masker::SecretMasker` is
   registered as the tracing `SecretRedactor` so registered
   `secrets.*` values (and their JSON-escaped variants) never reach
@@ -187,22 +194,30 @@ and no OTel.
   (`resolver`, `downloader`, `manifest`). `expressions/` is the
   full `${{ }}` evaluator: `lexer`, `parser` (AST + precedence +
   primary), `evaluator`, `template`, `functions` (builtins,
-  hashFiles, JSON convert), `context_data`. `workflow/` parses
+  `hashFiles` — now registered with the dispatcher, JSON convert),
+  `context_data`. `workflow/` parses
   workflow YAML (`parser` with `jobs` / `triggers` / `raw_types`),
   `matrix` (build matrix), `orchestrator` (job graph, plan),
   `reusable` (reusable workflow resolution), `trigger`,
   `job_graph`, `types`. `artifacts/` (upload / download via
   Azure append-blob; `backend` + `service` with `handlers` /
-  `lifecycle`). `cache/` (local disk + remote layered backend;
-  `key`, `trust`, `service` with `handlers` / `lifecycle`).
-  `oidc/` (OIDC token server + claims). `secret_masker`
+  `lifecycle`). `cache/` (content-addressed CI cache backing
+  `ServicesMode::Accelerated`): `cas/` (content-addressed store —
+  `manifest`, `chunker`, `store`, `chunk_io`, `index`, `gc`; FastCDC +
+  BLAKE3), `twirp/` (v2 `CacheService` RPCs), `blob/`
+  (Azure-blob-compatible endpoint), `v1/` (legacy REST on the CAS),
+  `tier/l2.rs` (S3 cold tier), `server.rs`, `proxy.rs` (selective
+  reverse proxy), `scope.rs` (read ladder + write scope), `trust.rs`
+  (branch-scoped writes), `accelerated.rs`. The old `backend/`,
+  `service/`, `key.rs` were removed. `oidc/` (OIDC token server +
+  claims). `secret_masker`
   (`SecretMasker` with `add_secret` + per-line `mask`; implements
   `shared::startup::SecretRedactor`). `context` (env, secrets,
   masking), `composite_*` (composite action scaffolding),
   `step_env` / `step_host` / `step_naming` / `step_state` (step
   helpers), `action_exec` / `action_support` (action invocation
   glue), `cgroup_join` (reserved), `command_parser`,
-  `depth_tracker`, `docker_cache`, `failure_category`,
+  `depth_tracker`, `failure_category`,
   `file_commands`, `service_auth` / `service_lifecycle`
   (back OIDC/artifact/cache axum services). E0–E3 wired the live
   job path: `command_dispatch` (stdout `::workflow-command::`
@@ -211,13 +226,19 @@ and no OTel.
   `step_timeout` (`timeout-minutes` / `working-directory`), `job_spec`
   / `job_hooks` (job `outputs:`, `defaults.run`, job hook env),
   `context_build` (full `${{ }}` context), `service_endpoints`
-  (forwarder vs offline service-URL injection). The live JIT register
-  POST lives in `net/register.rs` (`generate-jitconfig`).
+  (forwarder / offline / accelerated service-URL injection).
+  `workspace_gc.rs` prunes `workspace_root/<job_id>` older than
+  `gc_after_hours` (never the running job's). `shadow/`
+  (`fingerprint`, `record`) does off-by-default per-`run:`-step
+  workspace fingerprinting, appending masked `would_hit` / `false_hit`
+  records to `_diag/shadow/<job_id>.jsonl` — records only, never
+  serves. The live JIT register POST lives in `net/register.rs`
+  (`generate-jitconfig`).
 - `docker/` — bollard wrapper. `client` (Docker daemon), `services`
   (service container lifecycle), `path_translator` (host ↔
   container path mapping).
 - `node/` — Node.js runtime detection + caching. `runtime` (version
-  detection, download, cache at `data_dir/_node/<version>`).
+  detection, download, cache at `data_dir/node/{version}`).
 - `plugin/` — `RunnerPlugin` trait + `PluginRegistry`. New
   addition not in upstream `actions/runner`.
 - `journal/` — per-job JSONL event journal, the local observability

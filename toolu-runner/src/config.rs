@@ -13,7 +13,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use shared::{RunnerError, ServicesMode, paths};
+use shared::{CacheConfig, L2Config, RunnerError, ServicesMode, paths};
 
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
@@ -45,12 +45,41 @@ pub struct RunnerRegistrationConfig {
   /// `[services]` section: artifact/cache/OIDC serving mode.
   #[serde(default)]
   pub services: ServicesSection,
+  /// `[cache]` section: content-addressed cache settings.
+  #[serde(default)]
+  pub cache: CacheSection,
+  /// `[workspace]` section: per-job workspace GC.
+  #[serde(default)]
+  pub workspace: WorkspaceSection,
+  /// `[shadow]` section: step-observation mode.
+  #[serde(default)]
+  pub shadow: ShadowSection,
 }
 
 impl RunnerRegistrationConfig {
   /// Resolve the artifact/cache/OIDC serving mode (`forwarder` default).
   pub fn services_mode(&self) -> ServicesMode {
     self.services.resolve()
+  }
+
+  /// Address the accelerated cache server binds (`0.0.0.0` default).
+  pub fn service_bind(&self) -> String {
+    self.services.bind.clone()
+  }
+
+  /// Resolve the `[cache]` section into the runtime [`CacheConfig`].
+  pub fn cache_config(&self) -> CacheConfig {
+    self.cache.resolve()
+  }
+
+  /// Age in hours after which a finished job's workspace is pruned.
+  pub fn workspace_gc_hours(&self) -> u64 {
+    self.workspace.gc_after_hours
+  }
+
+  /// Whether shadow-mode step observation is enabled.
+  pub fn shadow_enabled(&self) -> bool {
+    self.shadow.enabled
   }
 }
 
@@ -60,15 +89,20 @@ impl RunnerRegistrationConfig {
 /// job message; `mode = "offline"` hosts local services for hermetic runs.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ServicesSection {
-  /// `"forwarder"` (default) or `"offline"`.
+  /// `"forwarder"` (default), `"offline"`, or `"accelerated"`.
   #[serde(default = "default_services_mode")]
   pub mode: String,
+  /// Address the accelerated cache server binds (`0.0.0.0` default; must not
+  /// be loopback — `docker-container` BuildKit reaches it across a netns).
+  #[serde(default = "default_service_bind")]
+  pub bind: String,
 }
 
 impl Default for ServicesSection {
   fn default() -> Self {
     Self {
       mode: default_services_mode(),
+      bind: default_service_bind(),
     }
   }
 }
@@ -79,6 +113,7 @@ impl ServicesSection {
   fn resolve(&self) -> ServicesMode {
     match self.mode.trim().to_ascii_lowercase().as_str() {
       "offline" => ServicesMode::Offline,
+      "accelerated" => ServicesMode::Accelerated,
       "forwarder" => ServicesMode::Forwarder,
       other => {
         tracing::warn!(mode = other, "unknown [services] mode; using forwarder");
@@ -90,6 +125,130 @@ impl ServicesSection {
 
 fn default_services_mode() -> String {
   "forwarder".to_owned()
+}
+
+fn default_service_bind() -> String {
+  "0.0.0.0".to_owned()
+}
+
+/// `[cache]` config section: content-addressed cache settings.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CacheSection {
+  /// L1 eviction ceiling in bytes.
+  #[serde(default = "default_cache_max_bytes")]
+  pub max_bytes: u64,
+  /// Entry TTL in days.
+  #[serde(default = "default_entry_ttl_days")]
+  pub entry_ttl_days: u64,
+  /// Branches a `Trusted` job may write the shared scope for.
+  #[serde(default = "default_protected_branches")]
+  pub protected_branches: Vec<String>,
+  /// FastCDC target average chunk size in bytes.
+  #[serde(default = "default_chunk_avg_bytes")]
+  pub chunk_avg_bytes: u32,
+  /// `[cache.l2]` S3 cold tier.
+  #[serde(default)]
+  pub l2: L2Section,
+}
+
+impl Default for CacheSection {
+  fn default() -> Self {
+    Self {
+      max_bytes: default_cache_max_bytes(),
+      entry_ttl_days: default_entry_ttl_days(),
+      protected_branches: default_protected_branches(),
+      chunk_avg_bytes: default_chunk_avg_bytes(),
+      l2: L2Section::default(),
+    }
+  }
+}
+
+impl CacheSection {
+  /// Resolve into the runtime [`CacheConfig`]. L2 is `Some` only when enabled.
+  fn resolve(&self) -> CacheConfig {
+    CacheConfig {
+      max_bytes: self.max_bytes,
+      entry_ttl_days: self.entry_ttl_days,
+      protected_branches: self.protected_branches.clone(),
+      chunk_avg_bytes: self.chunk_avg_bytes,
+      l2: self.l2.resolve(),
+    }
+  }
+}
+
+/// `[cache.l2]` config section: optional S3 cold tier.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct L2Section {
+  /// Enable the S3 mirror.
+  #[serde(default)]
+  pub enabled: bool,
+  /// S3 bucket.
+  #[serde(default)]
+  pub bucket: String,
+  /// S3-compatible endpoint URL.
+  #[serde(default)]
+  pub endpoint: String,
+  /// S3 region.
+  #[serde(default)]
+  pub region: String,
+}
+
+impl L2Section {
+  /// `Some(L2Config)` when enabled, else `None`.
+  fn resolve(&self) -> Option<L2Config> {
+    if !self.enabled {
+      return None;
+    }
+    Some(L2Config {
+      bucket: self.bucket.clone(),
+      endpoint: self.endpoint.clone(),
+      region: self.region.clone(),
+    })
+  }
+}
+
+/// `[workspace]` config section: per-job workspace GC.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkspaceSection {
+  /// Age in hours after which a finished job's workspace is pruned.
+  #[serde(default = "default_gc_after_hours")]
+  pub gc_after_hours: u64,
+}
+
+impl Default for WorkspaceSection {
+  fn default() -> Self {
+    Self {
+      gc_after_hours: default_gc_after_hours(),
+    }
+  }
+}
+
+/// `[shadow]` config section: step-observation mode.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ShadowSection {
+  /// Record would-hit / false-hit observations (never serves).
+  #[serde(default)]
+  pub enabled: bool,
+}
+
+fn default_cache_max_bytes() -> u64 {
+  100 * 1024 * 1024 * 1024
+}
+
+fn default_entry_ttl_days() -> u64 {
+  7
+}
+
+fn default_protected_branches() -> Vec<String> {
+  vec!["main".to_owned(), "master".to_owned()]
+}
+
+fn default_chunk_avg_bytes() -> u32 {
+  64 * 1024
+}
+
+fn default_gc_after_hours() -> u64 {
+  24
 }
 
 /// Runtime sub-section: paths, JIT config blob, protocol version.

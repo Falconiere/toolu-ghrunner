@@ -13,6 +13,8 @@ use super::file_commands::FileCommandManager;
 use super::handlers::script::{ScriptHandler, ScriptParams};
 use super::job_spec::JobSpec;
 use super::post_drain::drain_post_steps;
+use super::shadow::ShadowObserver;
+use super::shadow::record::StepKey;
 use super::step_env::{apply_file_commands, resolve_step_env};
 use super::step_naming::derive_step_name;
 use super::step_timeout::StepBounds;
@@ -31,6 +33,9 @@ pub(super) struct JobCtx<'a> {
   /// Job-level `defaults.run` fallback for run-steps that omit shell /
   /// working-directory (merged workflow + job defaults).
   pub(super) job: &'a JobSpec,
+  /// Shadow-mode step observer (approach C). `None` disables observation;
+  /// when set it records would-hit / false-hit and NEVER serves a result.
+  pub(super) shadow: Option<&'a ShadowObserver>,
 }
 
 /// Job-constant inputs for a run: the workspace root, runner config, and the
@@ -40,6 +45,8 @@ pub struct JobRun<'a> {
   pub workspace: &'a Path,
   pub config: &'a RunnerConfig,
   pub spec: &'a JobSpec,
+  /// Shadow-mode step observer (approach C); `None` disables observation.
+  pub shadow: Option<&'a ShadowObserver>,
 }
 
 /// Run a sequence of steps with condition evaluation and error handling.
@@ -64,6 +71,7 @@ pub async fn run_steps(
     config: run.config,
     cancel: &cancel,
     job: run.spec,
+    shadow: run.shadow,
   };
 
   let mut job_state = JobState {
@@ -260,17 +268,68 @@ async fn run_script_step(
     cancel: &bounds.cancel,
   };
 
+  // Shadow observation brackets the step: fingerprint the workspace before it
+  // runs and record a would-hit / false-hit after. Observation only — it never
+  // changes execution and never serves a cached result.
+  let pre = shadow_pre(job)?;
   let (result, stdout_outputs) =
     run_and_dispatch_script(&job.handler, &params, &step.id, ctx, events).await?;
+  shadow_post(job, &step.id, &interpolated, &env, &working_dir, pre)?;
   let outputs = merge_step_outputs(step, stdout_outputs, &file_cmds, ctx).await;
 
-  let status_msg = if result == Conclusion::Success {
+  emit_status(events, &step.id, result).await;
+  Ok((result, outputs))
+}
+
+/// Emit the C#-runner-style "Process completed with exit code N." trailer.
+async fn emit_status(events: &mpsc::Sender<RunnerEvent>, step_id: &str, result: Conclusion) {
+  let msg = if result == Conclusion::Success {
     "Process completed with exit code 0."
   } else {
     "Process completed with exit code 1."
   };
-  emit_log(events, &step.id, status_msg).await;
-  Ok((result, outputs))
+  emit_log(events, step_id, msg).await;
+}
+
+/// Fingerprint the workspace before a `run:` step when shadow-observing.
+///
+/// # Errors
+///
+/// Returns `RunnerError` if the workspace tree cannot be walked.
+fn shadow_pre(job: &JobCtx<'_>) -> Result<[u8; 32], RunnerError> {
+  if let Some(obs) = job.shadow {
+    obs.pre(job.workspace)
+  } else {
+    Ok([0u8; 32])
+  }
+}
+
+/// Record the shadow observation after a `run:` step (no-op when not
+/// observing). Observation only — it never serves a cached result.
+///
+/// # Errors
+///
+/// Returns `RunnerError` if the workspace tree cannot be walked.
+fn shadow_post(
+  job: &JobCtx<'_>,
+  step_id: &str,
+  cmd: &str,
+  env: &HashMap<String, String>,
+  working_dir: &Path,
+  pre: [u8; 32],
+) -> Result<(), RunnerError> {
+  let Some(obs) = job.shadow else {
+    return Ok(());
+  };
+  let pairs: Vec<(String, String)> = env.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+  let cwd = working_dir.to_string_lossy();
+  let key = StepKey {
+    step_id,
+    cmd,
+    env_kv: &pairs,
+    cwd: &cwd,
+  };
+  obs.post(&key, pre, job.workspace)
 }
 
 /// Run the shell child and stream-dispatch its stdout concurrently.

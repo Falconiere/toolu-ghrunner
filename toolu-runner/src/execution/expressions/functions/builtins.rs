@@ -29,8 +29,23 @@ pub fn call_function(
     "join" => fn_join(args),
     "tojson" => super::json_convert::fn_to_json(args),
     "fromjson" => super::json_convert::fn_from_json(args),
+    "hashfiles" => fn_hash_files(args, ctx),
     _ => Err(RunnerError::Expression(format!("unknown function: {name}"))),
   }
+}
+
+/// `hashFiles(pattern, ...)` — SHA-256 over the workspace files it matches.
+fn fn_hash_files(args: &[ExprValue], ctx: &EvalContext) -> Result<ExprValue, RunnerError> {
+  if args.is_empty() {
+    return Err(RunnerError::Expression(
+      "hashFiles expects at least 1 argument".to_owned(),
+    ));
+  }
+  let workspace = ctx.workspace.as_deref().ok_or_else(|| {
+    RunnerError::Expression("hashFiles is unavailable outside a job workspace".to_owned())
+  })?;
+  let patterns: Vec<String> = args.iter().map(ExprValue::coerce_to_string).collect();
+  super::hash::hash_files(workspace, &patterns).map(ExprValue::String)
 }
 
 fn arg2<'a>(

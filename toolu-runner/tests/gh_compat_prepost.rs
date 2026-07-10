@@ -128,6 +128,7 @@ async fn run_with_markers(
     workspace_root: workspace.clone(),
     cgroup_path: None,
     services_mode: shared::ServicesMode::default(),
+    ..RunnerConfig::default()
   };
 
   seed_node(&data_dir, &node)?;
@@ -197,6 +198,7 @@ async fn drive_with_cancel(
       workspace,
       config,
       spec: &spec,
+      shadow: None,
     },
   )
   .await?;
@@ -314,6 +316,7 @@ async fn drive_raw(
       workspace,
       config,
       spec: &spec,
+      shadow: None,
     },
   )
   .await;
@@ -341,6 +344,7 @@ async fn post_drains_even_when_a_later_step_errors_hard() -> TestResult<()> {
     workspace_root: workspace.clone(),
     cgroup_path: None,
     services_mode: shared::ServicesMode::default(),
+    ..RunnerConfig::default()
   };
   seed_node(&data_dir, &node)?;
   seed_action(&data_dir, "act-a", "A")?;
@@ -425,6 +429,7 @@ async fn post_drains_with_grace_when_job_is_cancelled() -> TestResult<()> {
     workspace_root: workspace.clone(),
     cgroup_path: None,
     services_mode: shared::ServicesMode::default(),
+    ..RunnerConfig::default()
   };
   seed_node(&data_dir, &node)?;
   seed_action(&data_dir, "act-a", "A")?;

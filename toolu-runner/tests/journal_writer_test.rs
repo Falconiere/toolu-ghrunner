@@ -43,6 +43,7 @@ async fn run_journaled_job(
     workspace_root,
     cgroup_path: None,
     services_mode: ServicesMode::Forwarder,
+    ..RunnerConfig::default()
   };
 
   let msg = fixture_job(steps)?;

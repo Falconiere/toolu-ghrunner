@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use shared::{
   AgentJobRequestMessage, Conclusion, RunnerConfig, RunnerError, RunnerEvent, ServicesMode,
@@ -8,29 +9,67 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
-use super::cache::backend::LocalDiskBackend;
-use super::cache::service::CacheService;
+use super::cache::accelerated::{AcceleratedInputs, accelerated_app};
+use super::cache::blob::{BlobRegistry, sweep_staging};
+use super::cache::cas::{CacheGc, CacheIndex, CasStore, LeaseSet};
+use super::cache::scope::{CacheScopes, scopes_for_job};
+use super::cache::server::CacheServer;
+use super::cache::trust::{TrustLevel, classify_trust};
+use super::cache::v1::{V1Inputs, V1State, v1_router};
 use super::context::ExecutionContext;
 use super::expressions::context_data::pipeline_data_to_expr_value;
 use super::job_hooks::{JobHookStage, run_job_hook};
 use super::job_spec::{JobSpec, evaluate_job_outputs};
 use super::secret_masker::SecretMasker;
-use super::service_endpoints::{extract_service_urls, forward_env};
+use super::service_endpoints::{ServiceUrls, extract_service_urls, forward_env};
+use super::shadow::ShadowObserver;
 use super::steps_runner::{JobRun, run_steps};
 
-/// Default cache size limit: 10 GB.
-const DEFAULT_CACHE_MAX_BYTES: u64 = 10 * 1024 * 1024 * 1024;
+/// The local services a job's configured mode brought up, threaded from the
+/// startup match through `setup_job_env` and shut down at job end.
+///
+/// Accelerated carries the real [`ServiceUrls`] alongside the server so
+/// `setup_job_env` can forward the non-cache vars (real GitHub URLs + token)
+/// before overriding the cache vars at the local server.
+enum LocalServices {
+  /// Forwarder: no local services; step env forwards the message's real URLs.
+  None,
+  /// Offline: a local cache server + its fresh bearer token + teardown handles.
+  Offline(CacheServer, String, CacheMaintenance),
+  /// Accelerated: a local cache server + the real service URLs to forward +
+  /// teardown handles. The runtime token needs no separate field — it rides in
+  /// `ServiceUrls` and `setup_job_env` forwards it verbatim.
+  Accelerated(CacheServer, ServiceUrls, CacheMaintenance),
+}
+
+/// The shared CAS handles a job's local cache server was built over, retained so
+/// [`run_cache_maintenance`] can sweep staging and GC the store at teardown.
+///
+/// Every handle is a cheap clone onto the same on-disk root / in-memory lease
+/// map the running server holds, so GC honours any in-flight read lease.
+struct CacheMaintenance {
+  store: CasStore,
+  index: CacheIndex,
+  leases: LeaseSet,
+  staging_root: std::path::PathBuf,
+}
+
+/// Age past which an abandoned `cas/staging` upload is swept at job teardown.
+///
+/// Comfortably exceeds a single upload window; single-job concurrency (the
+/// `.lock`) means nothing else is mid-upload when teardown runs.
+const STAGING_SWEEP_TTL: Duration = Duration::from_secs(3600);
 
 /// Execute a complete job from an `AgentJobRequestMessage`.
 ///
-/// In **forwarder** mode (default) the real GitHub service URLs + runtime token
-/// are copied from the job message into step env; no local services run. In
-/// **offline** mode a local cache service is started and step env points at it.
+/// The configured [`ServicesMode`] decides step env: forwarder copies the
+/// message's real URLs + token; offline points cache vars at a local server;
+/// accelerated serves both cache protocols local and proxies the rest.
 ///
 /// # Errors
 ///
-/// Returns `RunnerError` if workspace creation, cache service startup, or
-/// execution fails.
+/// Returns `RunnerError` if workspace creation, cache startup, or execution
+/// fails.
 pub async fn run_job(
   msg: AgentJobRequestMessage,
   config: &RunnerConfig,
@@ -39,19 +78,24 @@ pub async fn run_job(
   masker: Arc<Mutex<SecretMasker>>,
 ) -> Result<(), RunnerError> {
   let workspace = prepare_job_dirs(config, &msg.job_id)?;
+  gc_stale_workspaces(config, &msg.job_id);
 
-  // Offline mode hosts a local cache service; forwarder mode leaves it `None`.
-  let offline_cache = match config.services_mode {
-    ServicesMode::Offline => {
-      let (service, token) = start_cache_service(config).await?;
-      info!(url = service.base_url(), "offline cache service started");
-      Some((service, token))
-    },
-    ServicesMode::Forwarder => None,
-  };
-
+  // Build the context and set the workspace before starting local services:
+  // accelerated mode needs the job's github context to compute cache scopes.
   let mut ctx = build_context(&msg, config, masker);
-  setup_job_env(&mut ctx, &msg, config, offline_cache.as_ref())?;
+  ctx.set_workspace(Some(workspace.clone()));
+
+  let local = start_local_services(config, &msg, &ctx).await?;
+  setup_job_env(&mut ctx, &msg, config, &local)?;
+
+  // Shadow-mode step observer (approach C): records would-hit / false-hit per
+  // `run:` step and NEVER serves a cached result. Inert unless `shadow_enabled`.
+  let shadow = ShadowObserver::new(
+    config.shadow_enabled,
+    &config.data_dir,
+    &msg.job_id,
+    Arc::clone(ctx.masker()),
+  );
 
   emit_job_started(&events, &msg.job_id, &msg.job_display_name).await;
 
@@ -68,15 +112,93 @@ pub async fn run_job(
     events: &events,
     workspace: &workspace,
     spec: &spec,
+    shadow: &shadow,
   };
   let (conclusion, outputs) = run_job_body(&body, &mut ctx).await?;
 
-  if let Some((service, _)) = offline_cache {
-    service.shutdown().await;
-  }
+  shutdown_local_services(local, config).await;
   emit_job_completed(&events, msg.job_id, conclusion, outputs).await;
 
   Ok(())
+}
+
+/// Bring up whatever local cache services the configured mode needs, before
+/// step env is seeded.
+///
+/// The match is exhaustive over every [`ServicesMode`] arm — `wildcard_enum_match_arm`
+/// forbids a `_` catch-all, so a new mode must be handled explicitly here.
+///
+/// # Errors
+///
+/// Returns `RunnerError::Cache` if a local server cannot bind its port.
+async fn start_local_services(
+  config: &RunnerConfig,
+  msg: &AgentJobRequestMessage,
+  ctx: &ExecutionContext,
+) -> Result<LocalServices, RunnerError> {
+  match config.services_mode {
+    ServicesMode::Offline => {
+      let (service, token, maintenance) = start_cache_service(config).await?;
+      info!(url = service.base_url(), "offline cache service started");
+      Ok(LocalServices::Offline(service, token, maintenance))
+    },
+    ServicesMode::Accelerated => {
+      // The token is discarded: it already rides in `urls` (forwarded verbatim)
+      // and backs the app's bearer, so `LocalServices` need not carry it again.
+      let (service, urls, _token, maintenance) =
+        start_accelerated_service(config, msg, ctx).await?;
+      info!(
+        url = service.base_url(),
+        "accelerated cache service started"
+      );
+      Ok(LocalServices::Accelerated(service, urls, maintenance))
+    },
+    ServicesMode::Forwarder => Ok(LocalServices::None),
+  }
+}
+
+/// Shut down any local cache server the job brought up (offline / accelerated),
+/// then run best-effort cache maintenance over its retained CAS handles.
+async fn shutdown_local_services(local: LocalServices, config: &RunnerConfig) {
+  match local {
+    LocalServices::Offline(service, _, maintenance)
+    | LocalServices::Accelerated(service, _, maintenance) => {
+      service.shutdown().await;
+      run_cache_maintenance(config, &maintenance).await;
+    },
+    LocalServices::None => {},
+  }
+}
+
+/// Best-effort cache teardown: sweep abandoned staging uploads, then run one GC
+/// pass (TTL expiry + `max_bytes` eviction + unreferenced-blob sweep).
+///
+/// Neither step may fail the job: errors are logged and swallowed. Runs after
+/// the server has stopped, so no handler holds a read lease GC must respect.
+async fn run_cache_maintenance(config: &RunnerConfig, maintenance: &CacheMaintenance) {
+  sweep_staging_best_effort(&maintenance.staging_root);
+  gc_best_effort(config, maintenance).await;
+}
+
+/// Sweep abandoned `cas/staging` uploads best-effort; log and swallow errors.
+fn sweep_staging_best_effort(staging_root: &std::path::Path) {
+  match sweep_staging(staging_root, STAGING_SWEEP_TTL) {
+    Ok(0) => {},
+    Ok(n) => info!(removed = n, "cache staging sweep removed abandoned uploads"),
+    Err(e) => tracing::warn!(error = %e, "cache staging sweep failed; continuing"),
+  }
+}
+
+/// Run one GC pass over the retained CAS handles best-effort; never fails the job.
+async fn gc_best_effort(config: &RunnerConfig, maintenance: &CacheMaintenance) {
+  let gc = CacheGc::new(config.cache.entry_ttl_days, config.cache.max_bytes);
+  match gc
+    .run(&maintenance.store, &maintenance.index, &maintenance.leases)
+    .await
+  {
+    Ok(report) => info!(?report, "cache GC pass complete"),
+    Err(e) => tracing::warn!(error = %e, "cache GC failed; continuing"),
+  }
 }
 
 /// Create the per-job workspace and the data dir, restricting the data dir
@@ -93,6 +215,19 @@ fn prepare_job_dirs(
   Ok(workspace)
 }
 
+/// Prune stale per-job workspaces best-effort, sparing the running job `keep`.
+///
+/// GC failure must never fail the job, so an error is logged and the run
+/// continues; the count of pruned directories is logged at INFO.
+fn gc_stale_workspaces(config: &RunnerConfig, keep: &str) {
+  let max_age = Duration::from_secs(config.workspace_gc_hours.saturating_mul(3600));
+  match super::workspace_gc::gc_workspaces(&config.workspace_root, max_age, keep) {
+    Ok(0) => {},
+    Ok(n) => info!(removed = n, "workspace GC pruned stale job workspaces"),
+    Err(e) => tracing::warn!(error = %e, "workspace GC failed; continuing"),
+  }
+}
+
 /// Borrowed inputs for the hook + step-loop + outputs phase of a job run.
 struct JobBody<'a> {
   msg: &'a AgentJobRequestMessage,
@@ -101,6 +236,9 @@ struct JobBody<'a> {
   events: &'a mpsc::Sender<RunnerEvent>,
   workspace: &'a std::path::Path,
   spec: &'a JobSpec,
+  /// Shadow-mode step observer threaded into the step loop (records, never
+  /// serves).
+  shadow: &'a ShadowObserver,
 }
 
 /// Run the job-started hook, the step loop, job-output evaluation, and the
@@ -121,6 +259,7 @@ async fn run_job_body(
     events,
     workspace,
     spec,
+    shadow,
   } = *body;
 
   // Job-started hook is a hard gate: its failure fails the job before any step.
@@ -133,6 +272,7 @@ async fn run_job_body(
     workspace,
     config,
     spec,
+    shadow: Some(shadow),
   };
   let conclusion = run_steps(&msg.steps, ctx, events, cancel.clone(), &run).await?;
 
@@ -165,10 +305,9 @@ async fn run_completed_hook_best_effort(
   }
 }
 
-/// Seed the per-job env every step inherits: the `ACTIONS_*` service vars
-/// (forwarder: real URLs + token from the message; offline: the local cache
-/// service + token), `GITHUB_EVENT_PATH` (written outside the workspace since
-/// checkout wipes it), and a W3C trace context.
+/// Seed the per-job env every step inherits: the `ACTIONS_*` service vars (by
+/// mode), `GITHUB_EVENT_PATH` (written outside the workspace since checkout
+/// wipes it), and a W3C trace context.
 ///
 /// This is the central injection point — `ctx.set_env` lands on the global
 /// env that `ExecutionContext::build_step_env` merges into every step.
@@ -176,29 +315,12 @@ fn setup_job_env(
   ctx: &mut ExecutionContext,
   msg: &AgentJobRequestMessage,
   config: &RunnerConfig,
-  offline_cache: Option<&(CacheService, String)>,
+  local: &LocalServices,
 ) -> Result<(), RunnerError> {
-  match offline_cache {
-    // Offline: point the toolkit at the local cache service + local token.
-    Some((service, token)) => {
-      // Register the mask before the token is placed anywhere.
-      ctx.add_mask(token);
-      ctx.set_env("ACTIONS_CACHE_URL", service.base_url());
-      ctx.set_env("ACTIONS_RUNTIME_TOKEN", token);
-    },
-    // Forwarder: copy the real GitHub service URLs + runtime token from the
-    // message. A `None` URL is omitted (WARN); never an empty var.
-    None => {
-      for (key, value) in forward_env(&extract_service_urls(msg)) {
-        // Any `*_TOKEN` var is a credential (runtime token, id-token request
-        // token, and any future one) — register it with the masker before it
-        // is placed in the env so it never reaches the diag log or journal.
-        if key.ends_with("_TOKEN") {
-          ctx.add_mask(&value);
-        }
-        ctx.set_env(&key, &value);
-      }
-    },
+  match local {
+    LocalServices::Offline(service, token, _) => setup_offline_env(ctx, service, token),
+    LocalServices::Accelerated(service, urls, _) => setup_accelerated_env(ctx, service, urls),
+    LocalServices::None => apply_forwarded_env(ctx, &extract_service_urls(msg)),
   }
 
   // Write event.json outside workspace (checkout wipes workspace contents).
@@ -211,6 +333,44 @@ fn setup_job_env(
   ctx.set_env("TRACEPARENT", &format!("00-{trace_id}-{span_id}-01"));
   ctx.set_env("TRACESTATE", "toolu=true");
   Ok(())
+}
+
+/// Offline env: point the toolkit at the local cache service + local token.
+fn setup_offline_env(ctx: &mut ExecutionContext, service: &CacheServer, token: &str) {
+  // Register the mask before the token is placed anywhere.
+  ctx.add_mask(token);
+  ctx.set_env("ACTIONS_CACHE_URL", service.base_url());
+  ctx.set_env("ACTIONS_RUNTIME_TOKEN", token);
+}
+
+/// Accelerated env: forward the real non-cache vars (URLs + token), then
+/// override exactly the three cache vars at the local server.
+///
+/// `ACTIONS_RUNTIME_TOKEN` is deliberately left as the real GitHub token — the
+/// local server's bearer equals it and the reverse proxy forwards it upstream
+/// for artifacts. Only cache traffic is redirected local.
+fn setup_accelerated_env(ctx: &mut ExecutionContext, service: &CacheServer, urls: &ServiceUrls) {
+  apply_forwarded_env(ctx, urls);
+  let base = service.base_url().to_owned();
+  ctx.set_env("ACTIONS_RESULTS_URL", &base);
+  ctx.set_env("ACTIONS_CACHE_URL", &base);
+  ctx.set_env("ACTIONS_CACHE_SERVICE_V2", "true");
+}
+
+/// Forwarder env: copy the real GitHub service URLs + runtime token from the
+/// message into step env, masking every `*_TOKEN` credential first.
+///
+/// A `None` URL is omitted (WARN); never an empty var. Any `*_TOKEN` var (the
+/// runtime token, the id-token request token, and any future one) is registered
+/// with the masker before it reaches the env, so it never leaks to the diag log
+/// or journal.
+fn apply_forwarded_env(ctx: &mut ExecutionContext, urls: &ServiceUrls) {
+  for (key, value) in forward_env(urls) {
+    if key.ends_with("_TOKEN") {
+      ctx.add_mask(&value);
+    }
+    ctx.set_env(&key, &value);
+  }
 }
 
 async fn emit_job_started(events: &mpsc::Sender<RunnerEvent>, job_id: &str, job_name: &str) {
@@ -237,13 +397,115 @@ async fn emit_job_completed(
     .await;
 }
 
-async fn start_cache_service(config: &RunnerConfig) -> Result<(CacheService, String), RunnerError> {
-  let cache_dir = config.data_dir.join("cache");
-  std::fs::create_dir_all(&cache_dir)?;
-  let backend = LocalDiskBackend::new(cache_dir, DEFAULT_CACHE_MAX_BYTES);
+/// Start the offline v1 REST cache server over the content-addressed store.
+///
+/// Offline mode is hermetic/airgapped, so a single permissive `offline` scope
+/// (no branch isolation) backs both the write scope and the read ladder. The
+/// server binds `config.service_bind:0` (ephemeral port) and reports a loopback
+/// `base_url()` for step env. Returns the server plus a fresh bearer token.
+async fn start_cache_service(
+  config: &RunnerConfig,
+) -> Result<(CacheServer, String, CacheMaintenance), RunnerError> {
+  let maintenance = build_cas_handles(config)?;
   let token = uuid::Uuid::new_v4().to_string();
-  let service = CacheService::start(backend, token.clone()).await?;
-  Ok((service, token))
+  // Offline is hermetic: one permissive `offline` scope, always writable, so
+  // trust is `Trusted` with no protected set.
+  let state = V1State::new(V1Inputs {
+    store: maintenance.store.clone(),
+    index: maintenance.index.clone(),
+    leases: maintenance.leases.clone(),
+    scopes: CacheScopes {
+      write: "offline".to_owned(),
+      read_ladder: vec!["offline".to_owned()],
+    },
+    trust: TrustLevel::Trusted,
+    protected: Vec::new(),
+    bearer: token.clone(),
+    staging_root: maintenance.staging_root.clone(),
+  });
+  let bind = format!("{}:0", config.service_bind);
+  let server = CacheServer::start(v1_router(state), &bind).await?;
+  Ok((server, token, maintenance))
+}
+
+/// Build the per-job CAS handles + their retained teardown maintenance set.
+///
+/// Both local modes share one on-disk cache root (`data_dir/cache`); the
+/// returned [`CacheMaintenance`] is the canonical owner, and each caller clones
+/// its handles into the server state, so teardown GC sees the same store, index,
+/// and live-lease map the server used.
+///
+/// # Errors
+///
+/// Returns `RunnerError::Io` if the staging directory cannot be created.
+fn build_cas_handles(config: &RunnerConfig) -> Result<CacheMaintenance, RunnerError> {
+  let cache_dir = config.data_dir.join("cache");
+  let staging_root = cache_dir.join("staging");
+  std::fs::create_dir_all(&staging_root)?;
+  let store = CasStore::new(
+    cache_dir.clone(),
+    config.cache.chunk_avg_bytes,
+    config.cache.max_bytes,
+  );
+  let index = CacheIndex::new(cache_dir);
+  Ok(CacheMaintenance {
+    store,
+    index,
+    leases: LeaseSet::new(),
+    staging_root,
+  })
+}
+
+/// Start the accelerated cache app over a per-job content-addressed store.
+///
+/// Computes cache scopes + write trust from the github context, reads the real
+/// results URL + runtime token from the message, and binds the v2/v1/blob app +
+/// reverse proxy. Returns the server, the real [`ServiceUrls`], the token, and
+/// the teardown [`CacheMaintenance`] handles.
+///
+/// # Errors
+///
+/// `RunnerError::Config` if the runtime token is empty (an empty bearer would
+/// open the cache); otherwise `RunnerError` if the staging dir or bind fails.
+async fn start_accelerated_service(
+  config: &RunnerConfig,
+  msg: &AgentJobRequestMessage,
+  ctx: &ExecutionContext,
+) -> Result<(CacheServer, ServiceUrls, String, CacheMaintenance), RunnerError> {
+  let scopes = scopes_for_job(ctx, &config.cache.protected_branches);
+  let event = ctx.github_context("event_name").unwrap_or_default();
+  let ref_name = ctx.github_context("ref_name").unwrap_or_default();
+  let trust = classify_trust(event, ref_name, &config.cache.protected_branches);
+
+  let urls = extract_service_urls(msg);
+  let upstream_results_url = urls.results_url.clone().unwrap_or_default();
+  let bearer = urls.runtime_token.clone();
+  // An empty runtime token would make the local bearer accept `Bearer ` and the
+  // proxy forward no credential — fail loudly rather than serve an open cache.
+  if bearer.is_empty() {
+    return Err(RunnerError::Config(
+      "accelerated mode requires a runtime token".to_owned(),
+    ));
+  }
+
+  let maintenance = build_cas_handles(config)?;
+  let app = accelerated_app(AcceleratedInputs {
+    store: maintenance.store.clone(),
+    index: maintenance.index.clone(),
+    registry: BlobRegistry::new(),
+    leases: maintenance.leases.clone(),
+    scopes,
+    trust,
+    protected: config.cache.protected_branches.clone(),
+    bearer: bearer.clone(),
+    staging_root: maintenance.staging_root.clone(),
+    upstream_results_url,
+    client: reqwest::Client::new(),
+  });
+
+  let bind = format!("{}:0", config.service_bind);
+  let server = CacheServer::start(app, &bind).await?;
+  Ok((server, urls, bearer, maintenance))
 }
 
 /// Build the per-job `ExecutionContext` from the job message + runner config.

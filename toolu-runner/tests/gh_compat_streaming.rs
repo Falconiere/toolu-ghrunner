@@ -50,6 +50,7 @@ fn test_config(dir: &std::path::Path) -> TestResult<(RunnerConfig, std::path::Pa
     workspace_root: workspace.clone(),
     cgroup_path: None,
     services_mode: shared::ServicesMode::default(),
+    ..RunnerConfig::default()
   };
   std::fs::create_dir_all(&config.data_dir)?;
   Ok((config, workspace))
@@ -95,6 +96,7 @@ async fn run_steps_timed(
       workspace: &workspace,
       config: &config,
       spec: &spec,
+      shadow: None,
     },
   )
   .await?;

@@ -172,6 +172,7 @@ async fn run_echo_job_with_masker(
     workspace_root,
     cgroup_path: None,
     services_mode: mode,
+    ..RunnerConfig::default()
   };
 
   let mut msg = fixture_job()?;

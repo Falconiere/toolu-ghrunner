@@ -1,6 +1,7 @@
 //! Built-in GitHub Actions expression functions.
 
 mod builtins;
+mod glob_walk;
 mod hash;
 mod json_convert;
 

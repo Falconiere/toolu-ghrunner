@@ -15,9 +15,9 @@ use shared::RunnerError;
 use shared::startup;
 use tokio_util::sync::CancellationToken;
 use toolu_runner::config::{
-  CredentialsFile, RunnerRegistrationConfig, RuntimeConfig, ServicesSection,
-  load_config as load_reg_config, load_credentials, resolve_data_dir, resolve_work_dir,
-  save_config as save_reg_config, save_credentials,
+  CacheSection, CredentialsFile, RunnerRegistrationConfig, RuntimeConfig, ServicesSection,
+  ShadowSection, WorkspaceSection, load_config as load_reg_config, load_credentials,
+  resolve_data_dir, resolve_work_dir, save_config as save_reg_config, save_credentials,
 };
 use toolu_runner::execution::secret_masker::{MaskerRedactor, SecretMasker};
 use toolu_runner::listener::GitHubListener;
@@ -418,6 +418,9 @@ fn build_registration_config(
     runner_group: p.runner_group.to_owned(),
     runtime,
     services: ServicesSection::default(),
+    cache: CacheSection::default(),
+    workspace: WorkspaceSection::default(),
+    shadow: ShadowSection::default(),
   }
 }
 
@@ -477,6 +480,10 @@ async fn cmd_run(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
     workspace_root,
     cgroup_path: None,
     services_mode: cfg.services_mode(),
+    service_bind: cfg.service_bind(),
+    cache: cfg.cache_config(),
+    workspace_gc_hours: cfg.workspace_gc_hours(),
+    shadow_enabled: cfg.shadow_enabled(),
   };
 
   let jit_config_b64 = require_jit_config(&cfg)?;

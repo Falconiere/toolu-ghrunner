@@ -103,6 +103,7 @@ async fn run_steps_collect(
     workspace_root: workspace.clone(),
     cgroup_path: None,
     services_mode: shared::ServicesMode::default(),
+    ..RunnerConfig::default()
   };
   std::fs::create_dir_all(&config.data_dir)?;
 
@@ -128,6 +129,7 @@ async fn run_steps_collect(
       workspace: &workspace,
       config: &config,
       spec: &spec,
+      shadow: None,
     },
   )
   .await?;

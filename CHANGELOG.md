@@ -5,6 +5,63 @@ All notable changes to toolu-runner are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Cache acceleration (`ServicesMode::Accelerated`).** A new
+  `[services] mode = "accelerated"` that turns the runner into a CI
+  cache accelerator, alongside the existing `forwarder` and `offline`
+  modes.
+  - **Content-addressed store.** FastCDC-chunked, BLAKE3-addressed
+    blobs on local NVMe, restart-safe (an append-only per-scope index
+    that tolerates a torn trailing line). Identical archives collapse
+    to shared chunks; every chunk is re-hashed on read so corruption is
+    never served.
+  - **Both cache protocols, one store.** Serves the v2 Twirp
+    `CacheService` (`CreateCacheEntry` / `FinalizeCacheEntryUpload` /
+    `GetCacheEntryDownloadURL`) and an Azure-Blob-compatible upload
+    endpoint, and re-points the legacy v1 REST handlers at the same
+    store — so `actions/cache@v4.0`–`v4.1` and `docker buildx`'s
+    `type=gha` all hit the local cache instead of Azure.
+  - **Selective reverse proxy.** Cache paths are served locally;
+    `ArtifactService` and everything else is forwarded verbatim to the
+    real `ACTIONS_RESULTS_URL` with the `Authorization` header passed
+    through, so `upload-artifact@v4` still reaches GitHub. Upstream
+    failure isolates artifacts from the cache.
+  - **Branch-scoped trust.** Reads are global (chunks are
+    content-verified); the index keeps GitHub's branch isolation, and a
+    write to a protected branch from an untrusted event is soft-denied.
+  - **Optional S3 cold tier** (`[cache.l2]`) mirroring immutable chunks
+    and manifests off-box.
+  - **Workspace GC** (`[workspace] gc_after_hours`) pruning stale
+    per-job workspaces, and **shadow-mode step observation**
+    (`[shadow] enabled`) recording would-hit / false-hit fingerprints —
+    records only, never serves.
+
+### Fixed
+
+- **`hashFiles()` now works.** The expression function was implemented but
+  never registered with the dispatcher, so every `${{ hashFiles('**/x.lock') }}`
+  failed with `unknown function` — while the README and architecture docs
+  advertised it as supported. It is now wired, and its digest matches GitHub
+  byte for byte.
+
+  The previous implementation would also have produced the wrong value even
+  once reachable. GitHub computes `SHA256(SHA256(file₁) ‖ SHA256(file₂) ‖ …)`,
+  folding each file's **raw 32-byte** digest in traversal order; the old code
+  hashed the concatenated file *contents*. Matching GitHub matters because
+  `actions/cache` keys computed here must equal the keys a GitHub-hosted runner
+  computes for the same tree, or every cache lookup misses.
+
+  Also brought in line with `@actions/glob`: depth-first traversal with each
+  directory's children in byte-wise name order (a full-path sort visits
+  `a-b/Cargo.lock` before `a/Cargo.lock`, which GitHub does not), implicit
+  `<pattern>/**` descendant twins, `!` negation, `#` comments, dotfiles matched
+  by `*`, `..` rejected, matches outside the workspace skipped, symlinked
+  directories never descended, and an optional leading
+  `--follow-symbolic-links`.
+
 ## [0.1.0] - 2026-06-18
 
 The first release of toolu-runner. A standalone self-hosted GitHub

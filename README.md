@@ -15,6 +15,7 @@ didn't ask for.
 [Install](#install) · [Quick start](#quick-start) ·
 [Watch a job](#watch-live-jobs-in-your-terminal) ·
 [How it works](#how-it-works) ·
+[Cache acceleration](#cache-acceleration) ·
 [vs. `actions/runner`](#vs-actionsrunner) ·
 [Docs](docs/architecture.md)
 
@@ -146,10 +147,10 @@ left orphaned.
 | **Steps** | `run:` shell, `uses:` Node.js actions (runtime auto-downloaded + cached), Docker actions, composite actions, plugins |
 | **Workflows** | matrices, `needs:` job graphs, reusable workflows, `if:` conditions, `timeout-minutes`, `working-directory`, `defaults.run` |
 | **Expressions** | the full `${{ }}` engine — lexer, parser, evaluator, `hashFiles`, `fromJSON`/`toJSON`, `contains`, `startsWith`, … |
-| **Services** | artifacts, cache, and OIDC — forwarded to real GitHub by default, or hosted locally in `offline` mode |
+| **Services** | artifacts, cache, and OIDC — forwarded to real GitHub by default, hosted locally in `offline` mode, or a local content-addressed cache accelerator in `accelerated` mode |
 | **Safety** | secret masking across logs, stdout, and the journal; strict-mode clippy (no `unwrap`, no `panic`, no `unsafe`) |
 
-### Forwarder vs. offline
+### Service modes
 
 `[services] mode` decides where artifacts, cache, and OIDC go.
 
@@ -159,6 +160,80 @@ left orphaned.
   straight to GitHub. Drop-in compatible.
 - **`offline`** — the runner hosts local stand-ins for those services.
   For airgapped hosts.
+- **`accelerated`** — a local content-addressed cache intercepts
+  GitHub Actions cache traffic (both the v2 Twirp `CacheService` and
+  the legacy v1 REST protocol) and serves it from local NVMe,
+  reverse-proxying everything else — artifacts included — to real
+  GitHub. See [Cache acceleration](#cache-acceleration).
+
+## Cache acceleration
+
+In `accelerated` mode the runner hosts its own GitHub Actions cache. It
+stores content-addressed, FastCDC-chunked blobs on local disk and
+overrides **both** `ACTIONS_RESULTS_URL` (v2 Twirp) and
+`ACTIONS_CACHE_URL` (legacy v1 REST) so that `actions/cache@v4`,
+`docker buildx`'s `type=gha`, and older v1-only cache clients all hit
+the local store instead of Azure. Everything that isn't cache — most
+importantly `upload-artifact@v4` / `download-artifact@v4` — is
+reverse-proxied verbatim to the real service, and `ACTIONS_RUNTIME_TOKEN`
+stays the real GitHub token. Reads are shared across branches (chunks
+are content-verified on every read); writes are branch-scoped, so a
+`pull_request` job cannot poison a protected branch's cache. An
+optional S3 cold tier (`[cache.l2]`) mirrors immutable chunks and
+manifests off-box.
+
+```toml
+[services]
+mode = "accelerated"     # "forwarder" (default) | "offline" | "accelerated"
+bind = "0.0.0.0"         # must not be loopback — docker-container BuildKit reaches it here
+
+[cache]
+max_bytes          = 107374182400   # 100 GiB local (L1) budget
+entry_ttl_days     = 7              # matches GitHub
+protected_branches = ["main", "master"]
+chunk_avg_bytes    = 65536          # FastCDC target chunk size
+
+[cache.l2]                          # optional S3 cold tier
+enabled  = false
+bucket   = ""
+endpoint = ""
+region   = ""
+
+[workspace]
+gc_after_hours = 24      # prune _work/<job-id> older than this
+
+[shadow]
+enabled = false          # off by default; records would-hit/false-hit, never serves
+```
+
+### Docker: `buildx` needs `--driver-opt network=host`
+
+`docker/build-push-action` and `docker buildx build --cache-to
+type=gha` do **not** work against accelerated mode out of the box.
+`type=gha` forces the `docker-container` driver, whose BuildKit runs in
+its own network namespace and therefore cannot reach the runner's
+loopback cache server. Create the builder with host networking so it
+can:
+
+```sh
+docker buildx create --name toolu --driver-opt network=host --use
+docker buildx build \
+  --cache-to   type=gha,mode=max,url=http://127.0.0.1:<port>/ \
+  --cache-from type=gha,url=http://127.0.0.1:<port>/ \
+  .
+```
+
+The runner binds `0.0.0.0` (not loopback) precisely so a `network=host`
+builder can reach it. This works on **native Linux docker**, where the
+host namespace is the machine the runner runs on. On **Docker Desktop**
+(macOS/Windows) `network=host` shares the Desktop VM's namespace, not the
+host's, so `127.0.0.1` won't reach the runner — use the default bridge and
+`--cache-to type=gha,url=http://host.docker.internal:<port>/` instead.
+
+The `token=` attribute must be a **JWT** — BuildKit's cache client parses
+it to read its scope claim before making any request, so an opaque string
+is rejected. On a real GitHub-hosted job the injected `ACTIONS_RUNTIME_TOKEN`
+already is one; only manual `buildx` invocations need to supply a JWT.
 
 ## vs. `actions/runner`
 
@@ -211,8 +286,11 @@ data_dir         = "~/.toolu-runner"
 protocol_version = "v2"                      # "v1" for GHES
 
 [services]
-mode = "forwarder"   # "forwarder" (default) | "offline"
+mode = "forwarder"   # "forwarder" (default) | "offline" | "accelerated"
 ```
+
+The `accelerated` mode adds `[cache]`, `[cache.l2]`, `[workspace]`, and
+`[shadow]` sections — see [Cache acceleration](#cache-acceleration).
 
 Credentials live beside it in `credentials.json` (also 0600). Don't
 hand-edit `jit_config` or `auth_token` — re-run `register --replace`.
