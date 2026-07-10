@@ -46,13 +46,15 @@ impl AuthStore {
   /// Choose a backend: prefer the OS keyring, fall back to files.
   ///
   /// keyring 3.x has no `NoDefaultStore` variant — it surfaces an
-  /// unavailable secure store as an `Err` from [`keyring::Entry::new`]
-  /// (`PlatformFailure` / `NoStorageAccess`). We probe once here; on any
-  /// construction error we log a one-time WARN and fall back to
+  /// unavailable secure store as an `Err`. We probe once here with a
+  /// READ-ONLY reachability check ([`Self::keyring_reachable`]): it builds
+  /// the sentinel entry and calls `get_password`, which creates no keyring
+  /// entry — so probing never leaves a persistent `__probe__` credential
+  /// behind. On any probe error we log a one-time WARN and fall back to
   /// `File(data_dir)`.
   pub fn new(data_dir: &Path) -> Self {
-    match keyring::Entry::new(KEYRING_SERVICE, "__probe__") {
-      Ok(_) => AuthStore::Keyring,
+    match Self::keyring_reachable() {
+      Ok(()) => AuthStore::Keyring,
       Err(err) => {
         tracing::warn!(
           error = %err,
@@ -60,6 +62,18 @@ impl AuthStore {
         );
         AuthStore::File(data_dir.to_path_buf())
       },
+    }
+  }
+
+  /// Read-only keyring reachability probe. Builds the sentinel entry and
+  /// reads it; `get_password` never creates an entry, so a missing sentinel
+  /// (`NoEntry`) still proves the store is reachable. Any other error means
+  /// the secure store is unavailable.
+  fn keyring_reachable() -> Result<(), keyring::Error> {
+    let entry = keyring::Entry::new(KEYRING_SERVICE, "__probe__")?;
+    match entry.get_password() {
+      Ok(_) | Err(keyring::Error::NoEntry) => Ok(()),
+      Err(err) => Err(err),
     }
   }
 
@@ -150,7 +164,9 @@ fn keyring_entry(host: &str) -> Result<keyring::Entry, RunnerError> {
 /// `host` is whitelist-sanitized: only `[A-Za-z0-9.-]` survive, every other
 /// char (`:`, `/`, `\`, control chars, null, …) maps to `_`. The result can
 /// never introduce a path separator, so it always stays a flat filename
-/// directly under `dir` and cannot escape it on any platform.
+/// directly under `dir` and cannot escape it on any platform. A sanitized
+/// host that is empty or holds no alphanumeric (e.g. `..`, `::`) falls back
+/// to `unknown-host`, so the filename is never `token-.json` / `token-...json`.
 fn token_file_path(dir: &Path, host: &str) -> PathBuf {
   let safe: String = host
     .chars()
@@ -162,6 +178,11 @@ fn token_file_path(dir: &Path, host: &str) -> PathBuf {
       }
     })
     .collect();
+  let safe = if safe.is_empty() || !safe.chars().any(|c| c.is_ascii_alphanumeric()) {
+    "unknown-host".to_owned()
+  } else {
+    safe
+  };
   dir.join(format!("token-{safe}.json"))
 }
 

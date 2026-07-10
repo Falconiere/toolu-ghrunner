@@ -4,7 +4,7 @@
 //! per-file complexity limit. Reads only local files — no network.
 
 use toolu_runner::auth_store::AuthStore;
-use toolu_runner::config::{load_config as load_reg_config, resolve_data_dir};
+use toolu_runner::config::load_config as load_reg_config;
 
 use crate::{StatusArgs, credentials_path_for, default_config_path};
 
@@ -34,13 +34,16 @@ pub(crate) fn cmd_status(args: StatusArgs) -> Result<(), Box<dyn std::error::Err
   println!("creds:     {creds_summary}");
 
   // Login state (no network): report any stored device-flow login token
-  // for the host the runner registered against.
-  let data_dir = resolve_data_dir(&cfg.runtime.data_dir).map_err(|e| format!("{e}"))?;
+  // for the host the runner registered against. The token store lives next
+  // to config.toml (where login/register write it), NOT under the runtime
+  // data_dir — a custom --config or data_dir would otherwise diverge and
+  // make status wrongly report "not logged in".
+  let token_dir = crate::login_cmd::data_dir_for_config(&config_path);
   let host = url::Url::parse(&cfg.runner_url)
     .ok()
     .and_then(|u| u.host_str().map(str::to_owned))
     .unwrap_or_else(|| "github.com".to_owned());
-  match AuthStore::new(&data_dir).load(&host)? {
+  match AuthStore::new(&token_dir).load(&host)? {
     Some(tok) => println!("login:     logged in to {host} (scopes: {})", tok.scope),
     None => println!("login:     not logged in to {host}"),
   }

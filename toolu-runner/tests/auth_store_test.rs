@@ -196,6 +196,44 @@ fn file_backend_sanitizes_separators_in_host() {
   }
 }
 
+/// A degenerate host whose sanitized form holds no alphanumeric (`..`, `::`)
+/// still saves to a single flat file under the data dir and round-trips via
+/// `load` — the fallback filename keeps it from becoming `token-.json` or a
+/// dotted `token-...json` name.
+#[test]
+fn file_backend_handles_degenerate_host() {
+  let dir = TempDir::new().expect("tempdir");
+  let store = AuthStore::File(dir.path().to_path_buf());
+  let host = "..";
+
+  store
+    .save(&token_for(host, "gho_degenerate"))
+    .expect("save degenerate host");
+
+  // Round-trips through the same fallback path.
+  assert_eq!(
+    store
+      .load(host)
+      .expect("load degenerate host")
+      .expect("token present")
+      .access_token,
+    "gho_degenerate"
+  );
+
+  // Exactly one plain file exists directly under the data dir.
+  let entries: Vec<_> = std::fs::read_dir(dir.path())
+    .expect("read data dir")
+    .map(|e| e.expect("dir entry"))
+    .collect();
+  assert_eq!(entries.len(), 1, "degenerate host must yield a single file");
+  let entry = entries.first().expect("one entry");
+  assert!(
+    entry.file_type().expect("file type").is_file(),
+    "degenerate host must not create a dir: {:?}",
+    entry.file_name()
+  );
+}
+
 // ── AC-3: resolve_bearer sources (flag > TOOLU_RUNNER_TOKEN env > store) ─
 //
 // This is the ONLY test that touches TOOLU_RUNNER_TOKEN. No other test in
