@@ -18,9 +18,9 @@ use crate::execution::cache::mint_capability_token;
 /// enough out that no real client notices, finite so the entry still ages out.
 ///
 /// In the degenerate case where even this cap overflows (an `Instant` within a
-/// day of its maximum — unreachable on real platforms), the expiry falls back
-/// to `now`, deliberately minting an already-expired token: fail closed (every
-/// use resolves to `None`, a 403) rather than panic, with a WARN as the trace.
+/// day of its maximum — unreachable on real platforms), no entry is stored at
+/// all: the token resolves to `None` (a 403), exactly as under a poisoned lock.
+/// No code path ever inserts an entry that is already expired when minted.
 const OVERFLOW_TTL_CAP: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// What a minted blob token authorizes.
@@ -163,25 +163,25 @@ impl BlobRegistry {
 
   /// Store `target` under a fresh nonce with the given TTL; returns the nonce.
   ///
-  /// A poisoned registry lock still returns the token but never stores it, so
-  /// every use resolves to `None` (a 403); the WARN is the only trace of the
-  /// poison, so it must not stay silent.
+  /// Two paths return the token without storing it — a poisoned registry lock,
+  /// and an expiry that overflows `Instant` even at `OVERFLOW_TTL_CAP`. Both
+  /// resolve to `None` (a 403) on use, so an entry is never inserted already
+  /// expired. The WARN is the only trace, so it must not stay silent.
   fn insert(&self, target: BlobTarget, ttl: Duration) -> String {
     let token = mint_capability_token();
+    // A TTL too large for `Instant` arithmetic caps at `OVERFLOW_TTL_CAP`.
+    let now = Instant::now();
+    let Some(expiry) = now
+      .checked_add(ttl)
+      .or_else(|| now.checked_add(OVERFLOW_TTL_CAP))
+    else {
+      tracing::warn!(
+        "blob token TTL and overflow cap both overflow Instant arithmetic; \
+         minted token not stored (will 403 on use)"
+      );
+      return token;
+    };
     if let Ok(mut map) = self.entries.lock() {
-      // A TTL too large for `Instant` arithmetic caps at `OVERFLOW_TTL_CAP`
-      // instead of silently minting an already-expired token.
-      let now = Instant::now();
-      let expiry = now
-        .checked_add(ttl)
-        .or_else(|| now.checked_add(OVERFLOW_TTL_CAP))
-        .unwrap_or_else(|| {
-          tracing::warn!(
-            "blob token TTL and overflow cap both overflow Instant arithmetic; \
-             minting an already-expired token (fail closed, will 403 on use)"
-          );
-          now
-        });
       map.insert(token.clone(), Entry { target, expiry });
     } else {
       tracing::warn!("blob token registry poisoned; minted token not stored (will 403 on use)");

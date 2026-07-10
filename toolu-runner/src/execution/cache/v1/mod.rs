@@ -141,11 +141,16 @@ impl V1State {
 
   /// Register `manifest` under a fresh, unguessable token and return it.
   ///
+  /// The v1 download URL is served without a bearer (real clients send none),
+  /// so the token itself is the capability; it comes from the cache layer's
+  /// single shared mint, [`mint_capability_token`], so its format and entropy
+  /// can never diverge from the v2 blob tokens.
+  ///
   /// A poisoned registry lock still returns the token but never stores it, so
   /// the download it names 404s; the WARN is the only trace of the poison, so
   /// it must not stay silent.
   fn register_download(&self, manifest: Manifest) -> String {
-    let token = mint_download_token();
+    let token = mint_capability_token();
     if let Ok(mut map) = self.downloads.lock() {
       map.insert(token.clone(), manifest);
     } else {
@@ -158,16 +163,6 @@ impl V1State {
   fn download_manifest(&self, token: &str) -> Option<Manifest> {
     self.downloads.lock().ok()?.get(token).cloned()
   }
-}
-
-/// Mint an unguessable v1 download token.
-///
-/// The v1 download URL is served without a bearer (real clients send none), so
-/// the token itself is the capability; it comes from the cache layer's single
-/// shared mint, [`mint_capability_token`], so its format and entropy can never
-/// diverge from the v2 blob tokens.
-fn mint_download_token() -> String {
-  mint_capability_token()
 }
 
 /// Upper bound on a single v1 request body buffered in memory. `actions/cache`

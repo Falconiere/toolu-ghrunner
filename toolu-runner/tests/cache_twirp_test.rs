@@ -221,10 +221,13 @@ async fn miss_returns_bare_ok_false() -> TestResult<()> {
     200,
     "a miss is HTTP 200, not a Twirp error"
   );
-  let text = resp.text().await?;
+  // Object equality, not a string compare: order- and whitespace-independent,
+  // and still fails if the handler grows an extra field (e.g. a null URL).
+  let body = resp.json::<Value>().await?;
   assert_eq!(
-    text, r#"{"ok":false}"#,
-    "miss body must be exactly ok:false"
+    body,
+    json!({"ok": false}),
+    "miss body must carry ok:false and nothing else"
   );
   Ok(())
 }

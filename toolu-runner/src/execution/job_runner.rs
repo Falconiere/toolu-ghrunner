@@ -215,12 +215,17 @@ fn prepare_job_dirs(
   Ok(workspace)
 }
 
+/// Ceiling on `workspace_gc_hours` (100 years) so the seconds conversion cannot
+/// saturate. A configured value at or above the cap means "never prune".
+const MAX_GC_HOURS: u64 = 100 * 365 * 24;
+
 /// Prune stale per-job workspaces best-effort, sparing the running job `keep`.
 ///
 /// GC failure must never fail the job, so an error is logged and the run
 /// continues; the count of pruned directories is logged at INFO.
 fn gc_stale_workspaces(config: &RunnerConfig, keep: &str) {
-  let max_age = Duration::from_secs(config.workspace_gc_hours.saturating_mul(3600));
+  let hours = config.workspace_gc_hours.min(MAX_GC_HOURS);
+  let max_age = Duration::from_secs(hours * 3600);
   match super::workspace_gc::gc_workspaces(&config.workspace_root, max_age, keep) {
     Ok(0) => {},
     Ok(n) => info!(removed = n, "workspace GC pruned stale job workspaces"),

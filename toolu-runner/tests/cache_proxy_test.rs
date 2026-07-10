@@ -25,9 +25,13 @@ const PING_PATH: &str = "/twirp/github.actions.results.api.v1.CacheService/ping"
 /// Upper bound on the echoed upstream request body.
 const MAX_BODY: usize = 1 << 20;
 
-/// Join a `CacheServer` base URL (trailing `/`) with an absolute request path.
-fn join(base: &str, path: &str) -> String {
-  format!("{}{}", base.trim_end_matches('/'), path)
+/// Absolute URL for `path` (which must start with `/`) under a server `base`.
+///
+/// Not a general URL join: it trims a trailing `/` off `base` so the result
+/// holds exactly one separator regardless of `base_url`'s convention.
+fn abs_url(base: &str, path: &str) -> String {
+  debug_assert!(path.starts_with('/'), "path must be absolute: {path}");
+  format!("{}{path}", base.trim_end_matches('/'))
 }
 
 /// Upstream `ArtifactService` stand-in: echoes a JSON body carrying the received
@@ -90,7 +94,7 @@ async fn forwards_unmatched_path_and_authorization() -> TestResult<()> {
   let proxied = CacheServer::start(app, "127.0.0.1:0").await?;
 
   let resp = client
-    .post(join(proxied.base_url(), ARTIFACT_PATH))
+    .post(abs_url(proxied.base_url(), ARTIFACT_PATH))
     .header("Authorization", "Bearer xyz")
     .header("Content-Type", "application/json")
     .body(r#"{"name":"art"}"#)
@@ -130,7 +134,7 @@ async fn local_routes_stay_local() -> TestResult<()> {
   let proxied = CacheServer::start(app, "127.0.0.1:0").await?;
 
   let resp = client
-    .get(join(proxied.base_url(), PING_PATH))
+    .get(abs_url(proxied.base_url(), PING_PATH))
     .send()
     .await?;
   let status = resp.status();
@@ -156,7 +160,7 @@ async fn upstream_down_isolates_cache_from_artifacts() -> TestResult<()> {
   let proxied = CacheServer::start(app, "127.0.0.1:0").await?;
 
   let artifact = client
-    .post(join(proxied.base_url(), ARTIFACT_PATH))
+    .post(abs_url(proxied.base_url(), ARTIFACT_PATH))
     .header("Authorization", "Bearer xyz")
     .body("{}")
     .send()
@@ -168,7 +172,7 @@ async fn upstream_down_isolates_cache_from_artifacts() -> TestResult<()> {
   );
 
   let ping = client
-    .get(join(proxied.base_url(), PING_PATH))
+    .get(abs_url(proxied.base_url(), PING_PATH))
     .send()
     .await?;
   let ping_status = ping.status();
