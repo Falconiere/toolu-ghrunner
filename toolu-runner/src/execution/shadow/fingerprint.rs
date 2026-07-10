@@ -63,11 +63,22 @@ fn fold_entry(
   meta: &std::fs::Metadata,
   hasher: &mut blake3::Hasher,
 ) -> Result<(), RunnerError> {
-  let rel = path.strip_prefix(root).unwrap_or(path);
+  // Entries come from walking `root`, so they are normally workspace-relative.
+  // If strip_prefix ever fails (an entry outside the tree), skip it rather than
+  // fold an absolute path — the fingerprint is workspace-scoped and must stay
+  // portable across mount points.
+  let Ok(rel) = path.strip_prefix(root) else {
+    return Ok(());
+  };
   hasher.update(rel.to_string_lossy().as_bytes());
   hasher.update(&[0u8]);
   if meta.is_symlink() {
     let target = std::fs::read_link(path)?;
+    // Normalize an absolute in-workspace target to workspace-relative so two
+    // identical trees at different mount points fingerprint the same. A relative
+    // target is already portable; an absolute target outside the workspace is
+    // inherently non-portable and kept verbatim.
+    let target = target.strip_prefix(root).unwrap_or(target.as_path());
     hasher.update(b"L");
     hasher.update(target.to_string_lossy().as_bytes());
   } else {

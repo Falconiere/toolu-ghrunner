@@ -192,3 +192,36 @@ fn secret_in_command_is_masked_in_jsonl() -> TestResult {
   );
   Ok(())
 }
+
+/// Two workspaces with identical content — including a symlink whose target is
+/// an absolute path inside the workspace — but at different filesystem
+/// locations must fingerprint equally. Otherwise shadow mode records a spurious
+/// divergence for a mount-point difference. Regression for the absolute
+/// symlink-target leak.
+#[cfg(unix)]
+#[test]
+fn fingerprint_is_portable_across_mount_points_with_symlinks() -> TestResult {
+  let tmp = tempfile::tempdir()?;
+  let data_dir = tmp.path().join("data");
+
+  let make_ws = |name: &str| -> TestResult<PathBuf> {
+    let ws = tmp.path().join(name);
+    std::fs::create_dir_all(&ws)?;
+    std::fs::write(ws.join("real.txt"), b"payload")?;
+    // Absolute target pointing inside this workspace — the non-portable case.
+    std::os::unix::fs::symlink(ws.join("real.txt"), ws.join("link.txt"))?;
+    Ok(ws)
+  };
+
+  let ws_a = make_ws("mount_a")?;
+  let ws_b = make_ws("mount_b")?;
+
+  let obs = ShadowObserver::new(true, &data_dir, "job-sym", masker());
+  let pre_a = obs.pre(&ws_a)?;
+  let pre_b = obs.pre(&ws_b)?;
+  assert_eq!(
+    pre_a, pre_b,
+    "identical trees at different mount points must fingerprint equally"
+  );
+  Ok(())
+}
