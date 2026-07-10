@@ -52,6 +52,9 @@ blake3 = "1"
 # Azure Blob "Put Block List" XML (promoted from a transitive opendal dep)
 quick-xml = "0.37"
 
+# OS keyring for CLI login token persistence (no libdbus: linux-native = kernel keyutils)
+keyring = { version = "3", default-features = false, features = ["apple-native", "windows-native", "linux-native"] }
+
 # Observability (no OTel in v1)
 tracing = "0.1"
 
@@ -96,6 +99,10 @@ crossterm = "0.28"
 [dev-dependencies]
 wiremock = "0.6"
 tempfile = "3"
+# Safe, scoped process-env mutation for the resolve_bearer env test.
+# The crate keeps all `unsafe env::set_var` internal, so our tests stay
+# `unsafe`-free (workspace `unsafe_code = "deny"`).
+temp-env = "0.3"
 pretty_assertions = "1"
 filetime = "0.2"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

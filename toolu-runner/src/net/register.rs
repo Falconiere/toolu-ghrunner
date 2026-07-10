@@ -355,6 +355,12 @@ pub async fn register_jit(
     )));
   }
 
+  if status == reqwest::StatusCode::UNAUTHORIZED {
+    return Err(RunnerError::Auth(
+      "stored GitHub token invalid or expired — run 'toolu-runner login'".into(),
+    ));
+  }
+
   Err(RunnerError::Auth(format!(
     "generate-jitconfig failed with status {status}: {text}"
   )))

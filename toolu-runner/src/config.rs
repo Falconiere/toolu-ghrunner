@@ -351,7 +351,7 @@ pub fn save_credentials(path: &Path, creds: &CredentialsFile) -> Result<(), Runn
 ///
 /// On non-Unix platforms the mode is best-effort (Windows inherits its
 /// default ACL behavior — the runner logs a warning rather than failing).
-fn write_secret_file(path: &Path, body: &[u8]) -> Result<(), RunnerError> {
+pub(crate) fn write_secret_file(path: &Path, body: &[u8]) -> Result<(), RunnerError> {
   #[cfg(unix)]
   let mut opts = OpenOptions::new();
   #[cfg(unix)]

@@ -2,6 +2,8 @@
 
 #![doc(html_root_url = "https://docs.rs/toolu-runner/0.1.0")]
 
+/// CLI-login token persistence (OS keyring with a 0600 file fallback).
+pub mod auth_store;
 /// Persisted registration/runtime config (`config.toml`) + OAuth credentials.
 pub mod config;
 /// Bollard wrapper: daemon client, service containers, path translation.

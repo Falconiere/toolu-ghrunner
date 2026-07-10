@@ -14,6 +14,7 @@ use clap::{Args, Parser, Subcommand};
 use shared::RunnerError;
 use shared::startup;
 use tokio_util::sync::CancellationToken;
+use toolu_runner::auth_store::{self, AuthStore};
 use toolu_runner::config::{
   CacheSection, CredentialsFile, RunnerRegistrationConfig, RuntimeConfig, ServicesSection,
   ShadowSection, WorkspaceSection, load_config as load_reg_config, load_credentials,
@@ -22,6 +23,12 @@ use toolu_runner::config::{
 use toolu_runner::execution::secret_masker::{MaskerRedactor, SecretMasker};
 use toolu_runner::listener::GitHubListener;
 use toolu_runner::lockfile;
+
+mod login_cmd;
+
+/// github.com OAuth App `client_id` for the device-flow `login`.
+/// Placeholder until the real App is registered.
+const DEVICE_CLIENT_ID: &str = "REPLACE_ME";
 
 /// Standalone GitHub Actions JIT runner.
 #[derive(Debug, Parser)]
@@ -43,6 +50,10 @@ enum Command {
   Status(StatusArgs),
   /// Watch jobs in a TUI: history, live steps and logs, cancel key.
   Watch(WatchArgs),
+  /// Log in to GitHub via the OAuth device flow and store the token.
+  Login(login_cmd::LoginArgs),
+  /// Delete the stored login token for a host.
+  Logout(login_cmd::LogoutArgs),
 }
 
 #[derive(Debug, Args)]
@@ -51,9 +62,11 @@ struct RegisterArgs {
   #[arg(long)]
   url: String,
   /// GitHub API token with repo admin rights (PAT or App installation
-  /// token) — used for the `generate-jitconfig` REST call.
+  /// token) for the `generate-jitconfig` REST call. Optional — resolution
+  /// order is this flag > `TOOLU_RUNNER_TOKEN` env > the stored `login`
+  /// token for the URL's host.
   #[arg(long)]
-  token: String,
+  token: Option<String>,
   /// Runner name (defaults to the hostname).
   #[arg(long)]
   name: Option<String>,
@@ -141,6 +154,8 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     Command::Remove(args) => cmd_remove(args).await,
     Command::Status(args) => cmd_status(args),
     Command::Watch(args) => cmd_watch(args),
+    Command::Login(args) => login_cmd::cmd_login(args).await,
+    Command::Logout(args) => login_cmd::cmd_logout(&args),
   }
 }
 
@@ -214,9 +229,16 @@ async fn cmd_register(args: RegisterArgs) -> Result<(), Box<dyn std::error::Erro
 
   ensure_not_registered(&config_path, args.replace)?;
 
+  // Resolve the REST bearer: --token flag > TOOLU_RUNNER_TOKEN env >
+  // the stored `login` token for the URL's host. The token store lives
+  // next to config.toml (no RunnerConfig is loaded during register).
+  let data_dir = login_cmd::data_dir_for_config(&config_path);
+  let token = auth_store::resolve_bearer(&AuthStore::new(&data_dir), &host, args.token.clone())?
+    .ok_or("no GitHub token: run 'toolu-runner login' or pass --token")?;
+
   let runner_id = register_and_persist(RegisterPersist {
     url: &args.url,
-    token: &args.token,
+    token: &token,
     runner_name: &runner_name,
     labels: &labels,
     runner_group: &args.runner_group,
@@ -629,5 +651,17 @@ fn cmd_status(args: StatusArgs) -> Result<(), Box<dyn std::error::Error>> {
   println!("work_dir:  {}", cfg.runtime.work_dir);
   println!("jit_cfg:   {} bytes", cfg.runtime.jit_config.len());
   println!("creds:     {creds_summary}");
+
+  // Login state (no network): report any stored device-flow login token
+  // for the host the runner registered against.
+  let data_dir = resolve_data_dir(&cfg.runtime.data_dir).map_err(|e| format!("{e}"))?;
+  let host = url::Url::parse(&cfg.runner_url)
+    .ok()
+    .and_then(|u| u.host_str().map(str::to_owned))
+    .unwrap_or_else(|| "github.com".to_owned());
+  match AuthStore::new(&data_dir).load(&host)? {
+    Some(tok) => println!("login:     logged in to {host} (scopes: {})", tok.scope),
+    None => println!("login:     not logged in to {host}"),
+  }
   Ok(())
 }
