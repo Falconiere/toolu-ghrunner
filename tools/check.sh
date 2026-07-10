@@ -37,7 +37,7 @@ _check_file_size() {
       printf 'file-size: %s is %s lines (> 700)\n' "$f" "$n" >&2
       fail=1
     fi
-  done < <(find "$_project_root/shared" "$_project_root/protocol" "$_project_root/toolu-runner" \
+  done < <(find "$_project_root/crates" \
             -name '*.rs' -not -path '*/target/*')
   return $fail
 }
@@ -45,7 +45,7 @@ _check_file_size() {
 _check_no_allow() {
   # Reject #[allow(..)] / #[expect(..)] — must fix the lint, not silence it.
   if grep -RnE '#\[(allow|expect)\(' \
-       "$_project_root/shared" "$_project_root/protocol" "$_project_root/toolu-runner" \
+       "$_project_root/crates" \
        --include='*.rs' 2>/dev/null; then
     printf 'no-allow: #[allow(..)] / #[expect(..)] are not allowed\n' >&2
     return 1
@@ -71,10 +71,7 @@ _check_no_unwrap() {
         fail=1
       done <<<"$matches"
     fi
-  done < <(find "$_project_root/shared/src" \
-               "$_project_root/protocol/src" \
-               "$_project_root/toolu-runner/src" \
-               -name '*.rs' 2>/dev/null)
+  done < <(find "$_project_root/crates" -path '*/src/*.rs' 2>/dev/null)
   return $fail
 }
 
@@ -83,7 +80,7 @@ _check_no_yamless() {
   # AC #23 detection of YAMLESS_* env vars (legitimate) and the live
   # test fixtures (which mention the YAMLESS_ prefix).
   if grep -RnE 'yamless' \
-       "$_project_root/shared" "$_project_root/protocol" "$_project_root/toolu-runner" \
+       "$_project_root/crates" \
        "$_project_root/Cargo.toml" \
        --include='*.rs' --include='*.toml' 2>/dev/null \
      | grep -v 'YAMLESS_' | grep -v 'tests/live/'; then
