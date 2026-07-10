@@ -94,7 +94,9 @@ want "pushes to the homebrew-tap repo"    "Falconiere/homebrew-tap"
 # changes", skip the push, and still exit 0. Assert the --cached form, and
 # reject the bare one so the regression cannot return.
 want "skips an unchanged formula"         "git diff --cached --quiet"
-reject "compares the index, not worktree" "git diff --quiet"
+# `git diff --quiet` (no --cached) compares the WORKTREE, which cannot see an
+# untracked file — that is the bug. Reject the bare form.
+reject "no bare worktree diff"            "git diff --quiet"
 if awk '
   /^ *git add Formula\/toolu-runner\.rb$/          { staged = 1 }
   staged && /git diff --cached --quiet/            { ordered = 1 }
