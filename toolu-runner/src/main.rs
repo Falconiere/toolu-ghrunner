@@ -25,6 +25,7 @@ use toolu_runner::listener::GitHubListener;
 use toolu_runner::lockfile;
 
 mod login_cmd;
+mod status_cmd;
 
 /// github.com OAuth App `client_id` for the device-flow `login`.
 /// Placeholder until the real App is registered.
@@ -152,7 +153,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     Command::Register(args) => cmd_register(args).await,
     Command::Run(args) => cmd_run(args).await,
     Command::Remove(args) => cmd_remove(args).await,
-    Command::Status(args) => cmd_status(args),
+    Command::Status(args) => status_cmd::cmd_status(args),
     Command::Watch(args) => cmd_watch(args),
     Command::Login(args) => login_cmd::cmd_login(args).await,
     Command::Logout(args) => login_cmd::cmd_logout(&args),
@@ -234,7 +235,9 @@ async fn cmd_register(args: RegisterArgs) -> Result<(), Box<dyn std::error::Erro
   // next to config.toml (no RunnerConfig is loaded during register).
   let data_dir = login_cmd::data_dir_for_config(&config_path);
   let token = auth_store::resolve_bearer(&AuthStore::new(&data_dir), &host, args.token.clone())?
-    .ok_or("no GitHub token: run 'toolu-runner login' or pass --token")?;
+    .ok_or_else(|| {
+      RunnerError::Auth("no GitHub token: run 'toolu-runner login' or pass --token".to_owned())
+    })?;
 
   let runner_id = register_and_persist(RegisterPersist {
     url: &args.url,
@@ -626,42 +629,5 @@ async fn cmd_remove(args: RemoveArgs) -> Result<(), Box<dyn std::error::Error>> 
     "unregistered runner '{}' (config and credentials removed). Live GH unregistration call lands in step 10.",
     cfg.runner_name
   );
-  Ok(())
-}
-
-fn cmd_status(args: StatusArgs) -> Result<(), Box<dyn std::error::Error>> {
-  let config_path = args.config.unwrap_or_else(default_config_path);
-  let creds_path = credentials_path_for(&config_path);
-  if !config_path.exists() {
-    return Err(format!("config not found at {}", config_path.display()).into());
-  }
-  let cfg = load_reg_config(&config_path).map_err(|e| format!("{e}"))?;
-  let creds_summary = if creds_path.exists() {
-    "credentials present"
-  } else {
-    "credentials MISSING"
-  };
-  println!("runner:    {}", cfg.runner_name);
-  println!("url:       {}", cfg.runner_url);
-  println!("runner_id: {}", cfg.runner_id);
-  println!("labels:    {:?}", cfg.labels);
-  println!("group:     {}", cfg.runner_group);
-  println!("protocol:  {}", cfg.runtime.protocol_version);
-  println!("data_dir:  {}", cfg.runtime.data_dir);
-  println!("work_dir:  {}", cfg.runtime.work_dir);
-  println!("jit_cfg:   {} bytes", cfg.runtime.jit_config.len());
-  println!("creds:     {creds_summary}");
-
-  // Login state (no network): report any stored device-flow login token
-  // for the host the runner registered against.
-  let data_dir = resolve_data_dir(&cfg.runtime.data_dir).map_err(|e| format!("{e}"))?;
-  let host = url::Url::parse(&cfg.runner_url)
-    .ok()
-    .and_then(|u| u.host_str().map(str::to_owned))
-    .unwrap_or_else(|| "github.com".to_owned());
-  match AuthStore::new(&data_dir).load(&host)? {
-    Some(tok) => println!("login:     logged in to {host} (scopes: {})", tok.scope),
-    None => println!("login:     not logged in to {host}"),
-  }
   Ok(())
 }

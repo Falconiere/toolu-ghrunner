@@ -48,15 +48,25 @@ pub(crate) struct LogoutArgs {
 /// the token store lives in the config path's parent dir.
 pub(crate) async fn cmd_login(args: LoginArgs) -> Result<(), Box<dyn std::error::Error>> {
   let host = &args.hostname;
-  let client_id = args.client_id.as_deref().unwrap_or(DEVICE_CLIENT_ID);
 
-  // GHES needs a caller-supplied OAuth App: the built-in client_id is a
-  // github.com App and a GHES device endpoint would reject it. Fail before
-  // any network call.
-  if host != "github.com" && args.client_id.is_none() {
-    return Err(
-      format!("GHES login needs --client-id for an OAuth App registered on {host}").into(),
-    );
+  // Effective client_id: --client-id flag > TOOLU_RUNNER_CLIENT_ID env >
+  // the built-in DEVICE_CLIENT_ID placeholder.
+  let client_id: String = args
+    .client_id
+    .clone()
+    .or_else(|| std::env::var("TOOLU_RUNNER_CLIENT_ID").ok())
+    .unwrap_or_else(|| DEVICE_CLIENT_ID.to_owned());
+
+  // The built-in client_id is a compile-time placeholder: no real OAuth App
+  // is configured. Fail before any network call — for GHES the caller must
+  // register their own App, for github.com the built-in App is not wired yet.
+  if client_id == DEVICE_CLIENT_ID {
+    let msg = if host == "github.com" {
+      "no GitHub OAuth App configured — pass --client-id or set TOOLU_RUNNER_CLIENT_ID".to_owned()
+    } else {
+      format!("GHES login needs --client-id for an OAuth App registered on {host}")
+    };
+    return Err(msg.into());
   }
 
   let config_path = args.config.clone().unwrap_or_else(default_config_path);
@@ -68,11 +78,11 @@ pub(crate) async fn cmd_login(args: LoginArgs) -> Result<(), Box<dyn std::error:
     .map_err(|e| RunnerError::Network(format!("HTTP client: {e}")))?;
 
   let dc =
-    net::device_auth::request_device_code(&client, host, client_id, "repo admin:org").await?;
+    net::device_auth::request_device_code(&client, host, &client_id, "repo admin:org").await?;
   eprintln!("Enter code {} at {}", dc.user_code, dc.verification_uri);
   open_browser_best_effort(&dc.verification_uri);
 
-  let tok = net::device_auth::poll_for_token(&client, host, client_id, &dc).await?;
+  let tok = net::device_auth::poll_for_token(&client, host, &client_id, &dc).await?;
 
   let stored = StoredToken {
     access_token: tok.access_token,

@@ -147,10 +147,21 @@ fn keyring_entry(host: &str) -> Result<keyring::Entry, RunnerError> {
 
 /// Path of the per-host token file: `<dir>/token-<host>.json`.
 ///
-/// `host` is sanitized (both `/` and `\` replaced) so it is always
-/// filename-safe and cannot escape `dir` via a path separator on any platform.
+/// `host` is whitelist-sanitized: only `[A-Za-z0-9.-]` survive, every other
+/// char (`:`, `/`, `\`, control chars, null, …) maps to `_`. The result can
+/// never introduce a path separator, so it always stays a flat filename
+/// directly under `dir` and cannot escape it on any platform.
 fn token_file_path(dir: &Path, host: &str) -> PathBuf {
-  let safe = host.replace(['/', '\\'], "_");
+  let safe: String = host
+    .chars()
+    .map(|c| {
+      if c.is_ascii_alphanumeric() || c == '.' || c == '-' {
+        c
+      } else {
+        '_'
+      }
+    })
+    .collect();
   dir.join(format!("token-{safe}.json"))
 }
 
