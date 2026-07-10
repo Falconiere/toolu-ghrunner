@@ -128,7 +128,7 @@ fn default_services_mode() -> String {
 }
 
 fn default_service_bind() -> String {
-  "0.0.0.0".to_owned()
+  shared::RunnerConfig::DEFAULT_SERVICE_BIND.to_owned()
 }
 
 /// `[cache]` config section: content-addressed cache settings.

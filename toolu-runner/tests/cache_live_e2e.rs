@@ -155,9 +155,10 @@ fn enable_accelerated(harness: &LiveHarness) -> Result<(), Box<dyn std::error::E
   Ok(())
 }
 
-/// Wait for the `run --once` child to exit so it does not outlive the test.
-async fn wait_child(mut child: tokio::process::Child) {
-  let _ = child.wait().await;
+/// Wait for the `run --once` child to exit so it does not outlive the test,
+/// returning its exit status (`None` if the child was already reaped).
+async fn wait_child(mut child: tokio::process::Child) -> Option<std::process::ExitStatus> {
+  child.wait().await.ok()
 }
 
 /// Register + accelerate + push + run + trigger + wait, asserting `success`.
@@ -179,13 +180,18 @@ async fn run_accelerated_workflow(
   let conclusion = harness
     .wait_for_run(run_id, Duration::from_secs(600))
     .await?;
-  wait_child(child).await;
+  let status = wait_child(child).await;
   let _ = harness.cleanup(&[workflow]).await;
 
+  // The run's conclusion is the source of truth for "did the job pass"; the
+  // runner's exit code is a secondary signal (0 on success, 2 on error).
   assert_eq!(
     conclusion, "success",
-    "{workflow} should conclude with success in accelerated mode; got {conclusion}"
+    "{workflow} should conclude with success in accelerated mode; got {conclusion} (runner exit: {status:?})"
   );
+  if let Some(s) = status {
+    assert!(s.success(), "runner should exit 0 on success; got {s}");
+  }
   Ok(())
 }
 

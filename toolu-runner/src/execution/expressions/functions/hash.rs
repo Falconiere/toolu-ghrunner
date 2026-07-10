@@ -140,14 +140,14 @@ fn digest_file(path: &Path) -> Result<Option<sha2::digest::Output<Sha256>>, Runn
 /// `StringComparison.OrdinalIgnoreCase` and treats a `--` string in any
 /// later parameter as an ordinary pattern.
 fn split_options(args: &[String]) -> Result<(bool, &[String]), RunnerError> {
-  let Some(first) = args.first() else {
+  let Some((first, rest)) = args.split_first() else {
     return Ok((false, args));
   };
   if !first.starts_with("--") {
     return Ok((false, args));
   }
   if first.eq_ignore_ascii_case(FOLLOW_SYMLINKS_FLAG) {
-    return Ok((true, args.get(1..).unwrap_or_default()));
+    return Ok((true, rest));
   }
   Err(RunnerError::Expression(format!(
     "hashFiles: invalid option '{first}'"

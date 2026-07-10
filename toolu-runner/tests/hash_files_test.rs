@@ -216,6 +216,25 @@ fn paths_outside_the_workspace_are_skipped() -> TestResult {
   Ok(())
 }
 
+/// The workspace containment check compares whole path components
+/// (`Path::starts_with`, not `str::starts_with`): a sibling directory whose
+/// name merely extends the workspace's (`repo` vs `repo-evil`) is outside
+/// the workspace, and its files are never hashed.
+#[test]
+fn sibling_directory_sharing_a_name_prefix_is_outside_the_workspace() -> TestResult {
+  let parent = tempfile::tempdir()?;
+  let workspace = parent.path().join("repo");
+  std::fs::create_dir(&workspace)?;
+  let sibling = parent.path().join("repo-evil");
+  write_file(&sibling, "secret.lock", "should never be hashed")?;
+
+  let pattern = sibling.join("secret.lock");
+  let expr = format!("hashFiles('{}')", pattern.display());
+
+  assert_eq!(hash_of(&workspace, &expr)?, "");
+  Ok(())
+}
+
 /// `..` is rejected at pattern-parse time, as GitHub does.
 #[test]
 fn parent_directory_escape_is_rejected() -> TestResult {

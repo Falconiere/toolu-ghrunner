@@ -20,11 +20,9 @@ use std::sync::{Arc, Mutex};
 use axum::Router;
 use axum::extract::DefaultBodyLimit;
 use axum::routing::{get, post};
-use base64::Engine;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD as TOKEN;
-use rand::RngCore;
 
 use super::cas::{CacheIndex, CasStore, LeaseSet, Manifest};
+use super::mint_capability_token;
 use super::scope::CacheScopes;
 use super::trust::TrustLevel;
 
@@ -142,10 +140,16 @@ impl V1State {
   }
 
   /// Register `manifest` under a fresh, unguessable token and return it.
+  ///
+  /// A poisoned registry lock still returns the token but never stores it, so
+  /// the download it names 404s; the WARN is the only trace of the poison, so
+  /// it must not stay silent.
   fn register_download(&self, manifest: Manifest) -> String {
     let token = mint_download_token();
     if let Ok(mut map) = self.downloads.lock() {
       map.insert(token.clone(), manifest);
+    } else {
+      tracing::warn!("v1 download registry poisoned; minted token not stored (will 404 on use)");
     }
     token
   }
@@ -156,16 +160,14 @@ impl V1State {
   }
 }
 
-/// Mint an unguessable download token from 32 CSPRNG bytes, base64url-encoded.
+/// Mint an unguessable v1 download token.
 ///
 /// The v1 download URL is served without a bearer (real clients send none), so
-/// the token itself is the capability and must be infeasible to guess —
-/// `rand::thread_rng` is ChaCha reseeded from OS entropy, unlike the
-/// predictable `fastrand` used for non-secret poll jitter.
+/// the token itself is the capability; it comes from the cache layer's single
+/// shared mint, [`mint_capability_token`], so its format and entropy can never
+/// diverge from the v2 blob tokens.
 fn mint_download_token() -> String {
-  let mut bytes = [0u8; 32];
-  rand::thread_rng().fill_bytes(&mut bytes);
-  TOKEN.encode(bytes)
+  mint_capability_token()
 }
 
 /// Upper bound on a single v1 request body buffered in memory. `actions/cache`

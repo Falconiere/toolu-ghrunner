@@ -24,6 +24,8 @@ fn setup() -> TestResult<Fixture> {
   let tar_path = dir.path().join("shared-src.tar");
   let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../shared/src");
   let original = build_tar(&tar_path, &src)?;
+  // 16 KiB avg chunks (production default: 64 KiB) so the small fixture tar
+  // spans MANY chunks and exercises multi-chunk dedup/read; 1 GiB cap is moot.
   let store = CasStore::new(root.clone(), 16384, 1 << 30);
   Ok(Fixture {
     _dir: dir,

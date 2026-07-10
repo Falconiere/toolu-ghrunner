@@ -4,9 +4,11 @@
 //! verbatim; only the storage is new. Every route except `download`
 //! bearer-checks against `V1State::bearer` in constant time; `download` is an
 //! unauthenticated token capability (real clients send no header). A protected
-//! write from an untrusted job is `403`. A lookup miss is `204`, a finalize size
-//! mismatch is `400 {"ok":false}` (never indexed), and a download honours
-//! `Range` with `206` + `Content-Range` under a read lease.
+//! write from an untrusted job is `403`. A lookup miss is `204`, a chunk PATCH
+//! without a parseable `Content-Range` is `400 {"ok":false}` (never written), a
+//! finalize size mismatch is `400 {"ok":false}` (never indexed), and a download
+//! honours `Range` with `206` + `Content-Range` under a read lease (a malformed
+//! or unsatisfiable `Range` is `416`).
 
 use std::sync::Arc;
 
@@ -26,7 +28,6 @@ use super::{Reservation, V1State};
 use crate::execution::cache::cas::{ChunkId, IndexEntry, Manifest};
 use crate::execution::cache::trust::write_allowed;
 use crate::execution::cache::twirp::auth::{check_bearer, host_from};
-use crate::execution::service_lifecycle::parse_content_range_start;
 
 /// `GET /_apis/artifactcache/cache` query: comma-joined keys and exact version.
 #[derive(Deserialize)]
@@ -168,6 +169,10 @@ async fn do_reserve(state: &V1State, body: &ReserveBody) -> Result<u64, RunnerEr
 }
 
 /// `PATCH /_apis/artifactcache/caches/{cache_id}` — write one `Content-Range` chunk.
+///
+/// An absent or malformed `Content-Range` is a `400`: guessing offset `0` would
+/// silently overwrite the start of the staging file. Real `@actions/cache` /
+/// buildx clients always send `bytes START-END/*` on PATCH.
 pub async fn upload_chunk(
   State(state): State<Arc<V1State>>,
   headers: HeaderMap,
@@ -177,11 +182,24 @@ pub async fn upload_chunk(
   if !check_bearer(&headers, &state.bearer) {
     return StatusCode::UNAUTHORIZED.into_response();
   }
-  let offset = parse_content_range_start(&headers);
+  let Some(offset) = content_range_start(&headers) else {
+    return rejected();
+  };
   match write_chunk(&state, cache_id, offset, &body).await {
     Ok(()) => ok_true(),
     Err(e) => internal_error(&e),
   }
+}
+
+/// Parse the start offset from a `Content-Range: bytes START-END/TOTAL` header.
+///
+/// `None` when the header is absent or malformed — the caller must reject the
+/// chunk rather than fall back to offset `0` and corrupt the staging file.
+fn content_range_start(headers: &HeaderMap) -> Option<u64> {
+  let range = headers.get(header::CONTENT_RANGE)?.to_str().ok()?;
+  let after_bytes = range.strip_prefix("bytes ")?;
+  let (start, _) = after_bytes.split_once('-')?;
+  start.trim().parse().ok()
 }
 
 /// Seek to `offset` in the reservation's staging file and write `data`.
@@ -283,10 +301,11 @@ pub async fn download(
   }
 }
 
-/// Build the download response: full body (`200`) or a ranged slice (`206`).
+/// Build the download response: full body (`200`), a ranged slice (`206`), or a
+/// `416` for a `Range` header we cannot satisfy.
 ///
 /// # Errors
-/// `RunnerError::Cache` if the `Range` header or a response header is malformed.
+/// `RunnerError::Cache` if a response header cannot be constructed.
 fn stream_download(
   state: &V1State,
   token: &str,
@@ -296,9 +315,31 @@ fn stream_download(
     return Ok(StatusCode::NOT_FOUND.into_response());
   };
   let total = manifest.total_size;
-  let (status, offset, len, content_range) = plan_range(headers, total)?;
+  let (status, offset, len, content_range) = match plan_range(headers, total) {
+    Ok(plan) => plan,
+    Err(e) => return range_not_satisfiable(total, &e),
+  };
   let body = leased_body(state, &manifest, offset, len);
   finish_download(status, len, content_range, body)
+}
+
+/// The `416 Range Not Satisfiable` reply for a malformed or unsatisfiable
+/// `Range`, carrying the `Content-Range: bytes */{total}` marker (RFC 9110).
+///
+/// # Errors
+/// `RunnerError::Cache` if the `Content-Range` header cannot be constructed.
+fn range_not_satisfiable(total: u64, e: &RunnerError) -> Result<Response, RunnerError> {
+  tracing::debug!(error = %e, "rejecting unsatisfiable range");
+  let mut resp = (
+    StatusCode::RANGE_NOT_SATISFIABLE,
+    Json(json!({ "error": e.to_string() })),
+  )
+    .into_response();
+  resp.headers_mut().insert(
+    header::CONTENT_RANGE,
+    header_value(&format!("bytes */{total}"))?,
+  );
+  Ok(resp)
 }
 
 /// Decide the status, byte window, and `Content-Range` for a download.
@@ -365,8 +406,12 @@ fn finish_download(
 
 /// Parse `Range: bytes=a-b` into an inclusive `(start, end)` clamped to `total`.
 ///
+/// Single `bytes` ranges only — our clients (BuildKit, `@actions/cache`) never
+/// send multi-range, so `bytes=a-b, c-d` is rejected rather than half-parsed.
+///
 /// # Errors
-/// `RunnerError::Cache` on a malformed header or `start > end`.
+/// `RunnerError::Cache` on a malformed header, a multi-range, or `start > end`;
+/// the caller maps this to `416`.
 fn parse_range(headers: &HeaderMap, total: u64) -> Result<Option<(u64, u64)>, RunnerError> {
   let Some(raw) = headers.get(header::RANGE).and_then(|v| v.to_str().ok()) else {
     return Ok(None);
@@ -374,6 +419,11 @@ fn parse_range(headers: &HeaderMap, total: u64) -> Result<Option<(u64, u64)>, Ru
   let spec = raw
     .strip_prefix("bytes=")
     .ok_or_else(|| RunnerError::Cache(format!("unsupported range: {raw}")))?;
+  if spec.contains(',') {
+    return Err(RunnerError::Cache(format!(
+      "multi-range unsupported: {raw}"
+    )));
+  }
   let (start_str, end_str) = spec
     .split_once('-')
     .ok_or_else(|| RunnerError::Cache(format!("malformed range: {raw}")))?;
@@ -412,7 +462,8 @@ fn ok_true() -> Response {
   (StatusCode::OK, Json(json!({ "ok": true }))).into_response()
 }
 
-/// The `400 {"ok":false}` rejection for an unknown reservation or size mismatch.
+/// The `400 {"ok":false}` rejection for an unknown reservation, a size
+/// mismatch, or a chunk PATCH without a parseable `Content-Range`.
 fn rejected() -> Response {
   (StatusCode::BAD_REQUEST, Json(json!({ "ok": false }))).into_response()
 }

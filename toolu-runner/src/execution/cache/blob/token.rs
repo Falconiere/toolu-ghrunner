@@ -11,11 +11,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use base64::Engine;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD as TOKEN;
-use rand::RngCore;
-
 use crate::execution::cache::cas::Manifest;
+use crate::execution::cache::mint_capability_token;
 
 /// Fallback TTL when the requested one overflows `Instant` arithmetic: far
 /// enough out that no real client notices, finite so the entry still ages out.
@@ -160,8 +157,12 @@ impl BlobRegistry {
   }
 
   /// Store `target` under a fresh nonce with the given TTL; returns the nonce.
+  ///
+  /// A poisoned registry lock still returns the token but never stores it, so
+  /// every use resolves to `None` (a 403); the WARN is the only trace of the
+  /// poison, so it must not stay silent.
   fn insert(&self, target: BlobTarget, ttl: Duration) -> String {
-    let token = mint_token();
+    let token = mint_capability_token();
     if let Ok(mut map) = self.entries.lock() {
       // A TTL too large for `Instant` arithmetic caps at `OVERFLOW_TTL_CAP`
       // instead of silently minting an already-expired token.
@@ -171,18 +172,9 @@ impl BlobRegistry {
         .or_else(|| now.checked_add(OVERFLOW_TTL_CAP))
         .unwrap_or(now);
       map.insert(token.clone(), Entry { target, expiry });
+    } else {
+      tracing::warn!("blob token registry poisoned; minted token not stored (will 403 on use)");
     }
     token
   }
-}
-
-/// Generate an opaque token from 32 CSPRNG bytes, base64url-encoded.
-///
-/// The token is a bearer capability, so it must come from a CSPRNG —
-/// `rand::thread_rng` is ChaCha reseeded from OS entropy, unlike the
-/// predictable `fastrand` used for non-secret poll jitter.
-fn mint_token() -> String {
-  let mut bytes = [0u8; 32];
-  rand::thread_rng().fill_bytes(&mut bytes);
-  TOKEN.encode(bytes)
 }
