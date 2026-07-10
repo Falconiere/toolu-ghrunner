@@ -57,23 +57,22 @@ pub struct Manifest {
 
 impl Manifest {
   /// Chunk index and intra-chunk offset holding byte `offset`, or `None` if out of range.
+  ///
+  /// Walks the chunk list accumulating a running end offset and returns on the
+  /// first chunk that contains `offset` — no per-call allocation, and it stops
+  /// as soon as the chunk is found rather than scanning the whole manifest.
   pub fn locate(&self, offset: u64) -> Option<(usize, u64)> {
     if offset >= self.total_size {
       return None;
     }
-    let ends: Vec<u64> = self
-      .chunks
-      .iter()
-      .scan(0u64, |acc, chunk| {
-        *acc = acc.saturating_add(u64::from(chunk.len));
-        Some(*acc)
-      })
-      .collect();
-    let idx = ends.partition_point(|&end| end <= offset);
-    let start = idx
-      .checked_sub(1)
-      .and_then(|i| ends.get(i).copied())
-      .unwrap_or(0);
-    Some((idx, offset.saturating_sub(start)))
+    let mut start = 0u64;
+    for (idx, chunk) in self.chunks.iter().enumerate() {
+      let end = start.saturating_add(u64::from(chunk.len));
+      if offset < end {
+        return Some((idx, offset - start));
+      }
+      start = end;
+    }
+    None
   }
 }

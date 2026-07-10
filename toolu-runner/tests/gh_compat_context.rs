@@ -164,6 +164,32 @@ fn secrets_context_resolves_and_value_is_masked() -> TestResult<()> {
 }
 
 #[test]
+fn runtime_service_token_is_masked() -> TestResult<()> {
+  // The Actions runtime token (SystemVssConnection AccessToken) is not a
+  // `secrets.*` value, but build_context must still register it with the masker
+  // — it authenticates the cache/artifact/OIDC services and is forwarded
+  // upstream, so it must never reach a log unredacted (matches actions/runner).
+  let dir = tempfile::tempdir()?;
+  let (_ctx, masker) = build_ctx(dir.path())?;
+
+  // The exact AccessToken carried by the committed fixture's SystemVssConnection.
+  let token = "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.EXAMPLE.PAYLOAD";
+  let line = format!("upstream call with Authorization: Bearer {token}");
+  let redacted = {
+    let guard = masker
+      .lock()
+      .map_err(|err| format!("masker mutex poisoned: {err}"))?;
+    guard.mask(&line)
+  };
+  assert!(
+    !redacted.contains(token),
+    "runtime service token must be masked, got: {redacted}"
+  );
+  assert!(redacted.contains("***"), "masked output should contain ***");
+  Ok(())
+}
+
+#[test]
 fn job_and_strategy_contexts_resolve() -> TestResult<()> {
   let dir = tempfile::tempdir()?;
   let (ctx, _masker) = build_ctx(dir.path())?;

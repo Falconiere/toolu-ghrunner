@@ -77,7 +77,8 @@ impl CacheIndex {
       .append(true)
       .open(&path)
       .map_err(RunnerError::Io)?;
-    // One write_all of `line + "\n"` under O_APPEND — never two writes.
+    // One write_all of `line` (the `\n` was appended at L74) under O_APPEND —
+    // never two writes.
     file.write_all(line.as_bytes()).map_err(RunnerError::Io)?;
     Ok(())
   }

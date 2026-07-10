@@ -538,23 +538,8 @@ pub fn build_context(
   // into it for CPU/memory enforcement; `None` in listener/JIT mode.
   ctx.set_cgroup_path(config.cgroup_path.clone());
 
-  // Variables: secrets (is_secret) → secrets.* + masker; the auto github
-  // token (`system.github.token`) is excluded from secrets.* and routed to
-  // github.token instead (matches actions/runner). Non-secret system vars
-  // become env only — repo config variables arrive via contextData["vars"].
-  for (key, var) in &msg.variables {
-    if var.is_secret {
-      ctx.register_secret_masked(&var.value);
-      if let Some(gh_key) = key.strip_prefix("system.github.") {
-        ctx.set_github_context(gh_key, &var.value);
-        ctx.set_env(&github_env_key(gh_key), &var.value);
-      } else {
-        ctx.register_secret(key, &var.value);
-      }
-    } else {
-      ctx.set_env(key, &var.value);
-    }
-  }
+  // Variables (secrets.* / env) plus the runtime service token → masker.
+  register_message_variables(&mut ctx, msg);
 
   // github.* + vars.* from contextData dicts.
   extract_github_context(&msg.context_data, &mut ctx);
@@ -572,6 +557,39 @@ pub fn build_context(
   }
 
   ctx
+}
+
+/// Register the job message's `variables` and the Actions runtime token into
+/// `ctx`.
+///
+/// Secrets (`is_secret`) go to `secrets.*` + the masker; the auto
+/// `system.github.token` is routed to `github.token` instead of `secrets.*`
+/// (matches actions/runner); non-secret vars become env only. The runtime
+/// service token is masked like a secret so it never reaches a log unredacted.
+fn register_message_variables(ctx: &mut ExecutionContext, msg: &AgentJobRequestMessage) {
+  for (key, var) in &msg.variables {
+    if var.is_secret {
+      ctx.register_secret_masked(&var.value);
+      if let Some(gh_key) = key.strip_prefix("system.github.") {
+        ctx.set_github_context(gh_key, &var.value);
+        ctx.set_env(&github_env_key(gh_key), &var.value);
+      } else {
+        ctx.register_secret(key, &var.value);
+      }
+    } else {
+      ctx.set_env(key, &var.value);
+    }
+  }
+
+  // The Actions runtime token (from the job message's SystemVssConnection)
+  // authenticates the cache / artifact / OIDC services and is forwarded
+  // upstream and injected as `ACTIONS_RUNTIME_TOKEN`. Register it with the
+  // masker — like actions/runner, which treats it as a secret — so it can never
+  // reach `_diag/runner.log` or a step log unredacted.
+  let runtime_token = extract_service_urls(msg).runtime_token;
+  if !runtime_token.is_empty() {
+    ctx.register_secret_masked(&runtime_token);
+  }
 }
 
 /// Runner name: the message's `runner.name` context value, else the hostname.
