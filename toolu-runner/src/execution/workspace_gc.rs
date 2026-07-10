@@ -39,7 +39,7 @@ pub fn gc_workspaces(
   for entry in entries {
     match entry {
       Ok(entry) if prune_entry(&entry, now, max_age, keep) => {
-        removed = removed.saturating_add(1);
+        removed += 1;
       },
       Ok(_) => {},
       Err(e) => {
@@ -65,7 +65,7 @@ fn is_stale_job_dir(entry: &DirEntry, now: SystemTime, max_age: Duration, keep: 
     return false;
   }
   match entry.metadata() {
-    Ok(metadata) => metadata.is_dir() && is_older_than(&metadata, now, max_age),
+    Ok(metadata) => metadata.is_dir() && is_older_than(&entry.path(), &metadata, now, max_age),
     Err(e) => {
       tracing::warn!(path = %entry.path().display(), error = %e, "workspace GC: cannot stat entry, skipping");
       false
@@ -93,9 +93,10 @@ fn remove_workspace(path: &Path) -> bool {
 /// A mtime at or after `now` — clock skew, or `duration_since` failing on a
 /// future-dated entry — is treated as fresh, so such a directory is never
 /// pruned. An unreadable mtime (unsupported platform) is likewise treated as
-/// fresh.
-fn is_older_than(metadata: &Metadata, now: SystemTime, max_age: Duration) -> bool {
+/// fresh (never delete when unsure) and logged at DEBUG.
+fn is_older_than(path: &Path, metadata: &Metadata, now: SystemTime, max_age: Duration) -> bool {
   let Ok(mtime) = metadata.modified() else {
+    tracing::debug!(path = %path.display(), "workspace GC: mtime unavailable, treating entry as fresh");
     return false;
   };
   match now.duration_since(mtime) {

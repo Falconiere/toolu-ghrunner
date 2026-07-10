@@ -277,3 +277,114 @@ fn missing_workspace_is_an_error() {
     "error should name the cause, got: {message}"
   );
 }
+
+/// A leading `--follow-symbolic-links` makes traversal descend a symlinked
+/// directory, hashing the files reached through it — the same fixture that
+/// yields the empty string without the flag.
+#[cfg(unix)]
+#[test]
+fn follow_symlinks_flag_descends_symlinked_directory() -> TestResult {
+  let workspace = tempfile::tempdir()?;
+  write_file(workspace.path(), "target/data.txt", "inner")?;
+  std::os::unix::fs::symlink(
+    workspace.path().join("target"),
+    workspace.path().join("linked"),
+  )?;
+
+  assert_eq!(
+    hash_of(workspace.path(), "hashFiles('linked/*.txt')")?,
+    "",
+    "without the flag, the symlinked directory must not be descended"
+  );
+
+  let digest = hash_of(
+    workspace.path(),
+    "hashFiles('--follow-symbolic-links', 'linked/*.txt')",
+  )?;
+
+  assert_eq!(
+    digest, "82f185ea4c02be5c6b662e46166c5810cace03c38d3ed1556fd7fa7f2e553d74",
+    "must equal SHA256(SHA256('inner')) — reached through the symlink"
+  );
+  Ok(())
+}
+
+/// The option matches case-insensitively, mirroring `HashFilesFunction.cs`'s
+/// `StringComparison.OrdinalIgnoreCase` — `--FOLLOW-SYMBOLIC-LINKS` is the
+/// same flag, not an error and not a pattern.
+#[cfg(unix)]
+#[test]
+fn follow_symlinks_flag_is_case_insensitive() -> TestResult {
+  let workspace = tempfile::tempdir()?;
+  write_file(workspace.path(), "target/data.txt", "inner")?;
+  std::os::unix::fs::symlink(
+    workspace.path().join("target"),
+    workspace.path().join("linked"),
+  )?;
+
+  let digest = hash_of(
+    workspace.path(),
+    "hashFiles('--FOLLOW-SYMBOLIC-LINKS', 'linked/*.txt')",
+  )?;
+
+  assert_eq!(
+    digest, "82f185ea4c02be5c6b662e46166c5810cace03c38d3ed1556fd7fa7f2e553d74",
+    "case-variant flag must behave exactly like the lowercase flag"
+  );
+  Ok(())
+}
+
+/// Any other leading `--` argument is an invalid option, as on GitHub.
+#[test]
+fn unknown_leading_option_is_an_error() -> TestResult {
+  let workspace = tempfile::tempdir()?;
+
+  let message = error_message(
+    Some(workspace.path()),
+    "hashFiles('--dereference', '*.lock')",
+  );
+
+  assert!(
+    message.contains("invalid option"),
+    "unknown option must be rejected by name, got: {message}"
+  );
+  Ok(())
+}
+
+/// Only the first argument is parsed as an option: `--follow-symbolic-links`
+/// in a later position is an ordinary (unmatched) pattern, exactly as the
+/// upstream parameter loop treats it.
+#[test]
+fn flag_after_first_argument_is_a_pattern_not_an_option() -> TestResult {
+  let workspace = tempfile::tempdir()?;
+  write_file(workspace.path(), "a.lock", "ay")?;
+
+  let digest = hash_of(
+    workspace.path(),
+    "hashFiles('a.lock', '--follow-symbolic-links')",
+  )?;
+
+  assert_eq!(
+    digest, "06cf3774490a891a298e8ade3bca42e75dbeb8bfbe303a6e7c934527605597b5",
+    "must equal SHA256(SHA256('ay')) — the second argument matches nothing"
+  );
+  Ok(())
+}
+
+/// A pattern with an interior `**` (last component literal) still gains its
+/// implicit `/**` descendant twin, so both the exact file and everything
+/// beneath a same-named directory match — pinned against the inverted reading
+/// of `@actions/glob`'s `implicitDescendants` condition.
+#[test]
+fn interior_globstar_pattern_gains_descendant_twin() -> TestResult {
+  let workspace = tempfile::tempdir()?;
+  write_file(workspace.path(), "crates/one/vendor/dep.lock", "dep")?;
+
+  let digest = hash_of(workspace.path(), "hashFiles('crates/**/vendor')")?;
+
+  assert_eq!(
+    digest, "77b2cb910a32b83b14d342247e9fa47f5e261d056bbc252db3d8fbb31426ad3c",
+    "must equal SHA256(SHA256('dep')) — matched via the implicit 'crates/**/vendor/**' twin"
+  );
+  Ok(())
+}

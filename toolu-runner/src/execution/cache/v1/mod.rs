@@ -22,6 +22,7 @@ use axum::extract::DefaultBodyLimit;
 use axum::routing::{get, post};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD as TOKEN;
+use rand::RngCore;
 
 use super::cas::{CacheIndex, CasStore, LeaseSet, Manifest};
 use super::scope::CacheScopes;
@@ -155,15 +156,15 @@ impl V1State {
   }
 }
 
-/// Mint an unguessable download token from 32 random bytes, base64url-encoded.
+/// Mint an unguessable download token from 32 CSPRNG bytes, base64url-encoded.
 ///
 /// The v1 download URL is served without a bearer (real clients send none), so
-/// the token itself is the capability and must be infeasible to guess.
+/// the token itself is the capability and must be infeasible to guess —
+/// `rand::thread_rng` is ChaCha reseeded from OS entropy, unlike the
+/// predictable `fastrand` used for non-secret poll jitter.
 fn mint_download_token() -> String {
   let mut bytes = [0u8; 32];
-  for byte in &mut bytes {
-    *byte = fastrand::u8(..);
-  }
+  rand::thread_rng().fill_bytes(&mut bytes);
   TOKEN.encode(bytes)
 }
 

@@ -13,8 +13,13 @@ use std::time::{Duration, Instant};
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD as TOKEN;
+use rand::RngCore;
 
 use crate::execution::cache::cas::Manifest;
+
+/// Fallback TTL when the requested one overflows `Instant` arithmetic: far
+/// enough out that no real client notices, finite so the entry still ages out.
+const OVERFLOW_TTL_CAP: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// What a minted blob token authorizes.
 #[derive(Debug, Clone)]
@@ -158,18 +163,26 @@ impl BlobRegistry {
   fn insert(&self, target: BlobTarget, ttl: Duration) -> String {
     let token = mint_token();
     if let Ok(mut map) = self.entries.lock() {
-      let expiry = Instant::now().checked_add(ttl).unwrap_or_else(Instant::now);
+      // A TTL too large for `Instant` arithmetic caps at `OVERFLOW_TTL_CAP`
+      // instead of silently minting an already-expired token.
+      let now = Instant::now();
+      let expiry = now
+        .checked_add(ttl)
+        .or_else(|| now.checked_add(OVERFLOW_TTL_CAP))
+        .unwrap_or(now);
       map.insert(token.clone(), Entry { target, expiry });
     }
     token
   }
 }
 
-/// Generate an opaque token from 32 random bytes, base64url-encoded.
+/// Generate an opaque token from 32 CSPRNG bytes, base64url-encoded.
+///
+/// The token is a bearer capability, so it must come from a CSPRNG —
+/// `rand::thread_rng` is ChaCha reseeded from OS entropy, unlike the
+/// predictable `fastrand` used for non-secret poll jitter.
 fn mint_token() -> String {
   let mut bytes = [0u8; 32];
-  for byte in &mut bytes {
-    *byte = fastrand::u8(..);
-  }
+  rand::thread_rng().fill_bytes(&mut bytes);
   TOKEN.encode(bytes)
 }

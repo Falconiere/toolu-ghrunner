@@ -28,6 +28,9 @@ use crate::journal::types::sanitize_job_id;
 /// returns or reuses a step result — observation only, it does not serve.
 pub struct ShadowObserver {
   enabled: bool,
+  /// `data_dir/_diag/shadow` — created on first append.
+  dir: PathBuf,
+  /// `dir/<job_id>.jsonl`.
   path: PathBuf,
   masker: Arc<Mutex<SecretMasker>>,
   /// `(cmd, env, cwd, pre)` key -> the FIRST recorded post fingerprint, so
@@ -46,12 +49,11 @@ impl ShadowObserver {
     job_id: &str,
     masker: Arc<Mutex<SecretMasker>>,
   ) -> Self {
-    let path = data_dir
-      .join("_diag")
-      .join("shadow")
-      .join(format!("{}.jsonl", sanitize_job_id(job_id)));
+    let dir = data_dir.join("_diag").join("shadow");
+    let path = dir.join(format!("{}.jsonl", sanitize_job_id(job_id)));
     Self {
       enabled,
+      dir,
       path,
       masker,
       seen: Mutex::new(HashMap::new()),
@@ -127,38 +129,41 @@ impl ShadowObserver {
   /// Serialize, mask, and append one record as a JSON line. Any failure is
   /// logged (WARN) and swallowed — observation must never fail the job.
   fn append(&self, record: &ShadowRecord) {
-    let json = match serde_json::to_string(record) {
-      Ok(j) => j,
-      Err(e) => {
-        tracing::warn!(error = %e, "shadow: record serialization failed; line skipped");
-        return;
-      },
+    let Some(masked) = self.masked_json(record) else {
+      return;
     };
-    let masked = self.mask(&json);
     if let Err(e) = self.write_line(&masked) {
       tracing::warn!(error = %e, "shadow: record append failed; observation disabled for this step");
     }
   }
 
-  /// Mask one line through the shared `SecretMasker`, recovering a poisoned
-  /// lock (the inner masker stays valid) so a registered secret never leaks.
-  fn mask(&self, line: &str) -> String {
-    let guard = match self.masker.lock() {
-      Ok(g) => g,
-      Err(poisoned) => poisoned.into_inner(),
+  /// Serialize and mask one record. Returns `None` (after a WARN) when
+  /// serialization fails, or when the masker lock is poisoned — a panic
+  /// mid-`add_secret` may have left the pattern set incomplete, so the
+  /// diagnostic-only record is dropped (fail closed) rather than written
+  /// possibly unmasked.
+  fn masked_json(&self, record: &ShadowRecord) -> Option<String> {
+    let json = match serde_json::to_string(record) {
+      Ok(j) => j,
+      Err(e) => {
+        tracing::warn!(error = %e, "shadow: record serialization failed; line skipped");
+        return None;
+      },
     };
-    guard.mask(line)
+    let Ok(guard) = self.masker.lock() else {
+      tracing::warn!("shadow: masker lock poisoned; record dropped (fail closed)");
+      return None;
+    };
+    Some(guard.mask(&json))
   }
 
-  /// Append `line + "\n"` to the shadow jsonl, creating the parent dir first.
+  /// Append `line + "\n"` to the shadow jsonl, creating `self.dir` first.
   ///
   /// # Errors
   ///
   /// Returns `RunnerError::Io` on a create-dir or write failure.
   fn write_line(&self, line: &str) -> Result<(), RunnerError> {
-    if let Some(parent) = self.path.parent() {
-      std::fs::create_dir_all(parent)?;
-    }
+    std::fs::create_dir_all(&self.dir)?;
     let mut file = std::fs::OpenOptions::new()
       .create(true)
       .append(true)

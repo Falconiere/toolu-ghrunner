@@ -173,6 +173,9 @@ fn evict_over_cap(alive: &mut Vec<&IndexRecord>, max_bytes: u64) -> usize {
   if running <= max_bytes {
     return 0;
   }
+  // Evicting oldest `created_at` first composes with lookup semantics:
+  // `index::newest` resolves multiple matches to the newest entry, so the
+  // records dropped first are exactly the ones a lookup would pick last.
   alive.sort_by_key(|rec| rec.entry.created_at);
   let mut cut = 0usize;
   while running > max_bytes {
