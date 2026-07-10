@@ -55,12 +55,17 @@ fn build_head(state: &BlobState, token: &str) -> Result<Response, RunnerError> {
 }
 
 /// Build the GET response, streaming the requested range under a read lease.
+/// A `Range` header we cannot satisfy is a `416`, not an internal error.
 fn build_get(state: &BlobState, token: &str, headers: &HeaderMap) -> Result<Response, RunnerError> {
   let Some(manifest) = download_manifest(&state.registry, token) else {
     return forbidden();
   };
   let total = manifest.total_size;
-  let (status, offset, len, content_range) = match parse_range(headers, total)? {
+  let parsed = match parse_range(headers, total) {
+    Ok(parsed) => parsed,
+    Err(e) => return range_not_satisfiable(total, &e),
+  };
+  let (status, offset, len, content_range) = match parsed {
     Some((start, end)) => {
       let len = end
         .checked_sub(start)
@@ -121,10 +126,26 @@ fn download_manifest(registry: &BlobRegistry, token: &str) -> Option<Manifest> {
   }
 }
 
+/// The `416 Range Not Satisfiable` reply for a malformed or unsatisfiable
+/// `Range`, carrying the `Content-Range: bytes */{total}` marker (RFC 9110)
+/// plus the required Azure headers.
+fn range_not_satisfiable(total: u64, e: &RunnerError) -> Result<Response, RunnerError> {
+  tracing::debug!(error = %e, "rejecting unsatisfiable range");
+  let mut resp = Response::new(Body::empty());
+  *resp.status_mut() = StatusCode::RANGE_NOT_SATISFIABLE;
+  resp
+    .headers_mut()
+    .insert(header::CONTENT_RANGE, hv(&format!("bytes */{total}"))?);
+  add_required_headers(&mut resp, "unsatisfiable-range")?;
+  Ok(resp)
+}
+
 /// Parse `Range: bytes=a-b` into an inclusive `(start, end)` clamped to `total`.
 ///
 /// A missing header is `Ok(None)`. An open end (`bytes=a-`) runs to the last
-/// byte. A malformed header or `start > end` is `RunnerError::Cache`.
+/// byte. A malformed header, a multi-range (`bytes=a-b, c-d` — our clients
+/// never send one), or `start > end` is `RunnerError::Cache`, which the caller
+/// maps to `416`.
 fn parse_range(headers: &HeaderMap, total: u64) -> Result<Option<(u64, u64)>, RunnerError> {
   let Some(raw) = headers.get(header::RANGE).and_then(|v| v.to_str().ok()) else {
     return Ok(None);
@@ -132,6 +153,11 @@ fn parse_range(headers: &HeaderMap, total: u64) -> Result<Option<(u64, u64)>, Ru
   let spec = raw
     .strip_prefix("bytes=")
     .ok_or_else(|| RunnerError::Cache(format!("unsupported range: {raw}")))?;
+  if spec.contains(',') {
+    return Err(RunnerError::Cache(format!(
+      "multi-range unsupported: {raw}"
+    )));
+  }
   let (start_str, end_str) = spec
     .split_once('-')
     .ok_or_else(|| RunnerError::Cache(format!("malformed range: {raw}")))?;

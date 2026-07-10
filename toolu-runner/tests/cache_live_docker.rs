@@ -233,6 +233,25 @@ fn assert_layers_cached(second: &std::process::Output) {
   );
 }
 
+/// Unwrap both buildx spawn results, or say WHY spawning failed so the skip
+/// line names the real reason (e.g. `docker` missing from PATH).
+fn spawned(
+  first: std::io::Result<std::process::Output>,
+  second: std::io::Result<std::process::Output>,
+) -> Result<(std::process::Output, std::process::Output), String> {
+  match (first, second) {
+    (Ok(first), Ok(second)) => Ok((first, second)),
+    (first, second) => Err(
+      [first.err(), second.err()]
+        .into_iter()
+        .flatten()
+        .map(|e| e.to_string())
+        .collect::<Vec<_>>()
+        .join("; "),
+    ),
+  }
+}
+
 /// AC-5: `docker buildx build --cache-to type=gha` reuses layers through the
 /// local accelerated cache on the second run, and the buildx cache client does
 /// not crash on a missing `x-ms-request-id`.
@@ -269,8 +288,9 @@ async fn buildx_type_gha_reuses_layers_through_local_cache()
   remove_builder();
   server.shutdown().await;
 
-  let (Ok(first), Ok(second)) = (first, second) else {
-    skip_docker!("docker buildx build could not be spawned");
+  let (first, second) = match spawned(first, second) {
+    Ok(pair) => pair,
+    Err(why) => skip_docker!(format!("docker buildx build could not be spawned: {why}")),
   };
   if !build_ok("first", &first) {
     skip_docker!("first buildx build failed (image pull / network)");

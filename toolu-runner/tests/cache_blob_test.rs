@@ -251,6 +251,38 @@ async fn unknown_token_is_forbidden() -> TestResult<()> {
 }
 
 #[tokio::test]
+async fn malformed_range_get_is_416() -> TestResult<()> {
+  // A Range we cannot satisfy — wrong unit, multi-range, start > end — must be
+  // a 416 with `Content-Range: bytes */total` (RFC 9110), not a 500.
+  let harness = setup().await?;
+  let bytes = payload()?;
+  let staging = staging_path(&harness.staging_root);
+  std::fs::write(&staging, &bytes)?;
+  let manifest = harness.store.ingest(&staging).await?;
+  let download = harness
+    .registry
+    .mint_download(manifest, Duration::from_secs(300));
+  let url = blob_url(&harness.base, &download);
+  let client = reqwest::Client::new();
+
+  for bad in ["items=0-9", "bytes=0-4, 6-9", "bytes=9-2", "bytes=x-9"] {
+    let resp = client.get(&url).header("Range", bad).send().await?;
+    assert_eq!(
+      resp.status().as_u16(),
+      416,
+      "Range {bad:?} must be 416, not an internal error"
+    );
+    assert_eq!(
+      header_str(resp.headers(), "content-range")?,
+      format!("bytes */{}", bytes.len()),
+      "416 Content-Range marker"
+    );
+    assert_required_headers(resp.headers())?;
+  }
+  Ok(())
+}
+
+#[tokio::test]
 async fn corrupt_chunk_aborts_download() -> TestResult<()> {
   let harness = setup().await?;
   let bytes = payload()?;

@@ -90,6 +90,14 @@ pub struct RunnerConfig {
   pub shadow_enabled: bool,
 }
 
+impl RunnerConfig {
+  /// Default [`service_bind`](Self::service_bind) address. Non-loopback so
+  /// `docker-container` BuildKit reaches the cache server across a netns.
+  /// Also backs the `[services] bind` TOML default in `toolu-runner::config`
+  /// (`default_service_bind`) so the two sites cannot drift.
+  pub const DEFAULT_SERVICE_BIND: &'static str = "0.0.0.0";
+}
+
 impl Default for RunnerConfig {
   fn default() -> Self {
     Self {
@@ -97,7 +105,7 @@ impl Default for RunnerConfig {
       workspace_root: PathBuf::new(),
       cgroup_path: None,
       services_mode: ServicesMode::default(),
-      service_bind: "0.0.0.0".to_owned(),
+      service_bind: Self::DEFAULT_SERVICE_BIND.to_owned(),
       cache: CacheConfig::default(),
       workspace_gc_hours: 24,
       shadow_enabled: false,

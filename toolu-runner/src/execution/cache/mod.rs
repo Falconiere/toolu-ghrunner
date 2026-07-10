@@ -24,3 +24,22 @@ pub use blob::{BlobRegistry, BlobState, BlobTarget, blob_router};
 pub use proxy::proxied_app;
 pub use tier::{BlobKind, L2Tier};
 pub use twirp::{TwirpState, cache_router, twirp_router};
+
+use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use rand::RngCore;
+
+/// Mint an opaque capability token: 32 CSPRNG bytes, base64url-encoded.
+///
+/// These tokens are bearer capabilities — the v2 blob upload/download URLs and
+/// the v1 archive download URL (fetched with no `Authorization` header at all)
+/// are authorized by nothing but the token — so they must be infeasible to
+/// guess: `rand::thread_rng` is a ChaCha CSPRNG reseeded from OS entropy,
+/// unlike the predictable `fastrand` used for non-secret poll jitter. Every
+/// cache-layer capability token must come from this one helper so a format or
+/// entropy change can never land on only one mint site.
+pub(crate) fn mint_capability_token() -> String {
+  let mut bytes = [0u8; 32];
+  rand::thread_rng().fill_bytes(&mut bytes);
+  URL_SAFE_NO_PAD.encode(bytes)
+}
