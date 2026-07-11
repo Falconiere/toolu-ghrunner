@@ -35,58 +35,27 @@ fn check(cond: bool, msg: &str) -> Result<(), Box<dyn Error>> {
 fn classify_trust_matrix() -> Result<(), Box<dyn Error>> {
   let main = protected(&["main"]);
 
-  // Trusting events on a protected branch → Trusted.
-  eq(
-    &classify_trust("push", "main", &main),
-    &TrustLevel::Trusted,
-    "push/main",
-  )?;
-  eq(
-    &classify_trust("workflow_dispatch", "main", &main),
-    &TrustLevel::Trusted,
-    "workflow_dispatch/main",
-  )?;
-  eq(
-    &classify_trust("schedule", "main", &main),
-    &TrustLevel::Trusted,
-    "schedule/main",
-  )?;
-  eq(
-    &classify_trust("release", "main", &main),
-    &TrustLevel::Trusted,
-    "release/main",
-  )?;
-
-  // Trusting events on a NON-protected branch → Untrusted.
-  eq(
-    &classify_trust("push", "feature-x", &main),
-    &TrustLevel::Untrusted,
-    "push/feature-x",
-  )?;
-  eq(
-    &classify_trust("schedule", "feature", &main),
-    &TrustLevel::Untrusted,
-    "schedule/feature",
-  )?;
-
+  // (event, branch, expected); the failure label is "event/branch". Note
   // THE BUG FIX: workflow_dispatch on a non-protected branch is NOT trusted.
-  eq(
-    &classify_trust("workflow_dispatch", "feature-x", &main),
-    &TrustLevel::Untrusted,
-    "workflow_dispatch/feature-x",
-  )?;
+  let cases: &[(&str, &str, TrustLevel)] = &[
+    // Trusting events on a protected branch → Trusted.
+    ("push", "main", TrustLevel::Trusted),
+    ("workflow_dispatch", "main", TrustLevel::Trusted),
+    ("schedule", "main", TrustLevel::Trusted),
+    ("release", "main", TrustLevel::Trusted),
+    // Trusting events on a NON-protected branch → Untrusted.
+    ("push", "feature-x", TrustLevel::Untrusted),
+    ("schedule", "feature", TrustLevel::Untrusted),
+    ("workflow_dispatch", "feature-x", TrustLevel::Untrusted),
+    // Non-trusting events are Untrusted even on a protected branch.
+    ("pull_request", "main", TrustLevel::Untrusted),
+    ("pull_request_target", "main", TrustLevel::Untrusted),
+  ];
 
-  // Non-trusting events are Untrusted even on a protected branch.
-  eq(
-    &classify_trust("pull_request", "main", &main),
-    &TrustLevel::Untrusted,
-    "pull_request/main",
-  )?;
-  eq(
-    &classify_trust("pull_request_target", "main", &main),
-    &TrustLevel::Untrusted,
-    "pull_request_target/main",
-  )?;
+  for (event, branch, expected) in cases {
+    let label = format!("{event}/{branch}");
+    eq(&classify_trust(event, branch, &main), expected, &label)?;
+  }
 
   Ok(())
 }
@@ -99,7 +68,11 @@ fn scopes_for_pull_request_context() -> Result<(), Box<dyn Error>> {
   ctx.set_github_context("base_ref", "main");
   ctx.set_github_context("event_name", "pull_request");
 
-  let scopes = scopes_for_job(&ctx, &protected(&["main"]));
+  let scopes = scopes_for_job(
+    ctx.github_context("ref_name"),
+    ctx.github_context("base_ref"),
+    &protected(&["main"]),
+  );
 
   // Write is the running (head) ref.
   eq(&scopes.write.as_str(), &head_ref, "write")?;
@@ -125,7 +98,11 @@ fn scopes_for_push_context() -> Result<(), Box<dyn Error>> {
   ctx.set_github_context("ref_name", "main");
   ctx.set_github_context("event_name", "push");
 
-  let scopes = scopes_for_job(&ctx, &protected(&["main"]));
+  let scopes = scopes_for_job(
+    ctx.github_context("ref_name"),
+    ctx.github_context("base_ref"),
+    &protected(&["main"]),
+  );
 
   // No base_ref; ref_name == protected → single deduped scope.
   eq(&scopes.write.as_str(), &"main", "write")?;
@@ -139,7 +116,11 @@ fn scopes_with_no_ref_name() -> Result<(), Box<dyn Error>> {
   let ctx = ExecutionContext::new_for_test();
   let prot = protected(&["main", "master"]);
 
-  let scopes = scopes_for_job(&ctx, &prot);
+  let scopes = scopes_for_job(
+    ctx.github_context("ref_name"),
+    ctx.github_context("base_ref"),
+    &prot,
+  );
 
   // A ref-less job writes nothing but can still read the default scopes.
   eq(&scopes.write.as_str(), &"", "write")?;

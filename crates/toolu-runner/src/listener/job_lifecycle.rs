@@ -366,8 +366,8 @@ async fn poll_once(ctx: &SessionCtx, last_message_id: i64) -> PollOutcome {
     // single runner advertises one consistent identity on both calls
     // (the raw `std::env::consts` values "linux"/"x86_64" differed from the
     // canonical GitHub "Linux"/"X64" the acknowledge request sends).
-    os: crate::execution::context_build::runner_os(),
-    architecture: crate::execution::context_build::runner_arch(),
+    os: shared::platform::runner_os(),
+    architecture: shared::platform::runner_arch(),
     last_message_id,
   };
 

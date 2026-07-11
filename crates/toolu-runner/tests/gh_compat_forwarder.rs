@@ -22,13 +22,13 @@
 use std::error::Error;
 use std::sync::{Arc, Mutex};
 
+use shared::SecretMasker;
 use shared::{
   ActionStep, AgentJobRequestMessage, LogStream, RunnerConfig, RunnerEvent, ServicesMode,
 };
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use toolu_runner::execution::job_runner::run_job;
-use toolu_runner::execution::secret_masker::SecretMasker;
 use toolu_runner::execution::service_endpoints::{ServiceUrls, extract_service_urls, forward_env};
 
 const JOB_MESSAGE: &str = include_str!("fixtures/job_message.json");

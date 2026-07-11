@@ -38,6 +38,21 @@ pub fn expand_tilde(path: &Path) -> PathBuf {
   path.to_path_buf()
 }
 
+/// Sanitize a job id for use in a journal file name: every char outside
+/// `[A-Za-z0-9._-]` becomes one `_`; no collapsing, no truncation.
+pub fn sanitize_job_id(job_id: &str) -> String {
+  job_id
+    .chars()
+    .map(|c| {
+      if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') {
+        c
+      } else {
+        '_'
+      }
+    })
+    .collect()
+}
+
 /// Resolve the current user's home directory.
 ///
 /// Tries HOME first, then USERPROFILE, then falls back to

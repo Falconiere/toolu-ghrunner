@@ -14,6 +14,7 @@ use std::error::Error;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use shared::SecretMasker;
 use shared::{
   ActionStep, ActionStepDefinitionReference, AgentJobRequestMessage, Conclusion, DictEntry,
   RunnerConfig, RunnerEvent, TemplateToken,
@@ -22,7 +23,6 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use toolu_runner::execution::context::ExecutionContext;
 use toolu_runner::execution::handlers::node::input_env_key;
-use toolu_runner::execution::secret_masker::SecretMasker;
 use toolu_runner::execution::step_timeout::{WaitOutcome, timeout_duration, wait_bounded};
 use toolu_runner::execution::steps_runner::run_steps;
 

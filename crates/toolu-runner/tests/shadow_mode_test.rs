@@ -17,7 +17,7 @@ use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use toolu_runner::execution::secret_masker::SecretMasker;
+use shared::SecretMasker;
 use toolu_runner::execution::shadow::ShadowObserver;
 use toolu_runner::execution::shadow::record::{ShadowRecord, StepKey};
 

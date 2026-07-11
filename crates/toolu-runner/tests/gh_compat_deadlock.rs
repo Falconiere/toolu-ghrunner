@@ -22,12 +22,12 @@ use std::error::Error;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use shared::SecretMasker;
 use shared::{ActionStep, LogStream, RunnerConfig, RunnerEvent};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use toolu_runner::execution::context::ExecutionContext;
 use toolu_runner::execution::job_spec::JobSpec;
-use toolu_runner::execution::secret_masker::SecretMasker;
 use toolu_runner::execution::steps_runner::{JobRun, run_steps};
 
 type TestResult<T> = Result<T, Box<dyn Error>>;

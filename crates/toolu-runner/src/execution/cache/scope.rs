@@ -5,8 +5,6 @@
 //! sees its own entries, then its base's, then the shared defaults — never
 //! a sibling branch's.
 
-use crate::execution::context::ExecutionContext;
-
 /// The index scopes a job may write and read.
 #[derive(Clone)]
 pub struct CacheScopes {
@@ -16,17 +14,18 @@ pub struct CacheScopes {
   pub read_ladder: Vec<String>,
 }
 
-/// Resolve cache scopes from the job's github context.
+/// Resolve cache scopes from the job's `ref_name` / `base_ref`.
 ///
 /// `write` is `github.ref_name` (the running ref). `read_ladder` is
 /// `dedup([ref_name, base_ref?, ...protected])`: own ref, then the PR
-/// base branch when the context carries one, then the protected branches.
+/// base branch when the caller passes one, then the protected branches.
 /// With no `ref_name`, `write` is empty and the ladder is just `protected`
 /// (a ref-less job can still read the default scope).
-pub fn scopes_for_job(ctx: &ExecutionContext, protected: &[String]) -> CacheScopes {
-  let ref_name = ctx.github_context("ref_name");
-  let base_ref = ctx.github_context("base_ref");
-
+pub fn scopes_for_job(
+  ref_name: Option<&str>,
+  base_ref: Option<&str>,
+  protected: &[String],
+) -> CacheScopes {
   let mut read_ladder: Vec<String> = Vec::new();
   if let Some(name) = ref_name {
     push_unique(&mut read_ladder, name.to_owned());

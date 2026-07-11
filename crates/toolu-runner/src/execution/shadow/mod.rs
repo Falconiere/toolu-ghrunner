@@ -21,8 +21,8 @@ use shared::RunnerError;
 
 use self::fingerprint::fingerprint_dir;
 use self::record::{ShadowRecord, StepKey, digest_hex, env_digest, fingerprint_hex};
-use crate::execution::secret_masker::SecretMasker;
-use crate::journal::types::sanitize_job_id;
+use shared::SecretMasker;
+use shared::paths::sanitize_job_id;
 
 /// Observes `run:` steps and records would-hit / false-hit signals. It never
 /// returns or reuses a step result — observation only, it does not serve.

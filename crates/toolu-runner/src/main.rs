@@ -13,6 +13,7 @@ use std::time::Duration;
 use clap::{Args, Parser, Subcommand};
 use shared::RunnerError;
 use shared::startup;
+use shared::{MaskerRedactor, SecretMasker};
 use tokio_util::sync::CancellationToken;
 use toolu_runner::auth_store::{self, AuthStore};
 use toolu_runner::config::{
@@ -20,7 +21,6 @@ use toolu_runner::config::{
   ShadowSection, WorkspaceSection, load_config as load_reg_config, load_credentials,
   resolve_data_dir, resolve_work_dir, save_config as save_reg_config, save_credentials,
 };
-use toolu_runner::execution::secret_masker::{MaskerRedactor, SecretMasker};
 use toolu_runner::listener::GitHubListener;
 use toolu_runner::lockfile;
 

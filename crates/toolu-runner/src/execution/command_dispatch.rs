@@ -16,7 +16,7 @@ use tokio::sync::mpsc;
 
 use super::command_parser::{WorkflowCommand, parse_command};
 use super::context::ExecutionContext;
-use super::secret_masker::SecretMasker;
+use shared::SecretMasker;
 
 /// What to do with a stdout line after the dispatcher has inspected it.
 #[derive(Debug, Clone, PartialEq, Eq)]

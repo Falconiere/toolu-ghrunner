@@ -108,11 +108,8 @@ pub async fn acknowledge_message(
     .query(&[
       ("runnerRequestId", runner_request_id),
       ("status", "Online"),
-      ("os", crate::execution::context_build::runner_os()),
-      (
-        "architecture",
-        crate::execution::context_build::runner_arch(),
-      ),
+      ("os", shared::platform::runner_os()),
+      ("architecture", shared::platform::runner_arch()),
       ("runnerVersion", env!("CARGO_PKG_VERSION")),
     ])
     .bearer_auth(token)

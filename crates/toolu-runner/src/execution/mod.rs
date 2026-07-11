@@ -28,7 +28,6 @@ pub mod job_spec;
 mod node_stage;
 pub mod oidc;
 mod post_drain;
-pub mod secret_masker;
 mod service_auth;
 pub mod service_endpoints;
 pub mod service_lifecycle;

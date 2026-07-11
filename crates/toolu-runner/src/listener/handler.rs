@@ -4,10 +4,10 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use super::job_lifecycle;
-use crate::execution::secret_masker::SecretMasker;
 use crate::net;
 use protocol::JitConfig;
 use protocol::auth::parse_rsa_private_key;
+use shared::SecretMasker;
 use shared::{ListenerEvent, RunnerConfig, RunnerError};
 
 /// Shared state threaded through the listener lifecycle after authentication.

@@ -11,5 +11,5 @@ pub mod types;
 pub mod writer;
 
 pub use reader::{JobSummary, JournalReader, scan_jobs};
-pub use types::{JOURNAL_VERSION, JournalEvent, JournalLine, sanitize_job_id};
+pub use types::{JOURNAL_VERSION, JournalEvent, JournalLine};
 pub use writer::{JOURNAL_RETAIN, PREACQ_BUF};

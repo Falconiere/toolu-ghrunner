@@ -20,10 +20,10 @@ use super::context::ExecutionContext;
 use super::expressions::context_data::pipeline_data_to_expr_value;
 use super::job_hooks::{JobHookStage, run_job_hook};
 use super::job_spec::{JobSpec, evaluate_job_outputs};
-use super::secret_masker::SecretMasker;
 use super::service_endpoints::{ServiceUrls, extract_service_urls, forward_env};
 use super::shadow::ShadowObserver;
 use super::steps_runner::{JobRun, run_steps};
+use shared::SecretMasker;
 
 /// The local services a job's configured mode brought up, threaded from the
 /// startup match through `setup_job_env` and shut down at job end.
@@ -484,7 +484,11 @@ async fn start_accelerated_service(
   msg: &AgentJobRequestMessage,
   ctx: &ExecutionContext,
 ) -> Result<(CacheServer, ServiceUrls, String, CacheMaintenance), RunnerError> {
-  let scopes = scopes_for_job(ctx, &config.cache.protected_branches);
+  let scopes = scopes_for_job(
+    ctx.github_context("ref_name"),
+    ctx.github_context("base_ref"),
+    &config.cache.protected_branches,
+  );
   let event = ctx.github_context("event_name").unwrap_or_default();
   let ref_name = ctx.github_context("ref_name").unwrap_or_default();
   let trust = classify_trust(event, ref_name, &config.cache.protected_branches);

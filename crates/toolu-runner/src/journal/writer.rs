@@ -15,8 +15,9 @@ use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use super::types::{JOURNAL_VERSION, JournalEvent, JournalLine, sanitize_job_id};
-use crate::execution::secret_masker::SecretMasker;
+use super::types::{JOURNAL_VERSION, JournalEvent, JournalLine};
+use shared::SecretMasker;
+use shared::paths::sanitize_job_id;
 
 /// Max journal files kept in the jobs dir; oldest (by name) pruned first.
 pub const JOURNAL_RETAIN: usize = 50;

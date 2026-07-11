@@ -9,8 +9,8 @@ use std::sync::Arc;
 
 use serde_json::json;
 use shared::RunnerConfig;
+use shared::SecretMasker;
 use tokio_util::sync::CancellationToken;
-use toolu_runner::execution::secret_masker::SecretMasker;
 use toolu_runner::listener::GitHubListener;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};

@@ -18,12 +18,12 @@ use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use shared::SecretMasker;
 use shared::{ActionStep, RunnerConfig, RunnerEvent};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use toolu_runner::execution::actions::downloader::{action_cache_dir, watermark_path};
 use toolu_runner::execution::context::ExecutionContext;
-use toolu_runner::execution::secret_masker::SecretMasker;
 use toolu_runner::execution::steps_runner::run_steps;
 use toolu_runner::node::runtime::{node_binary_path, node_cache_dir, node_version_for};
 

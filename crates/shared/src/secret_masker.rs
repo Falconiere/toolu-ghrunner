@@ -12,7 +12,7 @@ pub struct SecretMasker {
   patterns: Vec<String>,
 }
 
-/// Bridge into `shared::startup::SecretRedactor` for a `SecretMasker`
+/// Bridge into [`crate::startup::SecretRedactor`] for a `SecretMasker`
 /// wrapped in a `Mutex` and shared across the listener, the per-job
 /// `ExecutionContext`, and the tracing file sink.
 ///
@@ -26,7 +26,7 @@ pub struct SecretMasker {
 /// must implement `SecretRedactor` for the file sink.
 pub struct MaskerRedactor(pub std::sync::Arc<std::sync::Mutex<SecretMasker>>);
 
-impl shared::startup::SecretRedactor for MaskerRedactor {
+impl crate::startup::SecretRedactor for MaskerRedactor {
   fn redact(&self, line: &str) -> String {
     // Use `match` to recover from a poisoned Mutex without using
     // the panic-on-poison convenience. The inner SecretMasker is
@@ -39,13 +39,12 @@ impl shared::startup::SecretRedactor for MaskerRedactor {
   }
 }
 
-/// Bridge into `shared::startup::SecretRedactor`.
+/// Bridge into [`crate::startup::SecretRedactor`].
 ///
-/// `SecretMasker` lives in `toolu-runner` but the trait lives in `shared`
-/// (so `shared` never has to depend on the runner). This impl is the
-/// one-way wiring the runner uses when calling
-/// `shared::startup::init_with_redactor`.
-impl shared::startup::SecretRedactor for SecretMasker {
+/// `SecretMasker` and the `SecretRedactor` trait both live in `shared`,
+/// so this impl is in-crate. It is the one-way wiring the runner uses
+/// when calling `crate::startup::init_with_redactor`.
+impl crate::startup::SecretRedactor for SecretMasker {
   fn redact(&self, line: &str) -> String {
     self.mask(line)
   }

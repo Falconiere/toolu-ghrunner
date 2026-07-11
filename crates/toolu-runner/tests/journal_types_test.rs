@@ -6,8 +6,9 @@
 use std::collections::HashMap;
 use std::error::Error;
 
+use shared::paths::sanitize_job_id;
 use shared::{AnnotationLevel, Conclusion, ListenerEvent, LogStream, RunnerEvent};
-use toolu_runner::journal::{JOURNAL_VERSION, JournalEvent, JournalLine, sanitize_job_id};
+use toolu_runner::journal::{JOURNAL_VERSION, JournalEvent, JournalLine};
 
 type TestResult = Result<(), Box<dyn Error>>;
 
