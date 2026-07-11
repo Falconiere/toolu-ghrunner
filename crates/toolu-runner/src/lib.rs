@@ -44,15 +44,12 @@ pub struct Runner {
   /// The `ExecutionContext` for each job receives the same Arc, so
   /// `register_secret` and `add_mask` propagate to all readers on the
   /// next call.
-  masker: Arc<Mutex<execution::secret_masker::SecretMasker>>,
+  masker: Arc<Mutex<shared::SecretMasker>>,
 }
 
 impl Runner {
   /// Create a runner bound to a config and a shared secret masker.
-  pub fn new(
-    config: RunnerConfig,
-    masker: Arc<Mutex<execution::secret_masker::SecretMasker>>,
-  ) -> Self {
+  pub fn new(config: RunnerConfig, masker: Arc<Mutex<shared::SecretMasker>>) -> Self {
     Self { config, masker }
   }
 
@@ -93,7 +90,7 @@ impl Runner {
   }
 
   /// Borrow the shared secret masker.
-  pub fn masker(&self) -> &Arc<Mutex<execution::secret_masker::SecretMasker>> {
+  pub fn masker(&self) -> &Arc<Mutex<shared::SecretMasker>> {
     &self.masker
   }
 }

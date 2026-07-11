@@ -256,18 +256,3 @@ fn level_str(l: AnnotationLevel) -> &'static str {
 pub fn conclusion_str(c: Conclusion) -> &'static str {
   c.to_report_string()
 }
-
-/// Sanitize a job id for use in a journal file name: every char outside
-/// `[A-Za-z0-9._-]` becomes one `_`; no collapsing, no truncation.
-pub fn sanitize_job_id(job_id: &str) -> String {
-  job_id
-    .chars()
-    .map(|c| {
-      if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') {
-        c
-      } else {
-        '_'
-      }
-    })
-    .collect()
-}

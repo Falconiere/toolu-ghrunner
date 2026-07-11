@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::sync::{Arc, Mutex};
 
+use shared::SecretMasker;
 use shared::{
   ActionStep, AgentJobRequestMessage, AnnotationLevel, Conclusion, LogStream, RunnerConfig,
   RunnerEvent,
@@ -19,7 +20,6 @@ use shared::{
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use toolu_runner::execution::context::ExecutionContext;
-use toolu_runner::execution::secret_masker::SecretMasker;
 use toolu_runner::execution::steps_runner::run_steps;
 
 const JOB_MESSAGE: &str = include_str!("fixtures/job_message.json");

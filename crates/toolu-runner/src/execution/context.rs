@@ -1,15 +1,13 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use shared::{Conclusion, RunnerError};
+use shared::platform::{runner_arch, runner_os};
+use shared::{Conclusion, RunnerError, SecretMasker};
 
-use super::context_build::{
-  build_strategy, default_strategy, runner_arch, runner_debug_on, runner_os,
-};
+use super::context_build::{build_strategy, default_strategy, runner_debug_on};
 use super::expressions::evaluator::{EvalContext, JobStatus, evaluate};
 use super::expressions::template::interpolate;
 use super::expressions::types::ExprValue;
-use super::secret_masker::SecretMasker;
 use super::step_state::{StepState, build_steps_context};
 
 /// Mutable execution state for a job run: context objects, environment,

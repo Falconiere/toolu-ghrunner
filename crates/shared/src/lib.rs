@@ -12,6 +12,9 @@ mod events;
 mod job_message;
 /// Home-directory and tilde path resolution.
 pub mod paths;
+/// Runner OS/arch reporting (GitHub `RUNNER_OS` / `RUNNER_ARCH`).
+pub mod platform;
+mod secret_masker;
 
 /// Tracing initialization and secret redaction.
 pub mod startup;
@@ -24,3 +27,4 @@ pub use job_message::{
   JobEndpoint, JobResources, MaskHint, PipelineContextData, TaskOrchestrationPlanReference,
   TemplateToken, VariableValue, WorkspaceOptions,
 };
+pub use secret_masker::{MaskerRedactor, SecretMasker};

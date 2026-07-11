@@ -9,7 +9,7 @@
 //! the `RedactingWriter` pipeline with a mock redactor. This file
 //! exercises the real masker that gets wired in as that redactor.
 
-use toolu_runner::execution::secret_masker::SecretMasker;
+use shared::SecretMasker;
 
 #[test]
 fn registered_secret_is_masked_in_log_line() {

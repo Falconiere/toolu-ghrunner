@@ -14,8 +14,8 @@ use super::log_uploader::StreamerConfig;
 use super::setup_step::report_setup_step;
 use super::step_reporter::StepCollector;
 use crate::Runner;
-use crate::execution::secret_masker::SecretMasker;
 use crate::reporting::live_log::LiveLogLine;
+use shared::SecretMasker;
 use shared::{AgentJobRequestMessage, Conclusion, ListenerEvent, RunnerEvent};
 
 /// Per-job addressing for the Run / Results services: where to renew

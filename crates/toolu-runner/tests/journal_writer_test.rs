@@ -7,11 +7,11 @@ use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use shared::SecretMasker;
 use shared::{ActionStep, AgentJobRequestMessage, ListenerEvent, RunnerConfig, ServicesMode};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use toolu_runner::execution::job_runner::run_job;
-use toolu_runner::execution::secret_masker::SecretMasker;
 use toolu_runner::journal::{JOURNAL_RETAIN, JournalEvent, JournalLine, writer};
 
 const JOB_MESSAGE: &str = include_str!("fixtures/job_message.json");

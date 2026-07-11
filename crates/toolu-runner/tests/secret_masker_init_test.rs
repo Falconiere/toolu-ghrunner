@@ -17,7 +17,7 @@ use std::io::Write;
 use std::sync::{Arc, Mutex};
 
 use shared::startup::{RedactingWriter, SecretRedactor};
-use toolu_runner::execution::secret_masker::{MaskerRedactor, SecretMasker};
+use shared::{MaskerRedactor, SecretMasker};
 
 #[test]
 fn masker_redacts_registered_secret_through_redacting_writer() {

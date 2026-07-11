@@ -8,32 +8,6 @@ use std::collections::HashMap;
 
 use super::expressions::types::ExprValue;
 
-/// GitHub `RUNNER_OS` for this build target. Linux only (see non-goals).
-///
-/// `pub(crate)` so the broker poll + acknowledge paths derive os one way.
-pub(crate) fn runner_os() -> &'static str {
-  "Linux"
-}
-
-/// Host CPU arch mapped to GitHub's `RUNNER_ARCH` naming.
-///
-/// `pub(crate)` so the broker poll + acknowledge paths derive arch one way.
-pub(crate) fn runner_arch() -> &'static str {
-  match std::env::consts::ARCH {
-    "x86_64" => "X64",
-    "aarch64" => "ARM64",
-    "arm" => "ARM",
-    "x86" => "X86",
-    other => {
-      tracing::warn!(
-        arch = other,
-        "host arch is not a canonical GitHub RUNNER_ARCH value; reporting it verbatim"
-      );
-      other
-    },
-  }
-}
-
 /// True when step-debug logging is requested via `RUNNER_DEBUG` /
 /// `ACTIONS_STEP_DEBUG` (`runner.debug == "1"`).
 pub(super) fn runner_debug_on() -> bool {

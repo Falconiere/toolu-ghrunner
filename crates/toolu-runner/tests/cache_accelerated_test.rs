@@ -15,11 +15,11 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::sync::{Arc, Mutex};
 
+use shared::SecretMasker;
 use shared::{ActionStep, AgentJobRequestMessage, RunnerConfig, RunnerEvent, ServicesMode};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use toolu_runner::execution::job_runner::run_job;
-use toolu_runner::execution::secret_masker::SecretMasker;
 
 const JOB_MESSAGE: &str = include_str!("fixtures/job_message.json");
 

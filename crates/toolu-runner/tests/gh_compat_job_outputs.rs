@@ -23,6 +23,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::sync::{Arc, Mutex};
 
+use shared::SecretMasker;
 use shared::{
   ActionStep, ActionStepDefinitionReference, AgentJobRequestMessage, Conclusion, DictEntry,
   RunnerConfig, RunnerEvent, TemplateToken,
@@ -32,7 +33,6 @@ use tokio_util::sync::CancellationToken;
 use toolu_runner::execution::context::ExecutionContext;
 use toolu_runner::execution::job_hooks::{JobHookStage, run_job_hook};
 use toolu_runner::execution::job_spec::{JobSpec, evaluate_job_outputs};
-use toolu_runner::execution::secret_masker::SecretMasker;
 use toolu_runner::execution::steps_runner::{JobRun, run_steps};
 use toolu_runner::execution::workflow::types::{RunDefaults, WorkflowDefaults};
 
