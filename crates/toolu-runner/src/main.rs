@@ -133,10 +133,6 @@ struct WatchArgs {
 
 #[tokio::main]
 async fn main() {
-  // AC #23: warn at startup for any deprecated YAMLESS_* env vars. Done
-  // before clap parsing and before `startup::init` so the warning lands
-  // even for subcommands (like `status`) that don't init tracing.
-  shared::startup::warn_about_legacy_env();
   let cli = Cli::parse();
   let exit_code = match run(cli).await {
     Ok(()) => 0,

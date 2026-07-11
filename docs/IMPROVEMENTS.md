@@ -26,10 +26,9 @@ Multi-dimension audit of `toolu-runner` (2026-06-18). Format:
 
 ## Hard constraints (any fix must respect)
 
-- No `yamless-*` imports, no `YAMLESS_*` env reads, no re-wiring
-  of `service_auth` / `service_lifecycle` (they back OIDC /
-  artifact / cache axum services — see `IMP-DO-003` for the doc
-  lie that pretends otherwise).
+- No re-wiring of `service_auth` / `service_lifecycle` (they back
+  OIDC / artifact / cache axum services — see `IMP-DO-003` for the
+  doc lie that pretends otherwise).
 - No OTel in v1. `tracing-subscriber` + `EnvFilter` only.
 - `protocol` crate stays sync + I/O-free (no `reqwest`, `tokio`,
   `opendal`, `bollard`, `axum`).
@@ -332,7 +331,7 @@ single PR.
 
 ### IMP-DO-003 — CLAUDE.md + CHANGELOG falsely list `service_auth` / `service_lifecycle` as cut
 - **Severity:** S | **Effort:** S
-- **Rationale:** `CLAUDE.md:58` and `:190` plus `CHANGELOG.md:200` claim these modules were yamless-cuts and are "kept for ref but not wired". In reality they are wired: `toolu-runner/src/execution/oidc/server.rs:17`, `toolu-runner/src/execution/artifacts/service/handlers.rs:14`, `toolu-runner/src/execution/cache/service/handlers.rs:14` all import them. A new contributor reading CLAUDE.md will think these files are dead code and delete them.
+- **Rationale:** `CLAUDE.md:58` and `:190` plus `CHANGELOG.md:200` claim these modules were cut and are "kept for ref but not wired". In reality they are wired: `toolu-runner/src/execution/oidc/server.rs:17`, `toolu-runner/src/execution/artifacts/service/handlers.rs:14`, `toolu-runner/src/execution/cache/service/handlers.rs:14` all import them. A new contributor reading CLAUDE.md will think these files are dead code and delete them.
 - **Fix:** Remove the bullet at `CLAUDE.md:58` and the line at `CLAUDE.md:190`; remove the entry from `CHANGELOG.md:200`. Add a one-liner under the execution engine section noting they back the OIDC/artifact/cache axum services.
 - **Refs:** `CLAUDE.md:58`, `CLAUDE.md:190`, `CHANGELOG.md:200`, `toolu-runner/src/execution/service_auth.rs:1`
 
@@ -362,7 +361,7 @@ single PR.
 
 ### IMP-DO-008 — README troubleshooting section misses 5 common failure modes
 - **Severity:** M | **Effort:** M
-- **Rationale:** `README.md:265-283` covers config-not-found, registration-exists, lock-held, yamless warning, JIT probe, and `bash -n`. It misses every listener-side error path: JIT config base64/JSON parse failure, token-exchange 401 (revoked registration), session-create failure, poll-loop persistent network error, GHES `connectionData` fetch failure. A first-time user hitting any of these has no next-action pointer.
+- **Rationale:** `README.md:265-283` covers config-not-found, registration-exists, lock-held, JIT probe, and `bash -n`. It misses every listener-side error path: JIT config base64/JSON parse failure, token-exchange 401 (revoked registration), session-create failure, poll-loop persistent network error, GHES `connectionData` fetch failure. A first-time user hitting any of these has no next-action pointer.
 - **Fix:** Add bullets: `"JIT config base64 decode failed" — register wrote a stale/empty JIT blob, re-run register against a live GH repo.`; `"token exchange failed with status 401" — registration token expired or revoked; get a new one from Settings → Actions → Runners and re-run register.`; `"V1 discovery request failed" — check GHES hostname + that pipelines.<host> is reachable.`; `"another run is in flight; wrote ... marker" — but no PID/started_at shown (lock_held variant has them; main.rs:419 doesn't surface them).`
 - **Refs:** `README.md:265`, `toolu-runner/src/main.rs:419`, `toolu-runner/src/listener/handler.rs:130`
 
@@ -420,7 +419,7 @@ from this list once the top-10s are burnt down.
 - **IMP-SE-016** — Action downloader calls `actions.githubusercontent.com` without TLS-pinning or checksum verification. Fix: hash the bytes (sha2 or blake3) and compare against the digest published in the action's GitHub release metadata. Refs: `toolu-runner/src/execution/actions/downloader.rs:115`
 - **IMP-SE-017** — `GITHUB_ENV` / `GITHUB_PATH` file-command parsing allows arbitrary env-var names (`LD_PRELOAD`, `PYTHONPATH`, `BASH_ENV`, `IFS`, etc.). Fix: maintain an allow/deny list mirroring upstream `actions/runner` rules (block `LD_*`, `DYLD_*`, `BASH_ENV`, `BASH_FUNC_*`, `IFS`, `PS*`, `PYTHONPATH`, `RUBYLIB`; `NODE_OPTIONS` already blocked). Refs: `toolu-runner/src/execution/file_commands.rs:145`
 - **IMP-SE-018** — `TRACEPARENT`/`TRACESTATE` injected into env but no W3C-trace-context validation. Fix: validate incoming `traceparent` (128-bit hex trace-id, 64-bit hex span-id, 2-hex flags, single-byte trace-flags) before honoring; reject malformed. Refs: `toolu-runner/src/execution/job_runner.rs:48`
-- **IMP-SE-019** — Step env inherits the full runner process env via `envs(std::env::vars())`. Fix: whitelist the env keys passed through; at minimum drop `TOOLU_RUNNER_*`, `RUST_LOG`, anything starting with `YAMLESS_*`, and any `_TOKEN`/`_KEY`/`_SECRET`-suffixed var unless explicitly included. Refs: `toolu-runner/src/execution/handlers/script.rs:50`, `toolu-runner/src/execution/handlers/node_exec.rs:38`
+- **IMP-SE-019** — Step env inherits the full runner process env via `envs(std::env::vars())`. Fix: whitelist the env keys passed through; at minimum drop `TOOLU_RUNNER_*`, `RUST_LOG`, and any `_TOKEN`/`_KEY`/`_SECRET`-suffixed var unless explicitly included. Refs: `toolu-runner/src/execution/handlers/script.rs:50`, `toolu-runner/src/execution/handlers/node_exec.rs:38`
 
 ### Performance
 

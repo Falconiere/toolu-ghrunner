@@ -222,9 +222,9 @@ redaction, and a CLI for register / run / remove / status.
   (or `--install-dir`), optionally installs the service unit
   with `--service`. `--check` prints the plan without downloading.
 - `tools/check.sh` — local quality gate (cargo fmt + clippy +
-  file-size ≤ 150 + no-allow + no-unwrap + no-yamless).
-- `lefthook.yml` — `pre-commit` runs fmt + clippy + yamless
-  coupling check; `pre-push` runs `./tools/check.sh all`.
+  file-size ≤ 150 + no-allow + no-unwrap).
+- `lefthook.yml` — `pre-commit` runs fmt + clippy; `pre-push`
+  runs `./tools/check.sh all`.
 
 **Release automation**
 
@@ -289,16 +289,6 @@ redaction, and a CLI for register / run / remove / status.
 - `docs/known-bugs.md` — B-001 (5-min cancellation watchdog),
   B-002 (live unregistration), B-003 (live register POST).
 
-### Changed
-
-- Renamed `warn_about_yamless_env` → `warn_about_legacy_env` and the
-  user-visible warning from "yamless" to "legacy"; behavior unchanged.
-  Detection still triggers on the `YAMLESS_` prefix.
-- Kept the `no-yamless-coupling` lefthook check name (it still greps for
-  the `yamless` / `YAMLESS_` prefix); logic unchanged.
-
-
-
 ### Removed
 
 - **yamless-orchestrator WebSocket client** (`serve/`, `ws_client/`,
@@ -317,8 +307,8 @@ redaction, and a CLI for register / run / remove / status.
   `EnvFilter` + JSON file sink.
 - **`yamless-shared` workspace dependency** — replaced by the
   local `shared` crate.
-- **`YAMLESS_*` env var compatibility** — variables are still
-  detected and trigger a `WARN` on startup, but they have no
-  effect on runner behavior.
+- **`YAMLESS_*` env var compatibility** — the old prefix has no
+  special handling: not detected, no warning, no effect on runner
+  behavior.
 
 [0.1.0]: #010---2026-06-18

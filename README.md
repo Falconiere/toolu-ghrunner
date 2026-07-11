@@ -269,8 +269,7 @@ clock, a socket, or tokio.
 | Plugin system | — | **`plugin::RunnerPlugin`** |
 
 **Deliberately not ported:** OpenTelemetry, and any coupling to the
-`yamless` orchestrator this code was extracted from. Both are rejected
-at CI time.
+`yamless` orchestrator this code was extracted from.
 
 **GHES** is supported over the V1 protocol (`connectionData` discovery,
 timeline records); protocol version is auto-selected from the `--url`
@@ -397,7 +396,7 @@ cargo test  --workspace          # 340 tests, no network required
 
 `tools/check.sh` is stricter than clippy: it rejects `.rs` files over
 700 lines, `#[allow(..)]` / `#[expect(..)]` outside tests, `.unwrap()` /
-`.expect()` in production code, and any `yamless` reference in source.
+`.expect()` in production code.
 `lefthook install` wires the same checks to `pre-commit`.
 
 The live suite talks to a real repo and is token-gated:
