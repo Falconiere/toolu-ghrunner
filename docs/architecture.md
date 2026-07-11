@@ -7,7 +7,7 @@ mirrors the layout of the source tree and explains how the three
 crates fit together, how the listener lifecycle runs, and how the
 runner behaves under failure.
 
-For the design rationale and the yamless extraction story, see
+For the design rationale, see
 [docs/toolu/specs/2026-06-18-toolu-runner-standalone-design.md](toolu/specs/2026-06-18-toolu-runner-standalone-design.md).
 
 ## Overview
@@ -20,7 +20,7 @@ toolu-ghrunner/                            workspace root
 │   ├── events.rs                          RunnerEvent, ListenerEvent, Conclusion
 │   ├── job_message/                       AgentJobRequestMessage + ~12 message types
 │   ├── paths.rs                           expand_tilde (HOME → USERPROFILE → fallback)
-│   ├── startup.rs                         tracing init + SecretRedactor + WARN about YAMLESS_*
+│   ├── startup.rs                         tracing init + SecretRedactor
 │   └── tests/                             unit tests
 ├── protocol/                              SYNC, NO I/O, NO NETWORK
 │   ├── auth.rs                            RSA key + JWT (PS256) crypto
@@ -88,10 +88,6 @@ runtime dependencies beyond `serde`, `chrono`, and `tracing`.
   layer. Two sinks: pretty stderr, JSON file
   (`data_dir/_diag/<service>.log`, daily-rotated). `EnvFilter` is
   built from `TOOLU_RUNNER_LOG` → `RUST_LOG` → `info`.
-- `startup::warn_about_yamless_env` — scans the env for `YAMLESS_*`
-  keys and emits a `WARN` per key to stderr. AC #23 — yamless users
-  re-registering get a clear "this var is no longer recognized"
-  signal.
 - `startup::RedactingMakeWriter` / `RedactingWriter` — byte-level
   line splitter + `SecretRedactor` hookup. The `SecretMasker` from
   `toolu-runner` implements `SecretRedactor` so registered secrets
@@ -726,7 +722,6 @@ non-goal for v1 (logged + best-effort; no spec guarantee).
 | 10 | `run` mid-job, network drops > 5 min                         | **Known bug:** runner does not cancel with "lost connection". Tracked in [known-bugs.md](known-bugs.md) B-001. |
 | 11 | Disk full mid-job                                            | Current step fails with `RunnerError::Io`; step marked `failure`; job completes `failure`; `run` stays alive for next job. |
 | 12 | `remove` with no registration                                 | Exit 0 with "no registration found." |
-| 13 | Any `YAMLESS_*` env var set                                   | Runner emits a `WARN` to stderr naming each var and ignores. |
 
 The full failure-mode coverage lives in
 `toolu-runner/tests/failure_modes_test.rs` (12 scenarios).

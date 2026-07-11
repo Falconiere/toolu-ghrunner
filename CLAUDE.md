@@ -1,22 +1,17 @@
 # toolu-runner
 
-Standalone GitHub Actions JIT runner — extracted from
-`yamless-runner`, with no yamless code paths, no orchestrator service,
-and no OTel.
+Standalone GitHub Actions JIT runner — no orchestrator service and
+no OTel.
 
 ## Crate Type
 
 - Library + Binary (`toolu-runner`, `toolu_runner` lib + `toolu-runner` bin).
 - Internal deps: `shared` (types + tracing init), `protocol` (sync
-  protocol types + crypto). No `yamless-*` crate references.
+  protocol types + crypto).
 - Workspace members: `shared`, `protocol`, `toolu-runner`.
 
 ## Crate-Specific Rules
 
-- **No yamless coupling.** No imports from `yamless-runner`,
-  `yamless-shared`, `yamless-auth`. No `YAMLESS_*` env vars read.
-  Yamless env vars trigger a `WARN` on startup and are ignored.
-  Enforced by `tools/check.sh` and `lefthook.yml`.
 - **No OTel in v1.** Tracing is `tracing-subscriber` + `EnvFilter`
   only. JSON-formatted to `data_dir/_diag/<service>.log` (daily
   rotation), pretty-printed to stderr. Secret redaction is wired
@@ -49,8 +44,7 @@ and no OTel.
   GHES. Selected automatically by host at `register` time; the
   `feature_detection` module handles the wire-shape difference.
 - **Handler dispatch** (in priority order): plugin → script → node
-  → docker → composite. There is **no** `yamless` handler variant —
-  it was cut in the port.
+  → docker → composite.
 - **Service mode (forwarder / offline / accelerated).** Config
   `[services] mode` (`ServicesMode` in `shared/src/config.rs`) selects
   how artifacts / cache / OIDC reach their backends. In `forwarder`
@@ -75,7 +69,7 @@ and no OTel.
   `_diag/runner.log` unredacted.
 - **No daemon mode for `run`.** The CLI blocks until SIGINT / SIGTERM.
   Service files wrap it.
-- **No `build_tool_*`** — yamless build-tool modules, cut in the port.
+- **No `build_tool_*`** — build-tool modules were cut in the port.
   `service_auth` / `service_lifecycle` are kept (they back the
   OIDC/artifact/cache axum services).
 
@@ -102,7 +96,7 @@ and no OTel.
 - `startup.rs` — `init` / `init_with_redactor` (tracing init with
   `RUST_LOG` / `TOOLU_RUNNER_LOG` EnvFilter), `SecretRedactor` trait,
   `RedactingMakeWriter` / `RedactingWriter` (line-level secret
-  redaction), `warn_about_yamless_env` (AC #23), `.env` loader.
+  redaction), `.env` loader.
 
 ### `protocol/` — sync, no I/O, no network
 

@@ -96,12 +96,6 @@ fn cleanup_old_logs(diag: &Path, service: &str) {
 /// `EnvFilter` is built from `RUST_LOG` first, then `TOOLU_RUNNER_LOG`,
 /// falling back to `info`.
 ///
-/// Before the tracing layer is attached, scans the process environment for
-/// any `YAMLESS_*` keys (the deprecated prefix from a previous runner) and
-/// emits a `tracing::warn!` for each. Users re-running an old shell profile
-/// see a clear "this var is no longer recognized" message instead of silent
-/// failure. Does not fail; just warns.
-///
 /// Uses `try_init` so duplicate calls (e.g. in tests) are silently ignored.
 ///
 /// # Errors
@@ -109,8 +103,6 @@ fn cleanup_old_logs(diag: &Path, service: &str) {
 /// Returns `RunnerError::Io` if the diagnostics directory cannot be created.
 pub fn init(manifest_dir: &str, service: &str) -> Result<(), crate::RunnerError> {
   load_dotenv(Path::new(manifest_dir));
-
-  warn_about_legacy_env();
 
   let data_dir = default_data_dir();
   let diag = diag_dir(&data_dir);
@@ -146,53 +138,6 @@ pub fn init(manifest_dir: &str, service: &str) -> Result<(), crate::RunnerError>
     .ok();
 
   Ok(())
-}
-
-/// Scan the process environment for any deprecated `YAMLESS_*` keys and
-/// emit a `tracing::warn!` for each. Users get a clear signal that their
-/// old env vars are no longer recognized (re-register with the new CLI).
-///
-/// Called from [`init`] / [`init_with_redactor`] before the subscriber is
-/// installed, so the warning still surfaces even if the first `tracing`
-/// event would otherwise be lost. Each key is written to stderr directly
-/// (via `eprintln!`) so the warning is visible whether or not the
-/// subscriber attaches successfully.
-///
-/// Returns the list of keys that were warned about — tests can assert
-/// the result directly without depending on capturing stderr.
-///
-/// Public so the warning logic is testable in isolation — the canonical
-/// test is in `toolu-runner/tests/failure_modes_test.rs`.
-pub fn warn_about_legacy_env() -> Vec<String> {
-  let legacy_keys = scan_legacy_env(std::env::vars());
-  for key in &legacy_keys {
-    eprintln!(
-      "warning: ignoring legacy env var {key} — toolu-runner has no compatibility layer for the old prefix; use TOOLU_RUNNER_* instead"
-    );
-  }
-  legacy_keys
-}
-
-/// Pure scan: return the subset of `env` whose keys start with `YAMLESS_`,
-/// sorted for deterministic output. Extracted so tests can verify the
-/// filter logic without mutating the process environment.
-pub fn scan_legacy_env<I, K, V>(env: I) -> Vec<String>
-where
-  I: IntoIterator<Item = (K, V)>,
-  K: AsRef<str>,
-{
-  let mut keys: Vec<String> = env
-    .into_iter()
-    .filter_map(|(k, _)| {
-      if k.as_ref().starts_with("YAMLESS_") {
-        Some(k.as_ref().to_owned())
-      } else {
-        None
-      }
-    })
-    .collect();
-  keys.sort();
-  keys
 }
 
 /// Initialize tracing with a [`SecretRedactor`] wrapping both sinks.
@@ -381,42 +326,5 @@ impl<W: Write> RedactingWriter<W> {
       self.inner.write_all(redacted.as_bytes())?;
     }
     Ok(())
-  }
-}
-
-#[cfg(test)]
-mod tests {
-  use super::*;
-
-  /// Minimal redactor used by the unit tests below.
-  struct LiteralRedactor(&'static str, &'static str);
-
-  impl SecretRedactor for LiteralRedactor {
-    fn redact(&self, line: &str) -> String {
-      line.replace(self.0, self.1)
-    }
-  }
-
-  #[test]
-  fn redacting_writer_replaces_secret_in_complete_line() {
-    let redactor = Arc::new(LiteralRedactor("hunter2", "***"));
-    let mut writer = RedactingWriter::new(Vec::<u8>::new(), redactor);
-    writeln!(writer, "user logged in password=hunter2").unwrap();
-    writer.flush().unwrap();
-    let out = String::from_utf8(writer.into_inner().unwrap()).unwrap();
-    assert!(!out.contains("hunter2"), "secret leaked: {out}");
-    assert!(out.contains("password=***"), "expected redaction in: {out}");
-  }
-
-  #[test]
-  fn redacting_writer_replaces_secret_split_across_writes() {
-    let redactor = Arc::new(LiteralRedactor("hunter2", "***"));
-    let mut writer = RedactingWriter::new(Vec::<u8>::new(), redactor);
-    write!(writer, "first half ").unwrap();
-    writeln!(writer, "password=hunter2").unwrap();
-    writer.flush().unwrap();
-    let out = String::from_utf8(writer.into_inner().unwrap()).unwrap();
-    assert!(!out.contains("hunter2"), "secret leaked: {out}");
-    assert!(out.contains("password=***"), "expected redaction in: {out}");
   }
 }

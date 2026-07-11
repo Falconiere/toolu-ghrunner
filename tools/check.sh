@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
-# tools/check.sh — code quality gates for toolu-runner.
-#
-# Mirrors a subset of yamless's ./tools/yamless/check.sh but scoped to
-# the toolu-runner Rust workspace. No TypeScript, no marketing checks.
+# tools/check.sh — code quality gates for the toolu-runner Rust
+# workspace. Rust only: no TypeScript, no marketing checks.
 
 set -euo pipefail
 
@@ -22,7 +20,6 @@ _check_rust() {
   _check_file_size
   _check_no_allow
   _check_no_unwrap
-  _check_no_yamless
 }
 
 _check_file_size() {
@@ -75,24 +72,6 @@ _check_no_unwrap() {
   return $fail
 }
 
-_check_no_yamless() {
-  # AC #19: no yamless coupling in source. The grep excludes the
-  # AC #23 detection of YAMLESS_* env vars (legitimate) and the live
-  # test fixtures (which mention the YAMLESS_ prefix).
-  if grep -RnE 'yamless' \
-       "$_project_root/crates" \
-       "$_project_root/Cargo.toml" \
-       --include='*.rs' --include='*.toml' 2>/dev/null \
-     | grep -v 'YAMLESS_' | grep -v 'tests/live/'; then
-    printf 'no-yamless: yamless reference in source (AC #19)\n' >&2
-    return 1
-  fi
-  if cargo tree --workspace 2>/dev/null | grep -qE 'yamless-|yamless_'; then
-    printf 'no-yamless: yamless-* crate in dependency tree\n' >&2
-    return 1
-  fi
-}
-
 _usage() {
   cat <<'EOF'
 toolu check — code quality gates (Rust only)
@@ -101,7 +80,7 @@ USAGE
   ./tools/check.sh GROUP
 
 GROUPS
-  all             rust fmt + clippy + file-size + no-allow + no-unwrap + no-yamless
+  all             rust fmt + clippy + file-size + no-allow + no-unwrap
 EOF
 }
 

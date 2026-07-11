@@ -23,7 +23,6 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use fs2::FileExt;
-use shared::startup::scan_legacy_env;
 use toolu_runner::lockfile::{self, LockBody};
 
 fn toolu_runner() -> Command {
@@ -162,80 +161,6 @@ fn lock_refuses_to_steal_fresh_lock_from_dead_pid() {
   );
   // Drop the held_file to release the fs2 lock (not strictly needed but tidy).
   drop(held_file);
-}
-
-// ─── YAMLESS_* env var warning (spec AC #23) ────────────────────────
-
-#[test]
-fn scan_legacy_env_matches_prefix_only() {
-  let env = vec![
-    ("YAMLESS_API_URL".to_owned(), "x".to_owned()),
-    ("YAMLESS_WORKSPACE_ROOT".to_owned(), "x".to_owned()),
-    ("PATH".to_owned(), "/usr/bin".to_owned()),
-    ("TOOLU_RUNNER_LOG".to_owned(), "info".to_owned()),
-    ("YAMLESS_X".to_owned(), "x".to_owned()),
-  ];
-  let keys = scan_legacy_env(env);
-  assert_eq!(
-    keys,
-    vec![
-      "YAMLESS_API_URL".to_owned(),
-      "YAMLESS_WORKSPACE_ROOT".to_owned(),
-      "YAMLESS_X".to_owned()
-    ],
-    "should return sorted YAMLESS_ keys only"
-  );
-}
-
-#[test]
-fn scan_legacy_env_empty_when_none_set() {
-  let env = vec![
-    ("PATH".to_owned(), "/usr/bin".to_owned()),
-    ("HOME".to_owned(), "/home/me".to_owned()),
-  ];
-  let keys = scan_legacy_env(env);
-  assert!(keys.is_empty(), "got unexpected: {keys:?}");
-}
-
-#[test]
-fn legacy_env_warning_emitted_to_stderr_when_var_set() {
-  // Run the binary with a YAMLESS_* env var set; the warning must
-  // appear on stderr. Using a child process avoids touching the
-  // host test process's env (which Rust 2024 requires unsafe for).
-  let key = "YAMLESS_TEST_WARNING_FROM_CHILD_BAR";
-  let value = "ignored-value";
-  let output = toolu_runner()
-    .args(["status", "--config", "/nonexistent.toml"])
-    .env(key, value)
-    .output()
-    .expect("run binary");
-  // `status` exits 2 because the config doesn't exist, but stderr
-  // should still contain the YAMLESS warning from `startup::init`.
-  let stderr = String::from_utf8_lossy(&output.stderr);
-  assert!(
-    stderr.contains(key),
-    "expected {key} in stderr warning; got: {stderr}"
-  );
-  assert!(
-    stderr.contains("ignoring legacy env var"),
-    "expected warning text; got: {stderr}"
-  );
-}
-
-#[test]
-fn legacy_env_warning_not_emitted_when_var_unset() {
-  let output = toolu_runner()
-    .args(["status", "--config", "/nonexistent.toml"])
-    .env_remove("YAMLESS_API_URL")
-    .env_remove("YAMLESS_WORKSPACE_ROOT")
-    .env_remove("YAMLESS_CPU_LIMIT")
-    .output()
-    .expect("run binary");
-  let stderr = String::from_utf8_lossy(&output.stderr);
-  assert!(
-    !stderr.contains("ignoring legacy env var"),
-    "should not emit warning when no YAMLESS_* is set; got: {stderr}"
-  );
 }
 
 // ─── `run` invoked with no `config.toml` / no `credentials.json` ────
