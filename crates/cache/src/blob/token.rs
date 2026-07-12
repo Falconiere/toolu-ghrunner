@@ -11,8 +11,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use crate::execution::cache::cas::Manifest;
-use crate::execution::cache::mint_capability_token;
+use crate::cas::Manifest;
+use crate::mint_capability_token;
 
 /// Fallback TTL when the requested one overflows `Instant` arithmetic: far
 /// enough out that no real client notices, finite so the entry still ages out.

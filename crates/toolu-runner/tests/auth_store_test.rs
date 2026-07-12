@@ -1,4 +1,4 @@
-//! Unit tests for `toolu_runner::auth_store`.
+//! Unit tests for `config::auth_store`.
 //!
 //! Covers the pure precedence resolver (AC-4), the per-host File backend
 //! with its `0600` files and idempotent delete (AC-6), and env-sourced
@@ -9,7 +9,7 @@
 //! so the suite never touches the OS keyring (hermetic on keyless CI).
 
 use tempfile::TempDir;
-use toolu_runner::auth_store::{self, AuthStore, StoredToken};
+use config::auth_store::{self, AuthStore, StoredToken};
 
 /// Build a `StoredToken` for `host` carrying `access`. `scope`/`issued_at`
 /// are fixed literals — no field the tests assert on is left to chance.

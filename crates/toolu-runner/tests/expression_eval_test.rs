@@ -18,8 +18,8 @@
 use std::collections::HashMap;
 
 use serde_json::Value;
-use toolu_runner::execution::expressions::evaluator::{self, EvalContext, JobStatus};
-use toolu_runner::execution::expressions::types::ExprValue;
+use expressions::evaluator::{self, EvalContext, JobStatus};
+use expressions::types::ExprValue;
 
 fn object_from(pairs: &[(&str, ExprValue)]) -> ExprValue {
   let mut map = HashMap::new();

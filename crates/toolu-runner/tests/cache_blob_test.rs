@@ -7,9 +7,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use reqwest::header::HeaderMap;
-use toolu_runner::execution::cache::blob::{BlobRegistry, BlobState, blob_router, sweep_staging};
-use toolu_runner::execution::cache::cas::{CasStore, LeaseSet};
-use toolu_runner::execution::cache::server::CacheServer;
+use cache::blob::{BlobRegistry, BlobState, blob_router, sweep_staging};
+use cache::cas::{CasStore, LeaseSet};
+use cache::server::CacheServer;
 
 /// Boxed error alias for test helpers that use `?`.
 type TestResult<T> = Result<T, Box<dyn std::error::Error>>;

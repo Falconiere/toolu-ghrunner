@@ -1,6 +1,6 @@
 //! Real-data unit tests for the CAS `Manifest`: `locate()` and JSON round-trip.
 
-use toolu_runner::execution::cache::cas::manifest::{ChunkId, ChunkRef, Manifest};
+use cache::cas::manifest::{ChunkId, ChunkRef, Manifest};
 
 /// A deterministic 32-byte id whose first byte marks which chunk it is.
 fn id(tag: u8) -> ChunkId {

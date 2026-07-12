@@ -10,11 +10,11 @@
 use std::path::PathBuf;
 
 use serde_json::{Value, json};
-use toolu_runner::execution::cache::cas::{CacheIndex, CasStore, LeaseSet};
-use toolu_runner::execution::cache::scope::CacheScopes;
-use toolu_runner::execution::cache::server::CacheServer;
-use toolu_runner::execution::cache::trust::TrustLevel;
-use toolu_runner::execution::cache::v1::{V1Inputs, V1State, v1_router};
+use cache::cas::{CacheIndex, CasStore, LeaseSet};
+use cache::scope::CacheScopes;
+use cache::server::CacheServer;
+use cache::trust::TrustLevel;
+use cache::v1::{V1Inputs, V1State, v1_router};
 
 type TestResult<T> = Result<T, Box<dyn std::error::Error>>;
 

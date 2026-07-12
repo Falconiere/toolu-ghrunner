@@ -28,7 +28,7 @@ use std::collections::HashSet;
 use std::io::Write;
 use std::path::Path;
 
-use toolu_runner::execution::cache::cas::{CasStore, ChunkId, Manifest};
+use cache::cas::{CasStore, ChunkId, Manifest};
 
 /// Boxed error alias for test helpers that use `?`.
 type TestResult<T> = Result<T, Box<dyn std::error::Error>>;

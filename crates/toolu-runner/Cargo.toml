@@ -18,6 +18,9 @@ path = "src/lib.rs"
 # Internal
 shared = { path = "../shared" }
 protocol = { path = "../protocol" }
+expressions = { path = "../expressions" }
+cache = { path = "../cache" }
+config = { path = "../config" }
 
 # Async runtime
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "net", "io-util", "fs", "signal"] }

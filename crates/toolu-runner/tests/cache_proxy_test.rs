@@ -15,8 +15,8 @@ use axum::extract::Request;
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use toolu_runner::execution::cache::proxied_app;
-use toolu_runner::execution::cache::server::CacheServer;
+use cache::proxied_app;
+use cache::server::CacheServer;
 
 /// Boxed error alias for test helpers that use `?`.
 type TestResult<T> = Result<T, Box<dyn std::error::Error>>;

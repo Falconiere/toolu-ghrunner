@@ -8,8 +8,8 @@ use std::path::Path;
 
 use futures_util::StreamExt;
 use shared::L2Config;
-use toolu_runner::execution::cache::cas::{CasStore, Manifest};
-use toolu_runner::execution::cache::tier::{BlobKind, L2Tier};
+use cache::cas::{CasStore, Manifest};
+use cache::tier::{BlobKind, L2Tier};
 
 /// Boxed error alias for test helpers that use `?`.
 type TestResult<T> = Result<T, Box<dyn std::error::Error>>;

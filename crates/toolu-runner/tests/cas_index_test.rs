@@ -7,7 +7,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use chrono::DateTime;
-use toolu_runner::execution::cache::cas::{CacheIndex, ChunkId, IndexEntry, entry_id_for};
+use cache::cas::{CacheIndex, ChunkId, IndexEntry, entry_id_for};
 
 /// Boxed error alias for test helpers that use `?`.
 type TestResult<T> = Result<T, Box<dyn std::error::Error>>;

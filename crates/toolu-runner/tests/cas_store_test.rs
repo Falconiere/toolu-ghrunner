@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use futures_util::StreamExt;
-use toolu_runner::execution::cache::cas::{CasStore, Manifest};
+use cache::cas::{CasStore, Manifest};
 
 /// Boxed error alias for test helpers that use `?`.
 type TestResult<T> = Result<T, Box<dyn std::error::Error>>;

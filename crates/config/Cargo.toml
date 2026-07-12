@@ -1,0 +1,31 @@
+[package]
+name = "config"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# Internal
+shared = { path = "../shared" }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+# OS keyring for CLI login token persistence (no libdbus: linux-native = kernel keyutils)
+keyring = { version = "3", default-features = false, features = ["apple-native", "windows-native", "linux-native"] }
+
+# Single-job advisory file lock + liveness probe for stale-lock recovery
+fs2 = "0.4"
+sysinfo = "0.37"
+
+# RFC3339 timestamps in the lock body / stored token
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+
+# Structured warnings (unknown [services] mode, keyring fallback)
+tracing = "0.1"
+
+[lints]
+workspace = true

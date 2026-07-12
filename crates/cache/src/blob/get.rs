@@ -15,7 +15,7 @@ use shared::RunnerError;
 
 use super::token::{BlobRegistry, BlobTarget};
 use super::{BlobState, add_required_headers, error_500, forbidden, hv};
-use crate::execution::cache::cas::{ChunkId, Manifest};
+use crate::cas::{ChunkId, Manifest};
 
 /// `HEAD /_toolu/blob/{token}` — Get Blob Properties.
 pub(super) async fn head(

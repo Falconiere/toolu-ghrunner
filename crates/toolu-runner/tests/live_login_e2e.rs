@@ -20,7 +20,7 @@
 use std::process::{Output, Stdio};
 
 use tokio::process::Command;
-use toolu_runner::auth_store::{AuthStore, StoredToken};
+use config::auth_store::{AuthStore, StoredToken};
 
 #[path = "helpers/live_harness.rs"]
 mod harness;

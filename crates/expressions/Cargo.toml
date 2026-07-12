@@ -1,0 +1,22 @@
+[package]
+name = "expressions"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# Internal
+shared = { path = "../shared" }
+
+# Serialization (tojson / fromjson + JSON context conversion)
+serde_json = "1"
+
+# hashFiles() digest
+sha2 = "0.10"
+
+# hashFiles() glob matching
+glob = "0.3"
+
+[lints]
+workspace = true
