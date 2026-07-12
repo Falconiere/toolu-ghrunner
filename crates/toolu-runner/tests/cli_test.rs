@@ -185,10 +185,12 @@ fn run_reports_missing_credentials_next_to_config() {
 
 #[test]
 fn clap_self_check_runs_at_startup() {
-  // `main` calls `cli::debug_assert_cli()` before parsing in debug builds
-  // (CARGO_BIN_EXE_* is the dev profile), so an invalid clap definition
-  // panics before `--version` can print. A clean exit here IS the
-  // assertion that clap's `Command::debug_assert` self-check passed.
+  // `main` calls `cli::debug_assert_cli()` before parsing when
+  // debug_assertions are on. `cargo test` builds this binary with the dev
+  // profile, so an invalid clap definition panics before `--version` can
+  // print — a clean exit here IS the assertion that clap's
+  // `Command::debug_assert` self-check passed. (Under `--release` the
+  // check is compiled out and this test only asserts `--version` works.)
   let output = Command::new(env!("CARGO_BIN_EXE_toolu-runner"))
     .arg("--version")
     .output()
