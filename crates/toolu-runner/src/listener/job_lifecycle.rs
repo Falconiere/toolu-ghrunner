@@ -5,10 +5,10 @@ use tokio_util::sync::CancellationToken;
 use super::SessionCtx;
 use super::execution_loop::execute_with_renewal;
 use super::helpers::map_conclusion;
-use crate::net::{PollParams, acknowledge_message, poll_message};
-use crate::reporting::StepResult;
-use crate::reporting::live_log::LiveLogStreamer;
-use crate::reporting::run_service::{
+use wire::net::{PollParams, acknowledge_message, poll_message};
+use wire::reporting::StepResult;
+use wire::reporting::live_log::LiveLogStreamer;
+use wire::reporting::run_service::{
   AcquireJobRequest, CompleteJobRequest, acquire_job, complete_job,
 };
 use protocol::messages::{BrokerMessage, BrokerMigrationBody, JobCancelBody};
@@ -77,7 +77,7 @@ type JobOutcome = (Conclusion, String, i64, Vec<StepResult>, Option<String>);
 
 /// Parse the acquired job body, or return a ready-made failure outcome.
 fn parse_job_message(
-  acquired: &crate::reporting::run_service::AcquireJobResponse,
+  acquired: &wire::reporting::run_service::AcquireJobResponse,
 ) -> Result<AgentJobRequestMessage, JobOutcome> {
   serde_json::from_value(acquired.body.clone()).map_err(|e| {
     tracing::error!(error = %e, "job message parse failed — completing with failure");
@@ -101,7 +101,7 @@ async fn run_job_with_cancel_watch(
   ctx: &SessionCtx,
   run_service_url: &str,
   rs_token: &str,
-  acquired: &crate::reporting::run_service::AcquireJobResponse,
+  acquired: &wire::reporting::run_service::AcquireJobResponse,
 ) -> JobOutcome {
   let job_cancel = ctx.cancel.child_token();
   let exec = run_acquired_job(ctx, run_service_url, rs_token, acquired, &job_cancel);
@@ -197,7 +197,7 @@ async fn run_acquired_job(
   ctx: &SessionCtx,
   run_service_url: &str,
   rs_token: &str,
-  acquired: &crate::reporting::run_service::AcquireJobResponse,
+  acquired: &wire::reporting::run_service::AcquireJobResponse,
   job_cancel: &CancellationToken,
 ) -> JobOutcome {
   let job_msg: AgentJobRequestMessage = match parse_job_message(acquired) {
@@ -500,7 +500,7 @@ fn parse_job_request_body(
 async fn connect_live_log(
   job_msg: &AgentJobRequestMessage,
   fallback_token: &str,
-) -> Option<tokio::sync::mpsc::Sender<crate::reporting::live_log::LiveLogLine>> {
+) -> Option<tokio::sync::mpsc::Sender<wire::reporting::live_log::LiveLogLine>> {
   let url = job_msg.feed_stream_url()?;
   let token = super::helpers::system_vss_access_token(job_msg);
   let ws_token = token.as_deref().unwrap_or(fallback_token);

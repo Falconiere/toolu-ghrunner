@@ -6,8 +6,8 @@ use std::error::Error;
 use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use toolu_runner::watch::input::{Action, action_for};
-use toolu_runner::watch::state::App;
+use observability::watch::input::{Action, action_for};
+use observability::watch::state::App;
 
 type TestResult<T = ()> = Result<T, Box<dyn Error>>;
 
@@ -67,7 +67,7 @@ fn confirm_modal_swallows_keys_until_answered() {
 #[test]
 fn send_cancel_without_lock_reports_error() {
   let dir = tempfile::tempdir().expect("tempdir");
-  let err = toolu_runner::watch::send_cancel(&dir.path().join(".lock"))
+  let err = observability::watch::send_cancel(&dir.path().join(".lock"))
     .expect_err("missing lock must not succeed");
   assert!(err.contains("no lock file"), "unexpected error: {err}");
 }
@@ -114,7 +114,7 @@ async fn deliver_sigint_stops_a_running_child() -> TestResult {
   // INT trap (code 42).
   let mut child = spawn_trap_child()?;
   let outcome = (|| {
-    toolu_runner::watch::deliver_sigint(child.id()).map_err(|e| format!("deliver: {e}"))?;
+    observability::watch::deliver_sigint(child.id()).map_err(|e| format!("deliver: {e}"))?;
     let status = wait_for_exit(&mut child)?;
     assert_eq!(status.code(), Some(42), "child must exit via its INT trap");
     Ok(())
@@ -139,7 +139,7 @@ async fn send_cancel_refuses_non_runner_pid() -> TestResult {
   });
   std::fs::write(&lock_path, serde_json::to_vec(&body)?)?;
 
-  let outcome: TestResult = match toolu_runner::watch::send_cancel(&lock_path) {
+  let outcome: TestResult = match observability::watch::send_cancel(&lock_path) {
     Ok(_) => Err("send_cancel must refuse a non-runner pid".into()),
     Err(e) if e.contains("not a toolu-runner process") => Ok(()),
     Err(e) => Err(format!("unexpected error: {e}").into()),

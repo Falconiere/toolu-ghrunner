@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use super::helpers::map_conclusion;
-use crate::reporting::{Status, StepResult};
+use wire::reporting::{Status, StepResult};
 use shared::RunnerEvent;
 
 /// Per-step metadata captured from StepStarted.

@@ -26,7 +26,7 @@ use futures_util::Sink;
 use serde_json::Value;
 use tokio::sync::mpsc;
 
-use toolu_runner::reporting::live_log::{FLUSH_LINE_THRESHOLD, LiveLogLine, Message, run_loop};
+use wire::reporting::live_log::{FLUSH_LINE_THRESHOLD, LiveLogLine, Message, run_loop};
 
 /// In-process `Sink<Message>` that records every text frame the streamer
 /// sends. A real sink — the actual `run_loop`/flush/serialize code path runs

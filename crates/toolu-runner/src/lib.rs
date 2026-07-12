@@ -6,20 +6,12 @@
 pub mod docker;
 /// Job execution engine (context, steps runner, handlers, expressions).
 pub mod execution;
-/// Per-job JSONL event journal under `_diag/jobs/`; read by `watch`.
-pub mod journal;
 /// GitHub JIT lifecycle: handler, poll loop, execution loop.
 pub mod listener;
-/// Async network layer: token exchange, session, messages, run service.
-pub mod net;
 /// Node.js runtime detection, download, and caching.
 pub mod node;
 /// `RunnerPlugin` trait and registry.
 pub mod plugin;
-/// Run service / results service domain types and async wrappers.
-pub mod reporting;
-/// `watch` subcommand: TUI over the job journal (history + live tail).
-pub mod watch;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

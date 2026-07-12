@@ -14,7 +14,7 @@ use super::log_uploader::StreamerConfig;
 use super::setup_step::report_setup_step;
 use super::step_reporter::StepCollector;
 use crate::Runner;
-use crate::reporting::live_log::LiveLogLine;
+use wire::reporting::live_log::LiveLogLine;
 use shared::SecretMasker;
 use shared::{AgentJobRequestMessage, Conclusion, ListenerEvent, RunnerEvent};
 
@@ -32,7 +32,7 @@ pub(super) async fn execute_with_renewal(
   job_msg: &AgentJobRequestMessage,
   live_log_tx: Option<tokio::sync::mpsc::Sender<LiveLogLine>>,
   job_cancel: &CancellationToken,
-) -> (Conclusion, Vec<crate::reporting::StepResult>) {
+) -> (Conclusion, Vec<wire::reporting::StepResult>) {
   let JobRoute {
     run_service_url,
     rs_token,

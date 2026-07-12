@@ -160,7 +160,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 /// tracing init so log output never corrupts the alternate screen.
 fn cmd_watch(args: WatchArgs) -> Result<(), Box<dyn std::error::Error>> {
   let config_path = args.config.unwrap_or_else(default_config_path);
-  toolu_runner::watch::run_watch(&config_path)?;
+  observability::watch::run_watch(&config_path)?;
   Ok(())
 }
 
@@ -340,14 +340,14 @@ struct RegisterPersist<'a> {
 /// POST `generate-jitconfig` for `p` and return the minted registration.
 async fn mint_jit(
   p: &RegisterPersist<'_>,
-) -> Result<toolu_runner::net::JitRegistration, RunnerError> {
+) -> Result<wire::net::JitRegistration, RunnerError> {
   let client = reqwest::Client::builder()
     .timeout(Duration::from_secs(30))
     .build()
     .map_err(|e| RunnerError::Network(format!("HTTP client: {e}")))?;
-  toolu_runner::net::register_jit(
+  wire::net::register_jit(
     &client,
-    &toolu_runner::net::RegisterParams {
+    &wire::net::RegisterParams {
       url: p.url,
       runner_token: p.token,
       name: p.runner_name,
@@ -418,7 +418,7 @@ fn roll_back_config(path: &std::path::Path, previous: Option<&[u8]>) {
 fn build_registration_config(
   p: &RegisterPersist<'_>,
   client_id: &str,
-  registration: toolu_runner::net::JitRegistration,
+  registration: wire::net::JitRegistration,
 ) -> RunnerRegistrationConfig {
   let runtime = RuntimeConfig {
     jit_config: registration.encoded_jit_config,

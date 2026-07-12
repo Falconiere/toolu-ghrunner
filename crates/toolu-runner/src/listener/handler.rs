@@ -4,7 +4,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use super::job_lifecycle;
-use crate::net;
+use wire::net;
 use protocol::JitConfig;
 use protocol::auth::parse_rsa_private_key;
 use shared::SecretMasker;
@@ -95,9 +95,9 @@ impl GitHubListener {
     // receiver were never read the bounded channel would fill and wedge the
     // job — the writer keeps draining even after a journal I/O failure. The
     // task ends when all `tx` clones drop (channel closes).
-    let journal = crate::journal::writer::spawn(
+    let journal = observability::journal::writer::spawn(
       rx,
-      crate::journal::writer::jobs_dir_for(&self.config.data_dir),
+      observability::journal::writer::jobs_dir_for(&self.config.data_dir),
       Arc::clone(&self.masker),
     );
     let mut ctx = self.build_session_ctx(cancel, tx).await?;
