@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Duration, Utc};
-use toolu_runner::execution::cache::cas::{
+use cache::cas::{
   CacheGc, CacheIndex, CasStore, ChunkId, GcReport, IndexEntry, LeaseSet, Manifest,
 };
 

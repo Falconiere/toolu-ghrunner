@@ -19,7 +19,7 @@
 
 use std::time::Duration;
 
-use toolu_runner::config::{load_config, save_config};
+use config::config::{load_config, save_config};
 
 #[path = "helpers/live_harness.rs"]
 mod harness;

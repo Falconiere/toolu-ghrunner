@@ -15,14 +15,14 @@ use shared::RunnerError;
 use shared::startup;
 use shared::{MaskerRedactor, SecretMasker};
 use tokio_util::sync::CancellationToken;
-use toolu_runner::auth_store::{self, AuthStore};
-use toolu_runner::config::{
+use config::auth_store::{self, AuthStore};
+use config::config::{
   CacheSection, CredentialsFile, RunnerRegistrationConfig, RuntimeConfig, ServicesSection,
   ShadowSection, WorkspaceSection, load_config as load_reg_config, load_credentials,
   resolve_data_dir, resolve_work_dir, save_config as save_reg_config, save_credentials,
 };
 use toolu_runner::listener::GitHubListener;
-use toolu_runner::lockfile;
+use config::lockfile;
 
 mod login_cmd;
 mod status_cmd;

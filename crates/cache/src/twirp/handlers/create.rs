@@ -16,7 +16,7 @@ use uuid::Uuid;
 use super::super::TwirpState;
 use super::super::auth::{check_bearer, host_from, unauthorized};
 use super::super::types::{CreateRequest, CreateResponse};
-use crate::execution::cache::trust::write_allowed;
+use crate::trust::write_allowed;
 
 /// Handle `POST .../CreateCacheEntry`: deny, duplicate, or mint an upload URL.
 pub async fn create_cache_entry(

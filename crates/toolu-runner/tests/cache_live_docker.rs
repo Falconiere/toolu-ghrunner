@@ -21,11 +21,11 @@
 use std::path::Path;
 use std::process::Command as StdCommand;
 
-use toolu_runner::execution::cache::cas::{CacheIndex, CasStore, LeaseSet};
-use toolu_runner::execution::cache::scope::CacheScopes;
-use toolu_runner::execution::cache::server::CacheServer;
-use toolu_runner::execution::cache::trust::TrustLevel;
-use toolu_runner::execution::cache::{AcceleratedInputs, BlobRegistry, accelerated_app};
+use cache::cas::{CacheIndex, CasStore, LeaseSet};
+use cache::scope::CacheScopes;
+use cache::server::CacheServer;
+use cache::trust::TrustLevel;
+use cache::{AcceleratedInputs, BlobRegistry, accelerated_app};
 
 /// A dummy JWT for buildx's `token=`. BuildKit's `go-actions-cache` client
 /// parses the token as a JWT (`ParseUnverified`) to read the `ac` scope claim

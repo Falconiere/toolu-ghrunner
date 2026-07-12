@@ -10,7 +10,7 @@
 use std::path::{Path, PathBuf};
 
 use shared::paths::expand_tilde;
-use toolu_runner::config::{
+use config::config::{
   CacheSection, CredentialsFile, RunnerRegistrationConfig, RuntimeConfig, ServicesSection,
   ShadowSection, WorkspaceSection, jit_endpoint_for_host, load_config as load_reg_config,
   load_credentials, resolve_data_dir, resolve_work_dir, save_config as save_reg_config,

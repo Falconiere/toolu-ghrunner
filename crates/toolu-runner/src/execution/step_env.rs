@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use shared::{ActionStep, RunnerError, TemplateToken};
 
 use super::context::ExecutionContext;
-use super::expressions::types::ExprValue;
+use expressions::types::ExprValue;
 use super::file_commands::FileCommandManager;
 
 /// Extract step-level environment from the `environment` token.

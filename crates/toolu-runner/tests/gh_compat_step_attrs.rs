@@ -177,7 +177,7 @@ fn step_logs(events: &[RunnerEvent], step_id: &str) -> Vec<String> {
 
 /// Read `steps.<id>.<field>` from the live expression context.
 fn steps_field(ctx: &ExecutionContext, id: &str, field: &str) -> Option<String> {
-  use toolu_runner::execution::expressions::types::ExprValue;
+  use expressions::types::ExprValue;
   let expr = format!("steps.{id}.{field}");
   if let Ok(ExprValue::String(s)) = ctx.evaluate_expression(&expr) {
     Some(s)

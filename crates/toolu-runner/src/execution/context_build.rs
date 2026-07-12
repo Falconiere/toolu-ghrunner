@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use super::expressions::types::ExprValue;
+use expressions::types::ExprValue;
 
 /// True when step-debug logging is requested via `RUNNER_DEBUG` /
 /// `ACTIONS_STEP_DEBUG` (`runner.debug == "1"`).

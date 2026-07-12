@@ -1,6 +1,6 @@
 //! CLI-login token persistence.
 //!
-//! The `login` flow (device-flow OAuth in [`crate::net::device_auth`])
+//! The `login` flow (device-flow OAuth in `toolu-runner`'s `net::device_auth`)
 //! yields a bearer token that later commands reuse. This module hides
 //! *where* that token lives: the OS keyring when one is available, or a
 //! per-host `0600` JSON file under `data_dir` when it is not.

@@ -22,7 +22,7 @@ use std::time::Duration;
 // `config.toml` / `credentials.json`, so this test deserializes them
 // with the same lib types `register` writes them with. All
 // process-level interaction still goes through `LiveHarness`.
-use toolu_runner::config::{
+use config::config::{
   CredentialsFile, RunnerRegistrationConfig, load_config as load_reg_config, load_credentials,
 };
 use toolu_runner::journal::{JournalEvent, JournalLine};
@@ -383,7 +383,7 @@ async fn journal_records_live_job_masked() {
 fn read_single_live_journal(harness: &LiveHarness) -> String {
   let cfg = load_reg_config(&harness.config_dir.path().join("config.toml")).expect("load config");
   let data_dir =
-    toolu_runner::config::resolve_data_dir(&cfg.runtime.data_dir).expect("resolve data dir");
+    config::config::resolve_data_dir(&cfg.runtime.data_dir).expect("resolve data dir");
   let journals: Vec<_> = std::fs::read_dir(data_dir.join("_diag").join("jobs"))
     .expect("jobs dir exists after a live run")
     .filter_map(Result::ok)

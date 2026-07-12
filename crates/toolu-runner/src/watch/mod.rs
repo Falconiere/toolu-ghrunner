@@ -63,9 +63,9 @@ pub fn run_watch(config_path: &Path) -> Result<(), RunnerError> {
 
 /// Runner display name + data dir, with the unregistered fallback.
 fn identity_for(config_path: &Path) -> (String, PathBuf) {
-  match crate::config::load_config(config_path) {
+  match config::config::load_config(config_path) {
     Ok(cfg) => {
-      let data_dir = crate::config::resolve_data_dir(&cfg.runtime.data_dir)
+      let data_dir = config::config::resolve_data_dir(&cfg.runtime.data_dir)
         .unwrap_or_else(|_| shared::paths::expand_tilde(Path::new("~/.toolu-runner")));
       (cfg.runner_name, data_dir)
     },
@@ -222,8 +222,8 @@ fn read_lock_capped(lock_path: &Path) -> std::io::Result<String> {
 /// Header line describing the `.lock` holder.
 fn lock_line(lock_path: &Path) -> String {
   match read_lock_capped(lock_path) {
-    Ok(body) => match serde_json::from_str::<crate::lockfile::LockBody>(&body) {
-      Ok(lock) if crate::lockfile::is_pid_alive(lock.pid) => {
+    Ok(body) => match serde_json::from_str::<config::lockfile::LockBody>(&body) {
+      Ok(lock) if config::lockfile::is_pid_alive(lock.pid) => {
         format!("running (pid {}, since {})", lock.pid, lock.started_at)
       },
       Ok(lock) => format!("stale lock (pid {} dead)", lock.pid),
@@ -244,7 +244,7 @@ fn lock_line(lock_path: &Path) -> String {
 #[cfg(unix)]
 pub fn send_cancel(lock_path: &Path) -> Result<u32, String> {
   let body = read_lock_capped(lock_path).map_err(|e| format!("no lock file: {e}"))?;
-  let lock: crate::lockfile::LockBody =
+  let lock: config::lockfile::LockBody =
     serde_json::from_str(&body).map_err(|e| format!("lock body unreadable: {e}"))?;
   // Guard against signalling an unrelated PID from a tampered or stale
   // (PID-recycled) lock file: the holder must actually be a toolu-runner.

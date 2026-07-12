@@ -15,7 +15,7 @@ use shared::RunnerError;
 use super::super::TwirpState;
 use super::super::auth::{check_bearer, host_from, unauthorized};
 use super::super::types::{DownloadRequest, DownloadResponse};
-use crate::execution::cache::cas::{CasStore, Manifest};
+use crate::cas::{CasStore, Manifest};
 
 /// Handle `POST .../GetCacheEntryDownloadURL`: a signed URL or a bare miss.
 pub async fn get_cache_entry_download_url(

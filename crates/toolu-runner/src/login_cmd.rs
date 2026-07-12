@@ -3,14 +3,14 @@
 //! Split out of `main.rs` to keep the CLI entrypoint under the crate's
 //! per-file complexity limit. [`cmd_login`] runs the device flow
 //! ([`crate`]'s [`toolu_runner::net::device_auth`]) and persists the token
-//! via [`toolu_runner::auth_store::AuthStore`]; [`cmd_logout`] deletes it.
+//! via [`config::auth_store::AuthStore`]; [`cmd_logout`] deletes it.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use clap::Args;
 use shared::RunnerError;
-use toolu_runner::auth_store::{AuthStore, StoredToken};
+use config::auth_store::{AuthStore, StoredToken};
 use toolu_runner::net;
 
 use crate::{DEVICE_CLIENT_ID, default_config_path};

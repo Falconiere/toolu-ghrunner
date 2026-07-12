@@ -2,7 +2,7 @@
 //! `axum::Router` served over a real TCP socket, driven with `reqwest`.
 
 use axum::routing::get;
-use toolu_runner::execution::cache::server::CacheServer;
+use cache::server::CacheServer;
 
 /// Boxed error alias for test helpers that use `?`.
 type TestResult<T> = Result<T, Box<dyn std::error::Error>>;

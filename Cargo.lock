@@ -319,6 +319,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
 
 [[package]]
+name = "cache"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "base64",
+ "blake3",
+ "chrono",
+ "fastcdc",
+ "futures-util",
+ "http",
+ "opendal",
+ "quick-xml 0.37.5",
+ "rand 0.8.6",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "shared",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "cassowary"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -446,6 +470,21 @@ dependencies = [
  "rustversion",
  "ryu",
  "static_assertions",
+]
+
+[[package]]
+name = "config"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "fs2",
+ "keyring",
+ "serde",
+ "serde_json",
+ "shared",
+ "sysinfo",
+ "toml",
+ "tracing",
 ]
 
 [[package]]
@@ -737,6 +776,16 @@ checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "expressions"
+version = "0.1.0"
+dependencies = [
+ "glob",
+ "serde_json",
+ "sha2",
+ "shared",
 ]
 
 [[package]]
@@ -3037,10 +3086,13 @@ dependencies = [
  "base64",
  "blake3",
  "bollard",
+ "cache",
  "cbc",
  "chrono",
  "clap",
+ "config",
  "crossterm",
+ "expressions",
  "fastcdc",
  "fastrand",
  "filetime",

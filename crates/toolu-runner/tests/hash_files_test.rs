@@ -19,8 +19,8 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::path::Path;
 
-use toolu_runner::execution::expressions::evaluator::{self, EvalContext, JobStatus};
-use toolu_runner::execution::expressions::types::ExprValue;
+use expressions::evaluator::{self, EvalContext, JobStatus};
+use expressions::types::ExprValue;
 
 type TestResult = Result<(), Box<dyn Error>>;
 

@@ -7,12 +7,12 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use toolu_runner::execution::cache::blob::BlobRegistry;
-use toolu_runner::execution::cache::cas::{CacheIndex, CasStore, LeaseSet};
-use toolu_runner::execution::cache::scope::CacheScopes;
-use toolu_runner::execution::cache::server::CacheServer;
-use toolu_runner::execution::cache::trust::TrustLevel;
-use toolu_runner::execution::cache::twirp::{TwirpState, cache_router};
+use cache::blob::BlobRegistry;
+use cache::cas::{CacheIndex, CasStore, LeaseSet};
+use cache::scope::CacheScopes;
+use cache::server::CacheServer;
+use cache::trust::TrustLevel;
+use cache::twirp::{TwirpState, cache_router};
 
 /// Boxed error alias so test helpers can use `?`.
 type TestResult<T> = Result<T, Box<dyn std::error::Error>>;

@@ -16,7 +16,7 @@ use shared::RunnerError;
 use super::super::TwirpState;
 use super::super::auth::{check_bearer, unauthorized};
 use super::super::types::{FinalizeRequest, FinalizeResponse};
-use crate::execution::cache::cas::{IndexEntry, entry_id_for};
+use crate::cas::{IndexEntry, entry_id_for};
 
 /// Handle `POST .../FinalizeCacheEntryUpload`: ingest + index, or `ok:false`.
 pub async fn finalize_cache_entry_upload(

@@ -3,8 +3,8 @@
 //! Split out of `main.rs` to keep the CLI entrypoint under the crate's
 //! per-file complexity limit. Reads only local files — no network.
 
-use toolu_runner::auth_store::AuthStore;
-use toolu_runner::config::load_config as load_reg_config;
+use config::auth_store::AuthStore;
+use config::config::load_config as load_reg_config;
 
 use crate::{StatusArgs, credentials_path_for, default_config_path};
 

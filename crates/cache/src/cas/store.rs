@@ -9,7 +9,7 @@ use shared::RunnerError;
 use super::chunk_io;
 use super::chunker;
 use super::manifest::{ChunkId, Manifest};
-use crate::execution::cache::tier::{BlobKind, L2Tier};
+use crate::tier::{BlobKind, L2Tier};
 
 /// One ranged read step: chunk id, bytes to skip within it, bytes to take.
 type ReadStep = (ChunkId, u64, u64);
