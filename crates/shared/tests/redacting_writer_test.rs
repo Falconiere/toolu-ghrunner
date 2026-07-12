@@ -1,7 +1,7 @@
 //! Restored unit coverage for `shared::startup::RedactingWriter`, the
-//! line-buffered secret redactor. Kept in `tests/` (the repo forbids inline
-//! `#[cfg(test)]`); exercises the complete-line and split-across-writes paths
-//! so a secret is masked whether or not it lands in a single `write`.
+//! line-buffered secret redactor. An integration test against the crate's
+//! public API; exercises the complete-line and split-across-writes paths so a
+//! secret is masked whether or not it lands in a single `write`.
 
 use std::io::Write;
 use std::sync::Arc;

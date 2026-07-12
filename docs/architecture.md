@@ -3,9 +3,10 @@
 **Date:** 2026-06-18 · **Status:** v0.1.0 · **Author:** toolu
 
 This document is the architectural reference for `toolu-runner`. It
-mirrors the layout of the source tree and explains how the ten
-workspace crates fit together, how the listener lifecycle runs, and
-how the runner behaves under failure.
+mirrors the layout of the source tree and explains how the nine
+library crates plus the `toolu-runner` binary (ten workspace members
+in total) fit together, how the listener lifecycle runs, and how the
+runner behaves under failure.
 
 For the design rationale, see
 [docs/toolu/specs/2026-06-18-toolu-runner-standalone-design.md](toolu/specs/2026-06-18-toolu-runner-standalone-design.md).
@@ -744,7 +745,7 @@ non-goal for v1 (logged + best-effort; no spec guarantee).
 | 12 | `remove` with no registration                                 | Exit 0 with "no registration found." |
 
 The full failure-mode coverage lives in
-`toolu-runner/tests/failure_modes_test.rs` (12 scenarios).
+`crates/toolu-runner/tests/failure_modes_test.rs` (12 scenarios).
 
 ## Open questions
 
