@@ -6,8 +6,8 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use chrono::DateTime;
 use cache::cas::{CacheIndex, ChunkId, IndexEntry, entry_id_for};
+use chrono::DateTime;
 
 /// Boxed error alias for test helpers that use `?`.
 type TestResult<T> = Result<T, Box<dyn std::error::Error>>;

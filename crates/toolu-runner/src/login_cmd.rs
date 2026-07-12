@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use clap::Args;
-use shared::RunnerError;
 use config::auth_store::{AuthStore, StoredToken};
+use shared::RunnerError;
 use wire::net;
 
 use crate::{DEVICE_CLIENT_ID, default_config_path};

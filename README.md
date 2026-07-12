@@ -248,25 +248,26 @@ already is one; only manual `buildx` invocations need to supply a JWT.
 ## vs. `actions/runner`
 
 GitHub's runner is ~30K lines of C#. `toolu-runner` reimplements the JIT
-listener subset in Rust, with a strict `sync protocol` → `async net`
+listener subset in Rust, with a strict `sync protocol` → `async wire`
 boundary that keeps the crypto and wire-format code testable without a
 clock, a socket, or tokio.
 
 | Subsystem | `actions/runner` | `toolu-runner` |
 |---|---|---|
 | JIT config parse + RSA + JWT | C# | `protocol::auth` *(sync, no I/O)* |
-| Token exchange / session | C# | `toolu-runner::net` |
+| Token exchange / session | C# | `wire::net` |
 | Message poll loop | C# | `listener::job_lifecycle` |
-| Run service (acquire/renew/complete) | C# | `reporting::run_service` |
-| Results service (Twirp) | C# | `reporting::results_service` |
-| Expression engine (`${{ }}`) | C# | `execution::expressions` |
+| Run service (acquire/renew/complete) | C# | `wire::reporting::run_service` |
+| Results service (Twirp) | C# | `wire::reporting::results_service` |
+| Expression engine (`${{ }}`) | C# | `expressions` *(own crate)* |
 | Step handlers | C# | `execution::handlers` |
-| Artifacts / cache / OIDC | C# | `execution::{artifacts,cache,oidc}` |
-| Secret masking | C# | `execution::secret_masker` + tracing layer |
-| Docker | C# | `docker::client` *(bollard)* |
-| Node.js auto-download | C# | `node::runtime` |
-| Live job TUI | — | **`toolu-runner watch`** |
-| Plugin system | — | **`plugin::RunnerPlugin`** |
+| Artifacts / OIDC | C# | `execution::{artifacts,oidc}` |
+| Content-addressed cache | C# | `cache` *(own crate)* |
+| Secret masking | C# | `shared::SecretMasker` + tracing layer |
+| Docker | C# | `execution::docker::client` *(bollard)* |
+| Node.js auto-download | C# | `execution::node::runtime` |
+| Live job TUI | — | **`toolu-runner watch`** *(`observability::watch`)* |
+| Plugin system | — | **`execution::plugin::RunnerPlugin`** |
 
 **Deliberately not ported:** OpenTelemetry, and any coupling to the
 `yamless` orchestrator this code was extracted from.
@@ -408,14 +409,28 @@ TOOLU_RUNNER_LIVE_TOKEN=<ghs_...> \
 
 ### Workspace
 
-Three crates, one direction of dependency:
+Ten layered crates under `crates/`, acyclic dependency graph:
 
-- **`shared`** — config, errors, events, job-message types, tracing init.
-  Sync, I/O-free.
 - **`protocol`** — JIT config, RSA/JWT, sessions, message decryption.
   Sync, I/O-free, **network-free** (no `reqwest`, no `tokio` — enforced
-  by its `Cargo.toml`).
-- **`toolu-runner`** — the lib + bin. Owns every socket, every `.await`.
+  by its `Cargo.toml`). No internal deps.
+- **`shared`** — config, errors, events, job-message types, tracing
+  init, `SecretMasker`, platform labels. Sync, I/O-free. No internal deps.
+- **`config`** — registration config (TOML/JSON), the single-job file
+  lock, and the login-token store. → `shared`.
+- **`expressions`** — the `${{ }}` evaluator. → `shared`.
+- **`cache`** — content-addressed CI cache (CAS + Twirp/blob/v1
+  endpoints). → `shared`.
+- **`wire`** — async HTTP transport (`net/`) + Run/Results reporting
+  domain types (`reporting/`). → `shared`, `protocol`.
+- **`observability`** — per-job JSONL journal + the `watch` TUI. →
+  `shared`, `config`.
+- **`execution`** — the job execution engine + Docker/Node/plugin + the
+  `Runner`. → `shared`, `expressions`, `cache`.
+- **`listener`** — the GitHub JIT lifecycle. → `execution`, `wire`,
+  `observability`, `shared`, `protocol`.
+- **`toolu-runner`** — the CLI **bin** (`register` / `run` / `remove` /
+  `status` / `watch` / `login` / `logout`). → all of the above.
 
 [docs/architecture.md](docs/architecture.md) has the full design with
 sequence diagrams for register / run / cancel / reconnect.
@@ -426,7 +441,7 @@ PRs welcome. Before you open one:
 
 1. `./tools/check.sh all` passes.
 2. `cargo test --workspace` passes.
-3. Listener or reporting change? Add a test under `toolu-runner/tests/`.
+3. Listener or reporting change? Add a test under `crates/toolu-runner/tests/`.
 4. User-facing change? Update `README.md`, `docs/architecture.md`, and
    `CHANGELOG.md` in the same commit.
 

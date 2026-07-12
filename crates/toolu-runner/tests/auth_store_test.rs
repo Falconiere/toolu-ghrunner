@@ -8,8 +8,8 @@
 //! a real `tempfile` directory. The File variant is constructed directly
 //! so the suite never touches the OS keyring (hermetic on keyless CI).
 
-use tempfile::TempDir;
 use config::auth_store::{self, AuthStore, StoredToken};
+use tempfile::TempDir;
 
 /// Build a `StoredToken` for `host` carrying `access`. `scope`/`issued_at`
 /// are fixed literals — no field the tests assert on is left to chance.

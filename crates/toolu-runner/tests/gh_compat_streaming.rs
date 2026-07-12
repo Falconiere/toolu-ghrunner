@@ -17,13 +17,13 @@ use std::error::Error;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use execution::execution::context::ExecutionContext;
+use execution::execution::job_spec::JobSpec;
+use execution::execution::steps_runner::{JobRun, run_steps};
 use shared::SecretMasker;
 use shared::{ActionStep, AgentJobRequestMessage, LogStream, RunnerConfig, RunnerEvent};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use execution::execution::context::ExecutionContext;
-use execution::execution::job_spec::JobSpec;
-use execution::execution::steps_runner::{JobRun, run_steps};
 
 const JOB_MESSAGE: &str = include_str!("fixtures/job_message.json");
 

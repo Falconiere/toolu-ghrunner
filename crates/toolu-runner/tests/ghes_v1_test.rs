@@ -103,14 +103,9 @@ async fn post_timeline_record_sends_record_with_bearer_auth() {
 
   let client = reqwest::Client::new();
   let timeline_url = format!("{}/_apis/distributedtask/hubs/Actions/Plans", server.uri());
-  wire::net::v1::post_timeline_record(
-    &client,
-    &timeline_url,
-    "ghes-timeline-token",
-    &record,
-  )
-  .await
-  .expect("post timeline record");
+  wire::net::v1::post_timeline_record(&client, &timeline_url, "ghes-timeline-token", &record)
+    .await
+    .expect("post timeline record");
 }
 
 #[tokio::test]
@@ -157,10 +152,9 @@ async fn fetch_timeline_returns_protocol_error_on_404() {
 
   let client = reqwest::Client::new();
   let timeline_url = format!("{}/_apis/distributedtask/hubs/Actions/Plans", server.uri());
-  let err =
-    wire::net::v1::fetch_timeline(&client, &timeline_url, "ghes-token", "missing-id")
-      .await
-      .expect_err("404 should error");
+  let err = wire::net::v1::fetch_timeline(&client, &timeline_url, "ghes-token", "missing-id")
+    .await
+    .expect_err("404 should error");
   let msg = format!("{err}");
   assert!(msg.contains("404"), "expected status: {msg}");
   assert!(

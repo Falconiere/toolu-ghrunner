@@ -9,12 +9,12 @@
 
 use std::path::PathBuf;
 
-use serde_json::{Value, json};
 use cache::cas::{CacheIndex, CasStore, LeaseSet};
 use cache::scope::CacheScopes;
 use cache::server::CacheServer;
 use cache::trust::TrustLevel;
 use cache::v1::{V1Inputs, V1State, v1_router};
+use serde_json::{Value, json};
 
 type TestResult<T> = Result<T, Box<dyn std::error::Error>>;
 

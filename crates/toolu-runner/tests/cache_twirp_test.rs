@@ -6,13 +6,13 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use serde_json::{Value, json};
 use cache::blob::BlobRegistry;
 use cache::cas::{CacheIndex, CasStore, LeaseSet};
 use cache::scope::CacheScopes;
 use cache::server::CacheServer;
 use cache::trust::TrustLevel;
 use cache::twirp::{TwirpState, cache_router};
+use serde_json::{Value, json};
 
 /// Boxed error alias so test helpers can use `?`.
 type TestResult<T> = Result<T, Box<dyn std::error::Error>>;

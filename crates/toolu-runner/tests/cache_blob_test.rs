@@ -6,10 +6,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use reqwest::header::HeaderMap;
 use cache::blob::{BlobRegistry, BlobState, blob_router, sweep_staging};
 use cache::cas::{CasStore, LeaseSet};
 use cache::server::CacheServer;
+use reqwest::header::HeaderMap;
 
 /// Boxed error alias for test helpers that use `?`.
 type TestResult<T> = Result<T, Box<dyn std::error::Error>>;

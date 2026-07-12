@@ -4,11 +4,11 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use super::job_lifecycle;
-use wire::net;
 use protocol::JitConfig;
 use protocol::auth::parse_rsa_private_key;
 use shared::SecretMasker;
 use shared::{ListenerEvent, RunnerConfig, RunnerError};
+use wire::net;
 
 /// Shared state threaded through the listener lifecycle after authentication.
 pub(crate) struct SessionCtx {

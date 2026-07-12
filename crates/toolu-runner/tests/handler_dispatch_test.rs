@@ -3,9 +3,9 @@
 //!
 //! Uses `ActionStep::with_ref_type` to construct real-shape step fixtures.
 
-use shared::ActionStep;
 use execution::execution::handlers::{HandlerKind, resolve_handler};
 use execution::plugin::{PluginRegistry, RunnerPlugin};
+use shared::ActionStep;
 
 /// A test plugin that names itself and always succeeds.
 struct EchoPlugin(&'static str);

@@ -22,13 +22,13 @@ use std::error::Error;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use execution::execution::context::ExecutionContext;
+use execution::execution::job_spec::JobSpec;
+use execution::execution::steps_runner::{JobRun, run_steps};
 use shared::SecretMasker;
 use shared::{ActionStep, LogStream, RunnerConfig, RunnerEvent};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use execution::execution::context::ExecutionContext;
-use execution::execution::job_spec::JobSpec;
-use execution::execution::steps_runner::{JobRun, run_steps};
 
 type TestResult<T> = Result<T, Box<dyn Error>>;
 

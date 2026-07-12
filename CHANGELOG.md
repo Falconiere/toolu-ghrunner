@@ -44,6 +44,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     (`[shadow] enabled`) recording would-hit / false-hit fingerprints —
     records only, never serves.
 
+### Changed
+
+- **Workspace reorganized into a 10-crate layered graph under `crates/`**
+  (`protocol` → `shared` → `config` / `expressions` / `cache` →
+  `wire` / `observability` → `execution` → `listener` → `toolu-runner`
+  bin). `toolu-runner` is now bin-only; the execution engine lives in
+  `execution` and the JIT lifecycle in `listener`. Behavior-preserving.
+
 ### Fixed
 
 - **`hashFiles()` now works.** The expression function was implemented but
