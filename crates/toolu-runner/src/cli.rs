@@ -131,10 +131,12 @@ pub(crate) struct RegisterArgs {
   /// Comma-separated runner labels (default: self-hosted,<os>,<arch>).
   #[arg(long, value_name = "LABELS", value_delimiter = ',')]
   pub(crate) labels: Vec<String>,
-  /// Numeric runner group ID (org registrations).
+  /// Numeric runner group ID for org registrations (default: the Default
+  /// group).
   ///
-  /// Group *names* are not supported by the JIT API: a non-numeric value
-  /// logs a warning and falls back to the Default group (ID 1).
+  /// Group *names* are not supported by the JIT API: any non-numeric value
+  /// other than "Default" logs a warning and falls back to the Default
+  /// group (ID 1).
   #[arg(long, default_value = "Default", value_name = "ID")]
   pub(crate) runner_group: String,
   /// Working directory for job workspaces (default: ~/.toolu-runner/_work).
