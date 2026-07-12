@@ -6,7 +6,7 @@
 
 use protocol::BrokerMessage;
 use protocol::messages::{JobCancelBody, MessageType};
-use toolu_runner::listener::message_route::{MessageRoute, route};
+use listener::message_route::{MessageRoute, route};
 
 #[test]
 fn job_cancellation_routes_to_cancel() {

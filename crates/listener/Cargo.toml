@@ -1,0 +1,39 @@
+[package]
+name = "listener"
+version.workspace = true
+edition.workspace = true
+publish = false
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# Internal
+execution = { path = "../execution" }
+wire = { path = "../wire" }
+observability = { path = "../observability" }
+shared = { path = "../shared" }
+protocol = { path = "../protocol" }
+
+# Async runtime
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+tokio-util = "0.7"
+
+# Web / HTTP
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-native-roots"] }
+
+# Serialization
+serde_json = "1"
+
+# Observability (no OTel in v1)
+tracing = "0.1"
+
+# Utilities
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
+flate2 = "1"
+
+# Jitter for poll backoff (never for secrets)
+fastrand = "2"
+
+[lints]
+workspace = true

@@ -18,8 +18,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use shared::SecretMasker;
-use toolu_runner::execution::shadow::ShadowObserver;
-use toolu_runner::execution::shadow::record::{ShadowRecord, StepKey};
+use execution::execution::shadow::ShadowObserver;
+use execution::execution::shadow::record::{ShadowRecord, StepKey};
 
 /// Build the `StepKey` for one observation.
 fn key<'a>(

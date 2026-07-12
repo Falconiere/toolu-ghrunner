@@ -10,7 +10,7 @@ use std::fmt::Debug;
 
 use cache::scope::scopes_for_job;
 use cache::trust::{TrustLevel, classify_trust};
-use toolu_runner::execution::context::ExecutionContext;
+use execution::execution::context::ExecutionContext;
 
 /// Build a `Vec<String>` protected-branch list from string literals.
 fn protected(branches: &[&str]) -> Vec<String> {

@@ -21,7 +21,7 @@ use config::config::{
   ShadowSection, WorkspaceSection, load_config as load_reg_config, load_credentials,
   resolve_data_dir, resolve_work_dir, save_config as save_reg_config, save_credentials,
 };
-use toolu_runner::listener::GitHubListener;
+use listener::GitHubListener;
 use config::lockfile;
 
 mod login_cmd;

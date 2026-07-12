@@ -1,4 +1,4 @@
-//! Smoke tests for `toolu_runner::listener::GitHubListener`.
+//! Smoke tests for `listener::GitHubListener`.
 //!
 //! Verifies the polling loop constructs and exchanges the right HTTP
 //! requests against a `wiremock` server simulating the GH message stream.
@@ -11,7 +11,7 @@ use serde_json::json;
 use shared::RunnerConfig;
 use shared::SecretMasker;
 use tokio_util::sync::CancellationToken;
-use toolu_runner::listener::GitHubListener;
+use listener::GitHubListener;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 

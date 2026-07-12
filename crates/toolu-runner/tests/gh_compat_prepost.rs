@@ -22,10 +22,10 @@ use shared::SecretMasker;
 use shared::{ActionStep, RunnerConfig, RunnerEvent};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use toolu_runner::execution::actions::downloader::{action_cache_dir, watermark_path};
-use toolu_runner::execution::context::ExecutionContext;
-use toolu_runner::execution::steps_runner::run_steps;
-use toolu_runner::node::runtime::{node_binary_path, node_cache_dir, node_version_for};
+use execution::execution::actions::downloader::{action_cache_dir, watermark_path};
+use execution::execution::context::ExecutionContext;
+use execution::execution::steps_runner::run_steps;
+use execution::node::runtime::{node_binary_path, node_cache_dir, node_version_for};
 
 type TestResult<T> = Result<T, Box<dyn Error>>;
 
@@ -188,13 +188,13 @@ async fn drive_with_cancel(
     events
   });
 
-  let spec = toolu_runner::execution::job_spec::JobSpec::default();
+  let spec = execution::execution::job_spec::JobSpec::default();
   let conclusion = run_steps(
     steps,
     &mut ctx,
     &tx,
     cancel,
-    &toolu_runner::execution::steps_runner::JobRun {
+    &execution::execution::steps_runner::JobRun {
       workspace,
       config,
       spec: &spec,
@@ -306,13 +306,13 @@ async fn drive_raw(
   let (tx, mut rx) = mpsc::channel::<RunnerEvent>(1024);
   let collector = tokio::spawn(async move { while rx.recv().await.is_some() {} });
 
-  let spec = toolu_runner::execution::job_spec::JobSpec::default();
+  let spec = execution::execution::job_spec::JobSpec::default();
   let result = run_steps(
     steps,
     &mut ctx,
     &tx,
     CancellationToken::new(),
-    &toolu_runner::execution::steps_runner::JobRun {
+    &execution::execution::steps_runner::JobRun {
       workspace,
       config,
       spec: &spec,

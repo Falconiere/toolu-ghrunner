@@ -779,6 +779,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "execution"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "blake3",
+ "bollard",
+ "cache",
+ "expressions",
+ "flate2",
+ "futures-util",
+ "hostname",
+ "jsonwebtoken",
+ "pretty_assertions",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "shared",
+ "tar",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "expressions"
 version = "0.1.0"
 dependencies = [
@@ -1537,6 +1566,26 @@ name = "linux-raw-sys"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
+
+[[package]]
+name = "listener"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "execution",
+ "fastrand",
+ "flate2",
+ "observability",
+ "protocol",
+ "reqwest",
+ "serde_json",
+ "shared",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+ "wire",
+]
 
 [[package]]
 name = "litemap"
@@ -3108,6 +3157,7 @@ dependencies = [
  "clap",
  "config",
  "crossterm",
+ "execution",
  "expressions",
  "fastcdc",
  "fastrand",
@@ -3119,6 +3169,7 @@ dependencies = [
  "hostname",
  "jsonwebtoken",
  "keyring",
+ "listener",
  "num-bigint-dig",
  "observability",
  "opendal",

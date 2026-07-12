@@ -12,7 +12,7 @@ use flate2::Compression;
 use flate2::write::GzEncoder;
 use tracing::warn;
 
-use crate::listener::helpers::ResultsCtx;
+use crate::helpers::ResultsCtx;
 use wire::reporting::results_service::{
   CreateJobLogsMetadataRequest, CreateStepLogsMetadataRequest, GetJobLogsSignedBlobUrlRequest,
   GetStepLogsSignedBlobUrlRequest, create_job_logs_metadata, create_step_logs_metadata,

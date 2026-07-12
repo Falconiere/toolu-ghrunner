@@ -19,7 +19,7 @@ use shared::SecretMasker;
 use shared::{ActionStep, AgentJobRequestMessage, RunnerConfig, RunnerEvent, ServicesMode};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use toolu_runner::execution::job_runner::run_job;
+use execution::execution::job_runner::run_job;
 
 const JOB_MESSAGE: &str = include_str!("fixtures/job_message.json");
 
