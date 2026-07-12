@@ -311,16 +311,17 @@ fn build_registration_config(
 
 /// Map a `--runner-group` string to a `generate-jitconfig` group ID.
 ///
-/// A numeric value is used directly; non-numeric (e.g. a group name)
-/// yields `None`, which [`net::register_jit`] defaults to `1` (Default).
-/// A non-empty, non-numeric value (a group *name*) is not supported by the
-/// JIT API and is WARNed about so the fallback to Default is not silent.
+/// A numeric value is used directly; non-numeric yields `None`, which
+/// [`net::register_jit`] defaults to `1` (Default). "Default" is the CLI's
+/// own default value and the canonical name of group 1, so it maps to
+/// `None` silently; any other group *name* is not supported by the JIT
+/// API and is WARNed about so the fallback to Default is not silent.
 fn runner_group_id(group: &str) -> Option<i64> {
   let trimmed = group.trim();
   if let Ok(id) = trimmed.parse::<i64>() {
     return Some(id);
   }
-  if !trimmed.is_empty() {
+  if !trimmed.is_empty() && !trimmed.eq_ignore_ascii_case("default") {
     tracing::warn!(
       runner_group = trimmed,
       "runner group names are not supported (a numeric group ID is required); \

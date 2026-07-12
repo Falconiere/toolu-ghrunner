@@ -139,6 +139,51 @@ fn config_flag_help_states_default_path_everywhere() {
 }
 
 #[test]
+fn run_without_config_reports_the_default_config_path() {
+  let home = tempfile::tempdir().expect("tempdir");
+  let output = Command::new(env!("CARGO_BIN_EXE_toolu-runner"))
+    .env("HOME", home.path())
+    .arg("run")
+    .output()
+    .expect("should run toolu-runner run");
+
+  assert!(!output.status.success(), "run without a config must fail");
+  let stderr = String::from_utf8_lossy(&output.stderr);
+  let expected = home.path().join(".toolu-runner/config.toml");
+  assert!(
+    stderr.contains(&*expected.to_string_lossy()),
+    "error should name the default config path {}: {stderr}",
+    expected.display()
+  );
+}
+
+#[test]
+fn run_reports_missing_credentials_next_to_config() {
+  let dir = tempfile::tempdir().expect("tempdir");
+  let config_path = dir.path().join("config.toml");
+  std::fs::write(&config_path, "").expect("write placeholder config");
+
+  let output = Command::new(env!("CARGO_BIN_EXE_toolu-runner"))
+    .env("HOME", dir.path())
+    .args(["run", "--config"])
+    .arg(&config_path)
+    .output()
+    .expect("should run toolu-runner run --config");
+
+  assert!(
+    !output.status.success(),
+    "run without credentials must fail"
+  );
+  let stderr = String::from_utf8_lossy(&output.stderr);
+  let expected = dir.path().join("credentials.json");
+  assert!(
+    stderr.contains(&*expected.to_string_lossy()),
+    "error should name the sibling credentials path {}: {stderr}",
+    expected.display()
+  );
+}
+
+#[test]
 fn version_prints_package_version() {
   let output = toolu_runner()
     .arg("--version")
