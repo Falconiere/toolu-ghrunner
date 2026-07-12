@@ -6,7 +6,7 @@
 use config::auth_store::AuthStore;
 use config::config::load_config as load_reg_config;
 
-use crate::{StatusArgs, credentials_path_for, default_config_path};
+use crate::cli::{StatusArgs, credentials_path_for, default_config_path};
 
 /// `status`: print the persisted registration, credential presence, and any
 /// stored device-flow login token for the registered host. No network.

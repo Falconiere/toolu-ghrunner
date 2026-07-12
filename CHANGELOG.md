@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Self-documenting CLI help.** Every command and flag now carries full
+  `--help` text: defaults stated everywhere (`--config`, `--work`, `--name`,
+  `--labels`), env fallbacks documented (`TOOLU_RUNNER_TOKEN`,
+  `TOOLU_RUNNER_CLIENT_ID`, `TOOLU_RUNNER_LOG` / `TOOLU_RUNNER_ALLOW_VERBOSE`),
+  a single-use JIT warning on `register`, and Examples/Environment sections on
+  the top-level help. Bare `toolu-runner` now prints the full help. The clap
+  surface moved to a new `cli.rs` (with a startup `debug_assert` self-check in
+  debug builds).
 - **Automated releases (`release-plz`).** A `release-plz.toml` +
   `.github/workflows/release-plz.yml` front half: a merge to `main` opens a
   version-bump + `CHANGELOG.md` release PR, and merging that PR pushes the

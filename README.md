@@ -84,10 +84,24 @@ installation token with `administration:write` on the repo/org) or set
 `TOOLU_RUNNER_TOKEN`. Resolution order for `register` is
 `--token` > `TOOLU_RUNNER_TOKEN` > stored login token. For GitHub Enterprise,
 register an OAuth App on that instance and run
-`toolu-runner login --hostname <ghes-host> --client-id <id>`.
+`toolu-runner login <ghes-host> --client-id <id>`.
 
 `status` prints local state — including login — without touching the network.
 `logout` deletes the stored token. `remove` unregisters. That's the whole CLI.
+
+### CLI flags reference
+
+| Flag | Command | What it does |
+|---|---|---|
+| `--work <DIR>` | `register` | Job workspace directory (default `~/.toolu-runner/_work`). |
+| `--runner-group <ID>` | `register` | Numeric runner group ID for org registrations. Group *names* aren't supported by the JIT API — a non-numeric value warns and falls back to the Default group. |
+| `--replace` | `register` | Overwrite an existing registration with the same name. |
+| `--once` | `run` | Exit after the first job — currently the default behavior, since a JIT registration is single-use. |
+| `--force` | `remove` | Cancel an in-flight run before unregistering. |
+
+Every command also takes `--config <FILE>` (default
+`~/.toolu-runner/config.toml`) and documents itself in full:
+`toolu-runner <command> --help`.
 
 ## Watch live jobs in your terminal
 
