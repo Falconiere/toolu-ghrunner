@@ -17,9 +17,9 @@
 
 use std::collections::HashMap;
 
-use serde_json::Value;
 use expressions::evaluator::{self, EvalContext, JobStatus};
 use expressions::types::ExprValue;
+use serde_json::Value;
 
 fn object_from(pairs: &[(&str, ExprValue)]) -> ExprValue {
   let mut map = HashMap::new();

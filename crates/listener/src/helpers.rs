@@ -6,10 +6,10 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use super::SessionCtx;
+use shared::{AgentJobRequestMessage, Conclusion, ListenerEvent, RunnerEvent};
 use wire::net::delete_session;
 use wire::reporting::ReportConclusion;
 use wire::reporting::run_service::{RenewJobRequest, renew_job};
-use shared::{AgentJobRequestMessage, Conclusion, ListenerEvent, RunnerEvent};
 
 /// Per-step metadata captured on `StepStarted` so later `StepCompleted` events
 /// can emit a full Step record (actions/runner C# always sends both

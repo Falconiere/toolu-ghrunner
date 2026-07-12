@@ -11,18 +11,18 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand};
-use shared::RunnerError;
-use shared::startup;
-use shared::{MaskerRedactor, SecretMasker};
-use tokio_util::sync::CancellationToken;
 use config::auth_store::{self, AuthStore};
 use config::config::{
   CacheSection, CredentialsFile, RunnerRegistrationConfig, RuntimeConfig, ServicesSection,
   ShadowSection, WorkspaceSection, load_config as load_reg_config, load_credentials,
   resolve_data_dir, resolve_work_dir, save_config as save_reg_config, save_credentials,
 };
-use listener::GitHubListener;
 use config::lockfile;
+use listener::GitHubListener;
+use shared::RunnerError;
+use shared::startup;
+use shared::{MaskerRedactor, SecretMasker};
+use tokio_util::sync::CancellationToken;
 
 mod login_cmd;
 mod status_cmd;
@@ -338,9 +338,7 @@ struct RegisterPersist<'a> {
 }
 
 /// POST `generate-jitconfig` for `p` and return the minted registration.
-async fn mint_jit(
-  p: &RegisterPersist<'_>,
-) -> Result<wire::net::JitRegistration, RunnerError> {
+async fn mint_jit(p: &RegisterPersist<'_>) -> Result<wire::net::JitRegistration, RunnerError> {
   let client = reqwest::Client::builder()
     .timeout(Duration::from_secs(30))
     .build()

@@ -17,9 +17,9 @@ use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use shared::SecretMasker;
 use execution::execution::shadow::ShadowObserver;
 use execution::execution::shadow::record::{ShadowRecord, StepKey};
+use shared::SecretMasker;
 
 /// Build the `StepKey` for one observation.
 fn key<'a>(

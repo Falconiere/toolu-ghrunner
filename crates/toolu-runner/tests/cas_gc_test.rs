@@ -5,10 +5,10 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Duration, Utc};
 use cache::cas::{
   CacheGc, CacheIndex, CasStore, ChunkId, GcReport, IndexEntry, LeaseSet, Manifest,
 };
+use chrono::{DateTime, Duration, Utc};
 
 /// Boxed error alias for test helpers that use `?`.
 type TestResult<T> = Result<T, Box<dyn std::error::Error>>;

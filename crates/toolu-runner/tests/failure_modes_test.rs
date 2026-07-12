@@ -22,8 +22,8 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use fs2::FileExt;
 use config::lockfile::{self, LockBody};
+use fs2::FileExt;
 
 fn toolu_runner() -> Command {
   let mut cmd = Command::new(env!("CARGO"));

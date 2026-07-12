@@ -14,9 +14,9 @@ use super::log_uploader::StreamerConfig;
 use super::setup_step::report_setup_step;
 use super::step_reporter::StepCollector;
 use execution::Runner;
-use wire::reporting::live_log::LiveLogLine;
 use shared::SecretMasker;
 use shared::{AgentJobRequestMessage, Conclusion, ListenerEvent, RunnerEvent};
+use wire::reporting::live_log::LiveLogLine;
 
 /// Per-job addressing for the Run / Results services: where to renew
 /// and report, with which token, under which plan.

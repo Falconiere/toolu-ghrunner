@@ -3,9 +3,9 @@
 **Date:** 2026-06-18 · **Status:** v0.1.0 · **Author:** toolu
 
 This document is the architectural reference for `toolu-runner`. It
-mirrors the layout of the source tree and explains how the three
-crates fit together, how the listener lifecycle runs, and how the
-runner behaves under failure.
+mirrors the layout of the source tree and explains how the ten
+workspace crates fit together, how the listener lifecycle runs, and
+how the runner behaves under failure.
 
 For the design rationale, see
 [docs/toolu/specs/2026-06-18-toolu-runner-standalone-design.md](toolu/specs/2026-06-18-toolu-runner-standalone-design.md).
@@ -14,56 +14,70 @@ For the design rationale, see
 
 ```
 toolu-ghrunner/                            workspace root
-├── shared/                                cross-cutting types + tracing init
-│   ├── config.rs                          RunnerConfig (data_dir, workspace_root, cgroup_path)
-│   ├── error.rs                           RunnerError enum
-│   ├── events.rs                          RunnerEvent, ListenerEvent, Conclusion
-│   ├── job_message/                       AgentJobRequestMessage + ~12 message types
-│   ├── paths.rs                           expand_tilde (HOME → USERPROFILE → fallback)
-│   ├── startup.rs                         tracing init + SecretRedactor
-│   └── tests/                             unit tests
-├── protocol/                              SYNC, NO I/O, NO NETWORK
-│   ├── auth.rs                            RSA key + JWT (PS256) crypto
-│   ├── jit_config.rs                      3-blob base64 envelope parser
-│   ├── messages.rs                        BrokerMessage + AES-256-CBC decrypt
-│   ├── session.rs                         CreateSessionRequest/Response builders
-│   ├── types.rs                           RunnerSettings, CredentialData, RsaKeyParams
-│   ├── v1/                                GHES V1 types + resolve_service_url
-│   └── tests/integration.rs               sync crypto tests against fixtures
-└── toolu-runner/                          lib + bin (the runner)
-    ├── src/main.rs                        clap CLI: register / run / remove / status / watch
-    ├── src/lib.rs                         Runner struct, execute_job
-    ├── src/config.rs                      TOML + JSON config load/save
-    ├── src/lockfile.rs                    single-job fs2 lock
-    ├── src/net/                           async I/O (reqwest)
-    ├── src/listener/                      JIT lifecycle
-    ├── src/reporting/                     domain types + async wrappers
-    ├── src/execution/                     job engine (handlers, expressions, workflow)
-    ├── src/docker/                        bollard wrapper
-    ├── src/node/                          Node.js runtime detection + cache
-    ├── src/plugin/                        RunnerPlugin trait + registry
-    ├── src/journal/                       per-job JSONL event journal (types, writer, reader)
-    ├── src/watch/                         `watch` TUI (state reducer, ratatui ui, input)
-    ├── src/types/                         RunnerConfig (duplicates shared::RunnerConfig for crate-local imports)
-    └── tests/                             5 integration tests (CLI, listener, failure modes, storage)
+└── crates/                                10 layered crates
+    ├── protocol/                          SYNC, NO I/O, NO NETWORK
+    │   ├── auth.rs                        RSA key + JWT (PS256) crypto
+    │   ├── jit_config.rs                  3-blob base64 envelope parser
+    │   ├── messages.rs                    BrokerMessage + AES-256-CBC decrypt
+    │   ├── session.rs                     CreateSessionRequest/Response builders
+    │   ├── types.rs                       RunnerSettings, CredentialData, RsaKeyParams
+    │   └── v1/                            GHES V1 types + resolve_service_url
+    ├── shared/                            cross-cutting types + tracing init (no deps)
+    │   ├── config.rs                      RunnerConfig, ServicesMode, CacheConfig, L2Config
+    │   ├── error.rs                       RunnerError enum
+    │   ├── events.rs                      RunnerEvent, ListenerEvent, Conclusion
+    │   ├── job_message/                   AgentJobRequestMessage + ~12 message types
+    │   ├── paths.rs                       expand_tilde + sanitize_job_id
+    │   ├── platform.rs                    runner_os / runner_arch
+    │   ├── secret_masker.rs               SecretMasker + MaskerRedactor
+    │   └── startup.rs                     tracing init + SecretRedactor
+    ├── config/                            registration config, lock, token store (→ shared)
+    │   ├── config.rs                      TOML + JSON config load/save, [services]/[cache]/…
+    │   ├── lockfile.rs                    single-job fs2 lock
+    │   └── auth_store.rs                  keyring / 0600-file login-token store
+    ├── expressions/                       the ${{ }} evaluator (→ shared)
+    ├── cache/                             content-addressed CI cache (→ shared)
+    ├── wire/                              async HTTP transport + reporting (→ shared, protocol)
+    │   ├── net/                           async I/O (reqwest): auth, session, messages, …, register
+    │   └── reporting/                     Run/Results domain types, live_log, feature_detection
+    ├── observability/                     journal + watch TUI (→ shared, config)
+    │   ├── journal/                       per-job JSONL event journal (types, writer, reader)
+    │   └── watch/                         `watch` TUI (state reducer, ratatui ui, input)
+    ├── execution/                         job execution engine (→ shared, expressions, cache)
+    │   ├── lib.rs                         Runner struct, execute_job
+    │   ├── execution/                     job engine (job_runner, handlers, workflow, artifacts, oidc, …)
+    │   ├── docker/                        bollard wrapper
+    │   ├── node/                          Node.js runtime detection + cache
+    │   └── plugin/                        RunnerPlugin trait + registry
+    ├── listener/                          GitHub JIT lifecycle (→ execution, wire, observability, …)
+    │   ├── handler.rs                     GitHubListener entry point
+    │   ├── job_lifecycle.rs               long-poll loop
+    │   ├── execution_loop.rs              run job + renewal + event forwarder
+    │   └── log_uploader/                  per-step + combined job-log upload
+    └── toolu-runner/                      bin only (the CLI)
+        ├── src/main.rs                    clap CLI: register / run / remove / status / watch / login / logout
+        ├── src/login_cmd.rs               login / logout (device flow)
+        ├── src/status_cmd.rs              status (no network)
+        └── tests/                         integration tests across the whole graph
 ```
 
-**Dependency direction (strict):**
+**Dependency direction (strict, acyclic):**
 
 ```
-shared  ←  protocol  ←  toolu-runner
-                 ↑           ↑
-                 └───────────┘
-                       ↑
-                 toolu-runner::net (HTTP transport)
-                 toolu-runner::listener (JIT lifecycle)
-                 toolu-runner::reporting (domain types)
-                 toolu-runner::execution (job engine)
+protocol ─────────────┐
+                      ├──► wire ──────┐
+shared ──┬────────────┘               │
+         ├──► config ──► observability ├──► listener ──► toolu-runner (bin)
+         ├──► expressions ──┐          │
+         └──► cache ────────┴► execution
 ```
 
-`protocol` never depends on `toolu-runner`. `shared` never depends
-on `protocol`. The arrow `protocol → toolu-runner::net` is one-way
-async I/O only; `protocol` itself is sync and free of network code.
+`protocol` and `shared` have no internal deps. `wire::net` owns all
+async HTTP I/O; the arrow `protocol → wire::net` is one-way (request
+types flow from `protocol`, async transport lives in `wire`).
+`protocol` itself is sync and free of network code. `toolu-runner` is
+a thin bin: it reaches `execution` only transitively through
+`listener`.
 
 ## crate: `shared`
 
@@ -89,9 +103,9 @@ runtime dependencies beyond `serde`, `chrono`, and `tracing`.
   (`data_dir/_diag/<service>.log`, daily-rotated). `EnvFilter` is
   built from `TOOLU_RUNNER_LOG` → `RUST_LOG` → `info`.
 - `startup::RedactingMakeWriter` / `RedactingWriter` — byte-level
-  line splitter + `SecretRedactor` hookup. The `SecretMasker` from
-  `toolu-runner` implements `SecretRedactor` so registered secrets
-  never reach the JSON log file unredacted.
+  line splitter + `SecretRedactor` hookup. `shared::SecretMasker`
+  (wrapped by `shared::MaskerRedactor`) implements `SecretRedactor`
+  so registered secrets never reach the JSON log file unredacted.
 
 ## crate: `protocol`
 
@@ -116,7 +130,7 @@ contain zero `reqwest`, `tokio`, `opendal`, `bollard`, `axum`.
   PID as the owner name. Pure function.
 - `messages::decrypt_message_body` — AES-256-CBC decrypt + PKCS#7
   padding strip + BOM strip. The async `poll_message` /
-  `acknowledge_message` live in `toolu-runner::net`.
+  `acknowledge_message` live in `wire::net`.
 - `types::*` — the three sub-blob shapes. `RunnerSettings` uses
   PascalCase (`AgentId`, `ServerUrlV2`), `RsaKeyParams` uses
   camelCase (`exponent`, `modulus`, `inverseQ`). The
@@ -125,19 +139,25 @@ contain zero `reqwest`, `tokio`, `opendal`, `bollard`, `axum`.
 - `v1::*` — GHES V1 protocol types (`ConnectionData`,
   `LocationServiceData`, `TimelineRecord`, etc.) plus the pure
   `resolve_service_url` helper. Async `V1ServiceDiscovery::discover`
-  is in `toolu-runner::net`.
+  is in `wire::net`.
 
 Tests against `protocol` need no clock, no HTTP client, no tokio —
 they construct a fake `RsaKeyParams` / `JitConfig`, call the parse /
 crypto functions, and assert on the bytes. The `tests/integration.rs`
 suite covers RSA + JWT + JIT-config round-trips.
 
-## crate: `toolu-runner`
+## crates: the runner engine + the `toolu-runner` bin
 
-The runner itself. Library + binary. Owns all async I/O, the
-listener lifecycle, the execution engine, and the CLI.
+Historically a single `toolu-runner` crate, now split across the
+layered graph above. `toolu-runner` itself is **bin-only** (the CLI:
+`main.rs` + `login_cmd.rs` + `status_cmd.rs`). The module descriptions
+that follow are grouped by their **current** crate: `net/` +
+`reporting/` live in `wire`; `listener/` in `listener`; `execution/` +
+`docker/` + `node/` + `plugin/` + the `Runner` (`lib.rs`) in
+`execution`; `journal/` + `watch/` in `observability`; `config.rs` +
+`lockfile.rs` + `auth_store.rs` in `config`.
 
-### `net/` — async network layer
+### `net/` — async network layer (crate `wire`)
 
 One-way dependency on `protocol`: takes request types from
 `protocol` and `reporting`, returns either `protocol` response types
@@ -171,7 +191,7 @@ through this module.
 The entry point is `handler::GitHubListener::run`. It wires:
 
 1. `parse_rsa_private_key` → DER bytes (`protocol::auth`).
-2. `authenticate` → `AccessToken` (`toolu-runner::net::auth`).
+2. `authenticate` → `AccessToken` (`wire::net::auth`).
 3. `build_session_request` + `create_session` → broker session
    (`protocol::session` + `net::session`).
 4. `poll_and_execute` (long-poll loop) (`listener::job_lifecycle`).
@@ -599,7 +619,7 @@ release-plz-pr       release-plz (release-pr): opens/updates a "release"
       │              rewrites CHANGELOG.md from the conventional commits
       │              since the last tag (feat → Added, fix → Fixed,
       │              docs → Documentation, refactor/perf → Changed; the
-      │              three crates move in lockstep via one version_group).
+      │              workspace crates move in lockstep via one version_group).
       ▼
 merge the release PR the bump + changelog land on main.
       │

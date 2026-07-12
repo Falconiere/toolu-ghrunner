@@ -7,12 +7,12 @@ use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use execution::execution::job_runner::run_job;
+use observability::journal::{JOURNAL_RETAIN, JournalEvent, JournalLine, writer};
 use shared::SecretMasker;
 use shared::{ActionStep, AgentJobRequestMessage, ListenerEvent, RunnerConfig, ServicesMode};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use execution::execution::job_runner::run_job;
-use observability::journal::{JOURNAL_RETAIN, JournalEvent, JournalLine, writer};
 
 const JOB_MESSAGE: &str = include_str!("fixtures/job_message.json");
 

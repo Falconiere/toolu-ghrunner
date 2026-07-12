@@ -21,10 +21,10 @@
 use std::error::Error;
 use std::sync::{Arc, Mutex};
 
-use shared::SecretMasker;
-use shared::{AgentJobRequestMessage, Conclusion, RunnerConfig};
 use execution::execution::context::ExecutionContext;
 use execution::execution::job_runner::build_context;
+use shared::SecretMasker;
+use shared::{AgentJobRequestMessage, Conclusion, RunnerConfig};
 
 const JOB_MESSAGE: &str = include_str!("fixtures/job_message.json");
 

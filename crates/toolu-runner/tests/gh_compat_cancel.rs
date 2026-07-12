@@ -4,9 +4,9 @@
 //! the pure routing decision sends a cancellation to `Cancel` (the in-flight
 //! token), while job-request and migration messages keep their behavior.
 
+use listener::message_route::{MessageRoute, route};
 use protocol::BrokerMessage;
 use protocol::messages::{JobCancelBody, MessageType};
-use listener::message_route::{MessageRoute, route};
 
 #[test]
 fn job_cancellation_routes_to_cancel() {

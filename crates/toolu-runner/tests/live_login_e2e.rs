@@ -19,8 +19,8 @@
 
 use std::process::{Output, Stdio};
 
-use tokio::process::Command;
 use config::auth_store::{AuthStore, StoredToken};
+use tokio::process::Command;
 
 #[path = "helpers/live_harness.rs"]
 mod harness;

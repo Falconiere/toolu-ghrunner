@@ -5,10 +5,10 @@ use shared::platform::{runner_arch, runner_os};
 use shared::{Conclusion, RunnerError, SecretMasker};
 
 use super::context_build::{build_strategy, default_strategy, runner_debug_on};
+use super::step_state::{StepState, build_steps_context};
 use expressions::evaluator::{EvalContext, JobStatus, evaluate};
 use expressions::template::interpolate;
 use expressions::types::ExprValue;
-use super::step_state::{StepState, build_steps_context};
 
 /// Mutable execution state for a job run: context objects, environment,
 /// step outputs/conclusions, and job-level status.

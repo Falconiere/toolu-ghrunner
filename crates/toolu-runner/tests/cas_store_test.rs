@@ -2,8 +2,8 @@
 
 use std::path::{Path, PathBuf};
 
-use futures_util::StreamExt;
 use cache::cas::{CasStore, Manifest};
+use futures_util::StreamExt;
 
 /// Boxed error alias for test helpers that use `?`.
 type TestResult<T> = Result<T, Box<dyn std::error::Error>>;

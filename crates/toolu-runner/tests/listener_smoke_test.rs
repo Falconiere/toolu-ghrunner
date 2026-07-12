@@ -7,11 +7,11 @@
 
 use std::sync::Arc;
 
+use listener::GitHubListener;
 use serde_json::json;
 use shared::RunnerConfig;
 use shared::SecretMasker;
 use tokio_util::sync::CancellationToken;
-use listener::GitHubListener;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 

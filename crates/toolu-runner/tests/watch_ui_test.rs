@@ -5,12 +5,12 @@
 use std::error::Error;
 use std::path::PathBuf;
 
-use ratatui::Terminal;
-use ratatui::backend::TestBackend;
 use observability::journal::JournalLine;
 use observability::journal::scan_jobs;
 use observability::watch::state::{App, OpenJob};
 use observability::watch::ui;
+use ratatui::Terminal;
+use ratatui::backend::TestBackend;
 
 const FIXTURE: &str = include_str!("fixtures/journal/canonical.jsonl");
 

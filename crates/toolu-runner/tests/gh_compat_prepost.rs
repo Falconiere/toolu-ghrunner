@@ -18,14 +18,14 @@ use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use shared::SecretMasker;
-use shared::{ActionStep, RunnerConfig, RunnerEvent};
-use tokio::sync::mpsc;
-use tokio_util::sync::CancellationToken;
 use execution::execution::actions::downloader::{action_cache_dir, watermark_path};
 use execution::execution::context::ExecutionContext;
 use execution::execution::steps_runner::run_steps;
 use execution::node::runtime::{node_binary_path, node_cache_dir, node_version_for};
+use shared::SecretMasker;
+use shared::{ActionStep, RunnerConfig, RunnerEvent};
+use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 
 type TestResult<T> = Result<T, Box<dyn Error>>;
 

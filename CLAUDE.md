@@ -5,10 +5,26 @@ no OTel.
 
 ## Crate Type
 
-- Library + Binary (`toolu-runner`, `toolu_runner` lib + `toolu-runner` bin).
-- Internal deps: `shared` (types + tracing init), `protocol` (sync
-  protocol types + crypto).
-- Workspace members: `shared`, `protocol`, `toolu-runner`.
+- Layered workspace of **10 crates under `crates/`**. `toolu-runner`
+  is now a **bin-only** crate (the CLI entrypoint: `main.rs` +
+  `login_cmd.rs` + `status_cmd.rs`). The execution **engine** lives in
+  `execution`; the GitHub **JIT lifecycle** lives in `listener`.
+- Workspace members (dependency order): `protocol`, `shared`,
+  `config`, `expressions`, `cache`, `wire`, `observability`,
+  `execution`, `listener`, `toolu-runner`.
+- Dependency graph (acyclic):
+  - `protocol` — no internal deps (sync crypto + protocol/v1 types).
+  - `shared` — no internal deps (cross-cutting types, tracing init,
+    `SecretMasker`, `sanitize_job_id`, `runner_os`/`runner_arch`).
+  - `config`, `expressions`, `cache` — each depend on `shared` only.
+  - `wire` — `shared`, `protocol`.
+  - `observability` — `shared`, `config`.
+  - `execution` — `shared`, `expressions`, `cache`.
+  - `listener` — `execution`, `wire`, `observability`, `shared`,
+    `protocol`.
+  - `toolu-runner` (bin) — `shared`, `protocol`, `config`, `wire`,
+    `observability`, `listener` at runtime (and, as dev-deps,
+    `execution` / `expressions` / `cache` for the integration tests).
 
 ## Crate-Specific Rules
 
@@ -23,10 +39,10 @@ no OTel.
   `sha1`, `sha2`, `aes`, `cbc`, `rsa`, `uuid` (dev-dep `rand`). `rsa`
   was added for message-body decryption (RSA-OAEP AES-key unwrap).
   Enforced by `protocol/Cargo.toml` (no `reqwest`, `tokio`, `opendal`,
-  `bollard`, `axum`). `toolu-runner::net` owns all async I/O.
-- **One-way `protocol` → `toolu-runner` boundary.** `protocol`
+  `bollard`, `axum`). `wire::net` owns all async I/O.
+- **One-way `protocol` → `wire` boundary.** `protocol`
   exposes `pub fn` builders and parsers; the async `pub async fn`
-  HTTP transport lives in `toolu-runner::net`. Tests against
+  HTTP transport lives in `wire::net`. Tests against
   `protocol` need no HTTP client, no clock, no tokio.
 - **Single-job concurrency.** `toolu-runner run` acquires an
   exclusive `fs2` file lock on `~/.toolu-runner/.lock` (body: JSON
@@ -61,12 +77,12 @@ no OTel.
   `ACTIONS_RESULTS_URL`, legacy v1 REST via `ACTIONS_CACHE_URL`) and
   serves them from local NVMe, while a selective reverse proxy forwards
   `ArtifactService` and everything else to real GitHub — the injected
-  `ACTIONS_RUNTIME_TOKEN` stays the real token. Wired in
-  `execution::service_endpoints`.
-- **Secret masking:** `execution::secret_masker::SecretMasker` is
-  registered as the tracing `SecretRedactor` so registered
-  `secrets.*` values (and their JSON-escaped variants) never reach
-  `_diag/runner.log` unredacted.
+  `ACTIONS_RUNTIME_TOKEN` stays the real token. Wired in the
+  `execution` crate's `service_endpoints` module.
+- **Secret masking:** `shared::SecretMasker` (wrapped by
+  `shared::MaskerRedactor`) is registered as the tracing
+  `SecretRedactor` so registered `secrets.*` values (and their
+  JSON-escaped variants) never reach `_diag/runner.log` unredacted.
 - **No daemon mode for `run`.** The CLI blocks until SIGINT / SIGTERM.
   Service files wrap it.
 - **No `build_tool_*`** — build-tool modules were cut in the port.
@@ -75,30 +91,7 @@ no OTel.
 
 ## Key Modules
 
-### `shared/` — cross-cutting types + tracing init
-
-- `config.rs` — `RunnerConfig` (data_dir, workspace_root, cgroup_path).
-- `error.rs` — `RunnerError` enum (Protocol, Auth, Network, Config,
-  StepExecution, ScriptHandler, Expression, Docker, Oidc, Artifact,
-  Cache, ReusableWorkflow, Reporting, WorkspaceInit, LockHeld, etc.).
-- `events.rs` — `RunnerEvent` (`JobStarted`, `StepStarted`, `Log`,
-  `StepCompleted`, `JobCompleted`, `Annotation`, `LogGroup`,
-  `StepSkipped`) + `ListenerEvent` (wraps `RunnerEvent` plus
-  `SessionCreated`, `JobAcquired`, `LockRenewed`, `ReportedStatus`).
-  `Conclusion` (Success / Failure / Cancelled / Skipped).
-- `job_message/` — `AgentJobRequestMessage`, `ActionStep`,
-  `ActionStepDefinitionReference`, `TaskOrchestrationPlanReference`,
-  `JobResources`, `JobEndpoint`, `JobAuthorization`, `VariableValue`,
-  `MaskHint`, `TemplateToken`, `WorkspaceOptions`,
-  `PipelineContextData`, `DictEntry`.
-- `paths.rs` — `expand_tilde` (HOME → USERPROFILE →
-  `/var/lib/toolu-runner`).
-- `startup.rs` — `init` / `init_with_redactor` (tracing init with
-  `RUST_LOG` / `TOOLU_RUNNER_LOG` EnvFilter), `SecretRedactor` trait,
-  `RedactingMakeWriter` / `RedactingWriter` (line-level secret
-  redaction), `.env` loader.
-
-### `protocol/` — sync, no I/O, no network
+### `protocol/` — sync, no I/O, no network (no deps)
 
 - `auth.rs` — `parse_rsa_private_key` (PKCS#1 DER from
   `.NET RSACryptoServiceProvider` params, computes CRT components),
@@ -122,42 +115,46 @@ no OTel.
   `ServiceDefinition`, `TimelineRecord` (GHES V1 protocol types).
   `resolve_service_url` (pure URL resolver).
 
-### `toolu-runner/` — lib + bin
+### `shared/` — cross-cutting types + tracing init (no deps)
 
-- `lib.rs` — `Runner` struct (config, `execute_job` returns an
-  `mpsc::Receiver<RunnerEvent>`).
-- `main.rs` — clap CLI: `login`, `logout`, `register`, `run`,
-  `remove`, `status`, `watch`.
-  `--config` defaults to `~/.toolu-runner/config.toml`. `login`
-  runs GitHub OAuth **device flow** (`net/device_auth`) and stores
-  the resulting token via `auth_store` (OS keyring, 0600-file
-  fallback); `logout` deletes it. The device-flow OAuth App
-  `client_id` is a baked-in `const DEVICE_CLIENT_ID` (placeholder
-  until the app is registered); non-`github.com` hosts require
-  `--client-id`. `register` validates `--url`, probes the JIT
-  endpoint with a 5s HEAD, computes the protocol version from the
-  host, and writes a placeholder config (live flow is step 10); its
-  `--token` is now **optional** — the bearer is resolved
-  `--token` > `TOOLU_RUNNER_TOKEN` env > stored login token
-  (`auth_store::resolve_bearer`). `run` loads the
-  config + credentials, acquires `.lock`, constructs
-  `GitHubListener::new(jit_config, …)`, wires SIGINT/SIGTERM to a
-  `CancellationToken`. `remove` writes `.pending_remove` if
-  `.lock` is held, otherwise deletes the persisted state (live
-  GH unregister call is step 10). `status` prints the config
-  **plus per-host login state** without network. `watch` opens the
-  journal TUI (no network, no tracing init — logs would corrupt the
-  alternate screen).
-- `login_cmd.rs` — `LoginArgs` / `LogoutArgs` + `cmd_login` /
-  `cmd_logout` handlers, browser-open helper, and data-dir
-  resolution (split out of `main.rs` for the 500-line ceiling).
-- `auth_store.rs` — GitHub token persistence. `AuthStore`
-  (`Keyring` via the `keyring` crate / `File(<data_dir>/token-<host>.json)`
-  0600 fallback), `StoredToken`, per-host `save`/`load`/`delete`,
-  pure `pick_bearer` (flag > env > stored) + `resolve_bearer`. Used
-  only for the `generate-jitconfig` bearer — never at runtime.
+- `config.rs` — `RunnerConfig` (data_dir, workspace_root, cgroup_path,
+  services_mode, service_bind, cache, workspace_gc_hours,
+  shadow_enabled) + `ServicesMode` (forwarder / offline / accelerated),
+  `CacheConfig`, `L2Config`.
+- `error.rs` — `RunnerError` enum (Protocol, Auth, Network, Config,
+  StepExecution, ScriptHandler, Expression, Docker, Oidc, Artifact,
+  Cache, ReusableWorkflow, Reporting, WorkspaceInit, LockHeld, etc.).
+- `events.rs` — `RunnerEvent` (`JobStarted`, `StepStarted`, `Log`,
+  `StepCompleted`, `JobCompleted`, `Annotation`, `LogGroup`,
+  `StepSkipped`) + `ListenerEvent` (wraps `RunnerEvent` plus
+  `SessionCreated`, `JobAcquired`, `LockRenewed`, `ReportedStatus`).
+  `Conclusion` (Success / Failure / Cancelled / Skipped).
+- `job_message/` — `AgentJobRequestMessage`, `ActionStep`,
+  `ActionStepDefinitionReference`, `TaskOrchestrationPlanReference`,
+  `JobResources`, `JobEndpoint`, `JobAuthorization`, `VariableValue`,
+  `MaskHint`, `TemplateToken`, `WorkspaceOptions`,
+  `PipelineContextData`, `DictEntry`.
+- `paths.rs` — `expand_tilde` (HOME → USERPROFILE →
+  `/var/lib/toolu-runner`) + `sanitize_job_id` (job id →
+  filesystem-safe file name; used by the journal).
+- `platform.rs` — `runner_os` / `runner_arch` (host OS/arch labels;
+  shared by `wire`, `listener`, and `execution::context_build`).
+- `secret_masker.rs` — `SecretMasker` (`add_secret` + per-line `mask`)
+  and `MaskerRedactor` (implements `startup::SecretRedactor`) so
+  registered `secrets.*` values never reach `_diag/runner.log`
+  unredacted.
+- `startup.rs` — `init` / `init_with_redactor` (tracing init with
+  `RUST_LOG` / `TOOLU_RUNNER_LOG` EnvFilter), `SecretRedactor` trait,
+  `RedactingMakeWriter` / `RedactingWriter` (line-level secret
+  redaction), `.env` loader.
+
+### `config/` — registration config, lock, token store (deps: shared)
+
 - `config.rs` — `RunnerRegistrationConfig`, `RuntimeConfig`,
-  `CredentialsFile`, `load_config` / `save_config` (TOML, 0600),
+  `CredentialsFile`, the `[services]` / `[cache]` / `[workspace]` /
+  `[shadow]` sections (`ServicesSection`, `CacheSection`,
+  `WorkspaceSection`, `ShadowSection`) + their `shared::RunnerConfig`
+  mappers, `load_config` / `save_config` (TOML, 0600),
   `load_credentials` / `save_credentials` (JSON, 0600),
   `jit_endpoint_for_host` (github.com → `pipelinesgh.azureedge.net`,
   any other host → `pipelines.<host>`), `resolve_data_dir`,
@@ -166,6 +163,32 @@ no OTel.
   config_path)` returns a `LockGuard`; `Drop` releases the OS
   advisory lock. Stale-lock recovery uses `is_pid_alive` (sysinfo)
   + mtime > 5 min.
+- `auth_store.rs` — GitHub token persistence. `AuthStore`
+  (`Keyring` via the `keyring` crate / `File(<data_dir>/token-<host>.json)`
+  0600 fallback), `StoredToken`, per-host `save`/`load`/`delete`,
+  pure `pick_bearer` (flag > env > stored) + `resolve_bearer`. Used
+  only for the `generate-jitconfig` bearer — never at runtime.
+
+### `expressions/` — the `${{ }}` evaluator (deps: shared)
+
+- The full `${{ }}` evaluator: `lexer`, `parser` (AST + precedence +
+  primary), `evaluator`, `template`, `functions` (builtins,
+  `hashFiles` — registered with the dispatcher; `glob_walk` + `hash`
+  back it — plus JSON convert), `context_data`, `types` (`ExprValue`).
+
+### `cache/` — content-addressed CI cache (deps: shared)
+
+- Content-addressed CI cache backing `ServicesMode::Accelerated`:
+  `cas/` (content-addressed store — `manifest`, `chunker`, `store`,
+  `chunk_io`, `index`, `gc`; FastCDC + BLAKE3), `twirp/` (v2
+  `CacheService` RPCs), `blob/` (Azure-blob-compatible endpoint),
+  `v1/` (legacy REST on the CAS), `tier/l2.rs` (S3 cold tier),
+  `server.rs`, `proxy.rs` (selective reverse proxy), `scope.rs` (read
+  ladder + write scope), `trust.rs` (branch-scoped writes),
+  `accelerated.rs`.
+
+### `wire/` — async HTTP transport + reporting domain types (deps: shared, protocol)
+
 - `net/` — async network layer. **One-way dependency on `protocol`**
   (request types from `protocol`, response types in `protocol` or
   `reporting`). `auth` (token exchange), `device_auth` (GitHub
@@ -177,21 +200,8 @@ no OTel.
   `update_workflow_steps`, `create_job_logs_metadata`,
   `create_step_logs_metadata`, signed blob URLs), `log_upload`
   (Azure append-blob: create / block / commit), `v1` (GHES
-  `connectionData` discovery, timeline record POST).
-- `listener/` — GitHub JIT lifecycle. `handler::GitHubListener` is
-  the entry point: parse JIT → authenticate (RSA → JWT → OAuth2) →
-  create session → `poll_and_execute`. `job_lifecycle::poll_and_execute`
-  owns the long-poll loop with exponential backoff (1s → 60s cap),
-  acquire_job, run_acquired_job, acknowledge_message, complete_job.
-  `execution_loop::execute_with_renewal` runs the job with a 60s
-  renewal task, an event forwarder that streams logs to the
-  Results Service, and a oneshot that captures the final conclusion.
-  `setup_step::report_setup_step` reports "Set up job" as step 1
-  (matches C# runner order). `step_reporter::StepCollector`
-  aggregates per-step results. `helpers::spawn_renewal` is the
-  background renewal task. `log_uploader/` owns the per-step log
-  streamer and the combined job-log upload. `helpers::cleanup_session`
-  deletes the broker session on exit.
+  `connectionData` discovery, timeline record POST), `register`
+  (the live JIT `generate-jitconfig` POST).
 - `reporting/` — domain types and async wrappers for the Run
   Service and Results Service. `run_service` (request/response
   shapes, `map_conclusion`), `results_service` (Twirp request
@@ -199,68 +209,14 @@ no OTel.
   detection), `live_log` (WebSocket streamer for real-time logs to
   the GH UI), `log_upload`, `results_types`, `types` (`Status`,
   `ReportConclusion`, `StepResult`, `Annotation`).
-- `execution/` — job execution engine. `job_runner::run_job` is the
-  single entry point. `steps_runner` runs the per-job step loop.
-  `handlers/` dispatches by `runs.using`: `script` (shell), `node`
-  / `node_exec` (Node.js actions, auto-downloaded), `docker`
-  (bollard), `composite` (composite actions), `resolve` (kind
-  detection). `actions/` resolves and downloads actions
-  (`resolver`, `downloader`, `manifest`). `expressions/` is the
-  full `${{ }}` evaluator: `lexer`, `parser` (AST + precedence +
-  primary), `evaluator`, `template`, `functions` (builtins,
-  `hashFiles` — now registered with the dispatcher, JSON convert),
-  `context_data`. `workflow/` parses
-  workflow YAML (`parser` with `jobs` / `triggers` / `raw_types`),
-  `matrix` (build matrix), `orchestrator` (job graph, plan),
-  `reusable` (reusable workflow resolution), `trigger`,
-  `job_graph`, `types`. `artifacts/` (upload / download via
-  Azure append-blob; `backend` + `service` with `handlers` /
-  `lifecycle`). `cache/` (content-addressed CI cache backing
-  `ServicesMode::Accelerated`): `cas/` (content-addressed store —
-  `manifest`, `chunker`, `store`, `chunk_io`, `index`, `gc`; FastCDC +
-  BLAKE3), `twirp/` (v2 `CacheService` RPCs), `blob/`
-  (Azure-blob-compatible endpoint), `v1/` (legacy REST on the CAS),
-  `tier/l2.rs` (S3 cold tier), `server.rs`, `proxy.rs` (selective
-  reverse proxy), `scope.rs` (read ladder + write scope), `trust.rs`
-  (branch-scoped writes), `accelerated.rs`. The old `backend/`,
-  `service/`, `key.rs` were removed. `oidc/` (OIDC token server +
-  claims). `secret_masker`
-  (`SecretMasker` with `add_secret` + per-line `mask`; implements
-  `shared::startup::SecretRedactor`). `context` (env, secrets,
-  masking), `composite_*` (composite action scaffolding),
-  `step_env` / `step_host` / `step_naming` / `step_state` (step
-  helpers), `action_exec` / `action_support` (action invocation
-  glue), `cgroup_join` (reserved), `command_parser`,
-  `depth_tracker`, `failure_category`,
-  `file_commands`, `service_auth` / `service_lifecycle`
-  (back OIDC/artifact/cache axum services). E0–E3 wired the live
-  job path: `command_dispatch` (stdout `::workflow-command::`
-  pipeline), `node_stage` / `post_drain` (pre/post step stages +
-  `STATE_`), `composite_uses` (local `./` + composite nested `uses:`),
-  `step_timeout` (`timeout-minutes` / `working-directory`), `job_spec`
-  / `job_hooks` (job `outputs:`, `defaults.run`, job hook env),
-  `context_build` (full `${{ }}` context), `service_endpoints`
-  (forwarder / offline / accelerated service-URL injection).
-  `workspace_gc.rs` prunes `workspace_root/<job_id>` older than
-  `gc_after_hours` (never the running job's). `shadow/`
-  (`fingerprint`, `record`) does off-by-default per-`run:`-step
-  workspace fingerprinting, appending masked `would_hit` / `false_hit`
-  records to `_diag/shadow/<job_id>.jsonl` — records only, never
-  serves. The live JIT register POST lives in `net/register.rs`
-  (`generate-jitconfig`).
-- `docker/` — bollard wrapper. `client` (Docker daemon), `services`
-  (service container lifecycle), `path_translator` (host ↔
-  container path mapping).
-- `node/` — Node.js runtime detection + caching. `runtime` (version
-  detection, download, cache at `data_dir/node/{version}`).
-- `plugin/` — `RunnerPlugin` trait + `PluginRegistry`. New
-  addition not in upstream `actions/runner`.
+
+### `observability/` — job journal + watch TUI (deps: shared, config)
+
 - `journal/` — per-job JSONL event journal, the local observability
   surface behind `watch`. `types` pins the on-disk line contract
   (v1: `{"v":1,"seq":N,"ts":"…","type":"<snake_case event>",…}`,
   decoupled from `shared::events` — internally-tagged serde enum
-  flattened into a version/seq/ts envelope). `writer` replaces the
-  old no-op `ListenerEvent` drain in `listener/handler.rs`: masks
+  flattened into a version/seq/ts envelope). `writer` masks
   every line through the job's `SecretMasker`, buffers pre-acquire
   events (cap 256), names the file `<UTC ts>-<job_id>.jsonl` under
   `data_dir/_diag/jobs/`, prunes to the newest 50, and NEVER fails
@@ -276,7 +232,100 @@ no OTel.
   Test fixture: `tests/fixtures/journal/canonical.jsonl`, captured
   from a real engine run via `JOURNAL_CAPTURE=1 cargo test -p
   toolu-runner --test journal_writer_test capture_canonical`.
-- `types/` — `RunnerConfig` (re-exported from `shared`).
+
+### `execution/` — job execution engine (deps: shared, expressions, cache)
+
+- `lib.rs` — `Runner` struct (config, `execute_job` returns an
+  `mpsc::Receiver<RunnerEvent>`).
+- `execution/` — the engine. `job_runner::run_job` is the single
+  entry point. `steps_runner` runs the per-job step loop. `handlers/`
+  dispatches by `runs.using`: `script` (shell), `node` / `node_exec`
+  (Node.js actions, auto-downloaded), `docker` (bollard), `composite`
+  (composite actions), `resolve` (kind detection). `actions/` resolves
+  and downloads actions (`resolver`, `downloader`, `manifest`).
+  `workflow/` parses workflow YAML (`parser` with `jobs` / `triggers`
+  / `raw_types`), `matrix` (build matrix), `orchestrator` (job graph,
+  plan), `reusable` (reusable workflow resolution), `trigger`,
+  `job_graph`, `types`. `artifacts/` (upload / download via
+  Azure append-blob; `backend` + `service` with `handlers` /
+  `lifecycle`). `oidc/` (OIDC token server + claims). `context` (env,
+  secrets, masking), `composite_*` (composite action scaffolding),
+  `step_env` / `step_host` / `step_naming` / `step_state` (step
+  helpers), `action_exec` / `action_support` (action invocation
+  glue), `cgroup_join` (reserved), `command_parser`, `depth_tracker`,
+  `file_commands`, `service_auth` / `service_lifecycle` (back
+  OIDC/artifact/cache axum services). E0–E3 wired the live job path:
+  `command_dispatch` (stdout `::workflow-command::` pipeline),
+  `node_stage` / `post_drain` (pre/post step stages + `STATE_`),
+  `composite_uses` (local `./` + composite nested `uses:`),
+  `step_timeout` (`timeout-minutes` / `working-directory`), `job_spec`
+  / `job_hooks` (job `outputs:`, `defaults.run`, job hook env),
+  `context_build` (full `${{ }}` context), `service_endpoints`
+  (forwarder / offline / accelerated service-URL injection).
+  `workspace_gc.rs` prunes `workspace_root/<job_id>` older than
+  `gc_after_hours` (never the running job's). `shadow/`
+  (`fingerprint`, `record`) does off-by-default per-`run:`-step
+  workspace fingerprinting, appending masked `would_hit` / `false_hit`
+  records to `_diag/shadow/<job_id>.jsonl` — records only, never
+  serves.
+- `docker/` — bollard wrapper. `client` (Docker daemon), `services`
+  (service container lifecycle), `path_translator` (host ↔
+  container path mapping).
+- `node/` — Node.js runtime detection + caching. `runtime` (version
+  detection, download, cache at `data_dir/node/{version}`).
+- `plugin/` — `RunnerPlugin` trait + `PluginRegistry`. New
+  addition not in upstream `actions/runner`.
+
+### `listener/` — GitHub JIT lifecycle (deps: execution, wire, observability, shared, protocol)
+
+- `handler::GitHubListener` is the entry point: parse JIT →
+  authenticate (RSA → JWT → OAuth2) → create session →
+  `poll_and_execute`. `job_lifecycle::poll_and_execute` owns the
+  long-poll loop with exponential backoff (1s → 60s cap), acquire_job,
+  run_acquired_job, acknowledge_message, complete_job. `message_route`
+  is the pure "what does the runner do with this broker message type"
+  decision (unit-testable without a live broker).
+  `execution_loop::execute_with_renewal` runs the job with a 60s
+  renewal task, an event forwarder that streams logs to the
+  Results Service, and a oneshot that captures the final conclusion.
+  `setup_step::report_setup_step` reports "Set up job" as step 1
+  (matches C# runner order). `step_reporter::StepCollector`
+  aggregates per-step results. `helpers::spawn_renewal` is the
+  background renewal task. `log_uploader/` owns the per-step log
+  streamer and the combined job-log upload. `helpers::cleanup_session`
+  deletes the broker session on exit. Listener events are drained to
+  the `observability::journal` writer (replacing the old no-op drain).
+
+### `toolu-runner/` — CLI bin (deps: shared, protocol, config, wire, observability, listener)
+
+- `main.rs` — clap CLI: `login`, `logout`, `register`, `run`,
+  `remove`, `status`, `watch`.
+  `--config` defaults to `~/.toolu-runner/config.toml`. `login`
+  runs GitHub OAuth **device flow** (`wire::net::device_auth`) and
+  stores the resulting token via `config::auth_store` (OS keyring,
+  0600-file fallback); `logout` deletes it. The device-flow OAuth App
+  `client_id` is a baked-in `const DEVICE_CLIENT_ID` (placeholder
+  until the app is registered); non-`github.com` hosts require
+  `--client-id`. `register` validates `--url`, resolves the bearer
+  (`--token` > `TOOLU_RUNNER_TOKEN` env > stored login token, via
+  `config::auth_store::resolve_bearer`), POSTs `generate-jitconfig`
+  (`wire::net::register_jit`), parses the minted config, then persists
+  real config + credentials (all-or-nothing, with config rollback on a
+  credentials-write failure); its `--token` is **optional**. `run`
+  loads the config + credentials, acquires `.lock`
+  (`config::lockfile`), constructs `GitHubListener::new(jit_config, …)`,
+  wires SIGINT/SIGTERM to a `CancellationToken`. `remove` writes
+  `.pending_remove` if `.lock` is held, otherwise deletes the
+  persisted state (live GH unregister call is step 10). `watch` opens
+  the journal TUI (`observability::watch`; no network, no tracing init
+  — logs would corrupt the alternate screen).
+- `login_cmd.rs` — `LoginArgs` / `LogoutArgs` + `cmd_login` /
+  `cmd_logout` handlers, browser-open helper, and data-dir
+  resolution (split out of `main.rs` for the 500-line ceiling).
+- `status_cmd.rs` — `cmd_status`: prints the persisted registration,
+  credential presence, and any stored device-flow login token for the
+  registered host **plus per-host login state**. No network (split
+  out of `main.rs`).
 
 ## References
 

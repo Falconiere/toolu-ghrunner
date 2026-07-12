@@ -49,10 +49,9 @@ async fn exchange_token_returns_protocol_error_on_http_failure() {
     .await;
 
   let client = reqwest::Client::new();
-  let err =
-    wire::net::exchange_token(&client, &format!("{}/oauth/token", server.uri()), "bad.jwt")
-      .await
-      .expect_err("should error on 401");
+  let err = wire::net::exchange_token(&client, &format!("{}/oauth/token", server.uri()), "bad.jwt")
+    .await
+    .expect_err("should error on 401");
 
   let msg = format!("{err}");
   assert!(msg.contains("401"), "expected status in error: {msg}");

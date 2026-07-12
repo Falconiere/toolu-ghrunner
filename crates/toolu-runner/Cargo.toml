@@ -10,54 +10,25 @@ repository.workspace = true
 name = "toolu-runner"
 path = "src/main.rs"
 
+# Bin-only crate: main.rs + login_cmd.rs + status_cmd.rs. The engine lives in
+# `execution`, the JIT lifecycle in `listener`; both reach the bin transitively
+# through `listener`. `[dependencies]` lists only what the three bin files name
+# directly — everything the integration tests need is in `[dev-dependencies]`.
 [dependencies]
 # Internal
 shared = { path = "../shared" }
 protocol = { path = "../protocol" }
-expressions = { path = "../expressions" }
-cache = { path = "../cache" }
 config = { path = "../config" }
 wire = { path = "../wire" }
 observability = { path = "../observability" }
-execution = { path = "../execution" }
 listener = { path = "../listener" }
 
-# Async runtime
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "net", "io-util", "fs", "signal"] }
+# Async runtime (bin: #[tokio::main] + SIGINT/SIGTERM signal bridge)
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
 tokio-util = "0.7"
-futures-util = "0.3"
-async-trait = "0.1"
 
-# Serialization
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-serde_yaml = "0.9"
-toml = "0.8"
-
-# Web / HTTP
+# Web / HTTP (register `generate-jitconfig` + device-flow login clients)
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-native-roots"] }
-
-# Crypto (mirror shared)
-jsonwebtoken = "9"
-pkcs1 = "0.7"
-num-bigint-dig = "0.8"
-aes = "0.8"
-cbc = "0.1"
-sha1 = "0.10"
-sha2 = "0.10"
-base64 = "0.22"
-
-# Storage
-opendal = { version = "0.51", features = ["services-fs", "services-s3"] }
-
-# Content-addressed cache: FastCDC chunking + BLAKE3 chunk ids
-fastcdc = "4"
-blake3 = "1"
-# Azure Blob "Put Block List" XML (promoted from a transitive opendal dep)
-quick-xml = "0.37"
-
-# OS keyring for CLI login token persistence (no libdbus: linux-native = kernel keyutils)
-keyring = { version = "3", default-features = false, features = ["apple-native", "windows-native", "linux-native"] }
 
 # Observability (no OTel in v1)
 tracing = "0.1"
@@ -66,51 +37,59 @@ tracing = "0.1"
 clap = { version = "4", features = ["derive", "env"] }
 
 # Utilities
-thiserror = "2"
-uuid = { version = "1", features = ["v4", "serde"] }
 url = ">=2, <2.5.8"
-chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 hostname = "0.4"
-glob = "0.3"
-regex = "1"
-tempfile = "3"
-tar = "0.4"
-flate2 = "1"
-sysinfo = "0.37"
-fs2 = "0.4"
-
-# Docker
-bollard = "0.20"
-
-# Local HTTP services (artifact / cache / OIDC micro-services)
-axum = "0.8"
-
-# WebSocket for the live-log streamer
-tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
-
-# Compression / archive
-serde_repr = "0.1"
-
-# Jitter for poll backoff (never for secrets)
-fastrand = "2"
-# CSPRNG for blob bearer tokens (also a dev-dep of the crypto tests)
-rand = { version = "0.8", features = ["std_rng"] }
-ratatui = "0.29"
-crossterm = "0.28"
-
-
 
 [dev-dependencies]
+# Internal — the test target integration-tests the full engine graph, so it
+# names `execution` / `expressions` / `cache` directly (the bin only reaches
+# them transitively through `listener`).
+execution = { path = "../execution" }
+expressions = { path = "../expressions" }
+cache = { path = "../cache" }
+
+# HTTP mocking + filesystem / test fixtures
 wiremock = "0.6"
 tempfile = "3"
 # Safe, scoped process-env mutation for the resolve_bearer env test.
 # The crate keeps all `unsafe env::set_var` internal, so our tests stay
 # `unsafe`-free (workspace `unsafe_code = "deny"`).
 temp-env = "0.3"
-pretty_assertions = "1"
 filetime = "0.2"
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+
+# Async / futures test helpers
+futures-util = "0.3"
+async-trait = "0.1"
+
+# Serialization
+serde_json = "1"
+
+# Crypto fixtures for the auth / jit-config tests
 rsa = "0.9"
+pkcs1 = "0.7"
+aes = "0.8"
+cbc = "0.1"
+sha1 = "0.10"
+base64 = "0.22"
+blake3 = "1"
+# CSPRNG for the crypto-fixture tests
+rand = { version = "0.8", features = ["std_rng"] }
+
+# Local HTTP service tests
+axum = "0.8"
+
+# Archive fixtures
+tar = "0.4"
+flate2 = "1"
+
+# Lock + id fixtures
+fs2 = "0.4"
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# watch TUI tests
+ratatui = "0.29"
+crossterm = "0.28"
 
 [features]
 e2e = []

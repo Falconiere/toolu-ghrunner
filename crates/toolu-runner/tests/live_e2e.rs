@@ -382,8 +382,7 @@ async fn journal_records_live_job_masked() {
 /// the single journal's raw body.
 fn read_single_live_journal(harness: &LiveHarness) -> String {
   let cfg = load_reg_config(&harness.config_dir.path().join("config.toml")).expect("load config");
-  let data_dir =
-    config::config::resolve_data_dir(&cfg.runtime.data_dir).expect("resolve data dir");
+  let data_dir = config::config::resolve_data_dir(&cfg.runtime.data_dir).expect("resolve data dir");
   let journals: Vec<_> = std::fs::read_dir(data_dir.join("_diag").join("jobs"))
     .expect("jobs dir exists after a live run")
     .filter_map(Result::ok)

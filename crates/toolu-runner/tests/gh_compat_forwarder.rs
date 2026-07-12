@@ -22,14 +22,14 @@
 use std::error::Error;
 use std::sync::{Arc, Mutex};
 
+use execution::execution::job_runner::run_job;
+use execution::execution::service_endpoints::{ServiceUrls, extract_service_urls, forward_env};
 use shared::SecretMasker;
 use shared::{
   ActionStep, AgentJobRequestMessage, LogStream, RunnerConfig, RunnerEvent, ServicesMode,
 };
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use execution::execution::job_runner::run_job;
-use execution::execution::service_endpoints::{ServiceUrls, extract_service_urls, forward_env};
 
 const JOB_MESSAGE: &str = include_str!("fixtures/job_message.json");
 

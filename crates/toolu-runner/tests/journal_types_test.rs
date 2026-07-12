@@ -6,9 +6,9 @@
 use std::collections::HashMap;
 use std::error::Error;
 
+use observability::journal::{JOURNAL_VERSION, JournalEvent, JournalLine};
 use shared::paths::sanitize_job_id;
 use shared::{AnnotationLevel, Conclusion, ListenerEvent, LogStream, RunnerEvent};
-use observability::journal::{JOURNAL_VERSION, JournalEvent, JournalLine};
 
 type TestResult = Result<(), Box<dyn Error>>;
 

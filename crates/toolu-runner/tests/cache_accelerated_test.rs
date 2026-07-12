@@ -15,11 +15,11 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::sync::{Arc, Mutex};
 
+use execution::execution::job_runner::run_job;
 use shared::SecretMasker;
 use shared::{ActionStep, AgentJobRequestMessage, RunnerConfig, RunnerEvent, ServicesMode};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use execution::execution::job_runner::run_job;
 
 const JOB_MESSAGE: &str = include_str!("fixtures/job_message.json");
 

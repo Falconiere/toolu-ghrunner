@@ -15,8 +15,8 @@ use std::time::Duration;
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD as B64;
-use serde_json::Value;
 use execution::execution::oidc::{OidcConfig, OidcJobContext, OidcServer};
+use serde_json::Value;
 
 fn sample_job_context() -> OidcJobContext {
   OidcJobContext {
