@@ -8,7 +8,7 @@ use std::path::Path;
 use std::time::{Duration, SystemTime};
 
 use filetime::FileTime;
-use toolu_runner::execution::workspace_gc::gc_workspaces;
+use execution::execution::workspace_gc::gc_workspaces;
 
 /// Boxed error alias for test helpers that use `?`.
 type TestResult<T> = Result<T, Box<dyn std::error::Error>>;

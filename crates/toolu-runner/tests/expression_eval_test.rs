@@ -1,6 +1,6 @@
 //! Real-data tests for the `${{ }}` expression evaluator (AC #5).
 //!
-//! Covers the public surface of `toolu_runner::execution::expressions`:
+//! Covers the public surface of `execution::execution::expressions`:
 //! - Literal evaluation
 //! - Context / property / index access
 //! - Function calls (`contains`, `startsWith`, `endsWith`, `format`, `join`,

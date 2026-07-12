@@ -4,7 +4,7 @@
 //!
 //! Uses real-shape ref strings (no mock data).
 
-use toolu_runner::execution::actions::resolver::{ActionRef, ActionRefKind, parse_action_ref};
+use execution::execution::actions::resolver::{ActionRef, ActionRefKind, parse_action_ref};
 
 #[test]
 fn parses_remote_action_with_tag() {

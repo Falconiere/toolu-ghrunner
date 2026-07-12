@@ -10,10 +10,6 @@ repository.workspace = true
 name = "toolu-runner"
 path = "src/main.rs"
 
-[lib]
-name = "toolu_runner"
-path = "src/lib.rs"
-
 [dependencies]
 # Internal
 shared = { path = "../shared" }
@@ -23,6 +19,8 @@ cache = { path = "../cache" }
 config = { path = "../config" }
 wire = { path = "../wire" }
 observability = { path = "../observability" }
+execution = { path = "../execution" }
+listener = { path = "../listener" }
 
 # Async runtime
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "net", "io-util", "fs", "signal"] }

@@ -4,8 +4,8 @@
 //! Uses `ActionStep::with_ref_type` to construct real-shape step fixtures.
 
 use shared::ActionStep;
-use toolu_runner::execution::handlers::{HandlerKind, resolve_handler};
-use toolu_runner::plugin::{PluginRegistry, RunnerPlugin};
+use execution::execution::handlers::{HandlerKind, resolve_handler};
+use execution::plugin::{PluginRegistry, RunnerPlugin};
 
 /// A test plugin that names itself and always succeeds.
 struct EchoPlugin(&'static str);
@@ -18,7 +18,7 @@ impl RunnerPlugin for EchoPlugin {
   async fn execute_step(
     &self,
     _step: &shared::ActionStep,
-    _ctx: &toolu_runner::execution::context::ExecutionContext,
+    _ctx: &execution::execution::context::ExecutionContext,
     _events: &tokio::sync::mpsc::Sender<shared::RunnerEvent>,
   ) -> shared::Conclusion {
     shared::Conclusion::Success

@@ -7,7 +7,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use super::upload::upload_compressed_step_logs;
-use crate::listener::helpers::ResultsCtx;
+use crate::helpers::ResultsCtx;
 
 /// Channel capacity for log lines sent to the streamer actor.
 pub const CHANNEL_CAPACITY: usize = 4096;

@@ -13,7 +13,7 @@ use super::helpers::{
 use super::log_uploader::StreamerConfig;
 use super::setup_step::report_setup_step;
 use super::step_reporter::StepCollector;
-use crate::Runner;
+use execution::Runner;
 use wire::reporting::live_log::LiveLogLine;
 use shared::SecretMasker;
 use shared::{AgentJobRequestMessage, Conclusion, ListenerEvent, RunnerEvent};

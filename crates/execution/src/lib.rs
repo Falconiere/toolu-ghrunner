@@ -1,13 +1,13 @@
-//! GitHub Actions JIT listener, execution engine, and CLI binary.
-
-#![doc(html_root_url = "https://docs.rs/toolu-runner/0.1.0")]
+//! Job execution engine: context, steps runner, handlers, expressions
+//! glue, plus the Node.js runtime, bollard Docker wrapper, and the plugin
+//! registry. Exposes the reusable [`Runner`] that spawns job work and
+//! returns an event stream. Depends only on `shared`, `expressions`, and
+//! `cache` — never on the listener, `wire`, or `observability`.
 
 /// Bollard wrapper: daemon client, service containers, path translation.
 pub mod docker;
 /// Job execution engine (context, steps runner, handlers, expressions).
 pub mod execution;
-/// GitHub JIT lifecycle: handler, poll loop, execution loop.
-pub mod listener;
 /// Node.js runtime detection, download, and caching.
 pub mod node;
 /// `RunnerPlugin` trait and registry.
@@ -54,7 +54,7 @@ impl Runner {
 
     tokio::spawn(async move {
       if let Err(err) =
-        execution::job_runner::run_job(job, &config, cancel, tx.clone(), masker).await
+        crate::execution::job_runner::run_job(job, &config, cancel, tx.clone(), masker).await
       {
         tracing::error!(error = %err, "job execution failed");
         let _ = tx

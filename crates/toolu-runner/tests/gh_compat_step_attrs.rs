@@ -21,10 +21,10 @@ use shared::{
 };
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use toolu_runner::execution::context::ExecutionContext;
-use toolu_runner::execution::handlers::node::input_env_key;
-use toolu_runner::execution::step_timeout::{WaitOutcome, timeout_duration, wait_bounded};
-use toolu_runner::execution::steps_runner::run_steps;
+use execution::execution::context::ExecutionContext;
+use execution::execution::handlers::node::input_env_key;
+use execution::execution::step_timeout::{WaitOutcome, timeout_duration, wait_bounded};
+use execution::execution::steps_runner::run_steps;
 
 const JOB_MESSAGE: &str = include_str!("fixtures/job_message.json");
 
@@ -119,13 +119,13 @@ async fn run_steps_collect(
     events
   });
 
-  let spec = toolu_runner::execution::job_spec::JobSpec::default();
+  let spec = execution::execution::job_spec::JobSpec::default();
   run_steps(
     &steps,
     &mut ctx,
     &tx,
     CancellationToken::new(),
-    &toolu_runner::execution::steps_runner::JobRun {
+    &execution::execution::steps_runner::JobRun {
       workspace: &workspace,
       config: &config,
       spec: &spec,

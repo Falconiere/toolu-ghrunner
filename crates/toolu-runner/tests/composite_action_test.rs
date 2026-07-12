@@ -13,11 +13,11 @@
 use std::collections::HashMap;
 
 use shared::ActionStep;
-use toolu_runner::execution::actions::manifest::{self, RunsUsing};
-use toolu_runner::execution::depth_tracker::DepthTracker;
-use toolu_runner::execution::handlers::composite::prepare_composite;
-use toolu_runner::execution::handlers::resolve::{HandlerKind, resolve_handler};
-use toolu_runner::plugin::PluginRegistry;
+use execution::execution::actions::manifest::{self, RunsUsing};
+use execution::execution::depth_tracker::DepthTracker;
+use execution::execution::handlers::composite::prepare_composite;
+use execution::execution::handlers::resolve::{HandlerKind, resolve_handler};
+use execution::plugin::PluginRegistry;
 
 const COMPOSITE_ACTION_YML: &str = r#"
 name: 'My Composite'

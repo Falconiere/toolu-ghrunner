@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use toolu_runner::execution::workflow::job_graph::topological_sort;
+use execution::execution::workflow::job_graph::topological_sort;
 
 #[test]
 fn linear_chain_is_sorted_in_order() {

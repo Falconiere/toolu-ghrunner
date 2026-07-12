@@ -12,7 +12,7 @@
 
 use std::collections::HashMap;
 
-use toolu_runner::execution::workflow::reusable::{
+use execution::execution::workflow::reusable::{
   self, InputDef, OutputDef, ResolveContext, ReusableWorkflowDef, SecretDef, SecretMode,
   build_caller_context, check_nesting_depth, parse_reusable_ref, resolve_reusable_invocation,
 };

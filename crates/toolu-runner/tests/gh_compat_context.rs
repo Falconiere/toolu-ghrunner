@@ -23,8 +23,8 @@ use std::sync::{Arc, Mutex};
 
 use shared::SecretMasker;
 use shared::{AgentJobRequestMessage, Conclusion, RunnerConfig};
-use toolu_runner::execution::context::ExecutionContext;
-use toolu_runner::execution::job_runner::build_context;
+use execution::execution::context::ExecutionContext;
+use execution::execution::job_runner::build_context;
 
 const JOB_MESSAGE: &str = include_str!("fixtures/job_message.json");
 
