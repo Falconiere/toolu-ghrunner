@@ -25,7 +25,7 @@ use std::time::Duration;
 use config::config::{
   CredentialsFile, RunnerRegistrationConfig, load_config as load_reg_config, load_credentials,
 };
-use toolu_runner::journal::{JournalEvent, JournalLine};
+use observability::journal::{JournalEvent, JournalLine};
 
 #[path = "helpers/live_harness.rs"]
 mod harness;

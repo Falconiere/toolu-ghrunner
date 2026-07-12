@@ -1,4 +1,4 @@
-//! Integration tests for the `toolu_runner::net` transport layer.
+//! Integration tests for the `wire::net` transport layer.
 //!
 //! Uses `wiremock` to simulate the broker + token endpoint and verify
 //! the public `net::*` functions issue the right HTTP requests. These
@@ -24,7 +24,7 @@ async fn exchange_token_posts_form_to_authorization_url() {
     .await;
 
   let client = reqwest::Client::new();
-  let token = toolu_runner::net::exchange_token(
+  let token = wire::net::exchange_token(
     &client,
     &format!("{}/_apis/distributedtracing/oauth2/token", server.uri()),
     "fake.jwt.value",
@@ -50,7 +50,7 @@ async fn exchange_token_returns_protocol_error_on_http_failure() {
 
   let client = reqwest::Client::new();
   let err =
-    toolu_runner::net::exchange_token(&client, &format!("{}/oauth/token", server.uri()), "bad.jwt")
+    wire::net::exchange_token(&client, &format!("{}/oauth/token", server.uri()), "bad.jwt")
       .await
       .expect_err("should error on 401");
 
@@ -80,7 +80,7 @@ async fn acknowledge_message_posts_message_id_to_broker() {
     .await;
 
   let client = reqwest::Client::new();
-  toolu_runner::net::acknowledge_message(&client, &server.uri(), "test-token", "req-uuid-42")
+  wire::net::acknowledge_message(&client, &server.uri(), "test-token", "req-uuid-42")
     .await
     .expect("ack should succeed");
 }
@@ -98,7 +98,7 @@ async fn poll_message_returns_none_on_202() {
     .await;
 
   let client = reqwest::Client::new();
-  let params = toolu_runner::net::PollParams {
+  let params = wire::net::PollParams {
     client: &client,
     server_url_v2: &server.uri(),
     token: "t",
@@ -109,7 +109,7 @@ async fn poll_message_returns_none_on_202() {
     last_message_id: 0,
   };
 
-  let msg = toolu_runner::net::poll_message(&params)
+  let msg = wire::net::poll_message(&params)
     .await
     .expect("poll should succeed");
 

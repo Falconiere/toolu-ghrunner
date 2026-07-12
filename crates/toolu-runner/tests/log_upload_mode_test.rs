@@ -3,7 +3,7 @@
 //!
 //! All tests are real-data (size thresholds, not HTTP requests).
 
-use toolu_runner::reporting::log_upload::UploadMode;
+use wire::reporting::log_upload::UploadMode;
 
 #[test]
 fn zero_bytes_is_block_blob() {

@@ -5,7 +5,7 @@
 //! flow — real payloads, not mocks. The classifier is pure, so no HTTP
 //! (and no client id) is needed to exercise it.
 
-use toolu_runner::net::device_auth::{PollOutcome, parse_poll_response, validate_host};
+use wire::net::device_auth::{PollOutcome, parse_poll_response, validate_host};
 
 #[test]
 fn authorization_pending_maps_to_pending() {

@@ -5,8 +5,8 @@
 use std::error::Error;
 use std::path::PathBuf;
 
-use toolu_runner::journal::{JournalEvent, JournalLine};
-use toolu_runner::watch::state::{LOG_RING, OpenJob, StepStatus};
+use observability::journal::{JournalEvent, JournalLine};
+use observability::watch::state::{LOG_RING, OpenJob, StepStatus};
 
 const FIXTURE: &str = include_str!("fixtures/journal/canonical.jsonl");
 

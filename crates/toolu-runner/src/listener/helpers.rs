@@ -6,9 +6,9 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use super::SessionCtx;
-use crate::net::delete_session;
-use crate::reporting::ReportConclusion;
-use crate::reporting::run_service::{RenewJobRequest, renew_job};
+use wire::net::delete_session;
+use wire::reporting::ReportConclusion;
+use wire::reporting::run_service::{RenewJobRequest, renew_job};
 use shared::{AgentJobRequestMessage, Conclusion, ListenerEvent, RunnerEvent};
 
 /// Per-step metadata captured on `StepStarted` so later `StepCompleted` events
@@ -138,7 +138,7 @@ pub(super) async fn report_step_to_results(
   change_order: &mut u64,
   step_meta: &mut StepMetaMap,
 ) {
-  use crate::reporting::results_service::{WorkflowStepsUpdateRequest, update_workflow_steps};
+  use wire::reporting::results_service::{WorkflowStepsUpdateRequest, update_workflow_steps};
 
   let Some(entry) = build_step_entry(event, step_meta) else {
     return;
@@ -174,9 +174,9 @@ pub(super) async fn report_step_to_results(
 fn build_step_entry(
   event: &RunnerEvent,
   step_meta: &mut StepMetaMap,
-) -> Option<crate::reporting::results_service::StepUpdateEntry> {
-  use crate::reporting::Status;
-  use crate::reporting::results_service::StepUpdateEntry;
+) -> Option<wire::reporting::results_service::StepUpdateEntry> {
+  use wire::reporting::Status;
+  use wire::reporting::results_service::StepUpdateEntry;
 
   match event {
     RunnerEvent::StepStarted {

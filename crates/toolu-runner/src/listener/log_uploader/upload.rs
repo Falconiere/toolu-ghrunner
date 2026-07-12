@@ -13,7 +13,7 @@ use flate2::write::GzEncoder;
 use tracing::warn;
 
 use crate::listener::helpers::ResultsCtx;
-use crate::reporting::results_service::{
+use wire::reporting::results_service::{
   CreateJobLogsMetadataRequest, CreateStepLogsMetadataRequest, GetJobLogsSignedBlobUrlRequest,
   GetStepLogsSignedBlobUrlRequest, create_job_logs_metadata, create_step_logs_metadata,
   get_job_logs_signed_blob_url, get_step_logs_signed_blob_url, upload_log_blob,
@@ -91,7 +91,7 @@ fn gzip_lines(lines: &[String]) -> Vec<u8> {
 async fn fetch_step_signed_url(
   rctx: &ResultsCtx<'_>,
   step_backend_id: &str,
-) -> Option<crate::reporting::results_service::SignedBlobUrlResponse> {
+) -> Option<wire::reporting::results_service::SignedBlobUrlResponse> {
   let url_req = GetStepLogsSignedBlobUrlRequest {
     workflow_job_run_backend_id: rctx.job_backend_id.to_owned(),
     workflow_run_backend_id: rctx.run_backend_id.to_owned(),
@@ -123,7 +123,7 @@ async fn finalize_step_metadata(rctx: &ResultsCtx<'_>, step_backend_id: &str, li
 
 async fn fetch_job_signed_url(
   rctx: &ResultsCtx<'_>,
-) -> Option<crate::reporting::results_service::SignedBlobUrlResponse> {
+) -> Option<wire::reporting::results_service::SignedBlobUrlResponse> {
   let url_req = GetJobLogsSignedBlobUrlRequest {
     workflow_job_run_backend_id: rctx.job_backend_id.to_owned(),
     workflow_run_backend_id: rctx.run_backend_id.to_owned(),

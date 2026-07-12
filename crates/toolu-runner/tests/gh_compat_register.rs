@@ -14,7 +14,7 @@
 
 use serde_json::Value;
 use shared::RunnerError;
-use toolu_runner::net::{RegisterParams, build_request, parse_response, register_jit};
+use wire::net::{RegisterParams, build_request, parse_response, register_jit};
 use wiremock::matchers::{body_json, header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 

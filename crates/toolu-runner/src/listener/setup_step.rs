@@ -1,7 +1,7 @@
-use crate::reporting::results_service::{
+use wire::reporting::results_service::{
   StepUpdateEntry, WorkflowStepsUpdateRequest, update_workflow_steps,
 };
-use crate::reporting::{ReportConclusion, Status, StepResult};
+use wire::reporting::{ReportConclusion, Status, StepResult};
 use shared::AgentJobRequestMessage;
 
 /// Report "Set up job" as step number 1 via Results Service.

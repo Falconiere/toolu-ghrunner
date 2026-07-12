@@ -1761,6 +1761,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "observability"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "config",
+ "crossterm",
+ "ratatui",
+ "serde",
+ "serde_json",
+ "shared",
+ "sysinfo",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3104,6 +3120,7 @@ dependencies = [
  "jsonwebtoken",
  "keyring",
  "num-bigint-dig",
+ "observability",
  "opendal",
  "pkcs1",
  "pretty_assertions",
@@ -3133,6 +3150,7 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
+ "wire",
  "wiremock",
 ]
 
@@ -3861,6 +3879,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df79d97927682d2fd8adb29682d1140b343be4ac0f08fd68b7765d9c059d3945"
 dependencies = [
  "memchr",
+]
+
+[[package]]
+name = "wire"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "protocol",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serde_repr",
+ "shared",
+ "tokio",
+ "tokio-tungstenite",
+ "tracing",
+ "url",
 ]
 
 [[package]]

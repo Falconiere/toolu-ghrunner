@@ -4,7 +4,7 @@
 //! broker skips already-handled messages. The first poll sends `0`; once a
 //! message id is known it is threaded onto the next poll.
 
-use toolu_runner::net::{PollParams, build_poll_url};
+use wire::net::{PollParams, build_poll_url};
 
 fn params(last_message_id: i64) -> PollParams<'static> {
   PollParams {

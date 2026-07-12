@@ -7,10 +7,10 @@ use std::path::PathBuf;
 
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
-use toolu_runner::journal::JournalLine;
-use toolu_runner::journal::scan_jobs;
-use toolu_runner::watch::state::{App, OpenJob};
-use toolu_runner::watch::ui;
+use observability::journal::JournalLine;
+use observability::journal::scan_jobs;
+use observability::watch::state::{App, OpenJob};
+use observability::watch::ui;
 
 const FIXTURE: &str = include_str!("fixtures/journal/canonical.jsonl");
 

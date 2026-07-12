@@ -1,6 +1,6 @@
 //! Real-data tests for the GHES V1 protocol path (AC #15).
 //!
-//! Drives `toolu_runner::net::v1::*` against a `wiremock` server
+//! Drives `wire::net::v1::*` against a `wiremock` server
 //! simulating a GHES instance. The mock returns the same shape the
 //! V1 protocol spec uses:
 //! - `GET /_apis/connectionData` → `ConnectionData` with service
@@ -44,7 +44,7 @@ async fn fetch_connection_data_returns_parsed_connection_data() {
     .await;
 
   let client = reqwest::Client::new();
-  let data = toolu_runner::net::v1::fetch_connection_data(&client, &server.uri(), "ghes-token")
+  let data = wire::net::v1::fetch_connection_data(&client, &server.uri(), "ghes-token")
     .await
     .expect("fetch connection data");
   assert_eq!(data.instance_id, "instance-1");
@@ -63,7 +63,7 @@ async fn fetch_connection_data_returns_protocol_error_on_http_failure() {
     .await;
 
   let client = reqwest::Client::new();
-  let err = toolu_runner::net::v1::fetch_connection_data(&client, &server.uri(), "bad-token")
+  let err = wire::net::v1::fetch_connection_data(&client, &server.uri(), "bad-token")
     .await
     .expect_err("401 should error");
   let msg = format!("{err}");
@@ -103,7 +103,7 @@ async fn post_timeline_record_sends_record_with_bearer_auth() {
 
   let client = reqwest::Client::new();
   let timeline_url = format!("{}/_apis/distributedtask/hubs/Actions/Plans", server.uri());
-  toolu_runner::net::v1::post_timeline_record(
+  wire::net::v1::post_timeline_record(
     &client,
     &timeline_url,
     "ghes-timeline-token",
@@ -131,7 +131,7 @@ async fn fetch_timeline_returns_parsed_record() {
 
   let client = reqwest::Client::new();
   let timeline_url = format!("{}/_apis/distributedtask/hubs/Actions/Plans", server.uri());
-  let value = toolu_runner::net::v1::fetch_timeline(&client, &timeline_url, "ghes-token", "rec-7")
+  let value = wire::net::v1::fetch_timeline(&client, &timeline_url, "ghes-token", "rec-7")
     .await
     .expect("fetch timeline record");
   let record_id = value.get("recordId").and_then(Value::as_str).unwrap_or("");
@@ -158,7 +158,7 @@ async fn fetch_timeline_returns_protocol_error_on_404() {
   let client = reqwest::Client::new();
   let timeline_url = format!("{}/_apis/distributedtask/hubs/Actions/Plans", server.uri());
   let err =
-    toolu_runner::net::v1::fetch_timeline(&client, &timeline_url, "ghes-token", "missing-id")
+    wire::net::v1::fetch_timeline(&client, &timeline_url, "ghes-token", "missing-id")
       .await
       .expect_err("404 should error");
   let msg = format!("{err}");
