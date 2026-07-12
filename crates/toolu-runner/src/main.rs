@@ -6,11 +6,11 @@
 //! `.pending_remove` mid-job), `status` (print config, no network),
 //! `watch` (TUI over the job journal, no network).
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use clap::{Args, Parser, Subcommand};
+use clap::Parser;
 use config::auth_store::{self, AuthStore};
 use config::config::{
   CacheSection, CredentialsFile, RunnerRegistrationConfig, RuntimeConfig, ServicesSection,
@@ -24,115 +24,19 @@ use shared::startup;
 use shared::{MaskerRedactor, SecretMasker};
 use tokio_util::sync::CancellationToken;
 
+mod cli;
 mod login_cmd;
 mod status_cmd;
 
-/// github.com OAuth App `client_id` for the device-flow `login`.
-/// Placeholder until the real App is registered.
-const DEVICE_CLIENT_ID: &str = "REPLACE_ME";
-
-/// Standalone GitHub Actions JIT runner.
-#[derive(Debug, Parser)]
-#[command(name = "toolu-runner", version, about, long_about = None)]
-struct Cli {
-  #[command(subcommand)]
-  command: Command,
-}
-
-#[derive(Debug, Subcommand)]
-enum Command {
-  /// Register the runner with a GitHub repository or organization.
-  Register(RegisterArgs),
-  /// Run the listener loop, polling for jobs.
-  Run(RunArgs),
-  /// Remove the runner registration.
-  Remove(RemoveArgs),
-  /// Print local config and credential state (no network).
-  Status(StatusArgs),
-  /// Watch jobs in a TUI: history, live steps and logs, cancel key.
-  Watch(WatchArgs),
-  /// Log in to GitHub via the OAuth device flow and store the token.
-  Login(login_cmd::LoginArgs),
-  /// Delete the stored login token for a host.
-  Logout(login_cmd::LogoutArgs),
-}
-
-#[derive(Debug, Args)]
-struct RegisterArgs {
-  /// Repository or organization URL (e.g. https://github.com/owner/repo).
-  #[arg(long)]
-  url: String,
-  /// GitHub API token with repo admin rights (PAT or App installation
-  /// token) for the `generate-jitconfig` REST call. Optional — resolution
-  /// order is this flag > `TOOLU_RUNNER_TOKEN` env > the stored `login`
-  /// token for the URL's host.
-  #[arg(long)]
-  token: Option<String>,
-  /// Runner name (defaults to the hostname).
-  #[arg(long)]
-  name: Option<String>,
-  /// Comma-separated labels (defaults to self-hosted,<os>,<arch>).
-  #[arg(long, value_delimiter = ',')]
-  labels: Vec<String>,
-  /// Runner group (defaults to "Default").
-  #[arg(long, default_value = "Default")]
-  runner_group: String,
-  /// Working directory for job workspaces.
-  #[arg(long)]
-  work: Option<PathBuf>,
-  /// Path to the runner config file.
-  #[arg(long)]
-  config: Option<PathBuf>,
-  /// Replace an existing registration with the same name.
-  #[arg(long)]
-  replace: bool,
-}
-
-#[derive(Debug, Args)]
-struct RunArgs {
-  /// Path to the runner config file.
-  #[arg(long)]
-  config: Option<PathBuf>,
-  /// Exit after the first job completes. Currently a no-op: a JIT
-  /// registration is single-use, so the listener always exits after one
-  /// job with or without this flag. Kept for scripts and a future
-  /// daemon mode, where omitting it would mean "keep listening".
-  #[arg(long)]
-  once: bool,
-}
-
-#[derive(Debug, Args)]
-struct RemoveArgs {
-  /// Path to the runner config file.
-  #[arg(long)]
-  config: Option<PathBuf>,
-  /// Unregistration token (falls back to the registration token in config).
-  #[arg(long)]
-  token: Option<String>,
-  /// Force-cancel an in-flight job before unregistering.
-  #[arg(long)]
-  force: bool,
-}
-
-#[derive(Debug, Args)]
-struct StatusArgs {
-  /// Path to the runner config file.
-  #[arg(long)]
-  config: Option<PathBuf>,
-}
-
-#[derive(Debug, Args)]
-struct WatchArgs {
-  /// Path to the runner config file (default `~/.toolu-runner/config.toml`).
-  /// When the file is absent or unreadable, `watch` falls back to browsing
-  /// the default data dir (`~/.toolu-runner`) read-only — the fallback is in
-  /// `watch::run_watch`.
-  #[arg(long)]
-  config: Option<PathBuf>,
-}
+use crate::cli::{
+  Cli, Command, RegisterArgs, RemoveArgs, RunArgs, WatchArgs, credentials_path_for,
+  default_config_path, default_labels, runner_name_or_hostname, work_folder_or_default,
+};
 
 #[tokio::main]
 async fn main() {
+  #[cfg(debug_assertions)]
+  cli::debug_assert_cli();
   let cli = Cli::parse();
   let exit_code = match run(cli).await {
     Ok(()) => 0,
@@ -162,37 +66,6 @@ fn cmd_watch(args: WatchArgs) -> Result<(), Box<dyn std::error::Error>> {
   let config_path = args.config.unwrap_or_else(default_config_path);
   observability::watch::run_watch(&config_path)?;
   Ok(())
-}
-
-fn default_config_path() -> PathBuf {
-  shared::paths::expand_tilde(Path::new("~/.toolu-runner/config.toml"))
-}
-
-/// Derive the credentials path from the config path. The credentials
-/// file lives next to `config.toml` in the same directory so users
-/// can override `--config` and have both files move together.
-fn credentials_path_for(config_path: &Path) -> PathBuf {
-  config_path.parent().map_or_else(
-    || PathBuf::from("credentials.json"),
-    |p| p.join("credentials.json"),
-  )
-}
-
-fn runner_name_or_hostname(name: Option<String>) -> String {
-  name.unwrap_or_else(|| {
-    hostname::get()
-      .ok()
-      .and_then(|h| h.into_string().ok())
-      .unwrap_or_else(|| "toolu-runner".to_owned())
-  })
-}
-
-fn default_labels() -> Vec<String> {
-  vec![
-    "self-hosted".to_owned(),
-    std::env::consts::OS.to_owned(),
-    std::env::consts::ARCH.to_owned(),
-  ]
 }
 
 fn parse_and_validate_url(url: &str) -> Result<String, RunnerError> {
@@ -289,13 +162,6 @@ fn ensure_not_registered(
     );
   }
   Ok(())
-}
-
-/// Work-folder string from `--work`, defaulting to `~/.toolu-runner/_work`.
-fn work_folder_or_default(work: Option<&PathBuf>) -> String {
-  work
-    .map(|p| p.to_string_lossy().into_owned())
-    .unwrap_or_else(|| "~/.toolu-runner/_work".to_owned())
 }
 
 /// Log + print the registration result.

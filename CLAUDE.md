@@ -7,7 +7,7 @@ no OTel.
 
 - Layered workspace of **10 crates under `crates/`**. `toolu-runner`
   is now a **bin-only** crate (the CLI entrypoint: `main.rs` +
-  `login_cmd.rs` + `status_cmd.rs`). The execution **engine** lives in
+  `cli.rs` + `login_cmd.rs` + `status_cmd.rs`). The execution **engine** lives in
   `execution`; the GitHub **JIT lifecycle** lives in `listener`.
 - Workspace members (dependency order): `protocol`, `shared`,
   `config`, `expressions`, `cache`, `wire`, `observability`,
@@ -298,15 +298,22 @@ no OTel.
 
 ### `toolu-runner/` — CLI bin (deps: shared, protocol, config, wire, observability, listener)
 
-- `main.rs` — clap CLI: `login`, `logout`, `register`, `run`,
-  `remove`, `status`, `watch`.
+- `cli.rs` — the clap surface: `Cli` (top-level parser with
+  Examples/Environment `after_help`, `propagate_version`,
+  `arg_required_else_help`), `Command` enum, per-subcommand args
+  structs with full `--help` text (defaults + env fallbacks stated),
+  the arg-default helpers (`default_config_path`, `default_labels`,
+  `runner_name_or_hostname`, `work_folder_or_default`,
+  `credentials_path_for`), and `debug_assert_cli` (clap's definition
+  self-check, run at startup in debug builds — exercised by the
+  shell-out CLI tests since the bin-only crate has no lib target for
+  a unit test).
+- `main.rs` — CLI entrypoint + dispatch for `login`, `logout`,
+  `register`, `run`, `remove`, `status`, `watch`.
   `--config` defaults to `~/.toolu-runner/config.toml`. `login`
   runs GitHub OAuth **device flow** (`wire::net::device_auth`) and
   stores the resulting token via `config::auth_store` (OS keyring,
-  0600-file fallback); `logout` deletes it. The device-flow OAuth App
-  `client_id` is a baked-in `const DEVICE_CLIENT_ID` (placeholder
-  until the app is registered); non-`github.com` hosts require
-  `--client-id`. `register` validates `--url`, resolves the bearer
+  0600-file fallback); `logout` deletes it. `register` validates `--url`, resolves the bearer
   (`--token` > `TOOLU_RUNNER_TOKEN` env > stored login token, via
   `config::auth_store::resolve_bearer`), POSTs `generate-jitconfig`
   (`wire::net::register_jit`), parses the minted config, then persists
@@ -322,6 +329,9 @@ no OTel.
 - `login_cmd.rs` — `LoginArgs` / `LogoutArgs` + `cmd_login` /
   `cmd_logout` handlers, browser-open helper, and data-dir
   resolution (split out of `main.rs` for the 500-line ceiling).
+  Holds the baked-in `const DEVICE_CLIENT_ID` (placeholder until the
+  OAuth App is registered); non-`github.com` hosts require
+  `--client-id` (or `TOOLU_RUNNER_CLIENT_ID` env).
 - `status_cmd.rs` — `cmd_status`: prints the persisted registration,
   credential presence, and any stored device-flow login token for the
   registered host **plus per-host login state**. No network (split

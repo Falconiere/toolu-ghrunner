@@ -8,25 +8,43 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use clap::Args;
+use clap::{Args, ValueHint};
 use config::auth_store::{AuthStore, StoredToken};
 use shared::RunnerError;
 use wire::net;
 
-use crate::{DEVICE_CLIENT_ID, default_config_path};
+use crate::cli::default_config_path;
+
+/// github.com OAuth App `client_id` for the device-flow `login`.
+/// Placeholder until the real App is registered.
+const DEVICE_CLIENT_ID: &str = "REPLACE_ME";
+
+/// Extended help footer for `login --help`.
+const LOGIN_AFTER_HELP: &str = "\
+Examples:
+  toolu-runner login
+  toolu-runner login ghes.example.com --client-id Iv1.0123456789abcdef";
 
 /// Arguments for the `login` subcommand.
 #[derive(Debug, Args)]
+#[command(after_help = LOGIN_AFTER_HELP)]
 pub(crate) struct LoginArgs {
   /// GitHub host to log in to (github.com or a GHES hostname).
-  #[arg(default_value = "github.com")]
+  #[arg(default_value = "github.com", value_name = "HOST", value_hint = ValueHint::Hostname)]
   hostname: String,
-  /// OAuth App `client_id`. Required for GHES; defaults to the built-in
-  /// github.com App when logging in to github.com.
-  #[arg(long)]
+  /// OAuth App client_id for the device flow.
+  ///
+  /// Resolution order: this flag > TOOLU_RUNNER_CLIENT_ID env > the
+  /// built-in github.com App. Required for GHES (register an OAuth App
+  /// on the GHES host); the built-in github.com App is not wired yet, so
+  /// github.com currently needs it too.
+  #[arg(long, value_name = "CLIENT_ID")]
   client_id: Option<String>,
-  /// Path to the runner config file (its parent dir holds the token store).
-  #[arg(long)]
+  /// Path to the runner config file (default: ~/.toolu-runner/config.toml).
+  ///
+  /// Only its parent directory is used — that is where the token store
+  /// lives; the file itself need not exist.
+  #[arg(long, value_name = "FILE", value_hint = ValueHint::FilePath)]
   config: Option<PathBuf>,
 }
 
@@ -34,10 +52,13 @@ pub(crate) struct LoginArgs {
 #[derive(Debug, Args)]
 pub(crate) struct LogoutArgs {
   /// GitHub host to log out of.
-  #[arg(default_value = "github.com")]
+  #[arg(default_value = "github.com", value_name = "HOST", value_hint = ValueHint::Hostname)]
   hostname: String,
-  /// Path to the runner config file (its parent dir holds the token store).
-  #[arg(long)]
+  /// Path to the runner config file (default: ~/.toolu-runner/config.toml).
+  ///
+  /// Only its parent directory is used — that is where the token store
+  /// lives; the file itself need not exist.
+  #[arg(long, value_name = "FILE", value_hint = ValueHint::FilePath)]
   config: Option<PathBuf>,
 }
 

@@ -164,13 +164,7 @@ async fn device_flow_login_stores_token() {
   // Drive the real `login` command: prints a code, opens the browser,
   // polls until the user approves, then persists the token.
   let status = Command::new(&harness.binary_path)
-    .args([
-      "login",
-      "--hostname",
-      "github.com",
-      "--config",
-      &config_path,
-    ])
+    .args(["login", "github.com", "--config", &config_path])
     .status()
     .await
     .expect("spawn login");
