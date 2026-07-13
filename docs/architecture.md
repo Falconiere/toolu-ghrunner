@@ -34,8 +34,10 @@ toolu-ghrunner/                            workspace root
     │   └── startup.rs                     tracing init + SecretRedactor
     ├── config/                            registration config, lock, token store (→ shared)
     │   ├── config.rs                      TOML + JSON config load/save, [services]/[cache]/…
-    │   ├── lockfile.rs                    single-job fs2 lock
-    │   └── auth_store.rs                  keyring / 0600-file login-token store
+    │   ├── lockfile.rs                    single-job fs2 lock (per registration dir)
+    │   ├── auth_store.rs                  keyring / 0600-file login-token store + decide_bearer TTY gate
+    │   ├── registry.rs                    runner home + runners/<owner>/<repo>/ discovery/resolution
+    │   └── repo_infer.rs                  cwd git remote → owner/repo inference
     ├── expressions/                       the ${{ }} evaluator (→ shared)
     ├── cache/                             content-addressed CI cache (→ shared)
     ├── wire/                              async HTTP transport + reporting (→ shared, protocol)
@@ -56,7 +58,9 @@ toolu-ghrunner/                            workspace root
     │   ├── execution_loop.rs              run job + renewal + event forwarder
     │   └── log_uploader/                  per-step + combined job-log upload
     └── toolu-runner/                      bin only (the CLI)
-        ├── src/main.rs                    clap CLI: register / run / remove / status / watch / login / logout
+        ├── src/main.rs                    dispatch + the run / remove / watch handlers
+        ├── src/cli.rs                     clap surface: register / run / remove / status / watch / login / logout
+        ├── src/register_cmd.rs            register (repo inference + inline device flow + per-repo persist)
         ├── src/login_cmd.rs               login / logout (device flow)
         ├── src/status_cmd.rs              status (no network)
         └── tests/                         integration tests across the whole graph
@@ -151,7 +155,8 @@ suite covers RSA + JWT + JIT-config round-trips.
 
 Historically a single `toolu-runner` crate, now split across the
 layered graph above. `toolu-runner` itself is **bin-only** (the CLI:
-`main.rs` + `login_cmd.rs` + `status_cmd.rs`). The module descriptions
+`main.rs` + `cli.rs` + `register_cmd.rs` + `login_cmd.rs` +
+`status_cmd.rs`). The module descriptions
 that follow are grouped by their **current** crate: `net/` +
 `reporting/` live in `wire`; `listener/` in `listener`; `execution/` +
 `docker/` + `node/` + `plugin/` + the `Runner` (`lib.rs`) in
@@ -315,7 +320,9 @@ job history list (newest first, conclusion badges), step tree + log
 tail for the opened journal (250 ms poll, 1 s rescan), and `c` →
 confirm → SIGINT to the `.lock` PID (unix only) riding the existing
 graceful-cancel path. Works with no runner running and no config —
-it falls back to `~/.toolu-runner` for pure history browsing.
+it discovers every registration's `runners/<owner>/<repo>/_diag/jobs`
+(plus the legacy home) and browses them merged, re-discovering on each
+1 s rescan so new registrations appear live.
 
 ## Accelerated mode (cache acceleration)
 
@@ -404,32 +411,87 @@ cached result.
 
 ## Sequence: register
 
+`--url` is optional. With no arguments, `register` infers the target
+repo from the cwd git remote `origin` (`config::repo_infer::detect_repo`
+— github.com only; GHES hosts and org-level runners still need an
+explicit `--url`). The bearer resolves `--token` > `TOOLU_RUNNER_TOKEN`
+env > the stored `login` token; when none exists,
+`config::auth_store::decide_bearer` gates on the terminal — interactive
+stderr runs the GitHub OAuth device flow inline (the minted token is
+stored at the runner-home root for next time), non-interactive fails
+listing the three manual options.
+
 ```
-User                toolu-runner            GH JIT endpoint         GH API
- │                       │                       │                     │
- │ register --url ...    │                       │                     │
- │ --token ...           │                       │                     │
- ├──────────────────────>│                       │                     │
- │                       │ parse + validate URL  │                     │
- │                       │ (host must have '.')   │                     │
- │                       │                       │                     │
- │                       │ HEAD <jit endpoint>   │                     │
- │                       ├──────────────────────>│                     │
- │                       │<────── 2xx/3xx ───────┤                     │
- │                       │                       │                     │
- │                       │ write placeholder     │                     │
- │                       │ config.toml + creds   │                     │
- │                       │ (mode 0600)           │                     │
- │<──────────────────────┤                       │                     │
- │ printed: registered   │                       │                     │
- │ 'my-runner' at host   │                       │                     │
+User              toolu-runner                     GitHub API
+ │                     │                               │
+ │ register            │                               │
+ ├────────────────────>│                               │
+ │                     │ detect_repo: parse the cwd    │
+ │                     │ `origin` remote               │
+ │                     │ (skipped when --url is given) │
+ │                     │                               │
+ │                     │ resolve bearer: --token >     │
+ │                     │ TOOLU_RUNNER_TOKEN > stored   │
+ │                     │ login token                   │
+ │                     │ decide_bearer: no token + TTY │
+ │                     │  → inline device flow (code + │
+ │                     │    browser, poll, store the   │
+ │                     │    token at the home root)    │
+ │                     │                               │
+ │                     │ POST …/actions/runners/       │
+ │                     │      generate-jitconfig       │
+ │                     ├──────────────────────────────>│
+ │                     │<─ runner id + encoded JIT cfg ┤
+ │                     │                               │
+ │                     │ parse the minted config       │
+ │                     │ write runners/<owner>/<repo>/ │
+ │                     │   config.toml + creds (0600,  │
+ │                     │   all-or-nothing: config      │
+ │                     │   rolled back if the creds    │
+ │                     │   write fails; data_dir = the │
+ │                     │   registration dir)           │
+ │<────────────────────┤                               │
+ │ registered 'name'   │                               │
+ │ (id N) at host      │                               │
 ```
 
-**v1 note:** the actual POST to the JIT endpoint with the registration
-token is wired in step 10 (live smoke). For now, `register` validates
-the URL, probes the JIT endpoint, and writes a placeholder config.
-`run` will refuse to start until `register` is re-run against a live
-GH repo.
+github.com registrations go through `api.github.com`; a GHES host keeps
+its own API base. Repo URLs — inferred or explicit, github.com or GHES
+— persist into the per-repo `runners/<owner>/<repo>/` dir (`--config`
+overrides); org-level URLs (a single path segment) use the home-root
+`config.toml` slot. The persisted `data_dir` is the registration dir
+itself, so the `.lock`, `_diag/`, and the job journal all land
+per-repo.
+
+## Multi-repo concurrency
+
+Each registration owns its state dir, so the single-job `.lock` is per
+repo: two `run`s for *different* repos hold their locks independently
+and execute concurrently, while a second `run` for the *same* repo
+still exits 2 with the holder's PID. `run` / `status` / `remove` pick
+their registration via `config::registry::resolve_config_path`:
+`--config` flag > the cwd-inferred `runners/<owner>/<repo>/config.toml`
+> the sole existing registration (the legacy `<home>/config.toml`
+included) > an error listing every candidate. `watch` with no usable
+config browses all registrations' journals merged.
+
+Two documented caveats for concurrent cross-repo runs:
+
+- **`workspace_gc` residual risk.** Job workspaces share the default
+  `<home>/_work` root. GC prunes job dirs older than
+  `[workspace] gc_after_hours` and never the running job's own — but a
+  run in one repo can prune *another* repo's still-live job dir if that
+  job outlives the GC window. Rare (a job running longer than the 24 h
+  default); accepted for now.
+- **`service_bind` collision.** `offline` / `accelerated` service modes
+  bind a local port; concurrent cross-repo runs sharing one
+  `service_bind` give the second run EADDRINUSE — use a distinct
+  `service_bind` per repo config. The default `forwarder` mode binds
+  nothing and is unaffected.
+
+`remove` deletes the registration's `config.toml`, `credentials.json`,
+`.lock`, and `.pending_remove`, and keeps `_diag/` (the `watch`
+history); empty parent dirs are left in place.
 
 ## Sequence: run
 
@@ -566,20 +628,24 @@ warn and returns — the user is expected to restart `run`.
 ## Storage layout
 
 ```
-~/.toolu-runner/
-├── config.toml                 # registration + runtime config (0600)
-├── credentials.json            # long-lived OAuth token (0600)
-├── .lock                       # single-job lock file (0600, JSON body)
-├── .pending_remove             # marker written by `remove` while a run is in flight
-├── _work/                      # per-job workspaces (GitHub-style)
+~/.toolu-runner/                    # runner home ($TOOLU_RUNNER_HOME overrides)
+├── token-<host>.json               # login-token file fallback (keyring first) — SHARED by all repos
+├── _work/                          # per-job workspaces (GitHub-style, shared default)
 │   └── <repo>/
 │       └── <job-id>/
-├── _diag/                      # log files, diagnostic dumps
-│   ├── runner.log              # JSON, secret-masked, daily-rotated
-│   ├── runner.log.YYYY-MM-DD   # rotated archives
-│   └── jobs/                   # per-job JSONL event journals (watch TUI)
-│       └── <ts>-<job-id>.jsonl # newest 50 kept, secret-masked
-└── .runner_version             # installed toolu-runner version
+├── config.toml                     # legacy single-slot registration (read-only
+│                                   # fallback; org registrations still land here)
+├── .runner_version                 # installed toolu-runner version
+└── runners/<owner>/<repo>/         # one dir per repo registration = its data_dir
+    ├── config.toml                 # registration + runtime config (0600)
+    ├── credentials.json            # (0600)
+    ├── .lock                       # per-repo single-job lock file (0600, JSON body)
+    ├── .pending_remove             # marker written by `remove` while a run is in flight
+    └── _diag/                      # log files, diagnostic dumps
+        ├── runner.log              # JSON, secret-masked, daily-rotated
+        ├── runner.log.YYYY-MM-DD   # rotated archives
+        └── jobs/                   # per-job JSONL event journals (watch TUI)
+            └── <ts>-<job-id>.jsonl # newest 50 kept, secret-masked
 ```
 
 `.lock` body is JSON:
@@ -588,7 +654,7 @@ warn and returns — the user is expected to restart `run`.
 {
   "pid": 12345,
   "started_at": "2026-06-18T10:00:00Z",
-  "config_path": "/Users/foo/.toolu-runner/config.toml"
+  "config_path": "/Users/foo/.toolu-runner/runners/owner/repo/config.toml"
 }
 ```
 

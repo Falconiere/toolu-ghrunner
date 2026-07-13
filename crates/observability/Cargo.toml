@@ -30,5 +30,9 @@ tracing = "0.1"
 ratatui = "0.29"
 crossterm = "0.28"
 
+[dev-dependencies]
+# Real temp runner homes for the watch multi-dir discovery tests (no mocks)
+tempfile = "3"
+
 [lints]
 workspace = true

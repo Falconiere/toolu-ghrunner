@@ -483,6 +483,7 @@ dependencies = [
  "serde_json",
  "shared",
  "sysinfo",
+ "tempfile",
  "toml",
  "tracing",
 ]
@@ -1821,6 +1822,7 @@ dependencies = [
  "serde_json",
  "shared",
  "sysinfo",
+ "tempfile",
  "tokio",
  "tracing",
 ]

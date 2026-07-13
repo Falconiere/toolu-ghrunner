@@ -82,6 +82,9 @@ async fn register_without_token(harness: &LiveHarness) -> Output {
       &work_path,
       "--replace",
     ])
+    // register reads the shared token store at runner_home(); pin it to the
+    // harness dir so the seeded store is the one it resolves.
+    .env("TOOLU_RUNNER_HOME", harness.config_dir.path())
     .stdout(Stdio::piped())
     .stderr(Stdio::piped())
     .output()
@@ -159,18 +162,20 @@ async fn register_bad_stored_token_maps_to_login_hint() {
 async fn device_flow_login_stores_token() {
   require_live_env!();
   let harness = LiveHarness::new().await.expect("harness init");
-  let config_path = harness.config_path().to_string_lossy().into_owned();
 
   // Drive the real `login` command: prints a code, opens the browser,
-  // polls until the user approves, then persists the token.
+  // polls until the user approves, then persists the token. `login` lost
+  // its `--config` flag — the store is pinned to the runner home, so the
+  // harness dir is passed as TOOLU_RUNNER_HOME instead.
   let status = Command::new(&harness.binary_path)
-    .args(["login", "github.com", "--config", &config_path])
+    .env("TOOLU_RUNNER_HOME", harness.config_dir.path())
+    .args(["login", "github.com"])
     .status()
     .await
     .expect("spawn login");
   assert!(status.success(), "login should exit 0 after approval");
 
-  // The token must now be readable from the store next to config.toml.
+  // The token must now be readable from the runner-home store.
   let store = AuthStore::File(harness.config_dir.path().to_path_buf());
   let stored = store
     .load("github.com")

@@ -16,20 +16,24 @@ use crate::login_cmd;
 const TOP_AFTER_HELP: &str = "\
 Examples:
   toolu-runner login                # one-time GitHub OAuth device-flow login
-  toolu-runner register --url https://github.com/owner/repo
+  toolu-runner register             # repo inferred from the cwd git remote
   toolu-runner run                  # poll for the job, execute it, exit
   toolu-runner watch                # TUI over running and past jobs
 
 Environment:
   TOOLU_RUNNER_TOKEN           GitHub bearer for `register` (flag > env > stored login token)
   TOOLU_RUNNER_CLIENT_ID       OAuth App client_id for `login` (fallback for --client-id)
+  TOOLU_RUNNER_HOME            runner state root (default ~/.toolu-runner)
   TOOLU_RUNNER_LOG / RUST_LOG  tracing filter; levels above `info` also require
                                TOOLU_RUNNER_ALLOW_VERBOSE=1 (secret-leak guard)";
 
 /// Extended help footer for `register --help`.
 const REGISTER_AFTER_HELP: &str = "\
 Examples:
-  # github.com repository, bearer from the stored `login` token
+  # zero-arg: repo inferred from the cwd git remote `origin` (github.com)
+  cd my-repo && toolu-runner register
+
+  # explicit github.com repository, bearer from the stored `login` token
   toolu-runner register --url https://github.com/owner/repo
 
   # GHES organization, explicit token, custom name + labels
@@ -113,10 +117,12 @@ pub(crate) enum Command {
 pub(crate) struct RegisterArgs {
   /// Repository or organization URL, e.g. https://github.com/owner/repo.
   ///
-  /// Accepts github.com and GHES hosts. A repository URL registers a
-  /// repo-level runner; an organization URL an org-level one.
+  /// Optional: when absent, the repository is inferred from the cwd git
+  /// remote `origin` (github.com only). Org registrations and GHES hosts
+  /// still require --url. A repository URL registers a repo-level runner;
+  /// an organization URL an org-level one.
   #[arg(long, value_name = "URL", value_hint = ValueHint::Url)]
-  pub(crate) url: String,
+  pub(crate) url: Option<String>,
   /// GitHub API token for the `generate-jitconfig` REST call.
   ///
   /// Needs admin rights on the target repo/org (PAT or App installation
@@ -142,7 +148,9 @@ pub(crate) struct RegisterArgs {
   /// Working directory for job workspaces (default: ~/.toolu-runner/_work).
   #[arg(long, value_name = "DIR", value_hint = ValueHint::DirPath)]
   pub(crate) work: Option<PathBuf>,
-  /// Path to the runner config file (default: ~/.toolu-runner/config.toml).
+  /// Path to the runner config file. Default: inferred from the cwd git
+  /// remote (runners/<owner>/<repo>/ under the runner home), else the
+  /// sole existing registration.
   ///
   /// The credentials file is written next to it in the same directory.
   #[arg(long, value_name = "FILE", value_hint = ValueHint::FilePath)]
@@ -157,7 +165,9 @@ pub(crate) struct RegisterArgs {
 /// Arguments for the `run` subcommand.
 #[derive(Debug, Args)]
 pub(crate) struct RunArgs {
-  /// Path to the runner config file (default: ~/.toolu-runner/config.toml).
+  /// Path to the runner config file. Default: inferred from the cwd git
+  /// remote (runners/<owner>/<repo>/ under the runner home), else the
+  /// sole existing registration.
   #[arg(long, value_name = "FILE", value_hint = ValueHint::FilePath)]
   pub(crate) config: Option<PathBuf>,
   /// Exit after the first job completes (currently the default behavior).
@@ -172,7 +182,9 @@ pub(crate) struct RunArgs {
 /// Arguments for the `remove` subcommand.
 #[derive(Debug, Args)]
 pub(crate) struct RemoveArgs {
-  /// Path to the runner config file (default: ~/.toolu-runner/config.toml).
+  /// Path to the runner config file. Default: inferred from the cwd git
+  /// remote (runners/<owner>/<repo>/ under the runner home), else the
+  /// sole existing registration.
   #[arg(long, value_name = "FILE", value_hint = ValueHint::FilePath)]
   pub(crate) config: Option<PathBuf>,
   /// Unregistration token (reserved).
@@ -192,7 +204,9 @@ pub(crate) struct RemoveArgs {
 /// Arguments for the `status` subcommand.
 #[derive(Debug, Args)]
 pub(crate) struct StatusArgs {
-  /// Path to the runner config file (default: ~/.toolu-runner/config.toml).
+  /// Path to the runner config file. Default: inferred from the cwd git
+  /// remote (runners/<owner>/<repo>/ under the runner home), else the
+  /// sole existing registration.
   #[arg(long, value_name = "FILE", value_hint = ValueHint::FilePath)]
   pub(crate) config: Option<PathBuf>,
 }
@@ -200,7 +214,9 @@ pub(crate) struct StatusArgs {
 /// Arguments for the `watch` subcommand.
 #[derive(Debug, Args)]
 pub(crate) struct WatchArgs {
-  /// Path to the runner config file (default: ~/.toolu-runner/config.toml).
+  /// Path to the runner config file. Default: inferred from the cwd git
+  /// remote (runners/<owner>/<repo>/ under the runner home), else the
+  /// sole existing registration.
   ///
   /// When the file is absent or unreadable, `watch` falls back to
   /// browsing the default data dir (~/.toolu-runner) read-only.

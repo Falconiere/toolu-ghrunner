@@ -212,3 +212,29 @@ pub fn resolve_bearer(
   let stored = store.load(host)?.map(|t| t.access_token);
   Ok(pick_bearer(flag, env, stored))
 }
+
+/// What `register` does about a bearer: the outcome of [`decide_bearer`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BearerDecision {
+  /// A token was resolved — use it (regardless of TTY).
+  Use(String),
+  /// No token, but interactive — start the inline device flow.
+  StartDeviceFlow,
+  /// No token and non-interactive — fail with this canonical message.
+  Fail(String),
+}
+
+/// Pure TTY gate on the resolved bearer: token → [`BearerDecision::Use`];
+/// none + TTY → [`BearerDecision::StartDeviceFlow`]; none + no TTY →
+/// [`BearerDecision::Fail`] naming `--token`, `TOOLU_RUNNER_TOKEN`, and
+/// `toolu-runner login`.
+pub fn decide_bearer(resolved: Option<String>, is_tty: bool) -> BearerDecision {
+  match (resolved, is_tty) {
+    (Some(token), _) => BearerDecision::Use(token),
+    (None, true) => BearerDecision::StartDeviceFlow,
+    (None, false) => BearerDecision::Fail(
+      "no GitHub token: pass --token, set TOOLU_RUNNER_TOKEN, or run 'toolu-runner login'"
+        .to_owned(),
+    ),
+  }
+}
