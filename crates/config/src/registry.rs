@@ -161,8 +161,9 @@ pub fn resolve_config_path(
 }
 
 /// Reject values unusable as a single path component: empty, `.`, `..`,
-/// or containing a `/` / `\` separator or a NUL byte (NUL terminates C
-/// path strings, so it can smuggle a truncated path past the check).
+/// or containing a `/` / `\` separator or a NUL byte. The NUL check is
+/// defense in depth: Rust strings carry NUL harmlessly and the OS layer
+/// rejects it in paths — this guards any future C-string boundary.
 fn validate_component(what: &str, value: &str) -> Result<(), RunnerError> {
   if value.is_empty()
     || value == "."

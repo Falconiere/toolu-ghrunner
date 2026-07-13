@@ -193,6 +193,13 @@ fn config_flag_help_states_default_resolution_everywhere() {
       !stdout.contains("--config"),
       "{subcommand} --help must not offer --config (token store lives at the runner home): {stdout}"
     );
+    // Positive counterpart to the negative assertion above: the help must
+    // name the host argument these commands DO take, so a format change
+    // can't silently satisfy the `!contains` check alone.
+    assert!(
+      stdout.contains("[HOST]"),
+      "{subcommand} --help should document its positional HOST arg: {stdout}"
+    );
   }
 }
 
