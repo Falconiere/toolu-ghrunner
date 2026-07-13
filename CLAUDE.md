@@ -172,7 +172,7 @@ no OTel.
   advisory lock. Stale-lock recovery uses `is_pid_alive` (sysinfo)
   + mtime > 5 min.
 - `auth_store.rs` — GitHub token persistence. `AuthStore`
-  (`Keyring` via the `keyring` crate / `File(<data_dir>/token-<host>.json)`
+  (`Keyring` via the `keyring` crate / `File(<runner home>/token-<host>.json)`
   0600 fallback), `StoredToken`, per-host `save`/`load`/`delete`,
   pure `pick_bearer` (flag > env > stored) + `resolve_bearer`, and the
   pure TTY gate `decide_bearer` → `BearerDecision` (`Use` /
