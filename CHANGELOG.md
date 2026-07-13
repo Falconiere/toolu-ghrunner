@@ -35,9 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `.github/workflows/release-pr.yml` front half: a merge to `main` opens a
   version-bump + `CHANGELOG.md` release PR, and merging that PR pushes the
   `vX.Y.Z` tag (via `RELEASE_PLZ_TOKEN`) that drives the existing
-  tag-triggered `release.yml`. (Initially built on release-plz; replaced
-  in-flight because its `git_only` mode cannot version unpublished
-  workspaces with path-only internal deps — release-plz#2595.)
+  tag-triggered `release.yml`.
 - **Cache acceleration (`ServicesMode::Accelerated`).** A new
   `[services] mode = "accelerated"` that turns the runner into a CI
   cache accelerator, alongside the existing `forwarder` and `offline`
