@@ -25,23 +25,9 @@ jobs:
         with:
           PROVIDER: openrouter
           API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          # The action reads convention files (CLAUDE.md) from the BASE ref
-          # by design (anti rule-injection), so a PR that legitimately
-          # CHANGES a convention gets reviewed against the stale text.
-          # State the current design here until the action grows a
-          # RULES_REF input.
-          CODEBASE_OVERVIEW: |
-            Current design (see this PR's CLAUDE.md, which supersedes the
-            base-ref copy the rules gatherer reads): runner state is
-            per-repo — each registration lives in
-            <home>/runners/<owner>/<repo>/ (config, credentials, .lock,
-            _diag/) with the persisted data_dir set to that directory.
-            Locks are per-repo by design: jobs for DIFFERENT repos run
-            concurrently; single-job exclusivity holds per repo. The
-            shared per-host login token store stays at the runner home
-            root. The legacy single-slot ~/.toolu-runner/config.toml is a
-            read-only fallback. run/status/remove/watch resolve their
-            config as: --config flag > cwd-inferred repo (one local
-            `git remote get-url origin` subprocess — this inference IS the
-            resolution mechanism, not incidental overhead) > sole existing
-            registration.
+          # Read convention files (CLAUDE.md etc.) from the PR merge ref
+          # instead of the base ref, so a PR that legitimately changes a
+          # convention is reviewed against its own updated text. Safe
+          # here: same-repo branches only, no fork PRs trigger this
+          # workflow. Requires toolu-ghactions >= 6.3.0.
+          RULES_REF: merge
