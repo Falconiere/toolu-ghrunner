@@ -669,44 +669,50 @@ forked watcher task; recovery happens at the next acquire attempt.
 ## Release pipeline
 
 Releases run in two halves. The **front half**
-(`.github/workflows/release-plz.yml` + `release-plz.toml`) turns merged
+(`.github/workflows/release-pr.yml` + `cliff.toml`) turns merged
 work into a version bump; the **back half**
 (`.github/workflows/release.yml`) turns the resulting tag into published
-binaries. The version is no longer hand-edited — release-plz authors it,
+binaries. The version is no longer hand-edited — git-cliff authors it,
 and the only write it makes to `main` is a pull request a human merges.
 
-The release-plz stage is gated by the `RELEASE_PLZ_ENABLED` repository
+The front half was originally release-plz; it was replaced by git-cliff
+because release-plz's `git_only` mode runs `cargo package` on every
+workspace member, which cannot handle this unpublished workspace's
+versionless internal path deps (release-plz#2595, fix unmerged).
+git-cliff reads git history only.
+
+The front half is gated by the `RELEASE_AUTOMATION_ENABLED` repository
 variable (off by default; set it to `true` to activate). Until then both
-release-plz jobs are inert, so merging to `main` opens no release PR and
-cuts no tag.
+jobs are inert, so merging to `main` opens no release PR and cuts no tag.
 
 ```
 merge to main
       │
       ▼
-release-plz-pr       release-plz (release-pr): opens/updates a "release"
-      │              PR that bumps the [workspace.package] version and
-      │              rewrites CHANGELOG.md from the conventional commits
-      │              since the last tag (feat → Added, fix → Fixed,
-      │              docs → Documentation, refactor/perf → Changed; the
-      │              workspace crates move in lockstep via one version_group).
+release-pr           computes the next semver with `git-cliff
+      │              --bumped-version`, bumps [workspace.package] version,
+      │              prepends the new section to CHANGELOG.md from the
+      │              conventional commits since the last tag (feat → Added,
+      │              fix → Fixed, docs → Documentation, refactor/perf →
+      │              Changed; the workspace crates move in lockstep via
+      │              version.workspace), and opens/updates the "release" PR.
       ▼
 merge the release PR the bump + changelog land on main.
       │
       ▼
-release-plz-release  release-plz (release): pushes the matching `vX.Y.Z`
-      │              tag — under RELEASE_PLZ_TOKEN (a PAT), NOT the default
-      │              GITHUB_TOKEN. GitHub suppresses workflow runs for
-      │              events raised by GITHUB_TOKEN, so a tag pushed by it
-      │              would never fire release.yml; the PAT is a distinct
-      │              identity, so its push does. That tag hands off to the
-      │              back half:
+release-tag          sees the untagged version on main and pushes the
+      │              matching `vX.Y.Z` tag — under RELEASE_PLZ_TOKEN (a
+      │              PAT), NOT the default GITHUB_TOKEN. GitHub suppresses
+      │              workflow runs for events raised by GITHUB_TOKEN, so a
+      │              tag pushed by it would never fire release.yml; the PAT
+      │              is a distinct identity, so its push does. That tag
+      │              hands off to the back half:
       ▼
 ```
 
 The back half is unchanged. It reads the repo and never writes to it;
 by the time it runs, `Cargo.toml` + `CHANGELOG.md` already carry the
-version release-plz wrote.
+version the release PR wrote.
 
 ```
 push tag vX.Y.Z
