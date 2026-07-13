@@ -13,6 +13,13 @@
 # workspace member, which cannot handle this unpublished workspace's
 # versionless internal path deps (release-plz#2595; fix #2789 unmerged).
 # git-cliff only reads git history — no cargo involvement at all.
+#
+# POLICY: keep the `## [Unreleased]` section of CHANGELOG.md EMPTY.
+# The changelog is generated from conventional commits; the prepend inserts
+# each new release section directly under the Unreleased heading, so any
+# hand-written entries sitting there end up dangling inside the generated
+# section (this bit v0.2.0). Rich release notes belong in commit messages
+# or in a hand-edit of the release PR itself.
 
 [changelog]
 # Must match the existing CHANGELOG.md preamble byte-for-byte, or the
