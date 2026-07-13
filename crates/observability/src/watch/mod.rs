@@ -1,6 +1,9 @@
 //! `toolu-runner watch` — ratatui TUI over the job journal
 //! (`<data_dir>/_diag/jobs/`): job history list, live step tree + log
 //! tail for the selected job, and a SIGINT cancel key (unix only).
+//! Without a usable config it browses every registered
+//! `runners/<owner>/<repo>/` jobs dir plus the legacy home, merged —
+//! multi-dir browsing is what backs the per-repo runner layout.
 
 /// Keyboard mapping: key events → `Action`s (incl. the confirm modal).
 pub mod input;
@@ -15,7 +18,7 @@ use std::time::{Duration, Instant};
 use crossterm::event::{Event, KeyEventKind};
 use shared::RunnerError;
 
-use crate::journal::reader::{JournalReader, scan_jobs};
+use crate::journal::reader::{JobSummary, JournalReader, scan_jobs};
 use crate::journal::writer::jobs_dir_for;
 use input::Action;
 use state::{App, OpenJob, Pane};
@@ -27,8 +30,13 @@ const RESCAN: Duration = Duration::from_secs(1);
 
 /// Everything the event loop needs besides the pure `App` state.
 struct WatchCtx {
-  jobs_dir: PathBuf,
+  /// Jobs dirs the rescan merges; one entry for a registered config,
+  /// one per discovered registration (+ legacy) in the fallback.
+  jobs_dirs: Vec<PathBuf>,
   lock_path: PathBuf,
+  /// `Some(home)` = unregistered fallback: `jobs_dirs` is re-discovered
+  /// from the registry on every rescan so new registrations appear live.
+  discover_home: Option<PathBuf>,
   reader: Option<JournalReader>,
   last_scan: Option<Instant>,
 }
@@ -36,20 +44,15 @@ struct WatchCtx {
 /// Run the watch TUI until the user quits.
 ///
 /// Config resolution is forgiving: a missing/unreadable config falls back
-/// to the default data dir so pure history browsing still works.
+/// to browsing every registered runner dir (plus the legacy home) so pure
+/// history browsing still works.
 ///
 /// # Errors
 ///
 /// Returns `RunnerError::Config` when the terminal cannot be initialized
 /// or restored — never for journal/config problems.
 pub fn run_watch(config_path: &Path) -> Result<(), RunnerError> {
-  let (runner_name, data_dir) = identity_for(config_path);
-  let mut ctx = WatchCtx {
-    jobs_dir: jobs_dir_for(&data_dir),
-    lock_path: data_dir.join(".lock"),
-    reader: None,
-    last_scan: None,
-  };
+  let (runner_name, mut ctx) = context_for(config_path);
   let mut app = App::new(runner_name);
 
   let mut terminal =
@@ -61,22 +64,85 @@ pub fn run_watch(config_path: &Path) -> Result<(), RunnerError> {
   result.map_err(|e| RunnerError::Config(format!("watch terminal error: {e}")))
 }
 
-/// Runner display name + data dir, with the unregistered fallback.
-fn identity_for(config_path: &Path) -> (String, PathBuf) {
+/// Runner display name + watch context, with the unregistered fallback.
+/// A readable config keeps the single-dir behavior over its `data_dir`;
+/// the fallback browses all registered runner dirs merged (per-repo layout).
+fn context_for(config_path: &Path) -> (String, WatchCtx) {
   match config::config::load_config(config_path) {
     Ok(cfg) => {
       let data_dir = config::config::resolve_data_dir(&cfg.runtime.data_dir)
-        .unwrap_or_else(|_| shared::paths::expand_tilde(Path::new("~/.toolu-runner")));
-      (cfg.runner_name, data_dir)
+        .unwrap_or_else(|_| config::registry::runner_home());
+      let ctx = WatchCtx {
+        jobs_dirs: vec![jobs_dir_for(&data_dir)],
+        lock_path: data_dir.join(".lock"),
+        discover_home: None,
+        reader: None,
+        last_scan: None,
+      };
+      (cfg.runner_name, ctx)
     },
     Err(e) => {
-      tracing::warn!(error = %e, "config unreadable; browsing default data dir");
-      (
-        "<unregistered>".to_owned(),
-        shared::paths::expand_tilde(Path::new("~/.toolu-runner")),
-      )
+      tracing::warn!(error = %e, "config unreadable; browsing all registered runner dirs");
+      let home = config::registry::runner_home();
+      let ctx = WatchCtx {
+        jobs_dirs: discover_jobs_dirs(&home),
+        lock_path: home.join(".lock"),
+        discover_home: Some(home),
+        reader: None,
+        last_scan: None,
+      };
+      ("<unregistered>".to_owned(), ctx)
     },
   }
+}
+
+/// Jobs dirs to browse under `home`: one per registration found by
+/// `config::registry::list_registrations` (the registration dir is the
+/// config's parent) plus the legacy `<home>/_diag/jobs`, deduplicated.
+/// Pure discovery — no TUI, no reads beyond the registry scan.
+pub fn discover_jobs_dirs(home: &Path) -> Vec<PathBuf> {
+  let mut dirs: Vec<PathBuf> = Vec::new();
+  for entry in config::registry::list_registrations(home) {
+    // A rootless config path has no parent dir to hold `_diag/` — skip.
+    let Some(reg_dir) = entry.config_path.parent() else {
+      continue;
+    };
+    let jobs = jobs_dir_for(reg_dir);
+    if !dirs.contains(&jobs) {
+      dirs.push(jobs);
+    }
+  }
+  // Legacy home journals can exist without a legacy config.toml.
+  let legacy = jobs_dir_for(home);
+  if !dirs.contains(&legacy) {
+    dirs.push(legacy);
+  }
+  dirs
+}
+
+/// Merge `scan_jobs` across several jobs dirs, newest first by journal
+/// file name (the `<UTC ts>-<job_id>` prefix orders by start time; ties
+/// break on the full path). Job identity stays the full journal path
+/// (`JobSummary::path`), so same-named files in different dirs never
+/// collide. Mirrors the journal's never-fail tolerance: an unreadable or
+/// missing dir is skipped (missing just means no jobs ran there yet).
+pub fn scan_all_jobs(jobs_dirs: &[PathBuf]) -> Vec<JobSummary> {
+  let mut jobs = Vec::new();
+  for dir in jobs_dirs {
+    match scan_jobs(dir) {
+      Ok(mut found) => jobs.append(&mut found),
+      Err(e) => {
+        tracing::debug!(dir = %dir.display(), error = %e, "watch: skipping unreadable jobs dir");
+      },
+    }
+  }
+  jobs.sort_by(|a, b| {
+    b.path
+      .file_name()
+      .cmp(&a.path.file_name())
+      .then_with(|| b.path.cmp(&a.path))
+  });
+  jobs
 }
 
 /// Draw / input / tail cycle.
@@ -109,11 +175,11 @@ fn rescan_if_due(app: &mut App, ctx: &mut WatchCtx) {
     return;
   }
   ctx.last_scan = Some(Instant::now());
-  match scan_jobs(&ctx.jobs_dir) {
-    Ok(jobs) => app.set_jobs(jobs),
-    // A missing dir just means no jobs have run yet.
-    Err(_) => app.set_jobs(Vec::new()),
+  // Unregistered browsing: re-discover so new registrations appear live.
+  if let Some(home) = &ctx.discover_home {
+    ctx.jobs_dirs = discover_jobs_dirs(home);
   }
+  app.set_jobs(scan_all_jobs(&ctx.jobs_dirs));
   app.lock_line = lock_line(&ctx.lock_path);
   if ctx.reader.is_none() && !app.jobs.is_empty() {
     open_job(app, ctx, 0);

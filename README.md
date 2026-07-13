@@ -58,36 +58,59 @@ Prebuilt for **macOS** (arm64, x86_64) and **Linux** (x86_64, arm64).
 
 ## Quick start
 
-Log in once — GitHub's device flow opens your browser, no PAT to craft by
-hand. The token is stored in your OS keyring (0600 file fallback where no
-keyring exists):
-
 ```sh
-# 1. Authenticate to GitHub
-toolu-runner login
+# 1. Register — the repo is inferred from the cwd git remote `origin`
+cd my-repo && toolu-runner register
 
-# 2. Register (repo URL or org URL both work) — no --token needed after login
-toolu-runner register \
-  --url https://github.com/owner/repo \
-  --name my-runner \
-  --labels self-hosted,linux,x64
-
-# 3. Run the listener — blocks until SIGINT/SIGTERM
+# 2. Run the listener — executes one job, then exits
 toolu-runner run
 
-# 4. Watch jobs execute, in another terminal
+# 3. Watch jobs execute, in another terminal
 toolu-runner watch
 ```
 
-Prefer to manage the credential yourself? Pass `--token <pat>` (a PAT or App
-installation token with `administration:write` on the repo/org) or set
-`TOOLU_RUNNER_TOKEN`. Resolution order for `register` is
-`--token` > `TOOLU_RUNNER_TOKEN` > stored login token. For GitHub Enterprise,
-register an OAuth App on that instance and run
-`toolu-runner login <ghes-host> --client-id <id>`.
+No flags, no PAT to craft by hand: on an interactive terminal with no
+token available, `register` runs GitHub's OAuth **device flow inline** —
+enter a one-time code in your browser, and the minted token lands in
+your OS keyring (0600 file fallback where no keyring exists). One login
+per host covers every repo: the token store is shared, at the
+runner-home root. Until the built-in OAuth App ships, the device flow
+needs your own App's client id — set `TOOLU_RUNNER_CLIENT_ID`, or run
+`toolu-runner login --client-id <id>` once.
 
-`status` prints local state — including login — without touching the network.
-`logout` deletes the stored token. `remove` unregisters. That's the whole CLI.
+Each registration gets its own directory —
+`~/.toolu-runner/runners/<owner>/<repo>/` (config, credentials, lock,
+logs) — so one machine holds runners for many repos, and jobs for
+*different* repos run **concurrently**: the single-job lock is per repo.
+
+### Headless / GHES
+
+Everything can also be explicit — for scripts, org-level runners, and
+GitHub Enterprise:
+
+```sh
+# explicit repo or org URL (org runners always need --url)
+toolu-runner register --url https://github.com/owner/repo
+
+# explicit credential: a PAT or App installation token with
+# administration:write on the repo/org — flag or env
+toolu-runner register --url https://github.com/owner/repo --token <pat>
+TOOLU_RUNNER_TOKEN=<pat> toolu-runner register
+
+# GHES: register an OAuth App on the instance, log in against it,
+# then register with an explicit --url (inference is github.com-only)
+toolu-runner login ghes.example.com --client-id <id>
+toolu-runner register --url https://ghes.example.com/owner/repo
+```
+
+Bearer resolution for `register`: `--token` > `TOOLU_RUNNER_TOKEN` >
+stored `login` token > inline device flow (interactive terminals only —
+non-interactive runs fail, listing those three options).
+
+`login` / `logout` manage the stored token per host — they take a
+hostname, not `--config`. `status` prints local state — including login
+— without touching the network. `remove` unregisters. That's the whole
+CLI.
 
 ### CLI flags reference
 
@@ -98,9 +121,12 @@ register an OAuth App on that instance and run
 | `--replace` | `register` | Overwrite an existing registration with the same name. |
 | `--once` | `run` | Exit after the first job — currently the default behavior, since a JIT registration is single-use. |
 | `--force` | `remove` | Cancel an in-flight run before unregistering. |
+| `--client-id <ID>` | `login` | OAuth App client id for the device flow (fallback: `TOOLU_RUNNER_CLIENT_ID`). Needed until the built-in github.com App ships; always needed for GHES. |
 
-Every command also takes `--config <FILE>` (default
-`~/.toolu-runner/config.toml`) and documents itself in full:
+`register`, `run`, `remove`, `status`, and `watch` also take
+`--config <FILE>`; when omitted, the config resolves to the cwd-inferred
+`runners/<owner>/<repo>/config.toml` under the runner home, else the
+sole existing registration. Every command documents itself in full:
 `toolu-runner <command> --help`.
 
 ## Watch live jobs in your terminal
@@ -129,8 +155,9 @@ and a cancel key. No network, no server, no browser tab.
 
 Logs are masked through the same `SecretMasker` that guards the runner's
 own log file, so `secrets.*` values never land on disk in the clear.
-`watch` also works with no runner running — it browses the last 50 job
-journals under `~/.toolu-runner/_diag/jobs/`.
+`watch` also works with no runner running — it browses the job journals
+of every registration (`runners/<owner>/<repo>/_diag/jobs/` plus the
+legacy home), merged, newest first (each dir keeps its newest 50).
 
 ## How it works
 
@@ -155,10 +182,16 @@ sequenceDiagram
     end
 ```
 
-One process, one job at a time. The single-job guarantee is an `fs2`
-file lock on `~/.toolu-runner/.lock` whose body carries the holder's
-PID — a second `run` reads it, prints the PID, and exits `2`. Stale
-locks (dead PID, mtime > 5 min) are reclaimed automatically.
+One process, one job per registration. The single-job guarantee is an
+`fs2` file lock on the registration's own `.lock` (under
+`~/.toolu-runner/runners/<owner>/<repo>/`) whose body carries the
+holder's PID — a second `run` for the same repo reads it, prints the
+PID, and exits `2`. Stale locks (dead PID, mtime > 5 min) are reclaimed
+automatically. Different repos lock independently, so cross-repo jobs
+run concurrently on one machine. (In `offline` / `accelerated` service
+modes, give each repo's config a distinct `service_bind` — concurrent
+runs would otherwise collide on the port; the default `forwarder` mode
+binds nothing.)
 
 `SIGINT`/`SIGTERM` are bridged to a `CancellationToken` that the poll
 loop, the renewal task, and the in-flight job all observe. Nothing is
@@ -293,7 +326,7 @@ host at `register` time.
 ## Configuration
 
 <details>
-<summary><code>~/.toolu-runner/config.toml</code> (mode 0600)</summary>
+<summary><code>~/.toolu-runner/runners/&lt;owner&gt;/&lt;repo&gt;/config.toml</code> (mode 0600)</summary>
 
 ```toml
 runner_url   = "https://github.com/owner/repo"
@@ -306,7 +339,7 @@ runner_group = "Default"
 [runtime]
 jit_config       = "<base64 blob from GH>"   # written by `register`
 work_dir         = "~/.toolu-runner/_work"
-data_dir         = "~/.toolu-runner"
+data_dir         = "~/.toolu-runner/runners/owner/repo"
 protocol_version = "v2"                      # "v1" for GHES
 
 [services]
@@ -325,17 +358,24 @@ hand-edit `jit_config` or `auth_token` — re-run `register --replace`.
 <summary>Storage layout</summary>
 
 ```
-~/.toolu-runner/
-├── config.toml         # registration + runtime config (0600)
-├── credentials.json    # OAuth token (0600)
-├── .lock               # single-job lock (JSON: pid, started_at, config_path)
-├── .pending_remove     # written by `remove` while a run is in flight
-├── _work/              # per-job workspaces: <repo>/<job-id>/
-├── _diag/
-│   ├── runner.log      # JSON, secret-masked, daily-rotated
-│   └── jobs/           # per-job JSONL journals (newest 50) — what `watch` reads
-└── .runner_version
+~/.toolu-runner/                # runner home — override with $TOOLU_RUNNER_HOME
+├── token-<host>.json           # `login` token file fallback (keyring first) — shared by all repos
+├── _work/                      # per-job workspaces: <repo>/<job-id>/ (shared default)
+├── config.toml                 # legacy single-slot registration; org registrations land here
+├── .runner_version
+└── runners/<owner>/<repo>/     # one directory per repo registration
+    ├── config.toml             # registration + runtime config (0600)
+    ├── credentials.json        # (0600)
+    ├── .lock                   # per-repo single-job lock (JSON: pid, started_at, config_path)
+    ├── .pending_remove         # written by `remove` while a run is in flight
+    └── _diag/
+        ├── runner.log          # JSON, secret-masked, daily-rotated
+        └── jobs/               # per-job JSONL journals (newest 50) — what `watch` reads
 ```
+
+`remove` deletes a registration's `config.toml`, `credentials.json`,
+`.lock`, and `.pending_remove`; `_diag/` is kept, so `watch` history
+survives unregistration.
 
 </details>
 
@@ -344,6 +384,9 @@ hand-edit `jit_config` or `auth_token` — re-run `register --replace`.
 
 | Variable | Default | Description |
 |---|---|---|
+| `TOOLU_RUNNER_HOME` | `~/.toolu-runner` | runner state root: the token store, `runners/<owner>/<repo>/` registrations, default `_work/`. |
+| `TOOLU_RUNNER_TOKEN` | — | bearer for `register` (resolution: `--token` > env > stored `login` token). |
+| `TOOLU_RUNNER_CLIENT_ID` | — | OAuth App client id for the device flow (`--client-id` fallback). |
 | `TOOLU_RUNNER_LOG` | `info` | tracing filter. Checked before `RUST_LOG`. |
 | `RUST_LOG` | — | tracing filter (standard fallback). |
 | `TOOLU_RUNNER_REPO` | `Falconiere/toolu-ghrunner` | `install.sh` only — release source. |
@@ -388,10 +431,13 @@ sudo journalctl -u toolu-runner -f
 
 | Symptom | Fix |
 |---|---|
-| `config not found at ...` | Run `register` before `run`. |
+| `config not found at ...` / `no runner registration found under ...` | Run `register` before `run`. |
+| `several runner registrations found (...)` | More than one repo is registered and the cwd matches none — `cd` into the repo, or pass `--config`. |
 | `registration already exists at ...` | Pass `--replace` to `register`. |
-| `another run is in flight` | Another `run` holds `.lock`; its PID is in the error. Wait it out, or cancel with `c` in `watch` (sends SIGINT to the holder). |
-| JIT endpoint probe fails at `register` | A firewall is blocking `pipelinesgh.azureedge.net` (github.com) or `pipelines.<host>` (GHES). |
+| `... is not a git repository` / `has no 'origin' remote` at `register` | Zero-arg inference needs a cwd git repo with an `origin` remote — pass `--url` instead. |
+| `no GitHub OAuth App configured` | The built-in device-flow App isn't wired yet — set `TOOLU_RUNNER_CLIENT_ID` (or `login --client-id`), or skip the device flow with `--token` / `TOOLU_RUNNER_TOKEN`. |
+| `another run is in flight` | Another `run` holds this repo's `.lock`; its PID is in the error. Wait it out, or cancel with `c` in `watch` (sends SIGINT to the holder). |
+| `generate-jitconfig` fails with a network error | A firewall is blocking `api.github.com` (github.com) or the GHES host. |
 | `warning: ignoring yamless env var ...` | A stale `YAMLESS_*` var is in your shell rc. Remove it. |
 
 Job not showing up? Check the labels in `runs-on:` match the ones you
@@ -430,8 +476,9 @@ Ten layered crates under `crates/`, acyclic dependency graph:
   by its `Cargo.toml`). No internal deps.
 - **`shared`** — config, errors, events, job-message types, tracing
   init, `SecretMasker`, platform labels. Sync, I/O-free. No internal deps.
-- **`config`** — registration config (TOML/JSON), the single-job file
-  lock, and the login-token store. → `shared`.
+- **`config`** — registration config (TOML/JSON), the per-repo
+  `runners/<owner>/<repo>/` registry, cwd repo inference, the
+  single-job file lock, and the login-token store. → `shared`.
 - **`expressions`** — the `${{ }}` evaluator. → `shared`.
 - **`cache`** — content-addressed CI cache (CAS + Twirp/blob/v1
   endpoints). → `shared`.

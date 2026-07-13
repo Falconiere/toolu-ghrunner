@@ -9,3 +9,7 @@ pub mod auth_store;
 pub mod config;
 /// Single-job `fs2` advisory lockfile with stale-lock recovery.
 pub mod lockfile;
+/// Per-repo runner registration registry (home layout + config resolution).
+pub mod registry;
+/// Repo inference from the cwd git remote (pure URL parse + `git` shell-out).
+pub mod repo_infer;

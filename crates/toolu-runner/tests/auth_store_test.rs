@@ -1,14 +1,15 @@
 //! Unit tests for `config::auth_store`.
 //!
-//! Covers the pure precedence resolver (AC-4), the per-host File backend
-//! with its `0600` files and idempotent delete (AC-6), and env-sourced
-//! bearer resolution (AC-3).
+//! Covers the pure precedence resolver (AC-4), the register-time TTY gate
+//! (zero-arg-register AC-5), the per-host File backend with its `0600`
+//! files and idempotent delete (AC-6), and env-sourced bearer resolution
+//! (AC-3).
 //!
 //! No mocks: every test drives the real `AuthStore::File` backend against
 //! a real `tempfile` directory. The File variant is constructed directly
 //! so the suite never touches the OS keyring (hermetic on keyless CI).
 
-use config::auth_store::{self, AuthStore, StoredToken};
+use config::auth_store::{self, AuthStore, BearerDecision, StoredToken};
 use tempfile::TempDir;
 
 /// Build a `StoredToken` for `host` carrying `access`. `scope`/`issued_at`
@@ -64,6 +65,53 @@ fn pick_bearer_falls_back_to_stored() {
 #[test]
 fn pick_bearer_none_when_all_absent() {
   assert_eq!(auth_store::pick_bearer(None, None, None), None);
+}
+
+// ── zero-arg-register AC-5: decide_bearer TTY gate (pure, no env, no I/O) ─
+
+#[test]
+fn decide_bearer_uses_resolved_token_on_tty() {
+  assert_eq!(
+    auth_store::decide_bearer(Some("resolved-token".to_owned()), true),
+    BearerDecision::Use("resolved-token".to_owned()),
+    "a resolved token must be used on a TTY"
+  );
+}
+
+#[test]
+fn decide_bearer_uses_resolved_token_without_tty() {
+  assert_eq!(
+    auth_store::decide_bearer(Some("resolved-token".to_owned()), false),
+    BearerDecision::Use("resolved-token".to_owned()),
+    "a resolved token must win regardless of TTY"
+  );
+}
+
+#[test]
+fn decide_bearer_starts_device_flow_when_none_on_tty() {
+  assert_eq!(
+    auth_store::decide_bearer(None, true),
+    BearerDecision::StartDeviceFlow,
+    "no token on a TTY must start the inline device flow"
+  );
+}
+
+#[test]
+fn decide_bearer_fail_message_names_all_manual_options() {
+  let decision = auth_store::decide_bearer(None, false);
+  assert!(
+    matches!(decision, BearerDecision::Fail(_)),
+    "no token without a TTY must be Fail; got {decision:?}"
+  );
+  let BearerDecision::Fail(msg) = decision else {
+    return; // proven Fail by the assert above
+  };
+  for needle in ["--token", "TOOLU_RUNNER_TOKEN", "login"] {
+    assert!(
+      msg.contains(needle),
+      "fail message must name {needle}; got: {msg}"
+    );
+  }
 }
 
 // ── AC-6: File backend — per-host, 0600, no clobber, idempotent delete ─

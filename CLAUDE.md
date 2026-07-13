@@ -7,7 +7,8 @@ no OTel.
 
 - Layered workspace of **10 crates under `crates/`**. `toolu-runner`
   is now a **bin-only** crate (the CLI entrypoint: `main.rs` +
-  `cli.rs` + `login_cmd.rs` + `status_cmd.rs`). The execution **engine** lives in
+  `cli.rs` + `register_cmd.rs` + `login_cmd.rs` + `status_cmd.rs`).
+  The execution **engine** lives in
   `execution`; the GitHub **JIT lifecycle** lives in `listener`.
 - Workspace members (dependency order): `protocol`, `shared`,
   `config`, `expressions`, `cache`, `wire`, `observability`,
@@ -44,12 +45,19 @@ no OTel.
   exposes `pub fn` builders and parsers; the async `pub async fn`
   HTTP transport lives in `wire::net`. Tests against
   `protocol` need no HTTP client, no clock, no tokio.
-- **Single-job concurrency.** `toolu-runner run` acquires an
-  exclusive `fs2` file lock on `~/.toolu-runner/.lock` (body: JSON
-  with `pid`, `started_at`, `config_path`). A second `run` reads
-  the body and exits 2 with the holder's PID. Stale locks (holder
-  PID dead AND mtime > 5 min) are removed and re-acquired by the
-  next `run`.
+- **Per-repo single-job concurrency.** Each registration lives in
+  `<home>/runners/<owner>/<repo>/` (home = `$TOOLU_RUNNER_HOME`, else
+  `~/.toolu-runner`; the dir is the persisted `data_dir`).
+  `toolu-runner run` acquires an exclusive `fs2` file lock on that
+  dir's `.lock` (body: JSON with `pid`, `started_at`, `config_path`),
+  so jobs for *different* repos run concurrently while a second `run`
+  for the same repo reads the body and exits 2 with the holder's PID.
+  Legacy single-slot registrations (read-only fallback; also org-level
+  registrations) lock `<home>/.lock`. Stale locks (holder PID dead AND
+  mtime > 5 min) are removed and re-acquired by the next `run`.
+  Caveat: concurrent cross-repo runs in `offline` / `accelerated`
+  services mode need a distinct `service_bind` per repo config
+  (EADDRINUSE otherwise); default `forwarder` binds nothing.
 - **Cancellation token wiring.** `toolu-runner run` builds a
   `tokio_util::sync::CancellationToken` and bridges SIGINT / SIGTERM
   to it. The poll loop, the renewal task, and the in-flight job all
@@ -166,8 +174,22 @@ no OTel.
 - `auth_store.rs` — GitHub token persistence. `AuthStore`
   (`Keyring` via the `keyring` crate / `File(<data_dir>/token-<host>.json)`
   0600 fallback), `StoredToken`, per-host `save`/`load`/`delete`,
-  pure `pick_bearer` (flag > env > stored) + `resolve_bearer`. Used
-  only for the `generate-jitconfig` bearer — never at runtime.
+  pure `pick_bearer` (flag > env > stored) + `resolve_bearer`, and the
+  pure TTY gate `decide_bearer` → `BearerDecision` (`Use` /
+  `StartDeviceFlow` / `Fail` naming `--token` / `TOOLU_RUNNER_TOKEN` /
+  `login`). The store is pinned to the runner home (shared by all
+  repos). Used only for the `generate-jitconfig` bearer — never at
+  runtime.
+- `registry.rs` — per-repo registration layout + discovery:
+  `runner_home()` (`$TOOLU_RUNNER_HOME` > `~/.toolu-runner`),
+  `runner_dir` (`<home>/runners/<owner>/<repo>`, path-component
+  validation), `RegistrationEntry`, `list_registrations` (scan
+  `runners/*/*/config.toml` + legacy root), `resolve_config_path`
+  (flag > cwd-inferred > sole registration > error listing candidates).
+- `repo_infer.rs` — cwd repo inference: pure `parse_remote_url`
+  (scp-like / `https://` / `ssh://` remote forms) + `detect_repo`
+  (`git -C <cwd> remote get-url origin`; each error names the `--url`
+  escape hatch).
 
 ### `expressions/` — the `${{ }}` evaluator (deps: shared)
 
@@ -228,7 +250,10 @@ no OTel.
   seq-gap flag), `ui` (rendering), `input` (key → `Action`, cancel
   confirm modal), `mod` (250 ms tick loop, 1 s rescan, terminal
   lifecycle, `send_cancel` = SIGINT to the `.lock` PID, unix only).
-  Missing config falls back to `~/.toolu-runner` (history browsing).
+  Missing/unreadable config falls back to multi-dir browsing:
+  `discover_jobs_dirs` (every `runners/<owner>/<repo>/_diag/jobs` from
+  `config::registry::list_registrations` + the legacy home) merged by
+  `scan_all_jobs`, re-discovered on each rescan.
   Test fixture: `tests/fixtures/journal/canonical.jsonl`, captured
   from a real engine run via `JOURNAL_CAPTURE=1 cargo test -p
   toolu-runner --test journal_writer_test capture_canonical`.
@@ -299,39 +324,55 @@ no OTel.
 ### `toolu-runner/` — CLI bin (deps: shared, protocol, config, wire, observability, listener)
 
 - `cli.rs` — the clap surface: `Cli` (top-level parser with
-  Examples/Environment `after_help`, `propagate_version`,
-  `arg_required_else_help`), `Command` enum, per-subcommand args
-  structs with full `--help` text (defaults + env fallbacks stated),
-  the arg-default helpers (`default_config_path`, `default_labels`,
-  `runner_name_or_hostname`, `work_folder_or_default`,
-  `credentials_path_for`), and `debug_assert_cli` (clap's definition
-  self-check, run at startup in debug builds — exercised by the
-  shell-out CLI tests since the bin-only crate has no lib target for
-  a unit test).
-- `main.rs` — CLI entrypoint + dispatch for `login`, `logout`,
-  `register`, `run`, `remove`, `status`, `watch`.
-  `--config` defaults to `~/.toolu-runner/config.toml`. `login`
-  runs GitHub OAuth **device flow** (`wire::net::device_auth`) and
-  stores the resulting token via `config::auth_store` (OS keyring,
-  0600-file fallback); `logout` deletes it. `register` validates `--url`, resolves the bearer
-  (`--token` > `TOOLU_RUNNER_TOKEN` env > stored login token, via
-  `config::auth_store::resolve_bearer`), POSTs `generate-jitconfig`
-  (`wire::net::register_jit`), parses the minted config, then persists
-  real config + credentials (all-or-nothing, with config rollback on a
-  credentials-write failure); its `--token` is **optional**. `run`
-  loads the config + credentials, acquires `.lock`
+  Examples/Environment `after_help` — `TOOLU_RUNNER_TOKEN` /
+  `TOOLU_RUNNER_CLIENT_ID` / `TOOLU_RUNNER_HOME` in the Environment
+  footer — `propagate_version`, `arg_required_else_help`), `Command`
+  enum, per-subcommand args structs with full `--help` text (`--url`
+  is `Option` — absent means "infer from the cwd git remote"; every
+  `--config` doc states the resolution default), the arg-default
+  helpers (`default_labels`, `runner_name_or_hostname`,
+  `work_folder_or_default`, `credentials_path_for`), and
+  `debug_assert_cli` (clap's definition self-check, run at startup in
+  debug builds — exercised by the shell-out CLI tests since the
+  bin-only crate has no lib target for a unit test).
+- `main.rs` — CLI entrypoint: parse + dispatch (`register` →
+  `register_cmd`, `login`/`logout` → `login_cmd`, `status` →
+  `status_cmd`) plus the `run` / `remove` / `watch` handlers.
+  `--config` resolution for `run` / `remove` / `status` / `watch`:
+  flag > cwd-inferred `runners/<owner>/<repo>/config.toml` > the sole
+  registration (legacy `<home>/config.toml` included) > error listing
+  candidates (`config::registry::resolve_config_path`). `run`
+  loads the config + credentials, acquires the per-repo `.lock`
   (`config::lockfile`), constructs `GitHubListener::new(jit_config, …)`,
   wires SIGINT/SIGTERM to a `CancellationToken`. `remove` writes
-  `.pending_remove` if `.lock` is held, otherwise deletes the
-  persisted state (live GH unregister call is step 10). `watch` opens
-  the journal TUI (`observability::watch`; no network, no tracing init
-  — logs would corrupt the alternate screen).
-- `login_cmd.rs` — `LoginArgs` / `LogoutArgs` + `cmd_login` /
-  `cmd_logout` handlers, browser-open helper, and data-dir
-  resolution (split out of `main.rs` for the 500-line ceiling).
+  `.pending_remove` if `.lock` is held, otherwise deletes
+  `config.toml` / `credentials.json` / `.lock` / `.pending_remove` and
+  keeps `_diag/` history (live GH unregister call is step 10). `watch`
+  opens the journal TUI (`observability::watch`; no network, no
+  tracing init — logs would corrupt the alternate screen).
+- `register_cmd.rs` — `cmd_register` + `register_and_persist` (split
+  out of `main.rs`). `--url` optional: absent infers the repo from the
+  cwd git remote `origin` (`config::repo_infer`; github.com only —
+  GHES and org runners need an explicit `--url`). Bearer: `--token` >
+  `TOOLU_RUNNER_TOKEN` env > stored login token
+  (`config::auth_store::resolve_bearer` against the home-root store);
+  no token + interactive stderr → inline device flow
+  (`auth_store::decide_bearer` + `login_cmd::run_device_flow`),
+  non-interactive fails listing the manual options. POSTs
+  `generate-jitconfig` (`wire::net::register_jit`), parses the minted
+  config, persists config + credentials into
+  `<home>/runners/<owner>/<repo>/` (org URLs keep `<home>/config.toml`;
+  `--config` overrides) with `data_dir` = the registration dir —
+  all-or-nothing, config rollback on a credentials-write failure.
+- `login_cmd.rs` — `LoginArgs` / `LogoutArgs` (positional host; **no
+  `--config`** — the token store is pinned to
+  `config::registry::runner_home()`, shared by all repos) + `cmd_login`
+  / `cmd_logout` handlers, the shared `run_device_flow` (reused by
+  `register`'s inline flow), and the browser-open helper.
   Holds the baked-in `const DEVICE_CLIENT_ID` (placeholder until the
-  OAuth App is registered); non-`github.com` hosts require
-  `--client-id` (or `TOOLU_RUNNER_CLIENT_ID` env).
+  OAuth App is registered — using it errors before any network call);
+  until then every device flow needs `--client-id` (login) or
+  `TOOLU_RUNNER_CLIENT_ID` env, and GHES always does.
 - `status_cmd.rs` — `cmd_status`: prints the persisted registration,
   credential presence, and any stored device-flow login token for the
   registered host **plus per-host login state**. No network (split

@@ -6,18 +6,16 @@
 //! `.pending_remove` mid-job), `status` (print config, no network),
 //! `watch` (TUI over the job journal, no network).
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
 
 use clap::Parser;
-use config::auth_store::{self, AuthStore};
 use config::config::{
-  CacheSection, CredentialsFile, RunnerRegistrationConfig, RuntimeConfig, ServicesSection,
-  ShadowSection, WorkspaceSection, load_config as load_reg_config, load_credentials,
-  resolve_data_dir, resolve_work_dir, save_config as save_reg_config, save_credentials,
+  RunnerRegistrationConfig, load_config as load_reg_config, load_credentials, resolve_data_dir,
+  resolve_work_dir,
 };
 use config::lockfile;
+use config::{registry, repo_infer};
 use listener::GitHubListener;
 use shared::RunnerError;
 use shared::startup;
@@ -26,11 +24,11 @@ use tokio_util::sync::CancellationToken;
 
 mod cli;
 mod login_cmd;
+mod register_cmd;
 mod status_cmd;
 
 use crate::cli::{
-  Cli, Command, RegisterArgs, RemoveArgs, RunArgs, WatchArgs, credentials_path_for,
-  default_config_path, default_labels, runner_name_or_hostname, work_folder_or_default,
+  Cli, Command, RemoveArgs, RunArgs, WatchArgs, credentials_path_for, default_config_path,
 };
 
 #[tokio::main]
@@ -50,7 +48,7 @@ async fn main() {
 
 async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
   match cli.command {
-    Command::Register(args) => cmd_register(args).await,
+    Command::Register(args) => register_cmd::cmd_register(args).await,
     Command::Run(args) => cmd_run(args).await,
     Command::Remove(args) => cmd_remove(args).await,
     Command::Status(args) => status_cmd::cmd_status(args),
@@ -62,76 +60,45 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 
 /// `watch`: TUI over the job journal. Blocks until the user quits; no
 /// tracing init so log output never corrupts the alternate screen.
+///
+/// Resolution is tolerant: when no registration resolves (none yet, or
+/// several without a cwd match), fall back to the default
+/// `<home>/config.toml` path — `run_watch` browses every discovered
+/// runner dir (plus the legacy home) when that file does not load, so
+/// history browsing still works unregistered.
 fn cmd_watch(args: WatchArgs) -> Result<(), Box<dyn std::error::Error>> {
-  let config_path = args.config.unwrap_or_else(default_config_path);
+  let config_path = match resolve_config(args.config) {
+    Ok(path) => path,
+    Err(_) => default_config_path(),
+  };
   observability::watch::run_watch(&config_path)?;
   Ok(())
 }
 
-fn parse_and_validate_url(url: &str) -> Result<String, RunnerError> {
-  let parsed =
-    url::Url::parse(url).map_err(|e| RunnerError::Config(format!("invalid --url: {e}")))?;
-  let host = parsed
-    .host_str()
-    .ok_or_else(|| RunnerError::Config("URL missing host".to_owned()))?
-    .to_owned();
-  if !host.contains('.') {
-    return Err(RunnerError::Config(format!(
-      "invalid host '{host}' — runner accepts github.com and GHES hosts only"
-    )));
+/// Resolve which registration config a subcommand should use: the
+/// `--config` flag > the cwd-inferred `runners/<owner>/<repo>/`
+/// registration (github.com `origin` remotes only — GHES and ssh-alias
+/// hosts never infer) > the sole existing registration (the legacy
+/// `<home>/config.toml` included). Zero registrations or an ambiguous
+/// set propagates [`registry::resolve_config_path`]'s error as-is.
+fn resolve_config(flag: Option<PathBuf>) -> Result<PathBuf, Box<dyn std::error::Error>> {
+  // An explicit flag short-circuits before the git shell-out: a `--config`
+  // invocation must work even where cwd inference cannot run.
+  if let Some(path) = flag {
+    return Ok(path);
   }
-  Ok(host)
-}
-
-async fn cmd_register(args: RegisterArgs) -> Result<(), Box<dyn std::error::Error>> {
-  init_runner_tracing().map_err(|e| format!("startup init: {e}"))?;
-
-  let host = parse_and_validate_url(&args.url).map_err(|e| format!("{e}"))?;
-
-  let config_path = args.config.clone().unwrap_or_else(default_config_path);
-  let creds_path = credentials_path_for(&config_path);
-  let runner_name = runner_name_or_hostname(args.name);
-  let labels = if args.labels.is_empty() {
-    default_labels()
-  } else {
-    args.labels
-  };
-
-  ensure_not_registered(&config_path, args.replace)?;
-
-  // Resolve the REST bearer: --token flag > TOOLU_RUNNER_TOKEN env >
-  // the stored `login` token for the URL's host. The token store lives
-  // next to config.toml (no RunnerConfig is loaded during register).
-  let data_dir = login_cmd::data_dir_for_config(&config_path);
-  let token = auth_store::resolve_bearer(&AuthStore::new(&data_dir), &host, args.token.clone())?
-    .ok_or_else(|| {
-      RunnerError::Auth("no GitHub token: run 'toolu-runner login' or pass --token".to_owned())
-    })?;
-
-  let runner_id = register_and_persist(RegisterPersist {
-    url: &args.url,
-    token: &token,
-    runner_name: &runner_name,
-    labels: &labels,
-    runner_group: &args.runner_group,
-    work_folder: &work_folder_or_default(args.work.as_ref()),
-    host: &host,
-    config_path: &config_path,
-    creds_path: &creds_path,
-    replace: args.replace,
-  })
-  .await
-  .map_err(|e| format!("{e}"))?;
-
-  report_registered(
-    &runner_name,
-    runner_id,
-    &host,
-    &config_path,
-    &creds_path,
-    &labels,
-  );
-  Ok(())
+  let cwd = std::env::current_dir()?;
+  let inferred = repo_infer::detect_repo(&cwd)
+    .ok()
+    .filter(|repo| repo.host.eq_ignore_ascii_case("github.com"));
+  let owner_repo = inferred
+    .as_ref()
+    .map(|repo| (repo.owner.as_str(), repo.repo.as_str()));
+  Ok(registry::resolve_config_path(
+    None,
+    &registry::runner_home(),
+    owner_repo,
+  )?)
 }
 
 /// Register `masker` as the tracing secret-redactor and initialize tracing.
@@ -145,190 +112,6 @@ fn init_tracing_for(masker: &Arc<std::sync::Mutex<SecretMasker>>) -> Result<(), 
 /// Initialize tracing for subcommands that do not run jobs (masker discarded).
 fn init_runner_tracing() -> Result<(), RunnerError> {
   init_tracing_for(&Arc::new(std::sync::Mutex::new(SecretMasker::new())))
-}
-
-/// Refuse to overwrite an existing registration unless `--replace` was given.
-fn ensure_not_registered(
-  config_path: &Path,
-  replace: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
-  if config_path.exists() && !replace {
-    return Err(
-      format!(
-        "registration already exists at {} — pass --replace to overwrite",
-        config_path.display()
-      )
-      .into(),
-    );
-  }
-  Ok(())
-}
-
-/// Log + print the registration result.
-fn report_registered(
-  runner_name: &str,
-  runner_id: i64,
-  host: &str,
-  config_path: &Path,
-  creds_path: &Path,
-  labels: &[String],
-) {
-  tracing::info!(
-    path = %config_path.display(),
-    credentials = %creds_path.display(),
-    runner = %runner_name,
-    runner_id,
-    host = %host,
-    labels = ?labels,
-    "registered runner via generate-jitconfig"
-  );
-  println!(
-    "registered runner '{runner_name}' (id {runner_id}) at {host} (config: {}, creds: {})",
-    config_path.display(),
-    creds_path.display()
-  );
-}
-
-/// Inputs for [`register_and_persist`] — the live register + write step.
-struct RegisterPersist<'a> {
-  url: &'a str,
-  token: &'a str,
-  runner_name: &'a str,
-  labels: &'a [String],
-  runner_group: &'a str,
-  work_folder: &'a str,
-  host: &'a str,
-  config_path: &'a Path,
-  creds_path: &'a Path,
-  replace: bool,
-}
-
-/// POST `generate-jitconfig` for `p` and return the minted registration.
-async fn mint_jit(p: &RegisterPersist<'_>) -> Result<wire::net::JitRegistration, RunnerError> {
-  let client = reqwest::Client::builder()
-    .timeout(Duration::from_secs(30))
-    .build()
-    .map_err(|e| RunnerError::Network(format!("HTTP client: {e}")))?;
-  wire::net::register_jit(
-    &client,
-    &wire::net::RegisterParams {
-      url: p.url,
-      runner_token: p.token,
-      name: p.runner_name,
-      labels: p.labels,
-      runner_group_id: runner_group_id(p.runner_group),
-      work_folder: p.work_folder,
-      replace: p.replace,
-    },
-  )
-  .await
-}
-
-/// Live JIT registration (all-or-nothing): POST generate-jitconfig, parse
-/// the minted config, then persist real config + credentials. Returns the
-/// assigned runner ID. Any failure returns before touching either file.
-///
-/// The RSA→JWT→OAuth2 chain runs at `run` time from the stored jit_config,
-/// not here. `auth_token` stores the runner's non-secret `client_id`.
-async fn register_and_persist(p: RegisterPersist<'_>) -> Result<i64, RunnerError> {
-  let registration = mint_jit(&p).await?;
-
-  // Decode the minted config to confirm it parses and to lift the
-  // client_id (a stable, non-secret identity) for the auth_token field.
-  let parsed = protocol::JitConfig::parse(&registration.encoded_jit_config)
-    .map_err(|e| RunnerError::Protocol(format!("minted jit_config did not parse: {e}")))?;
-  let client_id = parsed.credentials.data.client_id;
-  let runner_id = registration.runner_id;
-
-  let config = build_registration_config(&p, &client_id, registration);
-
-  // Snapshot any pre-existing config BEFORE overwriting so a rollback can
-  // restore it — re-registration must not destroy the previous registration
-  // when the credentials write fails.
-  let previous_config = std::fs::read(p.config_path).ok();
-
-  // Persist only after the live call + parse both succeed.
-  save_reg_config(p.config_path, &config)?;
-  let creds = CredentialsFile {
-    access_token: client_id,
-    issued_at: chrono::Utc::now().to_rfc3339(),
-    expires_at: None,
-  };
-  // Registration is all-or-nothing: a credentials write failure must not
-  // leave a config without creds (a half-registered state). Roll the config
-  // file back (best-effort) before surfacing the error.
-  if let Err(e) = save_credentials(p.creds_path, &creds) {
-    roll_back_config(p.config_path, previous_config.as_deref());
-    return Err(e);
-  }
-  Ok(runner_id)
-}
-
-/// Best-effort rollback of the config file after a failed registration:
-/// restore the pre-existing bytes when there were any (the overwrite keeps
-/// the file's 0600 mode), otherwise remove the newly created file.
-fn roll_back_config(path: &std::path::Path, previous: Option<&[u8]>) {
-  let result = match previous {
-    Some(bytes) => std::fs::write(path, bytes),
-    None => std::fs::remove_file(path),
-  };
-  if let Err(e) = result {
-    tracing::warn!(error = %e, "failed to roll back config after credentials write error");
-  }
-}
-
-/// Assemble the persisted [`RunnerRegistrationConfig`] from the minted
-/// registration. `auth_token` carries the non-secret `client_id`.
-fn build_registration_config(
-  p: &RegisterPersist<'_>,
-  client_id: &str,
-  registration: wire::net::JitRegistration,
-) -> RunnerRegistrationConfig {
-  let runtime = RuntimeConfig {
-    jit_config: registration.encoded_jit_config,
-    work_dir: p.work_folder.to_owned(),
-    data_dir: "~/.toolu-runner".to_owned(),
-    protocol_version: if p.host.eq_ignore_ascii_case("github.com") {
-      "v2".to_owned()
-    } else {
-      "v1".to_owned()
-    },
-  };
-  RunnerRegistrationConfig {
-    runner_url: p.url.to_owned(),
-    runner_name: p.runner_name.to_owned(),
-    runner_id: registration.runner_id,
-    auth_token: client_id.to_owned(),
-    labels: p.labels.to_vec(),
-    runner_group: p.runner_group.to_owned(),
-    runtime,
-    services: ServicesSection::default(),
-    cache: CacheSection::default(),
-    workspace: WorkspaceSection::default(),
-    shadow: ShadowSection::default(),
-  }
-}
-
-/// Map a `--runner-group` string to a `generate-jitconfig` group ID.
-///
-/// A numeric value is used directly; non-numeric yields `None`, which
-/// [`net::register_jit`] defaults to `1` (Default). "Default" is the CLI's
-/// own default value and the canonical name of group 1, so it maps to
-/// `None` silently; any other group *name* is not supported by the JIT
-/// API and is WARNed about so the fallback to Default is not silent.
-fn runner_group_id(group: &str) -> Option<i64> {
-  let trimmed = group.trim();
-  if let Ok(id) = trimmed.parse::<i64>() {
-    return Some(id);
-  }
-  if !trimmed.is_empty() && !trimmed.eq_ignore_ascii_case("default") {
-    tracing::warn!(
-      runner_group = trimmed,
-      "runner group names are not supported (a numeric group ID is required); \
-       defaulting to the Default group"
-    );
-  }
-  None
 }
 
 /// Lift the JIT config blob out of the persisted config (written by
@@ -351,7 +134,7 @@ async fn cmd_run(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
   let masker = Arc::new(std::sync::Mutex::new(SecretMasker::new()));
   init_tracing_for(&masker).map_err(|e| format!("startup init: {e}"))?;
 
-  let config_path = args.config.clone().unwrap_or_else(default_config_path);
+  let config_path = resolve_config(args.config)?;
   let cfg = load_run_config(&config_path)?;
   let data_dir = resolve_data_dir(&cfg.runtime.data_dir).map_err(|e| format!("{e}"))?;
   let workspace_root = resolve_work_dir(&cfg.runtime.work_dir);
@@ -451,7 +234,7 @@ async fn cmd_remove(args: RemoveArgs) -> Result<(), Box<dyn std::error::Error>> 
   startup::init_with_redactor(env!("CARGO_MANIFEST_DIR"), "runner", redactor)
     .map_err(|e| format!("startup init: {e}"))?;
 
-  let config_path = args.config.clone().unwrap_or_else(default_config_path);
+  let config_path = resolve_config(args.config)?;
   let creds_path = credentials_path_for(&config_path);
   if !config_path.exists() {
     println!("no registration found.");
@@ -483,12 +266,28 @@ async fn cmd_remove(args: RemoveArgs) -> Result<(), Box<dyn std::error::Error>> 
 
   // No active run — delete the persisted state. The live `acquire_job`
   // unregistration call lands in step 10.
-  std::fs::remove_file(&config_path)?;
-  std::fs::remove_file(&creds_path).ok();
-  std::fs::remove_file(&pending).ok();
+  delete_registration_state(&config_path, &creds_path, &pending, &lock_path)?;
   println!(
-    "unregistered runner '{}' (config and credentials removed). Live GH unregistration call lands in step 10.",
+    "unregistered runner '{}' (config, credentials, and lock removed; _diag kept). Live GH unregistration call lands in step 10.",
     cfg.runner_name
   );
+  Ok(())
+}
+
+/// Delete a registration's persisted state: `config.toml`,
+/// `credentials.json`, any `.pending_remove` marker, and the `.lock` file
+/// (best-effort past the config itself). `_diag/` (logs + job journal) is
+/// deliberately kept for `watch` history, and empty parent dirs stay in
+/// place.
+fn delete_registration_state(
+  config_path: &Path,
+  creds_path: &Path,
+  pending: &Path,
+  lock_path: &Path,
+) -> Result<(), std::io::Error> {
+  std::fs::remove_file(config_path)?;
+  std::fs::remove_file(creds_path).ok();
+  std::fs::remove_file(pending).ok();
+  std::fs::remove_file(lock_path).ok();
   Ok(())
 }

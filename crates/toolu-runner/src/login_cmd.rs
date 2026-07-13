@@ -1,19 +1,20 @@
 //! `login` / `logout` subcommands: GitHub OAuth device-flow login.
 //!
 //! Split out of `main.rs` to keep the CLI entrypoint under the crate's
-//! per-file complexity limit. [`cmd_login`] runs the device flow
-//! ([`crate`]'s [`wire::net::device_auth`]) and persists the token
-//! via [`config::auth_store::AuthStore`]; [`cmd_logout`] deletes it.
+//! per-file complexity limit. [`run_device_flow`] is the shared flow body
+//! ([`wire::net::device_auth`] + [`config::auth_store::AuthStore`]):
+//! [`cmd_login`] wraps it, and `register` reuses it inline when no token
+//! is available on an interactive terminal. Tokens are stored per host at
+//! the runner home (`registry::runner_home()`), shared by every per-repo
+//! registration; [`cmd_logout`] deletes them.
 
-use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use clap::{Args, ValueHint};
 use config::auth_store::{AuthStore, StoredToken};
+use config::registry;
 use shared::RunnerError;
 use wire::net;
-
-use crate::cli::default_config_path;
 
 /// github.com OAuth App `client_id` for the device-flow `login`.
 /// Placeholder until the real App is registered.
@@ -40,12 +41,6 @@ pub(crate) struct LoginArgs {
   /// github.com currently needs it too.
   #[arg(long, value_name = "CLIENT_ID")]
   client_id: Option<String>,
-  /// Path to the runner config file (default: ~/.toolu-runner/config.toml).
-  ///
-  /// Only its parent directory is used — that is where the token store
-  /// lives; the file itself need not exist.
-  #[arg(long, value_name = "FILE", value_hint = ValueHint::FilePath)]
-  config: Option<PathBuf>,
 }
 
 /// Arguments for the `logout` subcommand.
@@ -54,27 +49,30 @@ pub(crate) struct LogoutArgs {
   /// GitHub host to log out of.
   #[arg(default_value = "github.com", value_name = "HOST", value_hint = ValueHint::Hostname)]
   hostname: String,
-  /// Path to the runner config file (default: ~/.toolu-runner/config.toml).
-  ///
-  /// Only its parent directory is used — that is where the token store
-  /// lives; the file itself need not exist.
-  #[arg(long, value_name = "FILE", value_hint = ValueHint::FilePath)]
-  config: Option<PathBuf>,
 }
 
-/// `login`: run the GitHub OAuth device flow and persist the token.
-///
-/// Prints the user code, best-effort opens the browser, polls for the
-/// token, then stores it in the [`AuthStore`]. No config file is required —
-/// the token store lives in the config path's parent dir.
+/// `login`: run the GitHub OAuth device flow and persist the token in the
+/// runner-home token store (OS keyring, 0600-file fallback). The store is
+/// shared by all per-repo registrations — no config file is involved.
 pub(crate) async fn cmd_login(args: LoginArgs) -> Result<(), Box<dyn std::error::Error>> {
-  let host = &args.hostname;
+  let store = AuthStore::new(&registry::runner_home());
+  let stored = run_device_flow(&args.hostname, args.client_id, &store).await?;
+  println!("logged in to {} (scopes: {})", args.hostname, stored.scope);
+  Ok(())
+}
 
-  // Effective client_id: --client-id flag > TOOLU_RUNNER_CLIENT_ID env >
-  // the built-in DEVICE_CLIENT_ID placeholder.
-  let client_id: String = args
-    .client_id
-    .clone()
+/// Run the GitHub OAuth device flow against `host` and persist the minted
+/// token in `store`, returning it. Prints the user code, best-effort opens
+/// the browser, and polls until the grant completes. The effective
+/// client_id is `client_id_override` > `TOOLU_RUNNER_CLIENT_ID` env > the
+/// built-in github.com App (still a placeholder — using it errors before
+/// any network call). Shared by `login` and `register`'s inline flow.
+pub(crate) async fn run_device_flow(
+  host: &str,
+  client_id_override: Option<String>,
+  store: &AuthStore,
+) -> Result<StoredToken, Box<dyn std::error::Error>> {
+  let client_id: String = client_id_override
     .or_else(|| std::env::var("TOOLU_RUNNER_CLIENT_ID").ok())
     .unwrap_or_else(|| DEVICE_CLIENT_ID.to_owned());
 
@@ -89,9 +87,6 @@ pub(crate) async fn cmd_login(args: LoginArgs) -> Result<(), Box<dyn std::error:
     };
     return Err(msg.into());
   }
-
-  let config_path = args.config.clone().unwrap_or_else(default_config_path);
-  let data_dir = data_dir_for_config(&config_path);
 
   let client = reqwest::Client::builder()
     .timeout(Duration::from_secs(30))
@@ -108,33 +103,19 @@ pub(crate) async fn cmd_login(args: LoginArgs) -> Result<(), Box<dyn std::error:
   let stored = StoredToken {
     access_token: tok.access_token,
     scope: tok.scope,
-    host: host.clone(),
+    host: host.to_owned(),
     issued_at: chrono::Utc::now().to_rfc3339(),
   };
-  AuthStore::new(&data_dir).save(&stored)?;
-
-  println!("logged in to {host} (scopes: {})", stored.scope);
-  Ok(())
+  store.save(&stored)?;
+  Ok(stored)
 }
 
-/// `logout`: delete the stored login token for the host. Idempotent —
-/// a missing token is a no-op.
+/// `logout`: delete the stored login token for the host from the
+/// runner-home store. Idempotent — a missing token is a no-op.
 pub(crate) fn cmd_logout(args: &LogoutArgs) -> Result<(), Box<dyn std::error::Error>> {
-  let config_path = args.config.clone().unwrap_or_else(default_config_path);
-  let data_dir = data_dir_for_config(&config_path);
-  AuthStore::new(&data_dir).delete(&args.hostname)?;
+  AuthStore::new(&registry::runner_home()).delete(&args.hostname)?;
   println!("Logged out of {}", args.hostname);
   Ok(())
-}
-
-/// Data dir for the login-token store when no `RunnerConfig` is loaded.
-/// The store sits next to `config.toml`, i.e. the config path's parent
-/// (default `~/.toolu-runner`).
-pub(crate) fn data_dir_for_config(config_path: &Path) -> PathBuf {
-  config_path.parent().map_or_else(
-    || shared::paths::expand_tilde(Path::new("~/.toolu-runner")),
-    Path::to_path_buf,
-  )
 }
 
 /// Best-effort browser launch. Every error is ignored: login still works
