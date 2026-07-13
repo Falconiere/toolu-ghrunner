@@ -285,7 +285,25 @@ async fn register_and_persist(p: RegisterPersist<'_>) -> Result<i64, RunnerError
     roll_back_config(p.config_path, previous_config.as_deref());
     return Err(e);
   }
+  ensure_diag_dir(p.config_path);
   Ok(runner_id)
+}
+
+/// Pre-create the registration's `_diag/` dir so the persisted layout is
+/// self-evident right after `register`. `run` creates every run-critical
+/// dir on its own anyway (`config::lockfile::acquire` creates the lock's
+/// parent dir, the journal writer creates `<data_dir>/_diag/jobs/`, and
+/// `shared::startup` creates the default home's `_diag/` for tracing), so
+/// a failure here is WARNed, never fatal — the registration itself is
+/// already complete.
+fn ensure_diag_dir(config_path: &Path) {
+  let Some(dir) = config_path.parent() else {
+    return;
+  };
+  let diag = dir.join("_diag");
+  if let Err(e) = std::fs::create_dir_all(&diag) {
+    tracing::warn!(path = %diag.display(), error = %e, "could not pre-create the _diag dir");
+  }
 }
 
 /// Best-effort rollback of the config file after a failed registration:

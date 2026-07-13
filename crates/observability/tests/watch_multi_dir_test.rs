@@ -95,6 +95,37 @@ fn discover_empty_home_yields_only_legacy_dir() {
   assert_eq!(dirs, vec![home.path().join("_diag").join("jobs")]);
 }
 
+/// `list_registrations` errors on an unreadable `runners/` dir; `watch`
+/// discovery downgrades that to skip-and-continue (same tolerance
+/// `scan_all_jobs` applies per dir): no per-repo dirs, but the legacy
+/// home still browses. Unix-only: dir modes are not enforceable this
+/// way elsewhere.
+#[cfg(unix)]
+#[test]
+fn discover_tolerates_unreadable_runners_dir_keeping_legacy() {
+  use std::os::unix::fs::PermissionsExt;
+  let home = TempDir::new().unwrap();
+  add_runner_with_journal(home.path(), "o1", "r1", "a.jsonl").unwrap();
+  let runners = home.path().join("runners");
+  std::fs::set_permissions(&runners, std::fs::Permissions::from_mode(0o000)).unwrap();
+  // A privileged user (root CI containers) ignores dir modes — skip there.
+  if std::fs::read_dir(&runners).is_ok() {
+    std::fs::set_permissions(&runners, std::fs::Permissions::from_mode(0o755)).unwrap();
+    eprintln!("skipping: this user can read a 000 dir (running privileged)");
+    return;
+  }
+
+  let dirs = discover_jobs_dirs(home.path());
+
+  // Restore before asserting so the tempdir cleans up even on failure.
+  std::fs::set_permissions(&runners, std::fs::Permissions::from_mode(0o755)).unwrap();
+  assert_eq!(
+    dirs,
+    vec![home.path().join("_diag").join("jobs")],
+    "an unreadable registry scan must degrade to legacy-only browsing"
+  );
+}
+
 // ── scan_all_jobs: merge across dirs, ordering, identity, tolerance ──
 
 #[test]

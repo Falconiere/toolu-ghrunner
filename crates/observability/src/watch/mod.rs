@@ -99,10 +99,16 @@ fn context_for(config_path: &Path) -> (String, WatchCtx) {
 /// Jobs dirs to browse under `home`: one per registration found by
 /// `config::registry::list_registrations` (the registration dir is the
 /// config's parent) plus the legacy `<home>/_diag/jobs`, deduplicated.
-/// Pure discovery — no TUI, no reads beyond the registry scan.
+/// Pure discovery — no TUI, no reads beyond the registry scan. Mirrors
+/// `scan_all_jobs`'s skip-and-continue tolerance: an unreadable registry
+/// scan yields no per-repo dirs (the legacy home still browses).
 pub fn discover_jobs_dirs(home: &Path) -> Vec<PathBuf> {
   let mut dirs: Vec<PathBuf> = Vec::new();
-  for entry in config::registry::list_registrations(home) {
+  let registrations = config::registry::list_registrations(home).unwrap_or_else(|e| {
+    tracing::debug!(home = %home.display(), error = %e, "watch: skipping unreadable registrations scan");
+    Vec::new()
+  });
+  for entry in registrations {
     // A rootless config path has no parent dir to hold `_diag/` — skip.
     let Some(reg_dir) = entry.config_path.parent() else {
       continue;

@@ -181,6 +181,12 @@ fn assert_per_repo_state(home: &Path, url: &str) -> Result<(), Box<dyn std::erro
     "credentials carry the client_id lifted from the parsed envelope"
   );
 
+  assert!(
+    repo_dir.join("_diag").is_dir(),
+    "register must pre-create _diag/ in the registration dir (self-evident layout; \
+     run auto-creates it too)"
+  );
+
   assert_secret_modes(&[&config_path, &creds_path])?;
   Ok(())
 }
@@ -323,26 +329,96 @@ async fn stored_token_at_home_root_is_shared_across_repo_registrations() {
     .expect("mount o3/r3 mock");
 
   for (owner, repo) in [("o2", "r2"), ("o3", "r3")] {
-    let url = format!("{}/{owner}/{repo}", server.uri());
-    let output = runner_cmd(home.path())
-      .args(["register", "--url", &url, "--name", "shared-store-runner"])
-      .output()
-      .expect("spawn register");
-    assert!(
-      output.status.success(),
-      "register {owner}/{repo} with only the stored token must succeed; stderr: {}",
-      String::from_utf8_lossy(&output.stderr)
-    );
-    let config_path = home
-      .path()
-      .join("runners")
-      .join(owner)
-      .join(repo)
-      .join("config.toml");
-    assert!(
-      config_path.is_file(),
-      "per-repo config for {owner}/{repo} missing at {}",
-      config_path.display()
-    );
+    register_with_stored_token_and_assert(home.path(), &server.uri(), owner, repo)
+      .expect("shared-store register round must pass");
   }
+}
+
+/// One shared-store round: register `<owner>/<repo>` with NO `--token`
+/// flag and NO env token (only the seeded stored token can serve), then
+/// assert the per-repo config landed and its URL host is the port-less
+/// store key. `?` (not `expect`) keeps this non-`#[test]` helper
+/// clippy-clean.
+fn register_with_stored_token_and_assert(
+  home: &Path,
+  server_uri: &str,
+  owner: &str,
+  repo: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+  let url = format!("{server_uri}/{owner}/{repo}");
+  let output = runner_cmd(home)
+    .args(["register", "--url", &url, "--name", "shared-store-runner"])
+    .output()?;
+  assert!(
+    output.status.success(),
+    "register {owner}/{repo} with only the stored token must succeed; stderr: {}",
+    String::from_utf8_lossy(&output.stderr)
+  );
+  let config_path = home
+    .join("runners")
+    .join(owner)
+    .join(repo)
+    .join("config.toml");
+  assert!(
+    config_path.is_file(),
+    "per-repo config for {owner}/{repo} missing at {}",
+    config_path.display()
+  );
+  // Host vs host:port: the wiremock `--url` is `http://127.0.0.1:<port>/…`,
+  // but the AuthStore lookup key `register` derives is the URL HOST only
+  // (`url::Url::host_str()` strips the port) — which is exactly why the
+  // seeded token's `host: "127.0.0.1"` (no port) resolved above.
+  let cfg = load_config(&config_path)?;
+  let stored_host = url::Url::parse(&cfg.runner_url)?
+    .host_str()
+    .map(str::to_owned)
+    .ok_or("persisted runner_url has no host")?;
+  assert_eq!(
+    stored_host, "127.0.0.1",
+    "the store-key host must be port-less (url::Url::host_str strips the port)"
+  );
+  Ok(())
+}
+
+/// Bearer precedence, env leg, proven server-side: a stored token AND
+/// `TOOLU_RUNNER_TOKEN` are both present, and the wiremock fixture matches
+/// ONLY the env token's `Authorization` header with `expect(1)` (verified
+/// when the server drops) — so the binary demonstrably sent the env token,
+/// not the stored one (flag > env > stored, env leg).
+#[tokio::test(flavor = "multi_thread")]
+async fn env_token_beats_stored_token_server_side() {
+  let home = tempfile::tempdir().expect("home tempdir");
+  let store = AuthStore::new(home.path());
+  if matches!(store, AuthStore::Keyring) {
+    eprintln!(
+      "skipping: OS keyring reachable — seeding it would write the machine-global store \
+       (runs fully on keyless environments, e.g. Linux CI)"
+    );
+    return;
+  }
+  store
+    .save(&StoredToken {
+      access_token: "gho_stored_must_lose".to_owned(),
+      scope: "repo".to_owned(),
+      host: "127.0.0.1".to_owned(),
+      issued_at: "2026-07-13T00:00:00+00:00".to_owned(),
+    })
+    .expect("seed the stored token that must lose");
+
+  let server = MockServer::start().await;
+  mount_jitconfig(&server, "o4/r4", "env-token-wins")
+    .await
+    .expect("mount o4/r4 mock");
+
+  let url = format!("{}/o4/r4", server.uri());
+  let output = runner_cmd(home.path())
+    .env("TOOLU_RUNNER_TOKEN", "env-token-wins")
+    .args(["register", "--url", &url, "--name", "env-precedence-runner"])
+    .output()
+    .expect("spawn register");
+  assert!(
+    output.status.success(),
+    "register with env + stored tokens must succeed via the env token; stderr: {}",
+    String::from_utf8_lossy(&output.stderr)
+  );
 }
