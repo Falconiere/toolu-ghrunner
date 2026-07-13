@@ -86,17 +86,17 @@ fn cmd_watch(args: WatchArgs) -> Result<(), Box<dyn std::error::Error>> {
 /// a git repo, no `origin` remote, unparseable remote) — so a GHES-origin
 /// user sees why their remote never inferred.
 fn resolve_config(flag: Option<PathBuf>) -> Result<PathBuf, Box<dyn std::error::Error>> {
-  // An explicit flag short-circuits before the git shell-out: a `--config`
-  // invocation must work even where cwd inference cannot run.
-  if let Some(path) = flag {
-    return Ok(path);
-  }
-  let cwd = std::env::current_dir()?;
-  let (inferred, inference_note) = classify_inference(repo_infer::detect_repo(&cwd));
+  // Inference (and its git shell-out) only runs when no `--config` flag is
+  // given: a flag invocation must work even where cwd inference cannot run.
+  let (inferred, inference_note) = if flag.is_none() {
+    classify_inference(repo_infer::detect_repo(&std::env::current_dir()?))
+  } else {
+    (None, None)
+  };
   let owner_repo = inferred
     .as_ref()
     .map(|repo| (repo.owner.as_str(), repo.repo.as_str()));
-  match registry::resolve_config_path(None, &registry::runner_home(), owner_repo) {
+  match registry::resolve_config_path(flag, &registry::runner_home(), owner_repo) {
     Ok(path) => Ok(path),
     Err(err) => match inference_note {
       Some(note) => Err(format!("{err} (cwd inference: {note})").into()),
