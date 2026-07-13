@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-13
+
+### Added
+- *(cache)* accelerated services mode — content-addressed GHA cache
+- *(auth)* add `login`/`logout` via GitHub OAuth device flow
+- *(toolu-runner)* self-documenting CLI help for every command
+- *(toolu-runner)* zero-arg register
+
+### Changed
+- *(workspace)* relocate crates under crates/
+- *(shared)* drop YAMLESS_* legacy-env warning + coupling gate
+- *(crates)* break future crate cycles in place
+- *(crates)* extract expressions, cache, config leaf crates
+- *(crates)* extract wire + observability mid-layer crates
+- *(crates)* extract execution + listener, slim toolu-runner to bin
+- *(toolu-runner)* single-owner config resolution
+
+### Documentation
+- fix stale pre-split paths + test-comment accuracy
+- *(toolu-runner)* precise debug-profile wording in self-check test comment
+- *(toolu-runner)* document register's _diag pre-create in CLAUDE.md
+- *(toolu-runner)* precise fork-PR safety wording for RULES_REF
+
+### Fixed
+- *(cache)* address PR #15 review feedback
+- *(cache)* address PR #15 round-2 review feedback
+- *(cache)* cherry-pick round-3 review hardenings
+- *(cache)* address PR #15 round-4 review feedback
+- *(cache)* relay upstream Content-Encoding; log unreadable chunks
+- *(cache)* fold token length into bearer compare, no early exit
+- *(cache)* single-source config defaults; disable GC on zero hours
+- *(cache)* portable shadow fingerprint for symlinks and escaped paths
+- *(cache)* mask runtime token; alloc-free manifest locate; doc fix
+- *(auth)* address PR review feedback
+- *(auth)* address round-2 review feedback
+- *(toolu-runner)* address PR review feedback
+- *(toolu-runner)* address PR review feedback
+- *(toolu-runner)* address review round 2
+- *(toolu-runner)* address review round 4
+- *(toolu-runner)* address review round 6
+- *(release)* replace release-plz with git-cliff front half
+- *(release)* portable single-match sed for the version bump
+- *(release)* extract tested scripts, scope awk, harden sed
 ### Added
 
 - **Self-documenting CLI help.** Every command and flag now carries full
