@@ -1,0 +1,75 @@
+# git-cliff configuration — the front half of the release pipeline.
+#
+# On every push to main, .github/workflows/release-pr.yml runs git-cliff:
+#   * `git-cliff --bumped-version` computes the next semver from the
+#     conventional commits since the last `vX.Y.Z` tag.
+#   * The workflow opens/updates a release PR that bumps
+#     [workspace.package] version and regenerates CHANGELOG.md.
+#   * Once that PR merges, the workflow pushes the matching `vX.Y.Z` tag,
+#     which fires the tag-triggered .github/workflows/release.yml
+#     (build 4 targets -> GitHub Release -> Homebrew).
+#
+# This replaced release-plz: its git_only mode runs `cargo package` on every
+# workspace member, which cannot handle this unpublished workspace's
+# versionless internal path deps (release-plz#2595; fix #2789 unmerged).
+# git-cliff only reads git history — no cargo involvement at all.
+
+[changelog]
+# Must match the existing CHANGELOG.md preamble byte-for-byte, or the
+# regenerated file diverges from what scripts/changelog-extract.sh expects.
+header = """
+# Changelog
+
+All notable changes to toolu-runner are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+"""
+# Keep a Changelog section: heading is `## [X.Y.Z] - YYYY-MM-DD` with NO
+# package prefix (scripts/changelog-extract.sh matches `^## \[<version>\]`).
+# Groups come from commit_parsers below.
+body = """
+## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | upper_first }}
+{% for commit in commits %}
+{%- if commit.scope -%}
+- *({{ commit.scope }})* {% if commit.breaking %}[**breaking**] {% endif %}{{ commit.message }}
+{% else -%}
+- {% if commit.breaking %}[**breaking**] {% endif %}{{ commit.message }}
+{% endif -%}
+{% endfor -%}
+{% endfor %}
+"""
+trim = true
+
+[git]
+conventional_commits = true
+filter_unconventional = true
+# Only the single top-level `vX.Y.Z` tags mark releases (the same tags
+# release.yml triggers on); no per-crate tags exist.
+tag_pattern = "^v[0-9]+\\.[0-9]+\\.[0-9]+$"
+# feat -> Added, fix -> Fixed, docs -> Documentation, refactor/perf -> Changed;
+# chore/ci/test/build are release plumbing and never reach the changelog.
+commit_parsers = [
+  { message = "^feat", group = "Added" },
+  { message = "^fix", group = "Fixed" },
+  { message = "^docs", group = "Documentation" },
+  { message = "^refactor", group = "Changed" },
+  { message = "^perf", group = "Changed" },
+  { message = "^chore", skip = true },
+  { message = "^ci", skip = true },
+  { message = "^test", skip = true },
+  { message = "^build", skip = true },
+]
+
+[bump]
+# Pre-1.0 semantics: breaking changes bump the minor, features the patch is
+# NOT desired — keep cargo/semver conventions: feat -> minor, fix -> patch,
+# breaking -> minor while 0.x (initial_tag guards the floor).
+features_always_bump_minor = true
+breaking_always_bump_major = false
+initial_tag = "v0.1.0"

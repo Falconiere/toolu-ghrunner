@@ -1,0 +1,115 @@
+name: release-pr
+
+# Front half of the release pipeline; the tag-driven back half is release.yml.
+# Replaces the previous release-plz setup: release-plz's git_only mode runs
+# `cargo package` on every workspace member, which cannot handle this
+# unpublished workspace's versionless internal path deps (release-plz#2595;
+# fix #2789 unmerged). git-cliff reads git history only — no cargo packaging.
+#
+# On every push to main:
+#   * release-pr — opens/updates a "release" PR that bumps the workspace
+#     version (git-cliff --bumped-version from conventional commits) and
+#     prepends the new section to CHANGELOG.md. Nothing ships until a human
+#     merges that PR.
+#   * release-tag — once the bump has merged to main, pushes the matching
+#     `vX.Y.Z` git tag. That tag fires release.yml (verify -> build ->
+#     GitHub Release -> Homebrew).
+#
+# The token MUST be the RELEASE_PLZ_TOKEN PAT, never the default GITHUB_TOKEN:
+# GitHub suppresses workflow runs for events raised by the built-in
+# GITHUB_TOKEN, so a tag pushed under it would land silently and release.yml
+# would never run.
+#
+# Kill-switch: both jobs are gated on `vars.RELEASE_AUTOMATION_ENABLED ==
+# 'true'`, so the automation does NOTHING until an operator opts in.
+on:
+  push:
+    branches: [main]
+
+# Least privilege by default; each job widens only what it needs.
+permissions:
+  contents: read
+
+env:
+  GIT_CLIFF_VERSION: "2.13.1"
+
+jobs:
+  # Open/refresh the version-bump + CHANGELOG release PR. Skips when main is
+  # sitting on an untagged bump (that push is the merged release PR itself —
+  # release-tag below handles it; the run after tagging computes the next
+  # version cleanly).
+  release-pr:
+    if: ${{ vars.RELEASE_AUTOMATION_ENABLED == 'true' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # push the release-pr branch
+      pull-requests: write # open/update the PR
+    concurrency:
+      group: release-pr-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # git-cliff needs full history + tags
+          token: ${{ secrets.RELEASE_PLZ_TOKEN }}
+      - uses: dtolnay/rust-toolchain@1.94.1 # cargo update refreshes Cargo.lock
+      - name: Install git-cliff
+        uses: taiki-e/install-action@v2
+        with:
+          tool: git-cliff@${{ env.GIT_CLIFF_VERSION }}
+      - name: Compute bump and open/update the release PR
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+        run: |
+          set -euo pipefail
+          current=$(awk '/^\[workspace.package\]/{f=1} f && /^version = /{gsub(/"/,"",$3); print $3; exit}' Cargo.toml)
+          if ! git rev-parse -q --verify "refs/tags/v${current}" >/dev/null; then
+            echo "main carries untagged bump v${current} — release-tag owns this push; skipping PR"
+            exit 0
+          fi
+          next=$(git-cliff --bumped-version)
+          if [ "${next}" = "v${current}" ]; then
+            echo "no releasable commits since v${current}"
+            exit 0
+          fi
+          next_ver=${next#v}
+          echo "release PR: v${current} -> ${next}"
+          sed -i -E "0,/^version = \"${current}\"/s//version = \"${next_ver}\"/" Cargo.toml
+          cargo update --workspace --quiet
+          git-cliff --unreleased --bump --prepend CHANGELOG.md -o /dev/null
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B release-pr
+          git add Cargo.toml Cargo.lock CHANGELOG.md
+          git commit -m "chore(release): ${next}"
+          git push --force origin release-pr
+          if ! gh pr list --head release-pr --state open --json number --jq '.[0].number' | grep -q .; then
+            gh pr create --head release-pr --base main \
+              --title "chore(release): ${next}" \
+              --body "Automated release PR: bumps the workspace version to ${next_ver} and updates CHANGELOG.md from the conventional commits since v${current}. Merging this PR tags ${next}, which builds and publishes the release."
+          fi
+
+  # For a version bump that has already merged to main, push the `vX.Y.Z`
+  # tag (under the PAT) that hands off to release.yml.
+  release-tag:
+    if: ${{ vars.RELEASE_AUTOMATION_ENABLED == 'true' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # push the release tag
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PLZ_TOKEN }}
+      - name: Tag the merged version bump
+        run: |
+          set -euo pipefail
+          current=$(awk '/^\[workspace.package\]/{f=1} f && /^version = /{gsub(/"/,"",$3); print $3; exit}' Cargo.toml)
+          if git rev-parse -q --verify "refs/tags/v${current}" >/dev/null; then
+            echo "v${current} already tagged"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "v${current}" -m "toolu-runner ${current}"
+          git push origin "v${current}"
