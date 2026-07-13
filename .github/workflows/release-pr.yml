@@ -60,36 +60,7 @@ jobs:
       - name: Compute bump and open/update the release PR
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
-        run: |
-          set -euo pipefail
-          current=$(awk '/^\[workspace.package\]/{f=1} f && /^version = /{gsub(/"/,"",$3); print $3; exit}' Cargo.toml)
-          if ! git rev-parse -q --verify "refs/tags/v${current}" >/dev/null; then
-            echo "main carries untagged bump v${current} — release-tag owns this push; skipping PR"
-            exit 0
-          fi
-          next=$(git-cliff --bumped-version)
-          if [ "${next}" = "v${current}" ]; then
-            echo "no releasable commits since v${current}"
-            exit 0
-          fi
-          next_ver=${next#v}
-          echo "release PR: v${current} -> ${next}"
-          # Root Cargo.toml has exactly one `^version = ` line — the
-          # [workspace.package] one every crate inherits.
-          sed -i -E "s/^version = \"${current}\"/version = \"${next_ver}\"/" Cargo.toml
-          cargo update --workspace --quiet
-          git-cliff --unreleased --bump --prepend CHANGELOG.md -o /dev/null
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -B release-pr
-          git add Cargo.toml Cargo.lock CHANGELOG.md
-          git commit -m "chore(release): ${next}"
-          git push --force origin release-pr
-          if ! gh pr list --head release-pr --state open --json number --jq '.[0].number' | grep -q .; then
-            gh pr create --head release-pr --base main \
-              --title "chore(release): ${next}" \
-              --body "Automated release PR: bumps the workspace version to ${next_ver} and updates CHANGELOG.md from the conventional commits since v${current}. Merging this PR tags ${next}, which builds and publishes the release."
-          fi
+        run: bash scripts/release-pr.sh
 
   # For a version bump that has already merged to main, push the `vX.Y.Z`
   # tag (under the PAT) that hands off to release.yml.
@@ -104,14 +75,4 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.RELEASE_PLZ_TOKEN }}
       - name: Tag the merged version bump
-        run: |
-          set -euo pipefail
-          current=$(awk '/^\[workspace.package\]/{f=1} f && /^version = /{gsub(/"/,"",$3); print $3; exit}' Cargo.toml)
-          if git rev-parse -q --verify "refs/tags/v${current}" >/dev/null; then
-            echo "v${current} already tagged"
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "v${current}" -m "toolu-runner ${current}"
-          git push origin "v${current}"
+        run: bash scripts/release-tag.sh
