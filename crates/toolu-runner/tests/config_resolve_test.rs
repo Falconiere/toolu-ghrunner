@@ -189,6 +189,76 @@ fn status_with_ambiguous_registrations_lists_candidates() {
   );
 }
 
+/// Review-round addition (inference context): a multi-registration home
+/// and a cwd whose `origin` is a GHES host — inference never applies
+/// (github.com only), so the ambiguity error must carry the
+/// `cwd inference:` clause naming the GHES host, telling the user WHY
+/// their remote did not pick a registration.
+#[test]
+fn status_ambiguous_with_ghes_origin_explains_inference() {
+  let home = tempfile::tempdir().expect("home tempdir");
+  seed_per_repo(home.path(), "o1", "r1", "r1-runner").expect("seed o1/r1 registration");
+  seed_per_repo(home.path(), "o2", "r2", "r2-runner").expect("seed o2/r2 registration");
+  let repo = git_repo_with_origin("https://ghes.example.com/o1/r1.git").expect("temp git repo");
+
+  let output = runner_cmd(home.path(), repo.path())
+    .arg("status")
+    .output()
+    .expect("spawn status");
+
+  assert!(
+    !output.status.success(),
+    "ambiguous registrations must exit non-zero"
+  );
+  let stderr = String::from_utf8_lossy(&output.stderr);
+  assert!(
+    stderr.contains("cwd inference"),
+    "error must carry the inference clause: {stderr}"
+  );
+  assert!(
+    stderr.contains("ghes.example.com") && stderr.contains("not github.com"),
+    "inference clause must name the GHES origin host: {stderr}"
+  );
+  assert!(
+    stderr.contains("--config"),
+    "the --config fix must still be named: {stderr}"
+  );
+}
+
+/// Review-round addition (flag precedence): an explicit `--config` beats
+/// cwd inference — from a git repo whose `origin` matches a DIFFERENT
+/// existing registration, the flagged registration is the one served.
+#[test]
+fn status_config_flag_beats_cwd_inference() {
+  let home = tempfile::tempdir().expect("home tempdir");
+  seed_per_repo(home.path(), "o1", "r1", "inferred-runner").expect("seed o1/r1 registration");
+  let flagged =
+    seed_per_repo(home.path(), "o2", "r2", "flagged-runner").expect("seed o2/r2 registration");
+  // cwd's origin matches the o1/r1 registration — inference WOULD pick it.
+  let repo = git_repo_with_origin("https://github.com/o1/r1.git").expect("temp git repo");
+
+  let output = runner_cmd(home.path(), repo.path())
+    .args(["status", "--config"])
+    .arg(&flagged)
+    .output()
+    .expect("spawn status");
+
+  assert!(
+    output.status.success(),
+    "status --config must resolve the flagged registration; stderr: {}",
+    String::from_utf8_lossy(&output.stderr)
+  );
+  let stdout = String::from_utf8_lossy(&output.stdout);
+  assert!(
+    stdout.contains("flagged-runner"),
+    "the --config registration must win: {stdout}"
+  );
+  assert!(
+    !stdout.contains("inferred-runner"),
+    "the cwd-inferred registration must lose to the flag: {stdout}"
+  );
+}
+
 /// AC-9 (sole): exactly one registration and an unrelated cwd (a git repo
 /// whose `origin` matches no registration) still resolves — the sole
 /// registration needs neither a flag nor a matching cwd.

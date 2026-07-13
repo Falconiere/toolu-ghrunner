@@ -422,7 +422,7 @@ stored at the runner-home root for next time), non-interactive fails
 listing the three manual options.
 
 ```
-User              toolu-runner                     GitHub API
+User              toolu-runner                  api.github.com
  │                     │                               │
  │ register            │                               │
  ├────────────────────>│                               │
@@ -438,8 +438,11 @@ User              toolu-runner                     GitHub API
  │                     │    browser, poll, store the   │
  │                     │    token at the home root)    │
  │                     │                               │
- │                     │ POST …/actions/runners/       │
+ │                     │ POST /repos/<owner>/<repo>/   │
+ │                     │      actions/runners/         │
  │                     │      generate-jitconfig       │
+ │                     │ (GHES --url host:             │
+ │                     │  https://<host>/api/v3/…)     │
  │                     ├──────────────────────────────>│
  │                     │<─ runner id + encoded JIT cfg ┤
  │                     │                               │

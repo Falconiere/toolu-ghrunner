@@ -80,8 +80,11 @@ fn cmd_watch(args: WatchArgs) -> Result<(), Box<dyn std::error::Error>> {
 /// registration (github.com `origin` remotes only — GHES and ssh-alias
 /// hosts never infer; inference is one local `git remote get-url origin`
 /// subprocess, no network) > the sole existing registration (the legacy
-/// `<home>/config.toml` included). Zero registrations or an ambiguous
-/// set propagates [`registry::resolve_config_path`]'s error as-is.
+/// `<home>/config.toml` included). When [`registry::resolve_config_path`]
+/// errors AND cwd inference did not apply, the error gains one
+/// `cwd inference: …` clause saying why (non-github.com origin host, not
+/// a git repo, no `origin` remote, unparseable remote) — so a GHES-origin
+/// user sees why their remote never inferred.
 fn resolve_config(flag: Option<PathBuf>) -> Result<PathBuf, Box<dyn std::error::Error>> {
   // An explicit flag short-circuits before the git shell-out: a `--config`
   // invocation must work even where cwd inference cannot run.
@@ -89,17 +92,41 @@ fn resolve_config(flag: Option<PathBuf>) -> Result<PathBuf, Box<dyn std::error::
     return Ok(path);
   }
   let cwd = std::env::current_dir()?;
-  let inferred = repo_infer::detect_repo(&cwd)
-    .ok()
-    .filter(|repo| repo.host.eq_ignore_ascii_case("github.com"));
+  let (inferred, inference_note) = classify_inference(repo_infer::detect_repo(&cwd));
   let owner_repo = inferred
     .as_ref()
     .map(|repo| (repo.owner.as_str(), repo.repo.as_str()));
-  Ok(registry::resolve_config_path(
-    None,
-    &registry::runner_home(),
-    owner_repo,
-  )?)
+  match registry::resolve_config_path(None, &registry::runner_home(), owner_repo) {
+    Ok(path) => Ok(path),
+    Err(err) => match inference_note {
+      Some(note) => Err(format!("{err} (cwd inference: {note})").into()),
+      None => Err(err.into()),
+    },
+  }
+}
+
+/// Split a `detect_repo` outcome into the usable github.com inference and
+/// a "why inference did not apply" note for error enrichment: a
+/// non-github.com origin (the GHES case) names the host; a detection
+/// failure keeps its own message minus the error-kind prefix and the
+/// `pass --url` hint (`--url` is `register`-only — `run` / `status` /
+/// `remove` have no such flag).
+fn classify_inference(
+  outcome: Result<repo_infer::InferredRepo, RunnerError>,
+) -> (Option<repo_infer::InferredRepo>, Option<String>) {
+  match outcome {
+    Ok(repo) if repo.host.eq_ignore_ascii_case("github.com") => (Some(repo), None),
+    Ok(repo) => (
+      None,
+      Some(format!("origin host '{}' is not github.com", repo.host)),
+    ),
+    Err(err) => {
+      let msg = err.to_string();
+      let msg = msg.strip_prefix("config error: ").unwrap_or(&msg);
+      let msg = msg.split("; pass --url").next().unwrap_or(msg);
+      (None, Some(msg.to_owned()))
+    },
+  }
 }
 
 /// Register `masker` as the tracing secret-redactor and initialize tracing.

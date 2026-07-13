@@ -65,8 +65,11 @@ pub(crate) async fn cmd_login(args: LoginArgs) -> Result<(), Box<dyn std::error:
 /// token in `store`, returning it. Prints the user code, best-effort opens
 /// the browser, and polls until the grant completes. The effective
 /// client_id is `client_id_override` > `TOOLU_RUNNER_CLIENT_ID` env > the
-/// built-in github.com App (still a placeholder — using it errors before
-/// any network call). Shared by `login` and `register`'s inline flow.
+/// baked-in `DEVICE_CLIENT_ID` constant. That constant is still the
+/// compile-time placeholder (no OAuth App is registered yet), so whenever
+/// it would be used the flow errors BEFORE any network call — in practice
+/// github.com needs `--client-id` or `TOOLU_RUNNER_CLIENT_ID` too, until
+/// the real App exists. Shared by `login` and `register`'s inline flow.
 pub(crate) async fn run_device_flow(
   host: &str,
   client_id_override: Option<String>,

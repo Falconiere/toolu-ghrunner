@@ -37,8 +37,17 @@ fn add_legacy_registration(home: &Path) -> Result<PathBuf, std::io::Error> {
 }
 
 // ── runner_home: $TOOLU_RUNNER_HOME override vs ~/.toolu-runner default ─
+//
+// WHY subprocess re-exec: `runner_home()` reads the process environment,
+// and mutating it in-process is off the table — under edition 2024
+// `std::env::set_var` is `unsafe` and the workspace denies `unsafe_code`
+// (it would also race the parallel test threads). So each case re-runs
+// THIS test binary filtered to `helper_print_runner_home` with the env
+// prepared on the child. `--exact` and `--nocapture` are stable libtest
+// flags: run only that exact test name, and let its stdout through for
+// the parent to assert on.
 
-/// Subprocess helper: prints `runner_home()` when driven by the two
+/// Subprocess helper: prints `runner_home()` when driven by the
 /// `runner_home_*` tests below; a no-op pass in a normal suite run.
 #[test]
 fn helper_print_runner_home() {
@@ -50,14 +59,24 @@ fn helper_print_runner_home() {
 /// Re-run this test binary filtered to `helper_print_runner_home` with
 /// `TOOLU_RUNNER_HOME` set to `env_home` (or removed) and return its stdout.
 fn runner_home_via_subprocess(env_home: Option<&Path>) -> Result<String, std::io::Error> {
+  runner_home_subprocess(|cmd| {
+    match env_home {
+      Some(path) => cmd.env("TOOLU_RUNNER_HOME", path),
+      None => cmd.env_remove("TOOLU_RUNNER_HOME"),
+    };
+  })
+}
+
+/// Re-run this test binary filtered to `helper_print_runner_home`,
+/// letting `prepare` set the child's env; return its stdout.
+fn runner_home_subprocess(
+  prepare: impl FnOnce(&mut std::process::Command),
+) -> Result<String, std::io::Error> {
   let exe = std::env::current_exe()?;
   let mut cmd = std::process::Command::new(exe);
   cmd.args(["helper_print_runner_home", "--exact", "--nocapture"]);
   cmd.env("REGISTRY_TEST_PRINT_HOME", "1");
-  match env_home {
-    Some(path) => cmd.env("TOOLU_RUNNER_HOME", path),
-    None => cmd.env_remove("TOOLU_RUNNER_HOME"),
-  };
+  prepare(&mut cmd);
   let out = cmd.output()?;
   assert!(
     out.status.success(),
@@ -87,6 +106,23 @@ fn runner_home_defaults_to_dot_toolu_runner() {
   );
 }
 
+#[test]
+fn runner_home_expands_tilde_in_env_override() {
+  // HOME is pinned on the child so `~` expands into a hermetic tempdir,
+  // not the developer's real home.
+  let fake_home = TempDir::new().unwrap();
+  let stdout = runner_home_subprocess(|cmd| {
+    cmd.env("TOOLU_RUNNER_HOME", "~/custom-runner-home");
+    cmd.env("HOME", fake_home.path());
+  })
+  .unwrap();
+  let expected = fake_home.path().join("custom-runner-home");
+  assert!(
+    stdout.contains(&format!("runner_home={}", expected.display())),
+    "a `~/x` TOOLU_RUNNER_HOME must tilde-expand; helper printed: {stdout}"
+  );
+}
+
 // ── runner_dir: layout + path-component rejection ───────────────────
 
 #[test]
@@ -112,6 +148,8 @@ fn runner_dir_rejects_non_component_names() {
     ("owner", ""),
     (".", "repo"),
     ("owner", "."),
+    ("own\0er", "repo"),
+    ("owner", "re\0po"),
   ];
   for (owner, repo) in bad {
     let err = registry::runner_dir(home, owner, repo).unwrap_err();
@@ -127,14 +165,76 @@ fn runner_dir_rejects_non_component_names() {
 #[test]
 fn list_registrations_empty_home_yields_empty_vec() {
   let home = TempDir::new().unwrap();
-  assert_eq!(registry::list_registrations(home.path()), Vec::new());
+  assert_eq!(
+    registry::list_registrations(home.path()).unwrap(),
+    Vec::new()
+  );
 }
 
 #[test]
 fn list_registrations_missing_home_yields_empty_vec() {
   let home = TempDir::new().unwrap();
   let gone = home.path().join("never-created");
-  assert_eq!(registry::list_registrations(&gone), Vec::new());
+  assert_eq!(registry::list_registrations(&gone).unwrap(), Vec::new());
+}
+
+/// A stray file directly under `runners/` (or under an owner dir) is not
+/// a registration — the explicit `is_dir()` filter skips it silently.
+#[test]
+fn list_registrations_ignores_stray_files_at_both_levels() {
+  let home = TempDir::new().unwrap();
+  let real = add_registration(home.path(), "octocat", "hello-world").unwrap();
+  std::fs::write(home.path().join("runners").join("stray.txt"), "junk").unwrap();
+  std::fs::write(
+    home.path().join("runners").join("octocat").join("notes.md"),
+    "junk",
+  )
+  .unwrap();
+
+  let entries = registry::list_registrations(home.path()).unwrap();
+  assert_eq!(
+    entries,
+    vec![RegistrationEntry {
+      config_path: real,
+      owner_repo: Some("octocat/hello-world".to_owned()),
+    }],
+    "stray files must be skipped, never error, never register"
+  );
+}
+
+/// An EXISTING but unreadable `runners/` dir is an error naming the path
+/// — silently reporting "no registrations" would misdirect the user to
+/// `register` when the real problem is permissions. Unix-only: dir modes
+/// are not enforceable this way elsewhere.
+#[cfg(unix)]
+#[test]
+fn list_registrations_unreadable_runners_dir_is_an_error() {
+  use std::os::unix::fs::PermissionsExt;
+  let home = TempDir::new().unwrap();
+  add_registration(home.path(), "octocat", "hello-world").unwrap();
+  let runners = home.path().join("runners");
+  std::fs::set_permissions(&runners, std::fs::Permissions::from_mode(0o000)).unwrap();
+  // A privileged user (root CI containers) ignores dir modes — skip there.
+  if std::fs::read_dir(&runners).is_ok() {
+    std::fs::set_permissions(&runners, std::fs::Permissions::from_mode(0o755)).unwrap();
+    eprintln!("skipping: this user can read a 000 dir (running privileged)");
+    return;
+  }
+
+  let result = registry::list_registrations(home.path());
+
+  // Restore before asserting so the tempdir cleans up even on failure.
+  std::fs::set_permissions(&runners, std::fs::Permissions::from_mode(0o755)).unwrap();
+  let err = result.unwrap_err();
+  let msg = err.to_string();
+  assert!(
+    msg.contains(&runners.display().to_string()),
+    "error must name the unreadable path; got: {msg}"
+  );
+  assert!(
+    msg.contains("cannot read registrations dir"),
+    "error must say the dir could not be read (io error appended); got: {msg}"
+  );
 }
 
 #[test]
@@ -149,7 +249,7 @@ fn list_registrations_sorts_by_owner_repo_with_legacy_last() {
   // A stray file directly under runners/ is skipped, not an error.
   std::fs::write(home.path().join("runners").join("stray.txt"), "junk").unwrap();
 
-  let entries = registry::list_registrations(home.path());
+  let entries = registry::list_registrations(home.path()).unwrap();
   assert_eq!(
     entries,
     vec![

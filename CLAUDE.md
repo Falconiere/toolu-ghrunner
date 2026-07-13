@@ -181,11 +181,14 @@ no OTel.
   repos). Used only for the `generate-jitconfig` bearer — never at
   runtime.
 - `registry.rs` — per-repo registration layout + discovery:
-  `runner_home()` (`$TOOLU_RUNNER_HOME` > `~/.toolu-runner`),
-  `runner_dir` (`<home>/runners/<owner>/<repo>`, path-component
-  validation), `RegistrationEntry`, `list_registrations` (scan
-  `runners/*/*/config.toml` + legacy root), `resolve_config_path`
-  (flag > cwd-inferred > sole registration > error listing candidates).
+  `runner_home()` (`$TOOLU_RUNNER_HOME`, `~` expanded, >
+  `~/.toolu-runner`), `runner_dir` (`<home>/runners/<owner>/<repo>`,
+  path-component validation incl. NUL rejection), `RegistrationEntry`,
+  `list_registrations` (scan `runners/*/*/config.toml` + legacy root;
+  returns `Result` — missing dirs are `Ok(empty)`, an unreadable
+  existing dir is an `Err` naming the path, stray non-dir entries are
+  skipped), `resolve_config_path` (flag > cwd-inferred > sole
+  registration > error listing candidates).
 - `repo_infer.rs` — cwd repo inference: pure `parse_remote_url`
   (scp-like / `https://` / `ssh://` remote forms) + `detect_repo`
   (`git -C <cwd> remote get-url origin`; each error names the `--url`
