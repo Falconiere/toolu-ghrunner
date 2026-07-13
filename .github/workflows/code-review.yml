@@ -27,7 +27,9 @@ jobs:
           API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           # Read convention files (CLAUDE.md etc.) from the PR merge ref
           # instead of the base ref, so a PR that legitimately changes a
-          # convention is reviewed against its own updated text. Safe
-          # here: same-repo branches only, no fork PRs trigger this
-          # workflow. Requires toolu-ghactions >= 6.3.0.
+          # convention is reviewed against its own updated text. Safety:
+          # fork PRs do trigger `pull_request`, but the action step fails
+          # for them (secrets are not exposed to fork runs), so no fork
+          # diff is ever reviewed under merge-ref rules. Requires
+          # toolu-ghactions >= 6.3.0.
           RULES_REF: merge
