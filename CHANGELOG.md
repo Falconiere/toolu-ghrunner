@@ -10,61 +10,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.2.0] - 2026-07-13
 
 ### Added
-- *(cache)* accelerated services mode — content-addressed GHA cache
-- *(auth)* add `login`/`logout` via GitHub OAuth device flow
-- *(toolu-runner)* self-documenting CLI help for every command
-- *(toolu-runner)* zero-arg register
 
-### Changed
-- *(workspace)* relocate crates under crates/
-- *(shared)* drop YAMLESS_* legacy-env warning + coupling gate
-- *(crates)* break future crate cycles in place
-- *(crates)* extract expressions, cache, config leaf crates
-- *(crates)* extract wire + observability mid-layer crates
-- *(crates)* extract execution + listener, slim toolu-runner to bin
-- *(toolu-runner)* single-owner config resolution
-
-### Documentation
-- fix stale pre-split paths + test-comment accuracy
-- *(toolu-runner)* precise debug-profile wording in self-check test comment
-- *(toolu-runner)* document register's _diag pre-create in CLAUDE.md
-- *(toolu-runner)* precise fork-PR safety wording for RULES_REF
-
-### Fixed
-- *(cache)* address PR #15 review feedback
-- *(cache)* address PR #15 round-2 review feedback
-- *(cache)* cherry-pick round-3 review hardenings
-- *(cache)* address PR #15 round-4 review feedback
-- *(cache)* relay upstream Content-Encoding; log unreadable chunks
-- *(cache)* fold token length into bearer compare, no early exit
-- *(cache)* single-source config defaults; disable GC on zero hours
-- *(cache)* portable shadow fingerprint for symlinks and escaped paths
-- *(cache)* mask runtime token; alloc-free manifest locate; doc fix
-- *(auth)* address PR review feedback
-- *(auth)* address round-2 review feedback
-- *(toolu-runner)* address PR review feedback
-- *(toolu-runner)* address PR review feedback
-- *(toolu-runner)* address review round 2
-- *(toolu-runner)* address review round 4
-- *(toolu-runner)* address review round 6
-- *(release)* replace release-plz with git-cliff front half
-- *(release)* portable single-match sed for the version bump
-- *(release)* extract tested scripts, scope awk, harden sed
-### Added
-
+- **Zero-arg `register` + per-repo runner layout.** `cd my-repo &&
+  toolu-runner register` — the repository is inferred from the cwd git
+  remote (`origin`, github.com), and the bearer chain (`--token` >
+  `TOOLU_RUNNER_TOKEN` > stored login) now ends in an inline GitHub OAuth
+  **device-flow login** on interactive terminals (`login`/`logout` remain as
+  standalone commands). Each registration lives in its own
+  `~/.toolu-runner/runners/<owner>/<repo>/` dir with a per-repo job lock, so
+  runners for different repos run concurrently on one machine; the per-host
+  login token store is shared at the runner home, and the legacy single-slot
+  `config.toml` still works read-only. `run`/`status`/`remove`/`watch` resolve
+  their registration the same way: `--config` flag > cwd inference > sole
+  registration. `watch` browses job history across all runner dirs.
 - **Self-documenting CLI help.** Every command and flag now carries full
   `--help` text: defaults stated everywhere (`--config`, `--work`, `--name`,
   `--labels`), env fallbacks documented (`TOOLU_RUNNER_TOKEN`,
-  `TOOLU_RUNNER_CLIENT_ID`, `TOOLU_RUNNER_LOG` / `TOOLU_RUNNER_ALLOW_VERBOSE`),
-  a single-use JIT warning on `register`, and Examples/Environment sections on
-  the top-level help. Bare `toolu-runner` now prints the full help. The clap
-  surface moved to a new `cli.rs` (with a startup `debug_assert` self-check in
-  debug builds).
-- **Automated releases (`release-plz`).** A `release-plz.toml` +
-  `.github/workflows/release-plz.yml` front half: a merge to `main` opens a
+  `TOOLU_RUNNER_CLIENT_ID`, `TOOLU_RUNNER_HOME`, `TOOLU_RUNNER_LOG` /
+  `TOOLU_RUNNER_ALLOW_VERBOSE`), a single-use JIT warning on `register`, and
+  Examples/Environment sections on the top-level help. Bare `toolu-runner`
+  now prints the full help. The clap surface moved to a new `cli.rs` (with a
+  startup `debug_assert` self-check in debug builds).
+- **Automated releases (git-cliff).** A `cliff.toml` +
+  `.github/workflows/release-pr.yml` front half: a merge to `main` opens a
   version-bump + `CHANGELOG.md` release PR, and merging that PR pushes the
   `vX.Y.Z` tag (via `RELEASE_PLZ_TOKEN`) that drives the existing
-  tag-triggered `release.yml`.
+  tag-triggered `release.yml`. (Initially built on release-plz; replaced
+  in-flight because its `git_only` mode cannot version unpublished
+  workspaces with path-only internal deps — release-plz#2595.)
 - **Cache acceleration (`ServicesMode::Accelerated`).** A new
   `[services] mode = "accelerated"` that turns the runner into a CI
   cache accelerator, alongside the existing `forwarder` and `offline`
@@ -102,6 +75,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `wire` / `observability` → `execution` → `listener` → `toolu-runner`
   bin). `toolu-runner` is now bin-only; the execution engine lives in
   `execution` and the JIT lifecycle in `listener`. Behavior-preserving.
+- *(shared)* drop YAMLESS_* legacy-env warning + coupling gate
+
+### Documentation
+
+- fix stale pre-split paths + test-comment accuracy
+- *(toolu-runner)* precise debug-profile wording in self-check test comment
+- *(toolu-runner)* document register's _diag pre-create in CLAUDE.md
+- *(toolu-runner)* precise fork-PR safety wording for RULES_REF
 
 ### Fixed
 
