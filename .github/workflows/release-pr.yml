@@ -74,7 +74,9 @@ jobs:
           fi
           next_ver=${next#v}
           echo "release PR: v${current} -> ${next}"
-          sed -i -E "0,/^version = \"${current}\"/s//version = \"${next_ver}\"/" Cargo.toml
+          # Root Cargo.toml has exactly one `^version = ` line — the
+          # [workspace.package] one every crate inherits.
+          sed -i -E "s/^version = \"${current}\"/version = \"${next_ver}\"/" Cargo.toml
           cargo update --workspace --quiet
           git-cliff --unreleased --bump --prepend CHANGELOG.md -o /dev/null
           git config user.name "github-actions[bot]"
