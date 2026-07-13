@@ -1,24 +1,29 @@
 #!/usr/bin/env bash
 # release_pr_workflow_test.sh — static validation of the git-cliff front half:
-# .github/workflows/release-pr.yml + cliff.toml.
+# .github/workflows/release-pr.yml + the scripts/release-pr.sh /
+# scripts/release-tag.sh job bodies it calls + cliff.toml.
 #
 # The live flow needs the RELEASE_PLZ_TOKEN PAT and a push to main, so it can't
 # run offline. This asserts the invariants the auto-release contract depends on:
-# the workflow triggers on push to main, computes the bump with git-cliff and
-# prepends CHANGELOG.md (never regenerates history), uses the PAT (never the
-# default token) so the pushed tag actually fires release.yml, keeps
-# least-privilege perms, and cliff.toml keeps the Keep-a-Changelog shape that
+# the workflow triggers on push to main and delegates each job body to its
+# script, the scripts compute the bump with git-cliff and prepend CHANGELOG.md
+# (never regenerating history), the workflow uses the PAT (never the default
+# token) so the pushed tag actually fires release.yml, keeps least-privilege
+# perms, and cliff.toml keeps the Keep-a-Changelog shape that
 # scripts/changelog-extract.sh parses. Uses grep (dependency-free); if tomllib
-# is importable it additionally asserts cliff.toml parses.
+# is importable it additionally asserts cliff.toml parses. The scripts'
+# runtime behavior is covered by scripts/test/release_pr_script_test.sh.
 set -uo pipefail
 
 cd "$(dirname "$0")/../.." || exit 1 # repo root
 
 WF=".github/workflows/release-pr.yml"
+PR_SH="scripts/release-pr.sh"
+TAG_SH="scripts/release-tag.sh"
 TOML="cliff.toml"
 fail=0
 
-for f in "$WF" "$TOML"; do
+for f in "$WF" "$PR_SH" "$TAG_SH" "$TOML"; do
   if [[ ! -f "$f" ]]; then
     echo "FAIL: $f not found" >&2
     exit 1
@@ -60,17 +65,20 @@ else
   echo "FAIL: expected the kill-switch on both jobs, found $n_gates" >&2
   fail=1
 fi
-# --- workflow: git-cliff drives the bump and the changelog ---
-want "computes bump via git-cliff"       "$WF" "git-cliff --bumped-version"
-want "prepends CHANGELOG (no rewrite)"   "$WF" "git-cliff --unreleased --bump --prepend CHANGELOG\.md"
+# --- workflow: thin steps that delegate to the tested scripts ---
+want "pr job calls release-pr.sh"        "$WF" "run: bash scripts/release-pr\.sh"
+want "tag job calls release-tag.sh"      "$WF" "run: bash scripts/release-tag\.sh"
 want "pins the git-cliff version"        "$WF" "GIT_CLIFF_VERSION"
-# --- workflow: the two-push contract ---
+# --- scripts: git-cliff drives the bump and the changelog ---
+want "computes bump via git-cliff"       "$PR_SH" "git-cliff --bumped-version"
+want "prepends CHANGELOG (no rewrite)"   "$PR_SH" "git-cliff --unreleased --bump --prepend CHANGELOG\.md"
+# --- scripts: the two-push contract ---
 # release-pr skips when main carries an untagged bump (that push belongs to
 # release-tag); release-tag tags exactly that state.
-want "untagged-bump guard in pr job"     "$WF" "release-tag owns this push"
-want "no-releasable-commits guard"       "$WF" "no releasable commits"
-want "pr branch force-pushed"            "$WF" "git push --force origin release-pr"
-want "tag pushed as annotated vX.Y.Z"    "$WF" "git tag -a \"v\\\$\{current\}\""
+want "untagged-bump guard in pr script"  "$PR_SH" "release-tag owns this push"
+want "no-releasable-commits guard"       "$PR_SH" "no releasable commits"
+want "pr branch force-pushed"            "$PR_SH" "git push --force origin release-pr"
+want "tag pushed as annotated vX.Y.Z"    "$TAG_SH" "git tag -a \"v\\\$\{current\}\""
 # --- workflow: the token MUST be the PAT, never the default token ---
 # A tag pushed under the built-in GITHUB_TOKEN is suppressed by GitHub's
 # anti-recursion rule, so release.yml would never fire.
