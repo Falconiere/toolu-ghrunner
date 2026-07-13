@@ -366,7 +366,9 @@ no OTel.
   config, persists config + credentials into
   `<home>/runners/<owner>/<repo>/` (org URLs keep `<home>/config.toml`;
   `--config` overrides) with `data_dir` = the registration dir —
-  all-or-nothing, config rollback on a credentials-write failure.
+  all-or-nothing, config rollback on a credentials-write failure. Also
+  pre-creates the registration dir's `_diag/` (WARN-not-fatal — a
+  self-evident layout nicety; `run` recreates what it needs anyway).
 - `login_cmd.rs` — `LoginArgs` / `LogoutArgs` (positional host; **no
   `--config`** — the token store is pinned to
   `config::registry::runner_home()`, shared by all repos) + `cmd_login`
