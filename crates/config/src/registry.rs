@@ -25,7 +25,9 @@ pub fn runner_home() -> PathBuf {
 ///
 /// `owner` / `repo` are used verbatim as path components, after rejecting
 /// anything that is not a plain single component (defense in depth —
-/// GitHub names are already `[A-Za-z0-9._-]`).
+/// GitHub names are already `[A-Za-z0-9._-]`; the check is deliberately
+/// broader than that charset — it rejects anything path-hazardous rather
+/// than mirroring GitHub's naming rules).
 ///
 /// # Errors
 ///

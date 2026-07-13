@@ -50,6 +50,8 @@ pub fn detect_repo(cwd: &Path) -> Result<InferredRepo, RunnerError> {
     .arg("-C")
     .arg(cwd)
     .args(["remote", "get-url", "origin"])
+    // Pin the locale: `classify_git_failure` matches English stderr text.
+    .env("LC_ALL", "C")
     .output()
     .map_err(|e| {
       RunnerError::Config(format!(
@@ -64,7 +66,12 @@ pub fn detect_repo(cwd: &Path) -> Result<InferredRepo, RunnerError> {
       &String::from_utf8_lossy(&output.stderr),
     ));
   }
-  let stdout = String::from_utf8_lossy(&output.stdout);
+  let stdout = String::from_utf8(output.stdout).map_err(|e| {
+    RunnerError::Config(format!(
+      "git returned a non-UTF-8 `origin` remote URL ({e}); pass --url with the repository URL \
+       instead"
+    ))
+  })?;
   let url = stdout.trim();
   parse_remote_url(url).ok_or_else(|| {
     RunnerError::Config(format!(

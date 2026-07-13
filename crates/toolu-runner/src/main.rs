@@ -78,7 +78,8 @@ fn cmd_watch(args: WatchArgs) -> Result<(), Box<dyn std::error::Error>> {
 /// Resolve which registration config a subcommand should use: the
 /// `--config` flag > the cwd-inferred `runners/<owner>/<repo>/`
 /// registration (github.com `origin` remotes only — GHES and ssh-alias
-/// hosts never infer) > the sole existing registration (the legacy
+/// hosts never infer; inference is one local `git remote get-url origin`
+/// subprocess, no network) > the sole existing registration (the legacy
 /// `<home>/config.toml` included). Zero registrations or an ambiguous
 /// set propagates [`registry::resolve_config_path`]'s error as-is.
 fn resolve_config(flag: Option<PathBuf>) -> Result<PathBuf, Box<dyn std::error::Error>> {

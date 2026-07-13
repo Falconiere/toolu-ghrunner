@@ -33,7 +33,7 @@ use crate::login_cmd;
 pub(crate) async fn cmd_register(args: RegisterArgs) -> Result<(), Box<dyn std::error::Error>> {
   crate::init_runner_tracing().map_err(|e| format!("startup init: {e}"))?;
 
-  let (url, host) = resolve_url_and_host(args.url.clone()).map_err(|e| format!("{e}"))?;
+  let (url, host) = resolve_url_and_host(args.url).map_err(|e| format!("{e}"))?;
 
   let home = registry::runner_home();
   let config_path = match args.config.clone() {
