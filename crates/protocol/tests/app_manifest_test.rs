@@ -82,8 +82,8 @@ fn form_html_contains_structural_markers() {
     "form must carry the hidden manifest input"
   );
   assert!(
-    html.contains("administration"),
-    "manifest payload must survive into the form value"
+    html.contains("&quot;administration&quot;:&quot;write&quot;"),
+    "HTML-attribute-escaped manifest permission must survive into the form value"
   );
 }
 

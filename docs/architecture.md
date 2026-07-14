@@ -43,7 +43,7 @@ toolu-ghrunner/                            workspace root
     ├── expressions/                       the ${{ }} evaluator (→ shared)
     ├── cache/                             content-addressed CI cache (→ shared)
     ├── wire/                              async HTTP transport + reporting (→ shared, protocol)
-    │   ├── net/                           async I/O (reqwest): auth, session, messages, …, register, app_manifest
+    │   ├── net/                           async I/O (reqwest): auth, session, messages, …, register, app_manifest (+ create-app loopback callback server)
     │   └── reporting/                     Run/Results domain types, live_log, feature_detection
     ├── observability/                     journal + watch TUI (→ shared, config)
     │   ├── journal/                       per-job JSONL event journal (types, writer, reader)
