@@ -176,12 +176,14 @@ pub fn parse_callback_path(
   code.ok_or_else(|| RunnerError::Protocol("manifest callback missing code param".to_owned()))
 }
 
-/// HTML-attribute-escape a string: `&`, `"`, `<`, `>`. `&` must go first so
-/// the other replacements are not double-escaped.
+/// HTML-attribute-escape a string: `&`, `"`, `'`, `<`, `>`. `&` must go first
+/// so the other replacements are not double-escaped. Both quote styles are
+/// escaped so the result is safe in single- or double-quoted attributes.
 fn html_attr_escape(input: &str) -> String {
   input
     .replace('&', "&amp;")
     .replace('"', "&quot;")
+    .replace('\'', "&#39;")
     .replace('<', "&lt;")
     .replace('>', "&gt;")
 }
