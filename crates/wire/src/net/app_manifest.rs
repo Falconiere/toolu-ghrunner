@@ -11,7 +11,9 @@
 use std::net::SocketAddr;
 use std::time::Duration;
 
-use protocol::app_manifest::{ConversionResponse, form_html, parse_callback_path, parse_conversion};
+use protocol::app_manifest::{
+  ConversionResponse, form_html, parse_callback_path, parse_conversion,
+};
 use shared::RunnerError;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
@@ -97,7 +99,8 @@ impl CallbackServer {
     let Self {
       listener, state, ..
     } = self;
-    let outcome = tokio::time::timeout(timeout, accept_loop(&listener, &manifest_json, &state)).await;
+    let outcome =
+      tokio::time::timeout(timeout, accept_loop(&listener, &manifest_json, &state)).await;
     match outcome {
       Ok(result) => result,
       Err(_elapsed) => Err(RunnerError::Network(
@@ -247,19 +250,27 @@ async fn serve_callback<W: AsyncWriteExt + Unpin>(
 ) -> Result<Option<String>, RunnerError> {
   match parse_callback_path(target, state) {
     Ok(code) => {
-      let _ =
-        write_http_response(writer, "HTTP/1.1 200 OK", "text/html; charset=utf-8", SUCCESS_HTML)
-          .await;
+      log_write_err(
+        write_http_response(
+          writer,
+          "HTTP/1.1 200 OK",
+          "text/html; charset=utf-8",
+          SUCCESS_HTML,
+        )
+        .await,
+      );
       Ok(Some(code))
     },
     Err(e) => {
-      let _ = write_http_response(
-        writer,
-        "HTTP/1.1 400 Bad Request",
-        "text/plain; charset=utf-8",
-        "Bad request: the manifest callback was rejected.\n",
-      )
-      .await;
+      log_write_err(
+        write_http_response(
+          writer,
+          "HTTP/1.1 400 Bad Request",
+          "text/plain; charset=utf-8",
+          "Bad request: the manifest callback was rejected.\n",
+        )
+        .await,
+      );
       Err(e)
     },
   }
