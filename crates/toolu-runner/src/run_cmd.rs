@@ -90,7 +90,8 @@ fn warn_if_no_login(store: &AuthStore, host: &str, once: bool) {
   }
 }
 
-/// Loop-invariant state for the always-online run loop.
+/// Loop-invariant handles for the always-online run loop; the config
+/// itself is reloaded from `config_path` on every iteration.
 struct RunLoop {
   config_path: PathBuf,
   creds_path: PathBuf,
@@ -176,8 +177,8 @@ impl RunLoop {
     false
   }
 
-  /// Sleep `backoff` with decorrelated jitter, waking early on cancel.
-  /// Returns `true` if cancellation fired first.
+  /// Sleep `backoff` with jitter applied (see [`jittered_backoff`]),
+  /// waking early on cancel. Returns `true` if cancellation fired first.
   async fn sleep_or_cancel(&self, backoff: Duration) -> bool {
     let jittered = jittered_backoff(backoff);
     tokio::select! {

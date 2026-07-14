@@ -16,6 +16,10 @@ use crate::config::RunnerRegistrationConfig;
 /// `runtime.jit_config`. `runner_url`, `runner_name`, `labels`,
 /// `runner_group`, the rest of `[runtime]`, and the `[services]` /
 /// `[cache]` / `[workspace]` / `[shadow]` sections stay exactly as loaded.
+///
+/// Caller contract: this is a dumb merge — `jit_config`, `runner_id`, and
+/// `client_id` must all come from the SAME minted registration; nothing
+/// here cross-validates them.
 pub fn merge_reminted_config(
   prior: &RunnerRegistrationConfig,
   jit_config: String,
