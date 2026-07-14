@@ -24,8 +24,8 @@ fn create_app_rejects_non_github_host() {
   );
   let stderr = String::from_utf8_lossy(&output.stderr);
   assert!(
-    stderr.contains("github.com only"),
-    "error should name github.com as the only supported host: {stderr}"
+    stderr.contains("is not supported yet") && stderr.contains("github.com only this release"),
+    "error should be the host guard naming github.com as the only supported host: {stderr}"
   );
   assert!(
     stderr.contains("ghes.example.com"),
@@ -55,7 +55,7 @@ fn create_app_refuses_to_overwrite_without_force() {
   );
   let stderr = String::from_utf8_lossy(&output.stderr);
   assert!(
-    stderr.contains("pass --force to overwrite"),
+    stderr.contains("pass --force to overwrite it"),
     "error should name --force as the override: {stderr}"
   );
 
@@ -80,7 +80,7 @@ fn create_app_help_lists_flags() {
     String::from_utf8_lossy(&output.stderr)
   );
   let stdout = String::from_utf8_lossy(&output.stdout);
-  for flag in ["--name", "--host", "--no-browser", "--force"] {
+  for flag in ["--name <NAME>", "--host <HOST>", "--no-browser", "--force"] {
     assert!(stdout.contains(flag), "missing {flag} in: {stdout}");
   }
 }
