@@ -15,6 +15,8 @@
 //! can compose [`crate::reporting`] domain logic on top of these thin
 //! transport wrappers.
 
+/// GitHub App manifest onboarding: loopback callback server + code exchange.
+pub mod app_manifest;
 pub mod auth;
 /// GitHub OAuth device-flow login: request code, poll for token.
 pub mod device_auth;
@@ -26,6 +28,7 @@ pub mod run_service;
 pub mod session;
 pub mod v1;
 
+pub use app_manifest::{CallbackServer, convert_manifest_code};
 pub use auth::{authenticate, exchange_token};
 pub use device_auth::{
   DeviceCodeResponse, DeviceToken, PollOutcome, parse_poll_response, poll_for_token,

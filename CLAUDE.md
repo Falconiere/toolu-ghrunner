@@ -122,6 +122,13 @@ no OTel.
 - `v1/` — `ConnectionData`, `JobEvent`, `LocationServiceData`,
   `ServiceDefinition`, `TimelineRecord` (GHES V1 protocol types).
   `resolve_service_url` (pure URL resolver).
+- `app_manifest.rs` — GitHub **App Manifest flow** helpers (github.com
+  onboarding, backs `create-app`): `AppManifest::for_runner` (prefilled
+  manifest — `administration:write`, `public=false`, no webhook) +
+  `to_json`, `ConversionResponse` + `parse_conversion` (the
+  `app-manifests/{code}/conversions` reply), `new_state` (CSRF nonce),
+  `form_html` (auto-submitting POST page), `parse_callback_path`
+  (redirect query → code, CSRF-checked).
 
 ### `shared/` — cross-cutting types + tracing init (no deps)
 
@@ -180,6 +187,11 @@ no OTel.
   `login`). The store is pinned to the runner home (shared by all
   repos). Used only for the `generate-jitconfig` bearer — never at
   runtime.
+- `app_store.rs` — GitHub App credential persistence: `StoredApp`
+  (`save_app` / `load_app` at `<home>/github-app.json`, 0600) +
+  `install_url` / `safe_summary`. Home-root store shared by all repos;
+  backs `create-app`. Not yet consumed at runtime (installation-token
+  minting deferred).
 - `registry.rs` — per-repo registration layout + discovery:
   `runner_home()` (`$TOOLU_RUNNER_HOME`, `~` expanded, >
   `~/.toolu-runner`), `runner_dir` (`<home>/runners/<owner>/<repo>`,
@@ -226,7 +238,9 @@ no OTel.
   `create_step_logs_metadata`, signed blob URLs), `log_upload`
   (Azure append-blob: create / block / commit), `v1` (GHES
   `connectionData` discovery, timeline record POST), `register`
-  (the live JIT `generate-jitconfig` POST).
+  (the live JIT `generate-jitconfig` POST), `app_manifest` (the
+  `create-app` loopback `CallbackServer` on `127.0.0.1:0` +
+  `convert_manifest_code` — POSTs `app-manifests/{code}/conversions`).
 - `reporting/` — domain types and async wrappers for the Run
   Service and Results Service. `run_service` (request/response
   shapes, `map_conclusion`), `results_service` (Twirp request
@@ -340,7 +354,8 @@ no OTel.
   bin-only crate has no lib target for a unit test).
 - `main.rs` — CLI entrypoint: parse + dispatch (`register` →
   `register_cmd`, `login`/`logout` → `login_cmd`, `status` →
-  `status_cmd`) plus the `run` / `remove` / `watch` handlers.
+  `status_cmd`, `create-app` → `create_app_cmd`) plus the `run` /
+  `remove` / `watch` handlers.
   `--config` resolution for `run` / `remove` / `status` / `watch`:
   flag > cwd-inferred `runners/<owner>/<repo>/config.toml` > the sole
   registration (legacy `<home>/config.toml` included) > error listing
@@ -382,6 +397,18 @@ no OTel.
   credential presence, and any stored device-flow login token for the
   registered host **plus per-host login state**. No network (split
   out of `main.rs`).
+- `create_app_cmd.rs` — `cmd_create_app`: runs GitHub's **App Manifest
+  flow** to create a user-owned GitHub App in one click (github.com
+  only; a `--host` other than github.com errors as unsupported). Binds a
+  loopback `CallbackServer` (`wire::net::app_manifest`) on `127.0.0.1:0`,
+  opens the browser to a prefilled manifest form
+  (`protocol::app_manifest`; `--no-browser` prints the URL instead),
+  catches the redirect, exchanges the code at
+  `POST app-manifests/{code}/conversions`, and persists the app
+  credentials to `<home>/github-app.json` (`config::app_store`, 0600).
+  PRINTS the install URL — does NOT install the app or mint installation
+  tokens (deferred; `register` still uses `--token`/env/device-flow this
+  release). Flags: `--name`, `--host`, `--no-browser`, `--force`.
 
 ## References
 

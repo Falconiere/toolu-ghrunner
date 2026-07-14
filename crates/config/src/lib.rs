@@ -3,6 +3,8 @@
 //! Leaf crate: depends only on `shared` (+ external crates), never on
 //! `toolu-runner` or the execution engine.
 
+/// GitHub App identity + secret persistence (`<home>/github-app.json`, 0600).
+pub mod app_store;
 /// CLI-login bearer-token persistence (keyring / 0600-file fallback).
 pub mod auth_store;
 /// Runner registration + runtime config load/save (TOML) and credentials (JSON).
