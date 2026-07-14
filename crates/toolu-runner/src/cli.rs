@@ -24,6 +24,7 @@ Environment:
   TOOLU_RUNNER_TOKEN           GitHub bearer for `register` (flag > env > stored login token)
   TOOLU_RUNNER_CLIENT_ID       OAuth App client_id for `login` (fallback for --client-id)
   TOOLU_RUNNER_HOME            runner state root (default ~/.toolu-runner)
+  TOOLU_RUNNER_NO_KEYRING      force the file token store; skip the OS keyring probe
   TOOLU_RUNNER_LOG / RUST_LOG  tracing filter; levels above `info` also require
                                TOOLU_RUNNER_ALLOW_VERBOSE=1 (secret-leak guard)";
 
@@ -79,13 +80,14 @@ pub(crate) enum Command {
   /// registration is single-use (JIT): the first `run` consumes it —
   /// re-register for each job.
   Register(RegisterArgs),
-  /// Run the listener loop, polling for jobs.
+  /// Run the listener loop, staying online across jobs.
   ///
   /// Loads the persisted registration, acquires the exclusive single-job
   /// lock (`~/.toolu-runner/.lock`), creates a broker session, and polls
-  /// until a job arrives. Executes the job, streams logs to GitHub, then
-  /// exits — a JIT registration is single-use. SIGINT / SIGTERM cancel
-  /// gracefully.
+  /// until a job arrives. After each job it re-mints a fresh JIT config
+  /// with the stored `login` token and keeps listening, so one `run` stays
+  /// online across many jobs. `--once` runs a single job and exits. SIGINT
+  /// / SIGTERM cancel gracefully.
   Run(RunArgs),
   /// Remove the runner registration.
   ///
@@ -107,6 +109,14 @@ pub(crate) enum Command {
   /// files, including when no runner is registered. Cancelling a job
   /// sends SIGINT to the lock-holding `run` process (unix only).
   Watch(WatchArgs),
+  /// Install a supervisor unit that keeps `run` alive across reboots.
+  ///
+  /// Generates and activates a launchd LaunchAgent (macOS) or systemd
+  /// user unit (Linux) wrapping `run --config <path>`, so the runner
+  /// restarts on crash and at boot. `--print` shows the unit without
+  /// writing it, `--no-activate` writes but does not load it, and
+  /// `--remove` deactivates and deletes it. launchd/systemd only.
+  InstallService(InstallServiceArgs),
   /// Log in to GitHub via the OAuth device flow and store the token.
   ///
   /// Prints a one-time code, opens the verification page, polls until
@@ -214,11 +224,11 @@ pub(crate) struct RunArgs {
   /// sole existing registration.
   #[arg(long, value_name = "FILE", value_hint = ValueHint::FilePath)]
   pub(crate) config: Option<PathBuf>,
-  /// Exit after the first job completes (currently the default behavior).
+  /// Exit after the first job completes (single-job mode).
   ///
-  /// A JIT registration is single-use, so the listener always exits
-  /// after one job with or without this flag. Kept for scripts and a
-  /// future daemon mode, where omitting it would mean "keep listening".
+  /// The default is to stay online: after each job the runner re-mints a
+  /// fresh JIT config with the stored `login` token and keeps listening.
+  /// Pass this to run exactly one job and exit with its status.
   #[arg(long)]
   pub(crate) once: bool,
 }
@@ -266,6 +276,37 @@ pub(crate) struct WatchArgs {
   /// browsing the default data dir (~/.toolu-runner) read-only.
   #[arg(long, value_name = "FILE", value_hint = ValueHint::FilePath)]
   pub(crate) config: Option<PathBuf>,
+}
+
+/// Arguments for the `install-service` subcommand.
+#[derive(Debug, Args)]
+pub(crate) struct InstallServiceArgs {
+  /// Path to the runner config file. Default: inferred from the cwd git
+  /// remote (runners/<owner>/<repo>/ under the runner home), else the
+  /// sole existing registration.
+  ///
+  /// The registration dir names the unit: a per-repo config yields
+  /// `io.toolu.runner.<owner>.<repo>` (launchd) /
+  /// `toolu-runner-<owner>-<repo>.service` (systemd).
+  #[arg(long, value_name = "FILE", value_hint = ValueHint::FilePath)]
+  pub(crate) config: Option<PathBuf>,
+  /// Print the generated unit to stdout without writing or activating it.
+  ///
+  /// Conflicts with --remove. Use it to review the launchd/systemd unit
+  /// before installing.
+  #[arg(long, conflicts_with = "remove")]
+  pub(crate) print: bool,
+  /// Write the unit file but do not activate it.
+  ///
+  /// Prints the exact `launchctl` / `systemctl --user` command to load it
+  /// yourself later.
+  #[arg(long)]
+  pub(crate) no_activate: bool,
+  /// Deactivate and delete a previously installed unit (idempotent).
+  ///
+  /// A missing unit reports nothing-to-do and exits 0.
+  #[arg(long)]
+  pub(crate) remove: bool,
 }
 
 /// Default `--config` path: `~/.toolu-runner/config.toml`.

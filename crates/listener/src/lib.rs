@@ -5,6 +5,7 @@ mod handler;
 pub mod helpers;
 pub(crate) mod job_lifecycle;
 pub mod log_uploader;
+pub mod loop_decision;
 pub mod message_route;
 mod setup_step;
 mod step_reporter;

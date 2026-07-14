@@ -13,5 +13,9 @@ pub mod config;
 pub mod lockfile;
 /// Per-repo runner registration registry (home layout + config resolution).
 pub mod registry;
+/// Re-mint merge that preserves user-editable config sections verbatim.
+pub mod remint;
 /// Repo inference from the cwd git remote (pure URL parse + `git` shell-out).
 pub mod repo_infer;
+/// Supervisor unit rendering (launchd plist / systemd unit) for `install-service`.
+pub mod service_unit;

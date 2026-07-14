@@ -40,6 +40,8 @@ clap = { version = "4", features = ["derive", "env"] }
 url = ">=2, <2.5.8"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 hostname = "0.4"
+# Decorrelated-jitter backoff for the always-online run loop (run_cmd).
+fastrand = "2"
 
 [dev-dependencies]
 # Internal — the test target integration-tests the full engine graph, so it

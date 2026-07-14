@@ -231,11 +231,41 @@ async fn register_jit_is_all_or_nothing_on_non_2xx() {
   let msg = format!("{err}");
   assert!(
     matches!(err, RunnerError::Auth(_)),
-    "non-2xx maps to Auth, got {err:?}"
+    "403 (forbidden) maps to Auth — the run loop treats it as fatal, got {err:?}"
   );
   assert!(msg.contains("403"), "status surfaced: {msg}");
   assert!(
     msg.contains("admin rights"),
+    "GitHub's body surfaced: {msg}"
+  );
+}
+
+#[tokio::test]
+async fn register_jit_maps_5xx_to_network_for_backoff() {
+  let server = MockServer::start().await;
+
+  Mock::given(method("POST"))
+    .and(path(STUB_PATH))
+    .respond_with(ResponseTemplate::new(500).set_body_string(r#"{"message":"Server Error"}"#))
+    .expect(1)
+    .mount(&server)
+    .await;
+
+  let client = reqwest::Client::new();
+  let url = stub_repo_url(&server);
+  let labels = ["self-hosted".to_owned()];
+  let err = register_jit(&client, &params_for(&url, "reg-token-xyz", &labels, false))
+    .await
+    .expect_err("a 500 must yield an Err");
+
+  let msg = format!("{err}");
+  assert!(
+    matches!(err, RunnerError::Network(_)),
+    "a transient 5xx maps to Network so the run loop backs off instead of dying, got {err:?}"
+  );
+  assert!(msg.contains("500"), "status surfaced: {msg}");
+  assert!(
+    msg.contains("Server Error"),
     "GitHub's body surfaced: {msg}"
   );
 }

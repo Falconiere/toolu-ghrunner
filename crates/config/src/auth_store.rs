@@ -9,6 +9,7 @@
 //! pure [`pick_bearer`] so it can be unit-tested without any I/O, with
 //! [`resolve_bearer`] wiring the three real sources into it.
 
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -16,6 +17,9 @@ use shared::RunnerError;
 
 /// Keyring service name; the `user` slot holds the GitHub host.
 const KEYRING_SERVICE: &str = "toolu-runner";
+
+/// Env var that forces the file backend and skips the OS keyring probe.
+const NO_KEYRING_ENV: &str = "TOOLU_RUNNER_NO_KEYRING";
 
 /// A persisted login token plus the metadata needed to reuse it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,8 +36,9 @@ pub struct StoredToken {
 
 /// Where login tokens are persisted.
 ///
-/// [`AuthStore::new`] picks the variant: the OS keyring when reachable,
-/// otherwise a directory of per-host `0600` JSON files.
+/// [`AuthStore::new`] picks the variant: the file backend when
+/// `TOOLU_RUNNER_NO_KEYRING` forces it, otherwise the OS keyring when
+/// reachable, otherwise a directory of per-host `0600` JSON files.
 pub enum AuthStore {
   /// The OS secure store (`keyring` crate: macOS Keychain, Windows
   /// Credential Manager, Linux kernel keyutils).
@@ -43,16 +48,16 @@ pub enum AuthStore {
 }
 
 impl AuthStore {
-  /// Choose a backend: prefer the OS keyring, fall back to files.
-  ///
-  /// keyring 3.x has no `NoDefaultStore` variant — it surfaces an
-  /// unavailable secure store as an `Err`. We probe once here with a
-  /// READ-ONLY reachability check ([`Self::keyring_reachable`]): it builds
-  /// the sentinel entry and calls `get_password`, which creates no keyring
-  /// entry — so probing never leaves a persistent `__probe__` credential
-  /// behind. On any probe error we log a one-time WARN and fall back to
-  /// `File(data_dir)`.
+  /// Choose a backend: `File(data_dir)` when `TOOLU_RUNNER_NO_KEYRING`
+  /// forces it (see [`no_keyring_forced`] — short-circuits BEFORE any
+  /// keyring call, which can block or prompt on macOS Keychain / a locked
+  /// keyring), else the OS keyring when the READ-ONLY
+  /// [`Self::keyring_reachable`] probe succeeds, else `File(data_dir)` with
+  /// a one-time WARN.
   pub fn new(data_dir: &Path) -> Self {
+    if no_keyring_forced(std::env::var_os(NO_KEYRING_ENV).as_deref()) {
+      return AuthStore::File(data_dir.to_path_buf());
+    }
     match Self::keyring_reachable() {
       Ok(()) => AuthStore::Keyring,
       Err(err) => {
@@ -150,6 +155,17 @@ impl AuthStore {
         }
       },
     }
+  }
+}
+
+/// Whether `TOOLU_RUNNER_NO_KEYRING` forces the file backend: set to a
+/// non-empty value other than `"0"`. Set-but-empty and the literal `"0"`
+/// count as "not requested". Pure (takes the raw env value) so the rule is
+/// unit-tested without mutating the environment or touching the keyring.
+pub fn no_keyring_forced(value: Option<&OsStr>) -> bool {
+  match value {
+    Some(v) => !v.is_empty() && v != OsStr::new("0"),
+    None => false,
   }
 }
 

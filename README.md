@@ -62,7 +62,7 @@ Prebuilt for **macOS** (arm64, x86_64) and **Linux** (x86_64, arm64).
 # 1. Register — the repo is inferred from the cwd git remote `origin`
 cd my-repo && toolu-runner register
 
-# 2. Run the listener — executes one job, then exits
+# 2. Run the listener — stays online, re-registering after each job
 toolu-runner run
 
 # 3. Watch jobs execute, in another terminal
@@ -77,6 +77,14 @@ per host covers every repo: the token store is shared, at the
 runner-home root. Until the built-in OAuth App ships, the device flow
 needs your own App's client id — set `TOOLU_RUNNER_CLIENT_ID`, or run
 `toolu-runner login --client-id <id>` once.
+
+`run` stays online by default: after each job it re-mints a fresh JIT
+config with your stored `login` token and keeps listening, so one
+invocation survives many jobs, idle gaps, and re-dispatches — no manual
+re-register. Pass `--once` to run a single job and exit. To keep it
+running across reboots and crashes, `toolu-runner install-service` writes
+a launchd (macOS) / systemd (Linux) user unit that supervises it — see
+[Running as a service](#running-as-a-service).
 
 Each registration gets its own directory —
 `~/.toolu-runner/runners/<owner>/<repo>/` (config, credentials, lock,
@@ -119,12 +127,13 @@ CLI.
 | `--work <DIR>` | `register` | Job workspace directory (default `~/.toolu-runner/_work`). |
 | `--runner-group <ID>` | `register` | Numeric runner group ID for org registrations. Group *names* aren't supported by the JIT API — a non-numeric value warns and falls back to the Default group. |
 | `--replace` | `register` | Overwrite an existing registration with the same name. |
-| `--once` | `run` | Exit after the first job — currently the default behavior, since a JIT registration is single-use. |
+| `--once` | `run` | Run a single job, then exit. The default is to stay online — after each job `run` re-mints a fresh JIT config with the stored `login` token and keeps listening. |
+| `--print` / `--no-activate` / `--remove` | `install-service` | Print the unit without writing it / write it but don't activate / deactivate and delete it (idempotent). |
 | `--force` | `remove` | Cancel an in-flight run before unregistering. |
 | `--client-id <ID>` | `login` | OAuth App client id for the device flow (fallback: `TOOLU_RUNNER_CLIENT_ID`). Needed until the built-in github.com App ships; always needed for GHES. |
 
-`register`, `run`, `remove`, `status`, and `watch` also take
-`--config <FILE>`; when omitted, the config resolves to the cwd-inferred
+`register`, `run`, `remove`, `status`, `watch`, and `install-service`
+also take `--config <FILE>`; when omitted, the config resolves to the cwd-inferred
 `runners/<owner>/<repo>/config.toml` under the runner home, else the
 sole existing registration. Every command documents itself in full:
 `toolu-runner <command> --help`.
@@ -387,6 +396,7 @@ survives unregistration.
 | `TOOLU_RUNNER_HOME` | `~/.toolu-runner` | runner state root: the token store, `runners/<owner>/<repo>/` registrations, default `_work/`. |
 | `TOOLU_RUNNER_TOKEN` | — | bearer for `register` (resolution: `--token` > env > stored `login` token). |
 | `TOOLU_RUNNER_CLIENT_ID` | — | OAuth App client id for the device flow (`--client-id` fallback). |
+| `TOOLU_RUNNER_NO_KEYRING` | — | when set, forces the 0600-file token store and skips the OS keyring probe entirely (headless hosts, CI, locked keyrings). |
 | `TOOLU_RUNNER_LOG` | `info` | tracing filter. Checked before `RUST_LOG`. |
 | `RUST_LOG` | — | tracing filter (standard fallback). |
 | `TOOLU_RUNNER_REPO` | `Falconiere/toolu-ghrunner` | `install.sh` only — release source. |
@@ -402,28 +412,42 @@ implemented** — use the CLI flags.
 <details>
 <summary>Running as a service</summary>
 
-The release tarball ships service files under `scripts/`; `install.sh
---service` installs them.
-
-**launchd (macOS)** — `scripts/io.toolu-runner.plist` →
-`~/Library/LaunchAgents/`. Logs to
-`/Users/Shared/toolu-runner/_diag/launchd-*.log`.
-
-```sh
-launchctl load   ~/Library/LaunchAgents/io.toolu-runner.plist
-launchctl unload ~/Library/LaunchAgents/io.toolu-runner.plist
-```
-
-**systemd (Linux)** — `scripts/toolu-runner.service` →
-`/etc/systemd/system/`. Runs as the `toolu-runner` user with
-`NoNewPrivileges`, `ProtectSystem=strict`, `PrivateTmp`, `ProtectHome`,
-`MemoryDenyWriteExecute`, and `Restart=always`.
+`toolu-runner` never daemonizes itself — `run` blocks in the foreground and
+loops. To keep a runner up across crashes and reboots, `install-service`
+generates and activates a per-registration supervisor unit that wraps
+`run --config <path>`. The config resolves exactly like `run` (the
+registration dir names the unit), so one machine can supervise a runner per
+repo. The supervisor owns process lifetime; the always-online loop owns
+registration lifetime.
 
 ```sh
-sudo systemctl daemon-reload
-sudo systemctl enable --now toolu-runner
-sudo journalctl -u toolu-runner -f
+toolu-runner install-service                # write + activate the unit
+toolu-runner install-service --print        # print the unit, write nothing
+toolu-runner install-service --no-activate   # write it, print the load command
+toolu-runner install-service --remove       # deactivate + delete (idempotent)
 ```
+
+**launchd (macOS)** — a user `LaunchAgent` labelled
+`io.toolu.runner.<owner>.<repo>` at `~/Library/LaunchAgents/`, with
+`KeepAlive` + `RunAtLoad`. Activated with `launchctl bootstrap gui/<uid>`
+(falling back to legacy `launchctl load -w`); stdout/stderr go to
+`<data_dir>/_diag/service.{out,err}.log`.
+
+**systemd (Linux)** — a user unit `toolu-runner-<owner>-<repo>.service` at
+`~/.config/systemd/user/`, with `Restart=always` + `RestartSec=5`. Activated
+with `systemctl --user daemon-reload && systemctl --user enable --now`; logs
+land in journald (`journalctl --user -u toolu-runner-<owner>-<repo>`). A
+headless host needs `loginctl enable-linger <user>` so the unit runs without
+an active login session.
+
+Only launchd and systemd are supported — any other platform errors, naming
+those two as the targets.
+
+The release tarball also ships **static single-slot** units under `scripts/`
+(`io.toolu-runner.plist`, `toolu-runner.service`); `install.sh --service`
+installs and starts them (systemd lands in `/etc/systemd/system/` and needs
+root). Those predate the per-repo layout — reach for `install-service` on any
+new host.
 
 </details>
 
@@ -437,6 +461,7 @@ sudo journalctl -u toolu-runner -f
 | `... is not a git repository` / `has no 'origin' remote` at `register` | Zero-arg inference needs a cwd git repo with an `origin` remote — pass `--url` instead. |
 | `no GitHub OAuth App configured` | The built-in device-flow App isn't wired yet — set `TOOLU_RUNNER_CLIENT_ID` (or `login --client-id`), or skip the device flow with `--token` / `TOOLU_RUNNER_TOKEN`. |
 | `another run is in flight` | Another `run` holds this repo's `.lock`; its PID is in the error. Wait it out, or cancel with `c` in `watch` (sends SIGINT to the holder). |
+| `run` exits after one job (warned it would) | No stored `login` token, so re-mint has no bearer. Run `toolu-runner login` (or set `TOOLU_RUNNER_TOKEN`) to stay online; or pass `--once` if a single job is intended. |
 | `generate-jitconfig` fails with a network error | A firewall is blocking `api.github.com` (github.com) or the GHES host. |
 | `warning: ignoring yamless env var ...` | A stale `YAMLESS_*` var is in your shell rc. Remove it. |
 
@@ -491,7 +516,8 @@ Ten layered crates under `crates/`, acyclic dependency graph:
 - **`listener`** — the GitHub JIT lifecycle. → `execution`, `wire`,
   `observability`, `shared`, `protocol`.
 - **`toolu-runner`** — the CLI **bin** (`register` / `run` / `remove` /
-  `status` / `watch` / `login` / `logout`). → all of the above.
+  `status` / `watch` / `install-service` / `login` / `logout` /
+  `create-app`). → all of the above.
 
 [docs/architecture.md](docs/architecture.md) has the full design with
 sequence diagrams for register / run / cancel / reconnect.

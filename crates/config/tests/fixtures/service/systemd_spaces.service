@@ -1,0 +1,10 @@
+[Unit]
+Description=toolu-runner (io.toolu.runner.a & b.repo)
+
+[Service]
+ExecStart="/Users/dev name/apps/toolu & runner/toolu-runner" run --config "/Users/dev name/.toolu-runner/runners/a & b/repo/config.toml"
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
