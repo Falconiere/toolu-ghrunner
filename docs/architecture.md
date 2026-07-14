@@ -18,6 +18,7 @@ toolu-ghrunner/                            workspace root
 └── crates/                                10 layered crates
     ├── protocol/                          SYNC, NO I/O, NO NETWORK
     │   ├── auth.rs                        RSA key + JWT (PS256) crypto
+    │   ├── app_manifest.rs                App Manifest builder + conversion parse
     │   ├── jit_config.rs                  3-blob base64 envelope parser
     │   ├── messages.rs                    BrokerMessage + AES-256-CBC decrypt
     │   ├── session.rs                     CreateSessionRequest/Response builders
@@ -36,12 +37,13 @@ toolu-ghrunner/                            workspace root
     │   ├── config.rs                      TOML + JSON config load/save, [services]/[cache]/…
     │   ├── lockfile.rs                    single-job fs2 lock (per registration dir)
     │   ├── auth_store.rs                  keyring / 0600-file login-token store + decide_bearer TTY gate
+    │   ├── app_store.rs                   GitHub App credential store (github-app.json)
     │   ├── registry.rs                    runner home + runners/<owner>/<repo>/ discovery/resolution
     │   └── repo_infer.rs                  cwd git remote → owner/repo inference
     ├── expressions/                       the ${{ }} evaluator (→ shared)
     ├── cache/                             content-addressed CI cache (→ shared)
     ├── wire/                              async HTTP transport + reporting (→ shared, protocol)
-    │   ├── net/                           async I/O (reqwest): auth, session, messages, …, register
+    │   ├── net/                           async I/O (reqwest): auth, session, messages, …, register, app_manifest
     │   └── reporting/                     Run/Results domain types, live_log, feature_detection
     ├── observability/                     journal + watch TUI (→ shared, config)
     │   ├── journal/                       per-job JSONL event journal (types, writer, reader)
@@ -59,10 +61,11 @@ toolu-ghrunner/                            workspace root
     │   └── log_uploader/                  per-step + combined job-log upload
     └── toolu-runner/                      bin only (the CLI)
         ├── src/main.rs                    dispatch + the run / remove / watch handlers
-        ├── src/cli.rs                     clap surface: register / run / remove / status / watch / login / logout
+        ├── src/cli.rs                     clap surface: register / run / remove / status / watch / login / logout / create-app
         ├── src/register_cmd.rs            register (repo inference + inline device flow + per-repo persist)
         ├── src/login_cmd.rs               login / logout (device flow)
         ├── src/status_cmd.rs              status (no network)
+        ├── src/create_app_cmd.rs          create-app (GitHub App Manifest onboarding)
         └── tests/                         integration tests across the whole graph
 ```
 
@@ -465,6 +468,34 @@ overrides); org-level URLs (a single path segment) use the home-root
 `config.toml` slot. The persisted `data_dir` is the registration dir
 itself, so the `.lock`, `_diag/`, and the job journal all land
 per-repo.
+
+## Sequence: create-app
+
+`toolu-runner create-app` is a one-time onboarding convenience that runs
+GitHub's **App Manifest flow** to mint a user-owned GitHub App without
+hand-copying an app id and PEM through the web UI. github.com only
+(`--host` defaults to `github.com`; any other host errors as
+unsupported).
+
+The runner binds a loopback callback server on `127.0.0.1:0`
+(`wire::net::app_manifest::CallbackServer`), builds a prefilled manifest
+(`protocol::app_manifest::AppManifest::for_runner` —
+`administration:write`, `public = false`, no webhook), and opens the
+browser (unless `--no-browser`) to an auto-submitting form that POSTs the
+manifest to GitHub. GitHub redirects back to the loopback server with a
+temporary `code`, CSRF-checked against a `state` nonce
+(`parse_callback_path`); the runner exchanges it at
+`POST api.github.com/app-manifests/{code}/conversions`
+(`convert_manifest_code`) and persists the returned credentials — app id,
+PEM private key, client id/secret, webhook secret — to
+`<home>/github-app.json` (`config::app_store`, 0600, shared by all
+repos). It then PRINTS the app's install URL.
+
+`--force` overwrites an existing `github-app.json`; without it the
+command refuses before any network call. **Installation-token minting is
+deferred:** `create-app` neither installs the app nor exchanges an
+installation token this release — `register` still takes its bearer from
+`--token` / `TOOLU_RUNNER_TOKEN` / the stored device-flow login.
 
 ## Multi-repo concurrency
 

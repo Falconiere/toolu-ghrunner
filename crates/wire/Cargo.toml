@@ -12,7 +12,7 @@ shared = { path = "../shared" }
 protocol = { path = "../protocol" }
 
 # Async runtime
-tokio = { version = "1", features = ["rt", "macros", "sync", "time", "net"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
 futures-util = "0.3"
 
 # HTTP transport

@@ -27,6 +27,15 @@ Environment:
   TOOLU_RUNNER_LOG / RUST_LOG  tracing filter; levels above `info` also require
                                TOOLU_RUNNER_ALLOW_VERBOSE=1 (secret-leak guard)";
 
+/// Extended help footer for `create-app --help`.
+const CREATE_APP_AFTER_HELP: &str = "\
+Examples:
+  # create the runner's GitHub App on github.com (opens a browser)
+  toolu-runner create-app
+
+  # custom name, no browser (print the URL to open manually)
+  toolu-runner create-app --name my-org-runner --no-browser";
+
 /// Extended help footer for `register --help`.
 const REGISTER_AFTER_HELP: &str = "\
 Examples:
@@ -109,6 +118,41 @@ pub(crate) enum Command {
   ///
   /// Idempotent: a missing token is a no-op.
   Logout(login_cmd::LogoutArgs),
+  /// Create the runner's GitHub App via the App-manifest flow.
+  ///
+  /// Opens a browser to GitHub's App-manifest page, captures the minted
+  /// App's credentials on a loopback callback, and saves them (0600) to
+  /// `<home>/github-app.json` — an account-level identity shared by every
+  /// repo. github.com only this release. Re-run with --force to replace a
+  /// previously created App.
+  CreateApp(CreateAppArgs),
+}
+
+/// Arguments for the `create-app` subcommand.
+#[derive(Debug, Args)]
+#[command(after_help = CREATE_APP_AFTER_HELP)]
+pub(crate) struct CreateAppArgs {
+  /// GitHub App name (default: toolu-runner-<hostname>).
+  ///
+  /// Must be unique across all of GitHub — a duplicate name makes GitHub
+  /// refuse the redirect, which surfaces here as a browser-flow timeout.
+  #[arg(long, value_name = "NAME")]
+  pub(crate) name: Option<String>,
+  /// GitHub host to create the App on (github.com only this release).
+  ///
+  /// GHES and organization-owned Apps are not supported yet; any other
+  /// value is rejected before any browser launch or network call.
+  #[arg(long, default_value = "github.com", value_name = "HOST", value_hint = ValueHint::Hostname)]
+  pub(crate) host: String,
+  /// Print the URL to open manually instead of launching a browser.
+  #[arg(long)]
+  pub(crate) no_browser: bool,
+  /// Overwrite an existing saved GitHub App (`<home>/github-app.json`).
+  ///
+  /// Without it, `create-app` refuses (before any network call) when an
+  /// App is already saved under the runner home.
+  #[arg(long)]
+  pub(crate) force: bool,
 }
 
 /// Arguments for the `register` subcommand.

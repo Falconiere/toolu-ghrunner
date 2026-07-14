@@ -7,6 +7,9 @@
 
 #![doc(html_root_url = "https://docs.rs/toolu-runner-protocol/0.1.0")]
 
+/// GitHub App manifest onboarding: manifest build, conversion-response parse,
+/// and the loopback CSRF/callback helpers.
+pub mod app_manifest;
 /// JIT auth crypto: RSA key reconstruction and PS256 JWT signing.
 pub mod auth;
 /// End-to-end decrypt of an encrypted broker message body.

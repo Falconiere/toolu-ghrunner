@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`create-app` — one-click GitHub App onboarding.** A new
+  `toolu-runner create-app` runs GitHub's App Manifest flow: it binds a
+  loopback callback server on `127.0.0.1:0`, opens the browser to create
+  a **user-owned** GitHub App (prefilled `administration:write`, private,
+  no webhook) in one click, catches the redirect, exchanges the code at
+  `app-manifests/{code}/conversions`, and saves the app credentials (app
+  id, PEM private key, client id/secret, webhook secret) to
+  `~/.toolu-runner/github-app.json` (0600). It prints the app's install
+  URL; installing the app and minting installation tokens is a deferred
+  follow-up, so `register` still uses `--token` / `TOOLU_RUNNER_TOKEN` /
+  device-flow login this release. github.com only. Flags: `--name`,
+  `--host`, `--no-browser`, `--force`.
+
 ## [0.2.0] - 2026-07-13
 
 ### Added

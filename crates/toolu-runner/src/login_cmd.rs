@@ -122,8 +122,9 @@ pub(crate) fn cmd_logout(args: &LogoutArgs) -> Result<(), Box<dyn std::error::Er
 }
 
 /// Best-effort browser launch. Every error is ignored: login still works
-/// by typing the code at the printed URL manually.
-fn open_browser_best_effort(url: &str) {
+/// by typing the code at the printed URL manually. `pub(crate)` so
+/// `create-app`'s manifest flow can reuse the same launcher.
+pub(crate) fn open_browser_best_effort(url: &str) {
   let mut command = if cfg!(target_os = "macos") {
     let mut c = std::process::Command::new("open");
     c.arg(url);

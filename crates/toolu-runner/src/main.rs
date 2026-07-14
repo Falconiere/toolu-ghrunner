@@ -23,6 +23,7 @@ use shared::{MaskerRedactor, SecretMasker};
 use tokio_util::sync::CancellationToken;
 
 mod cli;
+mod create_app_cmd;
 mod login_cmd;
 mod register_cmd;
 mod status_cmd;
@@ -55,6 +56,10 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     Command::Watch(args) => cmd_watch(args),
     Command::Login(args) => login_cmd::cmd_login(args).await,
     Command::Logout(args) => login_cmd::cmd_logout(&args),
+    Command::CreateApp(args) => {
+      let home = registry::runner_home();
+      create_app_cmd::cmd_create_app(&args, &home).await
+    },
   }
 }
 
