@@ -104,7 +104,7 @@ fn build_client() -> Result<reqwest::Client, RunnerError> {
   reqwest::Client::builder()
     .timeout(Duration::from_secs(30))
     .build()
-    .map_err(|e| RunnerError::Network(format!("HTTP client: {e}")))
+    .map_err(|e| RunnerError::Network(format!("failed to build the create-app HTTP client: {e}")))
 }
 
 /// Assemble the persisted [`StoredApp`] from the conversion response,

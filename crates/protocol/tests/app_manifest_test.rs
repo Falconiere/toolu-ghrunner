@@ -1,9 +1,10 @@
 //! Real-data tests for the GitHub App manifest onboarding flow.
 //!
 //! No mocks: AC-1 round-trips the built manifest through serde_json, AC-2
-//! parses a shape-real conversion-response fixture whose `pem` is a genuine
-//! (throwaway) 2048-bit RSA key, and the remaining tests exercise the HTML
-//! form and the CSRF/callback query parser.
+//! parses a shape-real conversion-response fixture, and the remaining tests
+//! exercise the HTML form and the CSRF/callback query parser. The fixture's
+//! `pem` is a non-secret placeholder block (never used cryptographically — the
+//! parser only deserializes the field), so no private key is committed.
 
 use protocol::app_manifest::{
   AppManifest, form_html, new_state, parse_callback_path, parse_conversion,

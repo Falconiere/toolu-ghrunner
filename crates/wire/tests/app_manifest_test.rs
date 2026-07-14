@@ -40,15 +40,25 @@ async fn form_served_and_matching_callback_yields_code() -> TestResult<()> {
     form.contains("action=\"https://github.com/settings/apps/new?state=STATE123\""),
     "form action missing/wrong: {form}"
   );
-  assert!(form.contains("name=\"manifest\""), "manifest input missing: {form}");
-  assert!(form.contains("administration"), "manifest permission missing: {form}");
+  assert!(
+    form.contains("name=\"manifest\""),
+    "manifest input missing: {form}"
+  );
+  assert!(
+    form.contains("administration"),
+    "manifest permission missing: {form}"
+  );
 
   // GET /callback — GitHub's post-creation redirect.
   let done = client
     .get(format!("{base}/callback?code=abc123&state=STATE123"))
     .send()
     .await?;
-  assert!(done.status().is_success(), "callback status: {}", done.status());
+  assert!(
+    done.status().is_success(),
+    "callback status: {}",
+    done.status()
+  );
 
   let code = handle.await??;
   assert_eq!(code, "abc123");
@@ -81,7 +91,11 @@ async fn spurious_connection_does_not_abort_the_flow() -> TestResult<()> {
     .get(format!("{base}/callback?code=abc123&state=STATE123"))
     .send()
     .await?;
-  assert!(done.status().is_success(), "callback status: {}", done.status());
+  assert!(
+    done.status().is_success(),
+    "callback status: {}",
+    done.status()
+  );
 
   let code = handle.await??;
   assert_eq!(code, "abc123");
@@ -103,7 +117,11 @@ async fn callback_with_wrong_state_is_rejected() -> TestResult<()> {
     .get(format!("{base}/callback?code=abc&state=WRONG"))
     .send()
     .await?;
-  assert_eq!(resp.status().as_u16(), 400, "expected 400 for CSRF mismatch");
+  assert_eq!(
+    resp.status().as_u16(),
+    400,
+    "expected 400 for CSRF mismatch"
+  );
 
   let inner = handle.await?;
   assert!(inner.is_err(), "expected CSRF rejection, got: {inner:?}");

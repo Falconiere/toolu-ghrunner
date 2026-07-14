@@ -160,7 +160,7 @@ pub fn parse_callback_path(
     match key {
       "code" => code = Some(value.to_owned()),
       "state" => state = Some(value.to_owned()),
-      _ => {}
+      _ => {},
     }
   }
 

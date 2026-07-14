@@ -11,7 +11,8 @@ use config::app_store::{self, StoredApp};
 use tempfile::TempDir;
 
 /// A phony PEM body — right shape, no live key material.
-const DUMMY_PEM: &str = "-----BEGIN RSA PRIVATE KEY-----\nMIIphony\n-----END RSA PRIVATE KEY-----\n";
+const DUMMY_PEM: &str =
+  "-----BEGIN RSA PRIVATE KEY-----\nMIIphony\n-----END RSA PRIVATE KEY-----\n";
 /// The OAuth client secret used across the secret-leak assertions.
 const CLIENT_SECRET: &str = "cs_super_secret_value";
 /// The webhook secret used across the secret-leak assertions.
@@ -57,7 +58,10 @@ fn saved_file_is_mode_0600() {
   app_store::save_app(home.path(), &sample_app()).expect("save_app");
 
   let path = app_store::app_path(home.path());
-  let mode = std::fs::metadata(&path).expect("metadata").permissions().mode();
+  let mode = std::fs::metadata(&path)
+    .expect("metadata")
+    .permissions()
+    .mode();
   assert_eq!(mode & 0o777, 0o600, "github-app.json must be 0600");
 }
 
