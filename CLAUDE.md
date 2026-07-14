@@ -7,7 +7,8 @@ no OTel.
 
 - Layered workspace of **10 crates under `crates/`**. `toolu-runner`
   is now a **bin-only** crate (the CLI entrypoint: `main.rs` +
-  `cli.rs` + `register_cmd.rs` + `login_cmd.rs` + `status_cmd.rs`).
+  `cli.rs` + `register_cmd.rs` + `run_cmd.rs` + `service_cmd.rs` +
+  `login_cmd.rs` + `status_cmd.rs` + `create_app_cmd.rs`).
   The execution **engine** lives in
   `execution`; the GitHub **JIT lifecycle** lives in `listener`.
 - Workspace members (dependency order): `protocol`, `shared`,
@@ -61,9 +62,9 @@ no OTel.
 - **Cancellation token wiring.** `toolu-runner run` builds a
   `tokio_util::sync::CancellationToken` and bridges SIGINT / SIGTERM
   to it. The poll loop, the renewal task, and the in-flight job all
-  listen to it. `--once` exits after the first job completes —
-  currently also the default behavior, since a JIT registration is
-  single-use.
+  listen to it (the whole always-online loop shares one token, held
+  across re-mints). `--once` is the single-job opt-out; the default is
+  the re-mint loop (see the always-online run loop rule below).
 - **JIT config protocol version:** `v2` for github.com, `v1` for
   GHES. Selected automatically by host at `register` time; the
   `feature_detection` module handles the wire-shape difference.
@@ -91,8 +92,30 @@ no OTel.
   `shared::MaskerRedactor`) is registered as the tracing
   `SecretRedactor` so registered `secrets.*` values (and their
   JSON-escaped variants) never reach `_diag/runner.log` unredacted.
-- **No daemon mode for `run`.** The CLI blocks until SIGINT / SIGTERM.
-  Service files wrap it.
+- **Always-online run loop (default).** `run` no longer exits after one
+  job. Per iteration `run_cmd::RunLoop` reloads `config.toml`, runs one
+  `GitHubListener` lifecycle, then dispatches
+  `listener::loop_decision::next_action`: on a completed job — or a
+  listener `Auth` error (the single-use JIT is dead) — it re-mints a
+  fresh JIT config with the stored `login` / `TOOLU_RUNNER_TOKEN` bearer
+  (`register_cmd::remint_and_persist`) and re-polls; on any other
+  (transient) error it sleeps a decorrelated-jitter backoff (1s → 60s
+  cap, cancel-aware) and retries the still-valid config. Fatal (exit
+  non-zero) on a missing or auth-rejected re-mint bearer, naming `login`
+  / `--token` (register) / `TOOLU_RUNNER_TOKEN`. Cancel (SIGINT/SIGTERM)
+  or a `.pending_remove` seen between jobs → clean exit 0. `--once` opts
+  back into single-job semantics (exit with the listener's status). The
+  per-repo `.lock` is held for the whole loop.
+- **No self-daemonization for `run`.** `run` blocks in the foreground
+  and loops; it never double-forks. Boot/crash persistence is delegated
+  to the OS: `toolu-runner install-service` generates and activates a
+  launchd LaunchAgent (macOS, label `io.toolu.runner.<owner>.<repo>`,
+  `launchctl bootstrap gui/<uid>` fallback `load -w`) or a systemd user
+  unit (Linux, `toolu-runner-<owner>-<repo>.service`, `Restart=always`,
+  `systemctl --user enable --now`) wrapping `run --config <path>` — the
+  supervisor owns process lifetime, the loop owns registration lifetime.
+  No daemon code. (The static single-slot `scripts/` units installed by
+  `install.sh --service` still exist for legacy hosts.)
 - **No `build_tool_*`** — build-tool modules were cut in the port.
   `service_auth` / `service_lifecycle` are kept (they back the
   OIDC/artifact/cache axum services).
@@ -184,9 +207,13 @@ no OTel.
   pure `pick_bearer` (flag > env > stored) + `resolve_bearer`, and the
   pure TTY gate `decide_bearer` → `BearerDecision` (`Use` /
   `StartDeviceFlow` / `Fail` naming `--token` / `TOOLU_RUNNER_TOKEN` /
-  `login`). The store is pinned to the runner home (shared by all
-  repos). Used only for the `generate-jitconfig` bearer — never at
-  runtime.
+  `login`). `AuthStore::new` picks the backend: `TOOLU_RUNNER_NO_KEYRING`
+  (pure `no_keyring_forced`) forces the `File` backend and skips the OS
+  keyring probe entirely (headless/CI/locked keyrings), else the
+  read-only `keyring_reachable` probe decides. The store is pinned to
+  the runner home (shared by all repos). Used for the
+  `generate-jitconfig` bearer — at `register` time and on every re-mint
+  in the always-online `run` loop.
 - `app_store.rs` — GitHub App credential persistence: `StoredApp`
   (`save_app` / `load_app` at `<home>/github-app.json`, 0600) +
   `install_url` / `safe_summary`. Home-root store shared by all repos;
@@ -205,6 +232,20 @@ no OTel.
   (scp-like / `https://` / `ssh://` remote forms) + `detect_repo`
   (`git -C <cwd> remote get-url origin`; each error names the `--url`
   escape hatch).
+- `remint.rs` — re-mint merge for the always-online `run` loop: pure
+  `merge_reminted_config(prior, jit_config, runner_id, client_id)`
+  clones `prior` and overwrites ONLY the three mint-derived fields
+  (`runner_id`, `auth_token` = client_id, `runtime.jit_config`),
+  leaving `[services]` / `[cache]` / `[workspace]` / `[shadow]` (and the
+  rest of `[runtime]`) byte-identical. Backs
+  `register_cmd::remint_and_persist`.
+- `service_unit.rs` — pure supervisor-unit builders for
+  `install-service`: `ServiceSpec` + `launchd_plist` (macOS LaunchAgent —
+  `KeepAlive` + `RunAtLoad`, XML-escaped, stdout/stderr to
+  `<data_dir>/_diag/service.{out,err}.log`) / `systemd_unit` (Linux user
+  unit — `Restart=always`, `RestartSec=5`, `WantedBy=default.target`,
+  double-quoted `ExecStart` so paths with spaces survive). No I/O — the
+  bin writes and activates the rendered text.
 
 ### `expressions/` — the `${{ }}` evaluator (deps: shared)
 
@@ -238,7 +279,10 @@ no OTel.
   `create_step_logs_metadata`, signed blob URLs), `log_upload`
   (Azure append-blob: create / block / commit), `v1` (GHES
   `connectionData` discovery, timeline record POST), `register`
-  (the live JIT `generate-jitconfig` POST), `app_manifest` (the
+  (the live JIT `generate-jitconfig` POST; non-2xx mapping is
+  loop-critical — 401/403 → `RunnerError::Auth` (fatal), any other
+  status → `RunnerError::Network` so the re-mint loop backs off on a
+  transient 5xx instead of dying), `app_manifest` (the
   `create-app` loopback `CallbackServer` on `127.0.0.1:0` +
   `convert_manifest_code` — POSTs `app-manifests/{code}/conversions`).
 - `reporting/` — domain types and async wrappers for the Run
@@ -337,6 +381,12 @@ no OTel.
   streamer and the combined job-log upload. `helpers::cleanup_session`
   deletes the broker session on exit. Listener events are drained to
   the `observability::journal` writer (replacing the old no-op drain).
+  `loop_decision::next_action` (→ `LoopAction`) is the pure
+  per-iteration decision for the bin's always-online `run` loop —
+  precedence cancel > `--once` > `.pending_remove` > outcome (`Ok(())`
+  and `Err(Auth)` → `Reregister` since the JIT is spent/dead, any other
+  `Err` → `BackoffRetry`) — unit-testable without a broker, mirroring
+  `message_route`.
 
 ### `toolu-runner/` — CLI bin (deps: shared, protocol, config, wire, observability, listener)
 
@@ -353,16 +403,14 @@ no OTel.
   debug builds — exercised by the shell-out CLI tests since the
   bin-only crate has no lib target for a unit test).
 - `main.rs` — CLI entrypoint: parse + dispatch (`register` →
-  `register_cmd`, `login`/`logout` → `login_cmd`, `status` →
-  `status_cmd`, `create-app` → `create_app_cmd`) plus the `run` /
-  `remove` / `watch` handlers.
-  `--config` resolution for `run` / `remove` / `status` / `watch`:
-  flag > cwd-inferred `runners/<owner>/<repo>/config.toml` > the sole
-  registration (legacy `<home>/config.toml` included) > error listing
-  candidates (`config::registry::resolve_config_path`). `run`
-  loads the config + credentials, acquires the per-repo `.lock`
-  (`config::lockfile`), constructs `GitHubListener::new(jit_config, …)`,
-  wires SIGINT/SIGTERM to a `CancellationToken`. `remove` writes
+  `register_cmd`, `run` → `run_cmd`, `install-service` → `service_cmd`,
+  `login`/`logout` → `login_cmd`, `status` → `status_cmd`, `create-app`
+  → `create_app_cmd`) plus the inline `remove` / `watch` handlers.
+  `--config` resolution for `run` / `remove` / `status` / `watch` /
+  `install-service`: flag > cwd-inferred
+  `runners/<owner>/<repo>/config.toml` > the sole registration (legacy
+  `<home>/config.toml` included) > error listing candidates
+  (`config::registry::resolve_config_path`). `remove` writes
   `.pending_remove` if `.lock` is held, otherwise deletes
   `config.toml` / `credentials.json` / `.lock` / `.pending_remove` and
   keeps `_diag/` history (live GH unregister call is step 10). `watch`
@@ -384,6 +432,36 @@ no OTel.
   all-or-nothing, config rollback on a credentials-write failure. Also
   pre-creates the registration dir's `_diag/` (WARN-not-fatal — a
   self-evident layout nicety; `run` recreates what it needs anyway).
+  `remint_and_persist` (loop path) mints a fresh JIT config, folds it
+  into the prior config via `config::remint::merge_reminted_config`
+  (preserving `[services]`/`[cache]`/`[workspace]`/`[shadow]` verbatim),
+  and rewrites `config.toml` / `credentials.json` all-or-nothing.
+- `run_cmd.rs` — the always-online `run` loop (`cmd_run`, extracted from
+  `main.rs`). Startup: init tracing, resolve + load config, acquire the
+  per-repo `.lock` (held for the whole loop), bridge SIGINT/SIGTERM to
+  one `CancellationToken`, and WARN (unless `--once`) when no login token
+  is stored. `RunLoop::drive` reloads `config.toml` each iteration, runs
+  one `GitHubListener` lifecycle, and dispatches
+  `listener::loop_decision::next_action`: re-mint via
+  `register_cmd::remint_and_persist` on job-complete / listener-`Auth`;
+  decorrelated-jitter backoff (`BACKOFF_START` 1s → `BACKOFF_MAX` 60s,
+  cancel-aware `sleep_or_cancel`) on a transient failure; exit on cancel
+  / `--once` / `.pending_remove`. A missing or auth-rejected re-mint
+  bearer is fatal (`REMINT_TOKEN_HELP` names `login` / `--token` /
+  `TOOLU_RUNNER_TOKEN`).
+- `service_cmd.rs` — `cmd_install_service`: resolve the config like
+  `run`, derive the service identity from the registration dir
+  (`io.toolu.runner.<owner>.<repo>` / `toolu-runner-<owner>-<repo>.service`;
+  legacy root → `io.toolu.runner` / `toolu-runner.service`), render the
+  unit via `config::service_unit`, then per the flags: `--print` (stdout
+  only) / `--no-activate` (write + print the activation command) /
+  default (write + activate) / `--remove` (deactivate + delete,
+  idempotent). Activation shell-outs: launchd `launchctl bootstrap
+  gui/<uid>` (fallback `load -w`) / `bootout` (fallback `unload`);
+  systemd `systemctl --user daemon-reload` + `enable --now` /
+  `disable --now`. Files land at `~/Library/LaunchAgents/<label>.plist`
+  / `~/.config/systemd/user/<unit>` (honoring `$HOME`). Non-macOS/Linux
+  errors naming launchd/systemd. No network, no tracing init.
 - `login_cmd.rs` — `LoginArgs` / `LogoutArgs` (positional host; **no
   `--config`** — the token store is pinned to
   `config::registry::runner_home()`, shared by all repos) + `cmd_login`
@@ -420,3 +498,7 @@ no OTel.
   — design spec (gitignored as `docs/toolu/`).
 - [docs/toolu/plans/2026-06-18-toolu-runner-standalone.md](docs/toolu/plans/2026-06-18-toolu-runner-standalone.md)
   — build plan.
+- [docs/toolu/specs/2026-07-14-always-online-run-loop-design.md](docs/toolu/specs/2026-07-14-always-online-run-loop-design.md)
+  — always-online `run` loop + `install-service` design spec.
+- [docs/toolu/plans/2026-07-14-always-online-run-loop.md](docs/toolu/plans/2026-07-14-always-online-run-loop.md)
+  — always-online `run` loop build plan.

@@ -25,7 +25,14 @@ fn help_lists_all_subcommands() {
   assert!(output.status.success(), "--help should exit cleanly");
   let stdout = String::from_utf8_lossy(&output.stdout);
   for subcommand in [
-    "register", "run", "remove", "status", "watch", "login", "logout",
+    "register",
+    "run",
+    "remove",
+    "status",
+    "watch",
+    "install-service",
+    "login",
+    "logout",
   ] {
     assert!(
       stdout.contains(subcommand),
@@ -55,6 +62,7 @@ fn top_level_help_shows_examples_and_env_vars() {
     "TOOLU_RUNNER_TOKEN",
     "TOOLU_RUNNER_CLIENT_ID",
     "TOOLU_RUNNER_HOME",
+    "TOOLU_RUNNER_NO_KEYRING",
     "TOOLU_RUNNER_LOG",
     "TOOLU_RUNNER_ALLOW_VERBOSE",
   ] {
@@ -153,19 +161,28 @@ fn login_help_documents_client_id_env_fallback() {
   );
 }
 
-#[test]
-fn config_flag_help_states_default_resolution_everywhere() {
-  for subcommand in ["register", "run", "remove", "status", "watch"] {
-    let output = toolu_runner()
-      .args([subcommand, "--help"])
-      .output()
-      .expect("should run toolu-runner <subcommand> --help");
+/// `<subcommand> --help` stdout, threading run / exit-status errors to the
+/// caller (a free helper, so it avoids `expect` and returns `Result`).
+fn help_stdout(subcommand: &str) -> Result<String, Box<dyn std::error::Error>> {
+  let output = toolu_runner().args([subcommand, "--help"]).output()?;
+  if !output.status.success() {
+    return Err(format!("{subcommand} --help exited non-zero").into());
+  }
+  Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
 
-    assert!(
-      output.status.success(),
-      "{subcommand} --help should exit cleanly"
-    );
-    let stdout = String::from_utf8_lossy(&output.stdout);
+#[test]
+fn config_flag_help_states_default_resolution_everywhere() -> Result<(), Box<dyn std::error::Error>>
+{
+  for subcommand in [
+    "register",
+    "run",
+    "remove",
+    "status",
+    "watch",
+    "install-service",
+  ] {
+    let stdout = help_stdout(subcommand)?;
     assert!(
       stdout.contains("inferred from the cwd git remote"),
       "{subcommand} --help does not state the inferred --config default: {stdout}"
@@ -179,16 +196,7 @@ fn config_flag_help_states_default_resolution_everywhere() {
   // the runner home (TOOLU_RUNNER_HOME > ~/.toolu-runner), shared by all
   // per-repo registrations.
   for subcommand in ["login", "logout"] {
-    let output = toolu_runner()
-      .args([subcommand, "--help"])
-      .output()
-      .expect("should run toolu-runner <subcommand> --help");
-
-    assert!(
-      output.status.success(),
-      "{subcommand} --help should exit cleanly"
-    );
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = help_stdout(subcommand)?;
     assert!(
       !stdout.contains("--config"),
       "{subcommand} --help must not offer --config (token store lives at the runner home): {stdout}"
@@ -201,6 +209,26 @@ fn config_flag_help_states_default_resolution_everywhere() {
       "{subcommand} --help should document its positional HOST arg: {stdout}"
     );
   }
+  Ok(())
+}
+
+#[test]
+fn install_service_help_lists_flags_and_conflict() -> Result<(), Box<dyn std::error::Error>> {
+  let stdout = help_stdout("install-service")?;
+  for flag in ["--config", "--print", "--no-activate", "--remove"] {
+    assert!(stdout.contains(flag), "missing {flag} in: {stdout}");
+  }
+  assert!(
+    stdout.contains("launchd") && stdout.contains("systemd"),
+    "install-service --help should name launchd and systemd: {stdout}"
+  );
+  // `--print` conflicts with `--remove` (clap enforces it); the flag's doc
+  // states so, so the mutual exclusion is documented, not just enforced.
+  assert!(
+    stdout.contains("Conflicts with --remove"),
+    "install-service --help should document the --print/--remove conflict: {stdout}"
+  );
+  Ok(())
 }
 
 #[test]

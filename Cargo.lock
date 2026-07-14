@@ -3160,6 +3160,7 @@ dependencies = [
  "crossterm",
  "execution",
  "expressions",
+ "fastrand",
  "filetime",
  "flate2",
  "fs2",

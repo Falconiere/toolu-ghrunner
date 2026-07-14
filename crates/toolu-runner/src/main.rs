@@ -10,27 +10,21 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use clap::Parser;
-use config::config::{
-  RunnerRegistrationConfig, load_config as load_reg_config, load_credentials, resolve_data_dir,
-  resolve_work_dir,
-};
-use config::lockfile;
+use config::config::{load_config as load_reg_config, resolve_data_dir};
 use config::{registry, repo_infer};
-use listener::GitHubListener;
 use shared::RunnerError;
 use shared::startup;
 use shared::{MaskerRedactor, SecretMasker};
-use tokio_util::sync::CancellationToken;
 
 mod cli;
 mod create_app_cmd;
 mod login_cmd;
 mod register_cmd;
+mod run_cmd;
+mod service_cmd;
 mod status_cmd;
 
-use crate::cli::{
-  Cli, Command, RemoveArgs, RunArgs, WatchArgs, credentials_path_for, default_config_path,
-};
+use crate::cli::{Cli, Command, RemoveArgs, WatchArgs, credentials_path_for, default_config_path};
 
 #[tokio::main]
 async fn main() {
@@ -50,10 +44,11 @@ async fn main() {
 async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
   match cli.command {
     Command::Register(args) => register_cmd::cmd_register(args).await,
-    Command::Run(args) => cmd_run(args).await,
+    Command::Run(args) => run_cmd::cmd_run(args).await,
     Command::Remove(args) => cmd_remove(args).await,
     Command::Status(args) => status_cmd::cmd_status(args),
     Command::Watch(args) => cmd_watch(args),
+    Command::InstallService(args) => service_cmd::cmd_install_service(args),
     Command::Login(args) => login_cmd::cmd_login(args).await,
     Command::Logout(args) => login_cmd::cmd_logout(&args),
     Command::CreateApp(args) => {
@@ -145,119 +140,6 @@ fn init_tracing_for(masker: &Arc<std::sync::Mutex<SecretMasker>>) -> Result<(), 
 /// Initialize tracing for subcommands that do not run jobs (masker discarded).
 fn init_runner_tracing() -> Result<(), RunnerError> {
   init_tracing_for(&Arc::new(std::sync::Mutex::new(SecretMasker::new())))
-}
-
-/// Lift the JIT config blob out of the persisted config (written by
-/// `register` via generate-jitconfig). An empty blob means the config
-/// predates live registration — re-run `register`.
-fn require_jit_config(
-  cfg: &RunnerRegistrationConfig,
-) -> Result<String, Box<dyn std::error::Error>> {
-  let blob = cfg.runtime.jit_config.clone();
-  if blob.is_empty() {
-    return Err(
-      "config.toml has no JIT config blob — re-run `toolu-runner register` against a live GH repo"
-        .into(),
-    );
-  }
-  Ok(blob)
-}
-
-async fn cmd_run(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
-  let masker = Arc::new(std::sync::Mutex::new(SecretMasker::new()));
-  init_tracing_for(&masker).map_err(|e| format!("startup init: {e}"))?;
-
-  let config_path = resolve_config(args.config)?;
-  let cfg = load_run_config(&config_path)?;
-  let data_dir = resolve_data_dir(&cfg.runtime.data_dir).map_err(|e| format!("{e}"))?;
-  let workspace_root = resolve_work_dir(&cfg.runtime.work_dir);
-  let lock_path = data_dir.join(".lock");
-
-  // Acquire the single-job file lock — second `run` reads the body,
-  // prints the PID, and exits 2. Release on graceful shutdown.
-  let _lock_guard = lockfile::acquire(&lock_path, &config_path).map_err(|e| format!("{e}"))?;
-  tracing::info!(path = %lock_path.display(), "acquired single-job lock");
-  let runner_cfg = shared::RunnerConfig {
-    data_dir,
-    workspace_root,
-    cgroup_path: None,
-    services_mode: cfg.services_mode(),
-    service_bind: cfg.service_bind(),
-    cache: cfg.cache_config(),
-    workspace_gc_hours: cfg.workspace_gc_hours(),
-    shadow_enabled: cfg.shadow_enabled(),
-  };
-
-  let jit_config_b64 = require_jit_config(&cfg)?;
-  let listener = GitHubListener::new(&jit_config_b64, runner_cfg, masker)
-    .map_err(|e| format!("listener init: {e}"))?;
-
-  let cancel = CancellationToken::new();
-  spawn_signal_bridge(cancel.clone());
-  // `--once` needs no special wiring: the JIT session is single-use, so
-  // the listener exits after the first job completes. (An earlier stub
-  // cancelled after 100ms here, which killed the poll loop before any
-  // job could arrive.)
-  if args.once {
-    tracing::info!("--once is currently the default: the listener exits after the first job");
-  }
-
-  let result = listener
-    .run(cancel)
-    .await
-    .map_err(|e| format!("listener: {e}"));
-  // _lock_guard drops here, releasing the lock.
-  result?;
-  Ok(())
-}
-
-/// Bridge SIGINT/SIGTERM to `cancel` in a background task.
-fn spawn_signal_bridge(cancel: CancellationToken) {
-  tokio::spawn(async move {
-    let Ok(mut sigint) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
-    else {
-      return;
-    };
-    let Ok(mut sigterm) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-    else {
-      return;
-    };
-    tokio::select! {
-      _ = sigint.recv() => {},
-      _ = sigterm.recv() => {},
-    }
-    cancel.cancel();
-  });
-}
-
-/// Load + validate the persisted config and credentials for `run`.
-///
-/// Errors if either file is missing (with a `register` hint) or unparseable.
-fn load_run_config(
-  config_path: &Path,
-) -> Result<RunnerRegistrationConfig, Box<dyn std::error::Error>> {
-  if !config_path.exists() {
-    return Err(
-      format!(
-        "config not found at {} — run `toolu-runner register` first",
-        config_path.display()
-      )
-      .into(),
-    );
-  }
-  let creds_path = credentials_path_for(config_path);
-  if !creds_path.exists() {
-    return Err(
-      format!(
-        "credentials not found at {} — run `toolu-runner register` first",
-        creds_path.display()
-      )
-      .into(),
-    );
-  }
-  let cfg = load_reg_config(config_path).map_err(|e| format!("{e}"))?;
-  let _creds = load_credentials(&creds_path).map_err(|e| format!("{e}"))?;
-  Ok(cfg)
 }
 
 async fn cmd_remove(args: RemoveArgs) -> Result<(), Box<dyn std::error::Error>> {

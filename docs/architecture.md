@@ -39,7 +39,9 @@ toolu-ghrunner/                            workspace root
     │   ├── auth_store.rs                  keyring / 0600-file login-token store + decide_bearer TTY gate
     │   ├── app_store.rs                   GitHub App credential store (github-app.json)
     │   ├── registry.rs                    runner home + runners/<owner>/<repo>/ discovery/resolution
-    │   └── repo_infer.rs                  cwd git remote → owner/repo inference
+    │   ├── repo_infer.rs                  cwd git remote → owner/repo inference
+    │   ├── remint.rs                      re-mint merge (preserve [services]/[cache]/[workspace]/[shadow])
+    │   └── service_unit.rs                launchd plist / systemd unit builders (install-service)
     ├── expressions/                       the ${{ }} evaluator (→ shared)
     ├── cache/                             content-addressed CI cache (→ shared)
     ├── wire/                              async HTTP transport + reporting (→ shared, protocol)
@@ -58,11 +60,14 @@ toolu-ghrunner/                            workspace root
     │   ├── handler.rs                     GitHubListener entry point
     │   ├── job_lifecycle.rs               long-poll loop
     │   ├── execution_loop.rs              run job + renewal + event forwarder
+    │   ├── loop_decision.rs               pure next_action for the always-online run loop
     │   └── log_uploader/                  per-step + combined job-log upload
     └── toolu-runner/                      bin only (the CLI)
-        ├── src/main.rs                    dispatch + the run / remove / watch handlers
-        ├── src/cli.rs                     clap surface: register / run / remove / status / watch / login / logout / create-app
-        ├── src/register_cmd.rs            register (repo inference + inline device flow + per-repo persist)
+        ├── src/main.rs                    dispatch + the remove / watch handlers
+        ├── src/cli.rs                     clap surface: register / run / remove / status / watch / install-service / login / logout / create-app
+        ├── src/register_cmd.rs            register + remint_and_persist (per-repo persist, config rollback)
+        ├── src/run_cmd.rs                 the always-online run loop (re-mint after each job)
+        ├── src/service_cmd.rs             install-service (launchd / systemd user units)
         ├── src/login_cmd.rs               login / logout (device flow)
         ├── src/status_cmd.rs              status (no network)
         ├── src/create_app_cmd.rs          create-app (GitHub App Manifest onboarding)
@@ -158,8 +163,9 @@ suite covers RSA + JWT + JIT-config round-trips.
 
 Historically a single `toolu-runner` crate, now split across the
 layered graph above. `toolu-runner` itself is **bin-only** (the CLI:
-`main.rs` + `cli.rs` + `register_cmd.rs` + `login_cmd.rs` +
-`status_cmd.rs`). The module descriptions
+`main.rs` + `cli.rs` + `register_cmd.rs` + `run_cmd.rs` +
+`service_cmd.rs` + `login_cmd.rs` + `status_cmd.rs` +
+`create_app_cmd.rs`). The module descriptions
 that follow are grouped by their **current** crate: `net/` +
 `reporting/` live in `wire`; `listener/` in `listener`; `execution/` +
 `docker/` + `node/` + `plugin/` + the `Runner` (`lib.rs`) in
@@ -529,6 +535,16 @@ history); empty parent dirs are left in place.
 
 ## Sequence: run
 
+`run` is an **always-online loop**, not a one-shot:
+`register` → `run` → [ job → re-mint → poll ]* → cancel. A JIT config is
+single-use, so the listener runs exactly one job and returns; the bin's
+`run_cmd::RunLoop` then re-mints a fresh JIT config with the stored
+`login` / `TOOLU_RUNNER_TOKEN` bearer
+(`register_cmd::remint_and_persist`, preserving the operator's
+`[services]` / `[cache]` / `[workspace]` / `[shadow]` sections verbatim)
+and builds a new listener. The per-repo `.lock` is held for the whole
+loop; `--once` opts out (one job, then exit with its status).
+
 ```
 SIGINT/SIGTERM        toolu-runner run             GH broker         Run Service
  │                          │                          │                  │
@@ -573,22 +589,52 @@ SIGINT/SIGTERM        toolu-runner run             GH broker         Run Service
  │                          │ │ POST /completejob        │                  │
  │                          │ ├───────────────────────────────────────────>│
  │                          │ │<──── ack ─────────────────────────────────┤
- │                          │ │  loop back to GET /message                │
- │                          │ └──────────────────────┤                  │
+ │                          │ └─ listener returns Ok — JIT config spent ─┤
  │                          │                          │                  │
- │ ────────────────────────>│ cancel token            │                  │
+ │                          │ next_action = Reregister → RE-MINT:        │
+ │                          │  POST generate-jitconfig with the stored   │
+ │                          │  login / TOOLU_RUNNER_TOKEN bearer         │
+ │                          ├──────────────────────>│ api.github.com     │
+ │                          │<─ fresh JIT config; persist, preserving ──┤ │
+ │                          │  [services]/[cache]/[workspace]/[shadow]   │
+ │                          │  ⟳ build a new listener, loop to the top   │
+ │                          │                          │                  │
+ │ ────────────────────────>│ cancel token (or .pending_remove seen      │
+ │                          │  between jobs)          │                  │
  │                          │  DELETE /session        │                  │
  │                          ├───────────────────────>│                  │
- │                          │ release .lock           │                  │
- │                          │ exit                    │                  │
+ │                          │ release .lock; exit 0   │                  │
 ```
 
-The poll loop classifies each `poll_message` outcome as one of:
-`NoWork` (202), `Migrated` (BrokerMigration message), `Job`
-(RunnerJobRequest), `NetworkError`, `Cancelled`. On
-`NetworkError`, exponential backoff doubles (1s → 2s → … → 60s cap)
-until success or cancellation. The cancellation token is wired
-through every `tokio::select!` so SIGINT breaks the loop promptly.
+The listener's own poll loop classifies each `poll_message` outcome as
+`NoWork` (202), `Migrated` (BrokerMigration), `Job` (RunnerJobRequest),
+`NetworkError`, or `Cancelled`, backing off 1s → 60s on `NetworkError`.
+It runs exactly one job, then returns, and `run_cmd::RunLoop` dispatches
+`listener::loop_decision::next_action` over four already-observed facts —
+the cancel token, `--once`, `.pending_remove`, and the listener's
+`Result` (precedence: cancel > `--once` > `.pending_remove` > outcome):
+
+- **cancelled** (SIGINT/SIGTERM) → exit 0.
+- **`--once`** → exit with the listener's status (legacy single-job).
+- **`.pending_remove`** (a `remove` ran while the lock was held) → exit 0.
+- **`Ok(())`** (job done) or **`Err(Auth)`** (the single-use JIT is
+  dead) → **re-mint** a fresh config and re-poll.
+- any other **`Err`** (transient) → decorrelated-jitter backoff
+  (1s → 60s cap, cancel-aware) and retry the still-valid config.
+
+A re-mint POSTs `generate-jitconfig` again through
+`register_cmd::remint_and_persist`, which mints, folds the new config
+into the prior one via `config::remint::merge_reminted_config`
+(preserving `[services]` / `[cache]` / `[workspace]` / `[shadow]`
+verbatim), and rewrites `config.toml` / `credentials.json`
+all-or-nothing. `wire::net::register` maps 401/403 → `RunnerError::Auth`
+(fatal — guidance names `login` / `--token` / `TOOLU_RUNNER_TOKEN`) and
+any other non-2xx → `RunnerError::Network` (transient, backs off); a
+missing stored bearer is likewise fatal, and `run` WARNs about it at
+startup (unless `--once`) so an unattended runner does not silently stop
+after one job. The cancellation token is wired through every
+`tokio::select!` — including the backoff sleeps — so SIGINT breaks the
+loop promptly.
 
 ## Sequence: cancel
 

@@ -289,6 +289,68 @@ async fn register_and_persist(p: RegisterPersist<'_>) -> Result<i64, RunnerError
   Ok(runner_id)
 }
 
+/// Best-effort host for a validated registration URL, mirroring
+/// `status_cmd`. `runner_url` already passed `register`-time validation, so
+/// a parse miss falls back to github.com rather than failing the re-mint.
+pub(crate) fn host_from_runner_url(url: &str) -> String {
+  url::Url::parse(url)
+    .ok()
+    .and_then(|u| u.host_str().map(str::to_owned))
+    .unwrap_or_else(|| "github.com".to_owned())
+}
+
+/// Re-mint a JIT config for an existing registration and persist it,
+/// preserving all user-edited config sections. Same all-or-nothing
+/// rollback contract as [`register_and_persist`].
+pub(crate) async fn remint_and_persist(
+  prior: &RunnerRegistrationConfig,
+  bearer: &str,
+  config_path: &Path,
+  creds_path: &Path,
+) -> Result<(), RunnerError> {
+  let host = host_from_runner_url(&prior.runner_url);
+  let p = RegisterPersist {
+    url: &prior.runner_url,
+    token: bearer,
+    runner_name: &prior.runner_name,
+    labels: &prior.labels,
+    runner_group: &prior.runner_group,
+    work_folder: &prior.runtime.work_dir,
+    host: &host,
+    config_path,
+    creds_path,
+    replace: true,
+  };
+  let registration = mint_jit(&p).await?;
+
+  // Lift the client_id exactly as register_and_persist does; the re-minted
+  // config keeps prior's [services]/[cache]/[workspace]/[shadow] verbatim.
+  let parsed = protocol::JitConfig::parse(&registration.encoded_jit_config)
+    .map_err(|e| RunnerError::Protocol(format!("re-minted jit_config did not parse: {e}")))?;
+  let client_id = parsed.credentials.data.client_id;
+  let merged = config::remint::merge_reminted_config(
+    prior,
+    registration.encoded_jit_config,
+    registration.runner_id,
+    client_id.clone(),
+  );
+
+  // Snapshot BEFORE overwriting so a credentials-write failure rolls the
+  // config back — same all-or-nothing contract as register_and_persist.
+  let previous_config = std::fs::read(config_path).ok();
+  save_reg_config(config_path, &merged)?;
+  let creds = CredentialsFile {
+    access_token: client_id,
+    issued_at: chrono::Utc::now().to_rfc3339(),
+    expires_at: None,
+  };
+  if let Err(e) = save_credentials(creds_path, &creds) {
+    roll_back_config(config_path, previous_config.as_deref());
+    return Err(e);
+  }
+  Ok(())
+}
+
 /// Pre-create the registration's `_diag/` dir so the persisted layout is
 /// self-evident right after `register`. `run` creates every run-critical
 /// dir on its own anyway (`config::lockfile::acquire` creates the lock's
