@@ -101,7 +101,8 @@ fn xml_escape(s: &str) -> String {
 
 /// XML-escape a path's display form for use inside a plist `<string>`.
 fn xml_path(p: &Path) -> String {
-  xml_escape(&format!("{}", p.display()))
+  let display = format!("{}", p.display());
+  xml_escape(&display)
 }
 
 /// Double-quote a path for a systemd `ExecStart`, escaping `\` and `"`
