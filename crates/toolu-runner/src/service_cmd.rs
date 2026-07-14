@@ -186,9 +186,19 @@ fn remove_service(
     return Ok(());
   }
   deactivate(supervisor, dest, id);
-  std::fs::remove_file(dest)?;
-  println!("removed {} ({})", id.label, dest.display());
-  Ok(())
+  // Tolerate a concurrent delete between the exists() check and here —
+  // idempotency must hold under the race, not just sequentially.
+  match std::fs::remove_file(dest) {
+    Ok(()) => {
+      println!("removed {} ({})", id.label, dest.display());
+      Ok(())
+    },
+    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+      println!("no service installed at {} — nothing to do", dest.display());
+      Ok(())
+    },
+    Err(e) => Err(e.into()),
+  }
 }
 
 /// Activate the just-written unit. A non-zero manager exit is an error
