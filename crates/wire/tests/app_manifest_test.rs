@@ -23,7 +23,7 @@ fn manifest_json(redirect_url: &str) -> TestResult<String> {
 
 /// AC-4 + AC-5 (happy): the form is served with the CSRF state in its action,
 /// and a matching-state callback yields the code.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn form_served_and_matching_callback_yields_code() -> TestResult<()> {
   let server = CallbackServer::bind("STATE123".to_owned()).await?;
   let base = server.local_url();
@@ -68,7 +68,7 @@ async fn form_served_and_matching_callback_yields_code() -> TestResult<()> {
 /// Blocker fix: a spurious/aborted connection (a probe that connects, writes a
 /// partial request line, then drops without a newline) must NOT end the flow —
 /// the real callback that follows still yields the code.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn spurious_connection_does_not_abort_the_flow() -> TestResult<()> {
   let server = CallbackServer::bind("STATE123".to_owned()).await?;
   let base = server.local_url();
@@ -104,7 +104,7 @@ async fn spurious_connection_does_not_abort_the_flow() -> TestResult<()> {
 
 /// AC-5 (CSRF): a callback whose state does not match is rejected with a `400`
 /// and `wait_for_code` returns an error.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn callback_with_wrong_state_is_rejected() -> TestResult<()> {
   let server = CallbackServer::bind("STATE123".to_owned()).await?;
   let base = server.local_url();
