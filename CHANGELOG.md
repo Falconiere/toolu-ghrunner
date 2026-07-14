@@ -10,15 +10,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.3.0] - 2026-07-14
 
 ### Added
-- *(create-app)* GitHub App Manifest onboarding command
-
-### Fixed
-- *(create-app)* address PR review feedback
-- *(create-app)* address PR review round 2
-- *(create-app)* address PR review round 3
-- *(create-app)* tighten test assertions + doc nits (PR review round 4)
-- *(create-app)* scope manifest-permission assertion + tidy conversion-url doc
-### Added
 
 - **`create-app` — one-click GitHub App onboarding.** A new
   `toolu-runner create-app` runs GitHub's App Manifest flow: it binds a
