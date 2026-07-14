@@ -45,7 +45,7 @@ async fn form_served_and_matching_callback_yields_code() -> TestResult<()> {
     "manifest input missing: {form}"
   );
   assert!(
-    form.contains("administration"),
+    form.contains("&quot;administration&quot;:&quot;write&quot;"),
     "manifest permission missing: {form}"
   );
 
@@ -73,7 +73,11 @@ async fn spurious_connection_does_not_abort_the_flow() -> TestResult<()> {
   let server = CallbackServer::bind("STATE123".to_owned()).await?;
   let base = server.local_url();
   let base = base.trim_end_matches('/').to_owned();
-  let authority = base.trim_start_matches("http://").to_owned();
+  let authority = base
+    .split_once("://")
+    .map(|(_, a)| a)
+    .unwrap_or(base.as_str())
+    .to_owned();
   let manifest = manifest_json(&server.callback_url())?;
   let handle = tokio::spawn(server.wait_for_code(manifest, Duration::from_secs(10)));
 
