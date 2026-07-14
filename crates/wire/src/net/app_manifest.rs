@@ -71,14 +71,18 @@ impl CallbackServer {
   }
 
   /// `http://127.0.0.1:<port>/` — the URL to open in the browser.
+  ///
+  /// The IPv4 loopback literal is formatted explicitly (not via the
+  /// `SocketAddr` `Display`), so the URL stays bracket-free and safe to embed
+  /// in the manifest form even if the bind address ever changes.
   pub fn local_url(&self) -> String {
-    format!("http://{}/", self.local_addr)
+    format!("http://127.0.0.1:{}/", self.local_addr.port())
   }
 
   /// `http://127.0.0.1:<port>/callback` — the value the caller puts in the
   /// manifest's `redirect_url` so GitHub redirects back to this server.
   pub fn callback_url(&self) -> String {
-    format!("http://{}/callback", self.local_addr)
+    format!("http://127.0.0.1:{}/callback", self.local_addr.port())
   }
 
   /// Serve `GET /` (the auto-submit form embedding `manifest_json`) and
@@ -324,7 +328,11 @@ pub async fn convert_manifest_code(
     )
     .send()
     .await
-    .map_err(|e| RunnerError::Network(format!("app manifest conversion request failed: {e}")))?;
+    .map_err(|e| {
+      RunnerError::Network(format!(
+        "app manifest conversion request failed: {e}; re-run `create-app` to start a fresh flow"
+      ))
+    })?;
 
   let status = response.status();
   let text = response.text().await.map_err(|e| {
@@ -356,7 +364,8 @@ pub fn build_conversion_url(host: &str, code: &str) -> String {
 /// A 404 or 422 means the one-time manifest code was already spent (or was
 /// never valid), so the message tells the user to re-run `create-app`. Any
 /// other status yields a generic error carrying the status and a short body
-/// snippet.
+/// snippet, and likewise points the user back at `create-app` (re-running
+/// always mints a fresh manifest and code, whatever the failure).
 pub fn map_conversion_error(status: u16, body: &str) -> RunnerError {
   if status == 404 || status == 422 {
     RunnerError::Auth(format!(
@@ -367,7 +376,8 @@ pub fn map_conversion_error(status: u16, body: &str) -> RunnerError {
   } else {
     let snippet: String = body.chars().take(200).collect();
     RunnerError::Network(format!(
-      "app manifest conversion failed with HTTP {status}: {snippet}"
+      "app manifest conversion failed with HTTP {status}: {snippet}; re-run `create-app` to \
+       start a fresh flow"
     ))
   }
 }

@@ -77,12 +77,19 @@ async fn spurious_connection_does_not_abort_the_flow() -> TestResult<()> {
   let manifest = manifest_json(&server.callback_url())?;
   let handle = tokio::spawn(server.wait_for_code(manifest, Duration::from_secs(10)));
 
-  // A probe that connects, writes a partial (newline-less) request line, then
-  // drops at scope end — the kind of favicon/preconnect/aborted request that
-  // must not terminate the accept loop.
+  // Two spurious connections that must NOT terminate the accept loop: a
+  // partial (newline-less) line that drops mid-request, and a complete but
+  // unexpected request — the favicon/preconnect a real browser fires.
   {
     let mut probe = tokio::net::TcpStream::connect(&authority).await?;
     probe.write_all(b"GET /fav").await?;
+    probe.flush().await?;
+  }
+  {
+    let mut probe = tokio::net::TcpStream::connect(&authority).await?;
+    probe
+      .write_all(b"GET /favicon.ico HTTP/1.1\r\nHost: localhost\r\n\r\n")
+      .await?;
     probe.flush().await?;
   }
 
@@ -133,14 +140,20 @@ async fn callback_with_wrong_state_is_rejected() -> TestResult<()> {
 #[test]
 fn spent_code_errors_name_create_app_and_dotcom_url_is_api() {
   let e422 = map_conversion_error(422, "{\"message\":\"Not Found\"}");
-  assert!(
-    e422.to_string().contains("create-app"),
-    "422 message missing create-app hint: {e422}"
+  assert_eq!(
+    e422.to_string(),
+    "auth error: GitHub rejected the app manifest code (HTTP 422) \u{2014} the temporary code is \
+     single-use and has been spent or is invalid; re-run `create-app` to generate a fresh \
+     manifest and code",
+    "422 message: {e422}"
   );
   let e404 = map_conversion_error(404, "{\"message\":\"Not Found\"}");
-  assert!(
-    e404.to_string().contains("create-app"),
-    "404 message missing create-app hint: {e404}"
+  assert_eq!(
+    e404.to_string(),
+    "auth error: GitHub rejected the app manifest code (HTTP 404) \u{2014} the temporary code is \
+     single-use and has been spent or is invalid; re-run `create-app` to generate a fresh \
+     manifest and code",
+    "404 message: {e404}"
   );
 
   assert_eq!(
