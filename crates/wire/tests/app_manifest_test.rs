@@ -28,7 +28,7 @@ async fn form_served_and_matching_callback_yields_code() -> TestResult<()> {
   let server = CallbackServer::bind("STATE123".to_owned()).await?;
   let base = server.local_url();
   let base = base.trim_end_matches('/').to_owned();
-  // The manifest's redirect_url embeds the bound port, so build it post-bind.
+  // manifest is built after bind() so its redirect_url carries the bound port.
   let manifest = manifest_json(&server.callback_url())?;
   let handle = tokio::spawn(server.wait_for_code(manifest, Duration::from_secs(10)));
 
@@ -144,16 +144,14 @@ fn spent_code_errors_name_create_app_and_dotcom_url_is_api() {
     e422.to_string(),
     "auth error: GitHub rejected the app manifest code (HTTP 422) \u{2014} the temporary code is \
      single-use and has been spent or is invalid; re-run `create-app` to generate a fresh \
-     manifest and code",
-    "422 message: {e422}"
+     manifest and code"
   );
   let e404 = map_conversion_error(404, "{\"message\":\"Not Found\"}");
   assert_eq!(
     e404.to_string(),
     "auth error: GitHub rejected the app manifest code (HTTP 404) \u{2014} the temporary code is \
      single-use and has been spent or is invalid; re-run `create-app` to generate a fresh \
-     manifest and code",
-    "404 message: {e404}"
+     manifest and code"
   );
 
   assert_eq!(

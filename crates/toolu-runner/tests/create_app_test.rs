@@ -24,7 +24,7 @@ fn create_app_rejects_non_github_host() {
   );
   let stderr = String::from_utf8_lossy(&output.stderr);
   assert!(
-    stderr.contains("github.com"),
+    stderr.contains("github.com only"),
     "error should name github.com as the only supported host: {stderr}"
   );
   assert!(
@@ -55,7 +55,7 @@ fn create_app_refuses_to_overwrite_without_force() {
   );
   let stderr = String::from_utf8_lossy(&output.stderr);
   assert!(
-    stderr.contains("--force"),
+    stderr.contains("pass --force to overwrite"),
     "error should name --force as the override: {stderr}"
   );
 
