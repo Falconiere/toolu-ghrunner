@@ -21,6 +21,17 @@ fn manifest_json(redirect_url: &str) -> TestResult<String> {
   Ok(AppManifest::for_runner("t", redirect_url).to_json()?)
 }
 
+/// Reverse the HTML attribute escaping the served form applies, so the manifest
+/// embedded in the input's `value="…"` can be parsed back to JSON. `&amp;` is
+/// undone last so an escaped literal ampersand round-trips correctly.
+fn html_attr_unescape(s: &str) -> String {
+  s.replace("&quot;", "\"")
+    .replace("&#39;", "'")
+    .replace("&lt;", "<")
+    .replace("&gt;", ">")
+    .replace("&amp;", "&")
+}
+
 /// AC-4 + AC-5 (happy): the form is served with the CSRF state in its action,
 /// and a matching-state callback yields the code.
 #[tokio::test]
@@ -40,18 +51,23 @@ async fn form_served_and_matching_callback_yields_code() -> TestResult<()> {
     form.contains("action=\"https://github.com/settings/apps/new?state=STATE123\""),
     "form action missing/wrong: {form}"
   );
-  // The manifest JSON is HTML-escaped inside the hidden input's `value="…"`
-  // (html_attr_escape turns every `"` into `&quot;`, so the value carries no
-  // raw quote); scope the permission check to that attribute so it can't match
-  // in the form action URL or elsewhere.
-  let manifest_value = form
+  // Pull the manifest back out of the hidden input's `value="…"` attribute and
+  // parse it as JSON, so the permission is verified structurally — independent
+  // of key order or escaping details — rather than by matching an escaped
+  // substring that a serialization change could silently break.
+  let manifest_attr = form
     .split_once("name=\"manifest\" value=\"")
     .and_then(|(_, rest)| rest.split_once('"'))
     .map(|(value, _)| value)
-    .expect("manifest input with value attribute");
-  assert!(
-    manifest_value.contains("&quot;administration&quot;:&quot;write&quot;"),
-    "administration:write permission missing from manifest value: {manifest_value}"
+    .ok_or_else(|| std::io::Error::other("served form has no manifest input value"))?;
+  let manifest: serde_json::Value = serde_json::from_str(&html_attr_unescape(manifest_attr))?;
+  assert_eq!(
+    manifest
+      .get("default_permissions")
+      .and_then(|perms| perms.get("administration"))
+      .and_then(serde_json::Value::as_str),
+    Some("write"),
+    "manifest must request administration:write; got {manifest}"
   );
 
   // GET /callback — GitHub's post-creation redirect.
