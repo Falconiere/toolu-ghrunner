@@ -346,11 +346,10 @@ pub async fn convert_manifest_code(
   }
 }
 
-/// Build the `app-manifests/{code}/conversions` endpoint for `host`.
+/// Build the `app-manifests/{code}/conversions` endpoint URL for `host`.
 ///
-/// github.com routes through `api.github.com`; any other host is treated as
-/// GHES (`https://{host}/api/v3/…`) as a best-effort fallback (GHES is out of
-/// scope for this slice).
+/// `github.com` routes through `api.github.com`; any other host is treated as
+/// GHES and routed through `https://{host}/api/v3/…` as a best-effort fallback.
 pub fn build_conversion_url(host: &str, code: &str) -> String {
   if host.eq_ignore_ascii_case("github.com") {
     format!("https://api.github.com/app-manifests/{code}/conversions")

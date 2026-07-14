@@ -40,13 +40,18 @@ async fn form_served_and_matching_callback_yields_code() -> TestResult<()> {
     form.contains("action=\"https://github.com/settings/apps/new?state=STATE123\""),
     "form action missing/wrong: {form}"
   );
+  // The manifest JSON is HTML-escaped inside the hidden input's `value="…"`
+  // (html_attr_escape turns every `"` into `&quot;`, so the value carries no
+  // raw quote); scope the permission check to that attribute so it can't match
+  // in the form action URL or elsewhere.
+  let manifest_value = form
+    .split_once("name=\"manifest\" value=\"")
+    .and_then(|(_, rest)| rest.split_once('"'))
+    .map(|(value, _)| value)
+    .expect("manifest input with value attribute");
   assert!(
-    form.contains("name=\"manifest\""),
-    "manifest input missing: {form}"
-  );
-  assert!(
-    form.contains("&quot;administration&quot;:&quot;write&quot;"),
-    "manifest permission missing: {form}"
+    manifest_value.contains("&quot;administration&quot;:&quot;write&quot;"),
+    "administration:write permission missing from manifest value: {manifest_value}"
   );
 
   // GET /callback — GitHub's post-creation redirect.
