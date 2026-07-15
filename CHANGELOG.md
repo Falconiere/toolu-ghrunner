@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-15
+
+### Added
+- *(runner)* add `setup` interactive onboarding wizard
+
+### Documentation
+- *(cli)* clarify setup --url is validated at startup, not by clap
+
+### Fixed
+- *(runner)* address PR review feedback
+- *(runner)* address PR review feedback (round 2)
 ### Added
 - **`setup` — interactive full-screen onboarding wizard.** A new
   `toolu-runner setup` runs a ratatui wizard that walks a first-time user
