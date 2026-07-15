@@ -151,7 +151,8 @@ fn render_unit(
 ) -> Result<String, Box<dyn std::error::Error>> {
   let cfg = load_reg_config(config_path)?;
   let diag_dir = resolve_data_dir(&cfg.runtime.data_dir)?.join("_diag");
-  let exe = std::env::current_exe()?;
+  let exe = std::env::current_exe()
+    .map_err(|e| format!("cannot resolve the running binary's path: {e}"))?;
   let abs_config = config_path
     .canonicalize()
     .map_err(|e| format!("cannot resolve config path {}: {e}", config_path.display()))?;
