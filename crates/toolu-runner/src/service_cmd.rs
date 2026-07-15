@@ -272,9 +272,17 @@ fn activation_hint(supervisor: Supervisor, dest: &Path, id: &ServiceId) -> Strin
   }
 }
 
-/// The current user id via `id -u` (avoids an `unsafe` libc `getuid`).
+/// The current user id via `id -u` (avoids an `unsafe` libc `getuid`),
+/// validated as all-digits — a broken `id` wrapper must fail loudly here,
+/// not as a cryptic `launchctl` domain error downstream.
 fn current_uid() -> Result<String, RunnerError> {
-  run_stdout("id", &["-u"])
+  let uid = run_stdout("id", &["-u"])?;
+  if uid.is_empty() || !uid.bytes().all(|b| b.is_ascii_digit()) {
+    return Err(RunnerError::Config(format!(
+      "`id -u` returned a non-numeric uid: {uid:?}"
+    )));
+  }
+  Ok(uid)
 }
 
 /// Run `program args`, capturing output. An IO failure (e.g. the binary is

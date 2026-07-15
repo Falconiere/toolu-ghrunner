@@ -84,7 +84,10 @@ fn systemd_unit_escapes_single_quote_in_paths() {
     diag_dir: Path::new("/home/ci/.toolu-runner/runners/octocat/hello/_diag"),
   };
   let unit = service_unit::systemd_unit(&spec);
-  assert!(unit.contains(r#"ExecStart="/opt/o\'brien/toolu-runner" run"#));
+  assert_eq!(
+    unit,
+    include_str!("fixtures/service/systemd_squote.service")
+  );
 }
 
 #[test]

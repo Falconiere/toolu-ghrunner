@@ -355,26 +355,32 @@ pub async fn register_jit(
     )));
   }
 
-  // The run loop treats Auth as fatal and Network as transient (backoff).
-  // 401 gets its own login-specific message first; 429 and 5xx are the only
-  // genuinely transient statuses; every remaining non-2xx (403, 404 gone
-  // repo, 422 bad params, …) is permanent and must be fatal — mapping it to
-  // Network would make the loop retry a hopeless mint forever.
+  Err(mint_failure(status, &text))
+}
+
+/// Map a non-2xx `generate-jitconfig` status to the loop-critical error
+/// kind: the run loop treats `Auth` as fatal and `Network` as transient
+/// (backoff). 401 gets its own login-specific message; 429 and 5xx are the
+/// only genuinely transient statuses; every remaining non-2xx is permanent
+/// and must be fatal — mapping it to `Network` would make the loop retry a
+/// hopeless mint forever. That includes 403 (a valid bearer with
+/// insufficient scope): it lands in `Auth` even though the bearer itself
+/// is fine, because only a new token can fix it.
+fn mint_failure(status: reqwest::StatusCode, text: &str) -> RunnerError {
   if status == reqwest::StatusCode::UNAUTHORIZED {
-    return Err(RunnerError::Auth(
+    return RunnerError::Auth(
       "stored GitHub token invalid or expired — run 'toolu-runner login'".into(),
-    ));
+    );
   }
   if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
-    return Err(RunnerError::Network(format!(
+    return RunnerError::Network(format!(
       "generate-jitconfig failed with status {status} (transient — the run loop will back \
        off and retry): {text}"
-    )));
+    ));
   }
-
-  Err(RunnerError::Auth(format!(
+  RunnerError::Auth(format!(
     "generate-jitconfig failed with status {status} (permanent — retrying cannot succeed; \
      check the registration URL and runner parameters, or re-run 'toolu-runner login' if \
      the token lacks access to this repository): {text}"
-  )))
+  ))
 }
