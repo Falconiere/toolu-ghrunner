@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-07-15
+
+### Fixed
+- *(config)* default token store to 0600 file
+- *(runner)* round-1 review feedback — status backend line, changelog, env guard
 ### Changed
 - **Login-token store defaults to a 0600 file; the OS keyring is now
   opt-in.** `AuthStore::new` no longer touches the OS keyring by default —
