@@ -263,6 +263,38 @@ fn systemd_activation_failure_is_fatal_and_named() {
   );
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn non_numeric_uid_is_a_named_error() {
+  let home = tempfile::tempdir().expect("tempdir");
+  let config_path = write_fixture(home.path(), "octo", "demo").expect("write fixture");
+  let (bin, log, path_env) = shim_env(home.path()).expect("shim env");
+  let record_ok = "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$SHIM_LOG\"\nexit 0\n";
+  write_shim(&bin, "launchctl", record_ok).expect("launchctl shim");
+  // A broken `id` wrapper must fail activation loudly, before launchctl.
+  write_shim(&bin, "id", "#!/bin/sh\necho not-a-uid\n").expect("id shim");
+
+  let output = install_cmd(home.path(), &config_path, &[])
+    .env("PATH", &path_env)
+    .env("SHIM_LOG", &log)
+    .output()
+    .expect("run install-service (default activate)");
+
+  assert!(
+    !output.status.success(),
+    "a non-numeric uid must fail activation"
+  );
+  assert!(
+    String::from_utf8_lossy(&output.stderr).contains("non-numeric uid"),
+    "the error must name the bad uid; stderr:\n{}",
+    String::from_utf8_lossy(&output.stderr)
+  );
+  assert!(
+    !log.exists() || std::fs::read_to_string(&log).expect("shim log").is_empty(),
+    "launchctl must never be invoked with a broken uid"
+  );
+}
+
 /// The real `id -u` for the current user — the same value the bin embeds in
 /// its `gui/<uid>` launchd target (the `id` binary is NOT shimmed).
 #[cfg(unix)]
