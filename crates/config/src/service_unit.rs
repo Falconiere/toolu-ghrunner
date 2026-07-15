@@ -4,7 +4,7 @@
 //! LaunchAgent plist (macOS) or a systemd user unit (Linux). No I/O — the
 //! bin crate writes and activates the rendered text. Every interpolated
 //! path is escaped for its target format: XML entities in the plist,
-//! double-quoted with `\`/`"` escapes in the systemd `ExecStart`.
+//! double-quoted with `\`/`"`/`'` escapes in the systemd `ExecStart`.
 
 use std::path::Path;
 
@@ -110,10 +110,13 @@ fn xml_path(p: &Path) -> String {
   xml_escape(&display)
 }
 
-/// Double-quote a path for a systemd `ExecStart`, escaping `\` and `"`
-/// (C-style) so spaces and quotes survive systemd's tokenizer.
+/// Double-quote a path for a systemd `ExecStart`, escaping `\`, `"`, and
+/// `'` (C-style) so spaces and quotes survive systemd's tokenizer.
 fn systemd_quote(p: &Path) -> String {
   let raw = format!("{}", p.display());
-  let escaped = raw.replace('\\', "\\\\").replace('"', "\\\"");
+  let escaped = raw
+    .replace('\\', "\\\\")
+    .replace('"', "\\\"")
+    .replace('\'', "\\'");
   format!("\"{escaped}\"")
 }

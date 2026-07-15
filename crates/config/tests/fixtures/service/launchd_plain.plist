@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>io.toolu.runner.octocat.hello</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/toolu-runner</string>
+    <string>run</string>
+    <string>--config</string>
+    <string>/home/ci/.toolu-runner/runners/octocat/hello/config.toml</string>
+  </array>
+  <key>KeepAlive</key>
+  <true/>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/home/ci/.toolu-runner/runners/octocat/hello/_diag/service.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/home/ci/.toolu-runner/runners/octocat/hello/_diag/service.err.log</string>
+</dict>
+</plist>

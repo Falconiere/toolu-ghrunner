@@ -64,36 +64,27 @@ fn plain_spec() -> ServiceSpec<'static> {
 #[test]
 fn launchd_plist_minimal_spec_without_spaces() {
   let plist = service_unit::launchd_plist(&plain_spec());
-  assert!(plist.contains("<key>Label</key>\n  <string>io.toolu.runner.octocat.hello</string>\n"));
-  assert!(plist.contains("<string>/usr/local/bin/toolu-runner</string>\n"));
-  assert!(plist.contains("<string>run</string>\n"));
-  assert!(plist.contains("<string>--config</string>\n"));
-  assert!(
-    plist.contains("<string>/home/ci/.toolu-runner/runners/octocat/hello/config.toml</string>\n")
-  );
-  assert!(plist.contains("<key>KeepAlive</key>\n  <true/>\n"));
-  assert!(plist.contains("<key>RunAtLoad</key>\n  <true/>\n"));
-  assert!(plist.contains(
-    "<string>/home/ci/.toolu-runner/runners/octocat/hello/_diag/service.out.log</string>\n"
-  ));
-  assert!(plist.contains(
-    "<string>/home/ci/.toolu-runner/runners/octocat/hello/_diag/service.err.log</string>\n"
-  ));
-  // No spaces means no `&amp;` should ever appear.
-  assert!(!plist.contains("&amp;"));
+  assert_eq!(plist, include_str!("fixtures/service/launchd_plain.plist"));
 }
 
 #[test]
 fn systemd_unit_minimal_spec_without_spaces() {
   let unit = service_unit::systemd_unit(&plain_spec());
-  assert!(unit.contains("Description=toolu-runner (io.toolu.runner.octocat.hello)\n"));
-  assert!(unit.contains(
-    "ExecStart=\"/usr/local/bin/toolu-runner\" run --config \
-     \"/home/ci/.toolu-runner/runners/octocat/hello/config.toml\"\n"
-  ));
-  assert!(unit.contains("Restart=always\n"));
-  assert!(unit.contains("RestartSec=5\n"));
-  assert!(unit.contains("WantedBy=default.target\n"));
+  assert_eq!(unit, include_str!("fixtures/service/systemd_plain.service"));
+}
+
+#[test]
+fn systemd_unit_escapes_single_quote_in_paths() {
+  // systemd's tokenizer treats `'` as a quoting character and its C-style
+  // unescape accepts `\'` — a path carrying one must render escaped.
+  let spec = ServiceSpec {
+    label: "io.toolu.runner.octocat.hello",
+    exe: Path::new("/opt/o'brien/toolu-runner"),
+    config_path: Path::new("/home/ci/.toolu-runner/runners/octocat/hello/config.toml"),
+    diag_dir: Path::new("/home/ci/.toolu-runner/runners/octocat/hello/_diag"),
+  };
+  let unit = service_unit::systemd_unit(&spec);
+  assert!(unit.contains(r#"ExecStart="/opt/o\'brien/toolu-runner" run"#));
 }
 
 #[test]

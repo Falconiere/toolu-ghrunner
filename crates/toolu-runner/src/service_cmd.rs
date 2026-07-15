@@ -152,7 +152,9 @@ fn render_unit(
   let cfg = load_reg_config(config_path)?;
   let diag_dir = resolve_data_dir(&cfg.runtime.data_dir)?.join("_diag");
   let exe = std::env::current_exe()?;
-  let abs_config = config_path.canonicalize()?;
+  let abs_config = config_path
+    .canonicalize()
+    .map_err(|e| format!("cannot resolve config path {}: {e}", config_path.display()))?;
   let spec = ServiceSpec {
     label: &id.label,
     exe: &exe,
@@ -248,7 +250,8 @@ fn deactivate_launchd(plist: &Path, label: &str) -> Result<(), RunnerError> {
   if succeeds("launchctl", &["bootout", &target]) {
     return Ok(());
   }
-  run_checked("launchctl", &["unload", &plist.to_string_lossy()])
+  let plist_s = plist.to_string_lossy();
+  run_checked("launchctl", &["unload", &plist_s])
 }
 
 /// Disable + stop the unit, then reload the user manager.
