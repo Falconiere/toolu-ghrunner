@@ -627,9 +627,11 @@ A re-mint POSTs `generate-jitconfig` again through
 into the prior one via `config::remint::merge_reminted_config`
 (preserving `[services]` / `[cache]` / `[workspace]` / `[shadow]`
 verbatim), and rewrites `config.toml` / `credentials.json`
-all-or-nothing. `wire::net::register` maps 401/403 → `RunnerError::Auth`
-(fatal — guidance names `login` / `--token` / `TOOLU_RUNNER_TOKEN`) and
-any other non-2xx → `RunnerError::Network` (transient, backs off); a
+all-or-nothing. `wire::net::register` maps 429 and 5xx →
+`RunnerError::Network` (transient, backs off) and every other non-2xx —
+401/403 (bad bearer) as well as permanent client errors like 404/422 —
+→ `RunnerError::Auth` (fatal — guidance names `login` / `--token` /
+`TOOLU_RUNNER_TOKEN`; retrying a permanent failure cannot succeed); a
 missing stored bearer is likewise fatal, and `run` WARNs about it at
 startup (unless `--once`) so an unattended runner does not silently stop
 after one job. The cancellation token is wired through every

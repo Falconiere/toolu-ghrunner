@@ -117,10 +117,17 @@ impl RunLoop {
       let pending_remove = self.pending_path.exists();
       match next_action(&outcome, self.once, cancelled, pending_remove) {
         LoopAction::Exit(code) => return finish(code, outcome),
-        LoopAction::Reregister => match self.reregister(&cfg).await? {
-          Remint::Reset => backoff = BACKOFF_START,
-          Remint::Retry if self.backoff_step(&mut backoff).await => return Ok(()),
-          Remint::Retry => {},
+        LoopAction::Reregister => {
+          // A completed job is proof of health — shed backoff accumulated
+          // by earlier transient failures before the re-mint attempt.
+          if outcome.is_ok() {
+            backoff = BACKOFF_START;
+          }
+          match self.reregister(&cfg).await? {
+            Remint::Reset => backoff = BACKOFF_START,
+            Remint::Retry if self.backoff_step(&mut backoff).await => return Ok(()),
+            Remint::Retry => {},
+          }
         },
         LoopAction::BackoffRetry if self.backoff_step(&mut backoff).await => return Ok(()),
         LoopAction::BackoffRetry => {},

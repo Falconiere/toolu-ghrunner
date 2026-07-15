@@ -371,6 +371,7 @@ pub async fn register_jit(
   }
 
   Err(RunnerError::Auth(format!(
-    "generate-jitconfig failed with status {status}: {text}"
+    "generate-jitconfig failed with status {status} (permanent — retrying cannot succeed; \
+     check the registration URL and runner parameters): {text}"
   )))
 }
