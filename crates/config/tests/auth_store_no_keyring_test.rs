@@ -163,6 +163,14 @@ fn helper_default_file_roundtrip() {
   if std::env::var_os("DEFAULT_STORE_HELPER").is_none() {
     return;
   }
+  // Guard the premise, not just the outcome: if the test runner injected
+  // either env var past the parent's `env_remove`, fail HERE with a
+  // diagnosis instead of a confusing backend-mismatch assert below.
+  assert!(
+    std::env::var_os("TOOLU_RUNNER_KEYRING").is_none()
+      && std::env::var_os("TOOLU_RUNNER_NO_KEYRING").is_none(),
+    "parent driver must strip TOOLU_RUNNER_KEYRING / TOOLU_RUNNER_NO_KEYRING before re-exec"
+  );
   let dir = std::env::var_os("DEFAULT_STORE_DIR").expect("DEFAULT_STORE_DIR set by parent");
   let dir = Path::new(&dir);
 

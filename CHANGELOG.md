@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Login-token store defaults to a 0600 file; the OS keyring is now
+  opt-in.** `AuthStore::new` no longer touches the OS keyring by default —
+  the `login` token lands in `~/.toolu-runner/token-<host>.json` (0600),
+  matching the threat model of the on-disk `credentials.json`. This removes
+  the macOS keychain password prompt that re-appeared for every rebuilt
+  binary (keychain ACLs bind to the code signature) and failed `register`
+  outright when denied. Set `TOOLU_RUNNER_KEYRING=1` to opt back in; when
+  the keyring is opted in but unreachable, the store WARNs and falls back
+  to the 0600 file (previously the keyring was tried whenever
+  `TOOLU_RUNNER_NO_KEYRING` was absent). `TOOLU_RUNNER_NO_KEYRING` is kept
+  as a back-compat override and wins when both are set. **Migration:** a
+  token stored in the OS keyring by an older version is no longer read by
+  default — re-run `toolu-runner login` once (or set
+  `TOOLU_RUNNER_KEYRING=1`); `run` and `status` print this hint when no
+  file token is found.
+
 ## [0.4.0] - 2026-07-15
 
 ### Added

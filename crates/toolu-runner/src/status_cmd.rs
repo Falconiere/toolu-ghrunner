@@ -47,9 +47,18 @@ pub(crate) fn cmd_status(args: StatusArgs) -> Result<(), Box<dyn std::error::Err
     .ok()
     .and_then(|u| u.host_str().map(str::to_owned))
     .unwrap_or_else(|| "github.com".to_owned());
-  match AuthStore::new(&registry::runner_home()).load(&host)? {
+  let store = AuthStore::new(&registry::runner_home());
+  let backend = match &store {
+    AuthStore::File(_) => "0600 file (default; set TOOLU_RUNNER_KEYRING=1 for the OS keyring)",
+    AuthStore::Keyring => "OS keyring (TOOLU_RUNNER_KEYRING opt-in)",
+  };
+  println!("tokens:    {backend}");
+  match store.load(&host)? {
     Some(tok) => println!("login:     logged in to {host} (scopes: {})", tok.scope),
-    None => println!("login:     not logged in to {host}"),
+    None => println!(
+      "login:     not logged in to {host} — run `toolu-runner login`; a login stored in \
+       the OS keyring by an older version is only read with TOOLU_RUNNER_KEYRING=1"
+    ),
   }
   Ok(())
 }
