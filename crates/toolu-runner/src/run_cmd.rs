@@ -54,7 +54,7 @@ pub(crate) async fn cmd_run(args: RunArgs) -> Result<(), Box<dyn std::error::Err
   spawn_signal_bridge(cancel.clone());
 
   let store = AuthStore::new(&registry::runner_home());
-  let host = register_cmd::host_from_runner_url(&cfg.runner_url);
+  let host = register_cmd::host_from_runner_url(&cfg.runner_url)?;
   warn_if_no_login(&store, &host, args.once);
 
   RunLoop {

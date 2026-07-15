@@ -289,14 +289,19 @@ async fn register_and_persist(p: RegisterPersist<'_>) -> Result<i64, RunnerError
   Ok(runner_id)
 }
 
-/// Best-effort host for a validated registration URL, mirroring
-/// `status_cmd`. `runner_url` already passed `register`-time validation, so
-/// a parse miss falls back to github.com rather than failing the re-mint.
-pub(crate) fn host_from_runner_url(url: &str) -> String {
+/// Host of the persisted registration URL. `runner_url` passed
+/// `register`-time validation, so a parse miss here means a hand-edited or
+/// corrupted `config.toml` — fail the re-mint naming the bad URL rather
+/// than silently falling back to github.com's JIT endpoint.
+pub(crate) fn host_from_runner_url(url: &str) -> Result<String, RunnerError> {
   url::Url::parse(url)
     .ok()
     .and_then(|u| u.host_str().map(str::to_owned))
-    .unwrap_or_else(|| "github.com".to_owned())
+    .ok_or_else(|| {
+      RunnerError::Config(format!(
+        "runner_url in config.toml is not a valid URL: {url}"
+      ))
+    })
 }
 
 /// Re-mint a JIT config for an existing registration and persist it,
@@ -308,7 +313,7 @@ pub(crate) async fn remint_and_persist(
   config_path: &Path,
   creds_path: &Path,
 ) -> Result<(), RunnerError> {
-  let host = host_from_runner_url(&prior.runner_url);
+  let host = host_from_runner_url(&prior.runner_url)?;
   let p = RegisterPersist {
     url: &prior.runner_url,
     token: bearer,

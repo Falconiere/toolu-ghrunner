@@ -4,9 +4,9 @@
 //! registration under a temp home. The temp dir is BOTH `TOOLU_RUNNER_HOME`
 //! (so config resolution finds the registration) and `HOME` (so the unit file
 //! lands under an isolated LaunchAgents / systemd-user dir). Assertions branch
-//! on the host OS: launchd plist on macOS, systemd unit on Linux. No test
-//! exercises the default activate mode — nothing here invokes a live
-//! `launchctl` / `systemctl` that would load a real service.
+//! on the host OS: launchd plist on macOS, systemd unit on Linux. The default
+//! activate mode is exercised through PATH-shim `launchctl` / `systemctl`
+//! scripts that log their argv — no real service is ever loaded.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -121,6 +121,154 @@ fn assert_unit_content(stdout: &str, exe: &str, config: &str) {
       "unit must set Restart=always; got:\n{stdout}"
     );
   }
+}
+
+/// Write an executable shell script named `name` into `dir` (a PATH shim for
+/// `launchctl` / `systemctl`). The script appends its argv to `$SHIM_LOG`.
+#[cfg(unix)]
+fn write_shim(dir: &Path, name: &str, body: &str) -> Result<(), Box<dyn std::error::Error>> {
+  use std::os::unix::fs::PermissionsExt;
+  let path = dir.join(name);
+  std::fs::write(&path, body)?;
+  std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))?;
+  Ok(())
+}
+
+/// Prepare a shim dir + log and return `(shim_dir, log_path, path_env)` —
+/// `path_env` prepends the shim dir to the current `PATH`.
+#[cfg(unix)]
+fn shim_env(home: &Path) -> Result<(PathBuf, PathBuf, String), Box<dyn std::error::Error>> {
+  let bin = home.join("shim-bin");
+  std::fs::create_dir_all(&bin)?;
+  let log = home.join("shim.log");
+  let path_env = format!(
+    "{}:{}",
+    bin.display(),
+    std::env::var("PATH").unwrap_or_default()
+  );
+  Ok((bin, log, path_env))
+}
+
+/// Run the default (write + activate) mode with `shim_body` installed as
+/// BOTH the `launchctl` and `systemctl` PATH shim; returns the process
+/// output and the shim-call log (empty if no shim was ever invoked).
+#[cfg(unix)]
+fn run_activate(
+  home: &Path,
+  config_path: &Path,
+  shim_body: &str,
+) -> Result<(std::process::Output, String), Box<dyn std::error::Error>> {
+  let (bin, log, path_env) = shim_env(home)?;
+  write_shim(&bin, "launchctl", shim_body)?;
+  write_shim(&bin, "systemctl", shim_body)?;
+  let output = install_cmd(home, config_path, &[])
+    .env("PATH", &path_env)
+    .env("SHIM_LOG", &log)
+    .output()?;
+  let calls = std::fs::read_to_string(&log).unwrap_or_default();
+  Ok((output, calls))
+}
+
+#[cfg(unix)]
+#[test]
+fn default_mode_writes_the_unit_and_invokes_the_supervisor() {
+  let home = tempfile::tempdir().expect("tempdir");
+  let config_path = write_fixture(home.path(), "octo", "demo").expect("write fixture");
+  let record_ok = "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$SHIM_LOG\"\nexit 0\n";
+
+  let (output, calls) =
+    run_activate(home.path(), &config_path, record_ok).expect("default activate run");
+
+  assert!(
+    output.status.success(),
+    "default mode should exit 0; stderr:\n{}",
+    String::from_utf8_lossy(&output.stderr)
+  );
+  let dest = expected_dest(home.path());
+  assert!(
+    dest.is_file(),
+    "default mode must write the unit at {}",
+    dest.display()
+  );
+  if cfg!(target_os = "macos") {
+    assert_eq!(
+      calls,
+      format!(
+        "bootstrap gui/{} {}\n",
+        real_uid().expect("id -u"),
+        dest.display()
+      ),
+      "modern bootstrap alone must load the unit"
+    );
+  } else {
+    assert_eq!(
+      calls, "--user daemon-reload\n--user enable --now toolu-runner-octo-demo.service\n",
+      "systemd must daemon-reload then enable --now the unit"
+    );
+  }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn launchd_bootstrap_failure_falls_back_to_legacy_load() {
+  let home = tempfile::tempdir().expect("tempdir");
+  let config_path = write_fixture(home.path(), "octo", "demo").expect("write fixture");
+  // A failing `bootstrap` (older host) must fall back to legacy `load -w`.
+  let bootstrap_fails = "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$SHIM_LOG\"\n\
+                         case \"$1\" in bootstrap) exit 1;; esac\nexit 0\n";
+
+  let (output, calls) =
+    run_activate(home.path(), &config_path, bootstrap_fails).expect("default activate run");
+
+  assert!(
+    output.status.success(),
+    "legacy fallback should still exit 0; stderr:\n{}",
+    String::from_utf8_lossy(&output.stderr)
+  );
+  let dest = expected_dest(home.path());
+  assert_eq!(
+    calls,
+    format!(
+      "bootstrap gui/{uid} {dest}\nload -w {dest}\n",
+      uid = real_uid().expect("id -u"),
+      dest = dest.display()
+    ),
+    "failed bootstrap must fall back to legacy load -w"
+  );
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+#[test]
+fn systemd_activation_failure_is_fatal_and_named() {
+  let home = tempfile::tempdir().expect("tempdir");
+  let config_path = write_fixture(home.path(), "octo", "demo").expect("write fixture");
+  // A failing `daemon-reload` must surface as a fatal, named error.
+  let always_fails = "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$SHIM_LOG\"\nexit 1\n";
+
+  let (output, calls) =
+    run_activate(home.path(), &config_path, always_fails).expect("default activate run");
+
+  assert!(
+    !output.status.success(),
+    "a failing systemctl must fail the command"
+  );
+  assert!(
+    String::from_utf8_lossy(&output.stderr).contains("systemctl"),
+    "the error must name the failing systemctl invocation; stderr:\n{}",
+    String::from_utf8_lossy(&output.stderr)
+  );
+  assert_eq!(
+    calls, "--user daemon-reload\n",
+    "activation must stop at the first failing systemctl call"
+  );
+}
+
+/// The real `id -u` for the current user — the same value the bin embeds in
+/// its `gui/<uid>` launchd target (the `id` binary is NOT shimmed).
+#[cfg(unix)]
+fn real_uid() -> Result<String, Box<dyn std::error::Error>> {
+  let out = Command::new("id").arg("-u").output()?;
+  Ok(String::from_utf8_lossy(&out.stdout).trim().to_owned())
 }
 
 #[test]

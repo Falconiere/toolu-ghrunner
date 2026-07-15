@@ -367,12 +367,14 @@ pub async fn register_jit(
   }
   if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
     return Err(RunnerError::Network(format!(
-      "generate-jitconfig failed with status {status}: {text}"
+      "generate-jitconfig failed with status {status} (transient — the run loop will back \
+       off and retry): {text}"
     )));
   }
 
   Err(RunnerError::Auth(format!(
     "generate-jitconfig failed with status {status} (permanent — retrying cannot succeed; \
-     check the registration URL and runner parameters): {text}"
+     check the registration URL and runner parameters, or re-run 'toolu-runner login' if \
+     the token lacks access to this repository): {text}"
   )))
 }
