@@ -11,7 +11,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 use config::config::{load_config as load_reg_config, resolve_data_dir};
-use config::service_unit::{ServiceSpec, launchd_plist, systemd_unit};
+use config::service_unit::{
+  ServiceAction, ServiceSpec, launchd_plist, service_action_summary, systemd_unit,
+};
 use shared::RunnerError;
 
 use crate::cli::InstallServiceArgs;
@@ -53,33 +55,27 @@ pub(crate) fn cmd_install_service(
     return Ok(());
   }
 
-  // The core does the filesystem + activation work and returns the outcome;
-  // all user-facing printing stays here so the CLI output is owned in one place.
+  // The core does the filesystem + activation work and returns a
+  // self-describing outcome; the caller prints from `outcome.action` alone
+  // (never re-checking the flags it passed in). The status line is owned by
+  // the pure `service_action_summary`, so the CLI output lives in one place.
   let outcome = install_service_core(&config_path, args.print, args.no_activate, args.remove)?;
-  if args.remove {
-    if outcome.activated {
-      println!("removed {} ({})", outcome.label, outcome.path.display());
-    } else {
-      println!(
-        "no service installed at {} — nothing to do",
-        outcome.path.display()
-      );
-    }
-    return Ok(());
+  let summary = service_action_summary(&outcome.action, &outcome.label, &outcome.path);
+  if !summary.is_empty() {
+    println!("{summary}");
   }
-  if args.no_activate {
-    println!("wrote {}", outcome.path.display());
+  // A written-but-not-activated unit needs a follow-on activation command.
+  // It depends on the supervisor + unit id, which the pure summary can't
+  // compute, so it is printed here — keyed off the outcome, not the flags.
+  if matches!(
+    outcome.action,
+    ServiceAction::Installed { activated: false }
+  ) {
     println!(
       "activate it with:\n  {}",
       activation_hint(supervisor, &outcome.path, &id)
     );
-    return Ok(());
   }
-  println!(
-    "installed {} and activated it at {}",
-    outcome.label,
-    outcome.path.display()
-  );
   Ok(())
 }
 
@@ -90,10 +86,11 @@ pub(crate) struct InstallOutcome {
   pub path: PathBuf,
   /// The service label (launchd `Label` / systemd `Description` suffix).
   pub label: String,
-  /// `true` when the unit ended up activated (default install) or a unit file
-  /// was actually deleted (`--remove`); `false` for `--no-activate`, a
-  /// `--remove` with nothing to delete, and the `print` short-circuit.
-  pub activated: bool,
+  /// What the core did, so the caller prints the right message without
+  /// re-inspecting the flags. Encodes the `--no-activate` vs activated split
+  /// (`ServiceAction::Installed { activated }`), the two `--remove` cases,
+  /// and the `print` short-circuit.
+  pub action: ServiceAction,
 }
 
 /// The write / activate / remove work behind `install-service`, with all
@@ -119,7 +116,7 @@ pub(crate) fn install_service_core(
     return Ok(InstallOutcome {
       path: PathBuf::new(),
       label: id.label,
-      activated: false,
+      action: ServiceAction::Printed,
     });
   }
 
@@ -134,14 +131,14 @@ pub(crate) fn install_service_core(
     return Ok(InstallOutcome {
       path: dest,
       label: id.label,
-      activated: false,
+      action: ServiceAction::Installed { activated: false },
     });
   }
   activate(supervisor, &dest, &id)?;
   Ok(InstallOutcome {
     path: dest,
     label: id.label,
-    activated: true,
+    action: ServiceAction::Installed { activated: true },
   })
 }
 
@@ -249,9 +246,10 @@ fn write_unit(dest: &Path, unit: &str) -> Result<(), std::io::Error> {
 }
 
 /// `--remove`: deactivate the unit (best-effort) and delete the file.
-/// Idempotent — a missing file returns `activated: false` (the caller reports
-/// nothing-to-do). Deletion failure IS an error; deactivation failure (unit
-/// never loaded) is not. Never prints — printing is the caller's job.
+/// Idempotent — a missing file returns `ServiceAction::NothingToRemove` (the
+/// caller reports nothing-to-do). Deletion failure IS an error; deactivation
+/// failure (unit never loaded) is not. Never prints — printing is the caller's
+/// job.
 fn remove_service(
   supervisor: Supervisor,
   dest: &Path,
@@ -261,7 +259,7 @@ fn remove_service(
     return Ok(InstallOutcome {
       path: dest.to_owned(),
       label: id.label.clone(),
-      activated: false,
+      action: ServiceAction::NothingToRemove,
     });
   }
   deactivate(supervisor, dest, id);
@@ -271,12 +269,12 @@ fn remove_service(
     Ok(()) => Ok(InstallOutcome {
       path: dest.to_owned(),
       label: id.label.clone(),
-      activated: true,
+      action: ServiceAction::Removed,
     }),
     Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(InstallOutcome {
       path: dest.to_owned(),
       label: id.label.clone(),
-      activated: false,
+      action: ServiceAction::NothingToRemove,
     }),
     Err(e) => Err(e.into()),
   }
