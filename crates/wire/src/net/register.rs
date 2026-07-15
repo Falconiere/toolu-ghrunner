@@ -356,7 +356,8 @@ pub async fn register_jit(
   }
 
   // The run loop treats Auth as fatal and Network as transient (backoff).
-  // Only 429 and 5xx are genuinely transient; every other non-2xx (404 gone
+  // 401 gets its own login-specific message first; 429 and 5xx are the only
+  // genuinely transient statuses; every remaining non-2xx (403, 404 gone
   // repo, 422 bad params, …) is permanent and must be fatal — mapping it to
   // Network would make the loop retry a hopeless mint forever.
   if status == reqwest::StatusCode::UNAUTHORIZED {

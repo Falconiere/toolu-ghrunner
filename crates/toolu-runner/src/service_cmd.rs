@@ -275,10 +275,14 @@ fn current_uid() -> Result<String, RunnerError> {
 }
 
 /// Run `program args`, capturing output. An IO failure (e.g. the binary is
-/// missing) is an error naming the command line.
+/// missing) is an error naming the command line. Runner secrets are dropped
+/// from the child env — `launchctl`/`systemctl` don't need them (full
+/// `env_clear` would break `systemctl --user`, which needs XDG/DBus vars).
 fn run_capture(program: &str, args: &[&str]) -> Result<Output, RunnerError> {
   Command::new(program)
     .args(args)
+    .env_remove("TOOLU_RUNNER_TOKEN")
+    .env_remove("TOOLU_RUNNER_CLIENT_ID")
     .output()
     .map_err(|e| RunnerError::Config(format!("failed to run `{program} {}`: {e}", args.join(" "))))
 }
