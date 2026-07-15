@@ -629,7 +629,8 @@ into the prior one via `config::remint::merge_reminted_config`
 verbatim), and rewrites `config.toml` / `credentials.json`
 all-or-nothing. `wire::net::register` maps 429 and 5xx →
 `RunnerError::Network` (transient, backs off) and every other non-2xx —
-401/403 (bad bearer) as well as permanent client errors like 404/422 —
+401 (bad bearer, with its own login-specific message), 403 (valid
+bearer, insufficient scope), and permanent client errors like 404/422 —
 → `RunnerError::Auth` (fatal — guidance names `login` / `--token` /
 `TOOLU_RUNNER_TOKEN`; retrying a permanent failure cannot succeed); a
 missing stored bearer is likewise fatal, and `run` WARNs about it at
