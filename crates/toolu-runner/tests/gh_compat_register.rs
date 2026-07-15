@@ -270,6 +270,57 @@ async fn register_jit_maps_5xx_to_network_for_backoff() {
   );
 }
 
+#[tokio::test]
+async fn register_jit_maps_429_to_network_for_backoff() {
+  let server = MockServer::start().await;
+
+  Mock::given(method("POST"))
+    .and(path(STUB_PATH))
+    .respond_with(ResponseTemplate::new(429).set_body_string(r#"{"message":"rate limited"}"#))
+    .expect(1)
+    .mount(&server)
+    .await;
+
+  let client = reqwest::Client::new();
+  let url = stub_repo_url(&server);
+  let labels = ["self-hosted".to_owned()];
+  let err = register_jit(&client, &params_for(&url, "reg-token-xyz", &labels, false))
+    .await
+    .expect_err("a 429 must yield an Err");
+
+  assert!(
+    matches!(err, RunnerError::Network(_)),
+    "a rate limit is transient — Network so the run loop backs off, got {err:?}"
+  );
+}
+
+#[tokio::test]
+async fn register_jit_maps_404_to_fatal_auth() {
+  let server = MockServer::start().await;
+
+  Mock::given(method("POST"))
+    .and(path(STUB_PATH))
+    .respond_with(ResponseTemplate::new(404).set_body_string(r#"{"message":"Not Found"}"#))
+    .expect(1)
+    .mount(&server)
+    .await;
+
+  let client = reqwest::Client::new();
+  let url = stub_repo_url(&server);
+  let labels = ["self-hosted".to_owned()];
+  let err = register_jit(&client, &params_for(&url, "reg-token-xyz", &labels, false))
+    .await
+    .expect_err("a 404 must yield an Err");
+
+  let msg = format!("{err}");
+  assert!(
+    matches!(err, RunnerError::Auth(_)),
+    "a permanent 4xx (repo gone, bad params) must be fatal — the loop must \
+     not retry a hopeless mint forever, got {err:?}"
+  );
+  assert!(msg.contains("404"), "status surfaced: {msg}");
+}
+
 /// Mount the shared `--replace` prelude: the first mint 409s, the
 /// runner list yields the same-name runner (id 42), and its DELETE
 /// succeeds. Each test mounts its own retry-mint response on top.

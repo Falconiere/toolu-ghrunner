@@ -185,6 +185,8 @@ fn spawn_run(
 }
 
 /// Deliver SIGINT to the child by pid — no `unsafe`, just `kill -INT`.
+/// Non-unix hosts get a clear error instead of a missing-binary failure.
+#[cfg(unix)]
 fn send_sigint(pid: u32) -> Result<(), Box<dyn Error>> {
   let status = Command::new("kill")
     .arg("-INT")
@@ -196,6 +198,12 @@ fn send_sigint(pid: u32) -> Result<(), Box<dyn Error>> {
   Ok(())
 }
 
+/// Non-unix stub: the graceful-shutdown assertion needs SIGINT.
+#[cfg(not(unix))]
+fn send_sigint(_pid: u32) -> Result<(), Box<dyn Error>> {
+  Err("SIGINT delivery is not supported on this platform".into())
+}
+
 /// Best-effort read of the child's captured stderr for a failure message.
 fn read_log(path: &Path) -> String {
   std::fs::read_to_string(path).unwrap_or_else(|err| format!("<no captured stderr: {err}>"))
@@ -203,11 +211,11 @@ fn read_log(path: &Path) -> String {
 
 /// Wrap a failure `context` with the child's captured stderr for diagnosis.
 fn with_stderr(context: &str, stderr_path: &Path) -> Box<dyn Error> {
-  format!(
-    "{context}\n--- captured run stderr ---\n{}",
-    read_log(stderr_path)
-  )
-  .into()
+  let mut log = read_log(stderr_path);
+  if log.is_empty() {
+    log = "(no stderr captured — the failure likely happened during test setup)".to_owned();
+  }
+  format!("{context}\n--- captured run stderr ---\n{log}").into()
 }
 
 /// Attach the common GitHub REST headers (auth, media type, API version).
@@ -231,7 +239,10 @@ async fn dispatch(client: &reqwest::Client, gh: &GhLive) -> Result<(), Box<dyn E
     .await?;
   let status = resp.status();
   if status != reqwest::StatusCode::NO_CONTENT {
-    let detail = resp.text().await.unwrap_or_default();
+    let detail = resp
+      .text()
+      .await
+      .unwrap_or_else(|err| format!("<body read error: {err}>"));
     return Err(format!("workflow_dispatch returned {status} (expected 204): {detail}").into());
   }
   Ok(())
@@ -423,20 +434,30 @@ async fn two_jobs_one_invocation() -> Result<(), Box<dyn Error>> {
   )
   .await?;
 
+  shutdown_cleanly(&mut guard, &stderr_path).await
+}
+
+/// SIGINT the child and require a clean (status 0) exit within
+/// [`SHUTDOWN_TIMEOUT`] — the spec's "cancelled → exit 0" contract.
+async fn shutdown_cleanly(
+  guard: &mut ChildGuard,
+  stderr_path: &Path,
+) -> Result<(), Box<dyn Error>> {
   send_sigint(guard.0.id())?;
   let status = wait_for_exit(&mut guard.0, SHUTDOWN_TIMEOUT)
     .await?
     .ok_or_else(|| {
       with_stderr(
         &format!("`run` did not exit within {SHUTDOWN_TIMEOUT:?} of SIGINT"),
-        &stderr_path,
+        stderr_path,
       )
     })?;
-  assert!(
-    status.success(),
-    "`run` must exit cleanly on SIGINT; got {status}.\n{}",
-    read_log(&stderr_path)
-  );
+  if !status.success() {
+    return Err(with_stderr(
+      &format!("`run` must exit cleanly on SIGINT; got {status}"),
+      stderr_path,
+    ));
+  }
   Ok(())
 }
 

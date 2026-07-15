@@ -355,21 +355,22 @@ pub async fn register_jit(
     )));
   }
 
-  // The run loop treats Auth as fatal (bad/expired bearer or a dead JIT) and
-  // Network as transient (backoff): only 401/403 are Auth; a GitHub 5xx must
-  // map to Network so a re-mint retries instead of killing the loop.
+  // The run loop treats Auth as fatal and Network as transient (backoff).
+  // Only 429 and 5xx are genuinely transient; every other non-2xx (404 gone
+  // repo, 422 bad params, …) is permanent and must be fatal — mapping it to
+  // Network would make the loop retry a hopeless mint forever.
   if status == reqwest::StatusCode::UNAUTHORIZED {
     return Err(RunnerError::Auth(
       "stored GitHub token invalid or expired — run 'toolu-runner login'".into(),
     ));
   }
-  if status == reqwest::StatusCode::FORBIDDEN {
-    return Err(RunnerError::Auth(format!(
+  if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+    return Err(RunnerError::Network(format!(
       "generate-jitconfig failed with status {status}: {text}"
     )));
   }
 
-  Err(RunnerError::Network(format!(
+  Err(RunnerError::Auth(format!(
     "generate-jitconfig failed with status {status}: {text}"
   )))
 }
