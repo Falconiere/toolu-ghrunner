@@ -95,3 +95,17 @@ fn systemd_unit_minimal_spec_without_spaces() {
   assert!(unit.contains("RestartSec=5\n"));
   assert!(unit.contains("WantedBy=default.target\n"));
 }
+
+#[test]
+fn systemd_unit_escapes_percent_in_description() {
+  // `%` is systemd's specifier character (systemd.unit(5)) — a label
+  // carrying one must render as `%%` in Description.
+  let spec = ServiceSpec {
+    label: "io.toolu.runner.100%.repo",
+    exe: Path::new("/usr/local/bin/toolu-runner"),
+    config_path: Path::new("/home/ci/.toolu-runner/runners/pct/repo/config.toml"),
+    diag_dir: Path::new("/home/ci/.toolu-runner/runners/pct/repo/_diag"),
+  };
+  let unit = service_unit::systemd_unit(&spec);
+  assert!(unit.contains("Description=toolu-runner (io.toolu.runner.100%%.repo)\n"));
+}

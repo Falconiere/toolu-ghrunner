@@ -160,8 +160,9 @@ impl AuthStore {
 
 /// Whether `TOOLU_RUNNER_NO_KEYRING` forces the file backend: set to a
 /// non-empty value other than `"0"`. Set-but-empty and the literal `"0"`
-/// count as "not requested". Pure (takes the raw env value) so the rule is
-/// unit-tested without mutating the environment or touching the keyring.
+/// count as "not requested" — the comparison is exact, no trimming, so
+/// `"0 "` or `"00"` count as set. Pure (takes the raw env value) so the
+/// rule is unit-tested without mutating the environment or the keyring.
 pub fn no_keyring_forced(value: Option<&OsStr>) -> bool {
   match value {
     Some(v) => !v.is_empty() && v != OsStr::new("0"),

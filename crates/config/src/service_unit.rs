@@ -70,7 +70,12 @@ pub fn systemd_unit(spec: &ServiceSpec<'_>) -> String {
 
   let mut s = String::new();
   s.push_str("[Unit]\n");
-  s.push_str(&format!("Description=toolu-runner ({})\n", spec.label));
+  // `%` is the only systemd-special character in a Description value
+  // (specifier expansion, systemd.unit(5)); escape it as `%%`.
+  s.push_str(&format!(
+    "Description=toolu-runner ({})\n",
+    spec.label.replace('%', "%%")
+  ));
   s.push('\n');
   s.push_str("[Service]\n");
   s.push_str(&format!("ExecStart={exe} run --config {config}\n"));

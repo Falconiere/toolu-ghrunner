@@ -257,7 +257,7 @@ fn parse_run(entry: &serde_json::Value) -> Result<Run, Box<dyn Error>> {
   let status = entry
     .get("status")
     .and_then(serde_json::Value::as_str)
-    .unwrap_or_default()
+    .ok_or("run entry missing a string `status`")?
     .to_owned();
   let conclusion = entry
     .get("conclusion")
