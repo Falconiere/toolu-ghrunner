@@ -33,3 +33,8 @@ jobs:
           # diff is ever reviewed under merge-ref rules. Requires
           # toolu-ghactions >= 6.3.0.
           RULES_REF: merge
+          # Surrender cap (toolu-ghactions >= 6.4.0): on review round 5+ a
+          # blocker-free "changes" verdict auto-approves — findings stay
+          # listed as advisory — so a fresh-findings-every-push review can
+          # never block a PR forever. One blocker finding disables the cap.
+          MAX_ROUNDS: '5'
