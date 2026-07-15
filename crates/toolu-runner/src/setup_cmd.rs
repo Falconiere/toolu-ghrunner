@@ -160,41 +160,46 @@ async fn run_wizard(
   render_loop(&mut terminal, &mut state, &mut rx, &cancel)
 }
 
-/// Fold pipeline events into `state` and paint until the wizard finishes or
-/// the user quits. Each frame: drain every pending [`StepEvent`], draw, then
-/// poll input for up to [`TICK`]. Once every stage is complete (`done`) or one
-/// failed (`error`), it holds the final frame until any key is pressed, then
-/// exits — mapping a failed stage to `Err` (so `setup` exits non-zero) and a
-/// clean run to `Ok`. A mid-run `Quit` cancels the pipeline and returns `Ok`.
+/// Fold pipeline events into `state` and paint in two explicit phases. The
+/// interactive phase (`while !finished`) draws, drains every [`StepEvent`],
+/// recomputes `finished`, and lets a `Quit` key cancel the pipeline. Once the
+/// pipeline finished (not on a mid-run quit) the final-frame hold draws the
+/// last frame ONCE and blocks for a key, so the outcome stays on screen. A
+/// failed stage maps to `Err` (non-zero exit); a clean finish or quit is `Ok`.
 fn render_loop(
   terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
   state: &mut WizardState,
   rx: &mut UnboundedReceiver<StepEvent>,
   cancel: &CancellationToken,
 ) -> Result<(), Box<dyn std::error::Error>> {
-  loop {
+  let mut finished = false;
+  while !finished {
+    terminal.draw(|frame| wizard::ui::render(frame, state))?;
+    while let Ok(ev) = rx.try_recv() {
+      state.apply(ev);
+    }
+    finished = state.done || state.error.is_some();
+    if finished {
+      break;
+    }
+    if let Some(key) = poll_key()?
+      && wizard::input::action_for(state, key) == Action::Quit
+    {
+      cancel.cancel();
+      break;
+    }
+  }
+
+  // Only hold the final frame when the pipeline actually finished — a mid-run
+  // quit (finished == false) skips straight to the outcome and exits.
+  if finished {
     while let Ok(ev) = rx.try_recv() {
       state.apply(ev);
     }
     terminal.draw(|frame| wizard::ui::render(frame, state))?;
-
-    let finished = state.done || state.error.is_some();
-    let Some(key) = poll_key()? else {
-      continue;
-    };
-    // Once finished, the final frame is already drawn: any key dismisses it
-    // and we break to map the outcome. While running, only `Quit` exits
-    // (cancelling the pipeline) — other keys just repaint.
-    if finished {
-      break;
-    }
-    if wizard::input::action_for(state, key) == Action::Quit {
-      cancel.cancel();
-      return Ok(());
-    }
+    block_for_key()?;
   }
-  // A failed stage exits non-zero (naming the stage's error); a clean finish
-  // is Ok. The terminal guard restores the screen as this returns.
+
   match &state.error {
     Some(error) => Err(RunnerError::StepExecution(error.clone()).into()),
     None => Ok(()),
@@ -213,6 +218,17 @@ fn poll_key() -> io::Result<Option<KeyEvent>> {
     Ok(Some(key))
   } else {
     Ok(None)
+  }
+}
+
+/// Block until the user presses a key, ignoring timeouts and non-key events.
+/// Holds the wizard's final frame on screen until it is dismissed. Reuses
+/// [`poll_key`], so a non-key event or a [`TICK`] timeout just polls again.
+fn block_for_key() -> io::Result<()> {
+  loop {
+    if poll_key()?.is_some() {
+      return Ok(());
+    }
   }
 }
 

@@ -5,7 +5,7 @@
 //! [`StepEvent::Failed`] and returns (no panics, no swallowed errors). The
 //! pure reducers live in `observability::wizard`; this module owns the I/O.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use config::auth_store::{self, AuthStore, BearerDecision};
@@ -227,18 +227,15 @@ async fn verify_online(
   label: &str,
   cancel: &CancellationToken,
 ) -> VerifyOutcome {
-  // The runner writes its tracing log to the fixed home `_diag/` (tracing is
-  // initialized before any per-repo config loads), not the registration dir.
-  let diag = Some(shared::startup::default_data_dir().join("_diag"));
+  let diag_dirs = candidate_diag_dirs(inputs);
   let mut log_tail = String::new();
   for i in 0..VERIFY_POLL_SECS {
     if cancel.is_cancelled() {
       break;
     }
-    log_tail = diag
-      .as_deref()
-      .map(read_runner_log_tail)
-      .unwrap_or_default();
+    // Scan every candidate dir each poll; the marker counts if it appears in
+    // ANY of them (concatenating the per-dir `runner.log*` tails).
+    log_tail = diag_dirs.iter().map(|d| read_runner_log_tail(d)).collect();
     if log_tail.contains(ONLINE_MARKER) {
       break;
     }
@@ -247,6 +244,21 @@ async fn verify_online(
     }
   }
   verify_decision(service_active(label, inputs), &log_tail, ONLINE_MARKER)
+}
+
+/// The deduplicated `_diag` dirs the verify stage scans for the online marker.
+/// The runner writes its tracing log to the fixed home `_diag/` (tracing
+/// inits before per-repo config loads); we also scan the registration dir's
+/// `_diag/` as a fallback so verify is robust to custom setups.
+fn candidate_diag_dirs(inputs: &SetupInputs) -> Vec<PathBuf> {
+  let mut dirs = vec![shared::startup::default_data_dir().join("_diag")];
+  if let Some(parent) = inputs.config_path.parent() {
+    let reg_diag = parent.join("_diag");
+    if !dirs.contains(&reg_diag) {
+      dirs.push(reg_diag);
+    }
+  }
+  dirs
 }
 
 /// Whether the supervisor reports the runner's unit as loaded/active. macOS

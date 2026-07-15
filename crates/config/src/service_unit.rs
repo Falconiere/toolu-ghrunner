@@ -9,6 +9,45 @@
 
 use std::path::Path;
 
+/// What an `install-service` invocation did, so the CLI can print the right
+/// status line without re-inspecting the flags it passed in. The variants
+/// map one-to-one to the command's outcomes (write+activate, write-only,
+/// remove-hit, remove-miss, print).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServiceAction {
+  /// The unit file was written. `activated` is `true` when it was also loaded
+  /// into the supervisor (default mode) and `false` for `--no-activate`.
+  Installed {
+    /// Whether the written unit was loaded into the supervisor.
+    activated: bool,
+  },
+  /// `--remove` deleted an installed unit file.
+  Removed,
+  /// `--remove` found no unit file to delete (idempotent no-op).
+  NothingToRemove,
+  /// `--print` emitted the unit text to stdout; there is no status line.
+  Printed,
+}
+
+/// The exact user-facing status line for a completed [`ServiceAction`], given
+/// the service `label` and the acted-on unit `path`. Returns an empty string
+/// for [`ServiceAction::Printed`] (print mode emits the unit text itself, not
+/// a status line). The strings match `install-service`'s historical output
+/// byte-for-byte, so the CLI never re-derives them from its flags.
+pub fn service_action_summary(action: &ServiceAction, label: &str, path: &Path) -> String {
+  match action {
+    ServiceAction::Installed { activated: true } => {
+      format!("installed {label} and activated it at {}", path.display())
+    },
+    ServiceAction::Installed { activated: false } => format!("wrote {}", path.display()),
+    ServiceAction::Removed => format!("removed {label} ({})", path.display()),
+    ServiceAction::NothingToRemove => {
+      format!("no service installed at {} — nothing to do", path.display())
+    },
+    ServiceAction::Printed => String::new(),
+  }
+}
+
 /// Inputs for supervisor-unit generation, shared by both renderers.
 pub struct ServiceSpec<'a> {
   /// Supervisor identity: the launchd `Label` and the systemd
