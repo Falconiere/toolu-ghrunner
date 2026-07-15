@@ -160,7 +160,7 @@ impl RunLoop {
     cfg: &RunnerRegistrationConfig,
   ) -> Result<Remint, Box<dyn std::error::Error>> {
     let Some(bearer) = auth_store::resolve_bearer(&self.store, &self.host, None)? else {
-      return Err(REMINT_TOKEN_HELP.into());
+      return Err(format!("no GitHub token for {} — {REMINT_TOKEN_HELP}", self.host).into());
     };
     match register_cmd::remint_and_persist(cfg, &bearer, &self.config_path, &self.creds_path).await
     {

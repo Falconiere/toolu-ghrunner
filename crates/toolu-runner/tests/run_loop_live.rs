@@ -253,11 +253,11 @@ fn parse_run(entry: &serde_json::Value) -> Result<Run, Box<dyn Error>> {
   let id = entry
     .get("id")
     .and_then(serde_json::Value::as_u64)
-    .ok_or("run entry missing a numeric `id`")?;
+    .ok_or_else(|| format!("run entry missing a numeric `id`: {entry}"))?;
   let status = entry
     .get("status")
     .and_then(serde_json::Value::as_str)
-    .ok_or("run entry missing a string `status`")?
+    .ok_or_else(|| format!("run entry missing a string `status`: {entry}"))?
     .to_owned();
   let conclusion = entry
     .get("conclusion")

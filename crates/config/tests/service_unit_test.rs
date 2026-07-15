@@ -91,6 +91,23 @@ fn systemd_unit_escapes_single_quote_in_paths() {
 }
 
 #[test]
+fn systemd_unit_escapes_dollar_and_percent_in_paths() {
+  // `$` (variable expansion) and `%` (specifier expansion) are substituted
+  // inside double-quoted ExecStart values — they must render as `$$`/`%%`.
+  let spec = ServiceSpec {
+    label: "io.toolu.runner.octocat.hello",
+    exe: Path::new("/opt/100% $rusty/toolu-runner"),
+    config_path: Path::new("/home/ci/.toolu-runner/runners/octocat/hello/config.toml"),
+    diag_dir: Path::new("/home/ci/.toolu-runner/runners/octocat/hello/_diag"),
+  };
+  let unit = service_unit::systemd_unit(&spec);
+  assert_eq!(
+    unit,
+    include_str!("fixtures/service/systemd_specials.service")
+  );
+}
+
+#[test]
 fn systemd_unit_escapes_percent_in_description() {
   // `%` is systemd's specifier character (systemd.unit(5)) — a label
   // carrying one must render as `%%` in Description.
