@@ -82,8 +82,9 @@ pub(crate) enum Command {
   Register(RegisterArgs),
   /// Run the listener loop, staying online across jobs.
   ///
-  /// Loads the persisted registration, acquires the exclusive single-job
-  /// lock (`~/.toolu-runner/.lock`), creates a broker session, and polls
+  /// Loads the persisted registration, acquires the registration's
+  /// exclusive job lock (`<home>/runners/<owner>/<repo>/.lock`; the legacy
+  /// root `<home>/.lock` for old layouts), creates a broker session, and polls
   /// until a job arrives. After each job it re-mints a fresh JIT config
   /// with the stored `login` token and keeps listening, so one `run` stays
   /// online across many jobs. `--once` runs a single job and exits. SIGINT
