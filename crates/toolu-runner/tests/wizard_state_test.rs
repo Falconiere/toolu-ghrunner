@@ -136,8 +136,17 @@ fn probe_skips_auth_and_register_from_disk() -> TestResult {
     steps.contains(&StepId::Register),
     "existing config skips Register"
   );
-  assert!(!steps.contains(&StepId::Install));
-  assert!(!steps.contains(&StepId::Verify));
+  // Auth + Register skip ONLY — Install and Verify always run (install is
+  // idempotent, verify must confirm the live runner), so the probe must emit
+  // no Skipped event for either.
+  assert!(
+    !steps.contains(&StepId::Install),
+    "install must never be pre-skipped"
+  );
+  assert!(
+    !steps.contains(&StepId::Verify),
+    "verify must never be pre-skipped"
+  );
   Ok(())
 }
 
