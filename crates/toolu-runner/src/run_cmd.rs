@@ -112,6 +112,8 @@ impl RunLoop {
     let mut backoff = BACKOFF_START;
     loop {
       let cfg = load_run_config(&self.config_path)?;
+      // Fatal setup errors (corrupt config, unparseable JIT) deliberately
+      // exit here without backoff — only listener outcomes are retried.
       let outcome = self.run_once(&cfg).await?;
       let cancelled = self.cancel.is_cancelled();
       let pending_remove = self.pending_path.exists();
