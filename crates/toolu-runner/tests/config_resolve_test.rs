@@ -125,6 +125,43 @@ fn status_resolves_legacy_only_home_without_inference() {
   );
 }
 
+/// `status` names the token-store backend — the 0600 file default — and,
+/// when no login token is stored, carries the keyring-migration hint (a
+/// token stored by an older version's OS-keyring backend is only read
+/// with the opt-in set). Both keyring env vars are stripped so the child
+/// sees the clean default environment regardless of the developer shell.
+#[test]
+fn status_prints_file_backend_and_keyring_migration_hint() {
+  let home = tempfile::tempdir().expect("home tempdir");
+  let cwd = tempfile::tempdir().expect("cwd tempdir");
+  seed_legacy(home.path(), "legacy-runner").expect("seed legacy registration");
+
+  let mut cmd = runner_cmd(home.path(), cwd.path());
+  cmd.env_remove("TOOLU_RUNNER_KEYRING");
+  cmd.env_remove("TOOLU_RUNNER_NO_KEYRING");
+  let output = cmd.arg("status").output().expect("spawn status");
+
+  assert!(
+    output.status.success(),
+    "status must succeed; stderr: {}",
+    String::from_utf8_lossy(&output.stderr)
+  );
+  let stdout = String::from_utf8_lossy(&output.stdout);
+  assert!(
+    stdout
+      .contains("tokens:    0600 file (default; set TOOLU_RUNNER_KEYRING=1 for the OS keyring)"),
+    "status must name the file token-store backend: {stdout}"
+  );
+  assert!(
+    stdout.contains("not logged in to github.com"),
+    "status must report the missing login: {stdout}"
+  );
+  assert!(
+    stdout.contains("only read with TOOLU_RUNNER_KEYRING=1"),
+    "the not-logged-in line must carry the keyring-migration hint: {stdout}"
+  );
+}
+
 /// AC-7 (inference wins): a per-repo `runners/o1/r1/` registration AND the
 /// legacy one both exist; from a git repo whose `origin` is o1/r1, `status`
 /// picks the per-repo registration — no ambiguity error, legacy loses.

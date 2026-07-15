@@ -476,9 +476,10 @@ no OTel.
   until then every device flow needs `--client-id` (login) or
   `TOOLU_RUNNER_CLIENT_ID` env, and GHES always does.
 - `status_cmd.rs` — `cmd_status`: prints the persisted registration,
-  credential presence, and any stored device-flow login token for the
-  registered host **plus per-host login state**. No network (split
-  out of `main.rs`).
+  credential presence, the token-store backend (file default / keyring
+  opt-in), and any stored device-flow login token for the registered host
+  **plus per-host login state** (the not-logged-in line carries the
+  keyring-migration hint). No network (split out of `main.rs`).
 - `create_app_cmd.rs` — `cmd_create_app`: runs GitHub's **App Manifest
   flow** to create a user-owned GitHub App in one click (github.com
   only; a `--host` other than github.com errors as unsupported). Binds a
