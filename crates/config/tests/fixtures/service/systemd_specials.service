@@ -1,0 +1,10 @@
+[Unit]
+Description=toolu-runner (io.toolu.runner.octocat.hello)
+
+[Service]
+ExecStart="/opt/100%% $$rusty/toolu-runner" run --config "/home/ci/.toolu-runner/runners/octocat/hello/config.toml"
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

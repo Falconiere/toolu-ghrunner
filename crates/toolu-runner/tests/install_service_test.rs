@@ -141,8 +141,10 @@ fn shim_env(home: &Path) -> Result<(PathBuf, PathBuf, String), Box<dyn std::erro
 }
 
 /// Run the default (write + activate) mode with `shim_body` installed as
-/// BOTH the `launchctl` and `systemctl` PATH shim; returns the process
-/// output and the shim-call log (empty if no shim was ever invoked).
+/// the PATH shim for the current platform's supervisor (`launchctl` on
+/// macOS, `systemctl` elsewhere — the bin never invokes the other one);
+/// returns the process output and the shim-call log (empty if the shim was
+/// never invoked).
 #[cfg(unix)]
 fn run_activate(
   home: &Path,
@@ -150,8 +152,12 @@ fn run_activate(
   shim_body: &str,
 ) -> Result<(std::process::Output, String), Box<dyn std::error::Error>> {
   let (bin, log, path_env) = shim_env(home)?;
-  write_shim(&bin, "launchctl", shim_body)?;
-  write_shim(&bin, "systemctl", shim_body)?;
+  let supervisor = if cfg!(target_os = "macos") {
+    "launchctl"
+  } else {
+    "systemctl"
+  };
+  write_shim(&bin, supervisor, shim_body)?;
   let output = install_cmd(home, config_path, &[])
     .env("PATH", &path_env)
     .env("SHIM_LOG", &log)
