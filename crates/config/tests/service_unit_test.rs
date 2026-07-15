@@ -101,5 +101,8 @@ fn systemd_unit_escapes_percent_in_description() {
     diag_dir: Path::new("/home/ci/.toolu-runner/runners/pct/repo/_diag"),
   };
   let unit = service_unit::systemd_unit(&spec);
-  assert!(unit.contains("Description=toolu-runner (io.toolu.runner.100%%.repo)\n"));
+  assert_eq!(
+    unit,
+    include_str!("fixtures/service/systemd_percent.service")
+  );
 }
