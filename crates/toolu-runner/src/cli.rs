@@ -164,11 +164,13 @@ pub(crate) enum Command {
 #[derive(Debug, Args)]
 #[command(after_help = SETUP_AFTER_HELP)]
 pub(crate) struct SetupArgs {
-  /// Repository URL, e.g. https://github.com/owner/repo (github.com only).
+  /// Repository URL, e.g. https://github.com/owner/repo.
   ///
   /// Optional: when absent, the repository is inferred from the cwd git
-  /// remote `origin`. `setup` is github.com only — GHES and organization
-  /// runners are not supported (use `register --url` for those).
+  /// remote `origin`. The value is not validated by clap — only github.com
+  /// is supported, and a non-github.com URL (GHES / enterprise) or an
+  /// organization runner is rejected at startup with an error naming the
+  /// manual `register` / `login` / `install-service` commands.
   #[arg(long, value_name = "URL", value_hint = ValueHint::Url)]
   pub(crate) url: Option<String>,
   /// GitHub API token for the `generate-jitconfig` REST call.
