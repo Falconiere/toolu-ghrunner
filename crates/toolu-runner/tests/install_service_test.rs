@@ -15,6 +15,7 @@ use config::config::{
   CacheSection, CredentialsFile, RunnerRegistrationConfig, RuntimeConfig, ServicesSection,
   ShadowSection, WorkspaceSection, save_config, save_credentials,
 };
+use config::service_unit::{self, ServiceSpec};
 
 /// Persist a real registration under `<home>/runners/<owner>/<repo>/` and
 /// return its config path. A helper (not a `#[test]`), so it threads errors
@@ -86,41 +87,31 @@ fn expected_dest(home: &Path) -> PathBuf {
   }
 }
 
-/// Structural assertions on the printed unit, branching on the host OS:
-/// launchd plist on macOS, systemd unit on Linux. `exe` / `config` are the
-/// absolute paths the unit must embed.
-fn assert_unit_content(stdout: &str, exe: &str, config: &str) {
-  assert!(
-    stdout.contains("io.toolu.runner.octo.demo"),
-    "unit must carry the derived label; got:\n{stdout}"
-  );
-  if cfg!(target_os = "macos") {
-    assert!(
-      stdout.contains(&format!("<string>{exe}</string>")),
-      "plist must carry the absolute binary path in a <string>; got:\n{stdout}"
-    );
-    assert!(
-      stdout.contains(&format!("<string>{config}</string>")),
-      "plist must carry the absolute config path in a <string>; got:\n{stdout}"
-    );
-    assert!(
-      stdout.contains("<string>run</string>") && stdout.contains("<string>--config</string>"),
-      "plist ProgramArguments must run `run --config`; got:\n{stdout}"
-    );
-    assert!(
-      stdout.contains("<key>KeepAlive</key>"),
-      "plist must set KeepAlive; got:\n{stdout}"
-    );
+/// The exact unit text the bin must produce for the octo/demo fixture:
+/// the pure renderer applied to the spec the bin is expected to derive
+/// (label from the registration layout, canonicalized config path, `_diag`
+/// under the registration dir). The renderer's byte shape itself is pinned
+/// by the config crate's committed fixtures; temp-dir paths rule out a
+/// committed fixture here.
+fn expected_unit(config_path: &Path) -> Result<String, Box<dyn std::error::Error>> {
+  let config = config_path.canonicalize()?;
+  // The bin canonicalizes only the config path; `_diag` derives from the
+  // persisted data_dir verbatim (the registration dir as written).
+  let diag = config_path
+    .parent()
+    .ok_or("config path has no parent")?
+    .join("_diag");
+  let spec = ServiceSpec {
+    label: "io.toolu.runner.octo.demo",
+    exe: Path::new(env!("CARGO_BIN_EXE_toolu-runner")),
+    config_path: &config,
+    diag_dir: &diag,
+  };
+  Ok(if cfg!(target_os = "macos") {
+    service_unit::launchd_plist(&spec)
   } else {
-    assert!(
-      stdout.contains(&format!("ExecStart=\"{exe}\" run --config \"{config}\"")),
-      "unit ExecStart must run `run --config <config>` with absolute paths; got:\n{stdout}"
-    );
-    assert!(
-      stdout.contains("Restart=always"),
-      "unit must set Restart=always; got:\n{stdout}"
-    );
-  }
+    service_unit::systemd_unit(&spec)
+  })
 }
 
 /// Write an executable shell script named `name` into `dir` (a PATH shim for
@@ -318,15 +309,10 @@ fn print_emits_the_unit_without_writing_a_file() {
     String::from_utf8_lossy(&output.stderr)
   );
   let stdout = String::from_utf8_lossy(&output.stdout);
-  // config_path is canonicalized in the unit (symlinks resolved), so the
-  // test canonicalizes the same path before asserting containment.
-  let config = config_path
-    .canonicalize()
-    .expect("canonicalize config path");
-  assert_unit_content(
-    &stdout,
-    env!("CARGO_BIN_EXE_toolu-runner"),
-    &config.to_string_lossy(),
+  assert_eq!(
+    stdout,
+    expected_unit(&config_path).expect("build expected unit"),
+    "--print must emit the exact unit the renderer produces for this spec"
   );
   assert!(
     !expected_dest(home.path()).exists(),
