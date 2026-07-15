@@ -1,9 +1,11 @@
-//! Integration tests for `TOOLU_RUNNER_NO_KEYRING` (always-online AC-3).
+//! Integration tests for the `AuthStore::new` backend pick: file by
+//! default, OS keyring only when `TOOLU_RUNNER_KEYRING` opts in,
+//! `TOOLU_RUNNER_NO_KEYRING` (back-compat) overriding the opt-in.
 //!
 //! Real data only: tokens are persisted to a real `tempfile` dir and read
-//! back — no mocks, no keyring. The pure [`no_keyring_forced`] parse rule is
-//! exercised in-process; the end-to-end `AuthStore::new` wiring is proven by
-//! re-running this test binary as a subprocess with the env var set, because
+//! back — no mocks, no keyring. The pure parse rules are exercised
+//! in-process; the end-to-end `AuthStore::new` wiring is proven by
+//! re-running this test binary as a subprocess with the env vars set, because
 //! in-process `std::env::set_var` is `unsafe` under edition 2024 (the
 //! workspace denies `unsafe_code`) and would race the parallel test threads.
 
@@ -39,6 +41,18 @@ fn no_keyring_forced_parses_the_env_value() {
   assert!(auth_store::no_keyring_forced(Some(OsStr::new("00"))));
 }
 
+#[test]
+fn keyring_opted_in_parses_the_env_value() {
+  // Not opted in: unset, empty, or exactly "0" — the file backend stays.
+  assert!(!auth_store::keyring_opted_in(None));
+  assert!(!auth_store::keyring_opted_in(Some(OsStr::new(""))));
+  assert!(!auth_store::keyring_opted_in(Some(OsStr::new("0"))));
+  // Opted in: any other non-empty value.
+  assert!(auth_store::keyring_opted_in(Some(OsStr::new("1"))));
+  assert!(auth_store::keyring_opted_in(Some(OsStr::new("true"))));
+  assert!(auth_store::keyring_opted_in(Some(OsStr::new("00"))));
+}
+
 // ── the file backend, exercised directly (path + delete) ────────────
 
 #[test]
@@ -69,17 +83,18 @@ fn file_backend_roundtrips_and_deletes_at_token_host_json() {
   );
 }
 
-// ── end-to-end: TOOLU_RUNNER_NO_KEYRING=1 drives AuthStore::new ──────
+// ── end-to-end: the env vars drive AuthStore::new ────────────────────
 //
 // WHY subprocess re-exec: `AuthStore::new` reads the process environment,
 // and mutating it in-process is off the table (edition-2024 `unsafe`
-// `set_var`, denied `unsafe_code`, and a race with parallel threads). This
-// re-runs THIS test binary filtered to `helper_no_keyring_roundtrip` with
-// the env var set on the child; the helper is a no-op pass in a normal run.
+// `set_var`, denied `unsafe_code`, and a race with parallel threads). Each
+// driver re-runs THIS test binary filtered to one helper with the env vars
+// set on the child; the helpers are no-op passes in a normal run.
 
-/// Subprocess helper: with `TOOLU_RUNNER_NO_KEYRING=1` set by the parent,
-/// build `AuthStore::new` against `$NO_KEYRING_DIR` and prove it selected
-/// the file backend by running a save/load/delete cycle.
+/// Subprocess helper: with `TOOLU_RUNNER_NO_KEYRING=1` set by the parent
+/// (alongside `TOOLU_RUNNER_KEYRING=1`, proving the override), build
+/// `AuthStore::new` against `$NO_KEYRING_DIR` and prove it selected the
+/// file backend by running a save/load/delete cycle.
 #[test]
 fn helper_no_keyring_roundtrip() {
   if std::env::var_os("NO_KEYRING_HELPER").is_none() {
@@ -110,14 +125,16 @@ fn helper_no_keyring_roundtrip() {
 }
 
 #[test]
-fn no_keyring_env_forces_file_backend_end_to_end() {
+fn no_keyring_env_overrides_keyring_opt_in_end_to_end() {
   let dir = TempDir::new().expect("temp dir");
   let exe = std::env::current_exe().expect("current exe");
 
   let mut cmd = std::process::Command::new(exe);
   cmd.args(["helper_no_keyring_roundtrip", "--exact", "--nocapture"]);
   cmd.env("NO_KEYRING_HELPER", "1");
+  // Both set: the back-compat off-switch must beat the keyring opt-in.
   cmd.env("TOOLU_RUNNER_NO_KEYRING", "1");
+  cmd.env("TOOLU_RUNNER_KEYRING", "1");
   cmd.env("NO_KEYRING_DIR", dir.path());
   let out = cmd.output().expect("run helper subprocess");
 
@@ -134,5 +151,64 @@ fn no_keyring_env_forces_file_backend_end_to_end() {
   assert!(
     stdout.contains("token-github.com.json"),
     "helper must report the expected token file path; stdout: {stdout}"
+  );
+}
+
+/// Subprocess helper: with NEITHER env var set by the parent, build
+/// `AuthStore::new` against `$DEFAULT_STORE_DIR` and prove the file
+/// backend is the default (no keyring probe, no keychain prompt) by
+/// running a save/load/delete cycle.
+#[test]
+fn helper_default_file_roundtrip() {
+  if std::env::var_os("DEFAULT_STORE_HELPER").is_none() {
+    return;
+  }
+  let dir = std::env::var_os("DEFAULT_STORE_DIR").expect("DEFAULT_STORE_DIR set by parent");
+  let dir = Path::new(&dir);
+
+  let store = AuthStore::new(dir);
+  assert!(
+    matches!(&store, AuthStore::File(p) if p.as_path() == dir),
+    "the file backend must be the default at {}",
+    dir.display()
+  );
+
+  let token = sample_token();
+  store.save(&token).expect("save token");
+  let path = dir.join("token-github.com.json");
+  assert!(path.is_file(), "token file missing at {}", path.display());
+
+  let loaded = store.load("github.com").expect("load token");
+  assert_eq!(loaded.map(|t| t.access_token), Some(token.access_token));
+
+  store.delete("github.com").expect("delete token");
+  assert!(!path.exists(), "delete must remove the token file");
+
+  println!("DEFAULT_STORE_OK {}", path.display());
+}
+
+#[test]
+fn default_backend_is_file_end_to_end() {
+  let dir = TempDir::new().expect("temp dir");
+  let exe = std::env::current_exe().expect("current exe");
+
+  let mut cmd = std::process::Command::new(exe);
+  cmd.args(["helper_default_file_roundtrip", "--exact", "--nocapture"]);
+  cmd.env("DEFAULT_STORE_HELPER", "1");
+  // A clean default environment: neither the opt-in nor the off-switch.
+  cmd.env_remove("TOOLU_RUNNER_KEYRING");
+  cmd.env_remove("TOOLU_RUNNER_NO_KEYRING");
+  cmd.env("DEFAULT_STORE_DIR", dir.path());
+  let out = cmd.output().expect("run helper subprocess");
+
+  let stdout = String::from_utf8_lossy(&out.stdout);
+  assert!(
+    out.status.success(),
+    "helper failed:\n  stdout: {stdout}\n  stderr: {}",
+    String::from_utf8_lossy(&out.stderr)
+  );
+  assert!(
+    stdout.contains("DEFAULT_STORE_OK"),
+    "helper must confirm the default file-backed roundtrip; stdout: {stdout}"
   );
 }

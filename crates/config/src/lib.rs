@@ -5,7 +5,7 @@
 
 /// GitHub App identity + secret persistence (`<home>/github-app.json`, 0600).
 pub mod app_store;
-/// CLI-login bearer-token persistence (keyring / 0600-file fallback).
+/// CLI-login bearer-token persistence (0600 file default; keyring opt-in).
 pub mod auth_store;
 /// Runner registration + runtime config load/save (TOML) and credentials (JSON).
 pub mod config;

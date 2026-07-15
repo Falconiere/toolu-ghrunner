@@ -11,9 +11,9 @@
 //! AC-11) or a real OAuth App `client_id` + browser (AC-1); each is
 //! `#[ignore]`d and executed with `-- --ignored`.
 //!
-//! The stored-token path assumes a keyless environment (temp HOME, no OS
-//! keyring) so `AuthStore::new` inside `register` resolves to the same
-//! `File` backend these tests seed. That is how the Linux CI runner runs.
+//! The stored-token path relies on the `File` backend being the default
+//! (keyring is `TOOLU_RUNNER_KEYRING` opt-in), so `AuthStore::new` inside
+//! `register` resolves to the same store these tests seed.
 
 #![cfg(feature = "live")]
 

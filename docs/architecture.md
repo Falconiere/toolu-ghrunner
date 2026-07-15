@@ -36,7 +36,7 @@ toolu-ghrunner/                            workspace root
     ├── config/                            registration config, lock, token store (→ shared)
     │   ├── config.rs                      TOML + JSON config load/save, [services]/[cache]/…
     │   ├── lockfile.rs                    single-job fs2 lock (per registration dir)
-    │   ├── auth_store.rs                  keyring / 0600-file login-token store + decide_bearer TTY gate
+    │   ├── auth_store.rs                  0600-file login-token store (keyring opt-in) + decide_bearer TTY gate
     │   ├── app_store.rs                   GitHub App credential store (github-app.json)
     │   ├── registry.rs                    runner home + runners/<owner>/<repo>/ discovery/resolution
     │   ├── repo_infer.rs                  cwd git remote → owner/repo inference
@@ -712,7 +712,7 @@ warn and returns — the user is expected to restart `run`.
 
 ```
 ~/.toolu-runner/                    # runner home ($TOOLU_RUNNER_HOME overrides)
-├── token-<host>.json               # login-token file fallback (keyring first) — SHARED by all repos
+├── token-<host>.json               # login token (0600, default store; keyring opt-in) — SHARED by all repos
 ├── _work/                          # per-job workspaces (GitHub-style, shared default)
 │   └── <repo>/
 │       └── <job-id>/

@@ -1,9 +1,10 @@
 //! CLI-login token persistence.
 //!
-//! The `login` flow (device-flow OAuth in `toolu-runner`'s `net::device_auth`)
-//! yields a bearer token that later commands reuse. This module hides
-//! *where* that token lives: the OS keyring when one is available, or a
-//! per-host `0600` JSON file under `data_dir` when it is not.
+//! Stores the `login` device-flow bearer per host: a `0600` JSON file under
+//! `data_dir` by default, the OS keyring when `TOOLU_RUNNER_KEYRING` opts
+//! in. File is the default because macOS Keychain ACLs bind to the binary's
+//! code signature — every rebuild re-prompts — and `0600` already matches
+//! the on-disk `credentials.json` (RSA key) threat model.
 //!
 //! Token resolution precedence (flag > env > stored) is factored into the
 //! pure [`pick_bearer`] so it can be unit-tested without any I/O, with
@@ -19,7 +20,11 @@ use shared::RunnerError;
 const KEYRING_SERVICE: &str = "toolu-runner";
 
 /// Env var that forces the file backend and skips the OS keyring probe.
+/// Kept for back-compat; overrides [`KEYRING_ENV`] when both are set.
 const NO_KEYRING_ENV: &str = "TOOLU_RUNNER_NO_KEYRING";
+
+/// Env var that opts in to the OS keyring backend (file is the default).
+const KEYRING_ENV: &str = "TOOLU_RUNNER_KEYRING";
 
 /// A persisted login token plus the metadata needed to reuse it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -36,9 +41,9 @@ pub struct StoredToken {
 
 /// Where login tokens are persisted.
 ///
-/// [`AuthStore::new`] picks the variant: the file backend when
-/// `TOOLU_RUNNER_NO_KEYRING` forces it, otherwise the OS keyring when
-/// reachable, otherwise a directory of per-host `0600` JSON files.
+/// [`AuthStore::new`] picks the variant: per-host `0600` JSON files by
+/// default; the OS keyring only when `TOOLU_RUNNER_KEYRING` opts in and
+/// the keyring is reachable (`TOOLU_RUNNER_NO_KEYRING` overrides).
 pub enum AuthStore {
   /// The OS secure store (`keyring` crate: macOS Keychain, Windows
   /// Credential Manager, Linux kernel keyutils).
@@ -48,14 +53,16 @@ pub enum AuthStore {
 }
 
 impl AuthStore {
-  /// Choose a backend: `File(data_dir)` when `TOOLU_RUNNER_NO_KEYRING`
-  /// forces it (see [`no_keyring_forced`] — short-circuits BEFORE any
-  /// keyring call, which can block or prompt on macOS Keychain / a locked
-  /// keyring), else the OS keyring when the READ-ONLY
-  /// [`Self::keyring_reachable`] probe succeeds, else `File(data_dir)` with
-  /// a one-time WARN.
+  /// Choose a backend: `File(data_dir)` unless `TOOLU_RUNNER_KEYRING` opts
+  /// in to the OS keyring (see [`keyring_opted_in`]) AND the READ-ONLY
+  /// [`Self::keyring_reachable`] probe succeeds (probe failure WARNs once
+  /// and falls back to `File`). `TOOLU_RUNNER_NO_KEYRING` (back-compat)
+  /// forces `File` even when the opt-in is set, short-circuiting BEFORE any
+  /// keyring call — which can block or prompt on macOS / a locked keyring.
   pub fn new(data_dir: &Path) -> Self {
-    if no_keyring_forced(std::env::var_os(NO_KEYRING_ENV).as_deref()) {
+    if no_keyring_forced(std::env::var_os(NO_KEYRING_ENV).as_deref())
+      || !keyring_opted_in(std::env::var_os(KEYRING_ENV).as_deref())
+    {
       return AuthStore::File(data_dir.to_path_buf());
     }
     match Self::keyring_reachable() {
@@ -164,6 +171,18 @@ impl AuthStore {
 /// `"0 "` or `"00"` count as set. Pure (takes the raw env value) so the
 /// rule is unit-tested without mutating the environment or the keyring.
 pub fn no_keyring_forced(value: Option<&OsStr>) -> bool {
+  env_flag_set(value)
+}
+
+/// Whether `TOOLU_RUNNER_KEYRING` opts in to the OS keyring backend. Same
+/// parse rule as [`no_keyring_forced`]: set, non-empty, not the literal
+/// `"0"`. Pure for the same unit-testability reason.
+pub fn keyring_opted_in(value: Option<&OsStr>) -> bool {
+  env_flag_set(value)
+}
+
+/// Shared env-flag parse: set to a non-empty value other than `"0"`.
+fn env_flag_set(value: Option<&OsStr>) -> bool {
   match value {
     Some(v) => !v.is_empty() && v != OsStr::new("0"),
     None => false,

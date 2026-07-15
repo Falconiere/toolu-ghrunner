@@ -24,7 +24,8 @@ Environment:
   TOOLU_RUNNER_TOKEN           GitHub bearer for `register` (flag > env > stored login token)
   TOOLU_RUNNER_CLIENT_ID       OAuth App client_id for `login` (fallback for --client-id)
   TOOLU_RUNNER_HOME            runner state root (default ~/.toolu-runner)
-  TOOLU_RUNNER_NO_KEYRING      force the file token store; skip the OS keyring probe
+  TOOLU_RUNNER_KEYRING         opt in to the OS keyring token store (default: 0600 file)
+  TOOLU_RUNNER_NO_KEYRING      force the file token store; overrides TOOLU_RUNNER_KEYRING
   TOOLU_RUNNER_LOG / RUST_LOG  tracing filter; levels above `info` also require
                                TOOLU_RUNNER_ALLOW_VERBOSE=1 (secret-leak guard)";
 
@@ -121,8 +122,9 @@ pub(crate) enum Command {
   /// Log in to GitHub via the OAuth device flow and store the token.
   ///
   /// Prints a one-time code, opens the verification page, polls until
-  /// the grant completes, then stores the token in the OS keyring (0600
-  /// file fallback). `register` uses this token when neither --token nor
+  /// the grant completes, then stores the token as a 0600 file under the
+  /// runner home (or in the OS keyring with TOOLU_RUNNER_KEYRING=1).
+  /// `register` uses this token when neither --token nor
   /// TOOLU_RUNNER_TOKEN is set.
   Login(login_cmd::LoginArgs),
   /// Delete the stored login token for a host.

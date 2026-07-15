@@ -62,6 +62,7 @@ fn top_level_help_shows_examples_and_env_vars() {
     "TOOLU_RUNNER_TOKEN",
     "TOOLU_RUNNER_CLIENT_ID",
     "TOOLU_RUNNER_HOME",
+    "TOOLU_RUNNER_KEYRING",
     "TOOLU_RUNNER_NO_KEYRING",
     "TOOLU_RUNNER_LOG",
     "TOOLU_RUNNER_ALLOW_VERBOSE",

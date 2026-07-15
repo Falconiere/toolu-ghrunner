@@ -71,9 +71,10 @@ toolu-runner watch
 
 No flags, no PAT to craft by hand: on an interactive terminal with no
 token available, `register` runs GitHub's OAuth **device flow inline** —
-enter a one-time code in your browser, and the minted token lands in
-your OS keyring (0600 file fallback where no keyring exists). One login
-per host covers every repo: the token store is shared, at the
+enter a one-time code in your browser, and the minted token lands in a
+0600 file under the runner home (set `TOOLU_RUNNER_KEYRING=1` to use the
+OS keyring instead — note macOS re-prompts whenever the binary changes).
+One login per host covers every repo: the token store is shared, at the
 runner-home root. Until the built-in OAuth App ships, the device flow
 needs your own App's client id — set `TOOLU_RUNNER_CLIENT_ID`, or run
 `toolu-runner login --client-id <id>` once.
@@ -368,7 +369,7 @@ hand-edit `jit_config` or `auth_token` — re-run `register --replace`.
 
 ```
 ~/.toolu-runner/                # runner home — override with $TOOLU_RUNNER_HOME
-├── token-<host>.json           # `login` token file fallback (keyring first) — shared by all repos
+├── token-<host>.json           # `login` token (0600, default store; keyring opt-in) — shared by all repos
 ├── _work/                      # per-job workspaces: <repo>/<job-id>/ (shared default)
 ├── config.toml                 # legacy single-slot registration; org registrations land here
 ├── .runner_version
@@ -396,7 +397,8 @@ survives unregistration.
 | `TOOLU_RUNNER_HOME` | `~/.toolu-runner` | runner state root: the token store, `runners/<owner>/<repo>/` registrations, default `_work/`. |
 | `TOOLU_RUNNER_TOKEN` | — | bearer for `register` (resolution: `--token` > env > stored `login` token). |
 | `TOOLU_RUNNER_CLIENT_ID` | — | OAuth App client id for the device flow (`--client-id` fallback). |
-| `TOOLU_RUNNER_NO_KEYRING` | — | when set, forces the 0600-file token store and skips the OS keyring probe entirely (headless hosts, CI, locked keyrings). |
+| `TOOLU_RUNNER_KEYRING` | — | when set, opts the token store in to the OS keyring (default is a 0600 file — on macOS the keychain re-prompts whenever the binary's code signature changes, e.g. every rebuild). |
+| `TOOLU_RUNNER_NO_KEYRING` | — | when set, forces the 0600-file token store and skips the OS keyring probe entirely; overrides `TOOLU_RUNNER_KEYRING` (headless hosts, CI, locked keyrings). |
 | `TOOLU_RUNNER_LOG` | `info` | tracing filter. Checked before `RUST_LOG`. |
 | `RUST_LOG` | — | tracing filter (standard fallback). |
 | `TOOLU_RUNNER_REPO` | `Falconiere/toolu-ghrunner` | `install.sh` only — release source. |
