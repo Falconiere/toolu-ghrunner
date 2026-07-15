@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-15
+
+### Added
+- *(run)* always-online re-mint loop + install-service supervisor units
+
+### Fixed
+- *(install-service)* tolerate concurrent unit delete during --remove
+- *(run)* address PR review feedback
+- *(wire)* only 429/5xx map to transient Network on mint failure
+- *(run)* reset backoff after a completed job + round-3 review feedback
+- *(install-service)* drop runner secrets from supervisor child env
+- *(install-service)* round-4 review feedback — quote escaping + exact fixtures
+- *(runner)* round-5 review feedback — mint error hints, host fail-fast, activation shim tests
+- *(runner)* round-6 review feedback — 403 rationale, uid validation, exact squote fixture
+- *(install-service)* round-7 review feedback — exe-path error context, doc 401/403 split
+- *(runner)* round-9 review feedback — $/% ExecStart escapes, host-named bearer error
 ## [0.3.0] - 2026-07-14
 
 ### Added
