@@ -22,7 +22,9 @@ mod login_cmd;
 mod register_cmd;
 mod run_cmd;
 mod service_cmd;
+mod setup_cmd;
 mod status_cmd;
+mod wizard_steps;
 
 use crate::cli::{Cli, Command, RemoveArgs, WatchArgs, credentials_path_for, default_config_path};
 
@@ -43,6 +45,7 @@ async fn main() {
 
 async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
   match cli.command {
+    Command::Setup(args) => setup_cmd::cmd_setup(args).await,
     Command::Register(args) => register_cmd::cmd_register(args).await,
     Command::Run(args) => run_cmd::cmd_run(args).await,
     Command::Remove(args) => cmd_remove(args).await,

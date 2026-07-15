@@ -47,9 +47,10 @@ toolu-ghrunner/                            workspace root
     ├── wire/                              async HTTP transport + reporting (→ shared, protocol)
     │   ├── net/                           async I/O (reqwest): auth, session, messages, …, register, app_manifest (+ create-app loopback callback server)
     │   └── reporting/                     Run/Results domain types, live_log, feature_detection
-    ├── observability/                     journal + watch TUI (→ shared, config)
+    ├── observability/                     journal + watch/wizard TUIs (→ shared, config)
     │   ├── journal/                       per-job JSONL event journal (types, writer, reader)
-    │   └── watch/                         `watch` TUI (state reducer, ratatui ui, input)
+    │   ├── watch/                         `watch` TUI (state reducer, ratatui ui, input)
+    │   └── wizard/                        pure `setup` wizard state machine (state/input/verify/term/ui)
     ├── execution/                         job execution engine (→ shared, expressions, cache)
     │   ├── lib.rs                         Runner struct, execute_job
     │   ├── execution/                     job engine (job_runner, handlers, workflow, artifacts, oidc, …)
@@ -64,13 +65,15 @@ toolu-ghrunner/                            workspace root
     │   └── log_uploader/                  per-step + combined job-log upload
     └── toolu-runner/                      bin only (the CLI)
         ├── src/main.rs                    dispatch + the remove / watch handlers
-        ├── src/cli.rs                     clap surface: register / run / remove / status / watch / install-service / login / logout / create-app
+        ├── src/cli.rs                     clap surface: register / run / remove / status / watch / install-service / login / logout / create-app / setup
         ├── src/register_cmd.rs            register + remint_and_persist (per-repo persist, config rollback)
         ├── src/run_cmd.rs                 the always-online run loop (re-mint after each job)
         ├── src/service_cmd.rs             install-service (launchd / systemd user units)
         ├── src/login_cmd.rs               login / logout (device flow)
         ├── src/status_cmd.rs              status (no network)
         ├── src/create_app_cmd.rs          create-app (GitHub App Manifest onboarding)
+        ├── src/setup_cmd.rs               setup wizard entrypoint (non-TTY guard, TerminalGuard, render loop)
+        ├── src/wizard_steps.rs            setup async step executors (auth → register → install → verify)
         └── tests/                         integration tests across the whole graph
 ```
 
@@ -333,6 +336,17 @@ it discovers every registration's `runners/<owner>/<repo>/_diag/jobs`
 (plus the legacy home) and browses them merged, re-discovering on each
 1 s rescan so new registrations appear live.
 
+`observability::wizard` is the sibling pure state machine behind
+`toolu-runner setup`, the full-screen onboarding wizard: `state`
+(reducer + `probe_skips` idempotent already-done detection), `input`
+(key → action), `verify` (the `_diag/runner.log` online-marker gate),
+`term`, and `ui`. It holds no I/O or async — the impure driver
+(`setup_cmd::cmd_setup`, its `TerminalGuard` RAII restore + render loop)
+and the async step executors (`wizard_steps::run_pipeline`:
+auth → register → install-service → verify) live in the bin and reuse
+the existing `login` / `register` / `install-service` cores. github.com
+only and TTY-gated; see [Sequence: setup](#sequence-setup).
+
 ## Accelerated mode (cache acceleration)
 
 `[services] mode = "accelerated"` is `forwarder` plus a local cache
@@ -502,6 +516,50 @@ command refuses before any network call. **Installation-token minting is
 deferred:** `create-app` neither installs the app nor exchanges an
 installation token this release — `register` still takes its bearer from
 `--token` / `TOOLU_RUNNER_TOKEN` / the stored device-flow login.
+
+## Sequence: setup
+
+`toolu-runner setup` is the guided onboarding path — a full-screen
+ratatui wizard that runs the four onboarding steps end-to-end for a
+github.com repo runner, so a first-time user does not have to chain
+`login` → `register` → `install-service` by hand. It is github.com only
+(GHES / org runners still use the manual commands) and TTY-gated: a
+non-interactive terminal fails fast with a clean error naming `login` /
+`register` / `install-service`.
+
+The wizard is split pure/impure. The pure state machine lives in
+`observability::wizard` (a sibling of `watch/`): `state` reduces
+`StepEvent`s into the rendered `WizardState` (with a pure `probe_skips`
+helper that detects an already-satisfied auth or register stage); `verify`
+owns the online-marker gate; `input`, `term`, and `ui` handle keys, the
+alternate screen, and rendering. The impure driver is in the bin —
+`setup_cmd::cmd_setup` guards the TTY, installs a `TerminalGuard` RAII
+restore, and runs the async ratatui render loop draining a `StepEvent`
+channel, while `wizard_steps::run_pipeline` executes the steps:
+
+```
+auth      resolve a bearer (--token > TOOLU_RUNNER_TOKEN > stored login
+          token > inline device flow via login_cmd::run_device_flow)
+   ▼
+register  register_cmd::register_and_persist (skipped if already
+          registered — config.toml present for this repo)
+   ▼
+install   service_cmd::install_service_core — launchd / systemd user unit
+          (idempotently re-applied — re-writes + re-activates the unit,
+          never pre-skipped)
+   ▼
+verify    tail _diag/runner.log for the listener's
+          "session created — long-polling for jobs" online marker →
+          the runner is live
+```
+
+Each step reports progress back through the `StepEvent` channel, so the
+wizard shows per-step status. Only **auth** and **register** pre-skip when
+already satisfied (a stored login token, an existing registration);
+**install** is idempotently re-applied — it re-writes and re-activates the
+unit every run, it is never skipped — and **verify** always runs. The final
+verify step confirms the freshly installed service actually reached the
+broker rather than only asserting the unit was written.
 
 ## Multi-repo concurrency
 

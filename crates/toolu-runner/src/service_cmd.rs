@@ -45,35 +45,104 @@ pub(crate) fn cmd_install_service(
   let config_path = crate::resolve_config(args.config)?;
   let id = service_id(&config_path);
 
-  // `--print` writes nothing and needs no HOME, so it returns before the
-  // destination is computed (clap forbids `--print` with `--remove`).
+  // `--print` writes nothing and needs no HOME, so it renders to stdout and
+  // returns before the core touches the filesystem (clap forbids `--print`
+  // with `--remove`).
   if args.print {
     print!("{}", render_unit(supervisor, &config_path, &id)?);
     return Ok(());
   }
 
-  let dest = dest_path(supervisor, &id, &home_dir()?);
+  // The core does the filesystem + activation work and returns the outcome;
+  // all user-facing printing stays here so the CLI output is owned in one place.
+  let outcome = install_service_core(&config_path, args.print, args.no_activate, args.remove)?;
   if args.remove {
-    return remove_service(supervisor, &dest, &id);
+    if outcome.activated {
+      println!("removed {} ({})", outcome.label, outcome.path.display());
+    } else {
+      println!(
+        "no service installed at {} — nothing to do",
+        outcome.path.display()
+      );
+    }
+    return Ok(());
   }
-
-  let unit = render_unit(supervisor, &config_path, &id)?;
-  write_unit(&dest, &unit)?;
   if args.no_activate {
-    println!("wrote {}", dest.display());
+    println!("wrote {}", outcome.path.display());
     println!(
       "activate it with:\n  {}",
-      activation_hint(supervisor, &dest, &id)
+      activation_hint(supervisor, &outcome.path, &id)
     );
     return Ok(());
   }
-  activate(supervisor, &dest, &id)?;
   println!(
     "installed {} and activated it at {}",
-    id.label,
-    dest.display()
+    outcome.label,
+    outcome.path.display()
   );
   Ok(())
+}
+
+/// The outcome of [`install_service_core`] — what was written / removed, so
+/// [`cmd_install_service`] can print the result without doing the work itself.
+pub(crate) struct InstallOutcome {
+  /// The unit file path acted on (empty in the `print` short-circuit).
+  pub path: PathBuf,
+  /// The service label (launchd `Label` / systemd `Description` suffix).
+  pub label: String,
+  /// `true` when the unit ended up activated (default install) or a unit file
+  /// was actually deleted (`--remove`); `false` for `--no-activate`, a
+  /// `--remove` with nothing to delete, and the `print` short-circuit.
+  pub activated: bool,
+}
+
+/// The write / activate / remove work behind `install-service`, with all
+/// user-facing printing lifted to [`cmd_install_service`]. Resolves the
+/// supervisor and service id from `config_path`, acts per the flags, and
+/// returns the [`InstallOutcome`] — it never prints. `print` short-circuits
+/// before any filesystem work (nothing is written, no `$HOME` needed — the
+/// caller renders the unit to stdout); `remove` deactivates + deletes;
+/// otherwise the unit is written and, unless `no_activate`, activated. Keeps
+/// the launchctl / systemctl activation shell-outs.
+pub(crate) fn install_service_core(
+  config_path: &Path,
+  print: bool,
+  no_activate: bool,
+  remove: bool,
+) -> Result<InstallOutcome, RunnerError> {
+  let supervisor = current_supervisor()?;
+  let id = service_id(config_path);
+
+  // `--print` writes nothing and needs no HOME: return before the destination
+  // is computed. The caller renders the unit text to stdout.
+  if print {
+    return Ok(InstallOutcome {
+      path: PathBuf::new(),
+      label: id.label,
+      activated: false,
+    });
+  }
+
+  let dest = dest_path(supervisor, &id, &home_dir()?);
+  if remove {
+    return remove_service(supervisor, &dest, &id);
+  }
+
+  let unit = render_unit(supervisor, config_path, &id)?;
+  write_unit(&dest, &unit)?;
+  if no_activate {
+    return Ok(InstallOutcome {
+      path: dest,
+      label: id.label,
+      activated: false,
+    });
+  }
+  activate(supervisor, &dest, &id)?;
+  Ok(InstallOutcome {
+    path: dest,
+    label: id.label,
+    activated: true,
+  })
 }
 
 /// The supervisor for the build's target OS: launchd on macOS, systemd on
@@ -148,14 +217,17 @@ fn render_unit(
   supervisor: Supervisor,
   config_path: &Path,
   id: &ServiceId,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, RunnerError> {
   let cfg = load_reg_config(config_path)?;
   let diag_dir = resolve_data_dir(&cfg.runtime.data_dir)?.join("_diag");
   let exe = std::env::current_exe()
-    .map_err(|e| format!("cannot resolve the running binary's path: {e}"))?;
-  let abs_config = config_path
-    .canonicalize()
-    .map_err(|e| format!("cannot resolve config path {}: {e}", config_path.display()))?;
+    .map_err(|e| RunnerError::Config(format!("cannot resolve the running binary's path: {e}")))?;
+  let abs_config = config_path.canonicalize().map_err(|e| {
+    RunnerError::Config(format!(
+      "cannot resolve config path {}: {e}",
+      config_path.display()
+    ))
+  })?;
   let spec = ServiceSpec {
     label: &id.label,
     exe: &exe,
@@ -177,29 +249,35 @@ fn write_unit(dest: &Path, unit: &str) -> Result<(), std::io::Error> {
 }
 
 /// `--remove`: deactivate the unit (best-effort) and delete the file.
-/// Idempotent — a missing file reports nothing-to-do and exits 0. Deletion
-/// failure IS an error; deactivation failure (unit never loaded) is not.
+/// Idempotent — a missing file returns `activated: false` (the caller reports
+/// nothing-to-do). Deletion failure IS an error; deactivation failure (unit
+/// never loaded) is not. Never prints — printing is the caller's job.
 fn remove_service(
   supervisor: Supervisor,
   dest: &Path,
   id: &ServiceId,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<InstallOutcome, RunnerError> {
   if !dest.exists() {
-    println!("no service installed at {} — nothing to do", dest.display());
-    return Ok(());
+    return Ok(InstallOutcome {
+      path: dest.to_owned(),
+      label: id.label.clone(),
+      activated: false,
+    });
   }
   deactivate(supervisor, dest, id);
   // Tolerate a concurrent delete between the exists() check and here —
   // idempotency must hold under the race, not just sequentially.
   match std::fs::remove_file(dest) {
-    Ok(()) => {
-      println!("removed {} ({})", id.label, dest.display());
-      Ok(())
-    },
-    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-      println!("no service installed at {} — nothing to do", dest.display());
-      Ok(())
-    },
+    Ok(()) => Ok(InstallOutcome {
+      path: dest.to_owned(),
+      label: id.label.clone(),
+      activated: true,
+    }),
+    Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(InstallOutcome {
+      path: dest.to_owned(),
+      label: id.label.clone(),
+      activated: false,
+    }),
     Err(e) => Err(e.into()),
   }
 }

@@ -57,24 +57,29 @@ pub(crate) struct LogoutArgs {
 /// registrations — no config file is involved.
 pub(crate) async fn cmd_login(args: LoginArgs) -> Result<(), Box<dyn std::error::Error>> {
   let store = AuthStore::new(&registry::runner_home());
-  let stored = run_device_flow(&args.hostname, args.client_id, &store).await?;
+  let stored = run_device_flow(&args.hostname, args.client_id, &store, |dc| {
+    eprintln!("Enter code {} at {}", dc.user_code, dc.verification_uri)
+  })
+  .await?;
   println!("logged in to {} (scopes: {})", args.hostname, stored.scope);
   Ok(())
 }
 
 /// Run the GitHub OAuth device flow against `host` and persist the minted
-/// token in `store`, returning it. Prints the user code, best-effort opens
-/// the browser, and polls until the grant completes. The effective
-/// client_id is `client_id_override` > `TOOLU_RUNNER_CLIENT_ID` env > the
-/// baked-in `DEVICE_CLIENT_ID` constant. That constant is still the
-/// compile-time placeholder (no OAuth App is registered yet), so whenever
-/// it would be used the flow errors BEFORE any network call — in practice
-/// github.com needs `--client-id` or `TOOLU_RUNNER_CLIENT_ID` too, until
-/// the real App exists. Shared by `login` and `register`'s inline flow.
+/// token in `store`, returning it. Routes the user code + verification URL
+/// through the `present` callback (so the caller owns how it is shown),
+/// best-effort opens the browser, and polls until the grant completes. The
+/// effective client_id is `client_id_override` > `TOOLU_RUNNER_CLIENT_ID`
+/// env > the baked-in `DEVICE_CLIENT_ID` constant. That constant is still
+/// the compile-time placeholder (no OAuth App is registered yet), so
+/// whenever it would be used the flow errors BEFORE any network call — in
+/// practice github.com needs `--client-id` or `TOOLU_RUNNER_CLIENT_ID` too,
+/// until the real App exists. Shared by `login` and `register`'s inline flow.
 pub(crate) async fn run_device_flow(
   host: &str,
   client_id_override: Option<String>,
   store: &AuthStore,
+  present: impl Fn(&net::device_auth::DeviceCodeResponse),
 ) -> Result<StoredToken, Box<dyn std::error::Error>> {
   let client_id: String = client_id_override
     .or_else(|| std::env::var("TOOLU_RUNNER_CLIENT_ID").ok())
@@ -99,7 +104,7 @@ pub(crate) async fn run_device_flow(
 
   let dc =
     net::device_auth::request_device_code(&client, host, &client_id, "repo admin:org").await?;
-  eprintln!("Enter code {} at {}", dc.user_code, dc.verification_uri);
+  present(&dc);
   open_browser_best_effort(&dc.verification_uri);
 
   let tok = net::device_auth::poll_for_token(&client, host, &client_id, &dc).await?;
@@ -124,7 +129,10 @@ pub(crate) fn cmd_logout(args: &LogoutArgs) -> Result<(), Box<dyn std::error::Er
 
 /// Best-effort browser launch. Every error is ignored: login still works
 /// by typing the code at the printed URL manually. `pub(crate)` so
-/// `create-app`'s manifest flow can reuse the same launcher.
+/// `create-app`'s manifest flow can reuse the same launcher. The child's
+/// stdout+stderr are null-redirected — it is fire-and-forget and no output
+/// is wanted, so an opener's stray line can never corrupt the CLI output or
+/// the `setup` wizard's alternate screen.
 pub(crate) fn open_browser_best_effort(url: &str) {
   let mut command = if cfg!(target_os = "macos") {
     let mut c = std::process::Command::new("open");
@@ -139,5 +147,8 @@ pub(crate) fn open_browser_best_effort(url: &str) {
     c.arg(url);
     c
   };
-  let _ = command.spawn();
+  let _ = command
+    .stdout(std::process::Stdio::null())
+    .stderr(std::process::Stdio::null())
+    .spawn();
 }
