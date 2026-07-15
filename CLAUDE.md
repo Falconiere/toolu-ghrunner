@@ -202,15 +202,19 @@ no OTel.
   advisory lock. Stale-lock recovery uses `is_pid_alive` (sysinfo)
   + mtime > 5 min.
 - `auth_store.rs` — GitHub token persistence. `AuthStore`
-  (`Keyring` via the `keyring` crate / `File(<runner home>/token-<host>.json)`
-  0600 fallback), `StoredToken`, per-host `save`/`load`/`delete`,
-  pure `pick_bearer` (flag > env > stored) + `resolve_bearer`, and the
-  pure TTY gate `decide_bearer` → `BearerDecision` (`Use` /
-  `StartDeviceFlow` / `Fail` naming `--token` / `TOOLU_RUNNER_TOKEN` /
-  `login`). `AuthStore::new` picks the backend: `TOOLU_RUNNER_NO_KEYRING`
-  (pure `no_keyring_forced`) forces the `File` backend and skips the OS
-  keyring probe entirely (headless/CI/locked keyrings), else the
-  read-only `keyring_reachable` probe decides. The store is pinned to
+  (`File(<runner home>/token-<host>.json)` 0600 DEFAULT / `Keyring` via
+  the `keyring` crate opt-in), `StoredToken`, per-host
+  `save`/`load`/`delete`, pure `pick_bearer` (flag > env > stored) +
+  `resolve_bearer`, and the pure TTY gate `decide_bearer` →
+  `BearerDecision` (`Use` / `StartDeviceFlow` / `Fail` naming `--token` /
+  `TOOLU_RUNNER_TOKEN` / `login`). `AuthStore::new` picks the backend:
+  `File` by default (macOS Keychain ACLs bind to the code signature —
+  every rebuild re-prompts; 0600 matches the on-disk `credentials.json`
+  threat model); `TOOLU_RUNNER_KEYRING` (pure `keyring_opted_in`) opts in
+  to the OS keyring, gated on the read-only `keyring_reachable` probe;
+  `TOOLU_RUNNER_NO_KEYRING` (pure `no_keyring_forced`, back-compat)
+  overrides the opt-in and skips the probe (headless/CI/locked
+  keyrings). The store is pinned to
   the runner home (shared by all repos). Used for the
   `generate-jitconfig` bearer — at `register` time and on every re-mint
   in the always-online `run` loop.

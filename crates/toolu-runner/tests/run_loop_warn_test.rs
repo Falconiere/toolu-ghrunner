@@ -17,6 +17,11 @@ use config::config::{
 /// The exact substring the startup WARN must contain.
 const LOGIN_HINT: &str = "toolu-runner login";
 
+/// The keyring-migration hint the startup WARN must also carry: a login
+/// stored in the OS keyring by an older version is invisible to the
+/// file-default store unless the opt-in env is set.
+const KEYRING_MIGRATION_HINT: &str = "set TOOLU_RUNNER_KEYRING=1";
+
 /// Persist a real registration under `<home>/runners/<owner>/<repo>/` whose
 /// JIT blob is invalid base64, so `run` errors at parse right after the
 /// startup WARN. Returns the config path. A helper (not a `#[test]` fn), so
@@ -96,6 +101,10 @@ fn default_run_warns_about_missing_login_before_erroring() {
   assert!(
     stderr.contains(LOGIN_HINT),
     "startup WARN must name `{LOGIN_HINT}` even though run later errors; got stderr:\n{stderr}"
+  );
+  assert!(
+    stderr.contains(KEYRING_MIGRATION_HINT),
+    "startup WARN must carry the keyring-migration hint `{KEYRING_MIGRATION_HINT}`; got stderr:\n{stderr}"
   );
 }
 

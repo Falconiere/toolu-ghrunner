@@ -84,7 +84,9 @@ fn warn_if_no_login(store: &AuthStore, host: &str, once: bool) {
     Ok(None) => tracing::warn!(
       %host,
       "no stored GitHub login; the runner will exit after the first job — run \
-       `toolu-runner login` to stay online across jobs (or pass --once to silence this)"
+       `toolu-runner login` to stay online across jobs (or pass --once to silence this); \
+       a login stored in the OS keyring by an older version is no longer read by \
+       default — re-run `toolu-runner login`, or set TOOLU_RUNNER_KEYRING=1"
     ),
     Err(e) => tracing::warn!(error = %e, "could not check for a stored GitHub login"),
   }

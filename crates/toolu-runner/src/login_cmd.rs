@@ -52,8 +52,9 @@ pub(crate) struct LogoutArgs {
 }
 
 /// `login`: run the GitHub OAuth device flow and persist the token in the
-/// runner-home token store (OS keyring, 0600-file fallback). The store is
-/// shared by all per-repo registrations — no config file is involved.
+/// runner-home token store (0600 file; OS keyring when
+/// `TOOLU_RUNNER_KEYRING` opts in). The store is shared by all per-repo
+/// registrations — no config file is involved.
 pub(crate) async fn cmd_login(args: LoginArgs) -> Result<(), Box<dyn std::error::Error>> {
   let store = AuthStore::new(&registry::runner_home());
   let stored = run_device_flow(&args.hostname, args.client_id, &store).await?;

@@ -12,11 +12,12 @@
 //! Inference tests run against real `git init` repos.
 //!
 //! Token-store tests guard on the backend `AuthStore::new` picks: the
-//! `File` backend is hermetic per tempdir home; a reachable OS keyring is
+//! `File` backend (the default) is hermetic per tempdir home; the OS
+//! keyring — selected only when `TOOLU_RUNNER_KEYRING` opts in — is
 //! machine-global (seeding or reading it from tests would touch — or leak
-//! from — the developer's real store), so those tests skip on keyring
-//! machines and run fully on keyless environments such as the Linux CI
-//! runner (same assumption `live_login_e2e.rs` documents).
+//! from — the developer's real store), so those tests skip when the test
+//! environment opts in and run fully everywhere else (same assumption
+//! `live_login_e2e.rs` documents).
 
 use std::path::Path;
 
@@ -97,8 +98,9 @@ fn git_repo_with_origin(remote: &str) -> Result<tempfile::TempDir, std::io::Erro
 }
 
 /// Hermeticity guard for the no-token test: the spawned binary reads the
-/// same store `AuthStore::new` picks here. The `File` backend is always
-/// clean (fresh tempdir home); a reachable OS keyring is machine-global,
+/// same store `AuthStore::new` picks here. The `File` backend (the
+/// default) is always clean (fresh tempdir home); the OS keyring —
+/// selected only when `TOOLU_RUNNER_KEYRING` opts in — is machine-global,
 /// so a real github.com login token could leak into the child and send a
 /// real api.github.com request — report `false` so the test skips.
 fn no_stored_dotcom_token(home: &Path) -> bool {
