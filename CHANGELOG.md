@@ -7,11 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`setup` — interactive full-screen onboarding wizard.** A new
+  `toolu-runner setup` runs a ratatui wizard that walks a first-time user
+  through onboarding a github.com repo runner end-to-end
+  (auth → register → install-service → verify online). Auth and register
+  pre-skip when already satisfied (a stored login token, an existing
+  registration); install is idempotently re-applied (re-writes + re-activates
+  the unit) and verify always runs. Bearer precedence is `--token` >
+  `TOOLU_RUNNER_TOKEN` > stored login token > inline device flow; the
+  verify step tails `_diag/runner.log` for the listener's
+  long-polling online marker. github.com only (GHES / org runners use the
+  manual `login` / `register` / `install-service` commands) and TTY-gated
+  (a non-interactive terminal fails with a clean error naming those three
+  commands).
+
 ## [0.4.1] - 2026-07-15
 
 ### Fixed
 - *(config)* default token store to 0600 file
 - *(runner)* round-1 review feedback — status backend line, changelog, env guard
+
 ### Changed
 - **Login-token store defaults to a 0600 file; the OS keyring is now
   opt-in.** `AuthStore::new` no longer touches the OS keyring by default —

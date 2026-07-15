@@ -6,3 +6,5 @@
 pub mod journal;
 /// `watch` subcommand: TUI over the job journal (history + live tail).
 pub mod watch;
+/// Setup wizard: pure reducers + render helpers for guided first-run.
+pub mod wizard;

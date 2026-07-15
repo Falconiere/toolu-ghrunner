@@ -1,0 +1,2 @@
+{"timestamp":"2026-07-15T12:00:01.104Z","level":"INFO","fields":{"message":"registration loaded","repo":"acme/widgets"},"target":"toolu_runner::run_cmd"}
+{"timestamp":"2026-07-15T12:00:02.007Z","level":"WARN","fields":{"message":"no login token stored; re-mint will fail once the JIT is spent"},"target":"toolu_runner::run_cmd"}

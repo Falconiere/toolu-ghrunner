@@ -1,0 +1,3 @@
+{"timestamp":"2026-07-15T12:00:01.104Z","level":"INFO","fields":{"message":"registration loaded","repo":"acme/widgets"},"target":"toolu_runner::run_cmd"}
+{"timestamp":"2026-07-15T12:00:02.318Z","level":"INFO","fields":{"message":"authenticated to broker","runner_id":42},"target":"listener::handler"}
+{"timestamp":"2026-07-15T12:00:03.412Z","level":"INFO","fields":{"message":"session created — long-polling for jobs","session_id":"00000000-0000-0000-0000-000000000000"},"target":"listener::handler"}

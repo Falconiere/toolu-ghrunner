@@ -36,6 +36,10 @@ tracing = "0.1"
 # CLI
 clap = { version = "4", features = ["derive", "env"] }
 
+# Setup wizard full-screen TUI (matches the observability::wizard versions)
+ratatui = "0.29"
+crossterm = "0.28"
+
 # Utilities
 url = ">=2, <2.5.8"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

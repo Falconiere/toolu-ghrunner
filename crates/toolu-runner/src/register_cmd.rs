@@ -81,8 +81,8 @@ pub(crate) async fn cmd_register(args: RegisterArgs) -> Result<(), Box<dyn std::
 /// Resolve the registration `(url, host)`: an explicit `--url` is
 /// validated and used verbatim; when absent, the repo is inferred from
 /// the cwd git remote `origin` — github.com only, any other inferred
-/// host (GHES) requires an explicit `--url`.
-fn resolve_url_and_host(url: Option<String>) -> Result<(String, String), RunnerError> {
+/// host (GHES) requires an explicit `--url`. Shared with `setup`.
+pub(crate) fn resolve_url_and_host(url: Option<String>) -> Result<(String, String), RunnerError> {
   if let Some(url) = url {
     let host = parse_and_validate_url(&url)?;
     return Ok((url, host));
@@ -126,8 +126,8 @@ fn parse_and_validate_url(url: &str) -> Result<String, RunnerError> {
 /// explicit, github.com or GHES — get the per-repo
 /// `<home>/runners/<owner>/<repo>/config.toml`. Org-level URLs (a single
 /// path segment) keep the legacy single-slot `<home>/config.toml`
-/// default, unchanged behavior.
-fn register_config_path(url: &str, home: &Path) -> Result<PathBuf, RunnerError> {
+/// default, unchanged behavior. Shared with `setup`.
+pub(crate) fn register_config_path(url: &str, home: &Path) -> Result<PathBuf, RunnerError> {
   match owner_repo_from_url(url) {
     Some((owner, repo)) => Ok(registry::runner_dir(home, &owner, &repo)?.join("config.toml")),
     None => Ok(home.join("config.toml")),
@@ -137,7 +137,8 @@ fn register_config_path(url: &str, home: &Path) -> Result<PathBuf, RunnerError> 
 /// Lift `(owner, repo)` from a validated registration URL's first two
 /// path segments (`.git` stripped from the repo). `None` for org-level
 /// URLs (fewer than two segments) — mint-time validation still applies.
-fn owner_repo_from_url(url: &str) -> Option<(String, String)> {
+/// Shared with `setup` (which needs the `(owner, repo)` for its inputs).
+pub(crate) fn owner_repo_from_url(url: &str) -> Option<(String, String)> {
   let parsed = url::Url::parse(url).ok()?;
   let mut segments = parsed.path_segments()?.filter(|s| !s.is_empty());
   let owner = segments.next()?;
@@ -164,7 +165,10 @@ async fn resolve_register_bearer(
   match auth_store::decide_bearer(resolved, std::io::stderr().is_terminal()) {
     BearerDecision::Use(token) => Ok(token),
     BearerDecision::StartDeviceFlow => {
-      let stored = login_cmd::run_device_flow(host, None, &store).await?;
+      let stored = login_cmd::run_device_flow(host, None, &store, |dc| {
+        eprintln!("Enter code {} at {}", dc.user_code, dc.verification_uri)
+      })
+      .await?;
       Ok(stored.access_token)
     },
     BearerDecision::Fail(msg) => Err(RunnerError::Auth(msg).into()),
@@ -214,17 +218,27 @@ fn report_registered(
 }
 
 /// Inputs for [`register_and_persist`] — the live register + write step.
-struct RegisterPersist<'a> {
-  url: &'a str,
-  token: &'a str,
-  runner_name: &'a str,
-  labels: &'a [String],
-  runner_group: &'a str,
-  work_folder: &'a str,
-  host: &'a str,
-  config_path: &'a Path,
-  creds_path: &'a Path,
-  replace: bool,
+pub(crate) struct RegisterPersist<'a> {
+  /// Registration URL (`https://<host>/<owner>/<repo>` or an org URL).
+  pub(crate) url: &'a str,
+  /// REST bearer for the `generate-jitconfig` POST.
+  pub(crate) token: &'a str,
+  /// Runner display name.
+  pub(crate) runner_name: &'a str,
+  /// Labels applied to the runner.
+  pub(crate) labels: &'a [String],
+  /// `--runner-group` string (numeric ID or a group name).
+  pub(crate) runner_group: &'a str,
+  /// Work folder for job checkouts.
+  pub(crate) work_folder: &'a str,
+  /// Registration host (`github.com` or a GHES hostname).
+  pub(crate) host: &'a str,
+  /// Destination for the persisted `config.toml`.
+  pub(crate) config_path: &'a Path,
+  /// Destination for the persisted `credentials.json`.
+  pub(crate) creds_path: &'a Path,
+  /// Whether to replace an existing same-named runner at mint time.
+  pub(crate) replace: bool,
 }
 
 /// POST `generate-jitconfig` for `p` and return the minted registration.
@@ -254,7 +268,7 @@ async fn mint_jit(p: &RegisterPersist<'_>) -> Result<wire::net::JitRegistration,
 ///
 /// The RSA→JWT→OAuth2 chain runs at `run` time from the stored jit_config,
 /// not here. `auth_token` stores the runner's non-secret `client_id`.
-async fn register_and_persist(p: RegisterPersist<'_>) -> Result<i64, RunnerError> {
+pub(crate) async fn register_and_persist(p: RegisterPersist<'_>) -> Result<i64, RunnerError> {
   let registration = mint_jit(&p).await?;
 
   // Decode the minted config to confirm it parses and to lift the

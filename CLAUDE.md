@@ -322,6 +322,14 @@ no OTel.
   Test fixture: `tests/fixtures/journal/canonical.jsonl`, captured
   from a real engine run via `JOURNAL_CAPTURE=1 cargo test -p
   toolu-runner --test journal_writer_test capture_canonical`.
+- `wizard/` — the PURE full-screen setup-wizard state machine (sibling
+  to `watch/`, drives `toolu-runner setup`). `state` (`WizardState`
+  reducer + `StepEvent` + `probe_skips` — the idempotent
+  already-done detection), `input` (key → `Action`), `verify`
+  (`verify_decision` — the `_diag/runner.log` online-marker gate),
+  `term` (alt-screen writers), `ui` (render). No I/O, no async — the
+  impure driver lives in the bin (`setup_cmd` / `wizard_steps`).
+  Unit-tested from `crates/toolu-runner/tests/wizard_*_test.rs`.
 
 ### `execution/` — job execution engine (deps: shared, expressions, cache)
 
@@ -409,7 +417,8 @@ no OTel.
 - `main.rs` — CLI entrypoint: parse + dispatch (`register` →
   `register_cmd`, `run` → `run_cmd`, `install-service` → `service_cmd`,
   `login`/`logout` → `login_cmd`, `status` → `status_cmd`, `create-app`
-  → `create_app_cmd`) plus the inline `remove` / `watch` handlers.
+  → `create_app_cmd`, `setup` → `setup_cmd`) plus the inline `remove` /
+  `watch` handlers.
   `--config` resolution for `run` / `remove` / `status` / `watch` /
   `install-service`: flag > cwd-inferred
   `runners/<owner>/<repo>/config.toml` > the sole registration (legacy
@@ -492,6 +501,23 @@ no OTel.
   PRINTS the install URL — does NOT install the app or mint installation
   tokens (deferred; `register` still uses `--token`/env/device-flow this
   release). Flags: `--name`, `--host`, `--no-browser`, `--force`.
+- `setup_cmd.rs` — `cmd_setup`: the `setup` wizard entrypoint (the
+  full-screen ratatui onboarding flow, github.com only). Non-TTY guard
+  (clean error naming `login` / `register` / `install-service` — GHES /
+  org use the manual commands), `TerminalGuard` RAII terminal restore,
+  and the impure async ratatui render loop draining a `StepEvent`
+  channel into `observability::wizard::state`. No daemon; delegates the
+  step work to `wizard_steps`.
+- `wizard_steps.rs` — async step executors (`run_pipeline`: auth →
+  register → install-service → verify). Only **auth** (stored login token)
+  and **register** (existing registration) pre-skip; **install** is
+  idempotently re-applied (re-writes + re-activates the unit, never skipped)
+  and **verify** always runs. Reuses the existing cmd cores
+  (`login_cmd::run_device_flow`, `register_cmd::register_and_persist`,
+  `service_cmd::install_service_core`).
+  Bearer precedence `--token` > `TOOLU_RUNNER_TOKEN` > stored login token
+  > device flow; verify tails `_diag/runner.log` for the listener's
+  `"session created — long-polling for jobs"` online marker.
 
 ## References
 

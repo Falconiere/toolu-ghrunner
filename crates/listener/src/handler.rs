@@ -161,6 +161,7 @@ impl GitHubListener {
         session_id: session_response.session_id.clone(),
       })
       .await;
+    tracing::info!(session_id = %session_response.session_id, "session created — long-polling for jobs");
 
     Ok(SessionCtx {
       client: client.clone(),
