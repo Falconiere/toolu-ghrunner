@@ -5,6 +5,7 @@
 //! [`StepEvent::Failed`] and returns (no panics, no swallowed errors). The
 //! pure reducers live in `observability::wizard`; this module owns the I/O.
 
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -27,6 +28,23 @@ const ONLINE_MARKER: &str = "long-polling for jobs";
 
 /// How many one-second polls the verify stage waits for the online marker.
 const VERIFY_POLL_SECS: usize = 15;
+
+/// The tail window the verify stage reads from each `runner.log*` file.
+/// Verify polls repeatedly while waiting for the online marker, so bounding
+/// each read keeps the per-poll I/O constant regardless of how large the log
+/// has grown.
+const LOG_TAIL_BYTES: u64 = 64 * 1024;
+
+/// The supervisor identifiers `install_service_core` produced for a
+/// registration: the launchd `Label` and the systemd unit basename. The
+/// verify stage queries launchd by `label` and systemd by `unit`, so it must
+/// use exactly what install wrote — never a re-derivation that could drift.
+pub(crate) struct ServiceIdentity {
+  /// launchd `Label` (macOS) — the `launchctl list` argument.
+  pub(crate) label: String,
+  /// systemd unit basename (Linux) — the `systemctl is-active` argument.
+  pub(crate) unit: String,
+}
 
 /// The resolved plan the pipeline runs: the setup inputs plus the auth
 /// choices and the two skip decisions the driver computed. Bundled into one
@@ -70,11 +88,11 @@ pub(crate) async fn run_pipeline(
   if let Err(e) = run_register(&inputs, &bearer, skip_register, &tx).await {
     return emit_failed(&tx, StepId::Register, &e);
   }
-  let label = match run_install(&inputs, &tx) {
-    Ok(label) => label,
+  let identity = match run_install(&inputs, &tx) {
+    Ok(identity) => identity,
     Err(e) => return emit_failed(&tx, StepId::Install, &e),
   };
-  if let Err(e) = run_verify(&inputs, &label, &cancel, &tx).await {
+  if let Err(e) = run_verify(&inputs, &identity, &cancel, &tx).await {
     emit_failed(&tx, StepId::Verify, &e);
   }
 }
@@ -180,20 +198,23 @@ async fn run_register(
 }
 
 /// Install (and activate) the boot/crash supervisor unit for the
-/// registration. Idempotent — no skip is needed. Returns the service label
-/// so the verify stage can query the supervisor.
+/// registration. Idempotent — no skip is needed. Returns the [`ServiceIdentity`]
+/// install produced (launchd label + systemd unit) so the verify stage queries
+/// exactly what was written, not a re-derived identifier.
 fn run_install(
   inputs: &SetupInputs,
   tx: &UnboundedSender<StepEvent>,
-) -> Result<String, RunnerError> {
+) -> Result<ServiceIdentity, RunnerError> {
   let _ = tx.send(StepEvent::Started(StepId::Install));
   let out = service_cmd::install_service_core(&inputs.config_path, false, false, false)?;
-  let label = out.label.clone();
   let _ = tx.send(StepEvent::Done {
     step: StepId::Install,
-    summary: out.label,
+    summary: out.label.clone(),
   });
-  Ok(label)
+  Ok(ServiceIdentity {
+    label: out.label,
+    unit: out.unit,
+  })
 }
 
 /// Confirm the runner came online: the supervisor service must be active AND
@@ -201,12 +222,12 @@ fn run_install(
 /// a successful `Done` (not a failure) pointing the user at `watch`.
 async fn run_verify(
   inputs: &SetupInputs,
-  label: &str,
+  identity: &ServiceIdentity,
   cancel: &CancellationToken,
   tx: &UnboundedSender<StepEvent>,
 ) -> Result<(), RunnerError> {
   let _ = tx.send(StepEvent::Started(StepId::Verify));
-  let summary = match verify_online(inputs, label, cancel).await {
+  let summary = match verify_online(inputs, identity, cancel).await {
     VerifyOutcome::Online => "runner online".to_owned(),
     VerifyOutcome::Unconfirmed(reason) => {
       format!("unconfirmed ({reason}) — run `toolu-runner watch`")
@@ -224,7 +245,7 @@ async fn run_verify(
 /// checks the supervisor once and folds both through [`verify_decision`].
 async fn verify_online(
   inputs: &SetupInputs,
-  label: &str,
+  identity: &ServiceIdentity,
   cancel: &CancellationToken,
 ) -> VerifyOutcome {
   let diag_dirs = candidate_diag_dirs(inputs);
@@ -243,7 +264,7 @@ async fn verify_online(
       tokio::time::sleep(Duration::from_secs(1)).await;
     }
   }
-  verify_decision(service_active(label, inputs), &log_tail, ONLINE_MARKER)
+  verify_decision(service_active(identity), &log_tail, ONLINE_MARKER)
 }
 
 /// The deduplicated `_diag` dirs the verify stage scans for the online marker.
@@ -262,15 +283,17 @@ fn candidate_diag_dirs(inputs: &SetupInputs) -> Vec<PathBuf> {
 }
 
 /// Whether the supervisor reports the runner's unit as loaded/active. macOS
-/// asks launchd (`launchctl list <label>`, exit 0 = loaded); Linux asks
-/// systemd (`systemctl --user is-active <unit>`). Any spawn error or non-zero
-/// exit reads as "not active" so a probe failure never blocks the wizard.
-fn service_active(label: &str, inputs: &SetupInputs) -> bool {
+/// asks launchd (`launchctl list <label>`, exit 0 = loaded) with the install-
+/// produced `identity.label`; Linux asks systemd (`systemctl --user is-active
+/// <unit>`) with the install-produced `identity.unit` — the single source of
+/// truth is what install wrote, never a re-derived identifier. Any spawn error
+/// or non-zero exit reads as "not active" so a probe failure never blocks the
+/// wizard.
+fn service_active(identity: &ServiceIdentity) -> bool {
   if cfg!(target_os = "macos") {
-    command_succeeds("launchctl", &["list", label])
+    command_succeeds("launchctl", &["list", &identity.label])
   } else if cfg!(target_os = "linux") {
-    let unit = format!("toolu-runner-{}-{}.service", inputs.owner, inputs.repo);
-    command_succeeds("systemctl", &["--user", "is-active", &unit])
+    command_succeeds("systemctl", &["--user", "is-active", &identity.unit])
   } else {
     false
   }
@@ -285,9 +308,9 @@ fn command_succeeds(program: &str, args: &[&str]) -> bool {
 }
 
 /// Concatenated tails of every `runner.log*` file in `diag` (the daily
-/// rotator names them `runner.log.<date>`). Each file's last 64 KiB is read;
-/// an unreadable dir or file contributes nothing (the marker just stays
-/// unseen, which reads as `Unconfirmed`, not a failure).
+/// rotator names them `runner.log.<date>`). Each file's last [`LOG_TAIL_BYTES`]
+/// are read; an unreadable dir or file contributes nothing (the marker just
+/// stays unseen, which reads as `Unconfirmed`, not a failure).
 fn read_runner_log_tail(diag: &Path) -> String {
   let Ok(entries) = std::fs::read_dir(diag) else {
     return String::new();
@@ -304,18 +327,23 @@ fn read_runner_log_tail(diag: &Path) -> String {
   files.sort();
   let mut tail = String::new();
   for file in &files {
-    if let Some(chunk) = read_tail(file, 64 * 1024) {
+    if let Some(chunk) = read_tail(file) {
       tail.push_str(&chunk);
     }
   }
   tail
 }
 
-/// The last `max` bytes of `path` as a lossy string, or `None` if it cannot
-/// be read. Reads the whole (small) log then slices — no seeking.
-fn read_tail(path: &Path, max: usize) -> Option<String> {
-  let bytes = std::fs::read(path).ok()?;
-  let start = bytes.len().saturating_sub(max);
-  let slice = bytes.get(start..).unwrap_or_default();
-  Some(String::from_utf8_lossy(slice).into_owned())
+/// The last [`LOG_TAIL_BYTES`] of `path` as a lossy string, or `None` if it
+/// cannot be opened / read. Seeks to `len - LOG_TAIL_BYTES` (or the start for a
+/// file smaller than the window) and reads only from there, so a growing log
+/// costs a bounded read per verify poll rather than a full-file slurp.
+fn read_tail(path: &Path) -> Option<String> {
+  let mut file = std::fs::File::open(path).ok()?;
+  let len = file.metadata().ok()?.len();
+  let start = len.saturating_sub(LOG_TAIL_BYTES);
+  file.seek(SeekFrom::Start(start)).ok()?;
+  let mut buf = Vec::new();
+  file.take(LOG_TAIL_BYTES).read_to_end(&mut buf).ok()?;
+  Some(String::from_utf8_lossy(&buf).into_owned())
 }
