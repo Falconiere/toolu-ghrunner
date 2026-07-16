@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-07-16
+
+### Fixed
+- *(security)* disable stdout env commands and strip runner token from steps
+
+### Style
+- apply rustfmt to new security tests
 ## [0.5.0] - 2026-07-15
 
 ### Added
