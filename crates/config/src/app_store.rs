@@ -59,6 +59,10 @@ pub fn app_path(home: &Path) -> PathBuf {
 /// `RunnerError::Io` on filesystem errors.
 pub fn save_app(home: &Path, app: &StoredApp) -> Result<(), RunnerError> {
   std::fs::create_dir_all(home)?;
+  // `create-app` may create the runner home before any command runs tracing
+  // init (which is the only other place the home is chmod 0700), so tighten
+  // it here to keep it off the world-listable default umask.
+  crate::config::harden_dir_perms(home);
   let path = app_path(home);
   let body = serde_json::to_string_pretty(app)
     .map_err(|e| RunnerError::Config(format!("json encode: {e}")))?;

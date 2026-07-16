@@ -11,7 +11,7 @@ use tokio_util::sync::CancellationToken;
 use super::actions::manifest::{ActionDefinition, CompositeStep};
 use super::composite_expr::interpolate_composite_expr;
 use super::context::ExecutionContext;
-use super::file_commands::{parse_env_file, parse_output_file, parse_path_file};
+use super::file_commands::{parse_env_file, parse_output_file, parse_path_file, strip_blocked_env};
 use super::handlers::node::input_env_key;
 
 /// Bundled (read-only) parameters for composite action execution.
@@ -71,8 +71,10 @@ pub(super) fn build_step_env(
   let temp_dir = params.config.data_dir.join("tmp");
   let mut env = ctx.build_step_env(&HashMap::new());
 
-  // Inherit system env for PATH, HOME, etc.
-  for (k, v) in std::env::vars() {
+  // Inherit system env for PATH, HOME, etc., but strip the runner's private
+  // `TOOLU_RUNNER_*` namespace (incl. the admin re-mint bearer) so it never
+  // reaches a composite step child.
+  for (k, v) in super::context::safe_process_env_vars() {
     env.entry(k).or_insert(v);
   }
 
@@ -160,7 +162,12 @@ pub(super) fn process_file_commands(
     }
   }
   if let Ok(content) = std::fs::read_to_string(&files.env) {
-    extra_env.extend(parse_env_file(&content));
+    // Mirror the top-level file-command read-back: strip the blocked
+    // `NODE_OPTIONS` before folding, so a composite `run:` step can't set a
+    // node preload for later composite node children.
+    let mut parsed = parse_env_file(&content);
+    strip_blocked_env(&mut parsed);
+    extra_env.extend(parsed);
   }
   if let Ok(content) = std::fs::read_to_string(&files.path) {
     path_additions.extend(parse_path_file(&content));

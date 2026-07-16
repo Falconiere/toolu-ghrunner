@@ -182,9 +182,12 @@ pub async fn upload_log_blob(
 
   let status = response.status();
   if !status.is_success() {
+    // The response body from a SAS/signed-URL PUT can echo the token-bearing
+    // URL; log only the non-secret status + byte length.
     let text = response.text().await.unwrap_or_default();
     return Err(RunnerError::Protocol(format!(
-      "log blob upload status {status}: {text}"
+      "log blob upload status {status} (body {} bytes)",
+      text.len()
     )));
   }
   Ok(())
@@ -214,8 +217,11 @@ async fn twirp_post<T: Serialize>(
   let text = response.text().await.unwrap_or_default();
 
   if !status.is_success() {
+    // Signed-blob-URL RPC responses carry SAS URLs with embedded tokens;
+    // keep only the non-secret status + byte length in the error.
     return Err(RunnerError::Protocol(format!(
-      "twirp {method} status {status}: {text}"
+      "twirp {method} status {status} (body {} bytes)",
+      text.len()
     )));
   }
 

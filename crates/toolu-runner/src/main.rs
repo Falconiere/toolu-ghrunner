@@ -173,7 +173,7 @@ async fn cmd_remove(args: RemoveArgs) -> Result<(), Box<dyn std::error::Error>> 
       tracing::warn!("force-cancelling in-flight run (stub — live cancellation lands in step 10)");
     } else {
       let body = std::fs::read_to_string(&lock_path).unwrap_or_default();
-      std::fs::write(&pending, body)?;
+      write_pending_marker(&pending, &body)?;
       return Err(format!(
         "another run is in flight; wrote {} marker. Re-run with --force to cancel, or wait for the current job to finish.",
         pending.display()
@@ -190,6 +190,33 @@ async fn cmd_remove(args: RemoveArgs) -> Result<(), Box<dyn std::error::Error>> 
     cfg.runner_name
   );
   Ok(())
+}
+
+/// Write the `.pending_remove` marker with owner-only perms (0600 on unix).
+///
+/// The body is the copied `.lock` JSON (holder PID, `started_at`,
+/// `config_path`); it must not be world-readable, matching every other
+/// runner state file. `mode(0o600)` only applies when `create` actually
+/// creates the file, so an explicit `set_permissions` re-tightens a
+/// pre-existing marker left at looser perms.
+fn write_pending_marker(path: &Path, body: &str) -> std::io::Result<()> {
+  #[cfg(unix)]
+  {
+    use std::io::Write;
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    let mut f = std::fs::OpenOptions::new()
+      .write(true)
+      .create(true)
+      .truncate(true)
+      .mode(0o600)
+      .open(path)?;
+    f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    f.write_all(body.as_bytes())
+  }
+  #[cfg(not(unix))]
+  {
+    std::fs::write(path, body)
+  }
 }
 
 /// Delete a registration's persisted state: `config.toml`,

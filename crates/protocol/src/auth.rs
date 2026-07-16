@@ -15,6 +15,9 @@ use shared::RunnerError;
 
 use super::types::RsaKeyParams;
 
+/// CRT parameter triple `(exponent1, exponent2, coefficient)` as big-endian bytes.
+type CrtParams = (Vec<u8>, Vec<u8>, Vec<u8>);
+
 /// OAuth2 token response from GitHub's token endpoint.
 #[derive(Clone, Deserialize)]
 pub struct AccessToken {
@@ -66,7 +69,7 @@ pub fn parse_rsa_private_key(params: &RsaKeyParams) -> Result<Vec<u8>, RunnerErr
 
   // Compute CRT parameters: exponent1 = d mod (p-1), exponent2 = d mod (q-1),
   // coefficient = q^(-1) mod p (via Fermat's little theorem since p is prime).
-  let (exp1_bytes, exp2_bytes, coeff_bytes) = compute_crt_params(&d_bytes, &p_bytes, &q_bytes);
+  let (exp1_bytes, exp2_bytes, coeff_bytes) = compute_crt_params(&d_bytes, &p_bytes, &q_bytes)?;
 
   let n = uint_ref(&n_bytes, "modulus")?;
   let e = uint_ref(&e_bytes, "exponent")?;
@@ -142,31 +145,57 @@ fn uint_ref<'a>(bytes: &'a [u8], label: &str) -> Result<UintRef<'a>, RunnerError
     .map_err(|err| RunnerError::Protocol(format!("{label} ASN.1 integer encoding failed: {err}")))
 }
 
-/// Compute CRT (Chinese Remainder Theorem) parameters from RSA private key components.
+/// Compute CRT parameters from RSA private key components: returns
+/// `(exponent1 = d mod (p-1), exponent2 = d mod (q-1), coefficient = q^-1 mod p)`
+/// as big-endian byte vectors.
 ///
-/// Returns `(exponent1, exponent2, coefficient)` as big-endian byte vectors where:
-/// - exponent1 = d mod (p - 1)
-/// - exponent2 = d mod (q - 1)
-/// - coefficient = q^(-1) mod p (via Fermat's little theorem since p is prime)
+/// # Errors
+///
+/// Returns `RunnerError::Protocol` for degenerate primes (`p <= 1`, `q <= 1`, or
+/// `d == 0`), guarded up front so a spoofed JIT config cannot drive the
+/// `num-bigint-dig` math into a subtract-with-overflow / divide-by-zero panic.
 fn compute_crt_params(
   d_bytes: &[u8],
   p_bytes: &[u8],
   q_bytes: &[u8],
-) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+) -> Result<CrtParams, RunnerError> {
   let d_val = BigUint::from_bytes_be(d_bytes);
   let p_val = BigUint::from_bytes_be(p_bytes);
   let q_val = BigUint::from_bytes_be(q_bytes);
   let one = BigUint::from(1u32);
 
+  // Reject degenerate primes BEFORE any BigUint subtraction or modulus.
+  // `p <= 1` / `q <= 1` would make `p - 1`, `q - 1`, or `p - 2` underflow
+  // (BigUint has no negatives → panic) and make `d % (p - 1)` a modulus by
+  // zero; `d == 0` is a nonsensical private exponent. All are attacker-
+  // influenced (they arrive in the `generate-jitconfig` response), so we
+  // return an error instead of panicking the runner process.
+  if p_val <= one {
+    return Err(RunnerError::Protocol(
+      "invalid RSA parameter P: prime must be greater than 1".to_owned(),
+    ));
+  }
+  if q_val <= one {
+    return Err(RunnerError::Protocol(
+      "invalid RSA parameter Q: prime must be greater than 1".to_owned(),
+    ));
+  }
+  if d_val < one {
+    return Err(RunnerError::Protocol(
+      "invalid RSA parameter D: private exponent must be non-zero".to_owned(),
+    ));
+  }
+
+  // p, q >= 2 here: `p - 1`, `q - 1` >= 1 (non-zero modulus) and `p - 2` >= 0.
   let exponent1 = &d_val % (&p_val - &one);
   let exponent2 = &d_val % (&q_val - &one);
 
   let p_minus_2 = &p_val - BigUint::from(2u32);
   let coefficient = q_val.modpow(&p_minus_2, &p_val);
 
-  (
+  Ok((
     exponent1.to_bytes_be(),
     exponent2.to_bytes_be(),
     coefficient.to_bytes_be(),
-  )
+  ))
 }

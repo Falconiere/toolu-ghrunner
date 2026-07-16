@@ -28,7 +28,7 @@ pub struct DeviceCodeResponse {
 }
 
 /// A successfully issued device-flow access token.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct DeviceToken {
   /// The bearer token to persist and reuse.
   pub access_token: String,
@@ -36,6 +36,19 @@ pub struct DeviceToken {
   pub token_type: String,
   /// Space-delimited scopes granted to the token.
   pub scope: String,
+}
+
+impl std::fmt::Debug for DeviceToken {
+  /// Redacts `access_token` so a stray `{:?}` (directly or via
+  /// [`PollOutcome::Token`]) never prints the bearer in cleartext,
+  /// mirroring `protocol::AccessToken`'s manual `Debug`.
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    f.debug_struct("DeviceToken")
+      .field("access_token", &"<redacted>")
+      .field("token_type", &self.token_type)
+      .field("scope", &self.scope)
+      .finish()
+  }
 }
 
 /// Classification of a single poll response.

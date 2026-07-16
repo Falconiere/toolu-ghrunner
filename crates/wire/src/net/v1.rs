@@ -32,7 +32,7 @@ pub async fn fetch_connection_data(
   if !response.status().is_success() {
     let status = response.status();
     let body = response.text().await.unwrap_or_default();
-    tracing::debug!(status = %status, body = %body, "V1 discovery failed");
+    tracing::debug!(status = %status, body_len = body.len(), "V1 discovery failed");
     return Err(RunnerError::Protocol(format!(
       "V1 discovery returned {status}: see debug log"
     )));
@@ -76,7 +76,7 @@ pub async fn fetch_timeline(
   let status = response.status();
   if !status.is_success() {
     let body = response.text().await.unwrap_or_default();
-    tracing::debug!(status = %status, body = %body, "timeline fetch failed");
+    tracing::debug!(status = %status, body_len = body.len(), "timeline fetch failed");
     return Err(RunnerError::Protocol(format!(
       "timeline fetch status {status}: see debug log"
     )));
@@ -113,7 +113,7 @@ pub async fn post_timeline_record(
   let status = response.status();
   if !status.is_success() {
     let body = response.text().await.unwrap_or_default();
-    tracing::debug!(status = %status, body = %body, "timeline post failed");
+    tracing::debug!(status = %status, body_len = body.len(), "timeline post failed");
     return Err(RunnerError::Protocol(format!(
       "timeline post status {status}: see debug log"
     )));

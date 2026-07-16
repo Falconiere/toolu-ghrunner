@@ -392,7 +392,10 @@ fn build_step_env_and_file_commands(
   std::fs::create_dir_all(&tmp_dir)?;
   let (file_cmds, file_cmd_env) = FileCommandManager::create(&tmp_dir)?;
   env.extend(file_cmd_env);
-  for (k, v) in std::env::vars() {
+  // Fold the process env LAST (lowest precedence), stripping the runner's
+  // private `TOOLU_RUNNER_*` namespace so the admin re-mint bearer never
+  // reaches the step child.
+  for (k, v) in super::context::safe_process_env_vars() {
     env.entry(k).or_insert(v);
   }
   Ok((env, file_cmds))

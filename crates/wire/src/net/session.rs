@@ -27,7 +27,7 @@ pub async fn create_session(
   let status = response.status();
   if !status.is_success() {
     let body = response.text().await.unwrap_or_default();
-    tracing::debug!(status = %status, body = %body, "create session failed");
+    tracing::debug!(status = %status, body_len = body.len(), "create session failed");
     return Err(RunnerError::Protocol(format!(
       "create session failed with status {status}: see debug log"
     )));

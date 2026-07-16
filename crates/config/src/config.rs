@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use shared::{CacheConfig, L2Config, RunnerError, ServicesMode, paths};
 
 #[cfg(unix)]
-use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 
 #[cfg(unix)]
 const SECRET_FILE_MODE: u32 = 0o600;
@@ -349,8 +349,11 @@ pub fn save_credentials(path: &Path, creds: &CredentialsFile) -> Result<(), Runn
 
 /// Write `body` to `path` with explicit 0600 mode on Unix.
 ///
-/// On non-Unix platforms the mode is best-effort (Windows inherits its
-/// default ACL behavior — the runner logs a warning rather than failing).
+/// Beyond `.mode()`, Unix adds `O_NOFOLLOW` (refuse a symlink pre-planted at
+/// `path`) and an explicit `set_permissions(0600)` on the open handle —
+/// `.mode()` only fires on create, so an already-existing target (the re-mint
+/// loop rewrites `credentials.json` every job) would keep its looser mode.
+/// Non-Unix mode is best-effort (Windows inherits its default ACL).
 pub(crate) fn write_secret_file(path: &Path, body: &[u8]) -> Result<(), RunnerError> {
   #[cfg(unix)]
   let mut opts = OpenOptions::new();
@@ -360,7 +363,10 @@ pub(crate) fn write_secret_file(path: &Path, body: &[u8]) -> Result<(), RunnerEr
       .create(true)
       .write(true)
       .truncate(true)
-      .mode(SECRET_FILE_MODE);
+      .mode(SECRET_FILE_MODE)
+      // Unix-only, per-OS constant (0x100 macOS / 0o400000 Linux); taken
+      // from libc so the value is correct on both targets.
+      .custom_flags(libc::O_NOFOLLOW);
   }
   #[cfg(not(unix))]
   let mut opts = OpenOptions::new();
@@ -370,10 +376,33 @@ pub(crate) fn write_secret_file(path: &Path, body: &[u8]) -> Result<(), RunnerEr
   }
 
   let mut f = opts.open(path)?;
+  // Re-tighten an already-existing file to 0600 regardless of its prior mode
+  // (see the doc comment above — `.mode()` only fires on create).
+  #[cfg(unix)]
+  f.set_permissions(std::fs::Permissions::from_mode(SECRET_FILE_MODE))?;
   f.write_all(body)?;
   f.sync_all()?;
   Ok(())
 }
+
+/// Best-effort `0700` on a freshly created directory (Unix only).
+///
+/// Mirrors `shared::startup`'s directory hardening so the runner home is not
+/// left world-listable when `login` / `create-app` create it before any
+/// command has run tracing init (the only other place the home is
+/// tightened). WARN, not fatal — a chmod failure never blocks persisting the
+/// token / app file, and it also supplies no worse a posture than the prior
+/// behavior.
+#[cfg(unix)]
+pub(crate) fn harden_dir_perms(path: &Path) {
+  if let Err(e) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)) {
+    tracing::warn!(error = %e, path = %path.display(), "failed to set 0o700 on runner home");
+  }
+}
+
+/// Non-Unix no-op (permissions are inherited from the default ACL).
+#[cfg(not(unix))]
+pub(crate) fn harden_dir_perms(_path: &Path) {}
 
 /// JIT endpoint URL for a given GH host.
 ///

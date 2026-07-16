@@ -35,7 +35,7 @@ pub async fn exchange_token(
   let status = response.status();
   if !status.is_success() {
     let body = response.text().await.unwrap_or_default();
-    tracing::debug!(status = %status, body = %body, "token exchange failed");
+    tracing::debug!(status = %status, body_len = body.len(), "token exchange failed");
     return Err(RunnerError::Protocol(format!(
       "token exchange failed with status {status}: see debug log"
     )));
