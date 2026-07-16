@@ -19,7 +19,10 @@ fn base64_padded_and_unpadded_secret_is_masked() {
   let standard = STANDARD.encode(secret);
   let no_pad = STANDARD_NO_PAD.encode(secret);
   // 26 bytes (% 3 == 2) => the two forms genuinely differ by padding.
-  assert_ne!(standard, no_pad, "test input must exercise both base64 forms");
+  assert_ne!(
+    standard, no_pad,
+    "test input must exercise both base64 forms"
+  );
 
   // `echo $SECRET | base64` produces the padded (STANDARD) form.
   let redacted = masker.mask(&format!("dumped token: {standard}"));
@@ -38,7 +41,10 @@ fn base64_padded_and_unpadded_secret_is_masked() {
     !redacted.contains(&no_pad),
     "unpadded base64 secret leaked: {redacted}"
   );
-  assert!(redacted.contains("token=***"), "expected mask marker: {redacted}");
+  assert!(
+    redacted.contains("token=***"),
+    "expected mask marker: {redacted}"
+  );
 }
 
 #[test]
@@ -102,8 +108,14 @@ fn raw_and_json_escaped_secret_still_masked() {
 
   // Raw form.
   let redacted = masker.mask("login pa\"ss done");
-  assert!(!redacted.contains("pa\"ss"), "raw secret leaked: {redacted}");
-  assert!(redacted.contains("login *** done"), "expected mask marker: {redacted}");
+  assert!(
+    !redacted.contains("pa\"ss"),
+    "raw secret leaked: {redacted}"
+  );
+  assert!(
+    redacted.contains("login *** done"),
+    "expected mask marker: {redacted}"
+  );
 
   // JSON-serialized log line: the quote is backslash-escaped.
   let json_line = "{\"password\":\"pa\\\"ss\"}";
@@ -121,5 +133,9 @@ fn short_secret_and_its_encodings_are_not_registered() {
 
   // base64("ab") == "YWI=", hex("ab") == "6162"; none must be masked.
   let line = "raw=ab b64=YWI= hex=6162";
-  assert_eq!(masker.mask(line), line, "short secret must register no patterns");
+  assert_eq!(
+    masker.mask(line),
+    line,
+    "short secret must register no patterns"
+  );
 }

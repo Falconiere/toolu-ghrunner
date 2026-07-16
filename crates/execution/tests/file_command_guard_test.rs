@@ -21,7 +21,10 @@ fn strip_blocked_env_drops_node_options_case_insensitively() {
 
   strip_blocked_env(&mut env);
 
-  assert!(!env.contains_key("NODE_OPTIONS"), "NODE_OPTIONS must be dropped");
+  assert!(
+    !env.contains_key("NODE_OPTIONS"),
+    "NODE_OPTIONS must be dropped"
+  );
   assert!(
     !env.contains_key("node_options"),
     "NODE_OPTIONS must be dropped case-insensitively"

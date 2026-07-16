@@ -167,11 +167,7 @@ impl Default for SecretMasker {
 /// One hex digit for `nibble` (0..=15). `upper` picks `A-F` vs `a-f`.
 fn hex_nibble(nibble: u8, upper: bool) -> char {
   let c = char::from_digit(u32::from(nibble), 16).unwrap_or('0');
-  if upper {
-    c.to_ascii_uppercase()
-  } else {
-    c
-  }
+  if upper { c.to_ascii_uppercase() } else { c }
 }
 
 /// Hex-encode `bytes`; `upper` selects uppercase digits.
