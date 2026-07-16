@@ -87,8 +87,7 @@ impl FileCommandManager {
     let summary = std::fs::read_to_string(&self.summary_path)?;
 
     let mut env_vars = parse_env_file(&env_content);
-    // NODE_OPTIONS is blocked (case-insensitive)
-    env_vars.retain(|k, _| !k.eq_ignore_ascii_case("NODE_OPTIONS"));
+    strip_blocked_env(&mut env_vars);
 
     Ok(FileCommandResults {
       env_vars,
@@ -116,6 +115,16 @@ impl FileCommandManager {
     }
     Ok(())
   }
+}
+
+/// Strip env keys the runner refuses to propagate from a `$GITHUB_ENV`
+/// read-back. Today that is `NODE_OPTIONS` (case-insensitive): node children
+/// honor it (e.g. `--require`), so letting a `run:` step set it via
+/// `$GITHUB_ENV` would inject a preload into every later node action — the one
+/// env guard the runner enforces. Applied to BOTH the top-level file-command
+/// read-back and the composite `$GITHUB_ENV` read-back.
+pub fn strip_blocked_env(env: &mut HashMap<String, String>) {
+  env.retain(|k, _| !k.eq_ignore_ascii_case("NODE_OPTIONS"));
 }
 
 /// Parse a GITHUB_ENV file. Supports `KEY=VALUE` and heredoc `KEY<<DELIM`.

@@ -59,8 +59,9 @@ pub async fn upload_block_blob(
     .map_err(|e| RunnerError::Protocol(format!("block blob upload: {e}")))?;
 
   if !response.status().is_success() {
+    let status = response.status();
     let body = response.text().await.unwrap_or_default();
-    tracing::debug!(body = %body, "block blob upload failed");
+    tracing::debug!(status = %status, body_len = body.len(), "block blob upload failed");
     return Err(RunnerError::Protocol(
       "block blob upload failed: see debug log".into(),
     ));
@@ -86,8 +87,9 @@ pub async fn upload_log(
     .map_err(|e| RunnerError::Protocol(format!("create append blob: {e}")))?;
 
   if !response.status().is_success() {
+    let status = response.status();
     let body = response.text().await.unwrap_or_default();
-    tracing::debug!(body = %body, "create append blob failed");
+    tracing::debug!(status = %status, body_len = body.len(), "create append blob failed");
     return Err(RunnerError::Protocol(
       "create append blob failed: see debug log".into(),
     ));
@@ -106,8 +108,9 @@ pub async fn upload_log(
       .map_err(|e| RunnerError::Protocol(format!("append block: {e}")))?;
 
     if !response.status().is_success() {
+      let status = response.status();
       let body = response.text().await.unwrap_or_default();
-      tracing::debug!(body = %body, "append block failed");
+      tracing::debug!(status = %status, body_len = body.len(), "append block failed");
       return Err(RunnerError::Protocol(
         "append block failed: see debug log".into(),
       ));

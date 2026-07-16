@@ -101,11 +101,7 @@ pub fn parse_action_ref(uses: &str) -> Result<ActionRef, RunnerError> {
     )));
   }
 
-  let subpath = if parts.len() > 2 {
-    Some(parts.get(2..).unwrap_or_default().join("/"))
-  } else {
-    None
-  };
+  let subpath = parse_subpath(&parts, uses)?;
 
   Ok(ActionRef {
     kind: ActionRefKind::Remote,
@@ -114,6 +110,38 @@ pub fn parse_action_ref(uses: &str) -> Result<ActionRef, RunnerError> {
     git_ref: git_ref.to_owned(),
     subpath,
     local_path: None,
+  })
+}
+
+/// Build the validated remote subpath for `{owner}/{repo}/<subpath>@ref`.
+///
+/// A remote subpath is joined onto the action cache dir, then `read_manifest`
+/// reads `action.yml` from it. Reject any traversing subpath (a crafted
+/// `uses: actions/checkout/../../../../etc@v4`) so it cannot escape the cache
+/// and read a manifest from outside — mirrors `ActionRef::local_dir`'s guard.
+/// `None` when the ref carries no subpath.
+fn parse_subpath(parts: &[&str], uses: &str) -> Result<Option<String>, RunnerError> {
+  if parts.len() <= 2 {
+    return Ok(None);
+  }
+  let joined = parts.get(2..).unwrap_or_default().join("/");
+  if subpath_escapes(&joined) {
+    return Err(RunnerError::ActionResolution(format!(
+      "invalid action ref '{uses}': subpath escapes the action directory"
+    )));
+  }
+  Ok(Some(joined))
+}
+
+/// True if a remote subpath contains a `..`, absolute, or root component that
+/// would let `cache_dir.join(subpath)` escape the action cache directory.
+fn subpath_escapes(subpath: &str) -> bool {
+  use std::path::Component;
+  std::path::Path::new(subpath).components().any(|c| {
+    matches!(
+      c,
+      Component::ParentDir | Component::RootDir | Component::Prefix(_)
+    )
   })
 }
 

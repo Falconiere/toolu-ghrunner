@@ -479,6 +479,7 @@ dependencies = [
  "chrono",
  "fs2",
  "keyring",
+ "libc",
  "serde",
  "serde_json",
  "shared",
@@ -2692,6 +2693,7 @@ dependencies = [
 name = "shared"
 version = "0.5.0"
 dependencies = [
+ "base64",
  "chrono",
  "dotenvy",
  "serde",

@@ -432,6 +432,26 @@ impl ExecutionContext {
   }
 }
 
+/// True iff `key` is in the runner's private `TOOLU_RUNNER_*` env namespace
+/// (ASCII-case-insensitive). The re-mint bearer arrives via `TOOLU_RUNNER_TOKEN`
+/// and so sits in the runner's process env; this gates every point where the
+/// process env is folded or inherited into a job/step child, keeping the
+/// admin-scoped token (and the whole private namespace) out of semi-trusted
+/// workflow code. Byte-safe: a key shorter than (or not starting with) the
+/// prefix simply fails the `get(..13)`.
+pub fn is_runner_private_env_key(key: &str) -> bool {
+  key
+    .get(..13)
+    .is_some_and(|p| p.eq_ignore_ascii_case("TOOLU_RUNNER_"))
+}
+
+/// The current process env with the runner's private `TOOLU_RUNNER_*` namespace
+/// stripped — the only env iterator that may be folded or inherited into a
+/// job/step child.
+pub fn safe_process_env_vars() -> impl Iterator<Item = (String, String)> {
+  std::env::vars().filter(|(k, _)| !is_runner_private_env_key(k))
+}
+
 /// Map a `String → String` table to an `ExprValue::Object` of strings.
 fn string_map_to_obj(map: &HashMap<String, String>) -> HashMap<String, ExprValue> {
   map

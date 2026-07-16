@@ -198,9 +198,24 @@ fn oidc_request_url(upstream_url: &str, audience: Option<&str>) -> String {
     upstream_url.trim_end_matches('/')
   );
   if let Some(aud) = audience {
-    url.push_str(&format!("&audience={aud}"));
+    url.push_str(&format!("&audience={}", percent_encode_query(aud)));
   }
   url
+}
+
+/// Percent-encode a query-parameter value (RFC 3986): keep the unreserved set
+/// `A–Z a–z 0–9 - _ . ~` verbatim, encode every other byte as `%XX`. Stops a
+/// caller-supplied `audience` from injecting extra query params (or `#`/`&`/`/`
+/// tricks) into the upstream OIDC request URL.
+fn percent_encode_query(value: &str) -> String {
+  let mut out = String::with_capacity(value.len());
+  for &b in value.as_bytes() {
+    match b {
+      b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+      _ => out.push_str(&format!("%{b:02X}")),
+    }
+  }
+  out
 }
 
 /// The timeout-bounded HTTP client used to proxy OIDC requests, built once

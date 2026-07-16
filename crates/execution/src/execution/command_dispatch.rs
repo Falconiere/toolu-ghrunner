@@ -4,9 +4,10 @@
 //! `command_parser::parse_command` produces `WorkflowCommand` values; this
 //! module is the consumer that turns each parsed command into an effect:
 //! step outputs/state, secret masks (via the **shared** `SecretMasker`),
-//! env/path mutations, log groups, and annotations. Non-command lines (and
-//! lines emitted while `stop-commands` is active) pass through verbatim so
-//! they are logged unchanged.
+//! log groups, and annotations. The stdout `set-env`/`add-path` commands are
+//! **refused** (they re-open CVE-2020-15228); only the file-based
+//! `$GITHUB_ENV`/`$GITHUB_PATH` path may mutate env/PATH. Non-command lines
+//! pass through verbatim so they are logged unchanged.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -128,8 +129,14 @@ impl CommandDispatcher {
       WorkflowCommand::SetOutput { name, value } => self.apply_set_output(&name, &value, ctx),
       WorkflowCommand::SaveState { name, value } => self.apply_save_state(&name, &value, ctx),
       WorkflowCommand::AddMask { value } => self.apply_add_mask(&value),
-      WorkflowCommand::AddPath { value } => ctx.prepend_path(&unescape_data(&value)),
-      WorkflowCommand::SetEnv { name, value } => self.apply_set_env(&name, &value, ctx),
+      // Refused: mutating the runner's live PATH/env from untrusted step stdout
+      // re-opens CVE-2020-15228. Warn and apply nothing (no `ctx` mutation).
+      WorkflowCommand::AddPath { .. } => {
+        self.warn_disabled_stdout_command("add-path", "GITHUB_PATH");
+      },
+      WorkflowCommand::SetEnv { .. } => {
+        self.warn_disabled_stdout_command("set-env", "GITHUB_ENV");
+      },
       WorkflowCommand::Group { title } => self.apply_group(&title),
       WorkflowCommand::EndGroup => self.apply_endgroup(),
       WorkflowCommand::Error {
@@ -167,7 +174,12 @@ impl CommandDispatcher {
       WorkflowCommand::ResumeCommands { .. } => {},
     }
   }
+}
 
+/// Command-effect helpers: apply a parsed command to `ctx` / the shared masker
+/// / the pending event queue. Split from the dispatch impl to keep each block
+/// small.
+impl CommandDispatcher {
   fn apply_set_output(&mut self, name: &str, value: &str, ctx: &mut ExecutionContext) {
     if !name.is_empty() {
       let name = unescape_data(name);
@@ -186,10 +198,12 @@ impl CommandDispatcher {
     }
   }
 
-  fn apply_set_env(&self, name: &str, value: &str, ctx: &mut ExecutionContext) {
-    if !name.is_empty() {
-      ctx.set_env(&unescape_data(name), &unescape_data(value));
-    }
+  /// Refuse a stdout `set-env`/`add-path` command (CVE-2020-15228): warn once,
+  /// naming the `$GITHUB_ENV`/`$GITHUB_PATH` file replacement, and mutate nothing.
+  fn warn_disabled_stdout_command(&mut self, command: &str, file_var: &str) {
+    let msg =
+      format!("the `::{command}::` stdout command is disabled for security; use ${file_var}");
+    self.push_annotation(AnnotationLevel::Warning, &msg, None, None);
   }
 
   fn apply_add_mask(&self, value: &str) {

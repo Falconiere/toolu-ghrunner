@@ -92,7 +92,10 @@ fn build_node_command(params: &NodeExecParams<'_>) -> tokio::process::Command {
   let mut cmd = tokio::process::Command::new(params.node_binary);
   cmd.arg(params.script_path);
   cmd.current_dir(params.working_dir);
-  cmd.envs(std::env::vars());
+  // `params.env` (from `build_node_env`) is DELTA-only and relies on the
+  // inherited process env for PATH/HOME, so inherit — but strip the runner's
+  // private `TOOLU_RUNNER_*` namespace (incl. the admin re-mint bearer) first.
+  cmd.envs(crate::execution::context::safe_process_env_vars());
   cmd.envs(params.env);
   cmd.stdout(Stdio::piped());
   cmd.stderr(Stdio::piped());

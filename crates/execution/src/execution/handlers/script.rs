@@ -188,10 +188,15 @@ async fn spawn_step_shell(
 ) -> Result<tokio::process::Child, RunnerError> {
   let (program, args) = build_shell_args(shell_name, script_path);
   let mut cmd = tokio::process::Command::new(program);
+  // `params.env` already carries a COMPLETE, filtered process env (both
+  // constructors fold `context::safe_process_env_vars` — PATH/HOME/LANG
+  // included, `TOOLU_RUNNER_*` stripped). Clear inherited env and set only
+  // that map, so the runner's admin re-mint bearer can never re-enter via a
+  // raw `std::env::vars()` re-inclusion (matches `composite_shell`).
   cmd
     .args(&args)
     .current_dir(params.working_dir)
-    .envs(std::env::vars())
+    .env_clear()
     .envs(params.env)
     .stdout(Stdio::piped())
     .stderr(Stdio::piped());

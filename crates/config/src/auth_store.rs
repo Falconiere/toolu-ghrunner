@@ -105,6 +105,10 @@ impl AuthStore {
       },
       AuthStore::File(dir) => {
         std::fs::create_dir_all(dir)?;
+        // `login` may create the runner home before any command runs tracing
+        // init (which is the only other place the home is chmod 0700), so
+        // tighten it here to keep it off the world-listable default umask.
+        crate::config::harden_dir_perms(dir);
         let path = token_file_path(dir, &token.host);
         let body = serde_json::to_string_pretty(token)?;
         crate::config::write_secret_file(&path, body.as_bytes())

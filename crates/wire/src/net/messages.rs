@@ -74,7 +74,7 @@ pub async fn poll_message(
       .map_err(|e| RunnerError::Protocol(format!("message parse failed: {e}"))),
     other => {
       let body = response.text().await.unwrap_or_default();
-      tracing::debug!(status = other, body = %body, "message poll failed");
+      tracing::debug!(status = other, body_len = body.len(), "message poll failed");
       Err(RunnerError::Protocol(format!(
         "message poll returned status {other}: see debug log"
       )))
@@ -121,7 +121,7 @@ pub async fn acknowledge_message(
   let status = response.status();
   if !status.is_success() {
     let body = response.text().await.unwrap_or_default();
-    tracing::debug!(status = %status, body = %body, "acknowledge failed");
+    tracing::debug!(status = %status, body_len = body.len(), "acknowledge failed");
     return Err(RunnerError::Protocol(format!(
       "acknowledge status {status}: see debug log"
     )));

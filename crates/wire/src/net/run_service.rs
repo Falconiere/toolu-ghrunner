@@ -38,7 +38,7 @@ pub async fn acquire_job(
   let status = response.status();
   if !status.is_success() {
     let body = response.text().await.unwrap_or_default();
-    tracing::debug!(status = %status, body = %body, "acquire job failed");
+    tracing::debug!(status = %status, body_len = body.len(), "acquire job failed");
     return Err(RunnerError::Protocol(format!(
       "acquire job status {status}: see debug log"
     )));
@@ -93,7 +93,7 @@ pub async fn renew_job(
   let status = response.status();
   if !status.is_success() {
     let body = response.text().await.unwrap_or_default();
-    tracing::debug!(status = %status, body = %body, "renew job failed");
+    tracing::debug!(status = %status, body_len = body.len(), "renew job failed");
     return Err(RunnerError::Protocol(format!(
       "renew job status {status}: see debug log"
     )));
@@ -129,7 +129,7 @@ pub async fn complete_job(
   let status = response.status();
   if !status.is_success() {
     let body = response.text().await.unwrap_or_default();
-    tracing::debug!(status = %status, body = %body, "complete job failed");
+    tracing::debug!(status = %status, body_len = body.len(), "complete job failed");
     return Err(RunnerError::Protocol(format!(
       "complete job status {status}: see debug log"
     )));

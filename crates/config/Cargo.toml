@@ -28,6 +28,12 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 # Structured warnings (unknown [services] mode, keyring fallback)
 tracing = "0.1"
 
+# O_NOFOLLOW constant for the secret-file open (symlink-refusing write).
+# Unix-only; the portable constant differs per-OS (0x100 macOS, 0o400000
+# Linux) so we take it from libc rather than hard-coding a value.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 # Real temp dirs for the lockfile concurrency tests (no mocks)
 tempfile = "3"
