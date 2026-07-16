@@ -4,4 +4,4 @@ mod claims;
 mod server;
 
 pub use claims::{OidcClaims, OidcClaimsParams, OidcConfig, OidcJobContext, OidcMode};
-pub use server::OidcServer;
+pub use server::{OidcServer, oidc_request_url};

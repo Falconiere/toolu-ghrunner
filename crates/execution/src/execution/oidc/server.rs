@@ -192,7 +192,7 @@ fn mint_jwt(claims: &OidcClaims, signing_key: &[u8]) -> Result<String, RunnerErr
 }
 
 /// Build the upstream OIDC requestToken URL, appending `audience` if given.
-fn oidc_request_url(upstream_url: &str, audience: Option<&str>) -> String {
+pub fn oidc_request_url(upstream_url: &str, audience: Option<&str>) -> String {
   let mut url = format!(
     "{}/_apis/pipeline/oidc/requestToken?api-version=1",
     upstream_url.trim_end_matches('/')
