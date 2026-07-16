@@ -9,7 +9,8 @@
 use execution::execution::oidc::oidc_request_url;
 
 const UPSTREAM: &str = "https://token.actions.githubusercontent.com";
-const BASE: &str = "https://token.actions.githubusercontent.com/_apis/pipeline/oidc/requestToken?api-version=1";
+const BASE: &str =
+  "https://token.actions.githubusercontent.com/_apis/pipeline/oidc/requestToken?api-version=1";
 
 /// The substring of the built URL that carries the encoded audience value,
 /// i.e. everything after the single `audience=` delimiter (empty string when
@@ -41,14 +42,32 @@ fn query_and_fragment_chars_are_percent_encoded() {
   assert_eq!(value, "a%26b%3Dc%23d");
 
   // The injected delimiters must NOT appear literally in the audience value.
-  assert!(!value.contains('&'), "raw & would open a new query param: {value}");
-  assert!(!value.contains('='), "raw = would complete a key=value pair: {value}");
-  assert!(!value.contains('#'), "raw # would open a URL fragment: {value}");
+  assert!(
+    !value.contains('&'),
+    "raw & would open a new query param: {value}"
+  );
+  assert!(
+    !value.contains('='),
+    "raw = would complete a key=value pair: {value}"
+  );
+  assert!(
+    !value.contains('#'),
+    "raw # would open a URL fragment: {value}"
+  );
 
   // The literal injection sequences must be absent from the whole URL.
-  assert!(!url.contains("a&b"), "audience & leaked as a delimiter: {url}");
-  assert!(!url.contains("b=c"), "audience = leaked as a delimiter: {url}");
-  assert!(!url.contains("c#d"), "audience # leaked as a fragment: {url}");
+  assert!(
+    !url.contains("a&b"),
+    "audience & leaked as a delimiter: {url}"
+  );
+  assert!(
+    !url.contains("b=c"),
+    "audience = leaked as a delimiter: {url}"
+  );
+  assert!(
+    !url.contains("c#d"),
+    "audience # leaked as a fragment: {url}"
+  );
 
   // And the encoded forms are present.
   assert!(url.contains("%26") && url.contains("%3D") && url.contains("%23"));
@@ -66,8 +85,14 @@ fn slashes_and_scheme_are_percent_encoded() {
   assert_eq!(value, "https%3A%2F%2Fx%2Fy");
 
   // No raw path separators or scheme colon in the audience value.
-  assert!(!value.contains('/'), "raw / would inject a path segment: {value}");
-  assert!(!value.contains(':'), "raw : leaked from the audience: {value}");
+  assert!(
+    !value.contains('/'),
+    "raw / would inject a path segment: {value}"
+  );
+  assert!(
+    !value.contains(':'),
+    "raw : leaked from the audience: {value}"
+  );
   assert!(value.contains("%2F") && value.contains("%3A"));
 }
 

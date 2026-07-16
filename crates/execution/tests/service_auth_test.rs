@@ -32,7 +32,10 @@ fn wrong_token_is_unauthorized() {
     HeaderValue::from_static("Bearer not-the-right-token"),
   );
 
-  assert_eq!(validate_bearer(&headers, EXPECTED), Err(StatusCode::UNAUTHORIZED));
+  assert_eq!(
+    validate_bearer(&headers, EXPECTED),
+    Err(StatusCode::UNAUTHORIZED)
+  );
 }
 
 /// A token that shares a prefix with the expected one but differs in length
@@ -46,7 +49,10 @@ fn prefix_of_expected_token_is_unauthorized() {
     HeaderValue::from_str(&format!("Bearer {prefix}")).unwrap(),
   );
 
-  assert_eq!(validate_bearer(&headers, EXPECTED), Err(StatusCode::UNAUTHORIZED));
+  assert_eq!(
+    validate_bearer(&headers, EXPECTED),
+    Err(StatusCode::UNAUTHORIZED)
+  );
 }
 
 /// No Authorization header at all → UNAUTHORIZED.
@@ -54,7 +60,10 @@ fn prefix_of_expected_token_is_unauthorized() {
 fn missing_authorization_header_is_unauthorized() {
   let headers = HeaderMap::new();
 
-  assert_eq!(validate_bearer(&headers, EXPECTED), Err(StatusCode::UNAUTHORIZED));
+  assert_eq!(
+    validate_bearer(&headers, EXPECTED),
+    Err(StatusCode::UNAUTHORIZED)
+  );
 }
 
 /// A header present but WITHOUT the `Bearer ` scheme prefix → UNAUTHORIZED,
@@ -65,7 +74,10 @@ fn malformed_header_without_bearer_prefix_is_unauthorized() {
   // Right token, wrong scheme: `Basic ` / bare value must not authenticate.
   headers.insert("Authorization", HeaderValue::from_str(EXPECTED).unwrap());
 
-  assert_eq!(validate_bearer(&headers, EXPECTED), Err(StatusCode::UNAUTHORIZED));
+  assert_eq!(
+    validate_bearer(&headers, EXPECTED),
+    Err(StatusCode::UNAUTHORIZED)
+  );
 
   let mut basic = HeaderMap::new();
   basic.insert(
@@ -73,5 +85,8 @@ fn malformed_header_without_bearer_prefix_is_unauthorized() {
     HeaderValue::from_str(&format!("Basic {EXPECTED}")).unwrap(),
   );
 
-  assert_eq!(validate_bearer(&basic, EXPECTED), Err(StatusCode::UNAUTHORIZED));
+  assert_eq!(
+    validate_bearer(&basic, EXPECTED),
+    Err(StatusCode::UNAUTHORIZED)
+  );
 }

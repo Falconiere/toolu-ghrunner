@@ -47,7 +47,11 @@ fn stdout_set_env_is_refused_and_does_not_mutate_ctx() {
     ctx.env_var("LD_PRELOAD").is_none(),
     "stdout ::set-env:: must NOT mutate the execution env (CVE-2020-15228)"
   );
-  assert_eq!(warnings.len(), 1, "exactly one warning expected; got {warnings:?}");
+  assert_eq!(
+    warnings.len(),
+    1,
+    "exactly one warning expected; got {warnings:?}"
+  );
   let msg = warnings.first().map(String::as_str).unwrap_or_default();
   assert!(
     msg.contains("set-env") && msg.contains("GITHUB_ENV"),
@@ -67,7 +71,11 @@ fn stdout_add_path_is_refused_and_does_not_change_path() {
     !path.contains("/opt/attacker/bin"),
     "stdout ::add-path:: must NOT prepend to PATH; PATH={path:?}"
   );
-  assert_eq!(warnings.len(), 1, "exactly one warning expected; got {warnings:?}");
+  assert_eq!(
+    warnings.len(),
+    1,
+    "exactly one warning expected; got {warnings:?}"
+  );
   let msg = warnings.first().map(String::as_str).unwrap_or_default();
   assert!(
     msg.contains("add-path") && msg.contains("GITHUB_PATH"),
