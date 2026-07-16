@@ -26,7 +26,8 @@ pub mod job_spec;
 mod node_stage;
 pub mod oidc;
 mod post_drain;
-mod service_auth;
+/// Bearer-token validation shared across the local OIDC/artifact/cache services.
+pub mod service_auth;
 pub mod service_endpoints;
 pub mod service_lifecycle;
 /// Shadow-mode step observation (approach C): records only, never serves.

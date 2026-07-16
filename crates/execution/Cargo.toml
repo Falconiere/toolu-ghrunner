@@ -52,6 +52,9 @@ bollard = "0.20"
 [dev-dependencies]
 tempfile = "3"
 pretty_assertions = "1"
+# Integration tests build a real HeaderMap / assert StatusCode against the
+# service-auth + OIDC url helpers (a normal dep isn't visible to tests/).
+axum = "0.8"
 
 [lints]
 workspace = true
