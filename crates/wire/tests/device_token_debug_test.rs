@@ -6,11 +6,11 @@
 use wire::net::device_auth::{DeviceToken, PollOutcome, parse_poll_response};
 
 /// The bearer value that must never surface in `Debug` output.
-const SECRET: &str = "gho_16C7e42F292c6912E7710c838347Ae178B4a";
+const SECRET: &str = "gho_fake0123456789abcdef0123456789ab";
 
 /// A realistic GitHub device-flow success body, as returned by
 /// `POST /login/oauth/access_token` with `Accept: application/json`.
-const SUCCESS_BODY: &str = r#"{"access_token":"gho_16C7e42F292c6912E7710c838347Ae178B4a","token_type":"bearer","scope":"repo,workflow"}"#;
+const SUCCESS_BODY: &str = r#"{"access_token":"gho_fake0123456789abcdef0123456789ab","token_type":"bearer","scope":"repo,workflow"}"#;
 
 #[test]
 fn device_token_debug_redacts_access_token() -> Result<(), Box<dyn std::error::Error>> {
