@@ -36,7 +36,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       TAG: ${{ github.ref_name }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Download SHA256SUMS from the release
         run: gh release download "$TAG" --repo "${{ github.repository }}" -p SHA256SUMS -D dist
