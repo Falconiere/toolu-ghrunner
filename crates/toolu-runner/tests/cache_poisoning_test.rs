@@ -16,6 +16,7 @@ use cache::trust::TrustLevel;
 use cache::v1::{V1Inputs, V1State, v1_router};
 use futures_util::StreamExt;
 use serde_json::{Value, json};
+use shared::RunnerError;
 
 type TestResult<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -305,6 +306,134 @@ async fn corrupt_manifest_is_never_removed() -> TestResult<()> {
     manifest_path.exists(),
     "a corrupt MANIFEST must never be removed by the self-heal path — that path only ever \
      touches chunk files"
+  );
+  Ok(())
+}
+
+// --- AC-8c: WARN-and-continue when the corrupt chunk's own removal fails --
+
+/// Like `collect_until_error`, but returns the actual error (if any) instead
+/// of just a boolean, so a caller can assert on ITS SHAPE — distinguishing an
+/// ordinary miss from some other, unhandled failure (e.g. a removal error
+/// leaking out of the self-heal path instead of being warned-and-ignored).
+async fn collect_until_error_with_err(
+  store: &CasStore,
+  m: &Manifest,
+) -> (Vec<u8>, Option<RunnerError>) {
+  let stream = store.read_range(m, 0, m.total_size);
+  futures_util::pin_mut!(stream);
+  let mut out = Vec::new();
+  let mut err = None;
+  while let Some(item) = stream.next().await {
+    match item {
+      Ok(bytes) => out.extend_from_slice(&bytes),
+      Err(e) => {
+        err = Some(e);
+        break;
+      },
+    }
+  }
+  (out, err)
+}
+
+/// Best-effort: make `dir` immutable via Linux `chattr +i`, so files inside
+/// it cannot be created or removed by anyone — root included — unless the
+/// process holds `CAP_LINUX_IMMUTABLE` (commonly dropped inside a
+/// container's default capability set). `chmod`-based read-only is not used
+/// here because root bypasses directory write permission checks outright
+/// (verified by hand: `chmod 555` on a directory does not stop `root` from
+/// unlinking a file inside it).
+///
+/// Returns whether the flag is actually ENFORCED, not merely accepted, by
+/// round-tripping a throwaway file — so an environment where `chattr`
+/// silently has no effect (unsupported filesystem, or a process that does
+/// hold `CAP_LINUX_IMMUTABLE`) is detected rather than assumed.
+fn try_make_dir_removal_proof(dir: &Path) -> bool {
+  let Ok(status) = std::process::Command::new("chattr")
+    .arg("+i")
+    .arg(dir)
+    .status()
+  else {
+    return false; // `chattr` not available on this host.
+  };
+  if !status.success() {
+    return false;
+  }
+  let probe = dir.join(".removal_proof_probe");
+  if std::fs::write(&probe, b"x").is_ok() {
+    // Creation inside the "immutable" dir was NOT blocked either — the flag
+    // had no effect here; undo it and report unenforced.
+    let _ = std::fs::remove_file(&probe);
+    clear_dir_removal_proof(dir);
+    return false;
+  }
+  true
+}
+
+/// Undo `try_make_dir_removal_proof`. Best-effort test cleanup only.
+fn clear_dir_removal_proof(dir: &Path) {
+  let _ = std::process::Command::new("chattr")
+    .arg("-i")
+    .arg(dir)
+    .status();
+}
+
+/// RAII guard so the immutable flag is cleared even if an assertion below
+/// panics (`tempfile::TempDir`'s own `Drop` would otherwise try to recurse
+/// into a directory it can no longer delete from).
+struct RemovalProofGuard<'a>(&'a Path);
+
+impl Drop for RemovalProofGuard<'_> {
+  fn drop(&mut self) {
+    clear_dir_removal_proof(self.0);
+  }
+}
+
+/// AC-8c: when the corrupt chunk's own removal fails (its shard directory is
+/// immutable), the self-heal path's WARN-and-continue arm must still fall
+/// through to the SAME miss a successful removal would produce — not
+/// propagate the removal's own I/O error, and not panic.
+#[tokio::test]
+async fn corrupt_chunk_removal_failure_still_falls_through_to_miss() -> TestResult<()> {
+  let fx = seed_corrupt_second_chunk().await?;
+  let shard_dir = fx
+    .victim_path
+    .parent()
+    .ok_or("victim chunk path has no parent directory")?;
+
+  if !try_make_dir_removal_proof(shard_dir) {
+    eprintln!(
+      "skipping corrupt_chunk_removal_failure_still_falls_through_to_miss: this \
+       environment does not enforce directory immutability against the current \
+       process (root commonly holds CAP_LINUX_IMMUTABLE outside a container, or \
+       the filesystem lacks chattr support), so the removal-failure arm cannot \
+       be exercised here"
+    );
+    return Ok(());
+  }
+  let _guard = RemovalProofGuard(shard_dir);
+
+  let (bytes, err) = collect_until_error_with_err(&fx.store, &fx.manifest).await;
+  let err =
+    err.ok_or("reading a chunk whose corrupt-removal is blocked must still surface an error")?;
+  assert!(
+    !bytes.is_empty(),
+    "the first (good) chunk's bytes must still come through before the abort"
+  );
+  assert!(
+    matches!(err, RunnerError::Cache(_)),
+    "a blocked removal must still surface the ordinary miss error kind (Cache), \
+     not an unhandled I/O error from the failed remove_file, got {err:?}"
+  );
+  assert!(
+    err.to_string().contains("missing chunk"),
+    "expected the ordinary miss message, got: {err}"
+  );
+  assert!(
+    fx.victim_path.exists(),
+    "the corrupt chunk file must still exist — its removal was blocked by the \
+     immutable shard directory, and the WARN-and-continue arm must not have \
+     removed it some other way"
   );
   Ok(())
 }

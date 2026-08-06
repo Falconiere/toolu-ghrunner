@@ -66,7 +66,7 @@ impl CasStore {
 
   /// Apply the `[cache] fsync_chunks` config knob to the chunk-write
   /// durability mode, returning the store for chaining. `true` restores the
-  /// pre-0.6 per-chunk fsync; `false` (default) is the deferred-fsync mode
+  /// previous per-chunk fsync; `false` (default) is the deferred-fsync mode
   /// [`with_durability`](Self::with_durability) exists to support.
   /// [`Durability`] itself is crate-private, so this `bool`-typed wrapper is
   /// the only way a caller outside `cache` can set it.

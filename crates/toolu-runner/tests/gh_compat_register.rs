@@ -209,6 +209,40 @@ async fn register_jit_posts_bearer_body_and_parses_success() {
 }
 
 #[tokio::test]
+async fn register_jit_times_out_on_a_slow_response() {
+  let server = MockServer::start().await;
+
+  // The server delays its response well beyond the per-request timeout,
+  // so `send_generate`'s `.timeout(timeout)` must fire client-side and
+  // surface a `RunnerError::Network`, not hang for the mock's full delay.
+  Mock::given(method("POST"))
+    .and(path(STUB_PATH))
+    .respond_with(
+      ResponseTemplate::new(201)
+        .set_body_json(serde_json::from_str::<Value>(RESPONSE_FIXTURE).expect("fixture is valid JSON"))
+        .set_delay(std::time::Duration::from_secs(5)),
+    )
+    .expect(1)
+    .mount(&server)
+    .await;
+
+  let client = reqwest::Client::new();
+  let url = stub_repo_url(&server);
+  let labels = ["self-hosted".to_owned()];
+  let mut params = params_for(&url, "reg-token-xyz", &labels, false);
+  params.timeout = std::time::Duration::from_millis(50);
+
+  let err = register_jit(&client, &params)
+    .await
+    .expect_err("a response slower than the per-request timeout must yield an Err");
+
+  assert!(
+    matches!(err, RunnerError::Network(_)),
+    "a client-side timeout is a transport failure — Network, got {err:?}"
+  );
+}
+
+#[tokio::test]
 async fn register_jit_is_all_or_nothing_on_non_2xx() {
   let server = MockServer::start().await;
 

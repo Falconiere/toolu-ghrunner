@@ -278,10 +278,14 @@ enabled = false          # off by default; records would-hit/false-hit, never se
 chunk's atomic rename, trading it for save-path throughput. This does
 **not** weaken chunk integrity: every chunk is BLAKE3-verified on
 read regardless, so a torn chunk left by an unclean shutdown is never
-served — it self-heals (the corrupt chunk is removed) on the next
-read and degrades to a clean cache miss (or a clean restore from the
-optional S3 tier), rather than a permanently poisoned entry. Set
-`fsync_chunks = true` to restore the pre-0.6 per-chunk fsync.
+served silently. The read that DETECTS the mismatch removes the
+corrupt chunk, but still returns an error partway through the body —
+the status and `Content-Length` were already sent, so that first read
+looks to the client like an aborted/truncated download, not a clean
+miss. Only the corrupt chunk's removal is immediate: every SUBSEQUENT
+lookup is a clean cache miss (or a clean restore from the optional S3
+tier), never a permanently poisoned entry. Set `fsync_chunks = true`
+to restore the previous per-chunk fsync before rename.
 
 ### Docker: `buildx` needs `--driver-opt network=host`
 
