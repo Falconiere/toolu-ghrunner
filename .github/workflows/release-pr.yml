@@ -15,10 +15,22 @@ name: release-pr
 #     `vX.Y.Z` git tag. That tag fires release.yml (verify -> build ->
 #     GitHub Release -> Homebrew).
 #
-# The token MUST be the RELEASE_PLZ_TOKEN PAT, never the default GITHUB_TOKEN:
-# GitHub suppresses workflow runs for events raised by the built-in
-# GITHUB_TOKEN, so a tag pushed under it would land silently and release.yml
-# would never run.
+# The token MUST NOT be the default GITHUB_TOKEN: GitHub suppresses workflow
+# runs for events raised by the built-in GITHUB_TOKEN, so a tag pushed under it
+# would land silently and release.yml would never run. Both jobs therefore mint a
+# short-lived GitHub App installation token from secrets.HOMEBREW_APP_ID /
+# secrets.HOMEBREW_APP_PRIVATE_KEY, which does trigger downstream workflows.
+#
+# This replaces the RELEASE_PLZ_TOKEN PAT, matching git-better and comemory. An
+# App key is not tied to a person's account and cannot silently expire, and the
+# failure mode of an expired release credential is a release that never cuts
+# rather than anything going red.
+#
+# The App must be installed on Falconiere/toolu-ghrunner with Contents:
+# read+write and Pull requests: read+write, and both secrets must be synced onto
+# this repo — neither is true yet, see docs/architecture.md § Release pipeline.
+# No owner/repositories inputs are passed, so the action defaults to the current
+# repository and each token is scoped to this repo alone.
 #
 # Kill-switch: both jobs are gated on `vars.RELEASE_AUTOMATION_ENABLED ==
 # 'true'`, so the automation does NOTHING until an operator opts in.
@@ -48,10 +60,16 @@ jobs:
       group: release-pr-${{ github.ref }}
       cancel-in-progress: false
     steps:
+      - name: Mint release token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.HOMEBREW_APP_ID }}
+          private-key: ${{ secrets.HOMEBREW_APP_PRIVATE_KEY }}
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # git-cliff needs full history + tags
-          token: ${{ secrets.RELEASE_PLZ_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
       - uses: dtolnay/rust-toolchain@1.94.1 # cargo update refreshes Cargo.lock
       - name: Install git-cliff
         uses: taiki-e/install-action@v2
@@ -59,20 +77,26 @@ jobs:
           tool: git-cliff@${{ env.GIT_CLIFF_VERSION }}
       - name: Compute bump and open/update the release PR
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: bash scripts/release-pr.sh
 
   # For a version bump that has already merged to main, push the `vX.Y.Z`
-  # tag (under the PAT) that hands off to release.yml.
+  # tag (under the App token) that hands off to release.yml.
   release-tag:
     if: ${{ vars.RELEASE_AUTOMATION_ENABLED == 'true' }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write # push the release tag
     steps:
+      - name: Mint release token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.HOMEBREW_APP_ID }}
+          private-key: ${{ secrets.HOMEBREW_APP_PRIVATE_KEY }}
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.RELEASE_PLZ_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
       - name: Tag the merged version bump
         run: bash scripts/release-tag.sh

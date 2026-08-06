@@ -839,14 +839,37 @@ merge the release PR the bump + changelog land on main.
       │
       ▼
 release-tag          sees the untagged version on main and pushes the
-      │              matching `vX.Y.Z` tag — under RELEASE_PLZ_TOKEN (a
-      │              PAT), NOT the default GITHUB_TOKEN. GitHub suppresses
-      │              workflow runs for events raised by GITHUB_TOKEN, so a
-      │              tag pushed by it would never fire release.yml; the PAT
-      │              is a distinct identity, so its push does. That tag
-      │              hands off to the back half:
+      │              matching `vX.Y.Z` tag — under a GitHub App
+      │              installation token, NOT the default GITHUB_TOKEN.
+      │              GitHub suppresses workflow runs for events raised by
+      │              GITHUB_TOKEN, so a tag pushed by it would never fire
+      │              release.yml; the App is a distinct identity, so its
+      │              push does. That tag hands off to the back half:
       ▼
 ```
+
+**Credentials the front half needs.** Both jobs mint an installation token from
+`HOMEBREW_APP_ID` + `HOMEBREW_APP_PRIVATE_KEY`, the publish App shared with
+git-better and comemory. Two prerequisites, and **neither is satisfied on this
+repo yet**:
+
+1. Those secrets must be synced here. `gh secret list` currently shows only
+   `HOMEBREW_TAP_TOKEN`, `RELEASE_PLZ_TOKEN` and `OPENROUTER_API_KEY`, so this
+   repo is not in that Infisical sync group.
+2. The App must be installed on `Falconiere/toolu-ghrunner` with **Contents:
+   read and write** + **Pull requests: read and write**. A GitHub App has one
+   installation per account sharing a single permission grant, so granting Pull
+   requests here also exposes it on `homebrew-tap`, git-better and comemory.
+
+Until both hold, `release-pr` and `release-tag` fail — an empty `app-id` yields
+`401`, and a missing install yields `403 Resource not accessible`. The
+`RELEASE_AUTOMATION_ENABLED` kill-switch means nothing runs meanwhile.
+
+`release-homebrew.yml` still pushes the tap formula with the separate
+`HOMEBREW_TAP_TOKEN` PAT. Moving that onto the same App is the obvious next step
+— it would need explicit `owner` + `repositories` inputs, since that push crosses
+into `homebrew-tap` — but it is left alone here to keep this change to the tag
+credential.
 
 The back half is unchanged. It reads the repo and never writes to it;
 by the time it runs, `Cargo.toml` + `CHANGELOG.md` already carry the
