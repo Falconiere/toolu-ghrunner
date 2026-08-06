@@ -204,6 +204,14 @@ fn content_range_start(headers: &HeaderMap) -> Option<u64> {
 
 /// Seek to `offset` in the reservation's staging file and write `data`.
 ///
+/// Flushes before returning: `tokio::fs::File` completes writes on the blocking
+/// pool and dropping one does NOT wait for them, so without this the `finalize`
+/// that follows can `ingest` a still-short staging file and reject a good
+/// upload as a size mismatch. `flush`, not `sync_all` — the bytes only need to
+/// be visible to that same-process read, and a staging file never outlives the
+/// reservation, so a per-chunk fsync would only cost what `chunk_io::Durability`
+/// deliberately defers.
+///
 /// # Errors
 /// `RunnerError::Cache` for an unknown reservation, `RunnerError::Io` on write.
 async fn write_chunk(
@@ -229,6 +237,7 @@ async fn write_chunk(
     .await
     .map_err(RunnerError::Io)?;
   file.write_all(data).await.map_err(RunnerError::Io)?;
+  file.flush().await.map_err(RunnerError::Io)?;
   Ok(())
 }
 
