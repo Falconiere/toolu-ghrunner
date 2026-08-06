@@ -134,7 +134,10 @@ pub async fn renew_job(
 
   let status = response.status();
   if !status.is_success() {
-    let body = response.text().await.unwrap_or_default();
+    let body = response
+      .text()
+      .await
+      .unwrap_or_else(|e| format!("<body read failed: {e}>"));
     tracing::debug!(status = %status, body_len = body.len(), "renew job failed");
     return Err(classify_status("renew job", status, &body));
   }
@@ -171,7 +174,10 @@ pub async fn complete_job(
 
   let status = response.status();
   if !status.is_success() {
-    let body = response.text().await.unwrap_or_default();
+    let body = response
+      .text()
+      .await
+      .unwrap_or_else(|e| format!("<body read failed: {e}>"));
     tracing::debug!(status = %status, body_len = body.len(), "complete job failed");
     return Err(classify_status("complete job", status, &body));
   }

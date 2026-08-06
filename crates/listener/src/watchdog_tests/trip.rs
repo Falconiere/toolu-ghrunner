@@ -26,6 +26,7 @@ use shared::{
   ActionStep, AgentJobRequestMessage, JobAuthorization, JobEndpoint, JobResources, ListenerEvent,
   RunnerConfig, RunnerError, SecretMasker, TaskOrchestrationPlanReference,
 };
+use wire::reporting::ReportConclusion;
 
 use crate::SessionCtx;
 use crate::helpers::WatchdogConfig;
@@ -300,15 +301,31 @@ fn assert_request_count(
   Ok(())
 }
 
-fn annotations_mention_lost_connection(body: &serde_json::Value) -> TestResult<bool> {
+/// The exact "lost connection" annotation message
+/// `execution_loop::apply_outage_override` emits on a trip (see
+/// `crates/listener/src/execution_loop.rs`) — asserted verbatim, not by
+/// substring, so a wording regression there fails this test instead of
+/// drifting silently past it.
+const LOST_CONNECTION_MESSAGE: &str =
+  "Runner lost connection to GitHub for more than 5 minutes; job was cancelled (lost connection).";
+
+/// Find the annotation in a `/completejob` body whose `message` field is an
+/// EXACT match for [`LOST_CONNECTION_MESSAGE`]. Field names are the real
+/// wire shape `wire::reporting::Annotation` serializes to
+/// (`#[serde(rename_all = "camelCase")]`, no per-field override on
+/// `annotation_type`/`message` — see `crates/wire/src/reporting/types.rs`):
+/// `annotationType` / `message`.
+fn find_lost_connection_annotation(
+  body: &serde_json::Value,
+) -> TestResult<Option<&serde_json::Value>> {
   let annotations = body
     .get("annotations")
     .and_then(serde_json::Value::as_array)
     .ok_or("completejob body missing annotations array")?;
-  Ok(annotations.iter().any(|a| {
+  Ok(annotations.iter().find(|a| {
     a.get("message")
       .and_then(serde_json::Value::as_str)
-      .is_some_and(|m| m.contains("lost connection"))
+      .is_some_and(|m| m == LOST_CONNECTION_MESSAGE)
   }))
 }
 
@@ -319,17 +336,29 @@ fn body_conclusion(body: &serde_json::Value) -> TestResult<i64> {
     .ok_or_else(|| format!("completejob body missing numeric conclusion: {body}").into())
 }
 
-/// Assert the completejob body carries `conclusion: Failure` (`3` —
-/// `wire::reporting::ReportConclusion` is `serde_repr`, not a string; see
-/// `crates/wire/src/reporting/types.rs`) and an annotation mentioning
-/// "lost connection".
+/// Assert the completejob body carries `conclusion: Failure` (the real
+/// `wire::reporting::ReportConclusion::Failure` discriminant —
+/// `ReportConclusion` is `serde_repr`, not a string; see
+/// `crates/wire/src/reporting/types.rs`) and exactly the "lost connection"
+/// annotation the watchdog trip emits, with `annotationType: "error"`.
 fn assert_failure_with_lost_connection(body: &serde_json::Value) -> TestResult<()> {
   let conclusion = body_conclusion(body)?;
-  if conclusion != 3 {
-    return Err(format!("expected conclusion 3 (Failure), got {conclusion}: {body}").into());
+  let expected = ReportConclusion::Failure as i64;
+  if conclusion != expected {
+    return Err(
+      format!("expected conclusion {expected} (Failure), got {conclusion}: {body}").into(),
+    );
   }
-  if !annotations_mention_lost_connection(body)? {
-    return Err(format!("no annotation mentions 'lost connection': {body}").into());
+  let annotation = find_lost_connection_annotation(body)?
+    .ok_or_else(|| format!("no annotation with the exact lost-connection message: {body}"))?;
+  let annotation_type = annotation
+    .get("annotationType")
+    .and_then(serde_json::Value::as_str)
+    .ok_or_else(|| format!("annotation missing annotationType field: {annotation}"))?;
+  if annotation_type != "error" {
+    return Err(
+      format!("expected annotationType \"error\", got {annotation_type:?}: {annotation}").into(),
+    );
   }
   Ok(())
 }
@@ -438,10 +467,13 @@ async fn ac10_definitive_renew_error_never_trips() -> TestResult<()> {
     .ok_or("no completejob requests recorded")?;
   let body = first.body_json::<serde_json::Value>()?;
   let conclusion = body_conclusion(&body)?;
-  if conclusion != 2 {
-    return Err(format!("expected conclusion 2 (Success), got {conclusion}: {body}").into());
+  let expected = ReportConclusion::Success as i64;
+  if conclusion != expected {
+    return Err(
+      format!("expected conclusion {expected} (Success), got {conclusion}: {body}").into(),
+    );
   }
-  if annotations_mention_lost_connection(&body)? {
+  if find_lost_connection_annotation(&body)?.is_some() {
     return Err(
       format!("unexpected 'lost connection' annotation on a non-tripped job: {body}").into(),
     );

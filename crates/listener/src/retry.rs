@@ -52,10 +52,11 @@ const BACKOFF_MAX: Duration = Duration::from_secs(60);
 /// three return the last `Network` error (or the non-`Network` error)
 /// as-is; no new error variant. `what` names the op for the WARN log.
 ///
-/// Termination (holds for a millisecond `budget`, AC-11): elapsed time is
-/// checked *before* sleeping, so a stale budget never sleeps at all; the
-/// next sleep is capped to `min(backoff, budget - elapsed)`, so it never
-/// overshoots the remaining budget by more than itself.
+/// `budget` bounds only the sleeping between attempts — elapsed time is
+/// checked *before* each sleep and the sleep capped to what remains
+/// (AC-11) — never an in-flight attempt, so total wall-clock can overshoot
+/// `budget` by up to one attempt's duration (bounded by the HTTP client's
+/// own timeout).
 pub(crate) async fn retry_transient<T, F, Fut>(
   mut op: F,
   cancel: &CancellationToken,
