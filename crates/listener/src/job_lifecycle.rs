@@ -3,12 +3,11 @@ use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
 use super::SessionCtx;
-use super::execution_loop::execute_with_renewal;
+use super::execution_loop::{JobExecution, execute_with_renewal};
 use super::helpers::map_conclusion;
 use protocol::messages::{BrokerMessage, BrokerMigrationBody, JobCancelBody};
 use shared::{AgentJobRequestMessage, Conclusion, ListenerEvent, RunnerError};
 use wire::net::{PollParams, acknowledge_message, poll_message};
-use wire::reporting::StepResult;
 use wire::reporting::live_log::LiveLogStreamer;
 use wire::reporting::run_service::{
   AcquireJobRequest, CompleteJobRequest, acquire_job, complete_job,
@@ -47,105 +46,110 @@ pub(super) async fn poll_and_execute(
   tracing::info!(plan_id = %acquired.plan_id, "acquired job");
   let plan_id = acquired.plan_id.clone();
 
-  let (conclusion, job_id, request_id, step_results, job_token, live_log) =
+  let mut outcome =
     run_job_with_cancel_watch(ctx, &body.run_service_url, &rs_token, &acquired).await;
   // Stash the live-log wrapper handle now, before any further `?` in this
   // function — `ctx` is a full `&mut` borrow again here (the call above only
   // reborrowed it immutably), so this assignment survives an early return
   // below, and `cleanup_session` (called unconditionally by the caller) can
   // join it on both the `Ok` and `Err` paths.
-  ctx.live_log = live_log;
-  let rs_token = job_token.unwrap_or(rs_token);
+  ctx.live_log = outcome.live_log_handle.take();
+  let rs_token = outcome.job_token.clone().unwrap_or(rs_token);
 
-  acknowledge_and_complete(
-    ctx,
-    &body,
-    CompletionParams {
-      plan_id,
-      job_id,
-      request_id,
-      conclusion,
-      step_results,
+  acknowledge_best_effort(ctx, &body.runner_request_id).await;
+  report_completion(ctx, &body.run_service_url, plan_id, rs_token, outcome).await
+}
+
+/// Best-effort acknowledge of the broker message. Single attempt,
+/// WARN-on-failure, non-gating: completion ([`report_completion`]) is the
+/// contractual report to GitHub, and the ack targets the broker while
+/// `complete_job` targets the Run Service — independent endpoints, so a
+/// failed ack must not doom a completion the network can otherwise still
+/// deliver. The broker keys the ack on the job's `runner_request_id`
+/// (UUID), not the numeric broker message id.
+async fn acknowledge_best_effort(ctx: &SessionCtx, runner_request_id: &str) {
+  if let Err(e) =
+    acknowledge_message(&ctx.client, &ctx.broker_url, &ctx.token, runner_request_id).await
+  {
+    tracing::warn!(error = %e, "broker acknowledge failed — continuing to report completion");
+  }
+}
+
+/// Report the job's outcome to the Run Service, retrying `RunnerError::Network`
+/// failures (see [`crate::retry::retry_transient`]) so the report survives a
+/// still-recovering connection instead of being lost when the always-online
+/// loop re-polls.
+async fn report_completion(
+  ctx: &SessionCtx,
+  run_service_url: &str,
+  plan_id: String,
+  rs_token: String,
+  outcome: JobOutcome,
+) -> Result<(), RunnerError> {
+  let complete_req = CompleteJobRequest {
+    plan_id,
+    job_id: outcome.job_id,
+    request_id: outcome.request_id,
+    conclusion: map_conclusion(outcome.conclusion),
+    outputs: serde_json::Value::Object(serde_json::Map::new()),
+    step_results: outcome.step_results,
+    annotations: outcome.annotations,
+  };
+  let client = ctx.client.clone();
+  let run_service_url = run_service_url.to_owned();
+  crate::retry::retry_transient(
+    || {
+      let req = complete_req.clone();
+      let client = client.clone();
+      let run_service_url = run_service_url.clone();
+      let rs_token = rs_token.clone();
+      async move { complete_job(&client, &run_service_url, &rs_token, &req).await }
     },
-    &rs_token,
+    &ctx.cancel,
+    crate::retry::REPORT_RETRY_MAX,
+    "complete_job",
   )
   .await?;
   Ok(Some(conclusion))
 }
 
-/// Bundled completion parameters for `acknowledge_and_complete` — keeps it
-/// under the 7-arg clippy cap.
-struct CompletionParams {
-  plan_id: String,
+/// Outcome of running (or failing to parse) an acquired job — everything
+/// `report_completion` needs to build the `CompleteJobRequest`.
+///
+/// Replaces the previous bare 5-tuple alias so the `annotations` field
+/// (populated by the outage watchdog's failure-override path in
+/// [`execute_with_renewal`]) has a name instead of a positional slot.
+struct JobOutcome {
+  conclusion: Conclusion,
   job_id: String,
   request_id: i64,
-  conclusion: Conclusion,
-  step_results: Vec<StepResult>,
+  step_results: Vec<wire::reporting::StepResult>,
+  /// `SystemVssConnection` token extracted from the job message, when
+  /// present — overrides the run-service token used for reporting.
+  job_token: Option<String>,
+  annotations: Vec<wire::reporting::Annotation>,
+  /// The live-log wrapper task's `JoinHandle`, threaded up so
+  /// `poll_and_execute` can stash it on `ctx` before any further fallible
+  /// call — see the design note at its assignment site.
+  live_log_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
-/// Acknowledge the broker message and report the job's completion. Split out
-/// of `poll_and_execute` to keep that function short.
-async fn acknowledge_and_complete(
-  ctx: &SessionCtx,
-  body: &protocol::messages::RunnerJobRequestBody,
-  params: CompletionParams,
-  rs_token: &str,
-) -> Result<(), RunnerError> {
-  // Acknowledge the broker message — required by the JIT protocol before complete_job.
-  // The broker keys the ack on the job's runner_request_id (UUID), not the
-  // numeric broker message id.
-  acknowledge_message(
-    &ctx.client,
-    &ctx.broker_url,
-    &ctx.token,
-    &body.runner_request_id,
-  )
-  .await?;
-
-  let complete_req = CompleteJobRequest {
-    plan_id: params.plan_id,
-    job_id: params.job_id,
-    request_id: params.request_id,
-    conclusion: map_conclusion(params.conclusion),
-    outputs: serde_json::Value::Object(serde_json::Map::new()),
-    step_results: params.step_results,
-    annotations: Vec::new(),
-  };
-  complete_job(&ctx.client, &body.run_service_url, rs_token, &complete_req).await
-}
-
-/// Parse and execute the acquired job. Always returns a conclusion — never leaves
-/// the job hanging on GitHub even if parsing fails.
-/// Returns `(conclusion, job_id, request_id, step_results, optional_token,
-/// live_log_handle)`. The last element is the live-log wrapper task's
-/// `JoinHandle`, threaded up so `poll_and_execute` can stash it on `ctx`
-/// before any further fallible call — see the T1 design note at its
-/// assignment site.
-/// Result tuple for a job that never started because its message failed
-/// to parse — completes with failure rather than hanging on GitHub.
-type JobOutcome = (
-  Conclusion,
-  String,
-  i64,
-  Vec<StepResult>,
-  Option<String>,
-  Option<tokio::task::JoinHandle<()>>,
-);
-
-/// Parse the acquired job body, or return a ready-made failure outcome.
+/// Parse the acquired job body, or return a ready-made failure outcome —
+/// never leaves the job hanging on GitHub even if parsing fails.
 fn parse_job_message(
   acquired: &wire::reporting::run_service::AcquireJobResponse,
 ) -> Result<AgentJobRequestMessage, JobOutcome> {
   serde_json::from_value(acquired.body.clone()).map_err(|e| {
     tracing::error!(error = %e, "job message parse failed — completing with failure");
-    (
-      Conclusion::Failure,
-      "unknown".to_owned(),
-      0,
-      Vec::new(),
-      None,
-      None,
-    )
+    JobOutcome {
+      conclusion: Conclusion::Failure,
+      job_id: "unknown".to_owned(),
+      request_id: 0,
+      step_results: Vec::new(),
+      job_token: None,
+      annotations: Vec::new(),
+      live_log_handle: None,
+    }
   })
 }
 
@@ -287,16 +291,20 @@ async fn run_acquired_job(
     rs_token: effective_token,
     plan_id: &acquired.plan_id,
   };
-  let (conclusion, step_results) =
-    execute_with_renewal(ctx, &route, &job_msg, live_log_tx, job_cancel).await;
-  (
+  let JobExecution {
     conclusion,
-    job_msg.job_id,
+    steps,
+    annotations,
+  } = execute_with_renewal(ctx, &route, &job_msg, live_log_tx, job_cancel).await;
+  JobOutcome {
+    conclusion,
+    job_id: job_msg.job_id,
     request_id,
-    step_results,
+    step_results: steps,
     job_token,
+    annotations,
     live_log_handle,
-  )
+  }
 }
 
 async fn poll_until_job(ctx: &mut SessionCtx) -> Result<Option<BrokerMessage>, RunnerError> {
@@ -359,25 +367,11 @@ async fn backoff_after_poll_error(
     backoff_ms,
     "poll failed — retrying after backoff"
   );
-  let jittered = jittered_backoff(backoff);
+  let jittered = crate::retry::jittered_backoff(backoff);
   if sleep_or_cancel(ctx, jittered).await {
     return None;
   }
   Some(backoff.saturating_mul(2).min(POLL_BACKOFF_MAX))
-}
-
-/// Apply decorrelated jitter to a backoff duration so concurrent runners
-/// don't synchronize their retries. Returns a duration in
-/// `[backoff/2, backoff)` — half the current backoff plus a random offset.
-fn jittered_backoff(d: Duration) -> Duration {
-  let Ok(half_ms) = u64::try_from(d.as_millis().saturating_div(2)) else {
-    return d;
-  };
-  if half_ms == 0 {
-    return d;
-  }
-  let jitter = fastrand::u64(0..half_ms);
-  Duration::from_millis(half_ms + jitter)
 }
 
 /// Outcome of a single `poll_message` call, classified for the loop.

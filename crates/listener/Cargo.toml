@@ -40,6 +40,10 @@ fastrand = "2"
 # (AsyncWriteExt to write a raw 404 response). The crate's normal `tokio`
 # features (rt-multi-thread, macros, sync, time) have neither.
 tokio = { version = "1", features = ["net", "io-util"] }
+# HTTP mocking + filesystem fixtures for the in-crate watchdog/retry tests
+# (private-seam ACs unreachable from crates/listener/tests/).
+wiremock = "0.6"
+tempfile = "3"
 
 [lints]
 workspace = true
