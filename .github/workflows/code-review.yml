@@ -47,11 +47,19 @@ jobs:
             run. The lint set is deliberately deny-heavy (no unwrap/expect/
             panic/indexing outside tests) and CLAUDE.md is the source of truth
             for the crate graph and each module's responsibilities.
-          # The bot re-derives findings each push, so "zero findings" is not a
-          # reachable fixpoint. After three rounds, downgrade a changes verdict
-          # whose findings are all sub-blocker to approved; the findings stay
-          # listed as advisory. A single blocker still blocks.
-          MAX_ROUNDS: '3'
+          # Read convention files (CLAUDE.md etc.) from the PR merge ref
+          # instead of the base ref, so a PR that legitimately changes a
+          # convention is reviewed against its own updated text. Safety:
+          # fork PRs do trigger `pull_request`, but the action step fails
+          # for them (secrets are not exposed to fork runs), so no fork
+          # diff is ever reviewed under merge-ref rules. Requires
+          # toolu-ghactions >= 6.3.0.
+          RULES_REF: merge
+          # Surrender cap (toolu-ghactions >= 6.4.0): on review round 5+ a
+          # blocker-free "changes" verdict auto-approves — findings stay
+          # listed as advisory — so a fresh-findings-every-push review can
+          # never block a PR forever. One blocker finding disables the cap.
+          MAX_ROUNDS: '5'
           # The 8192 default truncated a chunk on this repo's first large PR
           # ("1/5 chunks truncated at the output-token limit"), which silently
           # drops findings after the cut. Rust diffs here are verbose.
