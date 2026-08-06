@@ -29,6 +29,7 @@ use shared::{
 use wire::reporting::ReportConclusion;
 
 use crate::SessionCtx;
+use crate::execution_loop::LOST_CONNECTION_MESSAGE;
 use crate::helpers::WatchdogConfig;
 use crate::job_lifecycle::poll_and_execute;
 
@@ -300,14 +301,6 @@ fn assert_request_count(
   }
   Ok(())
 }
-
-/// The exact "lost connection" annotation message
-/// `execution_loop::apply_outage_override` emits on a trip (see
-/// `crates/listener/src/execution_loop.rs`) — asserted verbatim, not by
-/// substring, so a wording regression there fails this test instead of
-/// drifting silently past it.
-const LOST_CONNECTION_MESSAGE: &str =
-  "Runner lost connection to GitHub for more than 5 minutes; job was cancelled (lost connection).";
 
 /// Find the annotation in a `/completejob` body whose `message` field is an
 /// EXACT match for [`LOST_CONNECTION_MESSAGE`]. Field names are the real

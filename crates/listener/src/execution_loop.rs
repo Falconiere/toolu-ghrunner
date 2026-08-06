@@ -87,6 +87,12 @@ pub(super) async fn execute_with_renewal(
   }
 }
 
+/// The single source of truth for the outage annotation text — referenced
+/// by the `watchdog_tests` assertions so tests cannot drift from the
+/// message actually reported to GitHub.
+pub(crate) const LOST_CONNECTION_MESSAGE: &str =
+  "Runner lost connection to GitHub for more than 5 minutes; job was cancelled (lost connection).";
+
 /// Fold the outage watchdog's trip flag into the engine's conclusion.
 ///
 /// Called only after the renewal task's `JoinHandle` has been awaited, so
@@ -115,9 +121,7 @@ pub(crate) fn apply_outage_override(
   }
   let annotation = wire::reporting::Annotation {
     annotation_type: "error".to_owned(),
-    message: "Runner lost connection to GitHub for more than 5 minutes; job was cancelled \
-              (lost connection)."
-      .to_owned(),
+    message: LOST_CONNECTION_MESSAGE.to_owned(),
     file: None,
     line: None,
     col: None,
