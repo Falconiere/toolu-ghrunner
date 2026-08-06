@@ -1,0 +1,172 @@
+name: release-image
+
+# Tag-driven container publish: push vX.Y.Z -> gate -> build linux/amd64 +
+# linux/arm64 legs on native runners -> push both by digest -> merge into
+# one multi-arch manifest at ghcr.io/<owner>/toolu-ghrunner -> print the
+# digest-pinned ref. toolu.sh pins NAMESPACE_RUNNER_IMAGE /
+# FLY_RUNNER_IMAGE by @sha256: digest (this container runs customer build
+# code holding a live GitHub credential — never a mutable tag), so the
+# manifest-list digest in the log and step summary IS the deliverable of
+# this workflow. The arm64 leg exists for local runs on Apple-Silicon
+# Macs; providers resolve amd64 from the same manifest digest.
+#
+# Each arch compiles on its native runner (the same ubuntu-24.04 /
+# ubuntu-24.04-arm pair release.yml builds on) — a QEMU-emulated Rust
+# release build would be painfully slow and flaky.
+#
+# PRs touching the image inputs build without pushing (catches Dockerfile
+# rot); workflow_dispatch does the same on demand. The verify job repeats
+# release.yml's gate rather than depending on it: the two workflows run
+# independently on the same tag, and an image must never publish off a
+# commit whose gate would fail.
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - .github/workflows/release-image.yml
+  workflow_dispatch:
+
+# One image per ref; never cancel a tag publish mid-flight.
+concurrency:
+  group: release-image-${{ github.ref_name }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+# Least privilege by default; only the pushing jobs get packages:write.
+permissions:
+  contents: read
+
+env:
+  # GHCR requires a lowercase namespace; the owner may not be. Bash
+  # lowercasing happens where the value is consumed (env is verbatim).
+  IMAGE_BASENAME: toolu-ghrunner
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.94.1
+        with:
+          components: rustfmt, clippy
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --workspace
+
+  # One leg per arch, compiled natively, pushed by digest only (tags are
+  # applied by `manifest` after both legs exist).
+  build:
+    needs: verify
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: linux/amd64
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            platform: linux/arm64
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write # push the per-arch leg to ghcr.io on tag
+    steps:
+      - uses: actions/checkout@v7
+      - name: Compute image name
+        id: meta
+        run: echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${IMAGE_BASENAME}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        if: github.ref_type == 'tag'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Build (and push by digest on tag)
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          # On tag: push the leg untagged (digest-only); `manifest` stitches
+          # and tags. On PR/dispatch: build-only.
+          outputs: type=image,name=${{ steps.meta.outputs.image }},push-by-digest=true,name-canonical=true,push=${{ github.ref_type == 'tag' }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ github.ref_name }}
+      - name: Export leg digest
+        if: github.ref_type == 'tag'
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+      - name: Upload leg digest
+        if: github.ref_type == 'tag'
+        uses: actions/upload-artifact@v7
+        with:
+          name: digest-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+
+  # Merge the per-arch legs into one multi-arch manifest, tag it, and print
+  # the manifest-list digest — the ref toolu.sh operators pin.
+  manifest:
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write # push the merged manifest + tags
+    steps:
+      - name: Download leg digests
+        uses: actions/download-artifact@v8
+        with:
+          pattern: digest-*
+          path: /tmp/digests
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Create multi-arch manifest
+        id: merge
+        # `latest` tracks stable tags only (a '-' marks a prerelease,
+        # matching release.yml's rule) — though consumers must pin by
+        # digest regardless.
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${IMAGE_BASENAME}"
+          tags=(-t "${image}:${GITHUB_REF_NAME#v}")
+          if [[ "${GITHUB_REF_NAME}" != *-* ]]; then
+            tags+=(-t "${image}:latest")
+          fi
+          refs=()
+          for d in /tmp/digests/*; do
+            refs+=("${image}@sha256:$(basename "$d")")
+          done
+          docker buildx imagetools create "${tags[@]}" "${refs[@]}"
+          digest="$(docker buildx imagetools inspect "${image}:${GITHUB_REF_NAME#v}" --format '{{json .Manifest}}' | jq -r .digest)"
+          echo "ref=${image}@${digest}" >> "$GITHUB_OUTPUT"
+      - name: Print digest-pinned ref
+        # The line toolu.sh operators copy into NAMESPACE_RUNNER_IMAGE /
+        # FLY_RUNNER_IMAGE. The manifest-list digest resolves per-arch
+        # (amd64 for the providers, arm64 for Apple-Silicon local runs).
+        run: |
+          echo "image ref: ${{ steps.merge.outputs.ref }}"
+          {
+            echo "## Runner image"
+            echo '```'
+            echo "${{ steps.merge.outputs.ref }}"
+            echo '```'
+            echo "Pin this digest in toolu.sh (NAMESPACE_RUNNER_IMAGE / FLY_RUNNER_IMAGE)."
+          } >> "$GITHUB_STEP_SUMMARY"
