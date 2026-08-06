@@ -1,6 +1,8 @@
 //! Shared fixtures for `boot_cmd_e2e_test.rs`: a real-keypair JIT config
 //! envelope pointed at a local `wiremock` broker, plus the mocks for one
-//! trivially-successful script job.
+//! single-script-step job (the step's shell command is a parameter, so
+//! callers can drive a success, a failure, or a long-running step through
+//! the same broker lifecycle).
 //!
 //! Deliberately NOT shared with `listener_smoke_test.rs` (its equivalent
 //! `real_jit_config_b64` / `mount_auth_and_session` / `mount_job_lifecycle`
@@ -92,23 +94,23 @@ pub async fn mount_auth_and_session(server: &MockServer) {
 }
 
 /// The fixture job message (`fixtures/job_message.json`, shared with
-/// `listener_smoke_test.rs`), cut down to a single trivially-successful
-/// script step so the job completes fast with a real `Conclusion::Success`.
-/// Clears `resources` so `connect_live_log` never attempts a live-log
-/// WebSocket in this sandbox.
-fn boot_e2e_job_message() -> Result<shared::AgentJobRequestMessage, String> {
+/// `listener_smoke_test.rs`), cut down to a single script step running
+/// `script_command` so the job completes fast with a real `Conclusion`
+/// determined by that command's exit status. Clears `resources` so
+/// `connect_live_log` never attempts a live-log WebSocket in this sandbox.
+fn boot_e2e_job_message(script_command: &str) -> Result<shared::AgentJobRequestMessage, String> {
   const JOB_MESSAGE: &str = include_str!("../fixtures/job_message.json");
   let mut msg: shared::AgentJobRequestMessage =
     serde_json::from_str(JOB_MESSAGE).map_err(|e| format!("parse job_message.json: {e}"))?;
-  msg.steps = vec![shared::ActionStep::script("done", "true", "")];
+  msg.steps = vec![shared::ActionStep::script("done", script_command, "")];
   msg.resources = shared::JobResources::default();
   Ok(msg)
 }
 
 /// Mount the full poll -> acquire -> acknowledge -> complete broker
 /// exchange for one `RunnerJobRequest`, serving `boot_e2e_job_message`'s
-/// single trivially-successful script step as the acquired job body.
-pub async fn mount_job_lifecycle(server: &MockServer) -> Result<(), String> {
+/// single script step (running `script_command`) as the acquired job body.
+pub async fn mount_job_lifecycle(server: &MockServer, script_command: &str) -> Result<(), String> {
   let job_body = json!({
     "runner_request_id": "22222222-3333-4444-5555-666677778888",
     "run_service_url": server.uri(),
@@ -133,7 +135,7 @@ pub async fn mount_job_lifecycle(server: &MockServer) -> Result<(), String> {
     .mount(server)
     .await;
 
-  let job_msg = boot_e2e_job_message()?;
+  let job_msg = boot_e2e_job_message(script_command)?;
   Mock::given(method("POST"))
     .and(path("/acquirejob"))
     .respond_with(
