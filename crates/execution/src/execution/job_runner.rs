@@ -132,7 +132,7 @@ fn build_job_client() -> Result<reqwest::Client, RunnerError> {
   reqwest::Client::builder()
     .timeout(Duration::from_secs(120))
     .build()
-    .map_err(|e| RunnerError::Config(format!("build job HTTP client: {e}")))
+    .map_err(|e| RunnerError::Network(format!("build job HTTP client: {e}")))
 }
 
 /// Build the per-job context with its workspace set.
