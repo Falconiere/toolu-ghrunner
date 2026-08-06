@@ -46,12 +46,16 @@ Tracking format: B-NNN — short title — severity — owner — status.
   token, and with none of the three the local removal still proceeds
   behind a WARN that the GitHub-side runner was left registered.
   `--skip-unregister` is the explicit escape hatch (revoked token,
-  deleted repo, no network). `--force` past a *held* lock also skips the
-  unregister: live cancellation is still step 10 work, so the job is
-  genuinely still running and renews/reports against this registration —
-  deleting it on GitHub mid-job would break the very run `--force`
-  targets. It warns and leaves the runner for the operator to remove once
-  the job ends.
+  deleted repo, no network). `--force` also skips the unregister when the
+  `.lock` holder is still ALIVE (`config::lockfile::holder_alive`): live
+  cancellation is still step 10 work, so that job keeps renewing and
+  reporting against this registration, and deleting it on GitHub mid-job
+  would break the very run `--force` targets — it warns and leaves the
+  runner for the operator to remove once the job ends. The check is
+  liveness, not mere existence: nothing deletes `.lock` on a normal `run`
+  exit, so a leftover lock with a dead holder is the resting state of any
+  machine that has run a job, and gating on existence alone would have
+  skipped the unregister in exactly that common case.
 - **Trigger:** `toolu-runner remove` is called while a registration
   exists.
 - **Observed:** The CLI writes `.pending_remove` if a `run` is in

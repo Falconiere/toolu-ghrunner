@@ -202,10 +202,13 @@ async fn cmd_remove(args: RemoveArgs) -> Result<(), Box<dyn std::error::Error>> 
 /// `.pending_remove` marker the running process picks up between jobs.
 /// `--force` proceeds instead (live cancellation is still step 10 work).
 ///
-/// `Ok(true)` means `--force` bypassed a *held* lock, so a job is very
-/// likely still running. The caller must not unregister in that case: the
-/// job renews and reports against this registration, and deleting it on
-/// GitHub mid-job would break the very run `--force` is aimed at.
+/// `Ok(true)` means `--force` bypassed a lock whose holder is ALIVE, so a
+/// job really is running and the caller must not unregister: that job
+/// renews and reports against this registration, and deleting it on GitHub
+/// mid-job would break the very run `--force` is aimed at. A leftover lock
+/// with a dead holder is `false` — nothing deletes `.lock` on a normal
+/// `run` exit, so treating mere existence as "running" would skip the
+/// unregister with nothing actually running.
 fn refuse_if_run_in_flight(
   lock_path: &Path,
   pending: &Path,
@@ -216,7 +219,7 @@ fn refuse_if_run_in_flight(
   }
   if force {
     tracing::warn!("force-cancelling in-flight run (stub — live cancellation lands in step 10)");
-    return Ok(true);
+    return Ok(config::lockfile::holder_alive(lock_path));
   }
   let body = std::fs::read_to_string(lock_path).unwrap_or_default();
   write_pending_marker(pending, &body)?;

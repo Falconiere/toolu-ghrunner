@@ -316,7 +316,11 @@ pub(crate) struct RemoveArgs {
   /// Cancel an in-flight run before removing state.
   ///
   /// Without it, a held job lock aborts the removal and writes a
-  /// `.pending_remove` marker for the running process.
+  /// `.pending_remove` marker for the running process. When the lock
+  /// holder is still alive, this ALSO skips the GitHub unregister — that
+  /// job is still reporting against the registration — and leaves the
+  /// runner for you to remove once it ends. A stale lock (dead holder)
+  /// unregisters normally.
   #[arg(long)]
   pub(crate) force: bool,
   /// Delete local state without calling GitHub.
