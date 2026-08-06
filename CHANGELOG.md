@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-08-06
+
+### Documentation
+- *(release)* the App secrets are synced now, only the install is left
 ## [0.5.1] - 2026-07-16
 
 ### Fixed
