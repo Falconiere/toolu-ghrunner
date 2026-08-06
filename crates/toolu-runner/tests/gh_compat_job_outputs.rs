@@ -89,6 +89,26 @@ fn script_step(id: &str, body: &str, shell: Option<&str>, working_dir: Option<&s
   }
 }
 
+/// Build a throwaway `RunnerConfig` rooted under `dir`, with its workspace
+/// prepared by `workspace_setup` before the steps run.
+fn test_config(
+  dir: &std::path::Path,
+  workspace_setup: impl FnOnce(&std::path::Path) -> std::io::Result<()>,
+) -> TestResult<(RunnerConfig, std::path::PathBuf)> {
+  let workspace = dir.join("work");
+  std::fs::create_dir_all(&workspace)?;
+  workspace_setup(&workspace)?;
+  let config = RunnerConfig {
+    data_dir: dir.join("data"),
+    workspace_root: workspace.clone(),
+    cgroup_path: None,
+    services_mode: shared::ServicesMode::default(),
+    ..RunnerConfig::default()
+  };
+  std::fs::create_dir_all(&config.data_dir)?;
+  Ok((config, workspace))
+}
+
 /// Drive `steps` through the real step loop with `spec`, returning the final
 /// context. `workspace_setup` runs before the steps.
 async fn run_steps_collect(
@@ -101,17 +121,7 @@ async fn run_steps_collect(
   }
 
   let dir = tempfile::tempdir()?;
-  let workspace = dir.path().join("work");
-  std::fs::create_dir_all(&workspace)?;
-  workspace_setup(&workspace)?;
-  let config = RunnerConfig {
-    data_dir: dir.path().join("data"),
-    workspace_root: workspace.clone(),
-    cgroup_path: None,
-    services_mode: shared::ServicesMode::default(),
-    ..RunnerConfig::default()
-  };
-  std::fs::create_dir_all(&config.data_dir)?;
+  let (config, workspace) = test_config(dir.path(), workspace_setup)?;
 
   let masker = Arc::new(Mutex::new(SecretMasker::new()));
   let mut ctx = ExecutionContext::with_masker(Arc::clone(&masker));
@@ -125,6 +135,7 @@ async fn run_steps_collect(
     events
   });
 
+  let http = reqwest::Client::new();
   run_steps(
     &steps,
     &mut ctx,
@@ -135,6 +146,7 @@ async fn run_steps_collect(
       config: &config,
       spec,
       shadow: None,
+      http: &http,
     },
   )
   .await?;

@@ -46,6 +46,8 @@ pub struct NestedUsesParams<'a> {
   pub temp_dir: &'a Path,
   /// Job-level cancellation token; nested actions must stop on SIGINT/SIGTERM.
   pub cancel: &'a CancellationToken,
+  /// The job-scope HTTP client, reused for the nested action's resolution.
+  pub http: &'a reqwest::Client,
 }
 
 /// Resolve and run a composite `uses:` step recursively.
@@ -93,6 +95,7 @@ pub async fn run_nested_uses_step(
     workspace: params.workspace,
     config: params.config,
     bounds: &bounds,
+    http: params.http,
   };
   let outcome = Box::pin(super::action_exec::execute_action(
     &synthetic,

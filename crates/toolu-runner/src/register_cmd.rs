@@ -42,28 +42,28 @@ pub(crate) async fn cmd_register(args: RegisterArgs) -> Result<(), Box<dyn std::
   };
   let creds_path = credentials_path_for(&config_path);
   let runner_name = runner_name_or_hostname(args.name);
-  let labels = if args.labels.is_empty() {
-    default_labels()
-  } else {
-    args.labels
-  };
+  let labels = resolve_labels(args.labels);
 
   ensure_not_registered(&config_path, args.replace)?;
 
   let token = resolve_register_bearer(&host, args.token.clone(), &home).await?;
+  let client = build_register_client().map_err(|e| format!("{e}"))?;
 
-  let runner_id = register_and_persist(RegisterPersist {
-    url: &url,
-    token: &token,
-    runner_name: &runner_name,
-    labels: &labels,
-    runner_group: &args.runner_group,
-    work_folder: &work_folder_or_default(args.work.as_ref()),
-    host: &host,
-    config_path: &config_path,
-    creds_path: &creds_path,
-    replace: args.replace,
-  })
+  let runner_id = register_and_persist(
+    RegisterPersist {
+      url: &url,
+      token: &token,
+      runner_name: &runner_name,
+      labels: &labels,
+      runner_group: &args.runner_group,
+      work_folder: &work_folder_or_default(args.work.as_ref()),
+      host: &host,
+      config_path: &config_path,
+      creds_path: &creds_path,
+      replace: args.replace,
+    },
+    &client,
+  )
   .await
   .map_err(|e| format!("{e}"))?;
 
@@ -76,6 +76,16 @@ pub(crate) async fn cmd_register(args: RegisterArgs) -> Result<(), Box<dyn std::
     &labels,
   );
   Ok(())
+}
+
+/// The runner's advertised labels: `--labels` verbatim, or the default set
+/// when none were passed.
+fn resolve_labels(labels: Vec<String>) -> Vec<String> {
+  if labels.is_empty() {
+    default_labels()
+  } else {
+    labels
+  }
 }
 
 /// Resolve the registration `(url, host)`: an explicit `--url` is
@@ -241,14 +251,34 @@ pub(crate) struct RegisterPersist<'a> {
   pub(crate) replace: bool,
 }
 
-/// POST `generate-jitconfig` for `p` and return the minted registration.
-async fn mint_jit(p: &RegisterPersist<'_>) -> Result<wire::net::JitRegistration, RunnerError> {
-  let client = reqwest::Client::builder()
-    .timeout(Duration::from_secs(30))
+/// Per-request timeout for every `generate-jitconfig` HTTP call (up to three
+/// per mint: generate → replace → generate). Applied inside
+/// `wire::net::register_jit`'s `RegisterParams`, not at the client level, so
+/// it holds regardless of whatever default timeout the caller's shared
+/// client carries.
+const MINT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Build a bare HTTP client for a one-shot `register` invocation (not shared
+/// across a loop — `run_cmd::RunLoop` builds and reuses its own for re-mints).
+///
+/// # Errors
+///
+/// Returns `RunnerError` if the TLS backend fails to initialize (the only
+/// realistic `reqwest::ClientBuilder::build` failure).
+fn build_register_client() -> Result<reqwest::Client, RunnerError> {
+  reqwest::Client::builder()
     .build()
-    .map_err(|e| RunnerError::Network(format!("HTTP client: {e}")))?;
+    .map_err(|e| RunnerError::Network(format!("HTTP client: {e}")))
+}
+
+/// POST `generate-jitconfig` for `p` over `client` and return the minted
+/// registration.
+async fn mint_jit(
+  p: &RegisterPersist<'_>,
+  client: &reqwest::Client,
+) -> Result<wire::net::JitRegistration, RunnerError> {
   wire::net::register_jit(
-    &client,
+    client,
     &wire::net::RegisterParams {
       url: p.url,
       runner_token: p.token,
@@ -257,19 +287,24 @@ async fn mint_jit(p: &RegisterPersist<'_>) -> Result<wire::net::JitRegistration,
       runner_group_id: runner_group_id(p.runner_group),
       work_folder: p.work_folder,
       replace: p.replace,
+      timeout: MINT_TIMEOUT,
     },
   )
   .await
 }
 
-/// Live JIT registration (all-or-nothing): POST generate-jitconfig, parse
-/// the minted config, then persist real config + credentials. Returns the
-/// assigned runner ID. Any failure returns before touching either file.
+/// Live JIT registration (all-or-nothing): POST generate-jitconfig over
+/// `client`, parse the minted config, then persist real config + credentials.
+/// Returns the assigned runner ID. Any failure returns before touching either
+/// file.
 ///
 /// The RSA→JWT→OAuth2 chain runs at `run` time from the stored jit_config,
 /// not here. `auth_token` stores the runner's non-secret `client_id`.
-pub(crate) async fn register_and_persist(p: RegisterPersist<'_>) -> Result<i64, RunnerError> {
-  let registration = mint_jit(&p).await?;
+pub(crate) async fn register_and_persist(
+  p: RegisterPersist<'_>,
+  client: &reqwest::Client,
+) -> Result<i64, RunnerError> {
+  let registration = mint_jit(&p, client).await?;
 
   // Decode the minted config to confirm it parses and to lift the
   // client_id (a stable, non-secret identity) for the auth_token field.
@@ -326,6 +361,7 @@ pub(crate) async fn remint_and_persist(
   bearer: &str,
   config_path: &Path,
   creds_path: &Path,
+  client: &reqwest::Client,
 ) -> Result<(), RunnerError> {
   let host = host_from_runner_url(&prior.runner_url)?;
   let p = RegisterPersist {
@@ -340,7 +376,7 @@ pub(crate) async fn remint_and_persist(
     creds_path,
     replace: true,
   };
-  let registration = mint_jit(&p).await?;
+  let registration = mint_jit(&p, client).await?;
 
   // Lift the client_id exactly as register_and_persist does; the re-minted
   // config keeps prior's [services]/[cache]/[workspace]/[shadow] verbatim.

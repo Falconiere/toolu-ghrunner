@@ -280,6 +280,18 @@ Handler priority: **plugin → script → node → docker → composite**.
 - `plugin` — `RunnerPlugin` extension point. New addition not in
   upstream `actions/runner`.
 
+**Job teardown order.** `run_job` returns a `JobTeardown`
+(`execution/job_teardown.rs`) rather than cleaning up inline: local
+cache servers are stopped and `JobCompleted` is emitted *before*
+`run_job` returns, but cache GC (a staging sweep plus one `CacheGc`
+pass over the retained CAS handles) and the workspace sweep
+(`workspace_gc`, running on `spawn_blocking` since job start) are
+deferred to `JobTeardown::finish`, which the caller invokes only
+after dropping the job's event sender — i.e. after the engine's
+event channel closes, which is what lets the listener report the
+job's completion to GitHub. GC therefore overlaps that completion
+round-trip instead of sitting between "job done" and "GitHub told".
+
 The expression engine (`expressions/`) is a complete `${{ }}`
 evaluator: lexer → parser (AST + precedence + primary) → evaluator
 → template. Function library: built-ins (`contains`, `startsWith`,

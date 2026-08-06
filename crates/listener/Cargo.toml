@@ -35,5 +35,11 @@ flate2 = "1"
 # Jitter for poll backoff (never for secrets)
 fastrand = "2"
 
+[dev-dependencies]
+# `net` + `io-util` for the `cleanup_session` test's real local TcpListener
+# (AsyncWriteExt to write a raw 404 response). The crate's normal `tokio`
+# features (rt-multi-thread, macros, sync, time) have neither.
+tokio = { version = "1", features = ["net", "io-util"] }
+
 [lints]
 workspace = true

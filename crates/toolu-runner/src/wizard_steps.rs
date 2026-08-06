@@ -177,18 +177,27 @@ async fn run_register(
     return Ok(());
   }
   let _ = tx.send(StepEvent::Started(StepId::Register));
-  let runner_id = register_cmd::register_and_persist(RegisterPersist {
-    url: &inputs.url,
-    token: bearer,
-    runner_name: &inputs.name,
-    labels: &inputs.labels,
-    runner_group: &inputs.runner_group,
-    work_folder: &inputs.work_folder,
-    host: &inputs.host,
-    config_path: &inputs.config_path,
-    creds_path: &inputs.creds_path,
-    replace: false,
-  })
+  // One-shot client for this wizard run (not shared across a loop like
+  // `run_cmd::RunLoop`'s); `register_and_persist` applies its own per-request
+  // mint timeout regardless of this client's (absent) default.
+  let client = reqwest::Client::builder()
+    .build()
+    .map_err(|e| RunnerError::Network(format!("HTTP client: {e}")))?;
+  let runner_id = register_cmd::register_and_persist(
+    RegisterPersist {
+      url: &inputs.url,
+      token: bearer,
+      runner_name: &inputs.name,
+      labels: &inputs.labels,
+      runner_group: &inputs.runner_group,
+      work_folder: &inputs.work_folder,
+      host: &inputs.host,
+      config_path: &inputs.config_path,
+      creds_path: &inputs.creds_path,
+      replace: false,
+    },
+    &client,
+  )
   .await?;
   let _ = tx.send(StepEvent::Done {
     step: StepId::Register,

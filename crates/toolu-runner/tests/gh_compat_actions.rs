@@ -132,6 +132,7 @@ async fn drive_with_cancel(
   });
 
   let spec = execution::execution::job_spec::JobSpec::default();
+  let http = reqwest::Client::new();
   let conclusion = run_steps(
     steps,
     &mut ctx,
@@ -142,6 +143,7 @@ async fn drive_with_cancel(
       config: &config,
       spec: &spec,
       shadow: None,
+      http: &http,
     },
   )
   .await?;

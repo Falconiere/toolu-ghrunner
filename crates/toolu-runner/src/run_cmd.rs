@@ -57,6 +57,13 @@ pub(crate) async fn cmd_run(args: RunArgs) -> Result<(), Box<dyn std::error::Err
   let host = register_cmd::host_from_runner_url(&cfg.runner_url)?;
   warn_if_no_login(&store, &host, args.once);
 
+  // One loop-scope HTTP client, reused across every re-mint iteration for
+  // both the listener and `generate-jitconfig` instead of a fresh connection
+  // (and TLS handshake) per job. 60 s: matches the listener's prior
+  // per-client timeout; `mint_jit`'s 30 s-per-request timeout is applied
+  // explicitly inside `wire::net::register_jit` and overrides this default.
+  let client = build_loop_client()?;
+
   RunLoop {
     config_path: config_path.clone(),
     creds_path: credentials_path_for(&config_path),
@@ -64,12 +71,27 @@ pub(crate) async fn cmd_run(args: RunArgs) -> Result<(), Box<dyn std::error::Err
     masker,
     store,
     host,
+    client,
     cancel,
     once: args.once,
   }
   .drive()
   .await
   // `_lock_guard` drops here, releasing the lock.
+}
+
+/// Build the one loop-scope HTTP client `RunLoop` threads to the listener and
+/// to every JIT re-mint.
+///
+/// # Errors
+///
+/// Errors if the TLS backend fails to initialize (the only realistic
+/// `reqwest::ClientBuilder::build` failure).
+fn build_loop_client() -> Result<reqwest::Client, Box<dyn std::error::Error>> {
+  reqwest::Client::builder()
+    .timeout(Duration::from_secs(60))
+    .build()
+    .map_err(|e| format!("build HTTP client: {e}").into())
 }
 
 /// WARN once, before polling, when the runner will drop offline after the
@@ -101,6 +123,9 @@ struct RunLoop {
   masker: Arc<Mutex<SecretMasker>>,
   store: AuthStore,
   host: String,
+  /// The loop-scope HTTP client (60 s timeout), reused for the listener and
+  /// every JIT re-mint instead of a fresh connection pool per iteration.
+  client: reqwest::Client,
   cancel: CancellationToken,
   once: bool,
 }
@@ -148,8 +173,13 @@ impl RunLoop {
   ) -> Result<Result<(), RunnerError>, Box<dyn std::error::Error>> {
     let runner_cfg = build_runner_config(cfg)?;
     let jit = require_jit_config(cfg)?;
-    let listener = GitHubListener::new(&jit, runner_cfg, Arc::clone(&self.masker))
-      .map_err(|e| format!("listener init: {e}"))?;
+    let listener = GitHubListener::new(
+      &jit,
+      runner_cfg,
+      Arc::clone(&self.masker),
+      self.client.clone(),
+    )
+    .map_err(|e| format!("listener init: {e}"))?;
     Ok(listener.run(self.cancel.clone()).await)
   }
 
@@ -164,7 +194,14 @@ impl RunLoop {
     let Some(bearer) = auth_store::resolve_bearer(&self.store, &self.host, None)? else {
       return Err(format!("no GitHub token for {} — {REMINT_TOKEN_HELP}", self.host).into());
     };
-    match register_cmd::remint_and_persist(cfg, &bearer, &self.config_path, &self.creds_path).await
+    match register_cmd::remint_and_persist(
+      cfg,
+      &bearer,
+      &self.config_path,
+      &self.creds_path,
+      &self.client,
+    )
+    .await
     {
       Ok(()) => Ok(Remint::Reset),
       Err(RunnerError::Auth(msg)) => {

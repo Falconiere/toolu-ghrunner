@@ -34,14 +34,10 @@ pub(super) async fn drain_post_steps(
   if drained.is_empty() {
     return Ok(());
   }
-  // A request timeout so a hung node-runtime download can't block post-drain
-  // (and thus the whole job) forever.
-  let client = reqwest::Client::builder()
-    .timeout(std::time::Duration::from_secs(120))
-    .build()
-    .map_err(|e| RunnerError::NodeHandler(format!("build HTTP client: {e}")))?;
+  // The job-scope HTTP client (120 s timeout) so a hung node-runtime download
+  // can't block post-drain (and thus the whole job) forever.
   for post in drained {
-    run_one_post(&post, ctx, events, job, &client).await?;
+    run_one_post(&post, ctx, events, job, job.http).await?;
   }
   Ok(())
 }

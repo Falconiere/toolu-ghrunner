@@ -280,8 +280,39 @@ impl ExecutionContext {
   /// # Errors
   /// Returns `RunnerError::Expression` on evaluation failure.
   pub fn interpolate_string(&self, input: &str) -> Result<String, RunnerError> {
+    // `interpolate` itself returns `input` unchanged when there is no
+    // `${{`, but only after `self.eval_context()` — a full deep-clone of
+    // github/env/secrets/vars/matrix/needs/inputs/strategy plus the
+    // O(steps²) `build_steps_context` rebuild — has already been paid for
+    // by the caller. Skip straight to the verbatim return in that case.
+    if !input.contains("${{") {
+      return Ok(input.to_owned());
+    }
     interpolate(input, &self.eval_context())
   }
+
+  /// `Some(bool)` when `cond` trimmed is exactly `success()`/`always()`/
+  /// `failure()`/`cancelled()`, answered from `job_status` with no
+  /// `eval_context()` snapshot. `None` (fall through unchanged) for
+  /// everything else, e.g. `!cancelled()` or `success() && …`. Mirrors
+  /// `expressions::functions::builtins::call_function`'s semantics for
+  /// these four. `pub` so `tests/` can exercise every `JobStatus`.
+  pub fn literal_status_condition(&self, cond: &str) -> Option<bool> {
+    match cond.trim() {
+      "success()" => Some(self.job_status == JobStatus::Success),
+      "always()" => Some(true),
+      "failure()" => Some(self.job_status == JobStatus::Failure),
+      "cancelled()" => Some(self.job_status == JobStatus::Cancelled),
+      _ => None,
+    }
+  }
+
+  /// Force the aggregate job status directly (test support only; production
+  /// code only reaches `Failure` via [`Self::record_step_failure`]).
+  pub fn set_job_status_for_test(&mut self, status: JobStatus) {
+    self.job_status = status;
+  }
+
   /// Set (or overwrite) a global environment variable for later steps.
   pub fn set_env(&mut self, key: &str, value: &str) {
     self.env.insert(key.to_owned(), value.to_owned());

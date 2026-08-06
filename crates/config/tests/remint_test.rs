@@ -48,6 +48,7 @@ fn non_default_config() -> RunnerRegistrationConfig {
         endpoint: "https://s3.example.com".to_owned(),
         region: "us-east-1".to_owned(),
       },
+      fsync_chunks: true,
     },
     workspace: WorkspaceSection { gc_after_hours: 72 },
     shadow: ShadowSection { enabled: true },

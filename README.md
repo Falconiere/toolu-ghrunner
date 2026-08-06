@@ -259,6 +259,7 @@ max_bytes          = 107374182400   # 100 GiB local (L1) budget
 entry_ttl_days     = 7              # matches GitHub
 protected_branches = ["main", "master"]
 chunk_avg_bytes    = 65536          # FastCDC target chunk size
+fsync_chunks       = false          # per-chunk fsync before rename — see below
 
 [cache.l2]                          # optional S3 cold tier
 enabled  = false
@@ -272,6 +273,15 @@ gc_after_hours = 24      # prune _work/<job-id> older than this
 [shadow]
 enabled = false          # off by default; records would-hit/false-hit, never serves
 ```
+
+`fsync_chunks` (default `false`) skips the per-chunk `fsync` before a
+chunk's atomic rename, trading it for save-path throughput. This does
+**not** weaken chunk integrity: every chunk is BLAKE3-verified on
+read regardless, so a torn chunk left by an unclean shutdown is never
+served — it self-heals (the corrupt chunk is removed) on the next
+read and degrades to a clean cache miss (or a clean restore from the
+optional S3 tier), rather than a permanently poisoned entry. Set
+`fsync_chunks = true` to restore the pre-0.6 per-chunk fsync.
 
 ### Docker: `buildx` needs `--driver-opt network=host`
 

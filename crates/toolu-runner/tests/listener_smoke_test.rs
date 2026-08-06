@@ -89,7 +89,7 @@ async fn listener_polls_until_cancellation() {
   let cancel = CancellationToken::new();
 
   let jit_config = minimal_jit_config_b64(&server.uri(), 42);
-  let listener = GitHubListener::new(&jit_config, config, masker)
+  let listener = GitHubListener::new(&jit_config, config, masker, reqwest::Client::new())
     .expect("listener should construct from a valid JIT config payload");
 
   // Cancel after a short delay — the listener should observe cancellation
@@ -114,8 +114,8 @@ async fn listener_constructs_from_jit_config() {
   let masker = Arc::new(std::sync::Mutex::new(SecretMasker::new()));
   let jit_config = minimal_jit_config_b64(&server.uri(), 99);
 
-  let listener =
-    GitHubListener::new(&jit_config, config, masker).expect("listener should construct");
+  let listener = GitHubListener::new(&jit_config, config, masker, reqwest::Client::new())
+    .expect("listener should construct");
   // The masker is held for future use by log uploaders; just confirm it's
   // retrievable.
   let _: &Arc<std::sync::Mutex<SecretMasker>> = listener.masker();
@@ -126,6 +126,6 @@ async fn listener_rejects_invalid_jit_config() {
   let config = make_config();
   let masker = Arc::new(std::sync::Mutex::new(SecretMasker::new()));
 
-  let result = GitHubListener::new("not-base64-or-json", config, masker);
+  let result = GitHubListener::new("not-base64-or-json", config, masker, reqwest::Client::new());
   assert!(result.is_err(), "expected parse error on garbage input");
 }

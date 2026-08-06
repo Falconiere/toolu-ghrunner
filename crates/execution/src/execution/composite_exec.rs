@@ -191,6 +191,7 @@ async fn run_uses_step(
     depth,
     temp_dir: run.temp_dir,
     cancel: params.cancel,
+    http: params.http,
   };
   run_nested_uses_step(nested, skip).await
 }

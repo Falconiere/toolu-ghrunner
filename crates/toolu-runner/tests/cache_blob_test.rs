@@ -322,11 +322,20 @@ async fn corrupt_chunk_aborts_download() -> TestResult<()> {
   let download = harness
     .registry
     .mint_download(manifest, Duration::from_secs(300));
-  let resp = reqwest::Client::new()
+  // The abort can surface at either stage: if the server reaches the corrupt
+  // chunk before the response headers are fully written, `send` itself fails
+  // with an incomplete message; if the headers got out first, the body stream
+  // dies mid-read. Which one happens depends on scheduling — in-process test
+  // parallelism reliably produces the former, one-process-per-test the latter.
+  // Both satisfy the contract under test: a corrupt chunk is never served whole.
+  let sent = reqwest::Client::new()
     .get(blob_url(&harness.base, &download))
     .send()
-    .await?;
-  let served_full = matches!(resp.bytes().await, Ok(body) if body.len() == bytes.len());
+    .await;
+  let served_full = match sent {
+    Ok(resp) => matches!(resp.bytes().await, Ok(body) if body.len() == bytes.len()),
+    Err(_) => false,
+  };
   assert!(!served_full, "corrupt chunk was served as a complete body");
   Ok(())
 }

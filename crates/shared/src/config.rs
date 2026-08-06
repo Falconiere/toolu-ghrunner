@@ -46,6 +46,11 @@ pub struct CacheConfig {
   pub chunk_avg_bytes: u32,
   /// S3 cold tier, or `None` for L1-only.
   pub l2: Option<L2Config>,
+  /// Restore the pre-0.6 per-chunk `fsync` before rename. Default `false`:
+  /// chunk integrity is guaranteed by BLAKE3 verify-on-read regardless, so a
+  /// torn chunk after an unclean shutdown is never served, self-heals on the
+  /// next read, and degrades to a cache miss (or an L2 restore).
+  pub fsync_chunks: bool,
 }
 
 impl CacheConfig {
@@ -74,6 +79,7 @@ impl Default for CacheConfig {
         .collect(),
       chunk_avg_bytes: Self::DEFAULT_CHUNK_AVG_BYTES,
       l2: None,
+      fsync_chunks: false,
     }
   }
 }

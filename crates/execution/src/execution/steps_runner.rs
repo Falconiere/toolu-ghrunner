@@ -36,17 +36,24 @@ pub(super) struct JobCtx<'a> {
   /// Shadow-mode step observer (approach C). `None` disables observation;
   /// when set it records would-hit / false-hit and NEVER serves a result.
   pub(super) shadow: Option<&'a ShadowObserver>,
+  /// One job-scope HTTP client (120 s timeout), reused for every action
+  /// download / node-runtime fetch / post-drain in this job instead of a
+  /// fresh connection per call.
+  pub(super) http: &'a reqwest::Client,
 }
 
-/// Job-constant inputs for a run: the workspace root, runner config, and the
-/// job's `outputs:`/`defaults.run` spec. Grouped so `run_steps` stays within
-/// the argument-count budget.
+/// Job-constant inputs for a run: the workspace root, runner config, the
+/// job's `outputs:`/`defaults.run` spec, and the shared job-scope HTTP
+/// client. Grouped so `run_steps` stays within the argument-count budget.
 pub struct JobRun<'a> {
   pub workspace: &'a Path,
   pub config: &'a RunnerConfig,
   pub spec: &'a JobSpec,
   /// Shadow-mode step observer (approach C); `None` disables observation.
   pub shadow: Option<&'a ShadowObserver>,
+  /// One job-scope HTTP client (120 s timeout), built once in `run_job` and
+  /// threaded to every action download / post-drain in this job.
+  pub http: &'a reqwest::Client,
 }
 
 /// Run a sequence of steps with condition evaluation and error handling.
@@ -72,6 +79,7 @@ pub async fn run_steps(
     cancel: &cancel,
     job: run.spec,
     shadow: run.shadow,
+    http: run.http,
   };
 
   let mut job_state = JobState {
@@ -194,6 +202,14 @@ fn evaluate_condition(step: &ActionStep, ctx: &ExecutionContext) -> Result<bool,
     return Ok(true);
   }
 
+  // Fast path: the overwhelmingly common condition is the injected default
+  // `success()`, which needs only `job_status` — not a full context
+  // snapshot. Anything else (`!cancelled()`, `success() && …`, …) falls
+  // through to the full evaluator unchanged.
+  if let Some(literal) = ctx.literal_status_condition(condition) {
+    return Ok(literal);
+  }
+
   let result = ctx.evaluate_expression(condition)?;
   Ok(result.is_truthy())
 }
@@ -215,6 +231,7 @@ async fn execute_step(
       workspace: job.workspace,
       config: job.config,
       bounds,
+      http: job.http,
     };
     let ActionOutcome {
       conclusion,

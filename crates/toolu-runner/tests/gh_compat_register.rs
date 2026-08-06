@@ -161,6 +161,7 @@ fn params_for<'a>(
     runner_group_id: None,
     work_folder: "_work",
     replace,
+    timeout: std::time::Duration::from_secs(30),
   }
 }
 

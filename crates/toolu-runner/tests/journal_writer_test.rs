@@ -71,9 +71,11 @@ async fn run_journaled_job(
     }
   });
 
-  run_job(msg, &config, CancellationToken::new(), tx, masker).await?;
+  let teardown = run_job(msg, &config, CancellationToken::new(), tx, masker).await?;
   fwd.await?;
   sink.await?;
+  // `run_job` now defers cache maintenance + workspace GC to the caller.
+  teardown.finish(&config).await;
   Ok(())
 }
 

@@ -6,7 +6,7 @@ use std::path::Path;
 use fastcdc::v2020::StreamCDC;
 use shared::RunnerError;
 
-use super::chunk_io;
+use super::chunk_io::{self, Durability};
 use super::manifest::{ChunkId, ChunkRef, Manifest};
 
 /// FastCDC min/avg/max derived from the configured average (min = avg/4, max = avg*4).
@@ -19,10 +19,14 @@ fn cdc_sizes(avg: u32) -> Result<(usize, usize, usize), RunnerError> {
 
 /// Chunk `staged` with FastCDC, write each unique chunk under `blobs_dir`, return the manifest.
 /// Synchronous (blocking `StreamCDC`); call from `spawn_blocking`.
+///
+/// `chunk_durability` gates the per-chunk fsync (see [`Durability`]) —
+/// `Deferred` by default, `Fsync` when `[cache] fsync_chunks = true`.
 pub(crate) fn chunk_and_store(
   staged: &Path,
   blobs_dir: &Path,
   avg: u32,
+  chunk_durability: Durability,
 ) -> Result<Manifest, RunnerError> {
   let file = File::open(staged).map_err(RunnerError::Io)?;
   let (min, avg_size, max) = cdc_sizes(avg)?;
@@ -34,7 +38,7 @@ pub(crate) fn chunk_and_store(
     let len = u32::try_from(chunk.data.len())
       .map_err(|e| RunnerError::Cache(format!("chunk too large: {e}")))?;
     let path = chunk_io::blob_path(blobs_dir, &id.to_hex());
-    chunk_io::write_atomic_sync(&path, &chunk.data)?;
+    chunk_io::write_atomic(&path, &chunk.data, chunk_durability)?;
     total = total.saturating_add(u64::from(len));
     chunks.push(ChunkRef { id, len });
   }

@@ -23,6 +23,8 @@ pub mod handlers;
 pub mod job_hooks;
 pub mod job_runner;
 pub mod job_spec;
+/// Deferred post-completion teardown (cache maintenance + workspace sweep).
+pub mod job_teardown;
 mod node_stage;
 pub mod oidc;
 mod post_drain;

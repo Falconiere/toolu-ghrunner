@@ -41,10 +41,49 @@ pub(super) async fn poll_and_execute(ctx: &mut SessionCtx) -> Result<(), RunnerE
   tracing::info!(plan_id = %acquired.plan_id, "acquired job");
   let plan_id = acquired.plan_id.clone();
 
-  let (conclusion, job_id, request_id, step_results, job_token) =
+  let (conclusion, job_id, request_id, step_results, job_token, live_log) =
     run_job_with_cancel_watch(ctx, &body.run_service_url, &rs_token, &acquired).await;
+  // Stash the live-log wrapper handle now, before any further `?` in this
+  // function — `ctx` is a full `&mut` borrow again here (the call above only
+  // reborrowed it immutably), so this assignment survives an early return
+  // below, and `cleanup_session` (called unconditionally by the caller) can
+  // join it on both the `Ok` and `Err` paths.
+  ctx.live_log = live_log;
   let rs_token = job_token.unwrap_or(rs_token);
 
+  acknowledge_and_complete(
+    ctx,
+    &body,
+    CompletionParams {
+      plan_id,
+      job_id,
+      request_id,
+      conclusion,
+      step_results,
+    },
+    &rs_token,
+  )
+  .await
+}
+
+/// Bundled completion parameters for `acknowledge_and_complete` — keeps it
+/// under the 7-arg clippy cap.
+struct CompletionParams {
+  plan_id: String,
+  job_id: String,
+  request_id: i64,
+  conclusion: Conclusion,
+  step_results: Vec<StepResult>,
+}
+
+/// Acknowledge the broker message and report the job's completion. Split out
+/// of `poll_and_execute` to keep that function short.
+async fn acknowledge_and_complete(
+  ctx: &SessionCtx,
+  body: &protocol::messages::RunnerJobRequestBody,
+  params: CompletionParams,
+  rs_token: &str,
+) -> Result<(), RunnerError> {
   // Acknowledge the broker message — required by the JIT protocol before complete_job.
   // The broker keys the ack on the job's runner_request_id (UUID), not the
   // numeric broker message id.
@@ -57,23 +96,34 @@ pub(super) async fn poll_and_execute(ctx: &mut SessionCtx) -> Result<(), RunnerE
   .await?;
 
   let complete_req = CompleteJobRequest {
-    plan_id,
-    job_id,
-    request_id,
-    conclusion: map_conclusion(conclusion),
+    plan_id: params.plan_id,
+    job_id: params.job_id,
+    request_id: params.request_id,
+    conclusion: map_conclusion(params.conclusion),
     outputs: serde_json::Value::Object(serde_json::Map::new()),
-    step_results,
+    step_results: params.step_results,
     annotations: Vec::new(),
   };
-  complete_job(&ctx.client, &body.run_service_url, &rs_token, &complete_req).await
+  complete_job(&ctx.client, &body.run_service_url, rs_token, &complete_req).await
 }
 
 /// Parse and execute the acquired job. Always returns a conclusion — never leaves
 /// the job hanging on GitHub even if parsing fails.
-/// Returns `(conclusion, job_id, request_id, step_results, optional_token)`.
+/// Returns `(conclusion, job_id, request_id, step_results, optional_token,
+/// live_log_handle)`. The last element is the live-log wrapper task's
+/// `JoinHandle`, threaded up so `poll_and_execute` can stash it on `ctx`
+/// before any further fallible call — see the T1 design note at its
+/// assignment site.
 /// Result tuple for a job that never started because its message failed
 /// to parse — completes with failure rather than hanging on GitHub.
-type JobOutcome = (Conclusion, String, i64, Vec<StepResult>, Option<String>);
+type JobOutcome = (
+  Conclusion,
+  String,
+  i64,
+  Vec<StepResult>,
+  Option<String>,
+  Option<tokio::task::JoinHandle<()>>,
+);
 
 /// Parse the acquired job body, or return a ready-made failure outcome.
 fn parse_job_message(
@@ -86,6 +136,7 @@ fn parse_job_message(
       "unknown".to_owned(),
       0,
       Vec::new(),
+      None,
       None,
     )
   })
@@ -219,7 +270,10 @@ async fn run_acquired_job(
   let effective_token = job_token.as_deref().unwrap_or(rs_token);
 
   // Connect live log WebSocket for real-time log streaming to GitHub UI.
-  let live_log_tx = connect_live_log(&job_msg, effective_token).await;
+  // `live_log_handle` is the wrapper task's `JoinHandle` — threaded back up
+  // through `JobOutcome` so `poll_and_execute` can stash it on `ctx` for
+  // `cleanup_session` to join, instead of being dropped un-joined here.
+  let (live_log_tx, live_log_handle) = connect_live_log(&job_msg, effective_token).await;
 
   let route = super::execution_loop::JobRoute {
     run_service_url,
@@ -234,6 +288,7 @@ async fn run_acquired_job(
     request_id,
     step_results,
     job_token,
+    live_log_handle,
   )
 }
 
@@ -496,22 +551,33 @@ fn parse_job_request_body(
 }
 
 /// Connect live log WebSocket for real-time log streaming to GitHub UI.
-/// Returns None on failure — live logs are best-effort.
+/// Returns `(None, None)` on failure — live logs are best-effort.
+///
+/// The second element is the `JoinHandle` of the wrapper task spawned below
+/// (not `LiveLogStreamer::connect`'s inner handle) — the caller no longer
+/// detaches it, but threads it back up so `cleanup_session` can join the
+/// streamer's final flush instead of racing it against session teardown.
 async fn connect_live_log(
   job_msg: &AgentJobRequestMessage,
   fallback_token: &str,
-) -> Option<tokio::sync::mpsc::Sender<wire::reporting::live_log::LiveLogLine>> {
-  let url = job_msg.feed_stream_url()?;
+) -> (
+  Option<tokio::sync::mpsc::Sender<wire::reporting::live_log::LiveLogLine>>,
+  Option<tokio::task::JoinHandle<()>>,
+) {
+  let Some(url) = job_msg.feed_stream_url() else {
+    return (None, None);
+  };
   let token = super::helpers::system_vss_access_token(job_msg);
   let ws_token = token.as_deref().unwrap_or(fallback_token);
-  let (tx, handle) = LiveLogStreamer::connect(&url, ws_token).await?;
-  // Detach — handle completes when tx is dropped.
-  tokio::spawn(async move {
-    if let Err(e) = handle.await {
+  let Some((tx, inner_handle)) = LiveLogStreamer::connect(&url, ws_token).await else {
+    return (None, None);
+  };
+  let wrapper_handle = tokio::spawn(async move {
+    if let Err(e) = inner_handle.await {
       tracing::warn!(error = %e, "live log WebSocket task panicked");
     }
   });
-  Some(tx)
+  (Some(tx), Some(wrapper_handle))
 }
 
 /// Extract the SystemVssConnection AccessToken from job message endpoints.

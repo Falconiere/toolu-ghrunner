@@ -385,8 +385,10 @@ fn decode_property_escape(slice: &str) -> Option<char> {
 /// Raw lines arrive on `stdout_rx` as the handler reads them off the child, so
 /// a passthrough line is logged before the next is produced. Command lines are
 /// applied to `ctx` and consumed; `group`/annotation commands emit their
-/// events; other lines are masked (an `add-mask` applies before later lines)
-/// and re-emitted. Returns the `set-output` map for `StepCompleted`.
+/// (masked) events. Plain passthrough lines are re-emitted **unmasked** — the
+/// engine event stream is unmasked by design (see `Runner::execute_job`'s doc
+/// contract); every durable sink masks on its own before the line lands on
+/// disk or over the wire. Returns the `set-output` map for `StepCompleted`.
 pub async fn stream_dispatch_stdout(
   step_id: &str,
   stdout_rx: &mut mpsc::Receiver<String>,
@@ -400,11 +402,10 @@ pub async fn stream_dispatch_stdout(
       let _ = events.send(event).await;
     }
     if let LineDisposition::PassThrough(text) = disposition {
-      let masked = mask_line(ctx, &text);
       let _ = events
         .send(RunnerEvent::Log {
           step_id: step_id.to_owned(),
-          line: masked,
+          line: text,
           stream: shared::LogStream::Stdout,
         })
         .await;
@@ -416,13 +417,4 @@ pub async fn stream_dispatch_stdout(
   // order, so a duplicate key keeps its LAST emitted value (order itself is
   // not preserved — only last-writer-wins matters to consumers).
   dispatcher.take_set_outputs().into_iter().collect()
-}
-
-/// Mask a line through the shared masker, recovering from a poisoned lock.
-fn mask_line(ctx: &ExecutionContext, line: &str) -> String {
-  let guard = match ctx.masker().lock() {
-    Ok(g) => g,
-    Err(poisoned) => poisoned.into_inner(),
-  };
-  guard.mask(line)
 }
