@@ -599,9 +599,24 @@ Two documented caveats for concurrent cross-repo runs:
   `service_bind` per repo config. The default `forwarder` mode binds
   nothing and is unaffected.
 
-`remove` deletes the registration's `config.toml`, `credentials.json`,
-`.lock`, and `.pending_remove`, and keeps `_diag/` (the `watch`
-history); empty parent dirs are left in place.
+`remove` first unregisters the runner on GitHub
+(`wire::net::unregister_runner`: DELETE `…/actions/runners/{id}` by the
+persisted `runner_id`, falling back to a name lookup when none was
+recorded; a 404 or no same-name match is success, so the call is
+idempotent — GitHub reaps a JIT registration after its single job, making
+"already gone" the common case). Only then does it delete the
+registration's `config.toml`, `credentials.json`, `.lock`, and
+`.pending_remove`, keeping `_diag/` (the `watch` history); empty parent
+dirs are left in place.
+
+The order is load-bearing: the persisted `runner_id` and URL are the only
+handle on the GitHub-side runner, so deleting them first would strand it
+with no way to retry. A failed unregister therefore aborts with local
+state untouched. The bearer resolves `--token` > `TOOLU_RUNNER_TOKEN` >
+the stored `login` token; with none of the three the local removal still
+proceeds behind a WARN that the runner was left registered.
+`--skip-unregister` skips the call outright (revoked token, deleted repo,
+no network).
 
 ## Sequence: run
 

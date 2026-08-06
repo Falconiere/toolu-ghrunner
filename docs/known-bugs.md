@@ -32,7 +32,23 @@ Tracking format: B-NNN — short title — severity — owner — status.
 
 - **Severity:** Low (deferred to step 10)
 - **Owner:** step 10
-- **Status:** Blocked on step 10
+- **Status:** Resolved
+- **Resolution:** `remove` now unregisters on GitHub before deleting
+  anything local. `wire::net::register::unregister_runner` DELETEs
+  `…/actions/runners/{id}` using the persisted `runner_id`, falling back
+  to a name lookup when no id was recorded; a 404 (or no same-name match)
+  is `Ok` so the call is idempotent — the common case, since GitHub reaps
+  a JIT registration after its single job. Ordering is deliberate: the
+  persisted `runner_id` and URL are the only way to name the runner, so
+  deleting them first would strand it. A failed unregister therefore
+  aborts with local state intact and the removal can be retried; the
+  bearer resolves `--token` > `TOOLU_RUNNER_TOKEN` > the stored `login`
+  token, and with none of the three the local removal still proceeds
+  behind a WARN that the GitHub-side runner was left registered.
+  `--skip-unregister` is the explicit escape hatch (revoked token,
+  deleted repo, no network). Note the in-flight-run path is unchanged:
+  `--force` still only writes the marker, and live cancellation of a
+  running job remains step 10 work.
 - **Trigger:** `toolu-runner remove` is called while a registration
   exists.
 - **Observed:** The CLI writes `.pending_remove` if a `run` is in

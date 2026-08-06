@@ -39,7 +39,9 @@ pub use log_upload::{
   upload_log,
 };
 pub use messages::{PollParams, acknowledge_message, build_poll_url, poll_message};
-pub use register::{JitRegistration, RegisterParams, build_request, parse_response, register_jit};
+pub use register::{
+  JitRegistration, RegisterParams, build_request, parse_response, register_jit, unregister_runner,
+};
 pub use results_service::{
   create_job_logs_metadata, create_step_logs_metadata, get_job_logs_signed_blob_url,
   get_step_logs_signed_blob_url, update_workflow_steps, upload_log_blob,
