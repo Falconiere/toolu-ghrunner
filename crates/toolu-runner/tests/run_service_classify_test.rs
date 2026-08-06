@@ -371,7 +371,11 @@ async fn renew_job_oversized_error_body_is_read_up_to_the_cap() -> TestResult<()
     .respond_with(ResponseTemplate::new(500).set_body_string(huge))
     .mount(&server)
     .await;
-  let client = short_timeout_client()?;
+  // No client timeout: `short_timeout_client` exists for the past-the-deadline
+  // tests, and a 200 ms budget could trip mid-body on a loaded runner — which
+  // would take `log_error_body`'s `Err` branch and emit no DEBUG fields at
+  // all, failing the assertions below for an unrelated reason.
+  let client = reqwest::Client::new();
 
   let result = {
     let _guard = tracing::subscriber::set_default(capture.clone());
