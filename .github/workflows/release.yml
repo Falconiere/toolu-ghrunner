@@ -27,7 +27,7 @@ jobs:
   verify:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Assert tag matches Cargo version
         run: bash scripts/assert-version.sh "${GITHUB_REF_NAME}"
       - uses: dtolnay/rust-toolchain@1.94.1
@@ -60,7 +60,7 @@ jobs:
             arch: arm64
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.94.1
       # Native host build (no --target): each runner's host triple IS the
       # release target. --locked pins the committed Cargo.lock.
@@ -69,7 +69,7 @@ jobs:
       - name: Package tarball
         run: bash scripts/package-release.sh "${{ matrix.os }}" "${{ matrix.arch }}" target/release/toolu-runner dist
       - name: Upload tarball
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: toolu-runner-${{ matrix.os }}-${{ matrix.arch }}
           path: dist/toolu-runner-${{ matrix.os }}-${{ matrix.arch }}.tar.gz
@@ -81,9 +81,9 @@ jobs:
     permissions:
       contents: write # create the release + upload assets
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Download all tarballs
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true

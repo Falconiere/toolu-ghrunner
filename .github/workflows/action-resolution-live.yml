@@ -7,7 +7,7 @@ jobs:
     runs-on: [self-hosted, toolu-runner-v1]
     steps:
       - name: checkout via actions/checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: verify checkout succeeded
         run: |
           test -f README.md || test -f readme.md || test -d .git
