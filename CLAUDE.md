@@ -454,8 +454,12 @@ no OTel.
   load-bearing: the persisted id/URL are the only handle on the runner, so
   a failed call aborts with local state intact and is retryable. Bearer:
   `--token` > `TOOLU_RUNNER_TOKEN` > stored `login`; none of the three
-  still removes locally behind a WARN. `--skip-unregister` skips the call.
-  (Live cancellation of an in-flight job is still step 10.) `watch`
+  still removes locally behind a WARN. `--skip-unregister` skips the call,
+  and so does `--force` when the `.lock` holder is still ALIVE
+  (`config::lockfile::holder_alive`) — that job still reports against the
+  registration. Liveness, not mere existence: nothing deletes `.lock` on a
+  normal `run` exit, so a dead-holder lock must still unregister. (Live
+  cancellation of an in-flight job is still step 10.) `watch`
   opens the journal TUI (`observability::watch`; no network, no
   tracing init — logs would corrupt the alternate screen).
 - `register_cmd.rs` — `cmd_register` + `register_and_persist` (split

@@ -616,9 +616,13 @@ state untouched. The bearer resolves `--token` > `TOOLU_RUNNER_TOKEN` >
 the stored `login` token; with none of the three the local removal still
 proceeds behind a WARN that the runner was left registered.
 `--skip-unregister` skips the call outright (revoked token, deleted repo,
-no network), and so does `--force` past a *held* lock — live cancellation
-is still step 10 work, so that job is genuinely still running and renews
-against this registration; unregistering mid-job would break it.
+no network), and so does `--force` when the `.lock` holder is still alive
+(`config::lockfile::holder_alive`): live cancellation is still step 10
+work, so that job keeps renewing against this registration and
+unregistering mid-job would break it. The check is liveness, not mere
+existence — nothing deletes `.lock` on a normal `run` exit, so a leftover
+lock with a dead holder is the resting state of any machine that has run
+a job, and it must still unregister.
 
 ## Sequence: run
 

@@ -201,9 +201,49 @@ async fn no_token_removes_locally_and_says_so() -> TestResult<()> {
   Ok(())
 }
 
-/// `--force` past a HELD lock must not unregister: the job still running
-/// renews and reports against this registration, so deleting it on GitHub
-/// would break the very run `--force` targets.
+/// A LEFTOVER lock — a dead holder PID — must still unregister. Nothing
+/// deletes `.lock` on a normal `run` exit, so this file is the resting
+/// state of any machine that has run a job; gating on mere existence would
+/// silently skip the unregister with nothing actually running, quietly
+/// reintroducing B-002 for the most common case.
+#[tokio::test]
+async fn force_past_a_stale_lock_still_unregisters() -> TestResult<()> {
+  let dir = tempfile::tempdir()?;
+  let home = tempfile::tempdir()?;
+  let server = MockServer::start().await;
+  Mock::given(method("DELETE"))
+    .and(path_matcher(delete_path()))
+    .respond_with(ResponseTemplate::new(204))
+    .expect(1)
+    .mount(&server)
+    .await;
+
+  let config_path = seed_registration(dir.path(), &server.uri())?;
+  // PID 0 is never a live process, so `is_pid_alive` reports it dead.
+  std::fs::write(
+    dir.path().join(".lock"),
+    r#"{"pid":0,"started_at":"now","config_path":"/tmp/x"}"#,
+  )?;
+
+  let out = run_remove(&config_path, home.path(), &["--force", "--token", "tok-1"])?;
+
+  assert!(
+    out.status.success(),
+    "remove --force should succeed: {}",
+    String::from_utf8_lossy(&out.stderr)
+  );
+  assert!(!config_path.exists(), "config.toml should be gone");
+  let stdout = String::from_utf8_lossy(&out.stdout);
+  assert!(
+    stdout.contains("unregistered on GitHub"),
+    "a dead lock holder must not suppress the unregister, got: {stdout}"
+  );
+  Ok(())
+}
+
+/// `--force` past a lock whose holder is ALIVE must not unregister: that
+/// job renews and reports against this registration, so deleting it on
+/// GitHub would break the very run `--force` targets.
 #[tokio::test]
 async fn force_past_an_in_flight_run_does_not_unregister() -> TestResult<()> {
   let dir = tempfile::tempdir()?;
@@ -216,8 +256,12 @@ async fn force_past_an_in_flight_run_does_not_unregister() -> TestResult<()> {
     .await;
 
   let config_path = seed_registration(dir.path(), &server.uri())?;
-  // A held job lock, as `run` leaves it.
-  std::fs::write(dir.path().join(".lock"), r#"{"pid":1,"started_at":"now"}"#)?;
+  // A lock held by a process that really is alive: this test's own PID.
+  let live = std::process::id();
+  std::fs::write(
+    dir.path().join(".lock"),
+    format!(r#"{{"pid":{live},"started_at":"now","config_path":"/tmp/x"}}"#),
+  )?;
 
   let out = run_remove(&config_path, home.path(), &["--force", "--token", "tok-1"])?;
 
