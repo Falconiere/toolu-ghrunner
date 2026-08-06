@@ -1,0 +1,10 @@
+# Allowlist build context: the image build needs exactly what
+# `cargo build --release --locked --bin toolu-runner` needs. Everything
+# else (git history, docs, target/, CI, scripts) stays out so context
+# uploads are small and unrelated edits never bust the build cache.
+*
+!Cargo.toml
+!Cargo.lock
+!rust-toolchain.toml
+!crates/
+crates/**/target/
