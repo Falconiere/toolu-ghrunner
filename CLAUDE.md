@@ -7,8 +7,9 @@ no OTel.
 
 - Layered workspace of **10 crates under `crates/`**. `toolu-runner`
   is now a **bin-only** crate (the CLI entrypoint: `main.rs` +
-  `cli.rs` + `register_cmd.rs` + `run_cmd.rs` + `service_cmd.rs` +
-  `login_cmd.rs` + `status_cmd.rs` + `create_app_cmd.rs`).
+  `cli.rs` + `register_cmd.rs` + `run_cmd.rs` + `boot_cmd.rs` +
+  `service_cmd.rs` + `login_cmd.rs` + `status_cmd.rs` +
+  `create_app_cmd.rs`).
   The execution **engine** lives in
   `execution`; the GitHub **JIT lifecycle** lives in `listener`.
 - Workspace members (dependency order): `protocol`, `shared`,
@@ -116,6 +117,18 @@ no OTel.
   supervisor owns process lifetime, the loop owns registration lifetime.
   No daemon code. (The static single-slot `scripts/` units installed by
   `install.sh --service` still exist for legacy hosts.)
+- **`boot`: zero-config one-shot container mode.** No flags — env-driven
+  (`TOOLU_JITCONFIG` required, `TOOLU_DEADLINE` optional watchdog
+  backstop, epoch-ms) for the toolu.sh provider image's ENTRYPOINT.
+  Builds an in-memory `RunnerConfig` (no `config.toml`, no
+  `credentials.json`, no `.lock`, no auth store, no re-mint) and runs
+  `GitHubListener::run` once. `boot_cmd::cmd_boot` returns an explicit
+  process exit code that `main` applies directly (bypassing the other
+  subcommands' uniform Ok-is-0/Err-is-2 mapping): `0`
+  Success/Skipped/no-job, `1` Failure/Cancelled or a listener error, `2`
+  env/config error before polling, `124` the deadline watchdog fired
+  (checked before any network call for an already-past deadline, or
+  mid-job via a `CancellationToken` graceful-cancel-then-hard-exit).
 - **No `build_tool_*`** — build-tool modules were cut in the port.
   `service_auth` / `service_lifecycle` are kept (they back the
   OIDC/artifact/cache axum services).
@@ -437,10 +450,11 @@ no OTel.
   debug builds — exercised by the shell-out CLI tests since the
   bin-only crate has no lib target for a unit test).
 - `main.rs` — CLI entrypoint: parse + dispatch (`register` →
-  `register_cmd`, `run` → `run_cmd`, `install-service` → `service_cmd`,
-  `login`/`logout` → `login_cmd`, `status` → `status_cmd`, `create-app`
-  → `create_app_cmd`, `setup` → `setup_cmd`) plus the inline `remove` /
-  `watch` handlers.
+  `register_cmd`, `run` → `run_cmd`, `boot` → `boot_cmd` (intercepted
+  before the generic dispatch — see `boot_cmd.rs` below), `install-service`
+  → `service_cmd`, `login`/`logout` → `login_cmd`, `status` →
+  `status_cmd`, `create-app` → `create_app_cmd`, `setup` → `setup_cmd`)
+  plus the inline `remove` / `watch` handlers.
   `--config` resolution for `run` / `remove` / `status` / `watch` /
   `install-service`: flag > cwd-inferred
   `runners/<owner>/<repo>/config.toml` > the sole registration (legacy
@@ -496,6 +510,19 @@ no OTel.
   / `--once` / `.pending_remove`. A missing or auth-rejected re-mint
   bearer is fatal (`REMINT_TOKEN_HELP` names `login` / `--token` /
   `TOOLU_RUNNER_TOKEN`).
+- `boot_cmd.rs` — `cmd_boot`: the zero-config one-shot container mode
+  (`toolu-runner boot`, no flags). Reads `TOOLU_JITCONFIG` /
+  `TOOLU_DEADLINE` straight from the env, builds an in-memory
+  `RunnerConfig` (no persisted state), bridges SIGINT/SIGTERM to a
+  `CancellationToken` (reuses `run_cmd::spawn_signal_bridge`), spawns
+  a deadline watchdog task when `TOOLU_DEADLINE` parses, and runs
+  `GitHubListener::run` once. Returns an explicit process exit code
+  (`main` applies it directly, bypassing every other subcommand's
+  uniform Ok-is-0/Err-is-2 mapping) — see the crate-rules bullet above
+  for the code table. `parse_deadline_ms` and the exit-code mapping
+  are pure; pinned by the shell-out tests in
+  `tests/boot_cmd_test.rs` / `tests/boot_cmd_e2e_test.rs` (bin-only
+  crate, no lib target for inline unit tests).
 - `service_cmd.rs` — `cmd_install_service`: resolve the config like
   `run`, derive the service identity from the registration dir
   (`io.toolu.runner.<owner>.<repo>` / `toolu-runner-<owner>-<repo>.service`;

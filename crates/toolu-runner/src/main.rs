@@ -2,9 +2,10 @@
 //!
 //! Subcommands: `register` (live `generate-jitconfig`, persists real
 //! jit_config + runner_id), `run` (load config, hold `.lock`, run the
-//! listener until SIGINT/SIGTERM), `remove` (delete state or write
-//! `.pending_remove` mid-job), `status` (print config, no network),
-//! `watch` (TUI over the job journal, no network).
+//! listener until SIGINT/SIGTERM), `boot` (env-driven, zero-config
+//! one-shot mode for the container image — no persisted state), `remove`
+//! (delete state or write `.pending_remove` mid-job), `status` (print
+//! config, no network), `watch` (TUI over the job journal, no network).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -18,6 +19,7 @@ use shared::RunnerError;
 use shared::startup;
 use shared::{MaskerRedactor, SecretMasker};
 
+mod boot_cmd;
 mod cli;
 mod create_app_cmd;
 mod login_cmd;
@@ -35,6 +37,12 @@ async fn main() {
   #[cfg(debug_assertions)]
   cli::debug_assert_cli();
   let cli = Cli::parse();
+  // `boot` needs richer exit codes than every other subcommand's uniform
+  // Ok-is-0 / Err-is-2 (see `boot_cmd::cmd_boot`'s doc), so it is
+  // intercepted here rather than folded into `run`'s `Result` mapping.
+  if matches!(cli.command, Command::Boot(_)) {
+    std::process::exit(boot_cmd::cmd_boot().await);
+  }
   let exit_code = match run(cli).await {
     Ok(()) => 0,
     Err(err) => {
@@ -60,6 +68,8 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
       let home = registry::runner_home();
       create_app_cmd::cmd_create_app(&args, &home).await
     },
+    // Intercepted in `main` before `run` is called (see above).
+    Command::Boot(_) => Ok(()),
   }
 }
 

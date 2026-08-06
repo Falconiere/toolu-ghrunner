@@ -166,7 +166,10 @@ impl RunLoop {
 
   /// Build a listener from `cfg` and run one JIT lifecycle. The outer
   /// `Result` is fatal setup (bad config / unparseable JIT blob / listener
-  /// init); the inner is the listener's own outcome for [`next_action`].
+  /// init); the inner is the listener's own outcome for [`next_action`],
+  /// which only distinguishes Ok from Err — the completed job's
+  /// `Conclusion` (`listener.run`'s `Some`/`None`) isn't needed by the loop,
+  /// so it's dropped here rather than threaded through `next_action`.
   async fn run_once(
     &self,
     cfg: &RunnerRegistrationConfig,
@@ -180,7 +183,12 @@ impl RunLoop {
       self.client.clone(),
     )
     .map_err(|e| format!("listener init: {e}"))?;
-    Ok(listener.run(self.cancel.clone()).await)
+    Ok(
+      listener
+        .run(self.cancel.clone())
+        .await
+        .map(|_conclusion| ()),
+    )
   }
 
   /// Re-mint a fresh JIT config for the next iteration. Re-resolves the
@@ -298,8 +306,10 @@ fn jittered_backoff(d: Duration) -> Duration {
   Duration::from_millis(half_ms + jitter)
 }
 
-/// Bridge SIGINT/SIGTERM to `cancel` in a background task.
-fn spawn_signal_bridge(cancel: CancellationToken) {
+/// Bridge SIGINT/SIGTERM to `cancel` in a background task. Shared with
+/// `boot_cmd`, which mirrors `run`'s signal handling for the one-shot
+/// container path.
+pub(crate) fn spawn_signal_bridge(cancel: CancellationToken) {
   tokio::spawn(async move {
     let Ok(mut sigint) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
     else {

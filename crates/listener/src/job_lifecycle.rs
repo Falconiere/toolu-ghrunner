@@ -21,9 +21,15 @@ const POLL_BACKOFF_START: Duration = Duration::from_secs(1);
 /// Cap on the exponential backoff between poll retries.
 const POLL_BACKOFF_MAX: Duration = Duration::from_secs(60);
 
-pub(super) async fn poll_and_execute(ctx: &mut SessionCtx) -> Result<(), RunnerError> {
+/// Poll until a job arrives (or the lifecycle exits with no job), then
+/// acquire, run, and report it. `Ok(None)` means no job was ever acquired;
+/// `Ok(Some(conclusion))` is the completed job's final conclusion, threaded
+/// up so [`super::handler::GitHubListener::run`] can surface it.
+pub(super) async fn poll_and_execute(
+  ctx: &mut SessionCtx,
+) -> Result<Option<Conclusion>, RunnerError> {
   let Some(msg) = poll_until_job(ctx).await? else {
-    return Ok(());
+    return Ok(None);
   };
 
   let body = parse_job_request_body(&msg)?;
@@ -63,7 +69,8 @@ pub(super) async fn poll_and_execute(ctx: &mut SessionCtx) -> Result<(), RunnerE
     },
     &rs_token,
   )
-  .await
+  .await?;
+  Ok(Some(conclusion))
 }
 
 /// Bundled completion parameters for `acknowledge_and_complete` — keeps it
