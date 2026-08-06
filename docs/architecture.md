@@ -616,7 +616,9 @@ state untouched. The bearer resolves `--token` > `TOOLU_RUNNER_TOKEN` >
 the stored `login` token; with none of the three the local removal still
 proceeds behind a WARN that the runner was left registered.
 `--skip-unregister` skips the call outright (revoked token, deleted repo,
-no network).
+no network), and so does `--force` past a *held* lock — live cancellation
+is still step 10 work, so that job is genuinely still running and renews
+against this registration; unregistering mid-job would break it.
 
 ## Sequence: run
 
