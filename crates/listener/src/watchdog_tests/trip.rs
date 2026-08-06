@@ -187,7 +187,12 @@ fn make_config(dir: &tempfile::TempDir) -> RunnerConfig {
 /// Run Service. Drains `ctx.tx` in the background so the job's
 /// `ListenerEvent` sends never backpressure on an unread receiver (the
 /// real `GitHubListener::run` gives that role to the journal writer; this
-/// fixture only needs the drain, not the journal).
+/// fixture only needs the drain, not the journal). The drain task needs no
+/// abort: `execute_with_renewal` clones `ctx.tx` twice (the event forwarder
+/// and the renewal task) but joins both handles before returning, so the
+/// `tx` moved into the returned `SessionCtx` is the last sender alive —
+/// when that drops at the end of the test `rx.recv()` yields `None` and the
+/// task returns on its own.
 fn make_ctx(
   server_uri: String,
   config: RunnerConfig,
