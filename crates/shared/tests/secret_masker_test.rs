@@ -147,7 +147,10 @@ fn assert_no_long_substring_leak(out: &str, pat: &str, max_len: usize) {
   for len in (max_len + 1)..=chars.len() {
     for window in chars.windows(len) {
       let sub: String = window.iter().collect();
-      assert!(!out.contains(&sub), "leaked substring {sub:?} of {pat:?} in {out:?}");
+      assert!(
+        !out.contains(&sub),
+        "leaked substring {sub:?} of {pat:?} in {out:?}"
+      );
     }
   }
 }
@@ -175,7 +178,10 @@ fn multi_line_secret_masks_a_line_seen_alone() {
   let mut masker = SecretMasker::new();
   masker.add_secret(secret);
   let out = masker.mask("header: -----BEGIN FAKE----- present");
-  assert!(!out.contains("-----BEGIN FAKE-----"), "leaked header: {out}");
+  assert!(
+    !out.contains("-----BEGIN FAKE-----"),
+    "leaked header: {out}"
+  );
   assert!(out.contains("***"), "expected marker: {out}");
 }
 
