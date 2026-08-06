@@ -847,8 +847,11 @@ Run Service              toolu-runner               in-flight step
 reading the trip flag (no teardown race), then folds it into the
 engine's own verdict: a tripped flag with a non-`Success` conclusion
 overrides the report to `Conclusion::Failure` and attaches an
-`annotation_type: "error"` annotation, "Runner lost connection to
-GitHub for more than 5 minutes; job was cancelled (lost connection)." A
+`annotation_type: "error"` annotation whose text is
+`execution_loop::LOST_CONNECTION_MESSAGE` — the single `const` the
+`watchdog_tests` assertions also read, currently "Runner lost connection
+to GitHub for more than 5 minutes; job was cancelled (lost connection)."
+Treat the `const` as authoritative if this prose ever drifts. A
 tripped flag alongside a `Success` conclusion (the job finished before
 the cancel landed — a trip-during-teardown race) is left as `Success`
 with a one-time WARN; rewriting a successful job's history would be
