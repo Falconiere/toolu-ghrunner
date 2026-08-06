@@ -6,7 +6,9 @@
 //! github.com JIT wire shape where both addresses come from the mint.
 //! Covers AC-2 (trip → kill → report `failure`), AC-9 (trip +
 //! report-on-reconnect), AC-10 (a persistent definitive renewal error must
-//! never trip). Filtered by the s6 ledger check `test(/^watchdog_tests::/)`.
+//! never trip), plus the best-effort-ack contract (a failing `/acknowledge`
+//! must not block the completion report). Filtered by the s6 ledger check
+//! `test(/^watchdog_tests::/)`.
 //!
 //! Split out of `watchdog_tests.rs` into its own file (nested module —
 //! declared there as `mod trip;`) once the combined `retry` + `trip` file
@@ -130,11 +132,13 @@ async fn mount_acquire_job(
   Ok(())
 }
 
-/// `/acknowledge`: always 200 — best-effort, non-gating.
-async fn mount_acknowledge(server: &MockServer) {
+/// `/acknowledge`: always answers `status`. The ack is best-effort and
+/// non-gating, so a non-2xx here must not stop the completion report —
+/// `ack_failure_does_not_block_completion` drives that with 500.
+async fn mount_acknowledge(server: &MockServer, status: u16) {
   Mock::given(method("POST"))
     .and(path("/acknowledge"))
-    .respond_with(ResponseTemplate::new(200))
+    .respond_with(ResponseTemplate::new(status))
     .mount(server)
     .await;
 }
@@ -211,37 +215,67 @@ fn make_ctx(
   })
 }
 
+/// Knobs for one fixture run. A struct rather than positional arguments
+/// because the set grew past what a reader can track at the call site (and
+/// past the 7-arg clippy cap). [`Scenario::new`] holds the ack-succeeds
+/// default the watchdog ACs want; only the ack test overrides it.
+struct Scenario {
+  job_id: &'static str,
+  script: &'static str,
+  renew_status: u16,
+  ack_status: u16,
+  complete_fail_times: u64,
+  outage_threshold: Duration,
+  renew_interval: Duration,
+}
+
+impl Scenario {
+  /// The watchdog-AC shape: `/acknowledge` answers 200 and `/completejob`
+  /// succeeds on the first try.
+  fn new(
+    job_id: &'static str,
+    script: &'static str,
+    renew_status: u16,
+    outage_threshold: Duration,
+    renew_interval: Duration,
+  ) -> Self {
+    Self {
+      job_id,
+      script,
+      renew_status,
+      ack_status: 200,
+      complete_fail_times: 0,
+      outage_threshold,
+      renew_interval,
+    }
+  }
+}
+
 /// Outcome of driving one `poll_and_execute` exchange against the fixture.
 struct TripOutcome {
   result: Result<(), RunnerError>,
   elapsed: Duration,
   complete_requests: Vec<wiremock::Request>,
+  acknowledge_requests: Vec<wiremock::Request>,
 }
 
 /// Wire up the fixture end to end and drive one real `poll_and_execute`
 /// call, returning everything the ACs assert on.
-async fn run_scenario(
-  job_id: &str,
-  script: &str,
-  renew_status: u16,
-  complete_fail_times: u64,
-  outage_threshold: Duration,
-  renew_interval: Duration,
-) -> TestResult<TripOutcome> {
+async fn run_scenario(scenario: Scenario) -> TestResult<TripOutcome> {
   let dir = tempfile::tempdir()?;
   let server = MockServer::start().await;
   let server_uri = server.uri();
-  let msg = job_message(&server_uri, job_id, script);
+  let msg = job_message(&server_uri, scenario.job_id, scenario.script);
 
-  mount_message_poll(&server, &format!("rr-{job_id}"), &server_uri).await;
+  mount_message_poll(&server, &format!("rr-{}", scenario.job_id), &server_uri).await;
   mount_acquire_job(&server, "plan-1", &msg).await?;
-  mount_acknowledge(&server).await;
-  mount_renew_job_always(&server, renew_status).await;
-  mount_complete_job(&server, complete_fail_times).await;
+  mount_acknowledge(&server, scenario.ack_status).await;
+  mount_renew_job_always(&server, scenario.renew_status).await;
+  mount_complete_job(&server, scenario.complete_fail_times).await;
 
   let watchdog = WatchdogConfig {
-    outage_threshold,
-    renew_interval,
+    outage_threshold: scenario.outage_threshold,
+    renew_interval: scenario.renew_interval,
   };
   let mut ctx = make_ctx(server_uri, make_config(&dir), watchdog)?;
 
@@ -249,18 +283,23 @@ async fn run_scenario(
   let result = poll_and_execute(&mut ctx).await;
   let elapsed = start.elapsed();
 
-  let complete_requests = server
+  let requests = server
     .received_requests()
     .await
-    .ok_or("request recording was disabled")?
-    .into_iter()
-    .filter(|r| r.url.path() == "/completejob")
-    .collect();
+    .ok_or("request recording was disabled")?;
+  let by_path = |want: &str| -> Vec<wiremock::Request> {
+    requests
+      .iter()
+      .filter(|r| r.url.path() == want)
+      .cloned()
+      .collect()
+  };
 
   Ok(TripOutcome {
     result,
     elapsed,
-    complete_requests,
+    complete_requests: by_path("/completejob"),
+    acknowledge_requests: by_path("/acknowledge"),
   })
 }
 
@@ -363,14 +402,13 @@ fn assert_failure_with_lost_connection(body: &serde_json::Value) -> TestResult<(
 async fn ac2_outage_trips_kills_job_reports_failure() -> TestResult<()> {
   let outcome = tokio::time::timeout(
     Duration::from_secs(60),
-    run_scenario(
+    run_scenario(Scenario::new(
       "job-ac2",
       "sleep 30",
       503,
-      0,
       Duration::from_millis(300),
       Duration::from_millis(75),
-    ),
+    )),
   )
   .await
   .map_err(|_elapsed| "AC-2 scenario did not complete within the 60s test guard")??;
@@ -398,14 +436,16 @@ async fn ac2_outage_trips_kills_job_reports_failure() -> TestResult<()> {
 async fn ac9_report_survives_reconnect() -> TestResult<()> {
   let outcome = tokio::time::timeout(
     Duration::from_secs(60),
-    run_scenario(
-      "job-ac9",
-      "sleep 30",
-      503,
-      2,
-      Duration::from_millis(300),
-      Duration::from_millis(75),
-    ),
+    run_scenario(Scenario {
+      complete_fail_times: 2,
+      ..Scenario::new(
+        "job-ac9",
+        "sleep 30",
+        503,
+        Duration::from_millis(300),
+        Duration::from_millis(75),
+      )
+    }),
   )
   .await
   .map_err(|_elapsed| "AC-9 scenario did not complete within the 60s test guard")??;
@@ -435,14 +475,13 @@ async fn ac9_report_survives_reconnect() -> TestResult<()> {
 async fn ac10_definitive_renew_error_never_trips() -> TestResult<()> {
   let outcome = tokio::time::timeout(
     Duration::from_secs(60),
-    run_scenario(
+    run_scenario(Scenario::new(
       "job-ac10",
       "sleep 1",
       401,
-      0,
       Duration::from_millis(200),
       Duration::from_millis(50),
-    ),
+    )),
   )
   .await
   .map_err(|_elapsed| "AC-10 scenario did not complete within the 60s test guard")??;
@@ -469,6 +508,50 @@ async fn ac10_definitive_renew_error_never_trips() -> TestResult<()> {
   if find_lost_connection_annotation(&body)?.is_some() {
     return Err(
       format!("unexpected 'lost connection' annotation on a non-tripped job: {body}").into(),
+    );
+  }
+  Ok(())
+}
+
+/// A failing `/acknowledge` must not doom the completion report: the ack
+/// targets the broker while `complete_job` targets the Run Service, so
+/// `acknowledge_best_effort` logs a WARN and `poll_and_execute` carries on.
+///
+/// Drives a job that never renews (a `true` step finishes long before the
+/// 5s renew interval) against a 500 ack, and asserts the ack really was
+/// attempted (one request) while the completion still landed once with
+/// `conclusion: success`.
+#[tokio::test]
+async fn ack_failure_does_not_block_completion() -> TestResult<()> {
+  let outcome = tokio::time::timeout(
+    Duration::from_secs(60),
+    run_scenario(Scenario {
+      ack_status: 500,
+      ..Scenario::new(
+        "job-ack-fail",
+        "true",
+        200,
+        Duration::from_secs(300),
+        Duration::from_secs(5),
+      )
+    }),
+  )
+  .await
+  .map_err(|_elapsed| "ack-failure scenario did not complete within the 60s test guard")??;
+
+  assert_ok(outcome.result)?;
+  assert_request_count(&outcome.acknowledge_requests, 1, "acknowledge")?;
+  assert_request_count(&outcome.complete_requests, 1, "completejob")?;
+  let first = outcome
+    .complete_requests
+    .first()
+    .ok_or("no completejob requests recorded")?;
+  let body = first.body_json::<serde_json::Value>()?;
+  let conclusion = body_conclusion(&body)?;
+  let expected = ReportConclusion::Success as i64;
+  if conclusion != expected {
+    return Err(
+      format!("expected conclusion {expected} (Success), got {conclusion}: {body}").into(),
     );
   }
   Ok(())

@@ -90,22 +90,23 @@ fn classify_transport_error(what: &str, err: &reqwest::Error) -> RunnerError {
 
 /// Classify a non-2xx run-service response.
 ///
-/// Mirrors the transient-vs-definitive *pattern* proven in
-/// `net/register.rs::mint_failure` — NOT its variants: `mint_failure` maps
-/// a definitive failure to `RunnerError::Auth` (a register-only semantic —
-/// "only a new token can fix it"); here a definitive failure maps to
-/// `RunnerError::Protocol`, since a stuck job report is not an auth
-/// problem. 429 and 5xx are the transient statuses (rate-limited or a
-/// server hiccup — retrying can succeed); every other non-2xx propagates
-/// as-is.
-fn classify_status(what: &str, status: reqwest::StatusCode, body: &str) -> RunnerError {
-  let snippet: String = body.chars().take(200).collect();
+/// 429 and 5xx are transient (rate-limited or a server hiccup — retrying
+/// can succeed); every other non-2xx is definitive. Mirrors the *pattern*
+/// of `net/register.rs::mint_failure`, NOT its variants: a definitive
+/// failure here is `Protocol`, not `Auth` — a stuck job report is not an
+/// auth problem.
+///
+/// The body is deliberately absent from the message: these errors are
+/// `Display`ed at WARN into the durable `_diag/runner.log`, and
+/// `SecretMasker` only redacts registered `secrets.*` — server text has no
+/// redaction guarantee. It stays on the caller's `debug!` line.
+fn classify_status(what: &str, status: reqwest::StatusCode) -> RunnerError {
   if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
     return RunnerError::Network(format!(
-      "{what} failed with status {status} (transient): {snippet}"
+      "{what} failed with status {status} (transient): see debug log"
     ));
   }
-  RunnerError::Protocol(format!("{what} failed with status {status}: {snippet}"))
+  RunnerError::Protocol(format!("{what} failed with status {status}: see debug log"))
 }
 
 /// Renew a job lock. Called every ~60 seconds during job execution.
@@ -138,8 +139,9 @@ pub async fn renew_job(
       .text()
       .await
       .unwrap_or_else(|e| format!("<body read failed: {e}>"));
-    tracing::debug!(status = %status, body_len = body.len(), "renew job failed");
-    return Err(classify_status("renew job", status, &body));
+    let snippet: String = body.chars().take(200).collect();
+    tracing::debug!(status = %status, body_len = body.len(), body = %snippet, "renew job failed");
+    return Err(classify_status("renew job", status));
   }
 
   response
@@ -178,8 +180,9 @@ pub async fn complete_job(
       .text()
       .await
       .unwrap_or_else(|e| format!("<body read failed: {e}>"));
-    tracing::debug!(status = %status, body_len = body.len(), "complete job failed");
-    return Err(classify_status("complete job", status, &body));
+    let snippet: String = body.chars().take(200).collect();
+    tracing::debug!(status = %status, body_len = body.len(), body = %snippet, "complete job failed");
+    return Err(classify_status("complete job", status));
   }
 
   Ok(())
