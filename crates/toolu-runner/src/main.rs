@@ -171,12 +171,19 @@ async fn cmd_remove(args: RemoveArgs) -> Result<(), Box<dyn std::error::Error>> 
   let pending = data_dir.join(".pending_remove");
   let lock_path = data_dir.join(".lock");
 
-  refuse_if_run_in_flight(&lock_path, &pending, args.force)?;
+  let forced_past_run = refuse_if_run_in_flight(&lock_path, &pending, args.force)?;
+  if forced_past_run {
+    tracing::warn!(
+      "--force with a run still in flight: skipping the GitHub unregister so the running job \
+       can still renew and report. Remove the runner on GitHub once that job ends."
+    );
+  }
 
   // Unregister on GitHub BEFORE touching local state: the persisted
   // runner_id and URL are the only way to name the runner, so deleting them
   // first would strand it with no way to retry.
-  let unregistered = unregister_on_github(&cfg, args.token, args.skip_unregister).await?;
+  let unregistered =
+    unregister_on_github(&cfg, args.token, args.skip_unregister || forced_past_run).await?;
 
   delete_registration_state(&config_path, &creds_path, &pending, &lock_path)?;
   let gh = if unregistered {
@@ -194,17 +201,22 @@ async fn cmd_remove(args: RemoveArgs) -> Result<(), Box<dyn std::error::Error>> 
 /// Abort the removal when a run holds the job lock, writing the
 /// `.pending_remove` marker the running process picks up between jobs.
 /// `--force` proceeds instead (live cancellation is still step 10 work).
+///
+/// `Ok(true)` means `--force` bypassed a *held* lock, so a job is very
+/// likely still running. The caller must not unregister in that case: the
+/// job renews and reports against this registration, and deleting it on
+/// GitHub mid-job would break the very run `--force` is aimed at.
 fn refuse_if_run_in_flight(
   lock_path: &Path,
   pending: &Path,
   force: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<bool, Box<dyn std::error::Error>> {
   if !lock_path.exists() {
-    return Ok(());
+    return Ok(false);
   }
   if force {
     tracing::warn!("force-cancelling in-flight run (stub — live cancellation lands in step 10)");
-    return Ok(());
+    return Ok(true);
   }
   let body = std::fs::read_to_string(lock_path).unwrap_or_default();
   write_pending_marker(pending, &body)?;

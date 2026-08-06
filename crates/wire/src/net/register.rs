@@ -276,16 +276,20 @@ async fn find_runner_id_by_name(
 
 /// DELETE the runner with `id` from the repo.
 ///
-/// A 404 is success, not an error: the runner is already gone, which is the
-/// caller's goal either way. Both callers want that — `replace_existing` only
-/// needs the name freed, and [`unregister_runner`] is routinely aimed at a JIT
-/// registration GitHub already reaped after its single job.
+/// `missing_ok` decides what a 404 means. [`unregister_runner`] passes
+/// `true` — the runner being gone IS the goal, and GitHub reaps a JIT
+/// registration after its single job, so "already absent" is the common
+/// case. [`replace_existing`] passes `false`: it just looked the id up, so a
+/// 404 is a genuine surprise worth surfacing verbatim (GitHub reports some
+/// authorization gaps as 404 rather than 403, and swallowing that would turn
+/// "this token cannot delete runners" into a silent no-op).
 async fn delete_runner(
   client: &reqwest::Client,
   runners_base: &str,
   token: &str,
   id: i64,
   timeout: Duration,
+  missing_ok: bool,
 ) -> Result<(), RunnerError> {
   let response = client
     .delete(format!("{runners_base}/{id}"))
@@ -301,7 +305,7 @@ async fn delete_runner(
     .await
     .map_err(|e| RunnerError::Network(format!("delete-runner request failed: {e}")))?;
   let status = response.status();
-  if status == reqwest::StatusCode::NOT_FOUND {
+  if missing_ok && status == reqwest::StatusCode::NOT_FOUND {
     tracing::debug!(runner_id = id, "runner already absent — delete is a no-op");
     return Ok(());
   }
@@ -348,7 +352,7 @@ pub async fn unregister_runner(
     };
     found
   };
-  delete_runner(client, &runners_base, token, id, timeout).await
+  delete_runner(client, &runners_base, token, id, timeout, true).await
 }
 
 /// Delete the same-name runner blocking a 409, so the retry can mint.
@@ -387,6 +391,7 @@ async fn replace_existing(
     params.runner_token,
     id,
     params.timeout,
+    false,
   )
   .await
 }

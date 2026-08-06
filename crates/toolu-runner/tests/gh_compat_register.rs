@@ -632,7 +632,15 @@ async fn unregister_runner_is_ok_when_no_runner_matches_the_name() {
     .expect(1)
     .mount(&server)
     .await;
-  // No DELETE mock: an attempted delete would 404 the mock server and fail.
+  // Assert NO delete is attempted. An absent mock would not prove it: this
+  // commit makes 404 a success, and wiremock answers an unmocked path with
+  // 404 — so a stray DELETE would be swallowed and the test would still
+  // pass. `expect(0)` catches the request itself, not its status.
+  Mock::given(method("DELETE"))
+    .respond_with(ResponseTemplate::new(204))
+    .expect(0)
+    .mount(&server)
+    .await;
 
   let client = reqwest::Client::new();
   let result = wire::net::unregister_runner(
@@ -645,6 +653,48 @@ async fn unregister_runner_is_ok_when_no_runner_matches_the_name() {
   )
   .await;
   assert!(result.is_ok(), "expected Ok, got {result:?}");
+}
+
+/// The 404-as-success relaxation is scoped to `unregister_runner`. The
+/// `register --replace` path must still surface a 404 on its own delete:
+/// it just looked the id up, so a 404 there is a real anomaly — including
+/// GitHub reporting an authorization gap as 404 rather than 403, which a
+/// silent Ok would turn into a confusing downstream 409.
+#[tokio::test]
+async fn replace_still_surfaces_404_from_its_delete() {
+  let server = MockServer::start().await;
+  Mock::given(method("POST"))
+    .and(path(STUB_PATH))
+    .respond_with(ResponseTemplate::new(409).set_body_string(r#"{"message":"name taken"}"#))
+    .mount(&server)
+    .await;
+  Mock::given(method("GET"))
+    .and(path(STUB_RUNNERS_PATH))
+    .and(query_param("name", "runner-1"))
+    .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+      "total_count": 1,
+      "runners": [{ "id": 461, "name": "runner-1" }],
+    })))
+    .mount(&server)
+    .await;
+  Mock::given(method("DELETE"))
+    .and(path(format!("{STUB_RUNNERS_PATH}/461")))
+    .respond_with(ResponseTemplate::new(404).set_body_string(r#"{"message":"Not Found"}"#))
+    .expect(1)
+    .mount(&server)
+    .await;
+
+  let client = reqwest::Client::new();
+  let url = stub_repo_url(&server);
+  let labels = ["self-hosted".to_owned()];
+  let err = register_jit(&client, &params_for(&url, "tok-1", &labels, true))
+    .await
+    .expect_err("a 404 on the replace delete must not be swallowed");
+  let msg = format!("{err}");
+  assert!(
+    msg.contains("404"),
+    "the delete's 404 must stay diagnosable, got: {msg}"
+  );
 }
 
 /// A revoked or under-scoped token must surface as `Auth`, NOT be swallowed
