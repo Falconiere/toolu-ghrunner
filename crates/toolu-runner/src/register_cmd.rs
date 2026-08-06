@@ -47,7 +47,11 @@ pub(crate) async fn cmd_register(args: RegisterArgs) -> Result<(), Box<dyn std::
   ensure_not_registered(&config_path, args.replace)?;
 
   let token = resolve_register_bearer(&host, args.token.clone(), &home).await?;
-  let client = build_register_client().map_err(|e| format!("{e}"))?;
+  // Propagate the `RunnerError` itself rather than flattening it to a
+  // `String`: the variant is what tells a caller (and the diagnostics) that
+  // this was a transport failure, and `wizard_steps` already preserves it on
+  // the same path.
+  let client = build_register_client()?;
 
   let runner_id = register_and_persist(
     RegisterPersist {
