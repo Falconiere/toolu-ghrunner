@@ -99,7 +99,7 @@ pub(super) async fn execute_with_renewal(
 /// trip-during-teardown race — the job finished before the cancel
 /// landed — so it is left as `Success`, WARN-logged once, with no
 /// annotation; rewriting a successful job's history would be dishonest.
-fn apply_outage_override(
+pub(crate) fn apply_outage_override(
   conclusion: Conclusion,
   outage_tripped: bool,
 ) -> (Conclusion, Vec<wire::reporting::Annotation>) {
