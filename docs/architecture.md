@@ -787,34 +787,100 @@ propagates through the in-flight job.
 
 ## Sequence: reconnect
 
-The runner has no explicit reconnect task. The poll loop's
-`NetworkError` arm handles transient failures via exponential
-backoff (1s → 60s cap). For mid-job network outages:
+The renewal task (`helpers::spawn_renewal`, spawned by
+`execution_loop::execute_with_renewal` for the life of the job) renews
+the job lock on a **fixed 60-second interval — not a backoff**; a
+`renew_job` failure neither slows nor speeds up the next tick. A pure
+`OutageWatchdog` (`listener::outage`) rides that heartbeat to detect a
+prolonged mid-job reporting outage: it seeds `last_ok` at spawn and, on
+every renewal, either resets the window (`record_ok`) or accumulates
+toward a 300-second (5-minute) threshold (`record_err`).
+`wire::net::run_service::renew_job` classifies its own failures so the
+watchdog can tell "GitHub is unreachable" apart from "GitHub said no": a
+transport failure, HTTP 429, or any 5xx maps to `RunnerError::Network`
+and feeds the watchdog; every other non-2xx (a persistent 401 or 404,
+say) maps to `RunnerError::Protocol`, is logged at WARN, and never feeds
+it — a stale renewal token must not manufacture a false "lost
+connection". `record_err` returning `true` is a write-once latch (a
+later successful renewal cannot un-trip it); on that first `true`,
+`spawn_renewal` sets a shared trip flag, cancels the job's
+`CancellationToken` (the engine SIGKILLs the running step via
+`step_timeout::wait_bounded`, yielding `Conclusion::Cancelled`), and
+logs one ERROR. With the first tick consumed by the interval and the
+client's own request timeout, the trip lands 5–6 minutes after the last
+successful renewal — the bug's contract is "more than 5 minutes", so this
+satisfies it without claiming exactness.
 
 ```
-Run Service            toolu-runner             in-flight step
- │                          │                          │
- │ renewal POST             │                          │
- ├─────────────────────────>│                          │
- │                          │ renew_job fails          │
- │                          │ tracing::warn!           │
- │                          │ backoff: 1s, 2s, … 60s   │
- │                          │                          │
- │ 5 min outage             │                          │
- │                          │ step keeps running       │
- │                          │ (local process)          │
- ├─────────────────────────>│ renewal succeeds         │
- │                          │ backoff resets           │
- │                          │                          │ step ends
- │                          │ complete_job with        │
- │                          │ queued status updates    │
+Run Service              toolu-runner               in-flight step
+ │                           │                           │
+ │ renewjob POST (t=60s)     │                           │
+ │<──────────────────────────┤                           │
+ │ transport / 429 / 5xx     │                           │
+ ├──────────────────────────>│ watchdog.record_err()      │
+ │                           │ (below threshold: WARN)    │
+ │            ⋮ every 60s ⋮  │            ⋮               │
+ │ renewjob POST (t≈300–360s)│                           │
+ │<──────────────────────────┤                           │
+ │ still unreachable         │                           │
+ ├──────────────────────────>│ watchdog trips (latched)   │
+ │                           │ outage_tripped = true      │
+ │                           │ job_cancel.cancel() ──────>│ SIGKILL via
+ │                           │ tracing::error! (once)     │ wait_bounded
+ │                           │                           │ Cancelled
+ │       (network recovers)                              │
+ │                           │ execute_with_renewal joins │
+ │                           │ the renewal task, reads    │
+ │                           │ the flag: conclusion !=    │
+ │                           │ Success → override to      │
+ │                           │ Failure + "lost             │
+ │                           │ connection" annotation      │
+ │ acknowledge_message       │ single attempt, WARN only,  │
+ │<──────────────────────────┤ non-gating                 │
+ │ completejob 5xx ×N        │ retry_transient retries     │
+ │<──────────────────────────┤ Network errors (jittered    │
+ │ completejob 200           │ 1s→60s backoff, ≤10 min)    │
+ │<──────────────────────────┤ report delivered             │
 ```
 
-**v1 gap:** the spec requires cancelling the job with reason
-"lost connection" after 5 minutes of unrecoverable network failure.
-Today the runner keeps the step running locally and re-reports on
-reconnect; it does not actively cancel. See
-[known-bugs.md](known-bugs.md) B-001.
+`execute_with_renewal` cancels and **joins** the renewal task before
+reading the trip flag (no teardown race), then folds it into the
+engine's own verdict: a tripped flag with a non-`Success` conclusion
+overrides the report to `Conclusion::Failure` and attaches an
+`annotation_type: "error"` annotation, "Runner lost connection to
+GitHub for more than 5 minutes; job was cancelled (lost connection)." A
+tripped flag alongside a `Success` conclusion (the job finished before
+the cancel landed — a trip-during-teardown race) is left as `Success`
+with a one-time WARN; rewriting a successful job's history would be
+dishonest.
+
+Report-on-reconnect applies to every job completion, not only
+watchdog-tripped ones. `job_lifecycle::poll_and_execute` demotes
+`acknowledge_message` to a single attempt, WARN-on-failure, non-gating
+call — the ack targets the broker while `complete_job` targets the Run
+Service, independent endpoints, so a failed ack must not doom a
+completion the network can otherwise still deliver. `complete_job` is
+wrapped in `listener::retry::retry_transient`, which retries
+`RunnerError::Network` only with the existing `jittered_backoff` (1s →
+60s cap), is cancel-aware against the *session* token (`ctx.cancel` — a
+watchdog trip only cancels the child `job_cancel`, so a trip never
+blocks the completion retry or the always-online loop's shutdown path),
+and gives up after `REPORT_RETRY_MAX` (10 minutes total elapsed) or a
+definitive error; either way the error propagates, `poll_and_execute`
+returns `Err`, and `loop_decision::next_action` maps it to
+`BackoffRetry` so the always-online loop retries with the still-valid
+config instead of blocking forever.
+
+**Residual risks (accepted, B-001 resolution note):** the OAuth bearer
+and `rs_token` are minted once per listener lifecycle and are assumed to
+outlive a multi-minute outage — if one expires mid-outage,
+`complete_job` gets a definitive 4xx that stops the retry and the
+report is lost, with GitHub's server-side job timeout as the backstop.
+Detection itself only covers `Network`-class renewal failures: a
+persistent *definitive* renewal error (a stale 401/404, say) never
+trips the watchdog, so that failure mode is unchanged by this fix. See
+[known-bugs.md](known-bugs.md) B-001, now Resolved. Live `tc` netem
+outage e2e remains deferred to the step-10 live smoke.
 
 For session-level reconnection: on `BrokerMigration` message, the
 poll loop switches `ctx.broker_url` to the new URL and continues.

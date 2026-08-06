@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
+use super::helpers::WatchdogConfig;
 use super::job_lifecycle;
 use protocol::JitConfig;
 use protocol::auth::parse_rsa_private_key;
@@ -40,6 +41,9 @@ pub(crate) struct SessionCtx {
   /// `Err` paths join it: the handle is created deep inside that call, and
   /// an early `?` return there would otherwise drop it un-joined.
   pub(crate) live_log: Option<tokio::task::JoinHandle<()>>,
+  /// Test-injectable outage-watchdog timing knobs (prod defaults set here
+  /// at construction; tests override for millisecond-cadence trip tests).
+  pub(crate) watchdog: WatchdogConfig,
 }
 
 /// GitHubListener wraps a Runner and handles the full GitHub protocol lifecycle:
@@ -204,6 +208,7 @@ impl GitHubListener {
       use_fips_encryption: session_response.use_fips_encryption,
       rsa_private_key_der,
       live_log: None,
+      watchdog: WatchdogConfig::default(),
     })
   }
 }

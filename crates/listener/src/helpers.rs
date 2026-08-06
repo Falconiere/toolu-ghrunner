@@ -1,12 +1,16 @@
 //! Shared helpers for the listener lifecycle.
 
 use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use super::SessionCtx;
-use shared::{AgentJobRequestMessage, Conclusion, ListenerEvent, RunnerEvent};
+use crate::outage::OutageWatchdog;
+use shared::{AgentJobRequestMessage, Conclusion, ListenerEvent, RunnerError, RunnerEvent};
 use wire::net::delete_session;
 use wire::reporting::ReportConclusion;
 use wire::reporting::run_service::{RenewJobRequest, renew_job};
@@ -53,6 +57,30 @@ pub(super) fn resolve_backend_ids(
   (run_id, job_id)
 }
 
+/// Fixed lock-renewal cadence (no backoff), matching the C# runner's ~60 s
+/// renewal beat. Prod default for [`WatchdogConfig::renew_interval`]; tests
+/// inject milliseconds so the trip-and-report path runs sub-second.
+pub(super) const RENEW_INTERVAL: Duration = Duration::from_secs(60);
+
+/// Test-injectable timing knobs for the mid-job outage watchdog hosted in
+/// [`spawn_renewal`]. Threaded through `SessionCtx` (prod uses the
+/// `Default` impl); tests override both fields to run the trip-and-report
+/// path at millisecond cadence.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct WatchdogConfig {
+  pub(crate) outage_threshold: Duration,
+  pub(crate) renew_interval: Duration,
+}
+
+impl Default for WatchdogConfig {
+  fn default() -> Self {
+    Self {
+      outage_threshold: crate::outage::OUTAGE_THRESHOLD,
+      renew_interval: RENEW_INTERVAL,
+    }
+  }
+}
+
 /// Owned parameters for the lock renewal background task.
 pub(super) struct RenewalParams {
   pub(super) client: reqwest::Client,
@@ -61,6 +89,21 @@ pub(super) struct RenewalParams {
   pub(super) plan_id: String,
   pub(super) job_id: String,
   pub(super) tx: mpsc::Sender<ListenerEvent>,
+  /// The job's own cancellation token (a child of the session token) —
+  /// cancelled on an outage trip so the engine tears the running step
+  /// down via `step_timeout::wait_bounded`.
+  pub(super) job_cancel: CancellationToken,
+  /// Write-once trip flag: set exactly once by the watchdog latch and
+  /// never cleared afterward — even a later successful renewal must not
+  /// un-trip it, since the job was already cancelled and the "lost
+  /// connection" annotation (applied downstream) must survive.
+  pub(super) outage_tripped: Arc<AtomicBool>,
+  /// `OutageWatchdog` threshold: prod `outage::OUTAGE_THRESHOLD` (5 min),
+  /// tests inject milliseconds.
+  pub(super) outage_threshold: Duration,
+  /// Lock-renewal cadence: prod `RENEW_INTERVAL` (60 s), tests inject
+  /// milliseconds.
+  pub(super) renew_interval: Duration,
 }
 
 pub(super) fn spawn_renewal(
@@ -72,7 +115,8 @@ pub(super) fn spawn_renewal(
       plan_id: params.plan_id,
       job_id: params.job_id,
     };
-    let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+    let mut watchdog = OutageWatchdog::new(Instant::now(), params.outage_threshold);
+    let mut interval = tokio::time::interval(params.renew_interval);
     interval.tick().await; // skip first immediate tick
     loop {
       tokio::select! {
@@ -82,8 +126,25 @@ pub(super) fn spawn_renewal(
           match renew_job(&params.client, &params.run_service_url, &params.token, &req).await {
             Ok(resp) => {
               let _ = params.tx.send(ListenerEvent::LockRenewed { locked_until: resp.locked_until }).await;
+              watchdog.record_ok(Instant::now());
             },
-            Err(e) => tracing::warn!(error = %e, "lock renewal failed"),
+            Err(e) => {
+              tracing::warn!(error = %e, "lock renewal failed");
+              // Feed rule: only Network-class renewal failures (transport /
+              // 429 / 5xx — GitHub unreachable) count toward the outage
+              // window. A persistent Protocol/Auth error (definitive, e.g.
+              // a stale 401/404) must never manufacture a false "lost
+              // connection" trip.
+              if matches!(e, RunnerError::Network(_)) && watchdog.record_err(Instant::now()) {
+                params.outage_tripped.store(true, Ordering::SeqCst);
+                params.job_cancel.cancel();
+                let outage_secs = params.outage_threshold.as_secs();
+                tracing::error!(
+                  outage_secs,
+                  "lost connection to GitHub for more than {outage_secs}s of renewal failures — job cancelled"
+                );
+              }
+            },
           }
         },
       }
@@ -384,7 +445,7 @@ mod tests {
 
   /// Build a `SessionCtx` pointed at a local test listener. `live_log` lets
   /// each test install its own handle (or none) without duplicating the
-  /// other eleven fields.
+  /// other twelve fields.
   fn test_ctx(broker_url: String, live_log: Option<tokio::task::JoinHandle<()>>) -> SessionCtx {
     let (tx, _rx) = mpsc::channel(1);
     SessionCtx {
@@ -400,6 +461,7 @@ mod tests {
       use_fips_encryption: false,
       rsa_private_key_der: Vec::new(),
       live_log,
+      watchdog: crate::helpers::WatchdogConfig::default(),
     }
   }
 

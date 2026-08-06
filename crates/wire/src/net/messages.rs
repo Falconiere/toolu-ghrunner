@@ -82,7 +82,13 @@ pub async fn poll_message(
   }
 }
 
-/// Acknowledge a broker message. Must be called before acquiring the job.
+/// Acknowledge a broker message.
+///
+/// The listener's caller (`job_lifecycle::poll_and_execute`) treats this as
+/// best-effort: a single attempt, WARN-logged and non-gating on failure.
+/// The ack targets the broker (redelivery bookkeeping), while the job's
+/// `complete_job` report targets the Run Service — independent endpoints,
+/// so a failed ack must not block or doom the completion report.
 ///
 /// # Errors
 ///

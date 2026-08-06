@@ -13,7 +13,38 @@ Tracking format: B-NNN — short title — severity — owner — status.
 
 - **Severity:** Medium
 - **Owner:** TBD (likely listener maintainer)
-- **Status:** Open
+- **Status:** Resolved
+- **Resolution:** A pure `OutageWatchdog` (`listener/src/outage.rs`,
+  300 s threshold, write-once latch) rides the existing 60 s lock-renewal
+  heartbeat in `helpers::spawn_renewal`. `wire::net::run_service`
+  classifies `renew_job` failures so only `RunnerError::Network`-class
+  errors (transport failure, 429, 5xx — GitHub is unreachable) feed the
+  watchdog; a definitive `Protocol`/`Auth` renewal error only WARNs and
+  never trips it, so a persistent 401/404 can't manufacture a false "lost
+  connection". On trip the watchdog sets the shared flag once, cancels the
+  job's `CancellationToken` (the engine SIGKILLs the running step), and
+  logs one ERROR; detection lands 5–6 minutes after the last successful
+  renewal. `execution_loop::execute_with_renewal` joins the renewal task
+  before reading the flag and, when tripped with a non-`Success`
+  conclusion, overrides the report to `Failure` with the annotation
+  "Runner lost connection to GitHub for more than 5 minutes; job was
+  cancelled (lost connection)." Report-on-reconnect: `poll_and_execute`
+  demotes `acknowledge_message` to a single-attempt, WARN-only,
+  non-gating call, and wraps `complete_job` in
+  `listener/src/retry.rs::retry_transient` — jittered 1s → 60s backoff,
+  cancel-aware, retrying `Network` errors only, up to a 10-minute total
+  budget — so the completion report survives a still-recovering
+  connection instead of being lost when the always-online loop re-polls.
+  Two residual risks are accepted and unchanged by this fix: (1) the
+  OAuth bearer / `rs_token` are minted once per listener lifecycle and
+  assumed to outlive the outage — if one expires mid-outage,
+  `complete_job` gets a definitive 4xx that stops the retry and the
+  report is lost, with GitHub's server-side job timeout as the backstop;
+  (2) detection covers `Network`-class renewal failures only — a
+  persistent *definitive* renewal error still leaves the job running with
+  a dead reporting channel, exactly as before this fix. Live `tc` netem
+  outage e2e remains deferred to the step-10 live smoke (see Reproduce,
+  below).
 - **Trigger:** The runner's network drops for more than 5 minutes
   during a job. The in-flight step keeps running locally, but the
   reporting channel is offline. The spec requires the runner to

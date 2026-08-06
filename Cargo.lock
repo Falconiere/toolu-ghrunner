@@ -1693,11 +1693,13 @@ dependencies = [
  "reqwest",
  "serde_json",
  "shared",
+ "tempfile",
  "tokio",
  "tokio-util",
  "tracing",
  "uuid",
  "wire",
+ "wiremock",
 ]
 
 [[package]]

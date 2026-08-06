@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tokio::sync::mpsc;
@@ -26,26 +27,39 @@ pub(super) struct JobRoute<'a> {
   pub(super) plan_id: &'a str,
 }
 
+/// Result of running one acquired job to completion.
+///
+/// `conclusion` and `annotations` may have been overridden by the outage
+/// watchdog's failure-override path (see [`apply_outage_override`]) after
+/// the renewal task was joined — the engine's own verdict is folded with
+/// the watchdog's trip flag before this struct is built.
+pub(super) struct JobExecution {
+  pub(super) conclusion: Conclusion,
+  pub(super) steps: Vec<wire::reporting::StepResult>,
+  pub(super) annotations: Vec<wire::reporting::Annotation>,
+}
+
 pub(super) async fn execute_with_renewal(
   ctx: &SessionCtx,
   route: &JobRoute<'_>,
   job_msg: &AgentJobRequestMessage,
   live_log_tx: Option<tokio::sync::mpsc::Sender<LiveLogLine>>,
   job_cancel: &CancellationToken,
-) -> (Conclusion, Vec<wire::reporting::StepResult>) {
+) -> JobExecution {
   let JobRoute {
-    run_service_url,
-    rs_token,
-    plan_id,
+    rs_token, plan_id, ..
   } = *route;
   let renewal_cancel = CancellationToken::new();
+  // Shared write-once trip flag: set by the renewal task's outage watchdog,
+  // read below only after the renewal task is joined (no teardown race).
+  let outage_tripped = Arc::new(AtomicBool::new(false));
   let renewal_handle = start_renewal(
     ctx,
-    run_service_url,
-    rs_token,
-    plan_id,
+    route,
     job_msg,
     &renewal_cancel,
+    job_cancel,
+    Arc::clone(&outage_tripped),
   );
 
   // Report "Set up job" as step 1 (matches C# runner order).
@@ -63,8 +77,52 @@ pub(super) async fn execute_with_renewal(
   renewal_cancel.cancel();
   let _ = renewal_handle.await;
 
-  let step_results = collector.collected_results().await;
-  (conclusion, step_results)
+  let (conclusion, annotations) =
+    apply_outage_override(conclusion, outage_tripped.load(Ordering::SeqCst));
+  let steps = collector.collected_results().await;
+  JobExecution {
+    conclusion,
+    steps,
+    annotations,
+  }
+}
+
+/// Fold the outage watchdog's trip flag into the engine's conclusion.
+///
+/// Called only after the renewal task's `JoinHandle` has been awaited, so
+/// there is no race between "the watchdog is still writing the flag" and
+/// "we are reading it". A tripped flag overrides a non-`Success`
+/// conclusion to `Failure` plus the "lost connection" annotation (an
+/// honest verdict either way: a genuinely-failed step, or a GH-initiated
+/// cancel racing the trip, both happened during a real outage). A tripped
+/// flag alongside a `Success` conclusion can only be a
+/// trip-during-teardown race — the job finished before the cancel
+/// landed — so it is left as `Success`, WARN-logged once, with no
+/// annotation; rewriting a successful job's history would be dishonest.
+fn apply_outage_override(
+  conclusion: Conclusion,
+  outage_tripped: bool,
+) -> (Conclusion, Vec<wire::reporting::Annotation>) {
+  if !outage_tripped {
+    return (conclusion, Vec::new());
+  }
+  if conclusion == Conclusion::Success {
+    tracing::warn!(
+      "outage watchdog tripped after the job already completed successfully \
+       (trip-during-teardown race) — leaving conclusion as Success"
+    );
+    return (conclusion, Vec::new());
+  }
+  let annotation = wire::reporting::Annotation {
+    annotation_type: "error".to_owned(),
+    message: "Runner lost connection to GitHub for more than 5 minutes; job was cancelled \
+              (lost connection)."
+      .to_owned(),
+    file: None,
+    line: None,
+    col: None,
+  };
+  (Conclusion::Failure, vec![annotation])
 }
 
 /// Build the forwarder config from the session context and job, deriving
@@ -131,21 +189,29 @@ async fn run_forwarded_job(
   conclusion
 }
 
+/// Spawn the lock-renewal task, routing through `route` instead of three
+/// loose strings (`run_service_url`/`rs_token`/`plan_id`) to leave headroom
+/// under the crate's `too_many_arguments` cap for the watchdog wiring
+/// (`job_cancel`, `outage_tripped`).
 fn start_renewal(
   ctx: &SessionCtx,
-  run_service_url: &str,
-  rs_token: &str,
-  plan_id: &str,
+  route: &JobRoute<'_>,
   job_msg: &AgentJobRequestMessage,
   cancel: &CancellationToken,
+  job_cancel: &CancellationToken,
+  outage_tripped: Arc<AtomicBool>,
 ) -> tokio::task::JoinHandle<()> {
   let params = RenewalParams {
     client: ctx.client.clone(),
-    token: rs_token.to_owned(),
-    run_service_url: run_service_url.to_owned(),
-    plan_id: plan_id.to_owned(),
+    token: route.rs_token.to_owned(),
+    run_service_url: route.run_service_url.to_owned(),
+    plan_id: route.plan_id.to_owned(),
     job_id: job_msg.job_id.clone(),
     tx: ctx.tx.clone(),
+    job_cancel: job_cancel.clone(),
+    outage_tripped,
+    outage_threshold: ctx.watchdog.outage_threshold,
+    renew_interval: ctx.watchdog.renew_interval,
   };
   spawn_renewal(params, cancel.clone())
 }

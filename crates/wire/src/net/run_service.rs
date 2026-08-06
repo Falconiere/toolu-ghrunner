@@ -69,11 +69,53 @@ pub async fn acquire_job(
   })
 }
 
+/// Classify a `reqwest::Error` raised while sending a run-service request,
+/// or while reading/decoding its response body.
+///
+/// A JSON decode failure on an otherwise-successful response (`is_decode`)
+/// is a protocol bug — the server answered 2xx with a body we can't
+/// parse — so it maps to `RunnerError::Protocol`. Every other case
+/// (connection refused, DNS failure, a client-side timeout — including one
+/// that lands *after* headers arrive under a packet blackhole, mid
+/// `.json()`) is transient: GitHub is unreachable right now, not wrong, so
+/// it maps to `RunnerError::Network`. This split is load-bearing for the
+/// outage watchdog: it feeds only on `Network`-class renewal failures, so a
+/// blackhole that times out mid-body-read must not go unclassified.
+fn classify_transport_error(what: &str, err: &reqwest::Error) -> RunnerError {
+  if err.is_decode() {
+    return RunnerError::Protocol(format!("{what} response was not valid JSON: {err}"));
+  }
+  RunnerError::Network(format!("{what} failed: {err}"))
+}
+
+/// Classify a non-2xx run-service response.
+///
+/// Mirrors the transient-vs-definitive *pattern* proven in
+/// `net/register.rs::mint_failure` — NOT its variants: `mint_failure` maps
+/// a definitive failure to `RunnerError::Auth` (a register-only semantic —
+/// "only a new token can fix it"); here a definitive failure maps to
+/// `RunnerError::Protocol`, since a stuck job report is not an auth
+/// problem. 429 and 5xx are the transient statuses (rate-limited or a
+/// server hiccup — retrying can succeed); every other non-2xx propagates
+/// as-is.
+fn classify_status(what: &str, status: reqwest::StatusCode, body: &str) -> RunnerError {
+  let snippet: String = body.chars().take(200).collect();
+  if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+    return RunnerError::Network(format!(
+      "{what} failed with status {status} (transient): {snippet}"
+    ));
+  }
+  RunnerError::Protocol(format!("{what} failed with status {status}: {snippet}"))
+}
+
 /// Renew a job lock. Called every ~60 seconds during job execution.
 ///
 /// # Errors
 ///
-/// Returns `RunnerError::Protocol` on HTTP or parse failures.
+/// Returns `RunnerError::Network` on a transport failure, HTTP 429, or any
+/// 5xx (transient — GitHub is unreachable or unhealthy; retrying can
+/// succeed). Returns `RunnerError::Protocol` on any other non-2xx status or
+/// a malformed success body (definitive — retrying cannot help).
 pub async fn renew_job(
   client: &reqwest::Client,
   run_service_url: &str,
@@ -88,28 +130,29 @@ pub async fn renew_job(
     .json(request)
     .send()
     .await
-    .map_err(|e| RunnerError::Protocol(format!("renew job failed: {e}")))?;
+    .map_err(|e| classify_transport_error("renew job", &e))?;
 
   let status = response.status();
   if !status.is_success() {
     let body = response.text().await.unwrap_or_default();
     tracing::debug!(status = %status, body_len = body.len(), "renew job failed");
-    return Err(RunnerError::Protocol(format!(
-      "renew job status {status}: see debug log"
-    )));
+    return Err(classify_status("renew job", status, &body));
   }
 
   response
     .json::<RenewJobResponse>()
     .await
-    .map_err(|e| RunnerError::Protocol(format!("renew job parse: {e}")))
+    .map_err(|e| classify_transport_error("renew job", &e))
 }
 
 /// Complete a job with its final conclusion, step results, and outputs.
 ///
 /// # Errors
 ///
-/// Returns `RunnerError::Protocol` on HTTP failures.
+/// Returns `RunnerError::Network` on a transport failure, HTTP 429, or any
+/// 5xx (transient — GitHub is unreachable or unhealthy; retrying can
+/// succeed). Returns `RunnerError::Protocol` on any other non-2xx status
+/// (definitive — retrying cannot help).
 pub async fn complete_job(
   client: &reqwest::Client,
   run_service_url: &str,
@@ -124,15 +167,13 @@ pub async fn complete_job(
     .json(request)
     .send()
     .await
-    .map_err(|e| RunnerError::Protocol(format!("complete job failed: {e}")))?;
+    .map_err(|e| classify_transport_error("complete job", &e))?;
 
   let status = response.status();
   if !status.is_success() {
     let body = response.text().await.unwrap_or_default();
     tracing::debug!(status = %status, body_len = body.len(), "complete job failed");
-    return Err(RunnerError::Protocol(format!(
-      "complete job status {status}: see debug log"
-    )));
+    return Err(classify_status("complete job", status, &body));
   }
 
   Ok(())

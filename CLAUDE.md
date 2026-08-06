@@ -424,7 +424,21 @@ no OTel.
   `setup_step::report_setup_step` reports "Set up job" as step 1
   (matches C# runner order). `step_reporter::StepCollector`
   aggregates per-step results. `helpers::spawn_renewal` is the
-  background renewal task. `log_uploader/` owns the per-step log
+  background renewal task — fixed 60s interval, no backoff — and now
+  also hosts the mid-job outage watchdog (see `outage.rs` below):
+  `RunnerError::Network`-class renewal failures feed it, a trip cancels
+  the job's `CancellationToken` and sets a write-once flag that
+  `execute_with_renewal` reads (after joining the renewal task) to
+  override a non-`Success` conclusion to `Failure` plus a "lost
+  connection" annotation. `outage.rs` is the pure `OutageWatchdog`
+  (300s threshold, latch; `pub`, tested from `crates/listener/tests/`).
+  `retry.rs` (`pub(crate)`) has `retry_transient` — retries
+  `RunnerError::Network` only with jittered 1s→60s backoff, cancel-aware,
+  budget-bounded (`REPORT_RETRY_MAX` 10 min) — wrapping `complete_job` in
+  `job_lifecycle::poll_and_execute`, which also demotes
+  `acknowledge_message` to a single-attempt, WARN-only, non-gating call.
+  In-crate `watchdog_tests` (`mod retry` + `mod trip`) is the integration
+  test home for both. `log_uploader/` owns the per-step log
   streamer and the combined job-log upload. `helpers::cleanup_session`
   deletes the broker session on exit. Listener events are drained to
   the `observability::journal` writer (replacing the old no-op drain).
