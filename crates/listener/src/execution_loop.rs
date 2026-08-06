@@ -470,4 +470,56 @@ mod tests {
       "per-step upload line missing the expected mask marker (assertion above would be vacuous): {uploaded_line}"
     );
   }
+
+  /// A dispatcher-produced line is masked exactly like a child-stdout line.
+  ///
+  /// `command_dispatch::log_event` builds a plain `RunnerEvent::Log` for the
+  /// echoed `::<cmd>::` line, and `handle_event_arm` matches
+  /// `RunnerEvent::Log { .. }` with no discrimination on who produced it — so
+  /// a synthetic line takes the same masked path. Pinned as a test because a
+  /// reviewer read the dispatcher's unmasked push as a leak, on the theory
+  /// that synthetic lines reach the sinks some other way. They do not: this
+  /// drives the whole arm, not just `forward_log_line`.
+  #[tokio::test]
+  async fn a_dispatcher_echoed_command_line_is_masked_like_any_other_log() {
+    const SECRET: &str = "s3cr3t-echoed-command-9f2b71";
+    let masker = masker_with_secret(SECRET);
+    let cfg = test_fwd_config(masker);
+    let mut state = ForwarderState::new(Vec::new());
+
+    let step_id = "step-1";
+    let (tx, mut rx) = mpsc::channel::<String>(4);
+    state.uploaders.insert(step_id.to_owned(), tx);
+
+    // Byte-for-byte the shape `command_dispatch::log_event` emits for an
+    // echoed command line, routed through the real dispatch arm.
+    let event = RunnerEvent::Log {
+      step_id: step_id.to_owned(),
+      line: format!("::set-output name=token::{SECRET}"),
+      stream: shared::LogStream::Stdout,
+    };
+    handle_event_arm(&mut state, &cfg, &event).await;
+
+    let job_log_line = state
+      .all_job_lines
+      .last()
+      .expect("the Log arm should have pushed exactly one line");
+    assert!(
+      !job_log_line.contains(SECRET),
+      "secret leaked into the combined job log from an echoed command line: {job_log_line}"
+    );
+    assert!(
+      job_log_line.contains("***"),
+      "echoed command line missing the mask marker (assertion above would be vacuous): {job_log_line}"
+    );
+
+    let uploaded_line = rx
+      .recv()
+      .await
+      .expect("the Log arm should have sent one line to the step upload channel");
+    assert!(
+      !uploaded_line.contains(SECRET),
+      "secret leaked into the per-step upload channel from an echoed command line: {uploaded_line}"
+    );
+  }
 }
