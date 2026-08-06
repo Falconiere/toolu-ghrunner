@@ -91,12 +91,13 @@ impl CommandDispatcher {
     };
 
     if self.echo_on {
-      // Echoed command lines reach the same event stream as plain output, so
-      // a secret printed inside a `::<cmd>::` line must be masked here too —
-      // the live-log / Results forwarder does not mask `Log` events it did
-      // not produce verbatim.
-      let masked = self.mask(line);
-      self.pending.push(self.log_event(masked));
+      // Echoed command lines are emitted as a plain `RunnerEvent::Log`,
+      // exactly like a passthrough line, so `execution_loop::forward_log_line`
+      // masks it unconditionally on the way to every durable sink — masking
+      // here too would be a redundant second mask of the same event kind.
+      // Pushing it unmasked keeps `Runner::execute_job`'s "the event stream
+      // is unmasked" contract true for every `Log` line, echoed or not.
+      self.pending.push(self.log_event(line.to_owned()));
     }
 
     self.apply(command, ctx);

@@ -69,16 +69,16 @@ impl JobTeardown {
   }
 
   /// Run the deferred teardown: cache staging sweep + one GC pass, then join
-  /// the workspace sweep.
+  /// the workspace sweep (joined last — it started at job start and is
+  /// almost always already finished).
   ///
-  /// **Ordering contract:** call this only after the job's event sender has
-  /// been dropped (see the [type docs](Self)), so GC overlaps GitHub's
+  /// **Ordering contract:** call only after the job's event sender is
+  /// dropped (see the [type docs](Self)), so GC overlaps GitHub's
   /// completion round-trip instead of preceding it.
   ///
-  /// Best-effort throughout: a maintenance error or a panicked/cancelled
-  /// workspace sweep is logged at WARN and the teardown continues. The
-  /// workspace sweep is joined last because it has been running since job
-  /// start and is almost always already finished.
+  /// Best-effort: errors and a panicked/cancelled sweep are WARNed and
+  /// swallowed. The `JoinError` arm is untested — it needs an injected task
+  /// panic, which this suite has no hook for.
   pub async fn finish(self, config: &RunnerConfig) {
     if let Some(maintenance) = &self.maintenance {
       run_cache_maintenance(config, maintenance).await;

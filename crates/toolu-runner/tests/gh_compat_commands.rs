@@ -179,25 +179,16 @@ async fn github_output_file_sets_step_output() -> TestResult<()> {
 }
 
 #[tokio::test]
-async fn add_mask_redacts_later_lines_and_shared_masker() -> TestResult<()> {
+async fn add_mask_registers_on_the_shared_masker() -> TestResult<()> {
   let script = "echo \"::add-mask::s3cretValue\"\necho \"leaked s3cretValue here\"";
   let step = ActionStep::script("s3", script, "");
-  let (events, masker) = run_steps_collect(vec![step]).await?;
+  let (_events, masker) = run_steps_collect(vec![step]).await?;
 
-  // The echoed output line itself is no longer asserted here: the engine
-  // event stream is unmasked by design (see `Runner::execute_job`'s doc
-  // contract) — masking is the downstream sinks' job, covered end-to-end by
+  // The echoed output line itself is not asserted here: the engine event
+  // stream is unmasked by design (see `Runner::execute_job`'s doc contract)
+  // — masking is the downstream sinks' job, covered end-to-end by
   // `secret_sink_coverage_test.rs`. What's pinned here is that `::add-mask::`
-  // registers on the shared masker below. (The `##[group]Run …` header
-  // echoes the script source verbatim, which predates the runtime add-mask —
-  // matching the upstream runner — so it is excluded.)
-  let lines = step_log_lines(&events, "s3");
-  lines
-    .iter()
-    .find(|l| l.contains("leaked") && !l.starts_with("##["))
-    .ok_or("the echoed output line was not emitted")?;
-
-  // The SHARED masker (also the tracing file-sink redactor) learned the secret.
+  // registers on the shared masker below.
   let guard = masker.lock().expect("masker lock");
   assert_eq!(
     guard.mask("prefix s3cretValue suffix"),

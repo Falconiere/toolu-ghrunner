@@ -242,34 +242,103 @@ echo after";
   Ok(())
 }
 
+/// Poll `masker` for the registered secret every 20ms while `run_fut` is
+/// still running, returning whether the mask was observed to land BEFORE
+/// `run_fut` resolved. Propagates `run_fut`'s own error, if any. This is
+/// what makes the caller's assertion non-vacuous: a masker that only learns
+/// the secret at step end would never be observed as masked here.
+async fn poll_masked_before_completion<F>(
+  mut run_fut: std::pin::Pin<&mut F>,
+  masker: &Arc<Mutex<SecretMasker>>,
+) -> TestResult<bool>
+where
+  F: std::future::Future<Output = Result<shared::Conclusion, shared::RunnerError>>,
+{
+  let mut masked_before_completion = false;
+  loop {
+    tokio::select! {
+      res = &mut run_fut => {
+        res?;
+        return Ok(masked_before_completion);
+      }
+      () = tokio::time::sleep(std::time::Duration::from_millis(20)) => {
+        if !masked_before_completion {
+          let sample = match masker.lock() {
+            Ok(g) => g.mask("prefix s3cretValue suffix"),
+            Err(poisoned) => poisoned.into_inner().mask("prefix s3cretValue suffix"),
+          };
+          masked_before_completion = sample == "prefix *** suffix";
+        }
+      }
+    }
+  }
+}
+
+/// Run `steps` through `run_steps` rooted under `dir`, concurrently polling
+/// `masker` for the registered secret via [`poll_masked_before_completion`].
+/// Returns whether the mask landed before `run_steps` resolved.
+async fn run_steps_polling_mask(
+  steps: &[ActionStep],
+  masker: &Arc<Mutex<SecretMasker>>,
+  dir: &std::path::Path,
+) -> TestResult<bool> {
+  let (config, workspace) = test_config(dir)?;
+  let mut ctx = ExecutionContext::with_masker(Arc::clone(masker));
+  let (tx, mut rx) = mpsc::channel::<RunnerEvent>(1024);
+  let spec = JobSpec::default();
+  let http = reqwest::Client::new();
+  let job_run = JobRun {
+    workspace: &workspace,
+    config: &config,
+    spec: &spec,
+    shadow: None,
+    http: &http,
+  };
+
+  // Drain the event channel concurrently so `run_steps`'s sends never block.
+  let drain = tokio::spawn(async move { while rx.recv().await.is_some() {} });
+
+  // Boxed (not `tokio::pin!`) so the future — and its borrow of `tx` — can be
+  // dropped by name before `tx` itself, letting `drain` see the channel close.
+  let mut run_fut = Box::pin(run_steps(
+    steps,
+    &mut ctx,
+    &tx,
+    CancellationToken::new(),
+    &job_run,
+  ));
+  let masked_before_completion = poll_masked_before_completion(run_fut.as_mut(), masker).await?;
+  drop(run_fut);
+
+  drop(tx);
+  drain.await?;
+  Ok(masked_before_completion)
+}
+
 #[tokio::test]
-async fn add_mask_registered_before_later_line_is_streamed() -> TestResult<()> {
-  // The engine event stream is unmasked by design (see `Runner::execute_job`'s
-  // doc contract), so this no longer asserts on the streamed line's payload —
-  // that used to pin "registered on the streaming path, not retroactively at
-  // step end", but masking-more-than-before is safe and downstream sinks are
-  // covered end-to-end by `secret_sink_coverage_test.rs`. What's pinned here
-  // is that `::add-mask::` registers on the shared masker while the step is
-  // still streaming (the `sleep 0.3` keeps the mask command and the secret
-  // line from landing in the same batch).
+async fn add_mask_registers_while_step_is_still_streaming() -> TestResult<()> {
+  // Prove `::add-mask::` registers on the SHARED masker while the step is
+  // still running, not only retroactively once it completes: the script
+  // sleeps for 300ms between the mask command and its own end, so `run_steps`
+  // cannot resolve for at least that long. `poll_masked_before_completion`
+  // (via `run_steps_polling_mask`) samples the masker concurrently with the
+  // still-running step.
   let script = "\
 echo \"::add-mask::s3cretValue\"
 sleep 0.3
 echo \"leaked s3cretValue here\"";
-  let step = ActionStep::script("s3", script, "");
-  let (events, masker) = run_steps_timed(vec![step]).await?;
+  let steps = [ActionStep::script("s3", script, "")];
+  let dir = tempfile::tempdir()?;
+  let masker = Arc::new(Mutex::new(SecretMasker::new()));
 
-  let lines = plain_lines(&events, "s3");
-  lines
-    .iter()
-    .find(|l| l.contains("leaked"))
-    .ok_or("the output line was not streamed")?;
-  // The SHARED masker (also the tracing file-sink redactor) learned the secret.
-  let guard = masker.lock().expect("masker lock");
-  assert_eq!(
-    guard.mask("prefix s3cretValue suffix"),
-    "prefix *** suffix",
-    "::add-mask:: must register on the shared masker instance"
+  let masked_before_completion = run_steps_polling_mask(&steps, &masker, dir.path()).await?;
+  drop(dir);
+
+  assert!(
+    masked_before_completion,
+    "::add-mask:: must be visible on the shared masker while the step (which sleeps \
+     300ms after issuing the mask command) is still running, not only retroactively \
+     once run_steps resolves"
   );
   Ok(())
 }

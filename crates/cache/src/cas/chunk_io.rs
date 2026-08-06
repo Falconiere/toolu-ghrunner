@@ -20,13 +20,14 @@ use super::manifest::ChunkId;
 /// Write durability for [`write_atomic`].
 ///
 /// `Fsync` restores the historical fsync-before-rename behaviour: the
-/// write cannot be lost once `write_atomic` returns `Ok`, at the cost of one
-/// blocking `fsync` per call. `Deferred` skips only the `fsync` — create,
-/// `write_all`, and the atomic rename are unchanged — trading that
-/// durability for throughput; a chunk written this way may exist empty or
-/// torn after a crash, but [`verify_bytes`] BLAKE3-checks every chunk on
-/// every read, so a torn chunk is never served (see the CAS self-heal path
-/// in `store.rs`).
+/// file's *contents* are on stable storage before the rename, at the cost of
+/// one blocking `fsync` per call — its directory entry still is not (see the
+/// module doc: nothing here fsyncs the parent directory). `Deferred` skips
+/// only the `fsync` — create, `write_all`, and the atomic rename are
+/// unchanged — trading that durability for throughput; a chunk written this
+/// way may exist empty or torn after a crash, but [`verify_bytes`]
+/// BLAKE3-checks every chunk on every read, so a torn chunk is never served
+/// (see the CAS self-heal path in `store.rs`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Durability {
   /// fsync the file before the atomic rename.

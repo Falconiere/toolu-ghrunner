@@ -149,7 +149,7 @@ pub struct CacheSection {
   /// `[cache.l2]` S3 cold tier.
   #[serde(default)]
   pub l2: L2Section,
-  /// Restore the pre-0.6 per-chunk `fsync` before rename (default `false`).
+  /// Restore the previous per-chunk `fsync` before rename (default `false`).
   /// See [`CacheConfig::fsync_chunks`](shared::CacheConfig) for the durability
   /// contract this overrides.
   #[serde(default)]
