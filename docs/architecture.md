@@ -850,20 +850,27 @@ release-tag          sees the untagged version on main and pushes the
 
 **Credentials the front half needs.** Both jobs mint an installation token from
 `HOMEBREW_APP_ID` + `HOMEBREW_APP_PRIVATE_KEY`, the publish App shared with
-git-better and comemory. Two prerequisites, and **neither is satisfied on this
-repo yet**:
+git-better and comemory. Two prerequisites:
 
-1. Those secrets must be synced here. `gh secret list` currently shows only
-   `HOMEBREW_TAP_TOKEN`, `RELEASE_PLZ_TOKEN` and `OPENROUTER_API_KEY`, so this
-   repo is not in that Infisical sync group.
+1. Those secrets are synced here by Infisical — done, verify with
+   `gh secret list --repo Falconiere/toolu-ghrunner`. An absent or empty
+   `app-id` yields `401 Bad credentials` from the mint step.
 2. The App must be installed on `Falconiere/toolu-ghrunner` with **Contents:
-   read and write** + **Pull requests: read and write**. A GitHub App has one
-   installation per account sharing a single permission grant, so granting Pull
-   requests here also exposes it on `homebrew-tap`, git-better and comemory.
+   read and write** + **Pull requests: read and write**. A missing install (or a
+   read-only permission) yields `403 Resource not accessible` on the first write
+   — `POST /git/refs` for the release branch, `POST /git/tags` for the tag. The
+   secrets existing does not imply the install: the sync is repo-wide, the
+   install is per-repo.
 
-Until both hold, `release-pr` and `release-tag` fail — an empty `app-id` yields
-`401`, and a missing install yields `403 Resource not accessible`. The
-`RELEASE_AUTOMATION_ENABLED` kill-switch means nothing runs meanwhile.
+A GitHub App has one installation per account sharing a single permission grant,
+so granting Pull requests here also exposes it on `homebrew-tap`, git-better and
+comemory, which need only `Contents`. Accepted knowingly: one already-synced key
+beats a second key to install, sync and rotate.
+
+The `RELEASE_AUTOMATION_ENABLED` kill-switch gates both jobs, so nothing runs
+until an operator flips it — note it must be a repo **variable**, not a secret,
+since the `vars` context cannot read secrets and a secret of that name leaves
+both jobs silently reporting `skipped` with zero steps.
 
 `release-homebrew.yml` still pushes the tap formula with the separate
 `HOMEBREW_TAP_TOKEN` PAT. Moving that onto the same App is the obvious next step
