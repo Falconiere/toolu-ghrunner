@@ -270,17 +270,42 @@ fn truncated_500_server() -> TestResult<String> {
   Ok(format!("http://{addr}"))
 }
 
-/// Minimal hand-rolled `tracing::Subscriber` that flags whether a **WARN**
-/// event carried a field whose Debug output contains `needle`. Mirrors
-/// `listener::helpers`'s test subscriber — asserting a WARN fired needs no
+/// Minimal hand-rolled `tracing::Subscriber` that records every event as
+/// `(level, field name, Debug of value)`. Mirrors `listener::helpers`'s test
+/// subscriber — asserting on emitted diagnostics needs no
 /// `tracing-subscriber` dev-dependency, since `tracing::Subscriber` comes
-/// with the plain `tracing` dep.
-struct WarnCapture {
-  needle: &'static str,
-  saw_needle: std::sync::Arc<std::sync::atomic::AtomicBool>,
+/// with the plain `tracing` dep. `Visit`'s other `record_*` methods default
+/// to forwarding into `record_debug`, so integer fields land here too.
+#[derive(Clone, Default)]
+struct EventCapture {
+  events: std::sync::Arc<std::sync::Mutex<Vec<(tracing::Level, String, String)>>>,
 }
 
-impl tracing::Subscriber for WarnCapture {
+impl EventCapture {
+  /// Every recorded value for `field` at `level`.
+  fn values(&self, level: tracing::Level, field: &str) -> Vec<String> {
+    let Ok(events) = self.events.lock() else {
+      return Vec::new();
+    };
+    events
+      .iter()
+      .filter(|(lvl, name, _)| *lvl == level && name == field)
+      .map(|(_, _, value)| value.clone())
+      .collect()
+  }
+
+  /// Whether any value recorded at `level` contains `needle`.
+  fn saw(&self, level: tracing::Level, needle: &str) -> bool {
+    let Ok(events) = self.events.lock() else {
+      return false;
+    };
+    events
+      .iter()
+      .any(|(lvl, _, value)| *lvl == level && value.contains(needle))
+  }
+}
+
+impl tracing::Subscriber for EventCapture {
   fn enabled(&self, _metadata: &tracing::Metadata<'_>) -> bool {
     true
   }
@@ -290,25 +315,20 @@ impl tracing::Subscriber for WarnCapture {
   fn record(&self, _span: &tracing::span::Id, _values: &tracing::span::Record<'_>) {}
   fn record_follows_from(&self, _span: &tracing::span::Id, _follows: &tracing::span::Id) {}
   fn event(&self, event: &tracing::Event<'_>) {
-    if *event.metadata().level() != tracing::Level::WARN {
-      return;
+    struct Collect<'a> {
+      level: tracing::Level,
+      events: &'a std::sync::Mutex<Vec<(tracing::Level, String, String)>>,
     }
-    struct Grep<'a> {
-      needle: &'a str,
-      saw_needle: &'a std::sync::atomic::AtomicBool,
-    }
-    impl tracing::field::Visit for Grep<'_> {
-      fn record_debug(&mut self, _field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
-        if format!("{value:?}").contains(self.needle) {
-          self
-            .saw_needle
-            .store(true, std::sync::atomic::Ordering::SeqCst);
+    impl tracing::field::Visit for Collect<'_> {
+      fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        if let Ok(mut events) = self.events.lock() {
+          events.push((self.level, field.name().to_owned(), format!("{value:?}")));
         }
       }
     }
-    event.record(&mut Grep {
-      needle: self.needle,
-      saw_needle: &self.saw_needle,
+    event.record(&mut Collect {
+      level: *event.metadata().level(),
+      events: &self.events,
     });
   }
   fn enter(&self, _span: &tracing::span::Id) {}
@@ -321,21 +341,56 @@ impl tracing::Subscriber for WarnCapture {
 /// `shared::startup` filters out unless `TOOLU_RUNNER_ALLOW_VERBOSE=1`.
 #[tokio::test]
 async fn renew_job_unreadable_error_body_warns_and_still_classifies() -> TestResult<()> {
-  let saw_needle = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+  let capture = EventCapture::default();
   let base = truncated_500_server()?;
   let client = short_timeout_client()?;
 
   let result = {
-    let _guard = tracing::subscriber::set_default(WarnCapture {
-      needle: "error body could not be read",
-      saw_needle: std::sync::Arc::clone(&saw_needle),
-    });
+    let _guard = tracing::subscriber::set_default(capture.clone());
     renew_job(&client, &base, "token", &renew_request()).await
   };
 
   assert_network(result, "renew_job 500 with a truncated body")?;
-  if !saw_needle.load(std::sync::atomic::Ordering::SeqCst) {
+  if !capture.saw(tracing::Level::WARN, "error body could not be read") {
     return Err("expected a WARN naming the unreadable error body".into());
+  }
+  Ok(())
+}
+
+/// An error body far larger than the cap must not be buffered whole:
+/// `log_error_body` trims each chunk to the remaining budget, so
+/// `bytes_read` lands on exactly `ERROR_BODY_READ_CAP` (200 chars x 4) and
+/// the logged snippet stays at 200 chars — no matter how big the page is.
+#[tokio::test]
+async fn renew_job_oversized_error_body_is_read_up_to_the_cap() -> TestResult<()> {
+  let capture = EventCapture::default();
+  let huge = "x".repeat(64 * 1024);
+  let server = MockServer::start().await;
+  Mock::given(method("POST"))
+    .and(path("/renewjob"))
+    .respond_with(ResponseTemplate::new(500).set_body_string(huge))
+    .mount(&server)
+    .await;
+  let client = short_timeout_client()?;
+
+  let result = {
+    let _guard = tracing::subscriber::set_default(capture.clone());
+    renew_job(&client, &server.uri(), "token", &renew_request()).await
+  };
+
+  assert_network(result, "renew_job 500 with an oversized body")?;
+
+  let bytes_read = capture.values(tracing::Level::DEBUG, "bytes_read");
+  if bytes_read != vec!["800".to_owned()] {
+    return Err(format!("expected a single bytes_read of 800, got {bytes_read:?}").into());
+  }
+  let bodies = capture.values(tracing::Level::DEBUG, "body");
+  let [body] = bodies.as_slice() else {
+    return Err(format!("expected exactly one body field, got {bodies:?}").into());
+  };
+  let chars = body.chars().count();
+  if chars != 200 {
+    return Err(format!("expected a 200-char snippet, got {chars}").into());
   }
   Ok(())
 }
