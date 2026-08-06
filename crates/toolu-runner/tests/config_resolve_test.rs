@@ -397,7 +397,13 @@ fn seed_runtime_state(dir: &Path) -> Result<(), std::io::Error> {
     dir.join("credentials.json"),
     "{\"access_token\":\"fixture-client-id\",\"issued_at\":\"2026-07-12T00:00:00+00:00\"}",
   )?;
-  std::fs::write(dir.join(".lock"), "{\"pid\":0}")?;
+  // A COMPLETE LockBody: `config::lockfile::holder_alive` parses it and
+  // reports PID 0 dead. A partial body would fail to parse and read as
+  // ALIVE (fail-closed), which is the opposite of what this fixture wants.
+  std::fs::write(
+    dir.join(".lock"),
+    "{\"pid\":0,\"started_at\":\"2026-07-12T00:00:00+00:00\",\"config_path\":\"/tmp/x\"}",
+  )?;
   let jobs = dir.join("_diag").join("jobs");
   std::fs::create_dir_all(&jobs)?;
   std::fs::write(jobs.join("history.jsonl"), "{\"v\":1}\n")?;
@@ -407,8 +413,8 @@ fn seed_runtime_state(dir: &Path) -> Result<(), std::io::Error> {
 /// OQ-3: `remove` on a per-repo registration deletes `config.toml`,
 /// `credentials.json`, the seeded `.lock` file, and any `.pending_remove`
 /// marker, while `_diag/` and its contents survive for `watch` history.
-/// The `.lock` is a plain seeded file with no live holder, so `--force`
-/// takes the force-cancel branch and proceeds to delete state.
+/// The seeded `.lock` names a dead holder (PID 0), so `--force` takes the
+/// force-cancel branch and proceeds to delete state.
 #[test]
 fn remove_deletes_registration_files_but_keeps_diag() {
   let home = tempfile::tempdir().expect("home tempdir");
