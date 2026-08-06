@@ -14,6 +14,19 @@ use expressions::evaluator::JobStatus;
 
 const ALL_STATUSES: [JobStatus; 3] = [JobStatus::Success, JobStatus::Failure, JobStatus::Cancelled];
 
+/// Compile-time exhaustiveness guard for [`ALL_STATUSES`]: this `match` has
+/// no wildcard arm, so a new `JobStatus` variant fails the build here — a
+/// forcing function to update `ALL_STATUSES` (and the fast-path tests above)
+/// rather than silently under-covering it.
+#[test]
+fn all_statuses_matches_every_job_status_variant() {
+  for status in ALL_STATUSES {
+    match status {
+      JobStatus::Success | JobStatus::Failure | JobStatus::Cancelled => {},
+    }
+  }
+}
+
 fn ctx_with_status(status: JobStatus) -> ExecutionContext {
   let mut ctx = ExecutionContext::new_for_test();
   ctx.set_job_status_for_test(status);

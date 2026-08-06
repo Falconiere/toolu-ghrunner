@@ -232,7 +232,9 @@ async fn register_jit_times_out_on_a_slow_response() {
   let url = stub_repo_url(&server);
   let labels = ["self-hosted".to_owned()];
   let mut params = params_for(&url, "reg-token-xyz", &labels, false);
-  params.timeout = std::time::Duration::from_millis(50);
+  // 500ms: comfortably above localhost connect+send jitter on a loaded CI
+  // box, comfortably below the mock's 5s response delay.
+  params.timeout = std::time::Duration::from_millis(500);
 
   let err = register_jit(&client, &params)
     .await

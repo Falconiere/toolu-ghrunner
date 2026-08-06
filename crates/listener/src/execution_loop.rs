@@ -448,26 +448,18 @@ mod tests {
       .all_job_lines
       .last()
       .expect("forward_log_line should have pushed exactly one line");
-    assert!(
-      !job_log_line.contains(SECRET),
-      "secret leaked into the combined job log: {job_log_line}"
-    );
-    assert!(
-      job_log_line.contains("***"),
-      "combined job log line missing the expected mask marker (assertion above would be vacuous): {job_log_line}"
+    assert_eq!(
+      job_log_line, "leaking *** now",
+      "combined job log line must be masked exactly, not merely contain a marker"
     );
 
     let uploaded_line = rx
       .recv()
       .await
       .expect("forward_log_line should have sent one line to the step upload channel");
-    assert!(
-      !uploaded_line.contains(SECRET),
-      "secret leaked into the per-step upload channel: {uploaded_line}"
-    );
-    assert!(
-      uploaded_line.contains("***"),
-      "per-step upload line missing the expected mask marker (assertion above would be vacuous): {uploaded_line}"
+    assert_eq!(
+      uploaded_line, "leaking *** now",
+      "per-step upload line must be masked exactly, not merely contain a marker"
     );
   }
 
@@ -504,22 +496,18 @@ mod tests {
       .all_job_lines
       .last()
       .expect("the Log arm should have pushed exactly one line");
-    assert!(
-      !job_log_line.contains(SECRET),
-      "secret leaked into the combined job log from an echoed command line: {job_log_line}"
-    );
-    assert!(
-      job_log_line.contains("***"),
-      "echoed command line missing the mask marker (assertion above would be vacuous): {job_log_line}"
+    assert_eq!(
+      job_log_line, "::set-output name=token::***",
+      "echoed command line must be masked exactly, not merely contain a marker"
     );
 
     let uploaded_line = rx
       .recv()
       .await
       .expect("the Log arm should have sent one line to the step upload channel");
-    assert!(
-      !uploaded_line.contains(SECRET),
-      "secret leaked into the per-step upload channel from an echoed command line: {uploaded_line}"
+    assert_eq!(
+      uploaded_line, "::set-output name=token::***",
+      "per-step upload line must be masked exactly, not merely contain a marker"
     );
   }
 }

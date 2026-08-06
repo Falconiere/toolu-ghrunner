@@ -91,7 +91,7 @@ fn build_loop_client() -> Result<reqwest::Client, Box<dyn std::error::Error>> {
   reqwest::Client::builder()
     .timeout(Duration::from_secs(60))
     .build()
-    .map_err(|e| format!("build HTTP client: {e}").into())
+    .map_err(|e| format!("HTTP client: {e}").into())
 }
 
 /// WARN once, before polling, when the runner will drop offline after the

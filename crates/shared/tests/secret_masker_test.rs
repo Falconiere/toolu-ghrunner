@@ -190,3 +190,15 @@ fn empty_masker_returns_input_unchanged() {
   let masker = SecretMasker::new();
   assert_eq!(masker.mask("no secrets here"), "no secrets here");
 }
+
+#[test]
+fn automaton_none_falls_back_to_replace_loop_and_still_masks() {
+  let mut masker = SecretMasker::new();
+  masker.add_secret("fallback-secret-value-9");
+  masker.force_automaton_none_for_test(); // simulate a build failure
+  let out = masker.mask("token=fallback-secret-value-9 tail");
+  assert_eq!(
+    out, "token=*** tail",
+    "fallback loop must still mask: {out}"
+  );
+}

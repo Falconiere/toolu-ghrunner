@@ -185,13 +185,13 @@ pub struct RegisterParams<'a> {
   pub work_folder: &'a str,
   /// On 409 (name taken), delete the same-name runner and retry once.
   pub replace: bool,
-  /// Per-request timeout, applied inside [`send_generate`] and
-  /// [`replace_existing`] — NOT at the `client` level. A mint can issue up to
-  /// three requests (generate → replace → generate); a client-level timeout
-  /// would apply once per request too, but an explicit per-request timeout
-  /// here holds regardless of whatever default the caller's shared `client`
-  /// carries (the always-online loop reuses one client across the listener
-  /// and every re-mint).
+  /// Per-request timeout, applied inside [`send_generate`],
+  /// [`find_runner_id_by_name`], and [`delete_runner`] — NOT at the `client`
+  /// level (`replace_existing` only threads it through to the latter two).
+  /// A mint can issue up to three requests (generate → replace → generate);
+  /// an explicit per-request timeout holds regardless of whatever default
+  /// the caller's shared `client` carries (the always-online loop reuses one
+  /// client across the listener and every re-mint).
   pub timeout: Duration,
 }
 

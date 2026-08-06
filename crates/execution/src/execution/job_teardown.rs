@@ -18,6 +18,9 @@ use tracing::info;
 ///
 /// Every handle is a cheap clone onto the same on-disk root / in-memory lease
 /// map the running server holds, so GC honours any in-flight read lease.
+/// Not exercised today — `run_job`'s ordering contract (see [`JobTeardown`])
+/// drains every lease before `finish` runs GC — but it keeps `CacheGc::run`'s
+/// lease-safety contract true regardless of when a future caller runs it.
 pub(super) struct CacheMaintenance {
   /// Content-addressed store the local server ingested into.
   pub(super) store: CasStore,
@@ -45,8 +48,8 @@ const STAGING_SWEEP_TTL: Duration = Duration::from_secs(3600);
 /// manifest and chunk on disk; running it any earlier puts it squarely between
 /// "job done" and "GitHub told".
 ///
-/// `#[must_use]` because dropping the value silently skips both cache
-/// maintenance and the workspace sweep.
+/// `#[must_use]`: dropping this silently skips maintenance. `Drop` backs it
+/// with a runtime WARN for the `let _ = teardown;` case `#[must_use]` misses.
 #[must_use]
 pub struct JobTeardown {
   /// Retained CAS handles, or `None` in `Forwarder` mode (no local server).
@@ -54,6 +57,8 @@ pub struct JobTeardown {
   /// The workspace sweep spawned at job start, or `None` when
   /// `workspace_gc_hours == 0` disables it.
   workspace_gc: Option<JoinHandle<()>>,
+  /// Set by `finish` so `Drop` can tell "already ran" apart from "skipped".
+  finished: bool,
 }
 
 impl JobTeardown {
@@ -65,6 +70,7 @@ impl JobTeardown {
     Self {
       maintenance,
       workspace_gc,
+      finished: false,
     }
   }
 
@@ -79,14 +85,30 @@ impl JobTeardown {
   /// Best-effort: errors and a panicked/cancelled sweep are WARNed and
   /// swallowed. The `JoinError` arm is untested — it needs an injected task
   /// panic, which this suite has no hook for.
-  pub async fn finish(self, config: &RunnerConfig) {
+  pub async fn finish(mut self, config: &RunnerConfig) {
+    self.finished = true;
     if let Some(maintenance) = &self.maintenance {
       run_cache_maintenance(config, maintenance).await;
     }
-    if let Some(handle) = self.workspace_gc
+    if let Some(handle) = self.workspace_gc.take()
       && let Err(e) = handle.await
     {
       tracing::warn!(error = %e, "workspace GC task did not complete; continuing");
+    }
+  }
+}
+
+impl Drop for JobTeardown {
+  /// WARN when dropped without `finish` ever running — the `let _ =
+  /// teardown;` case `#[must_use]` can't catch on its own. The workspace-GC
+  /// task itself is unaffected (Tokio never cancels a dropped `JoinHandle`);
+  /// only the staging sweep + cache GC pass are skipped.
+  fn drop(&mut self) {
+    if !self.finished {
+      tracing::warn!(
+        "JobTeardown dropped without calling finish(); cache staging sweep and cache GC \
+         were skipped for this job"
+      );
     }
   }
 }
@@ -97,12 +119,25 @@ impl JobTeardown {
 /// Neither step may fail the job: errors are logged and swallowed. Runs after
 /// the server has stopped, so no handler holds a read lease GC must respect.
 async fn run_cache_maintenance(config: &RunnerConfig, maintenance: &CacheMaintenance) {
-  sweep_staging_best_effort(&maintenance.staging_root);
+  sweep_staging_best_effort(maintenance.staging_root.clone()).await;
   gc_best_effort(config, maintenance).await;
 }
 
-/// Sweep abandoned `cas/staging` uploads best-effort; log and swallow errors.
-fn sweep_staging_best_effort(staging_root: &Path) {
+/// Sweep abandoned `cas/staging` uploads best-effort, on the blocking pool.
+///
+/// `sweep_staging` is synchronous `read_dir`/`remove_dir_all` filesystem
+/// work, so it must not run on the async worker thread `finish` is called
+/// from.
+async fn sweep_staging_best_effort(staging_root: PathBuf) {
+  let joined = tokio::task::spawn_blocking(move || log_staging_sweep(&staging_root)).await;
+  if let Err(e) = joined {
+    tracing::warn!(error = %e, "cache staging sweep task did not complete; continuing");
+  }
+}
+
+/// The synchronous sweep, with best-effort logging; runs inside
+/// [`sweep_staging_best_effort`]'s `spawn_blocking`.
+fn log_staging_sweep(staging_root: &Path) {
   match sweep_staging(staging_root, STAGING_SWEEP_TTL) {
     Ok(0) => {},
     Ok(n) => info!(removed = n, "cache staging sweep removed abandoned uploads"),

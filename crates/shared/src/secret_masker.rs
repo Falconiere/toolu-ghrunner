@@ -191,6 +191,15 @@ impl SecretMasker {
       "patterns must stay sorted longest-first (partition_point relies on it)"
     );
   }
+
+  /// Force `automaton` back to `None`, simulating an `AhoCorasickBuilder`
+  /// build failure without needing an adversarial pattern set. `automaton`
+  /// is private, so `tests/secret_masker_test.rs` (an external integration
+  /// test, like the rest of this type's test coverage) needs this hook to
+  /// exercise `mask`'s fallback-to-`str::replace` path.
+  pub fn force_automaton_none_for_test(&mut self) {
+    self.automaton = None;
+  }
 }
 
 impl Default for SecretMasker {
@@ -232,10 +241,23 @@ fn mask_with_automaton(automaton: &AhoCorasick, input: &str) -> String {
   let mut result = String::with_capacity(input.len());
   let mut cursor = 0;
   for (start, end) in merged {
+    // `patterns` is `-D expect_used`/`-D unreachable`, so an invariant
+    // violation here can only be a loud debug-build assert, not a panic
+    // message on the `unwrap_or_default` below — which stays a silent
+    // (and, given the invariant, unreachable) empty-slice fallback.
+    debug_assert!(
+      cursor <= start,
+      "merged spans must be sorted and non-overlapping (cursor={cursor}, start={start})"
+    );
     result.push_str(input.get(cursor..start).unwrap_or_default());
     result.push_str("***");
     cursor = end;
   }
+  debug_assert!(
+    cursor <= input.len(),
+    "cursor must not exceed input length after the last merged span (cursor={cursor}, len={})",
+    input.len()
+  );
   result.push_str(input.get(cursor..).unwrap_or_default());
   result
 }
@@ -271,26 +293,4 @@ fn percent_encode(bytes: &[u8], upper: bool) -> String {
     }
   }
   out
-}
-
-// Only the automaton-build-failure fallback lives here: it must construct
-// `SecretMasker` with `automaton: None` directly, which needs the private
-// field — unreachable from `tests/secret_masker_test.rs`, where the rest
-// of this file's test coverage (overlap no-leak, multi-line, encoded
-// variants) lives against the public API.
-#[cfg(test)]
-mod tests {
-  use super::*;
-
-  #[test]
-  fn automaton_none_falls_back_to_replace_loop_and_still_masks() {
-    let mut masker = SecretMasker::new();
-    masker.add_secret("fallback-secret-value-9");
-    masker.automaton = None; // simulate a build failure
-    let out = masker.mask("token=fallback-secret-value-9 tail");
-    assert_eq!(
-      out, "token=*** tail",
-      "fallback loop must still mask: {out}"
-    );
-  }
 }
