@@ -108,7 +108,19 @@ fn classify_status(what: &str, status: reqwest::StatusCode) -> RunnerError {
   RunnerError::Protocol(format!("{what} failed with status {status}: see debug log"))
 }
 
+/// Chars of the error body kept for the DEBUG snippet.
+const ERROR_BODY_SNIPPET_CHARS: usize = 200;
+/// Bytes read before the body stream is abandoned. Enough to fill
+/// [`ERROR_BODY_SNIPPET_CHARS`] even at 4 bytes per char; nothing past the
+/// snippet is ever logged, so reading further would only mean holding a
+/// bigger allocation (a 5xx HTML page can be arbitrarily large).
+const ERROR_BODY_READ_CAP: usize = ERROR_BODY_SNIPPET_CHARS * 4;
+
 /// Log a non-2xx response body for diagnostics, consuming the response.
+///
+/// Streams at most [`ERROR_BODY_READ_CAP`] bytes rather than buffering the
+/// whole body: `bytes_read` is therefore the capped read length, not the
+/// response's `Content-Length`.
 ///
 /// The body itself is DEBUG-only (see [`classify_status`] on why it stays
 /// out of the error). A *failure to read* it is different: that is itself a
@@ -116,20 +128,27 @@ fn classify_status(what: &str, status: reqwest::StatusCode) -> RunnerError {
 /// filter to `info` unless `TOOLU_RUNNER_ALLOW_VERBOSE=1`, so a DEBUG-only
 /// record of it would be invisible on a default deployment. It gets its own
 /// WARN line naming the `reqwest::Error`.
-async fn log_error_body(what: &str, status: reqwest::StatusCode, response: reqwest::Response) {
-  match response.text().await {
-    Ok(body) => {
-      let snippet: String = body.chars().take(200).collect();
-      tracing::debug!(status = %status, body_len = body.len(), body = %snippet, "{what} failed");
-    },
-    Err(e) => {
-      tracing::warn!(
-        status = %status,
-        error = %e,
-        "{what} failed and its error body could not be read"
-      );
-    },
+async fn log_error_body(what: &str, status: reqwest::StatusCode, mut response: reqwest::Response) {
+  let mut buf: Vec<u8> = Vec::new();
+  while buf.len() < ERROR_BODY_READ_CAP {
+    match response.chunk().await {
+      Ok(Some(chunk)) => buf.extend_from_slice(&chunk),
+      Ok(None) => break,
+      Err(e) => {
+        tracing::warn!(
+          status = %status,
+          error = %e,
+          "{what} failed and its error body could not be read"
+        );
+        return;
+      },
+    }
   }
+  let snippet: String = String::from_utf8_lossy(&buf)
+    .chars()
+    .take(ERROR_BODY_SNIPPET_CHARS)
+    .collect();
+  tracing::debug!(status = %status, bytes_read = buf.len(), body = %snippet, "{what} failed");
 }
 
 /// Renew a job lock. Called every ~60 seconds during job execution.
