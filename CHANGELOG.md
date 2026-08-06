@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-08-06
+
+### Changed
+- cut job wall-clock across teardown, masking, expressions, CAS and HTTP
+
+### Fixed
+- *(review)* close pre-push review findings on the perf branch
+- *(review)* address PR #35 review findings on the perf branch
+- *(review)* clarify workspace-GC panic wording on the re-review pass
+
+### Style
+- apply rustfmt to the perf branch
 ## [0.5.2] - 2026-08-06
 
 ### Documentation
