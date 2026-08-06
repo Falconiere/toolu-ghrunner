@@ -215,11 +215,7 @@ mod trip;
 mod override_rules {
   use shared::Conclusion;
 
-  use crate::execution_loop::apply_outage_override;
-
-  /// The exact "lost connection" annotation message the override emits —
-  /// mirrors `crates/listener/src/execution_loop.rs`.
-  const LOST_CONNECTION_MESSAGE: &str = "Runner lost connection to GitHub for more than 5 minutes; job was cancelled (lost connection).";
+  use crate::execution_loop::{LOST_CONNECTION_MESSAGE, apply_outage_override};
 
   /// (a) An untripped flag leaves the conclusion unchanged and adds no
   /// annotations, whatever the conclusion was.
