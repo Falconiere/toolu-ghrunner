@@ -284,6 +284,9 @@ mod tests {
     masker.add_secret("fallback-secret-value-9");
     masker.automaton = None; // simulate a build failure
     let out = masker.mask("token=fallback-secret-value-9 tail");
-    assert_eq!(out, "token=*** tail", "fallback loop must still mask: {out}");
+    assert_eq!(
+      out, "token=*** tail",
+      "fallback loop must still mask: {out}"
+    );
   }
 }

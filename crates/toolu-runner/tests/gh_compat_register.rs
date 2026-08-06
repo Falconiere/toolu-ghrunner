@@ -219,7 +219,9 @@ async fn register_jit_times_out_on_a_slow_response() {
     .and(path(STUB_PATH))
     .respond_with(
       ResponseTemplate::new(201)
-        .set_body_json(serde_json::from_str::<Value>(RESPONSE_FIXTURE).expect("fixture is valid JSON"))
+        .set_body_json(
+          serde_json::from_str::<Value>(RESPONSE_FIXTURE).expect("fixture is valid JSON"),
+        )
         .set_delay(std::time::Duration::from_secs(5)),
     )
     .expect(1)
