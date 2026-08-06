@@ -25,16 +25,37 @@ jobs:
         with:
           PROVIDER: openrouter
           API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          # Read convention files (CLAUDE.md etc.) from the PR merge ref
-          # instead of the base ref, so a PR that legitimately changes a
-          # convention is reviewed against its own updated text. Safety:
-          # fork PRs do trigger `pull_request`, but the action step fails
-          # for them (secrets are not exposed to fork runs), so no fork
-          # diff is ever reviewed under merge-ref rules. Requires
-          # toolu-ghactions >= 6.3.0.
-          RULES_REF: merge
-          # Surrender cap (toolu-ghactions >= 6.4.0): on review round 5+ a
-          # blocker-free "changes" verdict auto-approves — findings stay
-          # listed as advisory — so a fresh-findings-every-push review can
-          # never block a PR forever. One blocker finding disables the cap.
-          MAX_ROUNDS: '5'
+          # Repo-tuned checklist. Replaces the generic 8-dimension default with
+          # the failure modes that actually bite this codebase: unmasked sinks,
+          # swallowed errors, blocking I/O on the async runtime, durability
+          # claims drifting from the code, and tests that mirror production
+          # rather than drive it. Project conventions are still gathered and
+          # injected on top of it.
+          REVIEW_PROMPT_FILE: .github/code-review-prompt.md
+          CODEBASE_OVERVIEW: |
+            Standalone GitHub Actions JIT runner in Rust. A 10-crate workspace
+            under crates/, layered and acyclic: protocol (sync crypto and wire
+            types, no I/O) and shared (cross-cutting types, tracing, secret
+            masking) at the bottom; config, expressions, cache, wire,
+            observability in the middle; execution (the step engine) and
+            listener (the GitHub JIT lifecycle) above them; toolu-runner is the
+            bin-only CLI on top.
+
+            It authenticates to GitHub with a single-use JIT config, long-polls
+            a broker for jobs, and runs workflow steps on the host — so it
+            handles live credentials, customer source, and job secrets on every
+            run. The lint set is deliberately deny-heavy (no unwrap/expect/
+            panic/indexing outside tests) and CLAUDE.md is the source of truth
+            for the crate graph and each module's responsibilities.
+          # The bot re-derives findings each push, so "zero findings" is not a
+          # reachable fixpoint. After three rounds, downgrade a changes verdict
+          # whose findings are all sub-blocker to approved; the findings stay
+          # listed as advisory. A single blocker still blocks.
+          MAX_ROUNDS: '3'
+          # Keep generated and fixture bytes out of the LLM diff. They are still
+          # committed and still CI-checked; they just waste review budget and
+          # produce noise findings.
+          EXCLUDE_GLOBS: |
+            crates/*/benches/fixtures/**
+            crates/*/tests/fixtures/**
+            docs/toolu/**
