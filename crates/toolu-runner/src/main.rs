@@ -230,12 +230,31 @@ fn refuse_if_run_in_flight(
   .into())
 }
 
+/// Resolve the bearer for the unregister call, keyed by the registration
+/// URL's host: `--token` > `TOOLU_RUNNER_TOKEN` > the stored `login` token,
+/// the same precedence `register` uses. `Ok(None)` means no token anywhere.
+fn remove_bearer(
+  runner_url: &str,
+  flag: Option<String>,
+) -> Result<Option<String>, Box<dyn std::error::Error>> {
+  let host = url::Url::parse(runner_url)
+    .ok()
+    .and_then(|u| u.host_str().map(str::to_owned))
+    .ok_or_else(|| format!("registration URL '{runner_url}' has no host"))?;
+  let store = AuthStore::new(&registry::runner_home());
+  Ok(auth_store::resolve_bearer(&store, &host, flag)?)
+}
+
 /// Unregister the runner on GitHub. `Ok(true)` when the call succeeded,
 /// `Ok(false)` when it was deliberately skipped and local state should still
-/// go — an explicit `--skip-unregister`, or no token to authenticate with.
+/// go — `--skip-unregister`, no token to authenticate with, or a URL this
+/// repo-scoped endpoint cannot address (an org-level registration).
 ///
-/// A token that IS present and fails is an error: leaving a live runner
-/// registered while deleting the only record of it is the bug this closes.
+/// Only a RETRYABLE failure is an error: leaving a live runner registered
+/// while deleting the only record of it is the bug this closes, so a bad
+/// token or a dead network must not proceed. A `RunnerError::Config` is
+/// different — the URL will never resolve, so failing would make `remove`
+/// permanently impossible for org registrations, which worked before.
 async fn unregister_on_github(
   cfg: &RunnerRegistrationConfig,
   flag: Option<String>,
@@ -245,12 +264,7 @@ async fn unregister_on_github(
     tracing::warn!("--skip-unregister: leaving the runner registered on GitHub");
     return Ok(false);
   }
-  let host = url::Url::parse(&cfg.runner_url)
-    .ok()
-    .and_then(|u| u.host_str().map(str::to_owned))
-    .ok_or_else(|| format!("registration URL '{}' has no host", cfg.runner_url))?;
-  let store = AuthStore::new(&registry::runner_home());
-  let Some(token) = auth_store::resolve_bearer(&store, &host, flag)? else {
+  let Some(token) = remove_bearer(&cfg.runner_url, flag)? else {
     tracing::warn!(
       "no GitHub token (--token / TOOLU_RUNNER_TOKEN / 'toolu-runner login') — \
        removing local state only; the runner stays registered on GitHub"
@@ -258,7 +272,7 @@ async fn unregister_on_github(
     return Ok(false);
   };
   let client = reqwest::Client::new();
-  wire::net::unregister_runner(
+  let outcome = wire::net::unregister_runner(
     &client,
     &cfg.runner_url,
     &token,
@@ -266,15 +280,38 @@ async fn unregister_on_github(
     &cfg.runner_name,
     UNREGISTER_TIMEOUT,
   )
-  .await
-  .map_err(|e| {
+  .await;
+  match outcome {
+    Ok(()) => Ok(true),
+    Err(e) => classify_unregister_failure(&cfg.runner_name, e),
+  }
+}
+
+/// Decide whether a failed unregister should still clear local state.
+///
+/// `RunnerError::Config` means the URL has no repo segment (an org-level
+/// registration) — the repo-scoped endpoint can never address it, so no
+/// retry helps and refusing would make `remove` impossible for a
+/// registration that removed fine before B-002. Everything else is
+/// potentially transient, so it fails with local state intact.
+fn classify_unregister_failure(
+  name: &str,
+  e: RunnerError,
+) -> Result<bool, Box<dyn std::error::Error>> {
+  if let RunnerError::Config(msg) = e {
+    tracing::warn!(
+      "cannot unregister '{name}' via the repo-scoped runners API ({msg}) — \
+       removing local state only; remove the runner on GitHub by hand"
+    );
+    return Ok(false);
+  }
+  Err(
     format!(
-      "unregistering '{}' on GitHub failed: {e}\nNothing local was deleted — fix the token or \
-       connectivity and retry, or pass --skip-unregister to remove local state anyway.",
-      cfg.runner_name
+      "unregistering '{name}' on GitHub failed: {e}\nNothing local was deleted — fix the token \
+       or connectivity and retry, or pass --skip-unregister to remove local state anyway."
     )
-  })?;
-  Ok(true)
+    .into(),
+  )
 }
 
 /// Write the `.pending_remove` marker with owner-only perms (0600 on unix).

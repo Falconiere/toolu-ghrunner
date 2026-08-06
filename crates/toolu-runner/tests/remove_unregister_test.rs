@@ -273,3 +273,40 @@ async fn force_past_an_in_flight_run_does_not_unregister() -> TestResult<()> {
   assert!(!config_path.exists(), "config.toml should be gone");
   Ok(())
 }
+
+/// An ORG-level registration (`runner_url` with no repo segment) has no
+/// address on the repo-scoped runners API. `remove` must still clear local
+/// state — org registrations removed fine before B-002, and no retry could
+/// ever make the URL resolve, so failing here would strand the operator.
+#[tokio::test]
+async fn org_level_url_removes_locally_without_failing() -> TestResult<()> {
+  let dir = tempfile::tempdir()?;
+  let home = tempfile::tempdir()?;
+  let server = MockServer::start().await;
+  Mock::given(method("DELETE"))
+    .respond_with(ResponseTemplate::new(204))
+    .expect(0)
+    .mount(&server)
+    .await;
+
+  // No repo segment: `resolve_runners_base` cannot build a runners URL.
+  let config_path = seed_registration(dir.path(), &server.uri())?;
+  let raw = std::fs::read_to_string(&config_path)?;
+  let org_only = raw.replace("/octo-org/octo-repo", "/octo-org");
+  std::fs::write(&config_path, org_only)?;
+
+  let out = run_remove(&config_path, home.path(), &["--token", "tok-1"])?;
+
+  assert!(
+    out.status.success(),
+    "an org-level registration must still remove locally: {}",
+    String::from_utf8_lossy(&out.stderr)
+  );
+  assert!(!config_path.exists(), "config.toml should be gone");
+  let stdout = String::from_utf8_lossy(&out.stdout);
+  assert!(
+    stdout.contains("still registered on GitHub"),
+    "output must say the runner was left registered, got: {stdout}"
+  );
+  Ok(())
+}
