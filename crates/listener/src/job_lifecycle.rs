@@ -116,7 +116,7 @@ async fn report_completion(
 /// Outcome of running (or failing to parse) an acquired job — everything
 /// `report_completion` needs to build the `CompleteJobRequest`.
 ///
-/// Replaces the previous bare 5-tuple alias so the `annotations` field
+/// Replaces the previous bare 6-tuple alias so the `annotations` field
 /// (populated by the outage watchdog's failure-override path in
 /// [`execute_with_renewal`]) has a name instead of a positional slot.
 struct JobOutcome {
