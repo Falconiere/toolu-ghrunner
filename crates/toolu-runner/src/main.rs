@@ -8,9 +8,11 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use clap::Parser;
-use config::config::{load_config as load_reg_config, resolve_data_dir};
+use config::auth_store::{self, AuthStore};
+use config::config::{RunnerRegistrationConfig, load_config as load_reg_config, resolve_data_dir};
 use config::{registry, repo_infer};
 use shared::RunnerError;
 use shared::startup;
@@ -140,6 +142,11 @@ fn init_tracing_for(masker: &Arc<std::sync::Mutex<SecretMasker>>) -> Result<(), 
     .map_err(|e| RunnerError::Config(format!("startup init: {e}")))
 }
 
+/// Per-request timeout for `remove`'s GitHub unregister call. Matches the
+/// register path's bound: long enough for a slow API, short enough that a
+/// black-holed connection does not hang the CLI.
+const UNREGISTER_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Initialize tracing for subcommands that do not run jobs (masker discarded).
 fn init_runner_tracing() -> Result<(), RunnerError> {
   init_tracing_for(&Arc::new(std::sync::Mutex::new(SecretMasker::new())))
@@ -159,37 +166,100 @@ async fn cmd_remove(args: RemoveArgs) -> Result<(), Box<dyn std::error::Error>> 
     return Ok(());
   }
   let cfg = load_reg_config(&config_path).map_err(|e| format!("{e}"))?;
-  let _ = args.token; // registration token reserved for live GH call in step 10
 
   let data_dir = resolve_data_dir(&cfg.runtime.data_dir).map_err(|e| format!("{e}"))?;
   let pending = data_dir.join(".pending_remove");
   let lock_path = data_dir.join(".lock");
 
-  // Mid-job: refuse and write the pending marker unless --force. The
-  // actual unregistration is wired in step 10; for now we just write
-  // the marker and surface a clear message.
-  if lock_path.exists() {
-    if args.force {
-      tracing::warn!("force-cancelling in-flight run (stub — live cancellation lands in step 10)");
-    } else {
-      let body = std::fs::read_to_string(&lock_path).unwrap_or_default();
-      write_pending_marker(&pending, &body)?;
-      return Err(format!(
-        "another run is in flight; wrote {} marker. Re-run with --force to cancel, or wait for the current job to finish.",
-        pending.display()
-      )
-      .into());
-    }
-  }
+  refuse_if_run_in_flight(&lock_path, &pending, args.force)?;
 
-  // No active run — delete the persisted state. The live `acquire_job`
-  // unregistration call lands in step 10.
+  // Unregister on GitHub BEFORE touching local state: the persisted
+  // runner_id and URL are the only way to name the runner, so deleting them
+  // first would strand it with no way to retry.
+  let unregistered = unregister_on_github(&cfg, args.token, args.skip_unregister).await?;
+
   delete_registration_state(&config_path, &creds_path, &pending, &lock_path)?;
+  let gh = if unregistered {
+    "unregistered on GitHub"
+  } else {
+    "still registered on GitHub — remove it there by hand"
+  };
   println!(
-    "unregistered runner '{}' (config, credentials, and lock removed; _diag kept). Live GH unregistration call lands in step 10.",
+    "removed runner '{}' ({gh}; config, credentials, and lock removed, _diag kept).",
     cfg.runner_name
   );
   Ok(())
+}
+
+/// Abort the removal when a run holds the job lock, writing the
+/// `.pending_remove` marker the running process picks up between jobs.
+/// `--force` proceeds instead (live cancellation is still step 10 work).
+fn refuse_if_run_in_flight(
+  lock_path: &Path,
+  pending: &Path,
+  force: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+  if !lock_path.exists() {
+    return Ok(());
+  }
+  if force {
+    tracing::warn!("force-cancelling in-flight run (stub — live cancellation lands in step 10)");
+    return Ok(());
+  }
+  let body = std::fs::read_to_string(lock_path).unwrap_or_default();
+  write_pending_marker(pending, &body)?;
+  Err(format!(
+    "another run is in flight; wrote {} marker. Re-run with --force to cancel, or wait for the current job to finish.",
+    pending.display()
+  )
+  .into())
+}
+
+/// Unregister the runner on GitHub. `Ok(true)` when the call succeeded,
+/// `Ok(false)` when it was deliberately skipped and local state should still
+/// go — an explicit `--skip-unregister`, or no token to authenticate with.
+///
+/// A token that IS present and fails is an error: leaving a live runner
+/// registered while deleting the only record of it is the bug this closes.
+async fn unregister_on_github(
+  cfg: &RunnerRegistrationConfig,
+  flag: Option<String>,
+  skip: bool,
+) -> Result<bool, Box<dyn std::error::Error>> {
+  if skip {
+    tracing::warn!("--skip-unregister: leaving the runner registered on GitHub");
+    return Ok(false);
+  }
+  let host = url::Url::parse(&cfg.runner_url)
+    .ok()
+    .and_then(|u| u.host_str().map(str::to_owned))
+    .ok_or_else(|| format!("registration URL '{}' has no host", cfg.runner_url))?;
+  let store = AuthStore::new(&registry::runner_home());
+  let Some(token) = auth_store::resolve_bearer(&store, &host, flag)? else {
+    tracing::warn!(
+      "no GitHub token (--token / TOOLU_RUNNER_TOKEN / 'toolu-runner login') — \
+       removing local state only; the runner stays registered on GitHub"
+    );
+    return Ok(false);
+  };
+  let client = reqwest::Client::new();
+  wire::net::unregister_runner(
+    &client,
+    &cfg.runner_url,
+    &token,
+    cfg.runner_id,
+    &cfg.runner_name,
+    UNREGISTER_TIMEOUT,
+  )
+  .await
+  .map_err(|e| {
+    format!(
+      "unregistering '{}' on GitHub failed: {e}\nNothing local was deleted — fix the token or \
+       connectivity and retry, or pass --skip-unregister to remove local state anyway.",
+      cfg.runner_name
+    )
+  })?;
+  Ok(true)
 }
 
 /// Write the `.pending_remove` marker with owner-only perms (0600 on unix).

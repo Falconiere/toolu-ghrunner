@@ -275,6 +275,11 @@ async fn find_runner_id_by_name(
 }
 
 /// DELETE the runner with `id` from the repo.
+///
+/// A 404 is success, not an error: the runner is already gone, which is the
+/// caller's goal either way. Both callers want that — `replace_existing` only
+/// needs the name freed, and [`unregister_runner`] is routinely aimed at a JIT
+/// registration GitHub already reaped after its single job.
 async fn delete_runner(
   client: &reqwest::Client,
   runners_base: &str,
@@ -296,6 +301,10 @@ async fn delete_runner(
     .await
     .map_err(|e| RunnerError::Network(format!("delete-runner request failed: {e}")))?;
   let status = response.status();
+  if status == reqwest::StatusCode::NOT_FOUND {
+    tracing::debug!(runner_id = id, "runner already absent — delete is a no-op");
+    return Ok(());
+  }
   if !status.is_success() {
     let text = response.text().await.unwrap_or_default();
     return Err(RunnerError::Auth(format!(
@@ -303,6 +312,43 @@ async fn delete_runner(
     )));
   }
   Ok(())
+}
+
+/// Unregister a runner from its repo: `DELETE …/actions/runners/{id}`.
+///
+/// Idempotent: an already-absent runner — 404, or no same-name match — is
+/// `Ok(())`, so a repeated `remove` is safe. `runner_id` comes from the
+/// persisted registration; a non-positive one means none was recorded, so the
+/// runner is looked up by `name` instead.
+///
+/// # Errors
+///
+/// `RunnerError::Config` (URL lacks host or `owner/repo`),
+/// `RunnerError::Network` (transport), `RunnerError::Auth` (non-2xx other
+/// than 404, GitHub's body included).
+pub async fn unregister_runner(
+  client: &reqwest::Client,
+  url: &str,
+  token: &str,
+  runner_id: i64,
+  name: &str,
+  timeout: Duration,
+) -> Result<(), RunnerError> {
+  let runners_base = resolve_runners_base(url)?;
+  let id = if runner_id > 0 {
+    runner_id
+  } else {
+    let Some(found) = find_runner_id_by_name(client, &runners_base, token, name, timeout).await?
+    else {
+      tracing::info!(
+        name,
+        "no runner registered under this name — nothing to unregister"
+      );
+      return Ok(());
+    };
+    found
+  };
+  delete_runner(client, &runners_base, token, id, timeout).await
 }
 
 /// Delete the same-name runner blocking a 409, so the retry can mint.

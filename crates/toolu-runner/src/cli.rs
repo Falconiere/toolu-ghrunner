@@ -112,10 +112,12 @@ pub(crate) enum Command {
   Run(RunArgs),
   /// Remove the runner registration.
   ///
-  /// Deletes the persisted config and credentials. If a run is in flight
-  /// (the job lock is held) it refuses and writes a `.pending_remove`
-  /// marker instead — pass --force to cancel the run first. The live
-  /// GitHub unregister call is not yet wired.
+  /// Unregisters the runner from GitHub, then deletes the persisted config
+  /// and credentials. If a run is in flight (the job lock is held) it
+  /// refuses and writes a `.pending_remove` marker instead — pass --force
+  /// to cancel the run first. A failed unregister aborts before anything
+  /// local is deleted, so the removal can be retried; --skip-unregister
+  /// removes local state only.
   Remove(RemoveArgs),
   /// Print local config and credential state (no network).
   ///
@@ -304,10 +306,11 @@ pub(crate) struct RemoveArgs {
   /// sole existing registration.
   #[arg(long, value_name = "FILE", value_hint = ValueHint::FilePath)]
   pub(crate) config: Option<PathBuf>,
-  /// Unregistration token (reserved).
+  /// GitHub token authorizing the unregister call.
   ///
-  /// The live GitHub unregister call is not yet wired; when it lands,
-  /// this falls back to the registration token in config.
+  /// Precedence: this flag > TOOLU_RUNNER_TOKEN > the stored `login`
+  /// token. With none of the three, local state is still removed and the
+  /// GitHub-side runner is left registered (a warning says so).
   #[arg(long, value_name = "TOKEN")]
   pub(crate) token: Option<String>,
   /// Cancel an in-flight run before removing state.
@@ -316,6 +319,13 @@ pub(crate) struct RemoveArgs {
   /// `.pending_remove` marker for the running process.
   #[arg(long)]
   pub(crate) force: bool,
+  /// Delete local state without calling GitHub.
+  ///
+  /// The escape hatch for when the unregister cannot succeed — revoked
+  /// token, deleted repo, no network. Leaves the runner registered on
+  /// GitHub; remove it there by hand.
+  #[arg(long)]
+  pub(crate) skip_unregister: bool,
 }
 
 /// Arguments for the `status` subcommand.

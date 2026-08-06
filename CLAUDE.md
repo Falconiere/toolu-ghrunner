@@ -446,9 +446,16 @@ no OTel.
   `runners/<owner>/<repo>/config.toml` > the sole registration (legacy
   `<home>/config.toml` included) > error listing candidates
   (`config::registry::resolve_config_path`). `remove` writes
-  `.pending_remove` if `.lock` is held, otherwise deletes
-  `config.toml` / `credentials.json` / `.lock` / `.pending_remove` and
-  keeps `_diag/` history (live GH unregister call is step 10). `watch`
+  `.pending_remove` if `.lock` is held, otherwise unregisters on GitHub
+  (`wire::net::unregister_runner` — DELETE `…/actions/runners/{id}` by the
+  persisted `runner_id`, name-lookup fallback, 404 = already gone) and only
+  then deletes `config.toml` / `credentials.json` / `.lock` /
+  `.pending_remove`, keeping `_diag/` history. Unregister-first is
+  load-bearing: the persisted id/URL are the only handle on the runner, so
+  a failed call aborts with local state intact and is retryable. Bearer:
+  `--token` > `TOOLU_RUNNER_TOKEN` > stored `login`; none of the three
+  still removes locally behind a WARN. `--skip-unregister` skips the call.
+  (Live cancellation of an in-flight job is still step 10.) `watch`
   opens the journal TUI (`observability::watch`; no network, no
   tracing init — logs would corrupt the alternate screen).
 - `register_cmd.rs` — `cmd_register` + `register_and_persist` (split

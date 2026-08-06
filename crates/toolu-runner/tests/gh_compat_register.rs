@@ -521,3 +521,184 @@ async fn register_jit_surfaces_409_without_replace() {
     "GitHub's body surfaced: {msg}"
   );
 }
+
+// --- unregister (B-002): DELETE …/actions/runners/{id} ----------------------
+
+/// Per-request timeout for the unregister tests — matches the CLI's bound.
+const UNREGISTER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// `remove` deletes the runner GitHub knows by the persisted `runner_id`,
+/// presenting the bearer and GitHub's required headers.
+#[tokio::test]
+async fn unregister_runner_deletes_by_persisted_id() {
+  let server = MockServer::start().await;
+  Mock::given(method("DELETE"))
+    .and(path(format!("{STUB_RUNNERS_PATH}/461")))
+    .and(header("authorization", "Bearer tok-1"))
+    .and(header("accept", "application/vnd.github+json"))
+    .and(header("x-github-api-version", "2022-11-28"))
+    .respond_with(ResponseTemplate::new(204))
+    .expect(1)
+    .mount(&server)
+    .await;
+
+  let client = reqwest::Client::new();
+  let result = wire::net::unregister_runner(
+    &client,
+    &stub_repo_url(&server),
+    "tok-1",
+    461,
+    "runner-1",
+    UNREGISTER_TIMEOUT,
+  )
+  .await;
+  assert!(result.is_ok(), "expected Ok, got {result:?}");
+}
+
+/// A 404 is success: the runner is already gone, which is what `remove`
+/// wanted. JIT registrations are reaped by GitHub after their single job,
+/// so this is the common case, not an edge one — and it keeps a repeated
+/// `remove` idempotent.
+#[tokio::test]
+async fn unregister_runner_treats_404_as_already_gone() {
+  let server = MockServer::start().await;
+  Mock::given(method("DELETE"))
+    .and(path(format!("{STUB_RUNNERS_PATH}/461")))
+    .respond_with(ResponseTemplate::new(404).set_body_string(r#"{"message":"Not Found"}"#))
+    .expect(1)
+    .mount(&server)
+    .await;
+
+  let client = reqwest::Client::new();
+  let result = wire::net::unregister_runner(
+    &client,
+    &stub_repo_url(&server),
+    "tok-1",
+    461,
+    "runner-1",
+    UNREGISTER_TIMEOUT,
+  )
+  .await;
+  assert!(result.is_ok(), "404 should be Ok, got {result:?}");
+}
+
+/// With no persisted id (a registration written before the id was
+/// recorded), the runner is found by name and then deleted.
+#[tokio::test]
+async fn unregister_runner_falls_back_to_name_lookup() {
+  let server = MockServer::start().await;
+  Mock::given(method("GET"))
+    .and(path(STUB_RUNNERS_PATH))
+    .and(query_param("name", "runner-1"))
+    .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+      "total_count": 1,
+      "runners": [{ "id": 77, "name": "runner-1" }],
+    })))
+    .expect(1)
+    .mount(&server)
+    .await;
+  Mock::given(method("DELETE"))
+    .and(path(format!("{STUB_RUNNERS_PATH}/77")))
+    .respond_with(ResponseTemplate::new(204))
+    .expect(1)
+    .mount(&server)
+    .await;
+
+  let client = reqwest::Client::new();
+  let result = wire::net::unregister_runner(
+    &client,
+    &stub_repo_url(&server),
+    "tok-1",
+    0,
+    "runner-1",
+    UNREGISTER_TIMEOUT,
+  )
+  .await;
+  assert!(result.is_ok(), "expected Ok, got {result:?}");
+}
+
+/// No persisted id AND no same-name runner: nothing to unregister, so no
+/// DELETE is attempted and the caller may clear local state.
+#[tokio::test]
+async fn unregister_runner_is_ok_when_no_runner_matches_the_name() {
+  let server = MockServer::start().await;
+  Mock::given(method("GET"))
+    .and(path(STUB_RUNNERS_PATH))
+    .and(query_param("name", "runner-1"))
+    .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+      "total_count": 0,
+      "runners": [],
+    })))
+    .expect(1)
+    .mount(&server)
+    .await;
+  // No DELETE mock: an attempted delete would 404 the mock server and fail.
+
+  let client = reqwest::Client::new();
+  let result = wire::net::unregister_runner(
+    &client,
+    &stub_repo_url(&server),
+    "tok-1",
+    0,
+    "runner-1",
+    UNREGISTER_TIMEOUT,
+  )
+  .await;
+  assert!(result.is_ok(), "expected Ok, got {result:?}");
+}
+
+/// A revoked or under-scoped token must surface as `Auth`, NOT be swallowed
+/// — `remove` keeps local state on this error so the removal can be retried
+/// instead of stranding a live runner on GitHub.
+#[tokio::test]
+async fn unregister_runner_surfaces_401_as_auth() {
+  let server = MockServer::start().await;
+  Mock::given(method("DELETE"))
+    .and(path(format!("{STUB_RUNNERS_PATH}/461")))
+    .respond_with(ResponseTemplate::new(401).set_body_string(r#"{"message":"Bad credentials"}"#))
+    .expect(1)
+    .mount(&server)
+    .await;
+
+  let client = reqwest::Client::new();
+  let result = wire::net::unregister_runner(
+    &client,
+    &stub_repo_url(&server),
+    "bad-token",
+    461,
+    "runner-1",
+    UNREGISTER_TIMEOUT,
+  )
+  .await;
+  let err = result.expect_err("a 401 must yield an Err");
+  let msg = format!("{err}");
+  assert!(
+    matches!(err, RunnerError::Auth(_)),
+    "a revoked/under-scoped token must surface as Auth so `remove` keeps \
+     local state and the removal can be retried, got {err:?}"
+  );
+  assert!(
+    msg.contains("401") && msg.contains("Bad credentials"),
+    "error should carry the status and GitHub's body, got: {msg}"
+  );
+}
+
+/// A URL with no `owner/repo` cannot name a runner — reject before any
+/// request rather than deleting something unintended.
+#[tokio::test]
+async fn unregister_runner_rejects_a_url_without_a_repo() {
+  let client = reqwest::Client::new();
+  let result = wire::net::unregister_runner(
+    &client,
+    "https://github.com/octo-org",
+    "tok-1",
+    461,
+    "runner-1",
+    UNREGISTER_TIMEOUT,
+  )
+  .await;
+  assert!(
+    matches!(result, Err(RunnerError::Config(_))),
+    "expected RunnerError::Config, got {result:?}"
+  );
+}
