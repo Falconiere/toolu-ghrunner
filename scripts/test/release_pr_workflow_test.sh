@@ -3,13 +3,14 @@
 # .github/workflows/release-pr.yml + the scripts/release-pr.sh /
 # scripts/release-tag.sh job bodies it calls + cliff.toml.
 #
-# The live flow needs the RELEASE_PLZ_TOKEN PAT and a push to main, so it can't
-# run offline. This asserts the invariants the auto-release contract depends on:
-# the workflow triggers on push to main and delegates each job body to its
+# The live flow needs the publish App's credentials and a push to main, so it
+# can't run offline. This asserts the invariants the auto-release contract depends
+# on: the workflow triggers on push to main and delegates each job body to its
 # script, the scripts compute the bump with git-cliff and prepend CHANGELOG.md
-# (never regenerating history), the workflow uses the PAT (never the default
-# token) so the pushed tag actually fires release.yml, keeps least-privilege
-# perms, and cliff.toml keeps the Keep-a-Changelog shape that
+# (never regenerating history), the workflow authenticates with a minted App
+# installation token (never the default token) so the pushed tag actually fires
+# release.yml, keeps least-privilege perms, and cliff.toml keeps the
+# Keep-a-Changelog shape that
 # scripts/changelog-extract.sh parses. Uses grep (dependency-free); if tomllib
 # is importable it additionally asserts cliff.toml parses. The scripts'
 # runtime behavior is covered by scripts/test/release_pr_script_test.sh.
@@ -79,11 +80,18 @@ want "untagged-bump guard in pr script"  "$PR_SH" "release-tag owns this push"
 want "no-releasable-commits guard"       "$PR_SH" "no releasable commits"
 want "pr branch force-pushed"            "$PR_SH" "git push --force origin release-pr"
 want "tag pushed as annotated vX.Y.Z"    "$TAG_SH" "git tag -a \"v\\\$\{current\}\""
-# --- workflow: the token MUST be the PAT, never the default token ---
+# --- workflow: the token MUST be a minted App token, never the default token ---
 # A tag pushed under the built-in GITHUB_TOKEN is suppressed by GitHub's
-# anti-recursion rule, so release.yml would never fire.
-want "checkout auths with the PAT"       "$WF" "token: \\\$\{\{ secrets\.RELEASE_PLZ_TOKEN \}\}"
-want "gh auths with the PAT"             "$WF" "GH_TOKEN: \\\$\{\{ secrets\.RELEASE_PLZ_TOKEN \}\}"
+# anti-recursion rule, so release.yml would never fire. An App installation token
+# is a distinct identity, so its push does fire it.
+want "mints an App token"                "$WF" "uses: actions/create-github-app-token@"
+want "mint step is id app-token"         "$WF" "id: app-token"
+want "checkout auths with the App token" "$WF" "token: \\\$\{\{ steps\.app-token\.outputs\.token \}\}"
+want "gh auths with the App token"       "$WF" "GH_TOKEN: \\\$\{\{ steps\.app-token\.outputs\.token \}\}"
+# Scoping: no owner/repositories inputs, so the action defaults to this repo and
+# the token cannot reach the other repos the shared App installation covers.
+reject "mint step is repo-scoped"        "$WF" "^ *repositories:"
+reject "no PAT left behind"              "$WF" "secrets\.RELEASE_PLZ_TOKEN"
 reject "never uses the default token"    "$WF" "\\\$\{\{ secrets\.GITHUB_TOKEN \}\}"
 reject "never uses github.token"         "$WF" "\\\$\{\{ github\.token \}\}"
 # --- workflow: least privilege + full history ---
