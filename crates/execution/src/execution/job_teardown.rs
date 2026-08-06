@@ -93,7 +93,7 @@ impl JobTeardown {
     if let Some(handle) = self.workspace_gc.take()
       && let Err(e) = handle.await
     {
-      tracing::warn!(error = %e, "workspace GC task did not complete; continuing");
+      tracing::warn!(error = %e, "workspace GC task panicked or was cancelled; continuing");
     }
   }
 }
