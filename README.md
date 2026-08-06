@@ -17,6 +17,7 @@ didn't ask for.
 [How it works](#how-it-works) ·
 [Cache acceleration](#cache-acceleration) ·
 [vs. `actions/runner`](#vs-actionsrunner) ·
+[Container image](docs/container-image.md) ·
 [Docs](docs/architecture.md)
 
 </div>

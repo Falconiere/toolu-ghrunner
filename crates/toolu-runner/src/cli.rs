@@ -48,6 +48,33 @@ Examples:
   # explicit github.com repository
   toolu-runner setup --url https://github.com/owner/repo";
 
+/// Extended help footer for `boot --help`.
+const BOOT_AFTER_HELP: &str = "\
+Env:
+  TOOLU_JITCONFIG   required — GitHub's encoded_jit_config from
+                    POST /orgs/{org}/actions/runners/generate-jitconfig,
+                    verbatim (the 3-blob envelope protocol::JitConfig::parse
+                    handles). Missing or empty: exit 2, no network attempted.
+  TOOLU_DEADLINE    optional epoch-milliseconds decimal string (/^\\d+$/), a
+                    self-timeout backstop (e.g. now+6h). Missing or
+                    unparseable: runs without a watchdog. Already past: exit
+                    124 immediately, before any network call. Mid-job: the
+                    watchdog cancels the job gracefully, then hard-exits 124
+                    after a 30s grace period.
+
+Examples:
+  # container ENTRYPOINT — no other args or env needed
+  TOOLU_JITCONFIG=<encoded> TOOLU_DEADLINE=<epoch_ms> toolu-runner boot
+
+Exit codes:
+  0    job completed Success or Skipped (or cancelled before any job was
+       acquired)
+  1    job completed Failure or Cancelled (non-deadline), or the listener
+       errored (auth, network, protocol)
+  2    environment/config error before polling (missing TOOLU_JITCONFIG,
+       unparseable JIT envelope)
+  124  the TOOLU_DEADLINE watchdog fired";
+
 /// Extended help footer for `register --help`.
 const REGISTER_AFTER_HELP: &str = "\
 Examples:
@@ -158,6 +185,17 @@ pub(crate) enum Command {
   /// repo. github.com only this release. Re-run with --force to replace a
   /// previously created App.
   CreateApp(CreateAppArgs),
+  /// Zero-config one-shot mode for the toolu.sh container image.
+  ///
+  /// No flags: the image's ENTRYPOINT is `["toolu-runner", "boot"]` and
+  /// providers pass only env vars (never argv — JIT config in argv would
+  /// leak into provider dashboards). Reads `TOOLU_JITCONFIG` (required) and
+  /// `TOOLU_DEADLINE` (optional watchdog backstop) straight from the
+  /// container's environment, runs exactly one job with no persisted
+  /// state (no config.toml, no credentials.json, no `.lock`, no re-mint),
+  /// and exits with a code reflecting the job outcome. See `--help` for
+  /// the full env contract and exit-code mapping.
+  Boot(BootArgs),
 }
 
 /// Arguments for the `setup` subcommand.
@@ -371,6 +409,13 @@ pub(crate) struct InstallServiceArgs {
   #[arg(long)]
   pub(crate) remove: bool,
 }
+
+/// Arguments for the `boot` subcommand: none — it is driven entirely by
+/// `TOOLU_JITCONFIG` / `TOOLU_DEADLINE` env vars (see `--help`), by design
+/// (a container ENTRYPOINT gets no argv).
+#[derive(Debug, Args)]
+#[command(after_help = BOOT_AFTER_HELP)]
+pub(crate) struct BootArgs {}
 
 /// Default `--config` path: `~/.toolu-runner/config.toml`.
 pub(crate) fn default_config_path() -> PathBuf {

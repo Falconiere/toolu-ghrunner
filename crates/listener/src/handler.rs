@@ -7,7 +7,7 @@ use super::job_lifecycle;
 use protocol::JitConfig;
 use protocol::auth::parse_rsa_private_key;
 use shared::SecretMasker;
-use shared::{ListenerEvent, RunnerConfig, RunnerError};
+use shared::{Conclusion, ListenerEvent, RunnerConfig, RunnerError};
 use wire::net;
 
 /// Shared state threaded through the listener lifecycle after authentication.
@@ -91,10 +91,15 @@ impl GitHubListener {
 
   /// Run the listener lifecycle until cancellation or a fatal error.
   ///
+  /// `Ok(Some(conclusion))` — a job was acquired and completed (reported to
+  /// GitHub) with this final [`Conclusion`], including `Failure`/`Cancelled`.
+  /// `Ok(None)` — the lifecycle exited without ever acquiring a job
+  /// (cancelled while long-polling, or a control message with no job).
+  ///
   /// # Errors
   ///
   /// Returns `RunnerError::Protocol` on auth or session creation failure.
-  pub async fn run(&self, cancel: CancellationToken) -> Result<(), RunnerError> {
+  pub async fn run(&self, cancel: CancellationToken) -> Result<Option<Conclusion>, RunnerError> {
     let (tx, rx) = mpsc::channel(256);
     // Sink the listener-event channel into the per-job journal
     // (`<data_dir>/_diag/jobs/`). The writer doubles as the drain: the

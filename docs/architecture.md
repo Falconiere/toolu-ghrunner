@@ -65,9 +65,10 @@ toolu-ghrunner/                            workspace root
     │   └── log_uploader/                  per-step + combined job-log upload
     └── toolu-runner/                      bin only (the CLI)
         ├── src/main.rs                    dispatch + the remove / watch handlers
-        ├── src/cli.rs                     clap surface: register / run / remove / status / watch / install-service / login / logout / create-app / setup
+        ├── src/cli.rs                     clap surface: register / run / boot / remove / status / watch / install-service / login / logout / create-app / setup
         ├── src/register_cmd.rs            register + remint_and_persist (per-repo persist, config rollback)
         ├── src/run_cmd.rs                 the always-online run loop (re-mint after each job)
+        ├── src/boot_cmd.rs                zero-config one-shot container mode (env-driven, no persisted state)
         ├── src/service_cmd.rs             install-service (launchd / systemd user units)
         ├── src/login_cmd.rs               login / logout (device flow)
         ├── src/status_cmd.rs              status (no network)
@@ -615,6 +616,18 @@ single-use, so the listener runs exactly one job and returns; the bin's
 and builds a new listener. The per-repo `.lock` is held for the whole
 loop; `--once` opts out (one job, then exit with its status).
 
+A third mode, `boot`, is the container-image ENTRYPOINT: zero-config,
+env-driven (`TOOLU_JITCONFIG` / `TOOLU_DEADLINE`, no flags, no persisted
+state — no `config.toml`, no `.lock`, no re-mint), one JIT lifecycle then
+exit. `boot_cmd::cmd_boot` builds the same authenticate → session →
+poll → acquire → execute → report → complete path as `run`, but returns
+a richer process exit code (`0`/`1`/`2`/`124`) reflecting the job outcome
+for a provider reading container logs, plus an optional watchdog task
+that cancels the job and hard-exits 124 if `TOOLU_DEADLINE` (a
+provider-computed epoch-ms backstop, not a promise of remaining time) is
+reached. See `docs/container-image.md` for the full env/exit-code
+contract.
+
 ```
 SIGINT/SIGTERM        toolu-runner run             GH broker         Run Service
  │                          │                          │                  │
@@ -921,8 +934,11 @@ finalize         homebrew        both `uses:` reusable workflows, chained on
 
 The asset names + tarball layout are the contract `install.sh`
 consumes (`toolu-runner-<os>-<arch>.tar.gz`, binary at root, service
-files under `scripts/`). glibc-dynamic only — a static musl build is
-deferred because `tokio-tungstenite` pulls `native-tls` → openssl-sys.
+files under `scripts/`). glibc-dynamic only. The workspace is
+rustls-only — `tokio-tungstenite` uses `rustls-tls-native-roots`
+(matching `reqwest`), so no OpenSSL/`native-tls`/openssl-sys appears
+in the dependency graph. A static musl build is no longer blocked by
+OpenSSL; it stays deferred purely for lack of need.
 The four release scripts are unit-tested against real repo files under
 `scripts/test/` and run in `ci.yml`.
 
