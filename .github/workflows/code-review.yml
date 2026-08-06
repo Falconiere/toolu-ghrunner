@@ -52,6 +52,10 @@ jobs:
           # whose findings are all sub-blocker to approved; the findings stay
           # listed as advisory. A single blocker still blocks.
           MAX_ROUNDS: '3'
+          # The 8192 default truncated a chunk on this repo's first large PR
+          # ("1/5 chunks truncated at the output-token limit"), which silently
+          # drops findings after the cut. Rust diffs here are verbose.
+          MAX_TOKENS: '16384'
           # Keep generated and fixture bytes out of the LLM diff. They are still
           # committed and still CI-checked; they just waste review budget and
           # produce noise findings.

@@ -11,10 +11,14 @@ const MIN_SECRET_LEN: usize = 4;
 /// Secrets are registered upfront (job Variables + `MaskHints`); each
 /// registers its JSON-escaped, base64/hex/percent, and per-line variants
 /// too. `patterns` stays sorted longest-first (invariant of
-/// `insert_pattern`) — the automaton's source of truth and the fallback
-/// loop's ordering. `automaton` (`MatchKind::Standard`, rebuilt once per
-/// `add_secret`) is `None` only on a build failure (WARN-logged); `mask`
-/// then falls back to the old loop rather than returning input unmasked.
+/// `insert_pattern`) and is the automaton's source of truth, but only the
+/// fallback loop *depends* on that ordering — it replaces pattern by pattern,
+/// so a shorter pattern must not consume a longer one's text first. The
+/// automaton path is order-independent: `MatchKind::Standard` +
+/// `find_overlapping_iter` sees every match and merges overlapping spans into
+/// one `***`. `automaton` (rebuilt once per `add_secret`) is `None` only on a
+/// build failure (WARN-logged); `mask` then falls back to the loop rather
+/// than returning input unmasked.
 #[derive(Debug, Clone)]
 pub struct SecretMasker {
   patterns: Vec<String>,

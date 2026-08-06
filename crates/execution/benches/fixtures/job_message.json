@@ -64,7 +64,7 @@
   ],
   "variables": {
     "system.github.token": {
-      "value": "ghs_EXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLE0000",
+      "value": "not-a-token-bench-placeholder-0000000000",
       "isSecret": true
     },
     "MY_SECRET": {
@@ -82,7 +82,7 @@
   },
   "mask": [
     {
-      "value": "ghs_EXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLE0000",
+      "value": "not-a-token-bench-placeholder-0000000000",
       "type": "regex"
     }
   ],
