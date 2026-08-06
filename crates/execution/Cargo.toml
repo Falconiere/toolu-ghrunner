@@ -55,6 +55,12 @@ pretty_assertions = "1"
 # Integration tests build a real HeaderMap / assert StatusCode against the
 # service-auth + OIDC url helpers (a normal dep isn't visible to tests/).
 axum = "0.8"
+criterion = "0.5"
 
 [lints]
 workspace = true
+
+[[bench]]
+name = "interpolate"
+harness = false
+test = false

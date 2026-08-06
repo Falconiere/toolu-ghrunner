@@ -73,11 +73,13 @@ async fn run_steps_bounded(
   });
 
   let spec = JobSpec::default();
+  let http = reqwest::Client::new();
   let job_run = JobRun {
     workspace: &workspace,
     config: &config,
     spec: &spec,
     shadow: None,
+    http: &http,
   };
   let run = run_steps(&steps, &mut ctx, &tx, CancellationToken::new(), &job_run);
   // The whole step run is bounded; a deadlock trips the timeout instead of

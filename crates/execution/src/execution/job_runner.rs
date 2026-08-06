@@ -12,12 +12,13 @@ use tracing::info;
 use super::context::ExecutionContext;
 use super::job_hooks::{JobHookStage, run_job_hook};
 use super::job_spec::{JobSpec, evaluate_job_outputs};
+use super::job_teardown::{CacheMaintenance, JobTeardown};
 use super::service_endpoints::{ServiceUrls, extract_service_urls, forward_env};
 use super::shadow::ShadowObserver;
 use super::steps_runner::{JobRun, run_steps};
 use cache::accelerated::{AcceleratedInputs, accelerated_app};
-use cache::blob::{BlobRegistry, sweep_staging};
-use cache::cas::{CacheGc, CacheIndex, CasStore, LeaseSet};
+use cache::blob::BlobRegistry;
+use cache::cas::{CacheIndex, CasStore, LeaseSet};
 use cache::scope::{CacheScopes, scopes_for_job};
 use cache::server::CacheServer;
 use cache::trust::{TrustLevel, classify_trust};
@@ -42,29 +43,13 @@ enum LocalServices {
   Accelerated(CacheServer, ServiceUrls, CacheMaintenance),
 }
 
-/// The shared CAS handles a job's local cache server was built over, retained so
-/// [`run_cache_maintenance`] can sweep staging and GC the store at teardown.
-///
-/// Every handle is a cheap clone onto the same on-disk root / in-memory lease
-/// map the running server holds, so GC honours any in-flight read lease.
-struct CacheMaintenance {
-  store: CasStore,
-  index: CacheIndex,
-  leases: LeaseSet,
-  staging_root: std::path::PathBuf,
-}
-
-/// Age past which an abandoned `cas/staging` upload is swept at job teardown.
-///
-/// Comfortably exceeds a single upload window; single-job concurrency (the
-/// `.lock`) means nothing else is mid-upload when teardown runs.
-const STAGING_SWEEP_TTL: Duration = Duration::from_secs(3600);
-
 /// Execute a complete job from an `AgentJobRequestMessage`.
 ///
 /// The configured [`ServicesMode`] decides step env: forwarder copies the
 /// message's real URLs + token; offline points cache vars at a local server;
 /// accelerated serves both cache protocols local and proxies the rest.
+/// Returns a [`JobTeardown`] — servers stopped and `JobCompleted` emitted,
+/// maintenance deferred to the caller (see its ordering contract).
 ///
 /// # Errors
 ///
@@ -76,26 +61,20 @@ pub async fn run_job(
   cancel: CancellationToken,
   events: mpsc::Sender<RunnerEvent>,
   masker: Arc<Mutex<SecretMasker>>,
-) -> Result<(), RunnerError> {
+) -> Result<JobTeardown, RunnerError> {
   let workspace = prepare_job_dirs(config, &msg.job_id)?;
-  gc_stale_workspaces(config, &msg.job_id);
-
-  // Build the context and set the workspace before starting local services:
-  // accelerated mode needs the job's github context to compute cache scopes.
-  let mut ctx = build_context(&msg, config, masker);
-  ctx.set_workspace(Some(workspace.clone()));
+  let workspace_gc = spawn_workspace_gc(config, &msg.job_id);
+  let mut ctx = job_context(&msg, config, masker, &workspace);
+  // One job-scope HTTP client, reused for every action download / node-runtime
+  // fetch / post-drain in this job instead of a fresh connection (and TLS
+  // handshake) per call. 120 s: downloads can be large.
+  let http = build_job_client()?;
 
   let local = start_local_services(config, &msg, &ctx).await?;
   setup_job_env(&mut ctx, &msg, config, &local)?;
 
-  // Shadow-mode step observer (approach C): records would-hit / false-hit per
-  // `run:` step and NEVER serves a cached result. Inert unless `shadow_enabled`.
-  let shadow = ShadowObserver::new(
-    config.shadow_enabled,
-    &config.data_dir,
-    &msg.job_id,
-    Arc::clone(ctx.masker()),
-  );
+  // Shadow-mode step observer (approach C): records only, never serves.
+  let shadow = build_shadow_observer(config, &msg.job_id, &ctx);
 
   emit_job_started(&events, &msg.job_id, &msg.job_display_name).await;
 
@@ -113,13 +92,86 @@ pub async fn run_job(
     workspace: &workspace,
     spec: &spec,
     shadow: &shadow,
+    http: &http,
   };
   let (conclusion, outputs) = run_job_body(&body, &mut ctx).await?;
 
-  shutdown_local_services(local, config).await;
-  emit_job_completed(&events, msg.job_id, conclusion, outputs).await;
+  let outcome = JobOutcome {
+    job_id: msg.job_id,
+    conclusion,
+    outputs,
+  };
+  Ok(finish_job(local, &events, outcome, workspace_gc).await)
+}
 
-  Ok(())
+/// Build the shadow-mode step observer (approach C): records would-hit /
+/// false-hit per `run:` step and NEVER serves a cached result. Inert unless
+/// `config.shadow_enabled`.
+fn build_shadow_observer(
+  config: &RunnerConfig,
+  job_id: &str,
+  ctx: &ExecutionContext,
+) -> ShadowObserver {
+  ShadowObserver::new(
+    config.shadow_enabled,
+    &config.data_dir,
+    job_id,
+    Arc::clone(ctx.masker()),
+  )
+}
+
+/// Build the one job-scope HTTP client `run_job` threads to every action
+/// download, node-runtime fetch, and post-drain in this job. A generous
+/// timeout: action tarballs and node runtimes can be large.
+///
+/// # Errors
+///
+/// Returns `RunnerError` if the TLS backend fails to initialize (the only
+/// realistic `reqwest::ClientBuilder::build` failure).
+fn build_job_client() -> Result<reqwest::Client, RunnerError> {
+  reqwest::Client::builder()
+    .timeout(Duration::from_secs(120))
+    .build()
+    .map_err(|e| RunnerError::Config(format!("build job HTTP client: {e}")))
+}
+
+/// Build the per-job context with its workspace set.
+///
+/// Runs before local services start: accelerated mode needs the job's github
+/// context to compute cache scopes.
+fn job_context(
+  msg: &AgentJobRequestMessage,
+  config: &RunnerConfig,
+  masker: Arc<Mutex<SecretMasker>>,
+  workspace: &std::path::Path,
+) -> ExecutionContext {
+  let mut ctx = build_context(msg, config, masker);
+  ctx.set_workspace(Some(workspace.to_path_buf()));
+  ctx
+}
+
+/// What a finished job reports: its id, conclusion, and resolved outputs.
+struct JobOutcome {
+  job_id: String,
+  conclusion: Conclusion,
+  outputs: HashMap<String, String>,
+}
+
+/// Stop the local servers, emit `JobCompleted`, and package the deferred work.
+///
+/// Ordering contract: the servers are down and the completion event is queued
+/// before the returned [`JobTeardown`] exists, so the caller can drop the event
+/// sender — closing the channel the listener reports on — and only then run
+/// cache GC over the now-idle CAS handles.
+async fn finish_job(
+  local: LocalServices,
+  events: &mpsc::Sender<RunnerEvent>,
+  outcome: JobOutcome,
+  workspace_gc: Option<tokio::task::JoinHandle<()>>,
+) -> JobTeardown {
+  let maintenance = stop_local_services(local).await;
+  emit_job_completed(events, outcome.job_id, outcome.conclusion, outcome.outputs).await;
+  JobTeardown::new(maintenance, workspace_gc)
 }
 
 /// Bring up whatever local cache services the configured mode needs, before
@@ -158,46 +210,19 @@ async fn start_local_services(
 }
 
 /// Shut down any local cache server the job brought up (offline / accelerated),
-/// then run best-effort cache maintenance over its retained CAS handles.
-async fn shutdown_local_services(local: LocalServices, config: &RunnerConfig) {
+/// returning its retained CAS handles for deferred maintenance.
+///
+/// Ordering contract: the server is fully stopped before this returns, so the
+/// GC [`JobTeardown::finish`] later runs can never race a live request handler
+/// over the same store — but GC itself is deliberately *not* run here.
+async fn stop_local_services(local: LocalServices) -> Option<CacheMaintenance> {
   match local {
     LocalServices::Offline(service, _, maintenance)
     | LocalServices::Accelerated(service, _, maintenance) => {
       service.shutdown().await;
-      run_cache_maintenance(config, &maintenance).await;
+      Some(maintenance)
     },
-    LocalServices::None => {},
-  }
-}
-
-/// Best-effort cache teardown: sweep abandoned staging uploads, then run one GC
-/// pass (TTL expiry + `max_bytes` eviction + unreferenced-blob sweep).
-///
-/// Neither step may fail the job: errors are logged and swallowed. Runs after
-/// the server has stopped, so no handler holds a read lease GC must respect.
-async fn run_cache_maintenance(config: &RunnerConfig, maintenance: &CacheMaintenance) {
-  sweep_staging_best_effort(&maintenance.staging_root);
-  gc_best_effort(config, maintenance).await;
-}
-
-/// Sweep abandoned `cas/staging` uploads best-effort; log and swallow errors.
-fn sweep_staging_best_effort(staging_root: &std::path::Path) {
-  match sweep_staging(staging_root, STAGING_SWEEP_TTL) {
-    Ok(0) => {},
-    Ok(n) => info!(removed = n, "cache staging sweep removed abandoned uploads"),
-    Err(e) => tracing::warn!(error = %e, "cache staging sweep failed; continuing"),
-  }
-}
-
-/// Run one GC pass over the retained CAS handles best-effort; never fails the job.
-async fn gc_best_effort(config: &RunnerConfig, maintenance: &CacheMaintenance) {
-  let gc = CacheGc::new(config.cache.entry_ttl_days, config.cache.max_bytes);
-  match gc
-    .run(&maintenance.store, &maintenance.index, &maintenance.leases)
-    .await
-  {
-    Ok(report) => info!(?report, "cache GC pass complete"),
-    Err(e) => tracing::warn!(error = %e, "cache GC failed; continuing"),
+    LocalServices::None => None,
   }
 }
 
@@ -219,25 +244,38 @@ fn prepare_job_dirs(
 /// saturate. A configured value at or above the cap means "never prune".
 const MAX_GC_HOURS: u64 = 100 * 365 * 24;
 
-/// Prune stale per-job workspaces best-effort, sparing the running job `keep`.
+/// Spawn the stale-workspace sweep on a blocking thread, sparing the running
+/// job `keep`. `None` when `workspace_gc_hours == 0` disables GC.
+///
+/// The sweep is blocking `read_dir` + `remove_dir_all`, so it runs off the
+/// async worker and overlaps the job instead of delaying its first step. The
+/// handle is joined by [`JobTeardown::finish`]; an early `?` return between
+/// here and there drops it un-joined, but `spawn_blocking` is not cancelled on
+/// drop, so the sweep still completes.
 ///
 /// GC failure must never fail the job, so an error is logged and the run
 /// continues; the count of pruned directories is logged at INFO.
-fn gc_stale_workspaces(config: &RunnerConfig, keep: &str) {
+fn spawn_workspace_gc(config: &RunnerConfig, keep: &str) -> Option<tokio::task::JoinHandle<()>> {
   // Zero disables GC. Without this guard `max_age` would be `Duration::ZERO`,
   // and "prune anything older than zero seconds" sweeps every finished
   // workspace — including ones created moments ago. Never-prune has two forms:
   // the explicit `0` off switch here, and the `>= MAX_GC_HOURS` cap below.
   if config.workspace_gc_hours == 0 {
-    return;
+    return None;
   }
   let hours = config.workspace_gc_hours.min(MAX_GC_HOURS);
   let max_age = Duration::from_secs(hours * 3600);
-  match super::workspace_gc::gc_workspaces(&config.workspace_root, max_age, keep) {
-    Ok(0) => {},
-    Ok(n) => info!(removed = n, "workspace GC pruned stale job workspaces"),
-    Err(e) => tracing::warn!(error = %e, "workspace GC failed; continuing"),
-  }
+  // Owned copies only — the closure must be 'static, and cloning the whole
+  // `RunnerConfig` for two fields would be wasteful.
+  let workspace_root = config.workspace_root.clone();
+  let keep = keep.to_owned();
+  Some(tokio::task::spawn_blocking(
+    move || match super::workspace_gc::gc_workspaces(&workspace_root, max_age, &keep) {
+      Ok(0) => {},
+      Ok(n) => info!(removed = n, "workspace GC pruned stale job workspaces"),
+      Err(e) => tracing::warn!(error = %e, "workspace GC failed; continuing"),
+    },
+  ))
 }
 
 /// Borrowed inputs for the hook + step-loop + outputs phase of a job run.
@@ -251,6 +289,9 @@ struct JobBody<'a> {
   /// Shadow-mode step observer threaded into the step loop (records, never
   /// serves).
   shadow: &'a ShadowObserver,
+  /// The job-scope HTTP client threaded to the step loop's action resolution
+  /// and post-drain.
+  http: &'a reqwest::Client,
 }
 
 /// Run the job-started hook, the step loop, job-output evaluation, and the
@@ -272,6 +313,7 @@ async fn run_job_body(
     workspace,
     spec,
     shadow,
+    http,
   } = *body;
 
   // Job-started hook is a hard gate: its failure fails the job before any step.
@@ -285,6 +327,7 @@ async fn run_job_body(
     config,
     spec,
     shadow: Some(shadow),
+    http,
   };
   let conclusion = run_steps(&msg.steps, ctx, events, cancel.clone(), &run).await?;
 
@@ -454,11 +497,15 @@ fn build_cas_handles(config: &RunnerConfig) -> Result<CacheMaintenance, RunnerEr
   let cache_dir = config.data_dir.join("cache");
   let staging_root = cache_dir.join("staging");
   std::fs::create_dir_all(&staging_root)?;
+  // `[cache] fsync_chunks` is the escape hatch back to a per-chunk fsync
+  // before rename; the default (`false`) leaves chunk integrity to the
+  // BLAKE3 verify-on-read the CAS already does.
   let store = CasStore::new(
     cache_dir.clone(),
     config.cache.chunk_avg_bytes,
     config.cache.max_bytes,
-  );
+  )
+  .with_fsync_chunks(config.cache.fsync_chunks);
   let index = CacheIndex::new(cache_dir);
   Ok(CacheMaintenance {
     store,

@@ -189,6 +189,7 @@ async fn drive_with_cancel(
   });
 
   let spec = execution::execution::job_spec::JobSpec::default();
+  let http = reqwest::Client::new();
   let conclusion = run_steps(
     steps,
     &mut ctx,
@@ -199,6 +200,7 @@ async fn drive_with_cancel(
       config,
       spec: &spec,
       shadow: None,
+      http: &http,
     },
   )
   .await?;
@@ -307,6 +309,7 @@ async fn drive_raw(
   let collector = tokio::spawn(async move { while rx.recv().await.is_some() {} });
 
   let spec = execution::execution::job_spec::JobSpec::default();
+  let http = reqwest::Client::new();
   let result = run_steps(
     steps,
     &mut ctx,
@@ -317,12 +320,38 @@ async fn drive_raw(
       config,
       spec: &spec,
       shadow: None,
+      http: &http,
     },
   )
   .await;
   drop(tx);
   collector.await?;
   Ok(result)
+}
+
+/// Common single-action rig shared by the hard-`Err` and cancel-grace tests
+/// below: a temp workspace/data dir with the real node runtime + `act-a`
+/// (marker `"A"`) seeded, and an empty marker file. Returns the `TempDir`
+/// guard (keep it alive for the test's duration) alongside the paths + config.
+fn seed_single_action_fixture(
+  node: &Path,
+) -> TestResult<(tempfile::TempDir, PathBuf, RunnerConfig, PathBuf)> {
+  let dir = tempfile::tempdir()?;
+  let (workspace, data_dir) = (dir.path().join("work"), dir.path().join("data"));
+  std::fs::create_dir_all(&workspace)?;
+  std::fs::create_dir_all(&data_dir)?;
+  let config = RunnerConfig {
+    data_dir: data_dir.clone(),
+    workspace_root: workspace.clone(),
+    cgroup_path: None,
+    services_mode: shared::ServicesMode::default(),
+    ..RunnerConfig::default()
+  };
+  seed_node(&data_dir, node)?;
+  seed_action(&data_dir, "act-a", "A")?;
+  let marker_file = data_dir.join("markers.txt");
+  std::fs::write(&marker_file, "")?;
+  Ok((dir, workspace, config, marker_file))
 }
 
 /// 3b: posts still drain when a later step returns a hard `Err` (action
@@ -335,21 +364,7 @@ async fn post_drains_even_when_a_later_step_errors_hard() -> TestResult<()> {
     return Ok(());
   };
 
-  let dir = tempfile::tempdir()?;
-  let (workspace, data_dir) = (dir.path().join("work"), dir.path().join("data"));
-  std::fs::create_dir_all(&workspace)?;
-  std::fs::create_dir_all(&data_dir)?;
-  let config = RunnerConfig {
-    data_dir: data_dir.clone(),
-    workspace_root: workspace.clone(),
-    cgroup_path: None,
-    services_mode: shared::ServicesMode::default(),
-    ..RunnerConfig::default()
-  };
-  seed_node(&data_dir, &node)?;
-  seed_action(&data_dir, "act-a", "A")?;
-  let marker_file = data_dir.join("markers.txt");
-  std::fs::write(&marker_file, "")?;
+  let (_dir, workspace, config, marker_file) = seed_single_action_fixture(&node)?;
 
   // Step 2 references a local action dir that does not exist, so the step
   // loop hits a hard resolution `Err` (not a `Failure` conclusion).
@@ -420,24 +435,10 @@ async fn post_drains_with_grace_when_job_is_cancelled() -> TestResult<()> {
     return Ok(());
   };
 
-  let dir = tempfile::tempdir()?;
-  let (workspace, data_dir) = (dir.path().join("work"), dir.path().join("data"));
-  std::fs::create_dir_all(&workspace)?;
-  std::fs::create_dir_all(&data_dir)?;
-  let config = RunnerConfig {
-    data_dir: data_dir.clone(),
-    workspace_root: workspace.clone(),
-    cgroup_path: None,
-    services_mode: shared::ServicesMode::default(),
-    ..RunnerConfig::default()
-  };
-  seed_node(&data_dir, &node)?;
-  seed_action(&data_dir, "act-a", "A")?;
+  let (_dir, workspace, config, marker_file) = seed_single_action_fixture(&node)?;
   // Swap the cached main for the slow variant AFTER seeding; pre/post stay real.
-  let cache_dir = action_cache_dir(&data_dir, "toolu/act-a/v1");
+  let cache_dir = action_cache_dir(&config.data_dir, "toolu/act-a/v1");
   std::fs::write(cache_dir.join("main.js"), SLOW_MAIN_JS)?;
-  let marker_file = data_dir.join("markers.txt");
-  std::fs::write(&marker_file, "")?;
 
   let cancel = CancellationToken::new();
   let canceller = cancel_when_main_starts(cancel.clone(), marker_file.clone());

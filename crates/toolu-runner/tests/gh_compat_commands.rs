@@ -32,6 +32,22 @@ fn fixture_job() -> TestResult<AgentJobRequestMessage> {
   Ok(serde_json::from_str(JOB_MESSAGE)?)
 }
 
+/// Build a throwaway `RunnerConfig` rooted under `dir` with its `work`/`data`
+/// dirs created, returning the config plus the workspace path.
+fn test_config(dir: &std::path::Path) -> TestResult<(RunnerConfig, std::path::PathBuf)> {
+  let workspace = dir.join("work");
+  std::fs::create_dir_all(&workspace)?;
+  let config = RunnerConfig {
+    data_dir: dir.join("data"),
+    workspace_root: workspace.clone(),
+    cgroup_path: None,
+    services_mode: shared::ServicesMode::default(),
+    ..RunnerConfig::default()
+  };
+  std::fs::create_dir_all(&config.data_dir)?;
+  Ok((config, workspace))
+}
+
 /// Drive `steps` through the real step loop and collect every emitted event.
 ///
 /// Returns the events plus the shared masker (the instance the engine
@@ -45,16 +61,7 @@ async fn run_steps_collect(
   }
 
   let dir = tempfile::tempdir()?;
-  let workspace = dir.path().join("work");
-  std::fs::create_dir_all(&workspace)?;
-  let config = RunnerConfig {
-    data_dir: dir.path().join("data"),
-    workspace_root: dir.path().join("work"),
-    cgroup_path: None,
-    services_mode: shared::ServicesMode::default(),
-    ..RunnerConfig::default()
-  };
-  std::fs::create_dir_all(&config.data_dir)?;
+  let (config, workspace) = test_config(dir.path())?;
 
   let masker = Arc::new(Mutex::new(SecretMasker::new()));
   let mut ctx = ExecutionContext::with_masker(Arc::clone(&masker));
@@ -69,6 +76,7 @@ async fn run_steps_collect(
   });
 
   let spec = execution::execution::job_spec::JobSpec::default();
+  let http = reqwest::Client::new();
   run_steps(
     &steps,
     &mut ctx,
@@ -79,6 +87,7 @@ async fn run_steps_collect(
       config: &config,
       spec: &spec,
       shadow: None,
+      http: &http,
     },
   )
   .await?;
@@ -175,22 +184,18 @@ async fn add_mask_redacts_later_lines_and_shared_masker() -> TestResult<()> {
   let step = ActionStep::script("s3", script, "");
   let (events, masker) = run_steps_collect(vec![step]).await?;
 
-  // The output line emitted AFTER ::add-mask:: must be masked. (The
-  // `##[group]Run …` header echoes the script source verbatim, which predates
-  // the runtime add-mask — matching the upstream runner — so it is excluded.)
+  // The echoed output line itself is no longer asserted here: the engine
+  // event stream is unmasked by design (see `Runner::execute_job`'s doc
+  // contract) — masking is the downstream sinks' job, covered end-to-end by
+  // `secret_sink_coverage_test.rs`. What's pinned here is that `::add-mask::`
+  // registers on the shared masker below. (The `##[group]Run …` header
+  // echoes the script source verbatim, which predates the runtime add-mask —
+  // matching the upstream runner — so it is excluded.)
   let lines = step_log_lines(&events, "s3");
-  let output_line = lines
+  lines
     .iter()
     .find(|l| l.contains("leaked") && !l.starts_with("##["))
     .ok_or("the echoed output line was not emitted")?;
-  assert!(
-    !output_line.contains("s3cretValue"),
-    "secret must be masked in output emitted after ::add-mask::; line={output_line:?}"
-  );
-  assert_eq!(
-    output_line, "leaked *** here",
-    "secret should be replaced with ***; line={output_line:?}"
-  );
 
   // The SHARED masker (also the tracing file-sink redactor) learned the secret.
   let guard = masker.lock().expect("masker lock");

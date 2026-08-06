@@ -29,6 +29,9 @@ pub struct CompositeParams<'a> {
   /// Job-level cancellation token, threaded to nested `uses:` steps so a
   /// top-level cancel interrupts actions running inside a composite.
   pub cancel: &'a CancellationToken,
+  /// The job-scope HTTP client, threaded to nested `uses:` steps so their
+  /// action resolution reuses the same connection pool.
+  pub http: &'a reqwest::Client,
 }
 
 /// Result of composite execution including side effects (env/path changes).

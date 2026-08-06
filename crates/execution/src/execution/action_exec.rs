@@ -26,13 +26,15 @@ struct ResolvedStep {
 }
 
 /// Immutable per-step environment shared across an action's dispatch path:
-/// the event sink, the workspace root, the runner config, and the step's
-/// timeout / cancellation bounds (applied to every node child it spawns).
+/// the event sink, the workspace root, the runner config, the step's
+/// timeout / cancellation bounds (applied to every node child it spawns), and
+/// the job-scope HTTP client (threaded to nested composite `uses:` steps).
 struct ActionEnv<'a> {
   events: &'a mpsc::Sender<RunnerEvent>,
   workspace: &'a Path,
   config: &'a RunnerConfig,
   bounds: &'a StepBounds,
+  http: &'a reqwest::Client,
 }
 
 /// Outcome of running an action step's `pre`+`main` stages.
@@ -54,6 +56,8 @@ pub(crate) struct ActionRun<'a> {
   pub(crate) workspace: &'a Path,
   pub(crate) config: &'a RunnerConfig,
   pub(crate) bounds: &'a StepBounds,
+  /// The job-scope HTTP client (120 s timeout), built once in `run_job`.
+  pub(crate) http: &'a reqwest::Client,
 }
 
 /// Execute an action step end-to-end: resolve -> download -> parse manifest ->
@@ -69,12 +73,13 @@ pub(crate) async fn execute_action(
   run: &ActionRun<'_>,
   depth: &mut DepthTracker,
 ) -> Result<ActionOutcome, RunnerError> {
-  let resolved = resolve_action(step, run.workspace, run.config, run.events).await?;
+  let resolved = resolve_action(step, run.workspace, run.config, run.events, run.http).await?;
   let env = ActionEnv {
     events: run.events,
     workspace: run.workspace,
     config: run.config,
     bounds: run.bounds,
+    http: run.http,
   };
   dispatch_action(step, ctx, &env, &resolved, depth).await
 }
@@ -83,6 +88,10 @@ pub(crate) async fn execute_action(
 ///
 /// Remote actions are downloaded+cached; local `./path` actions resolve to a
 /// directory under `workspace` (the checked-out repo) with no network access.
+/// `client` is the job-scope HTTP client (120 s timeout, built once in
+/// `run_job`) reused for the tarball download and any node-runtime download —
+/// it is cloned into the returned [`ResolvedStep`] (an `Arc` bump under the
+/// hood, cheap).
 ///
 /// # Errors
 ///
@@ -92,6 +101,7 @@ async fn resolve_action(
   workspace: &Path,
   config: &RunnerConfig,
   events: &mpsc::Sender<RunnerEvent>,
+  client: &reqwest::Client,
 ) -> Result<ResolvedStep, RunnerError> {
   let uses = step
     .reference
@@ -108,27 +118,27 @@ async fn resolve_action(
 
   let action_ref = parse_action_ref(&uses_full)?;
 
-  // Build one timeout-bounded client per resolution and reuse it for the
-  // tarball download and any node-runtime download — a fresh `Client::new()`
-  // per call has no request timeout, so a hung connection would block the
-  // step forever. Downloads can be large, so the timeout is generous.
-  let client = action_client()?;
-
   if action_ref.kind == ActionRefKind::Local {
-    return resolve_local_action(step, &action_ref, &uses_full, workspace, events, client).await;
+    return resolve_local_action(
+      step,
+      &action_ref,
+      &uses_full,
+      workspace,
+      events,
+      client.clone(),
+    )
+    .await;
   }
 
-  resolve_remote_action(step, &action_ref, &uses_full, config, events, client).await
-}
-
-/// Build the per-resolution HTTP client with a generous request timeout
-/// (downloads can be large). Propagates the builder error rather than
-/// unwrapping.
-fn action_client() -> Result<reqwest::Client, RunnerError> {
-  reqwest::Client::builder()
-    .timeout(std::time::Duration::from_secs(120))
-    .build()
-    .map_err(|e| RunnerError::ActionResolution(format!("build HTTP client: {e}")))
+  resolve_remote_action(
+    step,
+    &action_ref,
+    &uses_full,
+    config,
+    events,
+    client.clone(),
+  )
+  .await
 }
 
 /// Resolve a local `./path` action to a directory under `workspace`.
@@ -281,6 +291,7 @@ async fn run_composite_inner(
     parent_step_id: &step.id,
     action_dir: &resolved.action_dir,
     cancel: &env.bounds.cancel,
+    http: env.http,
   };
   let result = execute_composite_action(&params, ctx, depth).await?;
   for (k, v) in &result.env_additions {

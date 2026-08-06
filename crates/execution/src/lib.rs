@@ -43,6 +43,11 @@ impl Runner {
   ///
   /// The job runs in a background task. Events are emitted as the job
   /// progresses. The stream closes when the job completes.
+  ///
+  /// **The event stream is unmasked.** `RunnerEvent::Log` lines are not
+  /// passed through the secret masker; every consumer of this receiver must
+  /// mask before writing a line to a durable sink. `execution` is a public
+  /// library, so callers outside this workspace must honor this contract too.
   pub async fn execute_job(
     &self,
     job: AgentJobRequestMessage,
@@ -53,18 +58,29 @@ impl Runner {
     let masker = Arc::clone(&self.masker);
 
     tokio::spawn(async move {
-      if let Err(err) =
-        crate::execution::job_runner::run_job(job, &config, cancel, tx.clone(), masker).await
-      {
-        tracing::error!(error = %err, "job execution failed");
-        let _ = tx
-          .send(RunnerEvent::JobCompleted {
-            job_id: String::new(),
-            conclusion: Conclusion::Failure,
-            outputs: HashMap::new(),
-          })
-          .await;
-      }
+      // `err_tx` exists only to report a failed job after `run_job` has
+      // consumed the sender it was given.
+      let err_tx = tx.clone();
+      let teardown =
+        match crate::execution::job_runner::run_job(job, &config, cancel, tx, masker).await {
+          Ok(teardown) => teardown,
+          Err(err) => {
+            tracing::error!(error = %err, "job execution failed");
+            let _ = err_tx
+              .send(RunnerEvent::JobCompleted {
+                job_id: String::new(),
+                conclusion: Conclusion::Failure,
+                outputs: HashMap::new(),
+              })
+              .await;
+            return;
+          },
+        };
+      // Dropping the last sender closes the event channel, which is what
+      // ultimately reports the job to GitHub. Cache GC and the workspace
+      // sweep then overlap that round-trip instead of preceding it.
+      drop(err_tx);
+      teardown.finish(&config).await;
     });
 
     rx

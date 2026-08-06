@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use futures_util::Stream;
 use shared::RunnerError;
 
-use super::chunk_io;
+use super::chunk_io::{self, Durability};
 use super::chunker;
 use super::manifest::{ChunkId, Manifest};
 use crate::tier::{BlobKind, L2Tier};
@@ -25,18 +25,23 @@ pub struct CasStore {
   chunk_avg_bytes: u32,
   max_bytes: u64,
   l2: Option<L2Tier>,
+  durability: Durability,
 }
 
 impl CasStore {
   /// Create a store rooted at `root` with the given FastCDC average and L1 byte cap.
   ///
-  /// The optional S3 cold tier defaults to `None`; attach one with [`with_l2`](Self::with_l2).
+  /// The optional S3 cold tier defaults to `None`; attach one with
+  /// [`with_l2`](Self::with_l2). Chunk writes default to
+  /// [`Durability::Deferred`] (no per-chunk fsync); restore the old
+  /// behaviour with [`with_durability`](Self::with_durability).
   pub fn new(root: PathBuf, chunk_avg_bytes: u32, max_bytes: u64) -> Self {
     Self {
       root,
       chunk_avg_bytes,
       max_bytes,
       l2: None,
+      durability: Durability::Deferred,
     }
   }
 
@@ -47,9 +52,46 @@ impl CasStore {
     self
   }
 
+  /// Set the chunk-write durability mode (`Deferred` by default), returning
+  /// the store for chaining. Mirrors [`with_l2`](Self::with_l2). Only
+  /// `ingest`'s per-chunk writes honor this setting — manifest writes are
+  /// always `Fsync`, and an L2 restore's L1 write-back is always `Deferred`
+  /// (it sits on the read-latency path, not the save path this escape hatch
+  /// targets).
+  #[must_use]
+  pub(crate) fn with_durability(mut self, mode: Durability) -> Self {
+    self.durability = mode;
+    self
+  }
+
+  /// Apply the `[cache] fsync_chunks` config knob to the chunk-write
+  /// durability mode, returning the store for chaining. `true` restores the
+  /// pre-0.6 per-chunk fsync; `false` (default) is the deferred-fsync mode
+  /// [`with_durability`](Self::with_durability) exists to support.
+  /// [`Durability`] itself is crate-private, so this `bool`-typed wrapper is
+  /// the only way a caller outside `cache` can set it.
+  #[must_use]
+  pub fn with_fsync_chunks(self, fsync_chunks: bool) -> Self {
+    let mode = if fsync_chunks {
+      Durability::Fsync
+    } else {
+      Durability::Deferred
+    };
+    self.with_durability(mode)
+  }
+
   /// The configured L1 byte cap (consumed by GC in a later step).
   pub fn max_bytes(&self) -> u64 {
     self.max_bytes
+  }
+
+  /// Whether chunk writes fsync before their atomic rename (`true`) or defer
+  /// to verify-on-read (`false`, the default). Read-only mirror of the
+  /// `bool`-typed [`with_fsync_chunks`](Self::with_fsync_chunks) setter, so a
+  /// caller outside `cache` (e.g. a wiring test) can observe which mode a
+  /// constructed store actually ended up in.
+  pub fn fsync_chunks(&self) -> bool {
+    self.durability == Durability::Fsync
   }
 
   /// Directory holding content-addressed chunk blobs.
@@ -61,7 +103,11 @@ impl CasStore {
   fn manifests_dir(&self) -> PathBuf {
     self.root.join("manifests")
   }
+}
 
+/// Ingest, read, and enumerate/delete operations, split from the construction
+/// block above so no single `impl CasStore` block grows unwieldy.
+impl CasStore {
   /// Chunk an assembled staging file with FastCDC, writing each unique chunk; returns the manifest.
   ///
   /// # Errors
@@ -70,10 +116,12 @@ impl CasStore {
     let blobs = self.blobs_dir();
     let staged = staged.to_path_buf();
     let avg = self.chunk_avg_bytes;
-    let manifest =
-      tokio::task::spawn_blocking(move || chunker::chunk_and_store(&staged, &blobs, avg))
-        .await
-        .map_err(|e| RunnerError::Cache(format!("ingest task join failed: {e}")))??;
+    let durability = self.durability;
+    let manifest = tokio::task::spawn_blocking(move || {
+      chunker::chunk_and_store(&staged, &blobs, avg, durability)
+    })
+    .await
+    .map_err(|e| RunnerError::Cache(format!("ingest task join failed: {e}")))??;
     self.mirror_chunks_to_l2(&manifest).await;
     Ok(manifest)
   }
@@ -88,9 +136,11 @@ impl CasStore {
     let hex = id.to_hex();
     let path = chunk_io::blob_path(&self.manifests_dir(), &hex);
     let for_write = json.clone();
-    tokio::task::spawn_blocking(move || chunk_io::write_atomic_sync(&path, &for_write))
-      .await
-      .map_err(|e| RunnerError::Cache(format!("manifest write join failed: {e}")))??;
+    tokio::task::spawn_blocking(move || {
+      chunk_io::write_atomic(&path, &for_write, Durability::Fsync)
+    })
+    .await
+    .map_err(|e| RunnerError::Cache(format!("manifest write join failed: {e}")))??;
     if let Some(l2) = &self.l2
       && let Err(e) = l2.put_blob(BlobKind::Manifest, &hex, &json).await
     {
@@ -277,19 +327,45 @@ async fn read_slice(
   slice_of(&bytes, skip, take)
 }
 
-/// Read+verify a chunk from L1; if absent and L2 is present, restore it into L1 first.
+/// Read+verify a chunk from L1, self-healing a torn chunk and restoring from
+/// L2 (if configured) when the chunk is missing or corrupt.
+///
+/// Inlines `tokio::fs::read` + [`chunk_io::verify_bytes`] instead of calling
+/// [`chunk_io::read_verified`] (shared with [`CasStore::get_manifest`], which
+/// must never lose a manifest to this path) so the mismatch is a locally
+/// typed arm, not a string match. On mismatch the corrupt chunk is removed
+/// (WARN-and-continue on a failed removal — never blocks the miss/restore).
 async fn read_chunk_or_restore(
   path: &Path,
   l2: Option<&L2Tier>,
   id: &ChunkId,
 ) -> Result<Vec<u8>, RunnerError> {
-  match chunk_io::read_verified(path, id).await {
-    Ok(bytes) => Ok(bytes),
-    Err(RunnerError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => {
-      restore_from_l2(path, l2, id).await
+  let bytes = match tokio::fs::read(path).await {
+    Ok(bytes) => bytes,
+    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+      return restore_from_l2(path, l2, id).await;
     },
-    Err(e) => Err(e),
+    Err(e) => return Err(RunnerError::Io(e)),
+  };
+  match chunk_io::verify_bytes(&bytes, id) {
+    Ok(()) => return Ok(bytes),
+    Err(e) => {
+      tracing::warn!(
+        error = %e,
+        chunk_id = %id.to_hex(),
+        path = %path.display(),
+        "self-heal: chunk failed BLAKE3 verify; removing"
+      );
+    },
   }
+  if let Err(e) = tokio::fs::remove_file(path).await {
+    tracing::warn!(
+      error = %e,
+      path = %path.display(),
+      "self-heal: removing corrupt chunk failed; continuing to miss/restore"
+    );
+  }
+  restore_from_l2(path, l2, id).await
 }
 
 /// Pull a chunk from L2 into L1 (crash-safe), verifying before the write so bad data never poisons L1.
@@ -310,9 +386,11 @@ async fn restore_from_l2(
   chunk_io::verify_bytes(&bytes, id)?;
   let dest = path.to_path_buf();
   let for_write = bytes.clone();
-  tokio::task::spawn_blocking(move || chunk_io::write_atomic_sync(&dest, &for_write))
-    .await
-    .map_err(|e| RunnerError::Cache(format!("L2 restore write join failed: {e}")))??;
+  tokio::task::spawn_blocking(move || {
+    chunk_io::write_atomic(&dest, &for_write, Durability::Deferred)
+  })
+  .await
+  .map_err(|e| RunnerError::Cache(format!("L2 restore write join failed: {e}")))??;
   Ok(bytes)
 }
 

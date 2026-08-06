@@ -149,6 +149,11 @@ pub struct CacheSection {
   /// `[cache.l2]` S3 cold tier.
   #[serde(default)]
   pub l2: L2Section,
+  /// Restore the pre-0.6 per-chunk `fsync` before rename (default `false`).
+  /// See [`CacheConfig::fsync_chunks`](shared::CacheConfig) for the durability
+  /// contract this overrides.
+  #[serde(default)]
+  pub fsync_chunks: bool,
 }
 
 impl Default for CacheSection {
@@ -159,6 +164,7 @@ impl Default for CacheSection {
       protected_branches: default_protected_branches(),
       chunk_avg_bytes: default_chunk_avg_bytes(),
       l2: L2Section::default(),
+      fsync_chunks: false,
     }
   }
 }
@@ -172,6 +178,7 @@ impl CacheSection {
       protected_branches: self.protected_branches.clone(),
       chunk_avg_bytes: self.chunk_avg_bytes,
       l2: self.l2.resolve(),
+      fsync_chunks: self.fsync_chunks,
     }
   }
 }

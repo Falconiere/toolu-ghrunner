@@ -139,3 +139,48 @@ fn short_secret_and_its_encodings_are_not_registered() {
     "short secret must register no patterns"
   );
 }
+
+/// Asserts `out` contains no substring of `pat` longer than `max_len`
+/// characters — the leak `MatchKind::LeftmostLongest` would produce.
+fn assert_no_long_substring_leak(out: &str, pat: &str, max_len: usize) {
+  let chars: Vec<char> = pat.chars().collect();
+  for len in (max_len + 1)..=chars.len() {
+    for window in chars.windows(len) {
+      let sub: String = window.iter().collect();
+      assert!(!out.contains(&sub), "leaked substring {sub:?} of {pat:?} in {out:?}");
+    }
+  }
+}
+
+#[test]
+fn overlapping_patterns_merge_into_one_mask_no_leak() {
+  // The case `MatchKind::LeftmostLongest` gets wrong: "xabc" and
+  // "abcdef12" overlap in "xabcdef12y", so the merged single-pass mask
+  // must cover their union ("***y"), not leak the shorter match's tail
+  // ("***def12y", 5 bytes of "abcdef12" exposed).
+  let mut masker = SecretMasker::new();
+  masker.add_secret("abcdef12");
+  masker.add_secret("xabc");
+  let out = masker.mask("xabcdef12y");
+  assert_eq!(out, "***y", "overlap must merge into one mask: {out}");
+  assert_no_long_substring_leak(&out, "abcdef12", 3);
+  assert_no_long_substring_leak(&out, "xabc", 3);
+}
+
+#[test]
+fn multi_line_secret_masks_a_line_seen_alone() {
+  // PEM keys / JWTs are multi-line; each line is registered separately so
+  // a header-only leak is still masked.
+  let secret = "-----BEGIN FAKE-----\nabcdef0123456789\n-----END FAKE-----";
+  let mut masker = SecretMasker::new();
+  masker.add_secret(secret);
+  let out = masker.mask("header: -----BEGIN FAKE----- present");
+  assert!(!out.contains("-----BEGIN FAKE-----"), "leaked header: {out}");
+  assert!(out.contains("***"), "expected marker: {out}");
+}
+
+#[test]
+fn empty_masker_returns_input_unchanged() {
+  let masker = SecretMasker::new();
+  assert_eq!(masker.mask("no secrets here"), "no secrets here");
+}

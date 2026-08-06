@@ -155,6 +155,25 @@ async fn run_echo_job(body: &str, mode: ServicesMode) -> TestResult<String> {
   Ok(run_echo_job_with_masker(body, mode).await?.0)
 }
 
+/// Drain the engine event stream into the concatenated stdout `Log` lines.
+fn spawn_stdout_collector(mut rx: mpsc::Receiver<RunnerEvent>) -> tokio::task::JoinHandle<String> {
+  tokio::spawn(async move {
+    let mut lines = String::new();
+    while let Some(ev) = rx.recv().await {
+      if let RunnerEvent::Log {
+        line,
+        stream: LogStream::Stdout,
+        ..
+      } = ev
+      {
+        lines.push_str(&line);
+        lines.push('\n');
+      }
+    }
+    lines
+  })
+}
+
 /// Same as `run_echo_job` but also returns the job's `SecretMasker`, so tests
 /// can assert what the run registered for redaction.
 async fn run_echo_job_with_masker(
@@ -179,24 +198,10 @@ async fn run_echo_job_with_masker(
   msg.steps = vec![ActionStep::script("echo-env", body, "")];
 
   let masker = Arc::new(Mutex::new(SecretMasker::new()));
-  let (tx, mut rx) = mpsc::channel::<RunnerEvent>(1024);
-  let collector = tokio::spawn(async move {
-    let mut lines = String::new();
-    while let Some(ev) = rx.recv().await {
-      if let RunnerEvent::Log {
-        line,
-        stream: LogStream::Stdout,
-        ..
-      } = ev
-      {
-        lines.push_str(&line);
-        lines.push('\n');
-      }
-    }
-    lines
-  });
+  let (tx, rx) = mpsc::channel::<RunnerEvent>(1024);
+  let collector = spawn_stdout_collector(rx);
 
-  run_job(
+  let teardown = run_job(
     msg,
     &config,
     CancellationToken::new(),
@@ -204,7 +209,10 @@ async fn run_echo_job_with_masker(
     Arc::clone(&masker),
   )
   .await?;
-  Ok((collector.await?, masker))
+  let lines = collector.await?;
+  // `run_job` now defers cache maintenance + workspace GC to the caller.
+  teardown.finish(&config).await;
+  Ok((lines, masker))
 }
 
 #[tokio::test]

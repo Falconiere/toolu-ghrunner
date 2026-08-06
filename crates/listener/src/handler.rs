@@ -34,6 +34,12 @@ pub(crate) struct SessionCtx {
   /// Runner RSA private key (PKCS#1 DER) for unwrapping an encrypted
   /// session AES key. Reconstructed from the JIT `credentials_rsaparams`.
   pub(crate) rsa_private_key_der: Vec<u8>,
+  /// Join handle for the detached live-log WebSocket wrapper task spawned
+  /// by `connect_live_log`, stashed here (rather than threaded as a
+  /// `cleanup_session` argument) so both the `poll_and_execute` `Ok` and
+  /// `Err` paths join it: the handle is created deep inside that call, and
+  /// an early `?` return there would otherwise drop it un-joined.
+  pub(crate) live_log: Option<tokio::task::JoinHandle<()>>,
 }
 
 /// GitHubListener wraps a Runner and handles the full GitHub protocol lifecycle:
@@ -50,6 +56,10 @@ pub struct GitHubListener {
 impl GitHubListener {
   /// Create a new listener from a base64-encoded JIT config string.
   ///
+  /// `client` is the loop-scope HTTP client (60 s timeout), built once by
+  /// `run_cmd::RunLoop` and reused across every re-mint iteration instead of
+  /// a fresh connection pool + TLS handshake per job.
+  ///
   /// # Errors
   ///
   /// Returns `RunnerError::Protocol` if JIT config parsing fails.
@@ -57,12 +67,9 @@ impl GitHubListener {
     jit_config_base64: &str,
     config: RunnerConfig,
     masker: Arc<Mutex<SecretMasker>>,
+    client: reqwest::Client,
   ) -> Result<Self, RunnerError> {
     let jit_config = JitConfig::parse(jit_config_base64)?;
-    let client = reqwest::Client::builder()
-      .timeout(std::time::Duration::from_secs(60))
-      .build()
-      .map_err(|e| RunnerError::Protocol(format!("HTTP client build: {e}")))?;
 
     Ok(Self {
       jit_config,
@@ -107,7 +114,7 @@ impl GitHubListener {
       log_job_error(e);
     }
 
-    super::helpers::cleanup_session(&ctx).await;
+    super::helpers::cleanup_session(&mut ctx).await;
     // Drop the ctx (and its `tx`) so the journal channel closes, then wait
     // for the writer to flush the final events (e.g. `job_completed`) before
     // returning — otherwise a fast `--once` exit could truncate the tail.
@@ -118,21 +125,18 @@ impl GitHubListener {
     result
   }
 
-  /// Authenticate, create the broker session, and assemble the `SessionCtx`.
-  /// Reconstructs the runner RSA key (PKCS#1 DER) so encrypted message
-  /// bodies can be decrypted on the poll path.
+  /// Authenticate against the broker and create the ephemeral session,
+  /// emitting the `SessionCreated` event. Split out of `build_session_ctx`
+  /// to keep that function short: returns just the pieces the caller needs
+  /// to assemble `SessionCtx`.
   ///
   /// # Errors
   ///
-  /// Returns `RunnerError::Protocol` on key reconstruction, auth, or
-  /// session creation failure.
-  async fn build_session_ctx(
+  /// Returns `RunnerError::Protocol` on auth or session creation failure.
+  async fn authenticate_and_create_session(
     &self,
-    cancel: CancellationToken,
-    tx: mpsc::Sender<ListenerEvent>,
-  ) -> Result<SessionCtx, RunnerError> {
-    let rsa_private_key_der = parse_rsa_private_key(&self.jit_config.rsa_key_params)?;
-
+    tx: &mpsc::Sender<ListenerEvent>,
+  ) -> Result<(String, protocol::CreateSessionResponse), RunnerError> {
     let jit = &self.jit_config;
     let client = &self.client;
 
@@ -163,10 +167,29 @@ impl GitHubListener {
       .await;
     tracing::info!(session_id = %session_response.session_id, "session created — long-polling for jobs");
 
+    Ok((token.access_token, session_response))
+  }
+
+  /// Authenticate, create the broker session, and assemble the `SessionCtx`.
+  /// Reconstructs the runner RSA key (PKCS#1 DER) so encrypted message
+  /// bodies can be decrypted on the poll path.
+  ///
+  /// # Errors
+  ///
+  /// Returns `RunnerError::Protocol` on key reconstruction, auth, or
+  /// session creation failure.
+  async fn build_session_ctx(
+    &self,
+    cancel: CancellationToken,
+    tx: mpsc::Sender<ListenerEvent>,
+  ) -> Result<SessionCtx, RunnerError> {
+    let rsa_private_key_der = parse_rsa_private_key(&self.jit_config.rsa_key_params)?;
+    let (access_token, session_response) = self.authenticate_and_create_session(&tx).await?;
+
     Ok(SessionCtx {
-      client: client.clone(),
-      token: token.access_token,
-      broker_url: jit.runner_settings.server_url_v2.clone(),
+      client: self.client.clone(),
+      token: access_token,
+      broker_url: self.jit_config.runner_settings.server_url_v2.clone(),
       session_id: session_response.session_id,
       config: self.config.clone(),
       masker: Arc::clone(&self.masker),
@@ -175,6 +198,7 @@ impl GitHubListener {
       encryption_key: session_response.encryption_key,
       use_fips_encryption: session_response.use_fips_encryption,
       rsa_private_key_der,
+      live_log: None,
     })
   }
 }

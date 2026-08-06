@@ -1,0 +1,154 @@
+{
+  "messageType": "PipelineAgentJobRequest",
+  "plan": {
+    "scopeIdentifier": "a1b2c3d4-0000-4000-8000-000000000001",
+    "planId": "f0e1d2c3-1111-4222-8333-444455556666",
+    "planType": "Build",
+    "version": 12
+  },
+  "timeline": {
+    "id": "9c8b7a60-2222-4333-8444-555566667777"
+  },
+  "jobId": "0e9d8c7b-3333-4444-8555-666677778888",
+  "jobDisplayName": "build",
+  "jobName": "__default",
+  "requestId": 421,
+  "lockedUntil": "2026-06-19T18:30:00.0000000Z",
+  "steps": [
+    {
+      "id": "11111111-aaaa-4bbb-8ccc-dddddddddddd",
+      "type": "action",
+      "contextName": "__run",
+      "condition": "success()",
+      "continueOnError": false,
+      "timeoutInMinutes": 5,
+      "reference": {
+        "type": "script"
+      },
+      "inputs": {
+        "type": 2,
+        "map": [
+          {
+            "Key": { "type": 0, "lit": "script" },
+            "Value": { "type": 0, "lit": "echo \"x=1\" >> $GITHUB_OUTPUT" }
+          },
+          {
+            "Key": { "type": 0, "lit": "shell" },
+            "Value": { "type": 0, "lit": "bash" }
+          }
+        ]
+      }
+    },
+    {
+      "id": "22222222-aaaa-4bbb-8ccc-eeeeeeeeeeee",
+      "type": "action",
+      "contextName": "checkout",
+      "condition": "success()",
+      "continueOnError": false,
+      "reference": {
+        "type": "repository",
+        "name": "actions/checkout",
+        "ref": "v4",
+        "repositoryType": "GitHub"
+      },
+      "inputs": {
+        "type": 2,
+        "map": [
+          {
+            "Key": { "type": 0, "lit": "fetch-depth" },
+            "Value": { "type": 0, "lit": "1" }
+          }
+        ]
+      }
+    }
+  ],
+  "variables": {
+    "system.github.token": {
+      "value": "ghs_EXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLE0000",
+      "isSecret": true
+    },
+    "MY_SECRET": {
+      "value": "s3cr3t-token-value-XYZ",
+      "isSecret": true
+    },
+    "DistributedTask.NewActionMetadata": {
+      "value": "true",
+      "isSecret": false
+    },
+    "system.runnerGroupName": {
+      "value": "Default",
+      "isSecret": false
+    }
+  },
+  "mask": [
+    {
+      "value": "ghs_EXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLE0000",
+      "type": "regex"
+    }
+  ],
+  "resources": {
+    "endpoints": [
+      {
+        "name": "SystemVssConnection",
+        "url": "https://pipelines.actions.githubusercontent.com/aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789/",
+        "authorization": {
+          "scheme": "OAuth",
+          "parameters": {
+            "AccessToken": "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.EXAMPLE.PAYLOAD"
+          }
+        },
+        "data": {
+          "FeedStreamUrl": "https://pipelines.actions.githubusercontent.com/aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789/_apis/distributedtask/hubs/Actions/plans/f0e1d2c3-1111-4222-8333-444455556666/feed/stream",
+          "CacheServerUrl": "https://acghubeus2.actions.githubusercontent.com/aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789/",
+          "ResultsServiceUrl": "https://results-receiver.actions.githubusercontent.com/",
+          "GenerateIdTokenUrl": "https://pipelines.actions.githubusercontent.com/aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789/_apis/distributedtask/hubs/Actions/plans/f0e1d2c3-1111-4222-8333-444455556666/jobs/0e9d8c7b-3333-4444-8555-666677778888/idtoken",
+          "PipelinesServiceUrl": "https://pipelines.actions.githubusercontent.com/aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789/"
+        }
+      }
+    ]
+  },
+  "runServiceUrl": "https://run-actions-1-azure-eastus.actions.githubusercontent.com/",
+  "contextData": {
+    "github": {
+      "type": 2,
+      "d": [
+        { "k": "sha", "v": "d6cd1e2bd19e03a81132a23b2025920577f84e37" },
+        { "k": "ref", "v": "refs/heads/main" },
+        { "k": "ref_name", "v": "main" },
+        { "k": "ref_type", "v": "branch" },
+        { "k": "repository", "v": "octocat/hello-world" },
+        { "k": "repository_owner", "v": "octocat" },
+        { "k": "run_id", "v": "9876543210" },
+        { "k": "run_number", "v": "42" },
+        { "k": "run_attempt", "v": "1" },
+        { "k": "event_name", "v": "push" },
+        { "k": "actor", "v": "octocat" },
+        { "k": "workflow", "v": "CI" },
+        { "k": "job", "v": "build" },
+        { "k": "server_url", "v": "https://github.com" },
+        { "k": "api_url", "v": "https://api.github.com" }
+      ]
+    },
+    "runner": {
+      "type": 2,
+      "d": [
+        { "k": "os", "v": "Linux" },
+        { "k": "arch", "v": "X64" },
+        { "k": "name", "v": "GitHub Actions 1" }
+      ]
+    },
+    "vars": {
+      "type": 2,
+      "d": [
+        { "k": "MY_VAR", "v": "repo-config-value" },
+        { "k": "DEPLOY_ENV", "v": "staging" }
+      ]
+    }
+  },
+  "workspace": {
+    "clean": "true"
+  },
+  "environmentVariables": [],
+  "defaults": [],
+  "fileTable": []
+}

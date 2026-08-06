@@ -71,8 +71,10 @@ async fn accelerated_env() -> TestResult<HashMap<String, String>> {
   let (tx, mut rx) = mpsc::channel::<RunnerEvent>(1024);
   let drain = tokio::spawn(async move { while rx.recv().await.is_some() {} });
 
-  run_job(msg, &config, CancellationToken::new(), tx, masker).await?;
+  let teardown = run_job(msg, &config, CancellationToken::new(), tx, masker).await?;
   drain.await?;
+  // `run_job` now defers cache maintenance + workspace GC to the caller.
+  teardown.finish(&config).await;
 
   let text = std::fs::read_to_string(&dump)?;
   Ok(parse_env(&text))

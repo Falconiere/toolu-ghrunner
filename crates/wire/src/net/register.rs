@@ -9,6 +9,8 @@
 //! Split for token-free testing: [`build_request`] / [`parse_response`]
 //! are pure; [`register_jit`] is the async send that glues them.
 
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 use shared::RunnerError;
 
@@ -183,16 +185,27 @@ pub struct RegisterParams<'a> {
   pub work_folder: &'a str,
   /// On 409 (name taken), delete the same-name runner and retry once.
   pub replace: bool,
+  /// Per-request timeout, applied inside [`send_generate`] and
+  /// [`replace_existing`] — NOT at the `client` level. A mint can issue up to
+  /// three requests (generate → replace → generate); a client-level timeout
+  /// would apply once per request too, but an explicit per-request timeout
+  /// here holds regardless of whatever default the caller's shared `client`
+  /// carries (the always-online loop reuses one client across the listener
+  /// and every re-mint).
+  pub timeout: Duration,
 }
 
 /// POST the built `generate-jitconfig` request; return status + body.
+/// `timeout` bounds this one request — see [`RegisterParams::timeout`].
 async fn send_generate(
   client: &reqwest::Client,
   request: &RegisterRequest,
   token: &str,
+  timeout: Duration,
 ) -> Result<(reqwest::StatusCode, String), RunnerError> {
   let response = client
     .post(&request.url)
+    .timeout(timeout)
     .bearer_auth(token)
     .header("Accept", "application/vnd.github+json")
     .header("X-GitHub-Api-Version", "2022-11-28")
@@ -223,9 +236,11 @@ async fn find_runner_id_by_name(
   runners_base: &str,
   token: &str,
   name: &str,
+  timeout: Duration,
 ) -> Result<Option<i64>, RunnerError> {
   let response = client
     .get(runners_base)
+    .timeout(timeout)
     .query(&[("name", name)])
     .bearer_auth(token)
     .header("Accept", "application/vnd.github+json")
@@ -265,9 +280,11 @@ async fn delete_runner(
   runners_base: &str,
   token: &str,
   id: i64,
+  timeout: Duration,
 ) -> Result<(), RunnerError> {
   let response = client
     .delete(format!("{runners_base}/{id}"))
+    .timeout(timeout)
     .bearer_auth(token)
     .header("Accept", "application/vnd.github+json")
     .header("X-GitHub-Api-Version", "2022-11-28")
@@ -299,20 +316,33 @@ async fn replace_existing(
   params: &RegisterParams<'_>,
 ) -> Result<(), RunnerError> {
   let runners_base = resolve_runners_base(params.url)?;
-  let id = find_runner_id_by_name(client, &runners_base, params.runner_token, params.name)
-    .await?
-    .ok_or_else(|| {
-      RunnerError::Auth(format!(
-        "generate-jitconfig returned 409 but no runner named '{}' was found to replace",
-        params.name
-      ))
-    })?;
+  let id = find_runner_id_by_name(
+    client,
+    &runners_base,
+    params.runner_token,
+    params.name,
+    params.timeout,
+  )
+  .await?
+  .ok_or_else(|| {
+    RunnerError::Auth(format!(
+      "generate-jitconfig returned 409 but no runner named '{}' was found to replace",
+      params.name
+    ))
+  })?;
   tracing::info!(
     runner_id = id,
     name = params.name,
     "replacing existing runner registration"
   );
-  delete_runner(client, &runners_base, params.runner_token, id).await
+  delete_runner(
+    client,
+    &runners_base,
+    params.runner_token,
+    id,
+    params.timeout,
+  )
+  .await
 }
 
 /// Mint a JIT runner config via `POST …/generate-jitconfig`.
@@ -339,14 +369,15 @@ pub async fn register_jit(
     params.work_folder,
   )?;
 
-  let (status, text) = send_generate(client, &request, params.runner_token).await?;
+  let (status, text) = send_generate(client, &request, params.runner_token, params.timeout).await?;
   if status.is_success() {
     return parse_response(&text, params.name);
   }
 
   if status == reqwest::StatusCode::CONFLICT && params.replace {
     replace_existing(client, params).await?;
-    let (status, text) = send_generate(client, &request, params.runner_token).await?;
+    let (status, text) =
+      send_generate(client, &request, params.runner_token, params.timeout).await?;
     if status.is_success() {
       return parse_response(&text, params.name);
     }

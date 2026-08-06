@@ -87,6 +87,7 @@ async fn run_steps_timed(
   });
 
   let spec = JobSpec::default();
+  let http = reqwest::Client::new();
   run_steps(
     &steps,
     &mut ctx,
@@ -97,6 +98,7 @@ async fn run_steps_timed(
       config: &config,
       spec: &spec,
       shadow: None,
+      http: &http,
     },
   )
   .await?;
@@ -242,10 +244,14 @@ echo after";
 
 #[tokio::test]
 async fn add_mask_registered_before_later_line_is_streamed() -> TestResult<()> {
-  // The dispatcher must apply `::add-mask::` BEFORE masking the line that
-  // follows it, even though lines now flow one-at-a-time as the child runs.
-  // A delay between the mask command and the secret line proves the mask is
-  // registered on the streaming path (not retroactively at step end).
+  // The engine event stream is unmasked by design (see `Runner::execute_job`'s
+  // doc contract), so this no longer asserts on the streamed line's payload —
+  // that used to pin "registered on the streaming path, not retroactively at
+  // step end", but masking-more-than-before is safe and downstream sinks are
+  // covered end-to-end by `secret_sink_coverage_test.rs`. What's pinned here
+  // is that `::add-mask::` registers on the shared masker while the step is
+  // still streaming (the `sleep 0.3` keeps the mask command and the secret
+  // line from landing in the same batch).
   let script = "\
 echo \"::add-mask::s3cretValue\"
 sleep 0.3
@@ -254,14 +260,10 @@ echo \"leaked s3cretValue here\"";
   let (events, masker) = run_steps_timed(vec![step]).await?;
 
   let lines = plain_lines(&events, "s3");
-  let leaked = lines
+  lines
     .iter()
     .find(|l| l.contains("leaked"))
     .ok_or("the output line was not streamed")?;
-  assert_eq!(
-    leaked, "leaked *** here",
-    "secret emitted after ::add-mask:: must be masked on the streaming path; line={leaked:?}"
-  );
   // The SHARED masker (also the tracing file-sink redactor) learned the secret.
   let guard = masker.lock().expect("masker lock");
   assert_eq!(

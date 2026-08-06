@@ -180,7 +180,12 @@ no OTel.
 - `secret_masker.rs` — `SecretMasker` (`add_secret` + per-line `mask`)
   and `MaskerRedactor` (implements `startup::SecretRedactor`) so
   registered `secrets.*` values never reach `_diag/runner.log`
-  unredacted.
+  unredacted. `mask` runs one `aho_corasick::AhoCorasick`
+  (`MatchKind::Standard`) overlapping pass, merging overlapping/adjacent
+  matches into a single `***` — not a `String::replace` per registered
+  pattern. The automaton is rebuilt once at the end of `add_secret`;
+  falls back to the old longest-first `patterns` replace loop if it
+  ever fails to build (WARN-logged) rather than skipping masking.
 - `startup.rs` — `init` / `init_with_redactor` (tracing init with
   `RUST_LOG` / `TOOLU_RUNNER_LOG` EnvFilter), `SecretRedactor` trait,
   `RedactingMakeWriter` / `RedactingWriter` (line-level secret
@@ -267,7 +272,14 @@ no OTel.
   `v1/` (legacy REST on the CAS), `tier/l2.rs` (S3 cold tier),
   `server.rs`, `proxy.rs` (selective reverse proxy), `scope.rs` (read
   ladder + write scope), `trust.rs` (branch-scoped writes),
-  `accelerated.rs`.
+  `accelerated.rs`. `chunk_io::Durability` (`Fsync` / `Deferred`) gates
+  the per-chunk fsync on `write_atomic`: chunk writes default to
+  `Deferred` (`CasStore::with_fsync_chunks` / `[cache] fsync_chunks`,
+  default `false`; manifest writes are always `Fsync`). `store.rs`'s
+  `read_chunk_or_restore` self-heals a BLAKE3 verify-on-read mismatch —
+  removes the corrupt chunk (WARN-and-continue on a failed removal)
+  and falls through to an L2 restore or a clean miss, instead of
+  leaving the entry permanently poisoned.
 
 ### `wire/` — async HTTP transport + reporting domain types (deps: shared, protocol)
 
@@ -334,9 +346,19 @@ no OTel.
 ### `execution/` — job execution engine (deps: shared, expressions, cache)
 
 - `lib.rs` — `Runner` struct (config, `execute_job` returns an
-  `mpsc::Receiver<RunnerEvent>`).
+  `mpsc::Receiver<RunnerEvent>`). **The event stream is unmasked** —
+  `RunnerEvent::Log` lines carry no masking; every consumer (job/step
+  log upload, the live-log WebSocket, the journal writer, the tracing
+  file sink) must mask its own line before it reaches a durable sink.
 - `execution/` — the engine. `job_runner::run_job` is the single
-  entry point. `steps_runner` runs the per-job step loop. `handlers/`
+  entry point, returning a `JobTeardown` (`job_teardown.rs`, `pub mod`
+  in `execution/mod.rs`) instead of `()`: it stops local cache servers
+  and emits `JobCompleted` before returning, and the caller must drop
+  the job's event sender — closing the channel that reports completion
+  to GitHub — before calling `JobTeardown::finish`, which runs cache GC
+  and joins the `spawn_blocking` workspace sweep so both overlap the
+  completion round-trip instead of blocking it. `steps_runner` runs
+  the per-job step loop. `handlers/`
   dispatches by `runs.using`: `script` (shell), `node` / `node_exec`
   (Node.js actions, auto-downloaded), `docker` (bollard), `composite`
   (composite actions), `resolve` (kind detection). `actions/` resolves

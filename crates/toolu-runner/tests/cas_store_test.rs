@@ -104,6 +104,39 @@ async fn ingest_reads_back_byte_for_byte() -> TestResult<()> {
   Ok(())
 }
 
+/// T5a AC-7: `fsync_chunks = false` (the `Durability::Deferred` default,
+/// unchanged from `setup()`) still produces a manifest whose every chunk
+/// reads back byte-identically — explicit about the config knob this
+/// exercises, on top of `ingest_reads_back_byte_for_byte` above.
+#[tokio::test]
+async fn ingest_with_fsync_chunks_false_reads_back_byte_for_byte() -> TestResult<()> {
+  let fx = setup()?;
+  let store = fx.store.with_fsync_chunks(false);
+  let m = store.ingest(&fx.tar_path).await?;
+  let got = collect_range(&store, &m, 0, m.total_size).await?;
+  assert_eq!(
+    got, fx.original,
+    "fsync_chunks = false must still round-trip every chunk byte-identically"
+  );
+  Ok(())
+}
+
+/// T5a AC-9 (functional half): `fsync_chunks = true` restores the per-chunk
+/// fsync without changing observable behaviour — the round trip is
+/// byte-identical either way.
+#[tokio::test]
+async fn ingest_with_fsync_chunks_true_reads_back_byte_for_byte() -> TestResult<()> {
+  let fx = setup()?;
+  let store = fx.store.with_fsync_chunks(true);
+  let m = store.ingest(&fx.tar_path).await?;
+  let got = collect_range(&store, &m, 0, m.total_size).await?;
+  assert_eq!(
+    got, fx.original,
+    "fsync_chunks = true must still round-trip every chunk byte-identically"
+  );
+  Ok(())
+}
+
 #[tokio::test]
 async fn dedup_second_ingest_writes_no_new_chunks() -> TestResult<()> {
   let fx = setup()?;

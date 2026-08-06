@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 use config::config::{
   CacheSection, RunnerRegistrationConfig, RuntimeConfig, ServicesSection, ShadowSection,
-  WorkspaceSection, save_config,
+  WorkspaceSection, load_config, save_config,
 };
 use shared::RunnerError;
 
@@ -342,6 +342,50 @@ fn status_with_no_registrations_names_register() {
   assert!(
     stderr.contains("toolu-runner register"),
     "error must name `toolu-runner register` as the fix: {stderr}"
+  );
+}
+
+/// AC-9: `[cache] fsync_chunks = true` in a real `config.toml` round-trips
+/// through `load_config` into `shared::CacheConfig`, restoring the T5
+/// per-chunk-fsync escape hatch; the unset default stays `false`.
+#[test]
+fn fsync_chunks_round_trips_through_load_config() {
+  let dir = tempfile::tempdir().expect("tempdir");
+  let config_path = dir.path().join("config.toml");
+  let mut config = RunnerRegistrationConfig {
+    runner_url: "https://github.com/o1/r1".to_owned(),
+    runner_name: "fsync-runner".to_owned(),
+    runner_id: 1,
+    auth_token: "fixture-client-id".to_owned(),
+    labels: vec!["self-hosted".to_owned()],
+    runner_group: "Default".to_owned(),
+    runtime: RuntimeConfig {
+      jit_config: "fixture-jit-blob".to_owned(),
+      work_dir: "~/.toolu-runner/_work".to_owned(),
+      data_dir: dir.path().to_string_lossy().into_owned(),
+      protocol_version: "v2".to_owned(),
+    },
+    services: ServicesSection::default(),
+    cache: CacheSection {
+      fsync_chunks: true,
+      ..CacheSection::default()
+    },
+    workspace: WorkspaceSection::default(),
+    shadow: ShadowSection::default(),
+  };
+  save_config(&config_path, &config).expect("save config with fsync_chunks = true");
+  let loaded = load_config(&config_path).expect("load config back");
+  assert!(
+    loaded.cache_config().fsync_chunks,
+    "fsync_chunks = true must round-trip through load_config into shared::CacheConfig"
+  );
+
+  config.cache.fsync_chunks = false;
+  save_config(&config_path, &config).expect("save config with fsync_chunks = false");
+  let loaded_default = load_config(&config_path).expect("load default config back");
+  assert!(
+    !loaded_default.cache_config().fsync_chunks,
+    "fsync_chunks must default to false when unset"
   );
 }
 
