@@ -25,10 +25,13 @@ use shared::RunnerError;
 /// completion-report backoff — moved here (from `job_lifecycle.rs`, already
 /// over the crate's 500-line convention) rather than duplicated.
 pub(crate) fn jittered_backoff(d: Duration) -> Duration {
-  // `as_millis()` is u128, `fastrand::u64` needs a u64 bound. Clamp rather
-  // than bail on the (unreachable at a 60s cap) overflow: an absurd input
-  // still gets jittered instead of silently returning the full backoff.
+  // `as_millis()` is u128, `fastrand::u64` needs a u64 bound. Clamping on
+  // the (unreachable at a 60s cap) overflow beats bailing, which would have
+  // returned the un-jittered backoff.
   let half_ms = u64::try_from(d.as_millis().saturating_div(2)).unwrap_or(u64::MAX);
+  // Under 2ms there is no half-millisecond to randomize over, so `d` really
+  // is the only answer — this arm returns the full backoff by necessity,
+  // unlike the overflow case above.
   if half_ms == 0 {
     return d;
   }

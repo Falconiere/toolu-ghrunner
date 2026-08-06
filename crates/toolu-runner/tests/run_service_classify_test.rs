@@ -244,3 +244,98 @@ async fn complete_job_response_past_client_timeout_is_network() -> TestResult<()
   let result = complete_job(&client, &server.uri(), "t", &complete_request()).await;
   assert_network(result, "complete_job past client timeout")
 }
+
+// --- 6. non-2xx whose error body cannot be read -> WARN + still classified --
+
+/// Serve exactly one request: a 500 status line promising a 100-byte body,
+/// then close the socket without sending it. `reqwest`'s body read then fails
+/// mid-message — a real truncated-response transport error over loopback, no
+/// mocking of internal types.
+fn truncated_500_server() -> TestResult<String> {
+  let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+  let addr = listener.local_addr()?;
+  std::thread::spawn(move || {
+    if let Ok((mut sock, _peer)) = listener.accept() {
+      // Drain the request head so the client's write completes before we reply.
+      let mut buf = [0_u8; 2048];
+      let _ = std::io::Read::read(&mut sock, &mut buf);
+      let _ = std::io::Write::write_all(
+        &mut sock,
+        b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 100\r\n\r\n",
+      );
+      let _ = std::io::Write::flush(&mut sock);
+      // Dropped here — the promised 100 bytes never arrive.
+    }
+  });
+  Ok(format!("http://{addr}"))
+}
+
+/// Minimal hand-rolled `tracing::Subscriber` that flags whether a **WARN**
+/// event carried a field whose Debug output contains `needle`. Mirrors
+/// `listener::helpers`'s test subscriber — asserting a WARN fired needs no
+/// `tracing-subscriber` dev-dependency, since `tracing::Subscriber` comes
+/// with the plain `tracing` dep.
+struct WarnCapture {
+  needle: &'static str,
+  saw_needle: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl tracing::Subscriber for WarnCapture {
+  fn enabled(&self, _metadata: &tracing::Metadata<'_>) -> bool {
+    true
+  }
+  fn new_span(&self, _span: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+    tracing::span::Id::from_u64(1)
+  }
+  fn record(&self, _span: &tracing::span::Id, _values: &tracing::span::Record<'_>) {}
+  fn record_follows_from(&self, _span: &tracing::span::Id, _follows: &tracing::span::Id) {}
+  fn event(&self, event: &tracing::Event<'_>) {
+    if *event.metadata().level() != tracing::Level::WARN {
+      return;
+    }
+    struct Grep<'a> {
+      needle: &'a str,
+      saw_needle: &'a std::sync::atomic::AtomicBool,
+    }
+    impl tracing::field::Visit for Grep<'_> {
+      fn record_debug(&mut self, _field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        if format!("{value:?}").contains(self.needle) {
+          self
+            .saw_needle
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+      }
+    }
+    event.record(&mut Grep {
+      needle: self.needle,
+      saw_needle: &self.saw_needle,
+    });
+  }
+  fn enter(&self, _span: &tracing::span::Id) {}
+  fn exit(&self, _span: &tracing::span::Id) {}
+}
+
+/// A 5xx whose body cannot be read must (a) still classify off the status
+/// code — `Network`, the class the outage watchdog feeds on — and (b) surface
+/// the body-read transport error at WARN, not only at the DEBUG level that
+/// `shared::startup` filters out unless `TOOLU_RUNNER_ALLOW_VERBOSE=1`.
+#[tokio::test]
+async fn renew_job_unreadable_error_body_warns_and_still_classifies() -> TestResult<()> {
+  let saw_needle = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+  let base = truncated_500_server()?;
+  let client = short_timeout_client()?;
+
+  let result = {
+    let _guard = tracing::subscriber::set_default(WarnCapture {
+      needle: "error body could not be read",
+      saw_needle: std::sync::Arc::clone(&saw_needle),
+    });
+    renew_job(&client, &base, "token", &renew_request()).await
+  };
+
+  assert_network(result, "renew_job 500 with a truncated body")?;
+  if !saw_needle.load(std::sync::atomic::Ordering::SeqCst) {
+    return Err("expected a WARN naming the unreadable error body".into());
+  }
+  Ok(())
+}

@@ -72,15 +72,14 @@ pub async fn acquire_job(
 /// Classify a `reqwest::Error` raised while sending a run-service request,
 /// or while reading/decoding its response body.
 ///
-/// A JSON decode failure on an otherwise-successful response (`is_decode`)
-/// is a protocol bug — the server answered 2xx with a body we can't
-/// parse — so it maps to `RunnerError::Protocol`. Every other case
-/// (connection refused, DNS failure, a client-side timeout — including one
-/// that lands *after* headers arrive under a packet blackhole, mid
-/// `.json()`) is transient: GitHub is unreachable right now, not wrong, so
-/// it maps to `RunnerError::Network`. This split is load-bearing for the
-/// outage watchdog: it feeds only on `Network`-class renewal failures, so a
-/// blackhole that times out mid-body-read must not go unclassified.
+/// `is_decode` — 2xx with a body we can't parse — is a protocol bug, so it
+/// maps to `RunnerError::Protocol`. Only the `.json()` call site reaches it;
+/// `send()` resolves on headers, before any body read, so a `send()` error
+/// is never `is_decode`. Everything else (connection refused, DNS failure,
+/// a timeout — including one landing mid-`.json()` under a blackhole, which
+/// reports `is_timeout`) is transient and maps to `RunnerError::Network`.
+/// Load-bearing for the outage watchdog: it feeds only on `Network`-class
+/// renewal failures, so a mid-body-read blackhole must not go unclassified.
 fn classify_transport_error(what: &str, err: &reqwest::Error) -> RunnerError {
   if err.is_decode() {
     return RunnerError::Protocol(format!("{what} response was not valid JSON: {err}"));
@@ -99,7 +98,7 @@ fn classify_transport_error(what: &str, err: &reqwest::Error) -> RunnerError {
 /// The body is deliberately absent from the message: these errors are
 /// `Display`ed at WARN into the durable `_diag/runner.log`, and
 /// `SecretMasker` only redacts registered `secrets.*` — server text has no
-/// redaction guarantee. It stays on the caller's `debug!` line.
+/// redaction guarantee. It stays on [`log_error_body`]'s `debug!` line.
 fn classify_status(what: &str, status: reqwest::StatusCode) -> RunnerError {
   if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
     return RunnerError::Network(format!(
@@ -107,6 +106,30 @@ fn classify_status(what: &str, status: reqwest::StatusCode) -> RunnerError {
     ));
   }
   RunnerError::Protocol(format!("{what} failed with status {status}: see debug log"))
+}
+
+/// Log a non-2xx response body for diagnostics, consuming the response.
+///
+/// The body itself is DEBUG-only (see [`classify_status`] on why it stays
+/// out of the error). A *failure to read* it is different: that is itself a
+/// transport error on a reachable path, and `shared::startup` pins the
+/// filter to `info` unless `TOOLU_RUNNER_ALLOW_VERBOSE=1`, so a DEBUG-only
+/// record of it would be invisible on a default deployment. It gets its own
+/// WARN line naming the `reqwest::Error`.
+async fn log_error_body(what: &str, status: reqwest::StatusCode, response: reqwest::Response) {
+  match response.text().await {
+    Ok(body) => {
+      let snippet: String = body.chars().take(200).collect();
+      tracing::debug!(status = %status, body_len = body.len(), body = %snippet, "{what} failed");
+    },
+    Err(e) => {
+      tracing::warn!(
+        status = %status,
+        error = %e,
+        "{what} failed and its error body could not be read"
+      );
+    },
+  }
 }
 
 /// Renew a job lock. Called every ~60 seconds during job execution.
@@ -135,12 +158,7 @@ pub async fn renew_job(
 
   let status = response.status();
   if !status.is_success() {
-    let body = response
-      .text()
-      .await
-      .unwrap_or_else(|e| format!("<body read failed: {e}>"));
-    let snippet: String = body.chars().take(200).collect();
-    tracing::debug!(status = %status, body_len = body.len(), body = %snippet, "renew job failed");
+    log_error_body("renew job", status, response).await;
     return Err(classify_status("renew job", status));
   }
 
@@ -176,12 +194,7 @@ pub async fn complete_job(
 
   let status = response.status();
   if !status.is_success() {
-    let body = response
-      .text()
-      .await
-      .unwrap_or_else(|e| format!("<body read failed: {e}>"));
-    let snippet: String = body.chars().take(200).collect();
-    tracing::debug!(status = %status, body_len = body.len(), body = %snippet, "complete job failed");
+    log_error_body("complete job", status, response).await;
     return Err(classify_status("complete job", status));
   }
 
