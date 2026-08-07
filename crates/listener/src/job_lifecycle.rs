@@ -55,9 +55,13 @@ pub(super) async fn poll_and_execute(
   // join it on both the `Ok` and `Err` paths.
   ctx.live_log = outcome.live_log_handle.take();
   let rs_token = outcome.job_token.clone().unwrap_or(rs_token);
+  // `Conclusion` is `Copy`; take it before `outcome` moves into the report so
+  // the caller still gets the job's verdict.
+  let conclusion = outcome.conclusion;
 
   acknowledge_best_effort(ctx, &body.runner_request_id).await;
-  report_completion(ctx, &body.run_service_url, plan_id, rs_token, outcome).await
+  report_completion(ctx, &body.run_service_url, plan_id, rs_token, outcome).await?;
+  Ok(Some(conclusion))
 }
 
 /// Best-effort acknowledge of the broker message. Single attempt,
@@ -105,8 +109,7 @@ async fn report_completion(
     crate::retry::REPORT_RETRY_MAX,
     "complete_job",
   )
-  .await?;
-  Ok(Some(conclusion))
+  .await
 }
 
 /// Outcome of running (or failing to parse) an acquired job — everything
