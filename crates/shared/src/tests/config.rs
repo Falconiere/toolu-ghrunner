@@ -49,11 +49,10 @@ fn allow_verbose_child_probe() {
 #[test]
 fn allow_verbose_covers_unset_enabled_other_and_invalid_unicode() {
   let invalid = invalid_unicode_value();
-  let cases: [(Option<&OsStr>, bool); 4] = [
+  let cases: [(Option<&OsStr>, bool); 3] = [
     (None, false),
     (Some(OsStr::new("1")), true),
     (Some(OsStr::new("true")), false),
-    (Some(invalid.as_os_str()), false),
   ];
 
   for (value, expected) in cases {
@@ -66,6 +65,11 @@ fn allow_verbose_covers_unset_enabled_other_and_invalid_unicode() {
   }
 
   let invalid_output = run_allow_verbose_probe(Some(invalid.as_os_str()), false);
+  assert!(
+    invalid_output.status.success(),
+    "invalid-Unicode child probe failed: {}",
+    String::from_utf8_lossy(&invalid_output.stderr)
+  );
   let stderr = String::from_utf8_lossy(&invalid_output.stderr);
   assert!(
     stderr.contains("TOOLU_RUNNER_ALLOW_VERBOSE is not valid Unicode"),
