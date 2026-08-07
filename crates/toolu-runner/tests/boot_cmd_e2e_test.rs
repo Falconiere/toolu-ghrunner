@@ -143,4 +143,21 @@ async fn boot_exits_124_when_the_deadline_watchdog_fires_mid_job() {
     elapsed < Duration::from_secs(40),
     "watchdog-triggered boot should exit well before the step's sleep finishes, took {elapsed:?}"
   );
+  // The graceful path (not the 30s hard exit) must have won: the cancelled
+  // job still reports its conclusion to the run service before the process
+  // exits — pin that the broker actually saw the /completejob call.
+  assert!(
+    broker_saw_completejob(&server).await,
+    "the watchdog's graceful cancel should report the job via /completejob before exiting"
+  );
+}
+
+/// Whether the wiremock broker received any `/completejob` call — the
+/// cancelled path's proof that the job's conclusion was reported to the run
+/// service rather than lost to a hard exit.
+async fn broker_saw_completejob(server: &wiremock::MockServer) -> bool {
+  server
+    .received_requests()
+    .await
+    .is_some_and(|reqs| reqs.iter().any(|r| r.url.path().ends_with("/completejob")))
 }

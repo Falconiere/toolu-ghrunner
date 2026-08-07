@@ -55,8 +55,8 @@ fn boot_without_jitconfig_exits_two_naming_the_var() {
   assert_eq!(output.status.code(), Some(2), "expected exit 2");
   let stderr = String::from_utf8_lossy(&output.stderr);
   assert!(
-    stderr.contains("TOOLU_JITCONFIG"),
-    "stderr should name TOOLU_JITCONFIG: {stderr}"
+    stderr.contains("TOOLU_JITCONFIG is not set (or empty)"),
+    "stderr should carry the full missing-TOOLU_JITCONFIG message: {stderr}"
   );
 }
 
@@ -79,8 +79,8 @@ fn boot_with_unparseable_deadline_and_no_jitconfig_still_exits_two() {
   assert_eq!(output.status.code(), Some(2), "expected exit 2");
   let stderr = String::from_utf8_lossy(&output.stderr);
   assert!(
-    stderr.contains("TOOLU_JITCONFIG"),
-    "stderr should still name TOOLU_JITCONFIG: {stderr}"
+    stderr.contains("TOOLU_JITCONFIG is not set (or empty)"),
+    "stderr should still carry the full missing-TOOLU_JITCONFIG message: {stderr}"
   );
 }
 

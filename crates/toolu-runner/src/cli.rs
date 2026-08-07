@@ -67,8 +67,8 @@ Examples:
   TOOLU_JITCONFIG=<encoded> TOOLU_DEADLINE=<epoch_ms> toolu-runner boot
 
 Exit codes:
-  0    job completed Success or Skipped (or cancelled before any job was
-       acquired)
+  0    job completed Success or Skipped, or the runner shut down (signal or
+       session end) before any job was acquired
   1    job completed Failure or Cancelled (non-deadline), or the listener
        errored (auth, network, protocol)
   2    environment/config error before polling (missing TOOLU_JITCONFIG,
