@@ -52,6 +52,18 @@ pub fn detect_repo(cwd: &Path) -> Result<InferredRepo, RunnerError> {
     .args(["remote", "get-url", "origin"])
     // Pin the locale: `classify_git_failure` matches English stderr text.
     .env("LC_ALL", "C")
+    // `-C <cwd>` only changes the working directory — it does NOT override an
+    // ambient GIT_DIR/GIT_WORK_TREE, which take precedence over discovery. Git
+    // exports both into every hook subprocess, so a `register` run from inside
+    // a git hook (or any shell where they are set) would infer whatever repo
+    // the hook belongs to and silently register the WRONG repository. This
+    // function's contract is "the repo at `cwd`", so the ambient pointers are
+    // cleared and `cwd` is made authoritative.
+    .env_remove("GIT_DIR")
+    .env_remove("GIT_WORK_TREE")
+    .env_remove("GIT_INDEX_FILE")
+    .env_remove("GIT_PREFIX")
+    .env_remove("GIT_COMMON_DIR")
     .output()
     .map_err(|e| {
       RunnerError::Config(format!(
