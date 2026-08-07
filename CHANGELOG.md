@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-07
+
+### Added
+- *(remove)* unregister the runner on GitHub before deleting local state (B-002)
+- *(boot)* zero-config one-shot container mode
+
+### Changed
+- cut job wall-clock across teardown, masking, expressions, CAS and HTTP
+- *(listener)* single source of truth for the lost-connection message
+
+### Documentation
+- *(boot)* spell out what the hard-exit 124 abandons
+
+### Fixed
+- *(review)* close pre-push review findings on the perf branch
+- *(review)* address PR #35 review findings on the perf branch
+- *(review)* clarify workspace-GC panic wording on the re-review pass
+- *(cache)* flush the v1 staging write before finalize can ingest it
+- *(remove)* never unregister while a job is still running
+- *(remove)* gate the unregister skip on lock-holder liveness, not existence
+- *(remove)* keep org-level registrations removable after B-002
+- *(remove)* decide in-flight by taking the lock, and never call a 404 success
+- *(remove)* WARN on best-effort I/O instead of discarding it
+- *(wire)* keep the delete-runner error body readable when the read fails
+- *(boot)* address PR #40 review findings
+- *(boot)* harden the deadline watchdog and mask the JIT blob
+- *(boot)* log a failed stderr flush before the hard exit
+- *(listener)* cancel job and report failure after >5 min reporting outage (B-001)
+- *(listener)* address PR review feedback
+- *(review)* keep run-service error bodies out of WARN-level errors
+- *(listener)* address PR review feedback
+- *(wire)* WARN when a non-2xx error body cannot be read
+- *(wire)* bound the error-body read in log_error_body
+- *(wire)* make the error-body read cap hard, and test it
+- *(listener)* stop cloning the completion request per retry; tighten the classify tests
+- *(listener)* report the job conclusion after the rebase onto main
+
+### Style
+- apply rustfmt to the perf branch
 ## [0.5.2] - 2026-08-06
 
 ### Documentation
