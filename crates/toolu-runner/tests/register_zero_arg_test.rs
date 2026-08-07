@@ -80,6 +80,15 @@ fn run_git(cwd: &Path, args: &[&str]) -> Result<(), std::io::Error> {
     .arg("-C")
     .arg(cwd)
     .args(args)
+    // GIT_DIR/GIT_WORK_TREE outrank `-C`, and git exports them into every hook
+    // subprocess — so under the pre-push gate these fixture commands would run
+    // against the REAL repository instead of the temp one. Clear them so `-C`
+    // is authoritative.
+    .env_remove("GIT_DIR")
+    .env_remove("GIT_WORK_TREE")
+    .env_remove("GIT_INDEX_FILE")
+    .env_remove("GIT_PREFIX")
+    .env_remove("GIT_COMMON_DIR")
     .output()?;
   assert!(
     output.status.success(),

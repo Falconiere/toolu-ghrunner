@@ -3,6 +3,15 @@
 //! Real data only: `parse_remote_url` runs over a table of real-world
 //! remote URL forms; `detect_repo` runs against real temp git repositories
 //! built with `git init` + `git remote add origin` subprocesses.
+//!
+//! There is no in-process test for "an ambient `GIT_DIR` must not steer
+//! `detect_repo`": setting it requires `std::env::set_var`, which is `unsafe`
+//! in edition 2024, and this workspace sets `unsafe_code = "forbid"`. The
+//! guard is the pre-push gate itself — git exports `GIT_DIR` into every hook
+//! subprocess, so `./tools/check.sh all` runs these four `detect_repo` cases
+//! in exactly the polluted environment that regressed them. Reproduce by hand
+//! with: `GIT_DIR=$(git rev-parse --absolute-git-dir) cargo test -p config
+//! --test repo_infer_test`.
 
 use std::path::Path;
 
@@ -10,11 +19,22 @@ use config::repo_infer::{self, InferredRepo};
 use tempfile::TempDir;
 
 /// Run `git -C <dir> <args…>`, asserting it succeeds.
+///
+/// The `GIT_*` pointers are cleared for the same reason `detect_repo` clears
+/// them: they outrank `-C` and would aim these fixture commands at whatever
+/// repository the surrounding process belongs to. Without this the suite
+/// passes standalone and fails under a git hook, which is exactly where the
+/// pre-push gate runs it.
 fn git(dir: &Path, args: &[&str]) -> Result<(), std::io::Error> {
   let out = std::process::Command::new("git")
     .arg("-C")
     .arg(dir)
     .args(args)
+    .env_remove("GIT_DIR")
+    .env_remove("GIT_WORK_TREE")
+    .env_remove("GIT_INDEX_FILE")
+    .env_remove("GIT_PREFIX")
+    .env_remove("GIT_COMMON_DIR")
     .output()?;
   assert!(
     out.status.success(),
