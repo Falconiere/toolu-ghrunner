@@ -221,8 +221,8 @@ async fn mount_job_lifecycle(server: &MockServer) -> Result<(), String> {
 /// A `RunnerConfig` rooted at a fresh tempdir (both `data_dir` and
 /// `workspace_root` pre-created), so the real engine can actually run a job
 /// in it — unlike `make_config`'s uncreated, test-shared temp paths.
-async fn unique_job_config()
--> Result<(tempfile::TempDir, RunnerConfig), Box<dyn std::error::Error>> {
+async fn unique_job_config() -> Result<(tempfile::TempDir, RunnerConfig), Box<dyn std::error::Error>>
+{
   let dir = tempfile::tempdir()?;
   let workspace_root = dir.path().join("work");
   let data_dir = dir.path().join("data");
