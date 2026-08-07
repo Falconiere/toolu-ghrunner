@@ -98,7 +98,9 @@ fn classify_transport_error(what: &str, err: &reqwest::Error) -> RunnerError {
 /// The body is deliberately absent from the message: these errors are
 /// `Display`ed at WARN into the durable `_diag/runner.log`, and
 /// `SecretMasker` only redacts registered `secrets.*` — server text has no
-/// redaction guarantee. It stays on [`log_error_body`]'s `debug!` line.
+/// redaction guarantee. It stays on [`log_error_body`]'s `debug!` line,
+/// which `shared::startup` filters out entirely unless an operator opts in
+/// with `TOOLU_RUNNER_ALLOW_VERBOSE=1`.
 fn classify_status(what: &str, status: reqwest::StatusCode) -> RunnerError {
   if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
     return RunnerError::Network(format!(
@@ -108,13 +110,15 @@ fn classify_status(what: &str, status: reqwest::StatusCode) -> RunnerError {
   RunnerError::Protocol(format!("{what} failed with status {status}: see debug log"))
 }
 
-/// Chars of the error body kept for the DEBUG snippet.
-const ERROR_BODY_SNIPPET_CHARS: usize = 200;
+/// Chars of the error body kept for the DEBUG snippet. `pub` so tests can
+/// assert the logged bound against the real constant instead of a literal.
+pub const ERROR_BODY_SNIPPET_CHARS: usize = 200;
 /// Bytes read before the body stream is abandoned. Enough to fill
 /// [`ERROR_BODY_SNIPPET_CHARS`] even at 4 bytes per char; nothing past the
-/// snippet is ever logged, so reading further would only mean holding a
-/// bigger allocation (a 5xx HTML page can be arbitrarily large).
-const ERROR_BODY_READ_CAP: usize = ERROR_BODY_SNIPPET_CHARS * 4;
+/// cap is ever read, so going further would only mean holding a bigger
+/// allocation (a 5xx HTML page can be arbitrarily large). The DEBUG line
+/// reports `bytes_read` up to this cap alongside the shorter snippet.
+pub const ERROR_BODY_READ_CAP: usize = ERROR_BODY_SNIPPET_CHARS * 4;
 
 /// Log a non-2xx response body for diagnostics, consuming the response.
 ///
