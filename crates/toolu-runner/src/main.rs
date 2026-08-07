@@ -180,7 +180,13 @@ async fn cmd_remove(args: RemoveArgs) -> Result<(), Box<dyn std::error::Error>> 
   if let Err(RunnerError::LockHeld { pid, .. }) = &held
     && !args.force
   {
-    let body = std::fs::read_to_string(&lock_path).unwrap_or_default();
+    // Best-effort, but not silent: the marker is more useful with the
+    // holder's lock body in it, and an unreadable lock is itself worth
+    // surfacing (permissions, a concurrent unlink).
+    let body = std::fs::read_to_string(&lock_path).unwrap_or_else(|e| {
+      tracing::warn!(error = %e, "could not read the job lock body — writing an empty marker");
+      String::new()
+    });
     write_pending_marker(&pending, &body)?;
     return Err(format!(
       "a run is in flight (pid {pid}); wrote {} marker. Re-run with --force to remove anyway, or wait for the current job to finish.",
@@ -257,10 +263,12 @@ fn remove_bearer(
   runner_url: &str,
   flag: Option<String>,
 ) -> Result<Option<String>, Box<dyn std::error::Error>> {
-  let host = url::Url::parse(runner_url)
-    .ok()
-    .and_then(|u| u.host_str().map(str::to_owned))
-    .ok_or_else(|| format!("registration URL '{runner_url}' has no host"))?;
+  let parsed = url::Url::parse(runner_url)
+    .map_err(|e| format!("registration URL '{runner_url}' is not a URL: {e}"))?;
+  let host = parsed
+    .host_str()
+    .ok_or_else(|| format!("registration URL '{runner_url}' has no host"))?
+    .to_owned();
   let store = AuthStore::new(&registry::runner_home());
   let resolved = auth_store::resolve_bearer(&store, &host, flag).unwrap_or_else(|e| {
     tracing::warn!(error = %e, "could not read the stored login token — treating it as absent");
@@ -336,9 +344,10 @@ async fn unregister_on_github(
 
 /// Decide whether a failed unregister should still clear local state.
 ///
-/// `RunnerError::Config` means the URL has no repo segment (an org-level
-/// registration) — the repo-scoped endpoint can never address it, so no
-/// retry helps and refusing would make `remove` impossible for a
+/// `RunnerError::Config` from `unregister_runner` means the registration URL
+/// cannot be turned into a repo-scoped runners endpoint at all — an org-level
+/// URL, or one malformed enough that no host/owner/repo comes out. Either way
+/// no retry can succeed, and refusing would make `remove` impossible for a
 /// registration that removed fine before B-002. Everything else is
 /// potentially transient, so it fails with local state intact.
 fn classify_unregister_failure(
@@ -346,9 +355,11 @@ fn classify_unregister_failure(
   e: RunnerError,
 ) -> Result<bool, Box<dyn std::error::Error>> {
   if let RunnerError::Config(msg) = e {
+    // Quote GitHub's/our own reason rather than asserting a cause: this
+    // fires for any URL the runners API cannot address, not only org URLs.
     tracing::warn!(
-      "cannot unregister '{name}' via the repo-scoped runners API ({msg}) — \
-       removing local state only; remove the runner on GitHub by hand"
+      "cannot address a runners API endpoint for '{name}' ({msg}) — removing local state only; \
+       remove the runner on GitHub by hand"
     );
     return Ok(false);
   }
@@ -407,10 +418,26 @@ fn delete_registration_state(
   keep_lock: bool,
 ) -> Result<(), std::io::Error> {
   std::fs::remove_file(config_path)?;
-  std::fs::remove_file(creds_path).ok();
-  std::fs::remove_file(pending).ok();
+  remove_best_effort(creds_path, "credentials");
+  remove_best_effort(pending, "pending-remove marker");
   if !keep_lock {
-    std::fs::remove_file(lock_path).ok();
+    remove_best_effort(lock_path, "job lock");
   }
   Ok(())
+}
+
+/// Remove `path`, WARNing rather than failing if it cannot go.
+///
+/// These are best-effort past `config.toml` — the registration is already
+/// gone once that is deleted — but "best-effort" here means WARN-and-
+/// continue, not silence: a leftover `.lock` in particular is what a later
+/// `run` weighs in its stale-lock check, so an operator wondering why it
+/// reports a job in flight deserves the reason in the log. A missing file
+/// is the expected case and stays quiet.
+fn remove_best_effort(path: &Path, what: &str) {
+  match std::fs::remove_file(path) {
+    Ok(()) => {},
+    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
+    Err(e) => tracing::warn!(error = %e, path = %path.display(), "could not remove the {what}"),
+  }
 }
