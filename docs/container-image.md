@@ -37,6 +37,18 @@ wins — once the listener returns, `boot` stands the watchdog down and
 exits `124` through its own return path, so the hard exit is reached
 only when shutdown itself hangs.
 
+That hard exit is `std::process::exit(124)`, and it is deliberately
+brutal: it runs no destructors, so anything still in flight — the
+journal writer, a step's log upload, the `/completejob` report — is
+abandoned mid-write. The runner flushes stderr immediately before it
+so the reason survives in the provider's log, and the `_diag` sink is
+synchronous (`tracing_appender::rolling`, no background worker) so
+what was already logged is on disk. Nothing else is guaranteed. This
+is the intended trade: a deadline backstop cannot wait on the very
+teardown that hung, and the provider force-kills the instance at its
+own deadline regardless. A job that reaches this path may appear
+in-progress in the GitHub UI until GitHub times it out.
+
 ### Exit codes
 
 | Code | Meaning |

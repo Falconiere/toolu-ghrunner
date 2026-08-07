@@ -219,13 +219,14 @@ fn now_epoch_ms() -> u64 {
       Duration::ZERO
     },
   };
-  u64::try_from(elapsed.as_millis()).unwrap_or_else(|_| {
+  let Ok(millis) = u64::try_from(elapsed.as_millis()) else {
     tracing::warn!(
       "system clock is past the u64 epoch-ms range; saturating at u64::MAX — the deadline \
        watchdog may fire immediately"
     );
-    u64::MAX
-  })
+    return u64::MAX;
+  };
+  millis
 }
 
 /// Whether `deadline_ms` is at or before the current time.
