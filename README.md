@@ -488,19 +488,43 @@ actually received.
 
 ## Development
 
-Requires Rust 1.94.1 (pinned in `rust-toolchain.toml`).
+Requires Rust 1.94.1 (pinned in `rust-toolchain.toml`), plus `jq` and
+[ast-grep](https://ast-grep.github.io) for the structure gate:
+
+```sh
+cargo install ast-grep --locked
+```
 
 ```sh
 cargo build --workspace
-cargo test  --workspace          # 340 tests, no network required
+cargo test  --workspace          # 699 tests, no network required
 
 ./tools/check.sh all             # the full local gate
 ```
 
-`tools/check.sh` is stricter than clippy: it rejects `.rs` files over
-700 lines, `#[allow(..)]` / `#[expect(..)]` outside tests, `.unwrap()` /
-`.expect()` in production code.
-`lefthook install` wires the same checks to `pre-commit`.
+`./tools/check.sh all` is the one command CI mirrors step-for-step:
+
+```
+cargo fmt --check
+cargo clippy --workspace --all-targets -- -D warnings
+the #[allow(..)] / #[expect(..)] ban
+bash scripts/guardrails/run.sh          # the structure gate
+cargo test --workspace
+```
+
+`scripts/guardrails/` is copied verbatim from
+[toolu-conventions](https://github.com/Falconiere/toolu-conventions) and
+is never hand-edited — change the crate's `guardrails.config.json`
+instead. It enforces what the compiler cannot see: no `mod.rs` barrels,
+no inline `#[cfg(test)] mod tests { … }` bodies, a 500 **code-line**
+ceiling per file (tests exempt), `snake_case` filenames, a `README.md`
+in every `src/` submodule folder, no `std::env::var` outside a crate's
+`config` module, and no committed credential values. It exits 3 — never
+0 — if `jq` or `ast-grep` is missing, so a broken setup can't look like
+a clean run.
+
+`lefthook install` wires `cargo fmt` + the structure gate to
+`pre-commit` and the full gate to `pre-push`.
 
 The live suite talks to a real repo and is token-gated:
 
@@ -549,7 +573,12 @@ PRs welcome. Before you open one:
 4. User-facing change? Update `README.md`, `docs/architecture.md`, and
    `CHANGELOG.md` in the same commit.
 
-New files stay under 700 lines; function bodies under 150.
+New files stay under 500 **code** lines (blanks and comments don't
+count; tests are exempt); function bodies under 150. Tests live in a
+sibling `tests/` folder, never in the same file as the logic. Every new
+`src/` submodule folder needs a `README.md` and an entry in that crate's
+`guardrails.config.json` `src.requireReadme`. See `CLAUDE.md` →
+"House Conventions & The Gate".
 
 ## License
 

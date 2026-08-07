@@ -1,3 +1,5 @@
+//! Tests for `RunnerConfig` / `ServicesMode` defaults and mapping.
+
 use shared::{RunnerConfig, ServicesMode};
 use std::path::PathBuf;
 

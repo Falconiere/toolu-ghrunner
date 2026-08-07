@@ -1,3 +1,5 @@
+//! Tests for `RunnerError` display formatting.
+
 use shared::RunnerError;
 
 #[test]

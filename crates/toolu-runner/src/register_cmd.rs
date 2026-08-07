@@ -180,7 +180,7 @@ async fn resolve_register_bearer(
     BearerDecision::Use(token) => Ok(token),
     BearerDecision::StartDeviceFlow => {
       let stored = login_cmd::run_device_flow(host, None, &store, |dc| {
-        eprintln!("Enter code {} at {}", dc.user_code, dc.verification_uri)
+        eprintln!("Enter code {} at {}", dc.user_code, dc.verification_uri);
       })
       .await?;
       Ok(stored.access_token)
@@ -302,7 +302,7 @@ async fn mint_jit(
 /// Returns the assigned runner ID. Any failure returns before touching either
 /// file.
 ///
-/// The RSA→JWT→OAuth2 chain runs at `run` time from the stored jit_config,
+/// The RSA→JWT→OAuth2 chain runs at `run` time from the stored `jit_config`,
 /// not here. `auth_token` stores the runner's non-secret `client_id`.
 pub(crate) async fn register_and_persist(
   p: RegisterPersist<'_>,
@@ -415,7 +415,7 @@ pub(crate) async fn remint_and_persist(
 /// dir on its own anyway (`config::lockfile::acquire` creates the lock's
 /// parent dir, the journal writer creates `<data_dir>/_diag/jobs/`, and
 /// `shared::startup` creates the default home's `_diag/` for tracing), so
-/// a failure here is WARNed, never fatal — the registration itself is
+/// a failure here is `WARNed`, never fatal — the registration itself is
 /// already complete.
 fn ensure_diag_dir(config_path: &Path) {
   let Some(dir) = config_path.parent() else {
@@ -483,7 +483,7 @@ fn build_registration_config(
 /// [`wire::net::register_jit`] defaults to `1` (Default). "Default" is the
 /// CLI's own default value and the canonical name of group 1, so it maps
 /// to `None` silently; any other group *name* is not supported by the JIT
-/// API and is WARNed about so the fallback to Default is not silent.
+/// API and is `WARNed` about so the fallback to Default is not silent.
 fn runner_group_id(group: &str) -> Option<i64> {
   let trimmed = group.trim();
   if let Ok(id) = trimmed.parse::<i64>() {

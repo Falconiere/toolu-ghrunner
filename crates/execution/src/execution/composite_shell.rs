@@ -10,10 +10,15 @@ use super::cgroup_join::spawn_in_cgroup;
 
 /// Parameters for running a composite-action shell script.
 pub struct ShellScriptParams<'a> {
+  /// Shell to invoke (`bash`, `sh`, `pwsh`, ...).
   pub shell: &'a str,
+  /// Script body to run under that shell.
   pub script: &'a str,
+  /// Environment variables to set on the child process.
   pub env: &'a HashMap<String, String>,
+  /// Directory the script runs in.
   pub working_dir: &'a Path,
+  /// Step id used to tag streamed log lines.
   pub log_step_id: &'a str,
   /// Per-job cgroup directory to move the spawned step into (`None` = no isolation).
   pub cgroup_path: Option<&'a Path>,

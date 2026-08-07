@@ -124,11 +124,15 @@ fn scan_jobs_summarizes_newest_first() -> TestResult {
   // truncated before job_completed reads as running (None).
   let dir = tempfile::tempdir()?;
   write_journal(dir.path(), "20260708T210044Z-full.jsonl", FIXTURE)?;
-  let truncated: String = FIXTURE
-    .lines()
-    .take(FIXTURE.lines().count() - 1)
-    .map(|l| format!("{l}\n"))
-    .collect();
+  let truncated: String =
+    FIXTURE
+      .lines()
+      .take(FIXTURE.lines().count() - 1)
+      .fold(String::new(), |mut acc, l| {
+        acc.push_str(l);
+        acc.push('\n');
+        acc
+      });
   write_journal(dir.path(), "20260709T000000Z-running.jsonl", &truncated)?;
 
   let jobs = scan_jobs(dir.path())?;

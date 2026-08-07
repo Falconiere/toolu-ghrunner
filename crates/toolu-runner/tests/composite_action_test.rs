@@ -74,13 +74,13 @@ fn parse_action_manifest_composite_collects_outputs_with_expressions() {
 
 #[test]
 fn parse_action_manifest_node20_uses_runs_using_node() {
-  let yaml = r#"
+  let yaml = r"
 name: 'Node Action'
 description: 'Does the thing'
 runs:
   using: 'node20'
   main: 'dist/index.js'
-"#;
+";
   let def = manifest::parse_action_manifest(yaml).expect("parse node");
   let is_node = matches!(def.runs.using, RunsUsing::Node { .. });
   assert!(is_node, "expected Node, got {:?}", def.runs.using);
@@ -92,13 +92,13 @@ runs:
 
 #[test]
 fn parse_action_manifest_deprecated_node16_redirects_to_20() {
-  let yaml = r#"
+  let yaml = r"
 name: 'Node16 Action'
 description: 'Old'
 runs:
   using: 'node16'
   main: 'dist/index.js'
-"#;
+";
   let def = manifest::parse_action_manifest(yaml).expect("parse node16");
   let is_node = matches!(def.runs.using, RunsUsing::Node { .. });
   assert!(is_node, "expected Node, got {:?}", def.runs.using);
@@ -109,13 +109,13 @@ runs:
 
 #[test]
 fn parse_action_manifest_unsupported_using_returns_error() {
-  let yaml = r#"
+  let yaml = r"
 name: 'Bad'
 description: 'Unsupported using'
 runs:
   using: 'fortran77'
   main: 'src/main.f'
-"#;
+";
   let err = manifest::parse_action_manifest(yaml).expect_err("unsupported");
   let msg = format!("{err}");
   assert!(msg.contains("unsupported runs.using"), "got: {msg}");

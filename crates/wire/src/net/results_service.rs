@@ -146,7 +146,7 @@ pub async fn create_job_logs_metadata(
 }
 
 /// Upload a log file to a SAS URL (Azure Blob Storage or compatible).
-/// Uses BlockBlob (single-shot upload). Matches actions/runner `UploadBlockFileAsync`.
+/// Uses `BlockBlob` (single-shot upload). Matches actions/runner `UploadBlockFileAsync`.
 /// When `compressed` is true, sets `Content-Type: application/gzip` and
 /// `Content-Encoding: gzip`; otherwise uses `Content-Type: text/plain`.
 ///

@@ -39,7 +39,7 @@ const TICK: Duration = Duration::from_millis(200);
 /// scriptable alternative), resolves the github.com repository + config
 /// paths, decides which stages are already satisfied, and hands off to the
 /// TUI driver.
-pub(crate) async fn cmd_setup(args: SetupArgs) -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) fn cmd_setup(args: SetupArgs) -> Result<(), Box<dyn std::error::Error>> {
   if !(io::stderr().is_terminal() && io::stdin().is_terminal()) {
     return Err(
       RunnerError::Config(
@@ -62,10 +62,10 @@ pub(crate) async fn cmd_setup(args: SetupArgs) -> Result<(), Box<dyn std::error:
     .flatten()
     .is_some()
     && args.token.is_none()
-    && std::env::var("TOOLU_RUNNER_TOKEN").is_err();
+    && crate::config::runner_token().is_none();
   let skip_register = inputs.config_path.exists();
 
-  run_wizard(inputs, args.token, args.client_id, skip_auth, skip_register).await
+  run_wizard(inputs, args.token, args.client_id, skip_auth, skip_register)
 }
 
 /// Resolve the wizard's [`SetupInputs`] from the CLI args. `--url` absent
@@ -119,7 +119,7 @@ fn resolve_inputs(args: &SetupArgs) -> Result<SetupInputs, Box<dyn std::error::E
 /// decisions (with the same reasons the pipeline emits) so the paint never
 /// diverges from the stages the pipeline actually skips; the guard restores
 /// the screen when this function returns.
-async fn run_wizard(
+fn run_wizard(
   inputs: SetupInputs,
   token: Option<String>,
   client_id: Option<String>,

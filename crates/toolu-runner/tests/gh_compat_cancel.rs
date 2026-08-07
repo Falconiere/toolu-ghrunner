@@ -1,4 +1,4 @@
-//! S3 — JobCancellation message classification and routing.
+//! S3 — `JobCancellation` message classification and routing.
 //!
 //! Real-data: deserializes broker messages from their wire JSON and asserts
 //! the pure routing decision sends a cancellation to `Cancel` (the in-flight

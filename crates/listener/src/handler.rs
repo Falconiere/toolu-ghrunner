@@ -46,7 +46,7 @@ pub(crate) struct SessionCtx {
   pub(crate) watchdog: WatchdogConfig,
 }
 
-/// GitHubListener wraps a Runner and handles the full GitHub protocol lifecycle:
+/// `GitHubListener` wraps a `Runner` and handles the full GitHub protocol lifecycle:
 /// decode JIT -> authenticate -> create session -> poll -> acquire -> execute -> report -> complete.
 ///
 /// Per ERRATA #7/#13: This struct absorbs the broker role directly (no separate `broker.rs`).

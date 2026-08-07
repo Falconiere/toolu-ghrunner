@@ -20,7 +20,9 @@ use super::handlers::script::{ScriptHandler, ScriptParams};
 /// Which job boundary a hook runs at.
 #[derive(Debug, Clone, Copy)]
 pub enum JobHookStage {
+  /// Runs before the job's first step (`ACTIONS_RUNNER_HOOK_JOB_STARTED`).
   Started,
+  /// Runs after post-drain (`ACTIONS_RUNNER_HOOK_JOB_COMPLETED`).
   Completed,
 }
 

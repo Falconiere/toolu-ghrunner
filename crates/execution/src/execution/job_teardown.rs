@@ -82,7 +82,7 @@ impl JobTeardown {
   /// dropped (see the [type docs](Self)), so GC overlaps GitHub's
   /// completion round-trip instead of preceding it.
   ///
-  /// Best-effort: errors and a panicked/cancelled sweep are WARNed and
+  /// Best-effort: errors and a panicked/cancelled sweep are `WARN`ed and
   /// swallowed. The `JoinError` arm is untested — it needs an injected task
   /// panic, which this suite has no hook for.
   pub async fn finish(mut self, config: &RunnerConfig) {

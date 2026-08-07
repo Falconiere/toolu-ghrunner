@@ -445,7 +445,7 @@ impl ExecutionContext {
       let existing = result
         .get("PATH")
         .cloned()
-        .or_else(|| std::env::var("PATH").ok())
+        .or_else(crate::config::path)
         .unwrap_or_default();
       let mut new_path: Vec<&str> = self
         .path_additions

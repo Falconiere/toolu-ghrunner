@@ -213,7 +213,7 @@ fn read_log(path: &Path) -> String {
 fn with_stderr(context: &str, stderr_path: &Path) -> Box<dyn Error> {
   let mut log = read_log(stderr_path);
   if log.is_empty() {
-    log = "(no stderr captured — the failure likely happened during test setup)".to_owned();
+    "(no stderr captured — the failure likely happened during test setup)".clone_into(&mut log);
   }
   format!("{context}\n--- captured run stderr ---\n{log}").into()
 }

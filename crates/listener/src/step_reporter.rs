@@ -1,4 +1,4 @@
-//! Collects step results from RunnerEvents for inclusion in complete_job.
+//! Collects step results from `RunnerEvent`s for inclusion in `complete_job`.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -9,7 +9,7 @@ use super::helpers::map_conclusion;
 use shared::RunnerEvent;
 use wire::reporting::{Status, StepResult};
 
-/// Per-step metadata captured from StepStarted.
+/// Per-step metadata captured from `StepStarted`.
 struct CollectedMeta {
   number: u32,
   name: String,
@@ -38,7 +38,7 @@ impl StepCollector {
     }
   }
 
-  /// Record a step event. Captures metadata on StepStarted, builds result on StepCompleted.
+  /// Record a step event. Captures metadata on `StepStarted`, builds result on `StepCompleted`.
   pub(super) async fn record(&self, event: &RunnerEvent) {
     match event {
       RunnerEvent::StepStarted {
@@ -89,7 +89,7 @@ impl StepCollector {
     }
   }
 
-  /// Append a pre-built StepResult (e.g. setup step).
+  /// Append a pre-built `StepResult` (e.g. setup step).
   pub(super) async fn push_result(&self, result: StepResult) {
     self.state.lock().await.results.push(result);
   }

@@ -9,11 +9,17 @@ use std::fmt;
 /// - String comparisons are case-insensitive
 #[derive(Debug, Clone)]
 pub enum ExprValue {
+  /// The `null` value.
   Null,
+  /// A boolean value.
   Bool(bool),
+  /// A numeric value.
   Number(f64),
+  /// A string value.
   String(String),
+  /// An ordered list of values.
   Array(Vec<ExprValue>),
+  /// A map from string keys to values.
   Object(HashMap<String, ExprValue>),
 }
 

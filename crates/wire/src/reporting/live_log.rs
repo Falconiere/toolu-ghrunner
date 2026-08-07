@@ -29,7 +29,9 @@ const MIN_ATTEMPTS_BEFORE_THRESHOLD: u32 = 5;
 /// Buffered log line with step context for WebSocket delivery.
 #[derive(Debug)]
 pub struct LiveLogLine {
+  /// Timeline record id of the step this line belongs to.
   pub step_id: String,
+  /// The raw log line text.
   pub line: String,
 }
 
@@ -80,7 +82,7 @@ impl SendState {
 pub struct LiveLogStreamer;
 
 impl LiveLogStreamer {
-  /// Connect to FeedStreamUrl and return (sender, join_handle).
+  /// Connect to `FeedStreamUrl` and return `(sender, join_handle)`.
   /// Returns None if connection fails — caller proceeds without live logs.
   pub async fn connect(
     feed_stream_url: &str,
@@ -212,7 +214,7 @@ where
   }
 }
 
-/// Drain buffer and group lines by step_id.
+/// Drain buffer and group lines by `step_id`.
 fn drain_into_groups(buffer: &mut Vec<LiveLogLine>) -> HashMap<String, Vec<String>> {
   let mut grouped: HashMap<String, Vec<String>> = HashMap::new();
   for line in buffer.drain(..) {

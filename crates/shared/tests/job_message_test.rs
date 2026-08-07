@@ -1,3 +1,5 @@
+//! Tests for the `job_message` deserialized job-request types.
+
 use shared::{ActionStep, AgentJobRequestMessage, DictEntry, PipelineContextData, TemplateToken};
 use std::collections::HashMap;
 

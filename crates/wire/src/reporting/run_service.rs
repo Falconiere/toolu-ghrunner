@@ -7,16 +7,21 @@ use shared::RunnerError;
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AcquireJobRequest {
+  /// Id of the broker message carrying the job to acquire.
   pub job_message_id: String,
+  /// This host's OS label, sent as the `runnerOS` field.
   #[serde(rename = "runnerOS")]
   pub runner_os: String,
+  /// Id of the billing owner the job runs under.
   pub billing_owner_id: String,
 }
 
 /// Response from acquirejob — wraps the job body + plan ID from header.
 #[derive(Debug, Clone)]
 pub struct AcquireJobResponse {
+  /// Id of the orchestration plan the acquired job belongs to.
   pub plan_id: String,
+  /// The raw acquired job body (broker's `AgentJobRequestMessage` JSON).
   pub body: serde_json::Value,
   /// Bearer token for subsequent run service calls (from x-actions-results-token).
   pub run_service_token: Option<String>,
@@ -26,7 +31,9 @@ pub struct AcquireJobResponse {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RenewJobRequest {
+  /// Id of the orchestration plan the job belongs to.
   pub plan_id: String,
+  /// Id of the job whose lock is being renewed.
   pub job_id: String,
 }
 
@@ -34,6 +41,7 @@ pub struct RenewJobRequest {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RenewJobResponse {
+  /// ISO 8601 timestamp the lock is now held until.
   pub locked_until: String,
 }
 
@@ -41,12 +49,19 @@ pub struct RenewJobResponse {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CompleteJobRequest {
+  /// Id of the orchestration plan the job belongs to.
   pub plan_id: String,
+  /// Id of the job being completed.
   pub job_id: String,
+  /// Id of the broker message that delivered the job, echoed back on completion.
   pub request_id: i64,
+  /// Final job conclusion.
   pub conclusion: Conclusion,
+  /// Job-level outputs to report back.
   pub outputs: serde_json::Value,
+  /// Per-step results for the completed job.
   pub step_results: Vec<super::types::StepResult>,
+  /// Job-level annotations (errors/warnings/notices) to report back.
   pub annotations: Vec<Annotation>,
 }
 

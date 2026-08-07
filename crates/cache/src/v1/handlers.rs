@@ -415,7 +415,7 @@ fn finish_download(
 
 /// Parse `Range: bytes=a-b` into an inclusive `(start, end)` clamped to `total`.
 ///
-/// Single `bytes` ranges only — our clients (BuildKit, `@actions/cache`) never
+/// Single `bytes` ranges only — our clients (`BuildKit`, `@actions/cache`) never
 /// send multi-range, so `bytes=a-b, c-d` is rejected rather than half-parsed.
 ///
 /// # Errors

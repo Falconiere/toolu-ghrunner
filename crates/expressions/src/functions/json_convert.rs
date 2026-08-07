@@ -39,9 +39,9 @@ fn expr_value_to_json(val: &ExprValue) -> serde_json::Value {
   match val {
     ExprValue::Null => serde_json::Value::Null,
     ExprValue::Bool(b) => serde_json::Value::Bool(*b),
-    ExprValue::Number(n) => serde_json::Number::from_f64(*n)
-      .map(serde_json::Value::Number)
-      .unwrap_or(serde_json::Value::Null),
+    ExprValue::Number(n) => {
+      serde_json::Number::from_f64(*n).map_or(serde_json::Value::Null, serde_json::Value::Number)
+    },
     ExprValue::String(s) => serde_json::Value::String(s.clone()),
     ExprValue::Array(arr) => serde_json::Value::Array(arr.iter().map(expr_value_to_json).collect()),
     ExprValue::Object(map) => {

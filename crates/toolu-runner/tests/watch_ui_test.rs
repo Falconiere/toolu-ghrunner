@@ -22,7 +22,7 @@ fn fixture_app() -> TestResult<(App, tempfile::TempDir)> {
   std::fs::write(dir.path().join("20260708T210044Z-fix.jsonl"), FIXTURE)?;
 
   let mut app = App::new("test-runner".to_owned());
-  app.lock_line = "idle".to_owned();
+  "idle".clone_into(&mut app.lock_line);
   app.set_jobs(scan_jobs(dir.path())?);
 
   let mut job = OpenJob::new(PathBuf::from("fixture.jsonl"));

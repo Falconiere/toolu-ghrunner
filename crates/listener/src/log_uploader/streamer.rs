@@ -1,4 +1,4 @@
-//! StepLogStreamer — per-step log streaming actor with gzip final upload.
+//! `StepLogStreamer` — per-step log streaming actor with gzip final upload.
 //!
 //! Spawns a tokio task that receives log lines via an mpsc channel
 //! and uploads a gzip-compressed blob via Results Service on finalize.
@@ -14,12 +14,19 @@ pub const CHANNEL_CAPACITY: usize = 4096;
 
 /// Configuration for spawning a `StepLogStreamer` actor.
 pub struct StreamerConfig {
+  /// HTTP client used for the Results Service upload.
   pub client: reqwest::Client,
+  /// Base URL of the Results Service.
   pub results_url: String,
+  /// Bearer token authorizing the upload.
   pub token: String,
+  /// The job's run-level backend id.
   pub run_backend_id: String,
+  /// The job's job-level backend id.
   pub job_backend_id: String,
+  /// The step's backend id.
   pub step_backend_id: String,
+  /// The step's display name.
   pub step_name: String,
 }
 

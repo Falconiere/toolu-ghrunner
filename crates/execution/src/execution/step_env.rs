@@ -61,7 +61,7 @@ fn env_token_to_string(
   }
 }
 
-/// Process file commands after step execution; returns GITHUB_OUTPUT values.
+/// Process file commands after step execution; returns `GITHUB_OUTPUT` values.
 pub(super) fn apply_file_commands(
   file_cmds: &FileCommandManager,
   ctx: &mut ExecutionContext,

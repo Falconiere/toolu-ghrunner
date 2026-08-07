@@ -67,8 +67,7 @@ pub fn extract_service_urls(msg: &AgentJobRequestMessage) -> ServiceUrls {
   let cache_service_v2 = msg
     .variables
     .get("ACTIONS_CACHE_SERVICE_V2")
-    .map(|v| is_truthy(&v.value))
-    .unwrap_or(false);
+    .is_some_and(|v| is_truthy(&v.value));
 
   ServiceUrls {
     results_url: data_value("ResultsServiceUrl"),

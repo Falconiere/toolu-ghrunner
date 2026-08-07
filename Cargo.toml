@@ -11,8 +11,17 @@ repository = "https://github.com/Falconiere/toolu-ghrunner"
 
 # ── Shared lint configuration ──────────────────────────────────────
 # Strict by design — every error and warning is a code-quality signal we
-# don't want to ship.
+# don't want to ship. CI runs `cargo clippy --workspace --all-targets -D
+# warnings`, so every `warn` below is a hard failure there.
+#
+# Groups carry a negative `priority` so the individual lines beneath them
+# win. The house kit (toolu-conventions, stacks/rust) sets `all` + `pedantic`
+# with the two relaxations at the bottom; everything between them is this
+# repo's own stricter set, kept because it exceeds the kit rather than
+# deviating from it (unwrap/expect/panic are `deny` here, `warn` there).
 [workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
 unwrap_used = "deny"
 expect_used = "deny"
 panic = "deny"
@@ -35,6 +44,16 @@ wildcard_enum_match_arm = "deny"
 cast_possible_truncation = "deny"
 cast_sign_loss = "deny"
 cast_possible_wrap = "deny"
+# The three cast lints above are the dangerous ones and stay denied.
+# `cast_precision_loss` arrives with the kit's `pedantic` group and is
+# deliberately NOT one of them: `PipelineContextData::n` is `Option<f64>`
+# because GitHub's context numbers ARE IEEE-754 doubles (same as its JS
+# runner), so the `i64`/`u64` → `f64` widening in
+# `shared::job_message::context_data_de` is the wire contract, not a mistake.
+# There is no lossless narrowing for an arbitrary 64-bit integer, and
+# rejecting large values would fail a job over a big id. Re-denied would
+# force a suppression at the one honest site — this keeps the rule truthful.
+cast_precision_loss = "allow"
 checked_conversions = "deny"
 lossy_float_literal = "deny"
 unnecessary_wraps = "deny"
@@ -47,7 +66,9 @@ large_types_passed_by_value = "deny"
 implicit_clone = "deny"
 str_to_string = "deny"
 verbose_file_reads = "deny"
+# The kit's two practical relaxations of the noisiest pedantic lints.
 module_name_repetitions = "allow"
+must_use_candidate = "allow"
 similar_names = "warn"
 if_not_else = "warn"
 match_same_arms = "warn"
@@ -57,7 +78,12 @@ missing_errors_doc = "warn"
 missing_panics_doc = "warn"
 
 [workspace.lints.rust]
-unsafe_code = "deny"
+unsafe_code = "forbid"
+# CORE rule 8 / Rust STRUCTURE rule 2: a doc line on every public item and
+# module — `///` on every pub fn, struct, enum, trait and field, `//!` at the
+# top of each module. With -D warnings an undocumented public item is a CI
+# failure.
+missing_docs = "warn"
 unused_imports = "deny"
 deprecated = "deny"
 unused_must_use = "deny"

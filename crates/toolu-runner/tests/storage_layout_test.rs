@@ -178,8 +178,7 @@ fn expand_tilde_does_not_expand_other_users() {
 fn home_dir() -> PathBuf {
   std::env::var_os("HOME")
     .or_else(|| std::env::var_os("USERPROFILE"))
-    .map(PathBuf::from)
-    .unwrap_or_else(|| PathBuf::from("/tmp"))
+    .map_or_else(|| PathBuf::from("/tmp"), PathBuf::from)
 }
 
 // ─── `resolve_data_dir` + `resolve_work_dir` ───────────────────────

@@ -1,4 +1,4 @@
-//! Artifact service lifecycle (start, base_url, shutdown).
+//! Artifact service lifecycle (start, `base_url`, shutdown).
 
 use std::sync::Arc;
 

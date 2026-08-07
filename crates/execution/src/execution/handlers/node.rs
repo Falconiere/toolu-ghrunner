@@ -33,11 +33,11 @@ pub fn input_env_key(name: &str) -> String {
 /// - `STATE_{KEY}` — state values from previous steps
 ///
 /// Does NOT set `NODE_OPTIONS` (blocked).
-pub fn build_action_env(
+pub fn build_action_env<S1: ::std::hash::BuildHasher, S2: ::std::hash::BuildHasher>(
   def: &ActionDefinition,
-  step_inputs: &HashMap<String, String>,
+  step_inputs: &HashMap<String, String, S1>,
   action_path: &str,
-  state: &HashMap<String, String>,
+  state: &HashMap<String, String, S2>,
 ) -> HashMap<String, String> {
   let mut env = HashMap::new();
 

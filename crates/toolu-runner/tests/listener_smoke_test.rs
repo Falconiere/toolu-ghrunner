@@ -128,7 +128,7 @@ fn real_jit_config_b64(server_url_v2: &str, agent_id: i64) -> Result<String, Str
   Ok(BASE64.encode(outer.to_string().as_bytes()))
 }
 
-/// Mock the OAuth2 token exchange + broker session creation — the two
+/// Mock the `OAuth2` token exchange + broker session creation — the two
 /// requests every successful `GitHubListener::run` issues before it ever
 /// reaches the poll loop.
 async fn mount_auth_and_session(server: &MockServer) {

@@ -20,7 +20,7 @@ use wire::reporting::results_service::{
 };
 
 /// Upload compressed step logs: get signed URL, PUT gzipped blob, finalize
-/// metadata. Shared by the streamer actor's finalize path and setup_step.
+/// metadata. Shared by the streamer actor's finalize path and `setup_step`.
 pub async fn upload_compressed_step_logs<'a>(
   rctx: &ResultsCtx<'a>,
   step_backend_id: &'a str,

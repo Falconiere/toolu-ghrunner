@@ -133,7 +133,7 @@ fn empty_restore_key_is_skipped() -> TestResult<()> {
   let version = "v1";
   idx.insert(scope, version, &mk_entry("anything", 1_000)?)?;
   // A `""` restore key would prefix-match everything; it must be ignored.
-  let hit = idx.lookup(&ladder(scope), version, "nomatch", &["".to_owned()])?;
+  let hit = idx.lookup(&ladder(scope), version, "nomatch", &[String::new()])?;
   assert!(
     hit.is_none(),
     "an empty restore key must not match an arbitrary entry"

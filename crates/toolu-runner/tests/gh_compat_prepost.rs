@@ -208,7 +208,7 @@ async fn drive_with_cancel(
   Ok((conclusion, collector.await?))
 }
 
-/// 1 + 4: a single action's post runs at job end and sees its main's STATE_k.
+/// 1 + 4: a single action's post runs at job end and sees its main's `STATE_k`.
 #[tokio::test]
 async fn post_runs_at_job_end_and_sees_main_state() -> TestResult<()> {
   let steps = vec![action_step("a", "act-a")];
@@ -253,7 +253,7 @@ async fn two_posts_drain_in_reverse_lifo_order() -> TestResult<()> {
   Ok(())
 }
 
-/// 3: a LATER `run:` step fails, yet the action's post still runs (always()).
+/// 3: a LATER `run:` step fails, yet the action's post still runs (`always()`).
 #[tokio::test]
 async fn post_runs_even_when_a_later_step_failed() -> TestResult<()> {
   let mut steps = vec![action_step("a", "act-a")];

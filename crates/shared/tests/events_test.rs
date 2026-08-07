@@ -1,3 +1,5 @@
+//! Tests for the `RunnerEvent` / `ListenerEvent` event types.
+
 use shared::{AnnotationLevel, Conclusion, ListenerEvent, LogStream, RunnerEvent};
 use std::collections::HashMap;
 

@@ -5,19 +5,29 @@ use shared::RunnerError;
 
 /// Manages temp files for GitHub Actions file commands.
 pub struct FileCommandManager {
+  /// Path backing `GITHUB_ENV`.
   pub env_path: PathBuf,
+  /// Path backing `GITHUB_OUTPUT`.
   pub output_path: PathBuf,
+  /// Path backing `GITHUB_PATH`.
   pub path_path: PathBuf,
+  /// Path backing `GITHUB_STATE`.
   pub state_path: PathBuf,
+  /// Path backing `GITHUB_STEP_SUMMARY`.
   pub summary_path: PathBuf,
 }
 
 /// Results from processing file commands after a step.
 pub struct FileCommandResults {
+  /// Env vars set via `GITHUB_ENV`.
   pub env_vars: HashMap<String, String>,
+  /// Outputs set via `GITHUB_OUTPUT`.
   pub outputs: HashMap<String, String>,
+  /// Directories prepended via `GITHUB_PATH`.
   pub path_additions: Vec<String>,
+  /// State saved via `GITHUB_STATE`, for the action's post step.
   pub state: HashMap<String, String>,
+  /// Contents written to `GITHUB_STEP_SUMMARY`, truncated to the 1 MiB limit.
   pub summary: String,
 }
 
@@ -123,11 +133,11 @@ impl FileCommandManager {
 /// `$GITHUB_ENV` would inject a preload into every later node action — the one
 /// env guard the runner enforces. Applied to BOTH the top-level file-command
 /// read-back and the composite `$GITHUB_ENV` read-back.
-pub fn strip_blocked_env(env: &mut HashMap<String, String>) {
+pub fn strip_blocked_env<S: ::std::hash::BuildHasher>(env: &mut HashMap<String, String, S>) {
   env.retain(|k, _| !k.eq_ignore_ascii_case("NODE_OPTIONS"));
 }
 
-/// Parse a GITHUB_ENV file. Supports `KEY=VALUE` and heredoc `KEY<<DELIM`.
+/// Parse a `GITHUB_ENV` file. Supports `KEY=VALUE` and heredoc `KEY<<DELIM`.
 ///
 /// Splits on first `=` only (values may contain `=`).
 /// Handles both `\r\n` and `\n` line endings.
@@ -136,12 +146,12 @@ pub fn parse_env_file(content: &str) -> HashMap<String, String> {
   parse_kv_file(content)
 }
 
-/// Parse a GITHUB_OUTPUT file (same format as env).
+/// Parse a `GITHUB_OUTPUT` file (same format as env).
 pub fn parse_output_file(content: &str) -> HashMap<String, String> {
   parse_kv_file(content)
 }
 
-/// Parse a GITHUB_PATH file — one path per line.
+/// Parse a `GITHUB_PATH` file — one path per line.
 pub fn parse_path_file(content: &str) -> Vec<String> {
   content
     .lines()

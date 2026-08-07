@@ -1,5 +1,5 @@
 //! Azure "Put Block": one block of a staged blob, keyed by its (base64) block
-//! id. Blocks arrive concurrently and out of order — the Go SDK BuildKit uses
+//! id. Blocks arrive concurrently and out of order — the Go SDK `BuildKit` uses
 //! stages ~1 MiB blocks — so each is written to a per-upload blocks directory
 //! alongside the staging file and assembled later at "Put Block List".
 

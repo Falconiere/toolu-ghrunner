@@ -80,7 +80,10 @@ fn assert_number(v: &ExprValue, expected: f64) {
   let matched = actual.is_some();
   let actual = actual.unwrap_or(0.0);
   assert!(matched, "expected Number({expected}), got {v:?}");
-  assert_eq!(actual, expected, "number mismatch");
+  assert!(
+    (actual - expected).abs() < f64::EPSILON,
+    "number mismatch: expected {expected}, got {actual}"
+  );
 }
 
 #[test]

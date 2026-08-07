@@ -12,7 +12,11 @@ pub(crate) mod retry;
 mod setup_step;
 mod step_reporter;
 #[cfg(test)]
-mod watchdog_tests;
+#[path = "tests/watchdog_retry.rs"]
+mod watchdog_retry;
+#[cfg(test)]
+#[path = "tests/watchdog_trip.rs"]
+mod watchdog_trip;
 
 pub use handler::GitHubListener;
 pub(crate) use handler::SessionCtx;

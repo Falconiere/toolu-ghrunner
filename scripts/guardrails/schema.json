@@ -1,0 +1,227 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "guardrails.config.json",
+  "description": "Declares this project's structural ceilings and allowlists. The declaration lives here; enforcement is delegated to whichever tool sees each language best; the kit's CI asserts the two agree.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "srcRoot",
+    "src",
+    "fileSize",
+    "functionSize",
+    "testDir",
+    "testGlob",
+    "barrelNames",
+    "bannedDeps",
+    "shadowConfigs"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "version": {
+      "type": "integer",
+      "description": "Config format version. run.sh warns (never fails) when this trails the scripts' version."
+    },
+    "srcRoot": {
+      "type": "string",
+      "description": "The source directory every tree rule is relative to."
+    },
+    "src": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "topLevel": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The only directories permitted directly under srcRoot. OMIT this key for 'unconstrained' (the Rust stack, whose module names are arbitrary) \u2014 an empty array means nothing is allowed, which is a different thing."
+        },
+        "nested": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "description": "Glob-keyed allowlist of subdirectories. A key ending /* governs every direct child, which is how intra-domain shape is expressed without naming any domain."
+        },
+        "requireReadme": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Directories under srcRoot that must carry a README.md index."
+        }
+      }
+    },
+    "fileSize": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max"
+      ],
+      "properties": {
+        "max": {
+          "type": "integer",
+          "description": "Code-line ceiling; blanks and comments excluded."
+        },
+        "overrides": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "description": "Per-glob ceilings, first match wins."
+        },
+        "skipExtensions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Extensions a linter already owns (oxlint max-lines owns .ts/.tsx). Listing them here is what prevents two enforcers of one ceiling drifting apart."
+        }
+      }
+    },
+    "functionSize": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max"
+      ],
+      "properties": {
+        "max": {
+          "type": "integer"
+        },
+        "overrides": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          }
+        }
+      },
+      "description": "Declared here, enforced by oxlint max-lines-per-function (TS) and clippy too_many_lines (Rust). validate-templates.sh asserts they agree."
+    },
+    "testDir": {
+      "type": "string",
+      "description": "__tests__ for TypeScript, tests for Rust."
+    },
+    "testGlob": {
+      "type": "string",
+      "description": "Space-separated filename globs identifying a test file."
+    },
+    "barrelNames": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "barrelExempt": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Globs where a barrel name is legitimate \u2014 console's src/app/** because index.tsx is TanStack Router's name for a directory's / route."
+    },
+    "bannedDeps": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "requiredFiles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "why"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "why": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "secrets": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "neverTracked": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "scanExempt": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Path prefixes/globs exempt from secret-content scanning. scripts/guardrails/ is exempt unconditionally regardless of this list."
+        }
+      }
+    },
+    "shadowConfigs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "found",
+          "use",
+          "why"
+        ],
+        "properties": {
+          "found": {
+            "type": "string"
+          },
+          "use": {
+            "type": "string"
+          },
+          "why": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "filenameCase": {
+      "type": "array",
+      "description": "Filename casing rules. OMIT on the TypeScript stacks \u2014 oxlint's unicorn/filename-case already owns kebab-case there. Present on Rust, where nothing else enforces snake_case.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "glob",
+          "regex",
+          "describe"
+        ],
+        "properties": {
+          "glob": {
+            "type": "string"
+          },
+          "regex": {
+            "type": "string"
+          },
+          "describe": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "ownedByLinter": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Checks the LINTER enforces, which this module therefore skips. oxlint's house plugin owns the per-file rules on the TypeScript stacks; the Rust stack lists nothing because oxlint cannot parse Rust. Listing a check here without a matching oxlint rule is caught by validate-templates.sh."
+    }
+  }
+}

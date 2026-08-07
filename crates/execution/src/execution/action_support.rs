@@ -118,7 +118,7 @@ pub(super) fn build_composite_inputs(
 }
 
 /// Resolve the action directory inside its cache dir, honoring a subpath.
-pub(super) fn resolve_action_dir(cache_dir: &Path, subpath: &Option<String>) -> std::path::PathBuf {
+pub(super) fn resolve_action_dir(cache_dir: &Path, subpath: Option<&String>) -> std::path::PathBuf {
   match subpath {
     Some(p) if !p.is_empty() => cache_dir.join(p),
     _ => cache_dir.to_path_buf(),
@@ -160,8 +160,7 @@ pub(super) async fn emit_action_header(
     for (k, v) in &input_map {
       let value = v
         .to_string_value()
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(|| "<unrenderable>".to_owned());
+        .map_or_else(|| "<unrenderable>".to_owned(), ToOwned::to_owned);
       emit_log(events, &step.id, &format!("    {k}: {value}")).await;
     }
   }

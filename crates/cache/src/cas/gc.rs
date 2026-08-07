@@ -205,8 +205,7 @@ fn rewrite_groups(
     let entries = retention
       .groups
       .get(&(scope.to_owned(), version.to_owned()))
-      .map(Vec::as_slice)
-      .unwrap_or(&[]);
+      .map_or(&[][..], Vec::as_slice);
     index.rewrite(scope, version, entries)?;
   }
   Ok(())

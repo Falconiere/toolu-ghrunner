@@ -1,7 +1,7 @@
 //! Real-data tests for the OIDC token service (AC #7).
 //!
 //! Spins up `OidcServer` in `Local` mode on `127.0.0.1:0`, mints a
-//! token by POSTing to the same endpoint a real GitHub Actions
+//! token by `POSTing` to the same endpoint a real GitHub Actions
 //! `ACTIONS_ID_TOKEN_REQUEST_TOKEN` step would hit, and verifies:
 //! - the response carries a well-formed JWT,
 //! - the JWT decodes to claims matching the job context,

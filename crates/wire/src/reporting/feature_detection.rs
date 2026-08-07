@@ -12,10 +12,12 @@ pub enum ProtocolVersion {
 }
 
 impl ProtocolVersion {
+  /// Returns `true` if this is the GHES legacy V1 protocol.
   pub fn is_v1(self) -> bool {
     matches!(self, Self::V1)
   }
 
+  /// Returns `true` if this is the github.com V2 protocol.
   pub fn is_v2(self) -> bool {
     matches!(self, Self::V2)
   }

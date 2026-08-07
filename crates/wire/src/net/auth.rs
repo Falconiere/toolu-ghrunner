@@ -2,11 +2,11 @@
 //!
 //! The sync crypto (`parse_rsa_private_key`, `build_jwt`) lives in
 //! `protocol::auth`. This module owns the single HTTP POST that swaps
-//! the signed JWT for an OAuth2 access token.
+//! the signed JWT for an `OAuth2` access token.
 
 use shared::RunnerError;
 
-/// Exchange a signed JWT for an OAuth2 access token.
+/// Exchange a signed JWT for an `OAuth2` access token.
 ///
 /// # Errors
 ///

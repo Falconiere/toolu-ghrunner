@@ -8,11 +8,11 @@ use regex::Regex;
 /// - `runner.os` / `runner.arch` / `runner.temp`
 /// - `env.NAME` — from the current environment context
 /// - Anything else resolves to an empty string.
-pub fn interpolate_composite_expr(
+pub fn interpolate_composite_expr<S: ::std::hash::BuildHasher>(
   text: &str,
-  inputs: &std::collections::HashMap<String, String>,
-  step_outputs: &std::collections::HashMap<String, std::collections::HashMap<String, String>>,
-  env_context: &std::collections::HashMap<String, String>,
+  inputs: &std::collections::HashMap<String, String, S>,
+  step_outputs: &std::collections::HashMap<String, std::collections::HashMap<String, String, S>, S>,
+  env_context: &std::collections::HashMap<String, String, S>,
   temp_dir: &std::path::Path,
 ) -> String {
   let Ok(re) = Regex::new(r"\$\{\{\s*(.*?)\s*\}\}") else {
@@ -26,11 +26,11 @@ pub fn interpolate_composite_expr(
   .into_owned()
 }
 
-fn resolve_expr(
+fn resolve_expr<S: ::std::hash::BuildHasher>(
   expr: &str,
-  inputs: &std::collections::HashMap<String, String>,
-  step_outputs: &std::collections::HashMap<String, std::collections::HashMap<String, String>>,
-  env_context: &std::collections::HashMap<String, String>,
+  inputs: &std::collections::HashMap<String, String, S>,
+  step_outputs: &std::collections::HashMap<String, std::collections::HashMap<String, String, S>, S>,
+  env_context: &std::collections::HashMap<String, String, S>,
   temp_dir: &std::path::Path,
 ) -> String {
   let parts: Vec<&str> = expr.split('.').collect();
@@ -44,7 +44,10 @@ fn resolve_expr(
   }
 }
 
-fn resolve_input(parts: &[&str], inputs: &std::collections::HashMap<String, String>) -> String {
+fn resolve_input<S: ::std::hash::BuildHasher>(
+  parts: &[&str],
+  inputs: &std::collections::HashMap<String, String, S>,
+) -> String {
   let key = parts.get(1).copied().unwrap_or_default();
   // Try exact match first, then case-insensitive
   if let Some(val) = inputs.get(key) {
@@ -58,9 +61,9 @@ fn resolve_input(parts: &[&str], inputs: &std::collections::HashMap<String, Stri
   String::new()
 }
 
-fn resolve_step_output(
+fn resolve_step_output<S: ::std::hash::BuildHasher>(
   parts: &[&str],
-  step_outputs: &std::collections::HashMap<String, std::collections::HashMap<String, String>>,
+  step_outputs: &std::collections::HashMap<String, std::collections::HashMap<String, String, S>, S>,
 ) -> String {
   // steps.ID.outputs.KEY
   if parts.len() >= 4 && parts.get(2).copied() == Some("outputs") {
@@ -84,7 +87,10 @@ fn resolve_runner(parts: &[&str], temp_dir: &std::path::Path) -> String {
   }
 }
 
-fn resolve_env(parts: &[&str], env_context: &std::collections::HashMap<String, String>) -> String {
+fn resolve_env<S: ::std::hash::BuildHasher>(
+  parts: &[&str],
+  env_context: &std::collections::HashMap<String, String, S>,
+) -> String {
   let key = parts.get(1).copied().unwrap_or_default();
   env_context.get(key).cloned().unwrap_or_default()
 }

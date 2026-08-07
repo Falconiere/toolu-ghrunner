@@ -10,12 +10,19 @@ use shared::RunnerError;
 /// Passed by reference so the listener can keep the underlying
 /// `String`s alive across `.await` points without cloning.
 pub struct PollParams<'a> {
+  /// The HTTP client to issue the long-poll `GET` on.
   pub client: &'a reqwest::Client,
+  /// Base URL of the broker's V2 message endpoint.
   pub server_url_v2: &'a str,
+  /// Bearer token authenticating the poll request.
   pub token: &'a str,
+  /// The broker session id this poll is scoped to.
   pub session_id: &'a str,
+  /// This runner's version string, sent for the broker's `runnerVersion` query param.
   pub runner_version: &'a str,
+  /// This host's OS label, sent for the broker's `os` query param.
   pub os: &'a str,
+  /// This host's architecture label, sent for the broker's `architecture` query param.
   pub architecture: &'a str,
   /// Redelivery cursor: the id of the last message the runner saw. The
   /// broker only returns messages newer than this, so a redelivered or

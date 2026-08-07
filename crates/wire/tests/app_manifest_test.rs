@@ -96,8 +96,7 @@ async fn spurious_connection_does_not_abort_the_flow() -> TestResult<()> {
   let base = base.trim_end_matches('/').to_owned();
   let authority = base
     .split_once("://")
-    .map(|(_, a)| a)
-    .unwrap_or(base.as_str())
+    .map_or(base.as_str(), |(_, a)| a)
     .to_owned();
   let manifest = manifest_json(&server.callback_url())?;
   let handle = tokio::spawn(server.wait_for_code(manifest, Duration::from_secs(10)));

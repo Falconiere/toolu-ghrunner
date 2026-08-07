@@ -9,22 +9,29 @@ use shared::RunnerError;
 /// Format: `{owner}/{repo}/{path}@{ref}`
 #[derive(Debug, Clone)]
 pub struct ReusableWorkflowRef {
+  /// Repository owner.
   pub owner: String,
+  /// Repository name.
   pub repo: String,
+  /// Path to the workflow file within the repo.
   pub path: String,
+  /// Git ref (tag/branch/sha) to resolve the workflow from.
   pub git_ref: String,
 }
 
 /// Definition of a reusable workflow input from `on.workflow_call.inputs`.
 #[derive(Debug, Clone)]
 pub struct InputDef {
+  /// Whether the caller must supply this input.
   pub required: bool,
+  /// Default value used when the caller doesn't set this input.
   pub default: Option<String>,
 }
 
 /// Definition of a reusable workflow secret from `on.workflow_call.secrets`.
 #[derive(Debug, Clone)]
 pub struct SecretDef {
+  /// Whether the caller must supply this secret.
   pub required: bool,
 }
 
@@ -40,22 +47,29 @@ pub enum SecretMode {
 /// Definition of a reusable workflow output.
 #[derive(Debug, Clone)]
 pub struct OutputDef {
+  /// Human-readable description of the output.
   pub description: Option<String>,
+  /// Expression producing the output's value (e.g. `${{ jobs.build.outputs.version }}`).
   pub value: String,
 }
 
 /// Parsed definition of a reusable workflow from `on: workflow_call:`.
 #[derive(Debug, Clone)]
 pub struct ReusableWorkflowDef {
+  /// Declared `inputs:` keyed by input name.
   pub inputs: HashMap<String, InputDef>,
+  /// Declared `outputs:` keyed by output name.
   pub outputs: HashMap<String, OutputDef>,
+  /// Declared `secrets:` keyed by secret name.
   pub secrets: HashMap<String, SecretDef>,
 }
 
 /// Context passed from a caller workflow to a reusable workflow.
 #[derive(Debug, Clone)]
 pub struct CallerContext {
+  /// Resolved inputs passed to the reusable workflow.
   pub inputs: HashMap<String, String>,
+  /// Resolved secrets passed to the reusable workflow.
   pub secrets: HashMap<String, String>,
 }
 
@@ -64,9 +78,9 @@ pub struct CallerContext {
 /// # Errors
 ///
 /// Returns `RunnerError::ReusableWorkflow` if a required input is missing.
-pub fn validate_inputs(
-  defined: &HashMap<String, InputDef>,
-  caller_inputs: &HashMap<String, String>,
+pub fn validate_inputs<S1: ::std::hash::BuildHasher, S2: ::std::hash::BuildHasher>(
+  defined: &HashMap<String, InputDef, S1>,
+  caller_inputs: &HashMap<String, String, S2>,
 ) -> Result<(), RunnerError> {
   for (name, def) in defined {
     if def.required && def.default.is_none() && !caller_inputs.contains_key(name) {
@@ -79,9 +93,9 @@ pub fn validate_inputs(
 }
 
 /// Build the resolved inputs map: caller values override defaults.
-pub fn resolve_inputs(
-  defined: &HashMap<String, InputDef>,
-  caller_inputs: &HashMap<String, String>,
+pub fn resolve_inputs<S1: ::std::hash::BuildHasher, S2: ::std::hash::BuildHasher>(
+  defined: &HashMap<String, InputDef, S1>,
+  caller_inputs: &HashMap<String, String, S2>,
 ) -> HashMap<String, String> {
   let mut resolved = HashMap::new();
   for (name, def) in defined {
@@ -99,13 +113,18 @@ pub fn resolve_inputs(
 /// # Errors
 ///
 /// Returns `RunnerError::ReusableWorkflow` if a required secret is missing.
-pub fn validate_secrets(
+pub fn validate_secrets<S1: ::std::hash::BuildHasher, S2: ::std::hash::BuildHasher>(
   mode: &SecretMode,
-  defined: &HashMap<String, SecretDef>,
-  caller_secrets: &HashMap<String, String>,
+  defined: &HashMap<String, SecretDef, S1>,
+  caller_secrets: &HashMap<String, String, S2>,
 ) -> Result<HashMap<String, String>, RunnerError> {
   match mode {
-    SecretMode::Inherit => Ok(caller_secrets.clone()),
+    SecretMode::Inherit => Ok(
+      caller_secrets
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect(),
+    ),
     SecretMode::Explicit(mapping) => {
       for (name, def) in defined {
         if def.required && !mapping.contains_key(name) {
@@ -122,9 +141,13 @@ pub fn validate_secrets(
 /// Resolve reusable workflow outputs from job execution results.
 ///
 /// Output `value` fields contain expressions like `${{ jobs.build.outputs.version }}`.
-pub fn resolve_outputs(
-  defined: &HashMap<String, OutputDef>,
-  job_outputs: &HashMap<String, HashMap<String, String>>,
+pub fn resolve_outputs<
+  S1: ::std::hash::BuildHasher,
+  S2: ::std::hash::BuildHasher,
+  S3: ::std::hash::BuildHasher,
+>(
+  defined: &HashMap<String, OutputDef, S1>,
+  job_outputs: &HashMap<String, HashMap<String, String, S3>, S2>,
 ) -> HashMap<String, String> {
   defined
     .iter()
@@ -136,9 +159,9 @@ pub fn resolve_outputs(
 }
 
 /// Resolve a simple output expression like `${{ jobs.build.outputs.version }}`.
-fn resolve_output_expression(
+fn resolve_output_expression<S2: ::std::hash::BuildHasher, S3: ::std::hash::BuildHasher>(
   expr: &str,
-  job_outputs: &HashMap<String, HashMap<String, String>>,
+  job_outputs: &HashMap<String, HashMap<String, String, S3>, S2>,
 ) -> String {
   let trimmed = expr.trim();
 
@@ -171,12 +194,15 @@ fn resolve_output_expression(
 }
 
 /// Build the caller context for a reusable workflow invocation.
-pub fn build_caller_context(
-  inputs: &HashMap<String, String>,
-  secrets: &HashMap<String, String>,
+pub fn build_caller_context<S1: ::std::hash::BuildHasher, S2: ::std::hash::BuildHasher>(
+  inputs: &HashMap<String, String, S1>,
+  secrets: &HashMap<String, String, S2>,
 ) -> CallerContext {
   CallerContext {
-    inputs: inputs.clone(),
-    secrets: secrets.clone(),
+    inputs: inputs.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+    secrets: secrets
+      .iter()
+      .map(|(k, v)| (k.clone(), v.clone()))
+      .collect(),
   }
 }

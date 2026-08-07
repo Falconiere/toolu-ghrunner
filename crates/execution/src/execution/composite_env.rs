@@ -19,12 +19,19 @@ use super::handlers::node::input_env_key;
 /// The mutable [`ExecutionContext`] is threaded separately so nested `uses:`
 /// steps can borrow it mutably while this bundle stays shareable.
 pub struct CompositeParams<'a> {
+  /// The composite action's parsed manifest.
   pub manifest: &'a ActionDefinition,
+  /// `with:` inputs the calling step passed to this composite action.
   pub step_inputs: &'a HashMap<String, String>,
+  /// Sink for the job's event stream.
   pub events: &'a mpsc::Sender<RunnerEvent>,
+  /// Job workspace root.
   pub workspace: &'a Path,
+  /// The runner's configuration.
   pub config: &'a RunnerConfig,
+  /// Id of the step that invoked this composite action.
   pub parent_step_id: &'a str,
+  /// Directory the composite action was downloaded/checked out into.
   pub action_dir: &'a Path,
   /// Job-level cancellation token, threaded to nested `uses:` steps so a
   /// top-level cancel interrupts actions running inside a composite.
@@ -36,8 +43,11 @@ pub struct CompositeParams<'a> {
 
 /// Result of composite execution including side effects (env/path changes).
 pub struct CompositeResult {
+  /// Overall outcome of the composite action's steps.
   pub conclusion: Conclusion,
+  /// `GITHUB_ENV` entries accumulated across the composite's steps.
   pub env_additions: HashMap<String, String>,
+  /// `GITHUB_PATH` entries accumulated across the composite's steps.
   pub path_additions: Vec<String>,
 }
 

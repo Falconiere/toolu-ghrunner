@@ -11,24 +11,34 @@ use shared::RunnerError;
 /// Registry authentication for pulling private images.
 #[derive(Debug, Clone)]
 pub struct RegistryAuth {
+  /// Registry account name.
   pub username: String,
+  /// Registry account password or token.
   pub password: String,
+  /// Registry host, when not Docker Hub.
   pub server_address: Option<String>,
 }
 
 /// Inspected image info.
 #[derive(Debug)]
 pub struct ImageInfo {
+  /// Tags the image is known by (`repo:tag` form).
   pub repo_tags: Vec<String>,
 }
 
 /// Parameters for creating a container.
 pub struct CreateParams<'a> {
+  /// Image reference to run.
   pub image: &'a str,
+  /// Container name, if one should be assigned.
   pub name: Option<&'a str>,
+  /// Command/entrypoint override.
   pub cmd: Vec<&'a str>,
+  /// `KEY=VALUE` environment entries.
   pub env: &'a [String],
+  /// Host bind mounts in `host:container[:opts]` form.
   pub binds: &'a [String],
+  /// Docker network to attach the container to.
   pub network: Option<&'a str>,
 }
 

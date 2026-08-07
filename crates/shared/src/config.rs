@@ -36,13 +36,13 @@ pub struct L2Config {
 /// Content-addressed cache settings (`[cache]`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CacheConfig {
-  /// L1 NVMe eviction ceiling in bytes.
+  /// L1 `NVMe` eviction ceiling in bytes.
   pub max_bytes: u64,
   /// Entry TTL in days (matches GitHub's 7).
   pub entry_ttl_days: u64,
   /// Branches a `Trusted` job may write the shared scope for.
   pub protected_branches: Vec<String>,
-  /// FastCDC target average chunk size in bytes.
+  /// `FastCDC` target average chunk size in bytes.
   pub chunk_avg_bytes: u32,
   /// S3 cold tier, or `None` for L1-only.
   pub l2: Option<L2Config>,
@@ -60,7 +60,7 @@ impl CacheConfig {
   pub const DEFAULT_MAX_BYTES: u64 = 100 * 1024 * 1024 * 1024;
   /// Default entry TTL: 7 days (matches GitHub). Backs `default_entry_ttl_days`.
   pub const DEFAULT_ENTRY_TTL_DAYS: u64 = 7;
-  /// Default FastCDC target average chunk size: 64 KiB. Backs
+  /// Default `FastCDC` target average chunk size: 64 KiB. Backs
   /// `default_chunk_avg_bytes`.
   pub const DEFAULT_CHUNK_AVG_BYTES: u32 = 64 * 1024;
   /// Default protected branches a `Trusted` job may write the shared scope for.
@@ -104,7 +104,7 @@ pub struct RunnerConfig {
   /// and `accelerated` alternatives.
   pub services_mode: ServicesMode,
   /// Address the accelerated cache server binds. Must not be loopback:
-  /// `docker-container` BuildKit reaches it across a network namespace.
+  /// `docker-container` `BuildKit` reaches it across a network namespace.
   pub service_bind: String,
   /// Content-addressed cache settings (accelerated mode).
   pub cache: CacheConfig,
@@ -116,9 +116,18 @@ pub struct RunnerConfig {
   pub shadow_enabled: bool,
 }
 
+/// Read `TOOLU_RUNNER_ALLOW_VERBOSE`: `true` iff set to exactly `"1"`.
+/// Unset (or any other value) means the tracing filter stays capped at
+/// `info`.
+pub fn allow_verbose() -> bool {
+  std::env::var("TOOLU_RUNNER_ALLOW_VERBOSE")
+    .map(|v| v == "1")
+    .unwrap_or(false)
+}
+
 impl RunnerConfig {
   /// Default [`service_bind`](Self::service_bind) address. Non-loopback so
-  /// `docker-container` BuildKit reaches the cache server across a netns.
+  /// `docker-container` `BuildKit` reaches the cache server across a netns.
   /// Also backs the `[services] bind` TOML default in `toolu-runner::config`
   /// (`default_service_bind`) so the two sites cannot drift.
   pub const DEFAULT_SERVICE_BIND: &'static str = "0.0.0.0";

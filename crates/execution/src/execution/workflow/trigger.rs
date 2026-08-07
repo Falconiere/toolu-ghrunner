@@ -5,10 +5,15 @@ use super::types::TriggerConfig;
 /// Event payload for trigger evaluation.
 #[derive(Debug, Clone)]
 pub struct EventPayload {
+  /// The triggering event's name (`push`, `pull_request`, `workflow_dispatch`, ...).
   pub event_name: String,
+  /// Branch the event occurred on, if applicable.
   pub branch: Option<String>,
+  /// Tag the event occurred on, if applicable.
   pub tag: Option<String>,
+  /// Paths touched by the event, for `paths:`/`paths-ignore:` filters.
   pub paths_changed: Vec<String>,
+  /// `workflow_dispatch` inputs, if any.
   pub inputs: HashMap<String, String>,
 }
 

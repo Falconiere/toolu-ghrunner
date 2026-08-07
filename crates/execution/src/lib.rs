@@ -4,6 +4,8 @@
 //! returns an event stream. Depends only on `shared`, `expressions`, and
 //! `cache` — never on the listener, `wire`, or `observability`.
 
+/// Environment-derived configuration (the only allowed `std::env::var` site).
+pub mod config;
 /// Bollard wrapper: daemon client, service containers, path translation.
 pub mod docker;
 /// Job execution engine (context, steps runner, handlers, expressions).
@@ -48,7 +50,7 @@ impl Runner {
   /// passed through the secret masker; every consumer of this receiver must
   /// mask before writing a line to a durable sink. `execution` is a public
   /// library, so callers outside this workspace must honor this contract too.
-  pub async fn execute_job(
+  pub fn execute_job(
     &self,
     job: AgentJobRequestMessage,
     cancel: CancellationToken,

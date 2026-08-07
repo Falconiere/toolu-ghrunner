@@ -1,0 +1,34 @@
+{
+  "$schema": "./scripts/guardrails/workspace.schema.json",
+  "version": 2,
+  "packages": [
+    "crates/cache",
+    "crates/config",
+    "crates/execution",
+    "crates/expressions",
+    "crates/listener",
+    "crates/observability",
+    "crates/protocol",
+    "crates/shared",
+    "crates/toolu-runner",
+    "crates/wire"
+  ],
+  "bannedDeps": [],
+  "secrets": {
+    "neverTracked": [
+      ".env"
+    ]
+  },
+  "shadowConfigs": [
+    {
+      "found": "lefthook.yaml",
+      "use": "lefthook.yml",
+      "why": "the lefthook 2.x installer shadows a .yaml, so the hooks never run"
+    },
+    {
+      "found": "guardrails.config.json",
+      "use": "guardrails.workspace.json",
+      "why": "a workspace root carries the manifest only; a config here would govern every crate at once and silently override what each one declares"
+    }
+  ]
+}

@@ -10,8 +10,11 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateSessionRequest {
+  /// The `sessionId` to create — always the ephemeral all-zero UUID.
   pub session_id: String,
+  /// The `ownerName` shown for this session (hostname + PID).
   pub owner_name: String,
+  /// The `agent` info describing this runner.
   pub agent: AgentInfo,
 }
 
@@ -19,10 +22,15 @@ pub struct CreateSessionRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentInfo {
+  /// The `id` — the runner's registered agent id.
   pub id: i64,
+  /// The `name` — the runner's display name.
   pub name: String,
+  /// The `version` — the reported runner version string.
   pub version: String,
+  /// The `osDescription` — a human-readable OS/arch label.
   pub os_description: String,
+  /// The `ephemeral` flag — always `true` for this runner.
   pub ephemeral: bool,
 }
 
@@ -30,9 +38,13 @@ pub struct AgentInfo {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateSessionResponse {
+  /// The `sessionId` the broker assigned to this session.
   pub session_id: String,
+  /// The `ownerName` the broker recorded for this session.
   pub owner_name: String,
+  /// The `agent` info the broker echoed back, if any.
   pub agent: Option<AgentInfo>,
+  /// The `encryptionKey` for decrypting broker message bodies, if any.
   pub encryption_key: Option<EncryptionKey>,
   /// Whether the session uses FIPS-compliant encryption. When true the
   /// wrapped AES key uses RSA-OAEP-SHA256; otherwise OAEP-SHA1. Absent on
@@ -47,22 +59,24 @@ pub struct CreateSessionResponse {
 /// If false, `value` is the raw AES key (base64).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EncryptionKey {
+  /// Whether `value` is RSA-OAEP encrypted (`true`) or the raw AES key (`false`).
   pub encrypted: bool,
+  /// The key material (base64), encrypted or raw per `encrypted`.
   pub value: String,
 }
 
 /// Lightweight session state held during the listener lifecycle.
 #[derive(Debug, Clone)]
 pub struct TaskAgentSession {
+  /// The active session id used to poll and acknowledge messages.
   pub session_id: String,
+  /// The session's encryption key, if the broker returned one.
   pub encryption_key: Option<EncryptionKey>,
 }
 
 /// Build a `CreateSessionRequest` from runner settings.
 pub fn build_session_request(agent_id: i64, agent_name: &str) -> CreateSessionRequest {
-  let hostname = std::env::var("HOSTNAME")
-    .or_else(|_| std::env::var("COMPUTERNAME"))
-    .unwrap_or_else(|_| "unknown".to_owned());
+  let hostname = crate::config::hostname().unwrap_or_else(|| "unknown".to_owned());
 
   CreateSessionRequest {
     session_id: "00000000-0000-0000-0000-000000000000".to_owned(),

@@ -29,6 +29,86 @@ no OTel.
     `observability`, `listener` at runtime (and, as dev-deps,
     `execution` / `expressions` / `cache` for the integration tests).
 
+## House Conventions & The Gate
+
+This repo follows [toolu-conventions](https://github.com/Falconiere/toolu-conventions)
+(`CORE.md` + `stacks/rust`). Read that kit's `CORE.md` and
+`stacks/rust/STRUCTURE.md` first; the rules below are the ones that
+bite here.
+
+- **The gate is ONE command**, run before every push and mirrored
+  step-for-step by `.github/workflows/ci.yml`:
+  `./tools/check.sh all` = `cargo fmt --check` → `cargo clippy
+  --workspace --all-targets -D warnings` → the `#[allow]` ban →
+  `bash scripts/guardrails/run.sh` → `cargo test --workspace`.
+  **No layer may be disabled to get it green** — not for an unrelated
+  failure, not "just this once".
+- **`scripts/guardrails/` is copied VERBATIM from the kit** and is
+  never hand-edited — change `guardrails.config.json` instead. It
+  needs `jq` **and** `ast-grep` on PATH (`cargo install ast-grep
+  --locked`) and exits 3 without either, so a missing dependency can
+  never look like a clean run.
+- **Workspace guardrail layout.** The root carries
+  `guardrails.workspace.json` (the manifest naming all 10 crates) and
+  must **NOT** carry a `guardrails.config.json`; each crate carries
+  its own. `run.sh` re-execs once per crate with the working directory
+  inside it, so every path in a crate config is **crate-relative**.
+- **No `mod.rs` barrels.** A module that outgrows one file becomes
+  `src/foo.rs` (declaring `mod bar;`) **beside** `src/foo/bar.rs`.
+  There are zero `mod.rs` files in this repo and the gate keeps it
+  that way.
+- **Tests never share a file with production logic.** No inline
+  `#[cfg(test)] mod tests { … }` bodies — the test code lives in a
+  sibling `tests/` folder and the production file keeps only the
+  one-line include:
+  ```rust
+  #[cfg(test)]
+  #[path = "tests/parse_config.rs"]
+  mod tests;
+  ```
+  Each `tests/` tree stays **flat** (a directory inside a `tests/`
+  dir fails the folder-tree check). Crate-root integration tests stay
+  in the top-level `tests/`, one file per surface. Real data, no
+  mock-data tests.
+- **Every `src/` submodule folder carries a `README.md`** listing what
+  belongs there, what does not, and one row per file. `src.requireReadme`
+  in each crate's config enforces it — when you add a module folder,
+  add the README and the config entry together.
+- **Doc line on every public item and module** — `///` on every `pub`
+  fn, struct, enum, trait, variant and field, `//!` at the top of each
+  module. `missing_docs = "warn"` under `-D warnings` makes an
+  undocumented public item a CI failure.
+- **Env reads go through the crate's `config` module.** A guardrail
+  pattern rule (`no-direct-env-var`) bans `std::env::var` anywhere but
+  `config.rs` / `config/**` / `tests/**`, so every variable a crate
+  reads is declared and validated in one place. `config`, `shared`,
+  `protocol`, `execution` and `toolu-runner` each have a `src/config.rs`
+  holding their accessors.
+- **500 code-line ceiling per file** (blanks and comment-only lines
+  excluded; anything under a `tests/` dir is exempt). Split the design
+  before you fight the gate.
+
+### Deliberate deviations from the kit
+
+CORE allows deviating; documenting it here is what makes it a
+decision rather than drift.
+
+| Deviation | Kit says | Here | Why |
+| --- | --- | --- | --- |
+| Cargo workspace | one crate, no workspace | 10 crates under `crates/` | The layering (`protocol`/`shared` → … → `listener`) is what keeps `protocol` provably I/O-free; the kit's workspace guardrail machinery supports it. |
+| `rustfmt.toml` `tab_spaces` | `4` | `2` | Adopting 4 would reformat all 341 `.rs` files (4,212 hunks) and reset `git blame` for no behavioural gain. Every other rustfmt option matches the kit. |
+| Lint set | `unwrap_used`/`expect_used` = `warn` | `deny`, plus `panic`/`unreachable`/`todo`/`indexing_slicing`/cast lints denied | Stricter than the kit, not looser. A runner that panics mid-job kills a customer's build. |
+| `#[allow(…)]` / `#[expect(…)]` | not addressed | banned repo-wide (`tools/check.sh`) | Fix the lint, don't silence it. Note the check matches the outer form only — a crate-level `#![allow(…)]` (as in the two `benches/*.rs`) slips through. |
+| `clippy::cast_precision_loss` | on via `pedantic` | `allow` (the other three cast lints stay `deny`) | `PipelineContextData::n` is `f64` because GitHub's context numbers *are* doubles; the `i64`/`u64` widening in `job_message::context_data_de` is the wire contract. No lossless narrowing exists, so denying it would force a suppression at the one honest site. |
+| `functionSize.max` | `100` | `150` (matches `clippy.toml` `too-many-lines-threshold`) | One number, one enforcer — the two must agree, and 150 is the ceiling this codebase was written to. |
+| `knip` / `jscpd` | absent on Rust by design | absent | Node tools; clippy's `dead_code`/`unused_imports` and cargo cover the ground. The kit says the same. |
+| Code-review workflow | `deepseek` + generic checklist | `openrouter` + `.github/code-review-prompt.md`, `RULES_REF: merge`, `MAX_ROUNDS`, `MAX_TOKENS` | Repo-tuned; strictly more configured than the template. |
+
+`secrets.scanExempt` in `crates/config` and `crates/toolu-runner`
+lists the **synthetic** credential fixtures (`MIIphony`,
+`ghs_EXAMPLE…`, `ghp_deadbeef…`) used to test secret masking. Adding
+to that list requires proving the value is not a real credential.
+
 ## Crate-Specific Rules
 
 - **No OTel in v1.** Tracing is `tracing-subscriber` + `EnvFilter`
@@ -437,8 +517,9 @@ no OTel.
   budget-bounded (`REPORT_RETRY_MAX` 10 min) — wrapping `complete_job` in
   `job_lifecycle::poll_and_execute`, which also demotes
   `acknowledge_message` to a single-attempt, WARN-only, non-gating call.
-  In-crate `watchdog_tests` (`mod retry` + `mod trip`) is the integration
-  test home for both. `log_uploader/` owns the per-step log
+  `src/tests/watchdog_retry.rs` + `src/tests/watchdog_trip.rs` (declared
+  from `lib.rs` with `#[cfg(test)] #[path = …]`) are the integration test
+  home for both. `log_uploader/` owns the per-step log
   streamer and the combined job-log upload. `helpers::cleanup_session`
   deletes the broker session on exit. Listener events are drained to
   the `observability::journal` writer (replacing the old no-op drain).
@@ -599,7 +680,12 @@ no OTel.
 
 ## References
 
-- Root `CLAUDE.md` (project-wide rules — when added).
+- [toolu-conventions](https://github.com/Falconiere/toolu-conventions)
+  — the house kit this repo follows. `CORE.md` (stack-agnostic rules),
+  `stacks/rust/STRUCTURE.md` (the Rust layout), `stacks/rust/SETUP.md`
+  (what a scaffold ships), `guardrails/README.md` (the check module in
+  `scripts/guardrails/`). See "House Conventions & The Gate" above for
+  what applies here and the deviations on record.
 - [docs/architecture.md](docs/architecture.md) — high-level design +
   sequence diagrams for register / run / cancel / reconnect.
 - [docs/known-bugs.md](docs/known-bugs.md) — listener bug tracker.

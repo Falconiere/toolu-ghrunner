@@ -4,7 +4,7 @@
 //! `TimelineRecordFeedLinesWrapper` frames streamed over the `FeedStreamUrl`
 //! WebSocket (and the V2 Results-Service equivalent), batched on a line-count
 //! OR time threshold. The durable gzip step-log blob is still committed once
-//! at step end — it is NOT the live-render path (it is a single-shot BlockBlob
+//! at step end — it is NOT the live-render path (it is a single-shot `BlockBlob`
 //! PUT, which Azure cannot render incrementally).
 //!
 //! These tests drive the REAL flush loop (`live_log::run_loop`) against an

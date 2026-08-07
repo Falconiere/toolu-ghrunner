@@ -93,7 +93,7 @@ pub struct ServicesSection {
   #[serde(default = "default_services_mode")]
   pub mode: String,
   /// Address the accelerated cache server binds (`0.0.0.0` default; must not
-  /// be loopback — `docker-container` BuildKit reaches it across a netns).
+  /// be loopback — `docker-container` `BuildKit` reaches it across a netns).
   #[serde(default = "default_service_bind")]
   pub bind: String,
 }
@@ -143,7 +143,7 @@ pub struct CacheSection {
   /// Branches a `Trusted` job may write the shared scope for.
   #[serde(default = "default_protected_branches")]
   pub protected_branches: Vec<String>,
-  /// FastCDC target average chunk size in bytes.
+  /// `FastCDC` target average chunk size in bytes.
   #[serde(default = "default_chunk_avg_bytes")]
   pub chunk_avg_bytes: u32,
   /// `[cache.l2]` S3 cold tier.
@@ -445,4 +445,9 @@ pub fn resolve_data_dir(stored: &str) -> Result<PathBuf, RunnerError> {
 /// subdirs under it on demand.
 pub fn resolve_work_dir(stored: &str) -> PathBuf {
   paths::expand_tilde(Path::new(stored))
+}
+
+/// Read `TOOLU_RUNNER_TOKEN`; `None` when unset or not valid unicode.
+pub fn runner_token() -> Option<String> {
+  std::env::var("TOOLU_RUNNER_TOKEN").ok()
 }

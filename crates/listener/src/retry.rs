@@ -83,7 +83,7 @@ where
           return Err(RunnerError::Network(msg));
         }
         tracing::warn!(what, attempt, error = %msg, "retrying transient reporting failure");
-        let remaining = budget - elapsed;
+        let remaining = budget.saturating_sub(elapsed);
         let sleep_for = jittered_backoff(backoff).min(remaining);
         tokio::select! {
           () = cancel.cancelled() => return Err(RunnerError::Network(msg)),

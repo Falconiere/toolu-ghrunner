@@ -11,6 +11,7 @@ pub struct PluginRegistry {
 }
 
 impl PluginRegistry {
+  /// Create an empty plugin registry.
   pub fn new() -> Self {
     Self {
       plugins: Vec::new(),

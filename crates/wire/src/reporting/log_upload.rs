@@ -2,7 +2,7 @@ use reqwest::header::HeaderMap;
 
 use shared::RunnerError;
 
-/// Threshold above which AppendBlob is used instead of BlockBlob (4 MB).
+/// Threshold above which `AppendBlob` is used instead of `BlockBlob` (4 MB).
 const APPEND_BLOB_THRESHOLD: usize = 4 * 1024 * 1024;
 
 /// Upload mode for Azure Blob Storage.
@@ -45,17 +45,17 @@ impl LogUploader {
     }
   }
 
-  /// Headers for a BlockBlob PUT request.
+  /// Headers for a `BlockBlob` `PUT` request.
   pub fn block_blob_headers() -> HeaderMap {
     crate::net::block_blob_headers()
   }
 
-  /// Headers for creating an AppendBlob (empty body).
+  /// Headers for creating an `AppendBlob` (empty body).
   pub fn create_append_blob_headers() -> HeaderMap {
     crate::net::create_append_blob_headers()
   }
 
-  /// Headers for an AppendBlock request.
+  /// Headers for an `AppendBlock` request.
   pub fn append_block_headers(content_length: usize) -> HeaderMap {
     crate::net::append_block_headers(content_length)
   }

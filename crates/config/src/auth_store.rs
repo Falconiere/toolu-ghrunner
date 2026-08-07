@@ -248,7 +248,7 @@ pub fn resolve_bearer(
   host: &str,
   flag: Option<String>,
 ) -> Result<Option<String>, RunnerError> {
-  let env = std::env::var("TOOLU_RUNNER_TOKEN").ok();
+  let env = crate::config::runner_token();
   let stored = store.load(host)?.map(|t| t.access_token);
   Ok(pick_bearer(flag, env, stored))
 }

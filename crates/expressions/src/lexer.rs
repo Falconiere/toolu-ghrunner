@@ -3,26 +3,47 @@ use shared::RunnerError;
 /// Token produced by the expression lexer.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
+  /// An identifier (context name, property name, or function name), original casing preserved.
   Ident(String),
+  /// A single-quoted string literal, with `''` already unescaped to `'`.
   StringLit(String),
+  /// A numeric literal.
   NumberLit(f64),
+  /// A `true` / `false` literal.
   BoolLit(bool),
+  /// The `null` literal.
   Null,
+  /// The `.` property-access operator.
   Dot,
+  /// The opening `[` of an index-access expression.
   LBracket,
+  /// The closing `]` of an index-access expression.
   RBracket,
+  /// The opening `(` of a grouped expression or function call.
   LParen,
+  /// The closing `)` of a grouped expression or function call.
   RParen,
+  /// The `,` separator between function-call arguments.
   Comma,
+  /// The `*` wildcard used in `object.*` wildcard-access expressions.
   Star,
+  /// The `==` equality operator.
   Eq,
+  /// The `!=` inequality operator.
   Neq,
+  /// The `<` less-than operator.
   Lt,
+  /// The `<=` less-than-or-equal operator.
   Le,
+  /// The `>` greater-than operator.
   Gt,
+  /// The `>=` greater-than-or-equal operator.
   Ge,
+  /// The `&&` logical-and operator.
   And,
+  /// The `||` logical-or operator.
   Or,
+  /// The `!` logical-not operator.
   Not,
 }
 

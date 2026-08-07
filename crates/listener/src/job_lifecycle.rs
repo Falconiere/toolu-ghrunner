@@ -320,7 +320,6 @@ async fn poll_until_job(ctx: &mut SessionCtx) -> Result<Option<BrokerMessage>, R
       PollOutcome::Cancelled => return Ok(None),
       PollOutcome::NoWork => {
         backoff = POLL_BACKOFF_START;
-        continue;
       },
       PollOutcome::Skip { message_id } => {
         // An undecryptable / unparseable message. The cursor was already
@@ -332,12 +331,10 @@ async fn poll_until_job(ctx: &mut SessionCtx) -> Result<Option<BrokerMessage>, R
           "skipping undecryptable/unparseable broker message"
         );
         backoff = POLL_BACKOFF_START;
-        continue;
       },
       PollOutcome::Migrated { url, .. } => {
         ctx.broker_url = url;
         backoff = POLL_BACKOFF_START;
-        continue;
       },
       PollOutcome::Job(msg) => return Ok(Some(msg)),
       PollOutcome::Cancel { msg: _, job_id } => {
@@ -580,7 +577,7 @@ async fn connect_live_log(
   (Some(tx), Some(wrapper_handle))
 }
 
-/// Extract the SystemVssConnection AccessToken from job message endpoints.
+/// Extract the `SystemVssConnection` `AccessToken` from job message endpoints.
 fn extract_system_token(job_msg: &AgentJobRequestMessage) -> Option<String> {
   let token = super::helpers::system_vss_access_token(job_msg);
   if token.is_none() {
@@ -597,8 +594,7 @@ fn extract_system_token(job_msg: &AgentJobRequestMessage) -> Option<String> {
       endpoint_found = endpoint.is_some(),
       auth_scheme = endpoint
         .and_then(|e| e.authorization.as_ref())
-        .map(|a| a.scheme.as_str())
-        .unwrap_or("<none>"),
+        .map_or("<none>", |a| a.scheme.as_str()),
       auth_keys = ?auth_keys,
       "SystemVssConnection AccessToken not found"
     );

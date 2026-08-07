@@ -1,0 +1,76 @@
+{
+  "$schema": "../../scripts/guardrails/schema.json",
+  "version": 2,
+  "srcRoot": "src",
+  "src": {
+    "nested": {
+      "execution": [
+        "actions",
+        "artifacts",
+        "handlers",
+        "oidc",
+        "shadow",
+        "workflow"
+      ],
+      "execution/artifacts": [
+        "service"
+      ],
+      "execution/workflow": [
+        "parser",
+        "reusable"
+      ],
+      "*": [
+        "tests"
+      ]
+    },
+    "requireReadme": [
+      "docker",
+      "execution",
+      "execution/actions",
+      "execution/artifacts",
+      "execution/artifacts/service",
+      "execution/handlers",
+      "execution/oidc",
+      "execution/shadow",
+      "execution/workflow",
+      "execution/workflow/parser",
+      "execution/workflow/reusable",
+      "node",
+      "plugin"
+    ]
+  },
+  "fileSize": {
+    "max": 500,
+    "skipExtensions": []
+  },
+  "functionSize": {
+    "max": 150
+  },
+  "testDir": "tests",
+  "testGlob": "",
+  "barrelNames": [
+    "mod.rs"
+  ],
+  "barrelExempt": [],
+  "bannedDeps": [],
+  "filenameCase": [
+    {
+      "glob": "*.rs",
+      "regex": "^[a-z0-9_]+[.]rs$",
+      "describe": "snake_case"
+    }
+  ],
+  "secrets": {
+    "neverTracked": [
+      ".env"
+    ]
+  },
+  "shadowConfigs": [
+    {
+      "found": "lefthook.yaml",
+      "use": "lefthook.yml",
+      "why": "the lefthook 2.x installer shadows a .yaml, so the hooks never run"
+    }
+  ],
+  "ownedByLinter": []
+}

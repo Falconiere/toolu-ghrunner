@@ -166,8 +166,8 @@ fn exit_code_for(result: Result<Option<Conclusion>, RunnerError>) -> i32 {
 
 /// Read `TOOLU_JITCONFIG`; `None` for unset or empty.
 fn read_jit_config() -> Option<String> {
-  match std::env::var("TOOLU_JITCONFIG") {
-    Ok(v) if !v.is_empty() => Some(v),
+  match crate::config::jit_config_raw() {
+    Some(v) if !v.is_empty() => Some(v),
     _ => None,
   }
 }
@@ -176,7 +176,7 @@ fn read_jit_config() -> Option<String> {
 /// unparseable — the deadline is a backstop, not authority, so `boot` runs
 /// without a watchdog rather than refusing to start.
 fn read_deadline() -> Option<u64> {
-  let Ok(v) = std::env::var("TOOLU_DEADLINE") else {
+  let Some(v) = crate::config::deadline_raw() else {
     tracing::warn!("TOOLU_DEADLINE not set; running without a watchdog");
     return None;
   };

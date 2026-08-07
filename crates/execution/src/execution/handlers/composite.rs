@@ -33,8 +33,11 @@ pub fn prepare_composite(
 
 /// State for a composite action execution.
 pub struct CompositeExecution {
+  /// Output-isolation scope for this composite's internal steps.
   pub scope: ScopeName,
+  /// The composite's declared `outputs:` expressions, pending evaluation.
   pub outputs: CompositeOutputs,
+  /// Id of the step that invoked this composite action.
   pub step_id: String,
 }
 
@@ -71,8 +74,7 @@ fn resolve_simple_output_ref(
   let inner = trimmed
     .strip_prefix("${{")
     .and_then(|s| s.strip_suffix("}}"))
-    .map(str::trim)
-    .unwrap_or(trimmed);
+    .map_or(trimmed, str::trim);
 
   // Parse "steps.<id>.outputs.<key>"
   let parts: Vec<&str> = inner.split('.').collect();
