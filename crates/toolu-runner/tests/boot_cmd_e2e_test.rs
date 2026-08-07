@@ -111,9 +111,11 @@ async fn boot_exits_124_when_the_deadline_watchdog_fires_mid_job() {
   let jit_config =
     boot_fixtures::real_jit_config_b64(&server.uri()).expect("build a real-keypair jit config");
 
+  // Saturating, not `expect`: a pre-epoch clock is a host defect, and this
+  // test asserts the watchdog's exit code, not `SystemTime`'s edge cases.
   let now_ms = SystemTime::now()
     .duration_since(UNIX_EPOCH)
-    .expect("system clock is after the epoch")
+    .unwrap_or_default()
     .as_millis();
   let deadline_ms = now_ms + 2_000;
 

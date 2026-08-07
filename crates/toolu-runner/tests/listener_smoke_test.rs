@@ -221,12 +221,17 @@ async fn mount_job_lifecycle(server: &MockServer) -> Result<(), String> {
 /// A `RunnerConfig` rooted at a fresh tempdir (both `data_dir` and
 /// `workspace_root` pre-created), so the real engine can actually run a job
 /// in it — unlike `make_config`'s uncreated, test-shared temp paths.
-fn unique_job_config() -> Result<(tempfile::TempDir, RunnerConfig), String> {
-  let dir = tempfile::tempdir().map_err(|e| format!("tempdir: {e}"))?;
+async fn unique_job_config()
+-> Result<(tempfile::TempDir, RunnerConfig), Box<dyn std::error::Error>> {
+  let dir = tempfile::tempdir()?;
   let workspace_root = dir.path().join("work");
   let data_dir = dir.path().join("data");
-  std::fs::create_dir_all(&workspace_root).map_err(|e| format!("create workspace_root: {e}"))?;
-  std::fs::create_dir_all(&data_dir).map_err(|e| format!("create data_dir: {e}"))?;
+  let (workspace_root, data_dir) = tokio::task::spawn_blocking(move || {
+    std::fs::create_dir_all(&workspace_root)?;
+    std::fs::create_dir_all(&data_dir)?;
+    Ok::<_, std::io::Error>((workspace_root, data_dir))
+  })
+  .await??;
   let config = RunnerConfig {
     data_dir,
     workspace_root,
@@ -353,7 +358,9 @@ async fn run_returns_the_completed_jobs_conclusion() {
     .await
     .expect("mount the broker + run-service mocks");
 
-  let (_dir, config) = unique_job_config().expect("build a fresh job-scoped RunnerConfig");
+  let (_dir, config) = unique_job_config()
+    .await
+    .expect("build a fresh job-scoped RunnerConfig");
   let masker = Arc::new(std::sync::Mutex::new(SecretMasker::new()));
   let cancel = CancellationToken::new();
   let jit_config = real_jit_config_b64(&server.uri(), 44).expect("build a real-keypair jit config");

@@ -32,7 +32,10 @@ Fly; deadline-driven teardown on Namespace).
 
 When a deadline is set, a watchdog fires at that instant: it cancels
 the in-flight job gracefully (the job reports Cancelled to GitHub) and
-hard-exits after a 30-second grace period.
+hard-exits after a 30-second grace period. The graceful path normally
+wins — once the listener returns, `boot` stands the watchdog down and
+exits `124` through its own return path, so the hard exit is reached
+only when shutdown itself hangs.
 
 ### Exit codes
 
