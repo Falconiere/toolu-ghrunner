@@ -296,7 +296,18 @@ fn spawn_watchdog(
     // hand before it: the line above must reach the provider's log even on
     // this path. The `_diag` file sink is `tracing_appender::rolling`
     // (synchronous, no background worker), so it is already durable.
-    drop(std::io::Write::flush(&mut std::io::stderr()));
+    //
+    // A failed flush (stderr closed, broken pipe) is not silently dropped:
+    // the file sink is a separate handle, so this line survives even when
+    // the stderr one cannot — which is exactly the case where knowing the
+    // diagnostic was lost matters.
+    if let Err(e) = std::io::Write::flush(&mut std::io::stderr()) {
+      tracing::error!(
+        error = %e,
+        "could not flush stderr before the deadline hard-exit; the exit reason may be missing \
+         from the provider's log"
+      );
+    }
     std::process::exit(124);
   })
 }
