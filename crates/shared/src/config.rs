@@ -116,14 +116,27 @@ pub struct RunnerConfig {
   pub shadow_enabled: bool,
 }
 
-/// Read `TOOLU_RUNNER_ALLOW_VERBOSE`: `true` iff set to exactly `"1"`.
-/// Unset (or any other value) means the tracing filter stays capped at
-/// `info`.
+/// Return `true` iff `TOOLU_RUNNER_ALLOW_VERBOSE` is exactly `"1"`.
+///
+/// Unset and all other Unicode values return `false`. Invalid Unicode is
+/// reported directly to stderr because this read happens before tracing is
+/// initialized, then also returns `false`.
 pub fn allow_verbose() -> bool {
-  std::env::var("TOOLU_RUNNER_ALLOW_VERBOSE")
-    .map(|v| v == "1")
-    .unwrap_or(false)
+  match std::env::var("TOOLU_RUNNER_ALLOW_VERBOSE") {
+    Ok(value) => value == "1",
+    Err(std::env::VarError::NotPresent) => false,
+    Err(std::env::VarError::NotUnicode(_)) => {
+      eprintln!(
+        "toolu-runner: TOOLU_RUNNER_ALLOW_VERBOSE is not valid Unicode; verbose logging remains disabled"
+      );
+      false
+    },
+  }
 }
+
+#[cfg(test)]
+#[path = "tests/config.rs"]
+mod tests;
 
 impl RunnerConfig {
   /// Default [`service_bind`](Self::service_bind) address. Non-loopback so
