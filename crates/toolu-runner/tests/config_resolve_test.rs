@@ -413,8 +413,9 @@ fn seed_runtime_state(dir: &Path) -> Result<(), std::io::Error> {
 /// OQ-3: `remove` on a per-repo registration deletes `config.toml`,
 /// `credentials.json`, the seeded `.lock` file, and any `.pending_remove`
 /// marker, while `_diag/` and its contents survive for `watch` history.
-/// The seeded `.lock` names a dead holder (PID 0), so `--force` takes the
-/// force-cancel branch and proceeds to delete state.
+/// Uses `--skip-unregister`: this test is about local file layout, and
+/// `remove` now calls GitHub — without the flag it would either fail for
+/// want of a token or issue a real DELETE to api.github.com.
 #[test]
 fn remove_deletes_registration_files_but_keeps_diag() {
   let home = tempfile::tempdir().expect("home tempdir");
@@ -425,7 +426,7 @@ fn remove_deletes_registration_files_but_keeps_diag() {
   seed_runtime_state(&repo_dir).expect("seed lock + credentials + _diag");
 
   let output = runner_cmd(home.path(), cwd.path())
-    .args(["remove", "--force"])
+    .args(["remove", "--force", "--skip-unregister"])
     .output()
     .expect("spawn remove");
 

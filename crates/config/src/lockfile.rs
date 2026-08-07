@@ -196,16 +196,6 @@ fn read_body(path: &Path) -> Result<LockBody, RunnerError> {
   serde_json::from_str(&raw).map_err(|e| RunnerError::Config(format!("lock body parse: {e}")))
 }
 
-/// Is the process recorded in the lock at `path` still running?
-///
-/// `true` for an unreadable or malformed body — the same fail-closed
-/// reading [`handle_contended`] takes, since neither can prove the holder
-/// is gone. Callers use this to tell a live run from the leftover `.lock`
-/// a normal `run` exit leaves behind (nothing deletes it on the way out).
-pub fn holder_alive(path: &Path) -> bool {
-  read_body(path).map_or(true, |b| is_pid_alive(b.pid))
-}
-
 /// Is `pid` still alive? Uses `sysinfo` to check a single PID without
 /// the full-process-table enumeration that the old `refresh_processes(All)`
 /// path did. Returns `false` for `0` and unknown PIDs.

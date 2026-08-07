@@ -35,27 +35,37 @@ Tracking format: B-NNN — short title — severity — owner — status.
 - **Status:** Resolved
 - **Resolution:** `remove` now unregisters on GitHub before deleting
   anything local. `wire::net::register::unregister_runner` DELETEs
-  `…/actions/runners/{id}` using the persisted `runner_id`, falling back
-  to a name lookup when no id was recorded; a 404 (or no same-name match)
-  is `Ok` so the call is idempotent — the common case, since GitHub reaps
-  a JIT registration after its single job. Ordering is deliberate: the
-  persisted `runner_id` and URL are the only way to name the runner, so
-  deleting them first would strand it. A failed unregister therefore
-  aborts with local state intact and the removal can be retried; the
-  bearer resolves `--token` > `TOOLU_RUNNER_TOKEN` > the stored `login`
-  token, and with none of the three the local removal still proceeds
-  behind a WARN that the GitHub-side runner was left registered.
-  `--skip-unregister` is the explicit escape hatch (revoked token,
-  deleted repo, no network). `--force` also skips the unregister when the
-  `.lock` holder is still ALIVE (`config::lockfile::holder_alive`): live
-  cancellation is still step 10 work, so that job keeps renewing and
-  reporting against this registration, and deleting it on GitHub mid-job
-  would break the very run `--force` targets — it warns and leaves the
-  runner for the operator to remove once the job ends. The check is
-  liveness, not mere existence: nothing deletes `.lock` on a normal `run`
-  exit, so a leftover lock with a dead holder is the resting state of any
-  machine that has run a job, and gating on existence alone would have
-  skipped the unregister in exactly that common case.
+  `…/actions/runners/{id}` using the persisted `runner_id`, falling back to a
+  name lookup when no id was recorded. A 404 is NOT taken as success on its
+  own — GitHub answers 404 for resources a token may not see, so it is
+  confirmed by a lookup the token must be able to perform; only a lookup that
+  succeeds and finds nothing proves absence. Without that, an under-scoped
+  token would be told "unregistered" right before the only local handle on a
+  still-registered runner was deleted: B-002 again, dressed as success.
+  Ordering is deliberate — the persisted `runner_id` and URL are the only way
+  to name the runner, so a failed unregister aborts with local state intact
+  and the removal can be retried.
+
+  Whether a run is in flight is decided by **acquiring** the job lock
+  (`config::lockfile::acquire`), not by inspecting the file: that is atomic,
+  reuses this crate's stale-lock rule, and holding the guard across the
+  multi-second DELETE closes the window where a `run` could start mid-removal.
+  A leftover `.lock` nobody holds — the resting state of any machine that has
+  run a job, since nothing deletes it on a normal exit — is therefore not
+  "in flight", so the ordinary `remove` still reaches the unregister. When the
+  lock IS held, `--force` removes local state but keeps `.lock` (fs2's lock is
+  inode-scoped, so unlinking it would let a second `run` acquire a fresh one
+  and race the live job) and skips the unregister, since that job still
+  reports against this registration.
+
+  Bearer precedence is `--token` > `TOOLU_RUNNER_TOKEN` > the stored `login`
+  token, with an empty value counting as absent. No token at all is an
+  **error**, not a warning-and-continue: deleting the persisted id and URL
+  while the runner is still registered is the very outcome this bug is about,
+  and a WARN scrolls past. `--skip-unregister` is the explicit opt-out, and a
+  `RunnerError::Config` (an org-level URL the repo-scoped API cannot address)
+  degrades to that same skip since no retry could ever resolve it. Live
+  cancellation of a running job remains step 10 work.
 - **Trigger:** `toolu-runner remove` is called while a registration
   exists.
 - **Observed:** The CLI writes `.pending_remove` if a `run` is in
