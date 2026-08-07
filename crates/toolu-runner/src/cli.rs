@@ -113,11 +113,12 @@ pub(crate) enum Command {
   /// Remove the runner registration.
   ///
   /// Unregisters the runner from GitHub, then deletes the persisted config
-  /// and credentials. If a run is in flight (the job lock is held) it
-  /// refuses and writes a `.pending_remove` marker instead — pass --force
-  /// to cancel the run first. A failed unregister aborts before anything
-  /// local is deleted, so the removal can be retried; --skip-unregister
-  /// removes local state only.
+  /// and credentials. Takes the job lock to decide: if a run holds it, the
+  /// removal refuses and writes a `.pending_remove` marker instead — pass
+  /// --force to remove anyway (which keeps the lock and skips the
+  /// unregister). A failed unregister, or no token at all, aborts before
+  /// anything local is deleted so the removal can be retried;
+  /// --skip-unregister removes local state only.
   Remove(RemoveArgs),
   /// Print local config and credential state (no network).
   ///
@@ -309,18 +310,19 @@ pub(crate) struct RemoveArgs {
   /// GitHub token authorizing the unregister call.
   ///
   /// Precedence: this flag > TOOLU_RUNNER_TOKEN > the stored `login`
-  /// token. With none of the three, local state is still removed and the
-  /// GitHub-side runner is left registered (a warning says so).
+  /// token. With none of the three, `remove` FAILS without deleting
+  /// anything — losing the persisted runner id would leave no way to
+  /// unregister. Pass --skip-unregister to remove local state anyway.
   #[arg(long, value_name = "TOKEN")]
   pub(crate) token: Option<String>,
-  /// Cancel an in-flight run before removing state.
+  /// Remove even while a run holds the job lock.
   ///
-  /// Without it, a held job lock aborts the removal and writes a
-  /// `.pending_remove` marker for the running process. When the lock
-  /// holder is still alive, this ALSO skips the GitHub unregister — that
-  /// job is still reporting against the registration — and leaves the
-  /// runner for you to remove once it ends. A stale lock (dead holder)
-  /// unregisters normally.
+  /// Without it, a held lock aborts the removal and writes a
+  /// `.pending_remove` marker for the running process. With it, local
+  /// state goes but the lock file is KEPT (the running process still owns
+  /// it) and the GitHub unregister is SKIPPED — that job is still
+  /// reporting against the registration. It does not yet cancel the job.
+  /// A leftover lock nobody holds is not "in flight" and removes normally.
   #[arg(long)]
   pub(crate) force: bool,
   /// Delete local state without calling GitHub.

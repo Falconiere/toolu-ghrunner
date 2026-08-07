@@ -274,23 +274,30 @@ async fn find_runner_id_by_name(
   )
 }
 
+/// Outcome of a DELETE against a specific runner id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DeleteOutcome {
+  /// GitHub accepted the delete.
+  Deleted,
+  /// GitHub answered 404. AMBIGUOUS on its own: the runner may be gone, or
+  /// the token may simply not be allowed to see it — GitHub hides
+  /// inaccessible resources behind 404 rather than 403. Callers that treat
+  /// this as success must confirm absence some other way.
+  NotFound,
+}
+
 /// DELETE the runner with `id` from the repo.
 ///
-/// `missing_ok` decides what a 404 means. [`unregister_runner`] passes
-/// `true` — the runner being gone IS the goal, and GitHub reaps a JIT
-/// registration after its single job, so "already absent" is the common
-/// case. [`replace_existing`] passes `false`: it just looked the id up, so a
-/// 404 is a genuine surprise worth surfacing verbatim (GitHub reports some
-/// authorization gaps as 404 rather than 403, and swallowing that would turn
-/// "this token cannot delete runners" into a silent no-op).
+/// A 404 is returned as [`DeleteOutcome::NotFound`] rather than folded into
+/// either success or failure, because the caller's correct reading differs
+/// and neither can be inferred here.
 async fn delete_runner(
   client: &reqwest::Client,
   runners_base: &str,
   token: &str,
   id: i64,
   timeout: Duration,
-  missing_ok: bool,
-) -> Result<(), RunnerError> {
+) -> Result<DeleteOutcome, RunnerError> {
   let response = client
     .delete(format!("{runners_base}/{id}"))
     .timeout(timeout)
@@ -305,9 +312,8 @@ async fn delete_runner(
     .await
     .map_err(|e| RunnerError::Network(format!("delete-runner request failed: {e}")))?;
   let status = response.status();
-  if missing_ok && status == reqwest::StatusCode::NOT_FOUND {
-    tracing::debug!(runner_id = id, "runner already absent — delete is a no-op");
-    return Ok(());
+  if status == reqwest::StatusCode::NOT_FOUND {
+    return Ok(DeleteOutcome::NotFound);
   }
   if !status.is_success() {
     let text = response.text().await.unwrap_or_default();
@@ -315,7 +321,7 @@ async fn delete_runner(
       "delete-runner {id} failed with status {status}: {text}"
     )));
   }
-  Ok(())
+  Ok(DeleteOutcome::Deleted)
 }
 
 /// Unregister a runner from its repo: `DELETE …/actions/runners/{id}`.
@@ -352,7 +358,26 @@ pub async fn unregister_runner(
     };
     found
   };
-  delete_runner(client, &runners_base, token, id, timeout, true).await
+  match delete_runner(client, &runners_base, token, id, timeout).await? {
+    DeleteOutcome::Deleted => Ok(()),
+    // 404 alone cannot distinguish "already gone" from "this token may not
+    // see this runner". Confirm with a lookup the token must be able to
+    // perform: if that succeeds and finds nothing, the runner really is
+    // absent; if it fails, propagate rather than report a false success —
+    // the caller deletes the only local handle on the strength of this.
+    DeleteOutcome::NotFound => {
+      match find_runner_id_by_name(client, &runners_base, token, name, timeout).await? {
+        None => {
+          tracing::debug!(runner_id = id, "runner absent, confirmed by lookup");
+          Ok(())
+        },
+        Some(other) => Err(RunnerError::Auth(format!(
+          "delete of runner {id} returned 404, but a runner named '{name}' still exists (id \
+         {other}) — refusing to report it unregistered"
+        ))),
+      }
+    },
+  }
 }
 
 /// Delete the same-name runner blocking a 409, so the retry can mint.
@@ -385,15 +410,23 @@ async fn replace_existing(
     name = params.name,
     "replacing existing runner registration"
   );
-  delete_runner(
+  match delete_runner(
     client,
     &runners_base,
     params.runner_token,
     id,
     params.timeout,
-    false,
   )
-  .await
+  .await?
+  {
+    DeleteOutcome::Deleted => Ok(()),
+    // The id came from a lookup moments ago, so a 404 is a real anomaly —
+    // often a token that cannot administer runners. Surface it verbatim.
+    DeleteOutcome::NotFound => Err(RunnerError::Auth(format!(
+      "delete-runner {id} failed with status 404 Not Found: the runner vanished between the \
+       lookup and the delete, or this token may not administer runners on this repo"
+    ))),
+  }
 }
 
 /// Mint a JIT runner config via `POST …/generate-jitconfig`.

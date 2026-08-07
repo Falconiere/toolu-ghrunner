@@ -16,7 +16,7 @@ use config::config::{
   CacheSection, RunnerRegistrationConfig, RuntimeConfig, ServicesSection, ShadowSection,
   WorkspaceSection, save_config,
 };
-use wiremock::matchers::{method, path as path_matcher};
+use wiremock::matchers::{header, method, path as path_matcher};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 /// Boxed error alias so helpers can use `?`.
@@ -60,9 +60,10 @@ fn delete_path() -> String {
 /// Run `remove` against the seeded registration. `home` isolates the token
 /// store so no developer's real `login` token leaks into the test.
 fn run_remove(config_path: &Path, home: &Path, extra: &[&str]) -> TestResult<std::process::Output> {
-  let mut cmd = Command::new(env!("CARGO"));
+  // The already-built binary, not `cargo run`: no re-resolve, no build-lock
+  // contention with the sibling test binaries.
+  let mut cmd = Command::new(env!("CARGO_BIN_EXE_toolu-runner"));
   cmd
-    .args(["run", "-p", "toolu-runner", "--quiet", "--"])
     .arg("remove")
     .arg("--config")
     .arg(config_path)
@@ -170,11 +171,12 @@ async fn skip_unregister_deletes_locally_without_calling_github() -> TestResult<
   Ok(())
 }
 
-/// With no token from any source, the local removal still proceeds — it
-/// worked before this feature and must keep working unauthenticated — but
-/// no request is made and the output says the runner was left registered.
+/// With no token from any source, `remove` must FAIL and keep local state.
+/// Deleting the persisted `runner_id` + URL while the runner is still
+/// registered is exactly the B-002 outcome; a warning would scroll past, so
+/// the operator is made to choose (`login`, `--token`, `--skip-unregister`).
 #[tokio::test]
-async fn no_token_removes_locally_and_says_so() -> TestResult<()> {
+async fn no_token_fails_without_touching_local_state() -> TestResult<()> {
   let dir = tempfile::tempdir()?;
   let home = tempfile::tempdir()?;
   let server = MockServer::start().await;
@@ -188,26 +190,108 @@ async fn no_token_removes_locally_and_says_so() -> TestResult<()> {
   let out = run_remove(&config_path, home.path(), &[])?;
 
   assert!(
-    out.status.success(),
-    "remove without a token should still clear local state: {}",
-    String::from_utf8_lossy(&out.stderr)
+    !out.status.success(),
+    "remove without a token must not silently strand the runner"
   );
-  assert!(!config_path.exists(), "config.toml should be gone");
-  let stdout = String::from_utf8_lossy(&out.stdout);
   assert!(
-    stdout.contains("still registered on GitHub"),
-    "output must say the runner was left registered, got: {stdout}"
+    config_path.exists(),
+    "config.toml must survive: it holds the only handle on the runner"
+  );
+  let stderr = String::from_utf8_lossy(&out.stderr);
+  for remedy in [
+    "login",
+    "--token",
+    "TOOLU_RUNNER_TOKEN",
+    "--skip-unregister",
+  ] {
+    assert!(
+      stderr.contains(remedy),
+      "the error must name {remedy}, got: {stderr}"
+    );
+  }
+  Ok(())
+}
+
+/// An exported-but-EMPTY `TOOLU_RUNNER_TOKEN` counts as no token, not as a
+/// token: sending `Bearer ` only earns a 401 and would turn a removable
+/// registration into a hard failure with a misleading auth error.
+#[tokio::test]
+async fn empty_env_token_is_treated_as_absent() -> TestResult<()> {
+  let dir = tempfile::tempdir()?;
+  let home = tempfile::tempdir()?;
+  let server = MockServer::start().await;
+  Mock::given(method("DELETE"))
+    .respond_with(ResponseTemplate::new(204))
+    .expect(0)
+    .mount(&server)
+    .await;
+
+  let config_path = seed_registration(dir.path(), &server.uri())?;
+  let mut cmd = Command::new(env!("CARGO_BIN_EXE_toolu-runner"));
+  cmd
+    .arg("remove")
+    .arg("--config")
+    .arg(&config_path)
+    .env("TOOLU_RUNNER_HOME", home.path())
+    .env("TOOLU_RUNNER_TOKEN", "   ");
+  let out = cmd.output()?;
+
+  assert!(!out.status.success(), "an empty token is not a token");
+  let stderr = String::from_utf8_lossy(&out.stderr);
+  assert!(
+    stderr.contains("no token available"),
+    "must report absence, not an auth failure, got: {stderr}"
   );
   Ok(())
 }
 
-/// A LEFTOVER lock — a dead holder PID — must still unregister. Nothing
-/// deletes `.lock` on a normal `run` exit, so this file is the resting
-/// state of any machine that has run a job; gating on mere existence would
-/// silently skip the unregister with nothing actually running, quietly
-/// reintroducing B-002 for the most common case.
+/// The stored `login` token is the bearer most operators actually rely on,
+/// and it drives a destructive DELETE — so it gets its own coverage rather
+/// than riding on the `--token` flag every other test here uses.
 #[tokio::test]
-async fn force_past_a_stale_lock_still_unregisters() -> TestResult<()> {
+async fn stored_login_token_authorizes_the_unregister() -> TestResult<()> {
+  let dir = tempfile::tempdir()?;
+  let home = tempfile::tempdir()?;
+  let server = MockServer::start().await;
+  Mock::given(method("DELETE"))
+    .and(path_matcher(delete_path()))
+    .and(header("authorization", "Bearer stored-tok"))
+    .respond_with(ResponseTemplate::new(204))
+    .expect(1)
+    .mount(&server)
+    .await;
+
+  let config_path = seed_registration(dir.path(), &server.uri())?;
+  // `AuthStore::File` keys by host; the seeded runner_url is the mock server.
+  let host = url::Url::parse(&server.uri())?
+    .host_str()
+    .unwrap_or_default()
+    .to_owned();
+  std::fs::write(
+    home.path().join(format!("token-{host}.json")),
+    format!(
+      r#"{{"access_token":"stored-tok","scope":"repo","host":"{host}","issued_at":"2026-08-06T00:00:00+00:00"}}"#
+    ),
+  )?;
+
+  let out = run_remove(&config_path, home.path(), &[])?;
+
+  assert!(
+    out.status.success(),
+    "the stored login token should authorize the unregister: {}",
+    String::from_utf8_lossy(&out.stderr)
+  );
+  assert!(!config_path.exists(), "config.toml should be gone");
+  Ok(())
+}
+
+/// A LEFTOVER `.lock` — present, nobody holding it — must not stop the
+/// unregister, with or without `--force`. Nothing deletes `.lock` on a
+/// normal `run` exit, so this file is the resting state of any machine that
+/// has run a job; treating its mere existence as "a run is in flight" would
+/// make the unregister unreachable in the ordinary flow.
+#[tokio::test]
+async fn a_leftover_lock_file_still_unregisters() -> TestResult<()> {
   let dir = tempfile::tempdir()?;
   let home = tempfile::tempdir()?;
   let server = MockServer::start().await;
@@ -219,24 +303,25 @@ async fn force_past_a_stale_lock_still_unregisters() -> TestResult<()> {
     .await;
 
   let config_path = seed_registration(dir.path(), &server.uri())?;
-  // PID 0 is never a live process, so `is_pid_alive` reports it dead.
+  // A lock file nobody holds: PID 0 is never live, and no flock is taken.
   std::fs::write(
     dir.path().join(".lock"),
     r#"{"pid":0,"started_at":"now","config_path":"/tmp/x"}"#,
   )?;
 
-  let out = run_remove(&config_path, home.path(), &["--force", "--token", "tok-1"])?;
+  // No --force: the ordinary invocation must get through.
+  let out = run_remove(&config_path, home.path(), &["--token", "tok-1"])?;
 
   assert!(
     out.status.success(),
-    "remove --force should succeed: {}",
+    "a leftover lock must not block remove: {}",
     String::from_utf8_lossy(&out.stderr)
   );
   assert!(!config_path.exists(), "config.toml should be gone");
   let stdout = String::from_utf8_lossy(&out.stdout);
   assert!(
     stdout.contains("unregistered on GitHub"),
-    "a dead lock holder must not suppress the unregister, got: {stdout}"
+    "an unheld lock must not suppress the unregister, got: {stdout}"
   );
   Ok(())
 }
@@ -256,14 +341,14 @@ async fn force_past_an_in_flight_run_does_not_unregister() -> TestResult<()> {
     .await;
 
   let config_path = seed_registration(dir.path(), &server.uri())?;
-  // A lock held by a process that really is alive: this test's own PID.
-  let live = std::process::id();
-  std::fs::write(
-    dir.path().join(".lock"),
-    format!(r#"{{"pid":{live},"started_at":"now","config_path":"/tmp/x"}}"#),
-  )?;
+  // Hold the job lock exactly as a live `run` does — a real advisory flock,
+  // not just a file with a live PID in it. `remove` now ACQUIRES the lock to
+  // decide, so only a genuine holder counts.
+  let held = config::lockfile::acquire(&dir.path().join(".lock"), &config_path)
+    .map_err(|e| format!("test should be able to take the lock: {e}"))?;
 
   let out = run_remove(&config_path, home.path(), &["--force", "--token", "tok-1"])?;
+  drop(held);
 
   assert!(
     out.status.success(),

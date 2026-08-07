@@ -13,7 +13,7 @@ use std::time::Duration;
 use clap::Parser;
 use config::auth_store::{self, AuthStore};
 use config::config::{RunnerRegistrationConfig, load_config as load_reg_config, resolve_data_dir};
-use config::{registry, repo_infer};
+use config::{lockfile, registry, repo_infer};
 use shared::RunnerError;
 use shared::startup;
 use shared::{MaskerRedactor, SecretMasker};
@@ -171,68 +171,88 @@ async fn cmd_remove(args: RemoveArgs) -> Result<(), Box<dyn std::error::Error>> 
   let pending = data_dir.join(".pending_remove");
   let lock_path = data_dir.join(".lock");
 
-  let forced_past_run = refuse_if_run_in_flight(&lock_path, &pending, args.force)?;
-  if forced_past_run {
-    tracing::warn!(
-      "--force with a run still in flight: skipping the GitHub unregister so the running job \
-       can still renew and report. Remove the runner on GitHub once that job ends."
-    );
+  // Take the job lock rather than inspecting it. `acquire` is atomic, it
+  // already implements this crate's stale-lock rule (dead holder AND old
+  // enough), and HOLDING it for the whole removal closes the window where a
+  // `run` could start between the check and the multi-second DELETE.
+  let held = lockfile::acquire(&lock_path, &config_path);
+  let skip = skip_reason(&held, args.skip_unregister);
+  if let Err(RunnerError::LockHeld { pid, .. }) = &held
+    && !args.force
+  {
+    let body = std::fs::read_to_string(&lock_path).unwrap_or_default();
+    write_pending_marker(&pending, &body)?;
+    return Err(format!(
+      "a run is in flight (pid {pid}); wrote {} marker. Re-run with --force to remove anyway, or wait for the current job to finish.",
+      pending.display()
+    )
+    .into());
   }
+  let guard = held.ok();
 
   // Unregister on GitHub BEFORE touching local state: the persisted
   // runner_id and URL are the only way to name the runner, so deleting them
   // first would strand it with no way to retry.
-  let unregistered =
-    unregister_on_github(&cfg, args.token, args.skip_unregister || forced_past_run).await?;
+  let unregistered = unregister_on_github(&cfg, args.token, skip).await?;
 
-  delete_registration_state(&config_path, &creds_path, &pending, &lock_path)?;
+  // A live run still owns `.lock`; deleting it would let a second `run`
+  // acquire a fresh one against the same data_dir and race the running job.
+  let keep_lock = guard.is_none();
+  delete_registration_state(&config_path, &creds_path, &pending, &lock_path, keep_lock)?;
+  drop(guard);
+
   let gh = if unregistered {
     "unregistered on GitHub"
   } else {
     "still registered on GitHub — remove it there by hand"
   };
+  let lock_note = if keep_lock {
+    ", job lock left for the running process"
+  } else {
+    " and lock"
+  };
   println!(
-    "removed runner '{}' ({gh}; config, credentials, and lock removed, _diag kept).",
+    "removed runner '{}' ({gh}; config, credentials{lock_note} removed, _diag kept).",
     cfg.runner_name
   );
   Ok(())
 }
 
-/// Abort the removal when a run holds the job lock, writing the
-/// `.pending_remove` marker the running process picks up between jobs.
-/// `--force` proceeds instead (live cancellation is still step 10 work).
-///
-/// `Ok(true)` means `--force` bypassed a lock whose holder is ALIVE, so a
-/// job really is running and the caller must not unregister: that job
-/// renews and reports against this registration, and deleting it on GitHub
-/// mid-job would break the very run `--force` is aimed at. A leftover lock
-/// with a dead holder is `false` — nothing deletes `.lock` on a normal
-/// `run` exit, so treating mere existence as "running" would skip the
-/// unregister with nothing actually running.
-fn refuse_if_run_in_flight(
-  lock_path: &Path,
-  pending: &Path,
-  force: bool,
-) -> Result<bool, Box<dyn std::error::Error>> {
-  if !lock_path.exists() {
-    return Ok(false);
-  }
-  if force {
-    tracing::warn!("force-cancelling in-flight run (stub — live cancellation lands in step 10)");
-    return Ok(config::lockfile::holder_alive(lock_path));
-  }
-  let body = std::fs::read_to_string(lock_path).unwrap_or_default();
-  write_pending_marker(pending, &body)?;
-  Err(format!(
-    "another run is in flight; wrote {} marker. Re-run with --force to cancel, or wait for the current job to finish.",
-    pending.display()
-  )
-  .into())
+/// Why `remove` will not call GitHub, if it will not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SkipReason {
+  /// The operator passed `--skip-unregister`.
+  Requested,
+  /// A live run holds the job lock and `--force` bypassed it. That job
+  /// renews and reports against this registration, so unregistering now
+  /// would break the very run `--force` targets.
+  RunInFlight,
 }
+
+/// Decide whether to skip the unregister, keeping the two reasons distinct
+/// so the warning names the one that actually applies.
+fn skip_reason(
+  held: &Result<lockfile::LockGuard, RunnerError>,
+  requested: bool,
+) -> Option<SkipReason> {
+  if requested {
+    return Some(SkipReason::Requested);
+  }
+  matches!(held, Err(RunnerError::LockHeld { .. })).then_some(SkipReason::RunInFlight)
+}
+
+/// Remedies to name whenever `remove` cannot authenticate the unregister.
+const NO_BEARER_HELP: &str = "run 'toolu-runner login', pass --token, or set TOOLU_RUNNER_TOKEN; \
+   pass --skip-unregister to remove local state and leave the runner registered on GitHub";
 
 /// Resolve the bearer for the unregister call, keyed by the registration
 /// URL's host: `--token` > `TOOLU_RUNNER_TOKEN` > the stored `login` token,
-/// the same precedence `register` uses. `Ok(None)` means no token anywhere.
+/// the same precedence `register` uses. `Ok(None)` means no usable token.
+///
+/// An unreadable token store is `Ok(None)`, not an error: a corrupt
+/// `token-<host>.json` should route to the same actionable "no token"
+/// message as having none, rather than aborting `remove` with a parse error.
+/// An empty token counts as absent — sending `Bearer ` only earns a 401.
 fn remove_bearer(
   runner_url: &str,
   flag: Option<String>,
@@ -242,7 +262,11 @@ fn remove_bearer(
     .and_then(|u| u.host_str().map(str::to_owned))
     .ok_or_else(|| format!("registration URL '{runner_url}' has no host"))?;
   let store = AuthStore::new(&registry::runner_home());
-  Ok(auth_store::resolve_bearer(&store, &host, flag)?)
+  let resolved = auth_store::resolve_bearer(&store, &host, flag).unwrap_or_else(|e| {
+    tracing::warn!(error = %e, "could not read the stored login token — treating it as absent");
+    None
+  });
+  Ok(resolved.filter(|t| !t.trim().is_empty()))
 }
 
 /// Unregister the runner on GitHub. `Ok(true)` when the call succeeded,
@@ -258,20 +282,43 @@ fn remove_bearer(
 async fn unregister_on_github(
   cfg: &RunnerRegistrationConfig,
   flag: Option<String>,
-  skip: bool,
+  skip: Option<SkipReason>,
 ) -> Result<bool, Box<dyn std::error::Error>> {
-  if skip {
-    tracing::warn!("--skip-unregister: leaving the runner registered on GitHub");
-    return Ok(false);
+  match skip {
+    Some(SkipReason::Requested) => {
+      tracing::warn!("--skip-unregister: leaving the runner registered on GitHub");
+      return Ok(false);
+    },
+    Some(SkipReason::RunInFlight) => {
+      tracing::warn!(
+        "--force with a run still in flight: skipping the GitHub unregister so the running job \
+         can still renew and report. Remove the runner on GitHub once that job ends."
+      );
+      return Ok(false);
+    },
+    None => {},
   }
+  // No token is an ERROR, not a warning-and-continue. Deleting the persisted
+  // runner_id and URL while the runner is still registered is precisely the
+  // B-002 outcome, and a WARN scrolls past; --skip-unregister makes that
+  // choice explicit and reproduces the old behavior exactly.
   let Some(token) = remove_bearer(&cfg.runner_url, flag)? else {
-    tracing::warn!(
-      "no GitHub token (--token / TOOLU_RUNNER_TOKEN / 'toolu-runner login') — \
-       removing local state only; the runner stays registered on GitHub"
+    return Err(
+      format!(
+        "cannot unregister '{}' on GitHub: no token available.\nNothing local was deleted — \
+       {NO_BEARER_HELP}.",
+        cfg.runner_name
+      )
+      .into(),
     );
-    return Ok(false);
   };
-  let client = reqwest::Client::new();
+  println!(
+    "unregistering runner '{}' (id {}) from {} …",
+    cfg.runner_name, cfg.runner_id, cfg.runner_url
+  );
+  let client = reqwest::Client::builder()
+    .build()
+    .map_err(|e| format!("building the HTTP client for the unregister failed: {e}"))?;
   let outcome = wire::net::unregister_runner(
     &client,
     &cfg.runner_url,
@@ -346,15 +393,24 @@ fn write_pending_marker(path: &Path, body: &str) -> std::io::Result<()> {
 /// (best-effort past the config itself). `_diag/` (logs + job journal) is
 /// deliberately kept for `watch` history, and empty parent dirs stay in
 /// place.
+///
+/// `keep_lock` spares `.lock` when a live run still owns it. fs2's advisory
+/// lock is inode-scoped and `LockGuard` has no `Drop` that unlinks the path,
+/// so removing the file would leave the running process holding a lock on an
+/// unlinked inode — a later `run` would create a fresh `.lock`, acquire it,
+/// and execute a second job against the same `data_dir` and workspace.
 fn delete_registration_state(
   config_path: &Path,
   creds_path: &Path,
   pending: &Path,
   lock_path: &Path,
+  keep_lock: bool,
 ) -> Result<(), std::io::Error> {
   std::fs::remove_file(config_path)?;
   std::fs::remove_file(creds_path).ok();
   std::fs::remove_file(pending).ok();
-  std::fs::remove_file(lock_path).ok();
+  if !keep_lock {
+    std::fs::remove_file(lock_path).ok();
+  }
   Ok(())
 }

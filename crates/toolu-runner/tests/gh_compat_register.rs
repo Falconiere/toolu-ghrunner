@@ -555,16 +555,28 @@ async fn unregister_runner_deletes_by_persisted_id() {
   assert!(result.is_ok(), "expected Ok, got {result:?}");
 }
 
-/// A 404 is success: the runner is already gone, which is what `remove`
-/// wanted. JIT registrations are reaped by GitHub after their single job,
-/// so this is the common case, not an edge one — and it keeps a repeated
-/// `remove` idempotent.
+/// A 404 alone does NOT prove the runner is gone — GitHub answers 404 for
+/// resources a token may not see, so it also covers "this token cannot
+/// administer runners". `unregister_runner` therefore confirms with a
+/// lookup: the lookup succeeding and finding nothing is the proof, and only
+/// then is it success. JIT registrations are reaped after their single job,
+/// so this is the common path, not an edge one.
 #[tokio::test]
-async fn unregister_runner_treats_404_as_already_gone() {
+async fn unregister_runner_confirms_a_404_with_a_lookup() {
   let server = MockServer::start().await;
   Mock::given(method("DELETE"))
     .and(path(format!("{STUB_RUNNERS_PATH}/461")))
     .respond_with(ResponseTemplate::new(404).set_body_string(r#"{"message":"Not Found"}"#))
+    .expect(1)
+    .mount(&server)
+    .await;
+  Mock::given(method("GET"))
+    .and(path(STUB_RUNNERS_PATH))
+    .and(query_param("name", "runner-1"))
+    .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+      "total_count": 0,
+      "runners": [],
+    })))
     .expect(1)
     .mount(&server)
     .await;
@@ -579,7 +591,82 @@ async fn unregister_runner_treats_404_as_already_gone() {
     UNREGISTER_TIMEOUT,
   )
   .await;
-  assert!(result.is_ok(), "404 should be Ok, got {result:?}");
+  assert!(
+    result.is_ok(),
+    "confirmed-absent should be Ok, got {result:?}"
+  );
+}
+
+/// The case the confirming lookup exists for: a token that cannot see the
+/// repo gets 404 on the DELETE *and* fails the lookup. Reporting success
+/// here would tell `remove` to delete the only local handle on a runner
+/// that is still registered — B-002, dressed as success.
+#[tokio::test]
+async fn unregister_runner_refuses_to_call_404_success_when_the_lookup_fails() {
+  let server = MockServer::start().await;
+  Mock::given(method("DELETE"))
+    .and(path(format!("{STUB_RUNNERS_PATH}/461")))
+    .respond_with(ResponseTemplate::new(404).set_body_string(r#"{"message":"Not Found"}"#))
+    .mount(&server)
+    .await;
+  Mock::given(method("GET"))
+    .and(path(STUB_RUNNERS_PATH))
+    .respond_with(ResponseTemplate::new(404).set_body_string(r#"{"message":"Not Found"}"#))
+    .mount(&server)
+    .await;
+
+  let client = reqwest::Client::new();
+  let result = wire::net::unregister_runner(
+    &client,
+    &stub_repo_url(&server),
+    "under-scoped",
+    461,
+    "runner-1",
+    UNREGISTER_TIMEOUT,
+  )
+  .await;
+  assert!(
+    result.is_err(),
+    "an unconfirmable 404 must not report success, got {result:?}"
+  );
+}
+
+/// A 404 on the delete while a same-name runner still exists is a genuine
+/// contradiction — never report that as unregistered.
+#[tokio::test]
+async fn unregister_runner_errors_when_a_same_name_runner_survives_a_404() {
+  let server = MockServer::start().await;
+  Mock::given(method("DELETE"))
+    .and(path(format!("{STUB_RUNNERS_PATH}/461")))
+    .respond_with(ResponseTemplate::new(404).set_body_string(r#"{"message":"Not Found"}"#))
+    .mount(&server)
+    .await;
+  Mock::given(method("GET"))
+    .and(path(STUB_RUNNERS_PATH))
+    .and(query_param("name", "runner-1"))
+    .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+      "total_count": 1,
+      "runners": [{ "id": 999, "name": "runner-1" }],
+    })))
+    .mount(&server)
+    .await;
+
+  let client = reqwest::Client::new();
+  let err = wire::net::unregister_runner(
+    &client,
+    &stub_repo_url(&server),
+    "tok-1",
+    461,
+    "runner-1",
+    UNREGISTER_TIMEOUT,
+  )
+  .await
+  .expect_err("a surviving same-name runner must not read as unregistered");
+  let msg = format!("{err}");
+  assert!(
+    msg.contains("999"),
+    "the error should name the surviving runner, got: {msg}"
+  );
 }
 
 /// With no persisted id (a registration written before the id was

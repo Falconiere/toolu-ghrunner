@@ -445,21 +445,22 @@ no OTel.
   `install-service`: flag > cwd-inferred
   `runners/<owner>/<repo>/config.toml` > the sole registration (legacy
   `<home>/config.toml` included) > error listing candidates
-  (`config::registry::resolve_config_path`). `remove` writes
-  `.pending_remove` if `.lock` is held, otherwise unregisters on GitHub
-  (`wire::net::unregister_runner` — DELETE `…/actions/runners/{id}` by the
-  persisted `runner_id`, name-lookup fallback, 404 = already gone) and only
+  (`config::registry::resolve_config_path`). `remove` **acquires** the job
+  lock (`config::lockfile::acquire`) to decide whether a run is in flight —
+  atomic, reuses the stale-lock rule, and held across the DELETE so no `run`
+  can start mid-removal. Lock held + no `--force` → `.pending_remove` +
+  exit 2; lock held + `--force` → local state goes but `.lock` is KEPT (fs2
+  is inode-scoped; unlinking it would let a second `run` race the live job)
+  and the unregister is skipped. Otherwise it unregisters on GitHub
+  (`wire::net::unregister_runner` — DELETE `…/actions/runners/{id}`, name
+  lookup when no id; a 404 is confirmed by a lookup before counting as
+  "already gone", since GitHub also 404s what a token may not see) and only
   then deletes `config.toml` / `credentials.json` / `.lock` /
-  `.pending_remove`, keeping `_diag/` history. Unregister-first is
-  load-bearing: the persisted id/URL are the only handle on the runner, so
-  a failed call aborts with local state intact and is retryable. Bearer:
-  `--token` > `TOOLU_RUNNER_TOKEN` > stored `login`; none of the three
-  still removes locally behind a WARN. `--skip-unregister` skips the call,
-  and so does `--force` when the `.lock` holder is still ALIVE
-  (`config::lockfile::holder_alive`) — that job still reports against the
-  registration. Liveness, not mere existence: nothing deletes `.lock` on a
-  normal `run` exit, so a dead-holder lock must still unregister. (Live
-  cancellation of an in-flight job is still step 10.) `watch`
+  `.pending_remove`, keeping `_diag/`. Unregister-first is load-bearing: the
+  persisted id/URL are the only handle, so a failed call aborts with local
+  state intact. Bearer `--token` > `TOOLU_RUNNER_TOKEN` > stored `login`
+  (empty = absent); NO token is a hard error, not a warning —
+  `--skip-unregister` is the explicit opt-out. `watch`
   opens the journal TUI (`observability::watch`; no network, no
   tracing init — logs would corrupt the alternate screen).
 - `register_cmd.rs` — `cmd_register` + `register_and_persist` (split

@@ -615,14 +615,21 @@ with no way to retry. A failed unregister therefore aborts with local
 state untouched. The bearer resolves `--token` > `TOOLU_RUNNER_TOKEN` >
 the stored `login` token; with none of the three the local removal still
 proceeds behind a WARN that the runner was left registered.
-`--skip-unregister` skips the call outright (revoked token, deleted repo,
-no network), and so does `--force` when the `.lock` holder is still alive
-(`config::lockfile::holder_alive`): live cancellation is still step 10
-work, so that job keeps renewing against this registration and
-unregistering mid-job would break it. The check is liveness, not mere
-existence — nothing deletes `.lock` on a normal `run` exit, so a leftover
-lock with a dead holder is the resting state of any machine that has run
-a job, and it must still unregister.
+`remove` decides whether a run is in flight by **acquiring** the job lock
+(`config::lockfile::acquire`), not by inspecting the file: that is atomic,
+it reuses the crate's stale-lock rule, and holding the guard across the
+multi-second DELETE closes the window where a `run` could start mid-removal.
+A leftover `.lock` nobody holds — the resting state of any machine that has
+run a job, since nothing deletes it on a normal exit — is therefore not
+"in flight" and removes normally.
+
+When the lock IS held, `--force` removes local state but **keeps `.lock`**
+(fs2's lock is inode-scoped, so unlinking it would let a second `run`
+acquire a fresh one and race the live job) and skips the unregister (that
+job still renews against this registration; live cancellation is step 10).
+`--skip-unregister` skips the call outright for a revoked token, deleted
+repo, or no network. No token at all is an **error**, not a warning: exit 2
+with nothing deleted, naming every remedy.
 
 ## Sequence: run
 
@@ -1013,7 +1020,9 @@ non-goal for v1 (logged + best-effort; no spec guarantee).
 | 4 | `register` with expired / already-used token                  | Exit 2 with the GH error verbatim. |
 | 5 | `register` with name that conflicts                            | Exit 2 unless `--replace`; with `--replace`, overwrites. |
 | 6 | `run` started when a previous `run` holds `.lock`             | Exit 2 with the holder's PID read from the lock body. |
-| 7 | `remove` mid-job                                              | Writes `.pending_remove`, refuses with exit 2 unless `--force`; with `--force`, cancels in-flight job. |
+| 7 | `remove` mid-job                                              | Writes `.pending_remove`, refuses with exit 2 unless `--force`; with `--force` it removes local state but keeps `.lock` and skips the GitHub unregister (the running job still reports against that registration). Live cancellation of the job is still step 10. |
+| 7a | `remove` with no GitHub token                                | Exit 2 with nothing deleted, naming `login` / `--token` / `TOOLU_RUNNER_TOKEN` / `--skip-unregister`. Deleting the persisted `runner_id` + URL while the runner is still registered is the B-002 failure. |
+| 7b | `remove` when the unregister fails (bad token, network)      | Exit 2 with local state intact so the removal is retryable. A `RunnerError::Config` (org-level URL the repo-scoped API cannot address) instead warns and removes locally. |
 | 8 | `run` started with network down at startup                    | Blocks on poll loop, exponential backoff 1s → 60s cap. |
 | 9 | `run` mid-job, network drops < 5 min                          | In-flight step keeps running locally; reporting queues and flushes on reconnect. |
 | 10 | `run` mid-job, network drops > 5 min                         | **Known bug:** runner does not cancel with "lost connection". Tracked in [known-bugs.md](known-bugs.md) B-001. |
