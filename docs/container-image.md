@@ -38,7 +38,7 @@ hard-exits after a 30-second grace period.
 
 | Code | Meaning |
 | --- | --- |
-| `0` | Job completed with Success or Skipped (or clean signal-driven shutdown before a job was acquired). |
+| `0` | Job completed with Success or Skipped, or the runner shut down (signal or session end) before any job was acquired. |
 | `1` | Job completed with Failure or Cancelled, or the listener failed (auth, network, protocol). |
 | `2` | Environment error before polling: `TOOLU_JITCONFIG` missing or unparseable. |
 | `124` | The `TOOLU_DEADLINE` watchdog fired (including a deadline already in the past at boot). |
