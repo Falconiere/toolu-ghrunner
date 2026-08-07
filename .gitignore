@@ -9,6 +9,9 @@ credentials.json
 .pending_remove
 _diag/
 
-# tool session state
+# tool session state — per-developer, never shared.
+# .claude/settings.json is deliberately NOT ignored: it carries the guardrail
+# hooks (CORE layer 2) that every agent working in this repo must inherit.
 .claude/tmp/
+.claude/toolu.config.json
 .serena/
