@@ -14,6 +14,7 @@
 use std::time::Duration;
 
 use shared::RunnerError;
+use wire::net::run_service::{ERROR_BODY_READ_CAP, ERROR_BODY_SNIPPET_CHARS};
 use wire::reporting::ReportConclusion;
 use wire::reporting::run_service::{CompleteJobRequest, RenewJobRequest, complete_job, renew_job};
 use wiremock::matchers::{method, path};
@@ -251,23 +252,53 @@ async fn complete_job_response_past_client_timeout_is_network() -> TestResult<()
 /// then close the socket without sending it. `reqwest`'s body read then fails
 /// mid-message — a real truncated-response transport error over loopback, no
 /// mocking of internal types.
-fn truncated_500_server() -> TestResult<String> {
+fn truncated_500_server() -> TestResult<(String, TruncatedServer)> {
   let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
   let addr = listener.local_addr()?;
-  std::thread::spawn(move || {
-    if let Ok((mut sock, _peer)) = listener.accept() {
-      // Drain the request head so the client's write completes before we reply.
-      let mut buf = [0_u8; 2048];
-      let _ = std::io::Read::read(&mut sock, &mut buf);
-      let _ = std::io::Write::write_all(
-        &mut sock,
-        b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 100\r\n\r\n",
-      );
-      let _ = std::io::Write::flush(&mut sock);
-      // Dropped here — the promised 100 bytes never arrive.
-    }
+  let handle = std::thread::spawn(move || -> std::io::Result<()> {
+    let (mut sock, _peer) = listener.accept()?;
+    // Drain the request head so the client's write completes before we reply.
+    let mut buf = [0_u8; 2048];
+    std::io::Read::read(&mut sock, &mut buf)?;
+    std::io::Write::write_all(
+      &mut sock,
+      b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 100\r\n\r\n",
+    )?;
+    std::io::Write::flush(&mut sock)?;
+    // Dropped here — the promised 100 bytes never arrive.
+    Ok(())
   });
-  Ok(format!("http://{addr}"))
+  Ok((format!("http://{addr}"), TruncatedServer(Some(handle))))
+}
+
+/// Handle for [`truncated_500_server`]'s thread.
+///
+/// Joined explicitly by [`TruncatedServer::finish`] so a serving error
+/// (failed accept, short write) surfaces as a test failure instead of a
+/// silent hang or a confusingly different client error. `Drop` joins too,
+/// so a panicking test still reaps the thread rather than leaking it.
+struct TruncatedServer(Option<std::thread::JoinHandle<std::io::Result<()>>>);
+
+impl TruncatedServer {
+  /// Join the serving thread and propagate whatever it hit.
+  fn finish(mut self) -> TestResult<()> {
+    let Some(handle) = self.0.take() else {
+      return Ok(());
+    };
+    match handle.join() {
+      Ok(Ok(())) => Ok(()),
+      Ok(Err(e)) => Err(format!("truncated-500 server failed: {e}").into()),
+      Err(_) => Err("truncated-500 server thread panicked".into()),
+    }
+  }
+}
+
+impl Drop for TruncatedServer {
+  fn drop(&mut self) {
+    if let Some(handle) = self.0.take() {
+      let _ = handle.join();
+    }
+  }
 }
 
 /// Minimal hand-rolled `tracing::Subscriber` that records every event as
@@ -276,9 +307,20 @@ fn truncated_500_server() -> TestResult<String> {
 /// `tracing-subscriber` dev-dependency, since `tracing::Subscriber` comes
 /// with the plain `tracing` dep. `Visit`'s other `record_*` methods default
 /// to forwarding into `record_debug`, so integer fields land here too.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 struct EventCapture {
   events: std::sync::Arc<std::sync::Mutex<Vec<(tracing::Level, String, String)>>>,
+  next_span_id: std::sync::Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl Default for EventCapture {
+  fn default() -> Self {
+    Self {
+      events: std::sync::Arc::default(),
+      // `tracing::span::Id::from_u64` panics on 0, so start at 1.
+      next_span_id: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(1)),
+    }
+  }
 }
 
 impl EventCapture {
@@ -310,7 +352,13 @@ impl tracing::Subscriber for EventCapture {
     true
   }
   fn new_span(&self, _span: &tracing::span::Attributes<'_>) -> tracing::span::Id {
-    tracing::span::Id::from_u64(1)
+    // Monotonic, never 0 (`Id::from_u64` rejects it). A hard-coded id would
+    // alias every span onto one — harmless while these tests open none, but
+    // a trap for the next test that does.
+    let next = self
+      .next_span_id
+      .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    tracing::span::Id::from_u64(next)
   }
   fn record(&self, _span: &tracing::span::Id, _values: &tracing::span::Record<'_>) {}
   fn record_follows_from(&self, _span: &tracing::span::Id, _follows: &tracing::span::Id) {}
@@ -342,8 +390,11 @@ impl tracing::Subscriber for EventCapture {
 #[tokio::test]
 async fn renew_job_unreadable_error_body_warns_and_still_classifies() -> TestResult<()> {
   let capture = EventCapture::default();
-  let base = truncated_500_server()?;
-  let client = short_timeout_client()?;
+  let (base, server) = truncated_500_server()?;
+  // No client timeout: the failure under test is the truncated body, and a
+  // 200 ms budget could fire first on a loaded runner — that would classify
+  // as a timeout with no WARN, failing this for an unrelated reason.
+  let client = reqwest::Client::new();
 
   let result = {
     let _guard = tracing::subscriber::set_default(capture.clone());
@@ -351,10 +402,16 @@ async fn renew_job_unreadable_error_body_warns_and_still_classifies() -> TestRes
   };
 
   assert_network(result, "renew_job 500 with a truncated body")?;
-  if !capture.saw(tracing::Level::WARN, "error body could not be read") {
+  // The whole message, not a fragment: `renew_job` and `complete_job` emit
+  // the same sentence under different `what`, so a substring match would
+  // pass on the wrong call site.
+  if !capture.saw(
+    tracing::Level::WARN,
+    "renew job failed and its error body could not be read",
+  ) {
     return Err("expected a WARN naming the unreadable error body".into());
   }
-  Ok(())
+  server.finish()
 }
 
 /// An error body far larger than the cap must not be buffered whole:
@@ -384,17 +441,27 @@ async fn renew_job_oversized_error_body_is_read_up_to_the_cap() -> TestResult<()
 
   assert_network(result, "renew_job 500 with an oversized body")?;
 
+  // Against the real constants, not literals, so a deliberate retune moves
+  // the test with the code. The derivation itself is pinned separately: the
+  // cap must still cover the snippet at worst-case 4-byte UTF-8.
+  assert_eq!(
+    ERROR_BODY_READ_CAP,
+    ERROR_BODY_SNIPPET_CHARS * 4,
+    "the read cap must still cover a full snippet of 4-byte chars"
+  );
   let bytes_read = capture.values(tracing::Level::DEBUG, "bytes_read");
-  if bytes_read != vec!["800".to_owned()] {
-    return Err(format!("expected a single bytes_read of 800, got {bytes_read:?}").into());
+  if bytes_read != vec![ERROR_BODY_READ_CAP.to_string()] {
+    return Err(
+      format!("expected a single bytes_read of {ERROR_BODY_READ_CAP}, got {bytes_read:?}").into(),
+    );
   }
   let bodies = capture.values(tracing::Level::DEBUG, "body");
   let [body] = bodies.as_slice() else {
     return Err(format!("expected exactly one body field, got {bodies:?}").into());
   };
   let chars = body.chars().count();
-  if chars != 200 {
-    return Err(format!("expected a 200-char snippet, got {chars}").into());
+  if chars != ERROR_BODY_SNIPPET_CHARS {
+    return Err(format!("expected a {ERROR_BODY_SNIPPET_CHARS}-char snippet, got {chars}").into());
   }
   Ok(())
 }

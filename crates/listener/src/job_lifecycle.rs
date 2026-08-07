@@ -95,16 +95,12 @@ async fn report_completion(
     step_results: outcome.step_results,
     annotations: outcome.annotations,
   };
-  let client = ctx.client.clone();
-  let run_service_url = run_service_url.to_owned();
+  // `retry_transient` bounds its closure as `FnMut() -> Fut` with no `'static`
+  // on `Fut`, so each attempt can borrow these rather than clone them. The
+  // request in particular owns the step results and annotations — cloning it
+  // per retry allocated the whole job's reporting payload again each time.
   crate::retry::retry_transient(
-    || {
-      let req = complete_req.clone();
-      let client = client.clone();
-      let run_service_url = run_service_url.clone();
-      let rs_token = rs_token.clone();
-      async move { complete_job(&client, &run_service_url, &rs_token, &req).await }
-    },
+    || complete_job(&ctx.client, run_service_url, &rs_token, &complete_req),
     &ctx.cancel,
     crate::retry::REPORT_RETRY_MAX,
     "complete_job",
