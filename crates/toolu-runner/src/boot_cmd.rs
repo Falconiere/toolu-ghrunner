@@ -38,15 +38,47 @@ pub(crate) async fn cmd_boot() -> i32 {
     Err(code) => return code,
   };
 
+  // The JIT blob carries the runner's RSA private key and OAuth client id:
+  // register it with the masker (already wired into the tracing redactor
+  // above) before anything can log it, so `boot` never depends on the
+  // engine's job-message mask hints to keep its own credential out of
+  // `_diag/runner.log`.
+  register_jit_secret(&masker, &jit_config_base64);
+
   let cancel = CancellationToken::new();
   crate::run_cmd::spawn_signal_bridge(cancel.clone());
 
   let deadline_hit = Arc::new(AtomicBool::new(false));
-  if let Some(deadline) = deadline_ms {
-    spawn_watchdog(deadline, cancel.clone(), Arc::clone(&deadline_hit));
+  let watchdog =
+    deadline_ms.map(|deadline| spawn_watchdog(deadline, cancel.clone(), Arc::clone(&deadline_hit)));
+
+  let code = run_listener_once(&jit_config_base64, masker, cancel, &deadline_hit).await;
+
+  // The lifecycle is over, so stand the watchdog down: its grace-period
+  // sleep must never hard-exit a process that already finished, and joining
+  // the handle surfaces a panic in the task instead of dropping it silently.
+  if let Some(handle) = watchdog {
+    handle.abort();
+    if let Err(e) = handle.await
+      && e.is_panic()
+    {
+      tracing::error!(error = %e, "deadline watchdog task panicked");
+    }
   }
 
-  run_listener_once(&jit_config_base64, masker, cancel, &deadline_hit).await
+  code
+}
+
+/// Register the raw `TOOLU_JITCONFIG` blob with the shared masker so the
+/// tracing redactor scrubs it from every subsequent line. Lock poisoning is
+/// logged, not fatal — a boot that cannot mask still has to run the job, and
+/// the blob is not logged on any known path.
+fn register_jit_secret(masker: &Arc<Mutex<SecretMasker>>, jit_config_base64: &str) {
+  if let Ok(mut m) = masker.lock() {
+    m.add_secret(jit_config_base64);
+  } else {
+    tracing::warn!("secret masker mutex poisoned; TOOLU_JITCONFIG not registered");
+  }
 }
 
 /// Read + validate env inputs before any network call: `TOOLU_JITCONFIG`
@@ -171,11 +203,29 @@ pub(crate) fn parse_deadline_ms(s: &str) -> Option<u64> {
 /// Current wall-clock time as epoch milliseconds, saturating instead of
 /// panicking on a `SystemTime` before the epoch or a `u128` overflow (both
 /// practically unreachable, but `expect`/`unwrap` are denied workspace-wide).
+///
+/// Both saturations WARN: either one can shift the watchdog's view of the
+/// deadline by decades, so a clock that fires `boot` early must leave a
+/// diagnostic behind rather than look like a normal timeout.
 fn now_epoch_ms() -> u64 {
-  let elapsed = std::time::SystemTime::now()
-    .duration_since(std::time::UNIX_EPOCH)
-    .unwrap_or_default();
-  u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
+  let elapsed = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+    Ok(elapsed) => elapsed,
+    Err(e) => {
+      tracing::warn!(
+        error = %e,
+        "system clock is before the unix epoch; treating now as epoch 0 — the deadline watchdog \
+         may fire late"
+      );
+      Duration::ZERO
+    },
+  };
+  u64::try_from(elapsed.as_millis()).unwrap_or_else(|_| {
+    tracing::warn!(
+      "system clock is past the u64 epoch-ms range; saturating at u64::MAX — the deadline \
+       watchdog may fire immediately"
+    );
+    u64::MAX
+  })
 }
 
 /// Whether `deadline_ms` is at or before the current time.
@@ -218,7 +268,15 @@ fn build_boot_client() -> Result<reqwest::Client, String> {
 /// hit), then fire `cancel` for a graceful shutdown (the job reports
 /// `Cancelled` to GitHub) and set `deadline_hit`. If the graceful path
 /// hasn't exited the process within [`WATCHDOG_GRACE`], hard-exit 124.
-fn spawn_watchdog(deadline_ms: u64, cancel: CancellationToken, deadline_hit: Arc<AtomicBool>) {
+///
+/// The returned handle is owned by [`cmd_boot`], which aborts and joins it
+/// once the lifecycle ends — so the grace-period sleep cannot outlive the
+/// job, and a panic in the task is logged rather than silently swallowed.
+fn spawn_watchdog(
+  deadline_ms: u64,
+  cancel: CancellationToken,
+  deadline_hit: Arc<AtomicBool>,
+) -> tokio::task::JoinHandle<()> {
   tokio::spawn(async move {
     let now = now_epoch_ms();
     let remaining = Duration::from_millis(deadline_ms.saturating_sub(now));
@@ -233,6 +291,11 @@ fn spawn_watchdog(deadline_ms: u64, cancel: CancellationToken, deadline_hit: Arc
 
     tokio::time::sleep(WATCHDOG_GRACE).await;
     tracing::error!("deadline grace period elapsed without a clean exit; hard-exiting 124");
+    // `std::process::exit` runs no destructors, so flush the stderr sink by
+    // hand before it: the line above must reach the provider's log even on
+    // this path. The `_diag` file sink is `tracing_appender::rolling`
+    // (synchronous, no background worker), so it is already durable.
+    drop(std::io::Write::flush(&mut std::io::stderr()));
     std::process::exit(124);
-  });
+  })
 }

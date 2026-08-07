@@ -514,9 +514,12 @@ no OTel.
   (`toolu-runner boot`, no flags). Reads `TOOLU_JITCONFIG` /
   `TOOLU_DEADLINE` straight from the env, builds an in-memory
   `RunnerConfig` (no persisted state), bridges SIGINT/SIGTERM to a
-  `CancellationToken` (reuses `run_cmd::spawn_signal_bridge`), spawns
-  a deadline watchdog task when `TOOLU_DEADLINE` parses, and runs
-  `GitHubListener::run` once. Returns an explicit process exit code
+  `CancellationToken` (reuses `run_cmd::spawn_signal_bridge`), registers
+  the raw `TOOLU_JITCONFIG` blob with the `SecretMasker` behind the
+  tracing redactor, spawns a deadline watchdog task when `TOOLU_DEADLINE`
+  parses, and runs `GitHubListener::run` once — then aborts and joins the
+  watchdog handle (so its grace-period sleep can't hard-exit a finished
+  process, and a panic in it is logged). Returns an explicit process exit code
   (`main` applies it directly, bypassing every other subcommand's
   uniform Ok-is-0/Err-is-2 mapping) — see the crate-rules bullet above
   for the code table. `parse_deadline_ms` and the exit-code mapping
