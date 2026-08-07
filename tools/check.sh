@@ -41,10 +41,20 @@ _check_no_allow() {
   # Reject #[allow(..)] / #[expect(..)] — must fix the lint, not silence it.
   # A house rule stricter than the kit's, with no counterpart in
   # scripts/guardrails/, so there is no second enforcer to drift from.
-  if grep -RnE '#\[(allow|expect)\(' \
+  #
+  # `#!?\[` matches BOTH forms. The outer-only pattern this used to carry let a
+  # crate-level `#![allow(clippy::unwrap_used)]` at the top of a file silence
+  # the lint while the gate still reported clean — the one attribute that can
+  # disable a rule for a whole file was the one the ban could not see.
+  #
+  # benches/ is the single sanctioned exception: a criterion harness needs
+  # unwrap/expect, and clippy.toml's allow-unwrap-in-tests covers #[cfg(test)]
+  # only — it does not reach a bench target. Nothing else is exempt.
+  if grep -RnE '#!?\[(allow|expect)\(' \
        "$_project_root/crates" \
-       --include='*.rs' 2>/dev/null; then
-    printf 'no-allow: #[allow(..)] / #[expect(..)] are not allowed\n' >&2
+       --include='*.rs' \
+       --exclude-dir=benches 2>/dev/null; then
+    printf 'no-allow: #[allow(..)] / #[expect(..)] are not allowed (benches/ excepted)\n' >&2
     return 1
   fi
 }
@@ -58,6 +68,9 @@ USAGE
 
 GROUPS
   all             fmt + clippy + no-allow + structure (guardrails) + test
+  no-allow        just the #[allow(..)] / #[expect(..)] ban (CI calls this one
+                  on its own, so the ban is enforced on every PR and not only
+                  by the local pre-push hook)
 
 REQUIREMENTS
   jq and ast-grep must be on PATH — scripts/guardrails/run.sh exits 3 without
@@ -69,6 +82,7 @@ EOF
 cmd=${1:-}
 case "$cmd" in
   all)                _check_rust ;;
+  no-allow)           _check_no_allow ;;
   help|''|-h|--help)  _usage ;;
   *)                  printf 'unknown group: %s\n' "$cmd" >&2; _usage; exit 2 ;;
 esac

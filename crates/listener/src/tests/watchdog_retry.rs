@@ -5,7 +5,8 @@
 //!
 //! `retry_transient` ACs (AC-3, AC-4, AC-7, AC-11) against a real wiremock
 //! completion endpoint and a real `CancellationToken` — no mocks of internal
-//! types. Filtered by the s3 ledger check `test(/^watchdog_tests::retry/)`.
+//! types. Filtered by the s3 ledger check `test(/^watchdog_retry::/)` — the
+//! module was `watchdog_tests::retry` before the tests moved into `tests/`.
 
 use std::time::Duration;
 

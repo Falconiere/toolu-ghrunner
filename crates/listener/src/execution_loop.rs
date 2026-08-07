@@ -88,7 +88,7 @@ pub(super) async fn execute_with_renewal(
 }
 
 /// The single source of truth for the outage annotation text — referenced
-/// by the `watchdog_tests` assertions so tests cannot drift from the
+/// by the `watchdog_trip` assertions so tests cannot drift from the
 /// message actually reported to GitHub.
 pub(crate) const LOST_CONNECTION_MESSAGE: &str =
   "Runner lost connection to GitHub for more than 5 minutes; job was cancelled (lost connection).";

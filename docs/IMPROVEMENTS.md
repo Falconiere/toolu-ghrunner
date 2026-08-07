@@ -82,7 +82,7 @@ single PR.
 ### IMP-CQ-004 — HTTP error-handling boilerplate duplicated across 6 `net/` files
 - **Severity:** M | **Effort:** M
 - **Rationale:** `net/{auth,run_service,session,messages,v1,log_upload}.rs` all repeat the same 5-line dance: send → `status().is_success()` → `text().await.unwrap_or_default()` → map to `RunnerError::Protocol`. `net::results_service` already has the right `twirp_post` pattern; the other six pre-date it.
-- **Fix:** Extract `pub(crate) async fn check_status(response: reqwest::Response, op: &str) -> Result<reqwest::Response, RunnerError>` in `net/mod.rs`; replace the 6 duplicated blocks.
+- **Fix:** Extract `pub(crate) async fn check_status(response: reqwest::Response, op: &str) -> Result<reqwest::Response, RunnerError>` in `net.rs`; replace the 6 duplicated blocks.
 - **Refs:** `crates/wire/src/net/auth.rs:35`, `crates/wire/src/net/messages.rs:50`, `crates/wire/src/net/run_service.rs:38`, `crates/wire/src/net/session.rs:27`, `crates/wire/src/net/v1.rs:32`, `crates/wire/src/net/log_upload.rs:61`
 
 ### IMP-CQ-005 — CLI entry points return `Box<dyn Error>`, dropping `RunnerError` structure
@@ -106,8 +106,8 @@ single PR.
 ### IMP-CQ-008 — `docker_cache.rs` is pub-but-unreferenced dead code
 - **Severity:** L | **Effort:** S
 - **Rationale:** `pub DockerCacheConfig`, `pub DockerCacheEvent`, `pub DockerPlatform`, `pub fn docker_layer_key` — none are referenced from any other module (grep-confirmed). Reachable as `pub mod docker_cache` so the symbols are crate-public but inert.
-- **Fix:** Wire `DockerCacheConfig` into cache or artifact service, or delete `docker_cache.rs` + remove `pub mod docker_cache` from `execution/mod.rs`.
-- **Refs:** `crates/execution/src/execution/docker_cache.rs:8`, `crates/execution/src/execution/docker_cache.rs:53`, `crates/execution/src/execution/mod.rs:19`
+- **Fix:** Wire `DockerCacheConfig` into cache or artifact service, or delete `docker_cache.rs` + remove `pub mod docker_cache` from `execution.rs`.
+- **Refs:** `crates/execution/src/execution/docker_cache.rs:8`, `crates/execution/src/execution/docker_cache.rs:53`, `crates/execution/src/execution.rs:19`
 
 ### IMP-CQ-009 — Unbounded `Vec<String>` accumulates every job log line in memory
 - **Severity:** L | **Effort:** M
@@ -445,7 +445,7 @@ from this list once the top-10s are burnt down.
 - ~~**IMP-DO-018**~~ **Done (2026-07-12)** — `register --once` and `--work` flags are absent from README. Shipped: "CLI flags reference" subsection under Quick start listing `--work`, `--runner-group`, `--replace` (register), `--once` (run), `--force` (remove). Refs: `README.md`, `crates/toolu-runner/src/cli.rs`
 - **IMP-DO-019** — `scripts/test/plist_test.sh` misses `--no-config` validation. Fix: grep the `--config` value out of the plist and assert the file exists (after install). Refs: `scripts/test/plist_test.sh:1`, `README.md:152`
 - **IMP-DO-020** — `install.sh` download-failed diagnostic doesn't mention `TOOLU_RUNNER_REPO`. Fix: append one line: `If you're installing from a fork, set TOOLU_RUNNER_REPO=<owner/repo> before running.` Refs: `install.sh:223`
-- **IMP-DO-021** — Step handler dispatch description in docs is inconsistent (CLAUDE vs `handlers/mod.rs`). Fix: align `handlers/mod.rs:13` with CLAUDE.md:49 (plugin is a real entry point via the `PluginRegistry`). Refs: `CLAUDE.md:49`, `crates/execution/src/execution/handlers/mod.rs:11`
+- **IMP-DO-021** — Step handler dispatch description in docs is inconsistent (CLAUDE vs `handlers.rs`). Fix: align `handlers.rs:13` with CLAUDE.md:49 (plugin is a real entry point via the `PluginRegistry`). Refs: `CLAUDE.md:49`, `crates/execution/src/execution/handlers.rs:11`
 - **IMP-DO-022** — `docs/architecture.md:154` session delete semantics claim is vague. Fix: replace with: `Status non-2xx on delete returns RunnerError::Protocol; transport errors propagate. The caller in listener/helpers.rs:105 logs and continues (broker may have expired the session already).` Refs: `docs/architecture.md:154`, `crates/wire/src/net/session.rs:44`
 
 ---

@@ -849,7 +849,7 @@ engine's own verdict: a tripped flag with a non-`Success` conclusion
 overrides the report to `Conclusion::Failure` and attaches an
 `annotation_type: "error"` annotation whose text is
 `execution_loop::LOST_CONNECTION_MESSAGE` — the single `const` the
-`watchdog_tests` assertions also read, currently "Runner lost connection
+`watchdog_trip` assertions also read, currently "Runner lost connection
 to GitHub for more than 5 minutes; job was cancelled (lost connection)."
 Treat the `const` as authoritative if this prose ever drifts. A
 tripped flag alongside a `Success` conclusion (the job finished before
