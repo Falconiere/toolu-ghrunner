@@ -25,8 +25,8 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use shared::{
-  ActionStep, AgentJobRequestMessage, JobAuthorization, JobEndpoint, JobResources, ListenerEvent,
-  RunnerConfig, RunnerError, SecretMasker, TaskOrchestrationPlanReference,
+  ActionStep, AgentJobRequestMessage, Conclusion, JobAuthorization, JobEndpoint, JobResources,
+  ListenerEvent, RunnerConfig, RunnerError, SecretMasker, TaskOrchestrationPlanReference,
 };
 use wire::reporting::ReportConclusion;
 
@@ -258,7 +258,7 @@ impl Scenario {
 
 /// Outcome of driving one `poll_and_execute` exchange against the fixture.
 struct TripOutcome {
-  result: Result<(), RunnerError>,
+  result: Result<Option<Conclusion>, RunnerError>,
   elapsed: Duration,
   complete_requests: Vec<wiremock::Request>,
   acknowledge_requests: Vec<wiremock::Request>,
@@ -308,11 +308,27 @@ async fn run_scenario(scenario: Scenario) -> TestResult<TripOutcome> {
   })
 }
 
-fn assert_ok(result: Result<(), RunnerError>) -> TestResult<()> {
+/// Assert `poll_and_execute` succeeded and hand back the conclusion it
+/// reported, so callers can pin the verdict threaded up to
+/// `GitHubListener::run` — not only the one written into the completejob
+/// body.
+fn assert_ok(result: Result<Option<Conclusion>, RunnerError>) -> TestResult<Option<Conclusion>> {
   match result {
-    Ok(()) => Ok(()),
-    Err(e) => Err(format!("expected poll_and_execute Ok(()), got Err({e})").into()),
+    Ok(conclusion) => Ok(conclusion),
+    Err(e) => Err(format!("expected poll_and_execute Ok, got Err({e})").into()),
   }
+}
+
+/// Assert the conclusion `poll_and_execute` returned is exactly `expected`.
+fn assert_reported(
+  result: Result<Option<Conclusion>, RunnerError>,
+  expected: Conclusion,
+) -> TestResult<()> {
+  let got = assert_ok(result)?;
+  if got != Some(expected) {
+    return Err(format!("expected poll_and_execute to report {expected:?}, got {got:?}").into());
+  }
+  Ok(())
 }
 
 fn assert_elapsed_under(elapsed: Duration, cap: Duration, context: &str) -> TestResult<()> {
@@ -418,7 +434,7 @@ async fn ac2_outage_trips_kills_job_reports_failure() -> TestResult<()> {
   .await
   .map_err(|_elapsed| "AC-2 scenario did not complete within the 60s test guard")??;
 
-  assert_ok(outcome.result)?;
+  assert_reported(outcome.result, Conclusion::Failure)?;
   assert_elapsed_under(
     outcome.elapsed,
     Duration::from_secs(20),
@@ -455,7 +471,7 @@ async fn ac9_report_survives_reconnect() -> TestResult<()> {
   .await
   .map_err(|_elapsed| "AC-9 scenario did not complete within the 60s test guard")??;
 
-  assert_ok(outcome.result)?;
+  assert_reported(outcome.result, Conclusion::Failure)?;
   assert_elapsed_under(
     outcome.elapsed,
     Duration::from_secs(20),
@@ -491,7 +507,7 @@ async fn ac10_definitive_renew_error_never_trips() -> TestResult<()> {
   .await
   .map_err(|_elapsed| "AC-10 scenario did not complete within the 60s test guard")??;
 
-  assert_ok(outcome.result)?;
+  assert_reported(outcome.result, Conclusion::Success)?;
   assert_elapsed_at_least(
     outcome.elapsed,
     Duration::from_millis(900),
@@ -544,7 +560,7 @@ async fn ack_failure_does_not_block_completion() -> TestResult<()> {
   .await
   .map_err(|_elapsed| "ack-failure scenario did not complete within the 60s test guard")??;
 
-  assert_ok(outcome.result)?;
+  assert_reported(outcome.result, Conclusion::Success)?;
   assert_request_count(&outcome.acknowledge_requests, 1, "acknowledge")?;
   assert_request_count(&outcome.complete_requests, 1, "completejob")?;
   let first = outcome
