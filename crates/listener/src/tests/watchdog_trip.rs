@@ -8,7 +8,8 @@
 //! report-on-reconnect), AC-10 (a persistent definitive renewal error must
 //! never trip), plus the best-effort-ack contract (a failing `/acknowledge`
 //! must not block the completion report). Filtered by the s6 ledger check
-//! `test(/^watchdog_tests::/)`.
+//! `test(/^watchdog_trip::/)` — the module was
+//! `watchdog_tests::trip` before the tests moved into `tests/`.
 //!
 //! Also carries [`mod@override_rules`]: the pure unit tests for
 //! `execution_loop::apply_outage_override` — the non-network fold of the
@@ -589,7 +590,7 @@ async fn ack_failure_does_not_block_completion() -> TestResult<()> {
 /// Pure unit tests for `execution_loop::apply_outage_override` — the
 /// non-network fold of the watchdog's trip flag into the job's final
 /// conclusion (no wiremock: plain values in, plain values out). Filtered
-/// by the s6 ledger check `test(/^watchdog_tests::/)`.
+/// by the s6 ledger check `test(/^watchdog_trip::override_rules/)`.
 mod override_rules {
   use shared::Conclusion;
 

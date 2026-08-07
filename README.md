@@ -497,7 +497,7 @@ cargo install ast-grep --locked
 
 ```sh
 cargo build --workspace
-cargo test  --workspace          # 699 tests, no network required
+cargo test  --workspace          # the full suite, no network required
 
 ./tools/check.sh all             # the full local gate
 ```

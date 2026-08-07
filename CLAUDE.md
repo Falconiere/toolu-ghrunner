@@ -445,7 +445,7 @@ to that list requires proving the value is not a real credential.
   file sink) must mask its own line before it reaches a durable sink.
 - `execution/` — the engine. `job_runner::run_job` is the single
   entry point, returning a `JobTeardown` (`job_teardown.rs`, `pub mod`
-  in `execution/mod.rs`) instead of `()`: it stops local cache servers
+  in `execution.rs`) instead of `()`: it stops local cache servers
   and emits `JobCompleted` before returning, and the caller must drop
   the job's event sender — closing the channel that reports completion
   to GitHub — before calling `JobTeardown::finish`, which runs cache GC

@@ -87,8 +87,11 @@ fn reject_tar_slip(path: &Path, stripped: &Path) -> Result<(), RunnerError> {
         | std::path::Component::Prefix(_)
     )
   }) {
+    // Quoted deliberately: the old `{path:?}` rendering quoted it, and this
+    // message is surfaced through RunnerError to logs. Quotes also keep a
+    // path with trailing whitespace legible in the rejection record.
     return Err(RunnerError::ActionDownload(format!(
-      "tar slip: entry {} escapes dest",
+      "tar slip: entry \"{}\" escapes dest",
       path.display()
     )));
   }

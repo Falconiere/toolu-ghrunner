@@ -35,30 +35,15 @@ pub(super) fn build_strategy(
   fail_fast: bool,
   max_parallel: Option<u64>,
 ) -> HashMap<String, ExprValue> {
+  // `as f64` on purpose: `${{ }}` numbers are IEEE-754 doubles, the same
+  // contract `PipelineContextData` carries, so a count widens exactly up to
+  // 2^53 and rounds beyond it. Narrowing through `u32` first would clamp a
+  // large count to a WRONG number rather than an imprecise one.
   let mut s = HashMap::new();
   s.insert("fail-fast".to_owned(), ExprValue::Bool(fail_fast));
-  s.insert(
-    "job-index".to_owned(),
-    ExprValue::Number(matrix_count_to_f64(job_index)),
-  );
-  s.insert(
-    "job-total".to_owned(),
-    ExprValue::Number(matrix_count_to_f64(job_total)),
-  );
-  let max = max_parallel.map_or(ExprValue::Null, |m| {
-    ExprValue::Number(matrix_count_to_f64(m))
-  });
+  s.insert("job-index".to_owned(), ExprValue::Number(job_index as f64));
+  s.insert("job-total".to_owned(), ExprValue::Number(job_total as f64));
+  let max = max_parallel.map_or(ExprValue::Null, |m| ExprValue::Number(m as f64));
   s.insert("max-parallel".to_owned(), max);
   s
-}
-
-/// Convert a matrix job-count/index to its `${{ }}` numeric representation.
-///
-/// GitHub Actions caps matrix jobs at 256 (github.com) / 65536 (GHES max
-/// documented ceiling), so every legitimate value here fits a `u32` losslessly
-/// as `f64`. Falls back to `f64::from(u32::MAX)` for the practically
-/// unreachable case of a count that doesn't fit `u32`, rather than silently
-/// losing precision via `as`.
-fn matrix_count_to_f64(count: u64) -> f64 {
-  u32::try_from(count).map_or(f64::from(u32::MAX), f64::from)
 }
