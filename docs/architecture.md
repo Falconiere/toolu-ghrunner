@@ -613,8 +613,10 @@ The order is load-bearing: the persisted `runner_id` and URL are the only
 handle on the GitHub-side runner, so deleting them first would strand it
 with no way to retry. A failed unregister therefore aborts with local
 state untouched. The bearer resolves `--token` > `TOOLU_RUNNER_TOKEN` >
-the stored `login` token; with none of the three the local removal still
-proceeds behind a WARN that the runner was left registered.
+the stored `login` token, an empty value counting as absent; with none of
+the three `remove` FAILS without deleting anything, naming every remedy —
+losing the persisted `runner_id` and URL while the runner is still
+registered is the B-002 outcome itself, and a WARN scrolls past.
 `remove` decides whether a run is in flight by **acquiring** the job lock
 (`config::lockfile::acquire`), not by inspecting the file: that is atomic,
 it reuses the crate's stale-lock rule, and holding the guard across the
