@@ -260,9 +260,7 @@ async fn execute_job_closes_channel_then_runs_teardown() -> TestResult {
   assert_eq!(fx.index_len()?, 1, "seeded entry must be indexed");
 
   let runner = Runner::new(fx.config.clone(), Arc::new(Mutex::new(SecretMasker::new())));
-  let mut rx = runner
-    .execute_job(fx.msg.clone(), CancellationToken::new())
-    .await;
+  let mut rx = runner.execute_job(fx.msg.clone(), CancellationToken::new());
 
   // A bounded drain: if the restructured spawn ever left a sender alive, this
   // would hang forever instead of failing.

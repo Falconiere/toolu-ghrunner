@@ -5,10 +5,13 @@ use shared::RunnerError;
 
 use super::cgroup_join::spawn_in_cgroup;
 
-/// Result of running a script via a StepHost.
+/// Result of running a script via a `StepHost`.
 pub struct ScriptOutput {
+  /// Process exit code (`-1` if the process was killed by a signal).
   pub exit_code: i64,
+  /// Captured stdout.
   pub stdout: String,
+  /// Captured stderr.
   pub stderr: String,
 }
 
@@ -33,6 +36,7 @@ pub trait StepHost: Send + Sync {
 /// for resource enforcement; `None` disables the join (listener/JIT mode).
 #[derive(Default)]
 pub struct DirectHost {
+  /// Per-job cgroup-v2 directory spawned steps are moved into (`None` disables the join).
   pub cgroup_path: Option<PathBuf>,
 }
 

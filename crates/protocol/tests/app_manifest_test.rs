@@ -1,6 +1,6 @@
 //! Real-data tests for the GitHub App manifest onboarding flow.
 //!
-//! No mocks: AC-1 round-trips the built manifest through serde_json, AC-2
+//! No mocks: AC-1 round-trips the built manifest through `serde_json`, AC-2
 //! parses a shape-real conversion-response fixture, and the remaining tests
 //! exercise the HTML form and the CSRF/callback query parser. The fixture's
 //! `pem` is a non-secret placeholder block (never used cryptographically — the
@@ -49,7 +49,7 @@ fn parse_conversion_reads_fixture() {
   let body = include_str!("fixtures/conversion_response.json");
   let resp = parse_conversion(body).expect("fixture parses");
 
-  assert_eq!(resp.id, 123456);
+  assert_eq!(resp.id, 123_456);
   assert_eq!(resp.slug, "toolu-runner-test");
   assert_eq!(resp.owner.login, "octocat");
   assert_eq!(resp.client_id, "Iv1.testclientid0001");

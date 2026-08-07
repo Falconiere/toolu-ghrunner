@@ -89,7 +89,7 @@ pub async fn wait_bounded(
 
 /// Kill the child and reap it so no zombie is left behind.
 ///
-/// The reap itself is bounded: a SIGKILLed process normally exits
+/// The reap itself is bounded: a `SIGKILL`ed process normally exits
 /// immediately, but one stuck in uninterruptible sleep (D state — NFS, dead
 /// device) would block `wait()` forever and hang the job. After the grace
 /// period the zombie is abandoned with a warning rather than wedging the

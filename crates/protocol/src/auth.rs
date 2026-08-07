@@ -18,11 +18,14 @@ use super::types::RsaKeyParams;
 /// CRT parameter triple `(exponent1, exponent2, coefficient)` as big-endian bytes.
 type CrtParams = (Vec<u8>, Vec<u8>, Vec<u8>);
 
-/// OAuth2 token response from GitHub's token endpoint.
+/// `OAuth2` token response from GitHub's token endpoint.
 #[derive(Clone, Deserialize)]
 pub struct AccessToken {
+  /// The bearer token to present to GitHub APIs.
   pub access_token: String,
+  /// Seconds until `access_token` expires.
   pub expires_in: u64,
+  /// The token type (e.g. `Bearer`), as returned by the token endpoint.
   pub token_type: String,
 }
 
@@ -55,7 +58,7 @@ struct JwtClaims {
 /// component is a base64-encoded big-endian unsigned integer.
 ///
 /// Computes the CRT parameters (dp, dq, qinv) from (d, p, q) to produce
-/// a complete PKCS#1 RSAPrivateKey DER structure.
+/// a complete PKCS#1 `RSAPrivateKey` DER structure.
 ///
 /// # Errors
 ///
@@ -71,24 +74,24 @@ pub fn parse_rsa_private_key(params: &RsaKeyParams) -> Result<Vec<u8>, RunnerErr
   // coefficient = q^(-1) mod p (via Fermat's little theorem since p is prime).
   let (exp1_bytes, exp2_bytes, coeff_bytes) = compute_crt_params(&d_bytes, &p_bytes, &q_bytes)?;
 
-  let n = uint_ref(&n_bytes, "modulus")?;
-  let e = uint_ref(&e_bytes, "exponent")?;
-  let d = uint_ref(&d_bytes, "D")?;
-  let p = uint_ref(&p_bytes, "P")?;
-  let q = uint_ref(&q_bytes, "Q")?;
-  let exp1 = uint_ref(&exp1_bytes, "exponent1")?;
-  let exp2 = uint_ref(&exp2_bytes, "exponent2")?;
-  let coeff = uint_ref(&coeff_bytes, "coefficient")?;
+  let modulus = uint_ref(&n_bytes, "modulus")?;
+  let public_exponent = uint_ref(&e_bytes, "exponent")?;
+  let private_exponent = uint_ref(&d_bytes, "D")?;
+  let prime1 = uint_ref(&p_bytes, "P")?;
+  let prime2 = uint_ref(&q_bytes, "Q")?;
+  let exponent1 = uint_ref(&exp1_bytes, "exponent1")?;
+  let exponent2 = uint_ref(&exp2_bytes, "exponent2")?;
+  let coefficient = uint_ref(&coeff_bytes, "coefficient")?;
 
   let private_key = RsaPrivateKey {
-    modulus: n,
-    public_exponent: e,
-    private_exponent: d,
-    prime1: p,
-    prime2: q,
-    exponent1: exp1,
-    exponent2: exp2,
-    coefficient: coeff,
+    modulus,
+    public_exponent,
+    private_exponent,
+    prime1,
+    prime2,
+    exponent1,
+    exponent2,
+    coefficient,
     other_prime_infos: None,
   };
 
@@ -97,7 +100,7 @@ pub fn parse_rsa_private_key(params: &RsaKeyParams) -> Result<Vec<u8>, RunnerErr
     .map_err(|err| RunnerError::Protocol(format!("PKCS#1 DER encoding failed: {err}")))
 }
 
-/// Build a JWT signed with PS256 for GitHub Actions OAuth2 token exchange.
+/// Build a JWT signed with PS256 for GitHub Actions `OAuth2` token exchange.
 ///
 /// Claims: `sub=clientId, iss=clientId, aud=authorizationUrl,
 /// jti=uuid, nbf=now-30s, iat=now-30s, exp=now+4m30s`

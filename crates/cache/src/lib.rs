@@ -1,3 +1,7 @@
+//! Content-addressed CI cache backing `ServicesMode::Accelerated`: the CAS
+//! store, the GitHub Actions Cache Service v2/v1 protocols, the Azure-Blob
+//! upload/download endpoint, and the selective reverse proxy.
+
 /// Accelerated services mode: one local cache app over both protocols + proxy.
 pub mod accelerated;
 /// Azure-Blob-compatible upload/download endpoint + in-memory token registry.
@@ -34,7 +38,7 @@ use rand::RngCore;
 /// These tokens are bearer capabilities — the v2 blob upload/download URLs and
 /// the v1 archive download URL (fetched with no `Authorization` header at all)
 /// are authorized by nothing but the token — so they must be infeasible to
-/// guess: `rand::thread_rng` is a ChaCha CSPRNG reseeded from OS entropy,
+/// guess: `rand::thread_rng` is a `ChaCha` CSPRNG reseeded from OS entropy,
 /// unlike the predictable `fastrand` used for non-secret poll jitter. Every
 /// cache-layer capability token must come from this one helper so a format or
 /// entropy change can never land on only one mint site.

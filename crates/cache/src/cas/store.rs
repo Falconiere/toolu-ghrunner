@@ -29,7 +29,7 @@ pub struct CasStore {
 }
 
 impl CasStore {
-  /// Create a store rooted at `root` with the given FastCDC average and L1 byte cap.
+  /// Create a store rooted at `root` with the given `FastCDC` average and L1 byte cap.
   ///
   /// The optional S3 cold tier defaults to `None`; attach one with
   /// [`with_l2`](Self::with_l2). Chunk writes default to
@@ -108,7 +108,7 @@ impl CasStore {
 /// Ingest, read, and enumerate/delete operations, split from the construction
 /// block above so no single `impl CasStore` block grows unwieldy.
 impl CasStore {
-  /// Chunk an assembled staging file with FastCDC, writing each unique chunk; returns the manifest.
+  /// Chunk an assembled staging file with `FastCDC`, writing each unique chunk; returns the manifest.
   ///
   /// # Errors
   /// `RunnerError::Cache`/`Io` if the file cannot be read or a chunk write fails.

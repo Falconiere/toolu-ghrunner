@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://falconiere.github.io/toolu-conventions/guardrails/workspace.schema.json",
+  "title": "agent-guardrails workspace manifest",
+  "description": "The root manifest of a monorepo. It names the packages — each of which carries its own guardrails.config.json — and holds the repo-level checks that have no source tree of their own. It is deliberately NOT guardrails.config.json: the oxlint plugin resolves that filename from process.cwd(), so a root file under that name would let a root-level oxlint run lint every package against one config and silently disable the checks each package declares ownedByLinter. Under this name, a root-level oxlint run fails closed at plugin load instead.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "packages"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Path to this schema, for editor completion."
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Manifest version. run.sh warns when it trails the scripts' version."
+    },
+    "packages": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^(?!.*\\.\\.)[^/].*[^/]$",
+        "description": "Repo-relative directory, no leading or trailing slash and no \"..\" segment — e.g. \"packages/database\". run.sh cd's into each of these, so a traversal here would take the whole gate outside the repo."
+      },
+      "description": "Every package guardrails governs. Each must exist on disk and hold a guardrails.config.json; either failure exits 3 rather than being skipped. minItems is 1 because an empty list is indistinguishable from a manifest nobody finished writing, and it would make the whole gate pass while checking nothing."
+    },
+    "bannedDeps": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Dependencies rejected in the ROOT package.json. Each package's own config still governs its own manifest."
+    },
+    "secrets": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "neverTracked": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Paths git must never track. In a workspace these are repo-relative and every package's secret file needs listing — wrangler reads .dev.vars beside each wrangler.jsonc, so naming only the root one silently leaves the others unguarded."
+        },
+        "scanExempt": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Paths excluded from secret-content scanning."
+        }
+      },
+      "description": "Repo-wide secret rules."
+    },
+    "shadowConfigs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["found", "use", "why"],
+        "properties": {
+          "found": { "type": "string", "description": "The shadowing filename to reject." },
+          "use": { "type": "string", "description": "The filename to use instead." },
+          "why": { "type": "string", "description": "What breaks when the shadow wins. Required — a rule whose reason is unwritten gets deleted by the next person who trips over it." }
+        }
+      },
+      "description": "Config files at the ROOT that shadow the real one."
+    },
+    "requiredFiles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "why"],
+        "properties": {
+          "path": { "type": "string", "description": "Repo-relative path that must exist." },
+          "why": { "type": "string", "description": "What is broken without it." }
+        }
+      },
+      "description": "Files the workspace ROOT must have."
+    }
+  }
+}

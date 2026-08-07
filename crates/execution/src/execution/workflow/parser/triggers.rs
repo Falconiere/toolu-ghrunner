@@ -2,7 +2,7 @@
 
 use crate::execution::workflow::types::{BranchFilter, TriggerConfig};
 
-pub(super) fn parse_trigger(on: &Option<serde_yaml::Value>) -> TriggerConfig {
+pub(super) fn parse_trigger(on: Option<&serde_yaml::Value>) -> TriggerConfig {
   let Some(value) = on else {
     return TriggerConfig::default();
   };

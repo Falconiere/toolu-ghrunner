@@ -11,23 +11,31 @@ use super::types::WorkflowDefinition;
 /// Conclusion for an entire workflow run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkflowConclusion {
+  /// Every job succeeded.
   Success,
+  /// At least one job failed.
   Failure,
+  /// The workflow run was cancelled.
   Cancelled,
 }
 
 /// Result of a single job execution.
 #[derive(Debug, Clone)]
 pub struct JobResult {
+  /// The job's id from the workflow YAML.
   pub job_id: String,
+  /// Outcome of the job's steps.
   pub conclusion: Conclusion,
+  /// The matrix combination this job instance ran, if the job used `strategy.matrix`.
   pub matrix: Option<HashMap<String, String>>,
 }
 
 /// Result of workflow orchestration.
 #[derive(Debug)]
 pub struct WorkflowResult {
+  /// Overall outcome across all jobs.
   pub conclusion: WorkflowConclusion,
+  /// Per-job results.
   pub job_results: Vec<JobResult>,
 }
 
@@ -85,8 +93,7 @@ fn execute_workflow(
       // Expand matrix if present
       let matrix_combos = job_def
         .and_then(|j| j.strategy.as_ref())
-        .map(|s| expand_matrix(&s.matrix))
-        .unwrap_or_else(|| vec![HashMap::new()]);
+        .map_or_else(|| vec![HashMap::new()], |s| expand_matrix(&s.matrix));
 
       for combo in &matrix_combos {
         // SIMULATED execution — always succeeds in this slice

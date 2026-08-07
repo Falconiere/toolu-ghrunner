@@ -198,7 +198,8 @@ pub fn oidc_request_url(upstream_url: &str, audience: Option<&str>) -> String {
     upstream_url.trim_end_matches('/')
   );
   if let Some(aud) = audience {
-    url.push_str(&format!("&audience={}", percent_encode_query(aud)));
+    url.push_str("&audience=");
+    url.push_str(&percent_encode_query(aud));
   }
   url
 }
@@ -211,11 +212,28 @@ fn percent_encode_query(value: &str) -> String {
   let mut out = String::with_capacity(value.len());
   for &b in value.as_bytes() {
     match b {
-      b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
-      _ => out.push_str(&format!("%{b:02X}")),
+      b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+        out.push(char::from(b));
+      },
+      _ => {
+        out.push('%');
+        out.push(hex_digit(b >> 4));
+        out.push(hex_digit(b));
+      },
     }
   }
   out
+}
+
+/// The uppercase hex digit for the low nibble of `byte`.
+///
+/// Masking first makes the mapping total, so it needs no bounds-checked table
+/// lookup — `indexing_slicing` is denied workspace-wide.
+fn hex_digit(byte: u8) -> char {
+  match byte & 0x0F {
+    n @ 0..=9 => char::from(b'0' + n),
+    n => char::from(b'A' + n - 10),
+  }
 }
 
 /// The timeout-bounded HTTP client used to proxy OIDC requests, built once

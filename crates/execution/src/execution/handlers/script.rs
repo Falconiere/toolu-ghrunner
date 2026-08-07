@@ -13,10 +13,15 @@ use crate::execution::step_timeout::{WaitOutcome, wait_bounded};
 
 /// Parameters for script execution.
 pub struct ScriptParams<'a> {
+  /// Script body to run.
   pub script: &'a str,
+  /// Shell to invoke the script under (`None` = platform default).
   pub shell: Option<&'a str>,
+  /// Environment variables to set on the child process.
   pub env: &'a HashMap<String, String>,
+  /// Directory the script runs in.
   pub working_dir: &'a Path,
+  /// Step id used to tag streamed log lines.
   pub step_id: &'a str,
   /// Per-job cgroup directory to move the spawned step into (`None` = no isolation).
   pub cgroup_path: Option<&'a Path>,
@@ -103,7 +108,7 @@ pub(crate) async fn emit_timeout(
   step_id: &str,
   timeout: Option<Duration>,
 ) {
-  let secs = timeout.map(|d| d.as_secs()).unwrap_or(0);
+  let secs = timeout.map_or(0, |d| d.as_secs());
   let _ = events
     .send(RunnerEvent::Log {
       step_id: step_id.to_owned(),
@@ -153,6 +158,7 @@ fn conclusion_for(success: bool) -> Conclusion {
 /// Result of running a script step: its exit conclusion. Stdout is streamed to
 /// the caller line-by-line during the run, not returned here.
 pub struct ScriptOutput {
+  /// Result of the child process's exit code (0 -> Success, non-zero -> Failure).
   pub conclusion: Conclusion,
 }
 

@@ -9,22 +9,32 @@ use super::template_token::TemplateToken;
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActionStep {
+  /// The step's id within the job.
   pub id: String,
+  /// Wire field `type`; the step's handler kind (e.g. `"script"`), if reported.
   #[serde(default, rename = "type")]
   pub step_type: Option<String>,
+  /// The step's `name:` as a template token, if specified.
   #[serde(default)]
   pub display_name_token: Option<TemplateToken>,
+  /// The `steps.<context_name>` key this step's outputs are addressed by.
   #[serde(default)]
   pub context_name: Option<String>,
+  /// The step's `if:` condition expression, if specified.
   #[serde(default)]
   pub condition: Option<String>,
+  /// The step's `continue-on-error:` setting, if specified.
   #[serde(default)]
   pub continue_on_error: Option<bool>,
+  /// The step's `timeout-minutes:` setting, if specified.
   #[serde(default)]
   pub timeout_in_minutes: Option<u32>,
+  /// Reference to the action/script this step runs.
   pub reference: ActionStepDefinitionReference,
+  /// The step's `with:` input values.
   #[serde(default)]
   pub inputs: TemplateToken,
+  /// The step's `env:` values, if specified.
   #[serde(default)]
   pub environment: Option<TemplateToken>,
 }
@@ -141,16 +151,22 @@ impl ActionStep {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActionStepDefinitionReference {
+  /// Wire field `type`; the handler kind (e.g. `"script"`, `"node20"`, `"docker"`).
   #[serde(default, rename = "type")]
   pub ref_type: Option<String>,
+  /// The Docker image reference, for `docker` steps.
   #[serde(default)]
   pub image: Option<String>,
+  /// The action's `owner/repo` (or local path) name, for `uses:` steps.
   #[serde(default)]
   pub name: Option<String>,
+  /// Wire field `ref`; the action's git ref (tag/branch/SHA), if specified.
   #[serde(default, rename = "ref")]
   pub git_ref: Option<String>,
+  /// The repository type the action is sourced from (e.g. `"GitHub"`, `"Local"`).
   #[serde(default)]
   pub repository_type: Option<String>,
+  /// The local path to a composite/JS action, for local `uses: ./...` steps.
   #[serde(default)]
   pub path: Option<String>,
 }

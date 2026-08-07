@@ -1,0 +1,51 @@
+{
+  "$schema": "../../scripts/guardrails/schema.json",
+  "version": 2,
+  "srcRoot": "src",
+  "src": {
+    "nested": {
+      "*": [
+        "tests"
+      ]
+    },
+    "requireReadme": [
+      "journal",
+      "watch",
+      "wizard"
+    ]
+  },
+  "fileSize": {
+    "max": 500,
+    "skipExtensions": []
+  },
+  "functionSize": {
+    "max": 150
+  },
+  "testDir": "tests",
+  "testGlob": "",
+  "barrelNames": [
+    "mod.rs"
+  ],
+  "barrelExempt": [],
+  "bannedDeps": [],
+  "filenameCase": [
+    {
+      "glob": "*.rs",
+      "regex": "^[a-z0-9_]+[.]rs$",
+      "describe": "snake_case"
+    }
+  ],
+  "secrets": {
+    "neverTracked": [
+      ".env"
+    ]
+  },
+  "shadowConfigs": [
+    {
+      "found": "lefthook.yaml",
+      "use": "lefthook.yml",
+      "why": "the lefthook 2.x installer shadows a .yaml, so the hooks never run"
+    }
+  ],
+  "ownedByLinter": []
+}

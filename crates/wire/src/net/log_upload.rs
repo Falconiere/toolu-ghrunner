@@ -1,6 +1,6 @@
 //! Async transport for uploading log content to Azure Blob Storage.
 //!
-//! The decision of which upload mode (BlockBlob vs AppendBlob) to use
+//! The decision of which upload mode (`BlockBlob` vs `AppendBlob`) to use
 //! lives in [`crate::reporting::log_upload`]; this file owns only the
 //! raw `PUT` requests.
 
@@ -8,7 +8,7 @@ use reqwest::header::{HeaderMap, HeaderValue};
 
 use shared::RunnerError;
 
-/// Headers for a BlockBlob PUT request.
+/// Headers for a `BlockBlob` `PUT` request.
 pub fn block_blob_headers() -> HeaderMap {
   let mut headers = HeaderMap::new();
   headers.insert("x-ms-blob-type", HeaderValue::from_static("BlockBlob"));
@@ -19,7 +19,7 @@ pub fn block_blob_headers() -> HeaderMap {
   headers
 }
 
-/// Headers for creating an AppendBlob (empty body).
+/// Headers for creating an `AppendBlob` (empty body).
 pub fn create_append_blob_headers() -> HeaderMap {
   let mut headers = HeaderMap::new();
   headers.insert("x-ms-blob-type", HeaderValue::from_static("AppendBlob"));
@@ -27,7 +27,7 @@ pub fn create_append_blob_headers() -> HeaderMap {
   headers
 }
 
-/// Headers for an AppendBlock request.
+/// Headers for an `AppendBlock` request.
 pub fn append_block_headers(content_length: usize) -> HeaderMap {
   let mut headers = HeaderMap::new();
   headers.insert(
@@ -69,7 +69,7 @@ pub async fn upload_block_blob(
   Ok(())
 }
 
-/// Streaming `PUT` for large log content (AppendBlob create + block appends).
+/// Streaming `PUT` for large log content (`AppendBlob` create + block appends).
 ///
 /// # Errors
 ///

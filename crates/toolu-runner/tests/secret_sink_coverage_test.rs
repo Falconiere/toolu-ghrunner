@@ -332,7 +332,8 @@ fn assert_journal_clean(jobs_dir: &std::path::Path) -> TestResult {
   let journal_raw = std::fs::read_to_string(&journal_path)?;
   assert!(
     !journal_raw.contains(SECRET),
-    "secret leaked into the journal: {journal_path:?}"
+    "secret leaked into the journal: {}",
+    journal_path.display()
   );
   assert!(
     journal_raw.contains("***"),

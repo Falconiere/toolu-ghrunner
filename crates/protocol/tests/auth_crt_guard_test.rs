@@ -3,7 +3,7 @@
 //! A crafted/spoofed `generate-jitconfig` response can carry degenerate RSA
 //! primes (`p`/`q` <= 1) or a zero private exponent. Before the guard, the
 //! `num-bigint-dig` CRT math (`p - 1`, `q - 1`, `p - 2`, `d % (p-1)`) panicked
-//! with subtract-with-overflow / divide-by-zero, killing the runner (DoS).
+//! with subtract-with-overflow / divide-by-zero, killing the runner (`DoS`).
 //! These tests feed those values through the public API and assert we get an
 //! `Err`, never a panic.
 

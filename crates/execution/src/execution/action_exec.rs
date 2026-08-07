@@ -43,8 +43,11 @@ struct ActionEnv<'a> {
 /// action defines a `post` entrypoint. `outputs` carries the `main` stage's
 /// stdout `::set-output::` values so they reach `StepCompleted.outputs`.
 pub struct ActionOutcome {
+  /// Result of the step's `pre` + `main` stages.
   pub conclusion: Conclusion,
+  /// The action's `post` entrypoint, queued LIFO if one was defined.
   pub post: Option<PostStep>,
+  /// `::set-output::` values from the `main` stage's stdout.
   pub outputs: std::collections::HashMap<String, String>,
 }
 
@@ -181,7 +184,7 @@ async fn resolve_remote_action(
     download_and_extract_action(&client, &tarball_url, None, &cache_dir).await?;
   }
 
-  let action_dir = resolve_action_dir(&cache_dir, &action_ref.subpath);
+  let action_dir = resolve_action_dir(&cache_dir, action_ref.subpath.as_ref());
   let manifest = read_manifest(&action_dir)?;
   emit_action_header(step, uses_full, events).await;
 
@@ -370,7 +373,7 @@ fn build_post_step(c: &NodeActionCtx<'_>) -> Option<PostStep> {
   })
 }
 
-impl<'a> NodeActionCtx<'a> {
+impl NodeActionCtx<'_> {
   /// Build a `NodeStage` for `stage`, reborrowing the live context mutably.
   fn stage<'s>(&'s mut self, stage: &'s str) -> NodeStage<'s> {
     NodeStage {

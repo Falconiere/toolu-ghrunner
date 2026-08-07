@@ -42,15 +42,20 @@ pub fn check_circular_reference(call_stack: &[String], new_ref: &str) -> Result<
 /// Context for resolving a reusable workflow invocation.
 #[derive(Debug, Clone)]
 pub struct ResolveContext {
+  /// Chain of reusable workflow refs already being invoked (for circular-ref checks).
   pub call_stack: Vec<String>,
+  /// Ref of the reusable workflow being resolved.
   pub current_ref: String,
+  /// Current nesting depth (checked against `MAX_REUSABLE_WORKFLOW_DEPTH`).
   pub current_depth: u32,
 }
 
 /// Result of resolving a reusable workflow invocation.
 #[derive(Debug, Clone)]
 pub struct ResolvedInvocation {
+  /// Resolved `with:` inputs for the called workflow.
   pub inputs: HashMap<String, String>,
+  /// Resolved `secrets:` for the called workflow.
   pub secrets: HashMap<String, String>,
 }
 
@@ -59,11 +64,11 @@ pub struct ResolvedInvocation {
 /// # Errors
 ///
 /// Returns `RunnerError::ReusableWorkflow` on depth, circular ref, or validation failures.
-pub fn resolve_reusable_invocation(
+pub fn resolve_reusable_invocation<S1: ::std::hash::BuildHasher, S2: ::std::hash::BuildHasher>(
   workflow_def: &ReusableWorkflowDef,
-  caller_inputs: &HashMap<String, String>,
+  caller_inputs: &HashMap<String, String, S1>,
   secret_mode: &SecretMode,
-  caller_secrets: &HashMap<String, String>,
+  caller_secrets: &HashMap<String, String, S2>,
   resolve_ctx: &ResolveContext,
 ) -> Result<ResolvedInvocation, RunnerError> {
   check_nesting_depth(resolve_ctx.current_depth)?;

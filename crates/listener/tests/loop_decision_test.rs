@@ -34,7 +34,7 @@ fn resolve(outcome: &Outcome) -> Result<(), RunnerError> {
 /// `(name, outcome, once, cancelled, pending_remove, expected)`.
 type Row = (&'static str, Outcome, bool, bool, bool, LoopAction);
 
-/// Rows that terminate the loop (rules 1-3: cancelled, once, pending_remove),
+/// Rows that terminate the loop (rules 1-3: cancelled, once, `pending_remove`),
 /// including the `cancelled` > `once` > `pending_remove` precedence rows.
 fn exiting_cases() -> Vec<Row> {
   use LoopAction::Exit;

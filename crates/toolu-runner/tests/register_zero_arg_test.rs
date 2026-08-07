@@ -114,7 +114,7 @@ fn no_stored_dotcom_token(home: &Path) -> bool {
 /// AC-3 / AC-12: explicit `--url` + `TOOLU_RUNNER_TOKEN` env → the state
 /// lands in the per-repo `runners/<owner>/<repo>/` dir, both files 0600,
 /// the persisted `data_dir` IS that per-repo dir, the workspace default
-/// is unchanged, and `credentials.json` carries the client_id lifted from
+/// is unchanged, and `credentials.json` carries the `client_id` lifted from
 /// the genuinely parsed JIT envelope.
 #[tokio::test(flavor = "multi_thread")]
 async fn register_persists_per_repo_layout_from_explicit_url() {
@@ -142,7 +142,7 @@ async fn register_persists_per_repo_layout_from_explicit_url() {
 /// Assert the persisted per-repo state for `testowner/testrepo`: both
 /// files present + 0600, the parsed `config.toml` carrying the fixture
 /// registration with the per-repo `data_dir` and the unchanged workspace
-/// default, and `credentials.json` carrying the envelope's client_id.
+/// default, and `credentials.json` carrying the envelope's `client_id`.
 /// `?` (not `expect`) keeps this non-`#[test]` helper clippy-clean.
 fn assert_per_repo_state(home: &Path, url: &str) -> Result<(), Box<dyn std::error::Error>> {
   let repo_dir = home.join("runners/testowner/testrepo");

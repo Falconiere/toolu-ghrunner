@@ -3,65 +3,113 @@ use std::collections::HashMap;
 /// A parsed GitHub Actions workflow command from stdout.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkflowCommand {
+  /// `::error::` — an error annotation on the job.
   Error {
+    /// Annotation message text.
     message: String,
+    /// File the annotation points at, if any.
     file: Option<String>,
+    /// Start line, if any.
     line: Option<u32>,
+    /// Start column, if any.
     col: Option<u32>,
+    /// End line, if any.
     end_line: Option<u32>,
+    /// End column, if any.
     end_column: Option<u32>,
+    /// Annotation title, if any.
     title: Option<String>,
   },
+  /// `::warning::` — a warning annotation on the job.
   Warning {
+    /// Annotation message text.
     message: String,
+    /// File the annotation points at, if any.
     file: Option<String>,
+    /// Start line, if any.
     line: Option<u32>,
+    /// Start column, if any.
     col: Option<u32>,
+    /// End line, if any.
     end_line: Option<u32>,
+    /// End column, if any.
     end_column: Option<u32>,
+    /// Annotation title, if any.
     title: Option<String>,
   },
+  /// `::notice::` — an informational annotation on the job.
   Notice {
+    /// Annotation message text.
     message: String,
+    /// File the annotation points at, if any.
     file: Option<String>,
+    /// Start line, if any.
     line: Option<u32>,
+    /// Start column, if any.
     col: Option<u32>,
+    /// End line, if any.
     end_line: Option<u32>,
+    /// End column, if any.
     end_column: Option<u32>,
+    /// Annotation title, if any.
     title: Option<String>,
   },
+  /// `::debug::` — a debug-level log line.
   Debug {
+    /// Debug message text.
     message: String,
   },
+  /// `::group::` — starts a collapsible log group.
   Group {
+    /// Group title shown in the GitHub UI.
     title: String,
   },
+  /// `::endgroup::` — closes the current log group.
   EndGroup,
+  /// `::set-output::` — sets a step output (legacy; superseded by `GITHUB_OUTPUT`).
   SetOutput {
+    /// Output name.
     name: String,
+    /// Output value.
     value: String,
   },
+  /// `::add-mask::` — registers a value to be masked in subsequent logs.
   AddMask {
+    /// Value to mask.
     value: String,
   },
+  /// `::save-state::` — saves state for the action's post step (legacy; superseded by `GITHUB_STATE`).
   SaveState {
+    /// State key.
     name: String,
+    /// State value.
     value: String,
   },
+  /// `::add-path::` — prepends a directory to `PATH` for later steps (legacy; superseded by `GITHUB_PATH`).
   AddPath {
+    /// Directory to prepend.
     value: String,
   },
+  /// `::set-env::` — sets an env var for later steps (legacy; superseded by `GITHUB_ENV`).
   SetEnv {
+    /// Environment variable name.
     name: String,
+    /// Environment variable value.
     value: String,
   },
+  /// `::echo::` — toggles command-echoing to the log.
   Echo {
+    /// Whether echoing is being turned on.
     on: bool,
   },
+  /// `::stop-commands::` — suspends workflow-command processing until the matching token.
   StopCommands {
+    /// Token that must appear on its own to resume processing.
     token: String,
   },
+  /// Resumes workflow-command processing (matches a prior `StopCommands` token).
   ResumeCommands {
+    /// Token that matched the pending `StopCommands`.
     token: String,
   },
 }

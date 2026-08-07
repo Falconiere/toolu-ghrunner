@@ -3,7 +3,7 @@
 //! Starts a standalone accelerated cache server in-process (the same
 //! `accelerated_app` the runner mounts, over a temp content-addressed store),
 //! creates a `--driver-opt network=host` buildx builder so `docker-container`
-//! BuildKit can reach the host loopback, and runs a real
+//! `BuildKit` can reach the host loopback, and runs a real
 //! `docker buildx build --cache-to type=gha --cache-from type=gha` twice
 //! against a multi-stage Dockerfile. It asserts the second build reuses
 //! cached layers (AC-5) and, by not crashing the buildx `go-actions-cache`

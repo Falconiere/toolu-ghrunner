@@ -3,7 +3,7 @@
 //! Exercises the print / no-activate / remove modes against a real persisted
 //! registration under a temp home. The temp dir is BOTH `TOOLU_RUNNER_HOME`
 //! (so config resolution finds the registration) and `HOME` (so the unit file
-//! lands under an isolated LaunchAgents / systemd-user dir). Assertions branch
+//! lands under an isolated `LaunchAgents` / systemd-user dir). Assertions branch
 //! on the host OS: launchd plist on macOS, systemd unit on Linux. The default
 //! activate mode is exercised through PATH-shim `launchctl` / `systemctl`
 //! scripts that log their argv — no real service is ever loaded.

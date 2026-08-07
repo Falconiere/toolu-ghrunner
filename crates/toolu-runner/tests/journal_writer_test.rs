@@ -200,7 +200,7 @@ async fn registered_secrets_never_reach_the_journal() -> TestResult {
 async fn retention_prunes_oldest_to_cap() -> TestResult {
   let jobs_dir = tempfile::tempdir()?;
   for i in 0..JOURNAL_RETAIN {
-    let name = format!("20200101T{:06}Z-old-{i}.jsonl", i);
+    let name = format!("20200101T{i:06}Z-old-{i}.jsonl");
     std::fs::write(jobs_dir.path().join(name), "{}\n")?;
   }
   let masker = Arc::new(Mutex::new(SecretMasker::new()));

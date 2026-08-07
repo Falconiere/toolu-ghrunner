@@ -9,7 +9,9 @@ use shared::RunnerError;
 /// # Errors
 ///
 /// Returns `RunnerError::Expression` if a cycle is detected.
-pub fn topological_sort(jobs: &HashMap<String, Vec<String>>) -> Result<Vec<String>, RunnerError> {
+pub fn topological_sort<S: ::std::hash::BuildHasher>(
+  jobs: &HashMap<String, Vec<String>, S>,
+) -> Result<Vec<String>, RunnerError> {
   let mut in_deg: HashMap<&str, usize> = HashMap::new();
   let mut dependents: HashMap<&str, Vec<&str>> = HashMap::new();
 
@@ -57,10 +59,10 @@ pub fn topological_sort(jobs: &HashMap<String, Vec<String>>) -> Result<Vec<Strin
 }
 
 /// Get jobs that are ready to execute (all dependencies completed).
-pub fn ready_jobs(
-  jobs: &HashMap<String, Vec<String>>,
-  completed: &HashSet<String>,
-  running: &HashSet<String>,
+pub fn ready_jobs<S: ::std::hash::BuildHasher>(
+  jobs: &HashMap<String, Vec<String>, S>,
+  completed: &HashSet<String, S>,
+  running: &HashSet<String, S>,
 ) -> Vec<String> {
   jobs
     .iter()

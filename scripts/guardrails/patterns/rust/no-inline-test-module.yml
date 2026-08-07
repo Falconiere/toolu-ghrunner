@@ -1,0 +1,9 @@
+id: no-inline-test-module
+language: rust
+severity: error
+message: in-file test module — move these tests to a sibling tests/ file so production code stays readable
+rule:
+  all:
+    - kind: mod_item
+    - has: { kind: declaration_list }
+    - follows: { kind: attribute_item, regex: 'cfg\(test\)' }

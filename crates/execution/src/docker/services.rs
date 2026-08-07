@@ -4,8 +4,11 @@ use shared::RunnerError;
 /// A running service container.
 #[derive(Debug)]
 pub struct ServiceContainer {
+  /// Network alias steps use to reach this service (`services.<id>`).
   pub alias: String,
+  /// Docker container id, for lifecycle calls (stop/remove).
   pub container_id: String,
+  /// Image the service container was started from.
   pub image: String,
 }
 

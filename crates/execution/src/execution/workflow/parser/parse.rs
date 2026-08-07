@@ -13,7 +13,7 @@ pub fn parse_workflow(yaml: &str) -> Result<WorkflowDefinition, RunnerError> {
   let raw: RawWorkflow = serde_yaml::from_str(yaml)
     .map_err(|e| RunnerError::Expression(format!("workflow YAML parse: {e}")))?;
 
-  let on = super::triggers::parse_trigger(&raw.on);
+  let on = super::triggers::parse_trigger(raw.on.as_ref());
   let jobs = super::jobs::parse_jobs(raw.jobs.unwrap_or_default());
 
   Ok(WorkflowDefinition {

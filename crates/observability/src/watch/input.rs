@@ -11,8 +11,9 @@ use super::state::App;
 pub enum Action {
   /// Exit the TUI.
   Quit,
-  /// Move the focused selection up / down.
+  /// Move the focused selection up.
   MoveUp,
+  /// Move the focused selection down.
   MoveDown,
   /// Open the selected job in the detail pane.
   OpenSelected,
@@ -20,8 +21,9 @@ pub enum Action {
   TogglePane,
   /// Toggle log follow (auto-scroll) mode.
   ToggleFollow,
-  /// Scroll the log pane by a page.
+  /// Scroll the log pane up by a page.
   PageUp,
+  /// Scroll the log pane down by a page.
   PageDown,
   /// `c`: ask for cancel confirmation.
   RequestCancel,

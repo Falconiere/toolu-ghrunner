@@ -1,6 +1,6 @@
 //! `install-service` subcommand: generate + activate a supervisor unit.
 //!
-//! Writes a launchd LaunchAgent (macOS) or systemd user unit (Linux) that
+//! Writes a launchd `LaunchAgent` (macOS) or systemd user unit (Linux) that
 //! wraps `run --config <path>` so the runner survives crashes and reboots.
 //! The unit text comes from `config::service_unit`; this module owns config
 //! resolution, service identity, file destinations, and the platform
@@ -22,7 +22,7 @@ use crate::cli::InstallServiceArgs;
 /// target OS; anything but macOS/Linux is rejected before any work.
 #[derive(Clone, Copy)]
 enum Supervisor {
-  /// macOS launchd user LaunchAgent.
+  /// macOS launchd user `LaunchAgent`.
   Launchd,
   /// Linux systemd user unit.
   Systemd,

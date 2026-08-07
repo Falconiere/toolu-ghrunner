@@ -6,52 +6,79 @@ use shared::RunnerError;
 /// Parsed action definition from action.yml/action.yaml.
 #[derive(Debug, Clone)]
 pub struct ActionDefinition {
+  /// The action's display name.
   pub name: String,
+  /// The action's description.
   pub description: String,
+  /// Declared `inputs:` keyed by input name.
   pub inputs: HashMap<String, ActionInput>,
+  /// Declared `outputs:` keyed by output name.
   pub outputs: HashMap<String, ActionOutput>,
+  /// The `runs:` section (execution kind + entrypoints).
   pub runs: ActionRuns,
 }
 
 /// An input parameter for an action.
 #[derive(Debug, Clone)]
 pub struct ActionInput {
+  /// Human-readable description of the input.
   pub description: String,
+  /// Whether the step must supply this input.
   pub required: bool,
+  /// Default value used when the step doesn't set this input.
   pub default: Option<String>,
 }
 
 /// An output parameter for an action.
 #[derive(Debug, Clone)]
 pub struct ActionOutput {
+  /// Human-readable description of the output.
   pub description: String,
+  /// Expression producing the output's value (composite actions).
   pub value: Option<String>,
 }
 
 /// A single step within a composite action's `steps:` array.
 #[derive(Debug, Clone)]
 pub struct CompositeStep {
+  /// Step id, used to reference its outputs from other steps.
   pub id: Option<String>,
+  /// Display name for the step.
   pub name: Option<String>,
+  /// Shell script body, for a `run:` step.
   pub run: Option<String>,
+  /// Shell to run the script under.
   pub shell: Option<String>,
+  /// `KEY=VALUE` environment entries for the step.
   pub env: HashMap<String, String>,
+  /// `if:` expression gating whether the step runs.
   pub condition: Option<String>,
+  /// Nested action reference, for a `uses:` step.
   pub uses: Option<String>,
+  /// Whether a failure in this step should not fail the job.
   pub continue_on_error: bool,
+  /// `with:` inputs passed to a nested `uses:` step.
   pub with: HashMap<String, String>,
 }
 
 /// The `runs` section of an action manifest.
 #[derive(Debug, Clone)]
 pub struct ActionRuns {
+  /// Execution kind (`node`, `composite`, `docker`).
   pub using: RunsUsing,
+  /// Main entrypoint script/executable.
   pub main: Option<String>,
+  /// Pre-step entrypoint, run before the main step.
   pub pre: Option<String>,
+  /// Post-step entrypoint, run after the job's steps complete.
   pub post: Option<String>,
+  /// `if:` expression gating the pre-step.
   pub pre_if: Option<String>,
+  /// `if:` expression gating the post-step.
   pub post_if: Option<String>,
+  /// Docker image reference, for a docker action.
   pub image: Option<String>,
+  /// The composite action's `steps:` array.
   pub steps: Vec<CompositeStep>,
 }
 
@@ -60,9 +87,12 @@ pub struct ActionRuns {
 pub enum RunsUsing {
   /// Node.js action — major version from `runs.using` (e.g. 20, 24).
   Node {
+    /// Node.js major version to run the action under.
     major: u8,
   },
+  /// Composite action — runs a nested `steps:` array.
   Composite,
+  /// Docker action — runs a container image.
   Docker,
 }
 
@@ -81,38 +111,9 @@ pub fn parse_action_manifest(yaml_content: &str) -> Result<ActionDefinition, Run
 
   let using = parse_runs_using(&runs_raw.using)?;
 
-  let inputs = raw
-    .inputs
-    .unwrap_or_default()
-    .into_iter()
-    .map(|(k, v)| {
-      (
-        k,
-        ActionInput {
-          description: v.description.unwrap_or_default(),
-          required: v.required.unwrap_or(false),
-          default: v.default,
-        },
-      )
-    })
-    .collect();
-
-  let outputs = raw
-    .outputs
-    .unwrap_or_default()
-    .into_iter()
-    .map(|(k, v)| {
-      (
-        k,
-        ActionOutput {
-          description: v.description.unwrap_or_default(),
-          value: v.value,
-        },
-      )
-    })
-    .collect();
-
-  let steps = parse_composite_steps(&runs_raw.steps);
+  let inputs = parse_inputs(raw.inputs);
+  let outputs = parse_outputs(raw.outputs);
+  let steps = parse_composite_steps(runs_raw.steps.as_ref());
 
   Ok(ActionDefinition {
     name: raw.name.unwrap_or_default(),
@@ -130,6 +131,39 @@ pub fn parse_action_manifest(yaml_content: &str) -> Result<ActionDefinition, Run
       steps,
     },
   })
+}
+
+fn parse_inputs(raw_inputs: Option<HashMap<String, RawInput>>) -> HashMap<String, ActionInput> {
+  raw_inputs
+    .unwrap_or_default()
+    .into_iter()
+    .map(|(k, v)| {
+      (
+        k,
+        ActionInput {
+          description: v.description.unwrap_or_default(),
+          required: v.required.unwrap_or(false),
+          default: v.default,
+        },
+      )
+    })
+    .collect()
+}
+
+fn parse_outputs(raw_outputs: Option<HashMap<String, RawOutput>>) -> HashMap<String, ActionOutput> {
+  raw_outputs
+    .unwrap_or_default()
+    .into_iter()
+    .map(|(k, v)| {
+      (
+        k,
+        ActionOutput {
+          description: v.description.unwrap_or_default(),
+          value: v.value,
+        },
+      )
+    })
+    .collect()
 }
 
 fn parse_runs_using(using: &str) -> Result<RunsUsing, RunnerError> {
@@ -207,7 +241,7 @@ struct RawCompositeStep {
   with: HashMap<String, String>,
 }
 
-fn parse_composite_steps(raw: &Option<Vec<RawCompositeStep>>) -> Vec<CompositeStep> {
+fn parse_composite_steps(raw: Option<&Vec<RawCompositeStep>>) -> Vec<CompositeStep> {
   let Some(steps) = raw else {
     return Vec::new();
   };

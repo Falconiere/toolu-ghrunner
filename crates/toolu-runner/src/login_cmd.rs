@@ -33,9 +33,9 @@ pub(crate) struct LoginArgs {
   /// GitHub host to log in to (github.com or a GHES hostname).
   #[arg(default_value = "github.com", value_name = "HOST", value_hint = ValueHint::Hostname)]
   hostname: String,
-  /// OAuth App client_id for the device flow.
+  /// OAuth App `client_id` for the device flow.
   ///
-  /// Resolution order: this flag > TOOLU_RUNNER_CLIENT_ID env > the
+  /// Resolution order: this flag > `TOOLU_RUNNER_CLIENT_ID` env > the
   /// built-in github.com App. Required for GHES (register an OAuth App
   /// on the GHES host); the built-in github.com App is not wired yet, so
   /// github.com currently needs it too.
@@ -58,7 +58,7 @@ pub(crate) struct LogoutArgs {
 pub(crate) async fn cmd_login(args: LoginArgs) -> Result<(), Box<dyn std::error::Error>> {
   let store = AuthStore::new(&registry::runner_home());
   let stored = run_device_flow(&args.hostname, args.client_id, &store, |dc| {
-    eprintln!("Enter code {} at {}", dc.user_code, dc.verification_uri)
+    eprintln!("Enter code {} at {}", dc.user_code, dc.verification_uri);
   })
   .await?;
   println!("logged in to {} (scopes: {})", args.hostname, stored.scope);
@@ -69,7 +69,7 @@ pub(crate) async fn cmd_login(args: LoginArgs) -> Result<(), Box<dyn std::error:
 /// token in `store`, returning it. Routes the user code + verification URL
 /// through the `present` callback (so the caller owns how it is shown),
 /// best-effort opens the browser, and polls until the grant completes. The
-/// effective client_id is `client_id_override` > `TOOLU_RUNNER_CLIENT_ID`
+/// effective `client_id` is `client_id_override` > `TOOLU_RUNNER_CLIENT_ID`
 /// env > the baked-in `DEVICE_CLIENT_ID` constant. That constant is still
 /// the compile-time placeholder (no OAuth App is registered yet), so
 /// whenever it would be used the flow errors BEFORE any network call — in
@@ -82,7 +82,7 @@ pub(crate) async fn run_device_flow(
   present: impl Fn(&net::device_auth::DeviceCodeResponse),
 ) -> Result<StoredToken, Box<dyn std::error::Error>> {
   let client_id: String = client_id_override
-    .or_else(|| std::env::var("TOOLU_RUNNER_CLIENT_ID").ok())
+    .or_else(crate::config::runner_client_id)
     .unwrap_or_else(|| DEVICE_CLIENT_ID.to_owned());
 
   // The built-in client_id is a compile-time placeholder: no real OAuth App

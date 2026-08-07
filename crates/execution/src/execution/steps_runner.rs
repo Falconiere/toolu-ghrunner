@@ -46,8 +46,11 @@ pub(super) struct JobCtx<'a> {
 /// job's `outputs:`/`defaults.run` spec, and the shared job-scope HTTP
 /// client. Grouped so `run_steps` stays within the argument-count budget.
 pub struct JobRun<'a> {
+  /// Job workspace root.
   pub workspace: &'a Path,
+  /// The runner's configuration.
   pub config: &'a RunnerConfig,
+  /// The job's `outputs:` map and merged `defaults.run`.
   pub spec: &'a JobSpec,
   /// Shadow-mode step observer (approach C); `None` disables observation.
   pub shadow: Option<&'a ShadowObserver>,
@@ -292,7 +295,7 @@ async fn run_script_step(
   let (result, stdout_outputs) =
     run_and_dispatch_script(&job.handler, &params, &step.id, ctx, events).await?;
   shadow_post(job, &step.id, &interpolated, &env, &working_dir, pre)?;
-  let outputs = merge_step_outputs(step, stdout_outputs, &file_cmds, ctx).await;
+  let outputs = merge_step_outputs(step, stdout_outputs, &file_cmds, ctx);
 
   emit_status(events, &step.id, result).await;
   Ok((result, outputs))
@@ -376,7 +379,7 @@ async fn run_and_dispatch_script(
 /// Merge a script step's stdout `set-output` outputs (already applied to `ctx`
 /// by the streaming dispatcher) with its `$GITHUB_OUTPUT` file-command outputs
 /// into one step-outputs map.
-async fn merge_step_outputs(
+fn merge_step_outputs(
   step: &ActionStep,
   stdout_outputs: HashMap<String, String>,
   file_cmds: &FileCommandManager,

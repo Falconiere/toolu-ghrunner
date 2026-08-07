@@ -9,8 +9,11 @@ use super::types::{CredentialData, RsaKeyParams, RunnerSettings};
 /// Decoded JIT config — the three base64-encoded blobs.
 #[derive(Clone)]
 pub struct JitConfig {
+  /// Decoded `.runner` blob — the runner's registration settings.
   pub runner_settings: RunnerSettings,
+  /// Decoded `.credentials` blob — the `OAuth2` scheme and its client id / authorization URL.
   pub credentials: CredentialData,
+  /// Decoded `.credentials_rsaparams` blob — the RSA key parameters.
   pub rsa_key_params: RsaKeyParams,
 }
 

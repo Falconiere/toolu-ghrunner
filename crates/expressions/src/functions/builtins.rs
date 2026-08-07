@@ -164,8 +164,7 @@ fn fn_join(args: &[ExprValue]) -> Result<ExprValue, RunnerError> {
   }
   let separator = args
     .get(1)
-    .map(ExprValue::coerce_to_string)
-    .unwrap_or_else(|| ",".to_owned());
+    .map_or_else(|| ",".to_owned(), ExprValue::coerce_to_string);
 
   let first = args
     .first()

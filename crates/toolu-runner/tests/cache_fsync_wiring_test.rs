@@ -102,7 +102,7 @@ async fn save_entry(
     .json(&json!({ "key": KEY, "version": VERSION }))
     .send()
     .await?;
-  assert!(reserved.status().is_success(), "reserve: {:?}", reserved);
+  assert!(reserved.status().is_success(), "reserve: {reserved:?}");
   let cache_id = reserved
     .json::<Value>()
     .await?
@@ -121,7 +121,7 @@ async fn save_entry(
     .body(bytes.to_vec())
     .send()
     .await?;
-  assert!(patched.status().is_success(), "patch: {:?}", patched);
+  assert!(patched.status().is_success(), "patch: {patched:?}");
 
   let finalized = client
     .post(api_url(
@@ -132,7 +132,7 @@ async fn save_entry(
     .json(&json!({ "size": bytes.len() }))
     .send()
     .await?;
-  assert!(finalized.status().is_success(), "finalize: {:?}", finalized);
+  assert!(finalized.status().is_success(), "finalize: {finalized:?}");
   Ok(())
 }
 

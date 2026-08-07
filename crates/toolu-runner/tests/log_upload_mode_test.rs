@@ -1,5 +1,5 @@
 //! Tests for `UploadMode::for_content` — the 4 MiB boundary between
-//! BlockBlob and AppendBlob transport selection.
+//! `BlockBlob` and `AppendBlob` transport selection.
 //!
 //! All tests are real-data (size thresholds, not HTTP requests).
 

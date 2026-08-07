@@ -6,7 +6,7 @@ use shared::{L2Config, RunnerError};
 /// Which content-addressed namespace an S3 object lives in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BlobKind {
-  /// A FastCDC content chunk, keyed under `chunks/<hex>`.
+  /// A `FastCDC` content chunk, keyed under `chunks/<hex>`.
   Chunk,
   /// A serialized manifest, keyed under `manifests/<hex>`.
   Manifest,

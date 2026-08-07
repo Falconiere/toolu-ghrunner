@@ -23,10 +23,15 @@ pub enum Pane {
 /// Execution state of one step in the tree.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StepStatus {
+  /// The step is currently executing.
   Running,
+  /// The step finished successfully.
   Success,
+  /// The step finished with an error.
   Failure,
+  /// The step was cancelled.
   Cancelled,
+  /// The step was skipped.
   Skipped,
 }
 
@@ -45,9 +50,13 @@ impl StepStatus {
 /// One step row in the detail pane.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StepView {
+  /// The step's id.
   pub step_id: String,
+  /// The step's display name.
   pub name: String,
+  /// The step's 1-based position in the job.
   pub number: u32,
+  /// The step's current execution state.
   pub status: StepStatus,
   /// `(level, message)` annotations attached to this step.
   pub annotations: Vec<(String, String)>,
@@ -56,19 +65,28 @@ pub struct StepView {
 /// One rendered log line.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LogLine {
+  /// The id of the step this log line belongs to.
   pub step_id: String,
+  /// The log line's rendered text.
   pub text: String,
 }
 
 /// Reduced view of one opened journal.
 #[derive(Debug, Default)]
 pub struct OpenJob {
+  /// Path to the journal file this state was folded from.
   pub path: PathBuf,
+  /// The job's id, once seen in a `JobAcquired` line.
   pub job_id: Option<String>,
+  /// The job's display name, once seen in a `JobStarted` line.
   pub job_name: Option<String>,
+  /// The broker session id, once seen in a `SessionCreated` line.
   pub session_id: Option<String>,
+  /// The step tree, ordered by step number.
   pub steps: Vec<StepView>,
+  /// The bounded log ring (newest lines evict oldest past `LOG_RING`).
   pub logs: VecDeque<LogLine>,
+  /// The job's final conclusion, once seen in a `JobCompleted` line.
   pub conclusion: Option<String>,
   /// Set when journal `seq` numbers are non-contiguous (UI warning).
   pub seq_gap: bool,
@@ -192,10 +210,15 @@ impl OpenJob {
 /// Top-level TUI state: job list + optional opened job.
 #[derive(Debug, Default)]
 pub struct App {
+  /// All discovered jobs, most recent first.
   pub jobs: Vec<JobSummary>,
+  /// Index of the currently highlighted row in `jobs`.
   pub selected: usize,
+  /// The currently opened job's folded state, if any.
   pub opened: Option<OpenJob>,
+  /// Which pane currently owns keyboard focus.
   pub pane: Pane,
+  /// Whether the log pane auto-scrolls to the newest line.
   pub follow: bool,
   /// Cancel confirmation pending (`c` pressed, awaiting `y`/`n`).
   pub confirm_cancel: bool,

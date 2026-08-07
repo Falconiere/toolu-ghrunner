@@ -216,10 +216,7 @@ pub fn init_with_redactor(
 /// log output from leaking secrets to the file sink. Set
 /// `TOOLU_RUNNER_ALLOW_VERBOSE=1` to honor the full env-var level.
 fn build_env_filter() -> EnvFilter {
-  if std::env::var("TOOLU_RUNNER_ALLOW_VERBOSE")
-    .map(|v| v == "1")
-    .unwrap_or(false)
-  {
+  if crate::config::allow_verbose() {
     EnvFilter::try_from_env("TOOLU_RUNNER_LOG")
       .or_else(|_| EnvFilter::try_from_env("RUST_LOG"))
       .unwrap_or_else(|_| EnvFilter::new("info"))

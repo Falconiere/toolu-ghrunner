@@ -22,7 +22,7 @@ impl ServiceHandle {
   /// # Errors
   ///
   /// Returns `RunnerError::Io` if reading the listener's local address fails.
-  pub async fn start_with_listener(
+  pub fn start_with_listener(
     listener: TcpListener,
     router: axum::Router,
   ) -> Result<Self, RunnerError> {
@@ -54,13 +54,15 @@ impl ServiceHandle {
     let listener = TcpListener::bind("127.0.0.1:0")
       .await
       .map_err(RunnerError::Io)?;
-    Self::start_with_listener(listener, router).await
+    Self::start_with_listener(listener, router)
   }
 
+  /// The socket address the service is bound to.
   pub fn address(&self) -> SocketAddr {
     self.address
   }
 
+  /// The service's base URL (`http://<address>`).
   pub fn base_url(&self) -> String {
     format!("http://{}", self.address)
   }

@@ -1,4 +1,4 @@
-//! FastCDC v2020 chunking of an assembled staging file into content-addressed blobs.
+//! `FastCDC` v2020 chunking of an assembled staging file into content-addressed blobs.
 
 use std::fs::File;
 use std::path::Path;
@@ -9,7 +9,7 @@ use shared::RunnerError;
 use super::chunk_io::{self, Durability};
 use super::manifest::{ChunkId, ChunkRef, Manifest};
 
-/// FastCDC min/avg/max derived from the configured average (min = avg/4, max = avg*4).
+/// `FastCDC` min/avg/max derived from the configured average (min = avg/4, max = avg*4).
 fn cdc_sizes(avg: u32) -> Result<(usize, usize, usize), RunnerError> {
   let avg = usize::try_from(avg)
     .map_err(|e| RunnerError::Cache(format!("bad chunk avg: {e}")))?
@@ -17,7 +17,7 @@ fn cdc_sizes(avg: u32) -> Result<(usize, usize, usize), RunnerError> {
   Ok((avg / 4, avg, avg.saturating_mul(4)))
 }
 
-/// Chunk `staged` with FastCDC, write each unique chunk under `blobs_dir`, return the manifest.
+/// Chunk `staged` with `FastCDC`, write each unique chunk under `blobs_dir`, return the manifest.
 /// Synchronous (blocking `StreamCDC`); call from `spawn_blocking`.
 ///
 /// `chunk_durability` gates the per-chunk fsync (see [`Durability`]) —

@@ -15,10 +15,15 @@ use crate::execution::step_timeout::{WaitOutcome, wait_bounded};
 
 /// Parameters for executing a Node.js action script.
 pub struct NodeExecParams<'a> {
+  /// Path to the `node` executable to run the script with.
   pub node_binary: &'a Path,
+  /// Path to the action's entrypoint script.
   pub script_path: &'a Path,
+  /// Environment variables to set on the child process.
   pub env: &'a HashMap<String, String>,
+  /// Directory the script runs in.
   pub working_dir: &'a Path,
+  /// Step id used to tag streamed log lines.
   pub step_id: &'a str,
   /// Per-job cgroup directory to move the spawned step into (`None` = no isolation).
   pub cgroup_path: Option<&'a Path>,
@@ -31,6 +36,7 @@ pub struct NodeExecParams<'a> {
 /// Output of a Node.js action: its exit conclusion. Stdout is streamed to the
 /// caller line-by-line during the run, not returned here.
 pub struct NodeExecOutput {
+  /// Result of the child process's exit code (0 -> Success, non-zero -> Failure).
   pub conclusion: Conclusion,
 }
 

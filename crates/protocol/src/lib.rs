@@ -14,6 +14,8 @@ pub mod app_manifest;
 pub mod auth;
 /// End-to-end decrypt of an encrypted broker message body.
 pub mod body_decrypt;
+/// Environment-derived configuration (the only allowed `std::env::var` site).
+pub mod config;
 mod jit_config;
 /// Broker message shapes and the AES-256-CBC body codec.
 pub mod messages;

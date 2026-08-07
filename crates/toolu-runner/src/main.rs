@@ -1,7 +1,7 @@
 //! `toolu-runner` — standalone GitHub Actions JIT runner CLI.
 //!
 //! Subcommands: `register` (live `generate-jitconfig`, persists real
-//! jit_config + runner_id), `run` (load config, hold `.lock`, run the
+//! `jit_config` + `runner_id`), `run` (load config, hold `.lock`, run the
 //! listener until SIGINT/SIGTERM), `boot` (env-driven, zero-config
 //! one-shot mode for the container image — no persisted state), `remove`
 //! (delete state or write `.pending_remove` mid-job), `status` (print
@@ -11,16 +11,19 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use ::config::auth_store::{self, AuthStore};
+use ::config::config::{
+  RunnerRegistrationConfig, load_config as load_reg_config, resolve_data_dir,
+};
+use ::config::{lockfile, registry, repo_infer};
 use clap::Parser;
-use config::auth_store::{self, AuthStore};
-use config::config::{RunnerRegistrationConfig, load_config as load_reg_config, resolve_data_dir};
-use config::{lockfile, registry, repo_infer};
 use shared::RunnerError;
 use shared::startup;
 use shared::{MaskerRedactor, SecretMasker};
 
 mod boot_cmd;
 mod cli;
+mod config;
 mod create_app_cmd;
 mod login_cmd;
 mod register_cmd;
@@ -43,7 +46,7 @@ async fn main() {
   if matches!(cli.command, Command::Boot(_)) {
     std::process::exit(boot_cmd::cmd_boot().await);
   }
-  let exit_code = match run(cli).await {
+  let exit_code = match Box::pin(run(cli)).await {
     Ok(()) => 0,
     Err(err) => {
       eprintln!("toolu-runner: {err}");
@@ -55,9 +58,9 @@ async fn main() {
 
 async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
   match cli.command {
-    Command::Setup(args) => setup_cmd::cmd_setup(args).await,
+    Command::Setup(args) => setup_cmd::cmd_setup(args),
     Command::Register(args) => register_cmd::cmd_register(args).await,
-    Command::Run(args) => run_cmd::cmd_run(args).await,
+    Command::Run(args) => Box::pin(run_cmd::cmd_run(args)).await,
     Command::Remove(args) => cmd_remove(args).await,
     Command::Status(args) => status_cmd::cmd_status(args),
     Command::Watch(args) => cmd_watch(args),
@@ -436,7 +439,7 @@ fn delete_registration_state(
   Ok(())
 }
 
-/// Remove `path`, WARNing rather than failing if it cannot go.
+/// Remove `path`, `WARNing` rather than failing if it cannot go.
 ///
 /// These are best-effort past `config.toml` — the registration is already
 /// gone once that is deleted — but "best-effort" here means WARN-and-

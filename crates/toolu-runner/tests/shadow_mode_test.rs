@@ -6,9 +6,9 @@
 //! path — the records are inspected only by the test).
 //!
 //! Asserts:
-//!   1. would_hit: a repeated identical observation of an unchanged workspace
+//!   1. `would_hit`: a repeated identical observation of an unchanged workspace
 //!      records `would_hit=true, false_hit=false` on the second record.
-//!   2. false_hit: an identical pre with a divergent post records
+//!   2. `false_hit`: an identical pre with a divergent post records
 //!      `would_hit=true, false_hit=true`.
 //!   3. disabled: a disabled observer writes no file at all.
 //!   4. masking: a registered secret in the command never reaches the JSONL.

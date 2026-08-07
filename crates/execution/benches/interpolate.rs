@@ -20,7 +20,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, black_box, criterion_main};
 use execution::execution::context::ExecutionContext;
 use execution::execution::job_runner::build_context;
 use expressions::types::ExprValue;
@@ -163,10 +163,19 @@ fn bench_default_condition(c: &mut Criterion) {
   group.finish();
 }
 
-criterion_group!(
-  benches,
-  bench_interpolate_literal,
-  bench_interpolate_expression,
-  bench_default_condition
-);
-criterion_main!(benches);
+// `criterion_group!` expands to a `pub fn` it does not document, and outer
+// attributes are not forwarded through the macro — so a doc comment on the
+// invocation cannot reach the generated item. Wrapping it in a private module
+// keeps that item off the crate's public surface, which is what `missing_docs`
+// lints, so the rule is satisfied in code rather than silenced.
+mod group {
+  use super::{bench_default_condition, bench_interpolate_expression, bench_interpolate_literal};
+  criterion::criterion_group!(
+    benches,
+    bench_interpolate_literal,
+    bench_interpolate_expression,
+    bench_default_condition
+  );
+}
+
+criterion_main!(group::benches);

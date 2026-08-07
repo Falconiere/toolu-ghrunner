@@ -1,7 +1,12 @@
-# toolu-runner — Git hooks.
+# toolu-runner — Git hooks. CORE guard-rail layer 3.
 #
 # Install: lefthook install
 # Run manually: lefthook run pre-commit
+#
+# Fast staged-file checks only — the full gate is ./tools/check.sh all, run on
+# push and in CI. The file must stay named lefthook.yml: the 2.x installer
+# writes a stub over a .yaml and the hooks then never run (guardrails'
+# shadow-configs check enforces this).
 
 pre-commit:
   parallel: true
@@ -9,10 +14,11 @@ pre-commit:
     rust-fmt:
       glob: "crates/**/*.rs"
       run: cargo fmt --all -- --check
-    rust-clippy:
-      glob: "crates/**/*.rs"
-      run: cargo clippy --workspace --all-targets -- -D warnings
+    guardrails:
+      glob: "*"
+      run: bash scripts/guardrails/run.sh --file {staged_files}
 
+# Clippy compiles the workspace, so it runs on push rather than every commit.
 pre-push:
   parallel: false
   commands:

@@ -107,7 +107,11 @@ fn render_steps(f: &mut Frame<'_>, app: &App, job: &OpenJob, area: Rect) {
       let (icon, color) = step_badge(s.status);
       let mut text = format!("{icon} {:>2}. {}", s.number, s.name);
       for (level, message) in &s.annotations {
-        text.push_str(&format!("  [{level}: {message}]"));
+        text.push_str("  [");
+        text.push_str(level);
+        text.push_str(": ");
+        text.push_str(message);
+        text.push(']');
       }
       ListItem::new(text).style(Style::default().fg(color))
     })

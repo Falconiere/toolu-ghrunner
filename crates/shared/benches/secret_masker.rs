@@ -9,7 +9,7 @@
 //! `benches/fixtures/` per-crate rather than `include_str!`-ed across
 //! crate layers (`shared` is the workspace's lowest crate).
 
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, black_box, criterion_main};
 use shared::SecretMasker;
 
 /// The corpus, copied verbatim from
@@ -72,5 +72,14 @@ fn bench_mask(c: &mut Criterion) {
   });
 }
 
-criterion_group!(benches, bench_mask);
-criterion_main!(benches);
+// `criterion_group!` expands to a `pub fn` it does not document, and outer
+// attributes are not forwarded through the macro — so a doc comment on the
+// invocation cannot reach the generated item. Wrapping it in a private module
+// keeps that item off the crate's public surface, which is what `missing_docs`
+// lints, so the rule is satisfied in code rather than silenced.
+mod group {
+  use super::bench_mask;
+  criterion::criterion_group!(benches, bench_mask);
+}
+
+criterion_main!(group::benches);

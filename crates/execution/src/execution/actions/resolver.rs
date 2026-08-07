@@ -14,18 +14,26 @@ pub enum ActionRefKind {
 /// Parsed action reference from a `uses:` field.
 #[derive(Debug, Clone)]
 pub struct ActionRef {
+  /// Whether this is a remote or local action reference.
   pub kind: ActionRefKind,
+  /// Repository owner, for a remote reference (empty for local).
   pub owner: String,
+  /// Repository name, for a remote reference (empty for local).
   pub repo: String,
+  /// Git ref (tag/branch/sha), for a remote reference (empty for local).
   pub git_ref: String,
+  /// Subpath into the repo, for a `{owner}/{repo}/{path}@{ref}` reference.
   pub subpath: Option<String>,
+  /// `./path` for a local action reference.
   pub local_path: Option<String>,
 }
 
 /// Info needed to download and locate an action.
 #[derive(Debug, Clone)]
 pub struct ResolvedAction {
+  /// The parsed `uses:` reference this resolution came from.
   pub action_ref: ActionRef,
+  /// URL to download the action's tarball from.
   pub tarball_url: String,
 }
 

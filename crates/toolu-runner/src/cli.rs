@@ -162,7 +162,7 @@ pub(crate) enum Command {
   Watch(WatchArgs),
   /// Install a supervisor unit that keeps `run` alive across reboots.
   ///
-  /// Generates and activates a launchd LaunchAgent (macOS) or systemd
+  /// Generates and activates a launchd `LaunchAgent` (macOS) or systemd
   /// user unit (Linux) wrapping `run --config <path>`, so the runner
   /// restarts on crash and at boot. `--print` shows the unit without
   /// writing it, `--no-activate` writes but does not load it, and
@@ -172,9 +172,9 @@ pub(crate) enum Command {
   ///
   /// Prints a one-time code, opens the verification page, polls until
   /// the grant completes, then stores the token as a 0600 file under the
-  /// runner home (or in the OS keyring with TOOLU_RUNNER_KEYRING=1).
+  /// runner home (or in the OS keyring with `TOOLU_RUNNER_KEYRING=1`).
   /// `register` uses this token when neither --token nor
-  /// TOOLU_RUNNER_TOKEN is set.
+  /// `TOOLU_RUNNER_TOKEN` is set.
   Login(login_cmd::LoginArgs),
   /// Delete the stored login token for a host.
   ///
@@ -205,7 +205,7 @@ pub(crate) enum Command {
 #[derive(Debug, Args)]
 #[command(after_help = SETUP_AFTER_HELP)]
 pub(crate) struct SetupArgs {
-  /// Repository URL, e.g. https://github.com/owner/repo.
+  /// Repository URL, e.g. <https://github.com/owner/repo>.
   ///
   /// Optional: when absent, the repository is inferred from the cwd git
   /// remote `origin`. The value is not validated by clap — only github.com
@@ -216,7 +216,7 @@ pub(crate) struct SetupArgs {
   pub(crate) url: Option<String>,
   /// GitHub API token for the `generate-jitconfig` REST call.
   ///
-  /// Optional — resolution order: this flag > TOOLU_RUNNER_TOKEN env > the
+  /// Optional — resolution order: this flag > `TOOLU_RUNNER_TOKEN` env > the
   /// stored `login` token. With none of those, the wizard runs the OAuth
   /// device flow inline (an interactive terminal is required either way).
   #[arg(long, value_name = "TOKEN")]
@@ -233,9 +233,9 @@ pub(crate) struct SetupArgs {
   /// The credentials file is written next to it in the same directory.
   #[arg(long, value_name = "FILE", value_hint = ValueHint::FilePath)]
   pub(crate) config: Option<PathBuf>,
-  /// OAuth App client_id for the device flow.
+  /// OAuth App `client_id` for the device flow.
   ///
-  /// Resolution order: this flag > TOOLU_RUNNER_CLIENT_ID env > the built-in
+  /// Resolution order: this flag > `TOOLU_RUNNER_CLIENT_ID` env > the built-in
   /// github.com App. Needed only when the wizard has to run the device flow
   /// (no token is otherwise available).
   #[arg(long, value_name = "CLIENT_ID")]
@@ -273,7 +273,7 @@ pub(crate) struct CreateAppArgs {
 #[derive(Debug, Args)]
 #[command(after_help = REGISTER_AFTER_HELP)]
 pub(crate) struct RegisterArgs {
-  /// Repository or organization URL, e.g. https://github.com/owner/repo.
+  /// Repository or organization URL, e.g. <https://github.com/owner/repo>.
   ///
   /// Optional: when absent, the repository is inferred from the cwd git
   /// remote `origin` (github.com only). Org registrations and GHES hosts
@@ -284,7 +284,7 @@ pub(crate) struct RegisterArgs {
   /// GitHub API token for the `generate-jitconfig` REST call.
   ///
   /// Needs admin rights on the target repo/org (PAT or App installation
-  /// token). Optional — resolution order: this flag > TOOLU_RUNNER_TOKEN
+  /// token). Optional — resolution order: this flag > `TOOLU_RUNNER_TOKEN`
   /// env > the stored `login` token for the URL's host. Used only during
   /// registration, never at job runtime.
   #[arg(long, value_name = "TOKEN")]
@@ -347,7 +347,7 @@ pub(crate) struct RemoveArgs {
   pub(crate) config: Option<PathBuf>,
   /// GitHub token authorizing the unregister call.
   ///
-  /// Precedence: this flag > TOOLU_RUNNER_TOKEN > the stored `login`
+  /// Precedence: this flag > `TOOLU_RUNNER_TOKEN` > the stored `login`
   /// token. With none of the three, `remove` FAILS without deleting
   /// anything — losing the persisted runner id would leave no way to
   /// unregister. Pass --skip-unregister to remove local state anyway.
@@ -469,9 +469,10 @@ pub(crate) fn credentials_path_for(config_path: &Path) -> PathBuf {
 
 /// Work-folder string from `--work`, defaulting to `~/.toolu-runner/_work`.
 pub(crate) fn work_folder_or_default(work: Option<&PathBuf>) -> String {
-  work
-    .map(|p| p.to_string_lossy().into_owned())
-    .unwrap_or_else(|| "~/.toolu-runner/_work".to_owned())
+  work.map_or_else(
+    || "~/.toolu-runner/_work".to_owned(),
+    |p| p.to_string_lossy().into_owned(),
+  )
 }
 
 /// clap's own consistency check, run at startup in debug builds only:

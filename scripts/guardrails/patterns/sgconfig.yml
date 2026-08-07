@@ -1,0 +1,8 @@
+# ast-grep project config for the guard-rail pattern rules.
+#
+# RUST ONLY. The TypeScript pattern rules (no-bare-fetch, no-hardcoded-hex) moved
+# into the oxlint house plugin, so keeping ast-grep copies of them here would be
+# two definitions of one rule — the exact drift this module exists to prevent.
+# What is left is what clippy does not cover and oxlint cannot parse.
+ruleDirs:
+  - rust

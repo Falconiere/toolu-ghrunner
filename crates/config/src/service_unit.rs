@@ -61,7 +61,7 @@ pub struct ServiceSpec<'a> {
   pub diag_dir: &'a Path,
 }
 
-/// Render a launchd user LaunchAgent plist for `spec` (all strings
+/// Render a launchd user `LaunchAgent` plist for `spec` (all strings
 /// XML-escaped). `KeepAlive` + `RunAtLoad` keep the runner up across
 /// crashes and reboots; stdout/stderr go to `<diag_dir>/service.{out,err}.log`.
 pub fn launchd_plist(spec: &ServiceSpec<'_>) -> String {
@@ -80,22 +80,32 @@ pub fn launchd_plist(spec: &ServiceSpec<'_>) -> String {
   s.push_str("<plist version=\"1.0\">\n");
   s.push_str("<dict>\n");
   s.push_str("  <key>Label</key>\n");
-  s.push_str(&format!("  <string>{label}</string>\n"));
+  s.push_str("  <string>");
+  s.push_str(&label);
+  s.push_str("</string>\n");
   s.push_str("  <key>ProgramArguments</key>\n");
   s.push_str("  <array>\n");
-  s.push_str(&format!("    <string>{exe}</string>\n"));
+  s.push_str("    <string>");
+  s.push_str(&exe);
+  s.push_str("</string>\n");
   s.push_str("    <string>run</string>\n");
   s.push_str("    <string>--config</string>\n");
-  s.push_str(&format!("    <string>{config}</string>\n"));
+  s.push_str("    <string>");
+  s.push_str(&config);
+  s.push_str("</string>\n");
   s.push_str("  </array>\n");
   s.push_str("  <key>KeepAlive</key>\n");
   s.push_str("  <true/>\n");
   s.push_str("  <key>RunAtLoad</key>\n");
   s.push_str("  <true/>\n");
   s.push_str("  <key>StandardOutPath</key>\n");
-  s.push_str(&format!("  <string>{out}</string>\n"));
+  s.push_str("  <string>");
+  s.push_str(&out);
+  s.push_str("</string>\n");
   s.push_str("  <key>StandardErrorPath</key>\n");
-  s.push_str(&format!("  <string>{err}</string>\n"));
+  s.push_str("  <string>");
+  s.push_str(&err);
+  s.push_str("</string>\n");
   s.push_str("</dict>\n");
   s.push_str("</plist>\n");
   s
@@ -112,13 +122,16 @@ pub fn systemd_unit(spec: &ServiceSpec<'_>) -> String {
   s.push_str("[Unit]\n");
   // `%` is the only systemd-special character in a Description value
   // (specifier expansion, systemd.unit(5)); escape it as `%%`.
-  s.push_str(&format!(
-    "Description=toolu-runner ({})\n",
-    spec.label.replace('%', "%%")
-  ));
+  s.push_str("Description=toolu-runner (");
+  s.push_str(&spec.label.replace('%', "%%"));
+  s.push_str(")\n");
   s.push('\n');
   s.push_str("[Service]\n");
-  s.push_str(&format!("ExecStart={exe} run --config {config}\n"));
+  s.push_str("ExecStart=");
+  s.push_str(&exe);
+  s.push_str(" run --config ");
+  s.push_str(&config);
+  s.push('\n');
   s.push_str("Restart=always\n");
   s.push_str("RestartSec=5\n");
   s.push('\n');

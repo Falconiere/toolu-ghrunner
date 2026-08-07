@@ -1,0 +1,12 @@
+id: no-direct-env-var
+language: rust
+severity: error
+message: direct env read — go through the crate's config module so every variable is validated in one place and a missing one fails at startup, not mid-request
+ignores:
+  - "**/config.rs"
+  - "**/config/**"
+  - "**/tests/**"
+rule:
+  any:
+    - pattern: std::env::var($$$ARGS)
+    - pattern: env::var($$$ARGS)

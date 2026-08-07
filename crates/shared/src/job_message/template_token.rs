@@ -18,18 +18,26 @@ use super::context_data::DictEntry;
 /// - 7 = null
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct TemplateToken {
+  /// The `type` discriminator (0=literal, 1=sequence, 2=mapping, 3=expression,
+  /// 5=boolean, 6=number, 7=null).
   #[serde(rename = "type", default)]
   pub token_type: i32,
+  /// The literal string value, present when `token_type` is 0.
   #[serde(default)]
   pub lit: Option<String>,
+  /// The unevaluated `${{ }}` expression text, present when `token_type` is 3.
   #[serde(default)]
   pub expr: Option<String>,
+  /// Wire field `bool`; the boolean value, present when `token_type` is 5.
   #[serde(default, rename = "bool")]
   pub bool_val: Option<bool>,
+  /// Wire field `num`; the numeric value, present when `token_type` is 6.
   #[serde(default, rename = "num")]
   pub num_val: Option<f64>,
+  /// The mapping entries (wire field `map`), present when `token_type` is 2.
   #[serde(default, alias = "map")]
   pub d: Option<Vec<DictEntry<TemplateToken>>>,
+  /// The sequence elements, present when `token_type` is 1.
   #[serde(default)]
   pub seq: Option<Vec<TemplateToken>>,
 }
@@ -53,7 +61,7 @@ impl TemplateToken {
     }
   }
 
-  /// Convert a mapping token (type 2) into a HashMap.
+  /// Convert a mapping token (type 2) into a `HashMap`.
   pub fn to_map(&self) -> HashMap<String, TemplateToken> {
     let mut result = HashMap::new();
     if let Some(entries) = &self.d {

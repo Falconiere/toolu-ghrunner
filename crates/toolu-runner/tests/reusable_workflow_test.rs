@@ -238,7 +238,8 @@ fn resolve_outputs_returns_empty_string_for_missing_job_output() {
       value: "${{ jobs.build.outputs.version }}".to_owned(),
     },
   );
-  let resolved = reusable::resolve_outputs(&outputs, &HashMap::new());
+  let empty_job_outputs: HashMap<String, HashMap<String, String>> = HashMap::new();
+  let resolved = reusable::resolve_outputs(&outputs, &empty_job_outputs);
   assert_eq!(resolved.get("version").map(String::as_str), Some(""));
 }
 

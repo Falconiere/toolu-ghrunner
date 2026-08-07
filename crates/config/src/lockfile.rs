@@ -74,7 +74,7 @@ impl std::fmt::Debug for LockGuard {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     f.debug_struct("LockGuard")
       .field("path", &self.path)
-      .finish()
+      .finish_non_exhaustive()
   }
 }
 
@@ -101,6 +101,8 @@ impl std::fmt::Debug for LockGuard {
 /// Returns `RunnerError::Io` on filesystem failures (parent dir creation,
 /// file open, lock acquisition).
 pub fn acquire(path: &Path, config_path: &Path) -> Result<LockGuard, RunnerError> {
+  const ACQUIRE_RETRIES: u32 = 10;
+
   if let Some(parent) = path.parent() {
     std::fs::create_dir_all(parent)?;
   }
@@ -122,7 +124,6 @@ pub fn acquire(path: &Path, config_path: &Path) -> Result<LockGuard, RunnerError
   // release-visibility race, seen on macOS under load). A genuine holder
   // (live fd) stays contended across all retries → `handle_contended`; a
   // just-released lock clears within a couple ms → we acquire it.
-  const ACQUIRE_RETRIES: u32 = 10;
   let retry_delay = std::time::Duration::from_millis(3);
   let mut attempt: u32 = 0;
   loop {

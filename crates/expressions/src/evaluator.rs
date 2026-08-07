@@ -5,11 +5,14 @@ use shared::RunnerError;
 use super::parser::{BinaryOperator, Expr, UnaryOperator, parse};
 use super::types::ExprValue;
 
-/// Current job status for status functions (success(), failure(), etc.).
+/// Current job status for status functions (`success()`, `failure()`, etc.).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JobStatus {
+  /// All previous steps have succeeded (or none have failed).
   Success,
+  /// A previous step has failed.
   Failure,
+  /// The job has been cancelled.
   Cancelled,
 }
 

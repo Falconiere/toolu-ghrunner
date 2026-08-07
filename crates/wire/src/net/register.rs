@@ -3,7 +3,7 @@
 //! POSTs the short-lived registration token to GitHub's
 //! `…/actions/runners/generate-jitconfig`, which returns the runner `id`
 //! plus an `encoded_jit_config` (the base64 3-blob envelope that
-//! [`protocol::JitConfig`] parses at run time). The RSA → JWT → OAuth2
+//! [`protocol::JitConfig`] parses at run time). The RSA → JWT → `OAuth2`
 //! exchange happens at run time from that config, not here.
 //!
 //! Split for token-free testing: [`build_request`] / [`parse_response`]

@@ -10,10 +10,18 @@
 //! must not block the completion report). Filtered by the s6 ledger check
 //! `test(/^watchdog_tests::/)`.
 //!
-//! Split out of `watchdog_tests.rs` into its own file (nested module —
-//! declared there as `mod trip;`) once the combined `retry` + `trip` file
-//! passed the crate's 500-line convention; the test module path stays
-//! `watchdog_tests::trip::*`, so the ledger filter is unaffected.
+//! Also carries [`mod@override_rules`]: the pure unit tests for
+//! `execution_loop::apply_outage_override` — the non-network fold of the
+//! watchdog's trip flag into the job's final conclusion (no wiremock: plain
+//! values in, plain values out). Both halves cover the same outage-trip
+//! seam (end to end here, pure-fold in `override_rules`), which is why they
+//! share this file.
+//!
+//! Originally split out of `watchdog_tests.rs` into its own nested-module
+//! file (`mod trip;`) once the combined `retry` + `trip` file passed the
+//! crate's 500-line convention; flattened again into
+//! `crates/listener/src/tests/` (this file) so the whole crate's test code
+//! lives under a sibling `tests/` tree instead of directly under `src/`.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -35,8 +43,8 @@ use crate::execution_loop::LOST_CONNECTION_MESSAGE;
 use crate::helpers::WatchdogConfig;
 use crate::job_lifecycle::poll_and_execute;
 
-/// Boxed error alias for helpers that use `?` — see the `mod retry` note
-/// at the top of `watchdog_tests.rs`: `allow-expect-in-tests` only covers
+/// Boxed error alias for helpers that use `?` — see the module doc at the
+/// top of `watchdog_retry.rs`: `allow-expect-in-tests` only covers
 /// `#[tokio::test]` fns themselves, not their helpers.
 type TestResult<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -83,7 +91,7 @@ fn job_message(server_uri: &str, job_id: &str, script: &str) -> AgentJobRequestM
 }
 
 /// `/message`: the job once — `RunnerJobRequestBody`'s wire fields really
-/// are snake_case (see `protocol::messages::RunnerJobRequestBody`) — then
+/// are `snake_case` (see `protocol::messages::RunnerJobRequestBody`) — then
 /// 202 (no work) for every later poll; the mid-job `watch_for_gh_cancel`
 /// watcher re-polls almost immediately after acquire.
 async fn mount_message_poll(server: &MockServer, runner_request_id: &str, run_service_url: &str) {
@@ -576,4 +584,54 @@ async fn ack_failure_does_not_block_completion() -> TestResult<()> {
     );
   }
   Ok(())
+}
+
+/// Pure unit tests for `execution_loop::apply_outage_override` — the
+/// non-network fold of the watchdog's trip flag into the job's final
+/// conclusion (no wiremock: plain values in, plain values out). Filtered
+/// by the s6 ledger check `test(/^watchdog_tests::/)`.
+mod override_rules {
+  use shared::Conclusion;
+
+  use crate::execution_loop::{LOST_CONNECTION_MESSAGE, apply_outage_override};
+
+  /// (a) An untripped flag leaves the conclusion unchanged and adds no
+  /// annotations, whatever the conclusion was.
+  #[test]
+  fn untripped_leaves_conclusion_and_annotations_unchanged() {
+    for conclusion in [
+      Conclusion::Success,
+      Conclusion::Failure,
+      Conclusion::Cancelled,
+      Conclusion::Skipped,
+    ] {
+      let (out, annotations) = apply_outage_override(conclusion, false);
+      assert_eq!(out, conclusion, "untripped must not change the conclusion");
+      assert!(annotations.is_empty(), "untripped must add no annotations");
+    }
+  }
+
+  /// (b) A tripped flag alongside a `Success` conclusion is the
+  /// trip-during-teardown race (the job finished before the cancel
+  /// landed) — it stays `Success`, with no annotation.
+  #[test]
+  fn tripped_success_stays_success_with_no_annotation() {
+    let (conclusion, annotations) = apply_outage_override(Conclusion::Success, true);
+    assert_eq!(conclusion, Conclusion::Success);
+    assert!(annotations.is_empty());
+  }
+
+  /// (c) A tripped flag alongside a non-`Success` conclusion (e.g. a
+  /// GH-initiated `Cancelled` racing the trip) overrides to `Failure` with
+  /// exactly one `annotation_type: "error"` annotation carrying the exact
+  /// production message.
+  #[test]
+  fn tripped_non_success_overrides_to_failure_with_error_annotation() {
+    let (conclusion, annotations) = apply_outage_override(Conclusion::Cancelled, true);
+    assert_eq!(conclusion, Conclusion::Failure);
+    assert_eq!(annotations.len(), 1);
+    let annotation = annotations.first().expect("checked len() == 1 above");
+    assert_eq!(annotation.annotation_type, "error");
+    assert_eq!(annotation.message, LOST_CONNECTION_MESSAGE);
+  }
 }
