@@ -316,7 +316,13 @@ async fn delete_runner(
     return Ok(DeleteOutcome::NotFound);
   }
   if !status.is_success() {
-    let text = response.text().await.unwrap_or_default();
+    // Not `unwrap_or_default()`: an empty body and an unreadable body would
+    // then look identical, and this text IS the whole diagnostic a human
+    // gets for a failed delete.
+    let text = response
+      .text()
+      .await
+      .unwrap_or_else(|e| format!("<error body unreadable: {e}>"));
     return Err(RunnerError::Auth(format!(
       "delete-runner {id} failed with status {status}: {text}"
     )));
