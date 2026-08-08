@@ -9,7 +9,7 @@ use super::action_exec::{ActionOutcome, ActionRun, execute_action};
 use super::command_dispatch::stream_dispatch_stdout;
 use super::context::ExecutionContext;
 use super::depth_tracker::DepthTracker;
-use super::file_commands::FileCommandManager;
+use super::file_commands::{FileCommandManager, create_file_command_dir};
 use super::handlers::script::{ScriptHandler, ScriptParams};
 use super::job_spec::JobSpec;
 use super::post_drain::drain_post_steps;
@@ -391,9 +391,9 @@ async fn merge_step_outputs(
 }
 
 /// Build the step's env map (global + step env + file-command paths + inherited
-/// process env) and create the per-step file-command temp files. Async
-/// (`tokio::fs` via [`FileCommandManager::create`]) — this runs on the async
-/// step-execution path, so the file creation must not block the executor.
+/// process env) and create the per-step file-command temp files. Synchronous
+/// filesystem work is batched onto Tokio's blocking pool by the shared
+/// file-command helpers.
 async fn build_step_env_and_file_commands(
   step: &ActionStep,
   ctx: &ExecutionContext,
@@ -402,7 +402,7 @@ async fn build_step_env_and_file_commands(
   let step_env = resolve_step_env(step, ctx)?;
   let mut env = ctx.build_step_env(&step_env);
   let tmp_dir = job.config.data_dir.join("tmp");
-  tokio::fs::create_dir_all(&tmp_dir).await?;
+  create_file_command_dir(&tmp_dir).await?;
   let (file_cmds, file_cmd_env) = FileCommandManager::create(&tmp_dir).await?;
   env.extend(file_cmd_env);
   // Fold the process env LAST (lowest precedence), stripping the runner's
