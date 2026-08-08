@@ -68,9 +68,13 @@ jobs:
           repository: Falconiere/homebrew-tap
           path: tap
           token: ${{ steps.tap-token.outputs.token }}
-          persist-credentials: true
+          # Do not write the install token into tap/.git/config — push uses a
+          # one-shot -c extraheader instead (same hygiene as the old PAT path).
+          persist-credentials: false
 
       - name: Push formula to homebrew-tap
+        env:
+          TAP_TOKEN: ${{ steps.tap-token.outputs.token }}
         run: |
           set -euo pipefail
           mkdir -p tap/Formula
@@ -90,4 +94,9 @@ jobs:
             exit 0
           fi
           git commit -m "toolu-runner ${TAG}"
-          git push
+          # Auth via an extraheader (same technique actions/checkout uses)
+          # instead of embedding the token in the remote URL or persisting it
+          # into .git/config, so it never appears in `git remote -v` output or
+          # clone/push error messages.
+          header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TAP_TOKEN" | base64 -w0)"
+          git -c http.https://github.com/.extraheader="$header" push
