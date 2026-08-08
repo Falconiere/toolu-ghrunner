@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-08
+
+### Added
+- *(image)* publish a vN compat-line tag for the runner image
+
 ## [0.6.3] - 2026-08-08
 
 ### Fixed
