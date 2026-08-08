@@ -126,10 +126,15 @@ still agree:
   responsibilities. A change to a crate's shape should be reflected there.
 - User-facing surfaces — a new config key, a changed CLI flag, a changed
   default — must appear in `README.md`.
-- `CHANGELOG.md`'s `## [Unreleased]` section is deliberately kept **empty**
-  (`cliff.toml` documents why: git-cliff prepends generated sections and
-  hand-written entries dangle inside them). Do not ask for a CHANGELOG entry;
-  release notes come from conventional-commit bodies.
+- `CHANGELOG.md` is **generated, never hand-written**, and so is the workspace
+  version. `cliff.toml` keeps a permanently empty `## [Unreleased]` slot in the
+  header, and git-cliff prepends each release as a **sibling** `## [X.Y.Z] -
+  DATE` heading directly below that slot. A release section appearing under
+  `[Unreleased]` is therefore generated output in its correct position — not an
+  entry someone wrote inside `[Unreleased]`. Do not ask for a CHANGELOG entry
+  (release notes come from conventional-commit bodies), and do not re-derive a
+  version bump: `cliff.toml`'s `[bump]` sets the pre-1.0 policy — feat bumps the
+  minor, fix the patch, and a breaking change bumps the minor while 0.x.
 - Do not flag a version number, date, or "as of" claim you cannot verify.
 
 ### 8. Architecture and layering
