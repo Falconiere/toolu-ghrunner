@@ -21,7 +21,9 @@ fn invalid_unicode_value() -> OsString {
 #[test]
 #[ignore = "child-process probe; exercised by invalid_unicode_hostname_values_warn_and_follow_fallback_order"]
 fn invalid_unicode_hostname_child_probe() {
-  let mode = std::env::var_os(PROBE_MODE).expect("child probe requires PROBE_MODE");
+  let Some(mode) = std::env::var_os(PROBE_MODE) else {
+    return;
+  };
   let hostname = super::hostname();
   if mode == "hostname" {
     assert_eq!(hostname.as_deref(), Some("fallback-host"));
