@@ -21,7 +21,9 @@ fn invalid_unicode_value() -> OsString {
 #[test]
 #[ignore = "child-process probe; exercised by invalid_unicode_cli_config_values_are_diagnosed"]
 fn invalid_unicode_cli_config_child_probe() {
-  let key = std::env::var(PROBE_KEY).expect("child probe requires PROBE_KEY");
+  let Ok(key) = std::env::var(PROBE_KEY) else {
+    return;
+  };
   assert!(
     matches!(
       key.as_str(),
