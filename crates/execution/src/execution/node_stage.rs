@@ -16,8 +16,10 @@ use super::action_support::{build_node_env, emit_log};
 use super::actions::manifest::ActionDefinition;
 use super::command_dispatch::stream_dispatch_stdout;
 use super::context::ExecutionContext;
+use super::file_commands::FileCommandManager;
 use super::handlers::node::determine_script;
 use super::handlers::node_exec::{NodeExecParams, execute_node_action};
+use super::step_env::apply_file_commands_and_merge_outputs;
 use super::step_timeout::StepBounds;
 use crate::node::runtime::ensure_node_runtime;
 
@@ -76,7 +78,7 @@ pub(super) async fn run_node_stage(
 ) -> Result<(Conclusion, HashMap<String, String>), RunnerError> {
   let script = resolve_stage_script(&s)?;
   let node_binary = ensure_node_runtime(s.client, &s.config.data_dir, s.major).await?;
-  let env = build_node_env(
+  let mut env = build_node_env(
     s.step,
     s.ctx,
     s.manifest,
@@ -84,6 +86,19 @@ pub(super) async fn run_node_stage(
     s.workspace,
     s.config,
   );
+  // Give this stage its own `$GITHUB_ENV`/`$GITHUB_OUTPUT`/`$GITHUB_PATH`/
+  // `$GITHUB_STATE`/`$GITHUB_STEP_SUMMARY` file-command files — a node
+  // action (e.g. setup-node/setup-bun style) exports env vars and PATH
+  // entries for later steps exactly like a `run:` step does, via
+  // `core.exportVariable`/`core.addPath`. Without these files present, the
+  // toolkit falls back to the stdout `set-env`/`add-path` commands, which
+  // `CommandDispatcher` refuses (CVE-2020-15228), so the export silently
+  // had no effect (live bug: PATH entries added by a node action never
+  // reached subsequent steps).
+  let tmp_dir = s.config.data_dir.join("tmp");
+  std::fs::create_dir_all(&tmp_dir)?;
+  let (file_cmds, file_cmd_env) = FileCommandManager::create(&tmp_dir)?;
+  env.extend(file_cmd_env);
 
   // Own the cgroup path so `node_params` doesn't borrow `s.ctx` — the
   // concurrent dispatcher needs `&mut s.ctx` while the child runs.
@@ -105,8 +120,11 @@ pub(super) async fn run_node_stage(
   let (stdout_tx, mut stdout_rx) = mpsc::channel::<String>(256);
   let exec = execute_node_action(&node_params, s.events, stdout_tx);
   let dispatch = stream_dispatch_stdout(&s.step.id, &mut stdout_rx, s.ctx, s.events);
-  let (output, outputs) = tokio::join!(exec, dispatch);
-  Ok((output?.conclusion, outputs))
+  let (output, stdout_outputs) = tokio::join!(exec, dispatch);
+  let conclusion = output?.conclusion;
+  let outputs =
+    apply_file_commands_and_merge_outputs(&s.step.id, stdout_outputs, &file_cmds, s.ctx);
+  Ok((conclusion, outputs))
 }
 
 /// Emit the per-stage `##[endgroup]` separator before a node entrypoint runs.

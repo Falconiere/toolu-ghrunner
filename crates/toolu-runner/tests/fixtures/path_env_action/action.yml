@@ -1,0 +1,13 @@
+name: 'path-env-fixture'
+description: >-
+  Real node action mimicking oven-sh/setup-bun / actions/setup-node: exports a
+  PATH entry and an env var for LATER steps via $GITHUB_PATH/$GITHUB_ENV, the
+  same file-command mechanism `@actions/core`'s `addPath`/`exportVariable` use.
+inputs:
+  bin_dir:
+    description: 'directory to prepend to PATH (rewritten by the test to a real temp dir)'
+    required: false
+    default: '/__PLACEHOLDER_BIN_DIR__'
+runs:
+  using: 'node20'
+  main: 'main.js'

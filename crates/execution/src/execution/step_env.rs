@@ -78,3 +78,29 @@ pub(super) fn apply_file_commands(
   }
   results.outputs
 }
+
+/// Apply a step's `$GITHUB_ENV`/`$GITHUB_PATH`/`$GITHUB_OUTPUT` file commands
+/// AND merge them with its stdout-emitted (`::set-output::`) outputs into one
+/// map, recording every output on `ctx` under `step_id`.
+///
+/// File-command outputs are applied first, then stdout outputs overlay them —
+/// a stdout `set-output` for a key the step also wrote to `$GITHUB_OUTPUT`
+/// wins, matching the real runner's last-writer-wins semantics. Shared by the
+/// `run:` step path ([`super::steps_runner`]) and Node.js action stages
+/// ([`super::node_stage`]) so both get identical env/PATH/output propagation.
+pub(super) fn apply_file_commands_and_merge_outputs(
+  step_id: &str,
+  stdout_outputs: HashMap<String, String>,
+  file_cmds: &FileCommandManager,
+  ctx: &mut ExecutionContext,
+) -> HashMap<String, String> {
+  let mut outputs = apply_file_commands(file_cmds, ctx);
+  for (key, value) in &outputs {
+    ctx.set_step_output(step_id, key, value);
+  }
+  for (key, value) in stdout_outputs {
+    ctx.set_step_output(step_id, &key, &value);
+    outputs.insert(key, value);
+  }
+  outputs
+}
