@@ -628,11 +628,17 @@ mod override_rules {
   /// production message.
   #[test]
   fn tripped_non_success_overrides_to_failure_with_error_annotation() {
-    let (conclusion, annotations) = apply_outage_override(Conclusion::Cancelled, true);
-    assert_eq!(conclusion, Conclusion::Failure);
-    assert_eq!(annotations.len(), 1);
-    let annotation = annotations.first().expect("checked len() == 1 above");
-    assert_eq!(annotation.annotation_type, "error");
-    assert_eq!(annotation.message, LOST_CONNECTION_MESSAGE);
+    for original in [
+      Conclusion::Failure,
+      Conclusion::Cancelled,
+      Conclusion::Skipped,
+    ] {
+      let (conclusion, annotations) = apply_outage_override(original, true);
+      assert_eq!(conclusion, Conclusion::Failure);
+      assert_eq!(annotations.len(), 1);
+      let annotation = annotations.first().expect("checked len() == 1 above");
+      assert_eq!(annotation.annotation_type, "error");
+      assert_eq!(annotation.message, LOST_CONNECTION_MESSAGE);
+    }
   }
 }

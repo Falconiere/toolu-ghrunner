@@ -19,10 +19,9 @@ fn invalid_unicode_value() -> OsString {
 }
 
 #[test]
+#[ignore = "child-process probe; exercised by invalid_unicode_hostname_values_warn_and_follow_fallback_order"]
 fn invalid_unicode_hostname_child_probe() {
-  let Some(mode) = std::env::var_os(PROBE_MODE) else {
-    return;
-  };
+  let mode = std::env::var_os(PROBE_MODE).expect("child probe requires PROBE_MODE");
   let hostname = super::hostname();
   if mode == "hostname" {
     assert_eq!(hostname.as_deref(), Some("fallback-host"));
@@ -37,7 +36,7 @@ fn invalid_unicode_hostname_values_warn_and_follow_fallback_order() {
   for (mode, invalid_key) in [("hostname", "HOSTNAME"), ("computername", "COMPUTERNAME")] {
     let mut command = Command::new(std::env::current_exe().expect("resolve current test binary"));
     command
-      .args(["--exact", CHILD_TEST, "--nocapture"])
+      .args(["--ignored", "--exact", CHILD_TEST, "--nocapture"])
       .env(PROBE_MODE, mode);
     if mode == "hostname" {
       command

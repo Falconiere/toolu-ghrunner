@@ -17,6 +17,7 @@ which calls into this module. Job-level cgroup wiring lives in
 | `path_translator.rs` | `PathTranslator` | Maps host paths (workspace, temp) to their `/github/workspace` and `/github/runner_temp` container equivalents and back. |
 | `services.rs` | `start_service` | Starts a `services:` container on the job network, using `DockerClient` and `path_translator`'s naming conventions. |
 
-When you add a file here, add its row above so the index stays current. No
-`mod.rs` barrel — declare submodules from the parent file (`src/foo.rs`
-declares `mod bar;` for `src/foo/bar.rs`) and import concrete paths.
+When you add a file here, add its row above so the index stays current. There
+is no `mod.rs`; the parent `docker.rs` is the module root and declares
+submodules (`src/foo.rs` declares `mod bar;` for `src/foo/bar.rs`). Import
+concrete paths.
