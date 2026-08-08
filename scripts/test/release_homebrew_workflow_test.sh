@@ -91,11 +91,13 @@ want "downloads SHA256SUMS from release"  "gh release download"
 want "generates the formula via script"   "generate-homebrew-formula\.sh"
 # App install token — same pattern as release-pr.yml / comemory / git-better.
 # Reject a long-lived PAT so the expired-HOMEBREW_TAP_TOKEN failure cannot return.
-want "mints an App token"                 "uses: actions/create-github-app-token@"
+want "mints an App token"                 "uses: actions/create-github-app-token@v3"
 want "scopes the App token to the tap"    "repositories: homebrew-tap"
 want "checks out the homebrew-tap repo"   "repository: Falconiere/homebrew-tap"
+want "does not persist the tap token"     "persist-credentials: false"
 reject "no long-lived HOMEBREW_TAP_TOKEN" "HOMEBREW_TAP_TOKEN"
 want "pushes to the homebrew-tap repo"    "Falconiere/homebrew-tap"
+want "pushes with a one-shot extraheader" 'git -c http\.https://github\.com/\.extraheader='
 # Must stage before comparing: on a first release the formula is untracked, and
 # `git diff` (without --cached) ignores untracked files — it would report "no
 # changes", skip the push, and still exit 0. Assert the --cached form, and
@@ -148,6 +150,7 @@ tap_checkout = next(
 )
 assert tap_checkout["with"]["path"] == "tap"
 assert "tap-token.outputs.token" in tap_checkout["with"]["token"]
+assert tap_checkout["with"].get("persist-credentials") is False, tap_checkout["with"]
 print("ok: PyYAML deep-check (job set + read-only perm + App secrets + mint+checkout tap)")
 PY
   then :; else
