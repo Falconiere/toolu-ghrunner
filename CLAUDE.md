@@ -102,7 +102,7 @@ decision rather than drift.
 | `clippy::cast_precision_loss` | on via `pedantic` | `allow` (the other three cast lints stay `deny`) | `PipelineContextData::n` is `f64` because GitHub's context numbers *are* doubles; the `i64`/`u64` widening in `job_message::context_data_de` is the wire contract. No lossless narrowing exists, so denying it would force a suppression at the one honest site. |
 | `functionSize.max` | `100` | `150` (matches `clippy.toml` `too-many-lines-threshold`) | One number, one enforcer — the two must agree, and 150 is the ceiling this codebase was written to. |
 | `knip` / `jscpd` | absent on Rust by design | absent | Node tools; clippy's `dead_code`/`unused_imports` and cargo cover the ground. The kit says the same. |
-| Code-review workflow | `deepseek` + generic checklist | `openrouter` + `.github/code-review-prompt.md`, `RULES_REF: merge`, `MAX_ROUNDS`, `MAX_TOKENS` | Repo-tuned; strictly more configured than the template. |
+| Code-review workflow | `deepseek` + generic checklist | `openrouter` + `.github/code-review-prompt.md`, `RULES_REF: merge`, `MAX_ROUNDS`, `MAX_TOKENS`; the `review` job is skipped for the generated `release-pr` PR, and only when it is same-repo (a fork branch of that name is still reviewed) | Repo-tuned; strictly more configured than the template. The release PR is 100% git-cliff/`sed` output, so reviewing it only ever produced false positives; `scripts/test/code_review_workflow_test.sh` pins the skip and its fork guard. |
 
 `secrets.scanExempt` in `crates/config` and `crates/toolu-runner`
 lists the **synthetic** credential fixtures (`MIIphony`,

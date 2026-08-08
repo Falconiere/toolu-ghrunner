@@ -16,6 +16,33 @@ concurrency:
 
 jobs:
   review:
+    # Skip the machine-generated release PR. Every byte of that diff is produced
+    # by scripts/release-pr.sh — the git-cliff CHANGELOG prepend, the
+    # [workspace.package] version line, and `cargo update` — so there is no
+    # human-authored code in it to review, and the generator itself is covered
+    # by scripts/test/release_pr_script_test.sh + release_pr_workflow_test.sh.
+    # Reviewing it only ever produced the same two false positives, every
+    # release (PR #49 hit both): the reviewer reads the generated
+    # `## [X.Y.Z]` heading sitting under the permanently empty `## [Unreleased]`
+    # slot as a hand-written entry placed inside it, and re-derives the version
+    # bump against plain SemVer instead of cliff.toml's pre-1.0 [bump] policy.
+    #
+    # A job-level `if` (a skipped job counts as success) rather than an `on:`
+    # branches-ignore filter, so the check still reports a conclusion if it is
+    # ever made a required status check — a filtered-out workflow would instead
+    # stay pending forever and block the release PR.
+    #
+    # The head-repo test is load-bearing, NOT redundant: `github.head_ref` is
+    # only the source branch's name, and it reads the same for a fork PR as for
+    # ours. On the branch name alone, anyone could fork this public repo, name a
+    # branch `release-pr`, and have their PR's review silently skipped — and a
+    # skipped job reports SUCCESS, a better disguise than the red ✗ a fork PR
+    # gets today (the action step fails without the secrets, see RULES_REF
+    # below). Only a same-repo `release-pr` is the generated one; a fork using
+    # that name is reviewed like any other. Actions string comparison is
+    # case-insensitive, so `Release-PR` matches too — harmless, since pushing
+    # any such branch here already requires write access.
+    if: ${{ github.head_ref != 'release-pr' || github.event.pull_request.head.repo.full_name != github.repository }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
