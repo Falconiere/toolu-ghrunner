@@ -66,12 +66,23 @@ assert_anchor "refs=() (extraction cut)"   '^          refs=()$'
 # Pull the `merge` step's run block, dedented, up to the digest-collection
 # line. `sub` strips only the block's own 10-space indent, so the relative
 # indentation of the if/fi bodies survives.
-derivation="$(awk '
+#
+# The status is checked rather than inferred from the output. This script runs
+# without `set -e`, so a failed awk would otherwise assign an empty or partial
+# block and carry on into the guards below — which would report "anchors
+# changed?" and send the next reader to edit a workflow that is in fact fine.
+# A partial block is the nastier half: it can still satisfy both guards and
+# then fail as a bash syntax error inside the harness, one indirection away
+# from its cause.
+if ! derivation="$(awk '
   /^        id: merge$/            { seen = 1 }
   seen && /^        run: \|$/      { inrun = 1; next }
   inrun && /^          refs=\(\)$/ { exit }
   inrun                            { sub(/^          /, ""); print }
-' "$WF")"
+' "$WF")"; then
+  echo "FAIL: awk exited non-zero scanning $WF — could not extract the step" >&2
+  exit 1
+fi
 
 # Belt-and-braces on top of the anchor checks: the `run: |` line between them
 # could still move or change shape.
