@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-08-08
+
+### Fixed
+- *(release)* mint the homebrew-tap token from the GitHub App
+- *(release)* keep the tap install token out of .git/config
+
 ## [0.6.1] - 2026-08-08
 
 ### Changed
