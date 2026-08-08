@@ -264,7 +264,7 @@ async fn run_script_step(
   let interpolated = ctx.interpolate_string(&script)?;
   // Shell precedence: step `shell:` > job/workflow `defaults.run.shell`.
   let shell = step.shell_name().or_else(|| job.job.defaults.shell.clone());
-  let (env, file_cmds) = build_step_env_and_file_commands(step, ctx, job)?;
+  let (env, file_cmds) = build_step_env_and_file_commands(step, ctx, job).await?;
   let working_dir = resolve_working_dir(step, ctx, job.workspace, &job.job.defaults)?;
 
   emit_log(
@@ -295,7 +295,7 @@ async fn run_script_step(
   let (result, stdout_outputs) =
     run_and_dispatch_script(&job.handler, &params, &step.id, ctx, events).await?;
   shadow_post(job, &step.id, &interpolated, &env, &working_dir, pre)?;
-  let outputs = merge_step_outputs(step, stdout_outputs, &file_cmds, ctx);
+  let outputs = merge_step_outputs(step, stdout_outputs, &file_cmds, ctx).await;
 
   emit_status(events, &step.id, result).await;
   Ok((result, outputs))
@@ -381,18 +381,20 @@ async fn run_and_dispatch_script(
 /// into one step-outputs map. Thin wrapper over the shared
 /// [`apply_file_commands_and_merge_outputs`], which also applies the step's
 /// `$GITHUB_ENV`/`$GITHUB_PATH` file commands to `ctx`.
-fn merge_step_outputs(
+async fn merge_step_outputs(
   step: &ActionStep,
   stdout_outputs: HashMap<String, String>,
   file_cmds: &FileCommandManager,
   ctx: &mut ExecutionContext,
 ) -> HashMap<String, String> {
-  apply_file_commands_and_merge_outputs(&step.id, stdout_outputs, file_cmds, ctx)
+  apply_file_commands_and_merge_outputs(&step.id, stdout_outputs, file_cmds, ctx).await
 }
 
 /// Build the step's env map (global + step env + file-command paths + inherited
-/// process env) and create the per-step file-command temp files.
-fn build_step_env_and_file_commands(
+/// process env) and create the per-step file-command temp files. Async
+/// (`tokio::fs` via [`FileCommandManager::create`]) — this runs on the async
+/// step-execution path, so the file creation must not block the executor.
+async fn build_step_env_and_file_commands(
   step: &ActionStep,
   ctx: &ExecutionContext,
   job: &JobCtx<'_>,
@@ -400,8 +402,8 @@ fn build_step_env_and_file_commands(
   let step_env = resolve_step_env(step, ctx)?;
   let mut env = ctx.build_step_env(&step_env);
   let tmp_dir = job.config.data_dir.join("tmp");
-  std::fs::create_dir_all(&tmp_dir)?;
-  let (file_cmds, file_cmd_env) = FileCommandManager::create(&tmp_dir)?;
+  tokio::fs::create_dir_all(&tmp_dir).await?;
+  let (file_cmds, file_cmd_env) = FileCommandManager::create(&tmp_dir).await?;
   env.extend(file_cmd_env);
   // Fold the process env LAST (lowest precedence), stripping the runner's
   // private `TOOLU_RUNNER_*` namespace so the admin re-mint bearer never

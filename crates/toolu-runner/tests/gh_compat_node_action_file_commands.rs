@@ -21,6 +21,13 @@
 //! commands are invoked by later steps) and reads the exported env var. The
 //! action's real `node` binary and manifest are seeded on disk (no network,
 //! fully hermetic); the test skips if no system `node` is available.
+//!
+//! `main.js` itself guards the contract: it throws a named
+//! `FIXTURE CONTRACT VIOLATION` error if `$GITHUB_PATH`/`$GITHUB_ENV` are
+//! ever unset or unwritable, so a regression that deletes the runner's
+//! file-command wiring fails LOUDLY at the mechanism (a named stderr `Log`
+//! line this test asserts is absent) rather than incidentally, downstream,
+//! as a bare `fixture-tool: command not found`.
 
 use std::error::Error;
 use std::path::{Path, PathBuf};
@@ -221,6 +228,20 @@ async fn node_action_path_and_env_exports_reach_the_next_step() -> TestResult<()
 
   let lines = drive(&steps, &workspace, &config).await?;
 
+  // The fixture's `main.js` throws a named `FIXTURE CONTRACT VIOLATION`
+  // error (streamed here as a stderr `Log` line) if the runner ever fails to
+  // inject a writable $GITHUB_PATH/$GITHUB_ENV for this stage. Asserting its
+  // absence proves the guard actually ran and passed on the live wiring — if
+  // `run_node_stage`'s file-command injection regresses, THIS assertion
+  // fails first, naming the missing contract, instead of the job merely
+  // failing incidentally later at `fixture-tool: command not found`.
+  assert!(
+    !lines
+      .iter()
+      .any(|l| l.contains("FIXTURE CONTRACT VIOLATION")),
+    "the node action must not hit its file-command contract guard when the \
+     runner's $GITHUB_PATH/$GITHUB_ENV wiring is present; got lines: {lines:?}"
+  );
   assert!(
     lines.iter().any(|l| l == "fixture-tool-ran"),
     "the exported $GITHUB_PATH entry must resolve a BARE command in the next \

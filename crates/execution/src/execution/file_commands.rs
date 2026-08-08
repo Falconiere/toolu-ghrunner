@@ -34,12 +34,17 @@ pub struct FileCommandResults {
 impl FileCommandManager {
   /// Create temp files for all file commands.
   ///
-  /// Returns the manager and a map of env var names to file paths.
+  /// Returns the manager and a map of env var names to file paths. Async
+  /// (`tokio::fs`, this crate's idiom for filesystem work reached from an
+  /// async context — see `artifacts/backend.rs`, `cache/blob/put_blob.rs`)
+  /// because every caller runs on the async step-execution path; a blocking
+  /// `std::fs` call here would stall the executor thread for the duration of
+  /// five file creations.
   ///
   /// # Errors
   ///
   /// Returns `RunnerError::Io` if file creation fails.
-  pub fn create(temp_dir: &Path) -> Result<(Self, HashMap<String, String>), RunnerError> {
+  pub async fn create(temp_dir: &Path) -> Result<(Self, HashMap<String, String>), RunnerError> {
     let mgr = Self {
       env_path: temp_dir.join("github_env"),
       output_path: temp_dir.join("github_output"),
@@ -56,7 +61,7 @@ impl FileCommandManager {
       &mgr.state_path,
       &mgr.summary_path,
     ] {
-      std::fs::write(path, "")?;
+      tokio::fs::write(path, "").await?;
     }
 
     let mut env_map = HashMap::new();
@@ -84,17 +89,18 @@ impl FileCommandManager {
     Ok((mgr, env_map))
   }
 
-  /// Read and parse all file command files after a step.
+  /// Read and parse all file command files after a step. Async (`tokio::fs`)
+  /// for the same reason as [`Self::create`].
   ///
   /// # Errors
   ///
   /// Returns `RunnerError::Io` if reading files fails.
-  pub fn process(&self) -> Result<FileCommandResults, RunnerError> {
-    let env_content = std::fs::read_to_string(&self.env_path)?;
-    let output_content = std::fs::read_to_string(&self.output_path)?;
-    let path_content = std::fs::read_to_string(&self.path_path)?;
-    let state_content = std::fs::read_to_string(&self.state_path)?;
-    let summary = std::fs::read_to_string(&self.summary_path)?;
+  pub async fn process(&self) -> Result<FileCommandResults, RunnerError> {
+    let env_content = tokio::fs::read_to_string(&self.env_path).await?;
+    let output_content = tokio::fs::read_to_string(&self.output_path).await?;
+    let path_content = tokio::fs::read_to_string(&self.path_path).await?;
+    let state_content = tokio::fs::read_to_string(&self.state_path).await?;
+    let summary = tokio::fs::read_to_string(&self.summary_path).await?;
 
     let mut env_vars = parse_env_file(&env_content);
     strip_blocked_env(&mut env_vars);
@@ -108,12 +114,13 @@ impl FileCommandManager {
     })
   }
 
-  /// Reset all file command files for the next step.
+  /// Reset all file command files for the next step. Async (`tokio::fs`) for
+  /// the same reason as [`Self::create`].
   ///
   /// # Errors
   ///
   /// Returns `RunnerError::Io` if writing fails.
-  pub fn reset(&self) -> Result<(), RunnerError> {
+  pub async fn reset(&self) -> Result<(), RunnerError> {
     for path in [
       &self.env_path,
       &self.output_path,
@@ -121,7 +128,7 @@ impl FileCommandManager {
       &self.state_path,
       &self.summary_path,
     ] {
-      std::fs::write(path, "")?;
+      tokio::fs::write(path, "").await?;
     }
     Ok(())
   }

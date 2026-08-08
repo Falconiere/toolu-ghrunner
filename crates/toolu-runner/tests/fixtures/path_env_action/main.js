@@ -5,6 +5,36 @@
 // CVE-2020-15228).
 const fs = require('fs');
 
+// FIX (regression hardening): if the runner's node-stage wiring that creates
+// and injects $GITHUB_PATH/$GITHUB_ENV is ever deleted, this stage must fail
+// LOUDLY, naming the missing contract — not incidentally, via a bare Node
+// "path must be a string" TypeError (undefined var) or a downstream
+// `fixture-tool: command not found` in the NEXT step (unset var / file never
+// created). Both env vars are streamed to `Log` events on this process's
+// stderr (see `execute_node_action`), so a thrown Error here surfaces in the
+// job's collected log lines and fails the test at the mechanism.
+function requireFileCommandVar(name) {
+  const path = process.env[name];
+  if (!path) {
+    throw new Error(
+      `FIXTURE CONTRACT VIOLATION: ${name} is not set — the runner did not ` +
+        'inject the file-command env for this node action stage'
+    );
+  }
+  try {
+    fs.accessSync(path, fs.constants.W_OK);
+  } catch (err) {
+    throw new Error(
+      `FIXTURE CONTRACT VIOLATION: ${name}=${path} is not a writable file — ` +
+        `the runner did not create the file-command file for this node ` +
+        `action stage (${err.message})`
+    );
+  }
+}
+
+requireFileCommandVar('GITHUB_PATH');
+requireFileCommandVar('GITHUB_ENV');
+
 const binDir = process.env.INPUT_BIN_DIR;
 fs.appendFileSync(process.env.GITHUB_PATH, `${binDir}\n`);
 fs.appendFileSync(process.env.GITHUB_ENV, 'FIXTURE_GREETING=hello-from-action\n');

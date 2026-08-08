@@ -96,8 +96,8 @@ pub(super) async fn run_node_stage(
   // had no effect (live bug: PATH entries added by a node action never
   // reached subsequent steps).
   let tmp_dir = s.config.data_dir.join("tmp");
-  std::fs::create_dir_all(&tmp_dir)?;
-  let (file_cmds, file_cmd_env) = FileCommandManager::create(&tmp_dir)?;
+  tokio::fs::create_dir_all(&tmp_dir).await?;
+  let (file_cmds, file_cmd_env) = FileCommandManager::create(&tmp_dir).await?;
   env.extend(file_cmd_env);
 
   // Own the cgroup path so `node_params` doesn't borrow `s.ctx` — the
@@ -123,7 +123,7 @@ pub(super) async fn run_node_stage(
   let (output, stdout_outputs) = tokio::join!(exec, dispatch);
   let conclusion = output?.conclusion;
   let outputs =
-    apply_file_commands_and_merge_outputs(&s.step.id, stdout_outputs, &file_cmds, s.ctx);
+    apply_file_commands_and_merge_outputs(&s.step.id, stdout_outputs, &file_cmds, s.ctx).await;
   Ok((conclusion, outputs))
 }
 
