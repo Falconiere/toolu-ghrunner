@@ -124,13 +124,14 @@ jobs:
 
   # Stable tags only; the callee's own `if:` enforces that. A called workflow
   # is granted github.token automatically but sees no other secret unless the
-  # caller passes it. Pass HOMEBREW_TAP_TOKEN explicitly, NOT `secrets:
+  # caller passes it. Pass the App credentials explicitly, NOT `secrets:
   # inherit` — inherit would forward every repo secret (RELEASE_PLZ_TOKEN,
-  # OPENROUTER_API_KEY, …) to a workflow that needs exactly one.
+  # OPENROUTER_API_KEY, …) to a workflow that needs exactly these two.
   homebrew:
     needs: publish
     permissions:
       contents: read
     uses: ./.github/workflows/release-homebrew.yml
     secrets:
-      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+      HOMEBREW_APP_ID: ${{ secrets.HOMEBREW_APP_ID }}
+      HOMEBREW_APP_PRIVATE_KEY: ${{ secrets.HOMEBREW_APP_PRIVATE_KEY }}

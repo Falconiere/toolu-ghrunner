@@ -5,8 +5,9 @@
 # A published-release event can't be exercised offline, so this asserts the
 # invariants the homebrew-publish contract depends on: trigger, prerelease
 # skip, least-privilege permissions, checksum download, formula generation,
-# and a guarded push to the external tap. Grep tier (dependency-free); if
-# PyYAML is importable it additionally asserts the file parses.
+# App-token mint, and a guarded push to the external tap. Grep tier
+# (dependency-free); if PyYAML is importable it additionally asserts the
+# file parses.
 set -uo pipefail
 
 cd "$(dirname "$0")/../.." || exit 1 # repo root
@@ -45,20 +46,22 @@ reject() {
 # by a workflow step using the default GITHUB_TOKEN emits no `release` event,
 # so an event-triggered version of this workflow could never fire.
 want "callable as a reusable workflow"    "^  workflow_call:"
-# Declared, not inherited: the caller passes exactly this one secret. Anchored
-# to the HOMEBREW_TAP_TOKEN block — a bare `required: true` match would also be
+# Declared, not inherited: the caller passes exactly these two App secrets.
+# Anchored to each secret block — a bare `required: true` match would also be
 # satisfied by that key appearing under some unrelated secret, or in a comment.
-if awk '
-  /^      HOMEBREW_TAP_TOKEN:[[:space:]]*$/ { inblock = 1; next }
-  inblock && /^      [^[:space:]]/          { inblock = 0 }
-  inblock && /^        required:[[:space:]]+true[[:space:]]*$/ { found = 1 }
-  END { exit !found }
-' "$WF"; then
-  echo "ok: tap token declared required under HOMEBREW_TAP_TOKEN"
-else
-  echo "FAIL: no 'required: true' inside the HOMEBREW_TAP_TOKEN secret block" >&2
-  fail=1
-fi
+for secret in HOMEBREW_APP_ID HOMEBREW_APP_PRIVATE_KEY; do
+  if awk -v s="$secret" '
+    $0 ~ "^      " s ":[[:space:]]*$" { inblock = 1; next }
+    inblock && /^      [^[:space:]]/          { inblock = 0 }
+    inblock && /^        required:[[:space:]]+true[[:space:]]*$/ { found = 1 }
+    END { exit !found }
+  ' "$WF"; then
+    echo "ok: $secret declared required under workflow_call.secrets"
+  else
+    echo "FAIL: no 'required: true' inside the $secret secret block" >&2
+    fail=1
+  fi
+done
 want "skips prereleases"                  "!contains\(github\.ref_name, '-'\)"
 want "reads the tag from the caller"      "TAG: \\\$\{\{ github\.ref_name \}\}"
 # `workflow_call` being present does not mean `release` is absent — a file may
@@ -86,8 +89,12 @@ want "least-privilege permissions"        "^permissions:"
 want "contents: read only"                "contents: read"
 want "downloads SHA256SUMS from release"  "gh release download"
 want "generates the formula via script"   "generate-homebrew-formula\.sh"
-# shellcheck disable=SC2016  # single quotes are deliberate: this is a grep pattern, not shell to expand
-want "guards against a missing PAT"       'if \[\[ -z "\$TAP_TOKEN" \]\]'
+# App install token — same pattern as release-pr.yml / comemory / git-better.
+# Reject a long-lived PAT so the expired-HOMEBREW_TAP_TOKEN failure cannot return.
+want "mints an App token"                 "uses: actions/create-github-app-token@"
+want "scopes the App token to the tap"    "repositories: homebrew-tap"
+want "checks out the homebrew-tap repo"   "repository: Falconiere/homebrew-tap"
+reject "no long-lived HOMEBREW_TAP_TOKEN" "HOMEBREW_TAP_TOKEN"
 want "pushes to the homebrew-tap repo"    "Falconiere/homebrew-tap"
 # Must stage before comparing: on a first release the formula is untracked, and
 # `git diff` (without --cached) ignores untracked files — it would report "no
@@ -119,13 +126,29 @@ assert wf["permissions"]["contents"] == "read"
 # YAML 1.1 parses the bare `on:` key as the boolean True, not the string "on".
 triggers = wf[True]
 assert set(triggers) == {"workflow_call"}, f"triggers: {list(triggers)}"
-# Exactly one secret is declared, and it is mandatory. Structural, so a comment
-# or a stray `required: true` elsewhere in the file cannot satisfy it.
+# Exactly the two App secrets, both mandatory. Structural, so a comment or a
+# stray `required: true` elsewhere in the file cannot satisfy it.
 secrets = triggers["workflow_call"]["secrets"]
-assert set(secrets) == {"HOMEBREW_TAP_TOKEN"}, f"workflow_call secrets: {list(secrets)}"
-tap = secrets["HOMEBREW_TAP_TOKEN"]
-assert tap.get("required") is True, f"tap token must be required, got: {tap.get('required')!r}"
-print("ok: PyYAML deep-check (job set + read-only perm + workflow_call declares only a required HOMEBREW_TAP_TOKEN)")
+assert set(secrets) == {"HOMEBREW_APP_ID", "HOMEBREW_APP_PRIVATE_KEY"}, (
+    f"workflow_call secrets: {list(secrets)}"
+)
+for name in ("HOMEBREW_APP_ID", "HOMEBREW_APP_PRIVATE_KEY"):
+    assert secrets[name].get("required") is True, (
+        f"{name} must be required, got: {secrets[name].get('required')!r}"
+    )
+# Mint step must precede the tap checkout and scope to homebrew-tap.
+steps = jobs["publish-formula"]["steps"]
+mint = next(s for s in steps if s.get("id") == "tap-token")
+assert "create-github-app-token@" in mint["uses"]
+assert mint["with"]["owner"] == "Falconiere"
+assert mint["with"]["repositories"] == "homebrew-tap"
+tap_checkout = next(
+    s for s in steps
+    if s.get("with", {}).get("repository") == "Falconiere/homebrew-tap"
+)
+assert tap_checkout["with"]["path"] == "tap"
+assert "tap-token.outputs.token" in tap_checkout["with"]["token"]
+print("ok: PyYAML deep-check (job set + read-only perm + App secrets + mint+checkout tap)")
 PY
   then :; else
     echo "FAIL: PyYAML deep-check failed" >&2

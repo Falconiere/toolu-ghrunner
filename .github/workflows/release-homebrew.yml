@@ -4,9 +4,9 @@ name: release-homebrew
 # a stable release is published. release.yml calls this workflow as a
 # `needs: publish` job. Downloads SHA256SUMS straight from the release (same
 # read-back pattern as release-finalize.yml), renders the formula with
-# scripts/generate-homebrew-formula.sh, and pushes it to the tap with a PAT
-# (the default GITHUB_TOKEN has no access outside this repo). Never touches
-# this repo.
+# scripts/generate-homebrew-formula.sh, and pushes it to the tap with a
+# short-lived GitHub App installation token (the default GITHUB_TOKEN has no
+# access outside this repo). Never touches this repo.
 #
 # Reusable, NOT `on: release: [published]` — a release created by a workflow
 # step using the default GITHUB_TOKEN emits no `release` event, so an
@@ -17,12 +17,19 @@ name: release-homebrew
 #
 # The prerelease skip (tag contains '-') lives here rather than on the caller
 # so the guard travels with the thing it guards: the tap must only ever point
-# at a stable release, whoever calls this.
+# at a stable release, whoever calls it.
+#
+# Auth matches Falconiere/comemory + Falconiere/git-better: mint from
+# HOMEBREW_APP_ID / HOMEBREW_APP_PRIVATE_KEY scoped to homebrew-tap, instead
+# of a long-lived PAT that silently expires.
 on:
   workflow_call:
     secrets:
-      HOMEBREW_TAP_TOKEN:
-        description: Fine-grained PAT, Contents read+write on Falconiere/homebrew-tap.
+      HOMEBREW_APP_ID:
+        description: GitHub App id (Contents write on Falconiere/homebrew-tap).
+        required: true
+      HOMEBREW_APP_PRIVATE_KEY:
+        description: GitHub App private key PEM for the same App.
         required: true
 
 permissions:
@@ -44,28 +51,31 @@ jobs:
       - name: Generate Formula/toolu-runner.rb
         run: bash scripts/generate-homebrew-formula.sh "$TAG" dist/SHA256SUMS > toolu-runner.rb
 
+      # NOTE: same App as release-pr.yml / comemory / git-better. Scoped to
+      # homebrew-tap so the install token cannot write this repo.
+      - name: Mint homebrew-tap token
+        id: tap-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.HOMEBREW_APP_ID }}
+          private-key: ${{ secrets.HOMEBREW_APP_PRIVATE_KEY }}
+          owner: Falconiere
+          repositories: homebrew-tap
+
+      - name: Checkout homebrew-tap
+        uses: actions/checkout@v7
+        with:
+          repository: Falconiere/homebrew-tap
+          path: tap
+          token: ${{ steps.tap-token.outputs.token }}
+          persist-credentials: true
+
       - name: Push formula to homebrew-tap
-        env:
-          # Fine-grained PAT with Contents: read+write on Falconiere/homebrew-tap.
-          # Must be provisioned as a repo secret before this job can succeed;
-          # the default GITHUB_TOKEN is scoped to this repo only.
-          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           set -euo pipefail
-          if [[ -z "$TAP_TOKEN" ]]; then
-            echo "::error::HOMEBREW_TAP_TOKEN secret is not set — see docs/architecture.md § Release pipeline"
-            exit 1
-          fi
-          # Auth via an extraheader (same technique actions/checkout uses)
-          # instead of embedding the PAT in the remote URL, so it never
-          # appears in `git remote -v` output or clone/push error messages.
-          header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TAP_TOKEN" | base64 -w0)"
-          git -c http.https://github.com/.extraheader="$header" \
-            clone https://github.com/Falconiere/homebrew-tap.git tap
           mkdir -p tap/Formula
           cp toolu-runner.rb tap/Formula/toolu-runner.rb
           cd tap
-          git config http.https://github.com/.extraheader "$header"
           git config user.name "toolu-runner release bot"
           git config user.email "actions@users.noreply.github.com"
           # Stage BEFORE comparing. On a first release the formula does not yet
