@@ -16,7 +16,7 @@ use super::action_support::{build_node_env, emit_log};
 use super::actions::manifest::ActionDefinition;
 use super::command_dispatch::stream_dispatch_stdout;
 use super::context::ExecutionContext;
-use super::file_commands::FileCommandManager;
+use super::file_commands::{FileCommandManager, create_file_command_dir};
 use super::handlers::node::determine_script;
 use super::handlers::node_exec::{NodeExecParams, execute_node_action};
 use super::step_env::apply_file_commands_and_merge_outputs;
@@ -96,7 +96,7 @@ pub(super) async fn run_node_stage(
   // had no effect (live bug: PATH entries added by a node action never
   // reached subsequent steps).
   let tmp_dir = s.config.data_dir.join("tmp");
-  tokio::fs::create_dir_all(&tmp_dir).await?;
+  create_file_command_dir(&tmp_dir).await?;
   let (file_cmds, file_cmd_env) = FileCommandManager::create(&tmp_dir).await?;
   env.extend(file_cmd_env);
 

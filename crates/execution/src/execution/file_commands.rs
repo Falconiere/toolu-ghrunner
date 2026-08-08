@@ -3,6 +3,34 @@ use std::path::{Path, PathBuf};
 
 use shared::RunnerError;
 
+async fn run_blocking_file_io<T>(
+  operation: &'static str,
+  task: impl FnOnce() -> std::io::Result<T> + Send + 'static,
+) -> Result<T, RunnerError>
+where
+  T: Send + 'static,
+{
+  tokio::task::spawn_blocking(task)
+    .await
+    .map_err(|e| RunnerError::FileCommand(format!("{operation} task failed: {e}")))?
+    .map_err(RunnerError::Io)
+}
+
+/// Create the directory that owns per-step file-command files on the blocking
+/// pool, keeping synchronous filesystem work off the async executor.
+///
+/// # Errors
+///
+/// Returns `RunnerError::Io` if directory creation fails, or
+/// `RunnerError::FileCommand` if the blocking task cannot be joined.
+pub(super) async fn create_file_command_dir(path: &Path) -> Result<(), RunnerError> {
+  let path = path.to_path_buf();
+  run_blocking_file_io("file-command directory creation", move || {
+    std::fs::create_dir_all(path)
+  })
+  .await
+}
+
 /// Manages temp files for GitHub Actions file commands.
 pub struct FileCommandManager {
   /// Path backing `GITHUB_ENV`.
@@ -34,16 +62,14 @@ pub struct FileCommandResults {
 impl FileCommandManager {
   /// Create temp files for all file commands.
   ///
-  /// Returns the manager and a map of env var names to file paths. Async
-  /// (`tokio::fs`, this crate's idiom for filesystem work reached from an
-  /// async context — see `artifacts/backend.rs`, `cache/blob/put_blob.rs`)
-  /// because every caller runs on the async step-execution path; a blocking
-  /// `std::fs` call here would stall the executor thread for the duration of
-  /// five file creations.
+  /// Returns the manager and a map of env var names to file paths. The five
+  /// synchronous file creations run as one task on Tokio's blocking pool so
+  /// this per-step operation does not stall an async executor thread.
   ///
   /// # Errors
   ///
-  /// Returns `RunnerError::Io` if file creation fails.
+  /// Returns `RunnerError::Io` if file creation fails, or
+  /// `RunnerError::FileCommand` if the blocking task cannot be joined.
   pub async fn create(temp_dir: &Path) -> Result<(Self, HashMap<String, String>), RunnerError> {
     let mgr = Self {
       env_path: temp_dir.join("github_env"),
@@ -53,16 +79,20 @@ impl FileCommandManager {
       summary_path: temp_dir.join("github_step_summary"),
     };
 
-    // Create empty files
-    for path in [
-      &mgr.env_path,
-      &mgr.output_path,
-      &mgr.path_path,
-      &mgr.state_path,
-      &mgr.summary_path,
-    ] {
-      tokio::fs::write(path, "").await?;
-    }
+    let paths = [
+      mgr.env_path.clone(),
+      mgr.output_path.clone(),
+      mgr.path_path.clone(),
+      mgr.state_path.clone(),
+      mgr.summary_path.clone(),
+    ];
+    run_blocking_file_io("file-command file creation", move || {
+      for path in paths {
+        std::fs::write(path, "")?;
+      }
+      Ok(())
+    })
+    .await?;
 
     let mut env_map = HashMap::new();
     env_map.insert(
@@ -89,18 +119,33 @@ impl FileCommandManager {
     Ok((mgr, env_map))
   }
 
-  /// Read and parse all file command files after a step. Async (`tokio::fs`)
-  /// for the same reason as [`Self::create`].
+  /// Read and parse all file command files after a step. The five synchronous
+  /// reads run as one task on Tokio's blocking pool.
   ///
   /// # Errors
   ///
-  /// Returns `RunnerError::Io` if reading files fails.
+  /// Returns `RunnerError::Io` if reading files fails, or
+  /// `RunnerError::FileCommand` if the blocking task cannot be joined.
   pub async fn process(&self) -> Result<FileCommandResults, RunnerError> {
-    let env_content = tokio::fs::read_to_string(&self.env_path).await?;
-    let output_content = tokio::fs::read_to_string(&self.output_path).await?;
-    let path_content = tokio::fs::read_to_string(&self.path_path).await?;
-    let state_content = tokio::fs::read_to_string(&self.state_path).await?;
-    let summary = tokio::fs::read_to_string(&self.summary_path).await?;
+    let paths = [
+      self.env_path.clone(),
+      self.output_path.clone(),
+      self.path_path.clone(),
+      self.state_path.clone(),
+      self.summary_path.clone(),
+    ];
+    let (env_content, output_content, path_content, state_content, summary) =
+      run_blocking_file_io("file-command file read", move || {
+        let [env_path, output_path, path_path, state_path, summary_path] = paths;
+        Ok((
+          std::fs::read_to_string(env_path)?,
+          std::fs::read_to_string(output_path)?,
+          std::fs::read_to_string(path_path)?,
+          std::fs::read_to_string(state_path)?,
+          std::fs::read_to_string(summary_path)?,
+        ))
+      })
+      .await?;
 
     let mut env_vars = parse_env_file(&env_content);
     strip_blocked_env(&mut env_vars);
@@ -114,23 +159,28 @@ impl FileCommandManager {
     })
   }
 
-  /// Reset all file command files for the next step. Async (`tokio::fs`) for
-  /// the same reason as [`Self::create`].
+  /// Reset all file command files for the next step. The five synchronous
+  /// writes run as one task on Tokio's blocking pool.
   ///
   /// # Errors
   ///
-  /// Returns `RunnerError::Io` if writing fails.
+  /// Returns `RunnerError::Io` if writing fails, or
+  /// `RunnerError::FileCommand` if the blocking task cannot be joined.
   pub async fn reset(&self) -> Result<(), RunnerError> {
-    for path in [
-      &self.env_path,
-      &self.output_path,
-      &self.path_path,
-      &self.state_path,
-      &self.summary_path,
-    ] {
-      tokio::fs::write(path, "").await?;
-    }
-    Ok(())
+    let paths = [
+      self.env_path.clone(),
+      self.output_path.clone(),
+      self.path_path.clone(),
+      self.state_path.clone(),
+      self.summary_path.clone(),
+    ];
+    run_blocking_file_io("file-command file reset", move || {
+      for path in paths {
+        std::fs::write(path, "")?;
+      }
+      Ok(())
+    })
+    .await
   }
 }
 

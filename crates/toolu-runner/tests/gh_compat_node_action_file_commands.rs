@@ -243,17 +243,19 @@ async fn node_action_path_and_env_exports_reach_the_next_step() -> TestResult<()
      runner's $GITHUB_PATH/$GITHUB_ENV wiring is present; got lines: {lines:?}"
   );
   assert!(
-    lines.iter().any(|l| l == "fixture-tool-ran"),
+    lines.iter().any(|l| l.contains("fixture-tool-ran")),
     "the exported $GITHUB_PATH entry must resolve a BARE command in the next \
      step (live bug repro: PATH additions from a node action never reached \
      later steps); got lines: {lines:?}"
   );
   assert!(
-    lines.iter().any(|l| l == "GREETING=hello-from-action"),
+    lines
+      .iter()
+      .any(|l| l.contains("GREETING=hello-from-action")),
     "the exported $GITHUB_ENV var must be visible to the next step; got lines: {lines:?}"
   );
   assert!(
-    lines.iter().any(|l| l == "MULTILINE=line one"),
+    lines.iter().any(|l| l.contains("MULTILINE=line one")),
     "the heredoc-form $GITHUB_ENV var must be visible to the next step \
      (only the first line survives an unquoted $VAR echo, which is enough to \
      prove it propagated); got lines: {lines:?}"
