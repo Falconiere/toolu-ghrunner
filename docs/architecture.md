@@ -996,11 +996,9 @@ until an operator flips it — note it must be a repo **variable**, not a secret
 since the `vars` context cannot read secrets and a secret of that name leaves
 both jobs silently reporting `skipped` with zero steps.
 
-`release-homebrew.yml` still pushes the tap formula with the separate
-`HOMEBREW_TAP_TOKEN` PAT. Moving that onto the same App is the obvious next step
-— it would need explicit `owner` + `repositories` inputs, since that push crosses
-into `homebrew-tap` — but it is left alone here to keep this change to the tag
-credential.
+`release-homebrew.yml` mints from the same App with explicit `owner` +
+`repositories: homebrew-tap`, so the install token can push the formula but
+cannot write this repo. No separate long-lived PAT.
 
 The back half is unchanged. It reads the repo and never writes to it;
 by the time it runs, `Cargo.toml` + `CHANGELOG.md` already carry the
@@ -1077,17 +1075,21 @@ downloads `SHA256SUMS` the same way, renders `Formula/toolu-runner.rb`
 via `scripts/generate-homebrew-formula.sh` (an `on_macos`/`on_linux` ×
 `on_arm`/`on_intel` formula selecting one of the four release
 tarballs), and pushes it to the external `Falconiere/homebrew-tap`
-repo using a `HOMEBREW_TAP_TOKEN` fine-grained PAT — the default
-`GITHUB_TOKEN` has no access outside this repo. A called workflow is
-granted `github.token` automatically but sees no other secret unless
-the caller passes it, and `release.yml` passes this one and nothing
-else: `secrets: inherit` would forward every repo secret to a workflow
-whose job is to push to an external repository. The callee declares it
-under `on.workflow_call.secrets` as `required: true`. The prerelease
-guard likewise lives in the callee, not the caller, so the tap can
-only ever point at a stable release regardless of who calls it. A
-no-op push (formula unchanged) is a normal outcome, not a failure.
-Missing the PAT fails this workflow only; the GitHub Release is
+repo using a short-lived GitHub App installation token minted from
+`HOMEBREW_APP_ID` + `HOMEBREW_APP_PRIVATE_KEY` (scoped with `owner` +
+`repositories: homebrew-tap`) — the default `GITHUB_TOKEN` has no
+access outside this repo, and a long-lived PAT is deliberately avoided
+because it silently expires (the failure mode that stranded the
+`v0.6.1` formula). A called workflow is granted `github.token`
+automatically but sees no other secret unless the caller passes it, and
+`release.yml` passes these two and nothing else: `secrets: inherit`
+would forward every repo secret to a workflow whose job is to push to
+an external repository. The callee declares both under
+`on.workflow_call.secrets` as `required: true`. The prerelease guard
+likewise lives in the callee, not the caller, so the tap can only ever
+point at a stable release regardless of who calls it. A no-op push
+(formula unchanged) is a normal outcome, not a failure. Missing the
+App credentials fails this workflow only; the GitHub Release is
 unaffected either way.
 
 `release.yml` holds a workflow-level `concurrency` group keyed on the

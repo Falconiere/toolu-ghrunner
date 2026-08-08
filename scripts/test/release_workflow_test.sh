@@ -62,15 +62,17 @@ want "one release per tag"             "^concurrency:"
 want "never cancels a release"         "cancel-in-progress: false"
 want "chains finalize off publish"     "uses: \./\.github/workflows/release-finalize\.yml"
 want "chains homebrew off publish"     "uses: \./\.github/workflows/release-homebrew\.yml"
-# Least privilege: pass the one secret homebrew needs, never `secrets: inherit`
-# (which would forward RELEASE_PLZ_TOKEN, OPENROUTER_API_KEY, … as well).
-want "passes only the tap token"       "HOMEBREW_TAP_TOKEN: \\\$\{\{ secrets\.HOMEBREW_TAP_TOKEN \}\}"
+# Least privilege: pass the two App secrets homebrew needs, never
+# `secrets: inherit` (which would forward RELEASE_PLZ_TOKEN,
+# OPENROUTER_API_KEY, … as well).
+want "passes the App id"               "HOMEBREW_APP_ID: \\\$\{\{ secrets\.HOMEBREW_APP_ID \}\}"
+want "passes the App private key"      "HOMEBREW_APP_PRIVATE_KEY: \\\$\{\{ secrets\.HOMEBREW_APP_PRIVATE_KEY \}\}"
 # Anchored to a real YAML pair, not the bare phrase: the workflow's own comment
 # explains why inherit is wrong, and a looser pattern matches that prose too.
 # [[:space:]] rather than \s — \s is a non-POSIX extension, and this file is the
 # one asserting that others are precise.
 if grep -Eq -- "^[[:space:]]+secrets:[[:space:]]+inherit[[:space:]]*$" "$WF"; then
-  echo "FAIL: 'secrets: inherit' forwards every repo secret — pass HOMEBREW_TAP_TOKEN explicitly" >&2
+  echo "FAIL: 'secrets: inherit' forwards every repo secret — pass HOMEBREW_APP_* explicitly" >&2
   fail=1
 else
   echo "ok: no blanket secrets: inherit"
@@ -101,20 +103,22 @@ assert got == exp, f"matrix os/arch: {got}"
 assert jobs["publish"]["permissions"]["contents"] == "write"
 # The downstream chain: both must run AFTER the release exists. A callee is
 # granted github.token automatically but sees no other secret, so homebrew is
-# passed HOMEBREW_TAP_TOKEN explicitly — never `secrets: inherit`, asserted below.
+# passed the App credentials explicitly — never `secrets: inherit`, asserted below.
 for j in ("finalize", "homebrew"):
     assert jobs[j]["needs"] == "publish", f"{j} needs: {jobs[j].get('needs')}"
     assert jobs[j]["permissions"]["contents"] == "read", f"{j} perms"
 assert jobs["finalize"]["uses"].endswith("release-finalize.yml"), jobs["finalize"]["uses"]
 assert jobs["homebrew"]["uses"].endswith("release-homebrew.yml"), jobs["homebrew"]["uses"]
-# Exactly one secret crosses into homebrew. `secrets: inherit` would forward
-# every repo secret to a workflow that pushes to an external repo.
+# Exactly the two App secrets cross into homebrew. `secrets: inherit` would
+# forward every repo secret to a workflow that pushes to an external repo.
 hb_secrets = jobs["homebrew"].get("secrets")
 assert hb_secrets != "inherit", "homebrew must not inherit all repo secrets"
-assert set(hb_secrets) == {"HOMEBREW_TAP_TOKEN"}, f"homebrew secrets: {hb_secrets}"
+assert set(hb_secrets) == {"HOMEBREW_APP_ID", "HOMEBREW_APP_PRIVATE_KEY"}, (
+    f"homebrew secrets: {hb_secrets}"
+)
 # finalize needs no secret at all: github.token is granted to callees automatically.
 assert "secrets" not in jobs["finalize"], "finalize needs no secrets"
-print("ok: PyYAML deep-check (job DAG + 4 os/arch + publish write perm + chained finalize/homebrew + scoped secret)")
+print("ok: PyYAML deep-check (job DAG + 4 os/arch + publish write perm + chained finalize/homebrew + scoped App secrets)")
 PY
   then :; else
     echo "FAIL: PyYAML deep-check failed" >&2
