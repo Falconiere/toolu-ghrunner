@@ -61,12 +61,16 @@ fn env_token_to_string(
   }
 }
 
-/// Process file commands after step execution; returns `GITHUB_OUTPUT` values.
-pub(super) fn apply_file_commands(
+/// Process file commands after step execution; returns `GITHUB_OUTPUT`
+/// values. Does NOT record them on `ctx` — the caller
+/// ([`apply_file_commands_and_merge_outputs`]) is the single writer, so a
+/// `$GITHUB_OUTPUT` value can't be recorded once here and again by a caller's
+/// own loop.
+async fn apply_file_commands(
   file_cmds: &FileCommandManager,
   ctx: &mut ExecutionContext,
 ) -> HashMap<String, String> {
-  let Ok(results) = file_cmds.process() else {
+  let Ok(results) = file_cmds.process().await else {
     tracing::warn!("failed to process file commands; step outputs/env will be empty");
     return HashMap::new();
   };
@@ -81,26 +85,30 @@ pub(super) fn apply_file_commands(
 
 /// Apply a step's `$GITHUB_ENV`/`$GITHUB_PATH`/`$GITHUB_OUTPUT` file commands
 /// AND merge them with its stdout-emitted (`::set-output::`) outputs into one
-/// map, recording every output on `ctx` under `step_id`.
+/// map, recording every output on `ctx` under `step_id` in a single pass.
 ///
-/// File-command outputs are applied first, then stdout outputs overlay them —
-/// a stdout `set-output` for a key the step also wrote to `$GITHUB_OUTPUT`
-/// wins, matching the real runner's last-writer-wins semantics. Shared by the
-/// `run:` step path ([`super::steps_runner`]) and Node.js action stages
-/// ([`super::node_stage`]) so both get identical env/PATH/output propagation.
-pub(super) fn apply_file_commands_and_merge_outputs(
+/// `$GITHUB_OUTPUT` file-command outputs are merged first, then stdout
+/// outputs overlay them via [`HashMap::extend`] (which replaces an existing
+/// key) — a stdout `set-output` for a key the step also wrote to
+/// `$GITHUB_OUTPUT` wins, matching the real runner's last-writer-wins
+/// semantics. The merged map is then recorded on `ctx` exactly once; writing
+/// the file-command and stdout maps to `ctx` as two separate loops (the prior
+/// shape) let the file-command loop transiently overwrite a stdout value
+/// already on `ctx`, which the stdout loop then had to correct back —
+/// correct in the end, but two writes per overlapping key through a
+/// window of the wrong value. Shared by the `run:` step path
+/// ([`super::steps_runner`]) and Node.js action stages ([`super::node_stage`])
+/// so both get identical env/PATH/output propagation.
+pub(super) async fn apply_file_commands_and_merge_outputs(
   step_id: &str,
   stdout_outputs: HashMap<String, String>,
   file_cmds: &FileCommandManager,
   ctx: &mut ExecutionContext,
 ) -> HashMap<String, String> {
-  let mut outputs = apply_file_commands(file_cmds, ctx);
+  let mut outputs = apply_file_commands(file_cmds, ctx).await;
+  outputs.extend(stdout_outputs);
   for (key, value) in &outputs {
     ctx.set_step_output(step_id, key, value);
-  }
-  for (key, value) in stdout_outputs {
-    ctx.set_step_output(step_id, &key, &value);
-    outputs.insert(key, value);
   }
   outputs
 }
