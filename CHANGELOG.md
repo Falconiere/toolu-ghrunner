@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - *(review)* handle malformed environment values
 - *(review)* tighten environment config diagnostics
 - *(review)* report malformed CLI environment
+
 ## [0.6.0] - 2026-08-07
 
 ### Added
