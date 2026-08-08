@@ -1,6 +1,4 @@
 //! Docker client wrapper (bollard).
-//!
-//! Populated in step 4b.
 
 /// The bollard Docker daemon client wrapper.
 pub mod client;
