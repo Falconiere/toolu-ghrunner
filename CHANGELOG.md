@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-08-08
+
+### Fixed
+- *(execution)* give node action stages the env-files contract
+- *(execution)* stop blocking async I/O and double-recorded outputs in file commands
+- *(execution)* offload file-command filesystem batches
+- *(execution)* clarify blocking task error flow
+
 ## [0.6.2] - 2026-08-08
 
 ### Fixed
