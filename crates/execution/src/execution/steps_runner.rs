@@ -15,7 +15,7 @@ use super::job_spec::JobSpec;
 use super::post_drain::drain_post_steps;
 use super::shadow::ShadowObserver;
 use super::shadow::record::StepKey;
-use super::step_env::{apply_file_commands, resolve_step_env};
+use super::step_env::{apply_file_commands_and_merge_outputs, resolve_step_env};
 use super::step_naming::derive_step_name;
 use super::step_timeout::StepBounds;
 
@@ -378,25 +378,16 @@ async fn run_and_dispatch_script(
 
 /// Merge a script step's stdout `set-output` outputs (already applied to `ctx`
 /// by the streaming dispatcher) with its `$GITHUB_OUTPUT` file-command outputs
-/// into one step-outputs map.
+/// into one step-outputs map. Thin wrapper over the shared
+/// [`apply_file_commands_and_merge_outputs`], which also applies the step's
+/// `$GITHUB_ENV`/`$GITHUB_PATH` file commands to `ctx`.
 fn merge_step_outputs(
   step: &ActionStep,
   stdout_outputs: HashMap<String, String>,
   file_cmds: &FileCommandManager,
   ctx: &mut ExecutionContext,
 ) -> HashMap<String, String> {
-  let mut outputs = apply_file_commands(file_cmds, ctx);
-  // Record `$GITHUB_OUTPUT` file-command outputs into the context too, so
-  // `${{ steps.<id>.outputs.* }}` (and job-level `outputs:`) can read them —
-  // `apply_file_commands` only returns the map, it doesn't record it.
-  for (key, value) in &outputs {
-    ctx.set_step_output(&step.id, key, value);
-  }
-  for (key, value) in stdout_outputs {
-    ctx.set_step_output(&step.id, &key, &value);
-    outputs.insert(key, value);
-  }
-  outputs
+  apply_file_commands_and_merge_outputs(&step.id, stdout_outputs, file_cmds, ctx)
 }
 
 /// Build the step's env map (global + step env + file-command paths + inherited
