@@ -42,6 +42,27 @@ want "keeps the stable-only guard"                             '\[\[ "\$\{GITHUB
 # Behavioural tier: run the real derivation.
 # ---------------------------------------------------------------------------
 
+# The extraction below is anchored on two lines. Assert each exists EXACTLY
+# once BEFORE extracting, rather than inferring it from the result: if the
+# `id: merge` anchor is dropped, awk's `seen` never trips and it would fall
+# through to whatever later step happens to carry a `run: |` block — a
+# non-empty extraction of the WRONG code, which every guard on the extracted
+# text (non-empty, contains a tags array) would happily accept. A duplicated
+# anchor is rejected for the same reason: awk would take the first match, and
+# which step that is stops being obvious.
+assert_anchor() {
+  local desc="$1" pat="$2" n
+  n="$(grep -c -- "$pat" "$WF")"
+  if [[ "$n" -ne 1 ]]; then
+    echo "FAIL: expected exactly 1 $desc anchor in $WF, found $n — workflow restructured?" >&2
+    echo "      the behavioural tier below cannot be trusted until this is re-anchored" >&2
+    exit 1
+  fi
+  echo "ok: $desc anchor present exactly once"
+}
+assert_anchor "step-id (extraction start)" '^        id: merge$'
+assert_anchor "refs=() (extraction cut)"   '^          refs=()$'
+
 # Pull the `merge` step's run block, dedented, up to the digest-collection
 # line. `sub` strips only the block's own 10-space indent, so the relative
 # indentation of the if/fi bodies survives.
@@ -52,8 +73,8 @@ derivation="$(awk '
   inrun                            { sub(/^          /, ""); print }
 ' "$WF")"
 
-# A restructured step that no longer matches the anchors yields an empty or
-# truncated extraction, which would make every case below pass vacuously.
+# Belt-and-braces on top of the anchor checks: the `run: |` line between them
+# could still move or change shape.
 if [[ -z "$derivation" ]]; then
   echo "FAIL: could not extract the merge step's run block — anchors changed?" >&2
   exit 1
