@@ -141,14 +141,29 @@ jobs:
           password: ${{ github.token }}
       - name: Create multi-arch manifest
         id: merge
-        # `latest` tracks stable tags only (a '-' marks a prerelease,
-        # matching release.yml's rule) — though consumers must pin by
-        # digest regardless.
+        # `latest` and the `vN` compat line track stable tags only (a '-'
+        # marks a prerelease, matching release.yml's rule) — though
+        # consumers must pin by digest regardless.
+        #
+        # `vN` follows the semver compatibility boundary, which is the
+        # MINOR while the major is 0 (0.6.x -> :v6, 0.7.x -> :v7) and the
+        # MAJOR from 1.0 on (1.x -> :v1). The number therefore resets once
+        # at 1.0.0 — :v1 is NEWER than :v7. That is deliberate; see
+        # docs/container-image.md.
         run: |
           image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${IMAGE_BASENAME}"
-          tags=(-t "${image}:${GITHUB_REF_NAME#v}")
+          version="${GITHUB_REF_NAME#v}"
+          tags=(-t "${image}:${version}")
           if [[ "${GITHUB_REF_NAME}" != *-* ]]; then
             tags+=(-t "${image}:latest")
+            major="${version%%.*}"
+            minor="${version#*.}"
+            minor="${minor%%.*}"
+            if [[ "${major}" == "0" ]]; then
+              tags+=(-t "${image}:v${minor}")
+            else
+              tags+=(-t "${image}:v${major}")
+            fi
           fi
           refs=()
           for d in /tmp/digests/*; do

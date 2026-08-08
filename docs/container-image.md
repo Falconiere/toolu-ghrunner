@@ -121,9 +121,9 @@ Publishing is tag-driven: pushing `vX.Y.Z` runs
 gates on fmt/clippy/tests, builds each arch on a native runner
 (`ubuntu-24.04` / `ubuntu-24.04-arm` — no QEMU Rust builds), pushes
 both legs by digest, merges them into one manifest at
-`ghcr.io/<owner>/toolu-ghrunner:<version>` (plus `:latest` for stable
-tags), and prints the **manifest-list digest** in the log and job
-summary:
+`ghcr.io/<owner>/toolu-ghrunner:<version>` (plus `:latest` and the
+`:vN` compat line for stable tags), and prints the **manifest-list
+digest** in the log and job summary:
 
 ```
 ghcr.io/<owner>/toolu-ghrunner@sha256:…
@@ -135,6 +135,29 @@ never a mutable tag — this container runs customer build code holding
 a live GitHub credential. PRs touching `Dockerfile`, `.dockerignore`,
 or the workflow build the image without pushing; `workflow_dispatch`
 does the same on demand.
+
+### Tag surface
+
+| Tag | Moves? | For |
+| --- | --- | --- |
+| `@sha256:…` | never | **Provider config.** The only ref that pins what runs. |
+| `X.Y.Z` | never in practice | A specific release — reproducing a run, bisecting. |
+| `vN` | on each stable release in the line | Humans: `docker run … :v6` to follow the current compat line. |
+| `latest` | on each stable release | Quick local smoke tests. Never a provider. |
+
+`vN` follows the semver **compatibility boundary**, which is not always
+the major: while the major is `0` the minor is what breaks, so `0.6.x`
+publishes `:v6` and `0.7.x` publishes `:v7`; from `1.0.0` on it is the
+major, so `1.x` publishes `:v1`.
+
+The number therefore **resets once at 1.0.0** — `:v1` is *newer* than
+`:v7`, and the `vN` series is not sortable across that boundary. Read
+`vN` as the name of a compatibility line, never as an ordering. If that
+ambiguity would bite a consumer, they should be on a digest anyway.
+
+Prereleases (`vX.Y.Z-rc.1`) get the exact-version tag only — never
+`latest`, never `vN`. A tag consumers follow must not move onto an
+unreleased build.
 
 One-time setup per registry namespace: flip the GHCR package to
 **public** (Fly cannot pull from private registries; alternatively
