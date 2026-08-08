@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-08-08
+
+### Changed
+- *(conventions)* align the workspace with toolu-conventions
+
+### Fixed
+- *(conventions)* close the review findings from the alignment pass
+- *(config)* stop an ambient GIT_DIR from steering repo inference
+- *(review)* handle malformed environment values
+- *(review)* tighten environment config diagnostics
+- *(review)* report malformed CLI environment
 ## [0.6.0] - 2026-08-07
 
 ### Added
