@@ -10,10 +10,11 @@ async fn run_blocking_file_io<T>(
 where
   T: Send + 'static,
 {
-  tokio::task::spawn_blocking(task)
-    .await
-    .map_err(|e| RunnerError::FileCommand(format!("{operation} task failed: {e}")))?
-    .map_err(RunnerError::Io)
+  Ok(
+    tokio::task::spawn_blocking(task)
+      .await
+      .map_err(|e| RunnerError::FileCommand(format!("{operation} task failed: {e}")))??,
+  )
 }
 
 /// Create the directory that owns per-step file-command files on the blocking
