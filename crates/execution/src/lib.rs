@@ -18,7 +18,7 @@ pub mod plugin;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use shared::{AgentJobRequestMessage, Conclusion, RunnerConfig, RunnerEvent};
+use shared::{AgentJobRequestMessage, Conclusion, LogStream, RunnerConfig, RunnerEvent};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -61,16 +61,29 @@ impl Runner {
 
     tokio::spawn(async move {
       // `err_tx` exists only to report a failed job after `run_job` has
-      // consumed the sender it was given.
+      // consumed the sender it was given. `job_id` is captured before the
+      // same move, since a `run_job` error drops `job` before returning.
       let err_tx = tx.clone();
+      let job_id = job.job_id.clone();
       let teardown =
         match crate::execution::job_runner::run_job(job, &config, cancel, tx, masker).await {
           Ok(teardown) => teardown,
           Err(err) => {
             tracing::error!(error = %err, "job execution failed");
+            // Surface the failure in the GitHub job log too — `tracing::error!`
+            // above only reaches the local diag log — before the completion
+            // event, and report the real job id so the run/step actually
+            // resolves out of "in_progress" on GitHub's side.
+            let _ = err_tx
+              .send(RunnerEvent::Log {
+                step_id: String::new(),
+                line: format!("##[error]{err}"),
+                stream: LogStream::Stdout,
+              })
+              .await;
             let _ = err_tx
               .send(RunnerEvent::JobCompleted {
-                job_id: String::new(),
+                job_id,
                 conclusion: Conclusion::Failure,
                 outputs: HashMap::new(),
               })

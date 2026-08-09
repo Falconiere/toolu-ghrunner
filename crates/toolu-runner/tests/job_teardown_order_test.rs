@@ -11,7 +11,8 @@
 //!    the event channel already closed, but with cache GC and the workspace
 //!    sweep provably not yet run — the test itself owns the sender that closes
 //!    the channel and decides when `finish` runs.
-//! 2. `Runner::execute_job` — the only test in the workspace that drives it —
+//! 2. `Runner::execute_job` — this is the ordering-focused half; see also
+//!    `execute_job_error_reporting_test.rs` for its failure-reporting path —
 //!    proves the restructured spawn still closes its channel (no deadlock) and
 //!    still runs the teardown afterwards. It deliberately does **not** assert
 //!    "GC has not run yet" at the instant the receiver yields `None`: there,
