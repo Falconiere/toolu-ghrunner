@@ -181,7 +181,27 @@ async fn run_single_step(
     .await;
 
   let bounds = StepBounds::new(step.timeout_in_minutes, job.cancel.clone());
-  let (outcome, outputs) = execute_step(step, ctx, events, job, job_state, &bounds).await?;
+  let (outcome, outputs) = match execute_step(step, ctx, events, job, job_state, &bounds).await {
+    Ok(result) => result,
+    Err(err) => {
+      // A hard error mid-step (e.g. action resolution failure) short-circuits
+      // before a `Conclusion` exists. Surface it on the step's OWN log stream
+      // and close out its `StepCompleted` before propagating: the listener's
+      // `forward_log_line` only forwards a `Log` to a step's uploader when
+      // `step_id` matches, and it flushes/removes that uploader on
+      // `StepCompleted` — a `Log` sent after would never reach GitHub, and the
+      // step would stay "in progress" forever without a `StepCompleted`.
+      emit_log(events, &step.id, &format!("##[error]{err}")).await;
+      let _ = events
+        .send(RunnerEvent::StepCompleted {
+          step_id: step.id.clone(),
+          conclusion: Conclusion::Failure,
+          outputs: HashMap::new(),
+        })
+        .await;
+      return Err(err);
+    },
+  };
   // `outcome` is the real result; `conclusion` is continue-on-error-adjusted.
   // Both are recorded so `steps.<id>.outcome` and `.conclusion` can differ.
   ctx.set_step_outcome(&step.id, outcome);
