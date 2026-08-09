@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-08-09
+
+### Fixed
+- *(execution)* parse continue-on-error on composite inner steps
+- *(execution)* surface composite inner-step errors on the parent step
+- *(execution)* record composite inner-step hard errors in the diag log
+
 ## [0.7.1] - 2026-08-09
 
 ### Fixed
