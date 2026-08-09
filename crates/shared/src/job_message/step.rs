@@ -166,7 +166,10 @@ pub struct ActionStepDefinitionReference {
   /// The repository type the action is sourced from (e.g. `"GitHub"`, `"Local"`).
   #[serde(default)]
   pub repository_type: Option<String>,
-  /// The local path to a composite/JS action, for local `uses: ./...` steps.
+  /// The subpath into the repo, for a `{owner}/{repo}/{path}@{ref}` remote
+  /// action reference (e.g. `"code-review"` when `name` is
+  /// `"owner/repo"`). Local `uses: ./...` steps carry the whole `./path`
+  /// in `name` instead and leave this `None`.
   #[serde(default)]
   pub path: Option<String>,
 }
