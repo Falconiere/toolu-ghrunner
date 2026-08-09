@@ -74,20 +74,31 @@ impl Runner {
             // above only reaches the local diag log — before the completion
             // event, and report the real job id so the run/step actually
             // resolves out of "in_progress" on GitHub's side.
-            let _ = err_tx
+            // These are the last-resort diagnostics for a dead job, so a
+            // closed channel is worth a warn rather than the crate's usual
+            // silent best-effort send.
+            if err_tx
               .send(RunnerEvent::Log {
                 step_id: String::new(),
                 line: format!("##[error]{err}"),
                 stream: LogStream::Stdout,
               })
-              .await;
-            let _ = err_tx
+              .await
+              .is_err()
+            {
+              tracing::warn!("event channel closed; job-failure log line was dropped");
+            }
+            if err_tx
               .send(RunnerEvent::JobCompleted {
                 job_id,
                 conclusion: Conclusion::Failure,
                 outputs: HashMap::new(),
               })
-              .await;
+              .await
+              .is_err()
+            {
+              tracing::warn!("event channel closed; job-failure completion event was dropped");
+            }
             return;
           },
         };

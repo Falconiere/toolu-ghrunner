@@ -52,12 +52,14 @@ fn accepts_valid_subpath() {
 /// Build a wire-shape reference with the fields GitHub actually sends: `name`
 /// ("owner/repo"), an optional `path` subpath, and `git_ref`.
 fn wire_reference(name: &str, path: Option<&str>, git_ref: &str) -> ActionStepDefinitionReference {
+  // `build_uses_ref` reads only `name`/`image`/`path`/`git_ref`; the other
+  // wire fields stay `None` so they can't read as inputs to the function.
   ActionStepDefinitionReference {
-    ref_type: Some("repository".to_owned()),
+    ref_type: None,
     image: None,
     name: Some(name.to_owned()),
     git_ref: Some(git_ref.to_owned()),
-    repository_type: Some("GitHub".to_owned()),
+    repository_type: None,
     path: path.map(ToOwned::to_owned),
   }
 }
