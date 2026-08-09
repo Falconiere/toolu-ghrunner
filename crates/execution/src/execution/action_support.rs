@@ -147,21 +147,26 @@ pub(super) fn read_manifest(action_dir: &Path) -> Result<ActionDefinition, Runne
   super::actions::manifest::parse_action_manifest(&content)
 }
 
+/// `log_step_id` is the id the emitted `Log` events carry — the real
+/// top-level GH step id for a nested composite `uses:` step (whose own
+/// synthetic id has no per-step uploader registered), otherwise `step.id`
+/// unchanged. `step` still supplies the `with:` inputs to print.
 pub(super) async fn emit_action_header(
+  log_step_id: &str,
   step: &ActionStep,
   uses_full: &str,
   events: &mpsc::Sender<RunnerEvent>,
 ) {
-  emit_log(events, &step.id, &format!("##[group]Run {uses_full}")).await;
-  emit_log(events, &step.id, &format!("  uses: {uses_full}")).await;
+  emit_log(events, log_step_id, &format!("##[group]Run {uses_full}")).await;
+  emit_log(events, log_step_id, &format!("  uses: {uses_full}")).await;
   let input_map = step.inputs.to_map();
   if !input_map.is_empty() {
-    emit_log(events, &step.id, "  with:").await;
+    emit_log(events, log_step_id, "  with:").await;
     for (k, v) in &input_map {
       let value = v
         .to_string_value()
         .map_or_else(|| "<unrenderable>".to_owned(), ToOwned::to_owned);
-      emit_log(events, &step.id, &format!("    {k}: {value}")).await;
+      emit_log(events, log_step_id, &format!("    {k}: {value}")).await;
     }
   }
 }

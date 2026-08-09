@@ -22,9 +22,18 @@ use super::depth_tracker::DepthTracker;
 
 /// Execute a composite action's steps sequentially.
 ///
+/// A hard error mid-inner-step (action resolution, manifest read, node
+/// runtime) does NOT abort the composite bare: it is reported via
+/// [`report_composite_step_error`] and folded into the same
+/// `continue-on-error` handling as a normal step failure, so a
+/// `continue-on-error: true` inner step survives it and a non-continue inner
+/// step ends the composite gracefully (`Ok(Conclusion::Failure)`), matching
+/// GitHub's semantics for a failed nested step.
+///
 /// # Errors
 ///
-/// Returns `RunnerError::StepExecution` on subprocess spawn failures.
+/// Returns `RunnerError` if the composite's temp dir cannot be created —
+/// setup failures outside any inner step's scope still propagate.
 pub async fn execute_composite_action(
   params: &CompositeParams<'_>,
   ctx: &mut ExecutionContext,
@@ -45,12 +54,18 @@ pub async fn execute_composite_action(
     let skip = should_skip_step(step);
 
     let conclusion = if step.uses.is_some() {
-      run_uses_step(&mut run, step, idx, depth, skip).await?
+      match run_uses_step(&mut run, step, idx, depth, skip).await {
+        Ok(c) => c,
+        Err(err) => report_composite_step_error(params.events, params.parent_step_id, &err).await,
+      }
     } else if let Some(script) = &step.run {
       if skip {
         continue;
       }
-      run_run_step(&mut run, step, idx, script).await?
+      match run_run_step(&mut run, step, idx, script).await {
+        Ok(c) => c,
+        Err(err) => report_composite_step_error(params.events, params.parent_step_id, &err).await,
+      }
     } else {
       continue;
     };
@@ -192,6 +207,7 @@ async fn run_uses_step(
     temp_dir: run.temp_dir,
     cancel: params.cancel,
     http: params.http,
+    parent_step_id: params.parent_step_id,
   };
   run_nested_uses_step(nested, skip).await
 }
@@ -214,6 +230,25 @@ fn merge_file_command_env(
     files.path.to_string_lossy().into_owned(),
   );
   env
+}
+
+/// Report a hard error that escaped an inner composite step (action
+/// resolution, manifest read, node runtime): these short-circuit before a
+/// `Conclusion` exists, unlike a subprocess/action exit that always yields
+/// one. The composite's own parent step is still `in_progress` on GitHub —
+/// no per-inner-step `StepCompleted` exists to close out (composite inner
+/// steps have no GH step of their own) — so this emits only the `##[error]`
+/// line, scoped to the parent step id, and returns `Failure` so the caller's
+/// existing `continue-on-error` check treats a hard error exactly like a
+/// normal step failure (surviving it when `continue-on-error: true`, ending
+/// the composite gracefully via `Ok` otherwise).
+async fn report_composite_step_error(
+  events: &mpsc::Sender<RunnerEvent>,
+  parent_step_id: &str,
+  err: &RunnerError,
+) -> Conclusion {
+  emit_log(events, parent_step_id, &format!("##[error]{err}")).await;
+  Conclusion::Failure
 }
 
 async fn emit_log(events: &mpsc::Sender<RunnerEvent>, step_id: &str, line: &str) {

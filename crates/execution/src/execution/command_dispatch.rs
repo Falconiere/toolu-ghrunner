@@ -39,6 +39,13 @@ pub enum LineDisposition {
 pub struct CommandDispatcher {
   masker: Arc<Mutex<SecretMasker>>,
   step_id: String,
+  /// The step id `Log`/`LogGroup`/`Annotation` events carry — equal to
+  /// `step_id` for every caller except a nested composite `uses:` step,
+  /// where it is the enclosing composite's parent step id instead (the
+  /// listener has no per-step uploader for the synthetic id nested `uses:`
+  /// steps carry). `step_id` alone still keys `ctx.set_step_output`/
+  /// `set_step_state` — output/state context bookkeeping is unaffected.
+  log_step_id: String,
   echo_on: bool,
   /// When `Some(token)`, command processing is suspended until a line
   /// exactly `::<token>::` is seen.
@@ -54,14 +61,16 @@ pub struct CommandDispatcher {
 }
 
 impl CommandDispatcher {
-  /// Create a dispatcher bound to a step id and the shared secret masker.
+  /// Create a dispatcher bound to a step id, the id its `Log`-family events
+  /// carry, and the shared secret masker.
   ///
   /// Pass `ctx.masker().clone()` so masks registered here propagate to the
   /// file sink and every other reader of the shared masker.
-  pub fn new(step_id: &str, masker: Arc<Mutex<SecretMasker>>) -> Self {
+  pub fn new(step_id: &str, log_step_id: &str, masker: Arc<Mutex<SecretMasker>>) -> Self {
     Self {
       masker,
       step_id: step_id.to_owned(),
+      log_step_id: log_step_id.to_owned(),
       echo_on: false,
       stop_token: None,
       group_depth: 0,
@@ -220,7 +229,7 @@ impl CommandDispatcher {
     self.group_depth = self.group_depth.saturating_add(1);
     let title = self.mask(&unescape_data(title));
     self.pending.push(RunnerEvent::LogGroup {
-      step_id: self.step_id.clone(),
+      step_id: self.log_step_id.clone(),
       title,
       open: true,
     });
@@ -229,7 +238,7 @@ impl CommandDispatcher {
   fn apply_endgroup(&mut self) {
     self.group_depth = self.group_depth.saturating_sub(1);
     self.pending.push(RunnerEvent::LogGroup {
-      step_id: self.step_id.clone(),
+      step_id: self.log_step_id.clone(),
       title: String::new(),
       open: false,
     });
@@ -247,7 +256,7 @@ impl CommandDispatcher {
     // `::notice::` must be redacted here at the single producer chokepoint.
     let message = self.mask(&unescape_data(message));
     self.pending.push(RunnerEvent::Annotation {
-      step_id: self.step_id.clone(),
+      step_id: self.log_step_id.clone(),
       level,
       message,
       file: file.map(|f| unescape_property(&f)),
@@ -257,7 +266,7 @@ impl CommandDispatcher {
 
   fn log_event(&self, line: String) -> RunnerEvent {
     RunnerEvent::Log {
-      step_id: self.step_id.clone(),
+      step_id: self.log_step_id.clone(),
       line,
       stream: shared::LogStream::Stdout,
     }
@@ -385,18 +394,22 @@ fn decode_property_escape(slice: &str) -> Option<char> {
 ///
 /// Raw lines arrive on `stdout_rx` as the handler reads them off the child, so
 /// a passthrough line is logged before the next is produced. Command lines are
-/// applied to `ctx` and consumed; `group`/annotation commands emit their
-/// (masked) events. Plain passthrough lines are re-emitted **unmasked** — the
-/// engine event stream is unmasked by design (see `Runner::execute_job`'s doc
-/// contract); every durable sink masks on its own before the line lands on
-/// disk or over the wire. Returns the `set-output` map for `StepCompleted`.
+/// applied to `ctx` (under `step_id`) and consumed; `group`/annotation
+/// commands emit their (masked) events under `log_step_id` instead — equal to
+/// `step_id` except for a nested composite `uses:` step, whose synthetic id
+/// has no per-step log uploader (see `CommandDispatcher`'s `log_step_id`
+/// field doc). Plain passthrough lines are re-emitted **unmasked** — the engine event
+/// stream is unmasked by design (see `Runner::execute_job`'s doc contract);
+/// every durable sink masks on its own before the line lands on disk or over
+/// the wire. Returns the `set-output` map for `StepCompleted`.
 pub async fn stream_dispatch_stdout(
   step_id: &str,
+  log_step_id: &str,
   stdout_rx: &mut mpsc::Receiver<String>,
   ctx: &mut ExecutionContext,
   events: &mpsc::Sender<RunnerEvent>,
 ) -> HashMap<String, String> {
-  let mut dispatcher = CommandDispatcher::new(step_id, Arc::clone(ctx.masker()));
+  let mut dispatcher = CommandDispatcher::new(step_id, log_step_id, Arc::clone(ctx.masker()));
   while let Some(line) = stdout_rx.recv().await {
     let disposition = dispatcher.on_stdout_line(&line, ctx);
     for event in dispatcher.take_events() {
@@ -405,7 +418,7 @@ pub async fn stream_dispatch_stdout(
     if let LineDisposition::PassThrough(text) = disposition {
       let _ = events
         .send(RunnerEvent::Log {
-          step_id: step_id.to_owned(),
+          step_id: log_step_id.to_owned(),
           line: text,
           stream: shared::LogStream::Stdout,
         })

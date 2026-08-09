@@ -38,6 +38,11 @@ pub(super) struct NodeStage<'a> {
   pub bounds: &'a StepBounds,
   /// `"pre"`, `"main"`, or `"post"`.
   pub stage: &'a str,
+  /// The step id `Log`/stdout/stderr events carry — `step.id` for a
+  /// top-level step, or the enclosing composite's parent step id for a
+  /// nested composite `uses:` step. `step.id` remains the key for
+  /// `steps.<id>.outputs`/state context bookkeeping regardless.
+  pub log_step_id: &'a str,
 }
 
 /// Resolve the stage's entrypoint to an existing on-disk script path.
@@ -108,7 +113,7 @@ pub(super) async fn run_node_stage(
     script_path: &script,
     env: &env,
     working_dir: s.workspace,
-    step_id: &s.step.id,
+    step_id: s.log_step_id,
     cgroup_path: cgroup.as_deref(),
     timeout: s.bounds.timeout,
     cancel: &s.bounds.cancel,
@@ -117,9 +122,11 @@ pub(super) async fn run_node_stage(
   // Stream the action's stdout through the dispatcher as it runs (realtime
   // `Log` events), mirroring the run-step path. `execute_node_action` owns the
   // only producer copy, so the dispatcher's `recv` closes when the child EOFs.
+  // `step_id` keys context bookkeeping (`steps.<id>.outputs`/state);
+  // `log_step_id` is only where the `Log`/group/annotation events land.
   let (stdout_tx, mut stdout_rx) = mpsc::channel::<String>(256);
   let exec = execute_node_action(&node_params, s.events, stdout_tx);
-  let dispatch = stream_dispatch_stdout(&s.step.id, &mut stdout_rx, s.ctx, s.events);
+  let dispatch = stream_dispatch_stdout(&s.step.id, s.log_step_id, &mut stdout_rx, s.ctx, s.events);
   let (output, stdout_outputs) = tokio::join!(exec, dispatch);
   let conclusion = output?.conclusion;
   let outputs =

@@ -48,6 +48,13 @@ pub struct NestedUsesParams<'a> {
   pub cancel: &'a CancellationToken,
   /// The job-scope HTTP client, reused for the nested action's resolution.
   pub http: &'a reqwest::Client,
+  /// The enclosing composite's own step id — the real top-level GH step id
+  /// its `##[group]`/log lines already land under. The nested step's action
+  /// header and stdout/stderr are routed here too: the listener only
+  /// registers a per-step log uploader for a real top-level step id, and the
+  /// synthetic id this nested step carries (`step.id` or
+  /// `__composite_uses_{idx}`) has none.
+  pub parent_step_id: &'a str,
 }
 
 /// Resolve and run a composite `uses:` step recursively.
@@ -96,6 +103,7 @@ pub async fn run_nested_uses_step(
     config: params.config,
     bounds: &bounds,
     http: params.http,
+    log_step_id: params.parent_step_id,
   };
   let outcome = Box::pin(super::action_exec::execute_action(
     &synthetic,
