@@ -235,7 +235,7 @@ struct RawCompositeStep {
   #[serde(rename = "if")]
   condition: Option<String>,
   uses: Option<String>,
-  #[serde(default)]
+  #[serde(default, rename = "continue-on-error")]
   continue_on_error: bool,
   #[serde(default)]
   with: HashMap<String, String>,

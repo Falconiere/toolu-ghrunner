@@ -107,6 +107,40 @@ runs:
   }
 }
 
+/// Pins the `continue-on-error` -> `continue_on_error` serde rename
+/// (`manifest.rs`'s `RawCompositeStep`): `serde_yaml` does not hyphen-convert
+/// field names on its own, so a missing `#[serde(rename = ...)]` silently
+/// left every composite inner step's `continue_on_error` at its `false`
+/// default regardless of the real YAML (production job 93275790191).
+#[test]
+fn parse_action_manifest_composite_step_continue_on_error_parses_true() {
+  let yaml = r"
+name: 'Continue On Error'
+description: 'One inner step tolerates failure'
+runs:
+  using: 'composite'
+  steps:
+    - name: tolerant step
+      shell: bash
+      continue-on-error: true
+      run: exit 1
+    - name: strict step
+      shell: bash
+      run: echo ok
+";
+  let def = manifest::parse_action_manifest(yaml).expect("parse");
+  let steps = def.runs.steps;
+  assert_eq!(steps.len(), 2);
+  assert!(
+    steps.first().expect("first step present").continue_on_error,
+    "continue-on-error: true must parse to continue_on_error == true"
+  );
+  assert!(
+    !steps.get(1).expect("second step present").continue_on_error,
+    "a step with no continue-on-error: must default to false"
+  );
+}
+
 #[test]
 fn parse_action_manifest_unsupported_using_returns_error() {
   let yaml = r"
