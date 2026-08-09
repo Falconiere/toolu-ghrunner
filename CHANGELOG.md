@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-08-09
+
+### Fixed
+- *(execution)* include reference.path when resolving remote action refs
+- *(execution)* surface job-fatal errors in the job log with the real job id
+- *(execution)* report a mid-step failure on the step's own log stream
+- *(execution)* warn when last-resort job-failure events are dropped
+- *(execution)* warn when a dead step's diagnostics are dropped
+
 ## [0.7.0] - 2026-08-08
 
 ### Added
