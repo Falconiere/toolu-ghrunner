@@ -2,7 +2,9 @@
 
 use std::path::Path;
 
-use shared::{ActionStep, Conclusion, RunnerConfig, RunnerError, RunnerEvent};
+use shared::{
+  ActionStep, ActionStepDefinitionReference, Conclusion, RunnerConfig, RunnerError, RunnerEvent,
+};
 use tokio::sync::mpsc;
 
 use super::action_support::{
@@ -87,6 +89,33 @@ pub(crate) async fn execute_action(
   dispatch_action(step, ctx, &env, &resolved, depth).await
 }
 
+/// Reassemble the `uses:` string GitHub reports as split wire fields —
+/// `name` ("owner/repo" or a local "./path"), `path` (the subpath of a
+/// `{owner}/{repo}/{path}@{ref}` remote reference, e.g. `"code-review"`),
+/// and `git_ref` — back into the single string `parse_action_ref` expects.
+///
+/// A missing or empty `path` reproduces the exact old `owner/repo@ref` (or
+/// `owner/repo` with no ref) form, so a subpath-less reference like
+/// `actions/checkout@v5` is unaffected. `pub` so integration tests can drive
+/// this exact reconstruction rather than a copy of it.
+pub fn build_uses_ref(reference: &ActionStepDefinitionReference) -> String {
+  let uses = reference
+    .name
+    .as_deref()
+    .or(reference.image.as_deref())
+    .unwrap_or("");
+  let with_path = match reference.path.as_deref() {
+    Some(path) if !path.is_empty() => format!("{uses}/{path}"),
+    _ => uses.to_owned(),
+  };
+  let git_ref = reference.git_ref.as_deref().unwrap_or("");
+  if git_ref.is_empty() {
+    with_path
+  } else {
+    format!("{with_path}@{git_ref}")
+  }
+}
+
 /// Resolve an action step to its on-disk directory + manifest.
 ///
 /// Remote actions are downloaded+cached; local `./path` actions resolve to a
@@ -106,18 +135,7 @@ async fn resolve_action(
   events: &mpsc::Sender<RunnerEvent>,
   client: &reqwest::Client,
 ) -> Result<ResolvedStep, RunnerError> {
-  let uses = step
-    .reference
-    .name
-    .as_deref()
-    .or(step.reference.image.as_deref())
-    .unwrap_or("");
-  let git_ref = step.reference.git_ref.as_deref().unwrap_or("");
-  let uses_full = if git_ref.is_empty() {
-    uses.to_owned()
-  } else {
-    format!("{uses}@{git_ref}")
-  };
+  let uses_full = build_uses_ref(&step.reference);
 
   let action_ref = parse_action_ref(&uses_full)?;
 
