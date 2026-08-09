@@ -101,12 +101,16 @@ pub(crate) async fn execute_action(
 pub fn build_uses_ref(reference: &ActionStepDefinitionReference) -> String {
   // The wire protocol always populates at least one of `name`/`image` for a
   // `uses:` step; the empty fallback only defends the type allowing both to
-  // be `None`, and `parse_action_ref` rejects the empty string downstream.
+  // be `None`, and `parse_action_ref` rejects the empty string downstream —
+  // the warn makes that invariant violation observable at its source.
   let uses = reference
     .name
     .as_deref()
     .or(reference.image.as_deref())
-    .unwrap_or("");
+    .unwrap_or_else(|| {
+      tracing::warn!("action reference carries neither name nor image; uses ref will be empty");
+      ""
+    });
   let with_path = match reference.path.as_deref() {
     Some(path) if !path.is_empty() => format!("{uses}/{path}"),
     _ => uses.to_owned(),

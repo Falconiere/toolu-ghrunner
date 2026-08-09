@@ -185,20 +185,8 @@ async fn run_single_step(
     Ok(result) => result,
     Err(err) => {
       // A hard error mid-step (e.g. action resolution failure) short-circuits
-      // before a `Conclusion` exists. Surface it on the step's OWN log stream
-      // and close out its `StepCompleted` before propagating: the listener's
-      // `forward_log_line` only forwards a `Log` to a step's uploader when
-      // `step_id` matches, and it flushes/removes that uploader on
-      // `StepCompleted` — a `Log` sent after would never reach GitHub, and the
-      // step would stay "in progress" forever without a `StepCompleted`.
-      emit_log(events, &step.id, &format!("##[error]{err}")).await;
-      let _ = events
-        .send(RunnerEvent::StepCompleted {
-          step_id: step.id.clone(),
-          conclusion: Conclusion::Failure,
-          outputs: HashMap::new(),
-        })
-        .await;
+      // before a `Conclusion` exists; close the step out before propagating.
+      report_step_failure(events, &step.id, &err).await;
       return Err(err);
     },
   };
@@ -486,6 +474,44 @@ fn apply_continue_on_error(
     ctx.record_step_failure();
   }
   outcome
+}
+
+/// Report a step that died mid-execution: its `##[error]` line, then a
+/// failing `StepCompleted`, in that order — the listener's `forward_log_line`
+/// only forwards a `Log` to the step's uploader while `step_id` matches, and
+/// it flushes/removes that uploader on `StepCompleted`, so a `Log` sent after
+/// would never reach GitHub. Direct sends rather than `emit_log`: these are
+/// the dead step's only diagnostics, so a closed channel is worth a warn —
+/// the job-fatal arm in `lib.rs` makes the same trade.
+async fn report_step_failure(events: &mpsc::Sender<RunnerEvent>, step_id: &str, err: &RunnerError) {
+  if events
+    .send(RunnerEvent::Log {
+      step_id: step_id.to_owned(),
+      line: format!("##[error]{err}"),
+      stream: LogStream::Stdout,
+    })
+    .await
+    .is_err()
+  {
+    tracing::warn!(
+      step_id,
+      "event channel closed; step-failure log line was dropped"
+    );
+  }
+  if events
+    .send(RunnerEvent::StepCompleted {
+      step_id: step_id.to_owned(),
+      conclusion: Conclusion::Failure,
+      outputs: HashMap::new(),
+    })
+    .await
+    .is_err()
+  {
+    tracing::warn!(
+      step_id,
+      "event channel closed; step-failure completion event was dropped"
+    );
+  }
 }
 
 async fn emit_log(events: &mpsc::Sender<RunnerEvent>, step_id: &str, line: &str) {
