@@ -247,6 +247,9 @@ async fn report_composite_step_error(
   parent_step_id: &str,
   err: &RunnerError,
 ) -> Conclusion {
+  // Also to the diag log/journal: the ##[error] line is the only durable
+  // sink otherwise, and the error's detail outlives the live stream here.
+  tracing::warn!(parent_step_id, error = %err, "composite inner step hard error");
   emit_log(events, parent_step_id, &format!("##[error]{err}")).await;
   Conclusion::Failure
 }
