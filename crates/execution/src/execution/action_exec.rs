@@ -99,6 +99,9 @@ pub(crate) async fn execute_action(
 /// `actions/checkout@v5` is unaffected. `pub` so integration tests can drive
 /// this exact reconstruction rather than a copy of it.
 pub fn build_uses_ref(reference: &ActionStepDefinitionReference) -> String {
+  // The wire protocol always populates at least one of `name`/`image` for a
+  // `uses:` step; the empty fallback only defends the type allowing both to
+  // be `None`, and `parse_action_ref` rejects the empty string downstream.
   let uses = reference
     .name
     .as_deref()
@@ -108,6 +111,7 @@ pub fn build_uses_ref(reference: &ActionStepDefinitionReference) -> String {
     Some(path) if !path.is_empty() => format!("{uses}/{path}"),
     _ => uses.to_owned(),
   };
+  // `git_ref` is optional on the wire — `None` means an unpinned reference.
   let git_ref = reference.git_ref.as_deref().unwrap_or("");
   if git_ref.is_empty() {
     with_path
