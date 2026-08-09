@@ -185,19 +185,20 @@ async fn mid_step_failure_reports_log_before_step_completed_before_job_completed
   let started_msg = format!("expected StepStarted for {step_id}; events={events:?}");
   let started_at = started_pos.expect(&started_msg);
 
-  // The exact `RunnerError::ActionManifest` Display shape, pinned so a format
-  // drift breaks the test. Only the path tail is asserted — canonicalization
-  // may rewrite the tempdir prefix, but never the trailing component.
-  let expected_prefix = "##[error]action manifest error: no action.yml or action.yaml in ";
+  // The exact line, pinned so any format drift breaks the test. Safe to
+  // assert whole: `ActionRef::local_dir` is a plain `base.join(rel)` — no
+  // canonicalization ever rewrites the tempdir path baked into the error.
+  let expected_line = format!(
+    "##[error]action manifest error: no action.yml or action.yaml in {}",
+    action_dir.display()
+  );
   let log_pos = events.iter().position(|e| {
-    if let RunnerEvent::Log {
-      step_id: sid, line, ..
-    } = e
-    {
-      sid == &step_id && line.starts_with(expected_prefix) && line.ends_with("broken-action")
-    } else {
-      false
-    }
+    matches!(
+      e,
+      RunnerEvent::Log {
+        step_id: sid, line, ..
+      } if sid == &step_id && line == &expected_line
+    )
   });
   let log_msg = format!("expected a ##[error] Log for step {step_id}; events={events:?}");
   let log_at = log_pos.expect(&log_msg);
