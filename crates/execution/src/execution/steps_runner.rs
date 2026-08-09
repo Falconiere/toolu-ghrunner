@@ -243,6 +243,7 @@ async fn execute_step(
       config: job.config,
       bounds,
       http: job.http,
+      log_step_id: &step.id,
     };
     let ActionOutcome {
       conclusion,
@@ -379,7 +380,7 @@ async fn run_and_dispatch_script(
   // its future completes (after EOF) the sender drops, so the dispatcher's
   // `recv` sees channel close and returns its `set-output` map.
   let exec = handler.execute(params, events, stdout_tx);
-  let dispatch = stream_dispatch_stdout(step_id, &mut stdout_rx, ctx, events);
+  let dispatch = stream_dispatch_stdout(step_id, step_id, &mut stdout_rx, ctx, events);
   let (exec_result, stdout_outputs) = tokio::join!(exec, dispatch);
   Ok((exec_result?.conclusion, stdout_outputs))
 }

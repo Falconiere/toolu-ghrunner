@@ -136,6 +136,11 @@ async fn run_post_node_stage(
     major: post.major,
     bounds,
     stage: "post",
+    // Post steps run entirely outside the composite scope they were
+    // registered in (drained at job end, LIFO), so there is no enclosing
+    // parent step id available here — unchanged from before this id was
+    // split, this stays `post.step.id` for every post step today.
+    log_step_id: &post.step.id,
   })
   .await?;
   Ok(conclusion)

@@ -37,6 +37,10 @@ struct ActionEnv<'a> {
   config: &'a RunnerConfig,
   bounds: &'a StepBounds,
   http: &'a reqwest::Client,
+  /// The step id `Log`/header/stdout events carry — `step.id` for a
+  /// top-level step, or the enclosing composite's parent step id for a
+  /// nested composite `uses:` step (see [`ActionRun::log_step_id`]).
+  log_step_id: &'a str,
 }
 
 /// Outcome of running an action step's `pre`+`main` stages.
@@ -63,6 +67,16 @@ pub(crate) struct ActionRun<'a> {
   pub(crate) bounds: &'a StepBounds,
   /// The job-scope HTTP client (120 s timeout), built once in `run_job`.
   pub(crate) http: &'a reqwest::Client,
+  /// The step id the action's header/stdout/stderr `Log` events carry.
+  /// A top-level `uses:` step passes its own `step.id` (unchanged
+  /// behavior); a nested composite `uses:` step passes the enclosing
+  /// composite's `parent_step_id` instead, because the listener only
+  /// registers a per-step log uploader for a REAL top-level step id — the
+  /// synthetic id composite `uses:` steps carry has none. `step.id` itself
+  /// is untouched and keeps addressing `steps.<id>.outputs`/state context
+  /// bookkeeping (`ctx.set_step_output`, `ctx.step_state`, ...); only which
+  /// id LOG events carry changes.
+  pub(crate) log_step_id: &'a str,
 }
 
 /// Execute an action step end-to-end: resolve -> download -> parse manifest ->
@@ -78,13 +92,14 @@ pub(crate) async fn execute_action(
   run: &ActionRun<'_>,
   depth: &mut DepthTracker,
 ) -> Result<ActionOutcome, RunnerError> {
-  let resolved = resolve_action(step, run.workspace, run.config, run.events, run.http).await?;
+  let resolved = resolve_action(step, run).await?;
   let env = ActionEnv {
     events: run.events,
     workspace: run.workspace,
     config: run.config,
     bounds: run.bounds,
     http: run.http,
+    log_step_id: run.log_step_id,
   };
   dispatch_action(step, ctx, &env, &resolved, depth).await
 }
@@ -127,66 +142,46 @@ pub fn build_uses_ref(reference: &ActionStepDefinitionReference) -> String {
 /// Resolve an action step to its on-disk directory + manifest.
 ///
 /// Remote actions are downloaded+cached; local `./path` actions resolve to a
-/// directory under `workspace` (the checked-out repo) with no network access.
-/// `client` is the job-scope HTTP client (120 s timeout, built once in
-/// `run_job`) reused for the tarball download and any node-runtime download —
-/// it is cloned into the returned [`ResolvedStep`] (an `Arc` bump under the
-/// hood, cheap).
+/// directory under `run.workspace` (the checked-out repo) with no network
+/// access. `run.http` is the job-scope HTTP client (120 s timeout, built once
+/// in `run_job`) reused for the tarball download and any node-runtime
+/// download — it is cloned into the returned [`ResolvedStep`] (an `Arc` bump
+/// under the hood, cheap). `run.log_step_id` is the id the resolution's
+/// header/download `Log` events carry (see [`ActionRun::log_step_id`]).
 ///
 /// # Errors
 ///
 /// Returns `RunnerError` on resolution, download, or manifest parse failure.
 async fn resolve_action(
   step: &ActionStep,
-  workspace: &Path,
-  config: &RunnerConfig,
-  events: &mpsc::Sender<RunnerEvent>,
-  client: &reqwest::Client,
+  run: &ActionRun<'_>,
 ) -> Result<ResolvedStep, RunnerError> {
   let uses_full = build_uses_ref(&step.reference);
 
   let action_ref = parse_action_ref(&uses_full)?;
 
   if action_ref.kind == ActionRefKind::Local {
-    return resolve_local_action(
-      step,
-      &action_ref,
-      &uses_full,
-      workspace,
-      events,
-      client.clone(),
-    )
-    .await;
+    return resolve_local_action(step, &action_ref, &uses_full, run).await;
   }
 
-  resolve_remote_action(
-    step,
-    &action_ref,
-    &uses_full,
-    config,
-    events,
-    client.clone(),
-  )
-  .await
+  resolve_remote_action(step, &action_ref, &uses_full, run).await
 }
 
-/// Resolve a local `./path` action to a directory under `workspace`.
+/// Resolve a local `./path` action to a directory under `run.workspace`.
 async fn resolve_local_action(
   step: &ActionStep,
   action_ref: &super::actions::resolver::ActionRef,
   uses_full: &str,
-  workspace: &Path,
-  events: &mpsc::Sender<RunnerEvent>,
-  client: reqwest::Client,
+  run: &ActionRun<'_>,
 ) -> Result<ResolvedStep, RunnerError> {
-  let action_dir = action_ref.local_dir(workspace).ok_or_else(|| {
+  let action_dir = action_ref.local_dir(run.workspace).ok_or_else(|| {
     RunnerError::ActionResolution(format!("invalid local action ref '{uses_full}'"))
   })?;
   let manifest = read_manifest(&action_dir)?;
-  emit_action_header(step, uses_full, events).await;
+  emit_action_header(run.log_step_id, step, uses_full, run.events).await;
 
   Ok(ResolvedStep {
-    client,
+    client: run.http.clone(),
     action_dir,
     manifest,
   })
@@ -197,25 +192,28 @@ async fn resolve_remote_action(
   step: &ActionStep,
   action_ref: &super::actions::resolver::ActionRef,
   uses_full: &str,
-  config: &RunnerConfig,
-  events: &mpsc::Sender<RunnerEvent>,
-  client: reqwest::Client,
+  run: &ActionRun<'_>,
 ) -> Result<ResolvedStep, RunnerError> {
   let cache_key = action_ref.cache_key();
-  let cache_dir = action_cache_dir(&config.data_dir, &cache_key);
+  let cache_dir = action_cache_dir(&run.config.data_dir, &cache_key);
 
   if !is_action_cached(&cache_dir) {
     let tarball_url = action_ref.tarball_url("https://api.github.com");
-    emit_log(events, &step.id, &format!("Downloading {uses_full}...")).await;
-    download_and_extract_action(&client, &tarball_url, None, &cache_dir).await?;
+    emit_log(
+      run.events,
+      run.log_step_id,
+      &format!("Downloading {uses_full}..."),
+    )
+    .await;
+    download_and_extract_action(run.http, &tarball_url, None, &cache_dir).await?;
   }
 
   let action_dir = resolve_action_dir(&cache_dir, action_ref.subpath.as_ref());
   let manifest = read_manifest(&action_dir)?;
-  emit_action_header(step, uses_full, events).await;
+  emit_action_header(run.log_step_id, step, uses_full, run.events).await;
 
   Ok(ResolvedStep {
-    client,
+    client: run.http.clone(),
     action_dir,
     manifest,
   })
@@ -247,6 +245,7 @@ async fn dispatch_action(
         manifest,
         major,
         bounds: env.bounds,
+        log_step_id: env.log_step_id,
       };
       run_node_action(node_ctx).await
     },
@@ -260,7 +259,12 @@ async fn dispatch_action(
     },
     RunsUsing::Docker => {
       // Fail the step, not the whole job (an `Err` would abort the step loop).
-      emit_log(env.events, &step.id, "  (docker actions not yet supported)").await;
+      emit_log(
+        env.events,
+        env.log_step_id,
+        "  (docker actions not yet supported)",
+      )
+      .await;
       Ok(ActionOutcome {
         conclusion: Conclusion::Failure,
         post: None,
@@ -310,14 +314,14 @@ async fn run_composite_inner(
   depth: &mut DepthTracker,
 ) -> Result<Conclusion, RunnerError> {
   let step_inputs = build_composite_inputs(step, &resolved.manifest);
-  emit_log(env.events, &step.id, "##[endgroup]").await;
+  emit_log(env.events, env.log_step_id, "##[endgroup]").await;
   let params = CompositeParams {
     manifest: &resolved.manifest,
     step_inputs: &step_inputs,
     events: env.events,
     workspace: env.workspace,
     config: env.config,
-    parent_step_id: &step.id,
+    parent_step_id: env.log_step_id,
     action_dir: &resolved.action_dir,
     cancel: &env.bounds.cancel,
     http: env.http,
@@ -344,6 +348,9 @@ struct NodeActionCtx<'a> {
   manifest: &'a ActionDefinition,
   major: u8,
   bounds: &'a StepBounds,
+  /// The step id this stage's `Log`/header/stdout/stderr events carry (see
+  /// [`ActionRun::log_step_id`]); `step.id` stays the context/output key.
+  log_step_id: &'a str,
 }
 
 /// Run a Node.js action: `pre` (if defined and `pre-if` holds) then `main`,
@@ -352,7 +359,7 @@ struct NodeActionCtx<'a> {
 async fn run_node_action(mut c: NodeActionCtx<'_>) -> Result<ActionOutcome, RunnerError> {
   run_node_pre_if_present(&mut c).await?;
 
-  emit_stage_endgroup(c.events, &c.step.id).await;
+  emit_stage_endgroup(c.events, c.log_step_id).await;
   // The `main` stage's stdout `::set-output::` values are surfaced on the
   // `StepCompleted` event (consistent with `ctx`).
   let (conclusion, outputs) = run_node_stage(c.stage("main")).await?;
@@ -378,8 +385,8 @@ async fn run_node_pre_if_present(c: &mut NodeActionCtx<'_>) -> Result<(), Runner
     return Ok(());
   }
 
-  emit_log(c.events, &c.step.id, "##[group]Pre Run").await;
-  emit_stage_endgroup(c.events, &c.step.id).await;
+  emit_log(c.events, c.log_step_id, "##[group]Pre Run").await;
+  emit_stage_endgroup(c.events, c.log_step_id).await;
   // A `pre` stage's outputs are recorded on `ctx` but not surfaced on the
   // step's `StepCompleted` (only `main` outputs are), so drop the map.
   let (_conclusion, _outputs) = run_node_stage(c.stage("pre")).await?;
@@ -414,6 +421,7 @@ impl NodeActionCtx<'_> {
       major: self.major,
       bounds: self.bounds,
       stage,
+      log_step_id: self.log_step_id,
     }
   }
 }

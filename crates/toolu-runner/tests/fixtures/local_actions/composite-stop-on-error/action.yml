@@ -1,0 +1,11 @@
+name: 'composite-stop-on-error'
+description: 'First inner step fails with no continue-on-error; the second inner step must not run.'
+runs:
+  using: 'composite'
+  steps:
+    - name: failing step
+      shell: bash
+      run: exit 1
+    - name: second step
+      shell: bash
+      run: echo "second-ran" >> "$MARKER_FILE"

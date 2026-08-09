@@ -17,7 +17,7 @@ use shared::{AnnotationLevel, RunnerEvent, SecretMasker};
 fn dispatch_one(line: &str) -> (ExecutionContext, Vec<String>) {
   let masker = Arc::new(Mutex::new(SecretMasker::new()));
   let mut ctx = ExecutionContext::with_masker(Arc::clone(&masker));
-  let mut d = CommandDispatcher::new("s1", masker);
+  let mut d = CommandDispatcher::new("s1", "s1", masker);
   d.on_stdout_line(line, &mut ctx);
   let warnings = d
     .take_events()
@@ -88,7 +88,7 @@ fn sibling_stdout_commands_still_apply() {
   // Only set-env/add-path are off — set-output must keep working with no warning.
   let masker = Arc::new(Mutex::new(SecretMasker::new()));
   let mut ctx = ExecutionContext::with_masker(Arc::clone(&masker));
-  let mut d = CommandDispatcher::new("s1", masker);
+  let mut d = CommandDispatcher::new("s1", "s1", masker);
 
   d.on_stdout_line("::set-output name=result::ok", &mut ctx);
 

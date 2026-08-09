@@ -1,0 +1,14 @@
+name: 'composite-uses-hard-error'
+description: >-
+  First inner step is a nested `uses:` pointing at a local action directory
+  with no action.yml/action.yaml (a hard ActionManifest error, not a script
+  exit code); continue-on-error lets the second inner step run anyway.
+runs:
+  using: 'composite'
+  steps:
+    - name: broken nested uses
+      uses: ./broken-no-manifest
+      continue-on-error: true
+    - name: second step
+      shell: bash
+      run: echo "second-ran" >> "$MARKER_FILE"
