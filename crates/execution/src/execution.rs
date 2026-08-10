@@ -56,8 +56,6 @@ pub mod service_lifecycle;
 /// Shadow-mode step observation (approach C): records only, never serves.
 pub mod shadow;
 mod step_env;
-/// Step host env/path helpers.
-pub mod step_host;
 mod step_naming;
 mod step_state;
 /// Bounded child-process wait shared by the script and node handlers.

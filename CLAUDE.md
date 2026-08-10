@@ -463,7 +463,7 @@ to that list requires proving the value is not a real credential.
   Azure append-blob; `backend` + `service` with `handlers` /
   `lifecycle`). `oidc/` (OIDC token server + claims). `context` (env,
   secrets, masking), `composite_*` (composite action scaffolding),
-  `step_env` / `step_host` / `step_naming` / `step_state` (step
+  `step_env` / `step_naming` / `step_state` (step
   helpers), `action_exec` / `action_support` (action invocation
   glue), `cgroup_join` (reserved), `command_parser`, `depth_tracker`,
   `file_commands`, `service_auth` / `service_lifecycle` (back

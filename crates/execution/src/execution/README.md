@@ -46,7 +46,6 @@ not part of it. Workflow YAML parsing/matrix/orchestration lives in the
 | `service_lifecycle.rs` | `ServiceHandle` | Generic start/shutdown lifecycle for a local axum HTTP service, plus shared 401/500 JSON responses and `Content-Range` parsing. |
 | `shadow.rs` | (mod decl) | Declares the `shadow` sub-module; see its own README. |
 | `step_env.rs` | `resolve_step_env` | Renders a step's `environment` template token to a string env map and applies file-command results back onto the context. |
-| `step_host.rs` | `StepHost` / `DirectHost` | Abstraction for where `run:` steps execute; `DirectHost` spawns a local process (moved into the per-job cgroup when set). |
 | `step_naming.rs` | `PostStep` / `PostStepQueue` | The registered-post-step record, its LIFO queue, and `derive_step_name` for step display names. |
 | `step_state.rs` | `StepState` | Per-step recorded outputs/state/outcome/conclusion, and `build_steps_context` for the `steps.*` expression context. |
 | `step_timeout.rs` | `wait_bounded` | Bounded child-process wait shared by the script and node handlers: races `timeout-minutes` against the job `CancellationToken`. |
