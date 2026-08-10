@@ -27,7 +27,7 @@ didn't ask for.
 `toolu-runner` speaks the same JIT listener protocol as GitHub's own
 runner — RSA key reconstruction → PS256 JWT → OAuth2 → broker session →
 long-poll → execute → report. It runs your real workflows: shell steps,
-Node.js actions, Docker actions, composite actions, reusable workflows,
+Node.js actions, composite actions, reusable workflows,
 matrices, `${{ }}` expressions, artifacts, cache, and OIDC.
 
 The nightly [`live`](.github/workflows/live.yml) workflow above is not a
@@ -35,11 +35,11 @@ mock. It dispatches a real job to a real `toolu-runner` on a real repo,
 every morning at 06:00 UTC.
 
 > [!WARNING]
-> **Pre-alpha (v0.1.0).** The live path is green nightly, but rough
-> edges remain: `remove` doesn't yet call GitHub's unregister API, and
-> there is no watchdog for network outages lasting more than 5 minutes
-> mid-job. See [docs/known-bugs.md](docs/known-bugs.md) before you point
-> this at anything you care about.
+> **Pre-1.0.** The live path is green nightly, but rough edges remain:
+> `uses: docker://` container actions fail as unsupported, and the
+> tool-cache/temp paths differ between `run:` steps and node-action
+> steps (B-004). See [docs/known-bugs.md](docs/known-bugs.md) before
+> you point this at anything you care about.
 
 ## Install
 
@@ -212,7 +212,7 @@ left orphaned.
 
 | | |
 |---|---|
-| **Steps** | `run:` shell, `uses:` Node.js actions (runtime auto-downloaded + cached), Docker actions, composite actions, plugins |
+| **Steps** | `run:` shell, `uses:` Node.js actions (runtime auto-downloaded + cached), composite actions, plugins — `uses: docker://` is not yet supported (the step fails with an explicit log line) |
 | **Workflows** | matrices, `needs:` job graphs, reusable workflows, `if:` conditions, `timeout-minutes`, `working-directory`, `defaults.run` |
 | **Expressions** | the full `${{ }}` engine — lexer, parser, evaluator, `hashFiles`, `fromJSON`/`toJSON`, `contains`, `startsWith`, … |
 | **Services** | artifacts, cache, and OIDC — forwarded to real GitHub by default, hosted locally in `offline` mode, or a local content-addressed cache accelerator in `accelerated` mode |
@@ -336,7 +336,7 @@ clock, a socket, or tokio.
 | Artifacts / OIDC | C# | `execution::{artifacts,oidc}` |
 | Content-addressed cache | C# | `cache` *(own crate)* |
 | Secret masking | C# | `shared::SecretMasker` + tracing layer |
-| Docker | C# | `execution::docker::client` *(bollard)* |
+| Docker | C# | `execution::docker::client` *(bollard; `uses: docker://` step dispatch not yet wired — such steps fail as unsupported)* |
 | Node.js auto-download | C# | `execution::node::runtime` |
 | Live job TUI | — | **`toolu-runner watch`** *(`observability::watch`)* |
 | Plugin system | — | **`execution::plugin::RunnerPlugin`** |

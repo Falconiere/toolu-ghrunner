@@ -1,6 +1,6 @@
 # toolu-runner Architecture
 
-**Date:** 2026-06-18 · **Status:** v0.1.0 · **Author:** toolu
+**Date:** 2026-06-18 · **Status:** maintained (v0.7.x) · **Author:** toolu
 
 This document is the architectural reference for `toolu-runner`. It
 mirrors the layout of the source tree and explains how the nine
@@ -1125,13 +1125,15 @@ The full failure-mode coverage lives in
 
 The full open-questions list is in the design spec at
 [docs/toolu/specs/2026-06-18-toolu-runner-standalone-design.md](toolu/specs/2026-06-18-toolu-runner-standalone-design.md#open-questions).
-The short version for v0.1.0:
+The short version (updated as items land):
 
-1. **GHES test instance.** Not available yet. Spec covers V1; live
-   GHES testing is blocked on access. Default: ship without
-   GHES live-tested in v1, mark in [known-bugs.md](known-bugs.md).
-2. **Homebrew tap.** Not yet. v1 uses `install.sh` + `cargo install`.
-   Homebrew tap is a v1.1 fast-follow.
+1. **GHES test instance.** The dispatch-gated harness now exists
+   (`.github/workflows/live-ghes.yml`; it skips without the
+   `TOOLU_RUNNER_LIVE_GHES_*` secrets). Live verification against a
+   real instance is still pending access; tracked in
+   [known-bugs.md](known-bugs.md).
+2. **Homebrew tap.** Shipped —
+   `brew install falconiere/tap/toolu-runner` (`release-homebrew.yml`).
 3. **Code signing on macOS.** Not signed in v1. Notarization in
    v1.1 if user demand warrants.
 4. **Telemetry opt-in.** OTel cut for v1. A `tracing-subscriber`
