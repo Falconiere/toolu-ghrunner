@@ -94,6 +94,14 @@ shared ──┬────────────┘               │
                                    listener ──► toolu-runner (bin)
 ```
 
+The arrows above are the edges BETWEEN library crates; the bin sits at
+the sink of every path and additionally depends on `shared`,
+`protocol`, `config`, `wire` and `observability` directly. `config` is
+drawn as a leaf because the bin is its only consumer — nothing in
+`execution` or `listener` may reach the registration layout, the lock
+or the token store, and the missing outgoing arrow is that rule, not an
+omission.
+
 `protocol` and `shared` have no internal deps. `observability` depends
 on `shared` only (its `journal` writer/reader need `tokio` for file
 I/O and `shared` for the event and `SecretMasker` types, nothing more).

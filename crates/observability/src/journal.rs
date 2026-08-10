@@ -1,7 +1,8 @@
-//! Per-job JSONL event journal: the local observability surface behind
-//! `toolu-runner watch`. `writer` sinks the listener's `ListenerEvent`
-//! stream to `<data_dir>/_diag/jobs/<ts>-<job_id>.jsonl`; `reader` replays
-//! and tails those files; `types` pins the on-disk line contract (v1).
+//! Per-job JSONL event journal: the local record of what a job did, written
+//! for whoever reads the files afterwards (there is no terminal UI in this
+//! crate). `writer` sinks the listener's `ListenerEvent` stream to
+//! `<data_dir>/_diag/jobs/<ts>-<job_id>.jsonl`; `reader` replays and tails
+//! those files; `types` pins the on-disk line contract (v1).
 
 /// Incremental replay/tail reader + jobs-dir scanner.
 pub mod reader;
