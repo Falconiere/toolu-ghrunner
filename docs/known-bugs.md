@@ -136,3 +136,152 @@ Tracking format: B-NNN — short title — severity — owner — status.
   parse the JIT config → RSA key reconstruction →
   PS256 JWT → OAuth2 exchange → write the real `auth_token`
   and base64 `jit_config` to `~/.toolu-runner/config.toml`.
+
+## B-004 — `RUNNER_TOOL_CACHE` / `RUNNER_TEMP` diverge between step kinds
+
+- **Severity:** Medium
+- **Owner:** TBD (execution maintainer)
+- **Status:** Resolved
+- **Resolution:** All writers now share one source:
+  `context::runner_temp_dir` / `runner_tool_cache_dir` (pub, beside
+  `set_runner_context`, which itself uses them) return `data_dir/_temp`
+  / `data_dir/_tool`; `action_support::apply_runner_paths` (node stages
+  at any nesting depth) and `composite_env::build_step_env` read them
+  back instead of joining their own `tmp` / `tool_cache` paths, and
+  `composite_exec` threads a dedicated `runner_temp` (distinct from the
+  composite's file-command backing dir, which deliberately stays
+  `data_dir/tmp`) into both composite interpolation sites — so
+  `${{ runner.temp }}` in a composite `run:` body or step `env:` now
+  equals the step's own `$RUNNER_TEMP`. Ordering: `set_runner_context`
+  runs during job context build (`job_runner.rs:601`), before any step,
+  creating both dirs 0700; a failed creation WARNs and degrades to the
+  old missing-dir behavior (`@actions/tool-cache` self-heals with
+  `mkdirP`), never worse than before. The units live in private
+  modules, so coverage drives public surfaces:
+  `crates/execution/tests/composite_runner_temp_test.rs` (a real bash
+  subprocess through `execute_composite_action`, pinning env ==
+  script-body interpolation == `env:`-value interpolation ==
+  `data_dir/_temp`), `crates/execution/tests/runner_paths_test.rs`
+  (pins the `_temp` / `_tool` literals; the wiring is structural via
+  the shared helpers), and the pre-existing `gh_compat_context.rs`
+  `${{ runner.tool_cache }}` pin. Existing `data_dir/tool_cache` trees
+  on live runners are orphaned — one cold re-download, accepted. Still
+  open by design, tracked here: the file-command backing dir remains
+  `data_dir/tmp` (internal, never env-exposed) and none of `_temp` /
+  `_tool` / `tmp` is GC'd.
+- **Trigger:** Any job that addresses `$RUNNER_TOOL_CACHE` /
+  `$RUNNER_TEMP` / `${{ runner.tool_cache }}` across the boundary
+  between `run:` steps and node-action stages (or composite inline
+  `run:` steps).
+- **Observed:** The job-level env (`context.rs::set_runner_context`,
+  `crates/execution/src/execution/context.rs:121-126,141-142`) sets
+  `RUNNER_TEMP=data_dir/_temp` and `RUNNER_TOOL_CACHE=data_dir/_tool`
+  (both created, 0700) — what top-level `run:` steps and the real
+  `${{ }}` evaluator see (pinned by
+  `crates/toolu-runner/tests/gh_compat_context.rs:90-91`). But every
+  node-action stage (`action_support.rs::apply_runner_paths`,
+  `crates/execution/src/execution/action_support.rs:66-83`, via
+  `build_node_env`) **overwrites** them with `data_dir/tmp` /
+  `data_dir/tool_cache` — and `tool_cache` is created by nothing and
+  pinned by no test. Composite inline `run:` steps get the wrong
+  `tmp` temp too (`composite_env.rs:84,120-122`; their tool_cache
+  correctly inherits `_tool`), and nested `uses:` steps re-enter
+  `action_exec::execute_action` (`composite_uses.rs:108-114`) so
+  inner node stages diverge identically at any depth. The two value
+  sets were born two days apart in different scaffolding passes
+  (`action_support.rs` in `3814f45`; `set_runner_context` in
+  `17eaa11`, resolving "Open Q6" only in `context.rs`) and have
+  never agreed at any commit. Adjacent inconsistencies: a top-level
+  `run:` step's own `$RUNNER_TEMP` (`_temp`) differs from the dir
+  backing its `$GITHUB_ENV`/`$GITHUB_OUTPUT` file commands (`tmp`,
+  `steps_runner.rs:413`), and none of `_temp` / `_tool` / `tmp` /
+  `tool_cache` is ever GC'd (`workspace_gc` sweeps `workspace_root`
+  children only) — unbounded growth on long-lived host-mode
+  registrations.
+  Ranked impact: (1) caching `${{ runner.tool_cache }}` with
+  `actions/cache` to persist `setup-*` installs saves/restores the
+  empty `_tool` tree forever — a silent, permanent cache-miss loop,
+  since `setup-node`/`-go`/`-java`/`-python` (node actions) really
+  install into `tool_cache`; (2) a `run:` step installing into
+  `$RUNNER_TOOL_CACHE` is invisible to a later node action's
+  tool-cache `find()` (miss → re-download; breaks airgapped setups);
+  (3) `run:` steps enumerating `$RUNNER_TOOL_CACHE` after a
+  `setup-*` action see an empty dir (PATH-based "install then invoke
+  by name" is unaffected — `core.addPath` works since `aa8a5ca`);
+  (4) two cache trees accumulate on disk.
+- **Expected:** One value per variable for the whole job, as in
+  upstream `actions/runner` (underscore-prefixed `_tool` / `_temp`).
+  The fix converges `action_support.rs::apply_runner_paths` and
+  `composite_env.rs` on the `context.rs` values — not the reverse:
+  `_tool`/`_temp` are the majority value today, the only side that
+  is disk-real (pre-created 0700) and test-pinned, and the upstream
+  naming. Existing `data_dir/tool_cache` trees on live runners are
+  orphaned by the change (acceptable: one cold re-download).
+- **Reproduce:** Job with `actions/setup-node@v4` followed by
+  `run: ls -la "$RUNNER_TOOL_CACHE"` — the run step lists an empty
+  `data_dir/_tool` while the node install landed in
+  `data_dir/tool_cache`.
+
+## B-005 — Composite interpolator resolves real `runner.*` fields to `""`
+
+- **Severity:** Medium
+- **Owner:** TBD (execution maintainer)
+- **Status:** Resolved
+- **Resolution:** `resolve_runner` no longer hand-implements a second,
+  independently-maintained copy of the `runner.*` values — it now takes
+  `ctx: &ExecutionContext` (replacing the bare `temp_dir: &Path` it used to
+  thread through) and answers every key via a new
+  `ExecutionContext::runner_value(key) -> Option<&str>` accessor
+  (`context.rs`, mirroring the existing `github_context` accessor), which
+  reads the SAME `runner_context` map `set_runner_context` populates
+  (`os`/`arch`/`name`/`temp`/`tool_cache`, plus `debug` when step-debug is
+  on) and `eval_context()` hands to the real evaluator. Sourcing this way
+  means every field composite interpolation answers is structurally the
+  same value the real evaluator answers — there is no second place a future
+  field could be added to one and not the other. An absent key (a
+  genuinely unknown field, or `debug` when step-debug is off) still
+  resolves to `""`, unchanged upstream semantics. Threading: all three
+  interpolation call sites (`composite_exec::run_run_step`,
+  `composite_env::build_step_env`, `composite_uses::build_nested_step` /
+  `build_inputs_token`) already had an `ExecutionContext` reference in
+  scope, so no new struct was needed — the dedicated `runner_temp: &Path`
+  field B-004 had threaded through `CompositeRun` and
+  `NestedUsesParams` purely to reach these interpolation call sites became
+  redundant and was removed (the `env:`-var-setting uses of
+  `runner_temp_dir`/`runner_tool_cache_dir` from B-004 are untouched).
+  `crates/execution/tests/composite_runner_context_test.rs` pins
+  `${{ runner.tool_cache }}` at both the `run:` body and step `env:` sites
+  to `data_dir/_tool`, pins `os`/`arch`/`name` to the same source
+  `set_runner_context` uses, and pins a genuinely unknown field
+  (`runner.bogus`) to `""`; `composite_runner_temp_test.rs` (B-004) now
+  also calls `set_runner_context` before running its probe composite,
+  mirroring real job-start sequencing now that interpolation reads
+  through it rather than an independently-computed path.
+- **Trigger:** A composite action using `${{ runner.tool_cache }}`
+  (or any `runner.*` field other than `os` / `arch` / `temp`) in an
+  inline `run:` body, a step `env:` value, or a nested `uses:`
+  `with:` value.
+- **Observed:** Composite steps do not route these fields through the
+  real `expressions` evaluator — the hand-rolled
+  `composite_expr.rs::resolve_runner`
+  (`crates/execution/src/execution/composite_expr.rs:81-88`)
+  implements only `os`, `arch`, and `temp`, and maps every other
+  field to `String::new()`. `"${{ runner.tool_cache }}/x"`
+  interpolates to `"/x"` — a root-relative path, which the boot
+  container (running as root) will happily create at `/`. The real
+  evaluator answers `data_dir/_tool` for the same expression one
+  stack frame up (`gh_compat_context.rs:91`), so the same YAML line
+  changes meaning depending on whether it appears in a workflow file
+  or inside a composite action. (Upstream expression semantics do
+  yield `""` for genuinely unknown properties; the bug is that
+  documented, populated fields — `tool_cache` foremost — are treated
+  as unknown here.)
+- **Expected:** Composite interpolation answers the documented
+  `runner.*` fields identically to the real evaluator — either by
+  adding the missing arms sourced from the same values
+  `set_runner_context` establishes, or by routing composite
+  interpolation through the `expressions` crate. Fixing B-004 first
+  settles which path `tool_cache` must report.
+- **Reproduce:** Composite action step
+  `run: echo "[${{ runner.tool_cache }}]"` prints `[]`; the same
+  line in a workflow `run:` step prints `[<data_dir>/_tool]`.

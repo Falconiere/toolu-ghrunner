@@ -1,11 +1,14 @@
 use regex::Regex;
 
+use super::context::ExecutionContext;
+
 /// Interpolate `${{ ... }}` expressions in a composite step string.
 ///
 /// Supported expressions:
 /// - `inputs.NAME` — from the action's resolved inputs
 /// - `steps.ID.outputs.KEY` — from previously completed composite steps
-/// - `runner.os` / `runner.arch` / `runner.temp`
+/// - `runner.*` — read back from `ctx`, same as the real evaluator (B-005);
+///   see [`resolve_runner`] for the exact semantics
 /// - `env.NAME` — from the current environment context
 /// - Anything else resolves to an empty string.
 pub fn interpolate_composite_expr<S: ::std::hash::BuildHasher>(
@@ -13,7 +16,7 @@ pub fn interpolate_composite_expr<S: ::std::hash::BuildHasher>(
   inputs: &std::collections::HashMap<String, String, S>,
   step_outputs: &std::collections::HashMap<String, std::collections::HashMap<String, String, S>, S>,
   env_context: &std::collections::HashMap<String, String, S>,
-  temp_dir: &std::path::Path,
+  ctx: &ExecutionContext,
 ) -> String {
   let Ok(re) = Regex::new(r"\$\{\{\s*(.*?)\s*\}\}") else {
     return text.to_owned();
@@ -21,7 +24,7 @@ pub fn interpolate_composite_expr<S: ::std::hash::BuildHasher>(
 
   re.replace_all(text, |caps: &regex::Captures<'_>| {
     let expr = caps.get(1).map(|m| m.as_str()).unwrap_or_default();
-    resolve_expr(expr, inputs, step_outputs, env_context, temp_dir)
+    resolve_expr(expr, inputs, step_outputs, env_context, ctx)
   })
   .into_owned()
 }
@@ -31,14 +34,14 @@ fn resolve_expr<S: ::std::hash::BuildHasher>(
   inputs: &std::collections::HashMap<String, String, S>,
   step_outputs: &std::collections::HashMap<String, std::collections::HashMap<String, String, S>, S>,
   env_context: &std::collections::HashMap<String, String, S>,
-  temp_dir: &std::path::Path,
+  ctx: &ExecutionContext,
 ) -> String {
   let parts: Vec<&str> = expr.split('.').collect();
 
   match parts.first().copied() {
     Some("inputs") => resolve_input(&parts, inputs),
     Some("steps") => resolve_step_output(&parts, step_outputs),
-    Some("runner") => resolve_runner(&parts, temp_dir),
+    Some("runner") => resolve_runner(&parts, ctx),
     Some("env") => resolve_env(&parts, env_context),
     _ => String::new(),
   }
@@ -78,13 +81,13 @@ fn resolve_step_output<S: ::std::hash::BuildHasher>(
   String::new()
 }
 
-fn resolve_runner(parts: &[&str], temp_dir: &std::path::Path) -> String {
-  match parts.get(1).copied() {
-    Some("os") => detect_os().to_owned(),
-    Some("arch") => detect_arch().to_owned(),
-    Some("temp") => temp_dir.to_string_lossy().into_owned(),
-    _ => String::new(),
-  }
+/// Resolve `runner.<field>` by reading back [`ExecutionContext::runner_value`]
+/// — the single source [`ExecutionContext::set_runner_context`] establishes
+/// and the real evaluator's `runner.*` also reads (B-005). An absent key
+/// (unknown field, or `debug` when step-debug is off) resolves to `""`.
+fn resolve_runner(parts: &[&str], ctx: &ExecutionContext) -> String {
+  let key = parts.get(1).copied().unwrap_or_default();
+  ctx.runner_value(key).unwrap_or_default().to_owned()
 }
 
 fn resolve_env<S: ::std::hash::BuildHasher>(
@@ -93,22 +96,4 @@ fn resolve_env<S: ::std::hash::BuildHasher>(
 ) -> String {
   let key = parts.get(1).copied().unwrap_or_default();
   env_context.get(key).cloned().unwrap_or_default()
-}
-
-fn detect_os() -> &'static str {
-  if cfg!(target_os = "macos") {
-    "macOS"
-  } else if cfg!(target_os = "windows") {
-    "Windows"
-  } else {
-    "Linux"
-  }
-}
-
-fn detect_arch() -> &'static str {
-  if cfg!(target_arch = "aarch64") {
-    "ARM64"
-  } else {
-    "X64"
-  }
 }

@@ -8,7 +8,7 @@ use shared::{ActionStep, LogStream, RunnerConfig, RunnerError, RunnerEvent};
 use tokio::sync::mpsc;
 
 use super::actions::manifest::ActionDefinition;
-use super::context::ExecutionContext;
+use super::context::{ExecutionContext, runner_temp_dir, runner_tool_cache_dir};
 use super::handlers::node::build_action_env;
 
 /// Build the env map for a Node.js action stage (inputs, `STATE_*`, paths).
@@ -63,6 +63,11 @@ fn collect_step_inputs(step: &ActionStep) -> HashMap<String, String> {
 }
 
 /// Inject `GITHUB_WORKSPACE` / `RUNNER_TEMP` / `RUNNER_TOOL_CACHE`.
+///
+/// `RUNNER_TEMP`/`RUNNER_TOOL_CACHE` are `runner_temp_dir`/
+/// `runner_tool_cache_dir` — the same `data_dir/_temp` /`data_dir/_tool`
+/// paths `set_runner_context` establishes for the job, so a node-action
+/// stage never diverges from a top-level `run:` step's env (B-004).
 fn apply_runner_paths(env: &mut HashMap<String, String>, workspace: &Path, config: &RunnerConfig) {
   env.insert(
     "GITHUB_WORKSPACE".to_owned(),
@@ -70,13 +75,13 @@ fn apply_runner_paths(env: &mut HashMap<String, String>, workspace: &Path, confi
   );
   env.insert(
     "RUNNER_TEMP".to_owned(),
-    config.data_dir.join("tmp").to_string_lossy().into_owned(),
+    runner_temp_dir(&config.data_dir)
+      .to_string_lossy()
+      .into_owned(),
   );
   env.insert(
     "RUNNER_TOOL_CACHE".to_owned(),
-    config
-      .data_dir
-      .join("tool_cache")
+    runner_tool_cache_dir(&config.data_dir)
       .to_string_lossy()
       .into_owned(),
   );

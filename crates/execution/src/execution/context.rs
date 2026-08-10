@@ -118,8 +118,8 @@ impl ExecutionContext {
     name: &str,
     data_dir: &std::path::Path,
   ) -> Result<(), RunnerError> {
-    let temp = data_dir.join("_temp");
-    let tool_cache = data_dir.join("_tool");
+    let temp = runner_temp_dir(data_dir);
+    let tool_cache = runner_tool_cache_dir(data_dir);
     std::fs::create_dir_all(&temp)?;
     std::fs::create_dir_all(&tool_cache)?;
     restrict_dir_permissions(&temp)?;
@@ -190,6 +190,24 @@ pub(crate) fn restrict_dir_permissions(dir: &std::path::Path) -> std::io::Result
   Ok(())
 }
 
+/// Per-job `RUNNER_TEMP` directory: `data_dir/_temp`. The single source for
+/// every step kind's `RUNNER_TEMP` env value and `${{ runner.temp }}`
+/// interpolation (B-004) — [`ExecutionContext::set_runner_context`] creates
+/// it (0700) at job start, before any step runs; `action_support` and
+/// `composite_env`/`composite_exec` read it back instead of computing their
+/// own path so no step kind can diverge from the job-level value.
+pub fn runner_temp_dir(data_dir: &std::path::Path) -> std::path::PathBuf {
+  data_dir.join("_temp")
+}
+
+/// Per-job `RUNNER_TOOL_CACHE` directory: `data_dir/_tool`. The single
+/// source for every step kind's `RUNNER_TOOL_CACHE` env value — see
+/// [`runner_temp_dir`] for the companion `RUNNER_TEMP` value and the same
+/// B-004 rationale.
+pub fn runner_tool_cache_dir(data_dir: &std::path::Path) -> std::path::PathBuf {
+  data_dir.join("_tool")
+}
+
 /// Context snapshot + expression evaluation + env accessors.
 impl ExecutionContext {
   /// Get a string value from the github context.
@@ -203,6 +221,22 @@ impl ExecutionContext {
   /// Get a typed value from the github context.
   pub fn github_context_value(&self, key: &str) -> Option<&ExprValue> {
     self.github.get(key)
+  }
+
+  /// Get a string value from the runner context (`runner.*`) by key — the
+  /// exact map [`Self::set_runner_context`] populates (via the private
+  /// `set_runner_value`) and [`Self::eval_context`] hands to the real
+  /// `${{ }}` evaluator. Composite-action interpolation
+  /// (`composite_expr::resolve_runner`) reads back through this accessor
+  /// instead of a second hand-rolled copy, so it cannot diverge from the
+  /// real evaluator's `runner.*` answers (B-005). `None` for a field the
+  /// context does not carry — a genuinely unknown field, or `debug` when
+  /// step-debug is off.
+  pub fn runner_value(&self, key: &str) -> Option<&str> {
+    match self.runner_context.get(key) {
+      Some(ExprValue::String(s)) => Some(s.as_str()),
+      _ => None,
+    }
   }
 
   /// Build an `EvalContext` snapshot for the expression evaluator.

@@ -42,8 +42,6 @@ pub struct NestedUsesParams<'a> {
   pub config: &'a RunnerConfig,
   /// Shared depth tracker bounding composite recursion.
   pub depth: &'a mut DepthTracker,
-  /// Temp dir for `${{ runner.temp }}` expansion in `with:` values.
-  pub temp_dir: &'a Path,
   /// Job-level cancellation token; nested actions must stop on SIGINT/SIGTERM.
   pub cancel: &'a CancellationToken,
   /// The job-scope HTTP client, reused for the nested action's resolution.
@@ -84,7 +82,7 @@ pub async fn run_nested_uses_step(
     uses,
     params.inputs,
     params.step_outputs,
-    params.temp_dir,
+    params.ctx,
   )?;
 
   // Per-step `env` is applied to the live context for the nested action's run.
@@ -132,7 +130,7 @@ fn build_nested_step(
   uses: &str,
   inputs: &HashMap<String, String>,
   step_outputs: &HashMap<String, HashMap<String, String>>,
-  temp_dir: &Path,
+  ctx: &ExecutionContext,
 ) -> Result<ActionStep, RunnerError> {
   let id = step
     .id
@@ -142,7 +140,7 @@ fn build_nested_step(
   let action_ref = super::actions::resolver::parse_action_ref(uses)?;
   let (name, git_ref) = nested_ref_parts(&action_ref);
 
-  let inputs_token = build_inputs_token(&step.with, inputs, step_outputs, temp_dir);
+  let inputs_token = build_inputs_token(&step.with, inputs, step_outputs, ctx);
 
   Ok(ActionStep {
     id,
@@ -189,7 +187,7 @@ fn build_inputs_token(
   with: &HashMap<String, String>,
   inputs: &HashMap<String, String>,
   step_outputs: &HashMap<String, HashMap<String, String>>,
-  temp_dir: &Path,
+  ctx: &ExecutionContext,
 ) -> TemplateToken {
   let entries: Vec<DictEntry<TemplateToken>> = with
     .iter()
@@ -199,7 +197,7 @@ fn build_inputs_token(
         inputs,
         step_outputs,
         &HashMap::new(),
-        temp_dir,
+        ctx,
       );
       DictEntry {
         key: literal_token(k),

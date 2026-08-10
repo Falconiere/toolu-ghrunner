@@ -10,7 +10,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::actions::manifest::{ActionDefinition, CompositeStep};
 use super::composite_expr::interpolate_composite_expr;
-use super::context::ExecutionContext;
+use super::context::{ExecutionContext, runner_temp_dir};
 use super::file_commands::{parse_env_file, parse_output_file, parse_path_file, strip_blocked_env};
 use super::handlers::node::input_env_key;
 
@@ -74,6 +74,13 @@ pub(super) fn should_skip_step(step: &CompositeStep) -> bool {
 
 /// Build the environment for a composite `run:` step: inherited job env plus
 /// the step's own `env`, accumulated path additions, and runner paths.
+///
+/// `temp_dir` (the `RUNNER_TEMP` value below) is `runner_temp_dir` — the
+/// same `data_dir/_temp` `set_runner_context` establishes for the job, so a
+/// composite inline `run:` step never diverges from a top-level step's env
+/// (B-004). The step's own `env:` values interpolate `${{ runner.* }}`
+/// (incl. `runner.temp`) straight from `ctx` (B-005), so that source can't
+/// drift from this env value either.
 pub(super) fn build_step_env(
   params: &CompositeParams<'_>,
   ctx: &ExecutionContext,
@@ -81,7 +88,7 @@ pub(super) fn build_step_env(
   extra_env: &HashMap<String, String>,
   path_additions: &[String],
 ) -> HashMap<String, String> {
-  let temp_dir = params.config.data_dir.join("tmp");
+  let temp_dir = runner_temp_dir(&params.config.data_dir);
   let mut env = ctx.build_step_env(&HashMap::new());
 
   // Inherit system env for PATH, HOME, etc., but strip the runner's private
@@ -106,7 +113,7 @@ pub(super) fn build_step_env(
   // Step-level env (interpolated)
   for (k, v) in &step.env {
     let interpolated =
-      interpolate_composite_expr(v, params.step_inputs, &HashMap::new(), &env, &temp_dir);
+      interpolate_composite_expr(v, params.step_inputs, &HashMap::new(), &env, ctx);
     env.insert(k.clone(), interpolated);
   }
 

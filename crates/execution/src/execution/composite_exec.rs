@@ -22,18 +22,13 @@ use super::depth_tracker::DepthTracker;
 
 /// Execute a composite action's steps sequentially.
 ///
-/// A hard error mid-inner-step (action resolution, manifest read, node
-/// runtime) does NOT abort the composite bare: it is reported via
-/// [`report_composite_step_error`] and folded into the same
-/// `continue-on-error` handling as a normal step failure, so a
-/// `continue-on-error: true` inner step survives it and a non-continue inner
-/// step ends the composite gracefully (`Ok(Conclusion::Failure)`), matching
-/// GitHub's semantics for a failed nested step.
+/// A hard error mid-inner-step is reported via [`report_composite_step_error`]
+/// and folded into the same `continue-on-error` handling as a step failure,
+/// matching GitHub's semantics for a failed nested step (see that fn's docs).
 ///
 /// # Errors
 ///
-/// Returns `RunnerError` if the composite's temp dir cannot be created —
-/// setup failures outside any inner step's scope still propagate.
+/// Returns `RunnerError` if the composite's temp dir cannot be created.
 pub async fn execute_composite_action(
   params: &CompositeParams<'_>,
   ctx: &mut ExecutionContext,
@@ -51,22 +46,7 @@ pub async fn execute_composite_action(
   };
 
   for (idx, step) in params.manifest.runs.steps.iter().enumerate() {
-    let skip = should_skip_step(step);
-
-    let conclusion = if step.uses.is_some() {
-      match run_uses_step(&mut run, step, idx, depth, skip).await {
-        Ok(c) => c,
-        Err(err) => report_composite_step_error(params.events, params.parent_step_id, &err).await,
-      }
-    } else if let Some(script) = &step.run {
-      if skip {
-        continue;
-      }
-      match run_run_step(&mut run, step, idx, script).await {
-        Ok(c) => c,
-        Err(err) => report_composite_step_error(params.events, params.parent_step_id, &err).await,
-      }
-    } else {
+    let Some(conclusion) = run_one_step(&mut run, step, idx, depth).await else {
       continue;
     };
 
@@ -83,8 +63,48 @@ pub async fn execute_composite_action(
   Ok(state.into_result(Conclusion::Success))
 }
 
+/// Dispatch one composite step (`uses:` or `run:`) and return its
+/// conclusion; `None` when `if:` skips it or it is neither kind.
+async fn run_one_step(
+  run: &mut CompositeRun<'_>,
+  step: &super::actions::manifest::CompositeStep,
+  idx: usize,
+  depth: &mut DepthTracker,
+) -> Option<Conclusion> {
+  let skip = should_skip_step(step);
+  let params = run.params;
+
+  if step.uses.is_some() {
+    match run_uses_step(run, step, idx, depth, skip).await {
+      Ok(c) => Some(c),
+      Err(err) => {
+        Some(report_composite_step_error(params.events, params.parent_step_id, &err).await)
+      },
+    }
+  } else if let Some(script) = &step.run {
+    if skip {
+      return None;
+    }
+    match run_run_step(run, step, idx, script).await {
+      Ok(c) => Some(c),
+      Err(err) => {
+        Some(report_composite_step_error(params.events, params.parent_step_id, &err).await)
+      },
+    }
+  } else {
+    None
+  }
+}
+
 /// Mutable working set for one composite action's step loop: the read-only
-/// bundle, the live context, the temp dir, and the cross-step state.
+/// bundle, the live context, the file-command temp dir, and the cross-step
+/// state.
+///
+/// `temp_dir` (`data_dir/tmp`) only backs the `$GITHUB_OUTPUT`/`ENV`/`PATH`
+/// file commands — distinct from `$RUNNER_TEMP` / `${{ runner.temp }}`,
+/// which both `composite_env.rs` (env) and `composite_expr.rs` via `ctx`
+/// (interpolation) source from `set_runner_context`'s `data_dir/_temp`
+/// instead (B-004, B-005).
 struct CompositeRun<'a> {
   params: &'a CompositeParams<'a>,
   ctx: &'a mut ExecutionContext,
@@ -144,7 +164,7 @@ async fn run_run_step(
     params.step_inputs,
     &run.state.step_outputs,
     &env,
-    run.temp_dir,
+    run.ctx,
   );
   let conclusion = run_step_shell(params, run.ctx, step, &interpolated, &full_env).await?;
 
@@ -204,7 +224,6 @@ async fn run_uses_step(
     workspace: params.workspace,
     config: params.config,
     depth,
-    temp_dir: run.temp_dir,
     cancel: params.cancel,
     http: params.http,
     parent_step_id: params.parent_step_id,
