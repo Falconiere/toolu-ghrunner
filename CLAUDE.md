@@ -270,8 +270,13 @@ to that list requires proving the value is not a real credential.
 - `paths.rs` — `expand_tilde` (HOME → USERPROFILE →
   `/var/lib/toolu-runner`) + `sanitize_job_id` (job id →
   filesystem-safe file name; used by the journal).
-- `platform.rs` — `runner_os` / `runner_arch` (host OS/arch labels;
-  shared by `wire`, `listener`, and `execution::context_build`).
+- `platform.rs` — `runner_os` / `runner_arch` (host OS/arch labels in
+  GitHub's spelling — `Linux`/`macOS`/`Windows`, `X64`/`ARM64`; both derived
+  from `std::env::consts`, warn-and-report-verbatim on an unknown target;
+  shared by `wire`, `listener`, and `execution::context_build`). NOTE
+  `listener::job_lifecycle`'s `AcquireJobRequest.runner_os` deliberately sends
+  the RAW lowercase `std::env::consts::OS` instead — a live acquisition
+  contract; do not converge it without evidence GitHub validates the field.
 - `secret_masker.rs` — `SecretMasker` (`add_secret` + per-line `mask`)
   and `MaskerRedactor` (implements `startup::SecretRedactor`) so
   registered `secrets.*` values never reach `_diag/runner.log`
@@ -346,10 +351,15 @@ to that list requires proving the value is not a real credential.
 - `service_unit.rs` — pure supervisor-unit builders for
   `install-service`: `ServiceSpec` + `launchd_plist` (macOS LaunchAgent —
   `KeepAlive` + `RunAtLoad`, XML-escaped, stdout/stderr to
-  `<data_dir>/_diag/service.{out,err}.log`) / `systemd_unit` (Linux user
-  unit — `Restart=always`, `RestartSec=5`, `WantedBy=default.target`,
-  double-quoted `ExecStart` so paths with spaces survive). No I/O — the
-  bin writes and activates the rendered text.
+  `<data_dir>/_diag/service.{out,err}.log`, plus `WorkingDirectory` and an
+  `EnvironmentVariables` `PATH` built by `launchd_env_path`) / `systemd_unit`
+  (Linux user unit — `Restart=always`, `RestartSec=5`,
+  `WantedBy=default.target`, double-quoted `ExecStart` so paths with spaces
+  survive; ignores `env_path`/`work_dir`). `launchd_env_path` folds the
+  installing shell's `PATH` with `/opt/homebrew/{bin,sbin}`, `/usr/local/bin`
+  and the system four, first-occurrence-wins — launchd otherwise gives an agent
+  only `/usr/bin:/bin:/usr/sbin:/sbin`, and job steps inherit the runner
+  process's env. No I/O — the bin writes and activates the rendered text.
 
 ### `expressions/` — the `${{ }}` evaluator (deps: shared)
 
@@ -470,9 +480,11 @@ to that list requires proving the value is not a real credential.
   workspace fingerprinting, appending masked `would_hit` / `false_hit`
   records to `_diag/shadow/<job_id>.jsonl` — records only, never
   serves.
-- `docker/` — bollard wrapper. `client` (Docker daemon), `services`
-  (service container lifecycle), `path_translator` (host ↔
-  container path mapping).
+- `docker/` — bollard wrapper. `client` (Docker daemon; `resolve_docker_host`
+  maps `execution::config::docker_host()` — i.e. `DOCKER_HOST` — to the
+  endpoint, defaulting to `unix:///var/run/docker.sock`, so Colima / OrbStack /
+  Podman / Rancher Desktop are reachable), `services` (service container
+  lifecycle), `path_translator` (host ↔ container path mapping).
 - `node/` — Node.js runtime detection + caching. `runtime` (version
   detection, download, cache at `data_dir/node/{version}`).
 - `plugin/` — `RunnerPlugin` trait + `PluginRegistry`. New

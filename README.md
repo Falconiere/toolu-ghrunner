@@ -302,7 +302,7 @@ clock, a socket, or tokio.
 | Artifacts / OIDC | C# | `execution::{artifacts,oidc}` |
 | Content-addressed cache | C# | `cache` *(own crate)* |
 | Secret masking | C# | `shared::SecretMasker` + tracing layer |
-| Docker | C# | `execution::docker::client` *(bollard; `uses: docker://` step dispatch not yet wired — such steps fail as unsupported)* |
+| Docker | C# | `execution::docker::client` *(bollard; endpoint from `DOCKER_HOST`; `uses: docker://` step dispatch not yet wired — such steps fail as unsupported)* |
 | Node.js auto-download | C# | `execution::node::runtime` |
 | Plugin system | — | **`execution::plugin::RunnerPlugin`** |
 
@@ -381,6 +381,7 @@ survives unregistration.
 | `TOOLU_RUNNER_NO_KEYRING` | — | when set, forces the 0600-file token store and skips the OS keyring probe entirely; overrides `TOOLU_RUNNER_KEYRING` (headless hosts, CI, locked keyrings). |
 | `TOOLU_RUNNER_LOG` | `info` | tracing filter. Checked before `RUST_LOG`. |
 | `RUST_LOG` | — | tracing filter (standard fallback). |
+| `DOCKER_HOST` | `unix:///var/run/docker.sock` | Docker daemon endpoint, read the same way the Docker CLI reads it — required for Colima, OrbStack, Podman and Rancher Desktop, which do not publish the default socket. `unix://`, `tcp://` and `http://` are supported; an `ssh://` or `https://` value is rejected with an error naming the endpoint rather than silently falling back. |
 | `TOOLU_RUNNER_REPO` | `Falconiere/toolu-ghrunner` | `install.sh` only — release source. |
 | `HOME` / `USERPROFILE` | — | resolves `~/.toolu-runner/`. |
 | `HOSTNAME` / `COMPUTERNAME` | `unknown` | identifies the runner host at `register`. |
@@ -414,6 +415,18 @@ toolu-runner install-service --remove       # deactivate + delete (idempotent)
 `KeepAlive` + `RunAtLoad`. Activated with `launchctl bootstrap gui/<uid>`
 (falling back to legacy `launchctl load -w`); stdout/stderr go to
 `<data_dir>/_diag/service.{out,err}.log`.
+
+The plist carries an `EnvironmentVariables` `PATH` — **the `PATH` of the shell
+that ran `install-service`**, plus `/opt/homebrew/{bin,sbin}`,
+`/usr/local/bin` and the system four if they were missing. Job steps inherit
+the runner process's environment, and launchd otherwise hands an agent only
+`/usr/bin:/bin:/usr/sbin:/sbin` — without this a workflow that runs fine from
+your terminal fails under the supervisor with `command not found` for anything
+Homebrew installed. It is baked in at install time, so **re-run
+`install-service` after changing your `PATH`** (the command is idempotent —
+it rewrites and reloads the unit). `install-service --print` shows the exact
+value that will be used. The systemd unit is unchanged: the user manager
+already exports a usable `PATH`.
 
 **systemd (Linux)** — a user unit `toolu-runner-<owner>-<repo>.service` at
 `~/.config/systemd/user/`, with `Restart=always` + `RestartSec=5`. Activated

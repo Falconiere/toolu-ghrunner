@@ -43,6 +43,27 @@ jobs:
         # Explicit list, not a scripts/test/*.sh glob — the plist/systemd tests
         # there are macOS-only and would fail on ubuntu.
         run: |
-          for t in assert_version changelog_extract package_release release_workflow release_finalize_workflow generate_homebrew_formula release_homebrew_workflow release_image_workflow release_pr_workflow release_pr_script code_review_workflow; do
+          for t in assert_version changelog_extract package_release release_workflow release_finalize_workflow generate_homebrew_formula release_homebrew_workflow release_image_workflow release_pr_workflow release_pr_script code_review_workflow ci_workflow; do
             bash "scripts/test/${t}_test.sh"
           done
+
+  # The OS-dependent half of the gate on a real macOS host. Formatting, the
+  # #[allow] ban and the guardrail structure checks are OS-independent and stay
+  # on the ubuntu leg alone — a second `cargo install ast-grep` would cost
+  # minutes for no additional signal. arm64 only: Apple Silicon is what this
+  # runner is deployed on, and the release workflow already cross-builds Intel.
+  ci-macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.94.1
+        with:
+          components: clippy
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --workspace
+      # plutil is macOS-only, so this is the one host where the generated
+      # LaunchAgent is validated as a real plist rather than as a string.
+      - name: Validate the launchd plist
+        run: bash scripts/test/plist_test.sh
