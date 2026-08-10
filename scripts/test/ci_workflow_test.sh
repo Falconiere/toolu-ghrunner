@@ -35,19 +35,36 @@ want() {
   fi
 }
 
-# want_macos <desc> <pattern> — assert a pattern is present in the ci-macos JOB,
+# job_body <job-key> — everything from `<job-key>:` up to the next job key at the
+# same indent (or EOF). Job-scoped extraction is what makes the assertions below
+# mean anything: a whole-file grep passes as long as SOME job carries the step,
+# which is exactly the drift both legs can suffer.
+job_body() {
+  awk -v key="  $1:" '
+    $0 == key                                  { injob = 1; print; next }
+    injob && /^  [A-Za-z0-9_-]+:[[:space:]]*$/ { injob = 0 }
+    injob                                      { print }
+  ' "$WF"
+}
+
+# want_in <job-body> <desc> <pattern> — assert a pattern is present in ONE job,
 # not merely somewhere in the file. `cargo clippy …` and `cargo test --workspace`
-# appear in the ubuntu leg too, so a whole-file grep would pass even if the macOS
-# job had neither step — exactly the hole this file exists to close.
-want_macos() {
-  local desc="$1" pat="$2"
-  if printf '%s\n' "$MACOS_JOB" | grep -Eq -- "$pat"; then
+# appear in both legs, so a whole-file grep would pass even if the macOS job had
+# neither step — exactly the hole this file exists to close. The ubuntu-only
+# layers (fmt, the #[allow] ban, the guardrails) need the same scoping for the
+# mirror direction: moved into `ci-macos` alone they would still match the file.
+want_in() {
+  local body="$1" desc="$2" pat="$3"
+  if printf '%s\n' "$body" | grep -Eq -- "$pat"; then
     echo "ok: $desc"
   else
-    echo "FAIL: $desc — pattern not found in the ci-macos job: $pat" >&2
+    echo "FAIL: $desc — pattern not found in the job: $pat" >&2
     fail=1
   fi
 }
+
+want_macos() { want_in "$MACOS_JOB" "$1" "$2"; }
+want_ci() { want_in "$CI_JOB" "$1" "$2"; }
 
 # --- both legs run on pull requests (a leg that never fires proves nothing) ---
 want "workflow runs on pull_request"      "^  pull_request:"
@@ -55,15 +72,16 @@ want "workflow runs on pull_request"      "^  pull_request:"
 # --- the macOS leg ---
 want "a macOS job exists"                 "^  ci-macos:"
 
-# Everything from `ci-macos:` up to the next job key at the same indent (or EOF).
-MACOS_JOB=$(awk '
-  /^  ci-macos:/            { injob = 1; print; next }
-  injob && /^  [A-Za-z0-9_-]+:[[:space:]]*$/ { injob = 0 }
-  injob                     { print }
-' "$WF")
+MACOS_JOB=$(job_body ci-macos)
+CI_JOB=$(job_body ci)
 
 if [[ -z "$MACOS_JOB" ]]; then
   echo "FAIL: could not extract the ci-macos job from $WF" >&2
+  exit 1
+fi
+
+if [[ -z "$CI_JOB" ]]; then
+  echo "FAIL: could not extract the ci job from $WF" >&2
   exit 1
 fi
 
@@ -78,18 +96,28 @@ want_macos "macOS runs the workspace tests"     "cargo test --workspace"
 want_macos "macOS validates the launchd plist"  "scripts/test/plist_test\.sh"
 
 # --- the ubuntu leg still mirrors ./tools/check.sh all ---
-want "ubuntu checks formatting"           "cargo fmt --all -- --check"
-want "ubuntu enforces the #[allow] ban"   "\./tools/check\.sh no-allow"
-want "ubuntu runs the guardrails"         "bash scripts/guardrails/run\.sh"
+want_ci "ubuntu checks formatting"         "cargo fmt --all -- --check"
+want_ci "ubuntu enforces the #[allow] ban" "\./tools/check\.sh no-allow"
+want_ci "ubuntu runs the guardrails"       "bash scripts/guardrails/run\.sh"
+want_ci "ubuntu runs the check.sh test"    "check_script"
 
 # The macOS leg must NOT be wired as a `continue-on-error` or `if: false`
 # no-op — a green-but-inert job is worse than none, because it reads as
-# coverage.
+# coverage. Both forms are asserted: `continue-on-error` file-wide (no job may
+# carry it), `if:` only inside `ci-macos`, since the other jobs are allowed
+# conditions.
 if grep -Eq -- "^ +continue-on-error: true" "$WF"; then
   echo "FAIL: no CI job may be continue-on-error — it reports green while failing" >&2
   fail=1
 else
   echo "ok: no job is continue-on-error"
+fi
+
+if printf '%s\n' "$MACOS_JOB" | grep -Eq -- "^ +if:[[:space:]]*(false|\\\$\\{\\{[[:space:]]*false[[:space:]]*\\}\\})[[:space:]]*$"; then
+  echo "FAIL: the ci-macos job is gated off with 'if: false' — it never runs" >&2
+  fail=1
+else
+  echo "ok: the ci-macos job is not gated off"
 fi
 
 if [[ "$fail" -ne 0 ]]; then
