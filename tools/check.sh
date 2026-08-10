@@ -19,6 +19,13 @@
 
 set -euo pipefail
 
+# Detach stdin. git hands a pre-push hook the ref list on stdin and lefthook
+# passes that stream through, but cargo's `rustc -` target probe inherits stdin
+# and parses whatever is left on it as Rust source — the gate then dies with a
+# parse error over unrelated text instead of running clippy and the tests. No
+# check below reads stdin, so nothing here needs it.
+exec </dev/null
+
 (( BASH_VERSINFO[0] >= 4 )) || { printf 'toolu: bash 4+ required (got %s).\n' "$BASH_VERSION" >&2; exit 1; }
 
 _self=${BASH_SOURCE[0]}
