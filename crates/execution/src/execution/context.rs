@@ -104,7 +104,8 @@ impl ExecutionContext {
 
   /// Populate the host/config-derived `runner.*` context and mirror it to env.
   ///
-  /// `os`/`arch` come from the host (Linux target only — see non-goals);
+  /// `os`/`arch` come from the host, in GitHub's spelling (`Linux`/`macOS`,
+  /// `X64`/`ARM64` — see `shared::platform`);
   /// `name` is the registered runner name (falling back to the message's
   /// runner dict, then hostname); `temp`/`tool_cache` are pinned to
   /// `data_dir/_temp` and `data_dir/_tool` (Open Q6) and created if absent;
