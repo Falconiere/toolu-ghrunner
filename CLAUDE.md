@@ -20,7 +20,9 @@ no OTel.
   - `shared` — no internal deps (cross-cutting types, tracing init,
     `SecretMasker`, `sanitize_job_id`, `runner_os`/`runner_arch`).
   - `config`, `expressions`, `cache`, `observability` — each depend
-    on `shared` only.
+    on `shared` only. `observability` in particular does NOT depend on
+    `config`: its journal takes `data_dir` from the caller rather than
+    resolving it (see `### observability/` below).
   - `wire` — `shared`, `protocol`.
   - `execution` — `shared`, `expressions`, `cache`.
   - `listener` — `execution`, `wire`, `observability`, `shared`,
@@ -413,7 +415,11 @@ to that list requires proving the value is not a real credential.
   `data_dir/_diag/jobs/`, prunes to the newest 50, and NEVER fails
   the job (WARN once, keep draining). `reader` is the incremental
   replay/tail reader (`poll()` advances only past complete lines)
-  plus `scan_jobs` head/tail-window summaries.
+  plus `scan_jobs` head/tail-window summaries. The crate reads NO
+  configuration: `writer::jobs_dir_for(data_dir)` joins `_diag/jobs`
+  onto the path its caller passes (`listener::handler`), so nothing
+  here calls `config::resolve_data_dir` and the `config` dep stays out
+  of `Cargo.toml`.
   Test fixture: `tests/fixtures/journal/canonical.jsonl`, captured
   from a real engine run via `JOURNAL_CAPTURE=1 cargo test -p
   toolu-runner --test journal_writer_test capture_canonical`, and
