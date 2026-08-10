@@ -56,6 +56,10 @@ pretty_assertions = "1"
 # service-auth + OIDC url helpers (a normal dep isn't visible to tests/).
 axum = "0.8"
 criterion = "0.5"
+# Safe, scoped DOCKER_HOST mutation for the endpoint-resolution wiring test.
+# The crate keeps all `unsafe env::set_var` internal, so our tests stay
+# `unsafe`-free (workspace `unsafe_code = "forbid"`).
+temp-env = "0.3"
 
 [lints]
 workspace = true

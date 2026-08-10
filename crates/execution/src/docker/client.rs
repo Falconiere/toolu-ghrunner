@@ -8,6 +8,26 @@ use futures_util::StreamExt;
 
 use shared::RunnerError;
 
+/// The endpoint used when `DOCKER_HOST` is unset — bollard's `DEFAULT_SOCKET`,
+/// which is also what the Docker CLI falls back to.
+const DEFAULT_DOCKER_ENDPOINT: &str = "unix:///var/run/docker.sock";
+
+/// Resolve the Docker daemon endpoint from a `DOCKER_HOST` value.
+///
+/// An unset, empty, or whitespace-only value yields
+/// [`DEFAULT_DOCKER_ENDPOINT`]; anything else is passed through verbatim so
+/// bollard can pick the transport from the scheme. Docker Desktop publishes
+/// the default socket, but Colima, `OrbStack`, Podman and Rancher Desktop all
+/// advertise themselves through `DOCKER_HOST` instead — hardcoding the socket
+/// made the runner blind to every one of them.
+pub fn resolve_docker_host(docker_host: Option<&str>) -> String {
+  docker_host
+    .map(str::trim)
+    .filter(|h| !h.is_empty())
+    .unwrap_or(DEFAULT_DOCKER_ENDPOINT)
+    .to_owned()
+}
+
 /// Registry authentication for pulling private images.
 #[derive(Debug, Clone)]
 pub struct RegistryAuth {
@@ -49,14 +69,19 @@ pub struct DockerClient {
 }
 
 impl DockerClient {
-  /// Connect to the local Docker daemon.
+  /// Connect to the Docker daemon named by `DOCKER_HOST`, falling back to the
+  /// default unix socket.
   ///
   /// # Errors
   ///
-  /// Returns `RunnerError::Docker` if the daemon is not available.
+  /// Returns `RunnerError::Docker`, naming the endpoint, if it cannot be used —
+  /// including a scheme bollard was not built with (`ssh://`, `https://`), which
+  /// must surface rather than silently fall back to a daemon the operator did
+  /// not select.
   pub fn new() -> Result<Self, RunnerError> {
-    let docker = Docker::connect_with_socket_defaults()
-      .map_err(|e| RunnerError::Docker(format!("connect docker daemon: {e}")))?;
+    let endpoint = resolve_docker_host(crate::config::docker_host().as_deref());
+    let docker = Docker::connect_with_host(&endpoint)
+      .map_err(|e| RunnerError::Docker(format!("connect docker daemon at {endpoint}: {e}")))?;
     Ok(Self { inner: docker })
   }
 
@@ -208,3 +233,7 @@ impl std::fmt::Debug for DockerClient {
     f.debug_struct("DockerClient").finish()
   }
 }
+
+#[cfg(test)]
+#[path = "tests/client.rs"]
+mod tests;
