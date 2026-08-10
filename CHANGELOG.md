@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-08-10
+
+### Changed
+- *(observability)* remove the watch and setup terminal UIs
+
+### Documentation
+- *(observability)* spell out that the journal crate reads no config
+- give observability its own dependency-graph bullet
+
+### Fixed
+- *(shared)* report the host OS in RUNNER_OS instead of a hardcoded Linux
+- *(config)* bake a usable PATH and WorkingDirectory into the launchd unit
+- *(execution)* resolve the Docker endpoint from DOCKER_HOST
+- *(tests)* address PR review feedback
+- *(gate)* detach stdin from the check script
+- *(tests)* scope the ubuntu CI assertions and cover the stdin detach
+- *(tests)* assert the docker default against the production constant
+
 ## [0.7.3] - 2026-08-10
 
 ### Changed
