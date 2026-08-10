@@ -86,11 +86,6 @@ pub(crate) struct InstallOutcome {
   pub path: PathBuf,
   /// The service label (launchd `Label` / systemd `Description` suffix).
   pub label: String,
-  /// The systemd unit file basename (`toolu-runner-<owner>-<repo>.service`) —
-  /// the exact identifier install produced, so consumers (e.g. the setup
-  /// wizard's verify step) query the supervisor with what was written rather
-  /// than re-deriving it.
-  pub unit: String,
   /// What the core did, so the caller prints the right message without
   /// re-inspecting the flags. Encodes the `--no-activate` vs activated split
   /// (`ServiceAction::Installed { activated }`), the two `--remove` cases,
@@ -121,7 +116,6 @@ pub(crate) fn install_service_core(
     return Ok(InstallOutcome {
       path: PathBuf::new(),
       label: id.label,
-      unit: id.unit,
       action: ServiceAction::Printed,
     });
   }
@@ -137,7 +131,6 @@ pub(crate) fn install_service_core(
     return Ok(InstallOutcome {
       path: dest,
       label: id.label,
-      unit: id.unit,
       action: ServiceAction::Installed { activated: false },
     });
   }
@@ -145,7 +138,6 @@ pub(crate) fn install_service_core(
   Ok(InstallOutcome {
     path: dest,
     label: id.label,
-    unit: id.unit,
     action: ServiceAction::Installed { activated: true },
   })
 }
@@ -267,7 +259,6 @@ fn remove_service(
     return Ok(InstallOutcome {
       path: dest.to_owned(),
       label: id.label.clone(),
-      unit: id.unit.clone(),
       action: ServiceAction::NothingToRemove,
     });
   }
@@ -278,13 +269,11 @@ fn remove_service(
     Ok(()) => Ok(InstallOutcome {
       path: dest.to_owned(),
       label: id.label.clone(),
-      unit: id.unit.clone(),
       action: ServiceAction::Removed,
     }),
     Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(InstallOutcome {
       path: dest.to_owned(),
       label: id.label.clone(),
-      unit: id.unit.clone(),
       action: ServiceAction::NothingToRemove,
     }),
     Err(e) => Err(e.into()),

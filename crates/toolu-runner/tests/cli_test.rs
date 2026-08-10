@@ -29,7 +29,6 @@ fn help_lists_all_subcommands() {
     "run",
     "remove",
     "status",
-    "watch",
     "install-service",
     "login",
     "logout",
@@ -175,14 +174,7 @@ fn help_stdout(subcommand: &str) -> Result<String, Box<dyn std::error::Error>> {
 #[test]
 fn config_flag_help_states_default_resolution_everywhere() -> Result<(), Box<dyn std::error::Error>>
 {
-  for subcommand in [
-    "register",
-    "run",
-    "remove",
-    "status",
-    "watch",
-    "install-service",
-  ] {
+  for subcommand in ["register", "run", "remove", "status", "install-service"] {
     let stdout = help_stdout(subcommand)?;
     assert!(
       stdout.contains("inferred from the cwd git remote"),

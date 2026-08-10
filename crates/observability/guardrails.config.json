@@ -9,9 +9,7 @@
       ]
     },
     "requireReadme": [
-      "journal",
-      "watch",
-      "wizard"
+      "journal"
     ]
   },
   "fileSize": {

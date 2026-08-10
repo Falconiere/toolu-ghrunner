@@ -47,10 +47,8 @@ toolu-ghrunner/                            workspace root
     ├── wire/                              async HTTP transport + reporting (→ shared, protocol)
     │   ├── net/                           async I/O (reqwest): auth, session, messages, …, register, app_manifest (+ create-app loopback callback server)
     │   └── reporting/                     Run/Results domain types, live_log, feature_detection
-    ├── observability/                     journal + watch/wizard TUIs (→ shared, config)
-    │   ├── journal/                       per-job JSONL event journal (types, writer, reader)
-    │   ├── watch/                         `watch` TUI (state reducer, ratatui ui, input)
-    │   └── wizard/                        pure `setup` wizard state machine (state/input/verify/term/ui)
+    ├── observability/                     per-job JSONL event journal (→ shared)
+    │   └── journal/                       per-job JSONL event journal (types, writer, reader)
     ├── execution/                         job execution engine (→ shared, expressions, cache)
     │   ├── lib.rs                         Runner struct, execute_job
     │   ├── execution/                     job engine (job_runner, handlers, workflow, artifacts, oidc, …)
@@ -64,8 +62,8 @@ toolu-ghrunner/                            workspace root
     │   ├── loop_decision.rs               pure next_action for the always-online run loop
     │   └── log_uploader/                  per-step + combined job-log upload
     └── toolu-runner/                      bin only (the CLI)
-        ├── src/main.rs                    dispatch + the remove / watch handlers
-        ├── src/cli.rs                     clap surface: register / run / boot / remove / status / watch / install-service / login / logout / create-app / setup
+        ├── src/main.rs                    dispatch + the inline remove handler
+        ├── src/cli.rs                     clap surface: register / run / boot / remove / status / install-service / login / logout / create-app
         ├── src/register_cmd.rs            register + remint_and_persist (per-repo persist, config rollback)
         ├── src/run_cmd.rs                 the always-online run loop (re-mint after each job)
         ├── src/boot_cmd.rs                zero-config one-shot container mode (env-driven, no persisted state)
@@ -73,8 +71,6 @@ toolu-ghrunner/                            workspace root
         ├── src/login_cmd.rs               login / logout (device flow)
         ├── src/status_cmd.rs              status (no network)
         ├── src/create_app_cmd.rs          create-app (GitHub App Manifest onboarding)
-        ├── src/setup_cmd.rs               setup wizard entrypoint (non-TTY guard, TerminalGuard, render loop)
-        ├── src/wizard_steps.rs            setup async step executors (auth → register → install → verify)
         └── tests/                         integration tests across the whole graph
 ```
 
@@ -84,17 +80,23 @@ toolu-ghrunner/                            workspace root
 protocol ─────────────┐
                       ├──► wire ──────┐
 shared ──┬────────────┘               │
-         ├──► config ──► observability ├──► listener ──► toolu-runner (bin)
-         ├──► expressions ──┐          │
+         ├──► config                  │
+         ├──► observability ──────────┤
+         ├──► expressions ──┐         │
          └──► cache ────────┴► execution
+                                       │
+                                       ▼
+                                   listener ──► toolu-runner (bin)
 ```
 
-`protocol` and `shared` have no internal deps. `wire::net` owns all
-async HTTP I/O; the arrow `protocol → wire::net` is one-way (request
-types flow from `protocol`, async transport lives in `wire`).
-`protocol` itself is sync and free of network code. `toolu-runner` is
-a thin bin: it reaches `execution` only transitively through
-`listener`.
+`protocol` and `shared` have no internal deps. `observability` depends
+on `shared` only (its `journal` writer/reader need `tokio` for file
+I/O and `shared` for the event and `SecretMasker` types, nothing more).
+`wire::net` owns all async HTTP I/O; the arrow `protocol → wire::net`
+is one-way (request types flow from `protocol`, async transport lives
+in `wire`). `protocol` itself is sync and free of network code.
+`toolu-runner` is a thin bin: it reaches `execution` only transitively
+through `listener`.
 
 ## crate: `shared`
 
@@ -173,7 +175,7 @@ layered graph above. `toolu-runner` itself is **bin-only** (the CLI:
 that follow are grouped by their **current** crate: `net/` +
 `reporting/` live in `wire`; `listener/` in `listener`; `execution/` +
 `docker/` + `node/` + `plugin/` + the `Runner` (`lib.rs`) in
-`execution`; `journal/` + `watch/` in `observability`; `config.rs` +
+`execution`; `journal/` in `observability`; `config.rs` +
 `lockfile.rs` + `auth_store.rs` in `config`.
 
 ### `net/` — async network layer (crate `wire`)
@@ -320,7 +322,7 @@ below.
 - `plugin` — `RunnerPlugin` trait + `PluginRegistry`. Plugins can
   add custom step types and override behavior.
 
-### `journal/` + `watch/` — local observability
+### `journal/` — local observability
 
 The listener's `ListenerEvent` channel (every `RunnerEvent` plus
 session / acquire / lock events) is sunk by `journal::writer` into
@@ -338,27 +340,10 @@ Envelope: `v` (contract version), `seq` (0-based, monotonic per file),
 partial trailing line is re-read on the next poll. Pre-acquire events
 are buffered (cap 256) until `job_acquired` names the file; the dir
 is pruned to the newest 50 journals; a write failure WARNs once and
-disables journaling without touching the job.
-
-`toolu-runner watch` (`watch/`) is a ratatui TUI over that directory:
-job history list (newest first, conclusion badges), step tree + log
-tail for the opened journal (250 ms poll, 1 s rescan), and `c` →
-confirm → SIGINT to the `.lock` PID (unix only) riding the existing
-graceful-cancel path. Works with no runner running and no config —
-it discovers every registration's `runners/<owner>/<repo>/_diag/jobs`
-(plus the legacy home) and browses them merged, re-discovering on each
-1 s rescan so new registrations appear live.
-
-`observability::wizard` is the sibling pure state machine behind
-`toolu-runner setup`, the full-screen onboarding wizard: `state`
-(reducer + `probe_skips` idempotent already-done detection), `input`
-(key → action), `verify` (the `_diag/runner.log` online-marker gate),
-`term`, and `ui`. It holds no I/O or async — the impure driver
-(`setup_cmd::cmd_setup`, its `TerminalGuard` RAII restore + render loop)
-and the async step executors (`wizard_steps::run_pipeline`:
-auth → register → install-service → verify) live in the bin and reuse
-the existing `login` / `register` / `install-service` cores. github.com
-only and TTY-gated; see [Sequence: setup](#sequence-setup).
+disables journaling without touching the job. `journal::reader` is
+the incremental replay/tail reader consumers use to read the files
+back — `poll()` advances only past complete lines, and `scan_jobs`
+gives head/tail-window summaries of a directory's journals.
 
 ## Accelerated mode (cache acceleration)
 
@@ -530,50 +515,6 @@ deferred:** `create-app` neither installs the app nor exchanges an
 installation token this release — `register` still takes its bearer from
 `--token` / `TOOLU_RUNNER_TOKEN` / the stored device-flow login.
 
-## Sequence: setup
-
-`toolu-runner setup` is the guided onboarding path — a full-screen
-ratatui wizard that runs the four onboarding steps end-to-end for a
-github.com repo runner, so a first-time user does not have to chain
-`login` → `register` → `install-service` by hand. It is github.com only
-(GHES / org runners still use the manual commands) and TTY-gated: a
-non-interactive terminal fails fast with a clean error naming `login` /
-`register` / `install-service`.
-
-The wizard is split pure/impure. The pure state machine lives in
-`observability::wizard` (a sibling of `watch/`): `state` reduces
-`StepEvent`s into the rendered `WizardState` (with a pure `probe_skips`
-helper that detects an already-satisfied auth or register stage); `verify`
-owns the online-marker gate; `input`, `term`, and `ui` handle keys, the
-alternate screen, and rendering. The impure driver is in the bin —
-`setup_cmd::cmd_setup` guards the TTY, installs a `TerminalGuard` RAII
-restore, and runs the async ratatui render loop draining a `StepEvent`
-channel, while `wizard_steps::run_pipeline` executes the steps:
-
-```
-auth      resolve a bearer (--token > TOOLU_RUNNER_TOKEN > stored login
-          token > inline device flow via login_cmd::run_device_flow)
-   ▼
-register  register_cmd::register_and_persist (skipped if already
-          registered — config.toml present for this repo)
-   ▼
-install   service_cmd::install_service_core — launchd / systemd user unit
-          (idempotently re-applied — re-writes + re-activates the unit,
-          never pre-skipped)
-   ▼
-verify    tail _diag/runner.log for the listener's
-          "session created — long-polling for jobs" online marker →
-          the runner is live
-```
-
-Each step reports progress back through the `StepEvent` channel, so the
-wizard shows per-step status. Only **auth** and **register** pre-skip when
-already satisfied (a stored login token, an existing registration);
-**install** is idempotently re-applied — it re-writes and re-activates the
-unit every run, it is never skipped — and **verify** always runs. The final
-verify step confirms the freshly installed service actually reached the
-broker rather than only asserting the unit was written.
-
 ## Multi-repo concurrency
 
 Each registration owns its state dir, so the single-job `.lock` is per
@@ -583,8 +524,7 @@ still exits 2 with the holder's PID. `run` / `status` / `remove` pick
 their registration via `config::registry::resolve_config_path`:
 `--config` flag > the cwd-inferred `runners/<owner>/<repo>/config.toml`
 > the sole existing registration (the legacy `<home>/config.toml`
-included) > an error listing every candidate. `watch` with no usable
-config browses all registrations' journals merged.
+included) > an error listing every candidate.
 
 Two documented caveats for concurrent cross-repo runs:
 
@@ -607,8 +547,8 @@ recorded; a 404 or no same-name match is success, so the call is
 idempotent — GitHub reaps a JIT registration after its single job, making
 "already gone" the common case). Only then does it delete the
 registration's `config.toml`, `credentials.json`, `.lock`, and
-`.pending_remove`, keeping `_diag/` (the `watch` history); empty parent
-dirs are left in place.
+`.pending_remove`, keeping `_diag/` (the job journal history); empty
+parent dirs are left in place.
 
 The order is load-bearing: the persisted `runner_id` and URL are the only
 handle on the GitHub-side runner, so deleting them first would strand it
@@ -909,7 +849,7 @@ warn and returns — the user is expected to restart `run`.
     └── _diag/                      # log files, diagnostic dumps
         ├── runner.log              # JSON, secret-masked, daily-rotated
         ├── runner.log.YYYY-MM-DD   # rotated archives
-        └── jobs/                   # per-job JSONL event journals (watch TUI)
+        └── jobs/                   # per-job JSONL event journals
             └── <ts>-<job-id>.jsonl # newest 50 kept, secret-masked
 ```
 

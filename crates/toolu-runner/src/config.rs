@@ -10,11 +10,6 @@ pub(crate) fn deadline_raw() -> Option<String> {
   read("TOOLU_DEADLINE")
 }
 
-/// Read `TOOLU_RUNNER_TOKEN`; invalid Unicode is diagnosed and treated as unset.
-pub(crate) fn runner_token() -> Option<String> {
-  read("TOOLU_RUNNER_TOKEN")
-}
-
 /// Read `TOOLU_RUNNER_CLIENT_ID`; invalid Unicode is diagnosed and treated as unset.
 pub(crate) fn runner_client_id() -> Option<String> {
   read("TOOLU_RUNNER_CLIENT_ID")

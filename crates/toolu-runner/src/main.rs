@@ -5,7 +5,7 @@
 //! listener until SIGINT/SIGTERM), `boot` (env-driven, zero-config
 //! one-shot mode for the container image — no persisted state), `remove`
 //! (delete state or write `.pending_remove` mid-job), `status` (print
-//! config, no network), `watch` (TUI over the job journal, no network).
+//! config, no network).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -29,11 +29,9 @@ mod login_cmd;
 mod register_cmd;
 mod run_cmd;
 mod service_cmd;
-mod setup_cmd;
 mod status_cmd;
-mod wizard_steps;
 
-use crate::cli::{Cli, Command, RemoveArgs, WatchArgs, credentials_path_for, default_config_path};
+use crate::cli::{Cli, Command, RemoveArgs, credentials_path_for};
 
 #[tokio::main]
 async fn main() {
@@ -58,12 +56,10 @@ async fn main() {
 
 async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
   match cli.command {
-    Command::Setup(args) => setup_cmd::cmd_setup(args),
     Command::Register(args) => register_cmd::cmd_register(args).await,
     Command::Run(args) => Box::pin(run_cmd::cmd_run(args)).await,
     Command::Remove(args) => cmd_remove(args).await,
     Command::Status(args) => status_cmd::cmd_status(args),
-    Command::Watch(args) => cmd_watch(args),
     Command::InstallService(args) => service_cmd::cmd_install_service(args),
     Command::Login(args) => login_cmd::cmd_login(args).await,
     Command::Logout(args) => login_cmd::cmd_logout(&args),
@@ -74,23 +70,6 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     // Intercepted in `main` before `run` is called (see above).
     Command::Boot(_) => Ok(()),
   }
-}
-
-/// `watch`: TUI over the job journal. Blocks until the user quits; no
-/// tracing init so log output never corrupts the alternate screen.
-///
-/// Resolution is tolerant: when no registration resolves (none yet, or
-/// several without a cwd match), fall back to the default
-/// `<home>/config.toml` path — `run_watch` browses every discovered
-/// runner dir (plus the legacy home) when that file does not load, so
-/// history browsing still works unregistered.
-fn cmd_watch(args: WatchArgs) -> Result<(), Box<dyn std::error::Error>> {
-  let config_path = match resolve_config(args.config) {
-    Ok(path) => path,
-    Err(_) => default_config_path(),
-  };
-  observability::watch::run_watch(&config_path)?;
-  Ok(())
 }
 
 /// Resolve which registration config a subcommand should use: the
