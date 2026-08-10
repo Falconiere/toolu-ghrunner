@@ -65,25 +65,22 @@ fn resolution_is_idempotent() {
 #[test]
 fn an_unsupported_scheme_errors_naming_the_endpoint() {
   temp_env::with_var("DOCKER_HOST", Some("ssh://builder@10.0.0.5"), || {
-    // Match the variant, not just the text: a different `RunnerError` carrying
-    // the endpoint by coincidence would otherwise satisfy this.
-    let result = DockerClient::new();
-    assert!(
-      matches!(result, Err(RunnerError::Docker(_))),
-      "ssh:// is outside bollard's default features — construction must fail \
-       with RunnerError::Docker; got: {result:?}"
-    );
-    // The assertion above already fixed the variant; the fallback arm is dead.
-    let message = match result {
+    // One match, no dead arm: only `Err(RunnerError::Docker(_))` yields a bare
+    // message, so every other outcome is carried into the assertion as its own
+    // `Debug` rendering — which starts with `Ok(`/`Err(` and can never satisfy
+    // the prefix below. That pins the variant and the text in one assertion
+    // instead of a `matches!` guard plus an unreachable fallback.
+    let message = match DockerClient::new() {
       Err(RunnerError::Docker(message)) => message,
-      _ => String::new(),
+      other => format!("{other:?}"),
     };
     // Anchored at the front, not a bare `contains`: the endpoint has to be the
     // one the message is ABOUT, not a substring that happens to appear inside
     // bollard's own trailing text.
     assert!(
       message.starts_with("connect docker daemon at ssh://builder@10.0.0.5:"),
-      "the error must name the endpoint it tried; got: {message:?}"
+      "ssh:// is outside bollard's default features — construction must fail \
+       with RunnerError::Docker naming the endpoint; got: {message:?}"
     );
   });
 }
