@@ -74,6 +74,11 @@ toolu-ghrunner/                            workspace root
         └── tests/                         integration tests across the whole graph
 ```
 
+The `(→ …)` annotation on a crate row lists that crate's **internal
+workspace** dependencies only — external crates (`tokio`, `reqwest`,
+`serde`, `bollard`, …) are never named there. Read each row's list as
+complete for workspace crates and silent about everything else.
+
 **Dependency direction (strict, acyclic):**
 
 ```
