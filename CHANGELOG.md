@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-08-10
+
+### Changed
+- *(execution)* remove the dead step_host module (IMP-CQ-A08)
+
+### Documentation
+- drop stale pre-alpha and docker-actions claims
+
+### Fixed
+- *(image)* expose the seeded node runtime on PATH for run: steps
+- *(execution)* converge runner paths and composite runner.* interpolation
+
 ## [0.7.2] - 2026-08-09
 
 ### Fixed
