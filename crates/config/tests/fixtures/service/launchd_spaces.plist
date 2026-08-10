@@ -11,6 +11,13 @@
     <string>--config</string>
     <string>/Users/dev name/.toolu-runner/runners/a &amp; b/repo/config.toml</string>
   </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/dev name/.toolu-runner/runners/a &amp; b/repo</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/dev tools &amp; bin:/usr/bin:/bin</string>
+  </dict>
   <key>KeepAlive</key>
   <true/>
   <key>RunAtLoad</key>

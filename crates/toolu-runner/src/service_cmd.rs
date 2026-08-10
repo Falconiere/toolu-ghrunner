@@ -12,7 +12,7 @@ use std::process::{Command, Output};
 
 use config::config::{load_config as load_reg_config, resolve_data_dir};
 use config::service_unit::{
-  ServiceAction, ServiceSpec, launchd_plist, service_action_summary, systemd_unit,
+  ServiceAction, ServiceSpec, launchd_env_path, launchd_plist, service_action_summary, systemd_unit,
 };
 use shared::RunnerError;
 
@@ -216,7 +216,12 @@ fn render_unit(
   id: &ServiceId,
 ) -> Result<String, RunnerError> {
   let cfg = load_reg_config(config_path)?;
-  let diag_dir = resolve_data_dir(&cfg.runtime.data_dir)?.join("_diag");
+  let data_dir = resolve_data_dir(&cfg.runtime.data_dir)?;
+  let diag_dir = data_dir.join("_diag");
+  // launchd hands an agent a minimal PATH, and steps inherit the runner
+  // process's env — so the installing shell's PATH is baked in here (see
+  // `launchd_env_path`). `systemd_unit` ignores both this and `work_dir`.
+  let env_path = launchd_env_path(crate::config::path().as_deref());
   let exe = std::env::current_exe()
     .map_err(|e| RunnerError::Config(format!("cannot resolve the running binary's path: {e}")))?;
   let abs_config = config_path.canonicalize().map_err(|e| {
@@ -230,6 +235,8 @@ fn render_unit(
     exe: &exe,
     config_path: &abs_config,
     diag_dir: &diag_dir,
+    env_path: &env_path,
+    work_dir: &data_dir,
   };
   Ok(match supervisor {
     Supervisor::Launchd => launchd_plist(&spec),

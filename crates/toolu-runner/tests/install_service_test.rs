@@ -93,19 +93,29 @@ fn expected_dest(home: &Path) -> PathBuf {
 /// under the registration dir). The renderer's byte shape itself is pinned
 /// by the config crate's committed fixtures; temp-dir paths rule out a
 /// committed fixture here.
-fn expected_unit(config_path: &Path) -> Result<String, Box<dyn std::error::Error>> {
+/// `path_env` must be the `PATH` the *child* process received, not this test's:
+/// on macOS the bin bakes it into the plist's `EnvironmentVariables`, so a
+/// caller that launches the bin with a shim-prefixed PATH (see `run_activate`)
+/// has to pass that same value or the comparison diverges. `None` = the child
+/// inherited this process's PATH.
+fn expected_unit(
+  config_path: &Path,
+  path_env: Option<&str>,
+) -> Result<String, Box<dyn std::error::Error>> {
   let config = config_path.canonicalize()?;
   // The bin canonicalizes only the config path; `_diag` derives from the
   // persisted data_dir verbatim (the registration dir as written).
-  let diag = config_path
-    .parent()
-    .ok_or("config path has no parent")?
-    .join("_diag");
+  let data_dir = config_path.parent().ok_or("config path has no parent")?;
+  let diag = data_dir.join("_diag");
+  let inherited = std::env::var("PATH").ok();
+  let env_path = service_unit::launchd_env_path(path_env.or(inherited.as_deref()));
   let spec = ServiceSpec {
     label: "io.toolu.runner.octo.demo",
     exe: Path::new(env!("CARGO_BIN_EXE_toolu-runner")),
     config_path: &config,
     diag_dir: &diag,
+    env_path: &env_path,
+    work_dir: data_dir,
   };
   Ok(if cfg!(target_os = "macos") {
     service_unit::launchd_plist(&spec)
@@ -317,7 +327,9 @@ fn print_emits_the_unit_without_writing_a_file() {
   let stdout = String::from_utf8_lossy(&output.stdout);
   assert_eq!(
     stdout,
-    expected_unit(&config_path).expect("build expected unit"),
+    // `install_cmd` does not override PATH, so the child inherited this
+    // process's — `None` reproduces exactly what the bin baked in.
+    expected_unit(&config_path, None).expect("build expected unit"),
     "--print must emit the exact unit the renderer produces for this spec"
   );
   assert!(

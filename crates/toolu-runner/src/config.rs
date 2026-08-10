@@ -15,6 +15,13 @@ pub(crate) fn runner_client_id() -> Option<String> {
   read("TOOLU_RUNNER_CLIENT_ID")
 }
 
+/// Read the installing shell's `PATH`; invalid Unicode is diagnosed and treated
+/// as unset. `install-service` bakes it into the launchd unit, so a supervised
+/// runner's steps see the same tools an operator has in a terminal.
+pub(crate) fn path() -> Option<String> {
+  read("PATH")
+}
+
 fn read(key: &str) -> Option<String> {
   match std::env::var(key) {
     Ok(value) => Some(value),
