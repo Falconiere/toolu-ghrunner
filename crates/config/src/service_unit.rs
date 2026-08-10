@@ -72,7 +72,10 @@ pub struct ServiceSpec<'a> {
 /// The directories a `LaunchAgent` must have on `PATH` regardless of what the
 /// installing shell had: Homebrew (Apple Silicon and Intel prefixes) plus the
 /// system four launchd would otherwise supply on its own.
-const GUARANTEED_PATH_DIRS: [&str; 7] = [
+///
+/// Public so the tests assert against THIS list rather than a copy that would
+/// silently drift from it.
+pub const GUARANTEED_PATH_DIRS: [&str; 7] = [
   "/opt/homebrew/bin",
   "/opt/homebrew/sbin",
   "/usr/local/bin",
@@ -82,8 +85,8 @@ const GUARANTEED_PATH_DIRS: [&str; 7] = [
   "/sbin",
 ];
 
-/// Build the `PATH` to bake into a `LaunchAgent` from the installing process's
-/// `PATH` (`None` when unset).
+/// Build the `PATH` to bake into a `LaunchAgent` from `current_path` — the
+/// installing process's `PATH` (`None` when unset).
 ///
 /// launchd gives an agent only `/usr/bin:/bin:/usr/sbin:/sbin`, so a
 /// service-installed runner cannot see Homebrew — steps that work from a
@@ -94,10 +97,10 @@ const GUARANTEED_PATH_DIRS: [&str; 7] = [
 /// the function to its own output is a no-op. A nonexistent directory is
 /// harmless — `execve` skips `PATH` entries that do not resolve — so the set
 /// is appended unconditionally rather than probed, keeping the builder pure.
-pub fn launchd_env_path(current: Option<&str>) -> String {
+pub fn launchd_env_path(current_path: Option<&str>) -> String {
   let mut out: Vec<&str> = Vec::new();
-  let entries = current
-    .unwrap_or_default()
+  let entries = current_path
+    .unwrap_or("")
     .split(':')
     .chain(GUARANTEED_PATH_DIRS);
   for entry in entries {
