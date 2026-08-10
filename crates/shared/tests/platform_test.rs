@@ -27,10 +27,11 @@ fn runner_os_is_the_github_spelling_for_this_host() {
   }
 }
 
-/// A macOS host must never report `Linux` — the regression this module exists
-/// to prevent (workflows branch on `runner.os == 'macOS'`).
+/// `Linux` is reported on Linux and nowhere else — the regression this module
+/// exists to prevent (workflows branch on `runner.os == 'macOS'`). Both
+/// directions are asserted, so the label cannot go back to a constant.
 #[test]
-fn runner_os_never_reports_linux_off_linux() {
+fn runner_os_reports_linux_only_on_linux() {
   if std::env::consts::OS == "linux" {
     assert_eq!(runner_os(), "Linux");
   } else {
