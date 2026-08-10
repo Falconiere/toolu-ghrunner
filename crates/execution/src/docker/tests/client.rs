@@ -7,17 +7,17 @@
 
 use shared::RunnerError;
 
-use super::{DockerClient, resolve_docker_host};
-
-const DEFAULT_SOCKET: &str = "unix:///var/run/docker.sock";
+// The production constant itself, not a copy of its value: a local literal
+// would keep asserting the old default after a change to `client.rs` and pass.
+use super::{DEFAULT_DOCKER_ENDPOINT, DockerClient, resolve_docker_host};
 
 /// Unset / blank must land on the Docker CLI's own default rather than an
 /// empty endpoint.
 #[test]
 fn absent_or_blank_docker_host_falls_back_to_the_default_socket() {
-  assert_eq!(resolve_docker_host(None), DEFAULT_SOCKET);
-  assert_eq!(resolve_docker_host(Some("")), DEFAULT_SOCKET);
-  assert_eq!(resolve_docker_host(Some("   ")), DEFAULT_SOCKET);
+  assert_eq!(resolve_docker_host(None), DEFAULT_DOCKER_ENDPOINT);
+  assert_eq!(resolve_docker_host(Some("")), DEFAULT_DOCKER_ENDPOINT);
+  assert_eq!(resolve_docker_host(Some("   ")), DEFAULT_DOCKER_ENDPOINT);
 }
 
 /// The endpoints Colima, `OrbStack`, Podman and a remote TCP daemon actually
