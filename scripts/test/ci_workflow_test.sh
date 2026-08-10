@@ -35,24 +35,51 @@ want() {
   fi
 }
 
+# want_macos <desc> <pattern> — assert a pattern is present in the ci-macos JOB,
+# not merely somewhere in the file. `cargo clippy …` and `cargo test --workspace`
+# appear in the ubuntu leg too, so a whole-file grep would pass even if the macOS
+# job had neither step — exactly the hole this file exists to close.
+want_macos() {
+  local desc="$1" pat="$2"
+  if printf '%s\n' "$MACOS_JOB" | grep -Eq -- "$pat"; then
+    echo "ok: $desc"
+  else
+    echo "FAIL: $desc — pattern not found in the ci-macos job: $pat" >&2
+    fail=1
+  fi
+}
+
 # --- both legs run on pull requests (a leg that never fires proves nothing) ---
 want "workflow runs on pull_request"      "^  pull_request:"
 
 # --- the macOS leg ---
+want "a macOS job exists"                 "^  ci-macos:"
+
+# Everything from `ci-macos:` up to the next job key at the same indent (or EOF).
+MACOS_JOB=$(awk '
+  /^  ci-macos:/            { injob = 1; print; next }
+  injob && /^  [A-Za-z0-9_-]+:[[:space:]]*$/ { injob = 0 }
+  injob                     { print }
+' "$WF")
+
+if [[ -z "$MACOS_JOB" ]]; then
+  echo "FAIL: could not extract the ci-macos job from $WF" >&2
+  exit 1
+fi
+
 # Pinned to a macos-14+ image: macos-13 and the -intel images are x86_64, and
 # arm64 is the deployment target this leg exists to cover.
-want "a macOS job exists"                 "^  ci-macos:"
-want "the macOS job is arm64"             "^ +runs-on: macos-(1[4-9]|[2-9][0-9])$"
-want "macOS runs clippy as an error gate" \
+want_macos "the macOS job is arm64"             "^ +runs-on: macos-(1[4-9]|[2-9][0-9])$"
+want_macos "macOS runs clippy as an error gate" \
   "cargo clippy --workspace --all-targets -- -D warnings"
-want "macOS runs the workspace tests"     "cargo test --workspace"
+want_macos "macOS runs the workspace tests"     "cargo test --workspace"
 # plutil only exists on macOS — validating the generated LaunchAgent as a real
 # plist is the single thing this leg can do that ubuntu cannot.
-want "macOS validates the launchd plist"  "scripts/test/plist_test\.sh"
+want_macos "macOS validates the launchd plist"  "scripts/test/plist_test\.sh"
 
 # --- the ubuntu leg still mirrors ./tools/check.sh all ---
 want "ubuntu checks formatting"           "cargo fmt --all -- --check"
-want "ubuntu enforces the #\[allow\] ban" "\./tools/check\.sh no-allow"
+want "ubuntu enforces the #[allow] ban"   "\./tools/check\.sh no-allow"
 want "ubuntu runs the guardrails"         "bash scripts/guardrails/run\.sh"
 
 # The macOS leg must NOT be wired as a `continue-on-error` or `if: false`
