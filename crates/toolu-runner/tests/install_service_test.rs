@@ -107,6 +107,9 @@ fn expected_unit(
   // persisted data_dir verbatim (the registration dir as written).
   let data_dir = config_path.parent().ok_or("config path has no parent")?;
   let diag = data_dir.join("_diag");
+  // `.ok()` on purpose: a non-Unicode PATH is exactly the "treat as unset" case
+  // the bin itself takes (`config::path()` returns `None`), so discarding the
+  // error here reproduces the child's behaviour rather than masking a failure.
   let inherited = std::env::var("PATH").ok();
   let env_path = service_unit::launchd_env_path(path_env.or(inherited.as_deref()));
   let spec = ServiceSpec {

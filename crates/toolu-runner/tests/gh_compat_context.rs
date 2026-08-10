@@ -25,6 +25,7 @@ use std::sync::{Arc, Mutex};
 use execution::execution::context::ExecutionContext;
 use execution::execution::job_runner::build_context;
 use shared::SecretMasker;
+use shared::platform::{runner_arch, runner_os};
 use shared::{AgentJobRequestMessage, Conclusion, RunnerConfig};
 
 const JOB_MESSAGE: &str = include_str!("fixtures/job_message.json");
@@ -65,26 +66,17 @@ fn runner_context_is_host_and_config_derived() -> TestResult<()> {
   let dir = tempfile::tempdir()?;
   let (ctx, _masker) = build_ctx(dir.path())?;
 
-  // os and arch both come from the host mapping — a macOS host must report
-  // "macOS", not the "Linux" this used to be pinned to.
-  let expected_os = match std::env::consts::OS {
-    "linux" => "Linux",
-    "macos" => "macOS",
-    "windows" => "Windows",
-    other => other,
-  };
+  // What this test owns is the PLUMBING: that the context and its env mirror
+  // carry whatever `shared::platform` reports. The mapping itself is pinned
+  // against compile-time literals in `crates/shared/tests/platform_test.rs`;
+  // re-deriving it here would only assert this file agrees with itself.
+  let expected_os = runner_os();
   assert_eq!(eval(&ctx, "${{ runner.os }}")?, expected_os);
   // RUNNER_OS is the env mirror of runner.os; steps read it far more often
   // than the context, so it is asserted through the same evaluator.
   assert_eq!(eval(&ctx, "${{ env.RUNNER_OS }}")?, expected_os);
 
-  let expected_arch = match std::env::consts::ARCH {
-    "x86_64" => "X64",
-    "aarch64" => "ARM64",
-    "arm" => "ARM",
-    "x86" => "X86",
-    other => other,
-  };
+  let expected_arch = runner_arch();
   assert_eq!(eval(&ctx, "${{ runner.arch }}")?, expected_arch);
 
   // temp/tool_cache are real existing dirs under data_dir (Open Q6).

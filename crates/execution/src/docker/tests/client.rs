@@ -5,6 +5,8 @@
 //! `OrbStack`'s, and a TCP daemon. No mocks; `resolve_docker_host` is pure, so
 //! the values below are the whole input space that matters.
 
+use shared::RunnerError;
+
 use super::{DockerClient, resolve_docker_host};
 
 const DEFAULT_SOCKET: &str = "unix:///var/run/docker.sock";
@@ -61,15 +63,22 @@ fn resolution_is_idempotent() {
 #[test]
 fn an_unsupported_scheme_errors_naming_the_endpoint() {
   temp_env::with_var("DOCKER_HOST", Some("ssh://builder@10.0.0.5"), || {
-    // An Ok leaves the message empty, so the one assertion covers both the
-    // "must fail" and the "must name the endpoint" halves.
-    let message = DockerClient::new()
-      .err()
-      .map_or_else(String::new, |e| e.to_string());
+    // Match the variant, not just the text: a different `RunnerError` carrying
+    // the endpoint by coincidence would otherwise satisfy this.
+    let result = DockerClient::new();
+    assert!(
+      matches!(result, Err(RunnerError::Docker(_))),
+      "ssh:// is outside bollard's default features — construction must fail \
+       with RunnerError::Docker; got: {result:?}"
+    );
+    // The assertion above already fixed the variant; the fallback arm is dead.
+    let message = match result {
+      Err(RunnerError::Docker(message)) => message,
+      _ => String::new(),
+    };
     assert!(
       message.contains("ssh://builder@10.0.0.5"),
-      "ssh:// is outside bollard's default features — construction must fail \
-       naming the endpoint; got: {message:?}"
+      "the error must name the endpoint; got: {message:?}"
     );
   });
 }

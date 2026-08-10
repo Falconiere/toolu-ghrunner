@@ -11,19 +11,7 @@
 
 use std::path::Path;
 
-use config::service_unit::{self, ServiceSpec, launchd_env_path};
-
-/// The directories a `LaunchAgent` must end up with regardless of the installing
-/// shell — mirrors `service_unit::GUARANTEED_PATH_DIRS`, which is private.
-const GUARANTEED: [&str; 7] = [
-  "/opt/homebrew/bin",
-  "/opt/homebrew/sbin",
-  "/usr/local/bin",
-  "/usr/bin",
-  "/bin",
-  "/usr/sbin",
-  "/sbin",
-];
+use config::service_unit::{self, GUARANTEED_PATH_DIRS, ServiceSpec, launchd_env_path};
 
 // ── the spaces + ampersand spec, exact-matched against fixtures ──────
 
@@ -175,11 +163,11 @@ fn systemd_unit_escapes_percent_in_description() {
 /// could see.
 #[test]
 fn launchd_env_path_keeps_the_real_path_and_adds_the_guaranteed_dirs() {
-  let real = std::env::var("PATH").unwrap_or_default();
+  let real = std::env::var("PATH").unwrap_or_else(|_| String::new());
   let built = launchd_env_path(Some(&real));
   let entries: Vec<&str> = built.split(':').collect();
 
-  for dir in GUARANTEED {
+  for dir in GUARANTEED_PATH_DIRS {
     assert!(entries.contains(&dir), "missing {dir} in {built}");
   }
   for entry in real.split(':').filter(|e| !e.is_empty()) {
@@ -208,7 +196,7 @@ fn launchd_env_path_deduplicates_keeping_first_occurrence() {
 /// into a plist survives a re-run of `install-service`.
 #[test]
 fn launchd_env_path_is_idempotent() {
-  let real = std::env::var("PATH").unwrap_or_default();
+  let real = std::env::var("PATH").unwrap_or_else(|_| String::new());
   let once = launchd_env_path(Some(&real));
   assert_eq!(launchd_env_path(Some(&once)), once);
 }
@@ -217,8 +205,8 @@ fn launchd_env_path_is_idempotent() {
 /// the service unable to spawn `bash` for a `run:` step.
 #[test]
 fn launchd_env_path_without_a_current_path_is_the_guaranteed_set() {
-  assert_eq!(launchd_env_path(None), GUARANTEED.join(":"));
-  assert_eq!(launchd_env_path(Some("")), GUARANTEED.join(":"));
+  assert_eq!(launchd_env_path(None), GUARANTEED_PATH_DIRS.join(":"));
+  assert_eq!(launchd_env_path(Some("")), GUARANTEED_PATH_DIRS.join(":"));
 }
 
 /// Empty segments (a trailing `:` or `::`, both legal in a real PATH and
