@@ -58,8 +58,10 @@ fn resolution_is_idempotent() {
 /// silently falling back to the default socket would run the job against a
 /// daemon the operator did not choose.
 ///
-/// `temp_env` scopes the mutation; nothing else in this crate reads
-/// `DOCKER_HOST`, so the global write cannot race another test.
+/// `temp_env` scopes the mutation. The write is process-global, but a test
+/// binary is its own process and nothing else linked into THIS one reads
+/// `DOCKER_HOST` — another crate's tests run in a separate process and cannot
+/// observe it.
 #[test]
 fn an_unsupported_scheme_errors_naming_the_endpoint() {
   temp_env::with_var("DOCKER_HOST", Some("ssh://builder@10.0.0.5"), || {
@@ -76,9 +78,12 @@ fn an_unsupported_scheme_errors_naming_the_endpoint() {
       Err(RunnerError::Docker(message)) => message,
       _ => String::new(),
     };
+    // Anchored at the front, not a bare `contains`: the endpoint has to be the
+    // one the message is ABOUT, not a substring that happens to appear inside
+    // bollard's own trailing text.
     assert!(
-      message.contains("ssh://builder@10.0.0.5"),
-      "the error must name the endpoint; got: {message:?}"
+      message.starts_with("connect docker daemon at ssh://builder@10.0.0.5:"),
+      "the error must name the endpoint it tried; got: {message:?}"
     );
   });
 }
