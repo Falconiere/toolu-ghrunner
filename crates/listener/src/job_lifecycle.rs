@@ -33,6 +33,11 @@ pub(super) async fn poll_and_execute(
 
   let body = parse_job_request_body(&msg)?;
 
+  // Deliberately the RAW lowercase `std::env::consts::OS` ("linux"/"macos"),
+  // NOT the canonical `shared::platform::runner_os()` the poll and acknowledge
+  // paths send. This is a live acquisition contract that works as-is; there is
+  // no evidence the Run Service validates the field, and a wrong guess here
+  // takes the runner fully offline. Do not "converge" it without that evidence.
   let acquire_req = AcquireJobRequest {
     job_message_id: body.runner_request_id.clone(),
     runner_os: std::env::consts::OS.to_owned(),

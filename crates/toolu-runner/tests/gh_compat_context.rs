@@ -7,7 +7,8 @@
 //! mocks, no hand-rolled lookup. Asserts:
 //!
 //! S12 (runner.*/github.*):
-//!   - `runner.os == "Linux"`, `runner.arch` == this host's arch,
+//!   - `runner.os` and `runner.arch` == this host's GitHub-canonical labels
+//!     (and `env.RUNNER_OS` mirrors `runner.os`),
 //!     `runner.temp`/`runner.tool_cache` are real existing dirs.
 //!   - `github.sha`/`github.repository`/`github.run_id` == the fixture values.
 //!
@@ -64,8 +65,18 @@ fn runner_context_is_host_and_config_derived() -> TestResult<()> {
   let dir = tempfile::tempdir()?;
   let (ctx, _masker) = build_ctx(dir.path())?;
 
-  // os is fixed to the Linux target; arch matches the host mapping.
-  assert_eq!(eval(&ctx, "${{ runner.os }}")?, "Linux");
+  // os and arch both come from the host mapping — a macOS host must report
+  // "macOS", not the "Linux" this used to be pinned to.
+  let expected_os = match std::env::consts::OS {
+    "linux" => "Linux",
+    "macos" => "macOS",
+    "windows" => "Windows",
+    other => other,
+  };
+  assert_eq!(eval(&ctx, "${{ runner.os }}")?, expected_os);
+  // RUNNER_OS is the env mirror of runner.os; steps read it far more often
+  // than the context, so it is asserted through the same evaluator.
+  assert_eq!(eval(&ctx, "${{ env.RUNNER_OS }}")?, expected_os);
 
   let expected_arch = match std::env::consts::ARCH {
     "x86_64" => "X64",
