@@ -50,8 +50,8 @@ pub trait SecretRedactor: Send + Sync {
 
 /// The home data directory (`~/.toolu-runner`). Tracing init writes
 /// `_diag/runner.log*` here, since tracing is initialized before any per-repo
-/// config is loaded. The setup wizard's verify step scans this dir's `_diag/`
-/// for the runner's own log, alongside the registration dir's `_diag/`.
+/// config is loaded, so the runner's own log lands here rather than in the
+/// registration dir's `_diag/`.
 pub fn default_data_dir() -> PathBuf {
   crate::paths::expand_tilde(Path::new("~/.toolu-runner"))
 }

@@ -27,14 +27,13 @@ fn invalid_unicode_cli_config_child_probe() {
   assert!(
     matches!(
       key.as_str(),
-      "TOOLU_JITCONFIG" | "TOOLU_DEADLINE" | "TOOLU_RUNNER_TOKEN" | "TOOLU_RUNNER_CLIENT_ID"
+      "TOOLU_JITCONFIG" | "TOOLU_DEADLINE" | "TOOLU_RUNNER_CLIENT_ID"
     ),
     "unexpected child probe key: {key}"
   );
   let value = match key.as_str() {
     "TOOLU_JITCONFIG" => super::jit_config_raw(),
     "TOOLU_DEADLINE" => super::deadline_raw(),
-    "TOOLU_RUNNER_TOKEN" => super::runner_token(),
     _ => super::runner_client_id(),
   };
   assert!(value.is_none(), "invalid Unicode must be treated as unset");
@@ -46,7 +45,6 @@ fn invalid_unicode_cli_config_values_are_diagnosed() {
   for key in [
     "TOOLU_JITCONFIG",
     "TOOLU_DEADLINE",
-    "TOOLU_RUNNER_TOKEN",
     "TOOLU_RUNNER_CLIENT_ID",
   ] {
     let output = Command::new(std::env::current_exe().expect("resolve current test binary"))

@@ -131,8 +131,7 @@ pub(crate) fn cmd_logout(args: &LogoutArgs) -> Result<(), Box<dyn std::error::Er
 /// by typing the code at the printed URL manually. `pub(crate)` so
 /// `create-app`'s manifest flow can reuse the same launcher. The child's
 /// stdout+stderr are null-redirected — it is fire-and-forget and no output
-/// is wanted, so an opener's stray line can never corrupt the CLI output or
-/// the `setup` wizard's alternate screen.
+/// is wanted, so an opener's stray line can never corrupt the CLI output.
 pub(crate) fn open_browser_best_effort(url: &str) {
   let mut command = if cfg!(target_os = "macos") {
     let mut c = std::process::Command::new("open");

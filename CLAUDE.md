@@ -19,9 +19,9 @@ no OTel.
   - `protocol` — no internal deps (sync crypto + protocol/v1 types).
   - `shared` — no internal deps (cross-cutting types, tracing init,
     `SecretMasker`, `sanitize_job_id`, `runner_os`/`runner_arch`).
-  - `config`, `expressions`, `cache` — each depend on `shared` only.
+  - `config`, `expressions`, `cache`, `observability` — each depend
+    on `shared` only.
   - `wire` — `shared`, `protocol`.
-  - `observability` — `shared`, `config`.
   - `execution` — `shared`, `expressions`, `cache`.
   - `listener` — `execution`, `wire`, `observability`, `shared`,
     `protocol`.
@@ -402,39 +402,22 @@ to that list requires proving the value is not a real credential.
   the GH UI), `log_upload`, `results_types`, `types` (`Status`,
   `ReportConclusion`, `StepResult`, `Annotation`).
 
-### `observability/` — job journal + watch TUI (deps: shared, config)
+### `observability/` — job journal (deps: shared)
 
-- `journal/` — per-job JSONL event journal, the local observability
-  surface behind `watch`. `types` pins the on-disk line contract
-  (v1: `{"v":1,"seq":N,"ts":"…","type":"<snake_case event>",…}`,
-  decoupled from `shared::events` — internally-tagged serde enum
-  flattened into a version/seq/ts envelope). `writer` masks
+- `journal/` — per-job JSONL event journal. `types` pins the on-disk
+  line contract (v1: `{"v":1,"seq":N,"ts":"…","type":"<snake_case
+  event>",…}`, decoupled from `shared::events` — internally-tagged
+  serde enum flattened into a version/seq/ts envelope). `writer` masks
   every line through the job's `SecretMasker`, buffers pre-acquire
   events (cap 256), names the file `<UTC ts>-<job_id>.jsonl` under
   `data_dir/_diag/jobs/`, prunes to the newest 50, and NEVER fails
   the job (WARN once, keep draining). `reader` is the incremental
   replay/tail reader (`poll()` advances only past complete lines)
   plus `scan_jobs` head/tail-window summaries.
-- `watch/` — `toolu-runner watch` ratatui TUI. `state` (pure reducer:
-  journal lines → job list / step tree / bounded 10k log ring /
-  seq-gap flag), `ui` (rendering), `input` (key → `Action`, cancel
-  confirm modal), `mod` (250 ms tick loop, 1 s rescan, terminal
-  lifecycle, `send_cancel` = SIGINT to the `.lock` PID, unix only).
-  Missing/unreadable config falls back to multi-dir browsing:
-  `discover_jobs_dirs` (every `runners/<owner>/<repo>/_diag/jobs` from
-  `config::registry::list_registrations` + the legacy home) merged by
-  `scan_all_jobs`, re-discovered on each rescan.
   Test fixture: `tests/fixtures/journal/canonical.jsonl`, captured
   from a real engine run via `JOURNAL_CAPTURE=1 cargo test -p
-  toolu-runner --test journal_writer_test capture_canonical`.
-- `wizard/` — the PURE full-screen setup-wizard state machine (sibling
-  to `watch/`, drives `toolu-runner setup`). `state` (`WizardState`
-  reducer + `StepEvent` + `probe_skips` — the idempotent
-  already-done detection), `input` (key → `Action`), `verify`
-  (`verify_decision` — the `_diag/runner.log` online-marker gate),
-  `term` (alt-screen writers), `ui` (render). No I/O, no async — the
-  impure driver lives in the bin (`setup_cmd` / `wizard_steps`).
-  Unit-tested from `crates/toolu-runner/tests/wizard_*_test.rs`.
+  toolu-runner --test journal_writer_test capture_canonical`, and
+  read back by `journal_reader_test.rs` / `journal_writer_test.rs`.
 
 ### `execution/` — job execution engine (deps: shared, expressions, cache)
 
@@ -548,9 +531,9 @@ to that list requires proving the value is not a real credential.
   `register_cmd`, `run` → `run_cmd`, `boot` → `boot_cmd` (intercepted
   before the generic dispatch — see `boot_cmd.rs` below), `install-service`
   → `service_cmd`, `login`/`logout` → `login_cmd`, `status` →
-  `status_cmd`, `create-app` → `create_app_cmd`, `setup` → `setup_cmd`)
-  plus the inline `remove` / `watch` handlers.
-  `--config` resolution for `run` / `remove` / `status` / `watch` /
+  `status_cmd`, `create-app` → `create_app_cmd`)
+  plus the inline `remove` handler.
+  `--config` resolution for `run` / `remove` / `status` /
   `install-service`: flag > cwd-inferred
   `runners/<owner>/<repo>/config.toml` > the sole registration (legacy
   `<home>/config.toml` included) > error listing candidates
@@ -569,9 +552,7 @@ to that list requires proving the value is not a real credential.
   persisted id/URL are the only handle, so a failed call aborts with local
   state intact. Bearer `--token` > `TOOLU_RUNNER_TOKEN` > stored `login`
   (empty = absent); NO token is a hard error, not a warning —
-  `--skip-unregister` is the explicit opt-out. `watch`
-  opens the journal TUI (`observability::watch`; no network, no
-  tracing init — logs would corrupt the alternate screen).
+  `--skip-unregister` is the explicit opt-out.
 - `register_cmd.rs` — `cmd_register` + `register_and_persist` (split
   out of `main.rs`). `--url` optional: absent infers the repo from the
   cwd git remote `origin` (`config::repo_infer`; github.com only —
@@ -660,23 +641,6 @@ to that list requires proving the value is not a real credential.
   PRINTS the install URL — does NOT install the app or mint installation
   tokens (deferred; `register` still uses `--token`/env/device-flow this
   release). Flags: `--name`, `--host`, `--no-browser`, `--force`.
-- `setup_cmd.rs` — `cmd_setup`: the `setup` wizard entrypoint (the
-  full-screen ratatui onboarding flow, github.com only). Non-TTY guard
-  (clean error naming `login` / `register` / `install-service` — GHES /
-  org use the manual commands), `TerminalGuard` RAII terminal restore,
-  and the impure async ratatui render loop draining a `StepEvent`
-  channel into `observability::wizard::state`. No daemon; delegates the
-  step work to `wizard_steps`.
-- `wizard_steps.rs` — async step executors (`run_pipeline`: auth →
-  register → install-service → verify). Only **auth** (stored login token)
-  and **register** (existing registration) pre-skip; **install** is
-  idempotently re-applied (re-writes + re-activates the unit, never skipped)
-  and **verify** always runs. Reuses the existing cmd cores
-  (`login_cmd::run_device_flow`, `register_cmd::register_and_persist`,
-  `service_cmd::install_service_core`).
-  Bearer precedence `--token` > `TOOLU_RUNNER_TOKEN` > stored login token
-  > device flow; verify tails `_diag/runner.log` for the listener's
-  `"session created — long-polling for jobs"` online marker.
 
 ## References
 

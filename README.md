@@ -13,7 +13,6 @@ didn't ask for.
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 [Install](#install) · [Quick start](#quick-start) ·
-[Watch a job](#watch-live-jobs-in-your-terminal) ·
 [How it works](#how-it-works) ·
 [Cache acceleration](#cache-acceleration) ·
 [vs. `actions/runner`](#vs-actionsrunner) ·
@@ -65,9 +64,6 @@ cd my-repo && toolu-runner register
 
 # 2. Run the listener — stays online, re-registering after each job
 toolu-runner run
-
-# 3. Watch jobs execute, in another terminal
-toolu-runner watch
 ```
 
 No flags, no PAT to craft by hand: on an interactive terminal with no
@@ -134,41 +130,11 @@ CLI.
 | `--force` | `remove` | Cancel an in-flight run before unregistering. |
 | `--client-id <ID>` | `login` | OAuth App client id for the device flow (fallback: `TOOLU_RUNNER_CLIENT_ID`). Needed until the built-in github.com App ships; always needed for GHES. |
 
-`register`, `run`, `remove`, `status`, `watch`, and `install-service`
+`register`, `run`, `remove`, `status`, and `install-service`
 also take `--config <FILE>`; when omitted, the config resolves to the cwd-inferred
 `runners/<owner>/<repo>/config.toml` under the runner home, else the
 sole existing registration. Every command documents itself in full:
 `toolu-runner <command> --help`.
-
-## Watch live jobs in your terminal
-
-Every job writes a JSONL event journal to disk. `toolu-runner watch` is a
-TUI over that journal — job history, a live step tree, streaming logs,
-and a cancel key. No network, no server, no browser tab.
-
-```
-┌ toolu-runner watch ─────────────────────────────────────────────────────┐
-│ runner: my-runner │ running · pid 48213 │                               │
-└─────────────────────────────────────────────────────────────────────────┘
-┌ jobs ──────────────────────────┐┌ build — running ───────────────────────┐
-│ ● build          10:42:07      ││ ✓  1. Set up job                       │
-│ ✓ test           09:18:22      ││ ✓  2. Checkout                         │
-│ ✗ lint           08:55:01      ││ ●  3. cargo build --release            │
-│ ⊘ deploy         08:31:44      ││ ○  4. Upload artifact                  │
-│ ○ nightly        06:00:12      │└────────────────────────────────────────┘
-│                                │┌ logs (follow) ─────────────────────────┐
-│                                ││    Compiling protocol v0.1.0           │
-│                                ││    Compiling toolu-runner v0.1.0       │
-│                                ││     Finished `release` in 41.20s       │
-└────────────────────────────────┘└────────────────────────────────────────┘
- q quit │ Tab pane │ ↑↓/jk move │ Enter open │ f follow │ PgUp/PgDn scroll │ c cancel
-```
-
-Logs are masked through the same `SecretMasker` that guards the runner's
-own log file, so `secrets.*` values never land on disk in the clear.
-`watch` also works with no runner running — it browses the job journals
-of every registration (`runners/<owner>/<repo>/_diag/jobs/` plus the
-legacy home), merged, newest first (each dir keeps its newest 50).
 
 ## How it works
 
@@ -338,7 +304,6 @@ clock, a socket, or tokio.
 | Secret masking | C# | `shared::SecretMasker` + tracing layer |
 | Docker | C# | `execution::docker::client` *(bollard; `uses: docker://` step dispatch not yet wired — such steps fail as unsupported)* |
 | Node.js auto-download | C# | `execution::node::runtime` |
-| Live job TUI | — | **`toolu-runner watch`** *(`observability::watch`)* |
 | Plugin system | — | **`execution::plugin::RunnerPlugin`** |
 
 **Deliberately not ported:** OpenTelemetry, and any coupling to the
@@ -395,11 +360,11 @@ hand-edit `jit_config` or `auth_token` — re-run `register --replace`.
     ├── .pending_remove         # written by `remove` while a run is in flight
     └── _diag/
         ├── runner.log          # JSON, secret-masked, daily-rotated
-        └── jobs/               # per-job JSONL journals (newest 50) — what `watch` reads
+        └── jobs/               # per-job JSONL journals (newest 50)
 ```
 
 `remove` deletes a registration's `config.toml`, `credentials.json`,
-`.lock`, and `.pending_remove`; `_diag/` is kept, so `watch` history
+`.lock`, and `.pending_remove`; `_diag/` is kept, so job history
 survives unregistration.
 
 </details>
@@ -477,14 +442,10 @@ new host.
 | `registration already exists at ...` | Pass `--replace` to `register`. |
 | `... is not a git repository` / `has no 'origin' remote` at `register` | Zero-arg inference needs a cwd git repo with an `origin` remote — pass `--url` instead. |
 | `no GitHub OAuth App configured` | The built-in device-flow App isn't wired yet — set `TOOLU_RUNNER_CLIENT_ID` (or `login --client-id`), or skip the device flow with `--token` / `TOOLU_RUNNER_TOKEN`. |
-| `another run is in flight` | Another `run` holds this repo's `.lock`; its PID is in the error. Wait it out, or cancel with `c` in `watch` (sends SIGINT to the holder). |
 | `run` exits after one job (warned it would) | No stored `login` token, so re-mint has no bearer. Run `toolu-runner login` (or set `TOOLU_RUNNER_TOKEN`) to stay online; or pass `--once` if a single job is intended. |
+| `another run is in flight` | Another `run` holds this repo's `.lock`; its PID is in the error. Wait it out, or stop the holder with `kill -INT <pid>`. |
 | `generate-jitconfig` fails with a network error | A firewall is blocking `api.github.com` (github.com) or the GHES host. |
 | `warning: ignoring yamless env var ...` | A stale `YAMLESS_*` var is in your shell rc. Remove it. |
-
-Job not showing up? Check the labels in `runs-on:` match the ones you
-registered with, then `toolu-runner watch` to see what the runner
-actually received.
 
 ## Development
 
@@ -550,14 +511,14 @@ Ten layered crates under `crates/`, acyclic dependency graph:
   endpoints). → `shared`.
 - **`wire`** — async HTTP transport (`net/`) + Run/Results reporting
   domain types (`reporting/`). → `shared`, `protocol`.
-- **`observability`** — per-job JSONL journal + the `watch` TUI. →
-  `shared`, `config`.
+- **`observability`** — per-job JSONL journal (`_diag/jobs/`). →
+  `shared`.
 - **`execution`** — the job execution engine + Docker/Node/plugin + the
   `Runner`. → `shared`, `expressions`, `cache`.
 - **`listener`** — the GitHub JIT lifecycle. → `execution`, `wire`,
   `observability`, `shared`, `protocol`.
 - **`toolu-runner`** — the CLI **bin** (`register` / `run` / `remove` /
-  `status` / `watch` / `install-service` / `login` / `logout` /
+  `status` / `install-service` / `login` / `logout` /
   `create-app`). → all of the above.
 
 [docs/architecture.md](docs/architecture.md) has the full design with

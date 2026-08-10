@@ -15,11 +15,9 @@ use crate::login_cmd;
 /// Extended help footer for the top-level `--help`.
 const TOP_AFTER_HELP: &str = "\
 Examples:
-  toolu-runner setup                # guided wizard: auth -> register -> install -> verify
   toolu-runner login                # one-time GitHub OAuth device-flow login
   toolu-runner register             # repo inferred from the cwd git remote
   toolu-runner run                  # poll for the job, execute it, exit
-  toolu-runner watch                # TUI over running and past jobs
 
 Environment:
   TOOLU_RUNNER_TOKEN           GitHub bearer for `register` (flag > env > stored login token)
@@ -38,15 +36,6 @@ Examples:
 
   # custom name, no browser (print the URL to open manually)
   toolu-runner create-app --name my-org-runner --no-browser";
-
-/// Extended help footer for `setup --help`.
-const SETUP_AFTER_HELP: &str = "\
-Examples:
-  # guided setup for the cwd repository (github.com), inferred from the git remote
-  cd my-repo && toolu-runner setup
-
-  # explicit github.com repository
-  toolu-runner setup --url https://github.com/owner/repo";
 
 /// Extended help footer for `boot --help`.
 const BOOT_AFTER_HELP: &str = "\
@@ -111,15 +100,6 @@ pub(crate) struct Cli {
 /// Top-level subcommands.
 #[derive(Debug, Subcommand)]
 pub(crate) enum Command {
-  /// Guided first-run setup: authenticate, register, install, verify.
-  ///
-  /// A full-screen wizard that walks all four steps end-to-end for a
-  /// github.com repository: OAuth device-flow auth (only if no token is
-  /// stored), JIT registration, supervisor-service install, and an online
-  /// check. `--url` absent infers the repo from the cwd git remote `origin`.
-  /// github.com only, and an interactive terminal is required — for GHES or
-  /// scripted setups run `login`, `register`, and `install-service` directly.
-  Setup(SetupArgs),
   /// Register the runner with a GitHub repository or organization.
   ///
   /// POSTs GitHub's `generate-jitconfig` REST endpoint and persists the
@@ -153,13 +133,6 @@ pub(crate) enum Command {
   /// present, and the stored device-flow login state for the registered
   /// host. Reads local files only.
   Status(StatusArgs),
-  /// Watch jobs in a TUI: history, live steps and logs, cancel key.
-  ///
-  /// Read-only terminal UI over the local job journal
-  /// (`data_dir/_diag/jobs`). No network: it replays and tails journal
-  /// files, including when no runner is registered. Cancelling a job
-  /// sends SIGINT to the lock-holding `run` process (unix only).
-  Watch(WatchArgs),
   /// Install a supervisor unit that keeps `run` alive across reboots.
   ///
   /// Generates and activates a launchd `LaunchAgent` (macOS) or systemd
@@ -199,47 +172,6 @@ pub(crate) enum Command {
   /// and exits with a code reflecting the job outcome. See `--help` for
   /// the full env contract and exit-code mapping.
   Boot(BootArgs),
-}
-
-/// Arguments for the `setup` subcommand.
-#[derive(Debug, Args)]
-#[command(after_help = SETUP_AFTER_HELP)]
-pub(crate) struct SetupArgs {
-  /// Repository URL, e.g. <https://github.com/owner/repo>.
-  ///
-  /// Optional: when absent, the repository is inferred from the cwd git
-  /// remote `origin`. The value is not validated by clap — only github.com
-  /// is supported, and a non-github.com URL (GHES / enterprise) or an
-  /// organization runner is rejected at startup with an error naming the
-  /// manual `register` / `login` / `install-service` commands.
-  #[arg(long, value_name = "URL", value_hint = ValueHint::Url)]
-  pub(crate) url: Option<String>,
-  /// GitHub API token for the `generate-jitconfig` REST call.
-  ///
-  /// Optional — resolution order: this flag > `TOOLU_RUNNER_TOKEN` env > the
-  /// stored `login` token. With none of those, the wizard runs the OAuth
-  /// device flow inline (an interactive terminal is required either way).
-  #[arg(long, value_name = "TOKEN")]
-  pub(crate) token: Option<String>,
-  /// Runner name (default: the machine hostname).
-  #[arg(long, value_name = "NAME")]
-  pub(crate) name: Option<String>,
-  /// Comma-separated runner labels (default: self-hosted,<os>,<arch>).
-  #[arg(long, value_name = "LABELS", value_delimiter = ',')]
-  pub(crate) labels: Vec<String>,
-  /// Path to the runner config file. Default: inferred from the cwd git
-  /// remote (runners/<owner>/<repo>/ under the runner home).
-  ///
-  /// The credentials file is written next to it in the same directory.
-  #[arg(long, value_name = "FILE", value_hint = ValueHint::FilePath)]
-  pub(crate) config: Option<PathBuf>,
-  /// OAuth App `client_id` for the device flow.
-  ///
-  /// Resolution order: this flag > `TOOLU_RUNNER_CLIENT_ID` env > the built-in
-  /// github.com App. Needed only when the wizard has to run the device flow
-  /// (no token is otherwise available).
-  #[arg(long, value_name = "CLIENT_ID")]
-  pub(crate) client_id: Option<String>,
 }
 
 /// Arguments for the `create-app` subcommand.
@@ -382,19 +314,6 @@ pub(crate) struct StatusArgs {
   pub(crate) config: Option<PathBuf>,
 }
 
-/// Arguments for the `watch` subcommand.
-#[derive(Debug, Args)]
-pub(crate) struct WatchArgs {
-  /// Path to the runner config file. Default: inferred from the cwd git
-  /// remote (runners/<owner>/<repo>/ under the runner home), else the
-  /// sole existing registration.
-  ///
-  /// When the file is absent or unreadable, `watch` falls back to
-  /// browsing the default data dir (~/.toolu-runner) read-only.
-  #[arg(long, value_name = "FILE", value_hint = ValueHint::FilePath)]
-  pub(crate) config: Option<PathBuf>,
-}
-
 /// Arguments for the `install-service` subcommand.
 #[derive(Debug, Args)]
 pub(crate) struct InstallServiceArgs {
@@ -432,11 +351,6 @@ pub(crate) struct InstallServiceArgs {
 #[derive(Debug, Args)]
 #[command(after_help = BOOT_AFTER_HELP)]
 pub(crate) struct BootArgs {}
-
-/// Default `--config` path: `~/.toolu-runner/config.toml`.
-pub(crate) fn default_config_path() -> PathBuf {
-  shared::paths::expand_tilde(Path::new("~/.toolu-runner/config.toml"))
-}
 
 /// Runner name from `--name`, defaulting to the machine hostname.
 pub(crate) fn runner_name_or_hostname(name: Option<String>) -> String {

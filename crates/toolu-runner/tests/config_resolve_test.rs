@@ -422,7 +422,8 @@ fn seed_runtime_state(dir: &Path) -> Result<(), std::io::Error> {
 
 /// OQ-3: `remove` on a per-repo registration deletes `config.toml`,
 /// `credentials.json`, the seeded `.lock` file, and any `.pending_remove`
-/// marker, while `_diag/` and its contents survive for `watch` history.
+/// marker, while `_diag/` and its contents survive as the local job
+/// journal history.
 /// Uses `--skip-unregister`: this test is about local file layout, and
 /// `remove` now calls GitHub — without the flag it would either fail for
 /// want of a token or issue a real DELETE to api.github.com.
@@ -458,6 +459,6 @@ fn remove_deletes_registration_files_but_keeps_diag() {
   }
   assert!(
     repo_dir.join("_diag/jobs/history.jsonl").is_file(),
-    "_diag contents must survive remove (watch history, OQ-3)"
+    "_diag contents must survive remove (job journal history, OQ-3)"
   );
 }

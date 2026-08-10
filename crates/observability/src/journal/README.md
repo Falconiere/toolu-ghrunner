@@ -6,10 +6,8 @@ channel into masked `_diag/jobs/<ts>-<job_id>.jsonl` files with retention,
 and the incremental reader/scanner that replays and tails those files.
 
 **What does NOT belong here:** rendering or interacting with journal data
-is `observability::watch` (the TUI); this module only produces and reads
-the files. The pure `WizardState` reducer that drives the setup wizard
-lives in `observability::wizard`, not here. Secret masking logic itself
-is `shared::SecretMasker` — `writer` only calls it per line.
+— this module only produces and reads the files. Secret masking logic
+itself is `shared::SecretMasker` — `writer` only calls it per line.
 
 ## Contents
 
