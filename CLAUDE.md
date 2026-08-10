@@ -19,10 +19,10 @@ no OTel.
   - `protocol` — no internal deps (sync crypto + protocol/v1 types).
   - `shared` — no internal deps (cross-cutting types, tracing init,
     `SecretMasker`, `sanitize_job_id`, `runner_os`/`runner_arch`).
-  - `config`, `expressions`, `cache`, `observability` — each depend
-    on `shared` only. `observability` in particular does NOT depend on
+  - `config`, `expressions`, `cache` — each depend on `shared` only.
+  - `observability` — depends on `shared` only. It does NOT depend on
     `config`: its journal takes `data_dir` from the caller rather than
-    resolving it (see `### observability/` below).
+    resolving it (see `observability/` below).
   - `wire` — `shared`, `protocol`.
   - `execution` — `shared`, `expressions`, `cache`.
   - `listener` — `execution`, `wire`, `observability`, `shared`,
