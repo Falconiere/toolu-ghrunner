@@ -5,6 +5,13 @@ pub fn path() -> Option<String> {
   read("PATH")
 }
 
+/// Read `DOCKER_HOST` — the endpoint the Docker CLI and every Docker-compatible
+/// daemon (Colima, `OrbStack`, Podman, Rancher Desktop) advertise themselves on.
+/// `None` when unset or not valid Unicode.
+pub fn docker_host() -> Option<String> {
+  read("DOCKER_HOST")
+}
+
 /// Generic passthrough read of an arbitrary environment variable `key`.
 /// `None` when unset or not valid Unicode.
 pub fn var(key: &str) -> Option<String> {
