@@ -68,6 +68,22 @@ COPY --from=builder /src/target/release/toolu-runner /usr/local/bin/toolu-runner
 COPY --from=node-seed /seed/node /var/lib/toolu-runner/node
 ENV TOOLU_RUNNER_HOME=/var/lib/toolu-runner
 
+# Hosted-runner parity for `run:` steps: GitHub's images ship `node` on PATH,
+# and composite actions lean on that (`run: node "$GITHUB_ACTION_PATH/dist/…"`
+# is the standard shape — the toolu-ghactions code-review action among them).
+# The seed above is only the engine's per-version cache for node-TYPE actions;
+# it never reaches a step's $PATH, so a `run: node …` step dies with
+# "command not found". Expose the newest seeded LTS system-wide. `test -x`
+# fails the build loudly if NODE_ON_PATH ever names a version the seed stage
+# did not lay down (the PR image build catches it before publish).
+ARG NODE_ON_PATH=24.0.2
+RUN set -eu; \
+  for tool in node npm npx corepack; do \
+    src="/var/lib/toolu-runner/node/${NODE_ON_PATH}/bin/${tool}"; \
+    test -x "${src}"; \
+    ln -s "${src}" "/usr/local/bin/${tool}"; \
+  done
+
 # source/revision/version labels are stamped by the CI workflow's `labels:`
 # (repo/sha are not knowable here); only the static ones live in the image.
 LABEL org.opencontainers.image.title="toolu-ghrunner" \

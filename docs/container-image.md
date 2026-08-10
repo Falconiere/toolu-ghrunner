@@ -79,6 +79,12 @@ deadline-driven); the codes exist for humans reading provider logs.
   `node24` actions. Ephemeral containers never warm a lazy cache, so
   seeding removes the per-job nodejs.org fetch (and the egress
   requirement) entirely.
+- The newest seeded LTS (**24.0.2**) is also on **PATH** as `node` /
+  `npm` / `npx` / `corepack` (symlinked into `/usr/local/bin`), matching
+  GitHub-hosted images: `run:` steps that invoke `node` directly — the
+  standard composite-action shape — resolve it. The per-version seed
+  alone only serves node-**type** actions and never reaches a step's
+  `$PATH`.
 - Runs as **root**, with `sudo` installed as a passthrough: isolation
   is the single-tenant micro-VM, not the container user, and root keeps
   the pervasive `apt-get` / `sudo apt-get` workflow idioms working.
