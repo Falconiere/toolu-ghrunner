@@ -220,6 +220,14 @@ fn promote_staging(staging: &Path, dest: &Path) -> Result<(), RunnerError> {
   }
 
   if dest.exists() {
+    // Re-check completeness at the last possible moment: a rival's rename can
+    // land between the check above and this removal, and deleting its
+    // just-committed runtime would strand later steps. Now-complete => lost
+    // race, defer to the winner.
+    if node_binary_path(dest).exists() {
+      cleanup_staging(staging);
+      return Ok(());
+    }
     if let Err(remove_err) = std::fs::remove_dir_all(dest) {
       tracing::warn!(
         dest = %dest.display(),

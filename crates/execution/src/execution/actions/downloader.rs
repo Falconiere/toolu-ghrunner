@@ -233,6 +233,14 @@ fn promote_staging(staging: &Path, dest: &Path) -> Result<(), RunnerError> {
   }
 
   if dest.exists() {
+    // Re-check the watermark at the last possible moment: a rival's rename can
+    // land between the check above and this removal, and deleting a
+    // just-committed tree here would hand later jobs a missing cache (or worse,
+    // yank it from under a concurrent reader). Now-cached => lost race, defer.
+    if is_action_cached(dest) {
+      cleanup_staging(staging);
+      return Ok(());
+    }
     if let Err(remove_err) = std::fs::remove_dir_all(dest) {
       tracing::warn!(
         dest = %dest.display(),
