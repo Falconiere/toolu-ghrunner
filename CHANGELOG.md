@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.5] - 2026-08-11
+
+### Changed
+- overlap job round-trips, single-pass masking, action prefetch
+
+### Documentation
+- *(ci)* disambiguate the gitleaks:allow clause in the review prompt
+- *(ci)* state scanExempt and gitleaks:allow as independent mechanisms
+
+### Fixed
+- address PR #59 review round 1
+- *(execution)* re-check cache completeness before stale-dest removal
+
 ## [0.7.4] - 2026-08-10
 
 ### Changed
