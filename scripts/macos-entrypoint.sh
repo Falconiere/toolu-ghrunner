@@ -102,7 +102,9 @@ if [[ -d "${here}/node" ]]; then
       default_node=""
     fi
     if [[ -z "${default_node}" ]]; then
-      : # already reported above
+      # Either a branch above already said why, or the marker is simply an
+      # empty file — nothing to name in that case, and no node on PATH.
+      :
     elif [[ -x "${here}/node/${default_node}/bin/node" ]]; then
       export PATH="${here}/node/${default_node}/bin:${PATH}"
     else
