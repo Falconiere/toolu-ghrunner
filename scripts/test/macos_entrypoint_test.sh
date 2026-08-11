@@ -250,11 +250,44 @@ if ((ran_unwritable_case)); then
     echo "FAIL: expected a warning about the seed link; got: $out" >&2
     fail=1
   fi
+  # The system's own reason belongs INSIDE that warning, not on a bare line of
+  # its own next to it: a job log showing `ln: …: Permission denied` with no
+  # context reads as a step failure.
+  if grep -q "Permission denied" <<<"$(grep 'could not link seeded node' <<<"$out")"; then
+    echo "ok: the warning carries the system's reason"
+  else
+    echo "FAIL: expected the ln error folded into the warning; got: $out" >&2
+    fail=1
+  fi
+  if grep -qE '^ln: ' <<<"$out"; then
+    echo "FAIL: ln's raw stderr leaked beside the warning: $out" >&2
+    fail=1
+  else
+    echo "ok: no raw ln error leaks into the job log"
+  fi
 fi
 chmod 755 "$home/node"
 # Put the shared temp root back to what `mktemp -d` gave us — only this one
 # fixture needed traversal, and the later cases should not inherit it.
 chmod 700 "$TMPROOT"
+
+# --- a marker that cannot be read at all is named, not swallowed -----------
+# A directory in place of the marker file is the reproducible stand-in for an
+# I/O failure: `head` fails, and its reason must reach the warning rather than
+# /dev/null, or an operator sees only "no node on PATH" with no cause.
+root="$(image_tree unreadablemarker 24.0.2)"
+rm -f "$root/node/default"
+mkdir -p "$root/node/default"
+home="$TMPROOT/home-unreadablemarker"
+out="$(PATH=/usr/bin:/bin TOOLU_RUNNER_HOME="$home" TOOLU_JITCONFIG=x "$root/entrypoint" 2>&1)"
+check "an unreadable marker still boots the job" "argv=boot" "$(grep '^argv=' <<<"$out")"
+check "…and adds no node to PATH"                "node=none" "$(grep '^node=' <<<"$out")"
+if grep -q "node/default is unusable" <<<"$out" && grep -qi "directory" <<<"$out"; then
+  echo "ok: the read failure is reported with its reason"
+else
+  echo "FAIL: expected the head error inside the warning; got: $out" >&2
+  fail=1
+fi
 
 # --- a seed whose `default` names a missing runtime warns, does not die ----
 root="$(image_tree brokenseed 24.0.2)"

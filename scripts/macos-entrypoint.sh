@@ -75,9 +75,14 @@ if [[ -d "${here}/node" ]]; then
     # The link itself is best-effort — the engine downloads any runtime it
     # cannot find — so a failure here (read-only home, full disk) is a WARN,
     # never the end of the job. `if !` keeps `set -e` out of it.
-    if ! ln -sfn "${dir%/}" "${target}"; then
-      echo "toolu-runner: could not link seeded node ${version} at ${target};" \
-        "the engine will download it if a step needs it" >&2
+    #
+    # `ln`'s own stderr is captured rather than left to leak into the job log
+    # beside the warning, and rather than discarded: "Permission denied" vs
+    # "No space left on device" is the whole diagnosis, so it is folded into
+    # the one structured line instead of being thrown away.
+    if ! link_error="$(ln -sfn "${dir%/}" "${target}" 2>&1)"; then
+      echo "toolu-runner: could not link seeded node ${version} at ${target}" \
+        "(${link_error:-no error text}); the engine will download it if a step needs it" >&2
     fi
   done
   # The seed is the engine's per-version cache for node-TYPE actions; it never
@@ -88,17 +93,20 @@ if [[ -d "${here}/node" ]]; then
   if [[ -r "${here}/node/default" ]]; then
     # `head`, not `read`: bash's `read` returns non-zero on a final line with
     # no newline even though it assigned the value, so `|| default_node=""`
-    # would discard a perfectly good version. A genuine read failure (I/O,
-    # permissions) is reported rather than silently swallowed.
-    if ! default_node="$(head -n 1 "${here}/node/default" 2>/dev/null)"; then
-      echo "toolu-runner: could not read ${here}/node/default; not adding node to PATH" >&2
-      default_node=""
-    fi
-    # The version is interpolated into PATH, so it is checked for shape first:
-    # a corrupted marker carrying a colon would append an arbitrary directory
-    # to every step's search path.
+    # would discard a perfectly good version.
+    #
+    # stderr is folded INTO the capture (`2>&1`) rather than sent to
+    # /dev/null. It cannot corrupt the value — anything `head` says about an
+    # I/O error fails the shape check below, which is what gates PATH — and
+    # keeping it means the warning names the actual failure instead of a
+    # generic "could not read", with nothing leaking to the job log raw.
+    default_node="$(head -n 1 "${here}/node/default" 2>&1)" || true
+    # The version is interpolated into PATH, so it is checked for shape: a
+    # corrupted marker carrying a colon would append an arbitrary directory to
+    # every step's search path.
     if [[ -n "${default_node}" && ! "${default_node}" =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
-      echo "toolu-runner: node/default is not a version ('${default_node}'); not adding node to PATH" >&2
+      echo "toolu-runner: node/default is unusable ('${default_node}');" \
+        "not adding node to PATH" >&2
       default_node=""
     fi
     if [[ -z "${default_node}" ]]; then
