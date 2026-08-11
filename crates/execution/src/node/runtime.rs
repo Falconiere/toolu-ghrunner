@@ -31,9 +31,11 @@ pub fn node_binary_path(cache_dir: &Path) -> PathBuf {
   cache_dir.join("bin").join("node")
 }
 
-/// Download URL for a Node.js release tarball.
-pub fn node_download_url(version: &str, os: &str, arch: &str) -> String {
-  format!("https://nodejs.org/dist/v{version}/node-v{version}-{os}-{arch}.tar.gz")
+/// Download URL for a Node.js release tarball, resolved against `base_url`
+/// (production always resolves against [`NODE_DOWNLOAD_BASE`] via
+/// [`ensure_node_runtime`]; tests can point this at a local HTTP server).
+pub fn node_download_url(base_url: &str, version: &str, os: &str, arch: &str) -> String {
+  format!("{base_url}/v{version}/node-v{version}-{os}-{arch}.tar.gz")
 }
 
 /// Detect current platform for Node.js downloads.
@@ -220,21 +222,51 @@ fn promote_staging(staging: &Path, dest: &Path) -> Result<(), RunnerError> {
   }
 }
 
+/// The real Node.js download host every production install resolves
+/// tarball URLs against. [`ensure_node_runtime_from`] takes the base as a
+/// parameter (this constant is the only value the public
+/// [`ensure_node_runtime`] ever calls it with) so an end-to-end test can
+/// drive the SAME fetch → stage → extract → promote sequence against a
+/// local HTTP server instead of `nodejs.org`.
+const NODE_DOWNLOAD_BASE: &str = "https://nodejs.org/dist";
+
 /// Download and cache Node.js if not already present, returning the binary path.
 ///
-/// Skips download when the binary already exists on disk. Otherwise fetches
-/// the tarball from `nodejs.org` and extracts it with first-component
-/// stripping (the tarball's `node-v{version}-{os}-{arch}/` prefix is
-/// removed) into a unique sibling staging directory, then promotes it onto
-/// the cache dir with a single [`std::fs::rename`] (see [`promote_staging`]).
-/// This keeps the cache dir always either absent or a complete tree, so an
-/// extraction from one runner process can never interleave with another's
-/// for the same Node.js version.
+/// Thin wrapper around [`ensure_node_runtime_from`] pinned to the real
+/// [`NODE_DOWNLOAD_BASE`].
 ///
 /// # Errors
 ///
 /// Returns `RunnerError::NodeRuntime` on HTTP or extraction failures.
 pub async fn ensure_node_runtime(
+  client: &reqwest::Client,
+  data_dir: &Path,
+  major: u8,
+) -> Result<PathBuf, RunnerError> {
+  ensure_node_runtime_from(NODE_DOWNLOAD_BASE, client, data_dir, major).await
+}
+
+/// Download and cache Node.js if not already present, returning the binary
+/// path. `base_url` is a parameter (rather than hardcoded) so this exact
+/// function — the full fetch → stage → extract → promote sequence
+/// [`ensure_node_runtime`] runs in production — can be driven end-to-end
+/// against a local HTTP server in tests; [`ensure_node_runtime`] always
+/// calls it with [`NODE_DOWNLOAD_BASE`].
+///
+/// Skips download when the binary already exists on disk. Otherwise fetches
+/// the tarball and extracts it with first-component stripping (the
+/// tarball's `node-v{version}-{os}-{arch}/` prefix is removed) into a
+/// unique sibling staging directory, then promotes it onto the cache dir
+/// with a single [`std::fs::rename`] (see [`promote_staging`]). This keeps
+/// the cache dir always either absent or a complete tree, so an extraction
+/// from one runner process can never interleave with another's for the same
+/// Node.js version.
+///
+/// # Errors
+///
+/// Returns `RunnerError::NodeRuntime` on HTTP or extraction failures.
+async fn ensure_node_runtime_from(
+  base_url: &str,
   client: &reqwest::Client,
   data_dir: &Path,
   major: u8,
@@ -248,7 +280,7 @@ pub async fn ensure_node_runtime(
   }
 
   let (os, arch) = detect_platform();
-  let url = node_download_url(version, os, arch);
+  let url = node_download_url(base_url, version, os, arch);
 
   tracing::info!(version, url = %url, "downloading Node.js runtime");
 

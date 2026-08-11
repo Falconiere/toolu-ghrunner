@@ -1,8 +1,12 @@
-//! Tests for `runtime`: version resolution helpers plus `extract_tarball`
-//! (real tar.gz fixture, contents + permissions verified), an end-to-end
-//! streamed download+extract against a real local HTTP server, and the
-//! atomic-staging promotion (`promote_staging`) under real concurrency and
-//! under extraction failure.
+//! Tests for `runtime`: version resolution helpers, `extract_tarball` (real
+//! tar.gz fixture, contents + permissions verified), the atomic-staging
+//! promotion (`promote_staging`) under real concurrency and under extraction
+//! failure, and — via the injected-`base_url` `ensure_node_runtime_from` —
+//! true end-to-end runs of the production entry point's full sequencing
+//! (`fetch_node_tarball_reader` → `spawn_blocking(extract_tarball)` →
+//! `cleanup_staging`/`promote_staging`, including its error mapping) against
+//! a real local HTTP server, on both the success path and its two distinct
+//! failure branches (non-success HTTP status, and a corrupt tarball body).
 //!
 //! Zero coverage existed for this module before this file — `cargo nextest
 //! run -p execution runtime` previously matched nothing and passed
@@ -41,7 +45,7 @@ fn node_cache_dir_and_binary_path_join_correctly() {
 
 #[test]
 fn node_download_url_is_well_formed() {
-  let url = node_download_url("20.18.3", "linux", "x64");
+  let url = node_download_url("https://nodejs.org/dist", "20.18.3", "linux", "x64");
   assert_eq!(
     url,
     "https://nodejs.org/dist/v20.18.3/node-v20.18.3-linux-x64.tar.gz"
@@ -119,65 +123,103 @@ fn extract_tarball_strips_prefix_and_preserves_permissions() {
   }
 }
 
-/// Serve `body` as the response to every request on a random localhost
-/// port, returning the bound address. The server task is aborted when
-/// the caller's Tokio runtime shuts down at test end.
-async fn spawn_tarball_server(body: Vec<u8>) -> SocketAddr {
+/// Serve `status`+`body` as the response to every request on a random
+/// localhost port, returning the bound address. The caller resolves the
+/// exact tarball path against the returned base URL via
+/// [`node_download_url`] — the fallback route matches any path, so the
+/// helper works whether the caller is asserting a success or a failure
+/// response. The server task is aborted when the caller's Tokio runtime
+/// shuts down at test end.
+async fn spawn_node_dist_server(status: axum::http::StatusCode, body: Vec<u8>) -> SocketAddr {
   let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
     .await
-    .expect("bind local tarball server");
+    .expect("bind local node dist server");
   let addr = listener.local_addr().expect("local_addr");
-  let app = axum::Router::new().route(
-    "/node.tar.gz",
-    axum::routing::get(move || async move { body }),
-  );
+  let app = axum::Router::new().fallback(move || {
+    let body = body.clone();
+    async move { (status, body) }
+  });
   tokio::spawn(async move {
     let _ = axum::serve(listener, app).await;
   });
   addr
 }
 
-/// AC-9 for the node-runtime copy: a real tarball fixture served over
-/// local HTTP downloads and extracts through the streamed path
-/// (`bytes_stream` → `StreamReader` → `SyncIoBridge` → `spawn_blocking`),
-/// landing at the resolved binary path with the returned path matching.
+/// End-to-end: a real tarball fixture served over local HTTP is downloaded
+/// and extracted through the ACTUAL production entry point
+/// (`ensure_node_runtime_from`, which `ensure_node_runtime` calls pinned to
+/// the real `nodejs.org` base) — driving its full sequencing
+/// (`fetch_node_tarball_reader` → `spawn_blocking(extract_tarball)` →
+/// `promote_staging`) rather than replaying the steps by hand. Asserts the
+/// binary lands at the resolved cache path, stays executable, and no
+/// `.tmp-` staging dir survives a successful run.
 #[tokio::test]
-async fn ensure_node_runtime_streams_from_http() {
+async fn ensure_node_runtime_end_to_end_downloads_and_extracts() {
   let tar = build_tarball(&[("node-v20.18.3-linux-x64/bin/node", b"#!fake-node", 0o755)]);
-  let addr = spawn_tarball_server(tar).await;
+  let addr = spawn_node_dist_server(axum::http::StatusCode::OK, tar).await;
+  let base_url = format!("http://{addr}");
 
-  let data_dir = tmp_dest("data-dir");
+  let data_dir = tmp_dest("e2e-success-data-dir");
   std::fs::create_dir_all(&data_dir).expect("mkdir data_dir");
   let client = reqwest::Client::new();
+
+  let binary = ensure_node_runtime_from(&base_url, &client, &data_dir, 20)
+    .await
+    .expect("ensure_node_runtime_from must succeed end-to-end");
+
   let version = node_version_for(20);
   let cache_dir = node_cache_dir(&data_dir, version);
-  let expected_binary = node_binary_path(&cache_dir);
+  assert_eq!(binary, node_binary_path(&cache_dir));
 
-  // ensure_node_runtime hardcodes the nodejs.org URL, so this test drives
-  // extract_tarball's streamed path directly (the same code the download
-  // path calls) against bytes fetched from the local server, matching
-  // what AC-9 asks for: a real fixture over local HTTP through the
-  // streamed extraction path.
-  let response = client
-    .get(format!("http://{addr}/node.tar.gz"))
-    .send()
-    .await
-    .expect("fetch from local server");
-  assert!(response.status().is_success());
-
-  let stream = response
-    .bytes_stream()
-    .map(|chunk| chunk.map_err(std::io::Error::other));
-  let stream_reader = tokio_util::io::StreamReader::new(stream);
-  let sync_reader = tokio_util::io::SyncIoBridge::new(stream_reader);
-  let dest = cache_dir.clone();
-  tokio::task::spawn_blocking(move || extract_tarball(sync_reader, &dest))
-    .await
-    .expect("blocking extraction task must join")
-    .expect("extraction must succeed");
-
-  let content = std::fs::read(&expected_binary).expect("binary present at expected path");
+  let content = std::fs::read(&binary).expect("binary present at expected path");
   assert_eq!(content, b"#!fake-node");
+
+  #[cfg(unix)]
+  {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = std::fs::metadata(&binary)
+      .expect("metadata")
+      .permissions()
+      .mode();
+    assert_eq!(mode & 0o111, 0o111, "binary must remain executable");
+  }
+
+  assert_eq!(
+    leftover_staging_dirs(&cache_dir),
+    Vec::<PathBuf>::new(),
+    "no staging dir must remain after a successful end-to-end run"
+  );
+}
+
+/// End-to-end failure branch 1: a non-success HTTP status (404) from the
+/// download host must propagate as an error out of the entry point, and
+/// must leave neither a cache dir nor a staging dir behind.
+#[tokio::test]
+async fn ensure_node_runtime_end_to_end_404_propagates_error_with_no_leftovers() {
+  let addr = spawn_node_dist_server(axum::http::StatusCode::NOT_FOUND, Vec::new()).await;
+  let base_url = format!("http://{addr}");
+
+  let data_dir = tmp_dest("e2e-404-data-dir");
+  std::fs::create_dir_all(&data_dir).expect("mkdir data_dir");
+  let client = reqwest::Client::new();
+
+  let result = ensure_node_runtime_from(&base_url, &client, &data_dir, 20).await;
+  assert!(
+    result.is_err(),
+    "a 404 tarball response must propagate as an error"
+  );
+
+  let version = node_version_for(20);
+  let cache_dir = node_cache_dir(&data_dir, version);
+  assert!(
+    !cache_dir.exists(),
+    "cache dir must not exist after a 404 fetch failure"
+  );
+  assert_eq!(
+    leftover_staging_dirs(&cache_dir),
+    Vec::<PathBuf>::new(),
+    "no staging dir must remain after a 404 fetch failure"
+  );
 }
 
 /// List any sibling staging dirs left behind for `dest` (i.e. anything
@@ -289,32 +331,29 @@ fn promote_staging_replaces_a_stale_dest_missing_the_binary() {
   );
 }
 
-/// A corrupt (non-gzip) tarball body must fail extraction and leave NO
-/// staging dir and NO cache dir behind — this drives the same
-/// fetch→stage→extract sequence `ensure_node_runtime` runs internally
-/// (it can't be exercised directly here since it hardcodes the nodejs.org
-/// URL; see `ensure_node_runtime_streams_from_http` above for the same
-/// constraint on the success path).
+/// End-to-end failure branch 2: a corrupt (non-gzip) tarball body — a
+/// successful fetch (200 OK) but a failing extraction — must propagate as
+/// an error out of the entry point, driving the SAME
+/// fetch→stage→extract→cleanup sequence `ensure_node_runtime` runs
+/// internally, and must leave neither a cache dir nor a staging dir behind.
 #[tokio::test]
-async fn extraction_failure_leaves_no_cache_dir_or_staging_dir() {
-  let addr = spawn_tarball_server(b"not a valid gzip tarball".to_vec()).await;
+async fn ensure_node_runtime_end_to_end_corrupt_tarball_propagates_error_with_no_leftovers() {
+  let addr = spawn_node_dist_server(
+    axum::http::StatusCode::OK,
+    b"not a valid gzip tarball".to_vec(),
+  )
+  .await;
+  let base_url = format!("http://{addr}");
+
+  let data_dir = tmp_dest("e2e-corrupt-data-dir");
+  std::fs::create_dir_all(&data_dir).expect("mkdir data_dir");
   let client = reqwest::Client::new();
-  let cache_dir = tmp_dest("node-corrupt-cachedir");
 
-  let url = format!("http://{addr}/node.tar.gz");
-  let sync_reader = fetch_node_tarball_reader(&client, &url)
-    .await
-    .expect("fetch itself must succeed even though the body is corrupt");
-
-  let staging = staging_dir_for(&cache_dir);
-  let staging_for_extract = staging.clone();
-  let result =
-    tokio::task::spawn_blocking(move || extract_tarball(sync_reader, &staging_for_extract))
-      .await
-      .expect("blocking extraction task must join");
+  let result = ensure_node_runtime_from(&base_url, &client, &data_dir, 20).await;
   assert!(result.is_err(), "a corrupt tarball must fail to extract");
-  cleanup_staging(&staging);
 
+  let version = node_version_for(20);
+  let cache_dir = node_cache_dir(&data_dir, version);
   assert!(
     !cache_dir.exists(),
     "cache dir must not exist after a failed extraction"
