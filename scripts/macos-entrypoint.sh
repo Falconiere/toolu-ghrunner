@@ -71,7 +71,14 @@ if [[ -d "${here}/node" ]]; then
     # would run against a path that exists, fail with "File exists", and — as
     # the last command of the guard — take `set -e` and the whole launcher
     # down before it ever dispatches a job.
-    ln -sfn "${dir%/}" "${target}"
+    #
+    # The link itself is best-effort — the engine downloads any runtime it
+    # cannot find — so a failure here (read-only home, full disk) is a WARN,
+    # never the end of the job. `if !` keeps `set -e` out of it.
+    if ! ln -sfn "${dir%/}" "${target}"; then
+      echo "toolu-runner: could not link seeded node ${version} at ${target};" \
+        "the engine will download it if a step needs it" >&2
+    fi
   done
   # The seed is the engine's per-version cache for node-TYPE actions; it never
   # reaches a step's $PATH on its own, so a `run: node …` step would die with
@@ -79,8 +86,24 @@ if [[ -d "${here}/node" ]]; then
   # also asserts the version it names was actually seeded), so no version
   # sorting happens here — a missing file just means no injection.
   if [[ -r "${here}/node/default" ]]; then
-    read -r default_node <"${here}/node/default" || default_node=""
-    if [[ -n "${default_node}" && -x "${here}/node/${default_node}/bin/node" ]]; then
+    # `head`, not `read`: bash's `read` returns non-zero on a final line with
+    # no newline even though it assigned the value, so `|| default_node=""`
+    # would discard a perfectly good version. A genuine read failure (I/O,
+    # permissions) is reported rather than silently swallowed.
+    if ! default_node="$(head -n 1 "${here}/node/default" 2>/dev/null)"; then
+      echo "toolu-runner: could not read ${here}/node/default; not adding node to PATH" >&2
+      default_node=""
+    fi
+    # The version is interpolated into PATH, so it is checked for shape first:
+    # a corrupted marker carrying a colon would append an arbitrary directory
+    # to every step's search path.
+    if [[ -n "${default_node}" && ! "${default_node}" =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
+      echo "toolu-runner: node/default is not a version ('${default_node}'); not adding node to PATH" >&2
+      default_node=""
+    fi
+    if [[ -z "${default_node}" ]]; then
+      : # already reported above
+    elif [[ -x "${here}/node/${default_node}/bin/node" ]]; then
       export PATH="${here}/node/${default_node}/bin:${PATH}"
     else
       echo "toolu-runner: seeded node '${default_node}' is unusable; not adding node to PATH" >&2
