@@ -64,10 +64,11 @@ tracing file sink via `MaskerRedactor`.
   credential-shaped fixtures (`MIIphony`, `ghs_EXAMPLE…`, `ghp_deadbeef…`);
   CLAUDE.md documents the bar for additions. The mechanism is **file-level by
   schema** — there is no line-level or inline-comment syntax in the kit's
-  scanner, so do not ask for a narrower exemption that cannot be expressed,
-  and do not propose `# gitleaks:allow` unless the **gitleaks check itself**
-  is the one failing. Flag a `scanExempt` addition only when the exempted
-  value could plausibly be a real credential.
+  scanner, so do not ask for a narrower exemption that cannot be expressed.
+  (`# gitleaks:allow` belongs to the separate gitleaks CI check — it neither
+  narrows nor replaces a `scanExempt` entry, so propose it only for a finding
+  the gitleaks check itself raised.) Flag a `scanExempt` addition only when
+  the exempted value could plausibly be a real credential.
 
 ### 3. Async discipline
 
