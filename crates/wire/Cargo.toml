@@ -16,7 +16,7 @@ tokio = { version = "1", features = ["rt", "macros", "sync", "time", "net", "io-
 futures-util = "0.3"
 
 # HTTP transport
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-native-roots"] }
+reqwest = { version = "0.12", default-features = false, features = ["http2", "json", "rustls-tls-native-roots"] }
 
 # WebSocket for the live-log streamer
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-native-roots"] }

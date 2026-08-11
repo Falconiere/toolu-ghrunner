@@ -14,7 +14,7 @@ cache = { path = "../cache" }
 
 # Async runtime
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "net", "io-util", "fs"] }
-tokio-util = "0.7"
+tokio-util = { version = "0.7", features = ["io-util"] }
 futures-util = "0.3"
 async-trait = "0.1"
 
@@ -24,7 +24,7 @@ serde_json = "1"
 serde_yaml = "0.9"
 
 # Web / HTTP
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-native-roots"] }
+reqwest = { version = "0.12", default-features = false, features = ["http2", "json", "rustls-tls-native-roots", "stream"] }
 
 # Local HTTP services (artifact / cache / OIDC micro-services)
 axum = "0.8"

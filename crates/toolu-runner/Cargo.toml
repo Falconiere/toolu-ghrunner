@@ -28,7 +28,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
 tokio-util = "0.7"
 
 # Web / HTTP (register `generate-jitconfig` + device-flow login clients)
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-native-roots"] }
+reqwest = { version = "0.12", default-features = false, features = ["http2", "json", "rustls-tls-native-roots"] }
 
 # Observability (no OTel in v1)
 tracing = "0.1"
@@ -66,6 +66,7 @@ async-trait = "0.1"
 
 # Serialization
 serde_json = "1"
+toml = "0.8"
 
 # Crypto fixtures for the auth / jit-config tests
 rsa = "0.9"

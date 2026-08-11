@@ -1531,10 +1531,12 @@ checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 name = "listener"
 version = "0.7.4"
 dependencies = [
+ "axum",
  "chrono",
  "execution",
  "fastrand",
  "flate2",
+ "futures-util",
  "observability",
  "protocol",
  "reqwest",
@@ -1542,6 +1544,7 @@ dependencies = [
  "shared",
  "tempfile",
  "tokio",
+ "tokio-tungstenite",
  "tokio-util",
  "tracing",
  "uuid",
@@ -2238,6 +2241,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-util",
+ "h2",
  "http",
  "http-body",
  "http-body-util",
@@ -3045,6 +3049,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-util",
+ "toml",
  "tracing",
  "url",
  "uuid",
