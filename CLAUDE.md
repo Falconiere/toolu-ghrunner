@@ -277,15 +277,21 @@ to that list requires proving the value is not a real credential.
   `listener::job_lifecycle`'s `AcquireJobRequest.runner_os` deliberately sends
   the RAW lowercase `std::env::consts::OS` instead — a live acquisition
   contract; do not converge it without evidence GitHub validates the field.
-- `secret_masker.rs` — `SecretMasker` (`add_secret` + per-line `mask`)
-  and `MaskerRedactor` (implements `startup::SecretRedactor`) so
-  registered `secrets.*` values never reach `_diag/runner.log`
-  unredacted. `mask` runs one `aho_corasick::AhoCorasick`
-  (`MatchKind::Standard`) overlapping pass, merging overlapping/adjacent
-  matches into a single `***` — not a `String::replace` per registered
-  pattern. The automaton is rebuilt once at the end of `add_secret`;
-  falls back to the old longest-first `patterns` replace loop if it
-  ever fails to build (WARN-logged) rather than skipping masking.
+- `secret_masker.rs` — `SecretMasker` (`add_secret` / batch `add_secrets` +
+  per-line `mask`) and `MaskerRedactor` (implements
+  `startup::SecretRedactor`) so registered `secrets.*` values never reach
+  `_diag/runner.log` unredacted. `mask` returns `Cow<'_, str>` —
+  `Borrowed` when nothing matches (no per-line alloc on the common path),
+  `Owned` only when a span was replaced — running one
+  `aho_corasick::AhoCorasick` (`MatchKind::Standard`) overlapping pass,
+  merging overlapping/adjacent matches into a single `***` — not a
+  `String::replace` per registered pattern. The automaton is rebuilt once
+  at the end of `add_secret`; `add_secrets` inserts a whole batch and
+  rebuilds exactly once (job startup registers all message
+  variables/mask-hints through the batch path —
+  `ExecutionContext::register_secrets` / `add_masks`). Falls back to the
+  old longest-first `patterns` replace loop if the automaton ever fails
+  to build (WARN-logged) rather than skipping masking.
 - `startup.rs` — `init` / `init_with_redactor` (tracing init with
   `RUST_LOG` / `TOOLU_RUNNER_LOG` EnvFilter), `SecretRedactor` trait,
   `RedactingMakeWriter` / `RedactingWriter` (line-level secret
@@ -455,10 +461,20 @@ to that list requires proving the value is not a real credential.
   (Node.js actions, auto-downloaded), `docker` (bollard), `composite`
   (composite actions), `resolve` (kind detection). `actions/` resolves
   and downloads actions (`resolver`, `downloader`, `manifest`).
-  `workflow/` parses workflow YAML (`parser` with `jobs` / `triggers`
-  / `raw_types`), `matrix` (build matrix), `orchestrator` (job graph,
-  plan), `reusable` (reusable workflow resolution), `trigger`,
-  `job_graph`, `types`. `artifacts/` (upload / download via
+  `actions/prefetch.rs` is the single-flight `ActionFetcher`: job start
+  kicks a capped (4) parallel prefetch of every distinct top-level remote
+  `uses:` ref (deduped via `actions/resolver.rs::resolve_action_refs`),
+  and step-time resolution (top-level AND composite nested) joins the
+  same in-flight fetch instead of re-downloading; a failed fetch evicts
+  its entry so step time retries fresh, and a prefetch failure alone
+  never fails the job. Tarball extraction (actions downloader + node
+  runtime) streams the HTTP body (`bytes_stream` → `StreamReader` →
+  `SyncIoBridge`) into a sync `extract_tarball(impl Read, …)` inside
+  `spawn_blocking` — no whole-tarball buffering, no CPU-bound work on
+  async workers. `workflow/` parses workflow YAML (`parser` with `jobs` /
+  `triggers` / `raw_types`), `matrix` (build matrix), `orchestrator`
+  (job graph, plan), `reusable` (reusable workflow resolution),
+  `trigger`, `job_graph`, `types`. `artifacts/` (upload / download via
   Azure append-blob; `backend` + `service` with `handlers` /
   `lifecycle`). `oidc/` (OIDC token server + claims). `context` (env,
   secrets, masking), `composite_*` (composite action scaffolding),
@@ -496,12 +512,34 @@ to that list requires proving the value is not a real credential.
   authenticate (RSA → JWT → OAuth2) → create session →
   `poll_and_execute`. `job_lifecycle::poll_and_execute` owns the
   long-poll loop with exponential backoff (1s → 60s cap), acquire_job,
-  run_acquired_job, acknowledge_message, complete_job. `message_route`
+  run_acquired_job, acknowledge_message, complete_job. The broker ack is
+  fired EARLY — right after `acquire_job` succeeds, not at job end (the
+  cancel watcher's cursor starts at 0 and would only re-see-and-skip the
+  un-acked job message; accepted trade: death mid-job loses broker
+  redelivery, the job waits out GitHub's lock timeout). `message_route`
   is the pure "what does the runner do with this broker message type"
   decision (unit-testable without a live broker).
   `execution_loop::execute_with_renewal` runs the job with a 60s
   renewal task, an event forwarder that streams logs to the
   Results Service, and a oneshot that captures the final conclusion.
+  Startup overlaps `connect_live_log` and `report_setup_step` under
+  `tokio::join!` (engine starts only after both). The forwarder masks
+  each `Log` line ONCE (Cow) and reuses it for all three sinks
+  (per-step upload, live-log, combined job log); the journal writer
+  still masks every line itself (deliberate — it is the end-to-end
+  leak guard, `secret_sink_coverage_test`). Step transitions go through
+  `step_report_queue.rs` (`StepReportQueue`): the forwarder enqueues
+  without awaiting the network, a dedicated task batches whatever is
+  queued into one `update_workflow_steps` per flush (per-request
+  `change_order` seeded 1; setup-step's direct report keeps 0), flush
+  failures WARN-drop and never feed the `OutageWatchdog`, and a
+  10s-bounded `drain()` completes before the conclusion fires.
+  Completion is finalize-split: per-step upload drain (feeds every
+  step's `completed_log_url` in `CompleteJobRequest.step_results`)
+  stays BEFORE the conclusion send; only the combined job-log upload
+  is spawned and overlaps `complete_job`, its `JoinHandle` carried on
+  `SessionCtx` (like `live_log`) and joined unconditionally in
+  `cleanup_session` on both Ok and Err paths.
   `setup_step::report_setup_step` reports "Set up job" as step 1
   (matches C# runner order). `step_reporter::StepCollector`
   aggregates per-step results. `helpers::spawn_renewal` is the

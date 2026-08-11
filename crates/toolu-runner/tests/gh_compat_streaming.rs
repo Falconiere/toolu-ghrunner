@@ -17,6 +17,7 @@ use std::error::Error;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use execution::execution::actions::prefetch::ActionFetcher;
 use execution::execution::context::ExecutionContext;
 use execution::execution::job_spec::JobSpec;
 use execution::execution::steps_runner::{JobRun, run_steps};
@@ -88,6 +89,7 @@ async fn run_steps_timed(
 
   let spec = JobSpec::default();
   let http = reqwest::Client::new();
+  let fetcher = ActionFetcher::new();
   run_steps(
     &steps,
     &mut ctx,
@@ -99,6 +101,7 @@ async fn run_steps_timed(
       spec: &spec,
       shadow: None,
       http: &http,
+      fetcher: &fetcher,
     },
   )
   .await?;
@@ -287,12 +290,14 @@ async fn run_steps_polling_mask(
   let (tx, mut rx) = mpsc::channel::<RunnerEvent>(1024);
   let spec = JobSpec::default();
   let http = reqwest::Client::new();
+  let fetcher = ActionFetcher::new();
   let job_run = JobRun {
     workspace: &workspace,
     config: &config,
     spec: &spec,
     shadow: None,
     http: &http,
+    fetcher: &fetcher,
   };
 
   // Drain the event channel concurrently so `run_steps`'s sends never block.

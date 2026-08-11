@@ -6,6 +6,13 @@
 //! events (action header) must land on the enclosing composite's real
 //! top-level step id, not the synthetic id nobody uploads.
 //!
+//! AC-4 (S4): a composite's nested step 2 reading nested step 1's
+//! `steps.*.outputs` via `${{ }}` still observes the UPDATED value — the
+//! per-step `EvalContext` snapshot reuse in `steps_runner`/`step_env` does
+//! NOT extend into composite nested-step evaluation (each nested step stays
+//! its own leaf unit, per the design), so this is a regression guard on that
+//! boundary rather than new composite behavior.
+//!
 //! Real-data, no mocks: drives the live step loop
 //! (`execution::steps_runner::run_steps`) against committed local action
 //! fixtures under `fixtures/local_actions/`, exactly like
@@ -65,6 +72,7 @@ async fn drive(
 
   let spec = execution::execution::job_spec::JobSpec::default();
   let http = reqwest::Client::new();
+  let fetcher = execution::execution::actions::prefetch::ActionFetcher::new();
   let steps = vec![local_action_step("outer", action_path)];
   let conclusion = run_steps(
     &steps,
@@ -77,6 +85,7 @@ async fn drive(
       spec: &spec,
       shadow: None,
       http: &http,
+      fetcher: &fetcher,
     },
   )
   .await?;
@@ -267,6 +276,32 @@ async fn nested_uses_step_action_header_logs_land_on_the_parent_step_id() -> Tes
   assert!(
     header.is_some(),
     "expected the nested uses: step's action header on the parent step id; events={events:?}"
+  );
+  Ok(())
+}
+
+/// AC-4 (S4): a composite's nested step 2 (`read prior step output`) reads
+/// nested step 1's (`first`) `steps.first.outputs.greeting` via `${{ }}` and
+/// observes the value THAT step just wrote, not a stale/empty one.
+#[tokio::test]
+async fn nested_step_two_observes_nested_step_ones_updated_output() -> TestResult {
+  let tmp = tempfile::tempdir()?;
+  let data_dir = tmp.path().join("data");
+  std::fs::create_dir_all(&data_dir)?;
+  let marker_file = tmp.path().join("markers.txt");
+
+  let (conclusion, _events) =
+    drive(&data_dir, &marker_file, "composite-nested-step-outputs").await?;
+
+  assert_eq!(
+    conclusion,
+    Conclusion::Success,
+    "both nested steps should run and succeed"
+  );
+  assert_eq!(
+    markers(&marker_file),
+    vec!["READ=hello-from-first".to_owned()],
+    "nested step 2 must observe nested step 1's just-written output"
   );
   Ok(())
 }

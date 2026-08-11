@@ -190,6 +190,7 @@ async fn drive_with_cancel(
 
   let spec = execution::execution::job_spec::JobSpec::default();
   let http = reqwest::Client::new();
+  let fetcher = execution::execution::actions::prefetch::ActionFetcher::new();
   let conclusion = run_steps(
     steps,
     &mut ctx,
@@ -201,6 +202,7 @@ async fn drive_with_cancel(
       spec: &spec,
       shadow: None,
       http: &http,
+      fetcher: &fetcher,
     },
   )
   .await?;
@@ -310,6 +312,7 @@ async fn drive_raw(
 
   let spec = execution::execution::job_spec::JobSpec::default();
   let http = reqwest::Client::new();
+  let fetcher = execution::execution::actions::prefetch::ActionFetcher::new();
   let result = run_steps(
     steps,
     &mut ctx,
@@ -321,6 +324,7 @@ async fn drive_raw(
       spec: &spec,
       shadow: None,
       http: &http,
+      fetcher: &fetcher,
     },
   )
   .await;

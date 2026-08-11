@@ -183,8 +183,8 @@ async fn run_and_collect(
 /// unreachable here) one-line `mask_line` helper verbatim.
 fn mask_line(masker: &Arc<Mutex<SecretMasker>>, line: &str) -> String {
   match masker.lock() {
-    Ok(g) => g.mask(line),
-    Err(poisoned) => poisoned.into_inner().mask(line),
+    Ok(g) => g.mask(line).into_owned(),
+    Err(poisoned) => poisoned.into_inner().mask(line).into_owned(),
   }
 }
 

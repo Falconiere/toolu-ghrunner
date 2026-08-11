@@ -22,6 +22,7 @@ use std::error::Error;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use execution::execution::actions::prefetch::ActionFetcher;
 use execution::execution::context::ExecutionContext;
 use execution::execution::job_spec::JobSpec;
 use execution::execution::steps_runner::{JobRun, run_steps};
@@ -74,12 +75,14 @@ async fn run_steps_bounded(
 
   let spec = JobSpec::default();
   let http = reqwest::Client::new();
+  let fetcher = ActionFetcher::new();
   let job_run = JobRun {
     workspace: &workspace,
     config: &config,
     spec: &spec,
     shadow: None,
     http: &http,
+    fetcher: &fetcher,
   };
   let run = run_steps(&steps, &mut ctx, &tx, CancellationToken::new(), &job_run);
   // The whole step run is bounded; a deadlock trips the timeout instead of

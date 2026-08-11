@@ -1,7 +1,10 @@
 //! Node.js runtime detection and caching.
 
+use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
+use futures_util::StreamExt;
 use shared::RunnerError;
 
 /// Resolve a Node.js major version to a concrete release version string.
@@ -56,9 +59,15 @@ pub fn detect_platform() -> (&'static str, &'static str) {
 /// Local copy so the `node` module compiles in step 4b before the real
 /// `execution::actions::downloader` lands in step 4c. The two share the
 /// same stripping semantics.
-fn extract_tarball(bytes: &[u8], dest: &Path) -> std::io::Result<()> {
+///
+/// Takes a plain [`Read`] rather than a buffered byte slice so the caller
+/// can stream the tarball body straight off the network (via
+/// `tokio_util::io::SyncIoBridge`) instead of holding the whole tarball in
+/// memory. This is CPU-bound, synchronous work — every production call
+/// site MUST run it inside `tokio::task::spawn_blocking`.
+fn extract_tarball(reader: impl Read, dest: &Path) -> std::io::Result<()> {
   use flate2::read::GzDecoder;
-  let decoder = GzDecoder::new(bytes);
+  let decoder = GzDecoder::new(reader);
   let mut archive = tar::Archive::new(decoder);
   std::fs::create_dir_all(dest)?;
   for entry in archive.entries()? {
@@ -87,11 +96,140 @@ fn extract_tarball(bytes: &[u8], dest: &Path) -> std::io::Result<()> {
   Ok(())
 }
 
+/// Fetch `url` and return a synchronous [`Read`] streaming its body,
+/// suitable for [`extract_tarball`] inside `spawn_blocking`.
+///
+/// # Errors
+///
+/// Returns `RunnerError::NodeRuntime` on a request failure or a non-success
+/// HTTP status.
+async fn fetch_node_tarball_reader(
+  client: &reqwest::Client,
+  url: &str,
+) -> Result<impl Read + use<>, RunnerError> {
+  let response = client
+    .get(url)
+    .send()
+    .await
+    .map_err(|e| RunnerError::NodeRuntime(format!("fetch {url}: {e}")))?;
+
+  let status = response.status();
+  if !status.is_success() {
+    let body = response.text().await.unwrap_or_default();
+    return Err(RunnerError::NodeRuntime(format!(
+      "node tarball {url} status {status}: {body}"
+    )));
+  }
+
+  let stream = response
+    .bytes_stream()
+    .map(|chunk| chunk.map_err(std::io::Error::other));
+  let stream_reader = tokio_util::io::StreamReader::new(stream);
+  // Constructed here (an async context) so it captures the current Tokio
+  // runtime handle, then moved into `spawn_blocking` — its documented use.
+  Ok(tokio_util::io::SyncIoBridge::new(stream_reader))
+}
+
+/// Monotonic counter disambiguating staging dirs created by this process.
+/// Mirrors `execution::actions::downloader`'s scheme (PID + counter, no
+/// UUID dependency) — this module is a deliberate local copy (see the
+/// module doc on [`extract_tarball`]), so the staging helpers are too.
+static STAGING_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// Build a unique sibling staging directory for `dest`:
+/// `<dest>.tmp-<pid>-<seq>`. Extraction lands here first; [`promote_staging`]
+/// renames it onto `dest` as the last step, so `dest` — the presence of
+/// `node_binary_path(dest)` other jobs/processes check to skip a re-download —
+/// never observes a partially-extracted tree, even under concurrent
+/// cross-repo runner processes sharing the same node cache dir.
+fn staging_dir_for(dest: &Path) -> PathBuf {
+  let seq = STAGING_SEQ.fetch_add(1, Ordering::Relaxed);
+  let pid = std::process::id();
+  let mut staging = dest.as_os_str().to_owned();
+  staging.push(format!(".tmp-{pid}-{seq}"));
+  PathBuf::from(staging)
+}
+
+/// Best-effort removal of a staging (or stale destination) directory. A
+/// failure is WARN-logged, never propagated: the caller already has (or is
+/// producing) the real error/result to return, and a leftover `.tmp-*` dir
+/// is a disk-hygiene issue, not a correctness one.
+fn cleanup_staging(staging: &Path) {
+  if let Err(e) = std::fs::remove_dir_all(staging)
+    && e.kind() != std::io::ErrorKind::NotFound
+  {
+    tracing::warn!(
+      staging = %staging.display(),
+      error = %e,
+      "node runtime staging dir cleanup failed"
+    );
+  }
+}
+
+/// Promote a fully-extracted `staging` dir onto `dest` as the last,
+/// atomic-on-same-filesystem step of a Node.js runtime install.
+///
+/// Ordering matters here in a way the code itself can't show: `dest` may
+/// still be a stale, incomplete leftover — either an old (pre-staging)
+/// direct extraction that was interrupted, or a genuinely partial `dest`
+/// left by a bug — signaled by the binary not being present at
+/// `node_binary_path(dest)`. It is cleared immediately before the rename so
+/// the window in which `dest` is absent is as short as possible. If a
+/// concurrent extraction (e.g. two runner processes for different repos
+/// both installing the same Node.js version) is racing us for the same
+/// `dest`, one of two things happens: either our `rename` lands first (the
+/// other extraction's later rename then fails and it defers to us), or
+/// theirs already landed (our `rename` fails with `dest` present, so we
+/// discard our own staging copy and defer to them). Either way `dest` ends
+/// up holding exactly ONE complete tree — never an interleaving of both,
+/// because extraction itself never writes into `dest`.
+///
+/// # Errors
+///
+/// Returns `RunnerError::NodeRuntime` when the rename fails and `dest`
+/// still does not exist afterward (a genuine filesystem error, not a lost
+/// race).
+fn promote_staging(staging: &Path, dest: &Path) -> Result<(), RunnerError> {
+  if dest.exists()
+    && !node_binary_path(dest).exists()
+    && let Err(e) = std::fs::remove_dir_all(dest)
+  {
+    tracing::warn!(
+      dest = %dest.display(),
+      error = %e,
+      "stale node cache dir removal failed before promote; rename may fail"
+    );
+  }
+
+  match std::fs::rename(staging, dest) {
+    Ok(()) => Ok(()),
+    Err(rename_err) => {
+      cleanup_staging(staging);
+      if dest.exists() {
+        // A concurrent install's rename already landed here first. Ours was
+        // redundant, not wrong — `dest` holds a complete tree either way.
+        Ok(())
+      } else {
+        Err(RunnerError::NodeRuntime(format!(
+          "rename {} -> {}: {rename_err}",
+          staging.display(),
+          dest.display()
+        )))
+      }
+    },
+  }
+}
+
 /// Download and cache Node.js if not already present, returning the binary path.
 ///
 /// Skips download when the binary already exists on disk. Otherwise fetches
-/// the tarball from `nodejs.org` and extracts it with first-component stripping
-/// (the tarball's `node-v{version}-{os}-{arch}/` prefix is removed).
+/// the tarball from `nodejs.org` and extracts it with first-component
+/// stripping (the tarball's `node-v{version}-{os}-{arch}/` prefix is
+/// removed) into a unique sibling staging directory, then promotes it onto
+/// the cache dir with a single [`std::fs::rename`] (see [`promote_staging`]).
+/// This keeps the cache dir always either absent or a complete tree, so an
+/// extraction from one runner process can never interleave with another's
+/// for the same Node.js version.
 ///
 /// # Errors
 ///
@@ -114,27 +252,28 @@ pub async fn ensure_node_runtime(
 
   tracing::info!(version, url = %url, "downloading Node.js runtime");
 
-  let response = client
-    .get(&url)
-    .send()
-    .await
-    .map_err(|e| RunnerError::NodeRuntime(format!("fetch {url}: {e}")))?;
+  let sync_reader = fetch_node_tarball_reader(client, &url).await?;
 
-  let status = response.status();
-  if !status.is_success() {
-    let body = response.text().await.unwrap_or_default();
-    return Err(RunnerError::NodeRuntime(format!(
-      "node tarball {url} status {status}: {body}"
-    )));
+  let staging = staging_dir_for(&cache_dir);
+  let staging_for_extract = staging.clone();
+  let extract_result =
+    tokio::task::spawn_blocking(move || extract_tarball(sync_reader, &staging_for_extract))
+      .await
+      .map_err(|e| RunnerError::NodeRuntime(format!("extraction task failed: {e}")))
+      .and_then(|inner| {
+        inner.map_err(|e| RunnerError::NodeRuntime(format!("extract node tarball: {e}")))
+      });
+
+  if let Err(err) = extract_result {
+    cleanup_staging(&staging);
+    return Err(err);
   }
 
-  let bytes = response
-    .bytes()
-    .await
-    .map_err(|e| RunnerError::NodeRuntime(format!("read tarball body: {e}")))?;
-
-  extract_tarball(&bytes, &cache_dir)
-    .map_err(|e| RunnerError::NodeRuntime(format!("extract node tarball: {e}")))?;
+  promote_staging(&staging, &cache_dir)?;
 
   Ok(binary)
 }
+
+#[cfg(test)]
+#[path = "tests/runtime.rs"]
+mod tests;

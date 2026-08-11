@@ -1,7 +1,9 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use flate2::read::GzDecoder;
+use futures_util::StreamExt;
 use shared::RunnerError;
 use tar::Archive;
 
@@ -27,14 +29,20 @@ pub fn is_action_cached(cache_dir: &Path) -> bool {
 /// GitHub tarballs contain `{owner}-{repo}-{sha}/` as top-level dir.
 /// This strips that first component so files land directly in `dest/`.
 ///
+/// Takes a plain [`Read`] rather than a buffered byte slice so the caller
+/// can stream the tarball body straight off the network (via
+/// `tokio_util::io::SyncIoBridge`) instead of holding the whole tarball in
+/// memory. This is CPU-bound, synchronous work — every production call
+/// site MUST run it inside `tokio::task::spawn_blocking`.
+///
 /// # Errors
 ///
 /// Returns `RunnerError::ActionDownload` on extraction failures.
-pub fn extract_tarball(tarball_bytes: &[u8], dest: &Path) -> Result<(), RunnerError> {
+pub fn extract_tarball(reader: impl Read, dest: &Path) -> Result<(), RunnerError> {
   std::fs::create_dir_all(dest)
     .map_err(|e| RunnerError::ActionDownload(format!("mkdir {}: {e}", dest.display())))?;
 
-  let decoder = GzDecoder::new(tarball_bytes);
+  let decoder = GzDecoder::new(reader);
   let mut archive = Archive::new(decoder);
 
   let entries = archive
@@ -130,6 +138,11 @@ fn set_executable_if_needed(target: &Path, entry: &tar::Entry<'_, impl Read>) {
 
 /// Write the watermark file to mark an action cache as complete.
 ///
+/// Idempotent — safe to call even when the watermark already exists (a
+/// concurrent extraction that lost the [`promote_staging`] race still calls
+/// this after treating `cache_dir` as authoritative, so two writers racing
+/// here just write the same empty file twice).
+///
 /// # Errors
 ///
 /// Returns `RunnerError::ActionDownload` on filesystem failure.
@@ -139,23 +152,108 @@ pub fn write_watermark(cache_dir: &Path) -> Result<(), RunnerError> {
     .map_err(|e| RunnerError::ActionDownload(format!("watermark {}: {e}", wm.display())))
 }
 
-/// Download an action tarball + extract to its cache directory.
-/// No-op if cached (watermark present). Requires a `User-Agent` — GitHub rejects
-/// plain `reqwest` requests without it.
+/// Monotonic counter disambiguating staging dirs created by this process.
+/// Combined with the PID, this makes [`staging_dir_for`] collision-free
+/// across both concurrent extractions in this process and concurrent
+/// runner processes on the same host (each has a distinct PID) without
+/// pulling in a UUID dependency.
+static STAGING_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// Build a unique sibling staging directory for `dest`:
+/// `<dest>.tmp-<pid>-<seq>`. Extraction lands here first; [`promote_staging`]
+/// renames it onto `dest` as the last step, so `dest` — the path every other
+/// job/step reads through [`is_action_cached`] / [`action_cache_dir`] — never
+/// observes a partially-extracted tree, even if this extraction is aborted
+/// mid-flight (e.g. the job that started it ends and the prefetch task is
+/// dropped/aborted around the still-running `spawn_blocking` extraction).
+fn staging_dir_for(dest: &Path) -> PathBuf {
+  let seq = STAGING_SEQ.fetch_add(1, Ordering::Relaxed);
+  let pid = std::process::id();
+  let mut staging = dest.as_os_str().to_owned();
+  staging.push(format!(".tmp-{pid}-{seq}"));
+  PathBuf::from(staging)
+}
+
+/// Best-effort removal of a staging (or stale destination) directory. A
+/// failure is WARN-logged, never propagated: the caller already has (or is
+/// producing) the real error/result to return, and a leftover `.tmp-*` dir
+/// is a disk-hygiene issue, not a correctness one — nothing ever reads it,
+/// since [`is_action_cached`] only ever looks at `dest`.
+fn cleanup_staging(staging: &Path) {
+  if let Err(e) = std::fs::remove_dir_all(staging)
+    && e.kind() != std::io::ErrorKind::NotFound
+  {
+    tracing::warn!(staging = %staging.display(), error = %e, "staging dir cleanup failed");
+  }
+}
+
+/// Promote a fully-extracted `staging` dir onto `dest` as the last,
+/// atomic-on-same-filesystem step of an extraction.
+///
+/// Ordering matters here in a way the code itself can't show: `dest` may
+/// still be a stale, non-watermarked leftover — either an old (pre-staging)
+/// direct extraction that was interrupted, or a genuinely partial `dest`
+/// left by a bug. It is cleared immediately before the rename so the window
+/// in which `dest` is absent is as short as possible. If a concurrent
+/// extraction is racing us for the same `dest`, one of two things happens:
+/// either our `rename` lands first (the other extraction's later rename
+/// then fails and it defers to us), or theirs already landed (our `rename`
+/// fails with `dest` present, so we discard our own staging copy and defer
+/// to them). Either way `dest` ends up holding exactly ONE complete tree —
+/// never an interleaving of both, because extraction itself never writes
+/// into `dest`.
 ///
 /// # Errors
 ///
-/// Returns `RunnerError::ActionDownload` on HTTP or extraction failure.
-pub async fn download_and_extract_action(
+/// Returns `RunnerError::ActionDownload` when the rename fails and `dest`
+/// still does not exist afterward (a genuine filesystem error, not a lost
+/// race).
+fn promote_staging(staging: &Path, dest: &Path) -> Result<(), RunnerError> {
+  if dest.exists()
+    && !is_action_cached(dest)
+    && let Err(e) = std::fs::remove_dir_all(dest)
+  {
+    tracing::warn!(
+      dest = %dest.display(),
+      error = %e,
+      "stale action cache dir removal failed before promote; rename may fail"
+    );
+  }
+
+  match std::fs::rename(staging, dest) {
+    Ok(()) => Ok(()),
+    Err(rename_err) => {
+      cleanup_staging(staging);
+      if dest.exists() {
+        // A concurrent extraction's rename already landed here first. Our
+        // extraction was redundant, not wrong — `dest` holds a complete
+        // tree either way. The caller's watermark write still runs
+        // (idempotent) even if `dest` doesn't have one yet.
+        Ok(())
+      } else {
+        Err(RunnerError::ActionDownload(format!(
+          "rename {} -> {}: {rename_err}",
+          staging.display(),
+          dest.display()
+        )))
+      }
+    },
+  }
+}
+
+/// Fetch `tarball_url` and return a synchronous [`Read`] streaming its body,
+/// suitable for [`extract_tarball`] inside `spawn_blocking`. Requires a
+/// `User-Agent` — GitHub rejects plain `reqwest` requests without one.
+///
+/// # Errors
+///
+/// Returns `RunnerError::ActionDownload` on a request failure or a
+/// non-success HTTP status.
+async fn fetch_tarball_reader(
   client: &reqwest::Client,
   tarball_url: &str,
   token: Option<&str>,
-  cache_dir: &Path,
-) -> Result<(), RunnerError> {
-  if is_action_cached(cache_dir) {
-    return Ok(());
-  }
-
+) -> Result<impl Read + use<>, RunnerError> {
   let mut req = client
     .get(tarball_url)
     .header(reqwest::header::USER_AGENT, "toolu-runner")
@@ -177,12 +275,56 @@ pub async fn download_and_extract_action(
     )));
   }
 
-  let bytes = response
-    .bytes()
-    .await
-    .map_err(|e| RunnerError::ActionDownload(format!("read tarball body: {e}")))?;
+  let stream = response
+    .bytes_stream()
+    .map(|chunk| chunk.map_err(std::io::Error::other));
+  let stream_reader = tokio_util::io::StreamReader::new(stream);
+  // Constructed here (an async context) so it captures the current Tokio
+  // runtime handle, then moved into `spawn_blocking` — its documented use.
+  Ok(tokio_util::io::SyncIoBridge::new(stream_reader))
+}
 
-  extract_tarball(&bytes, cache_dir)?;
+/// Download an action tarball + extract to its cache directory.
+/// No-op if cached (watermark present). Requires a `User-Agent` — GitHub rejects
+/// plain `reqwest` requests without it.
+///
+/// Extraction lands in a unique sibling staging directory first and is
+/// promoted onto `cache_dir` with a single [`std::fs::rename`] as the last
+/// step before the watermark write (see [`promote_staging`]). This keeps
+/// `cache_dir` always either absent or a complete tree, so an extraction
+/// that outlives its job (e.g. an aborted background prefetch whose
+/// `spawn_blocking` closure keeps running) can never leave the NEXT job's
+/// extraction of the same action interleaved with this one's bytes.
+///
+/// # Errors
+///
+/// Returns `RunnerError::ActionDownload` on HTTP or extraction failure.
+pub async fn download_and_extract_action(
+  client: &reqwest::Client,
+  tarball_url: &str,
+  token: Option<&str>,
+  cache_dir: &Path,
+) -> Result<(), RunnerError> {
+  if is_action_cached(cache_dir) {
+    return Ok(());
+  }
+
+  let sync_reader = fetch_tarball_reader(client, tarball_url, token).await?;
+
+  let staging = staging_dir_for(cache_dir);
+  let staging_for_extract = staging.clone();
+  let extract_result =
+    tokio::task::spawn_blocking(move || extract_tarball(sync_reader, &staging_for_extract))
+      .await
+      .map_err(|e| RunnerError::ActionDownload(format!("extraction task failed: {e}")))
+      .and_then(std::convert::identity);
+
+  if let Err(err) = extract_result {
+    cleanup_staging(&staging);
+    return Err(err);
+  }
+
+  promote_staging(&staging, cache_dir)?;
   write_watermark(cache_dir)?;
   Ok(())
 }

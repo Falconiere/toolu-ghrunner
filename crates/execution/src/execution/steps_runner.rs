@@ -6,6 +6,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use super::action_exec::{ActionOutcome, ActionRun, execute_action};
+use super::actions::prefetch::ActionFetcher;
 use super::command_dispatch::stream_dispatch_stdout;
 use super::context::ExecutionContext;
 use super::depth_tracker::DepthTracker;
@@ -18,6 +19,7 @@ use super::shadow::record::StepKey;
 use super::step_env::{apply_file_commands_and_merge_outputs, resolve_step_env};
 use super::step_naming::derive_step_name;
 use super::step_timeout::StepBounds;
+use expressions::evaluator::EvalContext;
 
 // Re-export post-step types so callers don't need to change imports.
 pub use super::step_naming::{PostStep, PostStepQueue};
@@ -40,6 +42,9 @@ pub(super) struct JobCtx<'a> {
   /// download / node-runtime fetch / post-drain in this job instead of a
   /// fresh connection per call.
   pub(super) http: &'a reqwest::Client,
+  /// The job-scope single-flight action fetcher, shared with the job's
+  /// background prefetch task.
+  pub(super) fetcher: &'a ActionFetcher,
 }
 
 /// Job-constant inputs for a run: the workspace root, runner config, the
@@ -57,6 +62,9 @@ pub struct JobRun<'a> {
   /// One job-scope HTTP client (120 s timeout), built once in `run_job` and
   /// threaded to every action download / post-drain in this job.
   pub http: &'a reqwest::Client,
+  /// The job-scope single-flight action fetcher, built once in `run_job` and
+  /// shared with the job's background prefetch task.
+  pub fetcher: &'a ActionFetcher,
 }
 
 /// Run a sequence of steps with condition evaluation and error handling.
@@ -83,6 +91,7 @@ pub async fn run_steps(
     job: run.spec,
     shadow: run.shadow,
     http: run.http,
+    fetcher: run.fetcher,
   };
 
   let mut job_state = JobState {
@@ -243,6 +252,7 @@ async fn execute_step(
       config: job.config,
       bounds,
       http: job.http,
+      fetcher: job.fetcher,
       log_step_id: &step.id,
     };
     let ActionOutcome {
@@ -260,6 +270,43 @@ async fn execute_step(
   run_script_step(step, ctx, events, job, bounds).await
 }
 
+/// A `run:` step's inputs, all resolved against ONE per-step `EvalContext`
+/// snapshot (S4): script body, shell, env map + file-command files, and
+/// working-dir.
+struct StepRender {
+  script: String,
+  shell: Option<String>,
+  env: HashMap<String, String>,
+  file_cmds: FileCommandManager,
+  working_dir: PathBuf,
+}
+
+/// Build ONE `EvalContext` snapshot for the step and resolve the script
+/// body, shell, env, and working-dir against it — matching GitHub semantics
+/// (every `${{ }}` in a step evaluates against the same step-start state)
+/// and replacing a context rebuild per value with a single rebuild. `ctx`
+/// holds no `&mut` borrow between these calls, so reuse here is safe.
+async fn render_script_step(
+  step: &ActionStep,
+  ctx: &ExecutionContext,
+  job: &JobCtx<'_>,
+) -> Result<StepRender, RunnerError> {
+  let script = step.script_body().unwrap_or_default();
+  let eval_ctx = ctx.eval_context();
+  let interpolated = ctx.interpolate_with(&eval_ctx, &script)?;
+  // Shell precedence: step `shell:` > job/workflow `defaults.run.shell`.
+  let shell = step.shell_name().or_else(|| job.job.defaults.shell.clone());
+  let (env, file_cmds) = build_step_env_and_file_commands(step, ctx, &eval_ctx, job).await?;
+  let working_dir = resolve_working_dir(step, ctx, &eval_ctx, job.workspace, &job.job.defaults)?;
+  Ok(StepRender {
+    script: interpolated,
+    shell,
+    env,
+    file_cmds,
+    working_dir,
+  })
+}
+
 /// Run a `run:` step: build env + file commands, execute the shell, dispatch
 /// stdout workflow commands, and merge step outputs.
 async fn run_script_step(
@@ -269,12 +316,13 @@ async fn run_script_step(
   job: &JobCtx<'_>,
   bounds: &StepBounds,
 ) -> Result<(Conclusion, HashMap<String, String>), RunnerError> {
-  let script = step.script_body().unwrap_or_default();
-  let interpolated = ctx.interpolate_string(&script)?;
-  // Shell precedence: step `shell:` > job/workflow `defaults.run.shell`.
-  let shell = step.shell_name().or_else(|| job.job.defaults.shell.clone());
-  let (env, file_cmds) = build_step_env_and_file_commands(step, ctx, job).await?;
-  let working_dir = resolve_working_dir(step, ctx, job.workspace, &job.job.defaults)?;
+  let StepRender {
+    script: interpolated,
+    shell,
+    env,
+    file_cmds,
+    working_dir,
+  } = render_script_step(step, ctx, job).await?;
 
   emit_log(
     events,
@@ -406,9 +454,10 @@ async fn merge_step_outputs(
 async fn build_step_env_and_file_commands(
   step: &ActionStep,
   ctx: &ExecutionContext,
+  eval_ctx: &EvalContext,
   job: &JobCtx<'_>,
 ) -> Result<(HashMap<String, String>, FileCommandManager), RunnerError> {
-  let step_env = resolve_step_env(step, ctx)?;
+  let step_env = resolve_step_env(step, ctx, eval_ctx)?;
   let mut env = ctx.build_step_env(&step_env);
   let tmp_dir = job.config.data_dir.join("tmp");
   create_file_command_dir(&tmp_dir).await?;
@@ -437,6 +486,7 @@ async fn build_step_env_and_file_commands(
 fn resolve_working_dir(
   step: &ActionStep,
   ctx: &ExecutionContext,
+  eval_ctx: &EvalContext,
   workspace: &Path,
   defaults: &super::job_spec::RunDefaultsResolved,
 ) -> Result<PathBuf, RunnerError> {
@@ -446,7 +496,7 @@ fn resolve_working_dir(
   let Some(raw) = raw else {
     return Ok(workspace.to_path_buf());
   };
-  let resolved = ctx.interpolate_string(&raw)?;
+  let resolved = ctx.interpolate_with(eval_ctx, &raw)?;
   if resolved.is_empty() {
     return Ok(workspace.to_path_buf());
   }

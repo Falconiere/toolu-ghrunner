@@ -110,6 +110,17 @@ async fn run_steps_collect(
   steps: Vec<ActionStep>,
   workspace_setup: impl FnOnce(&std::path::Path) -> std::io::Result<()>,
 ) -> TestResult<RunResult> {
+  run_steps_collect_with_ctx(steps, workspace_setup, |_ctx| {}).await
+}
+
+/// Like [`run_steps_collect`], but `ctx_setup` runs on the fresh
+/// `ExecutionContext` before the steps execute (e.g. to seed `github.*` /
+/// job-level `env.*` values for an interpolation-fidelity test).
+async fn run_steps_collect_with_ctx(
+  steps: Vec<ActionStep>,
+  workspace_setup: impl FnOnce(&std::path::Path) -> std::io::Result<()>,
+  ctx_setup: impl FnOnce(&mut ExecutionContext),
+) -> TestResult<RunResult> {
   if fixture_job()?.job_id.is_empty() {
     return Err("fixture job_id missing".into());
   }
@@ -119,6 +130,7 @@ async fn run_steps_collect(
 
   let masker = Arc::new(Mutex::new(SecretMasker::new()));
   let mut ctx = ExecutionContext::with_masker(Arc::clone(&masker));
+  ctx_setup(&mut ctx);
 
   let (tx, mut rx) = mpsc::channel::<RunnerEvent>(1024);
   let collector = tokio::spawn(async move {
@@ -131,6 +143,7 @@ async fn run_steps_collect(
 
   let spec = execution::execution::job_spec::JobSpec::default();
   let http = reqwest::Client::new();
+  let fetcher = execution::execution::actions::prefetch::ActionFetcher::new();
   run_steps(
     &steps,
     &mut ctx,
@@ -142,6 +155,7 @@ async fn run_steps_collect(
       spec: &spec,
       shadow: None,
       http: &http,
+      fetcher: &fetcher,
     },
   )
   .await?;
@@ -328,6 +342,91 @@ async fn no_working_directory_uses_workspace_root() -> TestResult<()> {
   assert!(
     pwd.ends_with("/work"),
     "pwd should be workspace root, got {logs:?}"
+  );
+  Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// AC-4 (S4): one per-step `EvalContext` snapshot covers the script body,
+// every env entry, and the working-dir of a `run:` step.
+// ---------------------------------------------------------------------------
+
+/// A step's `environment` token from literal `key: value` entries.
+fn env_token(entries: &[(&str, &str)]) -> TemplateToken {
+  TemplateToken {
+    token_type: 2,
+    d: Some(entries.iter().map(|(k, v)| lit_entry(k, v)).collect()),
+    ..TemplateToken::default()
+  }
+}
+
+/// AC-4: a step with 3 `${{ }}`-bearing env entries, an interpolated script
+/// body, and an interpolated working-dir all render byte-identical values —
+/// one drawing on `github.*`, one on job-level `env.*`, and one on a PRIOR
+/// step's `steps.*.outputs`, all through the single per-step `EvalContext`
+/// snapshot `run_script_step` now builds once (S4).
+#[tokio::test]
+async fn per_step_snapshot_renders_env_script_and_working_dir_byte_identical() -> TestResult<()> {
+  let prior = script_step(
+    "prior",
+    "echo \"val=hello-from-prior\" >> \"$GITHUB_OUTPUT\"",
+    None,
+  );
+
+  let mut target = script_step(
+    "target",
+    "echo \"SCRIPT=${{ github.repository }}\"\n\
+     echo \"ENV_A=$ENV_A\"\n\
+     echo \"ENV_B=$ENV_B\"\n\
+     echo \"ENV_C=$ENV_C\"\n\
+     pwd",
+    Some("sub-${{ env.GLOBAL }}"),
+  );
+  target.environment = Some(env_token(&[
+    ("ENV_A", "${{ github.repository }}"),
+    ("ENV_B", "${{ env.GLOBAL }}"),
+    ("ENV_C", "${{ steps.prior.outputs.val }}"),
+  ]));
+
+  let result = run_steps_collect_with_ctx(
+    vec![prior, target],
+    |ws| std::fs::create_dir_all(ws.join("sub-abc")),
+    |ctx| {
+      ctx.set_github_context("repository", "octocat/hello-world");
+      ctx.set_env("GLOBAL", "abc");
+    },
+  )
+  .await?;
+
+  assert_eq!(
+    step_conclusion(&result.events, "target"),
+    Some(Conclusion::Success)
+  );
+  let logs = step_logs(&result.events, "target");
+  assert!(
+    logs.iter().any(|l| l == "SCRIPT=octocat/hello-world"),
+    "script body must interpolate github.repository byte-identically: {logs:?}"
+  );
+  assert!(
+    logs.iter().any(|l| l == "ENV_A=octocat/hello-world"),
+    "env entry must interpolate github.repository byte-identically: {logs:?}"
+  );
+  assert!(
+    logs.iter().any(|l| l == "ENV_B=abc"),
+    "env entry must interpolate env.GLOBAL byte-identically: {logs:?}"
+  );
+  assert!(
+    logs.iter().any(|l| l == "ENV_C=hello-from-prior"),
+    "env entry must interpolate the prior step's steps.*.outputs byte-identically: {logs:?}"
+  );
+  let pwd = logs
+    .iter()
+    .find(|l| l.starts_with('/'))
+    .cloned()
+    .unwrap_or_default();
+  assert!(
+    pwd.ends_with("/sub-abc"),
+    "working-directory must interpolate env.GLOBAL byte-identically, got {logs:?}"
   );
   Ok(())
 }

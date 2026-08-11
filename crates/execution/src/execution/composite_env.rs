@@ -9,6 +9,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use super::actions::manifest::{ActionDefinition, CompositeStep};
+use super::actions::prefetch::ActionFetcher;
 use super::composite_expr::interpolate_composite_expr;
 use super::context::{ExecutionContext, runner_temp_dir};
 use super::file_commands::{parse_env_file, parse_output_file, parse_path_file, strip_blocked_env};
@@ -39,6 +40,10 @@ pub struct CompositeParams<'a> {
   /// The job-scope HTTP client, threaded to nested `uses:` steps so their
   /// action resolution reuses the same connection pool.
   pub http: &'a reqwest::Client,
+  /// The job-scope single-flight action fetcher, threaded to nested `uses:`
+  /// steps so they join the same in-flight downloads as the top-level step
+  /// and the job's prefetch task.
+  pub fetcher: &'a ActionFetcher,
 }
 
 /// Result of composite execution including side effects (env/path changes).

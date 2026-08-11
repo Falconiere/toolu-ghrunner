@@ -34,6 +34,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use execution::execution::actions::downloader::{action_cache_dir, watermark_path};
+use execution::execution::actions::prefetch::ActionFetcher;
 use execution::execution::context::ExecutionContext;
 use execution::execution::steps_runner::{JobRun, run_steps};
 use execution::node::runtime::{node_binary_path, node_cache_dir, node_version_for};
@@ -163,6 +164,7 @@ async fn drive(
 
   let spec = execution::execution::job_spec::JobSpec::default();
   let http = reqwest::Client::new();
+  let fetcher = ActionFetcher::new();
   let conclusion = run_steps(
     steps,
     &mut ctx,
@@ -174,6 +176,7 @@ async fn drive(
       spec: &spec,
       shadow: None,
       http: &http,
+      fetcher: &fetcher,
     },
   )
   .await?;

@@ -25,7 +25,8 @@ fn bearer_token_ghp_prefix_is_masked() {
   let mut masker = SecretMasker::new();
   let token = "ghp_FAKEghp_FAKEghp_FAKEghp_FAKE";
   masker.add_secret(token);
-  let out = masker.mask(&format!("INFO api: Authorization: Bearer {token}"));
+  let line = format!("INFO api: Authorization: Bearer {token}");
+  let out = masker.mask(&line);
   assert!(!out.contains(token), "leaked token: {out}");
   assert!(out.contains("Bearer ***"), "expected redaction: {out}");
 }
@@ -188,8 +189,8 @@ fn late_registration_through_shared_arc_masks_subsequent_lines() {
 
   let mask = |line: &str| -> String {
     match masker.lock() {
-      Ok(g) => g.mask(line),
-      Err(poisoned) => poisoned.into_inner().mask(line),
+      Ok(g) => g.mask(line).into_owned(),
+      Err(poisoned) => poisoned.into_inner().mask(line).into_owned(),
     }
   };
 

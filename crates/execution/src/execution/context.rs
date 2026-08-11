@@ -309,7 +309,7 @@ impl ExecutionContext {
   /// # Errors
   /// Returns `RunnerError::Expression` on parse or evaluation failure.
   pub fn evaluate_expression(&self, expr: &str) -> Result<ExprValue, RunnerError> {
-    evaluate(expr, &self.eval_context())
+    self.evaluate_with(&self.eval_context(), expr)
   }
 
   /// # Errors
@@ -323,7 +323,37 @@ impl ExecutionContext {
     if !input.contains("${{") {
       return Ok(input.to_owned());
     }
-    interpolate(input, &self.eval_context())
+    self.interpolate_with(&self.eval_context(), input)
+  }
+
+  /// Evaluate `expr` against a caller-supplied `EvalContext` snapshot instead
+  /// of building a fresh one — callers evaluating several values against the
+  /// same point-in-time state (one `run:` step's env + script + working-dir)
+  /// build [`Self::eval_context`] ONCE and reuse it here per value.
+  /// [`Self::evaluate_expression`] delegates to this with a fresh snapshot.
+  ///
+  /// # Errors
+  /// Returns `RunnerError::Expression` on parse or evaluation failure.
+  pub fn evaluate_with(&self, ctx: &EvalContext, expr: &str) -> Result<ExprValue, RunnerError> {
+    evaluate(expr, ctx)
+  }
+
+  /// Interpolate `${{ }}` in `input` against a caller-supplied `EvalContext`
+  /// snapshot instead of building a fresh one. See [`Self::evaluate_with`]
+  /// for the snapshot-reuse rationale; [`Self::interpolate_string`] delegates
+  /// to this with a fresh snapshot, so untouched callers are unaffected.
+  ///
+  /// # Errors
+  /// Returns `RunnerError::Expression` on evaluation failure.
+  pub fn interpolate_with(&self, ctx: &EvalContext, input: &str) -> Result<String, RunnerError> {
+    // Same fast path as `interpolate_string`: skip straight to the verbatim
+    // return for a `${{`-free input without walking `interpolate` at all,
+    // even though the snapshot here was already paid for (by the caller,
+    // once, up front) rather than by this call.
+    if !input.contains("${{") {
+      return Ok(input.to_owned());
+    }
+    interpolate(input, ctx)
   }
 
   /// `Some(bool)` when `cond` trimmed is exactly `success()`/`always()`/
@@ -447,6 +477,30 @@ impl ExecutionContext {
     guard.add_secret(value);
   }
 
+  /// Batch counterpart of [`Self::register_secret`]: registers every
+  /// `(key, value)` pair into `secrets.*` and the shared masker with a
+  /// single automaton rebuild, instead of one rebuild per pair.
+  pub fn register_secrets<I, K, V>(&mut self, values: I)
+  where
+    I: IntoIterator<Item = (K, V)>,
+    K: AsRef<str>,
+    V: AsRef<str>,
+  {
+    let mut to_mask: Vec<String> = Vec::new();
+    for (key, value) in values {
+      let value = value.as_ref();
+      self
+        .secrets
+        .insert(key.as_ref().to_owned(), value.to_owned());
+      to_mask.push(value.to_owned());
+    }
+    let mut guard = match self.masker.lock() {
+      Ok(g) => g,
+      Err(poisoned) => poisoned.into_inner(),
+    };
+    guard.add_secrets(to_mask);
+  }
+
   /// Register a value with the shared masker only, without exposing it in the
   /// `secrets.*` context. Used for the auto github token, which is masked but
   /// surfaced as `github.token` (matches actions/runner's exclusion).
@@ -461,6 +515,20 @@ impl ExecutionContext {
       Err(poisoned) => poisoned.into_inner(),
     };
     guard.add_secret(value);
+  }
+
+  /// Batch counterpart of [`Self::add_mask`]: adds every value to the
+  /// shared masker with a single automaton rebuild.
+  pub fn add_masks<I, S>(&mut self, values: I)
+  where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+  {
+    let mut guard = match self.masker.lock() {
+      Ok(g) => g,
+      Err(poisoned) => poisoned.into_inner(),
+    };
+    guard.add_secrets(values);
   }
 
   /// Merge global env + step env + PATH additions into a full env map.

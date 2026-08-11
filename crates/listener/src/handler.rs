@@ -41,6 +41,14 @@ pub(crate) struct SessionCtx {
   /// `Err` paths join it: the handle is created deep inside that call, and
   /// an early `?` return there would otherwise drop it un-joined.
   pub(crate) live_log: Option<tokio::task::JoinHandle<()>>,
+  /// Join handle for the detached combined job-log upload task spawned by
+  /// `execution_loop::spawn_job_log_upload` the moment the job's verdict is
+  /// final. Stashed here for the same reason as `live_log`: the upload is
+  /// deliberately still in flight while `report_completion` is on the wire,
+  /// so a `?` there must not drop it un-joined. The task holds no clone of
+  /// `tx`, so it can never keep the journal channel open past the `drop(ctx)`
+  /// in [`GitHubListener::run`].
+  pub(crate) job_log_upload: Option<tokio::task::JoinHandle<()>>,
   /// Test-injectable outage-watchdog timing knobs (prod defaults set here
   /// at construction; tests override for millisecond-cadence trip tests).
   pub(crate) watchdog: WatchdogConfig,
@@ -208,6 +216,7 @@ impl GitHubListener {
       use_fips_encryption: session_response.use_fips_encryption,
       rsa_private_key_der,
       live_log: None,
+      job_log_upload: None,
       watchdog: WatchdogConfig::default(),
     })
   }

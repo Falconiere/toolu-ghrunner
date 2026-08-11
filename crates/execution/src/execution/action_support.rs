@@ -33,10 +33,14 @@ pub(super) fn build_node_env(
     &state,
   ));
 
-  // Interpolate ${{ ... }} expressions in INPUT_* values (action.yml defaults)
+  // Interpolate ${{ ... }} expressions in INPUT_* values (action.yml
+  // defaults). ONE snapshot per stage invocation (S4), reused across every
+  // env value in this loop instead of rebuilt per value — `pre`/`main`/`post`
+  // each call `build_node_env` once, so this stays one rebuild per stage.
+  let eval_ctx = ctx.eval_context();
   for value in env.values_mut() {
     if value.contains("${{")
-      && let Ok(interpolated) = ctx.interpolate_string(value)
+      && let Ok(interpolated) = ctx.interpolate_with(&eval_ctx, value)
     {
       *value = interpolated;
     }

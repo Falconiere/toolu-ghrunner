@@ -220,10 +220,11 @@ async fn runtime_token_registered_in_masker() -> TestResult<()> {
   // AC-2 (local half): setup_job_env must register the forwarded runtime
   // token with the SecretMasker so no log/journal sink sees it unredacted.
   let (_, masker) = run_echo_job_with_masker("true", ServicesMode::Forwarder).await?;
+  let line = format!("token is {FIX_TOKEN} here");
   let redacted = masker
     .lock()
     .map_err(|e| format!("masker lock poisoned: {e}"))?
-    .mask(&format!("token is {FIX_TOKEN} here"));
+    .mask(&line);
   assert!(
     !redacted.contains(FIX_TOKEN),
     "runtime token was not registered with the masker; mask() output: {redacted}"

@@ -6,12 +6,16 @@ use shared::{ActionStep, RunnerError, TemplateToken};
 
 use super::context::ExecutionContext;
 use super::file_commands::FileCommandManager;
+use expressions::evaluator::EvalContext;
 use expressions::types::ExprValue;
 
-/// Extract step-level environment from the `environment` token.
+/// Extract step-level environment from the `environment` token, evaluating
+/// every entry against the caller's single per-step `eval_ctx` snapshot
+/// (S4) instead of a fresh one per entry.
 pub(super) fn resolve_step_env(
   step: &ActionStep,
   ctx: &ExecutionContext,
+  eval_ctx: &EvalContext,
 ) -> Result<HashMap<String, String>, RunnerError> {
   let Some(env_token) = &step.environment else {
     return Ok(HashMap::new());
@@ -22,7 +26,7 @@ pub(super) fn resolve_step_env(
     let Some(key) = entry.key.to_string_value() else {
       continue;
     };
-    let value = env_token_to_string(&entry.value, ctx)?;
+    let value = env_token_to_string(&entry.value, ctx, eval_ctx)?;
     result.insert(key.to_owned(), value);
   }
   Ok(result)
@@ -33,7 +37,7 @@ pub(super) fn resolve_step_env(
 /// GitHub serializes `KEY: ${{ expr }}` as an expression token (type 3),
 /// not a literal — reading only `to_string_value()` silently turned every
 /// such value into `""` (live bug: `WHO=${{ inputs.who }}` came out
-/// empty). Literals still pass through `interpolate_string` so an inline
+/// empty). Literals still pass through `interpolate_with` so an inline
 /// `${{ }}` inside a literal keeps working; expressions are evaluated
 /// with GitHub's string coercion. Bare scalars follow the same coercion
 /// rules: booleans (type 5) render lowercase, numbers (type 6) drop a
@@ -41,12 +45,13 @@ pub(super) fn resolve_step_env(
 fn env_token_to_string(
   token: &TemplateToken,
   ctx: &ExecutionContext,
+  eval_ctx: &EvalContext,
 ) -> Result<String, RunnerError> {
   match token.token_type {
-    0 => ctx.interpolate_string(token.lit.as_deref().unwrap_or_default()),
+    0 => ctx.interpolate_with(eval_ctx, token.lit.as_deref().unwrap_or_default()),
     3 => {
       let expr = token.expr.as_deref().unwrap_or_default();
-      Ok(ctx.evaluate_expression(expr)?.coerce_to_string())
+      Ok(ctx.evaluate_with(eval_ctx, expr)?.coerce_to_string())
     },
     5 => Ok(ExprValue::Bool(token.bool_val.unwrap_or_default()).coerce_to_string()),
     6 => Ok(ExprValue::Number(token.num_val.unwrap_or_default()).coerce_to_string()),
