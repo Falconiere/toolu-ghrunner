@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-11
+
+### Added
+- *(macos)* publish a macOS runner image for Namespace instances
+
+### Fixed
+- *(macos)* harden the launcher and the seed checksum after review
+- *(macos)* fold the seed's system errors into the launcher's warning
+- *(macos)* keep every launcher diagnosis on one line
+
 ## [0.7.5] - 2026-08-11
 
 ### Changed
