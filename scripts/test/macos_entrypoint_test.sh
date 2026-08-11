@@ -50,6 +50,9 @@ image_tree() {
 echo "argv=$*"
 echo "home=${TOOLU_RUNNER_HOME:-}"
 echo "node=$(command -v node || echo none)"
+# The whole PATH, because a colon-split injection adds an entry that resolves
+# to nothing — `command -v node` alone cannot see it.
+echo "path=${PATH}"
 exit "${STUB_EXIT:-0}"
 STUB
   chmod +x "$root/toolu-runner"
@@ -184,15 +187,65 @@ check "an unterminated default marker still puts node on PATH" \
   "node=$root/node/24.0.2/bin/node" "$(grep '^node=' <<<"$out")"
 
 # --- a corrupted marker cannot inject a directory into PATH ----------------
-# The value is interpolated into PATH, so a marker carrying a colon would
-# append an attacker-chosen directory to the search path of every step.
+# The value is interpolated into PATH, so a marker carrying a colon splits
+# into TWO search-path entries. The fixture is a single path component with a
+# real runtime under it (`24.0.2:evil`, a legal directory name): the `-x` test
+# on the concatenated path therefore SUCCEEDS, and without the shape check the
+# launcher exports `…/node/24.0.2` and a second, attacker-named entry. A
+# fixture containing a slash would prove nothing — the pre-fix code rejects
+# that one anyway, because the concatenated path simply does not exist.
 root="$(image_tree badmarker 24.0.2)"
-mkdir -p "$TMPROOT/injected"
-printf '24.0.2:%s\n' "$TMPROOT/injected" >"$root/node/default"
+mkdir -p "$root/node/24.0.2:evil/bin"
+printf '#!/usr/bin/env bash\necho evil-node\n' >"$root/node/24.0.2:evil/bin/node"
+chmod +x "$root/node/24.0.2:evil/bin/node"
+printf '24.0.2:evil\n' >"$root/node/default"
 home="$TMPROOT/home-badmarker"
 out="$(PATH=/usr/bin:/bin TOOLU_RUNNER_HOME="$home" TOOLU_JITCONFIG=x "$root/entrypoint" 2>&1)"
 check "a marker that is not a bare version is refused" "node=none" "$(grep '^node=' <<<"$out")"
 check "…and the job still boots"                       "argv=boot" "$(grep '^argv=' <<<"$out")"
+# The decisive assertion: `command -v node` reports nothing either way (the
+# injected entry resolves to nothing), so the proof is that no part of the
+# marker reached PATH at all.
+if grep '^path=' <<<"$out" | grep -q 'evil'; then
+  echo "FAIL: the corrupted marker reached PATH: $(grep '^path=' <<<"$out")" >&2
+  fail=1
+else
+  echo "ok: no part of the corrupted marker reaches PATH"
+fi
+
+# --- a seed link that cannot be created is a warning, not a dead job -------
+# The link is an optimisation — the engine downloads any runtime it cannot
+# find — so a read-only home or a full disk must not take the job down before
+# it dispatches. Exercised with a real unwritable directory, which means it
+# needs an unprivileged uid: root ignores the permission bits entirely.
+root="$(image_tree unwritable 24.0.2)"
+home="$TMPROOT/home-unwritable"
+mkdir -p "$home/node"
+# `mktemp -d` is 0700, so an unprivileged uid cannot even traverse into the
+# fixture; open the path (not the target dir) before dropping privileges.
+chmod 711 "$TMPROOT"
+chmod -R a+rX "$root" "$home"
+chmod 555 "$home/node"
+if [[ "$(id -u)" -eq 0 ]]; then
+  as_nobody=(setpriv --reuid=65534 --regid=65534 --clear-groups)
+  command -v setpriv >/dev/null || as_nobody=()
+else
+  as_nobody=()
+fi
+if [[ "$(id -u)" -ne 0 || ${#as_nobody[@]} -gt 0 ]]; then
+  out="$(env PATH=/usr/bin:/bin TOOLU_RUNNER_HOME="$home" TOOLU_JITCONFIG=x \
+    "${as_nobody[@]}" "$root/entrypoint" 2>&1)"
+  check "an unwritable data dir still boots the job" "argv=boot" "$(grep '^argv=' <<<"$out")"
+  if grep -q "could not link seeded node" <<<"$out"; then
+    echo "ok: the failed seed link is reported"
+  else
+    echo "FAIL: expected a warning about the seed link; got: $out" >&2
+    fail=1
+  fi
+else
+  echo "SKIP: seed-link failure needs an unprivileged uid (running as root, no setpriv)"
+fi
+chmod 755 "$home/node"
 
 # --- a seed whose `default` names a missing runtime warns, does not die ----
 root="$(image_tree brokenseed 24.0.2)"
