@@ -1,0 +1,190 @@
+name: release-macos-image
+
+# Tag-driven publish of the macOS runner payload: push vX.Y.Z -> gate ->
+# compile the darwin/arm64 binary on a real Mac -> pack it into a `scratch`
+# OCI carrier -> push to ghcr.io/<owner>/toolu-ghrunner-macos -> print the
+# digest-pinned ref.
+#
+# Two things make this workflow shaped differently from release-image.yml:
+#
+# 1. No multi-arch merge. Namespace macOS instances are Apple Silicon only
+#    (`MachineArch: "arm64"`), so there is exactly one leg and the build's own
+#    digest IS the deliverable — no `imagetools create` stitching.
+# 2. The compile and the pack happen on different hosts. Rust cannot
+#    cross-compile to darwin without an Apple SDK, and GitHub's macOS runners
+#    have no Docker daemon, so `build` produces the binary on macos-14 and
+#    `image` packs it on ubuntu-24.04. The image carries no OS and runs no
+#    build step, so nothing about the pack needs a Mac.
+#
+# The image is a filesystem carrier, not a bootable macOS environment: Xcode,
+# git and the shell come from Namespace's base image (selected per instance).
+# Full contract, including how toolu.sh must shape CreateInstance:
+# docs/macos-image.md.
+#
+# The verify job repeats the gate rather than depending on release.yml, for
+# the same reason release-image.yml does: the workflows run independently on
+# the same tag, and an image must never publish off a commit whose gate fails.
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths:
+      - Dockerfile.macos
+      - Dockerfile.macos.dockerignore
+      - scripts/macos-entrypoint.sh
+      - .github/workflows/release-macos-image.yml
+  workflow_dispatch:
+
+# One image per ref; never cancel a tag publish mid-flight.
+concurrency:
+  group: release-macos-image-${{ github.ref_name }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+# Least privilege by default; only the pushing job gets packages:write.
+permissions:
+  contents: read
+
+env:
+  # GHCR requires a lowercase namespace; the owner may not be. Bash
+  # lowercasing happens where the value is consumed (env is verbatim).
+  IMAGE_BASENAME: toolu-ghrunner-macos
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.94.1
+        with:
+          components: rustfmt, clippy
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --workspace
+
+  # The one host that can produce the payload. macos-14 is Apple Silicon, so
+  # this is a native build — no cross-compilation, no Apple SDK plumbing.
+  build:
+    needs: verify
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.94.1
+      - name: Build (darwin/arm64)
+        # --locked pins the committed Cargo.lock, same as release.yml.
+        run: cargo build --release --locked --bin toolu-runner
+      - name: Stage the binary
+        run: |
+          mkdir -p dist
+          cp target/release/toolu-runner dist/toolu-runner-darwin-arm64
+          # The carrier image has no shell to chmod with and `actions/upload-artifact`
+          # preserves the executable bit, so set it here and assert it landed.
+          chmod +x dist/toolu-runner-darwin-arm64
+          test -x dist/toolu-runner-darwin-arm64
+          file dist/toolu-runner-darwin-arm64
+      - uses: actions/upload-artifact@v7
+        with:
+          name: toolu-runner-darwin-arm64
+          path: dist/toolu-runner-darwin-arm64
+          if-no-files-found: error
+
+  image:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write # push the image to ghcr.io on tag
+    steps:
+      - uses: actions/checkout@v7
+      - name: Download the darwin/arm64 binary
+        uses: actions/download-artifact@v8
+        with:
+          name: toolu-runner-darwin-arm64
+          path: dist
+      - name: Restore the executable bit
+        # Belt and braces: the artifact keeps the mode, but a mode-0644 binary
+        # would produce an image that fails only at job time on the instance,
+        # which is the most expensive place to find out.
+        run: |
+          chmod +x dist/toolu-runner-darwin-arm64
+          test -x scripts/macos-entrypoint.sh
+      - name: Derive tags
+        id: tags
+        # Same tag rule as release-image.yml (see docs/container-image.md):
+        # `latest` and the `vN` compat line track stable tags only, and `vN`
+        # follows the semver compatibility boundary — the MINOR while the
+        # major is 0, the MAJOR from 1.0 on. Non-tag builds (PR, dispatch)
+        # get a local-only tag; they never push.
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${IMAGE_BASENAME}"
+          if [[ "${GITHUB_REF_TYPE}" != "tag" ]]; then
+            tags=(-t "${IMAGE_BASENAME}:pr")
+          else
+            version="${GITHUB_REF_NAME#v}"
+            tags=(-t "${image}:${version}")
+            if [[ "${GITHUB_REF_NAME}" != *-* ]]; then
+              tags+=(-t "${image}:latest")
+              major="${version%%.*}"
+              minor="${version#*.}"
+              minor="${minor%%.*}"
+              if [[ "${major}" == "0" ]]; then
+                tags+=(-t "${image}:v${minor}")
+              else
+                tags+=(-t "${image}:v${major}")
+              fi
+            fi
+          fi
+          list=()
+          for t in "${tags[@]}"; do
+            if [[ "$t" != "-t" ]]; then
+              list+=("$t")
+            fi
+          done
+          {
+            echo "tags<<TAGS"
+            printf '%s\n' "${list[@]}"
+            echo "TAGS"
+          } >>"$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        if: github.ref_type == 'tag'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Build (and push on tag)
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.macos
+          # The declared platform is cosmetic — Namespace uses the image
+          # filesystem and ignores the config (its own macrun example ships a
+          # darwin binary in a linux/amd64-config image). linux/arm64 is
+          # declared because the payload inside is arm64 and a manifest must
+          # say something.
+          platforms: linux/arm64
+          push: ${{ github.ref_type == 'tag' }}
+          tags: ${{ steps.tags.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ github.ref_name }}
+      - name: Print digest-pinned ref
+        if: github.ref_type == 'tag'
+        # The line a toolu.sh operator pins for macOS jobs. Same rule as the
+        # Linux image: this payload runs customer build code holding a live
+        # GitHub credential, so consumers pin the digest, never a moving tag.
+        run: |
+          ref="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${IMAGE_BASENAME}@${{ steps.build.outputs.digest }}"
+          echo "image ref: ${ref}"
+          {
+            echo "## macOS runner image"
+            echo '```'
+            echo "${ref}"
+            echo '```'
+            echo "Pin this digest in toolu.sh for macOS instances (see docs/macos-image.md)."
+          } >>"$GITHUB_STEP_SUMMARY"

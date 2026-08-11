@@ -1,0 +1,77 @@
+# The toolu.sh macOS runner image — for Namespace macOS instances (iOS/macOS
+# jobs: xcodebuild, simulators, fastlane). Contract: docs/macos-image.md.
+#
+# This is NOT a macOS VM image, and nothing in it is installed. Namespace
+# macOS instances boot Namespace's own base image (macOS + Xcode, chosen with
+# instance selectors such as `macos.version=26.x`); customer code arrives as
+# an OCI image whose FILESYSTEM ONLY is materialised on the instance —
+# "ENTRYPOINT/CMD from the image config are not respected"
+# (namespace.so/docs/architecture/compute/macos). This file therefore builds a
+# `scratch` CARRIER holding three things and no OS at all:
+#
+#   /entrypoint     the launcher named by `ApplicationRequest.command`
+#   /toolu-runner   the darwin/arm64 runner binary
+#   /node/…         pre-seeded Node runtimes + the `default` marker
+#
+# Consequences worth knowing before editing:
+#
+# - The binary is NOT compiled here. Rust cannot cross-compile to darwin from
+#   the Linux build host without an Apple SDK, so `release-macos-image.yml`
+#   builds it on a `macos-14` runner and drops it at
+#   dist/toolu-runner-darwin-arm64 before this file is built. There is no
+#   builder stage to keep honest.
+# - The image's declared platform is meaningless to Namespace. It reads the
+#   filesystem and ignores the config — Namespace's own `macrun` example
+#   pushes a go-containerregistry `empty.Image` (linux/amd64 config) carrying
+#   a darwin binary. The build declares linux/arm64 only because a manifest
+#   must say something.
+# - There is no shell, git, curl or Xcode in here. Job steps get those from
+#   the Namespace base image, which is also where `docker` is absent: docker:
+#   actions and service containers stay unsupported on macOS.
+#
+# The context is trimmed by Dockerfile.macos.dockerignore (BuildKit prefers a
+# per-Dockerfile ignore file), so the Linux image's `.dockerignore` allowlist
+# stays untouched.
+
+# Pre-seed the Node runtimes the engine's `ensure_node_runtime` would
+# otherwise fetch from nodejs.org on first use. Instances are ephemeral, so a
+# lazy cache never warms. Versions must match `node_version_for` in
+# crates/execution/src/node/runtime.rs (node20 -> 20.18.3, node24 -> 24.0.2);
+# the tarball flavour is darwin-arm64 because that is the only shape a
+# Namespace macOS instance runs (`MachineArch: "arm64"`). Downloading is
+# platform-independent work, so this stage pins $BUILDPLATFORM and is never
+# emulated.
+FROM --platform=$BUILDPLATFORM debian:bookworm-slim AS node-seed
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates curl \
+  && rm -rf /var/lib/apt/lists/*
+ARG NODE_VERSIONS="20.18.3 24.0.2"
+# The version the entrypoint puts on a step's $PATH (hosted-runner parity for
+# `run: node …`). Written to /seed/node/default so the launcher never has to
+# sort versions at boot; `test -x` below fails the build loudly if it names a
+# version the loop did not lay down.
+ARG NODE_ON_PATH=24.0.2
+RUN set -eu; \
+  for v in ${NODE_VERSIONS}; do \
+    tarball="node-v${v}-darwin-arm64.tar.gz"; \
+    curl -fsSLO "https://nodejs.org/dist/v${v}/${tarball}"; \
+    curl -fsSL "https://nodejs.org/dist/v${v}/SHASUMS256.txt" \
+      | grep " ${tarball}\$" | sha256sum -c -; \
+    mkdir -p "/seed/node/${v}"; \
+    tar -xzf "${tarball}" -C "/seed/node/${v}" --strip-components=1; \
+    rm "${tarball}"; \
+  done; \
+  test -x "/seed/node/${NODE_ON_PATH}/bin/node"; \
+  printf '%s\n' "${NODE_ON_PATH}" > /seed/node/default
+
+FROM scratch
+# Both files must already be executable in the context: `scratch` has no shell
+# to chmod with, and the materialised tree keeps the mode it was packed with.
+# The workflow chmods the downloaded artifact; the script is committed 0755.
+COPY dist/toolu-runner-darwin-arm64 /toolu-runner
+COPY scripts/macos-entrypoint.sh /entrypoint
+COPY --from=node-seed /seed/node /node
+
+# source/revision/version are stamped by the CI workflow's `labels:`.
+LABEL org.opencontainers.image.title="toolu-ghrunner-macos" \
+  org.opencontainers.image.description="GitHub Actions JIT runner payload for Namespace macOS instances (darwin/arm64)"

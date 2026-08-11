@@ -1,0 +1,11 @@
+# Build context for Dockerfile.macos. BuildKit prefers <dockerfile>.dockerignore
+# over .dockerignore, which is why this file exists at all: the Linux image's
+# allowlist excludes scripts/ and dist/, and widening it there would change the
+# Linux builder's context (it does `COPY . .`) for no reason.
+#
+# Nothing is compiled from this context — the darwin/arm64 binary is built on a
+# macOS runner and dropped into dist/ first — so the allowlist is two files
+# plus whatever the node-seed stage downloads itself.
+*
+!dist/toolu-runner-darwin-arm64
+!scripts/macos-entrypoint.sh
