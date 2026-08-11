@@ -1,12 +1,14 @@
-//! Integration test asserting HTTP/2 support is enabled across the workspace.
+//! Static manifest check pinning the workspace's `reqwest` feature lists.
 //!
-//! Reads the five `Cargo.toml` manifests that consume `reqwest` and verifies
-//! each one explicitly lists the `"http2"` feature. This is AC-11 of the
-//! job-speed improvements spec: the manifest check ensures no missed update
-//! when features are added or refactored (S1).
+//! Reads the five real `Cargo.toml` manifests that consume `reqwest` (located
+//! via `CARGO_MANIFEST_DIR`, no mocks) and verifies each one still explicitly
+//! lists the `"http2"` feature, so a dependency refactor cannot silently drop
+//! it from one crate. This is AC-11 of the job-speed improvements spec (S1).
 //!
-//! Uses real manifest files, not mocks — locates them via `CARGO_MANIFEST_DIR`
-//! and relative paths.
+//! What it is NOT: it does not exercise the runtime HTTP/2 path — no
+//! connection is opened and no negotiated protocol version is observed. That
+//! the enabled feature actually yields HTTP/2 against GitHub is validated on a
+//! real run at rollout.
 
 use std::path::PathBuf;
 

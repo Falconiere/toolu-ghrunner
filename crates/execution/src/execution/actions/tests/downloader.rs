@@ -1,7 +1,8 @@
 //! Tests for `downloader`: tar-slip guards on `extract_tarball`, plus an
 //! end-to-end streamed download+extract against a real local HTTP server,
-//! plus the atomic-staging promotion (`promote_staging`) under real
-//! concurrency and under extraction failure.
+//! plus the watermark-in-staging promotion (`promote_staging`) under real
+//! concurrency, over a stale unwatermarked destination, and under extraction
+//! failure.
 
 use super::*;
 use flate2::Compression;
@@ -278,13 +279,30 @@ fn leftover_staging_dirs(dest: &Path) -> Vec<PathBuf> {
     .collect()
 }
 
+/// Sorted file names directly inside `dir` (one level, no recursion), so a
+/// test can assert the extracted tree is EXACTLY the expected set — an extra
+/// entry (a second extraction's leftovers, a stray marker) fails just as
+/// loudly as a missing one.
+fn dir_entry_names(dir: &Path) -> Vec<String> {
+  let Ok(entries) = std::fs::read_dir(dir) else {
+    return Vec::new();
+  };
+  let mut names: Vec<String> = entries
+    .filter_map(Result::ok)
+    .map(|entry| entry.file_name().to_string_lossy().into_owned())
+    .collect();
+  names.sort();
+  names
+}
+
 /// Two concurrent `download_and_extract_action` calls racing for the SAME
 /// `dest` (a barrier-gated server proves genuine overlap, not a lucky
 /// interleave) must both succeed, must leave `dest` holding exactly one
-/// complete, valid extraction (not an interleaving of the two), the
-/// watermark present, and no `.tmp-` staging dirs left behind — the core
-/// regression test for the atomic-staging fix: without it, both extractions
-/// would write directly into `dest` and could interleave their bytes.
+/// complete, valid extraction — the exact expected file set, nothing more
+/// and nothing less, with the in-dir watermark present — and no `.tmp-`
+/// staging dirs left behind. The core regression test for the atomic-staging
+/// fix: without it, both extractions would write directly into `dest` and
+/// could interleave their bytes.
 #[tokio::test]
 async fn concurrent_downloads_to_the_same_dest_yield_one_complete_extraction() {
   let tar = build_tarball(&[(
@@ -308,9 +326,52 @@ async fn concurrent_downloads_to_the_same_dest_yield_one_complete_extraction() {
   assert_eq!(read, b"concurrent-same-dest-content");
   assert!(is_action_cached(&dest), "watermark must be written");
   assert_eq!(
+    dir_entry_names(&dest),
+    vec![".completed".to_owned(), "README.md".to_owned()],
+    "dest must hold exactly one extraction's files plus its watermark"
+  );
+  assert_eq!(
     leftover_staging_dirs(&dest),
     Vec::<PathBuf>::new(),
     "no staging dirs must remain after both extractions settle"
+  );
+}
+
+/// A stale `dest` left behind by an interrupted extraction — present on disk
+/// but NOT watermarked, so nothing valid is reading it — must be replaced by
+/// the promote rename's single retry rather than failing the download or
+/// leaving its leftovers mixed into the fresh tree.
+#[tokio::test]
+async fn download_over_a_stale_unwatermarked_dest_replaces_it() {
+  let tar = build_tarball(&[("acme-repo-v1-abc123/README.md", b"fresh-content")]);
+  let addr = spawn_tarball_server(tar).await;
+  let url = format!("http://{addr}/tarball.tar.gz");
+  let client = reqwest::Client::new();
+  let dest = tmp_dest("stale-dest");
+
+  std::fs::create_dir_all(&dest).expect("mkdir stale dest");
+  std::fs::write(dest.join("leftover.txt"), b"partial").expect("write stale leftover file");
+  assert!(
+    !is_action_cached(&dest),
+    "precondition: the stale dest is not watermarked"
+  );
+
+  download_and_extract_action(&client, &url, None, &dest)
+    .await
+    .expect("a download over a stale dest must succeed");
+
+  let read = std::fs::read(dest.join("README.md")).expect("fresh file present");
+  assert_eq!(read, b"fresh-content");
+  assert!(is_action_cached(&dest), "watermark must be written");
+  assert_eq!(
+    dir_entry_names(&dest),
+    vec![".completed".to_owned(), "README.md".to_owned()],
+    "the stale leftovers must not survive the replace"
+  );
+  assert_eq!(
+    leftover_staging_dirs(&dest),
+    Vec::<PathBuf>::new(),
+    "no staging dir must remain after the retried promote"
   );
 }
 
