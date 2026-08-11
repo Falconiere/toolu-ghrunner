@@ -26,6 +26,16 @@ set -euo pipefail
 here="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 runner="${here}/toolu-runner"
 
+# Squash captured command output onto one line before it goes into a warning.
+# Every message below is a single line by construction so that a log reader —
+# human or grep — can tell the launcher's own diagnosis from a raw tool error;
+# a two-line `ln`/`head` failure would otherwise put its second line in the
+# job log looking exactly like the bare leak the capture exists to prevent.
+one_line() {
+  local text="${1//$'\n'/ ; }"
+  printf '%s' "${text:-no error text}"
+}
+
 if [[ ! -x "${runner}" ]]; then
   echo "toolu-runner: no executable binary at ${runner} (image built wrong?)" >&2
   exit 2
@@ -82,7 +92,7 @@ if [[ -d "${here}/node" ]]; then
     # the one structured line instead of being thrown away.
     if ! link_error="$(ln -sfn "${dir%/}" "${target}" 2>&1)"; then
       echo "toolu-runner: could not link seeded node ${version} at ${target}" \
-        "(${link_error:-no error text}); the engine will download it if a step needs it" >&2
+        "($(one_line "${link_error}")); the engine will download it if a step needs it" >&2
     fi
   done
   # The seed is the engine's per-version cache for node-TYPE actions; it never
@@ -100,12 +110,20 @@ if [[ -d "${here}/node" ]]; then
     # I/O error fails the shape check below, which is what gates PATH — and
     # keeping it means the warning names the actual failure instead of a
     # generic "could not read", with nothing leaking to the job log raw.
-    default_node="$(head -n 1 "${here}/node/default" 2>&1)" || true
+    #
+    # The exit status is still checked explicitly rather than left to the
+    # shape check: a `head` that fails while printing nothing at all (killed
+    # mid-read) would otherwise reach the empty-value branch and say nothing.
+    if ! default_node="$(head -n 1 "${here}/node/default" 2>&1)"; then
+      echo "toolu-runner: could not read ${here}/node/default" \
+        "($(one_line "${default_node}")); not adding node to PATH" >&2
+      default_node=""
+    fi
     # The version is interpolated into PATH, so it is checked for shape: a
     # corrupted marker carrying a colon would append an arbitrary directory to
     # every step's search path.
     if [[ -n "${default_node}" && ! "${default_node}" =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
-      echo "toolu-runner: node/default is unusable ('${default_node}');" \
+      echo "toolu-runner: node/default is unusable ('$(one_line "${default_node}")');" \
         "not adding node to PATH" >&2
       default_node=""
     fi
