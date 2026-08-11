@@ -21,7 +21,7 @@ serde_json = "1"
 # Local HTTP cache services + selective reverse proxy
 axum = "0.8"
 http = "1"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots"] }
+reqwest = { version = "0.12", default-features = false, features = ["http2", "rustls-tls-native-roots"] }
 
 # Content-addressed store: opendal (fs + s3 tiers), FastCDC chunking, BLAKE3 chunk ids
 opendal = { version = "0.51", features = ["services-fs", "services-s3"] }

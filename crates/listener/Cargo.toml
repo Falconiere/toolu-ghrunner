@@ -19,7 +19,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"
 tokio-util = "0.7"
 
 # Web / HTTP
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-native-roots"] }
+reqwest = { version = "0.12", default-features = false, features = ["http2", "json", "rustls-tls-native-roots"] }
 
 # Serialization
 serde_json = "1"
@@ -44,6 +44,17 @@ tokio = { version = "1", features = ["net", "io-util"] }
 # (private-seam ACs unreachable from crates/listener/tests/).
 wiremock = "0.6"
 tempfile = "3"
+# `support.rs`'s recording HTTP server (real axum/hyper, not wiremock — it
+# needs per-request arrival `Instant`s and test-controlled held responses,
+# which wiremock cannot do) for the startup/completion overlap ACs.
+axum = "0.8"
+# `support.rs`'s accept-side WebSocket server standing in for GitHub's
+# live-log `FeedStreamUrl` feed. The crate's normal `wire` dependency only
+# exposes the CLIENT-side `LiveLogStreamer::connect` (via `tokio-tungstenite`
+# internally); the server (accept) side needs the crate directly.
+tokio-tungstenite = "0.26"
+# `StreamExt` to drain frames off the accepted WebSocket in `support.rs`.
+futures-util = "0.3"
 
 [lints]
 workspace = true
