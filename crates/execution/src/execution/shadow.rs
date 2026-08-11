@@ -159,7 +159,7 @@ impl ShadowObserver {
       tracing::warn!("shadow: masker lock poisoned; record dropped (fail closed)");
       return None;
     };
-    Some(guard.mask(&json))
+    Some(guard.mask(&json).into_owned())
   }
 
   /// Append `line + "\n"` to the shadow jsonl, creating `self.dir` first.

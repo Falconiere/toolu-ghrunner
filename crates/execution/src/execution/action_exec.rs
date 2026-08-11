@@ -10,8 +10,9 @@ use tokio::sync::mpsc;
 use super::action_support::{
   build_composite_inputs, emit_action_header, emit_log, read_manifest, resolve_action_dir,
 };
-use super::actions::downloader::{action_cache_dir, download_and_extract_action, is_action_cached};
+use super::actions::downloader::{action_cache_dir, is_action_cached};
 use super::actions::manifest::{ActionDefinition, RunsUsing};
+use super::actions::prefetch::ActionFetcher;
 use super::actions::resolver::{ActionRefKind, parse_action_ref};
 use super::composite_exec::{CompositeParams, execute_composite_action};
 use super::context::ExecutionContext;
@@ -37,6 +38,10 @@ struct ActionEnv<'a> {
   config: &'a RunnerConfig,
   bounds: &'a StepBounds,
   http: &'a reqwest::Client,
+  /// The job-scope single-flight action fetcher, threaded to nested
+  /// composite `uses:` steps so they join the same in-flight downloads as
+  /// the top-level step and the job's prefetch task.
+  fetcher: &'a ActionFetcher,
   /// The step id `Log`/header/stdout events carry — `step.id` for a
   /// top-level step, or the enclosing composite's parent step id for a
   /// nested composite `uses:` step (see [`ActionRun::log_step_id`]).
@@ -67,6 +72,11 @@ pub(crate) struct ActionRun<'a> {
   pub(crate) bounds: &'a StepBounds,
   /// The job-scope HTTP client (120 s timeout), built once in `run_job`.
   pub(crate) http: &'a reqwest::Client,
+  /// The job-scope single-flight action fetcher (one per job, shared with
+  /// the job's background prefetch task): `resolve_remote_action` routes its
+  /// download through this instead of calling `download_and_extract_action`
+  /// directly, so a step joins a prefetch already in flight for its ref.
+  pub(crate) fetcher: &'a ActionFetcher,
   /// The step id the action's header/stdout/stderr `Log` events carry.
   /// A top-level `uses:` step passes its own `step.id` (unchanged
   /// behavior); a nested composite `uses:` step passes the enclosing
@@ -99,6 +109,7 @@ pub(crate) async fn execute_action(
     config: run.config,
     bounds: run.bounds,
     http: run.http,
+    fetcher: run.fetcher,
     log_step_id: run.log_step_id,
   };
   dispatch_action(step, ctx, &env, &resolved, depth).await
@@ -205,7 +216,13 @@ async fn resolve_remote_action(
       &format!("Downloading {uses_full}..."),
     )
     .await;
-    download_and_extract_action(run.http, &tarball_url, None, &cache_dir).await?;
+    // Routes through the job's single-flight fetcher: if the job's prefetch
+    // task is already downloading this same ref, this step joins that
+    // attempt instead of starting a second download.
+    run
+      .fetcher
+      .ensure(run.http, &cache_key, &tarball_url, &cache_dir)
+      .await?;
   }
 
   let action_dir = resolve_action_dir(&cache_dir, action_ref.subpath.as_ref());
@@ -325,6 +342,7 @@ async fn run_composite_inner(
     action_dir: &resolved.action_dir,
     cancel: &env.bounds.cancel,
     http: env.http,
+    fetcher: env.fetcher,
   };
   let result = execute_composite_action(&params, ctx, depth).await?;
   for (k, v) in &result.env_additions {

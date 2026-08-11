@@ -1,6 +1,5 @@
 //! Shared helpers for the listener lifecycle.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -10,26 +9,14 @@ use tokio_util::sync::CancellationToken;
 
 use super::SessionCtx;
 use crate::outage::OutageWatchdog;
-use shared::{AgentJobRequestMessage, Conclusion, ListenerEvent, RunnerError, RunnerEvent};
+use shared::{AgentJobRequestMessage, Conclusion, ListenerEvent, RunnerError};
 use wire::net::delete_session;
 use wire::reporting::ReportConclusion;
 use wire::reporting::run_service::{RenewJobRequest, renew_job};
 
-/// Per-step metadata captured on `StepStarted` so later `StepCompleted` events
-/// can emit a full Step record (actions/runner C# always sends both
-/// `started_at` and `completed_at` on every update — null clobbers the value).
-#[derive(Debug, Clone)]
-pub(super) struct StepMeta {
-  pub name: String,
-  pub number: u32,
-  pub started_at: String,
-}
-
-pub(super) type StepMetaMap = HashMap<String, StepMeta>;
-
 /// Bundled context for Results Service calls — groups the constant-per-job
-/// parameters so `report_step_to_results` / `StepLogStreamer` stay within the
-/// 6-arg clippy cap.
+/// parameters so `step_report_queue::flush` / `StepLogStreamer` stay within
+/// the 6-arg clippy cap.
 pub struct ResultsCtx<'a> {
   /// Shared HTTP client for the Results Service calls.
   pub client: &'a reqwest::Client,
@@ -190,7 +177,8 @@ pub(super) fn system_vss_access_token(job_msg: &AgentJobRequestMessage) -> Optio
     })
 }
 
-/// Delete the broker session and join the live-log flush, concurrently.
+/// Delete the broker session, join the live-log flush, and join the
+/// combined job-log upload — all three concurrently.
 ///
 /// No artificial delay: `delete_session` already treats any non-2xx as
 /// expected (the broker may already have forgotten about JIT runners), and
@@ -202,12 +190,24 @@ pub(super) fn system_vss_access_token(job_msg: &AgentJobRequestMessage) -> Optio
 /// short if the process exits (e.g. `--once`) before it finishes, the same
 /// exposure the old sleep had, now bounded and logged here instead of paid
 /// on every job.
+///
+/// The job-log upload (`ctx.job_log_upload`, spawned by
+/// `execution_loop::spawn_job_log_upload` so it overlaps
+/// `report_completion`) is joined WITHOUT a timeout: before the finalize
+/// split it ran inline and unbounded on the completion path, and bounding it
+/// here would newly abandon a slow-but-healthy upload — the very durable log
+/// the split exists to preserve. Its own HTTP calls are already bounded by
+/// the client timeout. This join is what keeps "the listener never returns
+/// before the combined log is uploaded" true on both the `Ok` and the `Err`
+/// path of `poll_and_execute`, which is why it lives here rather than at the
+/// one non-fallible call site.
 pub(super) async fn cleanup_session(ctx: &mut SessionCtx) {
-  // Take the handle out before building the two futures: `flush` needs to
-  // own it (an `.await` consumes a `JoinHandle`), and `del` only needs the
-  // other `ctx.*` fields — splitting this way avoids a mutable-borrow /
-  // immutable-borrow conflict on `ctx` between the two joined futures.
+  // Take the handles out before building the futures: each `.await`
+  // consumes its `JoinHandle`, and `del` only needs the other `ctx.*`
+  // fields — splitting this way avoids a mutable-borrow / immutable-borrow
+  // conflict on `ctx` between the joined futures.
   let live_log = ctx.live_log.take();
+  let job_log_upload = ctx.job_log_upload.take();
   let flush = async {
     if let Some(handle) = live_log
       && tokio::time::timeout(std::time::Duration::from_secs(2), handle)
@@ -217,111 +217,17 @@ pub(super) async fn cleanup_session(ctx: &mut SessionCtx) {
       tracing::warn!("live-log flush timed out; durable logs unaffected");
     }
   };
+  let job_log = async {
+    if let Some(handle) = job_log_upload
+      && let Err(e) = handle.await
+    {
+      tracing::warn!(error = %e, "combined job-log upload task did not join cleanly");
+    }
+  };
   let del = delete_session(&ctx.client, &ctx.broker_url, &ctx.token, &ctx.session_id);
-  let ((), delete_result) = tokio::join!(flush, del);
+  let ((), (), delete_result) = tokio::join!(flush, job_log, del);
   if let Err(e) = delete_result {
     tracing::debug!(error = %e, "session delete failed (non-fatal)");
-  }
-}
-
-/// Report a step event to GitHub's Results Service. Errors are logged, not propagated.
-pub(super) async fn report_step_to_results(
-  rctx: &ResultsCtx<'_>,
-  event: &RunnerEvent,
-  change_order: &mut u64,
-  step_meta: &mut StepMetaMap,
-) {
-  use wire::reporting::results_service::{WorkflowStepsUpdateRequest, update_workflow_steps};
-
-  let Some(entry) = build_step_entry(event, step_meta) else {
-    return;
-  };
-
-  let order = *change_order;
-  *change_order += 1;
-
-  let request = WorkflowStepsUpdateRequest {
-    steps: vec![entry],
-    change_order: order,
-    workflow_run_backend_id: rctx.run_backend_id.to_owned(),
-    workflow_job_run_backend_id: rctx.job_backend_id.to_owned(),
-  };
-
-  let prefix_len = std::cmp::min(10, rctx.token.len());
-  let token_prefix = rctx.token.get(..prefix_len).map_or("", |s| s);
-
-  if let Err(e) = update_workflow_steps(rctx.client, rctx.results_url, rctx.token, &request).await {
-    tracing::warn!(
-      error = %e,
-      token_prefix,
-      url = rctx.results_url,
-      run_backend_id = rctx.run_backend_id,
-      job_backend_id = rctx.job_backend_id,
-      "results service step update failed"
-    );
-  }
-}
-
-/// Build the `StepUpdateEntry` for an event, updating `step_meta` as needed.
-/// Returns `None` for events that don't map to a step update.
-fn build_step_entry(
-  event: &RunnerEvent,
-  step_meta: &mut StepMetaMap,
-) -> Option<wire::reporting::results_service::StepUpdateEntry> {
-  use wire::reporting::Status;
-  use wire::reporting::results_service::StepUpdateEntry;
-
-  match event {
-    RunnerEvent::StepStarted {
-      step_id,
-      step_name,
-      step_number,
-    } => {
-      let started_at = chrono::Utc::now().to_rfc3339();
-      step_meta.insert(
-        step_id.clone(),
-        StepMeta {
-          name: step_name.clone(),
-          number: *step_number,
-          started_at: started_at.clone(),
-        },
-      );
-      Some(StepUpdateEntry {
-        external_id: step_id.clone(),
-        number: *step_number,
-        name: step_name.clone(),
-        status: Status::InProgress,
-        conclusion: None,
-        started_at: Some(started_at),
-        completed_at: None,
-      })
-    },
-    RunnerEvent::StepCompleted {
-      step_id,
-      conclusion,
-      ..
-    } => {
-      let meta = step_meta.get(step_id).cloned().unwrap_or(StepMeta {
-        name: String::new(),
-        number: 0,
-        started_at: chrono::Utc::now().to_rfc3339(),
-      });
-      Some(StepUpdateEntry {
-        external_id: step_id.clone(),
-        number: meta.number,
-        name: meta.name,
-        status: Status::Completed,
-        conclusion: Some(map_conclusion(*conclusion)),
-        started_at: Some(meta.started_at),
-        completed_at: Some(chrono::Utc::now().to_rfc3339()),
-      })
-    },
-    RunnerEvent::JobStarted { .. }
-    | RunnerEvent::JobCompleted { .. }
-    | RunnerEvent::StepSkipped { .. }
-    | RunnerEvent::Log { .. }
-    | RunnerEvent::LogGroup { .. }
-    | RunnerEvent::Annotation { .. } => None,
   }
 }
 

@@ -9,6 +9,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
+use super::actions::prefetch::{ActionFetcher, spawn_prefetch};
 use super::context::ExecutionContext;
 use super::job_hooks::{JobHookStage, run_job_hook};
 use super::job_spec::{JobSpec, evaluate_job_outputs};
@@ -69,9 +70,25 @@ pub async fn run_job(
   // fetch / post-drain in this job instead of a fresh connection (and TLS
   // handshake) per call. 120 s: downloads can be large.
   let http = build_job_client()?;
+  // One job-scope single-flight action fetcher (S6), shared by the
+  // background prefetch task below and every step-time `uses:` resolution.
+  let fetcher = Arc::new(ActionFetcher::new());
 
   let local = start_local_services(config, &msg, &ctx).await?;
   setup_job_env(&mut ctx, &msg, config, &local)?;
+
+  // Kick job-start action prefetch in the background (S6): dedupes every
+  // top-level remote `uses:` ref and downloads it ahead of step time, so a
+  // step's own resolution usually finds it already cached. Aborted below
+  // once the step loop is done, purely for resource hygiene — an abort
+  // cannot (and does not need to) stop an in-flight extraction; see
+  // `prefetch::spawn_prefetch`'s doc for why that's safe.
+  let prefetch_handle = spawn_prefetch(
+    &msg.steps,
+    Arc::clone(&fetcher),
+    http.clone(),
+    config.data_dir.clone(),
+  );
 
   // Shadow-mode step observer (approach C): records only, never serves.
   let shadow = build_shadow_observer(config, &msg.job_id, &ctx);
@@ -93,8 +110,17 @@ pub async fn run_job(
     spec: &spec,
     shadow: &shadow,
     http: &http,
+    fetcher: fetcher.as_ref(),
   };
-  let (conclusion, outputs) = run_job_body(&body, &mut ctx).await?;
+  let body_result = run_job_body(&body, &mut ctx).await;
+  // Resource hygiene, not a correctness guarantee: stops any future fetch
+  // this task would otherwise start, whether it finished on its own or is
+  // still fetching a ref no step needed. An in-flight extraction's
+  // `spawn_blocking` closure keeps running regardless — safe because it
+  // extracts into a private staging dir and only atomically renames onto
+  // the shared cache dir when done (see `prefetch::spawn_prefetch`'s doc).
+  prefetch_handle.abort();
+  let (conclusion, outputs) = body_result?;
 
   let outcome = JobOutcome {
     job_id: msg.job_id,
@@ -292,6 +318,9 @@ struct JobBody<'a> {
   /// The job-scope HTTP client threaded to the step loop's action resolution
   /// and post-drain.
   http: &'a reqwest::Client,
+  /// The job-scope single-flight action fetcher (S6), shared with the job's
+  /// background prefetch task.
+  fetcher: &'a ActionFetcher,
 }
 
 /// Run the job-started hook, the step loop, job-output evaluation, and the
@@ -314,6 +343,7 @@ async fn run_job_body(
     spec,
     shadow,
     http,
+    fetcher,
   } = *body;
 
   // Job-started hook is a hard gate: its failure fails the job before any step.
@@ -328,6 +358,7 @@ async fn run_job_body(
     spec,
     shadow: Some(shadow),
     http,
+    fetcher,
   };
   let conclusion = run_steps(&msg.steps, ctx, events, cancel.clone(), &run).await?;
 
@@ -602,10 +633,8 @@ pub fn build_context(
     tracing::warn!(error = %e, "failed to materialize runner.temp/tool_cache dirs");
   }
 
-  // Mask hints from the job message.
-  for hint in &msg.mask {
-    ctx.add_mask(&hint.value);
-  }
+  // Mask hints from the job message, one batch rebuild instead of one per hint.
+  ctx.add_masks(msg.mask.iter().map(|hint| hint.value.as_str()));
 
   ctx
 }
@@ -617,15 +646,21 @@ pub fn build_context(
 /// `system.github.token` is routed to `github.token` instead of `secrets.*`
 /// (matches actions/runner); non-secret vars become env only. The runtime
 /// service token is masked like a secret so it never reaches a log unredacted.
+/// Every mask registration is collected and applied through the batch APIs
+/// (`add_masks` / `register_secrets`) instead of rebuilding the automaton
+/// once per variable.
 fn register_message_variables(ctx: &mut ExecutionContext, msg: &AgentJobRequestMessage) {
+  let mut mask_only: Vec<String> = Vec::new();
+  let mut secret_pairs: Vec<(String, String)> = Vec::new();
+
   for (key, var) in &msg.variables {
     if var.is_secret {
-      ctx.register_secret_masked(&var.value);
+      mask_only.push(var.value.clone());
       if let Some(gh_key) = key.strip_prefix("system.github.") {
         ctx.set_github_context(gh_key, &var.value);
         ctx.set_env(&github_env_key(gh_key), &var.value);
       } else {
-        ctx.register_secret(key, &var.value);
+        secret_pairs.push((key.clone(), var.value.clone()));
       }
     } else {
       ctx.set_env(key, &var.value);
@@ -639,8 +674,11 @@ fn register_message_variables(ctx: &mut ExecutionContext, msg: &AgentJobRequestM
   // reach `_diag/runner.log` or a step log unredacted.
   let runtime_token = extract_service_urls(msg).runtime_token;
   if !runtime_token.is_empty() {
-    ctx.register_secret_masked(&runtime_token);
+    mask_only.push(runtime_token);
   }
+
+  ctx.add_masks(mask_only);
+  ctx.register_secrets(secret_pairs);
 }
 
 /// Runner name: the message's `runner.name` context value, else the hostname.

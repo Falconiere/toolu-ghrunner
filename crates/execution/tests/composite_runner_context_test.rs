@@ -21,6 +21,7 @@ use std::path::{Path, PathBuf};
 use execution::execution::actions::manifest::{
   ActionDefinition, ActionRuns, CompositeStep, RunsUsing,
 };
+use execution::execution::actions::prefetch::ActionFetcher;
 use execution::execution::composite_exec::{CompositeParams, execute_composite_action};
 use execution::execution::context::ExecutionContext;
 use execution::execution::depth_tracker::DepthTracker;
@@ -55,6 +56,7 @@ struct Fixture {
   events: mpsc::Sender<RunnerEvent>,
   cancel: CancellationToken,
   http: reqwest::Client,
+  fetcher: ActionFetcher,
 }
 
 impl Fixture {
@@ -87,6 +89,7 @@ impl Fixture {
       events,
       cancel: CancellationToken::new(),
       http: reqwest::Client::new(),
+      fetcher: ActionFetcher::new(),
     })
   }
 
@@ -101,6 +104,7 @@ impl Fixture {
       action_dir: self.data_dir.path(),
       cancel: &self.cancel,
       http: &self.http,
+      fetcher: &self.fetcher,
     }
   }
 

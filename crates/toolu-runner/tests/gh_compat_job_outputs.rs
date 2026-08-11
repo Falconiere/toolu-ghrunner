@@ -23,6 +23,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::sync::{Arc, Mutex};
 
+use execution::execution::actions::prefetch::ActionFetcher;
 use execution::execution::context::ExecutionContext;
 use execution::execution::job_hooks::{JobHookStage, run_job_hook};
 use execution::execution::job_spec::{JobSpec, evaluate_job_outputs};
@@ -136,6 +137,7 @@ async fn run_steps_collect(
   });
 
   let http = reqwest::Client::new();
+  let fetcher = ActionFetcher::new();
   run_steps(
     &steps,
     &mut ctx,
@@ -147,6 +149,7 @@ async fn run_steps_collect(
       spec,
       shadow: None,
       http: &http,
+      fetcher: &fetcher,
     },
   )
   .await?;

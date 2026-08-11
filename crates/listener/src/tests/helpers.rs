@@ -122,7 +122,9 @@ async fn spawn_404_listener() -> (SocketAddr, tokio::sync::oneshot::Receiver<Str
 
 /// Build a `SessionCtx` pointed at a local test listener. `live_log` lets
 /// each test install its own handle (or none) without duplicating the
-/// other twelve fields.
+/// other thirteen fields. `job_log_upload` stays `None` here: the
+/// combined job-log upload's join is proven end-to-end (through a real
+/// `poll_and_execute` + `cleanup_session`) in `tests/finalize_split.rs`.
 fn test_ctx(broker_url: String, live_log: Option<tokio::task::JoinHandle<()>>) -> SessionCtx {
   let (tx, _rx) = mpsc::channel(1);
   SessionCtx {
@@ -138,6 +140,7 @@ fn test_ctx(broker_url: String, live_log: Option<tokio::task::JoinHandle<()>>) -
     use_fips_encryption: false,
     rsa_private_key_der: Vec::new(),
     live_log,
+    job_log_upload: None,
     watchdog: crate::helpers::WatchdogConfig::default(),
   }
 }

@@ -18,6 +18,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use super::actions::manifest::CompositeStep;
+use super::actions::prefetch::ActionFetcher;
 use super::context::ExecutionContext;
 use super::depth_tracker::DepthTracker;
 use super::step_timeout::StepBounds;
@@ -46,6 +47,10 @@ pub struct NestedUsesParams<'a> {
   pub cancel: &'a CancellationToken,
   /// The job-scope HTTP client, reused for the nested action's resolution.
   pub http: &'a reqwest::Client,
+  /// The job-scope single-flight action fetcher — the nested action's
+  /// download joins any in-flight prefetch/step-time download for the same
+  /// ref instead of starting a second one.
+  pub fetcher: &'a ActionFetcher,
   /// The enclosing composite's own step id — the real top-level GH step id
   /// its `##[group]`/log lines already land under. The nested step's action
   /// header and stdout/stderr are routed here too: the listener only
@@ -101,6 +106,7 @@ pub async fn run_nested_uses_step(
     config: params.config,
     bounds: &bounds,
     http: params.http,
+    fetcher: params.fetcher,
     log_step_id: params.parent_step_id,
   };
   let outcome = Box::pin(super::action_exec::execute_action(

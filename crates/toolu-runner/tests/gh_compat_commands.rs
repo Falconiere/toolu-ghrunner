@@ -77,6 +77,7 @@ async fn run_steps_collect(
 
   let spec = execution::execution::job_spec::JobSpec::default();
   let http = reqwest::Client::new();
+  let fetcher = execution::execution::actions::prefetch::ActionFetcher::new();
   run_steps(
     &steps,
     &mut ctx,
@@ -88,6 +89,7 @@ async fn run_steps_collect(
       spec: &spec,
       shadow: None,
       http: &http,
+      fetcher: &fetcher,
     },
   )
   .await?;

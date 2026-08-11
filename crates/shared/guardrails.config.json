@@ -36,6 +36,9 @@
   "secrets": {
     "neverTracked": [
       ".env"
+    ],
+    "scanExempt": [
+      "tests/secret_masker_test.rs"
     ]
   },
   "shadowConfigs": [

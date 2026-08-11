@@ -226,6 +226,7 @@ async fn run_uses_step(
     depth,
     cancel: params.cancel,
     http: params.http,
+    fetcher: params.fetcher,
     parent_step_id: params.parent_step_id,
   };
   run_nested_uses_step(nested, skip).await

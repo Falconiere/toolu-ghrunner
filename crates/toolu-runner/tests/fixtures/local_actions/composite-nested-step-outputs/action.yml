@@ -1,0 +1,15 @@
+name: 'composite-nested-step-outputs'
+description: >-
+  First inner step (id: first) writes a $GITHUB_OUTPUT value; second inner
+  step reads it via ${{ steps.first.outputs.greeting }} and must observe the
+  UPDATED value, not a stale/empty one.
+runs:
+  using: 'composite'
+  steps:
+    - id: first
+      name: set greeting output
+      shell: bash
+      run: echo "greeting=hello-from-first" >> "$GITHUB_OUTPUT"
+    - name: read prior step output
+      shell: bash
+      run: echo "READ=${{ steps.first.outputs.greeting }}" >> "$MARKER_FILE"

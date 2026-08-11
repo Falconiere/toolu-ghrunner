@@ -7,17 +7,17 @@ use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
 use super::SessionCtx;
-use super::helpers::{
-  RenewalParams, ResultsCtx, StepMetaMap, report_step_to_results, resolve_backend_ids,
-  spawn_renewal,
-};
+use super::helpers::{RenewalParams, ResultsCtx, resolve_backend_ids, spawn_renewal};
 use super::log_uploader::StreamerConfig;
 use super::setup_step::report_setup_step;
+use super::step_report_queue::{
+  self, DRAIN_DEADLINE, StepMetaMap, StepReportQueue, StepReportQueueConfig,
+};
 use super::step_reporter::StepCollector;
 use execution::Runner;
 use shared::SecretMasker;
 use shared::{AgentJobRequestMessage, Conclusion, ListenerEvent, RunnerEvent};
-use wire::reporting::live_log::LiveLogLine;
+use wire::reporting::live_log::{LiveLogLine, LiveLogStreamer};
 
 /// Per-job addressing for the Run / Results services: where to renew
 /// and report, with which token, under which plan.
@@ -37,13 +37,24 @@ pub(super) struct JobExecution {
   pub(super) conclusion: Conclusion,
   pub(super) steps: Vec<wire::reporting::StepResult>,
   pub(super) annotations: Vec<wire::reporting::Annotation>,
+  /// The live-log wrapper task's `JoinHandle`, produced by [`connect_live_log`]
+  /// inside the same `tokio::join!` that runs [`report_setup_step`] — threaded
+  /// up so `job_lifecycle::run_acquired_job` can carry it into its
+  /// `JobOutcome` for `poll_and_execute` to stash on `ctx` before any further
+  /// fallible call (see the design note at that assignment site).
+  pub(super) live_log_handle: Option<tokio::task::JoinHandle<()>>,
+  /// The combined job-log upload task's `JoinHandle` (see
+  /// [`spawn_job_log_upload`]), travelling the exact same route as
+  /// `live_log_handle`: up through `JobOutcome`, onto
+  /// `SessionCtx::job_log_upload`, joined by `helpers::cleanup_session` on
+  /// both the `Ok` and `Err` paths of `job_lifecycle::poll_and_execute`.
+  pub(super) job_log_upload: Option<tokio::task::JoinHandle<()>>,
 }
 
 pub(super) async fn execute_with_renewal(
   ctx: &SessionCtx,
   route: &JobRoute<'_>,
   job_msg: &AgentJobRequestMessage,
-  live_log_tx: Option<tokio::sync::mpsc::Sender<LiveLogLine>>,
   job_cancel: &CancellationToken,
 ) -> JobExecution {
   let JobRoute {
@@ -62,10 +73,19 @@ pub(super) async fn execute_with_renewal(
     Arc::clone(&outage_tripped),
   );
 
-  // Report "Set up job" as step 1 (matches C# runner order).
-  // Real workflow steps start at number 2+.
-  let (setup_result, setup_lines) =
-    report_setup_step(rs_token, plan_id, job_msg, &ctx.client).await;
+  // "Set up job" (step 1, matches C# runner order — real workflow steps
+  // start at number 2+) and the live-log WebSocket handshake have no mutual
+  // dependency, so run them concurrently instead of paying the sum of their
+  // round-trips. The engine (`run_forwarded_job` below) starts only once
+  // BOTH have resolved. Each leg is boxed: `tokio::join!` holds both
+  // futures' state for the join's own lifetime, and the two together
+  // otherwise push this fn's returned future past clippy's `large_futures`
+  // threshold (it is awaited inside a `tokio::time::timeout` at several
+  // call sites, which inlines the whole state machine).
+  let ((setup_result, setup_lines), (live_log_tx, live_log_handle)) = tokio::join!(
+    Box::pin(report_setup_step(rs_token, plan_id, job_msg, &ctx.client)),
+    Box::pin(connect_live_log(job_msg, rs_token)),
+  );
 
   let collector = StepCollector::new();
   if let Some(result) = setup_result {
@@ -73,7 +93,10 @@ pub(super) async fn execute_with_renewal(
   }
   let cfg = build_fwd_config(ctx, rs_token, plan_id, job_msg, setup_lines, live_log_tx);
 
-  let conclusion = run_forwarded_job(ctx, job_msg, &collector, cfg, job_cancel).await;
+  let ForwarderOutcome {
+    conclusion,
+    job_log_upload,
+  } = run_forwarded_job(ctx, job_msg, &collector, cfg, job_cancel).await;
   renewal_cancel.cancel();
   let _ = renewal_handle.await;
 
@@ -84,7 +107,47 @@ pub(super) async fn execute_with_renewal(
     conclusion,
     steps,
     annotations,
+    live_log_handle,
+    job_log_upload,
   }
+}
+
+/// Connect the live-log WebSocket for real-time log streaming to GitHub's
+/// UI. Returns `(None, None)` on failure — live logs are best-effort, so a
+/// connect failure never fails the job.
+///
+/// Run inside the same `tokio::join!` as [`report_setup_step`] (see
+/// [`execute_with_renewal`]) — the two share no state, and previously ran
+/// strictly in sequence (this fn's caller used to `.await` in full before
+/// `report_setup_step` was ever called), paying the sum of both round-trips
+/// instead of their max.
+///
+/// The second element of the returned tuple is the `JoinHandle` of the
+/// wrapper task spawned below (not `LiveLogStreamer::connect`'s inner
+/// handle) — threaded all the way up through [`JobExecution`] so
+/// `job_lifecycle::poll_and_execute` can stash it on `ctx` for
+/// `cleanup_session` to join, instead of it being dropped un-joined here.
+async fn connect_live_log(
+  job_msg: &AgentJobRequestMessage,
+  fallback_token: &str,
+) -> (
+  Option<tokio::sync::mpsc::Sender<LiveLogLine>>,
+  Option<tokio::task::JoinHandle<()>>,
+) {
+  let Some(url) = job_msg.feed_stream_url() else {
+    return (None, None);
+  };
+  let token = super::helpers::system_vss_access_token(job_msg);
+  let ws_token = token.as_deref().unwrap_or(fallback_token);
+  let Some((tx, inner_handle)) = LiveLogStreamer::connect(&url, ws_token).await else {
+    return (None, None);
+  };
+  let wrapper_handle = tokio::spawn(async move {
+    if let Err(e) = inner_handle.await {
+      tracing::warn!(error = %e, "live log WebSocket task panicked");
+    }
+  });
+  (Some(tx), Some(wrapper_handle))
 }
 
 /// The single source of truth for the outage annotation text — referenced
@@ -156,6 +219,20 @@ fn build_fwd_config(
   }
 }
 
+/// What the event forwarder hands back the moment the job's verdict is
+/// final: the conclusion, plus the still-running combined job-log upload it
+/// spawned (see [`spawn_job_log_upload`]).
+///
+/// Sent over the forwarder's oneshot BEFORE the forwarder task itself ends,
+/// so the caller can proceed to `report_completion` while the upload is
+/// still in flight.
+struct ForwarderOutcome {
+  conclusion: Conclusion,
+  /// `None` when no Results Service URL is configured — there is nowhere to
+  /// upload the combined log to, so no task was spawned.
+  job_log_upload: Option<tokio::task::JoinHandle<()>>,
+}
+
 /// Run the engine and its event forwarder to completion, returning the
 /// job conclusion. The engine owns its own event channel; we hand the
 /// receiver to the forwarder, which derives the conclusion and signals
@@ -166,30 +243,33 @@ async fn run_forwarded_job(
   collector: &StepCollector,
   cfg: FwdConfig,
   job_cancel: &CancellationToken,
-) -> Conclusion {
+) -> ForwarderOutcome {
   let runner = Runner::new(ctx.config.clone(), Arc::clone(&ctx.masker));
   let engine_rx = runner
     // The per-job token (child of the session token) so a mid-job
     // `JobCancellation` from the broker winds the engine down too.
     .execute_job(job_msg.clone(), job_cancel.clone());
 
-  let (conclusion_tx, conclusion_rx) = oneshot::channel::<Conclusion>();
+  let (outcome_tx, outcome_rx) = oneshot::channel::<ForwarderOutcome>();
   let fwd_handle = spawn_event_forwarder(
     engine_rx,
     collector.clone(),
     ctx.tx.clone(),
     cfg,
-    conclusion_tx,
+    outcome_tx,
   );
 
-  let conclusion = if let Ok(c) = conclusion_rx.await {
-    c
+  let outcome = if let Ok(o) = outcome_rx.await {
+    o
   } else {
     tracing::error!("event forwarder dropped the conclusion sender");
-    Conclusion::Failure
+    ForwarderOutcome {
+      conclusion: Conclusion::Failure,
+      job_log_upload: None,
+    }
   };
   let _ = fwd_handle.await;
-  conclusion
+  outcome
 }
 
 /// Spawn the lock-renewal task, routing through `route` instead of three
@@ -247,8 +327,8 @@ struct FwdConfig {
 /// contract for the forwarder.
 fn mask_line(masker: &Arc<Mutex<SecretMasker>>, line: &str) -> String {
   match masker.lock() {
-    Ok(g) => g.mask(line),
-    Err(poisoned) => poisoned.into_inner().mask(line),
+    Ok(g) => g.mask(line).into_owned(),
+    Err(poisoned) => poisoned.into_inner().mask(line).into_owned(),
   }
 }
 
@@ -257,11 +337,14 @@ fn mask_line(masker: &Arc<Mutex<SecretMasker>>, line: &str) -> String {
 /// Bundled so the per-event and finalize helpers take `&mut self`
 /// instead of a long parameter list. Owns the running per-step
 /// uploaders, the in-flight upload tasks, the accumulated combined
-/// job log, the Results Service change-order/step-metadata cursors,
-/// and the latched job conclusion.
+/// job log, the step-report queue and its step-metadata cursor, and
+/// the latched job conclusion.
 struct ForwarderState {
-  change_order: u64,
   step_meta: StepMetaMap,
+  /// `None` when no Results Service URL is configured — matches the old
+  /// `report_step_to_results`'s own `results_url` guard, now hoisted to a
+  /// single check at construction instead of per event.
+  step_queue: Option<StepReportQueue>,
   uploaders: HashMap<String, mpsc::Sender<String>>,
   upload_tasks: tokio::task::JoinSet<Option<(String, String, u64)>>,
   all_job_lines: Vec<String>,
@@ -274,12 +357,17 @@ struct ForwarderState {
 }
 
 impl ForwarderState {
-  /// Seed the combined job log with the "Set up job" step output so
-  /// the uploaded job log includes setup lines.
-  fn new(setup_lines: Vec<String>) -> Self {
+  /// Seed the combined job log with the "Set up job" step output, and
+  /// spawn the step-report queue when a Results Service URL is configured
+  /// (see [`step_report_queue`]).
+  fn new(setup_lines: Vec<String>, cfg: &FwdConfig) -> Self {
+    let step_queue = cfg
+      .results_url
+      .as_ref()
+      .map(|url| spawn_step_queue(cfg, url));
     Self {
-      change_order: 1,
       step_meta: StepMetaMap::new(),
+      step_queue,
       uploaders: HashMap::new(),
       upload_tasks: tokio::task::JoinSet::new(),
       all_job_lines: setup_lines,
@@ -289,28 +377,60 @@ impl ForwarderState {
   }
 }
 
+/// Spawn the step-report queue task from the forwarder's config, discarding
+/// its `JoinHandle` — `StepReportQueue::drain` synchronizes with the task's
+/// own completion internally (see its doc comment), so the raw handle has
+/// no further use here; dropping it does not abort the task.
+fn spawn_step_queue(cfg: &FwdConfig, results_url: &str) -> StepReportQueue {
+  let (queue, _handle) = StepReportQueue::spawn(
+    StepReportQueueConfig {
+      client: cfg.results_client.clone(),
+      results_url: results_url.to_owned(),
+      token: cfg.results_token.clone(),
+      run_backend_id: cfg.run_backend_id.clone(),
+      job_backend_id: cfg.job_backend_id.clone(),
+    },
+    DRAIN_DEADLINE,
+  );
+  queue
+}
+
 fn spawn_event_forwarder(
   mut events_rx: mpsc::Receiver<RunnerEvent>,
   fwd_collector: StepCollector,
   fwd_tx: mpsc::Sender<ListenerEvent>,
   mut cfg: FwdConfig,
-  conclusion_tx: oneshot::Sender<Conclusion>,
+  outcome_tx: oneshot::Sender<ForwarderOutcome>,
 ) -> tokio::task::JoinHandle<()> {
   tokio::spawn(async move {
-    let mut state = ForwarderState::new(std::mem::take(&mut cfg.setup_lines));
+    let setup_lines = std::mem::take(&mut cfg.setup_lines);
+    let mut state = ForwarderState::new(setup_lines, &cfg);
     while let Some(event) = events_rx.recv().await {
       if let RunnerEvent::JobCompleted { conclusion: c, .. } = &event {
         state.conclusion = Some(*c);
       }
       fwd_collector.record(&event).await;
       handle_event_arm(&mut state, &cfg, &event).await;
-      report_step(&mut state, &cfg, &event).await;
+      report_step(&mut state, &event);
       if fwd_tx.send(ListenerEvent::Runner(event)).await.is_err() {
         break;
       }
     }
-    finalize_job_logs(&mut state, &cfg, &fwd_collector).await;
-    let _ = conclusion_tx.send(final_conclusion(&state));
+    // Ordering is load-bearing: the per-step drain backfills the log URLs
+    // `report_completion` ships, so it MUST finish first; the combined
+    // job-log upload feeds nothing in that payload, so it only gets spawned.
+    drain_step_uploads(&mut state, &fwd_collector).await;
+    let job_log_upload = spawn_job_log_upload(&mut state, &cfg);
+    // Close the queue and wait (bounded) for its final flush BEFORE the
+    // conclusion is sent — otherwise `complete_job` could race a step's
+    // last-known status still sitting in the queue.
+    if let Some(queue) = state.step_queue.take() {
+      queue.drain().await;
+    }
+    let _ = outcome_tx.send(ForwarderOutcome {
+      conclusion: final_conclusion(&state),
+      job_log_upload,
+    });
   })
 }
 
@@ -398,25 +518,31 @@ async fn forward_log_line(state: &mut ForwarderState, cfg: &FwdConfig, step_id: 
   }
 }
 
-/// Forward the event to the Results Service step report, advancing the
-/// change-order and step-metadata cursors. No-op without a Results URL.
-async fn report_step(state: &mut ForwarderState, cfg: &FwdConfig, event: &RunnerEvent) {
-  let Some(ref url) = cfg.results_url else {
+/// Enqueue the event's step-status update onto the step-report queue
+/// (advancing the step-metadata cursor), when a Results Service is
+/// configured. Never awaits the network — see
+/// [`StepReportQueue::enqueue`].
+fn report_step(state: &mut ForwarderState, event: &RunnerEvent) {
+  let Some(ref queue) = state.step_queue else {
     return;
   };
-  let rctx = ResultsCtx {
-    client: &cfg.results_client,
-    results_url: url,
-    token: &cfg.results_token,
-    run_backend_id: &cfg.run_backend_id,
-    job_backend_id: &cfg.job_backend_id,
+  let Some(entry) = step_report_queue::build_step_entry(event, &mut state.step_meta) else {
+    return;
   };
-  report_step_to_results(&rctx, event, &mut state.change_order, &mut state.step_meta).await;
+  queue.enqueue(entry);
 }
 
-/// Drain the in-flight per-step uploads (backfilling each step's log
-/// URL) and upload the combined job-level log blob.
-async fn finalize_job_logs(state: &mut ForwarderState, cfg: &FwdConfig, collector: &StepCollector) {
+/// Drain the in-flight per-step uploads, backfilling each step's log URL
+/// and line count onto the already-collected `StepResult`s.
+///
+/// **Must complete before the conclusion is sent.** `collector.set_log_url`
+/// is what populates `completed_log_url` / `completed_log_lines` on the
+/// results `report_completion` ships in `CompleteJobRequest.step_results`;
+/// a step reported without one renders as "log not found" in the GitHub UI.
+/// That dependency is the whole reason this half is separate from
+/// [`spawn_job_log_upload`], whose result nothing in the completion payload
+/// reads.
+async fn drain_step_uploads(state: &mut ForwarderState, collector: &StepCollector) {
   // Drop every per-step line sender FIRST. A step whose `StepCompleted`
   // never arrived (engine error mid-step) still has its sender parked in
   // `uploaders`, and its streamer task only finishes when that sender
@@ -435,20 +561,45 @@ async fn finalize_job_logs(state: &mut ForwarderState, cfg: &FwdConfig, collecto
       collector.set_log_url(&step_id, log_url, line_count).await;
     }
   }
+}
 
-  let Some(ref url) = cfg.results_url else {
-    return;
-  };
-  let rctx = ResultsCtx {
-    client: &cfg.results_client,
-    results_url: url,
-    token: &cfg.results_token,
-    run_backend_id: &cfg.run_backend_id,
-    job_backend_id: &cfg.job_backend_id,
-  };
-  if let Some(count) = super::log_uploader::upload_job_logs(&rctx, &state.all_job_lines).await {
-    tracing::info!(line_count = count, "job log uploaded");
-  }
+/// Spawn the combined job-level log upload (signed URL → blob PUT →
+/// metadata, 3 round-trips) and hand back its `JoinHandle`.
+///
+/// Deliberately NOT awaited here. Nothing in `CompleteJobRequest` reads its
+/// result — unlike [`drain_step_uploads`], which backfills every step's
+/// `completed_log_url` — so it overlaps `report_completion` instead of
+/// preceding it. The handle rides `JobExecution` → `JobOutcome` →
+/// `SessionCtx::job_log_upload`, and `helpers::cleanup_session` awaits it on
+/// both the `Ok` and the `Err` path of `job_lifecycle::poll_and_execute`, so
+/// the listener still never returns before the upload finishes.
+///
+/// The task captures only owned Results-Service addressing plus the log
+/// lines themselves — never a clone of the listener-event sender. A detached
+/// task holding one would keep the journal channel open past `handler.rs`'s
+/// `drop(ctx)` and wedge the `journal.await` that follows it.
+fn spawn_job_log_upload(
+  state: &mut ForwarderState,
+  cfg: &FwdConfig,
+) -> Option<tokio::task::JoinHandle<()>> {
+  let results_url = cfg.results_url.clone()?;
+  let lines = std::mem::take(&mut state.all_job_lines);
+  let client = cfg.results_client.clone();
+  let token = cfg.results_token.clone();
+  let run_backend_id = cfg.run_backend_id.clone();
+  let job_backend_id = cfg.job_backend_id.clone();
+  Some(tokio::spawn(async move {
+    let rctx = ResultsCtx {
+      client: &client,
+      results_url: &results_url,
+      token: &token,
+      run_backend_id: &run_backend_id,
+      job_backend_id: &job_backend_id,
+    };
+    if let Some(count) = super::log_uploader::upload_job_logs(&rctx, &lines).await {
+      tracing::info!(line_count = count, "job log uploaded");
+    }
+  }))
 }
 
 /// Resolve the latched conclusion, defaulting to failure if the engine

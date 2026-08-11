@@ -225,6 +225,7 @@ fn make_ctx(
     use_fips_encryption: false,
     rsa_private_key_der: Vec::new(),
     live_log: None,
+    job_log_upload: None,
     watchdog,
   })
 }

@@ -116,8 +116,8 @@ impl CommandDispatcher {
   /// Mask a line through the shared masker, recovering from a poisoned lock.
   fn mask(&self, line: &str) -> String {
     match self.masker.lock() {
-      Ok(g) => g.mask(line),
-      Err(poisoned) => poisoned.into_inner().mask(line),
+      Ok(g) => g.mask(line).into_owned(),
+      Err(poisoned) => poisoned.into_inner().mask(line).into_owned(),
     }
   }
 

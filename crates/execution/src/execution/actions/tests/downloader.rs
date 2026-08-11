@@ -1,10 +1,15 @@
-//! Tests for `downloader`: tar-slip guards on `extract_tarball`.
+//! Tests for `downloader`: tar-slip guards on `extract_tarball`, plus an
+//! end-to-end streamed download+extract against a real local HTTP server,
+//! plus the atomic-staging promotion (`promote_staging`) under real
+//! concurrency and under extraction failure.
 
 use super::*;
 use flate2::Compression;
 use flate2::write::GzEncoder;
 use std::env;
 use std::io::Write;
+use std::net::SocketAddr;
+use std::sync::Arc;
 use tar::{Builder, Header};
 
 fn tmp_dest(label: &str) -> PathBuf {
@@ -112,7 +117,7 @@ fn build_tarball_raw(path: &str, body: &[u8]) -> Vec<u8> {
 fn normal_prefix_is_stripped_and_extracted() {
   let dest = tmp_dest("normal");
   let tar = build_tarball(&[("actions-checkout-v4-abc123/README.md", b"hello")]);
-  extract_tarball(&tar, &dest).expect("normal tarball must extract");
+  extract_tarball(&tar[..], &dest).expect("normal tarball must extract");
   let read = std::fs::read(dest.join("README.md")).expect("file present");
   assert_eq!(read, b"hello");
 }
@@ -124,7 +129,7 @@ fn parent_dir_entry_is_rejected() {
   // a `..` component. Without the tar-slip guard, joining this under
   // `dest` would write outside the dest directory.
   let tar = build_tarball_raw("evil-action-v1-abc123/../../../tmp/pwn", b"bad");
-  let result = extract_tarball(&tar, &dest);
+  let result = extract_tarball(&tar[..], &dest);
   assert!(matches!(result, Err(RunnerError::ActionDownload(_))));
   // Nothing should have been written into dest.
   assert_eq!(
@@ -140,7 +145,7 @@ fn mid_path_parent_dir_is_rejected() {
   let dest = tmp_dest("mid");
   // Even a single `..` mid-path (not just at the root) is a slip.
   let tar = build_tarball_raw("evil-action-v1-abc123/dir/../../escape", b"bad");
-  let result = extract_tarball(&tar, &dest);
+  let result = extract_tarball(&tar[..], &dest);
   assert!(matches!(result, Err(RunnerError::ActionDownload(_))));
 }
 
@@ -173,7 +178,164 @@ fn good_entry_alongside_slip_is_not_extracted() {
     enc.write_all(&combined).expect("re-gzip");
     enc.finish().expect("gzip finish");
   }
-  let result = extract_tarball(&combined_gz, &dest);
+  let result = extract_tarball(&combined_gz[..], &dest);
   assert!(matches!(result, Err(RunnerError::ActionDownload(_))));
   assert!(!dest.join("README.md").exists());
+}
+
+/// Serve `body` as the response to every request on a random localhost
+/// port, returning the bound address. The server task is aborted when
+/// the caller's Tokio runtime shuts down at test end.
+async fn spawn_tarball_server(body: Vec<u8>) -> SocketAddr {
+  let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+    .await
+    .expect("bind local tarball server");
+  let addr = listener.local_addr().expect("local_addr");
+  let app = axum::Router::new().route(
+    "/tarball.tar.gz",
+    axum::routing::get(move || async move { body }),
+  );
+  tokio::spawn(async move {
+    let _ = axum::serve(listener, app).await;
+  });
+  addr
+}
+
+/// AC-9: a real tarball fixture served over local HTTP downloads and
+/// extracts through the streamed path (`bytes_stream` → `StreamReader` →
+/// `SyncIoBridge` → `spawn_blocking`) — contents, permissions, and the
+/// on-disk cache watermark all verified.
+#[tokio::test]
+async fn download_and_extract_action_streams_from_http() {
+  let tar = build_tarball(&[("actions-checkout-v4-abc123/README.md", b"hello from http")]);
+  let addr = spawn_tarball_server(tar).await;
+  let url = format!("http://{addr}/tarball.tar.gz");
+  let client = reqwest::Client::new();
+  let dest = tmp_dest("http-stream");
+
+  download_and_extract_action(&client, &url, None, &dest)
+    .await
+    .expect("download+extract over http must succeed");
+
+  let read = std::fs::read(dest.join("README.md")).expect("file present");
+  assert_eq!(read, b"hello from http");
+  assert!(is_action_cached(&dest), "watermark must be written");
+
+  // Re-running against the same dest is a cache hit — no second fetch,
+  // and the previously extracted content is untouched.
+  download_and_extract_action(&client, &url, None, &dest)
+    .await
+    .expect("cached re-run must succeed without a fetch");
+  let read_again = std::fs::read(dest.join("README.md")).expect("file still present");
+  assert_eq!(read_again, b"hello from http");
+}
+
+/// Serve `body` (200 OK) for every request, but hold each response behind a
+/// `gate` (sized to the number of concurrent callers under test) — a
+/// response is released only once ALL gated requests have arrived, proving
+/// genuine overlap rather than a lucky interleave. Mirrors
+/// `prefetch.rs`'s test helper of the same name.
+async fn spawn_gated_tarball_server(body: Vec<u8>, gate: Arc<tokio::sync::Barrier>) -> SocketAddr {
+  let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+    .await
+    .expect("bind local tarball server");
+  let addr = listener.local_addr().expect("local_addr");
+  let app = axum::Router::new().fallback(move || {
+    let body = body.clone();
+    let gate = Arc::clone(&gate);
+    async move {
+      gate.wait().await;
+      body
+    }
+  });
+  tokio::spawn(async move {
+    let _ = axum::serve(listener, app).await;
+  });
+  addr
+}
+
+/// List any sibling staging dirs left behind for `dest` (i.e. anything
+/// matching `<dest file name>.tmp-*` in `dest`'s parent directory).
+fn leftover_staging_dirs(dest: &Path) -> Vec<PathBuf> {
+  let Some(parent) = dest.parent() else {
+    return Vec::new();
+  };
+  let Some(dest_name) = dest.file_name() else {
+    return Vec::new();
+  };
+  let prefix = format!("{}.tmp-", dest_name.to_string_lossy());
+  let Ok(entries) = std::fs::read_dir(parent) else {
+    return Vec::new();
+  };
+  entries
+    .filter_map(Result::ok)
+    .map(|entry| entry.path())
+    .filter(|path| {
+      path
+        .file_name()
+        .is_some_and(|name| name.to_string_lossy().starts_with(&prefix))
+    })
+    .collect()
+}
+
+/// Two concurrent `download_and_extract_action` calls racing for the SAME
+/// `dest` (a barrier-gated server proves genuine overlap, not a lucky
+/// interleave) must both succeed, must leave `dest` holding exactly one
+/// complete, valid extraction (not an interleaving of the two), the
+/// watermark present, and no `.tmp-` staging dirs left behind — the core
+/// regression test for the atomic-staging fix: without it, both extractions
+/// would write directly into `dest` and could interleave their bytes.
+#[tokio::test]
+async fn concurrent_downloads_to_the_same_dest_yield_one_complete_extraction() {
+  let tar = build_tarball(&[(
+    "acme-repo-v1-abc123/README.md",
+    b"concurrent-same-dest-content",
+  )]);
+  let gate = Arc::new(tokio::sync::Barrier::new(2));
+  let addr = spawn_gated_tarball_server(tar, Arc::clone(&gate)).await;
+  let url = format!("http://{addr}/tarball.tar.gz");
+  let client = reqwest::Client::new();
+  let dest = tmp_dest("concurrent-same-dest");
+
+  let (a, b) = tokio::join!(
+    download_and_extract_action(&client, &url, None, &dest),
+    download_and_extract_action(&client, &url, None, &dest),
+  );
+  a.expect("first concurrent extraction must succeed");
+  b.expect("second concurrent extraction must succeed");
+
+  let read = std::fs::read(dest.join("README.md")).expect("extracted file present exactly once");
+  assert_eq!(read, b"concurrent-same-dest-content");
+  assert!(is_action_cached(&dest), "watermark must be written");
+  assert_eq!(
+    leftover_staging_dirs(&dest),
+    Vec::<PathBuf>::new(),
+    "no staging dirs must remain after both extractions settle"
+  );
+}
+
+/// A tarball that fails to extract (corrupt/non-gzip body) must leave NO
+/// staging dir and NO `dest` behind — `promote_staging` never runs, and the
+/// staging dir created by the failed `extract_tarball` call is cleaned up.
+#[tokio::test]
+async fn download_and_extract_action_leaves_no_dest_or_staging_on_extraction_failure() {
+  let addr = spawn_tarball_server(b"not a valid gzip tarball".to_vec()).await;
+  let url = format!("http://{addr}/tarball.tar.gz");
+  let client = reqwest::Client::new();
+  let dest = tmp_dest("corrupt-extraction");
+
+  let result = download_and_extract_action(&client, &url, None, &dest).await;
+  assert!(
+    matches!(result, Err(RunnerError::ActionDownload(_))),
+    "a corrupt tarball must fail extraction: {result:?}"
+  );
+  assert!(
+    !dest.exists(),
+    "dest must not exist after a failed extraction"
+  );
+  assert_eq!(
+    leftover_staging_dirs(&dest),
+    Vec::<PathBuf>::new(),
+    "no staging dir must remain after a failed extraction"
+  );
 }

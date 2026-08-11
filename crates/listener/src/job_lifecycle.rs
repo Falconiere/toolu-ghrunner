@@ -8,7 +8,6 @@ use super::helpers::map_conclusion;
 use protocol::messages::{BrokerMessage, BrokerMigrationBody, JobCancelBody};
 use shared::{AgentJobRequestMessage, Conclusion, ListenerEvent, RunnerError};
 use wire::net::{PollParams, acknowledge_message, poll_message};
-use wire::reporting::live_log::LiveLogStreamer;
 use wire::reporting::run_service::{
   AcquireJobRequest, CompleteJobRequest, acquire_job, complete_job,
 };
@@ -51,31 +50,40 @@ pub(super) async fn poll_and_execute(
   tracing::info!(plan_id = %acquired.plan_id, "acquired job");
   let plan_id = acquired.plan_id.clone();
 
+  // Ack right after acquire, not after the job finishes — see the "early ack"
+  // rationale + accepted risk on `acknowledge_best_effort`'s doc comment.
+  acknowledge_best_effort(ctx, &body.runner_request_id).await;
+
   let mut outcome =
     run_job_with_cancel_watch(ctx, &body.run_service_url, &rs_token, &acquired).await;
-  // Stash the live-log wrapper handle now, before any further `?` in this
+  // Stash the two detached-task handles now, before any further `?` in this
   // function — `ctx` is a full `&mut` borrow again here (the call above only
-  // reborrowed it immutably), so this assignment survives an early return
+  // reborrowed it immutably), so these assignments survive an early return
   // below, and `cleanup_session` (called unconditionally by the caller) can
-  // join it on both the `Ok` and `Err` paths.
+  // join both on the `Ok` and `Err` paths. The job-log upload in particular
+  // is deliberately still in flight across `report_completion` below, whose
+  // `?` is the early return in question.
   ctx.live_log = outcome.live_log_handle.take();
+  ctx.job_log_upload = outcome.job_log_upload.take();
   let rs_token = outcome.job_token.clone().unwrap_or(rs_token);
   // `Conclusion` is `Copy`; take it before `outcome` moves into the report so
   // the caller still gets the job's verdict.
   let conclusion = outcome.conclusion;
 
-  acknowledge_best_effort(ctx, &body.runner_request_id).await;
   report_completion(ctx, &body.run_service_url, plan_id, rs_token, outcome).await?;
   Ok(Some(conclusion))
 }
 
-/// Best-effort acknowledge of the broker message. Single attempt,
-/// WARN-on-failure, non-gating: completion ([`report_completion`]) is the
-/// contractual report to GitHub, and the ack targets the broker while
-/// `complete_job` targets the Run Service — independent endpoints, so a
-/// failed ack must not doom a completion the network can otherwise still
-/// deliver. The broker keys the ack on the job's `runner_request_id`
-/// (UUID), not the numeric broker message id.
+/// Best-effort acknowledge of the broker message: single attempt,
+/// WARN-on-failure, non-gating (independent endpoint from `complete_job`).
+///
+/// Called by [`poll_and_execute`] right after `acquire_job`, not after the
+/// job: an un-acked message is re-served (and skipped) on
+/// `watch_for_gh_cancel`'s first poll — acking early removes that re-see.
+/// Cancels are unaffected (separately keyed message). **Accepted risk**
+/// (design doc, Architecture item 3): a runner death between this ack and
+/// `complete_job` now loses broker redelivery for the whole job, not just
+/// the old post-job window.
 async fn acknowledge_best_effort(ctx: &SessionCtx, runner_request_id: &str) {
   if let Err(e) =
     acknowledge_message(&ctx.client, &ctx.broker_url, &ctx.token, runner_request_id).await
@@ -136,16 +144,26 @@ struct JobOutcome {
   /// `poll_and_execute` can stash it on `ctx` before any further fallible
   /// call — see the design note at its assignment site.
   live_log_handle: Option<tokio::task::JoinHandle<()>>,
+  /// The combined job-log upload task's `JoinHandle`, threaded up the same
+  /// way and for the same reason: it is still running while
+  /// `report_completion` is on the wire, and must be joined whichever way
+  /// that call returns.
+  job_log_upload: Option<tokio::task::JoinHandle<()>>,
 }
 
 /// Parse the acquired job body, or return a ready-made failure outcome —
 /// never leaves the job hanging on GitHub even if parsing fails.
+///
+/// The failure outcome is boxed: `JobOutcome` carries the whole job's step
+/// results, so an unboxed `Err` variant would make every caller of this
+/// `Result` pay that size (clippy's `result_large_err`). The one caller
+/// dereferences it straight into its own return value.
 fn parse_job_message(
   acquired: &wire::reporting::run_service::AcquireJobResponse,
-) -> Result<AgentJobRequestMessage, JobOutcome> {
+) -> Result<AgentJobRequestMessage, Box<JobOutcome>> {
   serde_json::from_value(acquired.body.clone()).map_err(|e| {
     tracing::error!(error = %e, "job message parse failed — completing with failure");
-    JobOutcome {
+    Box::new(JobOutcome {
       conclusion: Conclusion::Failure,
       job_id: "unknown".to_owned(),
       request_id: 0,
@@ -153,7 +171,8 @@ fn parse_job_message(
       job_token: None,
       annotations: Vec::new(),
       live_log_handle: None,
-    }
+      job_log_upload: None,
+    })
   })
 }
 
@@ -268,7 +287,7 @@ async fn run_acquired_job(
 ) -> JobOutcome {
   let job_msg: AgentJobRequestMessage = match parse_job_message(acquired) {
     Ok(msg) => msg,
-    Err(failure) => return failure,
+    Err(failure) => return *failure,
   };
 
   let job_token = extract_system_token(&job_msg);
@@ -284,22 +303,24 @@ async fn run_acquired_job(
   let request_id = job_msg.request_id;
   let effective_token = job_token.as_deref().unwrap_or(rs_token);
 
-  // Connect live log WebSocket for real-time log streaming to GitHub UI.
-  // `live_log_handle` is the wrapper task's `JoinHandle` — threaded back up
-  // through `JobOutcome` so `poll_and_execute` can stash it on `ctx` for
-  // `cleanup_session` to join, instead of being dropped un-joined here.
-  let (live_log_tx, live_log_handle) = connect_live_log(&job_msg, effective_token).await;
-
   let route = super::execution_loop::JobRoute {
     run_service_url,
     rs_token: effective_token,
     plan_id: &acquired.plan_id,
   };
+  // `live_log_handle` is the wrapper task's `JoinHandle` for the live-log
+  // WebSocket connection `execute_with_renewal` opens (concurrently with the
+  // setup-step report); `job_log_upload` is the combined job-log upload it
+  // spawned at conclusion time. Both are threaded back up through
+  // `JobOutcome` so `poll_and_execute` can stash them on `ctx` for
+  // `cleanup_session` to join, instead of being dropped un-joined here.
   let JobExecution {
     conclusion,
     steps,
     annotations,
-  } = execute_with_renewal(ctx, &route, &job_msg, live_log_tx, job_cancel).await;
+    live_log_handle,
+    job_log_upload,
+  } = execute_with_renewal(ctx, &route, &job_msg, job_cancel).await;
   JobOutcome {
     conclusion,
     job_id: job_msg.job_id,
@@ -308,6 +329,7 @@ async fn run_acquired_job(
     job_token,
     annotations,
     live_log_handle,
+    job_log_upload,
   }
 }
 
@@ -550,36 +572,6 @@ fn parse_job_request_body(
 ) -> Result<protocol::messages::RunnerJobRequestBody, RunnerError> {
   serde_json::from_str(&msg.body)
     .map_err(|e| RunnerError::Protocol(format!("job request body parse: {e}")))
-}
-
-/// Connect live log WebSocket for real-time log streaming to GitHub UI.
-/// Returns `(None, None)` on failure — live logs are best-effort.
-///
-/// The second element is the `JoinHandle` of the wrapper task spawned below
-/// (not `LiveLogStreamer::connect`'s inner handle) — the caller no longer
-/// detaches it, but threads it back up so `cleanup_session` can join the
-/// streamer's final flush instead of racing it against session teardown.
-async fn connect_live_log(
-  job_msg: &AgentJobRequestMessage,
-  fallback_token: &str,
-) -> (
-  Option<tokio::sync::mpsc::Sender<wire::reporting::live_log::LiveLogLine>>,
-  Option<tokio::task::JoinHandle<()>>,
-) {
-  let Some(url) = job_msg.feed_stream_url() else {
-    return (None, None);
-  };
-  let token = super::helpers::system_vss_access_token(job_msg);
-  let ws_token = token.as_deref().unwrap_or(fallback_token);
-  let Some((tx, inner_handle)) = LiveLogStreamer::connect(&url, ws_token).await else {
-    return (None, None);
-  };
-  let wrapper_handle = tokio::spawn(async move {
-    if let Err(e) = inner_handle.await {
-      tracing::warn!(error = %e, "live log WebSocket task panicked");
-    }
-  });
-  (Some(tx), Some(wrapper_handle))
 }
 
 /// Extract the `SystemVssConnection` `AccessToken` from job message endpoints.

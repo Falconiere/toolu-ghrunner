@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use aho_corasick::{AhoCorasick, AhoCorasickBuilder, MatchKind};
 use base64::Engine as _;
 use base64::engine::general_purpose::{STANDARD, STANDARD_NO_PAD};
@@ -48,7 +50,7 @@ impl crate::startup::SecretRedactor for MaskerRedactor {
       Ok(g) => g,
       Err(poisoned) => poisoned.into_inner(),
     };
-    guard.mask(line)
+    guard.mask(line).into_owned()
   }
 }
 
@@ -59,7 +61,7 @@ impl crate::startup::SecretRedactor for MaskerRedactor {
 /// when calling `crate::startup::init_with_redactor`.
 impl crate::startup::SecretRedactor for SecretMasker {
   fn redact(&self, line: &str) -> String {
-    self.mask(line)
+    self.mask(line).into_owned()
   }
 }
 
@@ -78,6 +80,28 @@ impl SecretMasker {
   /// (too short, would cause false positives). Rebuilds the matching
   /// automaton once at the end, not per pattern inserted.
   pub fn add_secret(&mut self, value: &str) {
+    self.insert_secret_patterns(value);
+    self.rebuild_automaton();
+  }
+
+  /// Register many secret values in one batch, rebuilding the automaton
+  /// exactly once at the end instead of once per value. Same per-value
+  /// variant expansion (and min-length guard) as [`Self::add_secret`].
+  pub fn add_secrets<I, S>(&mut self, values: I)
+  where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+  {
+    for value in values {
+      self.insert_secret_patterns(value.as_ref());
+    }
+    self.rebuild_automaton();
+  }
+
+  /// Insert `value`'s patterns (raw + per-line, each with its variants via
+  /// [`Self::add_pattern`]) WITHOUT rebuilding the automaton — the shared
+  /// body of [`Self::add_secret`] and [`Self::add_secrets`].
+  fn insert_secret_patterns(&mut self, value: &str) {
     let trimmed = value.trim();
     if trimmed.len() < MIN_SECRET_LEN {
       return;
@@ -91,22 +115,22 @@ impl SecretMasker {
         self.add_pattern(line);
       }
     }
-
-    self.rebuild_automaton();
   }
 
   /// Replace all registered secret patterns with `***` in one pass.
   ///
-  /// Falls back to the longest-first `str::replace` loop when the
+  /// Borrows `input` unchanged (`Cow::Borrowed`) when nothing matched;
+  /// allocates (`Cow::Owned`) only when a replacement happened. Falls back
+  /// to the longest-first `str::replace` loop (always `Owned`) when the
   /// automaton failed to build — never treats a missing automaton as
   /// "nothing to mask".
-  pub fn mask(&self, input: &str) -> String {
+  pub fn mask<'a>(&self, input: &'a str) -> Cow<'a, str> {
     if self.patterns.is_empty() {
-      return input.to_owned();
+      return Cow::Borrowed(input);
     }
     match &self.automaton {
       Some(automaton) => mask_with_automaton(automaton, input),
-      None => self.mask_with_replace_loop(input),
+      None => Cow::Owned(self.mask_with_replace_loop(input)),
     }
   }
 
@@ -215,13 +239,16 @@ impl Default for SecretMasker {
 /// Never leaks a partial pattern: a merged span is the union of every
 /// match that touches it, so `["abcdef12", "xabc"]` over `"xabcdef12y"`
 /// yields `"***y"`, not `LeftmostLongest`'s leaking `"***def12y"`.
-fn mask_with_automaton(automaton: &AhoCorasick, input: &str) -> String {
+///
+/// Borrows `input` (`Cow::Borrowed`) when no match is found; allocates
+/// (`Cow::Owned`) only once a span is actually replaced.
+fn mask_with_automaton<'a>(automaton: &AhoCorasick, input: &'a str) -> Cow<'a, str> {
   let mut spans: Vec<(usize, usize)> = automaton
     .find_overlapping_iter(input)
     .map(|m| (m.start(), m.end()))
     .collect();
   if spans.is_empty() {
-    return input.to_owned();
+    return Cow::Borrowed(input);
   }
   spans.sort_unstable();
 
@@ -259,7 +286,7 @@ fn mask_with_automaton(automaton: &AhoCorasick, input: &str) -> String {
     input.len()
   );
   result.push_str(input.get(cursor..).unwrap_or_default());
-  result
+  Cow::Owned(result)
 }
 
 /// One hex digit for `nibble` (0..=15). `upper` picks `A-F` vs `a-f`.
