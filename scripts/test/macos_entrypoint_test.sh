@@ -226,15 +226,23 @@ mkdir -p "$home/node"
 chmod 711 "$TMPROOT"
 chmod -R a+rX "$root" "$home"
 chmod 555 "$home/node"
-if [[ "$(id -u)" -eq 0 ]]; then
-  as_nobody=(setpriv --reuid=65534 --regid=65534 --clear-groups)
-  command -v setpriv >/dev/null || as_nobody=()
+# Written as three whole invocations rather than a command-prefix array: an
+# empty array expanded as "${arr[@]}" is an unbound-variable error under
+# `set -u` on bash 3.2, which is the /bin/bash every macOS host still ships —
+# the very platform this launcher runs on.
+unwritable_env=(PATH=/usr/bin:/bin "TOOLU_RUNNER_HOME=$home" TOOLU_JITCONFIG=x)
+out=""
+ran_unwritable_case=1
+if [[ "$(id -u)" -ne 0 ]]; then
+  out="$(env "${unwritable_env[@]}" "$root/entrypoint" 2>&1)"
+elif command -v setpriv >/dev/null; then
+  out="$(env "${unwritable_env[@]}" \
+    setpriv --reuid=65534 --regid=65534 --clear-groups "$root/entrypoint" 2>&1)"
 else
-  as_nobody=()
+  ran_unwritable_case=0
+  echo "SKIP: seed-link failure needs an unprivileged uid (running as root, no setpriv)"
 fi
-if [[ "$(id -u)" -ne 0 || ${#as_nobody[@]} -gt 0 ]]; then
-  out="$(env PATH=/usr/bin:/bin TOOLU_RUNNER_HOME="$home" TOOLU_JITCONFIG=x \
-    "${as_nobody[@]}" "$root/entrypoint" 2>&1)"
+if ((ran_unwritable_case)); then
   check "an unwritable data dir still boots the job" "argv=boot" "$(grep '^argv=' <<<"$out")"
   if grep -q "could not link seeded node" <<<"$out"; then
     echo "ok: the failed seed link is reported"
@@ -242,10 +250,11 @@ if [[ "$(id -u)" -ne 0 || ${#as_nobody[@]} -gt 0 ]]; then
     echo "FAIL: expected a warning about the seed link; got: $out" >&2
     fail=1
   fi
-else
-  echo "SKIP: seed-link failure needs an unprivileged uid (running as root, no setpriv)"
 fi
 chmod 755 "$home/node"
+# Put the shared temp root back to what `mktemp -d` gave us — only this one
+# fixture needed traversal, and the later cases should not inherit it.
+chmod 700 "$TMPROOT"
 
 # --- a seed whose `default` names a missing runtime warns, does not die ----
 root="$(image_tree brokenseed 24.0.2)"
