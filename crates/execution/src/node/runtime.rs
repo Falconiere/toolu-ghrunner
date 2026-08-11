@@ -117,15 +117,23 @@ async fn fetch_node_tarball_reader(
 
   let status = response.status();
   if !status.is_success() {
-    let body = response.text().await.unwrap_or_default();
+    // A failed body read is reported, not swallowed: "status 500: <nothing>"
+    // and "status 500: <could not be read>" are different diagnoses.
+    let body = match response.text().await {
+      Ok(body) => body,
+      Err(e) => format!("(body read failed: {e})"),
+    };
     return Err(RunnerError::NodeRuntime(format!(
       "node tarball {url} status {status}: {body}"
     )));
   }
 
-  let stream = response
-    .bytes_stream()
-    .map(|chunk| chunk.map_err(std::io::Error::other));
+  // The stream's `std::io::Error` surfaces from inside `extract_tarball`,
+  // where nothing knows which URL the bytes came from — so name it here.
+  let stream_url = url.to_owned();
+  let stream = response.bytes_stream().map(move |chunk| {
+    chunk.map_err(|e| std::io::Error::other(format!("tarball stream from {stream_url}: {e}")))
+  });
   let stream_reader = tokio_util::io::StreamReader::new(stream);
   // Constructed here (an async context) so it captures the current Tokio
   // runtime handle, then moved into `spawn_blocking` — its documented use.
@@ -168,58 +176,76 @@ fn cleanup_staging(staging: &Path) {
   }
 }
 
-/// Promote a fully-extracted `staging` dir onto `dest` as the last,
-/// atomic-on-same-filesystem step of a Node.js runtime install.
+/// Promote a fully-extracted `staging` dir onto `dest` with a single rename
+/// — the commit point of a Node.js runtime install.
 ///
-/// Ordering matters here in a way the code itself can't show: `dest` may
-/// still be a stale, incomplete leftover — either an old (pre-staging)
-/// direct extraction that was interrupted, or a genuinely partial `dest`
-/// left by a bug — signaled by the binary not being present at
-/// `node_binary_path(dest)`. It is cleared immediately before the rename so
-/// the window in which `dest` is absent is as short as possible. If a
-/// concurrent extraction (e.g. two runner processes for different repos
-/// both installing the same Node.js version) is racing us for the same
-/// `dest`, one of two things happens: either our `rename` lands first (the
-/// other extraction's later rename then fails and it defers to us), or
-/// theirs already landed (our `rename` fails with `dest` present, so we
-/// discard our own staging copy and defer to them). Either way `dest` ends
-/// up holding exactly ONE complete tree — never an interleaving of both,
-/// because extraction itself never writes into `dest`.
+/// This install's completeness signal is the binary at
+/// `node_binary_path(dest)`, which `extract_tarball` writes INSIDE the
+/// staging dir (as `bin/node`), so the rename publishes the tree and its
+/// completeness signal together — the mirror of `actions::downloader`'s
+/// watermark-inside-staging ordering, without needing a separate marker
+/// file. `dest` is therefore never observably a complete-but-unsignaled
+/// tree, and this function deliberately does NOT clear `dest` up front: such
+/// a pre-rename cleanup is exactly what could delete a rival's just-committed
+/// tree.
+///
+/// A failed rename means `dest` was already occupied (or the filesystem
+/// refused the operation); which it is decides what happens next:
+/// - `node_binary_path(dest)` exists: a concurrent install (e.g. two runner
+///   processes for different repos installing the same Node.js version)
+///   committed first. Ours was redundant, not wrong — discard the staging
+///   copy and defer to it.
+/// - `dest` exists without the binary: a stale partial (an interrupted
+///   pre-staging extraction, or one left by a bug). Nothing valid can be
+///   reading it, so clear it and retry the rename ONCE.
+/// - `dest` does not exist: a genuine filesystem error — propagate it.
+///
+/// Either way `dest` ends up holding exactly ONE complete tree — never an
+/// interleaving of both, because extraction itself never writes into `dest`.
 ///
 /// # Errors
 ///
-/// Returns `RunnerError::NodeRuntime` when the rename fails and `dest`
-/// still does not exist afterward (a genuine filesystem error, not a lost
-/// race).
+/// Returns `RunnerError::NodeRuntime` when the rename fails for a reason
+/// other than a lost race — either with `dest` absent (a genuine filesystem
+/// error) or with the single retry over a stale `dest` failing too.
 fn promote_staging(staging: &Path, dest: &Path) -> Result<(), RunnerError> {
-  if dest.exists()
-    && !node_binary_path(dest).exists()
-    && let Err(e) = std::fs::remove_dir_all(dest)
-  {
-    tracing::warn!(
-      dest = %dest.display(),
-      error = %e,
-      "stale node cache dir removal failed before promote; rename may fail"
-    );
+  let rename_err = match std::fs::rename(staging, dest) {
+    Ok(()) => return Ok(()),
+    Err(err) => err,
+  };
+
+  if node_binary_path(dest).exists() {
+    cleanup_staging(staging);
+    return Ok(());
   }
 
-  match std::fs::rename(staging, dest) {
-    Ok(()) => Ok(()),
-    Err(rename_err) => {
-      cleanup_staging(staging);
-      if dest.exists() {
-        // A concurrent install's rename already landed here first. Ours was
-        // redundant, not wrong — `dest` holds a complete tree either way.
-        Ok(())
-      } else {
-        Err(RunnerError::NodeRuntime(format!(
-          "rename {} -> {}: {rename_err}",
+  if dest.exists() {
+    if let Err(remove_err) = std::fs::remove_dir_all(dest) {
+      tracing::warn!(
+        dest = %dest.display(),
+        error = %remove_err,
+        "stale node cache dir removal failed; retrying the promote rename anyway"
+      );
+    }
+    match std::fs::rename(staging, dest) {
+      Ok(()) => return Ok(()),
+      Err(retry_err) => {
+        cleanup_staging(staging);
+        return Err(RunnerError::NodeRuntime(format!(
+          "rename {} -> {}: {rename_err}; retry after clearing a stale dest: {retry_err}",
           staging.display(),
           dest.display()
-        )))
-      }
-    },
+        )));
+      },
+    }
   }
+
+  cleanup_staging(staging);
+  Err(RunnerError::NodeRuntime(format!(
+    "rename {} -> {}: {rename_err}",
+    staging.display(),
+    dest.display()
+  )))
 }
 
 /// The real Node.js download host every production install resolves

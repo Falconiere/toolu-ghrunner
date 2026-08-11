@@ -12,11 +12,16 @@ pub fn action_cache_dir(data_dir: &Path, cache_key: &str) -> PathBuf {
   data_dir.join("actions").join(cache_key)
 }
 
-/// Watermark file path: `{cache_dir}.completed`.
+/// Watermark file path: `{cache_dir}/.completed`.
+///
+/// A CHILD of the cache dir rather than a sibling: [`download_and_extract_action`]
+/// writes it into the staging dir BEFORE [`promote_staging`] renames that dir
+/// onto `cache_dir`, so the rename publishes the extracted tree and its
+/// completeness marker in one atomic step. A sibling watermark could only be
+/// written after the rename, leaving a window in which `cache_dir` is a
+/// complete-but-unwatermarked tree.
 pub fn watermark_path(cache_dir: &Path) -> PathBuf {
-  let mut wm = cache_dir.as_os_str().to_owned();
-  wm.push(".completed");
-  PathBuf::from(wm)
+  cache_dir.join(".completed")
 }
 
 /// Check whether an action is cached and valid (watermark + dir exist).
@@ -136,12 +141,13 @@ fn set_executable_if_needed(target: &Path, entry: &tar::Entry<'_, impl Read>) {
   }
 }
 
-/// Write the watermark file to mark an action cache as complete.
+/// Write the watermark file that marks an extracted tree as complete.
 ///
-/// Idempotent — safe to call even when the watermark already exists (a
-/// concurrent extraction that lost the [`promote_staging`] race still calls
-/// this after treating `cache_dir` as authoritative, so two writers racing
-/// here just write the same empty file twice).
+/// [`download_and_extract_action`] calls this on the STAGING dir, before
+/// [`promote_staging`] renames it onto the cache dir — the rename is the
+/// commit point, so a watermarked staging dir becomes a watermarked cache dir
+/// atomically. Racing writers each watermark their OWN staging dir, so this
+/// never contends.
 ///
 /// # Errors
 ///
@@ -187,58 +193,72 @@ fn cleanup_staging(staging: &Path) {
   }
 }
 
-/// Promote a fully-extracted `staging` dir onto `dest` as the last,
-/// atomic-on-same-filesystem step of an extraction.
+/// Promote a fully-extracted, ALREADY-WATERMARKED `staging` dir onto `dest`
+/// with a single rename — the commit point of an extraction.
 ///
-/// Ordering matters here in a way the code itself can't show: `dest` may
-/// still be a stale, non-watermarked leftover — either an old (pre-staging)
-/// direct extraction that was interrupted, or a genuinely partial `dest`
-/// left by a bug. It is cleared immediately before the rename so the window
-/// in which `dest` is absent is as short as possible. If a concurrent
-/// extraction is racing us for the same `dest`, one of two things happens:
-/// either our `rename` lands first (the other extraction's later rename
-/// then fails and it defers to us), or theirs already landed (our `rename`
-/// fails with `dest` present, so we discard our own staging copy and defer
-/// to them). Either way `dest` ends up holding exactly ONE complete tree —
-/// never an interleaving of both, because extraction itself never writes
-/// into `dest`.
+/// Ordering matters here in a way the code itself can't show: the watermark
+/// lives INSIDE `staging` ([`write_watermark`] runs before this call), so the
+/// rename publishes the tree and its completeness marker together. `dest` is
+/// therefore never observably a complete-but-unwatermarked tree, and this
+/// function deliberately does NOT clear `dest` up front — such a pre-rename
+/// cleanup is exactly what could delete a rival's just-committed tree in the
+/// window before its watermark landed.
+///
+/// A failed rename means `dest` was already occupied (or the filesystem
+/// refused the operation); which it is decides what happens next:
+/// - [`is_action_cached`] holds: a concurrent extraction committed first. Our
+///   copy was redundant, not wrong — discard the staging dir and defer to it.
+/// - `dest` exists but is NOT watermarked: a stale partial (an interrupted
+///   extraction from before this ordering, or an old direct-into-`dest` one).
+///   Nothing valid can be reading it, so clear it and retry the rename ONCE.
+/// - `dest` does not exist: a genuine filesystem error — propagate it.
+///
+/// Either way `dest` ends up holding exactly ONE complete tree — never an
+/// interleaving of two, because extraction itself never writes into `dest`.
 ///
 /// # Errors
 ///
-/// Returns `RunnerError::ActionDownload` when the rename fails and `dest`
-/// still does not exist afterward (a genuine filesystem error, not a lost
-/// race).
+/// Returns `RunnerError::ActionDownload` when the rename fails for a reason
+/// other than a lost race — either with `dest` absent (a genuine filesystem
+/// error) or with the single retry over a stale `dest` failing too.
 fn promote_staging(staging: &Path, dest: &Path) -> Result<(), RunnerError> {
-  if dest.exists()
-    && !is_action_cached(dest)
-    && let Err(e) = std::fs::remove_dir_all(dest)
-  {
-    tracing::warn!(
-      dest = %dest.display(),
-      error = %e,
-      "stale action cache dir removal failed before promote; rename may fail"
-    );
+  let rename_err = match std::fs::rename(staging, dest) {
+    Ok(()) => return Ok(()),
+    Err(err) => err,
+  };
+
+  if is_action_cached(dest) {
+    cleanup_staging(staging);
+    return Ok(());
   }
 
-  match std::fs::rename(staging, dest) {
-    Ok(()) => Ok(()),
-    Err(rename_err) => {
-      cleanup_staging(staging);
-      if dest.exists() {
-        // A concurrent extraction's rename already landed here first. Our
-        // extraction was redundant, not wrong — `dest` holds a complete
-        // tree either way. The caller's watermark write still runs
-        // (idempotent) even if `dest` doesn't have one yet.
-        Ok(())
-      } else {
-        Err(RunnerError::ActionDownload(format!(
-          "rename {} -> {}: {rename_err}",
+  if dest.exists() {
+    if let Err(remove_err) = std::fs::remove_dir_all(dest) {
+      tracing::warn!(
+        dest = %dest.display(),
+        error = %remove_err,
+        "stale action cache dir removal failed; retrying the promote rename anyway"
+      );
+    }
+    match std::fs::rename(staging, dest) {
+      Ok(()) => return Ok(()),
+      Err(retry_err) => {
+        cleanup_staging(staging);
+        return Err(RunnerError::ActionDownload(format!(
+          "rename {} -> {}: {rename_err}; retry after clearing a stale dest: {retry_err}",
           staging.display(),
           dest.display()
-        )))
-      }
-    },
+        )));
+      },
+    }
   }
+
+  cleanup_staging(staging);
+  Err(RunnerError::ActionDownload(format!(
+    "rename {} -> {}: {rename_err}",
+    staging.display(),
+    dest.display()
+  )))
 }
 
 /// Fetch `tarball_url` and return a synchronous [`Read`] streaming its body,
@@ -269,15 +289,23 @@ async fn fetch_tarball_reader(
 
   let status = response.status();
   if !status.is_success() {
-    let body = response.text().await.unwrap_or_default();
+    // A failed body read is reported, not swallowed: "status 500: <nothing>"
+    // and "status 500: <could not be read>" are different diagnoses.
+    let body = match response.text().await {
+      Ok(body) => body,
+      Err(e) => format!("(body read failed: {e})"),
+    };
     return Err(RunnerError::ActionDownload(format!(
       "tarball {tarball_url} status {status}: {body}"
     )));
   }
 
-  let stream = response
-    .bytes_stream()
-    .map(|chunk| chunk.map_err(std::io::Error::other));
+  // The stream's `std::io::Error` surfaces from inside `extract_tarball`,
+  // where nothing knows which URL the bytes came from — so name it here.
+  let stream_url = tarball_url.to_owned();
+  let stream = response.bytes_stream().map(move |chunk| {
+    chunk.map_err(|e| std::io::Error::other(format!("tarball stream from {stream_url}: {e}")))
+  });
   let stream_reader = tokio_util::io::StreamReader::new(stream);
   // Constructed here (an async context) so it captures the current Tokio
   // runtime handle, then moved into `spawn_blocking` — its documented use.
@@ -288,13 +316,15 @@ async fn fetch_tarball_reader(
 /// No-op if cached (watermark present). Requires a `User-Agent` — GitHub rejects
 /// plain `reqwest` requests without it.
 ///
-/// Extraction lands in a unique sibling staging directory first and is
-/// promoted onto `cache_dir` with a single [`std::fs::rename`] as the last
-/// step before the watermark write (see [`promote_staging`]). This keeps
-/// `cache_dir` always either absent or a complete tree, so an extraction
-/// that outlives its job (e.g. an aborted background prefetch whose
-/// `spawn_blocking` closure keeps running) can never leave the NEXT job's
-/// extraction of the same action interleaved with this one's bytes.
+/// Extraction lands in a unique sibling staging directory, the watermark is
+/// written INTO that staging directory, and only then is it promoted onto
+/// `cache_dir` with a single [`std::fs::rename`] (see [`promote_staging`]).
+/// The rename is the commit point: `cache_dir` is always either absent or a
+/// complete, watermarked tree — never a valid-but-unmarked one another
+/// writer could mistake for a stale partial, and never an interleaving of
+/// two extractions' bytes (an extraction that outlives its job — e.g. an
+/// aborted background prefetch whose `spawn_blocking` closure keeps running —
+/// still only ever writes into its own staging dir).
 ///
 /// # Errors
 ///
@@ -305,6 +335,11 @@ pub async fn download_and_extract_action(
   token: Option<&str>,
   cache_dir: &Path,
 ) -> Result<(), RunnerError> {
+  // Best-effort fast path, not a lock: a concurrent extraction of the same
+  // action may be in flight here, or start right after this check, in which
+  // case both callers download and `promote_staging` resolves the race (one
+  // tree is committed, the loser discards its staging copy). This check only
+  // avoids the common redundant case — an action already committed on disk.
   if is_action_cached(cache_dir) {
     return Ok(());
   }
@@ -324,9 +359,14 @@ pub async fn download_and_extract_action(
     return Err(err);
   }
 
-  promote_staging(&staging, cache_dir)?;
-  write_watermark(cache_dir)?;
-  Ok(())
+  // Watermark BEFORE the promote: the rename then commits tree + watermark
+  // in one step (see `promote_staging`).
+  if let Err(err) = write_watermark(&staging) {
+    cleanup_staging(&staging);
+    return Err(err);
+  }
+
+  promote_staging(&staging, cache_dir)
 }
 
 #[cfg(test)]

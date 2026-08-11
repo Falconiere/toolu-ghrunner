@@ -72,6 +72,49 @@ async fn spawn_counting_tarball_server(body: Vec<u8>, counter: Arc<AtomicUsize>)
   addr
 }
 
+/// Serve `body` (200 OK) for every request, counting arrivals into `counter`,
+/// announcing each arrival on `arrivals`, and holding every response open
+/// until `release` flips to `true`.
+///
+/// The hold is what makes a single-flight assertion meaningful: with the
+/// first fetch parked mid-response, a second `ensure` call for the same key
+/// CANNOT be served by an already-populated cache, so a fetch count of 1 can
+/// only mean the second caller joined the in-flight attempt.
+async fn spawn_held_counting_tarball_server(
+  body: Vec<u8>,
+  counter: Arc<AtomicUsize>,
+  arrivals: tokio::sync::mpsc::Sender<()>,
+  release: tokio::sync::watch::Receiver<bool>,
+) -> SocketAddr {
+  let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+    .await
+    .expect("bind local tarball server");
+  let addr = listener.local_addr().expect("local_addr");
+  let app = axum::Router::new().fallback(move || {
+    let body = body.clone();
+    let counter = Arc::clone(&counter);
+    let arrivals = arrivals.clone();
+    let mut release = release.clone();
+    async move {
+      counter.fetch_add(1, Ordering::SeqCst);
+      let _ = arrivals.send(()).await;
+      loop {
+        if *release.borrow() {
+          break;
+        }
+        if release.changed().await.is_err() {
+          break;
+        }
+      }
+      body
+    }
+  });
+  tokio::spawn(async move {
+    let _ = axum::serve(listener, app).await;
+  });
+  addr
+}
+
 /// Serve `body` (200 OK) for every request, but hold each response behind a
 /// `gate` (sized to the number of concurrent callers under test) — a
 /// response is released only once ALL gated requests have arrived, proving
@@ -140,23 +183,56 @@ async fn spawn_always_failing_server() -> SocketAddr {
 
 /// AC-10a: two concurrent `ensure` calls for the SAME ref must result in
 /// exactly ONE tarball fetch, and both callers must get the same `PathBuf`.
+///
+/// The sequencing is what makes the count assertion mean "single-flight
+/// dedupe" rather than the far weaker "the second call was a cache hit": the
+/// server parks the first fetch mid-response and only releases it once the
+/// second caller is inside `ensure`, so the second call is forced to resolve
+/// against an attempt that is still IN FLIGHT. A regression to
+/// fetch-per-caller shows up as a second arrival at the (counting) server —
+/// which is likewise held, so the test still finishes and fails on the count
+/// instead of hanging.
 #[tokio::test]
 async fn ensure_dedupes_concurrent_prefetch_calls_for_the_same_ref() {
   let tar = build_tarball(&[("acme-repo-v1-abc/README.md", b"same-ref")]);
   let count = Arc::new(AtomicUsize::new(0));
-  let addr = spawn_counting_tarball_server(tar, Arc::clone(&count)).await;
+  let (arrival_tx, mut arrival_rx) = tokio::sync::mpsc::channel::<()>(4);
+  let (release_tx, release_rx) = tokio::sync::watch::channel(false);
+  let addr =
+    spawn_held_counting_tarball_server(tar, Arc::clone(&count), arrival_tx, release_rx).await;
   let client = reqwest::Client::new();
-  let fetcher = ActionFetcher::new();
+  let fetcher = Arc::new(ActionFetcher::new());
   let dest = tmp_dest("dedupe");
   let url = format!("http://{addr}/tarball.tar.gz");
 
-  let (a, b) = tokio::join!(
-    fetcher.ensure(&client, "acme/repo/v1", &url, &dest),
-    fetcher.ensure(&client, "acme/repo/v1", &url, &dest),
-  );
+  let first = spawn_ensure(&fetcher, &client, &url, &dest, None);
+  // The first fetch has reached the server and is parked there: the
+  // single-flight attempt is now unambiguously in flight.
+  arrival_rx
+    .recv()
+    .await
+    .expect("the first fetch must reach the server");
 
-  let a = a.expect("first concurrent ensure call must succeed");
-  let b = b.expect("second concurrent ensure call must succeed");
+  let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+  let second = spawn_ensure(&fetcher, &client, &url, &dest, Some(entered_tx));
+  entered_rx
+    .await
+    .expect("the second caller must enter ensure");
+
+  release_tx.send(true).expect("release the held response");
+
+  let (a, b) = tokio::time::timeout(Duration::from_secs(10), async {
+    tokio::join!(first, second)
+  })
+  .await
+  .expect("both ensure calls must settle once the response is released");
+
+  let a = a
+    .expect("first ensure task must not panic")
+    .expect("first concurrent ensure call must succeed");
+  let b = b
+    .expect("second ensure task must not panic")
+    .expect("second concurrent ensure call must succeed");
   assert_eq!(
     a, b,
     "concurrent callers for the same ref must get the same path"
@@ -166,6 +242,28 @@ async fn ensure_dedupes_concurrent_prefetch_calls_for_the_same_ref() {
     1,
     "two concurrent callers for the same ref must produce exactly one fetch"
   );
+}
+
+/// Spawn one `ensure` call for `acme/repo/v1` as its own task, signalling on
+/// `entered` (if given) the moment the task starts — the task then runs
+/// straight into `ensure`'s first await, i.e. the single-flight cell.
+fn spawn_ensure(
+  fetcher: &Arc<ActionFetcher>,
+  client: &reqwest::Client,
+  url: &str,
+  dest: &Path,
+  entered: Option<tokio::sync::oneshot::Sender<()>>,
+) -> tokio::task::JoinHandle<Result<PathBuf, RunnerError>> {
+  let fetcher = Arc::clone(fetcher);
+  let client = client.clone();
+  let url = url.to_owned();
+  let dest = dest.to_path_buf();
+  tokio::spawn(async move {
+    if let Some(entered) = entered {
+      let _ = entered.send(());
+    }
+    fetcher.ensure(&client, "acme/repo/v1", &url, &dest).await
+  })
 }
 
 /// AC-10b: two concurrent `ensure` calls for DISTINCT refs must overlap in

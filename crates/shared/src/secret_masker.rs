@@ -123,7 +123,9 @@ impl SecretMasker {
   /// allocates (`Cow::Owned`) only when a replacement happened. Falls back
   /// to the longest-first `str::replace` loop (always `Owned`) when the
   /// automaton failed to build — never treats a missing automaton as
-  /// "nothing to mask".
+  /// "nothing to mask". Note that fallback path allocates for EVERY line,
+  /// match or not (one `to_owned` plus one `replace` per pattern), so a
+  /// failed automaton build costs throughput as well as the WARN.
   pub fn mask<'a>(&self, input: &'a str) -> Cow<'a, str> {
     if self.patterns.is_empty() {
       return Cow::Borrowed(input);

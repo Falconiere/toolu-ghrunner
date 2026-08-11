@@ -9,11 +9,14 @@
 //! (`action_exec::resolve_remote_action`, which routes through the SAME
 //! fetcher) usually finds the tarball already on disk.
 //!
-//! Failure semantics (spec-pinned): a failed `ensure` call evicts its
-//! single-flight entry, so the NEXT `ensure` for that key starts a fresh
-//! download instead of replaying the failure forever. A background
-//! prefetch's failure is WARN-logged and swallowed here — it never fails
-//! the job; step-time resolution simply retries what prefetch failed to
+//! Failure semantics (spec-pinned): a failed `ensure` call never sticks — the
+//! NEXT `ensure` for that key starts a fresh download instead of replaying the
+//! failure forever. That retry comes from `tokio::sync::OnceCell` itself,
+//! which leaves the cell UNINITIALIZED when `get_or_try_init` returns an
+//! error; the explicit eviction on the failure path is belt-and-braces that
+//! also drops the map slot for a key nothing may ask about again. A
+//! background prefetch's failure is WARN-logged and swallowed here — it never
+//! fails the job; step-time resolution simply retries what prefetch failed to
 //! fetch.
 
 use std::collections::HashMap;
@@ -68,9 +71,12 @@ impl ActionFetcher {
   /// The first caller for `cache_key` runs the download; a concurrent
   /// `ensure` call for the same key awaits that same in-flight attempt
   /// instead of starting a second one and gets back the same `PathBuf`. A
-  /// failed attempt evicts the key's single-flight entry so the next
-  /// `ensure` call — from prefetch or from step-time resolution — retries
-  /// fresh rather than replaying the failure.
+  /// failed attempt is not cached: `OnceCell::get_or_try_init` leaves the
+  /// cell uninitialized on error, so the next `ensure` call — from prefetch
+  /// or from step-time resolution — retries fresh on its own; the [`evict`]
+  /// call on the error path only drops the now-pointless map slot.
+  ///
+  /// [`evict`]: Self::evict
   ///
   /// # Errors
   ///
@@ -113,8 +119,13 @@ impl ActionFetcher {
     )
   }
 
-  /// Drop `cache_key`'s single-flight entry so the next `ensure` call for it
-  /// starts a fresh download attempt instead of reusing a failed one.
+  /// Drop `cache_key`'s single-flight entry after a failed attempt.
+  ///
+  /// This is NOT what makes the next `ensure` retry — a failed
+  /// `OnceCell::get_or_try_init` already leaves the cell uninitialized, so
+  /// the next caller re-runs the download through the very same cell. What
+  /// eviction buys is freeing the map slot for a key that may never be asked
+  /// about again (a one-off failing ref), keeping the map to live entries.
   fn evict(&self, cache_key: &str) {
     let mut guard = match self.inflight.lock() {
       Ok(g) => g,
