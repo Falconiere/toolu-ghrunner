@@ -65,10 +65,12 @@ tracing file sink via `MaskerRedactor`.
   CLAUDE.md documents the bar for additions. The mechanism is **file-level by
   schema** — there is no line-level or inline-comment syntax in the kit's
   scanner, so do not ask for a narrower exemption that cannot be expressed.
-  (`# gitleaks:allow` belongs to the separate gitleaks CI check — it neither
-  narrows nor replaces a `scanExempt` entry, so propose it only for a finding
-  the gitleaks check itself raised.) Flag a `scanExempt` addition only when
-  the exempted value could plausibly be a real credential.
+  (`# gitleaks:allow` belongs to the separate gitleaks CI check — propose it
+  only for a finding the gitleaks check itself raised. A `scanExempt` entry
+  is still required for the kit's own scanner either way; the two mechanisms
+  are independent, and neither substitutes for the other.) Flag a
+  `scanExempt` addition only when the exempted value could plausibly be a
+  real credential.
 
 ### 3. Async discipline
 
