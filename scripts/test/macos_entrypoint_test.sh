@@ -282,10 +282,21 @@ home="$TMPROOT/home-unreadablemarker"
 out="$(PATH=/usr/bin:/bin TOOLU_RUNNER_HOME="$home" TOOLU_JITCONFIG=x "$root/entrypoint" 2>&1)"
 check "an unreadable marker still boots the job" "argv=boot" "$(grep '^argv=' <<<"$out")"
 check "…and adds no node to PATH"                "node=none" "$(grep '^node=' <<<"$out")"
-if grep -q "node/default is unusable" <<<"$out" && grep -qi "directory" <<<"$out"; then
+if grep -qE "(could not read .*node/default|node/default is unusable)" <<<"$out" && grep -qi "directory" <<<"$out"; then
   echo "ok: the read failure is reported with its reason"
 else
   echo "FAIL: expected the head error inside the warning; got: $out" >&2
+  fail=1
+fi
+# Every launcher diagnosis is ONE line: a captured error that spans lines
+# would put its tail in the job log looking exactly like the raw leak the
+# capture exists to prevent. Only the stub's own argv/home/node/path lines and
+# a single `toolu-runner:` line may appear.
+stray="$(grep -vE '^(argv=|home=|node=|path=|toolu-runner: )' <<<"$out" || true)"
+if [[ -z "$stray" ]]; then
+  echo "ok: the warning is a single line, nothing else on stderr"
+else
+  echo "FAIL: unexpected extra output lines: $stray" >&2
   fail=1
 fi
 
