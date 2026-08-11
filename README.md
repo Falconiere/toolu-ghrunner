@@ -17,6 +17,7 @@ didn't ask for.
 [Cache acceleration](#cache-acceleration) ·
 [vs. `actions/runner`](#vs-actionsrunner) ·
 [Container image](docs/container-image.md) ·
+[macOS image](docs/macos-image.md) ·
 [Docs](docs/architecture.md)
 
 </div>

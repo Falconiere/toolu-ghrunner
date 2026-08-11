@@ -15,3 +15,6 @@ _diag/
 .claude/tmp/
 .claude/toolu.config.json
 .serena/
+
+# Staged darwin/arm64 binary for the macOS carrier image (Dockerfile.macos).
+dist/
