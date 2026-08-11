@@ -59,6 +59,15 @@ tracing file sink via `MaskerRedactor`.
   built from.
 - A secret must not reach `_diag/runner.log`, the journal JSONL, an uploaded
   log blob, or an error message.
+- **Synthetic credential fixtures are policy, not leaks.** The guardrails
+  `secrets.scanExempt` arrays list test files holding deliberately invalid
+  credential-shaped fixtures (`MIIphony`, `ghs_EXAMPLE…`, `ghp_deadbeef…`);
+  CLAUDE.md documents the bar for additions. The mechanism is **file-level by
+  schema** — there is no line-level or inline-comment syntax in the kit's
+  scanner, so do not ask for a narrower exemption that cannot be expressed,
+  and do not propose `# gitleaks:allow` unless the **gitleaks check itself**
+  is the one failing. Flag a `scanExempt` addition only when the exempted
+  value could plausibly be a real credential.
 
 ### 3. Async discipline
 
@@ -150,12 +159,34 @@ because they are expensive to undo:
   reach `observability` or `listener`.
 - One responsibility per file, named after its export. A new module belongs in
   its own file rather than appended to an existing one.
+- **Additive dependency features in a consuming crate's manifest are not a
+  layering violation.** Cargo unifies features workspace-wide, so a capability
+  feature (e.g. reqwest `"http2"`) listed in every crate that builds a client
+  is deliberate documentation — the repo pins these lists with a manifest test
+  precisely so no crate silently relies on unification. Flag a manifest change
+  only when it adds a *dependency edge* the crate graph forbids.
 
 ## Output rules
 
 - Anchor every finding to `path:line` and quote the shortest decisive snippet.
 - State the failure concretely: the input or state that triggers it, and the
   wrong result. "This could be a problem" is not a finding.
+- **If your own analysis concludes the code is correct, emit nothing.** A
+  paragraph that walks the path and ends "this is safe" / "no finding" /
+  "this is correct" is not a finding — publishing it as one forces the author
+  to refute your conclusion back at you. The same goes for positive
+  observations ("strong assertion", "excellent diagnostics"): praise is
+  padding, not a finding.
+- **A claim about code outside the changed hunk must be verified in this
+  checkout before it can carry a severity.** "The caller passes X" or "the
+  old code did Y" requires the actual call site or the actual pre-change
+  line; if you cannot point at it, drop the finding. A blocker built on a
+  misremembered caller costs a full review round.
+- Findings are derived fresh each push; the PR's resolved review threads are
+  the record of what a previous round already adjudicated. If an identical
+  finding (same file, same substance) was answered with concrete evidence and
+  resolved in an earlier round, re-raise it only with **new** evidence that
+  the answer was wrong — otherwise omit it.
 - When you propose a change, propose the smallest one that fixes the cause.
 - If a dimension has nothing worth reporting, say nothing about it. Do not pad
   the review to look thorough.
