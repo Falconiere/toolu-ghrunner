@@ -103,12 +103,17 @@ jobs:
         with:
           name: toolu-runner-darwin-arm64
           path: dist
-      - name: Restore the executable bit
-        # Belt and braces: the artifact keeps the mode, but a mode-0644 binary
-        # would produce an image that fails only at job time on the instance,
-        # which is the most expensive place to find out.
+      - name: Assert both payload files are executable
+        # Two different sources, one requirement: `scratch` has no shell to
+        # chmod with, so whatever mode these carry here is the mode a job on
+        # the instance gets. The binary comes from the artifact (which does
+        # preserve the bit — the chmod is belt and braces); the entrypoint
+        # comes from THIS checkout, where a git core.fileMode misconfiguration
+        # is what would strip it. Both are asserted, because either one landing
+        # 0644 fails only at job time on a rented Mac.
         run: |
           chmod +x dist/toolu-runner-darwin-arm64
+          test -x dist/toolu-runner-darwin-arm64
           test -x scripts/macos-entrypoint.sh
       - name: Derive tags
         id: tags

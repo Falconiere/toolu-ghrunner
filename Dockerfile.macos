@@ -41,6 +41,12 @@
 # Namespace macOS instance runs (`MachineArch: "arm64"`). Downloading is
 # platform-independent work, so this stage pins $BUILDPLATFORM and is never
 # emulated.
+#
+# The checksum line is captured into a variable instead of piped straight from
+# `grep` into `sha256sum -c -`: `sh` has no `pipefail`, so in a pipeline a
+# `grep` that matched nothing is invisible and the verification would rest on
+# `sha256sum` happening to reject empty input. The command substitution makes
+# a missing line fail the build directly, under `set -e`.
 FROM --platform=$BUILDPLATFORM debian:bookworm-slim AS node-seed
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates curl \
@@ -55,8 +61,10 @@ RUN set -eu; \
   for v in ${NODE_VERSIONS}; do \
     tarball="node-v${v}-darwin-arm64.tar.gz"; \
     curl -fsSLO "https://nodejs.org/dist/v${v}/${tarball}"; \
-    curl -fsSL "https://nodejs.org/dist/v${v}/SHASUMS256.txt" \
-      | grep " ${tarball}\$" | sha256sum -c -; \
+    curl -fsSLO "https://nodejs.org/dist/v${v}/SHASUMS256.txt"; \
+    sum_line="$(grep " ${tarball}\$" SHASUMS256.txt)"; \
+    printf '%s\n' "${sum_line}" | sha256sum -c -; \
+    rm SHASUMS256.txt; \
     mkdir -p "/seed/node/${v}"; \
     tar -xzf "${tarball}" -C "/seed/node/${v}" --strip-components=1; \
     rm "${tarball}"; \

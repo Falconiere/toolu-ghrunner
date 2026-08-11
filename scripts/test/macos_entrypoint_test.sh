@@ -172,6 +172,28 @@ else
   fail=1
 fi
 
+# --- a `default` marker with no trailing newline is still honoured ---------
+# bash's `read` returns non-zero on an unterminated final line even though it
+# assigned the value, so a `read … || default_node=""` would throw away a
+# perfectly good version and silently ship a job with no node on PATH.
+root="$(image_tree nonewline 24.0.2)"
+printf '24.0.2' >"$root/node/default" # deliberately no \n
+home="$TMPROOT/home-nonewline"
+out="$(PATH=/usr/bin:/bin TOOLU_RUNNER_HOME="$home" TOOLU_JITCONFIG=x "$root/entrypoint" 2>&1)"
+check "an unterminated default marker still puts node on PATH" \
+  "node=$root/node/24.0.2/bin/node" "$(grep '^node=' <<<"$out")"
+
+# --- a corrupted marker cannot inject a directory into PATH ----------------
+# The value is interpolated into PATH, so a marker carrying a colon would
+# append an attacker-chosen directory to the search path of every step.
+root="$(image_tree badmarker 24.0.2)"
+mkdir -p "$TMPROOT/injected"
+printf '24.0.2:%s\n' "$TMPROOT/injected" >"$root/node/default"
+home="$TMPROOT/home-badmarker"
+out="$(PATH=/usr/bin:/bin TOOLU_RUNNER_HOME="$home" TOOLU_JITCONFIG=x "$root/entrypoint" 2>&1)"
+check "a marker that is not a bare version is refused" "node=none" "$(grep '^node=' <<<"$out")"
+check "…and the job still boots"                       "argv=boot" "$(grep '^argv=' <<<"$out")"
+
 # --- a seed whose `default` names a missing runtime warns, does not die ----
 root="$(image_tree brokenseed 24.0.2)"
 printf '99.0.0\n' >"$root/node/default"
