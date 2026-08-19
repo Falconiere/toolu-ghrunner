@@ -30,6 +30,11 @@ const LIVE_TOKEN: &str = "live-daemon-token";
 /// Six hours, the window `client.ts` puts between `nowMs` and `deadline`.
 const SIX_HOURS_MS: i64 = 6 * 60 * 60 * 1000;
 
+/// Docker's status for a container it no longer knows — an answer, not a
+/// fault. Hardcoded rather than imported so a drift in the production
+/// constant cannot make this test agree with itself.
+const HTTP_NOT_FOUND: u16 = 404;
+
 /// Anything a live test can fail on: bollard, reqwest, I/O, the clock.
 type LiveResult<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -114,11 +119,37 @@ async fn container_id_of(response: reqwest::Response) -> LiveResult<String> {
 }
 
 /// Whether Docker still knows about `container_id` at all.
-async fn container_exists(docker: &Docker, container_id: &str) -> bool {
-  docker
+///
+/// # Errors
+///
+/// Returns the bollard error for anything other than Docker's "no such
+/// container" 404, which is the answer `Ok(false)` rather than a failure —
+/// the same split `DockerBackend::image_present` makes. The assertions below
+/// read this answer in BOTH directions ("the labelled container must be
+/// gone", "an unrelated job's container must survive"), so no fixed guess for
+/// a transport error is safe: either choice would pass one of them for the
+/// wrong reason. A daemon that cannot be asked fails the test instead.
+async fn container_exists(
+  docker: &Docker,
+  container_id: &str,
+) -> Result<bool, bollard::errors::Error> {
+  match docker
     .inspect_container(container_id, None::<InspectContainerOptions>)
     .await
-    .is_ok()
+  {
+    Ok(_inspected) => Ok(true),
+    Err(err) if is_missing_container(&err) => Ok(false),
+    Err(err) => Err(err),
+  }
+}
+
+/// Whether a bollard failure is Docker's "no such container" 404.
+fn is_missing_container(err: &bollard::errors::Error) -> bool {
+  matches!(
+    err,
+    bollard::errors::Error::DockerResponseServerError { status_code, .. }
+      if *status_code == HTTP_NOT_FOUND
+  )
 }
 
 /// Best-effort cleanup so a failed assertion never leaks a container.
@@ -176,11 +207,11 @@ async fn reap_kills_exactly_the_labelled_container_and_a_sentinel_id_is_also_204
   assert_eq!(reap_target.status().as_u16(), 204);
 
   assert!(
-    !container_exists(&docker, &target_container).await,
+    !container_exists(&docker, &target_container).await?,
     "the labelled container must be gone"
   );
   assert!(
-    container_exists(&docker, &bystander_container).await,
+    container_exists(&docker, &bystander_container).await?,
     "an unrelated job's container must survive"
   );
 
@@ -255,7 +286,7 @@ async fn a_reap_racing_an_in_flight_create_stops_the_container_from_ever_startin
     // The reap lost the internal race: `finish_create` had already run
     // before the tombstone landed. `reap`'s own task — already awaited to
     // completion above — must still have removed what `create` "returned".
-    let still_there = container_exists(&docker, &created.container_id).await;
+    let still_there = container_exists(&docker, &created.container_id).await?;
     assert!(
       !still_there,
       "a create that raced a reap must not leave its container behind, even when it briefly won"

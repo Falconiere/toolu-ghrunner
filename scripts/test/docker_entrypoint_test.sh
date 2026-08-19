@@ -326,6 +326,22 @@ run_entry slow STUB_DOCKERD_MODE=ready STUB_DOCKERD_DELAY=1 TOOLU_DOCKERD_TIMEOU
 check "a slow daemon is waited for, not written off" "docker=up" "$(grep '^docker=' <<<"$OUT")"
 check "…and the job runs after it"                   "argv=boot" "$(grep '^argv=' <<<"$OUT")"
 
+# --- an unopenable log costs the log, never the daemon --------------------
+# `dockerd >>"$log"` is a redirect, so a path that will not open is not a quiet
+# loss of logging: bash prints its OWN unprefixed error into the job log and
+# dockerd never starts. The fixture is a directory where the log file belongs —
+# the one unwritable path that holds for every uid, including the root this
+# suite may run as (`touch` on a directory succeeds, which is why the
+# entrypoint probes with a real append instead).
+mkdir -p "$TMPROOT/home-logblocked/dockerd.log"
+run_entry logblocked STUB_DOCKERD_MODE=ready TOOLU_DOCKERD_TIMEOUT=5
+want_line "an unopenable dockerd log is named"    "cannot open" "$OUT"
+check     "…and Docker still comes up"            "docker=up"   "$(grep '^docker=' <<<"$OUT")"
+check     "…and the job still runs"               "argv=boot"   "$(grep '^argv=' <<<"$OUT")"
+check     "…with the runner's code intact"        "0"           "$CODE"
+stray="$(grep -vE '^(argv=|home=|docker=|toolu-runner: )' <<<"$OUT" || true)"
+check     "…and no unprefixed bash error leaks"   ""            "$stray"
+
 if [[ "$fail" -ne 0 ]]; then
   echo "docker_entrypoint_test: FAILED" >&2
   exit 1
