@@ -93,17 +93,23 @@ async fn create_sleep_container(
 ///
 /// # Errors
 ///
-/// Returns the bollard error on a failed inspect.
-async fn is_running(docker: &Docker, container_id: &str) -> Result<bool, bollard::errors::Error> {
+/// Returns the bollard error on a failed inspect, or an error of its own when
+/// the inspect succeeds but carries no `state.running`. A missing field is
+/// Docker declining to answer, not an answer of "no": reading it as `false`
+/// is how the "B must wait" assertion below would pass on a container that
+/// had in fact started.
+async fn is_running(docker: &Docker, container_id: &str) -> LiveResult<bool> {
   let inspected = docker
     .inspect_container(container_id, None::<InspectContainerOptions>)
     .await?;
-  Ok(
-    inspected
-      .state
-      .and_then(|state| state.running)
-      .unwrap_or(false),
-  )
+  inspected
+    .state
+    .and_then(|state| state.running)
+    .ok_or_else(|| {
+      Box::<dyn std::error::Error>::from(format!(
+        "docker inspect for {container_id} carried no state.running"
+      ))
+    })
 }
 
 /// Best-effort cleanup so a failed assertion never leaks a container.
