@@ -10,6 +10,7 @@ pub mod docker;
 #[path = "tests/fixture.rs"]
 mod fixture;
 pub mod gate;
+pub mod logging;
 pub mod prepull;
 pub mod reaper;
 pub mod routes;

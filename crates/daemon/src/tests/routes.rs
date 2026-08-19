@@ -17,15 +17,28 @@ use serde_json::{Value, json};
 use tokio::net::TcpListener;
 use tokio::sync::Semaphore;
 
-use super::backend::{BackendError, CreateError, CreateJobResult, DestroyOutcome, JobBackend};
+use super::backend::{
+  BackendError, CreateError, CreateJobResult, DestroyOutcome, JobBackend, ReapOutcome,
+};
 use super::state::AppState;
 use super::wire::CreateJobRequest;
 use crate::gate::{Gate, JobSize};
+
+/// The scenarios that need to observe the daemon's own bookkeeping — a
+/// client that disconnects mid-create, a reap racing that create, an image
+/// this host does not serve, a reap the backend could not settle. Split out
+/// to keep either file readable; they share every helper in this one.
+#[path = "routes_lifecycle.rs"]
+mod lifecycle;
 
 /// The bearer token every test server is configured with.
 const TOKEN: &str = "test-daemon-token";
 /// The header every response must carry — see `super::header`.
 const DAEMON_HEADER: &str = "sh-toolu-daemon";
+/// The image every test server pins, and the one every request body below
+/// asks for — `TOOLU_DAEMON_IMAGE` and `vps_hosts.image_ref` agreeing, which
+/// is the only configuration that serves jobs at all.
+const PINNED_IMAGE: &str = "ghcr.io/falconiere/toolu-ghrunner:latest";
 
 /// One call [`RecordingBackend`] was asked to make.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,6 +64,10 @@ struct RecordingBackend {
   /// itself — a real in-flight create, held open for as long as a test needs
   /// to observe what the daemon does while one is outstanding.
   create_hold: Option<Arc<Semaphore>>,
+  /// What every reap reports back. `false` is a backend that could not
+  /// remove — or could not even list — this job's containers, the case where
+  /// the job's budget must stay accounted.
+  reap_settles: Arc<AtomicBool>,
 }
 
 impl RecordingBackend {
@@ -62,7 +79,23 @@ impl RecordingBackend {
       image_resident: Arc::new(AtomicBool::new(true)),
       known_containers: Arc::new(Mutex::new(HashMap::new())),
       create_hold: None,
+      reap_settles: Arc::new(AtomicBool::new(true)),
     }
+  }
+
+  /// A backend whose reaps never confirm anything was removed — Docker
+  /// refusing the removal, or refusing to list at all.
+  fn unresolved_reap() -> Self {
+    let backend = Self::new();
+    backend.reap_settles.store(false, Ordering::SeqCst);
+    backend
+  }
+
+  /// Make the pinned image resident (or not) from here on, so one test can
+  /// span both — a create that fails on an absent image, then a later create
+  /// that succeeds once it is there.
+  fn set_image_resident(&self, resident: bool) {
+    self.image_resident.store(resident, Ordering::SeqCst);
   }
 
   /// A backend whose creates hang until [`Self::release_creates`] — the only
@@ -119,9 +152,6 @@ impl RecordingBackend {
 
 impl JobBackend for RecordingBackend {
   async fn create(&self, req: &CreateJobRequest) -> Result<CreateJobResult, CreateError> {
-    if !self.image_resident.load(Ordering::SeqCst) {
-      return Err(CreateError::ImageNotResident);
-    }
     self
       .calls
       .lock()
@@ -129,9 +159,15 @@ impl JobBackend for RecordingBackend {
       .push(RecordedCall::Create {
         image: req.image.clone(),
       });
+    // The residency check sits behind the hold, not in front of it: a
+    // failing create has to be holdable too, or no test can ask what the
+    // daemon does when the client disconnects from one.
     if let Some(hold) = &self.create_hold {
       let permit = hold.acquire().await.expect("create hold semaphore");
       permit.forget();
+    }
+    if !self.image_resident.load(Ordering::SeqCst) {
+      return Err(CreateError::ImageNotResident);
     }
     let id = self.next_id.fetch_add(1, Ordering::SeqCst);
     let container_id = format!("fake-container-{id}");
@@ -164,7 +200,7 @@ impl JobBackend for RecordingBackend {
     }
   }
 
-  async fn reap(&self, job_id: &str) {
+  async fn reap(&self, job_id: &str) -> ReapOutcome {
     self
       .calls
       .lock()
@@ -172,6 +208,16 @@ impl JobBackend for RecordingBackend {
       .push(RecordedCall::Reap {
         job_id: job_id.to_owned(),
       });
+    self
+      .known_containers
+      .lock()
+      .unwrap_or_else(std::sync::PoisonError::into_inner)
+      .retain(|_container_id, known| known != job_id);
+    if self.reap_settles.load(Ordering::SeqCst) {
+      ReapOutcome::Settled
+    } else {
+      ReapOutcome::Unresolved
+    }
   }
 }
 
@@ -184,19 +230,21 @@ fn write_token_file(dir: &Path, contents: &str) -> PathBuf {
 
 /// Bind a real axum server for `backend` on an ephemeral loopback port and
 /// serve it on a detached task for the rest of the test. Returns the bound
-/// address.
-async fn spawn_daemon(
+/// address and the very state the router serves from, so a test can read the
+/// daemon's own bookkeeping — the gate, the start queue, the created-container
+/// map — rather than infer it.
+async fn spawn_daemon_with_state(
   backend: RecordingBackend,
   queue_max: u32,
   token_file: PathBuf,
-) -> SocketAddr {
+) -> (SocketAddr, AppState<RecordingBackend>) {
   let budget = JobSize {
     vcpu: 64,
     memory_mb: 131_072,
   };
   let gate = Gate::new(budget, queue_max);
-  let state = AppState::new(backend, gate, token_file);
-  let router = super::build_router(state);
+  let state = AppState::new(backend, gate, token_file, PINNED_IMAGE);
+  let router = super::build_router(state.clone());
 
   let listener = TcpListener::bind("127.0.0.1:0")
     .await
@@ -207,7 +255,7 @@ async fn spawn_daemon(
       .await
       .expect("serve axum router");
   });
-  addr
+  (addr, state)
 }
 
 /// A well-formed `POST /v1/jobs` body for GitHub job `job_id`. The job id is
@@ -216,7 +264,7 @@ async fn spawn_daemon(
 fn create_request_body_for(job_id: &str) -> Value {
   json!({
     "jitConfig": "base64-encoded-jit-config",
-    "image": "ghcr.io/falconiere/toolu-ghrunner:latest",
+    "image": PINNED_IMAGE,
     "size": { "vcpu": 2, "memoryMb": 4096 },
     "jobRef": { "org": "acme", "repo": "widgets", "jobId": job_id },
     "purpose": "routes test",
@@ -250,6 +298,20 @@ async fn post_create(client: &reqwest::Client, addr: SocketAddr, token: &str) ->
   post_create_job(client, addr, token, "123").await
 }
 
+/// The raw bytes of a well-formed `POST /v1/jobs` for `job_id` — what
+/// [`post_create_job`] sends, spelled out, for the disconnect tests. They
+/// need a socket they can hang up on at a moment of their choosing, and no
+/// HTTP client hands one out.
+fn create_request_bytes(addr: SocketAddr, job_id: &str) -> Vec<u8> {
+  let body = create_request_body_for(job_id).to_string();
+  format!(
+    "POST /v1/jobs HTTP/1.1\r\nHost: {addr}\r\nAuthorization: Bearer {TOKEN}\r\n\
+     Content-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+    body.len()
+  )
+  .into_bytes()
+}
+
 /// Assert the response carries `sh-toolu-daemon: 1`.
 fn assert_daemon_header(response: &reqwest::Response) {
   let value = response
@@ -269,8 +331,20 @@ where
 {
   let dir = tempfile::tempdir().expect("tempdir");
   let token_path = write_token_file(dir.path(), &format!("{TOKEN}\n"));
-  let addr = spawn_daemon(backend, queue_max, token_path).await;
+  let (addr, _state) = spawn_daemon_with_state(backend, queue_max, token_path).await;
   body(addr).await;
+}
+
+/// [`with_daemon`], for a test that also needs the daemon's own state.
+async fn with_daemon_state<F, Fut>(backend: RecordingBackend, queue_max: u32, body: F)
+where
+  F: FnOnce(SocketAddr, AppState<RecordingBackend>) -> Fut,
+  Fut: Future<Output = ()>,
+{
+  let dir = tempfile::tempdir().expect("tempdir");
+  let token_path = write_token_file(dir.path(), &format!("{TOKEN}\n"));
+  let (addr, state) = spawn_daemon_with_state(backend, queue_max, token_path).await;
+  body(addr, state).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -483,23 +557,6 @@ async fn a_job_holds_its_queue_slot_while_its_create_is_still_in_flight() {
     handle.release_creates();
     let first = first.await.expect("join the first create");
     assert_eq!(first.status(), reqwest::StatusCode::CREATED);
-  })
-  .await;
-}
-
-/// A create that fails hands its queue slot back: the admission taken before
-/// the Docker call is released when that call comes back empty-handed, or the
-/// box would wedge at 429 after `TOOLU_DAEMON_QUEUE_MAX` failures.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_failed_create_gives_its_queue_slot_back() {
-  let backend = RecordingBackend::image_not_resident();
-  with_daemon(backend, 1, |addr| async move {
-    let client = reqwest::Client::new();
-
-    for _attempt in 0..3_u32 {
-      let response = post_create_job(&client, addr, TOKEN, "job-1").await;
-      assert_eq!(response.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
-    }
   })
   .await;
 }

@@ -143,7 +143,7 @@ not a silent empty-env launch. Every variable it reads
 | `TOOLU_DAEMON_TOKEN_FILE` | yes | Path to the bearer token file. | See section 5 — write it *before* you enable the host in the console. |
 | `TOOLU_DAEMON_VCPU` | yes | Whole-vCPU **budget** for concurrently *started* jobs. | **Not a job count.** It is the resource ceiling the gate admits *starts* against — leave headroom below the box's raw core count for the host OS, `dockerd`, and every job's own inner `dockerd` under the Docker-capable image. |
 | `TOOLU_DAEMON_MEMORY_MB` | yes | Memory **budget**, in MB, for concurrently started jobs. | Same rule as vCPU — this is not "memory per job", it is the whole pool jobs draw from. Size it below the box's physical RAM, with headroom for the same overhead. |
-| `TOOLU_DAEMON_IMAGE` | yes | The image ref pre-pulled at startup and kept resident. | Must be the `-docker` tag ([`docs/container-image.md`](container-image.md#the-docker-capable-variant)), pinned by digest, and must match `vps_hosts.image_ref` for this row exactly — a mismatch here is invisible until the console shows the host serving with the *wrong* image. |
+| `TOOLU_DAEMON_IMAGE` | yes | The image ref pre-pulled at startup and kept resident, and the **only** image this host will run. | Must be the `-docker` tag ([`docs/container-image.md`](container-image.md#the-docker-capable-variant)), pinned by digest, and must match `vps_hosts.image_ref` for this row exactly. A mismatch is a total outage for this host, not a wrong-image build: every create is refused with a `503` naming both values and an `ERROR` in the journal — see section 8. |
 | `TOOLU_DAEMON_BIND` | no (default `127.0.0.1:8080`) | Listen address. | Leave it loopback — the Cloudflare Tunnel (section 6) is what makes it reachable, not a public bind. |
 | `TOOLU_DAEMON_QUEUE_MAX` | no (default `32`) | Hard queue-depth ceiling — the *only* source of a 429. | A 429 permanently fails a customer's job (no requeue path exists anywhere upstream), so this is a last-resort ceiling, not a normal operating limit. Raise it rather than relying on it to shed load. |
 | `TOOLU_DAEMON_RUNTIME` | no (default `sysbox-runc`) | Docker runtime job containers are created under. | Leave the default. Changing it away from `sysbox-runc` removes the isolation the Docker-capable image's whole design depends on — see [`docs/container-image.md`](container-image.md#the-docker-capable-variant). |
@@ -397,6 +397,17 @@ apart:**
   text (or query the daemon directly with a real bearer token) rather
   than the box's own journal, which stays quiet about it.
 - A **wrong or stale `TOOLU_DAEMON_IMAGE`** (not matching
-  `vps_hosts.image_ref`) does not fail anything — the host serves jobs
-  normally, on the wrong image. Nothing detects this automatically;
-  compare the two values by hand after any image or host-config change.
+  `vps_hosts.image_ref`) is a **total outage for this host**, not a
+  cosmetic mismatch. The daemon pre-pulls and keeps resident exactly one
+  image — this variable — while every create names its own, from
+  `vps_hosts.image_ref`. When the two disagree the daemon refuses the
+  create outright: `503`, with a body that names both values
+  (`image mismatch: this host pins … and cannot run …`), and an
+  **`ERROR`-level line in `journalctl -u toolu-daemon`** saying the same.
+  That log line is the one create-path failure the box does report about
+  itself, precisely because it is the one an operator can fix. Every job
+  routed here fails, and `vpsDispositionFor` re-stamps a five-minute
+  cooldown on each delivery, so the host also drains. Fix it by making the
+  two values equal — `TOOLU_DAEMON_IMAGE` in
+  `/etc/toolu-daemon/toolu-daemon.env` and `vps_hosts.image_ref` for this
+  row — then `systemctl restart toolu-daemon`.

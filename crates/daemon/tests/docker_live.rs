@@ -349,6 +349,12 @@ async fn a_restart_re_adopts_a_running_containers_budget_from_its_labels() -> Li
 /// Serve the real Docker-backed router on an ephemeral loopback port for the
 /// rest of the test, returning the address it bound.
 ///
+/// Pinned to [`PREPULL_IMAGE`], the image its one caller's requests name: the
+/// daemon serves exactly the image `TOOLU_DAEMON_IMAGE` names and refuses
+/// every other outright, so a router pinned to anything else would refuse
+/// this test's creates before they ever reached the residency question they
+/// are about.
+///
 /// # Errors
 ///
 /// Returns the I/O error if the ephemeral port cannot be bound.
@@ -360,7 +366,7 @@ async fn spawn_live_daemon(
     vcpu: 16,
     memory_mb: 32768,
   };
-  let state = AppState::new(backend, Gate::new(budget, 32), token_file);
+  let state = AppState::new(backend, Gate::new(budget, 32), token_file, PREPULL_IMAGE);
   let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
   let addr = listener.local_addr()?;
   tokio::spawn(async move {

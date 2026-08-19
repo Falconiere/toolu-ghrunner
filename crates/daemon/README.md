@@ -28,6 +28,15 @@ Three properties are forced by that client and must not be traded away:
   done, and the id is recorded — in an in-memory **tombstone registry**
   (`crate::docker::registry`) — before create, so `DELETE /v1/jobs?jobId=` can
   always address an in-flight create, even one Docker does not know about yet.
+  The gate bookkeeping that follows the create — record the container, or give
+  the admission back — runs on that same detached task for the same reason: a
+  disconnect that cancelled it left a queue slot consumed by a job nothing
+  tracked, and `TOOLU_DAEMON_QUEUE_MAX` of those wedged the host at 429 with no
+  path back.
+- **One host, one image.** `TOOLU_DAEMON_IMAGE` is the only image pulled or kept
+  resident, and a create naming any other is refused with a 503 that says so, in
+  the body and in the journal. A `vps_hosts.image_ref` that has drifted from it
+  is a total outage for the host, and it used to look like a slow pull.
 
 State lives in Docker, not in this process: budget is released when a container
 exits, and every live job is rebuilt from container labels at startup
@@ -41,3 +50,10 @@ only then bind the listener — binding first would answer 503 to the client's
 first requests, which reads as a five-minute cooldown on this host. Timers
 (the reconcile tick, the periodic image refresh) start once the listener is
 up.
+
+**The live suite is not part of the gate.** Every `tests/docker_live*.rs` test
+is `#[ignore]`d and runs only from `.github/workflows/daemon-live.yml`, which
+is `workflow_dispatch`-only — `cargo test --workspace` never touches them. That
+workflow's header lists exactly what is left ungated as a result, and what was
+deliberately covered in the pure suite instead. Run it by hand after changing
+`src/docker.rs`, `src/reaper.rs` or `src/adopt.rs`.

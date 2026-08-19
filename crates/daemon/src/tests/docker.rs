@@ -8,23 +8,33 @@
 //! a real one: the container specification is asserted on the actual
 //! `ContainerCreateBody` that reaches `docker create`.
 //!
-//! Nothing here connects to Docker, deliberately. CI runs
+//! Nothing here reaches a Docker daemon, deliberately. CI runs
 //! `cargo test --workspace` on `ubuntu-latest` **and** `macos-14`, and the
-//! macOS leg has no Docker daemon at all — a test that dialled one would fail
-//! CI outright. Real-Docker behaviour is the live suite's job.
+//! macOS leg has no Docker daemon at all — a test that depended on one would
+//! fail CI outright. Real-Docker behaviour is the live suite's job.
+//!
+//! One test does dial: `a_reap_no_docker_daemon_answered_is_not_settled`
+//! points a real backend at an endpoint nothing serves. It needs the
+//! *absence* of a daemon, which every leg of CI has, and it is the only way
+//! to prove what a reap reports when Docker will not answer — the answer the
+//! route reads before it hands a running container's budget to the next job.
 
 use std::collections::HashMap;
+use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use bollard::errors::Error as DockerError;
+use bollard::{API_DEFAULT_VERSION, Docker};
 
 use super::registry::{BeginOutcome, FinishOutcome, JobRegistry, TOMBSTONE_TTL};
 use super::spec::{
   ENV_DEADLINE, ENV_JIT_CONFIG, JobLabels, LABEL_DEADLINE, LABEL_JOB_ID, LabelError,
   container_config, memory_bytes, nano_cpus,
 };
-use super::{HTTP_NOT_FOUND, classify_create_error};
-use crate::routes::backend::CreateError;
+use super::{DockerBackend, HTTP_NOT_FOUND, classify_create_error, requeue_after_failed_start};
+use crate::gate::{Gate, JobId, JobSize};
+use crate::reaper::{ContainerSnapshot, CreatedContainers, StartQueue, StartRequest, reconcile};
+use crate::routes::backend::{CreateError, JobBackend, ReapOutcome};
 use crate::routes::wire::CreateJobRequest;
 
 /// A stand-in for GitHub's `encoded_jit_config`: base64 text, single-use, and
@@ -385,5 +395,170 @@ fn any_other_docker_failure_carries_its_own_reason() {
   assert!(
     reason.contains("unknown runtime specified sysbox-runc"),
     "the daemon's log and the client's 503 both need Docker's own words; got {reason:?}"
+  );
+}
+
+/// `toolu-ubuntu` / `toolu-ubuntu-2vcpu-4gb`, and the whole box's budget
+/// below — one job's worth, so promotion is a real decision.
+const TAG_2VCPU_4GB: JobSize = JobSize {
+  vcpu: 2,
+  memory_mb: 4096,
+};
+
+/// Well inside the six-hour window `client.ts` sends, at [`TICK_NOW_MS`].
+const FAR_FUTURE_DEADLINE_MS: i64 = DEADLINE_MS + 6 * 60 * 60 * 1000;
+
+/// The clock every tick below is run against.
+const TICK_NOW_MS: i64 = DEADLINE_MS;
+
+/// The state a job holds between its 201 and its start: admitted, queued,
+/// and with its container recorded — what `create_job` leaves behind.
+fn admitted_and_created(
+  job_id: &str,
+  container_id: &str,
+) -> (Mutex<Gate>, Mutex<StartQueue>, CreatedContainers) {
+  let gate = Mutex::new(Gate::new(TAG_2VCPU_4GB, 8));
+  let queue = Mutex::new(StartQueue::new());
+  let mut created = CreatedContainers::new();
+  let job = JobId::new(job_id);
+
+  assert!(
+    gate
+      .lock()
+      .unwrap_or_else(PoisonError::into_inner)
+      .admit(&job, TAG_2VCPU_4GB)
+      .is_ok()
+  );
+  queue
+    .lock()
+    .unwrap_or_else(PoisonError::into_inner)
+    .push(job);
+  created.record(job_id, container_id);
+  (gate, queue, created)
+}
+
+/// One `reconcile` pass over `snapshot`, with the locks taken the way
+/// `DockerBackend::tick` takes them.
+fn tick_over(
+  gate: &Mutex<Gate>,
+  registry: &mut JobRegistry,
+  queue: &Mutex<StartQueue>,
+  created: &mut CreatedContainers,
+  snapshot: &[ContainerSnapshot],
+) -> crate::reaper::TickOutcome {
+  let mut gate = gate.lock().unwrap_or_else(PoisonError::into_inner);
+  let mut queue = queue.lock().unwrap_or_else(PoisonError::into_inner);
+  reconcile(
+    &mut gate,
+    registry,
+    &mut queue,
+    created,
+    snapshot,
+    TICK_NOW_MS,
+  )
+}
+
+/// A transient `docker start` failure — sysbox-runc not ready yet, a cgroup
+/// that could not be created — must cost the job its turn, not its
+/// container. `reconcile` marks a promoted job running and drops it from the
+/// queue *before* the start is issued, so a failure that only logged left the
+/// gate claiming a container was running that was not: the very next tick
+/// read that against Docker's "created, not running", called it an exit, and
+/// force-removed a container the customer already had a 201 for. The job then
+/// hung to GitHub's 24-hour timeout.
+#[test]
+fn a_failed_start_re_queues_the_job_instead_of_costing_it_its_container() {
+  let (gate, queue, mut created) = admitted_and_created("job-1", "container-1");
+  let mut registry = JobRegistry::new();
+  let job = JobId::new("job-1");
+  let snapshot = vec![ContainerSnapshot::new(
+    "job-1",
+    "container-1",
+    FAR_FUTURE_DEADLINE_MS,
+    false,
+  )];
+
+  let first = tick_over(&gate, &mut registry, &queue, &mut created, &snapshot);
+  assert_eq!(
+    first.start,
+    vec![StartRequest {
+      job_id: job.clone(),
+      container_id: "container-1".to_owned(),
+    }]
+  );
+  assert!(first.remove.is_empty());
+
+  // …and that `docker start` fails.
+  requeue_after_failed_start(&gate, &queue, &job);
+
+  // Docker still reports exactly what it did before: the container exists
+  // and is not running.
+  let second = tick_over(&gate, &mut registry, &queue, &mut created, &snapshot);
+  assert!(
+    second.remove.is_empty(),
+    "a failed start must not turn into a removal on the next tick; got {:?}",
+    second.remove
+  );
+  assert_eq!(
+    second.start,
+    vec![StartRequest {
+      job_id: job,
+      container_id: "container-1".to_owned(),
+    }],
+    "the job has to be retried, which is what start_container's own docs promise"
+  );
+  assert!(
+    created.existing("job-1").is_some(),
+    "the container is still this job's"
+  );
+}
+
+/// The other side of the re-queue: a job the gate no longer tracks — reaped
+/// or destroyed while the start was in flight — is not put back. Re-queueing
+/// it would leave the start queue holding an id nothing can ever promote.
+#[test]
+fn a_failed_start_re_queues_nothing_for_a_job_that_was_released_meanwhile() {
+  let (gate, queue, _created) = admitted_and_created("job-1", "container-1");
+  let job = JobId::new("job-1");
+
+  gate
+    .lock()
+    .unwrap_or_else(PoisonError::into_inner)
+    .release(&job);
+  queue
+    .lock()
+    .unwrap_or_else(PoisonError::into_inner)
+    .remove(&job);
+
+  requeue_after_failed_start(&gate, &queue, &job);
+
+  assert!(
+    queue
+      .lock()
+      .unwrap_or_else(PoisonError::into_inner)
+      .is_empty(),
+    "a job the gate let go must not come back through the start queue"
+  );
+}
+
+/// A reap answers 204 whatever happened, so nothing about the HTTP surface
+/// distinguishes "there was nothing to remove" from "Docker would not say".
+/// The difference is what the route does with the job's budget — releasing it
+/// claims the box has that vCPU and memory back, which a listing that never
+/// came is no evidence for.
+///
+/// Proved against a real backend pointed at an address nothing serves: no
+/// Docker daemon is needed to answer this, only the absence of one.
+#[tokio::test]
+async fn a_reap_no_docker_daemon_answered_is_not_settled() {
+  let unreachable = Docker::connect_with_http("http://127.0.0.1:1", 1, API_DEFAULT_VERSION)
+    .expect("build a client for an endpoint nothing serves");
+  let backend = DockerBackend::new(unreachable, RUNTIME);
+
+  assert_eq!(
+    backend.reap("77").await,
+    ReapOutcome::Unresolved,
+    "a reap that could not even list this job's containers must not let the gate free their \
+     budget"
   );
 }

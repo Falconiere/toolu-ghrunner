@@ -21,12 +21,12 @@ directly from `handlers.rs`, not wrapped by this module.
 | File | Primary item | Purpose |
 | --- | --- | --- |
 | `wire.rs` | `CreateJobRequest`, `CreateJobResponse`, `ReapQuery` | The exact JSON shapes `client.ts` sends and reads, `camelCase` on the wire via `serde(rename_all)`. |
-| `backend.rs` | `JobBackend`, `CreateJobResult`, `CreateError`, `DestroyOutcome` | The seam between HTTP and container orchestration: create, destroy-by-container-id, reap-by-job-id — deliberately narrow. |
-| `state.rs` | `AppState` | Router state threaded through every route: the job backend, the resource gate, the reaper's start queue and created-container map, and the token file path. |
+| `backend.rs` | `JobBackend`, `CreateJobResult`, `CreateError`, `DestroyOutcome`, `ReapOutcome` | The seam between HTTP and container orchestration: create, destroy-by-container-id, reap-by-job-id — deliberately narrow. A reap reports whether it actually settled: the 204 is owed either way, but the job's budget is only released when its containers are provably gone. |
+| `state.rs` | `AppState` | Router state threaded through every route: the job backend, the resource gate, the reaper's start queue and created-container map, the token file path, and the one image this host serves (`TOOLU_DAEMON_IMAGE`). |
 | `auth_middleware.rs` | `require_bearer` | Verifies `Authorization: Bearer <token>` against the token file (`crate::auth::verify_bearer`) ahead of every route. |
 | `header.rs` | `add_daemon_header` | Stamps `sh-toolu-daemon: 1` on every response, including errors, so a Cloudflare-generated 429 or challenge page can be told from a daemon one. |
 | `error.rs` | `ErrorBody`, `error_response` | The `{ "error": "<message>" }` shape every non-2xx response goes through, so no handler can hand-roll a different one. |
-| `handlers.rs` | `create_job`, `destroy_job`, `reap_job` | The three route handlers `build_router` wires up. |
+| `handlers.rs` | `create_job`, `destroy_job`, `reap_job` | The three route handlers `build_router` wires up. A create's bookkeeping runs on a detached task, because the client aborts at ten seconds and axum drops a handler future when it does. |
 
 When you add a file here, add its row above so the index stays current.
 There is no `mod.rs`; the parent `routes.rs` is the module root and

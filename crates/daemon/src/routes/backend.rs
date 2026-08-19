@@ -75,6 +75,29 @@ pub enum DestroyOutcome {
   NotFound,
 }
 
+/// What a reap actually managed to do — the distinction the handler needs
+/// before it hands a job's vCPU and memory back to the gate.
+///
+/// A reap answers 204 either way: `vps/verify.ts` (toolu.sh repo) probes a
+/// host's credentials by reaping a sentinel job id that matches nothing, so
+/// the status code cannot carry this. Releasing the budget, however, is a
+/// claim about the box's real capacity — if the container is still running,
+/// the gate handing its share to another job overcommits the machine by
+/// exactly that size. So the release is conditional even though the status
+/// is not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReapOutcome {
+  /// Every container for this job id is gone, or the backend confirmed with
+  /// Docker that there were none to begin with. The job holds nothing on
+  /// this box anymore.
+  Settled,
+  /// A removal failed, or the listing that would have proved nothing matched
+  /// failed. A container may still be running, so its budget must stay
+  /// accounted until `crate::reaper::reconcile` sees it exit or its deadline
+  /// pass.
+  Unresolved,
+}
+
 /// A backend-level failure on an operation with no documented failure mode
 /// of its own — mapped to a 500 at the HTTP layer.
 #[derive(Debug)]
@@ -125,8 +148,16 @@ pub trait JobBackend: Clone + Send + Sync + 'static {
 
   /// Best-effort kill of whatever container currently serves `job_id` — the
   /// terminal-timeout outcome `reapByJobId` in `client.ts` drives. Always
-  /// resolves: the daemon answers 204 whether or not anything matched, so
-  /// there is nowhere honest for a failure here to surface at the HTTP
-  /// layer; implementations log their own failures instead.
-  fn reap(&self, job_id: &str) -> impl Future<Output = ()> + Send;
+  /// resolves, and the daemon answers 204 whether or not anything matched,
+  /// so a failure never reaches the status code; implementations log their
+  /// own failures.
+  ///
+  /// It does reach the returned [`ReapOutcome`], which is not the same
+  /// question: 204 is what the client contract owes, while
+  /// [`ReapOutcome::Settled`] is what the caller needs before releasing the
+  /// job's vCPU and memory back to the gate. An implementation that could
+  /// not remove — or could not even list — this job's containers must report
+  /// [`ReapOutcome::Unresolved`], or the gate will hand real capacity a
+  /// running container still holds to the next job.
+  fn reap(&self, job_id: &str) -> impl Future<Output = ReapOutcome> + Send;
 }
