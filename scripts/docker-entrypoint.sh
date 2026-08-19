@@ -82,7 +82,15 @@ if ! mkdir_error="$(mkdir -p "${log_dir}" 2>&1)"; then
   log "could not create ${log_dir} ($(one_line "${mkdir_error}"));" \
     "dockerd will log under ${TMPDIR:-/tmp}"
   log_dir="${TMPDIR:-/tmp}"
-  mkdir -p "${log_dir}"
+  # The fallback gets the same treatment as the primary, for the same reason:
+  # if it fails too, dockerd's redirect below has nowhere to land, the daemon
+  # never comes up, and the warning that follows would blame the timeout for
+  # a directory this script could not create. WARN-and-continue either way —
+  # a job that never touches Docker still runs.
+  if ! fallback_error="$(mkdir -p "${log_dir}" 2>&1)"; then
+    log "could not create ${log_dir} either ($(one_line "${fallback_error}"));" \
+      "dockerd has nowhere to log and is unlikely to start"
+  fi
 fi
 dockerd_log="${log_dir}/dockerd.log"
 

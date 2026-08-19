@@ -118,12 +118,19 @@ async fn post_create(
 }
 
 /// Best-effort cleanup so a failed assertion never leaks a container.
+///
+/// Best-effort, never silent: a removal that fails leaves a container for the
+/// next run to trip over, and the run that leaked it is the only one that can
+/// say why. WARN-and-continue rather than `?` — a cleanup error must not
+/// replace the assertion failure that sent us here.
 async fn force_remove(docker: &Docker, container_id: &str) {
   let options = RemoveContainerOptions {
     force: true,
     ..RemoveContainerOptions::default()
   };
-  let _ = docker.remove_container(container_id, Some(options)).await;
+  if let Err(err) = docker.remove_container(container_id, Some(options)).await {
+    eprintln!("cleanup: could not force-remove {container_id}: {err}");
+  }
 }
 
 /// Assert one created container's Docker-level shape matches the request:
@@ -187,10 +194,11 @@ async fn a_real_create_names_a_matching_container_fast_with_a_hidden_jit_config(
   let backend = DockerBackend::new(docker.clone(), "runc");
   // AC-4 is specifically the image-resident case — the absent-image path is
   // `docker_live.rs`'s pre-pull test.
-  backend.attempt_pull(IMAGE).await;
+  let pulled = backend.attempt_pull(IMAGE).await;
   assert!(
     backend.image_present(IMAGE).await?,
-    "AC-4 assumes the image is already resident"
+    "AC-4 assumes the image is already resident — the pull meant to make it so \
+     returned {pulled:?}"
   );
 
   let dir = tempfile::tempdir()?;

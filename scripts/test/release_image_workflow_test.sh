@@ -110,6 +110,22 @@ if ! grep -q 'tags=(-t' <<<"$derivation"; then
   exit 1
 fi
 
+# The unset case below is only worth anything if the step has no default of
+# its own. A `VARIANT_SUFFIX="${VARIANT_SUFFIX:-}"` or `: "${VARIANT_SUFFIX=}"`
+# anywhere in the block would make "unset" indistinguishable from the runner
+# variant's deliberately empty value BEFORE the guard ever reads it — the
+# guard would then pass on a matrix that stopped passing the suffix, and the
+# unset case would be asserting the behaviour of a default rather than of the
+# guard. Checked here, against the extracted text, rather than trusted.
+if grep -Eq 'VARIANT_SUFFIX=|VARIANT_SUFFIX:?[-=]' <<<"$derivation"; then
+  echo "FAIL: the merge step defaults or assigns VARIANT_SUFFIX itself — the unset case below" >&2
+  echo "      would then exercise that default, not the fail-closed guard" >&2
+  echo "  offending line(s): $(grep -E 'VARIANT_SUFFIX=|VARIANT_SUFFIX:?[-=]' <<<"$derivation" | tr '\n' ' ')" >&2
+  fail=1
+else
+  echo "ok: the merge step never gives VARIANT_SUFFIX a default of its own"
+fi
+
 harness="$(mktemp)"
 trap 'rm -f "$harness"' EXIT
 {
@@ -223,6 +239,19 @@ if [[ "$unset_code" -eq 0 ]]; then
   fail=1
 else
   echo "ok: an unset VARIANT_SUFFIX fails closed (exit $unset_code)"
+fi
+# A nonzero exit alone does not prove the GUARD fired: a syntax error, a
+# `set -u` inherited from somewhere, or an unrelated failure earlier in the
+# block would all exit nonzero and read as a pass. Demand the guard's own
+# words, so this case can only go green for the one reason it is here to
+# check.
+if grep -q "VARIANT_SUFFIX is unset" <<<"$unset_out"; then
+  echo "ok: …and it is the fail-closed guard that says so, not an incidental error"
+else
+  echo "FAIL: the step exited nonzero without the guard's own message — it failed for" >&2
+  echo "      some other reason, so nothing here proves the guard is live" >&2
+  echo "  got: $(tr '\n' ' ' <<<"$unset_out")" >&2
+  fail=1
 fi
 if grep -q ":latest" <<<"$unset_out"; then
   echo "FAIL: an unset VARIANT_SUFFIX reached :latest — $(tr '\n' ' ' <<<"$unset_out")" >&2

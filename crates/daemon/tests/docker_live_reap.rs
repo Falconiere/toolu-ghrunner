@@ -122,12 +122,19 @@ async fn container_exists(docker: &Docker, container_id: &str) -> bool {
 }
 
 /// Best-effort cleanup so a failed assertion never leaks a container.
+///
+/// Best-effort, never silent: a removal that fails leaves a container for the
+/// next run to trip over, and the run that leaked it is the only one that can
+/// say why. WARN-and-continue rather than `?` — a cleanup error must not
+/// replace the assertion failure that sent us here.
 async fn force_remove(docker: &Docker, container_id: &str) {
   let options = RemoveContainerOptions {
     force: true,
     ..RemoveContainerOptions::default()
   };
-  let _ = docker.remove_container(container_id, Some(options)).await;
+  if let Err(err) = docker.remove_container(container_id, Some(options)).await {
+    eprintln!("cleanup: could not force-remove {container_id}: {err}");
+  }
 }
 
 #[tokio::test]

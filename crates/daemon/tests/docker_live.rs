@@ -91,12 +91,19 @@ async fn is_running(docker: &Docker, container_id: &str) -> Result<bool, bollard
 }
 
 /// Best-effort cleanup so a failed assertion never leaks a container.
+///
+/// Best-effort, never silent: a removal that fails leaves a container for the
+/// next run to trip over, and the run that leaked it is the only one that can
+/// say why. WARN-and-continue rather than `?` — a cleanup error must not
+/// replace the assertion failure that sent us here.
 async fn force_remove(docker: &Docker, container_id: &str) {
   let options = RemoveContainerOptions {
     force: true,
     ..RemoveContainerOptions::default()
   };
-  let _ = docker.remove_container(container_id, Some(options)).await;
+  if let Err(err) = docker.remove_container(container_id, Some(options)).await {
+    eprintln!("cleanup: could not force-remove {container_id}: {err}");
+  }
 }
 
 #[tokio::test]
@@ -128,7 +135,11 @@ async fn tick_starts_a_promoted_job_and_removes_one_past_its_deadline()
     let mut gate = gate
       .lock()
       .unwrap_or_else(std::sync::PoisonError::into_inner);
-    assert!(gate.admit(&JobId::new("job-waiting"), budget).is_ok());
+    let admitted = gate.admit(&JobId::new("job-waiting"), budget);
+    assert!(
+      admitted.is_ok(),
+      "seeding job-waiting into the gate: {admitted:?}"
+    );
   }
   {
     let mut queue = queue
@@ -334,7 +345,8 @@ async fn a_restart_re_adopts_a_running_containers_budget_from_its_labels() -> Li
 
   // The adopted budget is real: a job that no longer fits waits.
   let newcomer = JobId::new("adopt-newcomer");
-  assert!(gate.admit(&newcomer, budget).is_ok());
+  let admitted = gate.admit(&newcomer, budget);
+  assert!(admitted.is_ok(), "admitting adopt-newcomer: {admitted:?}");
   assert_eq!(
     gate.try_start(&newcomer),
     Some(daemon::gate::StartOutcome::Deferred),
@@ -414,7 +426,7 @@ async fn an_absent_image_answers_503_and_the_same_request_answers_201_after_the_
   let backend = DockerBackend::new(docker.clone(), "runc");
 
   // Start from a box that genuinely does not hold the pinned image.
-  let _removed = docker
+  let removed = docker
     .remove_image(
       PREPULL_IMAGE,
       Some(RemoveImageOptions {
@@ -426,7 +438,8 @@ async fn an_absent_image_answers_503_and_the_same_request_answers_201_after_the_
     .await;
   assert!(
     !backend.image_present(PREPULL_IMAGE).await?,
-    "the image must be absent for this test to mean anything"
+    "the image must be absent for this test to mean anything — the removal \
+     meant to make it so returned {removed:?}"
   );
 
   let dir = tempfile::tempdir()?;
