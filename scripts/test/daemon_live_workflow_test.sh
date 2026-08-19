@@ -11,7 +11,13 @@
 # precondition turning into a silent skip instead of a hard failure — the exact
 # shape `live.yml` and `live-ghes.yml` use on purpose for an *optional* secret,
 # which this workflow's Docker requirement is not.
-set -uo pipefail
+#
+# `-e` on purpose: every command here that is ALLOWED to fail is already a
+# condition (`if grep …`), so anything else exiting nonzero is a bug in this
+# script, and a test script that keeps going after one is a test script that
+# can report a false pass. The `fail` accumulator stays — it is what lets one
+# run report every missing pattern instead of only the first.
+set -euo pipefail
 
 cd "$(dirname "$0")/../.." || exit 1 # repo root
 

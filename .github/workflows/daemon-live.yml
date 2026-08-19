@@ -37,6 +37,11 @@ jobs:
     # sysbox-runc; macos-14 has no Docker at all — see crates/daemon/tests/
     # docker_live.rs's module docs.
     runs-on: [self-hosted, toolu-runner-v1]
+    # A hung live test would otherwise sit on the ONE box in this repo's CI
+    # with a real Docker daemon until GitHub's 6h job ceiling expires, and
+    # every other *-live.yml workflow queues behind it. The whole suite is
+    # seconds of Docker calls; 20 minutes can only be reached by a hang.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.94.1

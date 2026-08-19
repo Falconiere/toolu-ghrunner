@@ -194,7 +194,12 @@ impl Config {
 /// installed yet to report that through, and the fallback it lands on is the
 /// default filter, never a more verbose one.
 pub fn log_directives() -> Option<String> {
-  ProcessEnv.lookup(LOG_ENV).unwrap_or_default()
+  // `.ok().flatten()`, not `.unwrap_or_default()`: the discard is the point
+  // and it should read as one. The only error this lookup can produce is a
+  // non-UTF-8 value, which the doc comment above already rules as "unset".
+  // (An explicit `match` is what clippy's `manual_unwrap_or_default` rejects
+  // here, so this is the explicit form the gate accepts.)
+  ProcessEnv.lookup(LOG_ENV).ok().flatten()
 }
 
 /// The current and, if present, previous bearer token accepted during rotation.
@@ -224,7 +229,7 @@ pub fn read_tokens(path: &Path) -> Result<Tokens, ConfigError> {
   })?;
 
   let mut lines = contents.lines();
-  let current = lines.next().unwrap_or("").trim();
+  let current = lines.next().unwrap_or_default().trim();
   if current.is_empty() {
     return Err(ConfigError::TokenFileEmpty(path.to_owned()));
   }

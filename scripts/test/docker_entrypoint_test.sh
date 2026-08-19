@@ -122,8 +122,12 @@ chmod +x "$BIN/toolu-runner"
 # found — and the cases that scrub hardest are exactly the ones that must not
 # see this host's real `docker`.
 TIMEOUT_BIN="$(command -v timeout)"
-if [[ -z "$TIMEOUT_BIN" ]]; then
-  echo "FAIL: coreutils 'timeout' is required — without it a hang cannot be bounded" >&2
+# Present AND runnable: an unexecutable `timeout` makes every `run_entry`
+# below exit 126 without starting the entrypoint at all, and the cases that
+# assert on a nonzero CODE would pass on that. Cheaper to refuse here than to
+# read a green run that ran nothing.
+if [[ -z "$TIMEOUT_BIN" || ! -x "$TIMEOUT_BIN" ]]; then
+  echo "FAIL: a runnable coreutils 'timeout' is required — without it a hang cannot be bounded" >&2
   exit 1
 fi
 
@@ -270,6 +274,11 @@ check "a failed job stays failed when dockerd died" "1" "$CODE"
 # --- everything the entrypoint says is prefixed and single-line -----------
 # Same rule as the macOS launcher: an unprefixed line in a job log is
 # indistinguishable from a step's own output.
+#
+# Scope: `run_entry` REASSIGNS `OUT` on every call (`OUT="$(…)"`), so this
+# reads the case that ran last — the crashfail run above — not the whole
+# session. That is the case with the most to say (a dockerd that died, its
+# last words folded into a warning), which is why the check sits here.
 stray="$(grep -vE '^(argv=|home=|docker=|toolu-runner: )' <<<"$OUT" || true)"
 check "no unprefixed output reaches the job log" "" "$stray"
 

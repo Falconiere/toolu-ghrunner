@@ -101,7 +101,16 @@ pub fn memory_mb_from_bytes(bytes: i64) -> u32 {
 /// container this daemon created and are the conservative choice for one it
 /// did not.
 fn saturating_u32(value: i64) -> u32 {
-  u32::try_from(value).unwrap_or(if value.is_negative() { 0 } else { u32::MAX })
+  match u32::try_from(value) {
+    Ok(narrowed) => narrowed,
+    Err(_) => {
+      if value.is_negative() {
+        0
+      } else {
+        u32::MAX
+      }
+    },
+  }
 }
 
 /// The two labels a job container carries, parsed back into the values that

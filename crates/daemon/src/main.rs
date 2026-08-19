@@ -228,6 +228,12 @@ async fn adopt_existing_jobs(
     .map_err(StartupError::Inventory)?;
   let now_ms = epoch_ms()?;
 
+  // The three guards below are `std::sync::Mutex` guards, held together for
+  // one synchronous stretch. NOTHING inside this block may `.await`: a
+  // std guard held across an await point is held across a task yield, and
+  // the next task to reach the same lock on this thread deadlocks. That is
+  // why `adopt::adopt` is synchronous and why `backend.remove_all` — the
+  // one await this function needs — is outside the scope, below.
   let (adoption, consumption) = {
     let mut gate = state.gate.lock().unwrap_or_else(PoisonError::into_inner);
     let mut queue = state
@@ -310,8 +316,15 @@ async fn serve(
     .with_graceful_shutdown(shutdown_signal())
     .await;
 
-  // Nothing in flight to drain: both loops read their state fresh from
-  // Docker on every tick, so stopping between ticks loses nothing.
+  // No JOB state to drain: both loops read theirs fresh from Docker on every
+  // tick, so stopping between ticks loses nothing a job depends on.
+  //
+  // One thing is genuinely dropped: an image pull in flight in `refresh_loop`
+  // is cancelled mid-stream, and the layers it had already fetched stay in
+  // Docker's storage as a partial pull. That costs nothing — the next
+  // `attempt_pull`, at the next start or the next refresh tick, resumes from
+  // those layers — and waiting the pull out would hold shutdown for however
+  // long a registry takes.
   reconciler.abort();
   refresher.abort();
 
@@ -372,6 +385,18 @@ async fn refresh_loop(backend: DockerBackend, image: String) {
 /// stops one by hand). A signal listener that cannot be installed waits
 /// forever rather than resolving: reporting a shutdown nobody asked for would
 /// drop every job the box is running.
+///
+/// The consequence, stated rather than left to be discovered: if BOTH
+/// installs fail, this future never resolves and the daemon stops responding
+/// to a graceful stop entirely. systemd then waits out `TimeoutStopSec=30`
+/// (`scripts/toolu-daemon.service`) and SIGKILLs it — the jobs die either
+/// way, 30 seconds later. That is the deliberate
+/// trade. Silence is not a failure mode here: each failed install is logged
+/// at ERROR the moment it happens, so "the unit would not stop" always has
+/// its cause in the journal directly above it. Installing a signal handler
+/// only fails on a process that is out of file descriptors or running under
+/// a sandbox that blocks `signalfd`, neither of which is a state this daemon
+/// can serve jobs from anyway.
 async fn shutdown_signal() {
   let interrupt = async {
     match tokio::signal::ctrl_c().await {

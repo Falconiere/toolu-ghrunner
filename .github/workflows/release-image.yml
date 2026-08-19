@@ -208,9 +208,11 @@ jobs:
           # Fails closed rather than defaulting to empty: an unset suffix
           # would publish whatever this leg built onto :latest, which is the
           # tag toolu.sh's DEFAULT_RUNNER_IMAGE follows on every deployment.
-          # `+set` distinguishes "unset" from the runner variant's
-          # deliberately empty value.
-          if [[ -z "${VARIANT_SUFFIX+set}" ]]; then
+          # `-v` asks the one question that matters and asks it by name —
+          # "unset" and the runner variant's deliberately EMPTY value must
+          # stay distinguishable, so an emptiness test would break the
+          # default image.
+          if [[ ! -v VARIANT_SUFFIX ]]; then
             echo "VARIANT_SUFFIX is unset — refusing to guess which variant these legs are" >&2
             exit 1
           fi
