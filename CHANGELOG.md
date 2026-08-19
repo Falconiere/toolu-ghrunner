@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-19
+
+### Added
+- *(daemon)* serve the vps_hosts contract with sysbox-isolated job containers
+
+### Fixed
+- *(daemon)* close two slot leaks and a start failure that ate the container
+- *(daemon)* address PR review feedback
+- *(daemon)* stop a docker error reading as "the container is gone"
+- *(daemon)* stop a missing state.running reading as "not running"
+
 ## [0.8.0] - 2026-08-11
 
 ### Added
