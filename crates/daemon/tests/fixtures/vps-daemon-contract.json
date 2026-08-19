@@ -1,0 +1,13 @@
+{
+  "_comment": "Canonical VPS daemon HTTP contract fixture, pinned byte-for-byte between two repos. Source of truth: toolu-ghrunner's crates/daemon/tests/fixtures/vps-daemon-contract.json, asserted against the real routes/wire.rs types by crates/daemon/src/tests/fixture.rs. Vendored copy: toolu.sh's packages/api/src/__tests__/fixtures/vps-daemon-contract.json, asserted against the real providers/vps/client.ts by __tests__/vps-contract-fixture.test.ts. Both copies must stay byte-identical; each repo records this file's SHA-256 in the sibling vps-daemon-contract.sha256 and fails its own suite if the copy it holds no longer matches. Edit only the source-of-truth copy, then re-copy verbatim and update both recorded hashes.",
+  "request": {
+    "jitConfig": "ZW5jb2RlZC1qaXQtY29uZmln",
+    "image": "ghcr.io/falconiere/toolu-ghrunner:latest",
+    "size": { "vcpu": 4, "memoryMb": 16384 },
+    "jobRef": { "org": "acme", "repo": "acme/widgets", "jobId": "998877" },
+    "purpose": "toolu-ubuntu job for acme/widgets#998877",
+    "deadline": 1700000000000
+  },
+  "createResponse": { "containerId": "c-abc123" },
+  "errorResponse": { "error": "capacity" }
+}

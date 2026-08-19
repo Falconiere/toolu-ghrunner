@@ -40,10 +40,15 @@ jobs:
             exit 1
           fi
       - name: Run release-script tests
-        # Explicit list, not a scripts/test/*.sh glob — the plist/systemd tests
-        # there are macOS-only and would fail on ubuntu.
+        # Explicit list, not a scripts/test/*.sh glob — plist_test.sh is
+        # macOS-only (plutil) and would fail here. systemd_test.sh is NOT
+        # added below despite being pure static validation: `systemd-analyze
+        # verify` also checks that ExecStart's binary exists on disk, and
+        # nothing in this job installs toolu-runner to /usr/local/bin, so it
+        # fails here exactly as it does in a clean sandbox today — a gap for
+        # a later step to close, not this one.
         run: |
-          for t in assert_version changelog_extract package_release release_workflow release_finalize_workflow generate_homebrew_formula release_homebrew_workflow release_image_workflow release_macos_image_workflow macos_entrypoint release_pr_workflow release_pr_script code_review_workflow ci_workflow check_script; do
+          for t in assert_version changelog_extract package_release release_workflow release_finalize_workflow generate_homebrew_formula release_homebrew_workflow release_image_workflow release_macos_image_workflow macos_entrypoint docker_entrypoint release_pr_workflow release_pr_script code_review_workflow ci_workflow check_script daemon_live_workflow daemon_systemd; do
             bash "scripts/test/${t}_test.sh"
           done
 

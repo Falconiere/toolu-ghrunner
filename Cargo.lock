@@ -674,6 +674,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "daemon"
+version = "0.8.0"
+dependencies = [
+ "axum",
+ "bollard",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "data-encoding"
 version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -14,6 +14,18 @@ name: release-image
 # ubuntu-24.04-arm pair release.yml builds on) — a QEMU-emulated Rust
 # release build would be painfully slow and flaky.
 #
+# Two VARIANTS ship from the one Dockerfile, each as its own manifest:
+#
+#   target: runner  suffix: ''         the lean default every provider pulls
+#   target: docker  suffix: '-docker'  the same payload plus a Docker daemon
+#
+# The daemon lives behind its own tag rather than in the default image
+# because toolu.sh's DEFAULT_RUNNER_IMAGE follows this repo's moving tag:
+# fattening that image would slow the cold pull for every deployment, with
+# no deploy at all, to serve the VPS hosts that opt in per host through
+# `vps_hosts.image_ref`. The two targets share every expensive layer, so a
+# leg's second build is mostly cache hits on the first.
+#
 # PRs touching the image inputs build without pushing (catches Dockerfile
 # rot); workflow_dispatch does the same on demand. The verify job repeats
 # release.yml's gate rather than depending on it: the two workflows run
@@ -26,6 +38,7 @@ on:
     paths:
       - Dockerfile
       - .dockerignore
+      - scripts/docker-entrypoint.sh
       - .github/workflows/release-image.yml
   workflow_dispatch:
 
@@ -58,20 +71,31 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
-  # One leg per arch, compiled natively, pushed by digest only (tags are
-  # applied by `manifest` after both legs exist).
+  # One leg per arch PER VARIANT, compiled natively, pushed by digest only
+  # (tags are applied by `manifest` after both of a variant's legs exist).
+  #
+  # `target` is a real dimension crossed with `arch`; the `include` entries
+  # only attach the per-arch host and the per-variant tag suffix to the four
+  # combinations. The suffix is carried here, not derived in `manifest`, so
+  # exactly one place in this file decides which variant owns which tag.
   build:
     needs: verify
     strategy:
       fail-fast: true
       matrix:
+        arch: [amd64, arm64]
+        target: [runner, docker]
         include:
-          - runner: ubuntu-24.04
+          - arch: amd64
+            runner: ubuntu-24.04
             platform: linux/amd64
-            arch: amd64
-          - runner: ubuntu-24.04-arm
+          - arch: arm64
+            runner: ubuntu-24.04-arm
             platform: linux/arm64
-            arch: arm64
+          - target: runner
+            suffix: ''
+          - target: docker
+            suffix: '-docker'
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
@@ -95,6 +119,10 @@ jobs:
         with:
           context: .
           platforms: ${{ matrix.platform }}
+          # Always explicit, never the Dockerfile's default stage: the two
+          # variants differ by nothing else, so an omitted target would
+          # publish the same image under both tag lines.
+          target: ${{ matrix.target }}
           # On tag: push the leg untagged (digest-only); `manifest` stitches
           # and tags. On PR/dispatch: build-only.
           outputs: type=image,name=${{ steps.meta.outputs.image }},push-by-digest=true,name-canonical=true,push=${{ github.ref_type == 'tag' }}
@@ -112,16 +140,31 @@ jobs:
         if: github.ref_type == 'tag'
         uses: actions/upload-artifact@v7
         with:
-          name: digest-${{ matrix.arch }}
+          # Variant-scoped: `manifest` downloads one variant's legs by
+          # pattern, and an arch-only name would stitch a runner leg and a
+          # docker leg into a single manifest.
+          name: digest-${{ matrix.target }}-${{ matrix.arch }}
           path: /tmp/digests/*
           if-no-files-found: error
 
-  # Merge the per-arch legs into one multi-arch manifest, tag it, and print
-  # the manifest-list digest — the ref toolu.sh operators pin.
+  # Merge one variant's per-arch legs into one multi-arch manifest, tag it,
+  # and print the manifest-list digest — the ref toolu.sh operators pin. One
+  # job per variant: each publishes its own tag line off its own two legs.
   manifest:
     if: github.ref_type == 'tag'
     needs: build
     runs-on: ubuntu-24.04
+    strategy:
+      # Not fail-fast: the variants are independent tag lines, and cancelling
+      # a half-finished publish of the other one buys nothing.
+      fail-fast: false
+      matrix:
+        target: [runner, docker]
+        include:
+          - target: runner
+            suffix: ''
+          - target: docker
+            suffix: '-docker'
     permissions:
       contents: read
       packages: write # push the merged manifest + tags
@@ -129,7 +172,9 @@ jobs:
       - name: Download leg digests
         uses: actions/download-artifact@v8
         with:
-          pattern: digest-*
+          # This variant's legs only — `digest-*` would pull the other
+          # variant's in too and stitch both into one manifest.
+          pattern: digest-${{ matrix.target }}-*
           path: /tmp/digests
           merge-multiple: true
       - uses: docker/setup-buildx-action@v3
@@ -150,19 +195,36 @@ jobs:
         # MAJOR from 1.0 on (1.x -> :v1). The number therefore resets once
         # at 1.0.0 — :v1 is NEWER than :v7. That is deliberate; see
         # docs/container-image.md.
+        #
+        # Every tag this variant publishes carries VARIANT_SUFFIX, so the
+        # lean image keeps :latest / :vN and the Docker-capable one gets
+        # :latest-docker / :vN-docker. Replayed by
+        # scripts/test/release_image_workflow_test.sh against a table of
+        # refs and suffixes.
+        env:
+          VARIANT_SUFFIX: ${{ matrix.suffix }}
         run: |
           image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${IMAGE_BASENAME}"
+          # Fails closed rather than defaulting to empty: an unset suffix
+          # would publish whatever this leg built onto :latest, which is the
+          # tag toolu.sh's DEFAULT_RUNNER_IMAGE follows on every deployment.
+          # `+set` distinguishes "unset" from the runner variant's
+          # deliberately empty value.
+          if [[ -z "${VARIANT_SUFFIX+set}" ]]; then
+            echo "VARIANT_SUFFIX is unset — refusing to guess which variant these legs are" >&2
+            exit 1
+          fi
           version="${GITHUB_REF_NAME#v}"
-          tags=(-t "${image}:${version}")
+          tags=(-t "${image}:${version}${VARIANT_SUFFIX}")
           if [[ "${GITHUB_REF_NAME}" != *-* ]]; then
-            tags+=(-t "${image}:latest")
+            tags+=(-t "${image}:latest${VARIANT_SUFFIX}")
             major="${version%%.*}"
             minor="${version#*.}"
             minor="${minor%%.*}"
             if [[ "${major}" == "0" ]]; then
-              tags+=(-t "${image}:v${minor}")
+              tags+=(-t "${image}:v${minor}${VARIANT_SUFFIX}")
             else
-              tags+=(-t "${image}:v${major}")
+              tags+=(-t "${image}:v${major}${VARIANT_SUFFIX}")
             fi
           fi
           refs=()
@@ -170,18 +232,29 @@ jobs:
             refs+=("${image}@sha256:$(basename "$d")")
           done
           docker buildx imagetools create "${tags[@]}" "${refs[@]}"
-          digest="$(docker buildx imagetools inspect "${image}:${GITHUB_REF_NAME#v}" --format '{{json .Manifest}}' | jq -r .digest)"
+          digest="$(docker buildx imagetools inspect "${image}:${version}${VARIANT_SUFFIX}" --format '{{json .Manifest}}' | jq -r .digest)"
           echo "ref=${image}@${digest}" >> "$GITHUB_OUTPUT"
       - name: Print digest-pinned ref
         # The line toolu.sh operators copy into NAMESPACE_RUNNER_IMAGE /
-        # FLY_RUNNER_IMAGE. The manifest-list digest resolves per-arch
-        # (amd64 for the providers, arm64 for Apple-Silicon local runs).
+        # FLY_RUNNER_IMAGE (the runner variant) or a VPS host's
+        # `vps_hosts.image_ref` (the docker variant). The manifest-list
+        # digest resolves per-arch (amd64 for the providers, arm64 for
+        # Apple-Silicon local runs).
+        env:
+          VARIANT_SUFFIX: ${{ matrix.suffix }}
+          VARIANT_TARGET: ${{ matrix.target }}
+          IMAGE_REF: ${{ steps.merge.outputs.ref }}
         run: |
-          echo "image ref: ${{ steps.merge.outputs.ref }}"
+          echo "image ref (${VARIANT_TARGET}): ${IMAGE_REF}"
+          if [[ -n "${VARIANT_SUFFIX}" ]]; then
+            where="Set this digest as a VPS host's image_ref in toolu.sh (Docker-capable variant)."
+          else
+            where="Pin this digest in toolu.sh (NAMESPACE_RUNNER_IMAGE / FLY_RUNNER_IMAGE)."
+          fi
           {
-            echo "## Runner image"
+            echo "## Runner image (${VARIANT_TARGET})"
             echo '```'
-            echo "${{ steps.merge.outputs.ref }}"
+            echo "${IMAGE_REF}"
             echo '```'
-            echo "Pin this digest in toolu.sh (NAMESPACE_RUNNER_IMAGE / FLY_RUNNER_IMAGE)."
+            echo "${where}"
           } >> "$GITHUB_STEP_SUMMARY"

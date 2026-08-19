@@ -12,6 +12,12 @@
 # The extraction stops at `refs=()` — everything past it needs the per-arch
 # digests from a real build. That cut point is asserted below, so restructuring
 # the step fails this test loudly instead of silently testing nothing.
+#
+# The step publishes TWO tag lines off one derivation: the lean default image
+# (empty VARIANT_SUFFIX) and the Docker-capable variant (`-docker`). Both are
+# run below, because the failure that matters is the docker variant landing on
+# `:latest` — the tag toolu.sh's DEFAULT_RUNNER_IMAGE follows, on every
+# deployment, with no deploy of its own.
 set -uo pipefail
 
 cd "$(dirname "$0")/../.." || exit 1 # repo root
@@ -34,9 +40,18 @@ want() {
   fi
 }
 
-want "derives the compat line from the minor while major is 0" 'tags\+=\(-t "\$\{image\}:v\$\{minor\}"\)'
-want "derives the compat line from the major from 1.0 on"      'tags\+=\(-t "\$\{image\}:v\$\{major\}"\)'
+want "derives the compat line from the minor while major is 0" 'tags\+=\(-t "\$\{image\}:v\$\{minor\}\$\{VARIANT_SUFFIX\}"\)'
+want "derives the compat line from the major from 1.0 on"      'tags\+=\(-t "\$\{image\}:v\$\{major\}\$\{VARIANT_SUFFIX\}"\)'
 want "keeps the stable-only guard"                             '\[\[ "\$\{GITHUB_REF_NAME\}" != \*-\* \]\]'
+# The suffix is what keeps the two variants apart, so it is fed to the step by
+# the matrix rather than derived inside it — assert the wiring exists, since a
+# dropped `env:` block would leave the guard below firing on every publish.
+want "the merge step takes its suffix from the matrix" '^          VARIANT_SUFFIX: \$\{\{ matrix\.suffix \}\}$'
+want "both variants are built"                         '^        target: \[runner, docker\]$'
+want "the build target is never left to the Dockerfile default" \
+  '^          target: \$\{\{ matrix\.target \}\}$'
+want "legs are stitched per variant, not per arch alone" \
+  'pattern: digest-\$\{\{ matrix\.target \}\}-\*'
 
 # ---------------------------------------------------------------------------
 # Behavioural tier: run the real derivation.
@@ -113,27 +128,28 @@ SH
 # owner deliberately mixed-case: the step lowercases it via ${VAR,,}, and a
 # capital in a repository name is a push-time error at GHCR.
 run_case() {
-  local ref="$1"
+  local ref="$1" suffix="$2"
   GITHUB_REF_NAME="$ref" \
   GITHUB_REPOSITORY_OWNER="Falconiere" \
   IMAGE_BASENAME="toolu-ghrunner" \
+  VARIANT_SUFFIX="$suffix" \
     bash "$harness"
 }
 
-# ref -> the complete, ordered set of refs the step must publish. Asserted as
-# full identity: a case that gained or lost a tag is a failure, not a subset
-# match.
+# ref + variant suffix -> the complete, ordered set of refs the step must
+# publish. Asserted as full identity: a case that gained or lost a tag is a
+# failure, not a subset match.
 expect() {
-  local ref="$1" want_tags="$2" got
-  got="$(run_case "$ref")" || {
-    echo "FAIL: $ref — derivation exited non-zero" >&2
+  local ref="$1" suffix="$2" want_tags="$3" got
+  got="$(run_case "$ref" "$suffix")" || {
+    echo "FAIL: $ref ${suffix:-(default)} — derivation exited non-zero" >&2
     fail=1
     return
   }
   if [[ "$got" == "$want_tags" ]]; then
-    echo "ok: $ref -> $(tr '\n' ' ' <<<"$got")"
+    echo "ok: $ref ${suffix:-(default)} -> $(tr '\n' ' ' <<<"$got")"
   else
-    echo "FAIL: $ref" >&2
+    echo "FAIL: $ref ${suffix:-(default)}" >&2
     echo "  want: $(tr '\n' ' ' <<<"$want_tags")" >&2
     echo "  got:  $(tr '\n' ' ' <<<"$got")" >&2
     fail=1
@@ -142,35 +158,78 @@ expect() {
 
 IMG="ghcr.io/falconiere/toolu-ghrunner"
 
+# --- the default image: an empty suffix, the tags every provider follows ---
+
 # Stable: exact version + latest + the compat line.
-expect v0.6.3 "$IMG:0.6.3
+expect v0.6.3 "" "$IMG:0.6.3
 $IMG:latest
 $IMG:v6"
 # The minor is the compat boundary while the major is 0 — 0.7.0 breaks 0.6.x,
 # so it must NOT land on :v6.
-expect v0.7.0 "$IMG:0.7.0
+expect v0.7.0 "" "$IMG:0.7.0
 $IMG:latest
 $IMG:v7"
 # Two-digit minor: guards against a substring/lexical derivation yielding :v1.
-expect v0.10.0 "$IMG:0.10.0
+expect v0.10.0 "" "$IMG:0.10.0
 $IMG:latest
 $IMG:v10"
 # From 1.0.0 the major takes over. The series restarts here by design — :v1 is
 # newer than :v7 (see docs/container-image.md).
-expect v1.0.0 "$IMG:1.0.0
+expect v1.0.0 "" "$IMG:1.0.0
 $IMG:latest
 $IMG:v1"
 # A minor bump inside 1.x must stay on :v1 rather than minting :v1 -> :v2.
-expect v1.1.0 "$IMG:1.1.0
+expect v1.1.0 "" "$IMG:1.1.0
 $IMG:latest
 $IMG:v1"
-expect v2.0.0 "$IMG:2.0.0
+expect v2.0.0 "" "$IMG:2.0.0
 $IMG:latest
 $IMG:v2"
 # Prereleases get the exact version ONLY. A tag consumers follow must never
 # move onto an unreleased build — neither :latest nor the compat line.
-expect v0.7.0-rc.1 "$IMG:0.7.0-rc.1"
-expect v1.0.0-rc.1 "$IMG:1.0.0-rc.1"
+expect v0.7.0-rc.1 "" "$IMG:0.7.0-rc.1"
+expect v1.0.0-rc.1 "" "$IMG:1.0.0-rc.1"
+
+# --- the Docker-capable variant: the same rules, one suffix later ---------
+# Every tag it publishes must carry the suffix. The one that matters is
+# `:latest-docker`: a variant that reached bare `:latest` would put a
+# dockerd-carrying image in front of every toolu.sh deployment on the next
+# pull, since DEFAULT_RUNNER_IMAGE follows that tag.
+expect v0.6.3 -docker "$IMG:0.6.3-docker
+$IMG:latest-docker
+$IMG:v6-docker"
+expect v1.1.0 -docker "$IMG:1.1.0-docker
+$IMG:latest-docker
+$IMG:v1-docker"
+# The prerelease rule is about the REF, not the variant: a suffix must not
+# smuggle `-rc.1` past the stable-only guard, and must not earn the variant a
+# moving tag of its own either.
+expect v0.7.0-rc.1 -docker "$IMG:0.7.0-rc.1-docker"
+
+# --- an unset suffix publishes nothing at all -----------------------------
+# The variants differ by this one variable, so a matrix that stopped passing
+# it would silently republish whichever legs it downloaded onto `:latest`.
+# The step must fail closed instead — and the runner variant's own suffix is
+# deliberately EMPTY, so "unset" and "empty" have to stay distinguishable.
+unset_out="$(env -u VARIANT_SUFFIX \
+  GITHUB_REF_NAME=v1.2.3 \
+  GITHUB_REPOSITORY_OWNER="Falconiere" \
+  IMAGE_BASENAME="toolu-ghrunner" \
+  bash "$harness" 2>&1)"
+unset_code=$?
+if [[ "$unset_code" -eq 0 ]]; then
+  echo "FAIL: an unset VARIANT_SUFFIX must fail the step, not default to the lean tags" >&2
+  echo "  got: $(tr '\n' ' ' <<<"$unset_out")" >&2
+  fail=1
+else
+  echo "ok: an unset VARIANT_SUFFIX fails closed (exit $unset_code)"
+fi
+if grep -q ":latest" <<<"$unset_out"; then
+  echo "FAIL: an unset VARIANT_SUFFIX reached :latest — $(tr '\n' ' ' <<<"$unset_out")" >&2
+  fail=1
+else
+  echo "ok: …and no tag is derived on the way out"
+fi
 
 if [[ "$fail" -ne 0 ]]; then
   echo "release_image_workflow_test: FAILED" >&2

@@ -47,6 +47,12 @@ want "builds with --locked"            "cargo build --release --locked"
 want "packages via package-release.sh" "package-release\.sh"
 want "fails if no artifact"            "if-no-files-found: error"
 want "toolchain pinned 1.94.1"         "dtolnay/rust-toolchain@1\.94\.1"
+# --- toolu-daemon: linux-only (crates/daemon needs a local Docker socket —
+# there is no macOS build to match against these linux-only assertions) ---
+want "builds toolu-daemon"             "cargo build --release --locked --bin toolu-daemon"
+want "daemon build gated to linux"     "if: matrix\.os == 'linux'"
+want "daemon packaged via package-daemon-release.sh" "package-daemon-release\.sh"
+want "daemon tarball uploaded as an artifact" "name: toolu-daemon-\\\$\{\{ matrix\.os \}\}-\\\$\{\{ matrix\.arch \}\}"
 # --- publish ---
 want "least-privilege default"         "^permissions:"
 want "contents: read default"          "contents: read"
@@ -56,6 +62,7 @@ want "notes from changelog-extract.sh" "changelog-extract\.sh"
 want "prerelease on tag with '-'"      'GITHUB_REF_NAME.*\*-\*'
 want "passes --prerelease flag"        "flag=--prerelease"
 want "creates the release"             "gh release create"
+want "release includes the daemon tarballs" "dist/toolu-daemon-\*\.tar\.gz"
 # --- downstream chain (see the workflow header: a GITHUB_TOKEN-created release
 # emits no `release` event, so finalize/homebrew MUST be chained, not triggered) ---
 want "one release per tag"             "^concurrency:"

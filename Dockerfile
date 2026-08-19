@@ -10,6 +10,18 @@
 # runner — this file assumes no cross-compilation, only $TARGETARCH-aware
 # artifact selection. Builder suite (bookworm) is pinned to the runtime
 # base so the builder's glibc never exceeds the runtime's.
+#
+# Two published targets share one `runtime` payload:
+#
+#   --target runner  (default)  the lean image every provider pulls
+#   --target docker             the same payload plus a Docker daemon,
+#                               published under the `-docker` tag suffix
+#
+# `runner` is LAST on purpose: the last stage is what a bare `docker build .`
+# builds, and the lean image is the one that must stay the default. Fattening
+# it would slow the cold pull for every deployment — toolu.sh's
+# DEFAULT_RUNNER_IMAGE follows this repo's moving tag — while only VPS hosts
+# that opt in per host (`vps_hosts.image_ref`) need a daemon at all.
 
 FROM rust:1.94.1-bookworm AS builder
 WORKDIR /src
@@ -47,7 +59,7 @@ RUN set -eu; \
     rm "${tarball}"; \
   done
 
-FROM debian:bookworm-slim
+FROM debian:bookworm-slim AS runtime
 # Runtime surface for customer job steps:
 # - bash: the engine's default step shell (handlers/script.rs); sh rides along.
 # - git: bundled actions/checkout shells out to it.
@@ -89,6 +101,46 @@ RUN set -eu; \
 LABEL org.opencontainers.image.title="toolu-ghrunner" \
   org.opencontainers.image.description="One-shot GitHub Actions JIT runner for toolu.sh compute providers"
 
+# --- the Docker-capable variant -------------------------------------------
+# Opt-in per VPS host (`vps_hosts.image_ref`), never the default tag. The
+# container runs under `sysbox-runc`, which gives it a kernel-isolated
+# daemon of its own: no host socket is mounted in and no `--privileged` is
+# needed, so a job's `docker build` / `docker compose` / testcontainers step
+# cannot reach the host's Docker or its other tenants.
+#
+# Docker's own apt repository rather than bookworm's `docker.io` (20.10):
+# `docker buildx` and `docker compose` are what workflow steps actually
+# invoke, and neither ships in the distro package. apt verifies every package
+# against the keyring fetched here, so the fetch is the only trust step.
+FROM runtime AS docker
+ARG TARGETARCH
+RUN set -eu; \
+  apt-get update; \
+  apt-get install -y --no-install-recommends ca-certificates curl; \
+  install -m 0755 -d /etc/apt/keyrings; \
+  curl -fsSL https://download.docker.com/linux/debian/gpg \
+    -o /etc/apt/keyrings/docker.asc; \
+  chmod a+r /etc/apt/keyrings/docker.asc; \
+  printf '%s\n' \
+    "deb [arch=${TARGETARCH} signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable" \
+    > /etc/apt/sources.list.d/docker.list; \
+  apt-get update; \
+  apt-get install -y --no-install-recommends \
+    docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin; \
+  rm -rf /var/lib/apt/lists/*
+# The daemon has to be started by something, and that something must still
+# hand back the runner's exit code verbatim — see the script's header and
+# scripts/test/docker_entrypoint_test.sh.
+#
+# `--chmod`, not a COPY plus a `RUN chmod`: the mode is set as the layer is
+# written, so the entrypoint is executable even out of a checkout that lost
+# the bit, and no second copy of the file is layered on top to fix it.
+COPY --chmod=0755 scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+ENTRYPOINT ["docker-entrypoint.sh"]
+
+# --- the default image -----------------------------------------------------
+# Last stage on purpose: a bare `docker build .` must produce the lean image.
 # Providers pass no entrypoint/cmd/args override (the JIT config must never
 # reach argv — it would leak into provider dashboards). `boot` reads the env.
+FROM runtime AS runner
 ENTRYPOINT ["toolu-runner", "boot"]

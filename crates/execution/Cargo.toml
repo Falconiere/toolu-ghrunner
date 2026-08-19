@@ -47,7 +47,7 @@ tar = "0.4"
 flate2 = "1"
 
 # Docker
-bollard = "0.20"
+bollard = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
