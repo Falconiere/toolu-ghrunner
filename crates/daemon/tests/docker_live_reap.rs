@@ -282,19 +282,34 @@ async fn a_reap_racing_an_in_flight_create_stops_the_container_from_ever_startin
   };
   let (create_result, ()) = tokio::join!(create_call, reap_call);
 
-  if let Ok(created) = create_result {
-    // The reap lost the internal race: `finish_create` had already run
-    // before the tombstone landed. `reap`'s own task — already awaited to
-    // completion above — must still have removed what `create` "returned".
-    let still_there = container_exists(&docker, &created.container_id).await?;
-    assert!(
-      !still_there,
-      "a create that raced a reap must not leave its container behind, even when it briefly won"
-    );
+  match create_result {
+    Ok(created) => {
+      // The reap lost the internal race: `finish_create` had already run
+      // before the tombstone landed. `reap`'s own task — already awaited to
+      // completion above — must still have removed what `create` "returned".
+      let still_there = container_exists(&docker, &created.container_id).await?;
+      assert!(
+        !still_there,
+        "a create that raced a reap must not leave its container behind, even when it briefly won"
+      );
+    },
+    Err(err) => {
+      // The far likelier ordering — the tombstone landed while `docker
+      // create` was still in flight, and the container was discarded the
+      // moment it appeared — see `JobRegistry::finish_create`.
+      //
+      // Assert the reason, not merely that it failed: an unreachable Docker
+      // daemon also fails this create, and would otherwise satisfy the test
+      // without the race it exists to prove ever having happened. Both
+      // tombstone paths — `BeginOutcome::AlreadyReaped` and
+      // `FinishOutcome::DiscardReaped` — say "was reaped".
+      let reason = err.to_string();
+      assert!(
+        reason.contains("was reaped"),
+        "the only create this race may lose is one the reap took, but it failed with: {reason}"
+      );
+    },
   }
-  // else: the far likelier ordering — the tombstone landed while `docker
-  // create` was still in flight, and the container was discarded the
-  // moment it appeared — see `JobRegistry::finish_create`.
 
   let survivors = backend.existing_jobs().await?;
   assert!(
