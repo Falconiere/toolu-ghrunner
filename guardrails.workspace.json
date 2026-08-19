@@ -4,6 +4,7 @@
   "packages": [
     "crates/cache",
     "crates/config",
+    "crates/daemon",
     "crates/execution",
     "crates/expressions",
     "crates/listener",

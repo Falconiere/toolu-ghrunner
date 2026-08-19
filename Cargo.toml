@@ -9,6 +9,13 @@ edition = "2024"
 license = "MIT"
 repository = "https://github.com/Falconiere/toolu-ghrunner"
 
+# ── Shared third-party pins ────────────────────────────────────────
+# Crates used by more than one member live here so the pin has a single
+# source of truth. `bollard` drives Docker from both `execution` (job-level
+# service containers) and `daemon` (the per-job runner container).
+[workspace.dependencies]
+bollard = "0.20"
+
 # ── Shared lint configuration ──────────────────────────────────────
 # Strict by design — every error and warning is a code-quality signal we
 # don't want to ship. CI runs `cargo clippy --workspace --all-targets -D

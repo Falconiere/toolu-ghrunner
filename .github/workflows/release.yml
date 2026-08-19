@@ -75,6 +75,23 @@ jobs:
           path: dist/toolu-runner-${{ matrix.os }}-${{ matrix.arch }}.tar.gz
           if-no-files-found: error
 
+      # toolu-daemon ships linux-only: it runs on the toolu-operated compute
+      # box, never a developer's Mac, and crates/daemon depends on bollard
+      # talking to a local Docker socket — there is no macOS story for it.
+      - name: Build daemon release binary
+        if: matrix.os == 'linux'
+        run: cargo build --release --locked --bin toolu-daemon
+      - name: Package daemon tarball
+        if: matrix.os == 'linux'
+        run: bash scripts/package-daemon-release.sh "${{ matrix.os }}" "${{ matrix.arch }}" target/release/toolu-daemon dist
+      - name: Upload daemon tarball
+        if: matrix.os == 'linux'
+        uses: actions/upload-artifact@v7
+        with:
+          name: toolu-daemon-${{ matrix.os }}-${{ matrix.arch }}
+          path: dist/toolu-daemon-${{ matrix.os }}-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+
   publish:
     needs: build
     runs-on: ubuntu-24.04
@@ -107,7 +124,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${GITHUB_REF_NAME}" \
-            dist/toolu-runner-*.tar.gz dist/SHA256SUMS \
+            dist/toolu-runner-*.tar.gz dist/toolu-daemon-*.tar.gz dist/SHA256SUMS \
             --title "${GITHUB_REF_NAME}" \
             --notes-file release-notes.md \
             ${{ steps.pre.outputs.flag }}

@@ -18,6 +18,7 @@ didn't ask for.
 [vs. `actions/runner`](#vs-actionsrunner) ·
 [Container image](docs/container-image.md) ·
 [macOS image](docs/macos-image.md) ·
+[VPS host runbook](docs/vps-host-runbook.md) ·
 [Docs](docs/architecture.md)
 
 </div>

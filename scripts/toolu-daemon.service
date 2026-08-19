@@ -1,0 +1,97 @@
+[Unit]
+Description=toolu-daemon — toolu compute daemon (vps_hosts host)
+Documentation=https://github.com/Falconiere/toolu-ghrunner
+# Ordering only, not Requires=: some hosts run Docker via a differently
+# named unit (rootless mode, snap packaging), and a hard Requires= on a
+# unit that does not exist on this host would refuse to start the whole
+# service. The daemon itself already fails loudly and gets restarted by
+# Restart= below if Docker is not reachable at startup (crates/daemon's
+# main.rs: connect-to-Docker happens before the listener binds).
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=toolu-daemon
+Group=toolu-daemon
+# The daemon is a Docker client (bollard, over the local Docker socket) that
+# turns POST /v1/jobs into `docker create`/`start`/reap calls — unlike
+# toolu-runner, which never touches Docker on the host. It is not sandboxed
+# away from the socket: the service user is added to the docker group
+# (typically root:docker 0660 on /var/run/docker.sock) instead of running as
+# root, and nothing in the hardening block below restricts the AF_UNIX
+# connect() a Docker client needs.
+SupplementaryGroups=docker
+WorkingDirectory=/var/lib/toolu-daemon
+ExecStart=/usr/local/bin/toolu-daemon
+Restart=always
+RestartSec=10
+
+# The daemon takes no CLI flags — its whole configuration is sourced from
+# the process environment (crates/daemon/src/config.rs). Required, no
+# default:
+#   TOOLU_DAEMON_TOKEN_FILE  Path to the bearer token file. Line 1 is the
+#                            current token; an optional line 2 is the
+#                            previous token, accepted during rotation.
+#                            Re-read fresh on every request — rotating the
+#                            file's contents takes effect without
+#                            restarting this unit.
+#                            COMPAT: this line-1-current / optional-line-2-
+#                            previous layout is the wire format toolu.sh's
+#                            console writes to the box. The daemon build and
+#                            the console's token-file writer must agree on
+#                            it byte-for-byte; it is a compat contract
+#                            between the two, not a local convention, so a
+#                            format change is breaking on both sides and
+#                            must ship to them together.
+#   TOOLU_DAEMON_VCPU        Whole vCPU budget for concurrent jobs.
+#   TOOLU_DAEMON_MEMORY_MB   Memory budget, in MB, for concurrent jobs.
+#   TOOLU_DAEMON_IMAGE       OCI image ref pre-pulled at startup.
+# Optional (default in parentheses):
+#   TOOLU_DAEMON_BIND        Listen address (127.0.0.1:8080).
+#   TOOLU_DAEMON_QUEUE_MAX   Queue-depth ceiling before a request is
+#                            refused (32).
+#   TOOLU_DAEMON_RUNTIME     Docker runtime for job containers
+#                            (sysbox-runc).
+# Set them in /etc/toolu-daemon/toolu-daemon.env — provisioned onto the
+# host by whoever stands it up, not shipped by this repo. Required, not
+# optional (no leading '-'): the daemon has no config file to fall back to
+# if this is absent, so a missing file is a startup error, not a silent
+# empty-env launch.
+EnvironmentFile=/etc/toolu-daemon/toolu-daemon.env
+
+# Hardening — same posture as toolu-runner.service, minus any writable
+# path: the daemon persists nothing to disk (state lives in Docker, rebuilt
+# from container labels at startup; see crates/daemon/README.md), so unlike
+# the runner it declares no ReadWritePaths at all. Neither
+# ProtectSystem=strict nor ProtectHome=true blocks *reading*
+# /etc/toolu-daemon/toolu-daemon.env or the token file it points at — both
+# live outside /home, and a read-only mount still permits reads.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+MemoryDenyWriteExecute=true
+LockPersonality=true
+SystemCallArchitectures=native
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=toolu-daemon
+
+# Resource limits
+LimitNOFILE=65536
+TasksMax=infinity
+TimeoutStopSec=30
+KillMode=mixed
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target

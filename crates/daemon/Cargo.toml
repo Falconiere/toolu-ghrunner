@@ -1,0 +1,46 @@
+[package]
+name = "daemon"
+version.workspace = true
+edition.workspace = true
+publish = false
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "toolu-daemon"
+path = "src/main.rs"
+
+[dependencies]
+# Docker orchestration — the pin lives in the workspace manifest.
+bollard = { workspace = true }
+
+# Async runtime
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "signal", "fs", "net"] }
+
+# Draining bollard's image-pull progress stream; the pull is only finished
+# when the stream is. Same pin as the five other crates in this workspace.
+futures-util = "0.3"
+
+# HTTP surface
+axum = "0.8"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Diagnostics
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tempfile = "3"
+# Real HTTP client for the routes tests — real requests against a real
+# server, never a mock transport. No TLS backend: every test target is a
+# plain-http loopback address.
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+# The shared VPS contract fixture's drift guard: hashes the fixture bytes at
+# test time and compares against the recorded value next to it.
+sha2 = "0.10"
+
+[lints]
+workspace = true

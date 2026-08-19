@@ -1,0 +1,79 @@
+name: daemon-live
+on:
+  workflow_dispatch:
+
+jobs:
+  daemon-live:
+    # The toolu-operated box — the one place in this repo's CI with a real
+    # Docker daemon reachable at all, matching the repo's other *-live.yml
+    # workflows (journal-live.yml, cancel-live.yml, …), which all run here
+    # rather than on GitHub's hosted runners. ubuntu-latest has Docker but no
+    # sysbox-runc; macos-14 has no Docker at all — see crates/daemon/tests/
+    # docker_live.rs's module docs.
+    runs-on: [self-hosted, toolu-runner-v1]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.94.1
+
+      # Docker is a hard requirement for every test this workflow runs. A box
+      # without it must fail loudly right here, not let `cargo test
+      # --ignored` quietly report "0 passed" and go green.
+      - name: Docker is reachable
+        run: docker info
+
+      # No test `docker_live*.rs` currently runs needs sysbox-runc — see
+      # docker_live.rs's module docs: everything here proves the daemon's own
+      # Docker calls, not isolation. But AC-9 (a job container running
+      # `docker build` + `docker run --rm hello-world` under sysbox, spec
+      # 2026-08-19-ovh-compute-and-vps-daemon-design.md) has no coverage
+      # anywhere until this runtime is registered here, so its absence is
+      # reported loudly rather than passed over in silence — a warning, not a
+      # failure, because nothing this workflow runs today actually needs it.
+      - name: sysbox-runc registration (no test here exercises it yet)
+        shell: bash
+        run: |
+          set -uo pipefail
+          if docker info --format '{{json .Runtimes}}' 2>/dev/null | grep -q '"sysbox-runc"'; then
+            echo "sysbox-runc is registered as a Docker runtime"
+          else
+            echo "::warning::sysbox-runc is not registered as a Docker runtime on this runner (docs/container-image.md has the install steps). Nothing this workflow currently runs needs it, but AC-9 has no coverage anywhere until it is installed."
+          fi
+
+      - name: Run the live Docker suite
+        shell: bash
+        run: |
+          set -uo pipefail
+          cargo test -p daemon -- --ignored 2>&1 | tee /tmp/daemon-live-output.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            echo "::error::cargo test -p daemon -- --ignored exited $status"
+            exit "$status"
+          fi
+
+      # A filter that matches nothing runs 0 tests and exits 0 — the same
+      # green a real pass would report. Confirm at least one live test
+      # binary actually reported a nonzero pass count, not just a clean exit.
+      - name: Confirm the ignored tests actually ran
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! grep -qE 'test result: ok\. [1-9][0-9]* passed; 0 failed' /tmp/daemon-live-output.log; then
+            echo "::error::no live test binary reported passing ignored tests — see the previous step's log"
+            exit 1
+          fi
+
+      # Every test in this suite is expected to clean up after itself; this
+      # is the independent check that it actually did, run whether or not
+      # the tests themselves passed.
+      - name: No job containers were left behind
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          leftover=$(docker ps -a --filter label=sh.toolu.job-id -q)
+          if [ -n "$leftover" ]; then
+            echo "::error::the live suite left containers behind"
+            docker ps -a --filter label=sh.toolu.job-id
+            exit 1
+          fi
+          echo "no leftover sh.toolu.job-id containers"
