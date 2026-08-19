@@ -78,7 +78,7 @@ async fn spawn_live_daemon(
     vcpu: 64,
     memory_mb: 131_072,
   };
-  let state = AppState::new(backend, Gate::new(budget, 32), token_file);
+  let state = AppState::new(backend, Gate::new(budget, 32), token_file, IMAGE);
   let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
   let addr = listener.local_addr()?;
   tokio::spawn(async move {

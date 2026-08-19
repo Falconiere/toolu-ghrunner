@@ -15,7 +15,10 @@ path = "src/main.rs"
 bollard = { workspace = true }
 
 # Async runtime
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "signal", "fs", "net"] }
+# `io-util` is for the routes tests alone: reproducing a client disconnect
+# deterministically needs a raw socket the test hangs up on at a chosen
+# moment, which no HTTP client exposes.
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "signal", "fs", "net", "io-util"] }
 
 # Draining bollard's image-pull progress stream; the pull is only finished
 # when the stream is. Same pin as the five other crates in this workspace.

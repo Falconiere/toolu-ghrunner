@@ -33,6 +33,7 @@ use daemon::adopt;
 use daemon::config::{Config, ConfigError};
 use daemon::docker::DockerBackend;
 use daemon::gate::{Gate, JobSize};
+use daemon::logging::log_filter;
 use daemon::prepull::{RefreshDecision, StartupDecision, refresh_decision, startup_decision};
 use daemon::routes::state::AppState;
 
@@ -152,7 +153,11 @@ fn budget_of(config: &Config) -> JobSize {
 }
 
 fn main() -> ExitCode {
-  tracing_subscriber::fmt().with_env_filter("info").init();
+  // `RUST_LOG` decides everything except bollard's ceiling — see
+  // `daemon::logging`, which is where the reason that ceiling exists lives.
+  tracing_subscriber::fmt()
+    .with_env_filter(log_filter(daemon::config::log_directives().as_deref()))
+    .init();
 
   let runtime = match tokio::runtime::Runtime::new() {
     Ok(runtime) => runtime,
@@ -186,6 +191,7 @@ async fn run() -> Result<(), StartupError> {
     backend.clone(),
     Gate::new(budget_of(&config), config.queue_max),
     config.token_file.clone(),
+    &config.image,
   );
 
   adopt_existing_jobs(&backend, &state).await?;

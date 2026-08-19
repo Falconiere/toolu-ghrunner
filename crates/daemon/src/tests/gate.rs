@@ -275,3 +275,67 @@ fn a_job_exactly_at_the_total_budget_boundary_is_not_exceeds_budget() {
 
   assert_eq!(gate.admit(&a, budget), Ok(()));
 }
+
+/// `unstart` gives back exactly the budget a start took, and nothing else:
+/// the job keeps its queue slot, because it is still a job this daemon owes
+/// a run. This is what a failed `docker start` needs — the gate marks a job
+/// running before the caller has actually started it, so a start that failed
+/// leaves a claim only this can undo.
+#[test]
+fn unstart_frees_the_budget_and_keeps_the_queue_slot() {
+  let mut gate = Gate::new(TAG_16VCPU_32GB, 8);
+  let a = JobId::new("job-a");
+
+  assert!(gate.admit(&a, TAG_8VCPU_16GB).is_ok());
+  assert_eq!(gate.try_start(&a), Some(StartOutcome::Started));
+  assert_eq!(gate.consumption().vcpu_used, 8);
+
+  assert!(gate.unstart(&a), "the gate still tracks this job");
+  assert_eq!(gate.consumption().vcpu_used, 0, "the budget came back");
+  assert_eq!(
+    gate.consumption().queue_depth,
+    1,
+    "the job is still admitted — it has not run yet"
+  );
+  assert!(
+    gate.running_job_ids().is_empty(),
+    "nothing may still be reported running: the reaper reads this against Docker's own \
+     container list and would call the disagreement an exit"
+  );
+
+  // And it can start again, which is the whole point of putting it back.
+  assert_eq!(gate.try_start(&a), Some(StartOutcome::Started));
+  assert_eq!(gate.consumption().vcpu_used, 8);
+}
+
+/// A job the gate no longer tracks cannot be un-started — the caller needs
+/// that answer to know there is nothing left to re-queue.
+#[test]
+fn unstart_reports_a_job_the_gate_no_longer_tracks() {
+  let mut gate = Gate::new(TAG_16VCPU_32GB, 8);
+  let a = JobId::new("job-a");
+
+  assert!(!gate.unstart(&a), "never admitted");
+
+  assert!(gate.admit(&a, TAG_2VCPU_4GB).is_ok());
+  assert_eq!(gate.try_start(&a), Some(StartOutcome::Started));
+  gate.release(&a);
+  assert!(!gate.unstart(&a), "released while the start was in flight");
+}
+
+/// `tracks` answers for both states a tracked job can be in, and stops
+/// answering the moment the job is released — the check a create that
+/// finished has to make before recording anything against it.
+#[test]
+fn tracks_follows_admission_through_start_and_release() {
+  let mut gate = Gate::new(TAG_16VCPU_32GB, 8);
+  let a = JobId::new("job-a");
+
+  assert!(!gate.tracks(&a));
+  assert!(gate.admit(&a, TAG_4VCPU_8GB).is_ok());
+  assert!(gate.tracks(&a), "admitted, not started yet");
+  assert_eq!(gate.try_start(&a), Some(StartOutcome::Started));
+  assert!(gate.tracks(&a), "and once running");
+  gate.release(&a);
+  assert!(!gate.tracks(&a), "released");
+}

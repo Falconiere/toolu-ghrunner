@@ -10,7 +10,7 @@
 
 use std::time::Instant;
 
-use super::{ContainerSnapshot, CreatedContainers, StartQueue, reconcile};
+use super::{ContainerSnapshot, CreatedContainers, StartQueue, StartRequest, reconcile};
 use crate::docker::registry::{BeginOutcome, FinishOutcome, JobRegistry};
 use crate::gate::{AdmitError, Gate, JobId, JobSize, StartOutcome};
 
@@ -79,7 +79,13 @@ fn an_exit_frees_exactly_its_own_budget_and_promotes_a_waiting_job() {
     &snapshot,
     JUST_BEFORE_DEADLINE_MS,
   );
-  assert_eq!(first_tick.start, vec!["container-a".to_owned()]);
+  assert_eq!(
+    first_tick.start,
+    vec![StartRequest {
+      job_id: job_a.clone(),
+      container_id: "container-a".to_owned(),
+    }]
+  );
   assert!(first_tick.remove.is_empty());
   assert_eq!(gate.running_job_ids(), vec![job_a.clone()]);
   assert_eq!(queue.len(), 1);
@@ -101,7 +107,13 @@ fn an_exit_frees_exactly_its_own_budget_and_promotes_a_waiting_job() {
     JUST_BEFORE_DEADLINE_MS,
   );
   assert_eq!(second_tick.remove, vec!["container-a".to_owned()]);
-  assert_eq!(second_tick.start, vec!["container-b".to_owned()]);
+  assert_eq!(
+    second_tick.start,
+    vec![StartRequest {
+      job_id: job_b.clone(),
+      container_id: "container-b".to_owned(),
+    }]
+  );
   assert_eq!(gate.running_job_ids(), vec![job_b]);
   assert!(queue.is_empty());
   assert_eq!(gate.consumption().vcpu_used, 8);

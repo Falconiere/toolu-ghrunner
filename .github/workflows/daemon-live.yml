@@ -1,4 +1,30 @@
 name: daemon-live
+#
+# NOTHING HERE GATES A PUSH. This workflow is `workflow_dispatch` only — a
+# real Docker box is not something to dispatch on every commit — and
+# `cargo test --workspace` (ci.yml) never runs an `#[ignore]`d test. So every
+# invariant whose ONLY coverage is a `docker_live*.rs` test has no automated
+# gate at all: it is checked when a human remembers to press the button.
+#
+# Deliberate, and the trade is stated rather than assumed. What that leaves
+# ungated today, and what it does not:
+#
+#   - Ungated: everything that needs a real Docker daemon to be honest —
+#     the reconcile tick's real `docker start`/remove calls, startup
+#     adoption, the pre-pull, the create/destroy/reap round trips, and the
+#     two start-failure paths in docker_live_start.rs.
+#   - Gated by `cargo test --workspace`, deliberately not left to this
+#     workflow: the resource gate's own accounting (a failed create gives its
+#     queue slot back, a client disconnect does not leak one, a reap that
+#     settled nothing does not free budget), because those are pure decisions
+#     the router and the gate make with no Docker in the loop —
+#     `crates/daemon/src/tests/routes_lifecycle.rs` and
+#     `crates/daemon/src/tests/docker.rs` cover them there.
+#
+# Run this by hand after any change to `crates/daemon/src/docker.rs`,
+# `reaper.rs` or `adopt.rs`. If that discipline ever proves too thin, the fix
+# is a scheduled trigger or a `--ignored` leg on a Docker-capable runner, not
+# a comment.
 on:
   workflow_dispatch:
 

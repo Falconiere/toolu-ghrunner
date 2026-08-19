@@ -33,19 +33,30 @@ pub struct AppState<B: JobBackend> {
   /// Bearer token file path, re-read fresh on every request by
   /// `crate::auth::verify_bearer`.
   pub token_file: Arc<PathBuf>,
+  /// The one image this host serves — `TOOLU_DAEMON_IMAGE`, the image
+  /// `crate::prepull` pulls at startup and keeps resident.
+  ///
+  /// A create names its own image (`vps_hosts.image_ref`, carried on the
+  /// request), and the two can drift. Only this one is ever pre-pulled, so a
+  /// request for any other image is a job this host cannot run at all —
+  /// `crate::routes::handlers::create_job` refuses it rather than let every
+  /// create fail deep inside Docker as an image that is merely "not resident
+  /// yet".
+  pub pinned_image: Arc<str>,
 }
 
 impl<B: JobBackend> AppState<B> {
-  /// Build router state from an already-constructed backend and gate. The
-  /// start queue and created-container map always begin empty — nothing has
-  /// created a container yet.
-  pub fn new(backend: B, gate: Gate, token_file: PathBuf) -> Self {
+  /// Build router state from an already-constructed backend and gate, for a
+  /// host serving `pinned_image`. The start queue and created-container map
+  /// always begin empty — nothing has created a container yet.
+  pub fn new(backend: B, gate: Gate, token_file: PathBuf, pinned_image: &str) -> Self {
     Self {
       backend,
       gate: Arc::new(Mutex::new(gate)),
       start_queue: Arc::new(Mutex::new(StartQueue::new())),
       created_containers: Arc::new(Mutex::new(CreatedContainers::new())),
       token_file: Arc::new(token_file),
+      pinned_image: Arc::from(pinned_image),
     }
   }
 }

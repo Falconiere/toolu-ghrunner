@@ -15,6 +15,17 @@ use axum::response::Response;
 use crate::auth::verify_bearer;
 use crate::routes::error::error_response;
 
+/// The body every rejection answers with, whatever the reason.
+///
+/// One fixed string, deliberately: `AuthError`'s own `Display` distinguishes a
+/// missing header from a bad scheme from a mismatched token, and
+/// `AuthError::TokenFile` interpolates a `ConfigError` that carries the token
+/// file's absolute path. On the wire that is an oracle — anyone who can reach
+/// the tunnel learns where this box keeps its bearer token, and which of the
+/// four ways their credential was wrong. The detail goes to the daemon's log,
+/// where the operator who needs it already is.
+const UNAUTHORIZED_BODY: &str = "unauthorized";
+
 /// Reject any request whose `Authorization` header does not verify against
 /// the current (or rotating-previous) bearer token with a 401; otherwise
 /// pass it through to the next layer/handler unchanged.
@@ -30,6 +41,9 @@ pub async fn require_bearer(
 
   match verify_bearer(header, &token_file) {
     Ok(()) => next.run(request).await,
-    Err(err) => error_response(StatusCode::UNAUTHORIZED, err.to_string()),
+    Err(err) => {
+      tracing::warn!(error = %err, "rejecting a request with invalid bearer credentials");
+      error_response(StatusCode::UNAUTHORIZED, UNAUTHORIZED_BODY)
+    },
   }
 }

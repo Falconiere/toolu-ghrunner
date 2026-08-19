@@ -253,6 +253,40 @@ impl Gate {
     Some(StartOutcome::Started)
   }
 
+  /// Put an already-started job back in the "admitted, not running" state,
+  /// giving its budget back while keeping its queue slot — what
+  /// `crate::docker::DockerBackend::tick` does when the `docker start` it
+  /// issued for a promoted job fails. [`Self::try_start`] marks a job running
+  /// before the caller has actually started it, so without this a transient
+  /// start failure would leave the gate believing a container is running that
+  /// is not, and the next `crate::reaper::reconcile` pass would read that
+  /// disagreement as an exit and remove a container the customer already has
+  /// a 201 for.
+  ///
+  /// Returns `false` when `job_id` is not tracked at all — reaped, destroyed
+  /// or released while the start was in flight — which tells the caller there
+  /// is no job left to re-queue.
+  pub fn unstart(&mut self, job_id: &JobId) -> bool {
+    match self.jobs.get_mut(job_id) {
+      Some(entry) => {
+        entry.running = false;
+        true
+      },
+      None => false,
+    }
+  }
+
+  /// Whether the gate still tracks `job_id` at all, running or queued.
+  ///
+  /// `crate::routes::handlers` needs this to tell a create that finished
+  /// normally from one whose job was reaped, destroyed or reconciled away
+  /// while `docker create` was in flight: recording a container for a job the
+  /// gate has already let go would leave two maps holding an entry nothing
+  /// ever drains.
+  pub fn tracks(&self, job_id: &JobId) -> bool {
+    self.jobs.contains_key(job_id)
+  }
+
   /// Release `job_id` — call this when its container exits, whether it
   /// finished normally or is being reaped after a daemon restart. Frees its
   /// queue slot and, if it had started, the budget it held.

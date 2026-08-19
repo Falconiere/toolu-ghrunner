@@ -52,10 +52,10 @@ use bollard::query_parameters::{
   StartContainerOptions,
 };
 
-use crate::gate::Gate;
-use crate::reaper::{self, CreatedContainers, StartQueue};
+use crate::gate::{Gate, JobId};
+use crate::reaper::{self, CreatedContainers, StartQueue, StartRequest};
 use crate::routes::backend::{
-  BackendError, CreateError, CreateJobResult, DestroyOutcome, JobBackend,
+  BackendError, CreateError, CreateJobResult, DestroyOutcome, JobBackend, ReapOutcome,
 };
 use crate::routes::wire::CreateJobRequest;
 use registry::{BeginOutcome, FinishOutcome, JobRegistry};
@@ -158,20 +158,49 @@ impl DockerBackend {
   /// Reap on a detached task: mark the tombstone, then remove the container
   /// this process knows about and anything Docker still labels with `job_id`
   /// — the second half covers containers created before a daemon restart.
-  async fn run_reap(&self, job_id: &str) {
+  ///
+  /// Reports [`ReapOutcome::Unresolved`] unless every removal succeeded *and*
+  /// the listing that proves nothing else matched succeeded. The caller
+  /// answers 204 regardless; what it must not do on `Unresolved` is release
+  /// the job's budget, because a container that is still running still holds
+  /// the box's real vCPU and memory.
+  async fn run_reap(&self, job_id: &str) -> ReapOutcome {
     let known_container = self.registry().reap(job_id, Instant::now());
+    let mut settled = true;
     if let Some(container_id) = known_container {
-      self.force_remove(&container_id).await;
+      settled &= self.force_remove(&container_id).await;
     }
-    for container_id in self.containers_labelled(job_id).await {
-      self.force_remove(&container_id).await;
+
+    match self.containers_labelled(job_id).await {
+      Ok(container_ids) => {
+        for container_id in container_ids {
+          settled &= self.force_remove(&container_id).await;
+        }
+      },
+      Err(err) => {
+        tracing::warn!(job_id, error = %err, "listing containers for reap failed");
+        settled = false;
+      },
+    }
+
+    if settled {
+      ReapOutcome::Settled
+    } else {
+      ReapOutcome::Unresolved
     }
   }
 
   /// Every container id Docker currently labels `sh.toolu.job-id=<job_id>`,
-  /// running or not. A listing failure is logged and read as "none": reap
-  /// answers 204 either way, and `vps/verify.ts` depends on that.
-  async fn containers_labelled(&self, job_id: &str) -> Vec<String> {
+  /// running or not.
+  ///
+  /// # Errors
+  ///
+  /// Returns the bollard error when the listing itself failed. That is not
+  /// the same answer as an empty list and must not be flattened into one:
+  /// "Docker says this job has no containers" is what lets a reap release the
+  /// job's budget, while "Docker would not say" leaves a container that may
+  /// still be running unaccounted for.
+  async fn containers_labelled(&self, job_id: &str) -> Result<Vec<String>, DockerError> {
     let filters = HashMap::from([("label".to_owned(), vec![format!("{LABEL_JOB_ID}={job_id}")])]);
     let options = ListContainersOptions {
       all: true,
@@ -179,30 +208,35 @@ impl DockerBackend {
       ..ListContainersOptions::default()
     };
 
-    match self.docker.list_containers(Some(options)).await {
-      Ok(containers) => containers
+    let containers = self.docker.list_containers(Some(options)).await?;
+    Ok(
+      containers
         .into_iter()
         .filter_map(|container| container.id)
         .collect(),
-      Err(err) => {
-        tracing::warn!(job_id, error = %err, "listing containers for reap failed");
-        Vec::new()
-      },
-    }
+    )
   }
 
-  /// Kill-and-remove `container_id`, best effort. Used where the caller has
-  /// nowhere honest to report a failure — a reap answers 204 regardless, and
-  /// a container left behind by a failed removal is what the deadline reaper
-  /// exists for.
-  async fn force_remove(&self, container_id: &str) {
-    if let Err(err) = self
+  /// Kill-and-remove `container_id`, reporting whether it is now certainly
+  /// gone — `true` also for a container Docker no longer has, which is the
+  /// removal already having happened rather than a failure.
+  ///
+  /// `false` means the container may well still be running. Callers that have
+  /// nowhere to report that (the discard-a-reaped-create path, the reaper's
+  /// own removals) let the deadline reaper try again; the reap route uses it
+  /// to decide whether the job's budget may be released at all.
+  async fn force_remove(&self, container_id: &str) -> bool {
+    match self
       .docker
       .remove_container(container_id, Some(force_remove_options()))
       .await
-      && !is_not_found(&err)
     {
-      tracing::warn!(container_id, error = %err, "removing container failed");
+      Ok(()) => true,
+      Err(err) if is_not_found(&err) => true,
+      Err(err) => {
+        tracing::warn!(container_id, error = %err, "removing container failed");
+        false
+      },
     }
   }
 
@@ -227,21 +261,33 @@ impl DockerBackend {
   ///
   /// # Errors
   ///
-  /// Returns [`BackendError`] on any failure — the caller (`Self::tick`)
-  /// logs it and leaves the container queued for the next tick to retry;
-  /// there is nowhere else honest for this to surface.
-  async fn start_container(&self, container_id: &str) -> Result<(), BackendError> {
+  /// Returns [`StartFailure`] on any failure. `Self::start_promoted` is the
+  /// only caller and acts on the distinction: a container Docker no longer
+  /// has is gone for good and its job is released, while any other failure
+  /// (sysbox-runc not ready yet, a cgroup hiccup) puts the job back in the
+  /// start queue for the next tick to retry. Neither leaves the gate marking
+  /// a job running that is not — which is what made a single transient
+  /// failure remove a container the customer already had a 201 for.
+  async fn start_container(&self, container_id: &str) -> Result<(), StartFailure> {
     self
       .docker
       .start_container(container_id, None::<StartContainerOptions>)
       .await
-      .map_err(|err| BackendError(format!("docker start failed: {err}")))
+      .map_err(|err| {
+        if is_not_found(&err) {
+          StartFailure::NoSuchContainer
+        } else {
+          StartFailure::Transient(format!("docker start failed: {err}"))
+        }
+      })
   }
 
   /// Every container this daemon labelled, live or exited, as
   /// [`reaper::ContainerSnapshot`]s — the ground truth [`Self::tick`]
-  /// reconciles against. A listing failure is logged and read as "none",
-  /// same as [`Self::containers_labelled`]: the next tick tries again.
+  /// reconciles against. A listing failure here *is* logged and read as
+  /// "none" — unlike [`Self::containers_labelled`], nothing is released off
+  /// an empty snapshot, so the only cost is a tick that decides nothing and a
+  /// next tick that tries again.
   async fn snapshot(&self) -> Vec<reaper::ContainerSnapshot> {
     let filters = HashMap::from([("label".to_owned(), vec![LABEL_JOB_ID.to_owned()])]);
     let options = ListContainersOptions {
@@ -296,12 +342,110 @@ impl DockerBackend {
     for container_id in &outcome.remove {
       self.force_remove(container_id).await;
     }
-    for container_id in &outcome.start {
-      if let Err(err) = self.start_container(container_id).await {
-        tracing::warn!(container_id, error = %err, "starting a promoted container failed");
+    self
+      .start_promoted(&outcome.start, gate, queue, created)
+      .await;
+  }
+
+  /// `docker start` everything this tick promoted, and put back whatever the
+  /// start could not deliver.
+  ///
+  /// [`reaper::reconcile`] marks a promoted job running in the gate and drops
+  /// it from the start queue *before* this runs, so a start that fails leaves
+  /// the gate holding a claim nothing backs. Both failure paths undo that
+  /// claim rather than log and move on: the next tick would otherwise see the
+  /// gate's "running" against Docker's "not running", read it as an exit, and
+  /// force-remove a container the customer already has a 201 for — turning
+  /// one transient failure into a job that hangs to GitHub's 24-hour timeout.
+  async fn start_promoted(
+    &self,
+    requests: &[StartRequest],
+    gate: &Mutex<Gate>,
+    queue: &Mutex<StartQueue>,
+    created: &Mutex<CreatedContainers>,
+  ) {
+    for request in requests {
+      let container_id = request.container_id.as_str();
+      match self.start_container(container_id).await {
+        Ok(()) => {},
+        Err(StartFailure::Transient(reason)) => {
+          tracing::warn!(
+            container_id,
+            job_id = request.job_id.as_str(),
+            error = reason.as_str(),
+            "starting a promoted container failed; re-queueing it for the next tick"
+          );
+          requeue_after_failed_start(gate, queue, &request.job_id);
+        },
+        Err(StartFailure::NoSuchContainer) => {
+          tracing::warn!(
+            container_id,
+            job_id = request.job_id.as_str(),
+            "the container promoted for this job no longer exists; releasing the job"
+          );
+          self.release_vanished(gate, queue, created, &request.job_id);
+        },
       }
     }
   }
+
+  /// Release a promoted job whose container Docker no longer has. No later
+  /// snapshot can mention a container that does not exist, so neither the
+  /// exit pass nor the deadline pass of [`reaper::reconcile`] would ever
+  /// reach this job — re-queueing it would hold its slot until the daemon
+  /// restarts.
+  fn release_vanished(
+    &self,
+    gate: &Mutex<Gate>,
+    queue: &Mutex<StartQueue>,
+    created: &Mutex<CreatedContainers>,
+    job_id: &JobId,
+  ) {
+    let mut gate = gate.lock().unwrap_or_else(PoisonError::into_inner);
+    let mut registry = self.registry();
+    let mut queue = queue.lock().unwrap_or_else(PoisonError::into_inner);
+    let mut created = created.lock().unwrap_or_else(PoisonError::into_inner);
+    reaper::release_job(
+      &mut gate,
+      &mut registry,
+      &mut queue,
+      &mut created,
+      job_id.as_str(),
+    );
+  }
+}
+
+/// Why a promoted container could not be started.
+#[derive(Debug)]
+enum StartFailure {
+  /// Docker has no such container — it was removed out from under this
+  /// daemon, so there is nothing left to retry.
+  NoSuchContainer,
+  /// Any other failure, with Docker's own words. Assumed retryable: the
+  /// container still exists, and the conditions that produce this (a runtime
+  /// that is not ready yet, a cgroup that could not be created) clear on
+  /// their own.
+  Transient(String),
+}
+
+/// Undo the gate claim [`reaper::reconcile`] took for a job whose `docker
+/// start` failed, and put it back at the end of the start queue.
+///
+/// Back, not front: a container that just refused to start is the one least
+/// likely to start on the next attempt, and everything already queued has
+/// been waiting at least as long. A job the gate no longer tracks — reaped or
+/// destroyed while the start was in flight — is not re-queued at all; there
+/// is no job left to run.
+fn requeue_after_failed_start(gate: &Mutex<Gate>, queue: &Mutex<StartQueue>, job_id: &JobId) {
+  let mut gate = gate.lock().unwrap_or_else(PoisonError::into_inner);
+  let still_tracked = gate.unstart(job_id);
+  drop(gate);
+  if !still_tracked {
+    return;
+  }
+
+  let mut queue = queue.lock().unwrap_or_else(PoisonError::into_inner);
+  queue.push(job_id.clone());
 }
 
 /// Build a [`reaper::ContainerSnapshot`] from one listed container, skipping
@@ -416,12 +560,16 @@ impl JobBackend for DockerBackend {
     }
   }
 
-  async fn reap(&self, job_id: &str) {
+  async fn reap(&self, job_id: &str) -> ReapOutcome {
     let worker = self.clone();
     let owned_job_id = job_id.to_owned();
     let task = tokio::spawn(async move { worker.run_reap(&owned_job_id).await });
-    if let Err(join_err) = task.await {
-      tracing::warn!(job_id, error = %join_err, "reap task did not finish");
+    match task.await {
+      Ok(outcome) => outcome,
+      Err(join_err) => {
+        tracing::warn!(job_id, error = %join_err, "reap task did not finish");
+        ReapOutcome::Unresolved
+      },
     }
   }
 }

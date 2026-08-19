@@ -132,6 +132,24 @@ impl ContainerSnapshot {
   }
 }
 
+/// One container the tick promoted, and the job it serves.
+///
+/// The job id travels with the container id because a `docker start` can
+/// fail — [`promote`] has already marked the job running in the gate and
+/// taken it out of the queue by the time the caller issues that start, so a
+/// failure has to be able to put both back. Without the job id the caller
+/// would hold a container id it cannot map to a gate entry, and the next
+/// [`reconcile`] pass would read the gate's "running" against Docker's "not
+/// running" as an exit and remove a container the customer already has a 201
+/// for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StartRequest {
+  /// GitHub's own job id — the gate's and the start queue's key.
+  pub job_id: JobId,
+  /// The container to `docker start`.
+  pub container_id: String,
+}
+
 /// What one [`reconcile`] tick decided, in terms the caller executes
 /// against Docker.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -139,9 +157,9 @@ pub struct TickOutcome {
   /// Container ids to force-remove: exited on their own, or outlived their
   /// deadline while still running.
   pub remove: Vec<String>,
-  /// Container ids to `docker start`, in the order they should be started
-  /// — budget this tick freed now covers them.
-  pub start: Vec<String>,
+  /// Containers to `docker start`, in the order they should be started —
+  /// budget this tick freed now covers them.
+  pub start: Vec<StartRequest>,
 }
 
 /// Try to start every job in `queue`'s arrival order against `gate`'s
@@ -163,7 +181,13 @@ fn promote(gate: &mut Gate, queue: &mut StartQueue) -> Vec<JobId> {
 /// place in the start queue (if it never started), and its recorded
 /// container id. Returns the freed footprint, or `None` if `job_id` was not
 /// tracked — releasing an id twice is a no-op, not an error.
-fn release_job(
+///
+/// Public because [`reconcile`] is not the only place a job stops being this
+/// daemon's responsibility: `crate::docker::DockerBackend::tick` calls it for
+/// a promoted job whose container Docker no longer has, which no later
+/// snapshot can ever mention again and which would otherwise hold its queue
+/// slot forever.
+pub fn release_job(
   gate: &mut Gate,
   registry: &mut JobRegistry,
   queue: &mut StartQueue,
@@ -234,8 +258,14 @@ pub fn reconcile(
 
   let promoted = promote(gate, queue);
   let start = promoted
-    .iter()
-    .filter_map(|job_id| created.existing(job_id.as_str()).map(str::to_owned))
+    .into_iter()
+    .filter_map(|job_id| {
+      let container_id = created.existing(job_id.as_str())?.to_owned();
+      Some(StartRequest {
+        job_id,
+        container_id,
+      })
+    })
     .collect();
 
   TickOutcome { remove, start }

@@ -14,6 +14,10 @@ const DEFAULT_BIND: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCA
 const DEFAULT_QUEUE_MAX: u32 = 32;
 /// Default container runtime when `TOOLU_DAEMON_RUNTIME` is unset.
 const DEFAULT_RUNTIME: &str = "sysbox-runc";
+/// The variable `tracing_subscriber`'s `EnvFilter` reads by convention, and
+/// the only setting this daemon takes from the environment outside
+/// [`Config`].
+const LOG_ENV: &str = "RUST_LOG";
 
 /// Errors produced while loading daemon configuration or reading the token file.
 #[derive(Debug)]
@@ -178,6 +182,19 @@ impl Config {
       image,
     })
   }
+}
+
+/// The raw `RUST_LOG` value, or `None` when it is unset.
+///
+/// Read here rather than at the logging call site because this module is the
+/// crate's one door to the process environment — `crate::logging::log_filter`
+/// turns the value into the filter that is actually installed.
+///
+/// A value that is not valid UTF-8 reads as unset. There is no subscriber
+/// installed yet to report that through, and the fallback it lands on is the
+/// default filter, never a more verbose one.
+pub fn log_directives() -> Option<String> {
+  ProcessEnv.lookup(LOG_ENV).unwrap_or_default()
 }
 
 /// The current and, if present, previous bearer token accepted during rotation.
