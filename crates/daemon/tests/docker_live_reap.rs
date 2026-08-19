@@ -174,10 +174,10 @@ async fn reap_kills_exactly_the_labelled_container_and_a_sentinel_id_is_also_204
 {
   let docker = Docker::connect_with_defaults()?;
   let backend = DockerBackend::new(docker.clone(), "runc");
-  backend.attempt_pull(IMAGE).await;
+  let pulled = backend.attempt_pull(IMAGE).await;
   assert!(
     backend.image_present(IMAGE).await?,
-    "the live suite's shared image must be resident"
+    "the live suite's shared image must be resident (pull outcome: {pulled:?})"
   );
 
   let dir = tempfile::tempdir()?;
@@ -257,10 +257,10 @@ async fn a_reap_racing_an_in_flight_create_stops_the_container_from_ever_startin
 {
   let docker = Docker::connect_with_defaults()?;
   let backend = DockerBackend::new(docker.clone(), "runc");
-  backend.attempt_pull(IMAGE).await;
+  let pulled = backend.attempt_pull(IMAGE).await;
   assert!(
     backend.image_present(IMAGE).await?,
-    "the live suite's shared image must be resident"
+    "the live suite's shared image must be resident (pull outcome: {pulled:?})"
   );
 
   let job_id = format!("ac6-race-{}", now_ms()?);
