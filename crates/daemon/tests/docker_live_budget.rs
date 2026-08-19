@@ -41,6 +41,11 @@ const WAIT_FOR_EXIT: Duration = Duration::from_secs(4);
 /// How long each round's container runs before exiting normally.
 const EXIT_AFTER_SECS: u32 = 2;
 
+/// Docker's status for a container it no longer knows — an answer, not a
+/// fault. Hardcoded rather than imported for the same reason the labels above
+/// are: this test must not agree with the production constant by construction.
+const HTTP_NOT_FOUND: u16 = 404;
+
 /// Anything a live test can fail on: bollard, I/O, the clock.
 type LiveResult<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -230,7 +235,7 @@ async fn an_exited_job_releases_its_budget_and_the_next_admits() -> LiveResult<(
   tokio::time::sleep(WAIT_FOR_EXIT).await;
   rig.tick(base).await;
   assert!(
-    !container_still_known(&docker, &container_a).await,
+    !container_still_known(&docker, &container_a).await?,
     "A's container must be reaped once it exits on its own"
   );
   assert!(
@@ -254,7 +259,7 @@ async fn an_exited_job_releases_its_budget_and_the_next_admits() -> LiveResult<(
   tokio::time::sleep(WAIT_FOR_EXIT).await;
   rig.tick(base).await;
   assert!(
-    !container_still_known(&docker, &container_b).await,
+    !container_still_known(&docker, &container_b).await?,
     "B's container must be reaped once it exits on its own"
   );
   assert!(
@@ -268,9 +273,34 @@ async fn an_exited_job_releases_its_budget_and_the_next_admits() -> LiveResult<(
 
 /// Whether Docker still knows about `container_id` at all — the reaped
 /// containers in this test are removed outright, not merely stopped.
-async fn container_still_known(docker: &Docker, container_id: &str) -> bool {
-  docker
+///
+/// # Errors
+///
+/// Returns the bollard error for anything other than Docker's "no such
+/// container" 404, which is the answer `Ok(false)` rather than a failure —
+/// the same split `DockerBackend::image_present` makes. Collapsing a
+/// transport error to "gone" would let a closed socket satisfy the
+/// `!container_still_known(…)` assertions above: the test would report the
+/// reaper working on a run where nothing was ever asked.
+async fn container_still_known(
+  docker: &Docker,
+  container_id: &str,
+) -> Result<bool, bollard::errors::Error> {
+  match docker
     .inspect_container(container_id, None::<InspectContainerOptions>)
     .await
-    .is_ok()
+  {
+    Ok(_inspected) => Ok(true),
+    Err(err) if is_missing_container(&err) => Ok(false),
+    Err(err) => Err(err),
+  }
+}
+
+/// Whether a bollard failure is Docker's "no such container" 404.
+fn is_missing_container(err: &bollard::errors::Error) -> bool {
+  matches!(
+    err,
+    bollard::errors::Error::DockerResponseServerError { status_code, .. }
+      if *status_code == HTTP_NOT_FOUND
+  )
 }

@@ -94,6 +94,21 @@ if ! mkdir_error="$(mkdir -p "${log_dir}" 2>&1)"; then
 fi
 dockerd_log="${log_dir}/dockerd.log"
 
+# A redirect that cannot open its target is not merely a lost log. bash reports
+# the failure on ITS stderr — an unprefixed line in the job log, the one thing
+# every message here is shaped to avoid — and the command never runs, so an
+# unwritable file would cost the box Docker entirely over a logging problem.
+# The probe opens the file exactly as the redirect below does; `touch` cannot
+# stand in for it, because on a path that is a DIRECTORY touch succeeds and the
+# append still fails. A path that will not open falls back to /dev/null: the
+# daemon still starts, the job still gets Docker, and the warning says where
+# its output went.
+if ! open_error="$({ : >>"${dockerd_log}"; } 2>&1)"; then
+  log "cannot open ${dockerd_log} for writing ($(one_line "${open_error}"));" \
+    "dockerd will start with its output discarded"
+  dockerd_log=/dev/null
+fi
+
 # Defaults only: under sysbox the daemon picks a working storage driver on its
 # own and listens on /var/run/docker.sock, which is where both the CLI probe
 # below and the engine's own bollard client (DOCKER_HOST unset) look.
