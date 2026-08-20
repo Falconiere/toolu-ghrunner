@@ -46,7 +46,7 @@ every morning at 06:00 UTC.
 
 ```sh
 # macOS / Linux — installs to /usr/local/bin
-curl -fsSL https://raw.githubusercontent.com/Falconiere/toolu-ghrunner/main/install.sh | sh
+curl -fsSL https://get.toolu.sh/pkg/ghrunner/install | bash
 
 # ...or Homebrew
 brew install falconiere/tap/toolu-runner

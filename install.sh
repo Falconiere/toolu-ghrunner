@@ -51,7 +51,10 @@ EXAMPLES:
   bash install.sh --check
 
   # Install the latest release.
-  curl -fsSL https://raw.githubusercontent.com/$REPO/main/install.sh | bash
+  curl -fsSL https://get.toolu.sh/pkg/ghrunner/install | bash
+
+  # Install from a fork (TOOLU_RUNNER_REPO): fetch that fork's script directly.
+  curl -fsSL https://raw.githubusercontent.com/\$TOOLU_RUNNER_REPO/main/install.sh | bash
 
   # Install v0.1.0 to /opt/bin and set up the service.
   bash install.sh --version v0.1.0 --install-dir /opt/bin --service
