@@ -4,9 +4,8 @@
 #
 # The live flow needs an OpenRouter key and a real PR, so it can't run offline.
 # This pins the invariants the review contract depends on: the reviewer is
-# wired to the repo-tuned prompt under merge-ref rules, its budget/round caps
-# and Jev assessments stay set, and — the regression this file exists for — it
-# does NOT review the machine-generated release PR.
+# wired to the repo-tuned prompt with Jev assessments on, and — the regression
+# this file exists for — it does NOT review the machine-generated release PR.
 #
 # Every byte of the `release-pr` branch is written by scripts/release-pr.sh
 # (git-cliff CHANGELOG prepend, [workspace.package] version line, cargo
@@ -80,9 +79,6 @@ want "release-pr.sh opens that PR head"   "$PR_SH" \
 
 # --- the reviewer stays wired to the repo-tuned checklist ---
 want "uses the repo review prompt"        "$WF" "REVIEW_PROMPT_FILE: \.github/code-review-prompt\.md"
-want "reads conventions from merge ref"   "$WF" "RULES_REF: merge"
-want "keeps the surrender cap"            "$WF" "MAX_ROUNDS:"
-want "keeps the raised token cap"         "$WF" "MAX_TOKENS:"
 want "excludes fixtures from the diff"    "$WF" "EXCLUDE_GLOBS:"
 # JEV_ENABLED only exists from v8 on. A pre-v8 action ignores the input with a
 # mere "Unexpected input" warning, so a downgrade would drop Jev silently —

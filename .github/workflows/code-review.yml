@@ -37,8 +37,8 @@ jobs:
     # ours. On the branch name alone, anyone could fork this public repo, name a
     # branch `release-pr`, and have their PR's review silently skipped — and a
     # skipped job reports SUCCESS, a better disguise than the red ✗ a fork PR
-    # gets today (the action step fails without the secrets, see RULES_REF
-    # below). Only a same-repo `release-pr` is the generated one; a fork using
+    # gets today (the action step fails without the secrets, which are not
+    # exposed to fork runs). Only a same-repo `release-pr` is the generated one; a fork using
     # that name is reviewed like any other. Actions string comparison is
     # case-insensitive, so `Release-PR` matches too — harmless, since pushing
     # any such branch here already requires write access.
@@ -77,22 +77,6 @@ jobs:
             run. The lint set is deliberately deny-heavy (no unwrap/expect/
             panic/indexing outside tests) and AGENTS.md is the source of truth
             for the crate graph and each module's responsibilities.
-          # Read convention files (AGENTS.md etc.) from the PR merge ref
-          # instead of the base ref, so a PR that legitimately changes a
-          # convention is reviewed against its own updated text. Safety:
-          # fork PRs do trigger `pull_request`, but the action step fails
-          # for them (secrets are not exposed to fork runs), so no fork
-          # diff is ever reviewed under merge-ref rules.
-          RULES_REF: merge
-          # Surrender cap: on review round 5+ a
-          # blocker-free "changes" verdict auto-approves — findings stay
-          # listed as advisory — so a fresh-findings-every-push review can
-          # never block a PR forever. One blocker finding disables the cap.
-          MAX_ROUNDS: '5'
-          # The 8192 default truncated a chunk on this repo's first large PR
-          # ("1/5 chunks truncated at the output-token limit"), which silently
-          # drops findings after the cut. Rust diffs here are verbose.
-          MAX_TOKENS: '16384'
           # Keep generated and fixture bytes out of the LLM diff. They are still
           # committed and still CI-checked; they just waste review budget and
           # produce noise findings.
