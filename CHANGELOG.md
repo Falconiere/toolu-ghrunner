@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-09-23
+
+### Documentation
+- rename CLAUDE.md to AGENTS.md
+
+### Fixed
+- *(code-review)* address PR review feedback
+- *(code-review)* address PR review feedback
+
 ## [0.9.1] - 2026-08-20
 
 ### Documentation
