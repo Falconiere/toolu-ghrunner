@@ -48,10 +48,13 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # full history so the merge-base resolves without deepening
-      - uses: falconiere/toolu-ghactions/code-review@v7
+      - uses: falconiere/toolu-ghactions/code-review@v8
         with:
           PROVIDER: openrouter
           API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          # Jev finding assessment + risk routing (toolu-ghactions >= 8.0.0).
+          # Reuses API_KEY (OpenRouter-only) and the shared review deadline.
+          JEV_ENABLED: 'true'
           # Repo-tuned checklist. Replaces the generic 8-dimension default with
           # the failure modes that actually bite this codebase: unmasked sinks,
           # swallowed errors, blocking I/O on the async runtime, durability
