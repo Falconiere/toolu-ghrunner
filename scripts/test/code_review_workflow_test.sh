@@ -87,7 +87,8 @@ want "excludes fixtures from the diff"    "$WF" "EXCLUDE_GLOBS:"
 # JEV_ENABLED only exists from v8 on. A pre-v8 action ignores the input with a
 # mere "Unexpected input" warning, so a downgrade would drop Jev silently —
 # pin the major alongside the flag.
-want "keeps Jev assessments on"           "$WF" "JEV_ENABLED: 'true'"
+want "keeps Jev assessments on"           "$WF" \
+  "JEV_ENABLED:[[:space:]]*['\"]?true['\"]?([[:space:]]|$)"
 want "action is v8 or later (Jev input)"  "$WF" \
   "toolu-ghactions/code-review@v([89]|[1-9][0-9]+)(\.|[[:space:]]|$)"
 
