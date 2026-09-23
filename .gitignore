@@ -14,7 +14,10 @@ _diag/
 # hooks (CORE layer 2) that every agent working in this repo must inherit.
 .claude/tmp/
 .claude/toolu.config.json
+.claude/settings.local.json
 .serena/
+# SwiftPM / sourcekit-lsp build cache dropped by editor tooling.
+.build/
 
 # Staged darwin/arm64 binary for the macOS carrier image (Dockerfile.macos).
 dist/
