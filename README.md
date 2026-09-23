@@ -553,7 +553,7 @@ New files stay under 500 **code** lines (blanks and comments don't
 count; tests are exempt); function bodies under 150. Tests live in a
 sibling `tests/` folder, never in the same file as the logic. Every new
 `src/` submodule folder needs a `README.md` and an entry in that crate's
-`guardrails.config.json` `src.requireReadme`. See `CLAUDE.md` →
+`guardrails.config.json` `src.requireReadme`. See `AGENTS.md` →
 "House Conventions & The Gate".
 
 ## License
