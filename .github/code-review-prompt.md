@@ -62,7 +62,7 @@ tracing file sink via `MaskerRedactor`.
 - **Synthetic credential fixtures are policy, not leaks.** The guardrails
   `secrets.scanExempt` arrays list test files holding deliberately invalid
   credential-shaped fixtures (`MIIphony`, `ghs_EXAMPLE…`, `ghp_deadbeef…`);
-  CLAUDE.md documents the bar for additions. The mechanism is **file-level by
+  AGENTS.md documents the bar for additions. The mechanism is **file-level by
   schema** — there is no line-level or inline-comment syntax in the kit's
   scanner, so do not ask for a narrower exemption that cannot be expressed.
   (`# gitleaks:allow` belongs to the separate gitleaks CI check — propose it
@@ -134,7 +134,7 @@ still agree:
 
 - A doc comment or prose doc that contradicts the code is a finding, and the
   code is the source of truth.
-- `CLAUDE.md` carries a per-crate bullet describing each module's real
+- `AGENTS.md` carries a per-crate bullet describing each module's real
   responsibilities. A change to a crate's shape should be reflected there.
 - User-facing surfaces — a new config key, a changed CLI flag, a changed
   default — must appear in `README.md`.
@@ -151,7 +151,7 @@ still agree:
 
 ### 8. Architecture and layering
 
-`CLAUDE.md` defines a strict, acyclic crate graph. Violations are blockers
+`AGENTS.md` defines a strict, acyclic crate graph. Violations are blockers
 because they are expensive to undo:
 
 - `protocol` is sync, no I/O, no network, and has a pinned dependency set. No

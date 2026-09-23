@@ -72,9 +72,9 @@ jobs:
             a broker for jobs, and runs workflow steps on the host — so it
             handles live credentials, customer source, and job secrets on every
             run. The lint set is deliberately deny-heavy (no unwrap/expect/
-            panic/indexing outside tests) and CLAUDE.md is the source of truth
+            panic/indexing outside tests) and AGENTS.md is the source of truth
             for the crate graph and each module's responsibilities.
-          # Read convention files (CLAUDE.md etc.) from the PR merge ref
+          # Read convention files (AGENTS.md etc.) from the PR merge ref
           # instead of the base ref, so a PR that legitimately changes a
           # convention is reviewed against its own updated text. Safety:
           # fork PRs do trigger `pull_request`, but the action step fails
