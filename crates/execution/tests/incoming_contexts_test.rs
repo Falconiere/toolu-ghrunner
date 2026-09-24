@@ -181,20 +181,20 @@ fn new_roots_keep_nested_types_and_cannot_shadow_runtime_roots() -> TestResult {
   Ok(())
 }
 
-#[tokio::test]
-async fn acquired_matrix_jobs_execute_assertions_and_restore_composite_scope() -> TestResult {
+#[test]
+fn acquired_matrix_jobs_execute_assertions_and_restore_composite_scope() -> TestResult {
   for source in [MATRIX_0, MATRIX_1] {
-    replay(source, true).await?;
+    replay(source, true)?;
   }
   Ok(())
 }
 
-#[tokio::test]
-async fn acquired_workflow_call_executes_typed_input_assertions() -> TestResult {
-  replay(CALL, false).await
+#[test]
+fn acquired_workflow_call_executes_typed_input_assertions() -> TestResult {
+  replay(CALL, false)
 }
 
-async fn replay(source: &str, matrix: bool) -> TestResult {
+fn replay(source: &str, matrix: bool) -> TestResult {
   let mut msg: AgentJobRequestMessage = serde_json::from_str(source)?;
   // Acquisition-only adaptation: prepopulate the exact checked-in actions.
   msg
@@ -215,33 +215,40 @@ async fn replay(source: &str, matrix: bool) -> TestResult {
   let expected_steps = msg.steps.len();
   let runner = Runner::new(cfg, Arc::new(Mutex::new(SecretMasker::new())));
   let cancel = CancellationToken::new();
-  let mut events = runner.execute_job(msg, cancel.clone());
-  let result = tokio::time::timeout(Duration::from_secs(60), async {
-    let mut conclusion = None;
-    let mut completed = 0;
-    let mut logs = Vec::new();
-    while let Some(event) = events.recv().await {
-      match event {
-        RunnerEvent::Log { line, .. } => logs.push(line),
-        RunnerEvent::StepCompleted { conclusion, .. } => {
-          assert_eq!(conclusion, Conclusion::Success, "{logs:?}");
-          completed += 1;
-        },
-        RunnerEvent::JobCompleted {
-          conclusion: value, ..
-        } => conclusion = Some(value),
-        RunnerEvent::JobStarted { .. }
-        | RunnerEvent::StepStarted { .. }
-        | RunnerEvent::StepSkipped { .. }
-        | RunnerEvent::LogGroup { .. }
-        | RunnerEvent::Annotation { .. } => {},
+  // Keep fixture setup and output readback off Tokio's worker thread.
+  let runtime = tokio::runtime::Builder::new_current_thread()
+    .enable_all()
+    .build()?;
+  let result = runtime.block_on(async {
+    let mut events = runner.execute_job(msg, cancel.clone());
+    let result = tokio::time::timeout(Duration::from_secs(60), async {
+      let mut conclusion = None;
+      let mut completed = 0;
+      let mut logs = Vec::new();
+      while let Some(event) = events.recv().await {
+        match event {
+          RunnerEvent::Log { line, .. } => logs.push(line),
+          RunnerEvent::StepCompleted { conclusion, .. } => {
+            assert_eq!(conclusion, Conclusion::Success, "{logs:?}");
+            completed += 1;
+          },
+          RunnerEvent::JobCompleted {
+            conclusion: value, ..
+          } => conclusion = Some(value),
+          RunnerEvent::JobStarted { .. }
+          | RunnerEvent::StepStarted { .. }
+          | RunnerEvent::StepSkipped { .. }
+          | RunnerEvent::LogGroup { .. }
+          | RunnerEvent::Annotation { .. } => {},
+        }
       }
-    }
-    assert_eq!(conclusion, Some(Conclusion::Success), "{logs:?}");
-    assert_eq!(completed, expected_steps, "assertion steps must execute");
-  })
-  .await;
-  cancel.cancel();
+      assert_eq!(conclusion, Some(Conclusion::Success), "{logs:?}");
+      assert_eq!(completed, expected_steps, "assertion steps must execute");
+    })
+    .await;
+    cancel.cancel();
+    result
+  });
   result?;
   if matrix {
     for (file, expected) in [
