@@ -189,3 +189,36 @@ lane. Linux host replay is applicable in workspace CI; Linux live comparison and
 all GHES versions remain **unverified**, not passing evidence. Docker/container
 execution is not exercised here because no container behavior changes. This issue
 does not claim the epic-wide platform or cross-feature acceptance matrix is closed.
+
+## Step context identity (#98)
+
+The source capture is the sanitized `job_message.json` acquired-message
+fixture. It contains different wire UUIDs and `contextName` values, but its
+shell step's context name is generated (`__run`). The named `build` shell
+producer and consumer in `crates/execution/tests/step_context_identity_test.rs`
+are derived from those captured step IDs and execute real Bash children. This
+is a local production-step-loop regression, not a new named-step acquisition.
+The `acquired_message_replay_keeps_wire_ids_through_job_completion` case also
+retains the acquired envelope and runs it through `Runner::execute_job`, with
+only its steps derived for the named producer and consumer.
+
+| Scenario | Local check and expected observation | Evidence limit |
+| --- | --- | --- |
+| 98-S1 | Real Bash `$GITHUB_OUTPUT` and stdout `::set-output::` producer writes `hello` and `old`; a later shell prints `hello:old` from `steps.build.outputs`; `StepCompleted` retains the captured UUID. A generated `__run` has no expression entry. | A new named-step production capture and live GitHub.com/GHES reporting remain unverified. |
+| 98-S2 | Condition-false named step records empty outputs and `skipped` outcome/conclusion; an `always()` shell reads both. Engine emits a skipped completion with the wire UUID. `crates/listener/src/tests/step_context_identity.rs` checks local Results Service and `complete_job` serialization against that UUID and conclusion value 7. | Backend acceptance and UI display remain unverified. |
+| 98-S3 | A real failing Bash step with `continue-on-error` leaves `outcome=failure`, `conclusion=success`. A local Node pre/main/post action reports distinct IDs, retains the main output, and its post receives private `STATE_k`. | Live/reference stages and Linux host execution remain unverified. |
+| 98-S3 nested | Checked-in nested composite actions invoke the same inner name with different inputs; only declared `first`/`second` outputs reach the parent. | Full composite expression semantics remain with #102. |
+| 98-S4 | The producer-side expression value is exercised locally. | Acquired `jobOutputs`, completion output, and downstream `needs` cannot be accepted until #70 supplies the live wiring; no downstream success is claimed. |
+
+The pinned reference source for expression visibility and result updates is
+[actions/runner `ExecutionContext.cs` at cab9d1c](https://github.com/actions/runner/blob/cab9d1c3901e45c7705889c4f88284fdd93f4ae5/src/Runner.Worker/ExecutionContext.cs).
+The issue-specific local checks are `cargo test -p execution --test
+step_context_identity_test` and `cargo test -p listener --lib
+step_context_identity_test`. The eight execution tests and listener
+serialization test passed locally on macOS 26.6.2 ARM64 with Bash 5.3.20.
+The action manifest requests Node 20; the local regression seeds the installed
+Node 26.9.0 binary into that cache slot to keep the test offline, so this is
+not Node 20 runtime-parity evidence. The full `./tools/check.sh all` gate must
+be recorded from the final source tree before marking the workspace lane green.
+GitHub.com/GHES backend, the pinned reference-runner execution, and Linux/macOS
+cross-host comparisons for #98 are **unverified**.

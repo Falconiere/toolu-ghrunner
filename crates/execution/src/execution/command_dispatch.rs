@@ -39,12 +39,13 @@ pub enum LineDisposition {
 pub struct CommandDispatcher {
   masker: Arc<Mutex<SecretMasker>>,
   step_id: String,
+  output_context_name: Option<String>,
   /// The step id `Log`/`LogGroup`/`Annotation` events carry — equal to
   /// `step_id` for every caller except a nested composite `uses:` step,
   /// where it is the enclosing composite's parent step id instead (the
   /// listener has no per-step uploader for the synthetic id nested `uses:`
-  /// steps carry). `step_id` alone still keys `ctx.set_step_output`/
-  /// `set_step_state` — output/state context bookkeeping is unaffected.
+  /// steps carry). `step_id` keys private `save-state`; the optional
+  /// `output_context_name` keys expression-visible outputs.
   log_step_id: String,
   echo_on: bool,
   /// When `Some(token)`, command processing is suspended until a line
@@ -66,10 +67,16 @@ impl CommandDispatcher {
   ///
   /// Pass `ctx.masker().clone()` so masks registered here propagate to the
   /// file sink and every other reader of the shared masker.
-  pub fn new(step_id: &str, log_step_id: &str, masker: Arc<Mutex<SecretMasker>>) -> Self {
+  pub fn new(
+    step_id: &str,
+    log_step_id: &str,
+    output_context_name: Option<&str>,
+    masker: Arc<Mutex<SecretMasker>>,
+  ) -> Self {
     Self {
       masker,
       step_id: step_id.to_owned(),
+      output_context_name: output_context_name.map(str::to_owned),
       log_step_id: log_step_id.to_owned(),
       echo_on: false,
       stop_token: None,
@@ -194,7 +201,9 @@ impl CommandDispatcher {
     if !name.is_empty() {
       let name = unescape_data(name);
       let value = unescape_data(value);
-      ctx.set_step_output(&self.step_id, &name, &value);
+      if let Some(context_name) = &self.output_context_name {
+        ctx.set_step_output(context_name, &name, &value);
+      }
       // Record only this run's set-outputs (emission order) so the caller
       // can merge with last-writer-wins semantics; `ctx.step_outputs` would
       // also surface prior-stage and file-command outputs.
@@ -392,18 +401,25 @@ fn decode_property_escape(slice: &str) -> Option<char> {
 /// Stream a step's stdout through the dispatcher as the child runs, emitting
 /// each surviving line as a `Log` event immediately for realtime UI/blob.
 ///
-/// Commands update `ctx` under `step_id`; logs/groups/annotations use
-/// `log_step_id` (the parent id for nested actions). Passthrough logs remain
+/// Commands update `ctx` under `output_context_name` for outputs and
+/// `step_id` for private state; logs/groups/annotations use `log_step_id`
+/// (the parent id for nested actions). Passthrough logs remain
 /// unmasked: each durable sink masks through the shared masker. Returns only
 /// this run's `set-output` values for `StepCompleted`.
 pub async fn stream_dispatch_stdout(
   step_id: &str,
   log_step_id: &str,
+  output_context_name: Option<&str>,
   stdout_rx: &mut mpsc::Receiver<String>,
   ctx: &mut ExecutionContext,
   events: &mpsc::Sender<RunnerEvent>,
 ) -> HashMap<String, String> {
-  let mut dispatcher = CommandDispatcher::new(step_id, log_step_id, Arc::clone(ctx.masker()));
+  let mut dispatcher = CommandDispatcher::new(
+    step_id,
+    log_step_id,
+    output_context_name,
+    Arc::clone(ctx.masker()),
+  );
   while let Some(line) = stdout_rx.recv().await {
     let disposition = dispatcher.on_stdout_line(&line, ctx);
     for event in dispatcher.take_events() {

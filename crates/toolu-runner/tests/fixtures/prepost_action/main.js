@@ -5,6 +5,7 @@ const file = process.env.MARKER_FILE;
 
 // save-state surfaces as STATE_k to THIS step's post stage.
 console.log(`::save-state name=k::${marker}-state`);
+console.log('::set-output name=phase::main');
 
 if (file) {
   fs.appendFileSync(file, `${marker}:main\n`);

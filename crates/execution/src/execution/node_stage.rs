@@ -1,10 +1,10 @@
 //! Runs a single Node.js action stage (`pre` / `main` / `post`).
 //!
 //! A node action can define up to three entrypoints. Each stage runs in the
-//! *same* step scope (same `step.id`), so `save-state` written by `main`
-//! surfaces as `STATE_*` to that step's `pre`/`post` — `build_node_env`
-//! injects the step's accumulated state on every stage. Stdout workflow
-//! commands are dispatched onto the live context after the process exits.
+//! action-instance scope (same `step.id`), so `save-state` written by `main`
+//! surfaces as `STATE_*` to that step's `post` — `build_node_env`
+//! injects the step's accumulated private state on each stage. Stdout workflow
+//! commands are dispatched onto the live context as the process runs.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -40,8 +40,8 @@ pub(super) struct NodeStage<'a> {
   pub stage: &'a str,
   /// The step id `Log`/stdout/stderr events carry — `step.id` for a
   /// top-level step, or the enclosing composite's parent step id for a
-  /// nested composite `uses:` step. `step.id` remains the key for
-  /// `steps.<id>.outputs`/state context bookkeeping regardless.
+  /// nested composite `uses:` step. `step.id` keys private action state;
+  /// `contextName` keys expression-visible outputs for the main stage.
   pub log_step_id: &'a str,
 }
 
@@ -119,18 +119,39 @@ pub(super) async fn run_node_stage(
     cancel: &s.bounds.cancel,
   };
 
+  run_stage_process(s, &node_params, &file_cmds).await
+}
+
+/// Stream a node stage's workflow commands and merge its file outputs.
+async fn run_stage_process(
+  s: NodeStage<'_>,
+  node_params: &NodeExecParams<'_>,
+  file_cmds: &FileCommandManager,
+) -> Result<(Conclusion, HashMap<String, String>), RunnerError> {
   // Stream the action's stdout through the dispatcher as it runs (realtime
   // `Log` events), mirroring the run-step path. `execute_node_action` owns the
   // only producer copy, so the dispatcher's `recv` closes when the child EOFs.
-  // `step_id` keys context bookkeeping (`steps.<id>.outputs`/state);
-  // `log_step_id` is only where the `Log`/group/annotation events land.
+  // `step.id` keys private state, while `contextName` keys main outputs.
+  // `log_step_id` is where `Log`/group/annotation events land.
   let (stdout_tx, mut stdout_rx) = mpsc::channel::<String>(256);
-  let exec = execute_node_action(&node_params, s.events, stdout_tx);
-  let dispatch = stream_dispatch_stdout(&s.step.id, s.log_step_id, &mut stdout_rx, s.ctx, s.events);
+  let exec = execute_node_action(node_params, s.events, stdout_tx);
+  let output_name = if s.stage == "main" {
+    s.step.expression_name()
+  } else {
+    None
+  };
+  let dispatch = stream_dispatch_stdout(
+    &s.step.id,
+    s.log_step_id,
+    output_name,
+    &mut stdout_rx,
+    s.ctx,
+    s.events,
+  );
   let (output, stdout_outputs) = tokio::join!(exec, dispatch);
   let conclusion = output?.conclusion;
   let outputs =
-    apply_file_commands_and_merge_outputs(&s.step.id, stdout_outputs, &file_cmds, s.ctx).await;
+    apply_file_commands_and_merge_outputs(output_name, stdout_outputs, file_cmds, s.ctx).await;
   Ok((conclusion, outputs))
 }
 

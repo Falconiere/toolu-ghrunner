@@ -40,6 +40,14 @@ pub struct ActionStep {
 }
 
 impl ActionStep {
+  /// Name visible through `steps.<name>`; generated and absent names are private.
+  pub fn expression_name(&self) -> Option<&str> {
+    self
+      .context_name
+      .as_deref()
+      .filter(|name| !name.is_empty() && !name.starts_with("__"))
+  }
+
   /// Set the continue-on-error flag.
   pub fn set_continue_on_error(&mut self, value: bool) {
     self.continue_on_error = Some(value);

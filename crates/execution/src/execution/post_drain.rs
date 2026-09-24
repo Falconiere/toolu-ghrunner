@@ -50,16 +50,25 @@ async fn run_one_post(
   job: &JobCtx<'_>,
   client: &reqwest::Client,
 ) -> Result<(), RunnerError> {
-  let step_id = post.step.id.clone();
+  let prior_scope = ctx.scope_path();
+  ctx.restore_step_scope(post.scope_path.clone());
+  let result = run_scoped_post(post, ctx, events, job, client).await;
+  ctx.restore_step_scope(prior_scope);
+  result
+}
+
+async fn run_scoped_post(
+  post: &PostStep,
+  ctx: &mut ExecutionContext,
+  events: &mpsc::Sender<RunnerEvent>,
+  job: &JobCtx<'_>,
+  client: &reqwest::Client,
+) -> Result<(), RunnerError> {
+  let step_id = post.report_id.clone();
   let condition = post.effective_condition();
 
   if !ctx.evaluate_expression(condition)?.is_truthy() {
-    let _ = events
-      .send(RunnerEvent::StepSkipped {
-        step_id,
-        reason: format!("post-if '{condition}' evaluated to false"),
-      })
-      .await;
+    report_skipped_post(post, condition, &step_id, events).await;
     return Ok(());
   }
 
@@ -72,8 +81,6 @@ async fn run_one_post(
   let bounds = post_bounds(post, job);
   let conclusion = run_post_node_stage(post, ctx, events, job, client, &bounds).await?;
 
-  ctx.set_step_outcome(&step_id, conclusion);
-  ctx.set_step_conclusion(&step_id, conclusion);
   if conclusion == Conclusion::Failure {
     ctx.record_step_failure();
   }
@@ -85,6 +92,34 @@ async fn run_one_post(
     })
     .await;
   Ok(())
+}
+
+async fn report_skipped_post(
+  post: &PostStep,
+  condition: &str,
+  step_id: &str,
+  events: &mpsc::Sender<RunnerEvent>,
+) {
+  let _ = events
+    .send(RunnerEvent::StepStarted {
+      step_id: step_id.to_owned(),
+      step_name: format!("Post {}", post.action_name),
+      step_number: 0,
+    })
+    .await;
+  let _ = events
+    .send(RunnerEvent::StepSkipped {
+      step_id: step_id.to_owned(),
+      reason: format!("post-if '{condition}' evaluated to false"),
+    })
+    .await;
+  let _ = events
+    .send(RunnerEvent::StepCompleted {
+      step_id: step_id.to_owned(),
+      conclusion: Conclusion::Skipped,
+      outputs: std::collections::HashMap::new(),
+    })
+    .await;
 }
 
 /// Cleanup grace budget for post-steps draining after a job cancel.
@@ -121,9 +156,9 @@ async fn run_post_node_stage(
   client: &reqwest::Client,
   bounds: &StepBounds,
 ) -> Result<Conclusion, RunnerError> {
-  // The post stage runs in the originating step's scope; its outputs are
-  // already recorded on `ctx`, and the post `StepCompleted` carries no
-  // outputs map (matches the C# runner), so the dispatcher map is dropped.
+  // The post stage reads the originating action's private state. Its output
+  // commands do not change the main expression entry, and its completion
+  // carries no outputs map.
   let (conclusion, _outputs) = run_node_stage(NodeStage {
     step: &post.step,
     ctx,
@@ -136,11 +171,8 @@ async fn run_post_node_stage(
     major: post.major,
     bounds,
     stage: "post",
-    // Post steps run entirely outside the composite scope they were
-    // registered in (drained at job end, LIFO), so there is no enclosing
-    // parent step id available here — unchanged from before this id was
-    // split, this stays `post.step.id` for every post step today.
-    log_step_id: &post.step.id,
+    // Post logs and reporting use this stage's distinct report identity.
+    log_step_id: &post.report_id,
   })
   .await?;
   Ok(conclusion)

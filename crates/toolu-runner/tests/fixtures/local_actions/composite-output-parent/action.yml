@@ -1,0 +1,20 @@
+name: composite-output-parent
+description: Two invocations of the same child with distinct values.
+outputs:
+  first:
+    description: First child output.
+    value: ${{ steps.first.outputs.value }}
+  second:
+    description: Second child output.
+    value: ${{ steps.second.outputs.value }}
+runs:
+  using: composite
+  steps:
+    - id: first
+      uses: ./composite-output-child
+      with:
+        value: one
+    - id: second
+      uses: ./composite-output-child
+      with:
+        value: two

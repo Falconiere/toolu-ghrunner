@@ -6,3 +6,5 @@ const state = process.env.STATE_k || '<unset>';
 if (file) {
   fs.appendFileSync(file, `${marker}:post:STATE_k=${state}\n`);
 }
+console.log('::set-output name=phase::post');
+console.log(`post-state=${state}`);

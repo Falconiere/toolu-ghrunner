@@ -19,6 +19,9 @@ mod setup_step;
 #[cfg(test)]
 #[path = "tests/startup_overlap.rs"]
 mod startup_overlap;
+#[cfg(test)]
+#[path = "tests/step_context_identity.rs"]
+mod step_context_identity_test;
 mod step_report_queue;
 #[cfg(test)]
 #[path = "tests/step_report_queue.rs"]

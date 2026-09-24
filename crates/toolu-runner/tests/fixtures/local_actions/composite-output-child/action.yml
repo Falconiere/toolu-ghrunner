@@ -1,0 +1,16 @@
+name: composite-output-child
+description: Scoped child output for a repeated invocation regression.
+inputs:
+  value:
+    description: Value to publish.
+    required: true
+outputs:
+  value:
+    description: The nested step output.
+    value: ${{ steps.make.outputs.value }}
+runs:
+  using: composite
+  steps:
+    - id: make
+      shell: bash
+      run: echo "value=${{ inputs.value }}" >> "$GITHUB_OUTPUT"
