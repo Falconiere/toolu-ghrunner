@@ -21,11 +21,6 @@ fn is_debug_env(key: &str) -> bool {
   })
 }
 
-/// `strategy.*` for a non-matrix single-job run.
-pub(super) fn default_strategy() -> HashMap<String, ExprValue> {
-  build_strategy(0, 1, true, None)
-}
-
 /// Build the `strategy.*` object from matrix/strategy parameters.
 ///
 /// `max-parallel` is `null` (omitted) when the workflow does not pin it.

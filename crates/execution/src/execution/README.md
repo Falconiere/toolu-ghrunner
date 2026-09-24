@@ -29,7 +29,7 @@ not part of it. Workflow YAML parsing/matrix/orchestration lives in the
 | `composite_scope.rs` | `ScopeName` / `CompositeOutputs` | Output-isolation scope identifier and a composite manifest's `outputs:` expression map. |
 | `composite_shell.rs` | `run_shell_script` | Spawns a composite `run:` step's shell script as a subprocess and streams its stdout/stderr as log events. |
 | `composite_uses.rs` | `run_nested_uses_step` | Builds a synthetic `ActionStep` for a composite's nested `uses:` step and recurses through `action_exec::execute_action`, bounded by `DepthTracker`. |
-| `context.rs` | `ExecutionContext` | Mutable per-job execution state: env, per-step outputs/state/conclusions, `github`/`runner`/`vars`/`secrets`/`matrix`/`strategy` contexts, the shared `SecretMasker`, and expression evaluation. |
+| `context.rs` | `ExecutionContext` | Mutable per-job execution state: env, per-step outputs/state/conclusions, runtime-owned contexts plus typed incoming server roots (`matrix`/`needs`/`inputs`/`strategy` and future keys), the shared `SecretMasker`, and expression evaluation. |
 | `context_build.rs` | `build_strategy` | Pure helpers for `ExecutionContext`: `runner.debug` detection and the `strategy.*` object, split out to keep `context.rs`'s `impl` blocks small. |
 | `depth_tracker.rs` | `DepthTracker` | Tracks composite-action nesting depth and errors past `MAX_COMPOSITE_DEPTH` (10) to prevent infinite recursion. |
 | `file_commands.rs` | `FileCommandManager` | Creates/reads/resets a step's `$GITHUB_ENV`/`OUTPUT`/`PATH`/`STATE`/`STEP_SUMMARY` temp files and parses their contents. |
@@ -45,7 +45,7 @@ not part of it. Workflow YAML parsing/matrix/orchestration lives in the
 | `service_endpoints.rs` | `extract_service_urls` / `forward_env` | Extracts real GitHub service URLs + runtime token from the job message and builds the `ACTIONS_*` env vars for forwarder mode. |
 | `service_lifecycle.rs` | `ServiceHandle` | Generic start/shutdown lifecycle for a local axum HTTP service, plus shared 401/500 JSON responses and `Content-Range` parsing. |
 | `shadow.rs` | (mod decl) | Declares the `shadow` sub-module; see its own README. |
-| `step_env.rs` | `resolve_step_env` | Renders a step's `environment` template token to a string env map and applies file-command results back onto the context. |
+| `step_env.rs` | `resolve_step_env` | Renders scalar template tokens for step env/script/working-directory/action inputs and applies file-command results back onto the context. |
 | `step_naming.rs` | `PostStep` / `PostStepQueue` | The registered-post-step record, its LIFO queue, and `derive_step_name` for step display names. |
 | `step_state.rs` | `StepState` | Per-step recorded outputs/state/outcome/conclusion, and `build_steps_context` for the `steps.*` expression context. |
 | `step_timeout.rs` | `wait_bounded` | Bounded child-process wait shared by the script and node handlers: races `timeout-minutes` against the job `CancellationToken`. |

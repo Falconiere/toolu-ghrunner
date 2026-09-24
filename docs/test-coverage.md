@@ -106,18 +106,78 @@ the nested probe tests ordinary stdout/stderr, and the notice runs top-level.
 
 ## Incoming contexts acceptance (#68)
 
-The issue-specific `expression-live.yml` workflow uses label `toolu-68` and
-asserts typed dispatch/call inputs, producer outputs/result, both matrix
-children and their strategy values, and nested/sibling composite input scopes.
-The producer runs on GitHub-hosted Linux to isolate incoming `needs` from the
-separate outgoing-job-output issue. Local actions live under
-`.github/actions/context-68-{parent,child}`. The workflow must be dispatched with
-its default inputs (`world`, numeric `3`, boolean `false`).
+The issue-specific `expression-live.yml` workflow uses label `toolu-68`. A real
+GitHub-hosted producer emits `artifact-68`; two self-hosted consumer children
+assert their own matrix values, exact needs output/result, dispatch inputs and
+strategy fields. `expression-context-call.yml` asserts reusable-workflow inputs
+`called`, numeric `0`, and boolean `true`. The committed parent/child composite
+actions assert workflow/action input separation across nested and sibling calls,
+then the workflow verifies the resulting files and its restored input scope.
 
-Capture and toolu/reference comparison are pending. The initial unchanged
-expression baseline passed on official v2.337.0 macOS ARM64 in
-[run 36033199822](https://github.com/Falconiere/toolu-ghrunner/actions/runs/36033199822);
-that older print-only input test is not #68 acceptance evidence. New capture,
-production replay and live results will be recorded here after execution.
-Linux self-hosted and GHES comparison remain unverified; no Docker behavior is
-changed by this issue.
+Dispatch with `gh workflow run expression-live.yml --repo Falconiere/toolu-ghrunner
+--ref <branch> -f who=world -f count=3 -f enabled=false` (one command). GitHub
+actually delivered dispatch `count` as string `"3"`, despite its numeric input
+declaration; the reference runner preserved it. A REST dispatch with JSON numeric
+`3` was rejected (422). The assertions preserve that observation; matrix numbers
+and reusable-workflow numeric `0` exercise numeric values without coercion.
+
+| Requirement / scenario | Real input and exact result | Production check |
+| --- | --- | --- |
+| Incoming contexts; 68-S1 / S4 | Matrix alpha/7/true and beta/0/false; needs artifact-68/success; strategy index0/1, total2, max1, fail-fastfalse; dispatch world/string3/false and call called/number0/true | `acquired_contexts_retain_values_and_types`, `acquired_matrix_jobs_execute_assertions_and_restore_composite_scope`, `acquired_workflow_call_executes_typed_input_assertions` |
+| Unknown contexts; 68-S2 | Captured values moved to future root names retain zero/false/string/nested empty array. Removing roots, replacing with null, or emptying a dictionary preserves null versus object. Mixed-case runtime root collisions do not replace github/vars/env/secrets/steps/runner/job or import private runner env | `new_roots_keep_nested_types_and_cannot_shadow_runtime_roots`, `absent_null_and_empty_roots_remain_distinct` |
+| Composite input scope; 68-S3 | Parent world, nested inner, sibling sibling, then parent workflow world; exact output files prove each shell ran | Matrix production replay and identical committed actions on both live runners |
+| Captured-data coverage | Three sanitized raw Run Service acquisitions retain job UUIDs, context names, nested values, and template token types | `crates/execution/tests/incoming_contexts_test.rs`; `python3 scripts/test/context_capture_check.py` |
+| Repository gate and docs | Full workspace formatting/lint/guardrail/test command; architecture documents incoming versus runtime ownership | `./tools/check.sh all`; `docs/architecture.md` |
+
+All Rust rows run under `./tools/check.sh all`. Replay enters `Runner::execute_job`
+and the real `run_job`/step loop, shells and composite actions. It omits checkout
+and prepopulates the exact committed local action files; all context-bearing
+assertion steps remain unchanged. The S2 boundary cases are explicitly labelled
+transformations of captured messages, not additional GitHub captures. They test
+assembly/evaluation; the unmodified replay and live jobs prove engine wiring.
+`incoming_contexts_node_test.rs` additionally routes the captured expression-bearing
+action step to the committed real Node probe (`incoming_contexts_node_action.*`).
+It checks actual `INPUT_*` values/output JSON, a selected manifest default, a
+literal expression-looking result that must not be evaluated twice, and malformed
+expression failure before the action runs. This is a labelled capture-derived
+Node variant, not an additional live GitHub capture. It requires a real `node`
+on PATH (no passing skip); the cache is seeded with that executable to avoid a
+runtime download. Runtime version selection is not tested by this probe; the
+local run used Node 26.9.0.
+
+Display-name and timeout token evaluation remain owned by #99, and complete
+composite expression/cleanup semantics by #102. The committed workflow establishes
+server acceptance for the tested if/env/with/script/working-directory sites.
+
+The raw fixtures were captured from [run 36038637634](https://github.com/Falconiere/toolu-ghrunner/actions/runs/36038637634)
+at workflow/action revision `e607a7aae26e113aa3d8ecf1c26c62e0d74192eb`, using a
+private temporary acquisition probe in the unmodified toolu runner. That run
+failed as expected and is fixture provenance, not passing acceptance. The probe
+was removed before implementation. Sanitization replaces secret variables,
+endpoint authorization, mask values and token-bearing URLs, preserving structure
+and types. Fixtures and workflow files have SHA-256 records in
+`crates/execution/tests/incoming_contexts_evidence.json`.
+
+The official runner was built from the exact epic pin
+`cab9d1c3901e45c7705889c4f88284fdd93f4ae5` (not just a similarly named release).
+[Reference run 36038462880](https://github.com/Falconiere/toolu-ghrunner/actions/runs/36038462880)
+passed every assertion on that workflow/action revision. The evidence JSON records
+its Listener/Worker assembly hashes. Both lanes use the same macOS 26.6.2 ARM64
+host, Bash 5.3.20 and jq 1.7.1; reference checkout uses bundled Node 20.20.2 and
+toolu checkout uses Node 20.18.3. Context and composite assertions use the real shell.
+
+[Toolu run 36039705559](https://github.com/Falconiere/toolu-ghrunner/actions/runs/36039705559)
+passed all four jobs with the same workflow/action revision. The live checker
+verified both runs, required assertion steps, runner identities and content hashes.
+The full repository gate passed with all seven captured-context/replay and real-Node
+boundary tests. The live checker
+`python3 scripts/test/context_capture_check.py --live` requires authenticated `gh`,
+checks exact revisions, runner identities, four successful jobs and their required
+assertion steps, and compares workflow/action contents across both runs. Missing
+lane evidence fails the check.
+
+Applicability: macOS ARM64 / GitHub.com host execution is the captured and reference
+lane. Linux host replay is applicable in workspace CI; Linux live comparison and
+all GHES versions remain **unverified**, not passing evidence. Docker/container
+execution is not exercised here because no container behavior changes. This issue
+does not claim the epic-wide platform or cross-feature acceptance matrix is closed.

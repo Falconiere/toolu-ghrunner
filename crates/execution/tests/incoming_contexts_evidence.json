@@ -1,0 +1,72 @@
+{
+  "reference_source": "cab9d1c3901e45c7705889c4f88284fdd93f4ae5",
+  "platform": "macOS ARM64",
+  "backend": "github.com",
+  "captures": {
+    "incoming_contexts_call.json": {
+      "sha256": "c6a1e906dae6d4de7278d3ffcfc55a1ce014be611d6eec66aedd6321963c7452",
+      "job_id": "942d5a3a-04a6-550b-9a6d-554262f0999b",
+      "run_id": 36038637634,
+      "revision": "e607a7aae26e113aa3d8ecf1c26c62e0d74192eb"
+    },
+    "incoming_contexts_matrix_0.json": {
+      "sha256": "368b42e943115dec0b4b78e9e6018708727d89e4c4e3e18f5bfbe6adea81c657",
+      "job_id": "af60f1ed-e283-516c-8d88-01cc3ee1c589",
+      "run_id": 36038637634,
+      "revision": "e607a7aae26e113aa3d8ecf1c26c62e0d74192eb"
+    },
+    "incoming_contexts_matrix_1.json": {
+      "sha256": "5edfaeafa325844562312cd91244eed150730e37234237f01cc9c9a68d3c9f50",
+      "job_id": "3c5ef6b7-117d-5aad-b3f2-9ff695d753dd",
+      "run_id": 36038637634,
+      "revision": "e607a7aae26e113aa3d8ecf1c26c62e0d74192eb"
+    }
+  },
+  "workflow_sha256": {
+    ".github/workflows/expression-live.yml": "79bf0263882669b12a9b43111246027ab61f879c6c3b17e1291a6a67080d3c89",
+    ".github/workflows/expression-context-call.yml": "638551babe2ecb00d4d410b3b9766c1569a46f4ee8016432ef1340d6b407b5ac",
+    ".github/actions/context-68-parent/action.yml": "f3ecdd10542252601d1a1fa798ece1b2b9f07b8646c5c00fda4b2584e2331dae",
+    ".github/actions/context-68-child/action.yml": "1692c2384f38dea37c5fd95d1247a3ec81e2a66a9f82ee0cad1f7042cb4a1ee4"
+  },
+  "runs": {
+    "reference": {
+      "id": 36038462880,
+      "revision": "e607a7aae26e113aa3d8ecf1c26c62e0d74192eb",
+      "runner": "toolu-68-reference"
+    },
+    "toolu": {
+      "id": 36039705559,
+      "revision": "e607a7aae26e113aa3d8ecf1c26c62e0d74192eb",
+      "runner": "toolu-68-final"
+    }
+  },
+  "reference_binary_sha256": {
+    "bin/Runner.Listener.dll": "1188e474f4ac1549f9cb4663d902041857ae1c57a949b77c0d4dbf2dced646ef",
+    "bin/Runner.Worker.dll": "b3737d5401acafdf9da790c21e2e88ba4331aa872145ef0935a28476447c1ef4"
+  },
+  "unverified": [
+    "Linux host live comparison",
+    "GHES live comparison"
+  ],
+  "toolu_source_sha256": {
+    "crates/execution/src/execution/action_exec.rs": "1ff0147874cafce7968d227cf62abc68d1533470846217bc2e2f5b8ab3a51a32",
+    "crates/execution/src/execution/action_support.rs": "7e37fb5df75265a99be749e34963b8d5b5503722ddd9af3242b16ce08278fd02",
+    "crates/execution/src/execution/context.rs": "6056d693e3c03d19b28f399f2982ec90350a81ea8ffe8042153010abbf0da305",
+    "crates/execution/src/execution/context_build.rs": "e0b59d00036621010e99080c89f73fcfa5dbe62fce3c1bab3943b01f2b2e076c",
+    "crates/execution/src/execution/job_runner.rs": "e03ba7b125add4a3ae3bd448e49f605c578801d476a455d4c59d0a177c8ff22c",
+    "crates/execution/src/execution/node_stage.rs": "2df0ec1fc0a14cf1aa8a2eafbfe707db122ceb76d6162e7aea9972e15039ae5e",
+    "crates/execution/src/execution/step_env.rs": "f646056df2d3c635ebf12d9ea246b7c1ef0022799f0ed86486a3c882c95f2631",
+    "crates/execution/src/execution/steps_runner.rs": "ea334b9f4a2531329c33e20580edc2b92e96aace55e045f3f47d946fa7c7112b",
+    "crates/shared/src/job_message/step.rs": "97fa95983cc9179f440a5b9c14ebf283cec578a41cde6caed3b21bbb9b088469"
+  },
+  "toolu_binary_sha256": "8e0c91668aa9f9e335bb1ab0b7be9ba69311d0e65fe5d4b0551bead6b1bc93f3",
+  "host": {
+    "os": "macOS 26.6.2",
+    "arch": "ARM64",
+    "bash": "5.3.20",
+    "jq": "1.7.1-apple",
+    "reference_node": "20.20.2",
+    "toolu_node": "20.18.3",
+    "node_probe": "26.9.0 (installed real Node; cache seeded only to avoid runtime download)"
+  }
+}

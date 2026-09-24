@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use shared::platform::{runner_arch, runner_os};
 use shared::{Conclusion, RunnerError, SecretMasker};
 
-use super::context_build::{build_strategy, default_strategy, runner_debug_on};
+use super::context_build::{build_strategy, runner_debug_on};
 use super::step_state::{StepState, build_steps_context};
 use expressions::evaluator::{EvalContext, JobStatus, evaluate};
 use expressions::template::interpolate;
@@ -21,11 +21,8 @@ pub struct ExecutionContext {
   secrets: HashMap<String, String>,
   /// Repo/org/env configuration variables — the `vars.*` context.
   vars: HashMap<String, String>,
-  matrix: ExprValue,
-  needs: ExprValue,
-  inputs: ExprValue,
-  /// `strategy.*` context (job-index/total, fail-fast, max-parallel).
-  strategy: HashMap<String, ExprValue>,
+  /// Server-owned roots, including contexts introduced after this runner.
+  incoming_contexts: HashMap<String, ExprValue>,
   /// Shared with the listener and the tracing file sink's redactor.
   /// Wrapped in a `Mutex` so `register_secret` and `add_mask` can
   /// mutate the pattern set from any Arc clone — the file sink's
@@ -64,14 +61,32 @@ impl ExecutionContext {
       job_status: JobStatus::Success,
       secrets: HashMap::new(),
       vars: HashMap::new(),
-      matrix: ExprValue::Null,
-      needs: ExprValue::Null,
-      inputs: ExprValue::Null,
-      strategy: default_strategy(),
+      incoming_contexts: HashMap::new(),
       masker,
       path_additions: Vec::new(),
       cgroup_path: None,
       workspace: None,
+    }
+  }
+
+  /// Import typed server roots without replacing runtime-owned contexts.
+  pub(super) fn import_contexts(
+    &mut self,
+    contexts: &HashMap<String, shared::PipelineContextData>,
+  ) {
+    for (name, value) in contexts {
+      let name = name.to_ascii_lowercase();
+      // These roots have their own authoritative assembly paths below.
+      if matches!(
+        name.as_str(),
+        "github" | "vars" | "env" | "secrets" | "steps" | "runner" | "job"
+      ) {
+        continue;
+      }
+      self.incoming_contexts.insert(
+        name,
+        expressions::context_data::pipeline_data_to_expr_value(value),
+      );
     }
   }
 
@@ -161,7 +176,8 @@ impl ExecutionContext {
   }
 
   /// Populate the `strategy.*` context (job-index/total, fail-fast,
-  /// max-parallel). Absent matrix/strategy keeps the single-job defaults.
+  /// max-parallel) for an explicitly supplied local execution strategy.
+  /// Acquired jobs instead preserve the server's complete strategy object.
   pub fn set_strategy(
     &mut self,
     job_index: u64,
@@ -169,7 +185,15 @@ impl ExecutionContext {
     fail_fast: bool,
     max_parallel: Option<u64>,
   ) {
-    self.strategy = build_strategy(job_index, job_total, fail_fast, max_parallel);
+    self.incoming_contexts.insert(
+      "strategy".to_owned(),
+      ExprValue::Object(build_strategy(
+        job_index,
+        job_total,
+        fail_fast,
+        max_parallel,
+      )),
+    );
   }
 }
 
@@ -242,7 +266,7 @@ impl ExecutionContext {
 
   /// Build an `EvalContext` snapshot for the expression evaluator.
   pub fn eval_context(&self) -> EvalContext {
-    let mut contexts = HashMap::new();
+    let mut contexts = self.incoming_contexts.clone();
 
     // github context
     contexts.insert("github".to_owned(), ExprValue::Object(self.github.clone()));
@@ -276,15 +300,8 @@ impl ExecutionContext {
       ExprValue::Object(string_map_to_obj(&self.vars)),
     );
 
-    // matrix, needs, inputs, job, strategy
-    contexts.insert("matrix".to_owned(), self.matrix.clone());
-    contexts.insert("needs".to_owned(), self.needs.clone());
-    contexts.insert("inputs".to_owned(), self.inputs.clone());
+    // Job status is owned by the running engine, not the server snapshot.
     contexts.insert("job".to_owned(), ExprValue::Object(self.job_context()));
-    contexts.insert(
-      "strategy".to_owned(),
-      ExprValue::Object(self.strategy.clone()),
-    );
 
     EvalContext {
       contexts,

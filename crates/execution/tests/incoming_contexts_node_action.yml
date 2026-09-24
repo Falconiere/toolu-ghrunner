@@ -1,0 +1,15 @@
+name: Captured input Node probe
+description: Assert the actual Node process receives acquired input expressions once
+inputs:
+  who:
+    description: Supplied captured expression
+    required: true
+  expected:
+    description: Exact value expected by the probe
+    required: true
+  fallback:
+    description: Selected manifest default evaluated against workflow inputs
+    default: ${{ inputs.who }}
+runs:
+  using: node20
+  main: main.js

@@ -16,7 +16,7 @@
 //!   - `vars.MY_VAR` resolves to the fixture's non-secret config variable.
 //!   - `secrets.MY_SECRET` resolves to the fixture's secret AND that value is
 //!     masked in a log line via the shared masker.
-//!   - `job.status` resolves; `strategy.*` carries single-job defaults.
+//!   - `job.status` resolves; absent `strategy` stays null.
 //!   - `steps.<id>.outcome`/`.conclusion` are distinct, and `.state` is exposed.
 
 use std::error::Error;
@@ -200,12 +200,14 @@ fn job_and_strategy_contexts_resolve() -> TestResult<()> {
   // job.status is real (success for a fresh context).
   assert_eq!(eval(&ctx, "${{ job.status }}")?, "success");
 
-  // strategy.* carries single-job defaults for a non-matrix run.
-  assert_eq!(eval(&ctx, "${{ strategy.job-index }}")?, "0");
-  assert_eq!(eval(&ctx, "${{ strategy.job-total }}")?, "1");
-  assert_eq!(eval(&ctx, "${{ strategy.fail-fast }}")?, "true");
-  // max-parallel is null when the workflow does not pin it.
-  assert_eq!(eval(&ctx, "${{ strategy.max-parallel }}")?, "");
+  // This capture omits strategy; do not invent matrix metadata.
+  assert!(matches!(
+    ctx.evaluate_expression("strategy")?,
+    expressions::types::ExprValue::Null
+  ));
+  for field in ["job-index", "job-total", "fail-fast", "max-parallel"] {
+    assert_eq!(eval(&ctx, &format!("${{{{ strategy.{field} }}}}"))?, "");
+  }
   Ok(())
 }
 

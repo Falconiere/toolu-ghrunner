@@ -125,7 +125,11 @@ pub(crate) async fn execute_action(
 /// `actions/checkout@v5` is unaffected. `pub` so integration tests can drive
 /// this exact reconstruction rather than a copy of it.
 pub fn build_uses_ref(reference: &ActionStepDefinitionReference) -> String {
-  // The wire protocol always populates at least one of `name`/`image` for a
+  // Acquired local references carry their complete path without a name.
+  if reference.repository_type.as_deref() == Some("self") {
+    return reference.path.clone().unwrap_or_default();
+  }
+  // Remote references populate at least one of `name`/`image` for a
   // `uses:` step; the empty fallback only defends the type allowing both to
   // be `None`, and `parse_action_ref` rejects the empty string downstream —
   // the warn makes that invariant violation observable at its source.
@@ -330,7 +334,7 @@ async fn run_composite_inner(
   resolved: &ResolvedStep,
   depth: &mut DepthTracker,
 ) -> Result<Conclusion, RunnerError> {
-  let step_inputs = build_composite_inputs(step, &resolved.manifest);
+  let step_inputs = build_composite_inputs(step, &resolved.manifest, ctx)?;
   emit_log(env.events, env.log_step_id, "##[endgroup]").await;
   let params = CompositeParams {
     manifest: &resolved.manifest,

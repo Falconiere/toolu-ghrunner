@@ -16,7 +16,9 @@ use super::job_spec::JobSpec;
 use super::post_drain::drain_post_steps;
 use super::shadow::ShadowObserver;
 use super::shadow::record::StepKey;
-use super::step_env::{apply_file_commands_and_merge_outputs, resolve_step_env};
+use super::step_env::{
+  apply_file_commands_and_merge_outputs, env_token_to_string, resolve_step_env,
+};
 use super::step_naming::derive_step_name;
 use super::step_timeout::StepBounds;
 use expressions::evaluator::EvalContext;
@@ -291,9 +293,14 @@ async fn render_script_step(
   ctx: &ExecutionContext,
   job: &JobCtx<'_>,
 ) -> Result<StepRender, RunnerError> {
-  let script = step.script_body().unwrap_or_default();
   let eval_ctx = ctx.eval_context();
-  let interpolated = ctx.interpolate_with(&eval_ctx, &script)?;
+  let interpolated = step
+    .inputs
+    .to_map()
+    .get("script")
+    .map(|token| env_token_to_string(token, ctx, &eval_ctx))
+    .transpose()?
+    .unwrap_or_default();
   // Shell precedence: step `shell:` > job/workflow `defaults.run.shell`.
   let shell = step.shell_name().or_else(|| job.job.defaults.shell.clone());
   let (env, file_cmds) = build_step_env_and_file_commands(step, ctx, &eval_ctx, job).await?;
@@ -490,13 +497,14 @@ fn resolve_working_dir(
   workspace: &Path,
   defaults: &super::job_spec::RunDefaultsResolved,
 ) -> Result<PathBuf, RunnerError> {
-  let raw = step
-    .input("workingDirectory")
-    .or_else(|| defaults.working_directory.clone());
-  let Some(raw) = raw else {
+  let inputs = step.inputs.to_map();
+  let resolved = if let Some(token) = inputs.get("workingDirectory") {
+    env_token_to_string(token, ctx, eval_ctx)?
+  } else if let Some(default) = &defaults.working_directory {
+    ctx.interpolate_with(eval_ctx, default)?
+  } else {
     return Ok(workspace.to_path_buf());
   };
-  let resolved = ctx.interpolate_with(eval_ctx, &raw)?;
   if resolved.is_empty() {
     return Ok(workspace.to_path_buf());
   }

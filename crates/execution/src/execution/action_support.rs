@@ -10,6 +10,8 @@ use tokio::sync::mpsc;
 use super::actions::manifest::ActionDefinition;
 use super::context::{ExecutionContext, runner_temp_dir, runner_tool_cache_dir};
 use super::handlers::node::build_action_env;
+use super::step_env::env_token_to_string;
+use expressions::evaluator::EvalContext;
 
 /// Build the env map for a Node.js action stage (inputs, `STATE_*`, paths).
 pub(super) fn build_node_env(
@@ -19,8 +21,18 @@ pub(super) fn build_node_env(
   action_dir: &Path,
   workspace: &Path,
   config: &RunnerConfig,
-) -> HashMap<String, String> {
-  let step_inputs = collect_step_inputs(step);
+) -> Result<HashMap<String, String>, RunnerError> {
+  let eval_ctx = ctx.eval_context();
+  let mut step_inputs = collect_step_inputs(step, ctx, &eval_ctx)?;
+  // Only selected action defaults still contain unevaluated expressions.
+  // Supplied values (including nested composite literals) are already final.
+  for (name, input) in &manifest.inputs {
+    if !step_inputs.contains_key(name)
+      && let Some(default) = &input.default
+    {
+      step_inputs.insert(name.clone(), ctx.interpolate_with(&eval_ctx, default)?);
+    }
+  }
 
   // The step's `save-state` values surface as `STATE_*` to its own
   // pre/main/post stages (keyed by step id), so post can read what main saved.
@@ -33,35 +45,28 @@ pub(super) fn build_node_env(
     &state,
   ));
 
-  // Interpolate ${{ ... }} expressions in INPUT_* values (action.yml
-  // defaults). ONE snapshot per stage invocation (S4), reused across every
-  // env value in this loop instead of rebuilt per value — `pre`/`main`/`post`
-  // each call `build_node_env` once, so this stays one rebuild per stage.
-  let eval_ctx = ctx.eval_context();
-  for value in env.values_mut() {
-    if value.contains("${{")
-      && let Ok(interpolated) = ctx.interpolate_with(&eval_ctx, value)
-    {
-      *value = interpolated;
-    }
-  }
   apply_runner_paths(&mut env, workspace, config);
-  env
+  Ok(env)
 }
 
-/// Collect a step's `with:` inputs as plain string key/values.
-fn collect_step_inputs(step: &ActionStep) -> HashMap<String, String> {
+/// Evaluate supplied `with:` inputs once; type-0 values are final literals.
+/// Nested composite calls have already rendered their inputs into literals.
+fn collect_step_inputs(
+  step: &ActionStep,
+  ctx: &ExecutionContext,
+  eval_ctx: &EvalContext,
+) -> Result<HashMap<String, String>, RunnerError> {
   step
     .inputs
     .to_map()
     .into_iter()
-    .map(|(k, v)| {
-      (
-        k,
-        v.to_string_value()
-          .map(ToOwned::to_owned)
-          .unwrap_or_default(),
-      )
+    .map(|(key, token)| {
+      let value = if token.token_type == 0 {
+        token.lit.unwrap_or_default()
+      } else {
+        env_token_to_string(&token, ctx, eval_ctx)?
+      };
+      Ok((key, value))
     })
     .collect()
 }
@@ -95,20 +100,9 @@ fn apply_runner_paths(env: &mut HashMap<String, String>, workspace: &Path, confi
 pub(super) fn build_composite_inputs(
   step: &ActionStep,
   manifest: &ActionDefinition,
-) -> HashMap<String, String> {
-  let user_inputs: HashMap<_, _> = step
-    .inputs
-    .to_map()
-    .into_iter()
-    .map(|(k, v)| {
-      (
-        k,
-        v.to_string_value()
-          .map(ToOwned::to_owned)
-          .unwrap_or_default(),
-      )
-    })
-    .collect();
+  ctx: &ExecutionContext,
+) -> Result<HashMap<String, String>, RunnerError> {
+  let user_inputs = collect_step_inputs(step, ctx, &ctx.eval_context())?;
 
   let mut result = HashMap::new();
   for (name, input_def) in &manifest.inputs {
@@ -123,7 +117,7 @@ pub(super) fn build_composite_inputs(
   for (k, v) in &user_inputs {
     result.entry(k.clone()).or_insert_with(|| v.clone());
   }
-  result
+  Ok(result)
 }
 
 /// Resolve the action directory inside its cache dir, honoring a subpath.
