@@ -401,7 +401,7 @@ No parser or constructed fixture result establishes live backend parity.
 | Scenario | Test surface and exact observable | Status |
 | --- | --- | --- |
 | 73-S1 | `execution/tests/job_container_linux_test.rs`: Ubuntu OS, shared hostname across shell/Node/composite/posts, container cwd and exact marker bytes | Local Linux lane; see command below |
-| 73-S2 | `docker/tests/job_container.rs`: paths with spaces, metadata equals inspect, multiline opaque env preserved, cleanup; `job_container_composite_test.rs`: container shell, expression paths and ENV/PATH; Linux lane: OUTPUT/ENV/PATH/STATE | Local Docker; live checkout/artifact backend remains unverified |
+| 73-S2 | `docker/tests/job_container.rs`: paths with spaces, metadata equals inspect, ephemeral published port, user bind-volume persistence, multiline opaque env preserved, cleanup; `job_container_composite_test.rs`: container shell, expression paths and ENV/PATH; Linux lane: OUTPUT/ENV/PATH/STATE | Local Docker; live checkout/artifact backend remains unverified |
 | 73-S3 | Service aliases and Docker actions sharing the job network | Unverified; requires #74/#75 integration |
 | 73-S4 | `docker/tests/job_container_failures.rs`: observed-start cancellation, timeout/post exec, pull/create/start/exec failure, owned-resource removal | Explicit real-Docker lane |
 | 73-S5 | `execution/tests/job_container_test.rs`: non-Linux declaration fails before host workspace/step, absent declaration keeps host behavior | Default macOS lane; Linux setup-cancel conclusion regression |
