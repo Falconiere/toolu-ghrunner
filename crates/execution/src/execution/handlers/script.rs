@@ -17,7 +17,8 @@ use crate::execution::step_timeout::{WaitOutcome, wait_bounded};
 pub struct ScriptParams<'a> {
   /// Script body to run.
   pub script: &'a str,
-  /// Shell to invoke the script under (`None` = platform default).
+  /// Shell to invoke (`None` = `bash` on the host, `sh` in a job container).
+  /// Container images need not include Bash, so their default uses POSIX `sh`.
   pub shell: Option<&'a str>,
   /// Environment variables to set on the child process.
   pub env: &'a HashMap<String, String>,

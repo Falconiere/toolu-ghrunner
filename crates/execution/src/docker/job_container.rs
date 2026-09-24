@@ -17,7 +17,7 @@ use super::container_command::ContainerCommand;
 use super::container_create_options::apply_container_options;
 use super::container_mounts::{ContainerMounts, validate_volume};
 use super::container_ports::apply_ports;
-use super::container_spec::ContainerSpec;
+use super::container_spec::{ContainerCredentials, ContainerSpec};
 use super::path_translator::PathTranslator;
 
 /// Job execution host. The caller must await cleanup after all main/post steps.
@@ -54,12 +54,7 @@ impl JobContainer {
     for volume in &spec.volumes {
       validate_volume(volume)?;
     }
-    if let Some(credentials) = &spec.credentials {
-      masker
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .add_secrets([&credentials.username, &credentials.password]);
-    }
+    register_credentials(spec.credentials.as_ref(), &masker);
     let transport = ContainerCommand::connect(masker).await?;
     let mounts = materialize_mounts(config, workspace).await?;
     if cancel.is_cancelled() {
@@ -333,6 +328,24 @@ async fn materialize_mounts(
   tokio::task::spawn_blocking(move || ContainerMounts::create(&mount_config, &mount_workspace))
     .await
     .map_err(|error| RunnerError::Docker(format!("materialize job container mounts: {error}")))?
+}
+
+fn register_credentials(
+  credentials: Option<&ContainerCredentials>,
+  masker: &Arc<Mutex<SecretMasker>>,
+) {
+  let Some(credentials) = credentials else {
+    return;
+  };
+  let (mut guard, recovered) = match masker.lock() {
+    Ok(guard) => (guard, false),
+    Err(poisoned) => (poisoned.into_inner(), true),
+  };
+  guard.add_secrets([&credentials.username, &credentials.password]);
+  drop(guard);
+  if recovered {
+    tracing::warn!("recovered poisoned Docker secret masker mutex");
+  }
 }
 
 fn owner_label() -> HashMap<String, String> {

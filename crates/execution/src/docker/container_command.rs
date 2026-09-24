@@ -65,10 +65,15 @@ impl ContainerCommand {
 
   /// Mask daemon errors before they enter diagnostics or an event stream.
   pub(crate) fn error(&self, operation: &str, error: impl std::fmt::Display) -> RunnerError {
-    let guard = self
-      .masker
-      .lock()
-      .unwrap_or_else(std::sync::PoisonError::into_inner);
-    RunnerError::Docker(format!("{operation}: {}", guard.mask(&error.to_string())))
+    let (guard, recovered) = match self.masker.lock() {
+      Ok(guard) => (guard, false),
+      Err(poisoned) => (poisoned.into_inner(), true),
+    };
+    let masked_error = guard.mask(&error.to_string()).into_owned();
+    drop(guard);
+    if recovered {
+      tracing::warn!("recovered poisoned Docker secret masker mutex");
+    }
+    RunnerError::Docker(format!("{operation}: {masked_error}"))
   }
 }
