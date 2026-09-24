@@ -14,7 +14,7 @@ use super::actions::downloader::{action_cache_dir, is_action_cached};
 use super::actions::manifest::{ActionDefinition, RunsUsing};
 use super::actions::prefetch::ActionFetcher;
 use super::actions::resolver::{ActionRefKind, parse_action_ref};
-use super::composite_exec::{CompositeParams, execute_composite_action};
+use super::composite_exec::{CompositeParams, CompositeResult, execute_composite_action};
 use super::context::ExecutionContext;
 use super::depth_tracker::DepthTracker;
 use super::node_stage::{NodeStage, emit_stage_endgroup, run_node_stage};
@@ -154,18 +154,8 @@ pub fn build_uses_ref(reference: &ActionStepDefinitionReference) -> String {
   }
 }
 
-/// Resolve an action step to its on-disk directory + manifest.
-///
-/// Remote actions are downloaded+cached; local `./path` actions resolve to a
-/// directory under `run.workspace` (the checked-out repo) with no network
-/// access. `run.http` is the job-scope HTTP client (120 s timeout, built once
-/// in `run_job`) reused for the tarball download and any node-runtime
-/// download — it is cloned into the returned [`ResolvedStep`] (an `Arc` bump
-/// under the hood, cheap). `run.log_step_id` is the id the resolution's
-/// header/download `Log` events carry (see [`ActionRun::log_step_id`]).
-///
-/// # Errors
-///
+/// Resolve a local or cached/downloaded action to its directory and manifest.
+/// Uses the job HTTP client and routes logs through `run.log_step_id`.
 /// Returns `RunnerError` on resolution, download, or manifest parse failure.
 async fn resolve_action(
   step: &ActionStep,
@@ -271,27 +261,28 @@ async fn dispatch_action(
       run_node_action(node_ctx).await
     },
     RunsUsing::Composite => {
-      let conclusion = run_composite_action(step, ctx, env, resolved, depth).await?;
+      let result = run_composite_action(step, ctx, env, resolved, depth).await?;
       Ok(ActionOutcome {
-        conclusion,
+        conclusion: result.conclusion,
         post: None,
-        outputs: std::collections::HashMap::new(),
+        outputs: result.outputs,
       })
     },
-    RunsUsing::Docker => {
-      // Fail the step, not the whole job (an `Err` would abort the step loop).
-      emit_log(
-        env.events,
-        env.log_step_id,
-        "  (docker actions not yet supported)",
-      )
-      .await;
-      Ok(ActionOutcome {
-        conclusion: Conclusion::Failure,
-        post: None,
-        outputs: std::collections::HashMap::new(),
-      })
-    },
+    RunsUsing::Docker => Ok(unsupported_docker_action(env).await),
+  }
+}
+
+async fn unsupported_docker_action(env: &ActionEnv<'_>) -> ActionOutcome {
+  emit_log(
+    env.events,
+    env.log_step_id,
+    "  (docker actions not yet supported)",
+  )
+  .await;
+  ActionOutcome {
+    conclusion: Conclusion::Failure,
+    post: None,
+    outputs: std::collections::HashMap::new(),
   }
 }
 
@@ -319,7 +310,7 @@ async fn run_composite_action(
   env: &ActionEnv<'_>,
   resolved: &ResolvedStep,
   depth: &mut DepthTracker,
-) -> Result<Conclusion, RunnerError> {
+) -> Result<CompositeResult, RunnerError> {
   depth.enter()?;
   let guard = DepthExitGuard(depth);
   run_composite_inner(step, ctx, env, resolved, &mut *guard.0).await
@@ -333,7 +324,7 @@ async fn run_composite_inner(
   env: &ActionEnv<'_>,
   resolved: &ResolvedStep,
   depth: &mut DepthTracker,
-) -> Result<Conclusion, RunnerError> {
+) -> Result<CompositeResult, RunnerError> {
   let step_inputs = build_composite_inputs(step, &resolved.manifest, ctx)?;
   emit_log(env.events, env.log_step_id, "##[endgroup]").await;
   let params = CompositeParams {
@@ -348,14 +339,18 @@ async fn run_composite_inner(
     http: env.http,
     fetcher: env.fetcher,
   };
-  let result = execute_composite_action(&params, ctx, depth).await?;
+  let prior_scope = ctx.scope_path();
+  ctx.enter_step_scope(&step.id);
+  let result = execute_composite_action(&params, ctx, depth).await;
+  ctx.restore_step_scope(prior_scope);
+  let result = result?;
   for (k, v) in &result.env_additions {
     ctx.set_env(k, v);
   }
   for p in &result.path_additions {
     ctx.prepend_path(p);
   }
-  Ok(result.conclusion)
+  Ok(result)
 }
 
 /// Inputs for running a Node.js action's `pre`/`main` stages.
@@ -407,12 +402,37 @@ async fn run_node_pre_if_present(c: &mut NodeActionCtx<'_>) -> Result<(), Runner
     return Ok(());
   }
 
-  emit_log(c.events, c.log_step_id, "##[group]Pre Run").await;
-  emit_stage_endgroup(c.events, c.log_step_id).await;
-  // A `pre` stage's outputs are recorded on `ctx` but not surfaced on the
-  // step's `StepCompleted` (only `main` outputs are), so drop the map.
-  let (_conclusion, _outputs) = run_node_stage(c.stage("pre")).await?;
-  Ok(())
+  report_pre_stage(c).await
+}
+
+async fn report_pre_stage(c: &mut NodeActionCtx<'_>) -> Result<(), RunnerError> {
+  let report_id = uuid::Uuid::new_v4().to_string();
+  let _ = c
+    .events
+    .send(RunnerEvent::StepStarted {
+      step_id: report_id.clone(),
+      step_name: format!("Pre {}", c.manifest.name),
+      step_number: 0,
+    })
+    .await;
+  emit_log(c.events, &report_id, "##[group]Pre Run").await;
+  emit_stage_endgroup(c.events, &report_id).await;
+  let mut stage = c.stage("pre");
+  stage.log_step_id = &report_id;
+  let result = run_node_stage(stage).await;
+  let conclusion = result
+    .as_ref()
+    .map(|(result, _)| *result)
+    .unwrap_or(Conclusion::Failure);
+  let _ = c
+    .events
+    .send(RunnerEvent::StepCompleted {
+      step_id: report_id,
+      conclusion,
+      outputs: std::collections::HashMap::new(),
+    })
+    .await;
+  result.map(|_| ())
 }
 
 /// Build the post-step registration for a node action that defines `runs.post`.
@@ -420,6 +440,8 @@ fn build_post_step(c: &NodeActionCtx<'_>) -> Option<PostStep> {
   c.manifest.runs.post.as_ref()?;
   Some(PostStep {
     step: c.step.clone(),
+    report_id: uuid::Uuid::new_v4().to_string(),
+    scope_path: c.ctx.scope_path(),
     action_name: c.manifest.name.clone(),
     action_dir: c.action_dir.to_path_buf(),
     manifest: c.manifest.clone(),

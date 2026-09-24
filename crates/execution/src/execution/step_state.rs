@@ -10,8 +10,6 @@ use expressions::types::ExprValue;
 #[derive(Default)]
 pub(super) struct StepState {
   pub(super) outputs: HashMap<String, String>,
-  /// `save-state` / `STATE_*` values, surfaced to the action's post step.
-  pub(super) state: HashMap<String, String>,
   /// The step's REAL result, before `continue-on-error` adjustment.
   pub(super) outcome: Option<Conclusion>,
   /// The effective result after `continue-on-error`: equals `outcome` unless
@@ -32,15 +30,6 @@ pub(super) fn build_steps_context(steps: &HashMap<String, StepState>) -> ExprVal
       .map(|(k, v)| (k.clone(), ExprValue::String(v.clone())))
       .collect();
     step_obj.insert("outputs".to_owned(), ExprValue::Object(outputs));
-
-    // state (`save-state` values; surfaced as `STATE_*` to the post stage and
-    // exposed here so `${{ steps.<id>.state.<k> }}` resolves).
-    let state_map: HashMap<String, ExprValue> = state
-      .state
-      .iter()
-      .map(|(k, v)| (k.clone(), ExprValue::String(v.clone())))
-      .collect();
-    step_obj.insert("state".to_owned(), ExprValue::Object(state_map));
 
     // outcome = real result; conclusion = continue-on-error-adjusted result.
     // They differ when a step failed under `continue-on-error: true`.

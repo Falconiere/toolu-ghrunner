@@ -212,7 +212,7 @@ fn job_and_strategy_contexts_resolve() -> TestResult<()> {
 }
 
 #[test]
-fn steps_context_exposes_outcome_conclusion_and_state() -> TestResult<()> {
+fn steps_context_exposes_results_but_keeps_action_state_private() -> TestResult<()> {
   let dir = tempfile::tempdir()?;
   let (mut ctx, _masker) = build_ctx(dir.path())?;
 
@@ -231,8 +231,8 @@ fn steps_context_exposes_outcome_conclusion_and_state() -> TestResult<()> {
   );
   assert_eq!(eval(&ctx, "${{ steps.build.outputs.result }}")?, "ok");
 
-  // .state is exposed in the steps context AND via the post-stage accessor.
-  assert_eq!(eval(&ctx, "${{ steps.build.state.saved }}")?, "value-123");
+  // save-state is private to the action instance and its post stage.
+  assert_eq!(eval(&ctx, "${{ steps.build.state.saved }}")?, "");
   assert_eq!(
     ctx.step_state("build").get("saved").map(String::as_str),
     Some("value-123")

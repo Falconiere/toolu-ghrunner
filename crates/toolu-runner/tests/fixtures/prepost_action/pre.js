@@ -5,3 +5,4 @@ const file = process.env.MARKER_FILE;
 if (file) {
   fs.appendFileSync(file, `${marker}:pre\n`);
 }
+console.log('::set-output name=phase::pre');

@@ -51,16 +51,16 @@ pub async fn execute_composite_action(
     };
 
     if conclusion == Conclusion::Failure && !step.continue_on_error {
-      return Ok(state.into_result(Conclusion::Failure));
+      return Ok(run.state.result(Conclusion::Failure, params, run.ctx));
     }
     // A cancelled nested step means the job cancel token fired: stop the
     // composite and surface `Cancelled` so the parent stops too.
     if conclusion == Conclusion::Cancelled {
-      return Ok(state.into_result(Conclusion::Cancelled));
+      return Ok(run.state.result(Conclusion::Cancelled, params, run.ctx));
     }
   }
 
-  Ok(state.into_result(Conclusion::Success))
+  Ok(run.state.result(Conclusion::Success, params, run.ctx))
 }
 
 /// Dispatch one composite step (`uses:` or `run:`) and return its
@@ -122,11 +122,36 @@ struct CompositeState {
 }
 
 impl CompositeState {
-  fn into_result(self, conclusion: Conclusion) -> CompositeResult {
+  fn result(
+    &self,
+    conclusion: Conclusion,
+    params: &CompositeParams<'_>,
+    ctx: &ExecutionContext,
+  ) -> CompositeResult {
+    let outputs = params
+      .manifest
+      .outputs
+      .iter()
+      .filter_map(|(name, output)| {
+        output.value.as_ref().map(|value| {
+          (
+            name.clone(),
+            interpolate_composite_expr(
+              value,
+              params.step_inputs,
+              &self.step_outputs,
+              &self.extra_env,
+              ctx,
+            ),
+          )
+        })
+      })
+      .collect();
     CompositeResult {
       conclusion,
-      env_additions: self.extra_env,
-      path_additions: self.path_additions,
+      outputs,
+      env_additions: self.extra_env.clone(),
+      path_additions: self.path_additions.clone(),
     }
   }
 }
@@ -229,7 +254,11 @@ async fn run_uses_step(
     fetcher: params.fetcher,
     parent_step_id: params.parent_step_id,
   };
-  run_nested_uses_step(nested, skip).await
+  let (conclusion, outputs) = run_nested_uses_step(nested, skip).await?;
+  if let Some(name) = step.id.as_deref() {
+    run.state.step_outputs.insert(name.to_owned(), outputs);
+  }
+  Ok(conclusion)
 }
 
 fn merge_file_command_env(

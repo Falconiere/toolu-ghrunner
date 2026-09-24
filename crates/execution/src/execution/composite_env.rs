@@ -50,6 +50,8 @@ pub struct CompositeParams<'a> {
 pub struct CompositeResult {
   /// Overall outcome of the composite action's steps.
   pub conclusion: Conclusion,
+  /// Outputs declared by the composite manifest and mapped from inner steps.
+  pub outputs: HashMap<String, String>,
   /// `GITHUB_ENV` entries accumulated across the composite's steps.
   pub env_additions: HashMap<String, String>,
   /// `GITHUB_PATH` entries accumulated across the composite's steps.

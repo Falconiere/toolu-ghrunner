@@ -1119,3 +1119,22 @@ and carry the local path separately from the optional remote action name.
 Deferred display names/timeouts are tracked in #99; full composite expressions
 and cleanup conditions are tracked in #102. The measured scope and reference
 run evidence are in [test-coverage.md](test-coverage.md#incoming-contexts-acceptance-68).
+
+## Step expression identity
+
+An acquired action step has a wire `id` for timeline events, log routing and
+GitHub step reporting, and a separate `contextName` for `steps.<name>`
+expressions. Runtime step outputs, outcome and conclusion use `contextName`
+only when it is nonempty and does not begin with `__`; generated steps remain
+absent from the expression map. A false `if:` records empty outputs and both
+result fields as `skipped` for a visible name, then reports a skipped completion
+using the wire ID. `continue-on-error` preserves the real outcome while its
+effective conclusion can be success.
+
+Composite invocations have separate `steps` maps keyed by their invocation
+path. Only the declared composite outputs flow to the parent step. Action
+`save-state` is private to its instance and feeds the post entrypoint through
+`STATE_*`; it is not part of `steps.*`. Node pre and post stages have their own
+report IDs, and their outputs and results do not overwrite the main step's
+expression entry. The local tests and remaining live evidence are tracked in
+[test-coverage.md](test-coverage.md#step-context-identity-98).

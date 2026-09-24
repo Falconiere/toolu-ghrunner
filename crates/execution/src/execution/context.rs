@@ -15,6 +15,11 @@ use expressions::types::ExprValue;
 pub struct ExecutionContext {
   env: HashMap<String, String>,
   steps: HashMap<String, StepState>,
+  /// Inner `steps` maps keyed by the composite invocation path.
+  scoped_steps: HashMap<Vec<String>, HashMap<String, StepState>>,
+  scope_path: Vec<String>,
+  /// `save-state` is private action-instance data, independent of `steps.*`.
+  action_states: HashMap<(Vec<String>, String), HashMap<String, String>>,
   github: HashMap<String, ExprValue>,
   runner_context: HashMap<String, ExprValue>,
   job_status: JobStatus,
@@ -56,6 +61,9 @@ impl ExecutionContext {
     Self {
       env: HashMap::new(),
       steps: HashMap::new(),
+      scoped_steps: HashMap::new(),
+      scope_path: Vec::new(),
+      action_states: HashMap::new(),
       github: HashMap::new(),
       runner_context: runner_ctx,
       job_status: JobStatus::Success,
@@ -280,7 +288,7 @@ impl ExecutionContext {
     contexts.insert("env".to_owned(), ExprValue::Object(env_obj));
 
     // steps context
-    contexts.insert("steps".to_owned(), build_steps_context(&self.steps));
+    contexts.insert("steps".to_owned(), self.steps_context());
 
     // runner context
     contexts.insert(
@@ -307,6 +315,17 @@ impl ExecutionContext {
       contexts,
       job_status: self.job_status,
       workspace: self.workspace.clone(),
+    }
+  }
+
+  fn steps_context(&self) -> ExprValue {
+    if self.scope_path.is_empty() {
+      build_steps_context(&self.steps)
+    } else {
+      self
+        .scoped_steps
+        .get(&self.scope_path)
+        .map_or_else(|| ExprValue::Object(HashMap::new()), build_steps_context)
     }
   }
 
@@ -413,23 +432,63 @@ impl ExecutionContext {
 
 /// Per-step output / state / conclusion recording.
 impl ExecutionContext {
-  /// Record an output value for a step (`set-output` / `$GITHUB_OUTPUT`).
-  pub fn set_step_output(&mut self, step_id: &str, key: &str, value: &str) {
-    let state = self.steps.entry(step_id.to_owned()).or_default();
+  /// Enter one composite invocation's isolated expression scope.
+  pub(super) fn enter_step_scope(&mut self, wire_id: &str) {
+    self.scope_path.push(wire_id.to_owned());
+  }
+
+  /// Snapshot the current scope for a post action registered inside a composite.
+  pub(super) fn scope_path(&self) -> Vec<String> {
+    self.scope_path.clone()
+  }
+
+  /// Restore the parent scope after a composite or post action finishes.
+  pub(super) fn restore_step_scope(&mut self, path: Vec<String>) {
+    self.scope_path = path;
+  }
+
+  fn current_steps_mut(&mut self) -> &mut HashMap<String, StepState> {
+    if self.scope_path.is_empty() {
+      &mut self.steps
+    } else {
+      self
+        .scoped_steps
+        .entry(self.scope_path.clone())
+        .or_default()
+    }
+  }
+
+  fn current_steps(&self) -> Option<&HashMap<String, StepState>> {
+    if self.scope_path.is_empty() {
+      Some(&self.steps)
+    } else {
+      self.scoped_steps.get(&self.scope_path)
+    }
+  }
+
+  /// Record an output under a visible `steps.<context_name>` entry.
+  pub fn set_step_output(&mut self, context_name: &str, key: &str, value: &str) {
+    let state = self
+      .current_steps_mut()
+      .entry(context_name.to_owned())
+      .or_default();
     state.outputs.insert(key.to_owned(), value.to_owned());
   }
 
   /// Record a `save-state` value for a step, surfaced to its post step.
   pub fn set_step_state(&mut self, step_id: &str, key: &str, value: &str) {
-    let state = self.steps.entry(step_id.to_owned()).or_default();
-    state.state.insert(key.to_owned(), value.to_owned());
+    self
+      .action_states
+      .entry((self.scope_path.clone(), step_id.to_owned()))
+      .or_default()
+      .insert(key.to_owned(), value.to_owned());
   }
 
-  /// Read the recorded outputs map for a step (empty if none).
-  pub fn step_outputs(&self, step_id: &str) -> HashMap<String, String> {
+  /// Read the recorded outputs for a visible expression name (empty if none).
+  pub fn step_outputs(&self, context_name: &str) -> HashMap<String, String> {
     self
-      .steps
-      .get(step_id)
+      .current_steps()
+      .and_then(|steps| steps.get(context_name))
       .map(|s| s.outputs.clone())
       .unwrap_or_default()
   }
@@ -438,24 +497,30 @@ impl ExecutionContext {
   /// to that same step's pre/main/post stages (empty if none).
   pub fn step_state(&self, step_id: &str) -> HashMap<String, String> {
     self
-      .steps
-      .get(step_id)
-      .map(|s| s.state.clone())
+      .action_states
+      .get(&(self.scope_path.clone(), step_id.to_owned()))
+      .cloned()
       .unwrap_or_default()
   }
 
-  /// Record a step's REAL result (`steps.<id>.outcome`), before any
+  /// Record a step's REAL result (`steps.<context_name>.outcome`), before any
   /// `continue-on-error` adjustment.
-  pub fn set_step_outcome(&mut self, step_id: &str, outcome: Conclusion) {
-    let state = self.steps.entry(step_id.to_owned()).or_default();
+  pub fn set_step_outcome(&mut self, context_name: &str, outcome: Conclusion) {
+    let state = self
+      .current_steps_mut()
+      .entry(context_name.to_owned())
+      .or_default();
     state.outcome = Some(outcome);
   }
 
   /// Record a step's effective result (`steps.<id>.conclusion`), after
   /// `continue-on-error` (equals the outcome unless the step failed with
   /// `continue-on-error: true`).
-  pub fn set_step_conclusion(&mut self, step_id: &str, conclusion: Conclusion) {
-    let state = self.steps.entry(step_id.to_owned()).or_default();
+  pub fn set_step_conclusion(&mut self, context_name: &str, conclusion: Conclusion) {
+    let state = self
+      .current_steps_mut()
+      .entry(context_name.to_owned())
+      .or_default();
     state.conclusion = Some(conclusion);
   }
 

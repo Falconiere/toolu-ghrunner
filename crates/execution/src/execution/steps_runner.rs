@@ -175,12 +175,7 @@ async fn run_single_step(
   job_state: &mut JobState,
 ) -> Result<Conclusion, RunnerError> {
   if !evaluate_condition(step, ctx)? {
-    let _ = events
-      .send(RunnerEvent::StepSkipped {
-        step_id: step.id.clone(),
-        reason: "condition evaluated to false".to_owned(),
-      })
-      .await;
+    report_skipped_step(step, step_number, ctx, events).await;
     return Ok(Conclusion::Success);
   }
   let _ = events
@@ -201,11 +196,7 @@ async fn run_single_step(
       return Err(err);
     },
   };
-  // `outcome` is the real result; `conclusion` is continue-on-error-adjusted.
-  // Both are recorded so `steps.<id>.outcome` and `.conclusion` can differ.
-  ctx.set_step_outcome(&step.id, outcome);
-  let conclusion = apply_continue_on_error(step, outcome, ctx);
-  ctx.set_step_conclusion(&step.id, conclusion);
+  let conclusion = record_step_result(step, outcome, ctx);
 
   let _ = events
     .send(RunnerEvent::StepCompleted {
@@ -215,6 +206,53 @@ async fn run_single_step(
     })
     .await;
   Ok(conclusion)
+}
+
+async fn report_skipped_step(
+  step: &ActionStep,
+  step_number: u32,
+  ctx: &mut ExecutionContext,
+  events: &mpsc::Sender<RunnerEvent>,
+) {
+  if let Some(name) = step.expression_name() {
+    ctx.set_step_outcome(name, Conclusion::Skipped);
+    ctx.set_step_conclusion(name, Conclusion::Skipped);
+  }
+  let _ = events
+    .send(RunnerEvent::StepStarted {
+      step_id: step.id.clone(),
+      step_name: derive_step_name(step),
+      step_number,
+    })
+    .await;
+  let _ = events
+    .send(RunnerEvent::StepSkipped {
+      step_id: step.id.clone(),
+      reason: "condition evaluated to false".to_owned(),
+    })
+    .await;
+  let _ = events
+    .send(RunnerEvent::StepCompleted {
+      step_id: step.id.clone(),
+      conclusion: Conclusion::Skipped,
+      outputs: HashMap::new(),
+    })
+    .await;
+}
+
+fn record_step_result(
+  step: &ActionStep,
+  outcome: Conclusion,
+  ctx: &mut ExecutionContext,
+) -> Conclusion {
+  if let Some(name) = step.expression_name() {
+    ctx.set_step_outcome(name, outcome);
+  }
+  let conclusion = apply_continue_on_error(step, outcome, ctx);
+  if let Some(name) = step.expression_name() {
+    ctx.set_step_conclusion(name, conclusion);
+  }
+  conclusion
 }
 
 fn evaluate_condition(step: &ActionStep, ctx: &ExecutionContext) -> Result<bool, RunnerError> {
@@ -262,6 +300,11 @@ async fn execute_step(
       post,
       outputs,
     } = execute_action(step, ctx, &run, &mut job_state.depth).await?;
+    if let Some(name) = step.expression_name() {
+      for (key, value) in &outputs {
+        ctx.set_step_output(name, key, value);
+      }
+    }
     // Register the action's `post` entrypoint to drain LIFO at job end.
     if let Some(post_step) = post {
       job_state.posts.register(post_step);
@@ -357,7 +400,7 @@ async fn run_script_step(
   // changes execution and never serves a cached result.
   let pre = shadow_pre(job)?;
   let (result, stdout_outputs) =
-    run_and_dispatch_script(&job.handler, &params, &step.id, ctx, events).await?;
+    run_and_dispatch_script(&job.handler, &params, step, ctx, events).await?;
   shadow_post(job, &step.id, &interpolated, &env, &working_dir, pre)?;
   let outputs = merge_step_outputs(step, stdout_outputs, &file_cmds, ctx).await;
 
@@ -426,7 +469,7 @@ fn shadow_post(
 async fn run_and_dispatch_script(
   handler: &ScriptHandler,
   params: &ScriptParams<'_>,
-  step_id: &str,
+  step: &ActionStep,
   ctx: &mut ExecutionContext,
   events: &mpsc::Sender<RunnerEvent>,
 ) -> Result<(Conclusion, HashMap<String, String>), RunnerError> {
@@ -435,7 +478,14 @@ async fn run_and_dispatch_script(
   // its future completes (after EOF) the sender drops, so the dispatcher's
   // `recv` sees channel close and returns its `set-output` map.
   let exec = handler.execute(params, events, stdout_tx);
-  let dispatch = stream_dispatch_stdout(step_id, step_id, &mut stdout_rx, ctx, events);
+  let dispatch = stream_dispatch_stdout(
+    &step.id,
+    &step.id,
+    step.expression_name(),
+    &mut stdout_rx,
+    ctx,
+    events,
+  );
   let (exec_result, stdout_outputs) = tokio::join!(exec, dispatch);
   Ok((exec_result?.conclusion, stdout_outputs))
 }
@@ -451,7 +501,8 @@ async fn merge_step_outputs(
   file_cmds: &FileCommandManager,
   ctx: &mut ExecutionContext,
 ) -> HashMap<String, String> {
-  apply_file_commands_and_merge_outputs(&step.id, stdout_outputs, file_cmds, ctx).await
+  apply_file_commands_and_merge_outputs(step.expression_name(), stdout_outputs, file_cmds, ctx)
+    .await
 }
 
 /// Build the step's env map (global + step env + file-command paths + inherited

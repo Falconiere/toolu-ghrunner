@@ -72,13 +72,14 @@ pub struct NestedUsesParams<'a> {
 pub async fn run_nested_uses_step(
   params: NestedUsesParams<'_>,
   should_skip: bool,
-) -> Result<Conclusion, RunnerError> {
+) -> Result<(Conclusion, HashMap<String, String>), RunnerError> {
   if should_skip {
-    return Ok(Conclusion::Success);
+    record_skipped_nested(params.ctx, params.step);
+    return Ok((Conclusion::Success, HashMap::new()));
   }
 
   let Some(uses) = params.step.uses.as_deref() else {
-    return Ok(Conclusion::Success);
+    return Ok((Conclusion::Success, HashMap::new()));
   };
 
   let synthetic = build_nested_step(
@@ -91,9 +92,7 @@ pub async fn run_nested_uses_step(
   )?;
 
   // Per-step `env` is applied to the live context for the nested action's run.
-  for (k, v) in &params.step.env {
-    params.ctx.set_env(k, v);
-  }
+  apply_nested_env(params.ctx, &params.step.env);
 
   // Recursive call: a nested composite re-enters `execute_action`, which
   // enters the depth tracker again, so the chain is bounded by `MAX_COMPOSITE_DEPTH`.
@@ -117,7 +116,39 @@ pub async fn run_nested_uses_step(
   ))
   .await?;
 
-  Ok(outcome.conclusion)
+  record_nested_result(params.ctx, &synthetic, &outcome);
+  Ok((outcome.conclusion, outcome.outputs))
+}
+
+fn apply_nested_env(ctx: &mut ExecutionContext, env: &HashMap<String, String>) {
+  for (key, value) in env {
+    ctx.set_env(key, value);
+  }
+}
+
+fn record_skipped_nested(ctx: &mut ExecutionContext, step: &CompositeStep) {
+  if let Some(name) = step
+    .id
+    .as_deref()
+    .filter(|name| !name.is_empty() && !name.starts_with("__"))
+  {
+    ctx.set_step_outcome(name, Conclusion::Skipped);
+    ctx.set_step_conclusion(name, Conclusion::Skipped);
+  }
+}
+
+fn record_nested_result(
+  ctx: &mut ExecutionContext,
+  step: &ActionStep,
+  outcome: &super::action_exec::ActionOutcome,
+) {
+  if let Some(name) = step.expression_name() {
+    for (key, value) in &outcome.outputs {
+      ctx.set_step_output(name, key, value);
+    }
+    ctx.set_step_outcome(name, outcome.conclusion);
+    ctx.set_step_conclusion(name, outcome.conclusion);
+  }
 }
 
 /// Build a synthetic [`ActionStep`] for a nested composite `uses:` step.
