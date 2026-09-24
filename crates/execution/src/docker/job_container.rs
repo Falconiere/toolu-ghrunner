@@ -92,16 +92,9 @@ impl JobContainer {
     check_cancel(cancel)?;
     self.pull(spec, cancel).await?;
     check_cancel(cancel)?;
-    let docker = &self.transport.docker;
-    docker
-      .create_network(NetworkCreateRequest {
-        name: self.network.clone(),
-        labels: Some(owner_label()),
-        ..Default::default()
-      })
-      .await
-      .map_err(|e| self.transport.error("create job network", e))?;
+    self.create_network().await?;
     check_cancel(cancel)?;
+    let docker = &self.transport.docker;
     let created = docker
       .create_container(
         Some(CreateContainerOptions {
@@ -135,6 +128,20 @@ impl JobContainer {
       .unwrap_or_default()
       .clone_into(&mut self.image_path);
     check_cancel(cancel)
+  }
+
+  async fn create_network(&self) -> Result<(), RunnerError> {
+    self
+      .transport
+      .docker
+      .create_network(NetworkCreateRequest {
+        name: self.network.clone(),
+        labels: Some(owner_label()),
+        ..Default::default()
+      })
+      .await
+      .map_err(|e| self.transport.error("create job network", e))?;
+    Ok(())
   }
 
   fn create_body(&self, spec: &ContainerSpec) -> Result<ContainerCreateBody, RunnerError> {
@@ -173,7 +180,9 @@ impl JobContainer {
     apply_ports(&spec.ports, &mut body)?;
     Ok(body)
   }
+}
 
+impl JobContainer {
   async fn pull(
     &self,
     spec: &ContainerSpec,
