@@ -9,6 +9,8 @@ use expressions::types::ExprValue;
 /// Recorded outputs, saved state, and final outcome for a single executed step.
 #[derive(Default)]
 pub(super) struct StepState {
+  /// Workflow-visible name; the enclosing map remains keyed by runtime UUID.
+  pub(super) context_name: Option<String>,
   pub(super) outputs: HashMap<String, String>,
   /// The step's REAL result, before `continue-on-error` adjustment.
   pub(super) outcome: Option<Conclusion>,
@@ -47,7 +49,8 @@ pub(super) fn build_steps_context(steps: &HashMap<String, StepState>) -> ExprVal
       ExprValue::String(conclusion_str.to_owned()),
     );
 
-    steps_map.insert(id.clone(), ExprValue::Object(step_obj));
+    let name = state.context_name.as_deref().unwrap_or(id);
+    steps_map.insert(name.to_owned(), ExprValue::Object(step_obj));
   }
   ExprValue::Object(steps_map)
 }

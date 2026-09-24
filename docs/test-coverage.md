@@ -401,11 +401,11 @@ No parser or constructed fixture result establishes live backend parity.
 | Scenario | Test surface and exact observable | Status |
 | --- | --- | --- |
 | 73-S1 | `execution/tests/job_container_linux_test.rs`: Ubuntu OS, shared hostname across shell/Node/composite/posts, container cwd and exact marker bytes | Local Linux lane; see command below |
-| 73-S2 | `docker/tests/job_container.rs`: paths with spaces, metadata equals inspect, ephemeral published port, user bind-volume persistence, multiline opaque env preserved, cleanup; `job_container_composite_test.rs`: container shell, expression paths and ENV/PATH; Linux lane: OUTPUT/ENV/PATH/STATE | Local Docker; live checkout/artifact backend remains unverified |
+| 73-S2 | `docker/tests/job_container.rs`: paths with spaces, metadata equals inspect, ephemeral published port, user bind-volume persistence, multiline opaque env preserved, cleanup; `job_container_composite_test.rs`: container shell, expression paths and ENV/PATH; Linux lane: OUTPUT/ENV/PATH/STATE | Local Docker plus live checkout/artifact byte verification (runs below) |
 | 73-S3 | Service aliases and Docker actions sharing the job network | Unverified; requires #74/#75 integration |
 | 73-S4 | `docker/tests/job_container_failures.rs`: observed-start cancellation, timeout/post exec, missing daemon, pull/create/start/exec failure, owned-resource removal | Explicit real-Docker lane |
 | 73-S5 | `execution/tests/job_container_test.rs`: non-Linux declaration fails before host workspace/step, absent declaration keeps host behavior | Default macOS lane; Linux setup-cancel conclusion regression |
-| Live applicability | Captured `jobContainer`, official pinned runner comparison, real GitHub artifact bytes, GHES | Unverified; no closure claim |
+| Live applicability | Captured `jobContainer` replay; toolu 36057599244 / official 2.337.0 36057648598: six markers, exact artifact bytes and cleanup | GitHub.com paired harness passed; GHES remains unverified |
 
 Ordinary repository gate: `./tools/check.sh all`. Resource-creating Docker tests
 are ignored there and must be run explicitly. With a local Linux daemon:
@@ -449,3 +449,27 @@ ignored result is not live evidence.
 cargo nextest run -p toolu-runner --features live --test job_container_live \
   --run-ignored only -j 1
 ```
+
+The real GitHub.com capture is documented in
+`crates/toolu-runner/tests/fixtures/job_container_message.md`. Its Linux replay
+(`execution/tests/job_container_capture_replay.rs`) preserves captured step UUIDs,
+context names and token shapes, removes only checkout/artifact backend steps, and
+executes the original shell, pinned Node probe, local composite and final output
+verification. It exposed and now pins local `self` references carried only in
+`reference.path`, and named `steps` contexts distinct from internal step UUIDs.
+The three captured parse/replay checks passed on Linux with real Docker.
+The live comparison reads GitHub's combined job log, which preserves all Node
+stages even when per-step log metadata reuses the main step ID for posts.
+
+On 2026-09-24 the paired harness passed (67.337 s) against
+[toolu run 36057599244](https://github.com/Falconiere/toolu-ghrunner/actions/runs/36057599244)
+and [official run 36057648598](https://github.com/Falconiere/toolu-ghrunner/actions/runs/36057648598).
+Both used workflow SHA `44aedf38e95137ad6128a14db84475e8048cd791` and the
+same pinned action revisions. The toolu binary included the captured local-reference
+and context-name fixes in this change; workflow revision and runner revision are
+distinct. The harness verified all six markers, exact `container-73-artifact\n`
+bytes, and absence of each artifact-recorded container/network. Official logs
+contain terminal escapes; the harness permits these only in private captured
+output. The earlier official log-fetch failure was CLI output protection, not
+a failed workflow or delayed publication. Services/Docker-action integration
+(#74/#75), private-registry authentication failure, and GHES remain unverified.
