@@ -163,13 +163,14 @@ pub struct ActionStepDefinitionReference {
   /// Wire field `ref`; the action's git ref (tag/branch/SHA), if specified.
   #[serde(default, rename = "ref")]
   pub git_ref: Option<String>,
-  /// The repository type the action is sourced from (e.g. `"GitHub"`, `"Local"`).
+  /// The repository type: `"GitHub"` for remote or `"self"` for acquired local actions.
   #[serde(default)]
   pub repository_type: Option<String>,
   /// The subpath into the repo, for a `{owner}/{repo}/{path}@{ref}` remote
   /// action reference (e.g. `"code-review"` when `name` is
-  /// `"owner/repo"`). Local `uses: ./...` steps carry the whole `./path`
-  /// in `name` instead and leave this `None`.
+  /// `"owner/repo"`). Acquired local `uses: ./...` steps carry their whole
+  /// `./path` here with `repository_type = "self"` and no `name`. Locally
+  /// constructed nested composite references may instead use `name`.
   #[serde(default)]
   pub path: Option<String>,
 }

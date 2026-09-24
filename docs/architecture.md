@@ -1092,3 +1092,29 @@ The short version (updated as items land):
 4. **Telemetry opt-in.** OTel cut for v1. A `tracing-subscriber`
    JSON-formatter + optional OTel layer (behind a feature flag) is
    a v1.1 fast-follow.
+## Incoming expression contexts
+
+Acquired jobs carry server-resolved `contextData`; `build_context` imports its
+server-owned roots using the existing typed PipelineContextData conversion.
+`matrix`, `needs`, workflow `inputs`, `strategy`, and future root names retain
+their supplied strings, numbers, booleans, arrays, objects and nulls. There is
+no numeric-string coercion or reconstruction of matrix strategy from YAML.
+An absent strategy stays null, rather than inventing a single-job strategy.
+
+Root names are normalized for case-insensitive expression lookup. `github` and
+`vars` retain their dedicated assembly paths; `env`, `secrets`, `steps`, `runner`
+and `job` remain runtime-owned, so a case-variant server key cannot replace
+them. Only contextData is forwarded; endpoint authorization and private runner
+process environment are not imported.
+
+The existing scalar token evaluator resolves acquired type-3 expressions for
+script bodies, working directories and action inputs. Expression results are
+used once. Supplied action literals (including already-rendered nested inputs)
+are not evaluated again; only selected manifest defaults need interpolation.
+Composite invocation inputs remain separate from workflow inputs and from
+other invocations. Acquired local actions identify their repository as `self`
+and carry the local path separately from the optional remote action name.
+
+Deferred display names/timeouts are tracked in #99; full composite expressions
+and cleanup conditions are tracked in #102. The measured scope and reference
+run evidence are in [test-coverage.md](test-coverage.md#incoming-contexts-acceptance-68).

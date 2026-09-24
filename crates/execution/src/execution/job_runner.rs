@@ -615,6 +615,7 @@ pub fn build_context(
   masker: Arc<Mutex<SecretMasker>>,
 ) -> ExecutionContext {
   let mut ctx = ExecutionContext::with_masker(masker);
+  ctx.import_contexts(&msg.context_data);
 
   // In Serve mode this carries the per-job cgroup so spawned steps are moved
   // into it for CPU/memory enforcement; `None` in listener/JIT mode.

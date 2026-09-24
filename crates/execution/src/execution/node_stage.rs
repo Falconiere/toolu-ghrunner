@@ -90,7 +90,7 @@ pub(super) async fn run_node_stage(
     s.action_dir,
     s.workspace,
     s.config,
-  );
+  )?;
   // Give this stage its own `$GITHUB_ENV`/`$GITHUB_OUTPUT`/`$GITHUB_PATH`/
   // `$GITHUB_STATE`/`$GITHUB_STEP_SUMMARY` file-command files — a node
   // action (e.g. setup-node/setup-bun style) exports env vars and PATH

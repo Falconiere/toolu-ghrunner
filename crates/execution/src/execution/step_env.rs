@@ -32,7 +32,7 @@ pub(super) fn resolve_step_env(
   Ok(result)
 }
 
-/// Render a scalar env-value token to its final string.
+/// Render a scalar template token to its final string, evaluating expressions once.
 ///
 /// GitHub serializes `KEY: ${{ expr }}` as an expression token (type 3),
 /// not a literal — reading only `to_string_value()` silently turned every
@@ -42,7 +42,7 @@ pub(super) fn resolve_step_env(
 /// with GitHub's string coercion. Bare scalars follow the same coercion
 /// rules: booleans (type 5) render lowercase, numbers (type 6) drop a
 /// trailing `.0`, and null (type 7) is the empty string.
-fn env_token_to_string(
+pub(super) fn env_token_to_string(
   token: &TemplateToken,
   ctx: &ExecutionContext,
   eval_ctx: &EvalContext,
