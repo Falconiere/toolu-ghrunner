@@ -1,0 +1,26 @@
+name: expression-context-call
+on:
+  workflow_call:
+    inputs:
+      who:
+        required: true
+        type: string
+      count:
+        required: true
+        type: number
+      enabled:
+        required: true
+        type: boolean
+jobs:
+  inputs:
+    runs-on: [self-hosted, toolu-68]
+    steps:
+      - name: Assert typed workflow_call inputs
+        if: inputs.enabled && inputs.count == 0
+        env:
+          INPUTS: ${{ toJSON(inputs) }}
+        run: |
+          printf '%s' "$INPUTS" | jq -e '.who == "called" and .count == 0 and .enabled == true'
+          printf 'call-ok' > context-68-call.out
+      - name: Assert typed condition ran
+        run: test "$(cat context-68-call.out)" = call-ok

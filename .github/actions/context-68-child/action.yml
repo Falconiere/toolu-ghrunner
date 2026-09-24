@@ -1,0 +1,13 @@
+name: Nested context input scope probe
+description: Assert the child input is independent of workflow and parent inputs
+inputs:
+  who:
+    required: true
+    description: Value scoped to the child invocation
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        test '${{ inputs.who }}' = inner
+        printf '%s' '${{ inputs.who }}' > context-68-child.out

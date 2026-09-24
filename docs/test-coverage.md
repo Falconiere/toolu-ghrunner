@@ -103,3 +103,21 @@ these local buffers do not prove remote UI behavior. Diagnostics here exercise
 the actual writer/redactor directly, not global subscriber initialization.
 Nested composite shell workflow-command routing is a separate observed gap;
 the nested probe tests ordinary stdout/stderr, and the notice runs top-level.
+
+## Incoming contexts acceptance (#68)
+
+The issue-specific `expression-live.yml` workflow uses label `toolu-68` and
+asserts typed dispatch/call inputs, producer outputs/result, both matrix
+children and their strategy values, and nested/sibling composite input scopes.
+The producer runs on GitHub-hosted Linux to isolate incoming `needs` from the
+separate outgoing-job-output issue. Local actions live under
+`.github/actions/context-68-{parent,child}`. The workflow must be dispatched with
+its default inputs (`world`, numeric `3`, boolean `false`).
+
+Capture and toolu/reference comparison are pending. The initial unchanged
+expression baseline passed on official v2.337.0 macOS ARM64 in
+[run 36033199822](https://github.com/Falconiere/toolu-ghrunner/actions/runs/36033199822);
+that older print-only input test is not #68 acceptance evidence. New capture,
+production replay and live results will be recorded here after execution.
+Linux self-hosted and GHES comparison remain unverified; no Docker behavior is
+changed by this issue.

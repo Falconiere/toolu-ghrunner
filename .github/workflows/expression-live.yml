@@ -1,22 +1,91 @@
 
 name: expression
+run-name: context-68 ${{ inputs.who }}
 on:
   workflow_dispatch:
     inputs:
       who:
-        description: 'Who to greet'
-        required: true
-        default: 'world'
+        description: Exact string input
+        type: string
+        default: world
+      count:
+        description: Exact numeric input
+        type: number
+        default: 3
+      enabled:
+        description: Exact boolean input
+        type: boolean
+        default: false
+permissions:
+  contents: read
 jobs:
-  greet:
-    runs-on: [self-hosted, toolu-runner-v1]
+  producer:
+    runs-on: ubuntu-latest
+    outputs:
+      artifact: ${{ steps.produce.outputs.artifact }}
     steps:
-      - name: echo interpolated values
+      - id: produce
+        run: echo 'artifact=artifact-68' >> "$GITHUB_OUTPUT"
+  consumer:
+    needs: producer
+    runs-on: [self-hosted, toolu-68]
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - tag: alpha
+            number: 7
+            flag: true
+            index: 0
+            directory: context-68-alpha
+          - tag: beta
+            number: 0
+            flag: false
+            index: 1
+            directory: context-68-beta
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare context-selected working directories
+        run: mkdir -p context-68-alpha context-68-beta
+      - name: Assert incoming contexts
+        if: needs.producer.result == 'success' && inputs.count == 3 && !inputs.enabled
+        working-directory: ${{ matrix.directory }}
+        env:
+          MATRIX: ${{ toJSON(matrix) }}
+          NEEDS: ${{ toJSON(needs) }}
+          INPUTS: ${{ toJSON(inputs) }}
+          STRATEGY: ${{ toJSON(strategy) }}
+        run: |
+          test "$(basename "$PWD")" = '${{ matrix.directory }}'
+          test '${{ needs.producer.outputs.artifact }}' = artifact-68
+          printf '%s' "$MATRIX" | jq -e 'if .index == 0 then .tag == "alpha" and .number == 7 and .flag == true else .index == 1 and .tag == "beta" and .number == 0 and .flag == false end'
+          printf '%s' "$NEEDS" | jq -e '.producer == {"outputs":{"artifact":"artifact-68"},"result":"success"}'
+          printf '%s' "$INPUTS" | jq -e '.who == "world" and .count == 3 and .enabled == false'
+          printf '%s' "$STRATEGY" | jq -e --argjson index '${{ matrix.index }}' '."job-index" == $index and ."job-total" == 2 and ."max-parallel" == 1 and ."fail-fast" == false'
+          printf 'contexts-ok' > ../context-68.out
+      - name: Workflow input passed to action
+        uses: ./.github/actions/context-68-parent
+        with:
+          who: ${{ inputs.who }}
+          expected: world
+      - name: Independent sibling action input
+        uses: ./.github/actions/context-68-parent
+        with:
+          who: sibling
+          expected: sibling
+      - name: Assert parent workflow scope restored
         env:
           WHO: ${{ inputs.who }}
-          REPO: ${{ github.repository }}
-          SHA: ${{ github.sha }}
         run: |
-          echo "hello $WHO from $REPO @ $SHA"
-          test -n "$REPO"
-          test -n "$SHA"
+          test "$WHO" = world
+          test "$(cat context-68.out)" = contexts-ok
+          test "$(cat context-68-world.out)" = world
+          test "$(cat context-68-sibling.out)" = sibling
+          test "$(cat context-68-child.out)" = inner
+  call:
+    uses: ./.github/workflows/expression-context-call.yml
+    with:
+      who: called
+      count: 0
+      enabled: true
