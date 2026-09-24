@@ -165,7 +165,7 @@ pub struct ActionStepDefinitionReference {
   /// The Docker image reference, for `docker` steps.
   #[serde(default)]
   pub image: Option<String>,
-  /// The action's `owner/repo` (or local path) name, for `uses:` steps.
+  /// The action's `owner/repo`, or a legacy local path, for `uses:` steps.
   #[serde(default)]
   pub name: Option<String>,
   /// Wire field `ref`; the action's git ref (tag/branch/SHA), if specified.
