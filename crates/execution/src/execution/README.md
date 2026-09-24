@@ -21,7 +21,7 @@ not part of it. Workflow YAML parsing/matrix/orchestration lives in the
 | `actions.rs` | (mod decl) | Declares the `actions` sub-module (resolver, downloader, manifest). |
 | `artifacts.rs` | (mod decl) | Declares the `artifacts` sub-module (backend + service). |
 | `cgroup_join.rs` | `spawn_in_cgroup` | Spawns a step process and, if a per-job cgroup path is set, best-effort moves the child into it so `cpu.max`/`memory.max` apply. |
-| `command_dispatch.rs` | `CommandDispatcher` | Consumes a step's stdout `::workflow-command::` lines and applies each to the live `ExecutionContext` (outputs, state, masks, groups, annotations); refuses stdout `set-env`/`add-path` (CVE-2020-15228). |
+| `command_dispatch.rs` | `CommandDispatcher` | Consumes a step's stdout `::workflow-command::` lines and applies each to the live `ExecutionContext` (outputs, state, masks, groups, annotations); refuses stdout `set-env`/`add-path` (CVE-2020-15228). Decoded `add-mask` registers the exact whole value and every nonempty trimmed CR/LF line, including short values. |
 | `command_parser.rs` | `parse_command` | Parses one stdout line into a `WorkflowCommand` (error/warning/notice/debug/group/set-output/add-mask/save-state/…). |
 | `composite_env.rs` | `build_step_env` | Composite-action step-skip evaluation, per-step env building, and file-command path management shared by the composite executor. |
 | `composite_exec.rs` | `execute_composite_action` | Runs a composite action's `steps:` sequentially as shell subprocesses or nested `uses:`, threading `GITHUB_OUTPUT`/`ENV`/`PATH` file commands between steps. |

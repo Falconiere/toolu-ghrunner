@@ -614,3 +614,7 @@ fn final_conclusion(state: &ForwarderState) -> Conclusion {
 #[cfg(test)]
 #[path = "tests/execution_loop.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/multiline_mask.rs"]
+mod multiline_mask;
