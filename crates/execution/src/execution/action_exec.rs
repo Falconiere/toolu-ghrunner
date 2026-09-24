@@ -420,10 +420,10 @@ async fn report_pre_stage(c: &mut NodeActionCtx<'_>) -> Result<(), RunnerError> 
   let mut stage = c.stage("pre");
   stage.log_step_id = &report_id;
   let result = run_node_stage(stage).await;
-  let conclusion = result
-    .as_ref()
-    .map(|(result, _)| *result)
-    .unwrap_or(Conclusion::Failure);
+  let conclusion = match &result {
+    Ok((conclusion, _)) => *conclusion,
+    Err(_) => Conclusion::Failure,
+  };
   let _ = c
     .events
     .send(RunnerEvent::StepCompleted {
@@ -432,7 +432,10 @@ async fn report_pre_stage(c: &mut NodeActionCtx<'_>) -> Result<(), RunnerError> 
       outputs: std::collections::HashMap::new(),
     })
     .await;
-  result.map(|_| ())
+  match result {
+    Ok(_) => Ok(()),
+    Err(error) => Err(error),
+  }
 }
 
 /// Build the post-step registration for a node action that defines `runs.post`.
