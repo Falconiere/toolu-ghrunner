@@ -36,6 +36,7 @@ jobs:
           test "$RUNNER_TEMP" = "$EXPECTED_TEMP"
           test -n "$CONTAINER_ID"
           test -n "$CONTAINER_NETWORK"
+          printf '%s\n%s\n' "$CONTAINER_ID" "$CONTAINER_NETWORK" > container-73-runtime.txt
           test -f "$GITHUB_EVENT_PATH"
           printf 'FROM_SHELL=shell-value\n' >> "$GITHUB_ENV"
           printf 'shell_result=shell-value\n' >> "$GITHUB_OUTPUT"
@@ -61,5 +62,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: container-73
-          path: container-73.txt
+          path: |
+            container-73.txt
+            container-73-runtime.txt
           if-no-files-found: error

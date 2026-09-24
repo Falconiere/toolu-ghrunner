@@ -344,3 +344,31 @@ impl ContainerSpec {
     }
   }
 }
+
+#[cfg(unix)]
+#[test]
+fn job_container_missing_daemon_reports_connection_failure()
+-> Result<(), Box<dyn std::error::Error>> {
+  let root = tempfile::tempdir()?;
+  let endpoint = format!(
+    "unix://{}",
+    root.path().join("missing-docker.sock").display()
+  );
+  let runtime = tokio::runtime::Runtime::new()?;
+  temp_env::with_var("DOCKER_HOST", Some(endpoint), || {
+    let result = runtime.block_on(super::container_command::ContainerCommand::connect(
+      Arc::new(Mutex::new(SecretMasker::new())),
+    ));
+    let Err(error) = result else {
+      return Err("nonexistent Docker socket unexpectedly connected".into());
+    };
+    assert!(
+      error
+        .to_string()
+        .starts_with("docker error: connect local Docker daemon:"),
+      "{error}"
+    );
+    assert!(error.to_string().contains("missing-docker.sock"), "{error}");
+    Ok(())
+  })
+}
