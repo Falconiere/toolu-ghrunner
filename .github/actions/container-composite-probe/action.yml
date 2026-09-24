@@ -1,0 +1,18 @@
+name: Container composite probe
+description: Verifies shell identity, expression paths and environment exports.
+runs:
+  using: composite
+  steps:
+    - shell: sh
+      env:
+        EXPECTED_TEMP: ${{ runner.temp }}
+        EXPECTED_WORKSPACE: ${{ github.workspace }}
+        EXPECTED_ACTION: ${{ github.action_path }}
+      run: |
+        test "$(hostname)" = container-73-probe
+        test "$FROM_NODE" = node-value
+        test "$RUNNER_TEMP" = "$EXPECTED_TEMP"
+        test "$GITHUB_WORKSPACE" = "$EXPECTED_WORKSPACE"
+        test -f "$EXPECTED_ACTION/action.yml"
+        printf 'FROM_COMPOSITE=composite-value\n' >> "$GITHUB_ENV"
+        echo CONTAINER_73_COMPOSITE_OK
