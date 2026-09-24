@@ -35,7 +35,7 @@
       "runner": "toolu-68-reference"
     },
     "toolu": {
-      "id": 36039705559,
+      "id": 36042145619,
       "revision": "e607a7aae26e113aa3d8ecf1c26c62e0d74192eb",
       "runner": "toolu-68-final"
     }
@@ -59,7 +59,7 @@
     "crates/execution/src/execution/steps_runner.rs": "ea334b9f4a2531329c33e20580edc2b92e96aace55e045f3f47d946fa7c7112b",
     "crates/shared/src/job_message/step.rs": "97fa95983cc9179f440a5b9c14ebf283cec578a41cde6caed3b21bbb9b088469"
   },
-  "toolu_binary_sha256": "8e0c91668aa9f9e335bb1ab0b7be9ba69311d0e65fe5d4b0551bead6b1bc93f3",
+  "toolu_binary_sha256": "d3f2577edf4527e308d66800877ea891b4581f7cdf13374ade6b6cede2f9a5de",
   "host": {
     "os": "macOS 26.6.2",
     "arch": "ARM64",
@@ -68,5 +68,6 @@
     "reference_node": "20.20.2",
     "toolu_node": "20.18.3",
     "node_probe": "26.9.0 (installed real Node; cache seeded only to avoid runtime download)"
-  }
+  },
+  "toolu_source_commit": "4aed9b97b724258170f4ebfce3880498df1c141e"
 }
