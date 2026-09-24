@@ -526,7 +526,14 @@ impl ExecutionContext {
 
   /// Mark the overall job status as failed (for `failure()` conditions).
   pub fn record_step_failure(&mut self) {
-    self.job_status = JobStatus::Failure;
+    if self.job_status != JobStatus::Cancelled {
+      self.job_status = JobStatus::Failure;
+    }
+  }
+
+  /// Mark the job cancelled before evaluating cleanup `post-if` conditions.
+  pub fn record_job_cancelled(&mut self) {
+    self.job_status = JobStatus::Cancelled;
   }
 
   /// Current aggregate job status used by step-condition functions.

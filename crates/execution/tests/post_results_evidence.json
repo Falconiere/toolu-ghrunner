@@ -1,0 +1,12 @@
+{
+  "issue": 101,
+  "official_runner_commit": "cab9d1c3901e45c7705889c4f88284fdd93f4ae5",
+  "local_platform": "macOS ARM64",
+  "capture": "crates/execution/tests/incoming_contexts_matrix_0.json",
+  "live": {
+    "github_com_toolu_run_id": null,
+    "github_com_official_run_id": null,
+    "linux_run_id": null,
+    "ghes_run_id": null
+  }
+}

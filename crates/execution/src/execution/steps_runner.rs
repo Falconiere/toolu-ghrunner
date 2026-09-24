@@ -47,6 +47,8 @@ pub(super) struct JobCtx<'a> {
   /// The job-scope single-flight action fetcher, shared with the job's
   /// background prefetch task.
   pub(super) fetcher: &'a ActionFetcher,
+  /// First post's timeline number, after setup and all main steps.
+  pub(super) first_post_number: u32,
 }
 
 /// Job-constant inputs for a run: the workspace root, runner config, the
@@ -94,6 +96,7 @@ pub async fn run_steps(
     shadow: run.shadow,
     http: run.http,
     fetcher: run.fetcher,
+    first_post_number: u32::try_from(steps.len().saturating_add(2)).unwrap_or(u32::MAX),
   };
 
   let mut job_state = JobState {
@@ -102,23 +105,48 @@ pub async fn run_steps(
     // since top-level steps are not nested in one another).
     depth: DepthTracker::new(),
   };
+  run_main_and_posts(steps, ctx, events, &cancel, &job, &mut job_state).await
+}
 
+/// Run main steps, then every registered cleanup stage before merging status.
+async fn run_main_and_posts(
+  steps: &[ActionStep],
+  ctx: &mut ExecutionContext,
+  events: &mpsc::Sender<RunnerEvent>,
+  cancel: &CancellationToken,
+  job: &JobCtx<'_>,
+  job_state: &mut JobState,
+) -> Result<Conclusion, RunnerError> {
   // Held as a `Result` (not unwrapped) so the drain below runs even when the
   // main loop returned a hard `Err` — a spawn/I-O error must not abandon
   // registered posts.
-  let main_result = run_main_steps(steps, ctx, events, &cancel, &job, &mut job_state).await;
-
-  // Drain post-steps LIFO AFTER all main steps — including when a prior step
-  // failed or errored hard. Each post-if is evaluated against the live
-  // job/steps status, so `always()` posts run on failure while
-  // `success()`/`failure()` honor it. Best-effort: a failing post-step must
-  // not overwrite the job's conclusion (a `Failure` from a main step must
-  // survive a post-step error).
-  if let Err(e) = drain_post_steps(&mut job_state.posts, ctx, events, &job).await {
-    tracing::error!(error = ?e, "post-step drain failed; preserving job conclusion");
+  let main_result = run_main_steps(steps, ctx, events, cancel, job, job_state).await;
+  if main_result.is_err() {
+    ctx.record_step_failure();
+  }
+  if main_result
+    .as_ref()
+    .is_ok_and(|main| *main == Conclusion::Cancelled)
+    || cancel.is_cancelled()
+  {
+    ctx.record_job_cancelled();
   }
 
-  main_result
+  // Post failures affect the job like main failures; cancellation takes precedence.
+  let post_result = drain_post_steps(&mut job_state.posts, ctx, events, job).await;
+  if cancel.is_cancelled() {
+    ctx.record_job_cancelled();
+  }
+  main_result.map(|main| {
+    if cancel.is_cancelled() {
+      return Conclusion::Cancelled;
+    }
+    match (main, post_result) {
+      (Conclusion::Cancelled, _) | (_, Conclusion::Cancelled) => Conclusion::Cancelled,
+      (Conclusion::Failure, _) | (_, Conclusion::Failure) => Conclusion::Failure,
+      _ => main,
+    }
+  })
 }
 
 /// Run the main step loop, draining posts on cancel. Returns the aggregate
@@ -134,11 +162,6 @@ async fn run_main_steps(
   let mut job_conclusion = Conclusion::Success;
   for (index, step) in steps.iter().enumerate() {
     if cancel.is_cancelled() {
-      // Still drain registered post-steps so action cleanup runs on cancel.
-      // Best-effort: a failing post-step must not mask the `Cancelled` result.
-      if let Err(e) = drain_post_steps(&mut job_state.posts, ctx, events, job).await {
-        tracing::error!(error = ?e, "post-step drain on cancel failed; still cancelling");
-      }
       return Ok(Conclusion::Cancelled);
     }
 

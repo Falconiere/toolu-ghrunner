@@ -40,7 +40,7 @@ not part of it. Workflow YAML parsing/matrix/orchestration lives in the
 | `job_teardown.rs` | `JobTeardown` | Deferred post-completion work returned by `run_job`: cache staging sweep + GC pass, and joining the workspace-sweep task, run only after the event sender is dropped. |
 | `node_stage.rs` | `run_node_stage` | Runs one Node.js action entrypoint (`pre`/`main`/`post`), rebuilding env per stage and dispatching its stdout workflow commands. |
 | `oidc.rs` | (mod decl) | Declares the `oidc` sub-module and re-exports `OidcClaims`/`OidcServer`/etc. |
-| `post_drain.rs` | `drain_post_steps` | Drains the job's `PostStepQueue` LIFO after main steps, evaluating each `post-if` and running the action's `post` entrypoint in its original step scope. |
+| `post_drain.rs` | `drain_post_steps` | Drains registered posts LIFO, gives each a distinct report ID, keeps draining after errors, and shares the cancellation deadline while reusing the originating action's state. |
 | `service_auth.rs` | `validate_bearer` | Bearer-token validation (constant-time compare) shared by the local OIDC/artifact/cache axum services. |
 | `service_endpoints.rs` | `extract_service_urls` / `forward_env` | Extracts real GitHub service URLs + runtime token from the job message and builds the `ACTIONS_*` env vars for forwarder mode. |
 | `service_lifecycle.rs` | `ServiceHandle` | Generic start/shutdown lifecycle for a local axum HTTP service, plus shared 401/500 JSON responses and `Content-Range` parsing. |
@@ -60,6 +60,7 @@ not part of it. Workflow YAML parsing/matrix/orchestration lives in the
 - `handlers/` — the concrete `runs.using` handlers plus dispatch resolution.
 - `oidc/` — OIDC token server and claims building.
 - `shadow/` — shadow-mode (approach C) workspace fingerprinting; records only.
+- `tests/` — flat sibling test files for execution module internals.
 - `workflow/` — workflow YAML parsing, matrix expansion, orchestration, and reusable-workflow resolution.
 
 When you add a file here, add its row above so the index stays current. No

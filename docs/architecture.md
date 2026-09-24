@@ -1147,3 +1147,25 @@ path. Only the declared composite outputs flow to the parent step. Action
 report IDs, and their outputs and results do not overwrite the main step's
 expression entry. The local tests and remaining live evidence are tracked in
 [test-coverage.md](test-coverage.md#step-context-identity-98).
+
+## Post-action cleanup results
+
+`steps_runner` registers Node action post stages during main execution and
+drains them LIFO after the main loop, including after a hard step error or
+cancellation. Each post keeps its registered report ID and gets a timeline number. Its
+`STATE_*`, action inputs, and action metadata still come from the originating
+main step; the separate report ID keeps the main outcome intact in the
+`steps` expression context and creates its own Results Service record/log.
+
+Each post condition sees the current aggregate status. A failed post marks the
+job failed before the next condition; cancellation remains the highest-priority
+status. A missing post script or other hard post error emits a diagnostic and a
+failed step result, then later registered posts still run. All post results are
+merged into `JobCompleted` and the listener's `completejob` payload.
+
+After cancellation, remaining posts share one five-minute cleanup deadline.
+Individual step `timeout-minutes` can shorten it. Once the shared deadline is
+spent, unstarted posts are reported skipped and teardown continues. The local
+replay and live comparison scope are documented in
+[test-coverage.md](test-coverage.md#post-action-cleanup-101).
+

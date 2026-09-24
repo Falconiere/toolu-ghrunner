@@ -9,187 +9,256 @@
 //! that `main` saved.
 
 use shared::{Conclusion, RunnerError, RunnerEvent};
+use std::time::Duration;
 use tokio::sync::mpsc;
+use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use super::actions::manifest::RunsUsing;
 use super::context::ExecutionContext;
 use super::node_stage::{NodeStage, emit_stage_endgroup, run_node_stage};
-use super::step_naming::PostStep;
+use super::step_naming::{PostStep, derive_step_name};
 use super::step_timeout::StepBounds;
 use super::steps_runner::JobCtx;
 
+#[cfg(test)]
+#[path = "tests/post_drain.rs"]
+mod tests;
+
+/// Reporting identity and shared cleanup bound for one queued post.
+struct PostReport<'a> {
+  id: &'a str,
+  number: u32,
+  cancellation_deadline: Option<Instant>,
+}
+
 /// Drain the post-step queue LIFO and run each post that passes its condition.
-///
-/// # Errors
-///
-/// Returns `RunnerError` if a post stage fails to spawn/await its entrypoint.
 pub(super) async fn drain_post_steps(
   posts: &mut super::step_naming::PostStepQueue,
   ctx: &mut ExecutionContext,
   events: &mpsc::Sender<RunnerEvent>,
   job: &JobCtx<'_>,
-) -> Result<(), RunnerError> {
-  let drained = posts.drain_lifo();
-  if drained.is_empty() {
-    return Ok(());
+) -> Conclusion {
+  let mut aggregate = Conclusion::Success;
+  let mut cancellation_deadline = None;
+  for (index, post) in posts.drain_lifo().into_iter().enumerate() {
+    if job.cancel.is_cancelled() {
+      ctx.record_job_cancelled();
+      cancellation_deadline.get_or_insert_with(|| Instant::now() + CANCELLED_POST_GRACE);
+    }
+    let number = job
+      .first_post_number
+      .saturating_add(u32::try_from(index).unwrap_or(u32::MAX));
+    let report = PostReport {
+      id: &post.report_id,
+      number,
+      cancellation_deadline,
+    };
+    let result = match run_one_post(&post, &report, ctx, events, job).await {
+      Ok(result) => result,
+      Err(error) => {
+        report_post_error(events, report.id, &error).await;
+        Conclusion::Failure
+      },
+    };
+    if result == Conclusion::Failure {
+      if aggregate != Conclusion::Cancelled {
+        aggregate = Conclusion::Failure;
+      }
+      ctx.record_step_failure();
+    } else if result == Conclusion::Cancelled {
+      aggregate = Conclusion::Cancelled;
+      ctx.record_job_cancelled();
+    }
   }
-  // The job-scope HTTP client (120 s timeout) so a hung node-runtime download
-  // can't block post-drain (and thus the whole job) forever.
-  for post in drained {
-    run_one_post(&post, ctx, events, job, job.http).await?;
-  }
-  Ok(())
+  aggregate
 }
 
 /// Evaluate one post-step's condition and run its `post` entrypoint if it holds.
 async fn run_one_post(
   post: &PostStep,
+  report: &PostReport<'_>,
   ctx: &mut ExecutionContext,
   events: &mpsc::Sender<RunnerEvent>,
   job: &JobCtx<'_>,
-  client: &reqwest::Client,
-) -> Result<(), RunnerError> {
+) -> Result<Conclusion, RunnerError> {
   let prior_scope = ctx.scope_path();
   ctx.restore_step_scope(post.scope_path.clone());
-  let result = run_scoped_post(post, ctx, events, job, client).await;
+  let result = run_scoped_post(post, report, ctx, events, job).await;
   ctx.restore_step_scope(prior_scope);
   result
 }
 
 async fn run_scoped_post(
   post: &PostStep,
+  report: &PostReport<'_>,
   ctx: &mut ExecutionContext,
   events: &mpsc::Sender<RunnerEvent>,
   job: &JobCtx<'_>,
-  client: &reqwest::Client,
-) -> Result<(), RunnerError> {
-  let step_id = post.report_id.clone();
+) -> Result<Conclusion, RunnerError> {
   let condition = post.effective_condition();
+  emit_post_header(
+    events,
+    report.id,
+    &derive_step_name(&post.step),
+    report.number,
+  )
+  .await;
 
   if !ctx.evaluate_expression(condition)?.is_truthy() {
-    report_skipped_post(post, condition, &step_id, events).await;
-    return Ok(());
+    skip_post(
+      events,
+      report.id,
+      format!("post-if '{condition}' evaluated to false"),
+    )
+    .await;
+    return Ok(Conclusion::Skipped);
   }
 
   let RunsUsing::Node { .. } = post.manifest.runs.using else {
     // Only node actions register a post entrypoint today.
-    return Ok(());
+    return Err(RunnerError::ActionManifest(
+      "post stage requires a node action".to_owned(),
+    ));
   };
 
-  emit_post_header(events, &step_id, &post.action_name).await;
-  let bounds = post_bounds(post, job);
-  let conclusion = run_post_node_stage(post, ctx, events, job, client, &bounds).await?;
-
-  if conclusion == Conclusion::Failure {
-    ctx.record_step_failure();
-  }
-  let _ = events
-    .send(RunnerEvent::StepCompleted {
-      step_id,
-      conclusion,
-      outputs: std::collections::HashMap::new(),
-    })
+  let bounds = post_bounds(post, job, report.cancellation_deadline);
+  if bounds.timeout == Some(Duration::ZERO) {
+    skip_post(
+      events,
+      report.id,
+      "post cancellation grace elapsed".to_owned(),
+    )
     .await;
-  Ok(())
+    return Ok(Conclusion::Skipped);
+  }
+  let conclusion = run_post_node_stage(post, report, ctx, events, job, &bounds).await?;
+
+  complete_post(events, report.id, conclusion).await;
+  Ok(conclusion)
 }
 
-async fn report_skipped_post(
-  post: &PostStep,
-  condition: &str,
-  step_id: &str,
-  events: &mpsc::Sender<RunnerEvent>,
-) {
+async fn report_post_error(events: &mpsc::Sender<RunnerEvent>, step_id: &str, error: &RunnerError) {
   let _ = events
-    .send(RunnerEvent::StepStarted {
+    .send(RunnerEvent::Log {
       step_id: step_id.to_owned(),
-      step_name: format!("Post {}", post.action_name),
-      step_number: 0,
+      line: format!("##[error]post-step failed: {error}"),
+      stream: shared::LogStream::Stdout,
     })
     .await;
+  complete_post(events, step_id, Conclusion::Failure).await;
+}
+
+async fn skip_post(events: &mpsc::Sender<RunnerEvent>, step_id: &str, reason: String) {
   let _ = events
     .send(RunnerEvent::StepSkipped {
       step_id: step_id.to_owned(),
-      reason: format!("post-if '{condition}' evaluated to false"),
+      reason,
     })
     .await;
+  complete_post(events, step_id, Conclusion::Skipped).await;
+}
+
+async fn complete_post(events: &mpsc::Sender<RunnerEvent>, step_id: &str, conclusion: Conclusion) {
   let _ = events
     .send(RunnerEvent::StepCompleted {
       step_id: step_id.to_owned(),
-      conclusion: Conclusion::Skipped,
+      conclusion,
       outputs: std::collections::HashMap::new(),
     })
     .await;
 }
 
 /// Cleanup grace budget for post-steps draining after a job cancel.
-const CANCELLED_POST_GRACE_MINUTES: u32 = 5;
+const CANCELLED_POST_GRACE: Duration = Duration::from_secs(5 * 60);
 
 /// Bounds for one post-step run.
 ///
 /// A cancelled job still runs its cleanup posts (matching the upstream
 /// runner's cancel-grace behavior): the fired job token would kill the post
 /// child the instant it spawned, so a cancelled drain runs each post under a
-/// FRESH token bounded by [`CANCELLED_POST_GRACE_MINUTES`] (or the step's own
-/// tighter `timeout-minutes`). An uncancelled drain keeps the live job token
+/// fresh token bounded by the remaining shared [`CANCELLED_POST_GRACE`]
+/// deadline (or the step's own tighter `timeout-minutes`). An uncancelled drain keeps the live job token
 /// so SIGINT/SIGTERM still interrupts posts normally.
-fn post_bounds(post: &PostStep, job: &JobCtx<'_>) -> StepBounds {
+fn post_bounds(post: &PostStep, job: &JobCtx<'_>, deadline: Option<Instant>) -> StepBounds {
   if !job.cancel.is_cancelled() {
     return StepBounds::new(post.step.timeout_in_minutes, job.cancel.clone());
   }
-  let grace = post
-    .step
-    .timeout_in_minutes
-    .filter(|&t| t > 0)
-    .map_or(CANCELLED_POST_GRACE_MINUTES, |t| {
-      t.min(CANCELLED_POST_GRACE_MINUTES)
-    });
-  StepBounds::new(Some(grace), CancellationToken::new())
+  let remaining = deadline.map_or(CANCELLED_POST_GRACE, cancel_remaining);
+  let step_timeout = super::step_timeout::timeout_duration(post.step.timeout_in_minutes);
+  StepBounds {
+    timeout: Some(step_timeout.map_or(remaining, |limit| limit.min(remaining))),
+    cancel: CancellationToken::new(),
+  }
+}
+
+/// Time left in the one deadline shared by every post after cancellation.
+fn cancel_remaining(deadline: Instant) -> Duration {
+  deadline.saturating_duration_since(Instant::now())
 }
 
 /// Run the `post` node entrypoint in the originating step's scope.
 async fn run_post_node_stage(
   post: &PostStep,
+  report: &PostReport<'_>,
   ctx: &mut ExecutionContext,
   events: &mpsc::Sender<RunnerEvent>,
   job: &JobCtx<'_>,
-  client: &reqwest::Client,
   bounds: &StepBounds,
 ) -> Result<Conclusion, RunnerError> {
-  // The post stage reads the originating action's private state. Its output
-  // commands do not change the main expression entry, and its completion
-  // carries no outputs map.
-  let (conclusion, _outputs) = run_node_stage(NodeStage {
+  // The post stage runs in the originating step's scope; its outputs are
+  // already recorded on `ctx`, and the post `StepCompleted` carries no
+  // outputs map (matches the C# runner), so the dispatcher map is dropped.
+  let stage = run_node_stage(NodeStage {
     step: &post.step,
     ctx,
     events,
     workspace: job.workspace,
     config: job.config,
-    client,
+    client: job.http,
     action_dir: &post.action_dir,
     manifest: &post.manifest,
     major: post.major,
     bounds,
     stage: "post",
-    // Post logs and reporting use this stage's distinct report identity.
-    log_step_id: &post.report_id,
-  })
-  .await?;
+    // Report and upload post logs under their own timeline ID. The original
+    // step ID remains the action state/output key inside run_node_stage.
+    log_step_id: report.id,
+  });
+  let (conclusion, _outputs) = if job.cancel.is_cancelled() {
+    let remaining = report
+      .cancellation_deadline
+      .map_or(CANCELLED_POST_GRACE, cancel_remaining);
+    match tokio::time::timeout(remaining, stage).await {
+      Ok(result) => result?,
+      Err(_) => return Ok(Conclusion::Cancelled),
+    }
+  } else {
+    tokio::select! {
+      () = job.cancel.cancelled() => return Ok(Conclusion::Cancelled),
+      result = stage => result?,
+    }
+  };
   Ok(conclusion)
 }
 
 /// Emit the `Post <action>` group header before a post stage runs.
-async fn emit_post_header(events: &mpsc::Sender<RunnerEvent>, step_id: &str, action_name: &str) {
-  let name = if action_name.is_empty() {
+async fn emit_post_header(
+  events: &mpsc::Sender<RunnerEvent>,
+  step_id: &str,
+  main_name: &str,
+  step_number: u32,
+) {
+  let name = if main_name.is_empty() {
     "Post".to_owned()
   } else {
-    format!("Post {action_name}")
+    format!("Post {main_name}")
   };
   let _ = events
     .send(RunnerEvent::StepStarted {
       step_id: step_id.to_owned(),
       step_name: name.clone(),
-      step_number: 0,
+      step_number,
     })
     .await;
   let _ = events

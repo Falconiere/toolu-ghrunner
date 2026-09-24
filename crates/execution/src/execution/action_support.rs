@@ -38,6 +38,10 @@ pub(super) fn build_node_env(
   // pre/main/post stages (keyed by step id), so post can read what main saved.
   let state = ctx.step_state(&step.id);
   let mut env = ctx.build_step_env(&HashMap::new());
+  env.insert(
+    "GITHUB_ACTION".to_owned(),
+    step.context_name.as_deref().unwrap_or(&step.id).to_owned(),
+  );
   env.extend(build_action_env(
     manifest,
     &step_inputs,
