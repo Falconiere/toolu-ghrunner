@@ -5,9 +5,10 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use execution::Runner;
+use shared::startup::SecretRedactor;
 use shared::{
-  ActionStep, AgentJobRequestMessage, Conclusion, RunnerConfig, RunnerEvent, SecretMasker,
-  TemplateToken,
+  ActionStep, AgentJobRequestMessage, Conclusion, MaskerRedactor, RunnerConfig, RunnerEvent,
+  SecretMasker, TemplateToken,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -125,6 +126,9 @@ async fn job_container_real_production_shell_node_composite_and_posts() -> TestR
   write_actions(&workspace)?;
   job.steps = steps();
   let runner = Runner::new(config, Arc::new(Mutex::new(SecretMasker::new())));
+  // Job context construction registers fixture secrets and mask hints. Events
+  // stay raw inside the engine; this consumer masks before assertion output.
+  let redactor = MaskerRedactor(Arc::clone(runner.masker()));
   let mut events = runner.execute_job(job, CancellationToken::new());
   let mut conclusion = None;
   let mut logs = Vec::new();
@@ -133,7 +137,7 @@ async fn job_container_real_production_shell_node_composite_and_posts() -> TestR
       RunnerEvent::JobCompleted {
         conclusion: result, ..
       } => conclusion = Some(result),
-      RunnerEvent::Log { line, .. } => logs.push(line),
+      RunnerEvent::Log { line, .. } => logs.push(redactor.redact(&line)),
       RunnerEvent::JobStarted { .. }
       | RunnerEvent::StepStarted { .. }
       | RunnerEvent::StepCompleted { .. }
