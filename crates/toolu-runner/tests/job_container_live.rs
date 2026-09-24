@@ -11,11 +11,14 @@
 
 #![cfg(feature = "live")]
 
+mod job_container_live_command;
+
+use job_container_live_command::{Captured, capture};
 use std::collections::BTreeSet;
 use std::error::Error;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitStatus, Stdio};
+use std::process::Command;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -25,7 +28,6 @@ const WORKFLOW: &str = "multistep-live.yml";
 const RUN_PREFIX: &str = "job-container-73 / ";
 const TIMEOUT: Duration = Duration::from_secs(15 * 60);
 const POLL_INTERVAL: Duration = Duration::from_secs(5);
-const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 const ARTIFACT_NAME: &str = "container-73";
 const ARTIFACT_BYTES: &[u8] = b"container-73-artifact\n";
 const MARKERS: &[&str] = &[
@@ -92,13 +94,6 @@ impl Drop for OwnedRunGuard {
 struct RunState {
   conclusion: String,
   status: String,
-}
-
-/// Bounded subprocess output held in temporary files while a command runs.
-struct Captured {
-  status: ExitStatus,
-  stdout: Vec<u8>,
-  stderr: Vec<u8>,
 }
 
 /// A per-lane artifact whose runtime file identifies the job container and
@@ -353,13 +348,35 @@ fn run_state(run_id: u64) -> Result<RunState, Box<dyn Error>> {
 }
 
 fn assert_log_markers(run_id: u64) -> Result<(), Box<dyn Error>> {
-  let output = gh_capture(&[
+  let metadata = gh_capture(&[
     "run".to_owned(),
     "view".to_owned(),
     run_id.to_string(),
     "--repo".to_owned(),
     REPOSITORY.to_owned(),
-    "--log".to_owned(),
+    "--json".to_owned(),
+    "jobs".to_owned(),
+  ])?;
+  if !metadata.status.success() {
+    return Err(format!("could not read owned run {run_id} jobs").into());
+  }
+  let value = json_value(&metadata.stdout)?;
+  let jobs = value
+    .get("jobs")
+    .and_then(serde_json::Value::as_array)
+    .ok_or("missing jobs")?;
+  let [job] = jobs.as_slice() else {
+    return Err("expected one container job".into());
+  };
+  let job_id = job
+    .get("databaseId")
+    .and_then(serde_json::Value::as_u64)
+    .ok_or("missing job id")?;
+  // The combined job log retains pre/main/post even when step logs reuse IDs.
+  let output = gh_capture(&[
+    "api".to_owned(),
+    "--allow-escape-sequences".to_owned(),
+    format!("repos/{REPOSITORY}/actions/jobs/{job_id}/logs"),
   ])?;
   if !output.status.success() {
     return Err(format!("could not download owned run {run_id} logs").into());
@@ -516,36 +533,4 @@ fn json_string(bytes: &[u8], field: &str) -> Result<String, Box<dyn Error>> {
     .and_then(serde_json::Value::as_str)
     .map(str::to_owned)
     .ok_or_else(|| format!("gh JSON was missing string field {field}").into())
-}
-
-fn capture(mut command: Command, description: &str) -> Result<Captured, Box<dyn Error>> {
-  let stdout = tempfile::NamedTempFile::new()?;
-  let stderr = tempfile::NamedTempFile::new()?;
-  command
-    .stdout(Stdio::from(stdout.reopen()?))
-    .stderr(Stdio::from(stderr.reopen()?));
-  let mut child = command
-    .spawn()
-    .map_err(|error| format!("could not start {description}: {error}"))?;
-  let until = Instant::now() + COMMAND_TIMEOUT;
-  let status = loop {
-    if let Some(status) = child.try_wait()? {
-      break status;
-    }
-    if Instant::now() >= until {
-      let _ = child.kill();
-      let _ = child.wait();
-      return Err(
-        format!("{description} exceeded the {COMMAND_TIMEOUT:?} subprocess bound").into(),
-      );
-    }
-    thread::sleep(Duration::from_millis(50));
-  };
-  let stdout = fs::read(stdout.path())?;
-  let stderr = fs::read(stderr.path())?;
-  Ok(Captured {
-    status,
-    stdout,
-    stderr,
-  })
 }

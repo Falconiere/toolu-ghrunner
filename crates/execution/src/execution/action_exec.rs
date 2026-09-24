@@ -126,6 +126,8 @@ pub(crate) async fn execute_action(
 /// `owner/repo` with no ref) form, so a subpath-less reference like
 /// `actions/checkout@v5` is unaffected. `pub` so integration tests can drive
 /// this exact reconstruction rather than a copy of it.
+/// Local `repositoryType: self` references carry their complete `./path`
+/// in `path`, with no repository `name`.
 pub fn build_uses_ref(reference: &ActionStepDefinitionReference) -> String {
   // Acquired local references carry their complete path without a name.
   if reference.repository_type.as_deref() == Some("self") {

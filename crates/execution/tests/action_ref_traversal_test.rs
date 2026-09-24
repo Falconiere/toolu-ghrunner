@@ -107,3 +107,23 @@ fn empty_path_is_treated_as_absent() {
   let reference = wire_reference("actions/checkout", Some(""), "v5");
   assert_eq!(build_uses_ref(&reference), "actions/checkout@v5");
 }
+
+#[test]
+fn captured_self_reference_uses_path_without_repository_name()
+-> Result<(), Box<dyn std::error::Error>> {
+  let job: shared::AgentJobRequestMessage = serde_json::from_str(include_str!(
+    "../../toolu-runner/tests/fixtures/job_container_message.json"
+  ))?;
+  let step = job
+    .steps
+    .iter()
+    .find(|step| step.context_name.as_deref() == Some("__self"))
+    .ok_or("captured local composite step missing")?;
+  assert!(step.reference.name.is_none());
+  assert_eq!(step.reference.repository_type.as_deref(), Some("self"));
+  let uses = build_uses_ref(&step.reference);
+  assert_eq!(uses, "./.github/actions/container-composite-probe");
+  let parsed = parse_action_ref(&uses)?;
+  assert_eq!(parsed.local_path.as_deref(), Some(uses.as_str()));
+  Ok(())
+}

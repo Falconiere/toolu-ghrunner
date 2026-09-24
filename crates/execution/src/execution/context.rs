@@ -471,6 +471,15 @@ impl ExecutionContext {
     state.outputs.insert(key.to_owned(), value.to_owned());
   }
 
+  /// Bind the workflow expression name without changing internal step identity.
+  pub(super) fn set_step_context_name(&mut self, step_id: &str, name: Option<&str>) {
+    self
+      .steps
+      .entry(step_id.to_owned())
+      .or_default()
+      .context_name = name.map(ToOwned::to_owned);
+  }
+
   /// Record a `save-state` value for a step, surfaced to its post step.
   pub fn set_step_state(&mut self, step_id: &str, key: &str, value: &str) {
     self

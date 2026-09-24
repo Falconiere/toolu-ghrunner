@@ -201,6 +201,7 @@ async fn run_single_step(
   job: &JobCtx<'_>,
   job_state: &mut JobState,
 ) -> Result<Conclusion, RunnerError> {
+  ctx.set_step_context_name(&step.id, step.context_name.as_deref());
   if !evaluate_condition(step, ctx)? {
     report_skipped_step(step, step_number, ctx, events).await;
     return Ok(Conclusion::Success);
