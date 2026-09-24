@@ -59,11 +59,13 @@ impl JobContainer {
       biased;
       () = params.cancel.cancelled() => Ok(Conclusion::Cancelled),
       () = deadline => {
-        let _ = events.send(RunnerEvent::Log {
+        if events.send(RunnerEvent::Log {
           step_id: params.step_id.to_owned(),
           line: "##[error]Container step timed out; execution detached and remaining processes will be removed at job teardown.".to_owned(),
           stream: LogStream::Stderr,
-        }).await;
+        }).await.is_err() {
+          tracing::warn!("job container timeout event receiver dropped; continuing");
+        }
         Ok(Conclusion::Failure)
       },
       code = self.run_exec(params, events, &stdout) => {
@@ -78,38 +80,10 @@ impl JobContainer {
     events: &mpsc::Sender<RunnerEvent>,
     stdout: &mpsc::Sender<String>,
   ) -> Result<i64, RunnerError> {
-    let mut command = vec![
-      self
-        .translator()
-        .to_container(params.program)
-        .to_string_lossy()
-        .into_owned(),
-    ];
-    command.extend_from_slice(params.args);
-    let config = ExecConfig {
-      cmd: Some(command),
-      env: Some(
-        params
-          .env
-          .iter()
-          .map(|(key, value)| format!("{key}={}", self.translate_env(key, value)))
-          .collect(),
-      ),
-      working_dir: Some(
-        self
-          .translator()
-          .to_container(params.working_dir)
-          .to_string_lossy()
-          .into_owned(),
-      ),
-      attach_stdout: Some(true),
-      attach_stderr: Some(true),
-      ..Default::default()
-    };
     let exec = self
       .transport
       .docker
-      .create_exec(self.id(), config)
+      .create_exec(self.id(), self.exec_config(params))
       .await
       .map_err(|e| self.transport.error("create job exec", e))?;
     let attached = self
@@ -146,6 +120,37 @@ impl JobContainer {
     }
   }
 
+  fn exec_config(&self, params: &ContainerExec<'_>) -> ExecConfig {
+    let mut command = vec![
+      self
+        .translator()
+        .to_container(params.program)
+        .to_string_lossy()
+        .into_owned(),
+    ];
+    command.extend_from_slice(params.args);
+    ExecConfig {
+      cmd: Some(command),
+      env: Some(
+        params
+          .env
+          .iter()
+          .map(|(key, value)| format!("{key}={}", self.translate_env(key, value)))
+          .collect(),
+      ),
+      working_dir: Some(
+        self
+          .translator()
+          .to_container(params.working_dir)
+          .to_string_lossy()
+          .into_owned(),
+      ),
+      attach_stdout: Some(true),
+      attach_stderr: Some(true),
+      ..Default::default()
+    }
+  }
+
   async fn wait_exit(&self, exec: &str) -> Result<i64, RunnerError> {
     loop {
       let inspect = self
@@ -172,6 +177,8 @@ async fn forward_output(
 ) -> Result<(), bollard::errors::Error> {
   let mut out = Vec::new();
   let mut err = Vec::new();
+  let mut stderr_events_open = true;
+  let mut stdout_open = true;
   while let Some(item) = output.next().await {
     let (buffer, message, stderr) = match item? {
       LogOutput::StdOut { message } | LogOutput::Console { message } => (&mut out, message, false),
@@ -185,14 +192,19 @@ async fn forward_output(
       if bytes.last() == Some(&b'\r') {
         bytes.pop();
       }
-      forward_line(&bytes, stderr, step, events, stdout).await;
+      let open = if stderr {
+        &mut stderr_events_open
+      } else {
+        &mut stdout_open
+      };
+      forward_line(&bytes, stderr, step, events, stdout, open).await;
     }
   }
   if !out.is_empty() {
-    forward_line(&out, false, step, events, stdout).await;
+    forward_line(&out, false, step, events, stdout, &mut stdout_open).await;
   }
   if !err.is_empty() {
-    forward_line(&err, true, step, events, stdout).await;
+    forward_line(&err, true, step, events, stdout, &mut stderr_events_open).await;
   }
   Ok(())
 }
@@ -203,17 +215,26 @@ async fn forward_line(
   step: &str,
   events: &mpsc::Sender<RunnerEvent>,
   stdout: &mpsc::Sender<String>,
+  open: &mut bool,
 ) {
+  if !*open {
+    return;
+  }
   let line = String::from_utf8_lossy(bytes).into_owned();
-  if stderr {
-    let _ = events
+  let closed = if stderr {
+    events
       .send(RunnerEvent::Log {
         step_id: step.to_owned(),
         line,
         stream: LogStream::Stderr,
       })
-      .await;
+      .await
+      .is_err()
   } else {
-    let _ = stdout.send(line).await;
+    stdout.send(line).await.is_err()
+  };
+  if closed {
+    *open = false;
+    tracing::warn!(stderr, "job container output receiver dropped; continuing");
   }
 }

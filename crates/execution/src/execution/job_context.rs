@@ -102,10 +102,20 @@ fn runner_name(msg: &AgentJobRequestMessage) -> String {
 
 /// Hostname for the runner name, or a stable fallback if unavailable.
 fn fallback_hostname() -> String {
-  hostname::get()
-    .ok()
-    .and_then(|h| h.into_string().ok())
-    .unwrap_or_else(|| "toolu-runner".to_owned())
+  match hostname::get() {
+    Ok(hostname) => {
+      if let Ok(hostname) = hostname.into_string() {
+        hostname
+      } else {
+        tracing::warn!("runner hostname is not valid Unicode; using fallback name");
+        "toolu-runner".to_owned()
+      }
+    },
+    Err(error) => {
+      tracing::warn!(error = %error, "failed to read runner hostname; using fallback name");
+      "toolu-runner".to_owned()
+    },
+  }
 }
 
 /// Populate `vars.*` from `contextData["vars"]` (repo/org/env config variables).
@@ -125,26 +135,27 @@ fn extract_vars_context(
   }
 }
 
-/// Write the GitHub event payload to `{data_dir}/events/{job_id}.json`.
+/// Serialize the GitHub event payload, defaulting to an empty JSON object.
+pub(super) fn event_json(ctx: &ExecutionContext) -> Result<String, RunnerError> {
+  let Some(event_value) = ctx.github_context_value("event") else {
+    return Ok("{}".to_owned());
+  };
+  Ok(serde_json::to_string_pretty(&event_value.to_json_value())?)
+}
+
+/// Write a serialized GitHub event payload to `{data_dir}/events/{job_id}.json`.
 ///
 /// Stored outside the workspace because `actions/checkout` wipes it.
 pub(super) fn write_event_json(
   data_dir: &std::path::Path,
   job_id: &str,
-  ctx: &ExecutionContext,
+  json: &str,
 ) -> Result<String, RunnerError> {
   let events_dir = data_dir.join("events");
   std::fs::create_dir_all(&events_dir)?;
   let event_path = events_dir.join(format!("{job_id}.json"));
 
-  let json = match ctx.github_context_value("event") {
-    Some(event_value) => {
-      serde_json::to_string_pretty(&event_value.to_json_value()).unwrap_or_else(|_| "{}".to_owned())
-    },
-    None => "{}".to_owned(),
-  };
-
-  std::fs::write(&event_path, &json)?;
+  std::fs::write(&event_path, json)?;
   Ok(event_path.to_string_lossy().into_owned())
 }
 
