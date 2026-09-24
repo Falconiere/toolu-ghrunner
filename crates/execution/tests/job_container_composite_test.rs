@@ -83,6 +83,8 @@ runs:
     });
     let inputs = HashMap::new();
     let fetcher = ActionFetcher::new();
+    // One client for this isolated test's entire composite invocation. This
+    // shell-only manifest makes no HTTP requests; no cross-test pool is needed.
     let http = reqwest::Client::new();
     let params = CompositeParams {
       manifest: &manifest,

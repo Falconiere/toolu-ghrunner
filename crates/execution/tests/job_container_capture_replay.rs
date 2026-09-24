@@ -11,7 +11,9 @@ use std::time::Duration;
 #[cfg(target_os = "linux")]
 use execution::Runner;
 #[cfg(target_os = "linux")]
-use shared::{Conclusion, RunnerConfig, RunnerEvent, SecretMasker};
+use shared::startup::SecretRedactor;
+#[cfg(target_os = "linux")]
+use shared::{Conclusion, MaskerRedactor, RunnerConfig, RunnerEvent, SecretMasker};
 #[cfg(target_os = "linux")]
 use tokio_util::sync::CancellationToken;
 
@@ -137,6 +139,9 @@ async fn captured_job_container_replays_shell_node_composite_and_verify() -> Tes
   job.steps.remove(0);
 
   let runner = Runner::new(config, Arc::new(Mutex::new(SecretMasker::new())));
+  // Job context construction registers the captured secrets and mask hints.
+  // The engine emits raw events; mask at this consumer before assertion output.
+  let redactor = MaskerRedactor(Arc::clone(runner.masker()));
   let cancel = CancellationToken::new();
   let mut events = runner.execute_job(job, cancel.clone());
   let collected = tokio::time::timeout(Duration::from_secs(180), async {
@@ -147,7 +152,7 @@ async fn captured_job_container_replays_shell_node_composite_and_verify() -> Tes
         RunnerEvent::JobCompleted {
           conclusion: result, ..
         } => conclusion = Some(result),
-        RunnerEvent::Log { line, .. } => logs.push(line),
+        RunnerEvent::Log { line, .. } => logs.push(redactor.redact(&line)),
         RunnerEvent::JobStarted { .. }
         | RunnerEvent::StepStarted { .. }
         | RunnerEvent::StepCompleted { .. }

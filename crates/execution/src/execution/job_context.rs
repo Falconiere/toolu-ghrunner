@@ -146,6 +146,7 @@ pub(super) fn event_json(ctx: &ExecutionContext) -> Result<String, RunnerError> 
 /// Write a serialized GitHub event payload to `{data_dir}/events/{job_id}.json`.
 ///
 /// Stored outside the workspace because `actions/checkout` wipes it.
+/// Synchronous helper: `setup_job_env` calls it inside `spawn_blocking`.
 pub(super) fn write_event_json(
   data_dir: &std::path::Path,
   job_id: &str,
