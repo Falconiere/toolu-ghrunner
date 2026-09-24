@@ -6,11 +6,16 @@ use shared::{Conclusion, RunnerError, SecretMasker};
 
 use super::context_build::{build_strategy, runner_debug_on};
 use super::step_naming::PostStep;
-use super::step_state::{StepState, build_steps_context};
+use super::step_state::StepState;
+use crate::docker::job_container::JobContainer;
 use expressions::evaluator::{EvalContext, JobStatus, evaluate};
 use expressions::template::interpolate;
 use expressions::types::ExprValue;
 
+#[path = "context_env.rs"]
+mod context_env;
+#[path = "context_eval.rs"]
+mod context_eval;
 #[path = "context_scopes.rs"]
 mod context_scopes;
 
@@ -48,6 +53,7 @@ pub struct ExecutionContext {
   cgroup_path: Option<std::path::PathBuf>,
   /// Per-job workspace root; `hashFiles()` resolves its patterns against it.
   workspace: Option<std::path::PathBuf>,
+  container: Option<Arc<JobContainer>>,
 }
 
 impl ExecutionContext {
@@ -88,6 +94,7 @@ impl ExecutionContext {
       path_additions: Vec::new(),
       cgroup_path: None,
       workspace: None,
+      container: None,
     }
   }
 
@@ -115,6 +122,28 @@ impl ExecutionContext {
   /// Set the per-job workspace root that `hashFiles()` resolves against.
   pub fn set_workspace(&mut self, path: Option<std::path::PathBuf>) {
     self.workspace = path;
+  }
+
+  /// Attach the execution host while retaining host paths for filesystem access.
+  pub fn set_job_container(&mut self, container: Arc<JobContainer>) {
+    if let Some(workspace) = &self.workspace {
+      let path = workspace.to_string_lossy().into_owned();
+      self.env.insert("GITHUB_WORKSPACE".to_owned(), path.clone());
+      self
+        .github
+        .insert("workspace".to_owned(), ExprValue::String(path));
+    }
+    for key in ["temp", "tool_cache"] {
+      if let Some(ExprValue::String(value)) = self.runner_context.get_mut(key) {
+        *value = container.translate_value(value);
+      }
+    }
+    self.container = Some(container);
+  }
+
+  /// Container shared by shell, Node and composite stages, if this job has one.
+  pub fn job_container(&self) -> Option<&Arc<JobContainer>> {
+    self.container.as_ref()
   }
 
   /// Set the per-job cgroup-v2 directory that spawned steps are moved into.
@@ -283,90 +312,6 @@ impl ExecutionContext {
       Some(ExprValue::String(s)) => Some(s.as_str()),
       _ => None,
     }
-  }
-
-  /// Build an `EvalContext` snapshot for the expression evaluator.
-  pub fn eval_context(&self) -> EvalContext {
-    let mut contexts = self.incoming_contexts.clone();
-    if let Some(inputs) = self.scoped_inputs.get(&self.scope_path) {
-      contexts.insert(
-        "inputs".to_owned(),
-        ExprValue::Object(string_map_to_obj(inputs)),
-      );
-    }
-
-    // github context
-    contexts.insert("github".to_owned(), self.scoped_github_context());
-
-    // env context
-    let env_obj: HashMap<String, ExprValue> = self
-      .visible_env()
-      .iter()
-      .map(|(k, v)| (k.clone(), ExprValue::String(v.clone())))
-      .collect();
-    contexts.insert("env".to_owned(), ExprValue::Object(env_obj));
-
-    // steps context
-    contexts.insert("steps".to_owned(), self.steps_context());
-
-    // runner context
-    contexts.insert(
-      "runner".to_owned(),
-      ExprValue::Object(self.runner_context.clone()),
-    );
-
-    // secrets context (from job Variables where is_secret == true)
-    contexts.insert(
-      "secrets".to_owned(),
-      ExprValue::Object(string_map_to_obj(&self.secrets)),
-    );
-
-    // vars context (repo/org/env configuration variables)
-    contexts.insert(
-      "vars".to_owned(),
-      ExprValue::Object(string_map_to_obj(&self.vars)),
-    );
-
-    // Job status is owned by the running engine, not the server snapshot.
-    contexts.insert("job".to_owned(), ExprValue::Object(self.job_context()));
-
-    EvalContext {
-      contexts,
-      job_status: self.scoped_job_status(),
-      workspace: self.workspace.clone(),
-    }
-  }
-
-  fn scoped_job_status(&self) -> JobStatus {
-    self
-      .scoped_status
-      .get(&self.scope_path)
-      .copied()
-      .unwrap_or(self.job_status)
-  }
-
-  fn steps_context(&self) -> ExprValue {
-    if self.scope_path.is_empty() {
-      build_steps_context(&self.steps)
-    } else {
-      self
-        .scoped_steps
-        .get(&self.scope_path)
-        .map_or_else(|| ExprValue::Object(HashMap::new()), build_steps_context)
-    }
-  }
-
-  /// Build the `job.*` context: a real `status` plus empty container/services
-  /// (no-container jobs are in scope; container objects stay null).
-  fn job_context(&self) -> HashMap<String, ExprValue> {
-    let mut job = HashMap::new();
-    job.insert(
-      "status".to_owned(),
-      ExprValue::String(job_status_str(self.job_status).to_owned()),
-    );
-    job.insert("container".to_owned(), ExprValue::Null);
-    job.insert("services".to_owned(), ExprValue::Object(HashMap::new()));
-    job
   }
 
   /// # Errors
@@ -669,40 +614,6 @@ impl ExecutionContext {
       Err(poisoned) => poisoned.into_inner(),
     };
     guard.add_secrets(values);
-  }
-
-  /// Merge global env + step env + PATH additions into a full env map.
-  pub fn build_step_env(&self, step_env: &HashMap<String, String>) -> HashMap<String, String> {
-    let mut result = self.visible_env();
-    result.extend(step_env.clone());
-
-    // Prepend path additions (reverse order) to existing PATH. The job env
-    // rarely carries PATH itself, so fall back to the process PATH — without
-    // it the step env's PATH would be ONLY the additions, the spawn-time env
-    // override would clobber the inherited PATH, and the step shell (`bash`)
-    // becomes unresolvable (live bug: every run-step after setup-node
-    // failed with ENOENT). The fallback is read lazily per step; steps
-    // run as child processes and cannot mutate this process's PATH, so
-    // it is stable for the life of the (single-job) run.
-    if !self.path_additions.is_empty() {
-      let existing = result
-        .get("PATH")
-        .cloned()
-        .or_else(crate::config::path)
-        .unwrap_or_default();
-      let mut new_path: Vec<&str> = self
-        .path_additions
-        .iter()
-        .rev()
-        .map(String::as_str)
-        .collect();
-      if !existing.is_empty() {
-        new_path.push(&existing);
-      }
-      result.insert("PATH".to_owned(), new_path.join(":"));
-    }
-
-    result
   }
 }
 

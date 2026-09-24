@@ -425,7 +425,9 @@ async fn run_script_step(
   // Own the cgroup path so `params` doesn't borrow `ctx` — the concurrent
   // dispatcher needs `&mut ctx` while the child runs.
   let cgroup = ctx.cgroup_path().map(Path::to_path_buf);
+  let container = ctx.job_container().cloned();
   let params = ScriptParams {
+    container: container.as_deref(),
     script: &interpolated,
     shell: shell.as_deref(),
     env: &env,
@@ -571,8 +573,10 @@ async fn build_step_env_and_file_commands(
   // Fold the process env LAST (lowest precedence), stripping the runner's
   // private `TOOLU_RUNNER_*` namespace so the admin re-mint bearer never
   // reaches the step child.
-  for (k, v) in super::context::safe_process_env_vars() {
-    env.entry(k).or_insert(v);
+  if ctx.job_container().is_none() {
+    for (k, v) in super::context::safe_process_env_vars() {
+      env.entry(k).or_insert(v);
+    }
   }
   Ok((env, file_cmds))
 }

@@ -55,6 +55,7 @@ type TestResult<T> = Result<T, Box<dyn std::error::Error>>;
 /// plan) and one script step.
 fn job_message(server_uri: &str, job_id: &str, script: &str) -> AgentJobRequestMessage {
   AgentJobRequestMessage {
+    job_container: None,
     message_type: "PipelineAgentJobRequest".to_owned(),
     plan: TaskOrchestrationPlanReference {
       scope_identifier: None,

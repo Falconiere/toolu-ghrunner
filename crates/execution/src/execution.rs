@@ -25,6 +25,7 @@ pub mod composite_scope;
 /// Runs a composite step's shell script as a subprocess, streaming its output.
 pub mod composite_shell;
 mod composite_uses;
+mod container_job;
 /// Step environment, secrets and masking built for the running job.
 pub mod context;
 /// Builds the full `${{ }}` evaluation context for a step.
@@ -35,6 +36,7 @@ pub mod depth_tracker;
 pub mod file_commands;
 /// Handler dispatch by `runs.using` (plugin → script → node → docker → composite).
 pub mod handlers;
+mod job_context;
 /// Job-level `ACTIONS_RUNNER_HOOK_JOB_*` hooks (self-hosted job lifecycle scripts).
 pub mod job_hooks;
 /// The job execution entry point (`run_job`) and per-job directory setup.

@@ -83,32 +83,14 @@ pub(super) async fn run_node_stage(
 ) -> Result<(Conclusion, HashMap<String, String>), RunnerError> {
   let script = resolve_stage_script(&s)?;
   let node_binary = ensure_node_runtime(s.client, &s.config.data_dir, s.major).await?;
-  let mut env = build_node_env(
-    s.step,
-    s.ctx,
-    s.manifest,
-    s.action_dir,
-    s.workspace,
-    s.config,
-  )?;
-  // Give this stage its own `$GITHUB_ENV`/`$GITHUB_OUTPUT`/`$GITHUB_PATH`/
-  // `$GITHUB_STATE`/`$GITHUB_STEP_SUMMARY` file-command files — a node
-  // action (e.g. setup-node/setup-bun style) exports env vars and PATH
-  // entries for later steps exactly like a `run:` step does, via
-  // `core.exportVariable`/`core.addPath`. Without these files present, the
-  // toolkit falls back to the stdout `set-env`/`add-path` commands, which
-  // `CommandDispatcher` refuses (CVE-2020-15228), so the export silently
-  // had no effect (live bug: PATH entries added by a node action never
-  // reached subsequent steps).
-  let tmp_dir = s.config.data_dir.join("tmp");
-  create_file_command_dir(&tmp_dir).await?;
-  let (file_cmds, file_cmd_env) = FileCommandManager::create(&tmp_dir).await?;
-  env.extend(file_cmd_env);
+  let (env, file_cmds) = node_stage_env(&s).await?;
 
   // Own the cgroup path so `node_params` doesn't borrow `s.ctx` — the
   // concurrent dispatcher needs `&mut s.ctx` while the child runs.
   let cgroup = s.ctx.cgroup_path().map(Path::to_path_buf);
+  let container = s.ctx.job_container().cloned();
   let node_params = NodeExecParams {
+    container: container.as_deref(),
     node_binary: &node_binary,
     script_path: &script,
     env: &env,
@@ -159,6 +141,25 @@ async fn run_stage_process(
   )
   .await;
   Ok((conclusion, outputs))
+}
+
+/// Give every pre/main/post stage its own host-readable command files.
+async fn node_stage_env(
+  s: &NodeStage<'_>,
+) -> Result<(HashMap<String, String>, FileCommandManager), RunnerError> {
+  let mut env = build_node_env(
+    s.step,
+    s.ctx,
+    s.manifest,
+    s.action_dir,
+    s.workspace,
+    s.config,
+  )?;
+  let tmp_dir = s.config.data_dir.join("tmp");
+  create_file_command_dir(&tmp_dir).await?;
+  let (file_cmds, file_cmd_env) = FileCommandManager::create(&tmp_dir).await?;
+  env.extend(file_cmd_env);
+  Ok((env, file_cmds))
 }
 
 /// Emit the per-stage `##[endgroup]` separator before a node entrypoint runs.

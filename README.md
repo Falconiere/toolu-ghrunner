@@ -202,6 +202,35 @@ replaces the workflow `run` mapping; an explicit step value wins. Relative
 directories resolve from that job's workspace, and a missing directory fails
 the step with its path in the diagnostic. Composite steps keep their own scope.
 
+### Job containers
+
+On Linux, `jobs.<id>.container` selects one container for shell steps,
+Node action pre/main/post stages, and composite shell steps. The runner exposes
+`job.container.id` and `job.container.network`, mounts workspace, temp,
+file-command and tool-cache directories, and removes the container/network
+before reporting job completion. Cancellation detaches the active exec; eligible
+post steps retain the container, and final removal terminates remaining processes.
+Jobs declaring a container on macOS or Windows fail before any step runs.
+
+Use a local Linux Docker daemon over a Unix socket (`DOCKER_HOST`, or the active
+Docker CLI context) and `forwarder` services mode. The image must provide `tail`
+and the requested shell; the default container shell is `sh`. Node actions use
+runner-downloaded Linux binaries, so the image needs their compatible runtime
+libraries. A runtime failure fails the step without falling back to the host.
+
+Both image shorthand and the object form support evaluated `image`, registry
+`credentials`, `env`, `ports`, `volumes`, and `options`. Options accept CPU/memory/
+PID limits, user/group, hostname/domainname, capabilities, security options,
+ulimits, `--privileged`, and `--read-only`; unsupported options fail explicitly.
+The runner reserves name, network, entrypoint, environment and mount flags;
+workflow volumes cannot cover `/github`. Registry credentials and multiline
+workflow environment values travel through the Docker API. The image supplies
+the base PATH, with `GITHUB_PATH` entries prepended.
+
+Service-container and Docker-action integration, live GitHub.com comparison,
+and GHES acceptance are **unverified**; see the
+[#73 coverage map](docs/test-coverage.md#job-containers-73).
+
 ### Service modes
 
 `[services] mode` decides where artifacts, cache, and OIDC go.

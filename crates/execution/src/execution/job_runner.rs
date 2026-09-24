@@ -10,6 +10,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use super::actions::prefetch::ActionFetcher;
+use super::container_job::{evaluate_container, finish_container, start_container};
 use super::context::ExecutionContext;
 use super::job_hooks::{JobHookStage, run_job_hook};
 use super::job_spec::{JobSpec, evaluate_job_outputs};
@@ -65,15 +66,43 @@ pub async fn run_job(
   events: mpsc::Sender<RunnerEvent>,
   masker: Arc<Mutex<SecretMasker>>,
 ) -> Result<JobTeardown, RunnerError> {
-  let workspace = prepare_job_dirs(config, &msg.job_id)?;
-  let workspace_gc = spawn_workspace_gc(config, &msg.job_id);
+  let workspace = config.workspace_root.join(&msg.job_id);
   let mut ctx = job_context(&msg, config, masker, &workspace);
+  let container_spec = evaluate_container(&msg, config, &ctx)?;
+  prepare_job_dirs(config, &msg.job_id)?;
+  let workspace_gc = spawn_workspace_gc(config, &msg.job_id);
   // One job-scope HTTP client, reused for every action download / node-runtime
   // fetch / post-drain in this job instead of a fresh connection (and TLS
   // handshake) per call. 120 s: downloads can be large.
   let http = build_job_client()?;
   let local = start_local_services(config, &msg, &ctx).await?;
-  setup_job_env(&mut ctx, &msg, config, &local)?;
+  if let Err(error) = setup_job_env(&mut ctx, &msg, config, &local) {
+    stop_local_services(local).await;
+    return Err(error);
+  }
+  match start_container(
+    container_spec.as_ref(),
+    config,
+    &workspace,
+    &mut ctx,
+    &cancel,
+  )
+  .await
+  {
+    Ok(true) => {},
+    Ok(false) => {
+      let outcome = JobOutcome {
+        job_id: msg.job_id,
+        conclusion: Conclusion::Cancelled,
+        outputs: HashMap::new(),
+      };
+      return Ok(finish_job(local, &events, outcome, workspace_gc).await);
+    },
+    Err(error) => {
+      stop_local_services(local).await;
+      return Err(error);
+    },
+  }
   let inputs = prepared::Inputs {
     msg: &msg,
     config,
@@ -82,7 +111,14 @@ pub async fn run_job(
     workspace: &workspace,
     http: &http,
   };
-  let (conclusion, outputs) = prepared::execute(inputs, &mut ctx).await?;
+  let body_result = prepared::execute(inputs, &mut ctx).await;
+  let (conclusion, outputs) = match finish_container(&ctx, body_result).await {
+    Ok(result) => result,
+    Err(error) => {
+      stop_local_services(local).await;
+      return Err(error);
+    },
+  };
   let outcome = JobOutcome {
     job_id: msg.job_id,
     conclusion,

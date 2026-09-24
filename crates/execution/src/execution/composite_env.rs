@@ -79,45 +79,69 @@ pub(super) fn build_step_env(
 ) -> Result<HashMap<String, String>, RunnerError> {
   let temp_dir = runner_temp_dir(&params.config.data_dir);
   let mut env = ctx.build_step_env(&HashMap::new());
-
-  // Inherit system env for PATH, HOME, etc., but strip the runner's private
-  // `TOOLU_RUNNER_*` namespace (incl. the admin re-mint bearer) so it never
-  // reaches a composite step child.
-  for (k, v) in super::context::safe_process_env_vars() {
-    env.entry(k).or_insert(v);
-  }
-
+  inherit_safe_process_env(ctx, &mut env);
   env.extend(extra_env.clone());
+  add_composite_inputs(&mut env, params.step_inputs);
+  add_composite_action_path(&mut env, params);
+  interpolate_step_env(&mut env, params.step_inputs, &step.env, ctx)?;
+  prepend_path_additions(&mut env, path_additions);
+  add_runner_paths(&mut env, params.workspace, &temp_dir);
+  translate_container_env(&mut env, ctx);
+  Ok(env)
+}
 
-  // INPUT_* vars from step inputs (whitespace → `_`, uppercased).
-  for (k, v) in params.step_inputs {
-    env.insert(input_env_key(k), v.clone());
+fn inherit_safe_process_env(ctx: &ExecutionContext, env: &mut HashMap<String, String>) {
+  if ctx.job_container().is_none() {
+    for (key, value) in super::context::safe_process_env_vars() {
+      env.entry(key).or_insert(value);
+    }
   }
+}
 
+fn add_composite_inputs(env: &mut HashMap<String, String>, inputs: &HashMap<String, String>) {
+  for (key, value) in inputs {
+    env.insert(input_env_key(key), value.clone());
+  }
+}
+
+fn add_composite_action_path(env: &mut HashMap<String, String>, params: &CompositeParams<'_>) {
   env.insert(
     "GITHUB_ACTION_PATH".to_owned(),
     params.action_dir.to_string_lossy().into_owned(),
   );
+}
 
-  // Step-level env (interpolated)
-  let eval_ctx = composite_eval_context(ctx, params.step_inputs, Some(&env));
-  for (k, v) in &step.env {
-    let interpolated = interpolate_composite_expr(v, &eval_ctx, CompositeField::Env)?;
-    env.insert(k.clone(), interpolated);
+fn interpolate_step_env(
+  env: &mut HashMap<String, String>,
+  inputs: &HashMap<String, String>,
+  step_env: &HashMap<String, String>,
+  ctx: &ExecutionContext,
+) -> Result<(), RunnerError> {
+  let eval_ctx = composite_eval_context(ctx, inputs, Some(env));
+  for (key, value) in step_env {
+    let interpolated = interpolate_composite_expr(value, &eval_ctx, CompositeField::Env)?;
+    env.insert(key.clone(), interpolated);
   }
+  Ok(())
+}
 
-  prepend_path_additions(&mut env, path_additions);
-
+fn add_runner_paths(env: &mut HashMap<String, String>, workspace: &Path, temp: &Path) {
   env.insert(
     "GITHUB_WORKSPACE".to_owned(),
-    params.workspace.to_string_lossy().into_owned(),
+    workspace.to_string_lossy().into_owned(),
   );
   env.insert(
     "RUNNER_TEMP".to_owned(),
-    temp_dir.to_string_lossy().into_owned(),
+    temp.to_string_lossy().into_owned(),
   );
+}
 
-  Ok(env)
+fn translate_container_env(env: &mut HashMap<String, String>, ctx: &ExecutionContext) {
+  if let Some(container) = ctx.job_container() {
+    for (key, value) in env {
+      *value = container.translate_env(key, value);
+    }
+  }
 }
 
 /// Prepend composite `GITHUB_PATH` additions ahead of the inherited `PATH`.

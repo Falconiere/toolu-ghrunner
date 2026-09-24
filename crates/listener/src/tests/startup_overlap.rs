@@ -73,6 +73,7 @@ fn job_message(
   job_id: &str,
 ) -> AgentJobRequestMessage {
   AgentJobRequestMessage {
+    job_container: None,
     message_type: "PipelineAgentJobRequest".to_owned(),
     plan: TaskOrchestrationPlanReference {
       scope_identifier: None,

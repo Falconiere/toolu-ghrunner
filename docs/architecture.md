@@ -307,6 +307,17 @@ Handler priority: **plugin → script → node → docker → composite**.
 - `plugin` — `RunnerPlugin` extension point. New addition not in
   upstream `actions/runner`.
 
+**Job containers.** `container_job` evaluates the wire `jobContainer` token
+before workspace creation and rejects non-Linux hosts. `docker::JobContainer`
+owns a unique network/container, starts before hooks, and survives all eligible
+post steps. Shell, Node and composite execution use attached Docker API exec;
+workflow environment never enters a host Docker client process. Explicit mount
+mappings translate runner path variables and expression paths while preserving
+opaque workflow values. `container_job::finish_container` removes the container
+and network on both body success and error before job completion. On exec
+cancellation, remote children can remain until that force-removal boundary.
+Only forwarder service URLs are supported; local loopback cache URLs are rejected.
+
 **Job teardown order.** `run_job` returns a `JobTeardown`
 (`execution/job_teardown.rs`) rather than cleaning up inline: local
 cache servers are stopped and `JobCompleted` is emitted *before*
