@@ -18,15 +18,19 @@ use tokio_util::sync::CancellationToken;
 type TestResult = Result<(), Box<dyn Error>>;
 const CAPTURE: &str = include_str!("incoming_contexts_matrix_0.json");
 
-#[tokio::test]
-async fn acquired_with_tokens_reach_node_and_expressions_are_not_reevaluated() -> TestResult {
+#[test]
+fn acquired_with_tokens_reach_node_and_expressions_are_not_reevaluated() -> TestResult {
+  let runtime = tokio::runtime::Builder::new_current_thread()
+    .enable_all()
+    .build()?;
   for value in ["world", "${{ matrix.tag }}"] {
     let dir = tempfile::tempdir()?;
     let msg = node_variant(value, false)?;
     let cfg = config(dir.path());
     let workspace = cfg.workspace_root.join(&msg.job_id);
     seed_probe(&cfg.data_dir, &workspace)?;
-    let (result, logs) = execute(msg, cfg).await?;
+    // Keep fixture setup and output readback off Tokio's worker thread.
+    let (result, logs) = runtime.block_on(execute(msg, cfg))?;
     assert_eq!(result, Some(Conclusion::Success), "{logs:?}");
     let observed: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(
       workspace.join("node-inputs.json"),
@@ -39,14 +43,18 @@ async fn acquired_with_tokens_reach_node_and_expressions_are_not_reevaluated() -
   Ok(())
 }
 
-#[tokio::test]
-async fn malformed_acquired_with_expression_fails_before_node_runs() -> TestResult {
+#[test]
+fn malformed_acquired_with_expression_fails_before_node_runs() -> TestResult {
+  let runtime = tokio::runtime::Builder::new_current_thread()
+    .enable_all()
+    .build()?;
   let dir = tempfile::tempdir()?;
   let msg = node_variant("world", true)?;
   let cfg = config(dir.path());
   let workspace = cfg.workspace_root.join(&msg.job_id);
   seed_probe(&cfg.data_dir, &workspace)?;
-  let (result, logs) = execute(msg, cfg).await?;
+  // Keep fixture setup and output readback off Tokio's worker thread.
+  let (result, logs) = runtime.block_on(execute(msg, cfg))?;
   assert_eq!(result, Some(Conclusion::Failure), "{logs:?}");
   assert!(!workspace.join("node-inputs.json").exists());
   assert!(
