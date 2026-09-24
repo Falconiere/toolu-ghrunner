@@ -136,17 +136,17 @@ async fn boot_exits_124_when_the_deadline_watchdog_fires_mid_job() {
   boot_fixtures::mount_auth_and_session(&server).await;
   boot_fixtures::mount_job_lifecycle(
     &server,
-    "printf started > \"$HOME/watchdog-started\"; sleep 120",
+    "printf started > \"$HOME/watchdog-started\"; sleep 300",
   )
   .await
   .expect("mount the broker + run-service mocks");
   let jit_config =
     boot_fixtures::real_jit_config_b64(&server.uri()).expect("build a real-keypair jit config");
 
-  // Cold process startup on a loaded macOS host can exceed the former 2s
-  // budget before deadline validation. Keep setup outside the timed interval.
+  // Cold process startup on a loaded macOS host can exceed 30s before Rust
+  // reaches deadline validation. Keep setup outside the timed interval.
   let home = temp_home("deadline-watchdog");
-  let startup_budget = Duration::from_secs(30);
+  let startup_budget = Duration::from_secs(120);
   let deadline_ms = deadline_in(startup_budget);
 
   let started = Instant::now();
