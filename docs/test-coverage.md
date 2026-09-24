@@ -155,8 +155,11 @@ private temporary acquisition probe in the unmodified toolu runner. That run
 failed as expected and is fixture provenance, not passing acceptance. The probe
 was removed before implementation. Sanitization replaces secret variables,
 endpoint authorization, mask values and token-bearing URLs, preserving structure
-and types. Fixtures and workflow files have SHA-256 records in
-`crates/execution/tests/incoming_contexts_evidence.json`.
+and types. In the workflow-call fixture, the `github_token` and
+`system.github.token` secret aliases use the same fixed synthetic UUID instead
+of the generic `[redacted]` marker, retaining `isSecret: true`. The capture
+checker pins those exact placeholder values. Fixtures and workflow files have
+SHA-256 records in `crates/execution/tests/incoming_contexts_evidence.json`.
 
 The official runner was built from the exact epic pin
 `cab9d1c3901e45c7705889c4f88284fdd93f4ae5` (not just a similarly named release).

@@ -1133,7 +1133,7 @@
     },
     "github_token": {
       "isSecret": true,
-      "value": "[redacted]"
+      "value": "7fdb8d2a-89c3-4e1b-a62d-046b28654e09"
     },
     "system.from_run_service": {
       "value": "true"
@@ -1152,7 +1152,7 @@
     },
     "system.github.token": {
       "isSecret": true,
-      "value": "[redacted]"
+      "value": "7fdb8d2a-89c3-4e1b-a62d-046b28654e09"
     },
     "system.github.token.permissions": {
       "value": "{\"Contents\":\"read\",\"Metadata\":\"read\"}"
