@@ -50,10 +50,10 @@ fn write_actions(workspace: &Path) -> TestResult {
 
 fn steps() -> Vec<ActionStep> {
   let mut node = ActionStep::with_ref_type("node_probe", "repository");
-  node.reference.name = Some("./node action".to_owned());
+  node.reference.path = Some("./node action".to_owned());
   node.reference.repository_type = Some("self".to_owned());
   let mut composite = ActionStep::with_ref_type("composite_probe", "repository");
-  composite.reference.name = Some("./composite action".to_owned());
+  composite.reference.path = Some("./composite action".to_owned());
   composite.reference.repository_type = Some("self".to_owned());
   vec![
     ActionStep::script(

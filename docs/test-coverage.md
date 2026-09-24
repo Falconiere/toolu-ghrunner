@@ -473,3 +473,13 @@ contain terminal escapes; the harness permits these only in private captured
 output. The earlier official log-fetch failure was CLI output protection, not
 a failed workflow or delayed publication. Services/Docker-action integration
 (#74/#75), private-registry authentication failure, and GHES remain unverified.
+
+After rebasing onto #68 (`aa674e9`), the Linux regression lane passed the
+seven acquired-context/real-Node cases, eight action-reference cases, and all
+three captured-container parse/replay cases. The standalone container routing
+probe initially exposed its constructed `self` references using `name` rather
+than the captured `path` field. Correcting those two references made the same
+probe pass (12.490 s), with all identity/path/output/post/cleanup assertions
+unchanged. Incoming contexts and fallible Node input evaluation are retained
+alongside container translation. The live-run links above describe the earlier
+workflow/source revisions; this rebase evidence is local Linux replay.
