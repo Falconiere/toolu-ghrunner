@@ -19,7 +19,7 @@ type TestResult = Result<(), Box<dyn Error>>;
 const CAPTURE: &str = include_str!("incoming_contexts_matrix_0.json");
 
 #[tokio::test]
-async fn acquired_with_tokens_reach_node_once_and_selected_defaults_resolve() -> TestResult {
+async fn acquired_with_tokens_reach_node_and_expressions_are_not_reevaluated() -> TestResult {
   for value in ["world", "${{ matrix.tag }}"] {
     let dir = tempfile::tempdir()?;
     let msg = node_variant(value, false)?;
