@@ -1,0 +1,21 @@
+name: Context input scope probe
+description: Assert invocation inputs before and after a nested action
+inputs:
+  who:
+    required: true
+    description: Value scoped to this invocation
+  expected:
+    required: true
+    description: Expected invocation value
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: test '${{ inputs.who }}' = '${{ inputs.expected }}'
+    - uses: ./.github/actions/context-68-child
+      with:
+        who: inner
+    - shell: bash
+      run: |
+        test '${{ inputs.who }}' = '${{ inputs.expected }}'
+        printf '%s' '${{ inputs.who }}' > 'context-68-${{ inputs.expected }}.out'
