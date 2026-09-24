@@ -1092,6 +1092,7 @@ The short version (updated as items land):
 4. **Telemetry opt-in.** OTel cut for v1. A `tracing-subscriber`
    JSON-formatter + optional OTel layer (behind a feature flag) is
    a v1.1 fast-follow.
+
 ## Incoming expression contexts
 
 Acquired jobs carry server-resolved `contextData`; `build_context` imports its

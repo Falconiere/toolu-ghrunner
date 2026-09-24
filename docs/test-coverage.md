@@ -166,8 +166,9 @@ its Listener/Worker assembly hashes. Both lanes use the same macOS 26.6.2 ARM64
 host, Bash 5.3.20 and jq 1.7.1; reference checkout uses bundled Node 20.20.2 and
 toolu checkout uses Node 20.18.3. Context and composite assertions use the real shell.
 
-[Toolu run 36039705559](https://github.com/Falconiere/toolu-ghrunner/actions/runs/36039705559)
-passed all four jobs with the same workflow/action revision. The live checker
+[Toolu run 36042145619](https://github.com/Falconiere/toolu-ghrunner/actions/runs/36042145619)
+passed all four jobs with the same workflow/action revision after rebasing onto
+main. The evidence JSON records the exact rebased source commit and binary hash. The live checker
 verified both runs, required assertion steps, runner identities and content hashes.
 The full repository gate passed with all seven captured-context/replay and real-Node
 boundary tests. The live checker
