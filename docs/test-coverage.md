@@ -403,7 +403,7 @@ No parser or constructed fixture result establishes live backend parity.
 | 73-S1 | `execution/tests/job_container_linux_test.rs`: Ubuntu OS, shared hostname across shell/Node/composite/posts, container cwd and exact marker bytes | Local Linux lane; see command below |
 | 73-S2 | `docker/tests/job_container.rs`: paths with spaces, metadata equals inspect, ephemeral published port, user bind-volume persistence, multiline opaque env preserved, cleanup; `job_container_composite_test.rs`: container shell, expression paths and ENV/PATH; Linux lane: OUTPUT/ENV/PATH/STATE | Local Docker; live checkout/artifact backend remains unverified |
 | 73-S3 | Service aliases and Docker actions sharing the job network | Unverified; requires #74/#75 integration |
-| 73-S4 | `docker/tests/job_container_failures.rs`: observed-start cancellation, timeout/post exec, pull/create/start/exec failure, owned-resource removal | Explicit real-Docker lane |
+| 73-S4 | `docker/tests/job_container_failures.rs`: observed-start cancellation, timeout/post exec, missing daemon, pull/create/start/exec failure, owned-resource removal | Explicit real-Docker lane |
 | 73-S5 | `execution/tests/job_container_test.rs`: non-Linux declaration fails before host workspace/step, absent declaration keeps host behavior | Default macOS lane; Linux setup-cancel conclusion regression |
 | Live applicability | Captured `jobContainer`, official pinned runner comparison, real GitHub artifact bytes, GHES | Unverified; no closure claim |
 
@@ -433,3 +433,19 @@ The branch-only `multistep-live.yml` workflow requires a dedicated runner label
 and pins its Ubuntu image, checkout and artifact action revisions. It exercises
 checkout, shell, Node pre/main/post, composite, command files and artifact bytes;
 its presence alone does not establish live success.
+
+The opt-in `toolu-runner/tests/job_container_live.rs` harness targets only
+`Falconiere/toolu-ghrunner`, this feature branch and `multistep-live.yml`.
+It requires `GH_TOKEN`/`GITHUB_TOKEN`, two separately provisioned, distinct
+`toolu-73-*` labels in `TOOLU_CONTAINER_TOOLU_LABEL` and
+`TOOLU_CONTAINER_REFERENCE_LABEL`, and access to their Docker daemon. It
+compares successful runs at one workflow SHA, stage markers, exact downloaded
+artifact bytes and removal of the artifact-recorded container/network IDs.
+It does not provision/authenticate the reference runner, capture/sanitize an
+acquired message, replay a capture, or cover GHES. Compilation or an ordinary
+ignored result is not live evidence.
+
+```sh
+cargo nextest run -p toolu-runner --features live --test job_container_live \
+  --run-ignored only -j 1
+```
