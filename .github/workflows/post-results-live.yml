@@ -1,0 +1,49 @@
+name: post-results-live
+on:
+  workflow_dispatch:
+    inputs:
+      runner_label:
+        description: Label for the toolu or pinned official runner host
+        type: string
+        required: true
+      scenario:
+        description: Failure result or externally cancelled cleanup
+        type: choice
+        options:
+          - failure
+          - cancel
+        default: failure
+permissions:
+  contents: read
+jobs:
+  post_failure:
+    if: inputs.scenario == 'failure'
+    runs-on: [self-hosted, "${{ inputs.runner_label }}"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: First main succeeds
+        uses: ./.github/actions/post-results-probe
+        with:
+          marker: A
+          fail-post: 'false'
+      - name: Second main succeeds and post fails
+        uses: ./.github/actions/post-results-probe
+        with:
+          marker: B
+          fail-post: 'true'
+  cancel_cleanup:
+    if: inputs.scenario == 'cancel'
+    runs-on: [self-hosted, "${{ inputs.runner_label }}"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Short cleanup
+        uses: ./.github/actions/post-results-probe
+        with:
+          marker: A
+          fail-post: 'false'
+      - name: Long cleanup to cancel after post starts
+        uses: ./.github/actions/post-results-probe
+        with:
+          marker: B
+          fail-post: 'false'
+          sleep-ms: '30000'

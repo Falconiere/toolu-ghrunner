@@ -284,3 +284,54 @@ The full gate is `./tools/check.sh all`. On this macOS host, test binaries
 have stalled in `_dyld_start` before Rust test code runs; GitHub Linux `ci`
 and `ci-macos` are the authorized gate evidence for this branch. Actual
 GitHub.com and GHES control-message behavior remains unverified.
+## Post-action cleanup (#101)
+
+`crates/execution/tests/post_results_test.rs` replays the sanitized acquired
+message from #68 through the real `Runner::execute_job` path, using a committed
+Node action fixture. It checks successful mains plus failed posts, LIFO order,
+state/input/action-name isolation, hard missing-script diagnostics with later
+posts continuing, changing `post-if` status, and cancellation during an
+observed running post. `crates/listener/src/tests/post_results.rs` consumes the
+real event stream through `StepCollector` and serializes the actual
+`CompleteJobRequest`, checking separate main/post results and failed job status.
+`execution::post_drain::tests::cancel_budget_is_shared` checks that later posts
+use the remaining time on a single deadline. The exact local pass/fail evidence is the repository
+gate and issue-specific test commands, recorded with the worker report.
+
+| Issue scenario | Exact local observation required | Test and runnable check | Evidence status |
+| --- | --- | --- | --- |
+| S1 / failed post result | Main `Success`, distinct post `Failure`, job `Failure`; completion JSON uses conclusion `3`, main `2`, post `3`, number `3`, and `Post Workflow input passed to action`. | `post_failure_reaches_job_completed`; `post_results_reach_distinct_completion_records`; `cargo test -p execution --test post_results_test post_failure_reaches_job_completed && cargo test -p listener --lib post_results_reach_distinct_completion_records` | Local production replay; GitHub UI unverified. |
+| S2 / hard error drain | A/B mains then B missing-script failure followed by `A:post` with A-state and A input; four completion records, final Failure. | `hard_post_error_keeps_draining_lifo`; `cargo test -p execution --test post_results_test hard_post_error_keeps_draining_lifo` | Local production replay. |
+| S3 / live conditions | After B post failure, A `failure()` runs and A `success()` skips. After A main failure, B `failure()` runs and B `success()` skips. A hard B main error still completes after A `failure()` cleanup. Cancelling a running main keeps `Cancelled` even when A's eligible post fails. | `post_conditions_follow_live_status`, `hard_main_error_still_completes_after_post_cleanup`, `cancelled_main_keeps_failure_post_and_final_cancelled`; `cargo test -p execution --test post_results_test post_conditions_follow_live_status && cargo test -p execution --test post_results_test hard_main_error_still_completes_after_post_cleanup && cargo test -p execution --test post_results_test cancelled_main_keeps_failure_post_and_final_cancelled` | Local production replay; pinned reference unverified. |
+| S4 / state and report isolation | B post reads B-state/B/`__self_2` before A reads A-state/A/`__self`; four distinct report IDs. | `repeated_posts_keep_state_and_report_identity`; `cargo test -p execution --test post_results_test repeated_posts_keep_state_and_report_identity` | Repeated top-level local production replay; nested pending #102. |
+| S5 / cancellation budget | B's observed post start precedes cancel; A's later `cancelled()` post finishes, B never writes a late finish marker, job `Cancelled`, completion within 5 s. A 120 ms shared deadline reaches zero after elapsed time. | `cancelled_posts_complete_job`, `cancel_budget_is_shared`; `cargo test -p execution --test post_results_test cancelled_posts_complete_job && cargo test -p execution cancel_budget_is_shared` | Local real processes plus deadline unit check; multi-post expiry unverified. |
+
+These tests use the #68 sanitized acquired message and real Node 26.9.0 on
+macOS ARM64, with local action files preseeded at its captured workspace path.
+They preserve the captured job IDs, context names and wire token types; the
+action paths and manifest defaults are labelled test transformations.
+
+The repeated-instance check covers two top-level local actions. Nested Node
+post registration is still unverified because `composite_uses` currently drops
+the nested `ActionOutcome.post`; #102 explicitly owns nested pre/post
+registration. This #101 branch leaves that composite execution path to #102
+and must be replayed against its merged change before closing nested S4.
+The cancellation process test starts a slow post, cancels after its observed
+start marker, checks a second slow `cancelled()` post runs, and verifies the
+first process produces no late marker. The multi-slow-post expiry case is
+covered only by the shared-deadline unit check; end-to-end expiry remains
+unverified until a short test deadline can be injected into the production
+drain without changing the runtime default.
+
+The committed `post-results-live.yml` and matching action allow the same
+revision to be dispatched to toolu and the pinned official runner using
+different runner labels. Its failure scenario expects both mains to succeed,
+the second post to fail, and the job to fail with a separate post record. Its
+cancel scenario must be cancelled externally after the long post begins.
+The reference source pin is `actions/runner`
+`cab9d1c3901e45c7705889c4f88284fdd93f4ae5`.
+
+GitHub currently reports zero registered runners for this repository, so the
+GitHub.com UI, official-runner comparison, Linux host execution, and GHES
+lanes are **unverified**. Local replay on macOS ARM64 tests the execution and
+report serialization paths, but does not claim remote acceptance.

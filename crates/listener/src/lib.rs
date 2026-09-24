@@ -19,6 +19,9 @@ pub mod log_uploader;
 pub mod loop_decision;
 pub mod message_route;
 pub mod outage;
+#[cfg(test)]
+#[path = "tests/post_results.rs"]
+mod post_results;
 pub(crate) mod retry;
 mod setup_step;
 #[cfg(test)]

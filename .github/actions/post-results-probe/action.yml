@@ -1,0 +1,20 @@
+name: post-results-probe
+description: Real Node action for post result and state checks
+inputs:
+  marker:
+    description: Marker written by the action
+    default: A
+  fail-post:
+    description: Whether post exits one
+    default: 'true'
+  sleep-ms:
+    description: Delay in post before completion
+    default: '0'
+  remove-post:
+    description: Remove own post script after main to exercise a hard drain error
+    default: 'false'
+runs:
+  using: node20
+  main: main.js
+  post: post.js
+  post-if: always()

@@ -9,7 +9,8 @@
       ]
     },
     "requireReadme": [
-      "log_uploader"
+      "log_uploader",
+      "tests"
     ]
   },
   "fileSize": {

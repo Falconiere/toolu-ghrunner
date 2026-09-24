@@ -98,6 +98,9 @@ fn build_node_command(params: &NodeExecParams<'_>) -> tokio::process::Command {
   let mut cmd = tokio::process::Command::new(params.node_binary);
   cmd.arg(params.script_path);
   cmd.current_dir(params.working_dir);
+  // A cancelled post can drop the whole stage future while it is waiting;
+  // do not leave that Node child running past the shared cleanup deadline.
+  cmd.kill_on_drop(true);
   // `params.env` (from `build_node_env`) is DELTA-only and relies on the
   // inherited process env for PATH/HOME, so inherit — but strip the runner's
   // private `TOOLU_RUNNER_*` namespace (incl. the admin re-mint bearer) first.
