@@ -22,7 +22,7 @@ use shared::{
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-type TestResult<T> = Result<T, Box<dyn Error>>;
+type TestResult<T> = Result<T, Box<dyn Error + Send + Sync>>;
 
 const CAPTURED_JOB: &str = include_str!("../../toolu-runner/tests/fixtures/job_message.json");
 
@@ -50,18 +50,22 @@ fn captured_action(index: usize, name: &str, path: &str) -> TestResult<ActionSte
 
 async fn execute_with(
   steps: Vec<ActionStep>,
-  setup: impl FnOnce(&Path, &Path) -> TestResult<()>,
+  setup: impl FnOnce(&Path, &Path) -> TestResult<()> + Send + 'static,
 ) -> TestResult<(ExecutionContext, Vec<RunnerEvent>)> {
-  let dir = tempfile::tempdir()?;
-  let workspace = dir.path().join("work");
-  std::fs::create_dir_all(&workspace)?;
-  let config = RunnerConfig {
-    data_dir: dir.path().join("data"),
-    workspace_root: workspace.clone(),
-    ..RunnerConfig::default()
-  };
-  std::fs::create_dir_all(&config.data_dir)?;
-  setup(&workspace, &config.data_dir)?;
+  let (dir, workspace, config) = tokio::task::spawn_blocking(move || {
+    let dir = tempfile::tempdir()?;
+    let workspace = dir.path().join("work");
+    std::fs::create_dir_all(&workspace)?;
+    let config = RunnerConfig {
+      data_dir: dir.path().join("data"),
+      workspace_root: workspace.clone(),
+      ..RunnerConfig::default()
+    };
+    std::fs::create_dir_all(&config.data_dir)?;
+    setup(&workspace, &config.data_dir)?;
+    Ok::<_, Box<dyn Error + Send + Sync>>((dir, workspace, config))
+  })
+  .await??;
   let mut ctx = ExecutionContext::with_masker(Arc::new(Mutex::new(SecretMasker::new())));
   let (tx, mut rx) = mpsc::channel::<RunnerEvent>(256);
   let collector = tokio::spawn(async move {
@@ -92,6 +96,7 @@ async fn execute_with(
   drop(tx);
   let events = collector.await?;
   assert_eq!(conclusion, Conclusion::Success, "events: {events:?}");
+  drop(dir);
   Ok((ctx, events))
 }
 
@@ -245,7 +250,7 @@ async fn skipped_named_step_has_skipped_results_and_empty_outputs() -> TestResul
     ..
   } if step_id == &skipped_id))
   );
-  assert!(!log_lines(&events, &skipped_id).contains(&"must-not-run"));
+  assert!(log_lines(&events, &skipped_id).is_empty());
   Ok(())
 }
 
@@ -313,7 +318,7 @@ async fn post_stage_keeps_main_output_and_uses_distinct_report_identity() -> Tes
   let consumer_id = consumer.id.clone();
   let source =
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../toolu-runner/tests/fixtures/prepost_action");
-  let (ctx, events) = execute_with(vec![action, consumer], |workspace, data_dir| {
+  let (ctx, events) = execute_with(vec![action, consumer], move |workspace, data_dir| {
     copy_action(
       &source,
       workspace,
@@ -366,7 +371,7 @@ async fn skipped_post_reports_skipped_without_rewriting_main_result() -> TestRes
   let main_id = action.id.clone();
   let source =
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../toolu-runner/tests/fixtures/prepost_action");
-  let (ctx, events) = execute_with(vec![action], |workspace, data_dir| {
+  let (ctx, events) = execute_with(vec![action], move |workspace, data_dir| {
     copy_action(
       &source,
       workspace,
@@ -416,7 +421,7 @@ async fn repeated_nested_composites_do_not_leak_inner_step_outputs() -> TestResu
   let consumer_id = consumer.id.clone();
   let source =
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../toolu-runner/tests/fixtures/local_actions");
-  let (ctx, events) = execute_with(vec![parent, consumer], |workspace, _| {
+  let (ctx, events) = execute_with(vec![parent, consumer], move |workspace, _| {
     for name in ["composite-output-child", "composite-output-parent"] {
       copy_action(&source.join(name), workspace, name, &["action.yml"])?;
     }
@@ -462,7 +467,7 @@ async fn acquired_message_replay_keeps_wire_ids_through_job_completion() -> Test
   )?;
   let ids = [producer.id.clone(), consumer.id.clone()];
   message.steps = vec![producer, consumer];
-  let dir = tempfile::tempdir()?;
+  let dir = tokio::task::spawn_blocking(tempfile::tempdir).await??;
   let config = RunnerConfig {
     data_dir: dir.path().join("data"),
     workspace_root: dir.path().join("work"),
