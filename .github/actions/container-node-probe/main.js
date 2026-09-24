@@ -1,0 +1,10 @@
+const fs = require('fs');
+const assert = require('assert');
+assert.equal(process.env.STATE_from_pre, 'pre-value');
+assert.equal(process.env.FROM_SHELL, 'shell-value');
+assert.equal(require('os').hostname(), 'container-73-probe');
+assert.equal(process.cwd(), process.env.GITHUB_WORKSPACE);
+fs.appendFileSync(process.env.GITHUB_STATE, 'from_main=main-value\n');
+fs.appendFileSync(process.env.GITHUB_OUTPUT, 'node_result=node-value\n');
+fs.appendFileSync(process.env.GITHUB_ENV, 'FROM_NODE=node-value\n');
+console.log('CONTAINER_73_NODE_MAIN_OK');

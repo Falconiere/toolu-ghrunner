@@ -1,0 +1,7 @@
+name: Container identity and state probe
+description: Verifies Node pre, main and post execution in the job container.
+runs:
+  using: node20
+  pre: pre.js
+  main: main.js
+  post: post.js
