@@ -4,23 +4,16 @@ use aho_corasick::{AhoCorasick, AhoCorasickBuilder, MatchKind};
 use base64::Engine as _;
 use base64::engine::general_purpose::{STANDARD, STANDARD_NO_PAD};
 
-/// Minimum length for a secret (and any derived variant) to be registered.
-/// Shorter values are too generic and would cause false-positive masking.
+/// Minimum byte length for ordinary secrets and non-JSON encoded variants.
+/// Explicit workflow masks bypass this heuristic for raw values and lines.
 const MIN_SECRET_LEN: usize = 4;
 
 /// Masks secret values in strings.
 ///
-/// Secrets are registered upfront (job Variables + `MaskHints`); each
-/// registers its JSON-escaped, base64/hex/percent, and per-line variants
-/// too. `patterns` stays sorted longest-first (invariant of
-/// `insert_pattern`) and is the automaton's source of truth, but only the
-/// fallback loop *depends* on that ordering — it replaces pattern by pattern,
-/// so a shorter pattern must not consume a longer one's text first. The
-/// automaton path is order-independent: `MatchKind::Standard` +
-/// `find_overlapping_iter` sees every match and merges overlapping spans into
-/// one `***`. `automaton` (rebuilt once per `add_secret`) is `None` only on a
-/// build failure (WARN-logged); `mask` then falls back to the loop rather
-/// than returning input unmasked.
+/// Job secrets register trimmed raw, per-line and encoded variants; explicit
+/// workflow masks also preserve short lines and the exact whole value. One
+/// overlapping Aho-Corasick pass merges matches into `***`. On build failure,
+/// masking falls back to longest-first replacement rather than exposing input.
 #[derive(Debug, Clone)]
 pub struct SecretMasker {
   patterns: Vec<String>,
@@ -31,7 +24,7 @@ pub struct SecretMasker {
 /// wrapped in a `Mutex` and shared across the listener, the per-job
 /// `ExecutionContext`, and the tracing file sink.
 ///
-/// The Mutex is the gate for `add_secret`; the inner `mask` call is
+/// The Mutex is the gate for registration; the inner `mask` call is
 /// `&self` so it doesn't need exclusive access. Each `redact` call
 /// takes the lock briefly to read the current pattern set.
 ///
@@ -81,6 +74,25 @@ impl SecretMasker {
   /// automaton once at the end, not per pattern inserted.
   pub fn add_secret(&mut self, value: &str) {
     self.insert_secret_patterns(value);
+    self.rebuild_automaton();
+  }
+
+  /// Register a decoded `::add-mask::` value and each nonempty trimmed line.
+  ///
+  /// Explicit workflow masks preserve the exact whole value and include even
+  /// one-character lines, unlike the minimum-length policy of `add_secret`.
+  /// CR and LF both separate lines; whitespace-only values register nothing.
+  /// Rebuilds the automaton once after inserting all patterns and variants.
+  pub fn add_mask(&mut self, value: &str) {
+    if value.trim().is_empty() {
+      return;
+    }
+    self.add_pattern(value);
+    for line in value.split(['\r', '\n']).map(str::trim) {
+      if !line.is_empty() {
+        self.add_pattern(line);
+      }
+    }
     self.rebuild_automaton();
   }
 

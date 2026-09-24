@@ -66,3 +66,40 @@ Total test count after step 11: see `cargo test --workspace` summary
 below. Live tests compile under `--features live` but only run with
 `--ignored` and the required env vars (`TOOLU_RUNNER_LIVE_TOKEN`,
 `TOOLU_RUNNER_LIVE_REPO`).
+
+## Issue #86 — explicit multiline workflow masks
+
+`::add-mask::` registers the decoded whole value exactly and every nonempty
+trimmed CR/LF-separated line, including one-character values. Empty and
+whitespace-only commands register nothing. The general four-byte policy for
+message secrets remains unchanged. Explicit short masks can redact ordinary
+text; callers intentionally request that behavior.
+
+The real-tool regression is
+`crates/listener/src/tests/multiline_mask.rs::multiline_mask_real_job_reaches_every_local_sink`,
+run with `cargo nextest run -p listener -E 'test(multiline_mask)'`. It replays
+the committed sanitized `crates/toolu-runner/tests/fixtures/job_message.json` envelope through
+`run_job`, preserving the first two step UUID/contextName identities and
+replacing their inputs with the disposable shell probe
+`crates/listener/tests/multiline_mask.sh` and local composite actions. This is
+local production replay, not a newly captured live GitHub job. Probe values
+are deliberately non-credential text. The behavior oracle is
+[actions/runner cab9d1c, ActionCommandManager](https://github.com/actions/runner/blob/cab9d1c3901e45c7705889c4f88284fdd93f4ae5/src/Runner.Worker/ActionCommandManager.cs#L444).
+
+| Scenario | Input and exact expected observation | Evidence scope |
+| --- | --- | --- |
+| 86-S1 | Encoded LF/CRLF/CR, blank lines, whitespace, repeated/overlapping values, 1–3 byte values and Unicode; whole value and each trimmed line become `***`; a plain space stays unchanged. `%250A` is decoded only once. | Real shell → dispatcher → shared masker. |
+| 86-S2 | Seven stdout and seven stderr records become `stdout=[***]` / `stderr=[***]`, with `control remains visible` unchanged. | Actual event forwarder produces identical combined-job, step-upload and live-log buffers; real journal writer persists matching JSONL lines; production `RedactingWriter` with `MaskerRedactor` yields identical diagnostic lines. No HTTP service or upload acknowledgment is mocked. |
+| 86-S3 | Nested local composite invokes background shell writers after registration; repeated/overlapping values merge without residual text. | Sorted probe records match exactly; stream identities, counts and successful job completion are asserted. Concurrent registration is serialized by the existing shared mutex. |
+| 86-S4 | A later top-level notice containing three newly registered short lines becomes `annotation=[***|***|***]`. | Annotation producer covered locally. Summary, job output and deployment-URL integration with #70/#82/#83/#88 remains **unverified**. |
+
+Verification status: the pre-fix test reproduced cleartext
+`annotation=[Q|RS|TUV]` on macOS. The post-fix production-replay test passes
+on macOS with nextest, and the full `./tools/check.sh all` gate passes.
+Ignored live tests remain unverified.
+Linux execution, GitHub.com/GHES UI/backend uploads and comparison with the
+pinned official runner are **unverified**. Registration is backend-independent;
+these local buffers do not prove remote UI behavior. Diagnostics here exercise
+the actual writer/redactor directly, not global subscriber initialization.
+Nested composite shell workflow-command routing is a separate observed gap;
+the nested probe tests ordinary stdout/stderr, and the notice runs top-level.

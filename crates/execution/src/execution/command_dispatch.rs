@@ -222,7 +222,7 @@ impl CommandDispatcher {
       Ok(g) => g,
       Err(poisoned) => poisoned.into_inner(),
     };
-    guard.add_secret(&secret);
+    guard.add_mask(&secret);
   }
 
   fn apply_group(&mut self, title: &str) {
@@ -392,16 +392,10 @@ fn decode_property_escape(slice: &str) -> Option<char> {
 /// Stream a step's stdout through the dispatcher as the child runs, emitting
 /// each surviving line as a `Log` event immediately for realtime UI/blob.
 ///
-/// Raw lines arrive on `stdout_rx` as the handler reads them off the child, so
-/// a passthrough line is logged before the next is produced. Command lines are
-/// applied to `ctx` (under `step_id`) and consumed; `group`/annotation
-/// commands emit their (masked) events under `log_step_id` instead — equal to
-/// `step_id` except for a nested composite `uses:` step, whose synthetic id
-/// has no per-step log uploader (see `CommandDispatcher`'s `log_step_id`
-/// field doc). Plain passthrough lines are re-emitted **unmasked** — the engine event
-/// stream is unmasked by design (see `Runner::execute_job`'s doc contract);
-/// every durable sink masks on its own before the line lands on disk or over
-/// the wire. Returns the `set-output` map for `StepCompleted`.
+/// Commands update `ctx` under `step_id`; logs/groups/annotations use
+/// `log_step_id` (the parent id for nested actions). Passthrough logs remain
+/// unmasked: each durable sink masks through the shared masker. Returns only
+/// this run's `set-output` values for `StepCompleted`.
 pub async fn stream_dispatch_stdout(
   step_id: &str,
   log_step_id: &str,
