@@ -286,6 +286,10 @@ async fn run_step_shell(
 ) -> Result<Conclusion, RunnerError> {
   let params = run.params;
   let cancel = run.active_cancel();
+  let deadline = run.active_deadline();
+  if run.ctx.job_container().is_some() {
+    return run_container_shell(params, run.ctx, Some(shell), script, env, &cancel, deadline).await;
+  }
   let shell_params = ShellScriptParams {
     shell,
     script,
@@ -299,6 +303,39 @@ async fn run_step_shell(
     cancel: &cancel,
   };
   run_shell_script(&shell_params, params.events).await
+}
+
+async fn run_container_shell(
+  params: &CompositeParams<'_>,
+  ctx: &ExecutionContext,
+  shell: Option<&str>,
+  script: &str,
+  env: &HashMap<String, String>,
+  cancel: &CancellationToken,
+  deadline: Option<Instant>,
+) -> Result<Conclusion, RunnerError> {
+  use super::handlers::script::{ScriptHandler, ScriptParams};
+  let shell_params = ScriptParams {
+    script,
+    shell,
+    env,
+    working_dir: params.workspace,
+    step_id: params.parent_step_id,
+    cgroup_path: None,
+    timeout: deadline.map(|deadline| deadline.saturating_duration_since(Instant::now())),
+    cancel,
+    container: ctx.job_container().map(AsRef::as_ref),
+  };
+  let (stdout, mut receiver) = mpsc::channel(256);
+  let handler = ScriptHandler::new();
+  let run = handler.execute(&shell_params, params.events, stdout);
+  let logs = async {
+    while let Some(line) = receiver.recv().await {
+      emit_log(params.events, params.parent_step_id, &line).await;
+    }
+  };
+  let (result, ()) = tokio::join!(run, logs);
+  Ok(result?.conclusion)
 }
 
 /// Run a nested composite `uses:` step, recursing through the action engine.

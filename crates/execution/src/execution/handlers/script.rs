@@ -8,6 +8,8 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
+use crate::docker::container_exec::ContainerExec;
+use crate::docker::job_container::JobContainer;
 use crate::execution::cgroup_join::spawn_in_cgroup;
 use crate::execution::step_timeout::{WaitOutcome, wait_bounded};
 
@@ -29,6 +31,8 @@ pub struct ScriptParams<'a> {
   pub timeout: Option<Duration>,
   /// In-flight cancellation: a fired token kills the child mid-run.
   pub cancel: &'a CancellationToken,
+  /// Job container that executes this step when present.
+  pub container: Option<&'a JobContainer>,
 }
 
 /// Executes `run:` step scripts as shell processes.
@@ -56,8 +60,12 @@ impl ScriptHandler {
     events: &mpsc::Sender<RunnerEvent>,
     stdout_tx: mpsc::Sender<String>,
   ) -> Result<ScriptOutput, RunnerError> {
+    if let Some(container) = params.container {
+      return execute_in_container(container, params, events, stdout_tx).await;
+    }
+
     let shell_name = params.shell.unwrap_or("bash");
-    let script_file = write_script_file(params.script, shell_name)?;
+    let script_file = write_script_file(params.script, shell_name, None)?;
     let script_path = script_file.path().to_string_lossy().to_string();
 
     let mut child = spawn_step_shell(params, shell_name, &script_path).await?;
@@ -89,6 +97,38 @@ impl ScriptHandler {
     finish_streams(stdout_handle, stderr_handle).await;
     Ok(ScriptOutput { conclusion })
   }
+}
+
+async fn execute_in_container(
+  container: &JobContainer,
+  params: &ScriptParams<'_>,
+  events: &mpsc::Sender<RunnerEvent>,
+  stdout_tx: mpsc::Sender<String>,
+) -> Result<ScriptOutput, RunnerError> {
+  let shell_name = params.shell.unwrap_or("sh");
+  let script_file = write_script_file(params.script, shell_name, Some(container))?;
+  let script_path = container
+    .translator()
+    .to_container(script_file.path())
+    .to_string_lossy()
+    .into_owned();
+  let (program, args) = build_shell_args(shell_name, &script_path);
+  let conclusion = container
+    .execute(
+      &ContainerExec {
+        program: Path::new(program),
+        args: &args,
+        env: params.env,
+        working_dir: params.working_dir,
+        step_id: params.step_id,
+        timeout: params.timeout,
+        cancel: params.cancel,
+      },
+      events,
+      stdout_tx,
+    )
+    .await?;
+  Ok(ScriptOutput { conclusion })
 }
 
 /// Grace period to drain already-buffered output AFTER the child exits, before
@@ -168,16 +208,23 @@ impl Default for ScriptHandler {
   }
 }
 
-fn write_script_file(script: &str, shell: &str) -> Result<tempfile::NamedTempFile, RunnerError> {
+fn write_script_file(
+  script: &str,
+  shell: &str,
+  container: Option<&JobContainer>,
+) -> Result<tempfile::NamedTempFile, RunnerError> {
   let suffix = match shell {
     "python" | "python3" => ".py",
     "pwsh" | "powershell" => ".ps1",
     _ => ".sh",
   };
-  let mut file = tempfile::Builder::new()
-    .suffix(suffix)
-    .tempfile()
-    .map_err(|e| RunnerError::ScriptHandler(format!("temp file: {e}")))?;
+  let mut builder = tempfile::Builder::new();
+  builder.suffix(suffix);
+  let mut file = match container {
+    Some(container) => builder.tempfile_in(container.temp_dir()),
+    None => builder.tempfile(),
+  }
+  .map_err(|e| RunnerError::ScriptHandler(format!("temp file: {e}")))?;
   std::io::Write::write_all(&mut file, script.as_bytes())
     .map_err(|e| RunnerError::ScriptHandler(format!("write script: {e}")))?;
   Ok(file)

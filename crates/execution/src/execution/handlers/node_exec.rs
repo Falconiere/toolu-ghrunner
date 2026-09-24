@@ -7,6 +7,8 @@ use shared::{Conclusion, LogStream, RunnerError, RunnerEvent};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
+use crate::docker::container_exec::ContainerExec;
+use crate::docker::job_container::JobContainer;
 use crate::execution::cgroup_join::spawn_in_cgroup;
 use crate::execution::handlers::script::{
   bounded_drain, emit_timeout, forward_lines, stream_output,
@@ -31,6 +33,8 @@ pub struct NodeExecParams<'a> {
   pub timeout: Option<Duration>,
   /// In-flight cancellation: a fired token kills the child mid-run.
   pub cancel: &'a CancellationToken,
+  /// Job container that executes this action when present.
+  pub container: Option<&'a JobContainer>,
 }
 
 /// Output of a Node.js action: its exit conclusion. Stdout is streamed to the
@@ -56,6 +60,10 @@ pub async fn execute_node_action(
   events: &mpsc::Sender<RunnerEvent>,
   stdout_tx: mpsc::Sender<String>,
 ) -> Result<NodeExecOutput, RunnerError> {
+  if let Some(container) = params.container {
+    return execute_in_container(container, params, events, stdout_tx).await;
+  }
+
   let mut cmd = build_node_command(params);
   let mut child = spawn_in_cgroup(&mut cmd, params.cgroup_path).await?;
 
@@ -90,6 +98,36 @@ pub async fn execute_node_action(
     },
     WaitOutcome::Cancelled => Conclusion::Cancelled,
   };
+  Ok(NodeExecOutput { conclusion })
+}
+
+async fn execute_in_container(
+  container: &JobContainer,
+  params: &NodeExecParams<'_>,
+  events: &mpsc::Sender<RunnerEvent>,
+  stdout_tx: mpsc::Sender<String>,
+) -> Result<NodeExecOutput, RunnerError> {
+  let script_path = container
+    .translator()
+    .to_container(params.script_path)
+    .to_string_lossy()
+    .into_owned();
+  let args = vec![script_path];
+  let conclusion = container
+    .execute(
+      &ContainerExec {
+        program: params.node_binary,
+        args: &args,
+        env: params.env,
+        working_dir: params.working_dir,
+        step_id: params.step_id,
+        timeout: params.timeout,
+        cancel: params.cancel,
+      },
+      events,
+      stdout_tx,
+    )
+    .await?;
   Ok(NodeExecOutput { conclusion })
 }
 

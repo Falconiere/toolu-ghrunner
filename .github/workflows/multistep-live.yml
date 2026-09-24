@@ -1,14 +1,65 @@
-
-name: multistep
+name: job-container-73
+run-name: job-container-73 / ${{ inputs.runner_label }}
 on:
   workflow_dispatch:
+    inputs:
+      runner_label:
+        description: Unique label of the dedicated issue 73 runner
+        type: string
+        required: true
+permissions:
+  contents: read
 jobs:
-  hello:
-    runs-on: [self-hosted, toolu-runner-v1]
+  container:
+    runs-on: [self-hosted, "${{ inputs.runner_label }}"]
+    timeout-minutes: 10
+    container:
+      image: ubuntu@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3
+      env:
+        CONTAINER_DECLARATION: declared-value
+      ports:
+        - 8080
+      options: --hostname container-73-probe --cpus 1
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Shell identity and command files
+        id: shell
+        env:
+          EXPECTED_TEMP: ${{ runner.temp }}
+          EXPECTED_WORKSPACE: ${{ github.workspace }}
+          CONTAINER_ID: ${{ job.container.id }}
+          CONTAINER_NETWORK: ${{ job.container.network }}
+        run: |
+          test "$(hostname)" = container-73-probe
+          test "$CONTAINER_DECLARATION" = declared-value
+          test "$GITHUB_WORKSPACE" = "$EXPECTED_WORKSPACE"
+          test "$RUNNER_TEMP" = "$EXPECTED_TEMP"
+          test -n "$CONTAINER_ID"
+          test -n "$CONTAINER_NETWORK"
+          test -f "$GITHUB_EVENT_PATH"
+          printf 'FROM_SHELL=shell-value\n' >> "$GITHUB_ENV"
+          printf 'shell_result=shell-value\n' >> "$GITHUB_OUTPUT"
+          mkdir -p "$RUNNER_TEMP/bin"
+          printf '#!/bin/sh\nprintf tool-value' > "$RUNNER_TEMP/bin/container-tool"
+          chmod +x "$RUNNER_TEMP/bin/container-tool"
+          printf '%s\n' "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          echo CONTAINER_73_SHELL_OK
+      - id: node_probe
+        uses: Falconiere/toolu-ghrunner/.github/actions/container-node-probe@dec29e817264994f7e8e1f49824647f739c7c063
+      - uses: ./.github/actions/container-composite-probe
+      - name: Verify exported values and artifact bytes
+        env:
+          SHELL_RESULT: ${{ steps.shell.outputs.shell_result }}
+          NODE_RESULT: ${{ steps.node_probe.outputs.node_result }}
+        run: |
+          test "$(container-tool)" = tool-value
+          test "$FROM_COMPOSITE" = composite-value
+          test "$SHELL_RESULT" = shell-value
+          test "$NODE_RESULT" = node-value
+          printf 'container-73-artifact\n' > container-73.txt
+          echo CONTAINER_73_COMMAND_FILES_OK
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          node-version: '20'
-      - name: alpine via docker
-        run: echo "hello from a step that pulls docker://alpine:3.19"
+          name: container-73
+          path: container-73.txt
+          if-no-files-found: error

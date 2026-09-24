@@ -40,6 +40,7 @@ type TestResult<T> = Result<T, Box<dyn std::error::Error>>;
 /// not the engine's own network surface.
 fn job_message(server_uri: &str, job_id: &str) -> AgentJobRequestMessage {
   AgentJobRequestMessage {
+    job_container: None,
     message_type: "PipelineAgentJobRequest".to_owned(),
     plan: TaskOrchestrationPlanReference {
       scope_identifier: None,

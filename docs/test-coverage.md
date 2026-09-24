@@ -390,3 +390,46 @@ must be recorded before claiming pinned-reference parity. A Linux toolu host
 and a GHES server are unavailable here, so those applicable lanes are also
 **unverified**. Issue #81 remains open and owns composite cwd parsing and
 resolution; #102 must consume and test its expression site after it lands.
+## Job containers (#73)
+
+Local component evidence uses real Docker output and actual shell/action code.
+`job_container_test.rs` and `job_container_linux_test.rs` drive `Runner::execute_job`
+using the existing message fixture with explicit test steps/declarations. This is
+production execution coverage, **not** an acquired container-message capture.
+No parser or constructed fixture result establishes live backend parity.
+
+| Scenario | Test surface and exact observable | Status |
+| --- | --- | --- |
+| 73-S1 | `execution/tests/job_container_linux_test.rs`: Ubuntu OS, shared hostname across shell/Node/composite/posts, container cwd and exact marker bytes | Local Linux lane; see command below |
+| 73-S2 | `docker/tests/job_container.rs`: paths with spaces, metadata equals inspect, multiline opaque env preserved, cleanup; `job_container_composite_test.rs`: container shell, expression paths and ENV/PATH; Linux lane: OUTPUT/ENV/PATH/STATE | Local Docker; live checkout/artifact backend remains unverified |
+| 73-S3 | Service aliases and Docker actions sharing the job network | Unverified; requires #74/#75 integration |
+| 73-S4 | `docker/tests/job_container_failures.rs`: observed-start cancellation, timeout/post exec, pull/create/start/exec failure, owned-resource removal | Explicit real-Docker lane |
+| 73-S5 | `execution/tests/job_container_test.rs`: non-Linux declaration fails before host workspace/step, absent declaration keeps host behavior | Default macOS lane; Linux setup-cancel conclusion regression |
+| Live applicability | Captured `jobContainer`, official pinned runner comparison, real GitHub artifact bytes, GHES | Unverified; no closure claim |
+
+Ordinary repository gate: `./tools/check.sh all`. Resource-creating Docker tests
+are ignored there and must be run explicitly. With a local Linux daemon:
+
+```sh
+TOOLU_CONTAINER_TEST_ROOT=/absolute/shared/test-root \
+  cargo nextest run -p execution -j 1 -E 'test(job_container) | test(container_spec) | test(container_options) | test(container_create_options)' --run-ignored all
+```
+
+The Linux production test is compiled only on Linux. On macOS, the component
+adapter can exercise a Linux daemon, while production rejects container jobs.
+For a VM daemon, set `TOOLU_CONTAINER_TEST_ROOT` to a directory shared at the same
+absolute path by the test process and daemon. Missing Docker/sharing fails the
+explicit lane; it never counts as a pass. Tests pin Ubuntu image digest
+`sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3`.
+
+On 2026-09-24 the initial macOS explicit lane passed all seven tests. After
+review fixes, the expanded Linux lane passed all 22 selected tests on the ARM64
+Colima Docker daemon, including the exact live action fixtures, setup cancellation,
+composite action_path in env, exact workspace roots and host completion-hook PATH. Linux
+`cargo clippy -p execution --all-targets -- -D warnings` also passed. Run
+resource-snapshot tests serially (`-j 1`) on an otherwise idle test daemon.
+The real-Docker lane also requires the Docker CLI for independent inspect checks.
+The branch-only `multistep-live.yml` workflow requires a dedicated runner label
+and pins its Ubuntu image, checkout and artifact action revisions. It exercises
+checkout, shell, Node pre/main/post, composite, command files and artifact bytes;
+its presence alone does not establish live success.

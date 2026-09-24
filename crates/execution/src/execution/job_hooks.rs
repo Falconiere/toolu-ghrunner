@@ -98,6 +98,7 @@ pub async fn run_job_hook(
   emit_log(events, stage.step_id(), "##[endgroup]").await;
 
   let params = ScriptParams {
+    container: None,
     script: &script,
     shell: Some(shell),
     env: &env,
@@ -155,7 +156,7 @@ fn detect_shell(script_path: &str) -> &'static str {
 /// Build the hook's env from the job env plus the inherited process env, so a
 /// hook sees the same `GITHUB_*` / `RUNNER_*` a step would.
 fn job_hook_env(ctx: &ExecutionContext) -> HashMap<String, String> {
-  let mut env = ctx.build_step_env(&HashMap::new());
+  let mut env = ctx.build_host_step_env();
   // Strip the runner's private `TOOLU_RUNNER_*` namespace (incl. the admin
   // re-mint bearer) from the inherited process env before it reaches the hook.
   for (k, v) in super::context::safe_process_env_vars() {

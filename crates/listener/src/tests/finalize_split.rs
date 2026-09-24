@@ -75,6 +75,7 @@ const JOB_BLOB_PATH: &str = "/job-blob";
 /// the `completedLogURL` assertion would pass vacuously.
 fn job_message(results_base_url: &str, job_id: &str) -> AgentJobRequestMessage {
   AgentJobRequestMessage {
+    job_container: None,
     message_type: "PipelineAgentJobRequest".to_owned(),
     plan: TaskOrchestrationPlanReference {
       scope_identifier: None,
