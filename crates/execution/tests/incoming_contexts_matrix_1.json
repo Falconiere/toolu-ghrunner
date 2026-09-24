@@ -819,99 +819,99 @@
   "mask": [
     {
       "type": "regex",
-      "value": "[redacted]"
+      "value": "384476a8-3658-56ac-b692-21b148ad4901"
     },
     {
       "type": "regex",
-      "value": "[redacted]"
+      "value": "6f191f0e-f41c-5804-a890-0bf6e00e0ca2"
     },
     {
       "type": "regex",
-      "value": "[redacted]"
+      "value": "a2c33549-c45f-54b9-b5b6-ca29baff5827"
     },
     {
       "type": "regex",
-      "value": "[redacted]"
+      "value": "43fbb48e-0b30-5b90-9af5-f8a4f8b5a2ac"
     },
     {
       "type": "regex",
-      "value": "[redacted]"
+      "value": "fce19df4-af42-5d62-9e70-bbe89cb151f4"
     },
     {
       "type": "regex",
-      "value": "[redacted]"
+      "value": "8260cb64-e9e9-5e6e-aabf-fb14d4ea2c27"
     },
     {
       "type": "regex",
-      "value": "[redacted]"
+      "value": "f567a39a-0932-5a20-8b6d-58a5309333cd"
     },
     {
       "type": "regex",
-      "value": "[redacted]"
+      "value": "792e3a56-d3bf-5339-a4bf-a29d44c54962"
     },
     {
       "type": "regex",
-      "value": "[redacted]"
+      "value": "519c47fa-d79b-5fcf-9663-c1254dc95c19"
     },
     {
       "type": "regex",
-      "value": "[redacted]"
+      "value": "a9f4fca5-b18c-5c95-a7d6-75c3c1452b8e"
     },
     {
       "type": "regex",
-      "value": "[redacted]"
+      "value": "619daa66-f07b-59d4-8671-bb0ee7fd676e"
     },
     {
       "type": "regex",
-      "value": "[redacted]"
+      "value": "bc378682-7632-551d-ab90-4a5d2a4177d1"
     },
     {
       "type": "regex",
-      "value": "[redacted]"
+      "value": "0947662f-78cf-5c07-b1fe-5dc0e1c00e2f"
     },
     {
       "type": "regex",
-      "value": "[redacted]"
+      "value": "2b7d84d6-b6f1-5258-b13c-c6ab391b0c23"
     },
     {
       "type": "regex",
-      "value": "[redacted]"
+      "value": "9dfd1f90-c282-51fd-a808-75eaee8bbca6"
     },
     {
       "type": "regex",
-      "value": "[redacted]"
+      "value": "9d540a81-db2e-5152-8654-947560b379d4"
     },
     {
       "type": "regex",
-      "value": "[redacted]"
+      "value": "0c42b9d9-d5ef-5c6b-ab0a-7b323e5f46c8"
     },
     {
       "type": "regex",
-      "value": "[redacted]"
+      "value": "598a4fef-48a0-5ed4-93c3-b16d8126845f"
     },
     {
       "type": "regex",
-      "value": "[redacted]"
+      "value": "3cafdf63-e60c-5528-b66f-9d1e087038b8"
     },
     {
       "type": "regex",
-      "value": "[redacted]"
+      "value": "7cafa94f-2bd3-5fb0-93d7-966b3204d34c"
     },
     {
       "type": "regex",
-      "value": "[redacted]"
+      "value": "206ec72c-8d7a-504f-90c1-0c939f909bbc"
     },
     {
       "type": "regex",
-      "value": "[redacted]"
+      "value": "4c443710-7830-5444-bc3a-29b7197731d8"
     },
     {
       "type": "regex",
-      "value": "[redacted]"
+      "value": "ead2cf25-2601-548d-b2a0-091f2df7aa8a"
     },
     {
       "type": "regex",
-      "value": "[redacted]"
+      "value": "27feb8a3-920a-519f-a662-61da62101014"
     }
   ],
   "messageType": "RunnerJobRequest",
@@ -928,7 +928,7 @@
       {
         "authorization": {
           "parameters": {
-            "AccessToken": "[redacted]"
+            "AccessToken": "2ddfccd7-8735-5e1f-81fe-bc3cfdc5018a"
           },
           "scheme": "OAuth"
         },
@@ -1441,7 +1441,7 @@
     },
     "github_token": {
       "isSecret": true,
-      "value": "[redacted]"
+      "value": "d7622918-08d5-520f-af60-d149d540fa18"
     },
     "system.from_run_service": {
       "value": "true"
@@ -1460,7 +1460,7 @@
     },
     "system.github.token": {
       "isSecret": true,
-      "value": "[redacted]"
+      "value": "b8068d28-e674-514b-99b2-42801ed97e1a"
     },
     "system.github.token.permissions": {
       "value": "{\"Contents\":\"read\",\"Metadata\":\"read\"}"

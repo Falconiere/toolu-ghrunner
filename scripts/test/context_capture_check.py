@@ -6,6 +6,7 @@ import hashlib
 import json
 from pathlib import Path
 import subprocess
+from uuid import NAMESPACE_URL, uuid5
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = ROOT / 'crates/execution/tests'
@@ -34,8 +35,27 @@ def api(path):
     return json.loads(subprocess.check_output(['gh', 'api', f'repos/{REPO}/{path}']))
 
 
+def check_sanitized(name, job, seen):
+    assert '[redacted]' not in json.dumps(job), name
+    for key in ('github_token', 'system.github.token'):
+        assert job['variables'][key]['isSecret'] is True
+    values = {f'variables/{key}/value': variable['value']
+              for key, variable in job['variables'].items() if variable.get('isSecret')}
+    values.update({f'mask/{index}/value': hint['value']
+                   for index, hint in enumerate(job.get('mask', []))})
+    for index, endpoint in enumerate(job.get('resources', {}).get('endpoints', [])):
+        for key, actual in endpoint.get('authorization', {}).get('parameters', {}).items():
+            values[f'resources/endpoints/{index}/authorization/parameters/{key}'] = actual
+    for path, actual in values.items():
+        expected = str(uuid5(NAMESPACE_URL, f'toolu-ghrunner/68/{name}/{path}'))
+        assert actual == expected, (name, path)
+        assert actual not in seen, (name, path)
+        seen.add(actual)
+
+
 def check_captures(evidence):
     assert evidence['reference_source'] == PIN
+    seen = set()
     for name, record in evidence['captures'].items():
         path = FIXTURES / name
         assert hashlib.sha256(path.read_bytes()).hexdigest() == record['sha256'], name
@@ -58,14 +78,7 @@ def check_captures(evidence):
             inputs = contexts['inputs']
             assert inputs == {'who': 'called', 'count': 0, 'enabled': True}
             assert type(inputs['count']) is int
-        for key, variable in job.get('variables', {}).items():
-            if variable.get('isSecret'):
-                expected = '[redacted]'
-                if name == 'incoming_contexts_call.json' and key in ('github_token', 'system.github.token'):
-                    expected = '7fdb8d2a-89c3-4e1b-a62d-046b28654e09'
-                assert variable['value'] == expected
-        for endpoint in job.get('resources', {}).get('endpoints', []):
-            assert all(v == '[redacted]' for v in endpoint.get('authorization', {}).get('parameters', {}).values())
+        check_sanitized(name, job, seen)
     for path, digest in evidence.get('toolu_source_sha256', {}).items():
         assert hashlib.sha256((ROOT / path).read_bytes()).hexdigest() == digest, path
     for path, digest in evidence['workflow_sha256'].items():
