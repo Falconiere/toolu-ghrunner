@@ -61,13 +61,17 @@ impl JobContainer {
         .add_secrets([&credentials.username, &credentials.password]);
     }
     let transport = ContainerCommand::connect(masker).await?;
+    let mounts = materialize_mounts(config, workspace).await?;
+    if cancel.is_cancelled() {
+      return Ok(None);
+    }
     let suffix = uuid::Uuid::new_v4().simple().to_string();
     let mut container = Self {
       transport,
       name: format!("toolu_job_{suffix}"),
       id: String::new(),
       network: format!("toolu_network_{suffix}"),
-      mounts: ContainerMounts::create(config, workspace)?,
+      mounts,
       image_path: String::new(),
     };
     if let Err(error) = container.initialize(spec, cancel).await {
@@ -318,6 +322,17 @@ impl JobContainer {
       Err(RunnerError::Docker(errors.join("; ")))
     }
   }
+}
+
+async fn materialize_mounts(
+  config: &RunnerConfig,
+  workspace: &Path,
+) -> Result<ContainerMounts, RunnerError> {
+  let mount_config = config.clone();
+  let mount_workspace = workspace.to_path_buf();
+  tokio::task::spawn_blocking(move || ContainerMounts::create(&mount_config, &mount_workspace))
+    .await
+    .map_err(|error| RunnerError::Docker(format!("materialize job container mounts: {error}")))?
 }
 
 fn owner_label() -> HashMap<String, String> {

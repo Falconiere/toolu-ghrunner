@@ -12,6 +12,7 @@ use tracing::info;
 use super::actions::prefetch::ActionFetcher;
 use super::container_job::{evaluate_container, finish_container, start_container};
 use super::context::ExecutionContext;
+use super::job_context::{event_json, write_event_json};
 use super::job_hooks::{JobHookStage, run_job_hook};
 use super::job_spec::{JobSpec, evaluate_job_outputs};
 use super::job_teardown::{CacheMaintenance, JobTeardown};
@@ -67,16 +68,31 @@ pub async fn run_job(
   masker: Arc<Mutex<SecretMasker>>,
 ) -> Result<JobTeardown, RunnerError> {
   let workspace = config.workspace_root.join(&msg.job_id);
-  let mut ctx = job_context(&msg, config, masker, &workspace);
+  let context_config = config.clone();
+  let context_workspace = workspace.clone();
+  let (msg, mut ctx) = tokio::task::spawn_blocking(move || {
+    let ctx = job_context(&msg, &context_config, masker, &context_workspace);
+    (msg, ctx)
+  })
+  .await
+  .map_err(|error| RunnerError::StepExecution(format!("build job context: {error}")))?;
   let container_spec = evaluate_container(&msg, config, &ctx)?;
-  prepare_job_dirs(config, &msg.job_id)?;
+  let directory_config = config.clone();
+  let directory_job_id = msg.job_id.clone();
+  let workspace =
+    tokio::task::spawn_blocking(move || prepare_job_dirs(&directory_config, &directory_job_id))
+      .await
+      .map_err(|error| RunnerError::WorkspaceInit {
+        path: workspace,
+        source: std::io::Error::other(format!("prepare job directories: {error}")),
+      })??;
   let workspace_gc = spawn_workspace_gc(config, &msg.job_id);
   // One job-scope HTTP client, reused for every action download / node-runtime
   // fetch / post-drain in this job instead of a fresh connection (and TLS
   // handshake) per call. 120 s: downloads can be large.
   let http = build_job_client()?;
   let local = start_local_services(config, &msg, &ctx).await?;
-  if let Err(error) = setup_job_env(&mut ctx, &msg, config, &local) {
+  if let Err(error) = setup_job_env(&mut ctx, &msg, config, &local).await {
     stop_local_services(local).await;
     return Err(error);
   }
@@ -394,7 +410,7 @@ async fn run_completed_hook_best_effort(
 ///
 /// This is the central injection point — `ctx.set_env` lands on the global
 /// env that `ExecutionContext::build_step_env` merges into every step.
-fn setup_job_env(
+async fn setup_job_env(
   ctx: &mut ExecutionContext,
   msg: &AgentJobRequestMessage,
   config: &RunnerConfig,
@@ -406,8 +422,19 @@ fn setup_job_env(
     LocalServices::None => apply_forwarded_env(ctx, &extract_service_urls(msg)),
   }
 
-  // Write event.json outside workspace (checkout wipes workspace contents).
-  let event_path = write_event_json(&config.data_dir, &msg.job_id, ctx)?;
+  // Serialize first so a serialization error propagates before the blocking
+  // filesystem task starts. The payload is then materialized outside the
+  // workspace because checkout wipes workspace contents.
+  let json = event_json(ctx)?;
+  let data_dir = config.data_dir.clone();
+  let job_id = msg.job_id.clone();
+  let event_path = tokio::task::spawn_blocking(move || write_event_json(&data_dir, &job_id, &json))
+    .await
+    .map_err(|error| {
+      RunnerError::Io(std::io::Error::other(format!(
+        "write event payload: {error}"
+      )))
+    })??;
   ctx.set_env("GITHUB_EVENT_PATH", &event_path);
 
   // Inject W3C trace context for distributed trace correlation.
