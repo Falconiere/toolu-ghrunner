@@ -8,7 +8,7 @@
 //! - `boot_exits_one_on_a_failed_job` — Failure -> 1 (a regression flipping
 //!   this to 0 would make failed GitHub jobs look green).
 //! - `boot_exits_124_when_the_deadline_watchdog_fires_mid_job` — a
-//!   `TOOLU_DEADLINE` a couple seconds out fires the watchdog while a
+//!   `TOOLU_DEADLINE` with startup margin fires the watchdog while a
 //!   long-running step is in flight, cancels the job gracefully, and the
 //!   process exits 124 well before the step would otherwise finish.
 //! - `boot_stands_the_watchdog_down_when_the_job_finishes_first` — the
@@ -127,38 +127,30 @@ async fn boot_exits_one_on_a_failed_job() {
   );
 }
 
-/// Pins the deadline-watchdog -> exit 124 mapping through the real
-/// subprocess: same broker lifecycle, but the script step `sleep`s far
-/// longer than the deadline. `TOOLU_DEADLINE` is set to roughly 2 seconds
-/// out (epoch milliseconds, computed from wall-clock `SystemTime`) so the
-/// watchdog fires mid-job, gracefully cancels the running step, and the
-/// process exits 124 well before the sleep would otherwise finish.
-///
-/// The mid-job cancel means the job reports `Cancelled` (not `Success`) to
-/// the run service — `mount_job_lifecycle`'s `/completejob` mock has no
-/// body matcher and no call-count expectation, so it accepts whatever
-/// conclusion the cancelled path posts. The post is asserted, not optional:
-/// `cmd_boot` stands the watchdog down once the listener returns, so the
-/// hard exit cannot race ahead of the report.
+/// Pins mid-job deadline cancellation: allow subprocess startup time, require
+/// a marker from the real shell, then assert exit 124 and completion reporting
+/// before the watchdog's hard-exit grace can expire.
 #[tokio::test]
 async fn boot_exits_124_when_the_deadline_watchdog_fires_mid_job() {
   let server = wiremock::MockServer::start().await;
   boot_fixtures::mount_auth_and_session(&server).await;
-  boot_fixtures::mount_job_lifecycle(&server, "sleep 60")
-    .await
-    .expect("mount the broker + run-service mocks");
+  boot_fixtures::mount_job_lifecycle(
+    &server,
+    "printf started > \"$HOME/watchdog-started\"; sleep 120",
+  )
+  .await
+  .expect("mount the broker + run-service mocks");
   let jit_config =
     boot_fixtures::real_jit_config_b64(&server.uri()).expect("build a real-keypair jit config");
 
-  let deadline_ms = deadline_in(Duration::from_secs(2));
+  // Cold process startup on a loaded macOS host can exceed the former 2s
+  // budget before deadline validation. Keep setup outside the timed interval.
+  let home = temp_home("deadline-watchdog");
+  let startup_budget = Duration::from_secs(30);
+  let deadline_ms = deadline_in(startup_budget);
 
   let started = Instant::now();
-  let output = run_boot(
-    &temp_home("deadline-watchdog"),
-    &jit_config,
-    Some(deadline_ms),
-  )
-  .expect("run binary");
+  let output = run_boot(&home, &jit_config, Some(deadline_ms)).expect("run binary");
   let elapsed = started.elapsed();
 
   let stderr = String::from_utf8_lossy(&output.stderr);
@@ -167,21 +159,25 @@ async fn boot_exits_124_when_the_deadline_watchdog_fires_mid_job() {
     Some(124),
     "expected exit 124 when the deadline watchdog fires mid-job, stderr: {stderr}"
   );
-  // Tight enough to distinguish the two 124 paths: the deadline fires at
-  // +2s, so the watchdog's hard exit could not land before +32s (its 30s
-  // grace period). Exiting under 25s therefore proves the graceful path
-  // won AND that `cmd_boot` stood the watchdog down on its way out,
-  // rather than the process being force-killed from the spawned task.
+  assert_eq!(
+    std::fs::read_to_string(home.join("watchdog-started"))
+      .as_deref()
+      .ok(),
+    Some("started"),
+    "the deadline must fire after the real shell starts; stderr: {stderr}"
+  );
+  // The hard exit cannot occur before deadline + 30s. A 25s post-deadline
+  // bound still proves graceful completion, independent of the startup budget.
   assert!(
-    elapsed < Duration::from_secs(25),
-    "the graceful cancel path should exit long before the 30s hard-exit grace, took {elapsed:?}"
+    elapsed < startup_budget + Duration::from_secs(25),
+    "the graceful cancel path should exit before the hard-exit grace, took {elapsed:?}"
   );
   // The graceful path (not the 30s hard exit) must have won: the cancelled
   // job still reports its conclusion to the run service before the process
   // exits — pin that the broker actually saw the /completejob call.
   assert!(
     broker_saw_completejob(&server).await,
-    "the watchdog's graceful cancel should report the job via /completejob before exiting"
+    "the watchdog's graceful cancel should report the job via /completejob before exiting; stderr: {stderr}"
   );
 }
 
