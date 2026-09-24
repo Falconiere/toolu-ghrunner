@@ -61,7 +61,7 @@ jobs:
           test '${{ needs.producer.outputs.artifact }}' = artifact-68
           printf '%s' "$MATRIX" | jq -e 'if .index == 0 then .tag == "alpha" and .number == 7 and .flag == true else .index == 1 and .tag == "beta" and .number == 0 and .flag == false end'
           printf '%s' "$NEEDS" | jq -e '.producer == {"outputs":{"artifact":"artifact-68"},"result":"success"}'
-          printf '%s' "$INPUTS" | jq -e '.who == "world" and .count == 3 and .enabled == false'
+          printf '%s' "$INPUTS" | jq -e '.who == "world" and .count == "3" and .enabled == false'
           printf '%s' "$STRATEGY" | jq -e --argjson index '${{ matrix.index }}' '."job-index" == $index and ."job-total" == 2 and ."max-parallel" == 1 and ."fail-fast" == false'
           printf 'contexts-ok' > ../context-68.out
       - name: Workflow input passed to action
