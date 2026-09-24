@@ -35,12 +35,14 @@ async fn job_container_real_mounts_env_metadata_and_cleanup()
   let workspace = config.workspace_root.join("job one");
   std::fs::create_dir_all(&workspace)?;
   std::fs::write(workspace.join("input file"), "real Docker mount\n")?;
+  let user_volume = workspace.join("user volume");
+  std::fs::create_dir_all(&user_volume)?;
   let spec = ContainerSpec {
     image: IMAGE.to_owned(),
     credentials: None,
     env: HashMap::from([("FROM_IMAGE_SETUP".to_owned(), "container value".to_owned())]),
-    ports: Vec::new(),
-    volumes: Vec::new(),
+    ports: vec!["127.0.0.1::8080/tcp".to_owned()],
+    volumes: vec![format!("{}:/opt/user-volume:rw", user_volume.display())],
     options: vec!["--hostname".to_owned(), "toolu-job-probe".to_owned()],
   };
   let cancel = CancellationToken::new();
@@ -62,7 +64,7 @@ async fn job_container_real_mounts_env_metadata_and_cleanup()
     ]);
     let (events, mut event_rx) = tokio::sync::mpsc::channel(64);
     let (stdout, mut stdout_rx) = tokio::sync::mpsc::channel(64);
-    let args = ["-ec".to_owned(), "test \"$(hostname)\" = toolu-job-probe; test \"$FROM_IMAGE_SETUP\" = 'container value'; cat 'input file' > \"$GITHUB_OUTPUT\"; test -f /etc/os-release; printf '%s' \"$OPAQUE\" > opaque".to_owned()];
+    let args = ["-ec".to_owned(), "test \"$(hostname)\" = toolu-job-probe; test \"$FROM_IMAGE_SETUP\" = 'container value'; cat 'input file' > \"$GITHUB_OUTPUT\"; test -f /etc/os-release; printf '%s' \"$OPAQUE\" > opaque; printf volume-preserved > /opt/user-volume/marker".to_owned()];
     let params = crate::docker::container_exec::ContainerExec {
       program: Path::new("sh"), args: &args, env: &env, working_dir: &workspace,
       step_id: "probe", timeout: Some(std::time::Duration::from_secs(30)), cancel: &cancel,
@@ -80,11 +82,27 @@ async fn job_container_real_mounts_env_metadata_and_cleanup()
     ]).output().await?;
     assert!(inspect.status.success());
     assert_eq!(String::from_utf8(inspect.stdout)?.trim(), format!("{} {}", container.id(), container.network()));
+    let ports = tokio::process::Command::new("docker").args([
+      "inspect", "--format", "{{json .NetworkSettings.Ports}}", container.id(),
+    ]).output().await?;
+    assert!(ports.status.success());
+    let published: serde_json::Value = serde_json::from_slice(&ports.stdout)?;
+    let binding = published.get("8080/tcp").and_then(serde_json::Value::as_array)
+      .and_then(|bindings| bindings.first()).ok_or("published port missing")?;
+    assert_eq!(binding.get("HostIp").and_then(serde_json::Value::as_str), Some("127.0.0.1"));
+    let assigned = binding.get("HostPort").and_then(serde_json::Value::as_str)
+      .ok_or("assigned host port missing")?.parse::<u16>()?;
+    assert!(assigned > 0);
+
     Ok::<(), Box<dyn std::error::Error>>(())
   }).catch_unwind().await;
   let cleanup = container.cleanup().await;
   result.map_err(|_panic| "container assertion failed; owned resources cleaned")??;
   cleanup?;
+  assert_eq!(
+    std::fs::read_to_string(user_volume.join("marker"))?,
+    "volume-preserved"
+  );
   let inspect = tokio::process::Command::new("docker")
     .args(["inspect", container.id()])
     .output()
