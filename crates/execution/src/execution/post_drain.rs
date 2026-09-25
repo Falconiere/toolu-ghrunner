@@ -9,10 +9,7 @@
 //! that `main` saved.
 
 use shared::{Conclusion, RunnerError, RunnerEvent};
-use std::time::Duration;
 use tokio::sync::mpsc;
-use tokio::time::Instant;
-use tokio_util::sync::CancellationToken;
 
 use super::actions::manifest::RunsUsing;
 use super::context::ExecutionContext;
@@ -21,15 +18,10 @@ use super::step_naming::{PostStep, derive_step_name};
 use super::step_timeout::StepBounds;
 use super::steps_runner::JobCtx;
 
-#[cfg(test)]
-#[path = "tests/post_drain.rs"]
-mod tests;
-
 /// Reporting identity and shared cleanup bound for one queued post.
 struct PostReport<'a> {
   id: &'a str,
   number: u32,
-  cancellation_deadline: Option<Instant>,
 }
 
 /// Keep overflow visible when assigning the post's timeline step number.
@@ -63,20 +55,21 @@ pub(super) async fn drain_post_steps(
   job: &JobCtx<'_>,
 ) -> Conclusion {
   let mut aggregate = Conclusion::Success;
-  let mut cancellation_deadline = None;
   for (index, post) in posts.drain_lifo().into_iter().enumerate() {
     if job.cancel.is_cancelled() {
       ctx.record_job_cancelled();
-      cancellation_deadline.get_or_insert_with(|| Instant::now() + CANCELLED_POST_GRACE);
     }
     let number = post_number(job.first_post_number, index);
     let report = PostReport {
       id: &post.report_id,
       number,
-      cancellation_deadline,
     };
     let result = match run_one_post(&post, &report, ctx, events, job).await {
       Ok(result) => result,
+      Err(RunnerError::Cancelled) => {
+        complete_post(events, report.id, Conclusion::Cancelled).await;
+        Conclusion::Cancelled
+      },
       Err(error) => {
         report_post_error(events, report.id, &error).await;
         Conclusion::Failure
@@ -128,7 +121,7 @@ async fn run_scoped_post(
   )
   .await;
 
-  if !evaluate_post_condition(ctx, condition)? {
+  if job.cancellation.is_forced() || !evaluate_post_condition(ctx, condition)? {
     skip_post(
       events,
       report.id,
@@ -145,16 +138,12 @@ async fn run_scoped_post(
     ));
   };
 
-  let bounds = post_bounds(post, job, report.cancellation_deadline);
-  if bounds.timeout == Some(Duration::ZERO) {
-    skip_post(
-      events,
-      report.id,
-      "post cancellation grace elapsed".to_owned(),
-    )
-    .await;
-    return Ok(Conclusion::Skipped);
-  }
+  let watch = job.cancellation.watch_step(ctx.eval_context(), condition);
+  let bounds = StepBounds::nested(
+    job.cancellation.deadline(),
+    post.step.timeout_in_minutes,
+    watch.cancel.clone(),
+  );
   let conclusion = run_post_node_stage(post, report, ctx, events, job, &bounds).await?;
 
   complete_post(events, report.id, conclusion).await;
@@ -215,36 +204,6 @@ async fn complete_post(events: &mpsc::Sender<RunnerEvent>, step_id: &str, conclu
   }
 }
 
-/// Cleanup grace budget for post-steps draining after a job cancel.
-const CANCELLED_POST_GRACE: Duration = Duration::from_secs(5 * 60);
-
-/// Bounds for one post-step run.
-///
-/// A cancelled job still runs its cleanup posts (matching the upstream
-/// runner's cancel-grace behavior): the fired job token would kill the post
-/// child the instant it spawned, so a cancelled drain runs each post under a
-/// fresh token bounded by the remaining shared [`CANCELLED_POST_GRACE`]
-/// deadline (or the step's own tighter `timeout-minutes`). An uncancelled drain keeps the live job token
-/// so SIGINT/SIGTERM still interrupts posts normally.
-/// If no duration remains, [`run_one_post`] reports the post as skipped without running it.
-fn post_bounds(post: &PostStep, job: &JobCtx<'_>, deadline: Option<Instant>) -> StepBounds {
-  if !job.cancel.is_cancelled() {
-    return StepBounds::new(post.step.timeout_in_minutes, job.cancel.clone());
-  }
-  let remaining = deadline.map_or(CANCELLED_POST_GRACE, cancel_remaining);
-  let step_timeout = super::step_timeout::timeout_duration(post.step.timeout_in_minutes);
-  StepBounds {
-    timeout: Some(step_timeout.map_or(remaining, |limit| limit.min(remaining))),
-    deadline: Some(Instant::now() + step_timeout.map_or(remaining, |limit| limit.min(remaining))),
-    cancel: CancellationToken::new(),
-  }
-}
-
-/// Time left in the one deadline shared by every post after cancellation.
-fn cancel_remaining(deadline: Instant) -> Duration {
-  deadline.saturating_duration_since(Instant::now())
-}
-
 /// Run the `post` node entrypoint in the originating step's scope.
 async fn run_post_node_stage(
   post: &PostStep,
@@ -273,20 +232,7 @@ async fn run_post_node_stage(
     // step ID remains the action state/output key inside run_node_stage.
     log_step_id: report.id,
   });
-  let (conclusion, _outputs) = if job.cancel.is_cancelled() {
-    let remaining = report
-      .cancellation_deadline
-      .map_or(CANCELLED_POST_GRACE, cancel_remaining);
-    match tokio::time::timeout(remaining, stage).await {
-      Ok(result) => result?,
-      Err(_) => return Ok(Conclusion::Cancelled),
-    }
-  } else {
-    tokio::select! {
-      () = job.cancel.cancelled() => return Ok(Conclusion::Cancelled),
-      result = stage => result?,
-    }
-  };
+  let (conclusion, _outputs) = stage.await?;
   Ok(conclusion)
 }
 

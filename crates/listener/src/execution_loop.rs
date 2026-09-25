@@ -257,7 +257,7 @@ async fn run_forwarded_job(
   let engine_rx = runner
     // The per-job token (child of the session token) so a mid-job
     // `JobCancellation` from the broker winds the engine down too.
-    .execute_job(job_msg.clone(), job_cancel.clone());
+    .execute_job_with_shutdown(job_msg.clone(), job_cancel.clone(), ctx.cancel.clone());
 
   let (outcome_tx, outcome_rx) = oneshot::channel::<ForwarderOutcome>();
   let fwd_handle = spawn_event_forwarder(

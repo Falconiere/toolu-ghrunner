@@ -79,11 +79,14 @@ impl ExecutionContext {
   }
 
   fn scoped_job_status(&self) -> JobStatus {
+    if self.job_status() == JobStatus::Cancelled {
+      return JobStatus::Cancelled;
+    }
     self
       .scoped_status
       .get(&self.scope_path)
       .copied()
-      .unwrap_or(self.job_status)
+      .unwrap_or_else(|| self.job_status())
   }
 
   fn steps_context(&self) -> ExprValue {
@@ -103,7 +106,7 @@ impl ExecutionContext {
     let mut job = HashMap::new();
     job.insert(
       "status".to_owned(),
-      ExprValue::String(job_status_str(self.job_status).to_owned()),
+      ExprValue::String(job_status_str(self.job_status()).to_owned()),
     );
     let container = self.container.as_ref().map_or(ExprValue::Null, |host| {
       ExprValue::Object(HashMap::from([

@@ -22,7 +22,7 @@ use expressions::evaluator::EvalContext;
 
 #[path = "step_errors.rs"]
 mod step_errors;
-use step_errors::report_step_failure;
+use step_errors::{report_step_error, report_step_failure};
 mod script_support;
 use script_support::{
   build_step_env_and_file_commands, merge_step_outputs, run_and_dispatch_script,
@@ -36,9 +36,11 @@ pub(super) struct JobCtx<'a> {
   handler: ScriptHandler,
   pub(super) workspace: &'a Path,
   pub(super) config: &'a RunnerConfig,
-  /// The job's in-flight cancellation token (one per job; per-step bounds
-  /// clone it). A fired token kills the running step's child.
+  /// Graceful job-cancellation signal; running conditions decide whether their
+  /// own child token is cancelled.
   pub(super) cancel: &'a CancellationToken,
+  /// Shared cancellation deadline and separate forced/shutdown policy.
+  pub(super) cancellation: &'a super::job_cancellation::JobCancellation,
   /// Job-level `defaults.run` fallback for run-steps that omit shell /
   /// working-directory (merged workflow + job defaults).
   pub(super) job: &'a JobSpec,
@@ -88,15 +90,16 @@ pub async fn run_steps(
   cancel: CancellationToken,
   run: &JobRun<'_>,
 ) -> Result<Conclusion, RunnerError> {
-  if cancel.is_cancelled() {
-    return Ok(Conclusion::Cancelled);
-  }
+  let cancellation = std::sync::Arc::clone(ctx.cancellation.get_or_insert_with(|| {
+    super::job_cancellation::JobCancellation::new(cancel.clone(), CancellationToken::new())
+  }));
 
   let job = JobCtx {
     handler: ScriptHandler::new(),
     workspace: run.workspace,
     config: run.config,
     cancel: &cancel,
+    cancellation: &cancellation,
     job: run.spec,
     shadow: run.shadow,
     http: run.http,
@@ -143,6 +146,9 @@ async fn run_main_and_posts(
     ctx.record_job_cancelled();
   }
   main_result.map(|main| {
+    if job.cancellation.shutdown.is_cancelled() {
+      return Conclusion::Failure;
+    }
     if cancel.is_cancelled() {
       return Conclusion::Cancelled;
     }
@@ -167,21 +173,21 @@ async fn run_main_steps(
   let mut job_conclusion = Conclusion::Success;
   for (index, step) in steps.iter().enumerate() {
     if cancel.is_cancelled() {
-      return Ok(Conclusion::Cancelled);
+      ctx.record_job_cancelled();
     }
 
     // Step 1 is "Set up job" (reported by setup_step.rs). Workflow steps start at 2.
     let step_number = u32::try_from(index + 2).unwrap_or(0);
     let step_conclusion = run_single_step(step, step_number, ctx, events, job, job_state).await?;
 
-    if step_conclusion == Conclusion::Failure {
+    if step_conclusion == Conclusion::Failure && job_conclusion != Conclusion::Cancelled {
       job_conclusion = Conclusion::Failure;
     }
-    // A `Cancelled` step conclusion only arises when the job cancel token
-    // fired mid-step (its child was killed); surface it without waiting for
-    // the next-iteration token check. Post-steps are drained by the caller.
+    // Preserve cancellation while still evaluating later cleanup conditions.
+    // Post steps are drained by the caller under the same job budget.
     if step_conclusion == Conclusion::Cancelled {
-      return Ok(Conclusion::Cancelled);
+      ctx.record_job_cancelled();
+      job_conclusion = Conclusion::Cancelled;
     }
   }
   Ok(job_conclusion)
@@ -202,7 +208,31 @@ async fn run_single_step(
   job: &JobCtx<'_>,
   job_state: &mut JobState,
 ) -> Result<Conclusion, RunnerError> {
-  if !evaluate_condition(step, ctx)? {
+  if job.cancellation.is_forced() {
+    report_skipped_step(step, step_number, ctx, events).await;
+    return Ok(Conclusion::Skipped);
+  }
+  // Upstream env/condition evaluation failures happen before RunStepAsync and
+  // cannot be recovered by continue-on-error.
+  let preparation = super::step_env::resolve_step_env(step, ctx, &ctx.eval_context())
+    .and_then(|_| evaluate_condition(step, ctx));
+  if let Err(error) = &preparation {
+    let _ = events
+      .send(RunnerEvent::StepStarted {
+        step_id: step.id.clone(),
+        step_name: derive_step_name(step),
+        step_number,
+      })
+      .await;
+    if let Some(name) = step.expression_name() {
+      ctx.set_step_outcome(name, Conclusion::Failure);
+      ctx.set_step_conclusion(name, Conclusion::Failure);
+    }
+    ctx.record_step_failure();
+    report_step_failure(events, &step.id, error).await;
+    return Ok(Conclusion::Failure);
+  }
+  if !preparation? {
     report_skipped_step(step, step_number, ctx, events).await;
     return Ok(Conclusion::Success);
   }
@@ -214,14 +244,20 @@ async fn run_single_step(
     })
     .await;
 
-  let bounds = StepBounds::new(step.timeout_in_minutes, job.cancel.clone());
+  let watch = job.cancellation.watch_step(
+    ctx.eval_context(),
+    step.condition.as_deref().unwrap_or("success()"),
+  );
+  let bounds = StepBounds::nested(
+    job.cancellation.deadline(),
+    step.timeout_in_minutes,
+    watch.cancel.clone(),
+  );
   let (outcome, outputs) = match execute_step(step, ctx, events, job, job_state, &bounds).await {
     Ok(result) => result,
     Err(err) => {
-      // A hard error mid-step (e.g. action resolution failure) short-circuits
-      // before a `Conclusion` exists; close the step out before propagating.
-      report_step_failure(events, &step.id, &err).await;
-      return Err(err);
+      report_step_error(events, &step.id, &err).await;
+      (Conclusion::Failure, HashMap::new())
     },
   };
   let conclusion = record_step_result(step, outcome, ctx);
@@ -286,8 +322,8 @@ fn record_step_result(
 fn evaluate_condition(step: &ActionStep, ctx: &ExecutionContext) -> Result<bool, RunnerError> {
   let condition = step.condition.as_deref().unwrap_or("success()");
 
-  if condition.is_empty() {
-    return Ok(true);
+  if condition.trim().is_empty() {
+    return Ok(ctx.literal_status_condition("success()").unwrap_or(false));
   }
 
   // Fast path: the overwhelmingly common condition is the injected default

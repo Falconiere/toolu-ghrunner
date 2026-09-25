@@ -44,7 +44,10 @@ pub(super) async fn execute(
   let fetcher = Arc::new(ActionFetcher::for_job(
     msg,
     Arc::clone(ctx.masker()),
-    cancel.clone(),
+    ctx
+      .cancellation
+      .as_ref()
+      .map_or_else(CancellationToken::new, |signal| signal.force.clone()),
   ));
   // A failed prefetch never fails the job; step-time resolution can retry.
   let prefetch_handle = spawn_prefetch(

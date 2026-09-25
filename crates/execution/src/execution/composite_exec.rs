@@ -59,6 +59,14 @@ pub async fn execute_composite_action(
 async fn run_composite_steps(run: &mut CompositeRun<'_>, depth: &mut DepthTracker) -> Conclusion {
   let mut aggregate = Conclusion::Success;
   for (idx, step) in run.params.manifest.runs.steps.iter().enumerate() {
+    if run
+      .ctx
+      .cancellation
+      .as_ref()
+      .is_some_and(|signal| signal.is_forced())
+    {
+      return Conclusion::Cancelled;
+    }
     // Previous inner steps can change steps.*, env, and condition status.
     let eval_ctx = composite_eval_context(run.ctx, run.params.step_inputs, None);
     match evaluate_composite_condition(step.condition.as_deref(), &eval_ctx) {
@@ -93,11 +101,24 @@ async fn run_composite_steps(run: &mut CompositeRun<'_>, depth: &mut DepthTracke
     } else if conclusion == Conclusion::Cancelled {
       aggregate = Conclusion::Cancelled;
       run.ctx.set_scope_status(JobStatus::Cancelled);
-      run.cleanup_token = Some(CancellationToken::new());
+      run.cleanup_token = Some(
+        run
+          .ctx
+          .cancellation
+          .as_ref()
+          .map_or_else(CancellationToken::new, |signal| signal.force.child_token()),
+      );
       run.cleanup_deadline = Some(
         run
           .params
           .deadline
+          .or_else(|| {
+            run
+              .ctx
+              .cancellation
+              .as_ref()
+              .and_then(|signal| signal.deadline())
+          })
           .unwrap_or_else(|| Instant::now() + Duration::from_secs(300)),
       );
     }

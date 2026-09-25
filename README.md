@@ -626,3 +626,23 @@ sibling `tests/` folder, never in the same file as the logic. Every new
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+### Step failure and cancellation cleanup
+
+A step execution error (including a missing shell/cwd or action manifest) is
+reported under that step's ID and follows the same `continue-on-error` adjustment
+as a nonzero exit. Its expression `outcome` remains `failure`; its `conclusion`
+is `success` only when continuation applies. Condition and step-env evaluation
+errors fail their step before continuation; job setup failures remain fatal.
+Later conditions evaluate against the updated job state.
+
+GitHub job cancellation re-evaluates the running condition. Eligible `always()`
+work can finish, and later `always()`/`cancelled()` cleanup can run, within one
+five-minute budget shared with action posts. Cleanup cannot change the final
+cancelled result. SIGINT/SIGTERM runner shutdown interrupts running work, skips
+later user steps/posts, tears down job resources, and reports failure.
+Timeout and cancellation kill the owned Unix process group and reap its leader;
+processes that deliberately detach from that group remain outside this guarantee.
+Reaping allows up to ten seconds and each output pipe up to two seconds after
+termination. See [the evidence map](docs/test-coverage.md#issue-100--conditional-cleanup)
+for verified cases and remaining live/reference lanes.

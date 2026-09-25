@@ -1,0 +1,74 @@
+{
+  "issue": 100,
+  "official_runner_commit": "cab9d1c3901e45c7705889c4f88284fdd93f4ae5",
+  "capture": "crates/execution/tests/incoming_contexts_matrix_0.json",
+  "transformations": "Replace captured step scripts, conditions, env, cwd and action reference with probes; retain UUIDs and token structure; assign the first contextName=probe because captured __-prefixed generated names are intentionally hidden.",
+  "scenarios": {
+    "S1": {
+      "ac": [
+        "AC-1",
+        "AC-5"
+      ],
+      "test": "execution_errors_follow_exit_failure_policy_and_continue_on_error",
+      "expected": "failure outcome; success conclusion only with continue-on-error; one UUID completion; setup failure runs no user work"
+    },
+    "S2": {
+      "ac": [
+        "AC-2"
+      ],
+      "test": "real_step_timeout_is_failure_then_conditional_cleanup_runs",
+      "expected": "failure, always and !cancelled markers; default and cancelled skipped; final Failure"
+    },
+    "S3": {
+      "ac": [
+        "AC-3"
+      ],
+      "test": "observed_start_cancel_retests_current_condition_and_runs_cleanup",
+      "expected": "running always finishes; success and !cancelled interrupt; later always/cancelled run; final Cancelled"
+    },
+    "S4": {
+      "ac": [
+        "AC-3",
+        "AC-4"
+      ],
+      "test": "cancellation_during_real_action_resolution_runs_later_cleanup",
+      "expected": "observed real resolver request cancels; later cleanup runs; separate shutdown interrupts always and reports Failure"
+    },
+    "S5": {
+      "ac": [
+        "AC-4",
+        "AC-5"
+      ],
+      "test": "cancellation_kills_owned_child_and_grandchild_but_not_unrelated_process",
+      "expected": "owned process family dead; unrelated process alive; one job completion; existing container/post regressions remain required"
+    }
+  },
+  "required_live": {
+    "linux_docker_resources": {
+      "status": "unverified",
+      "evidence": null,
+      "reason": "Full host-process regression passed; live Docker teardown probe pending."
+    },
+    "macos_sigterm": {
+      "status": "unverified",
+      "evidence": null,
+      "reason": "Independent shutdown API is tested; actual acquired-job CLI SIGTERM has not run. macOS process launches stall in _dyld_start."
+    },
+    "github_com_toolu": {
+      "status": "unverified",
+      "evidence": null,
+      "reason": "Repository inventory has only offline toolu-70-final; no online issue-100 runner."
+    },
+    "github_com_pinned_official": {
+      "status": "unverified",
+      "evidence": null,
+      "reason": "No online paired official runner at cab9d1c3901e45c7705889c4f88284fdd93f4ae5 is provisioned."
+    },
+    "ghes_toolu_and_reference": {
+      "status": "unverified",
+      "evidence": null,
+      "reason": "Orchestrator confirms no GHES endpoint or credential exists for this epic run."
+    }
+  },
+  "delivery_decision": "Orchestrator authorizes PR delivery with unavailable lanes explicitly unverified; this is not full parity certification."
+}

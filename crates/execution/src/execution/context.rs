@@ -41,6 +41,8 @@ pub struct ExecutionContext {
   github: HashMap<String, ExprValue>,
   runner_context: HashMap<String, ExprValue>,
   job_status: JobStatus,
+  /// Live job cancellation policy shared by main, composite and post execution.
+  pub(crate) cancellation: Option<Arc<super::job_cancellation::JobCancellation>>,
   secrets: HashMap<String, String>,
   /// Repo/org/env configuration variables — the `vars.*` context.
   vars: HashMap<String, String>,
@@ -91,6 +93,7 @@ impl ExecutionContext {
       github: HashMap::new(),
       runner_context: runner_ctx,
       job_status: JobStatus::Success,
+      cancellation: None,
       secrets: HashMap::new(),
       vars: HashMap::new(),
       incoming_contexts: HashMap::new(),
@@ -376,10 +379,10 @@ impl ExecutionContext {
   /// these four. `pub` so `tests/` can exercise every `JobStatus`.
   pub fn literal_status_condition(&self, cond: &str) -> Option<bool> {
     match cond.trim() {
-      "success()" => Some(self.job_status == JobStatus::Success),
+      "success()" => Some(self.job_status() == JobStatus::Success),
       "always()" => Some(true),
-      "failure()" => Some(self.job_status == JobStatus::Failure),
-      "cancelled()" => Some(self.job_status == JobStatus::Cancelled),
+      "failure()" => Some(self.job_status() == JobStatus::Failure),
+      "cancelled()" => Some(self.job_status() == JobStatus::Cancelled),
       _ => None,
     }
   }
@@ -410,7 +413,7 @@ impl ExecutionContext {
 impl ExecutionContext {
   /// Mark the overall job status as failed (for `failure()` conditions).
   pub fn record_step_failure(&mut self) {
-    if self.job_status != JobStatus::Cancelled {
+    if self.job_status() != JobStatus::Cancelled {
       self.job_status = JobStatus::Failure;
     }
   }
@@ -422,7 +425,10 @@ impl ExecutionContext {
 
   /// Current aggregate job status used by step-condition functions.
   pub fn job_status(&self) -> JobStatus {
-    self.job_status
+    self
+      .cancellation
+      .as_ref()
+      .map_or(self.job_status, |cancel| cancel.status(self.job_status))
   }
 
   /// Borrow the shared secret masker (same `Arc` as the tracing redactor).

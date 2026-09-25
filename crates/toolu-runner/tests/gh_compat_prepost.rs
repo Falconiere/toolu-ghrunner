@@ -289,8 +289,8 @@ fn fixture_declares_all_three_stages() -> TestResult<()> {
   Ok(())
 }
 
-/// `drive`, but returning the raw `run_steps` `Result` (for error-path tests
-/// where the step loop is expected to surface a hard `Err`).
+/// `drive`, but returning the raw `run_steps` `Result` so error-policy tests
+/// can distinguish a step failure conclusion from an escaped engine error.
 async fn drive_raw(
   steps: &[ActionStep],
   workspace: &Path,
@@ -327,7 +327,7 @@ async fn drive_raw(
   Ok(result)
 }
 
-/// Common single-action rig shared by the hard-`Err` and cancel-grace tests
+/// Common single-action rig shared by the action-error and cancel-grace tests
 /// below: a temp workspace/data dir with the real node runtime + `act-a`
 /// (marker `"A"`) seeded, and an empty marker file. Returns the `TempDir`
 /// guard (keep it alive for the test's duration) alongside the paths + config.
@@ -352,9 +352,8 @@ fn seed_single_action_fixture(
   Ok((dir, workspace, config, marker_file))
 }
 
-/// 3b: posts still drain when a later step returns a hard `Err` (action
-/// resolution failure), not just a `Failure` conclusion — the drain must run
-/// before the error propagates out of `run_steps`.
+/// 3b: a later action resolution error becomes a step Failure and posts still
+/// drain with their saved state before `run_steps` returns the job conclusion.
 #[tokio::test]
 async fn post_drains_even_when_a_later_step_errors_hard() -> TestResult<()> {
   let Some(node) = system_node() else {
@@ -364,8 +363,8 @@ async fn post_drains_even_when_a_later_step_errors_hard() -> TestResult<()> {
 
   let (_dir, workspace, config, marker_file) = seed_single_action_fixture(&node)?;
 
-  // Step 2 references a local action dir that does not exist, so the step
-  // loop hits a hard resolution `Err` (not a `Failure` conclusion).
+  // Step 2 references a local action dir that does not exist, producing a real
+  // resolution error that the step loop must normalize to Failure.
   let mut broken = ActionStep::with_ref_type("broken", "repository");
   broken.reference.name = Some("./does-not-exist".to_owned());
   broken.reference.git_ref = None;
@@ -373,8 +372,8 @@ async fn post_drains_even_when_a_later_step_errors_hard() -> TestResult<()> {
 
   let result = drive_raw(&steps, &workspace, &config, &marker_file).await?;
   assert!(
-    result.is_err(),
-    "an unresolvable action must surface a hard Err from run_steps; got {result:?}"
+    matches!(result, Ok(shared::Conclusion::Failure)),
+    "an unresolvable action must produce a Failure conclusion; got {result:?}"
   );
 
   let lines: Vec<String> = std::fs::read_to_string(&marker_file)?

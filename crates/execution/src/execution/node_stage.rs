@@ -82,8 +82,11 @@ pub(super) async fn run_node_stage(
   s: NodeStage<'_>,
 ) -> Result<(Conclusion, HashMap<String, String>), RunnerError> {
   let script = resolve_stage_script(&s)?;
-  let node_binary = ensure_node_runtime(s.client, &s.config.data_dir, s.major).await?;
-  let (env, file_cmds) = node_stage_env(&s).await?;
+  let node_binary = s
+    .bounds
+    .resolve_within_bounds(ensure_node_runtime(s.client, &s.config.data_dir, s.major))
+    .await?;
+  let (env, file_cmds) = s.bounds.resolve_within_bounds(node_stage_env(&s)).await?;
 
   // Own the cgroup path so `node_params` doesn't borrow `s.ctx` — the
   // concurrent dispatcher needs `&mut s.ctx` while the child runs.

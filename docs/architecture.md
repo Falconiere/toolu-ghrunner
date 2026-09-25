@@ -1190,3 +1190,25 @@ Individual step `timeout-minutes` can shorten it. Once the shared deadline is
 spent, unstarted posts are reported skipped and teardown continues. The local
 replay and live comparison scope are documented in
 [test-coverage.md](test-coverage.md#post-action-cleanup-101).
+
+## Main-step cancellation and error policy (#100)
+
+`Runner::execute_job_with_shutdown` receives the per-job cancel token and the
+listener's session/shutdown token independently. `execute_job` remains available
+for callers with graceful job cancellation only. `job_runner/entry.rs` installs a
+job-scoped `JobCancellation`; its deadline starts on observed cancellation and
+its forced token fires on shutdown or expiry of the single five-minute cleanup
+budget. Setup and hooks also observe shutdown. Main steps and posts receive
+fresh step tokens: a watcher re-evaluates the step-start expression scope with
+cancelled job status and interrupts only when the running condition becomes
+false or invalid. The live context exposes cancelled/failed status to later steps.
+The executing future is awaited through child reaping rather than discarded.
+
+Step execution errors are logged, converted to failure outcomes, adjusted for
+continue-on-error, and completed exactly once. Env/condition evaluation errors
+are reported before that adjustment. Fatal setup errors stay outside the loop.
+Shutdown wins the final conclusion as failure; GitHub cancellation wins over
+ordinary step/post results as cancelled. Registered posts retain LIFO ordering
+and their originating scope. Composites consume the shared forced token/deadline
+when entering cleanup. `spawn_in_cgroup` also creates a dedicated Unix process
+group; bounded waits kill only that owned group before reaping the leader.
