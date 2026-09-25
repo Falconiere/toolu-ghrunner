@@ -573,7 +573,9 @@ arm64; the capture retains real step UUIDs, context names and token shapes.
 
 The branch-scoped [live workflow](../.github/workflows/annotation-82-live.yml)
 uses `toolu-82-tool` and `toolu-82-reference` self-hosted labels on one push
-SHA. Its ignored verifier `crates/toolu-runner/tests/annotation_live.rs`
+SHA. Set the repository variable `TOOLU_ANNOTATION_82_LIVE=true` after both
+runners are provisioned to enable the jobs; skipped jobs are not live evidence.
+Its ignored verifier `crates/toolu-runner/tests/annotation_live.rs`
 requires `GH_TOKEN`, both runner names, and expected binary versions as
 `TOOLU_ANNOTATION_{TOOLU,REFERENCE}_{NAME,VERSION}`. The GHES lane also needs
 `TOOLU_ANNOTATION_GHES_URL`, `_TOKEN`, `_REPO`, `_BRANCH`, and the corresponding

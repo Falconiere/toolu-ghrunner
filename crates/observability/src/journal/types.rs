@@ -87,7 +87,7 @@ pub enum JournalEvent {
     message: String,
     /// The file path the annotation refers to, if any.
     file: Option<String>,
-    /// The line number in `file` the annotation refers to, if any.
+    /// Parsed line coordinate, kept signed to match the upstream command parser.
     line: Option<i32>,
   },
   /// A step finished.
