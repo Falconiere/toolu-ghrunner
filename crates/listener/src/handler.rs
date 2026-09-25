@@ -11,6 +11,14 @@ use shared::SecretMasker;
 use shared::{Conclusion, ListenerEvent, RunnerConfig, RunnerError};
 use wire::net;
 
+/// JIT identity needed to sign a new OAuth assertion during broker refresh.
+pub(crate) struct RefreshAuth {
+  /// The JIT OAuth client ID used as the JWT subject and issuer.
+  pub(crate) client_id: String,
+  /// The JIT OAuth token endpoint used as the JWT audience.
+  pub(crate) authorization_url: String,
+}
+
 /// Shared state threaded through the listener lifecycle after authentication.
 pub(crate) struct SessionCtx {
   pub(crate) client: reqwest::Client,
@@ -35,6 +43,8 @@ pub(crate) struct SessionCtx {
   /// Runner RSA private key (PKCS#1 DER) for unwrapping an encrypted
   /// session AES key. Reconstructed from the JIT `credentials_rsaparams`.
   pub(crate) rsa_private_key_der: Vec<u8>,
+  /// JIT identity for an on-demand broker `ForceTokenRefresh`.
+  pub(crate) refresh_auth: Option<RefreshAuth>,
   /// Join handle for the detached live-log WebSocket wrapper task spawned
   /// by `connect_live_log`, stashed here (rather than threaded as a
   /// `cleanup_session` argument) so both the `poll_and_execute` `Ok` and
@@ -215,6 +225,10 @@ impl GitHubListener {
       encryption_key: session_response.encryption_key,
       use_fips_encryption: session_response.use_fips_encryption,
       rsa_private_key_der,
+      refresh_auth: Some(RefreshAuth {
+        client_id: self.jit_config.credentials.data.client_id.clone(),
+        authorization_url: self.jit_config.credentials.data.authorization_url.clone(),
+      }),
       live_log: None,
       job_log_upload: None,
       watchdog: WatchdogConfig::default(),

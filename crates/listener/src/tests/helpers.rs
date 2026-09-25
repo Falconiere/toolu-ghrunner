@@ -139,6 +139,7 @@ fn test_ctx(broker_url: String, live_log: Option<tokio::task::JoinHandle<()>>) -
     encryption_key: None,
     use_fips_encryption: false,
     rsa_private_key_der: Vec::new(),
+    refresh_auth: None,
     live_log,
     job_log_upload: None,
     watchdog: crate::helpers::WatchdogConfig::default(),

@@ -4,15 +4,14 @@
 //! because they talk HTTP. The crypto stays here so we can unit-test
 //! padding stripping and BOM handling without a broker.
 
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use shared::RunnerError;
 
 /// Message types from the broker long-poll.
 ///
-/// Variant names are the wire `messageType` strings verbatim (serde uses
-/// the variant identifier with no rename). `JobCancellation` matches the
-/// C# runner's `JobCancelMessage.MessageType` discriminator.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+/// Known variant names are the wire `messageType` strings verbatim.
+/// `Unknown` retains a future wire name so its envelope can still be handled.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MessageType {
   /// A job to run, carried in a `RunnerJobRequestBody`.
   RunnerJobRequest,
@@ -20,13 +19,44 @@ pub enum MessageType {
   BrokerMigration,
   /// A cancellation of an in-flight job, carried in a `JobCancelBody`.
   JobCancellation,
+  /// Broker request to exchange the runner's OAuth access token again.
+  ForceTokenRefresh,
+  /// Broker request to refresh the runner installation.
+  RunnerRefresh,
+  /// Broker request to refresh the agent installation.
+  AgentRefresh,
+  /// Broker request to refresh runner configuration.
+  RunnerRefreshConfig,
+  /// Broker request to shut down a hosted runner.
+  HostedRunnerShutdown,
+  /// An unrecognized future wire type; the original discriminator is retained.
+  Unknown(String),
+}
+
+impl<'de> Deserialize<'de> for MessageType {
+  fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+  where
+    D: Deserializer<'de>,
+  {
+    Ok(match String::deserialize(deserializer)?.as_str() {
+      "RunnerJobRequest" => Self::RunnerJobRequest,
+      "BrokerMigration" => Self::BrokerMigration,
+      "JobCancellation" => Self::JobCancellation,
+      "ForceTokenRefresh" => Self::ForceTokenRefresh,
+      "RunnerRefresh" => Self::RunnerRefresh,
+      "AgentRefresh" => Self::AgentRefresh,
+      "RunnerRefreshConfig" => Self::RunnerRefreshConfig,
+      "HostedRunnerShutdown" => Self::HostedRunnerShutdown,
+      other => Self::Unknown(other.to_owned()),
+    })
+  }
 }
 
 /// Raw message from the broker `GET /message` response.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BrokerMessage {
-  /// The `messageId` — must be echoed back to acknowledge the message.
+  /// The `messageId` — sent as the next poll cursor; acquired jobs also use it in acknowledgement.
   pub message_id: i64,
   /// The `messageType` — which body shape `body` decodes to.
   pub message_type: MessageType,

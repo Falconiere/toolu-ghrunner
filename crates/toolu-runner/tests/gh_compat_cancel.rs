@@ -54,3 +54,23 @@ fn every_message_type_has_a_route() {
     assert_eq!(route(&ty), want);
   }
 }
+
+#[test]
+fn known_control_types_do_not_take_the_unknown_route() {
+  for (ty, want) in [
+    (MessageType::ForceTokenRefresh, MessageRoute::RefreshToken),
+    (MessageType::RunnerRefresh, MessageRoute::UnsupportedControl),
+    (MessageType::AgentRefresh, MessageRoute::UnsupportedControl),
+    (
+      MessageType::RunnerRefreshConfig,
+      MessageRoute::UnsupportedControl,
+    ),
+    (MessageType::HostedRunnerShutdown, MessageRoute::Shutdown),
+    (
+      MessageType::Unknown("FutureBrokerNotice".to_owned()),
+      MessageRoute::SkipUnknown,
+    ),
+  ] {
+    assert_eq!(route(&ty), want);
+  }
+}

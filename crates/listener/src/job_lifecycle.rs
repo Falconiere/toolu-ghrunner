@@ -1,18 +1,20 @@
 use std::time::Duration;
 
+use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
 use super::SessionCtx;
 use super::execution_loop::{JobExecution, execute_with_renewal};
 use super::helpers::map_conclusion;
-use protocol::messages::{BrokerMessage, BrokerMigrationBody, JobCancelBody};
+use protocol::messages::BrokerMessage;
 use shared::{AgentJobRequestMessage, Conclusion, ListenerEvent, RunnerError};
 use wire::net::{PollParams, acknowledge_message, poll_message};
 use wire::reporting::run_service::{
   AcquireJobRequest, CompleteJobRequest, acquire_job, complete_job,
 };
 
-use super::message_route::MessageRoute;
+use crate::broker_message::{PollOutcome, classify_received_message, log_skipped_control};
+use crate::broker_refresh::refresh_access_token;
 
 /// Starting backoff for a network error during the poll loop.
 const POLL_BACKOFF_START: Duration = Duration::from_secs(1);
@@ -54,8 +56,11 @@ pub(super) async fn poll_and_execute(
   // rationale + accepted risk on `acknowledge_best_effort`'s doc comment.
   acknowledge_best_effort(ctx, &body.runner_request_id).await;
 
-  let mut outcome =
+  let (mut outcome, refreshed_token) =
     run_job_with_cancel_watch(ctx, &body.run_service_url, &rs_token, &acquired).await;
+  if let Some(token) = refreshed_token {
+    ctx.token = token;
+  }
   // Stash the two detached-task handles now, before any further `?` in this
   // function — `ctx` is a full `&mut` borrow again here (the call above only
   // reborrowed it immutably), so these assignments survive an early return
@@ -187,18 +192,21 @@ async fn run_job_with_cancel_watch(
   run_service_url: &str,
   rs_token: &str,
   acquired: &wire::reporting::run_service::AcquireJobResponse,
-) -> JobOutcome {
+) -> (JobOutcome, Option<String>) {
   let job_cancel = ctx.cancel.child_token();
+  let (token_tx, token_rx) = watch::channel(None);
   let exec = run_acquired_job(ctx, run_service_url, rs_token, acquired, &job_cancel);
   tokio::pin!(exec);
-  let watch = watch_for_gh_cancel(ctx, &job_cancel);
-  tokio::pin!(watch);
-  tokio::select! {
+  let watcher = watch_for_gh_cancel(ctx, &job_cancel, &token_tx);
+  tokio::pin!(watcher);
+  let outcome = tokio::select! {
     outcome = &mut exec => outcome,
     // The watcher pends forever after signalling, so this arm only
     // fires if it somehow returns — finish the job either way.
-    () = &mut watch => (&mut exec).await,
-  }
+    () = &mut watcher => (&mut exec).await,
+  };
+  let refreshed_token = token_rx.borrow().clone();
+  (outcome, refreshed_token)
 }
 
 /// Poll the broker for a `JobCancellation` while a job is in flight.
@@ -208,15 +216,31 @@ async fn run_job_with_cancel_watch(
 /// the cursor advanced so the broker does not re-serve it after the
 /// job completes. Never returns; the caller drops this future when the
 /// job finishes.
-async fn watch_for_gh_cancel(ctx: &SessionCtx, job_cancel: &CancellationToken) {
+async fn watch_for_gh_cancel(
+  ctx: &SessionCtx,
+  job_cancel: &CancellationToken,
+  token_tx: &watch::Sender<Option<String>>,
+) {
   let mut last_message_id: i64 = 0;
   let mut backoff = POLL_BACKOFF_START;
+  let mut token = ctx.token.clone();
   loop {
-    let outcome = poll_once(ctx, last_message_id).await;
+    let outcome = poll_once(ctx, &token, last_message_id).await;
     if let Some(id) = outcome.message_id() {
+      if is_redelivery(last_message_id, &outcome) {
+        tracing::warn!(
+          message_id = id,
+          "broker redelivered an already-seen message"
+        );
+        if sleep_or_cancel(ctx, backoff).await {
+          return std::future::pending::<()>().await;
+        }
+        backoff = backoff.saturating_mul(2).min(POLL_BACKOFF_MAX);
+        continue;
+      }
       last_message_id = id;
     }
-    match watch_step(ctx, job_cancel, outcome, backoff).await {
+    match watch_step(ctx, job_cancel, &mut token, token_tx, outcome, backoff).await {
       Some(next) => backoff = next,
       None => return std::future::pending::<()>().await,
     }
@@ -229,6 +253,8 @@ async fn watch_for_gh_cancel(ctx: &SessionCtx, job_cancel: &CancellationToken) {
 async fn watch_step(
   ctx: &SessionCtx,
   job_cancel: &CancellationToken,
+  token: &mut String,
+  token_tx: &watch::Sender<Option<String>>,
   outcome: PollOutcome,
   backoff: Duration,
 ) -> Option<Duration> {
@@ -242,7 +268,41 @@ async fn watch_step(
     // token, so the job is already winding down — just go dormant.
     PollOutcome::Cancelled => None,
     PollOutcome::NetworkError(e) => backoff_after_poll_error(ctx, &e, backoff).await,
-    PollOutcome::NoWork | PollOutcome::Skip { .. } => Some(POLL_BACKOFF_START),
+    control @ (PollOutcome::NoWork
+    | PollOutcome::Skip { .. }
+    | PollOutcome::Unknown { .. }
+    | PollOutcome::UnsupportedControl { .. }
+    | PollOutcome::Shutdown { .. }
+    | PollOutcome::RefreshToken { .. }
+    | PollOutcome::Migrated { .. }
+    | PollOutcome::Job(_)) => watch_control_step(ctx, token, token_tx, control, backoff).await,
+  }
+}
+
+/// Apply broker control messages while a job remains in flight.
+async fn watch_control_step(
+  ctx: &SessionCtx,
+  token: &mut String,
+  token_tx: &watch::Sender<Option<String>>,
+  outcome: PollOutcome,
+  backoff: Duration,
+) -> Option<Duration> {
+  match outcome {
+    PollOutcome::NoWork
+    | PollOutcome::Skip { .. }
+    | PollOutcome::Unknown { .. }
+    | PollOutcome::UnsupportedControl { .. } => {
+      log_skipped_control(&outcome);
+      Some(POLL_BACKOFF_START)
+    },
+    PollOutcome::Shutdown { message_id } => {
+      tracing::info!(message_id, "broker requested runner shutdown");
+      ctx.cancel.cancel();
+      None
+    },
+    PollOutcome::RefreshToken { message_id } => {
+      refresh_watcher_token(ctx, token, token_tx, message_id, backoff).await
+    },
     PollOutcome::Migrated { url, .. } => {
       note_migration_mid_job(&url);
       Some(POLL_BACKOFF_START)
@@ -251,6 +311,27 @@ async fn watch_step(
       note_unexpected_job_mid_job(msg.message_id);
       Some(POLL_BACKOFF_START)
     },
+    PollOutcome::Cancel { .. } | PollOutcome::Cancelled | PollOutcome::NetworkError(_) => None,
+  }
+}
+
+/// Replace the watcher's token only after an exchange succeeds.
+async fn refresh_watcher_token(
+  ctx: &SessionCtx,
+  token: &mut String,
+  token_tx: &watch::Sender<Option<String>>,
+  message_id: i64,
+  backoff: Duration,
+) -> Option<Duration> {
+  match refresh_access_token(ctx).await {
+    Ok(next) => {
+      token_tx.send_replace(Some(next.clone()));
+      *token = next;
+      tracing::info!(message_id, "broker token refreshed");
+      Some(POLL_BACKOFF_START)
+    },
+    Err(RunnerError::Cancelled) => None,
+    Err(e) => backoff_after_poll_error(ctx, &e, backoff).await,
   }
 }
 
@@ -339,40 +420,119 @@ async fn poll_until_job(ctx: &mut SessionCtx) -> Result<Option<BrokerMessage>, R
   // message handled. Sent on every poll so the broker skips re-served ones.
   let mut last_message_id: i64 = 0;
   loop {
-    let result = poll_once(ctx, last_message_id).await;
+    let result = poll_once(ctx, &ctx.token, last_message_id).await;
     if let Some(id) = result.message_id() {
+      if is_redelivery(last_message_id, &result) {
+        tracing::warn!(
+          message_id = id,
+          "broker redelivered an already-seen message"
+        );
+        if sleep_or_cancel(ctx, backoff).await {
+          return Ok(None);
+        }
+        backoff = backoff.saturating_mul(2).min(POLL_BACKOFF_MAX);
+        continue;
+      }
       last_message_id = id;
     }
-    match result {
-      PollOutcome::Cancelled => return Ok(None),
-      PollOutcome::NoWork => {
-        backoff = POLL_BACKOFF_START;
-      },
-      PollOutcome::Skip { message_id } => {
-        // An undecryptable / unparseable message. The cursor was already
-        // advanced past it above (`result.message_id()`), so the broker
-        // won't re-serve it — otherwise we'd wedge in an infinite backoff
-        // loop on one poisoned message. Reset backoff and keep polling.
-        tracing::warn!(
-          message_id,
-          "skipping undecryptable/unparseable broker message"
-        );
-        backoff = POLL_BACKOFF_START;
-      },
-      PollOutcome::Migrated { url, .. } => {
-        ctx.broker_url = url;
-        backoff = POLL_BACKOFF_START;
-      },
-      PollOutcome::Job(msg) => return Ok(Some(msg)),
-      PollOutcome::Cancel { msg: _, job_id } => {
-        handle_cancellation(ctx, &job_id);
-        return Ok(None);
-      },
-      PollOutcome::NetworkError(e) => match backoff_after_poll_error(ctx, &e, backoff).await {
-        Some(next) => backoff = next,
-        None => return Ok(None),
-      },
+    match handle_idle_outcome(ctx, result, &mut backoff).await? {
+      IdleDecision::Continue => {},
+      IdleDecision::Exit => return Ok(None),
+      IdleDecision::Job(msg) => return Ok(Some(msg)),
     }
+  }
+}
+
+/// A broker reply at or behind the cursor must not trigger a second action.
+pub(crate) fn is_redelivery(last_message_id: i64, outcome: &PollOutcome) -> bool {
+  outcome
+    .message_id()
+    .is_some_and(|message_id| message_id <= last_message_id)
+}
+
+/// Effect of one broker outcome on the idle poll loop.
+enum IdleDecision {
+  Continue,
+  Exit,
+  Job(BrokerMessage),
+}
+
+/// Apply a classified broker outcome after its cursor has been advanced.
+async fn handle_idle_outcome(
+  ctx: &mut SessionCtx,
+  outcome: PollOutcome,
+  backoff: &mut Duration,
+) -> Result<IdleDecision, RunnerError> {
+  match outcome {
+    PollOutcome::Cancelled => return Ok(IdleDecision::Exit),
+    PollOutcome::NoWork => {},
+    PollOutcome::Migrated { url, .. } => ctx.broker_url = url,
+    PollOutcome::Job(msg) => return Ok(IdleDecision::Job(msg)),
+    PollOutcome::Cancel { msg: _, job_id } => {
+      handle_cancellation(ctx, &job_id);
+      return Ok(IdleDecision::Exit);
+    },
+    PollOutcome::NetworkError(e) => {
+      return Ok(match backoff_after_poll_error(ctx, &e, *backoff).await {
+        Some(next) => {
+          *backoff = next;
+          IdleDecision::Continue
+        },
+        None => IdleDecision::Exit,
+      });
+    },
+    control @ (PollOutcome::Skip { .. }
+    | PollOutcome::Unknown { .. }
+    | PollOutcome::UnsupportedControl { .. }
+    | PollOutcome::Shutdown { .. }
+    | PollOutcome::RefreshToken { .. }) => {
+      let decision = handle_idle_control(ctx, control).await?;
+      *backoff = POLL_BACKOFF_START;
+      return Ok(decision);
+    },
+  }
+  *backoff = POLL_BACKOFF_START;
+  Ok(IdleDecision::Continue)
+}
+
+/// Handle a control envelope after the idle cursor has advanced.
+async fn handle_idle_control(
+  ctx: &mut SessionCtx,
+  outcome: PollOutcome,
+) -> Result<IdleDecision, RunnerError> {
+  match outcome {
+    PollOutcome::Skip { .. }
+    | PollOutcome::Unknown { .. }
+    | PollOutcome::UnsupportedControl { .. } => log_skipped_control(&outcome),
+    PollOutcome::Shutdown { message_id } => {
+      tracing::info!(message_id, "broker requested runner shutdown");
+      ctx.cancel.cancel();
+      return Ok(IdleDecision::Exit);
+    },
+    PollOutcome::RefreshToken { message_id } => return refresh_idle_token(ctx, message_id).await,
+    PollOutcome::NoWork
+    | PollOutcome::Migrated { .. }
+    | PollOutcome::Job(_)
+    | PollOutcome::Cancel { .. }
+    | PollOutcome::NetworkError(_)
+    | PollOutcome::Cancelled => {},
+  }
+  Ok(IdleDecision::Continue)
+}
+
+/// Publish a replacement token only after a complete successful exchange.
+async fn refresh_idle_token(
+  ctx: &mut SessionCtx,
+  message_id: i64,
+) -> Result<IdleDecision, RunnerError> {
+  match refresh_access_token(ctx).await {
+    Ok(next) => {
+      ctx.token = next;
+      tracing::info!(message_id, "broker token refreshed");
+      Ok(IdleDecision::Continue)
+    },
+    Err(RunnerError::Cancelled) => Ok(IdleDecision::Exit),
+    Err(e) => Err(e),
   }
 }
 
@@ -397,48 +557,11 @@ async fn backoff_after_poll_error(
   Some(backoff.saturating_mul(2).min(POLL_BACKOFF_MAX))
 }
 
-/// Outcome of a single `poll_message` call, classified for the loop.
-enum PollOutcome {
-  /// Long-poll returned 202 — broker accepted the connection but had
-  /// no work.
-  NoWork,
-  /// Long-poll returned a `BrokerMigration` message; carries the new
-  /// broker URL and the message id (to advance the redelivery cursor).
-  Migrated { url: String, message_id: i64 },
-  /// Long-poll returned a `RunnerJobRequest` — caller should acquire.
-  Job(BrokerMessage),
-  /// Long-poll returned a `JobCancellation` — caller should cancel the
-  /// in-flight token. No broker ack is sent (a cancel body carries no
-  /// `runner_request_id`); the message is carried so `message_id()` advances
-  /// the redelivery cursor, plus the target `jobId` for logging / scoping.
-  Cancel { msg: BrokerMessage, job_id: String },
-  /// A received message that could not be decrypted or parsed. Carries its
-  /// id so the cursor advances past it (the broker won't re-serve it), so the
-  /// runner does not wedge re-fetching one poisoned message forever.
-  Skip { message_id: i64 },
-  /// Network/HTTP failure — caller should back off and retry.
-  NetworkError(RunnerError),
-  /// Cancellation token tripped during the poll — caller should exit.
-  Cancelled,
-}
-
-impl PollOutcome {
-  /// The broker message id, when the outcome carried a real message.
-  /// Used to advance the `lastMessageId` redelivery cursor.
-  fn message_id(&self) -> Option<i64> {
-    match self {
-      Self::Migrated { message_id, .. } | Self::Skip { message_id } => Some(*message_id),
-      Self::Job(msg) | Self::Cancel { msg, .. } => Some(msg.message_id),
-      Self::NoWork | Self::NetworkError(_) | Self::Cancelled => None,
-    }
-  }
-}
-
-async fn poll_once(ctx: &SessionCtx, last_message_id: i64) -> PollOutcome {
+async fn poll_once(ctx: &SessionCtx, token: &str, last_message_id: i64) -> PollOutcome {
   let params = PollParams {
     client: &ctx.client,
     server_url_v2: &ctx.broker_url,
-    token: &ctx.token,
+    token,
     session_id: &ctx.session_id,
     runner_version: "3.0.0",
     // Derive os/arch from the same helpers the acknowledge path uses so a
@@ -456,90 +579,10 @@ async fn poll_once(ctx: &SessionCtx, last_message_id: i64) -> PollOutcome {
     () = ctx.cancel.cancelled() => PollOutcome::Cancelled,
     result = poll_fut => match result {
       Ok(None) => PollOutcome::NoWork,
-      Ok(Some(mut msg)) => match decrypt_body_if_needed(ctx, &mut msg) {
-        Ok(()) => classify_message(msg),
-        // A decrypt failure is per-message, not a transport fault: skip past
-        // this message id so the broker stops re-serving it (see F5).
-        Err(e) => {
-          tracing::warn!(message_id = msg.message_id, error = %e, "broker message decrypt failed");
-          PollOutcome::Skip {
-            message_id: msg.message_id,
-          }
-        },
-      },
+      Ok(Some(msg)) => classify_received_message(ctx, msg),
       Err(e) => PollOutcome::NetworkError(e),
     },
   }
-}
-
-/// Classify a (decrypted) broker message into a poll outcome.
-///
-/// The message-type → action decision is the pure
-/// [`super::message_route::route`]; this fn attaches the parsed body.
-fn classify_message(msg: BrokerMessage) -> PollOutcome {
-  let message_id = msg.message_id;
-  match super::message_route::route(&msg.message_type) {
-    MessageRoute::Migrate => match parse_migration(&msg.body) {
-      Ok(url) => PollOutcome::Migrated { url, message_id },
-      // An unparseable control message must not wedge the cursor: skip it.
-      // A job request is never dropped here — `AcquireJob` is returned intact.
-      Err(e) => {
-        tracing::warn!(message_id, error = %e, "broker migration message unparseable");
-        PollOutcome::Skip { message_id }
-      },
-    },
-    MessageRoute::AcquireJob => PollOutcome::Job(msg),
-    MessageRoute::Cancel => match parse_cancel(&msg.body) {
-      Ok(job_id) => PollOutcome::Cancel { msg, job_id },
-      Err(e) => {
-        tracing::warn!(message_id, error = %e, "broker cancel message unparseable");
-        PollOutcome::Skip { message_id }
-      },
-    },
-  }
-}
-
-/// Decrypt `msg.body` in place when the session negotiated encryption.
-///
-/// No-op (plaintext passthrough) when the session has no encryption key —
-/// the common github.com JIT case where broker bodies arrive in cleartext.
-///
-/// # Errors
-///
-/// Returns `RunnerError::Protocol` on a missing IV, key unwrap failure, or
-/// AES-CBC decryption failure.
-fn decrypt_body_if_needed(ctx: &SessionCtx, msg: &mut BrokerMessage) -> Result<(), RunnerError> {
-  let Some(key) = ctx.encryption_key.as_ref() else {
-    return Ok(());
-  };
-  let iv = msg
-    .iv
-    .as_deref()
-    .ok_or_else(|| RunnerError::Protocol("encrypted broker message missing iv".to_owned()))?;
-  let plaintext = protocol::decrypt_broker_body(
-    &msg.body,
-    iv,
-    key,
-    &ctx.rsa_private_key_der,
-    ctx.use_fips_encryption,
-  )?;
-  msg.body = String::from_utf8(plaintext)
-    .map_err(|e| RunnerError::Protocol(format!("decrypted broker body not UTF-8: {e}")))?;
-  Ok(())
-}
-
-fn parse_migration(body: &str) -> Result<String, RunnerError> {
-  let migration: BrokerMigrationBody = serde_json::from_str(body)
-    .map_err(|e| RunnerError::Protocol(format!("migration parse: {e}")))?;
-  tracing::info!(new_url = %migration.broker_base_url, "broker migration");
-  Ok(migration.broker_base_url)
-}
-
-/// Parse a `JobCancellation` body, returning the target `jobId`.
-fn parse_cancel(body: &str) -> Result<String, RunnerError> {
-  let cancel: JobCancelBody = serde_json::from_str(body)
-    .map_err(|e| RunnerError::Protocol(format!("cancel body parse: {e}")))?;
-  Ok(cancel.job_id)
 }
 
 /// Cancel the in-flight job token.

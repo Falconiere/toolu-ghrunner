@@ -10,7 +10,9 @@ use shared::RunnerError;
 ///
 /// # Errors
 ///
-/// Returns `RunnerError::Protocol` on HTTP or response parse failures.
+/// Returns `RunnerError::Network` for transport, 429, or 5xx failures,
+/// `RunnerError::Auth` for rejected credentials, and `RunnerError::Protocol`
+/// for other HTTP or response parse failures.
 pub async fn exchange_token(
   client: &reqwest::Client,
   authorization_url: &str,
@@ -30,15 +32,20 @@ pub async fn exchange_token(
     .form(&params)
     .send()
     .await
-    .map_err(|err| RunnerError::Protocol(format!("token exchange request failed: {err}")))?;
+    .map_err(|_err| RunnerError::Network("token exchange request failed".to_owned()))?;
 
   let status = response.status();
   if !status.is_success() {
     let body = response.text().await.unwrap_or_default();
     tracing::debug!(status = %status, body_len = body.len(), "token exchange failed");
-    return Err(RunnerError::Protocol(format!(
-      "token exchange failed with status {status}: see debug log"
-    )));
+    let message = format!("token exchange failed with status {status}: see debug log");
+    return Err(if status.as_u16() == 401 || status.as_u16() == 403 {
+      RunnerError::Auth(message)
+    } else if status.as_u16() == 429 || status.is_server_error() {
+      RunnerError::Network(message)
+    } else {
+      RunnerError::Protocol(message)
+    });
   }
 
   response
