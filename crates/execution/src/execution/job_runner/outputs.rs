@@ -50,6 +50,10 @@ async fn emit_secret_warning(
       message,
       file: None,
       line: None,
+      col: None,
+      end_line: None,
+      end_column: None,
+      title: None,
     })
     .await
     .is_err()
