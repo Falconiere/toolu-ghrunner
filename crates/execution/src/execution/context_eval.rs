@@ -12,7 +12,11 @@ impl ExecutionContext {
   fn github_expression_context(&self) -> ExprValue {
     let mut github = match self.scoped_github_context() {
       ExprValue::Object(github) => github,
-      _ => HashMap::new(),
+      ExprValue::Null
+      | ExprValue::Bool(_)
+      | ExprValue::Number(_)
+      | ExprValue::String(_)
+      | ExprValue::Array(_) => HashMap::new(),
     };
     if let Some(container) = &self.container {
       for key in ["workspace", "action_path"] {

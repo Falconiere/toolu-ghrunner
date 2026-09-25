@@ -284,12 +284,11 @@ async fn run_step_shell(
   script: &str,
   env: &HashMap<String, String>,
 ) -> Result<Conclusion, RunnerError> {
+  if run.ctx.job_container().is_some() {
+    return run_container_shell(run, shell, script, env).await;
+  }
   let params = run.params;
   let cancel = run.active_cancel();
-  let deadline = run.active_deadline();
-  if run.ctx.job_container().is_some() {
-    return run_container_shell(params, run.ctx, Some(shell), script, env, &cancel, deadline).await;
-  }
   let shell_params = ShellScriptParams {
     shell,
     script,
@@ -306,25 +305,25 @@ async fn run_step_shell(
 }
 
 async fn run_container_shell(
-  params: &CompositeParams<'_>,
-  ctx: &ExecutionContext,
-  shell: Option<&str>,
+  run: &CompositeRun<'_>,
+  shell: &str,
   script: &str,
   env: &HashMap<String, String>,
-  cancel: &CancellationToken,
-  deadline: Option<Instant>,
 ) -> Result<Conclusion, RunnerError> {
   use super::handlers::script::{ScriptHandler, ScriptParams};
+  let params = run.params;
+  let cancel = run.active_cancel();
+  let deadline = run.active_deadline();
   let shell_params = ScriptParams {
     script,
-    shell,
+    shell: Some(shell),
     env,
     working_dir: params.workspace,
     step_id: params.parent_step_id,
     cgroup_path: None,
     timeout: deadline.map(|deadline| deadline.saturating_duration_since(Instant::now())),
-    cancel,
-    container: ctx.job_container().map(AsRef::as_ref),
+    cancel: &cancel,
+    container: run.ctx.job_container().map(AsRef::as_ref),
   };
   let (stdout, mut receiver) = mpsc::channel(256);
   let handler = ScriptHandler::new();
