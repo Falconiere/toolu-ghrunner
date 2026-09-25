@@ -166,6 +166,7 @@ pub struct ActionStepDefinitionReference {
   #[serde(default)]
   pub image: Option<String>,
   /// The action's `owner/repo`, or a locally constructed `uses: ./...` path.
+  /// `None` for acquired local actions, which use `path` instead.
   #[serde(default)]
   pub name: Option<String>,
   /// Wire field `ref`; the action's git ref (tag/branch/SHA), if specified.

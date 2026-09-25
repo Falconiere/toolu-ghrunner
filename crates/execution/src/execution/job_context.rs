@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 /// and the secret masker. `pub` so hermetic tests can drive the real
 /// context-assembly path. Best-effort on `runner.*` dir creation: a failure
 /// is logged and the run continues without the env mirror.
-pub(super) fn build_context(
+pub fn build_context(
   msg: &AgentJobRequestMessage,
   config: &RunnerConfig,
   masker: Arc<Mutex<SecretMasker>>,

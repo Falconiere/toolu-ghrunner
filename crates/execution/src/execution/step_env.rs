@@ -72,6 +72,7 @@ pub(super) fn env_token_to_string(
 /// `$GITHUB_OUTPUT` value can't be recorded once here and again by a caller's
 /// own loop.
 async fn apply_file_commands(
+  step_id: &str,
   file_cmds: &FileCommandManager,
   ctx: &mut ExecutionContext,
   state_id: Option<&str>,
@@ -86,24 +87,26 @@ async fn apply_file_commands(
   for dir in results.path_additions {
     ctx.prepend_path(&dir);
   }
-  if let Some(id) = state_id {
+  if state_id.is_some() {
     for (key, value) in results.state {
-      ctx.set_step_state(id, &key, &value);
+      ctx.set_step_state(step_id, &key, &value);
     }
   }
   results.outputs
 }
 
 /// Apply file commands and merge output values for a visible expression name.
+/// Saved state uses the runtime step ID within the current action scope.
 /// Stdout outputs take precedence over file outputs with the same key.
 pub(super) async fn apply_file_commands_and_merge_outputs(
+  step_id: &str,
   expression_name: Option<&str>,
   state_id: Option<&str>,
   stdout_outputs: HashMap<String, String>,
   file_cmds: &FileCommandManager,
   ctx: &mut ExecutionContext,
 ) -> HashMap<String, String> {
-  let mut outputs = apply_file_commands(file_cmds, ctx, state_id).await;
+  let mut outputs = apply_file_commands(step_id, file_cmds, ctx, state_id).await;
   outputs.extend(stdout_outputs);
   if let Some(name) = expression_name {
     for (key, value) in &outputs {
