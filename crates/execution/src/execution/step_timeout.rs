@@ -4,6 +4,7 @@
 //! in-flight `CancellationToken`: whichever fires first kills the child and
 //! the caller reports the step as `failure` (timed out) / `cancelled`.
 
+use std::future::Future;
 use std::process::ExitStatus;
 use std::time::Duration;
 use tokio::time::Instant;
@@ -11,6 +12,10 @@ use tokio::time::Instant;
 use shared::RunnerError;
 use tokio::process::Child;
 use tokio_util::sync::CancellationToken;
+
+#[cfg(test)]
+#[path = "tests/step_timeout.rs"]
+mod tests;
 
 /// Per-step run bounds: one absolute timeout deadline (if any) and the
 /// in-flight job `CancellationToken`. Computed once per step and threaded to
@@ -57,6 +62,24 @@ impl StepBounds {
     self
       .deadline
       .map(|deadline| deadline.saturating_duration_since(Instant::now()))
+  }
+
+  /// Bound action resolution before a subprocess exists to receive the deadline.
+  pub(crate) async fn resolve_within_bounds<T>(
+    &self,
+    resolution: impl Future<Output = Result<T, RunnerError>>,
+  ) -> Result<T, RunnerError> {
+    let deadline = async {
+      match self.deadline {
+        Some(at) => tokio::time::sleep_until(at).await,
+        None => std::future::pending::<()>().await,
+      }
+    };
+    tokio::select! {
+      result = resolution => result,
+      () = self.cancel.cancelled() => Err(RunnerError::Cancelled),
+      () = deadline => Err(RunnerError::StepExecution("step timed out while resolving action".to_owned())),
+    }
   }
 }
 

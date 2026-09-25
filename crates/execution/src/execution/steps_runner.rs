@@ -330,7 +330,10 @@ async fn execute_step(
       conclusion,
       post,
       outputs,
-    } = action_result?;
+    } = match action_result {
+      Err(RunnerError::Cancelled) => return Ok((Conclusion::Cancelled, HashMap::new())),
+      other => other?,
+    };
     if let Some(name) = step.expression_name() {
       for (key, value) in &outputs {
         ctx.set_step_output(name, key, value);

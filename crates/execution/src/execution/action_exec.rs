@@ -101,7 +101,10 @@ pub(crate) async fn execute_action(
   run: &ActionRun<'_>,
   depth: &mut DepthTracker,
 ) -> Result<ActionOutcome, RunnerError> {
-  let resolved = resolve_action(step, run).await?;
+  let resolved = run
+    .bounds
+    .resolve_within_bounds(resolve_action(step, run))
+    .await?;
   let env = ActionEnv {
     events: run.events,
     workspace: run.workspace,

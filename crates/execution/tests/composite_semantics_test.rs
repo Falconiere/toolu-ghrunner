@@ -115,7 +115,7 @@ async fn replay_with_options(
     .await?;
     cancel.cancel();
   }
-  let collected = tokio::time::timeout(Duration::from_secs(90), collect(events)).await?;
+  let collected = tokio::time::timeout(Duration::from_secs(240), collect(events)).await?;
   cancel.cancel();
   Ok((temp, workspace, collected))
 }

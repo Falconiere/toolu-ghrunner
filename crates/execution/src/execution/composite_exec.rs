@@ -127,6 +127,7 @@ async fn run_one_step(
   if step.uses.is_some() {
     match run_uses_step(run, step, idx, depth).await {
       Ok(c) => Some(c),
+      Err(RunnerError::Cancelled) => Some(Conclusion::Cancelled),
       Err(err) => {
         Some(report_composite_step_error(params.events, params.parent_step_id, &err).await)
       },
