@@ -10,7 +10,6 @@ use tokio::sync::mpsc;
 use super::action_support::{
   build_composite_inputs, emit_action_header, emit_log, read_manifest, resolve_action_dir,
 };
-use super::actions::downloader::{action_cache_dir, is_action_cached};
 use super::actions::manifest::{ActionDefinition, RunsUsing};
 use super::actions::prefetch::ActionFetcher;
 use super::actions::resolver::{ActionRefKind, parse_action_ref};
@@ -202,25 +201,16 @@ async fn resolve_remote_action(
   uses_full: &str,
   run: &ActionRun<'_>,
 ) -> Result<ResolvedStep, RunnerError> {
-  let cache_key = action_ref.cache_key();
-  let cache_dir = action_cache_dir(&run.config.data_dir, &cache_key);
-
-  if !is_action_cached(&cache_dir) {
-    let tarball_url = action_ref.tarball_url("https://api.github.com");
-    emit_log(
-      run.events,
-      run.log_step_id,
-      &format!("Downloading {uses_full}..."),
-    )
-    .await;
-    // Routes through the job's single-flight fetcher: if the job's prefetch
-    // task is already downloading this same ref, this step joins that
-    // attempt instead of starting a second download.
-    run
-      .fetcher
-      .ensure(run.http, &cache_key, &tarball_url, &cache_dir)
-      .await?;
-  }
+  emit_log(
+    run.events,
+    run.log_step_id,
+    &format!("Resolving {uses_full}..."),
+  )
+  .await;
+  let cache_dir = run
+    .fetcher
+    .ensure_action(run.http, action_ref, &run.config.data_dir)
+    .await?;
 
   let action_dir = resolve_action_dir(&cache_dir, action_ref.subpath.as_ref());
   let manifest = read_manifest(&action_dir)?;

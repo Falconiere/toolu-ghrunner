@@ -33,8 +33,6 @@ pub struct ActionRef {
 pub struct ResolvedAction {
   /// The parsed `uses:` reference this resolution came from.
   pub action_ref: ActionRef,
-  /// URL to download the action's tarball from.
-  pub tarball_url: String,
 }
 
 impl ActionRef {
@@ -92,9 +90,9 @@ pub fn parse_action_ref(uses: &str) -> Result<ActionRef, RunnerError> {
     )));
   };
 
-  if git_ref.is_empty() {
+  if !valid_git_ref(git_ref) {
     return Err(RunnerError::ActionResolution(format!(
-      "invalid action ref '{uses}': empty ref"
+      "invalid action ref '{uses}': unsafe ref"
     )));
   }
 
@@ -103,7 +101,7 @@ pub fn parse_action_ref(uses: &str) -> Result<ActionRef, RunnerError> {
   let owner = parts.first().copied().unwrap_or_default();
   let repo = parts.get(1).copied().unwrap_or_default();
 
-  if owner.is_empty() || repo.is_empty() {
+  if !valid_repo_component(owner) || !valid_repo_component(repo) {
     return Err(RunnerError::ActionResolution(format!(
       "invalid action ref '{uses}': need owner/repo"
     )));
@@ -119,6 +117,23 @@ pub fn parse_action_ref(uses: &str) -> Result<ActionRef, RunnerError> {
     subpath,
     local_path: None,
   })
+}
+
+fn valid_repo_component(value: &str) -> bool {
+  !matches!(value, "" | "." | "..")
+    && value
+      .bytes()
+      .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+}
+
+fn valid_git_ref(value: &str) -> bool {
+  !value.is_empty()
+    && value
+      .split('/')
+      .all(|part| !matches!(part, "" | "." | ".."))
+    && value
+      .bytes()
+      .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'/'))
 }
 
 /// Build the validated remote subpath for `{owner}/{repo}/<subpath>@ref`.
@@ -179,7 +194,6 @@ fn local_action_ref(uses: &str) -> ActionRef {
 pub fn resolve_action_refs(
   uses_refs: &[String],
 ) -> Result<HashMap<String, ResolvedAction>, RunnerError> {
-  let api_base = "https://api.github.com";
   let mut resolved = HashMap::new();
 
   for uses in uses_refs {
@@ -194,14 +208,7 @@ pub fn resolve_action_refs(
       continue;
     }
 
-    let tarball_url = action_ref.tarball_url(api_base);
-    resolved.insert(
-      key,
-      ResolvedAction {
-        action_ref,
-        tarball_url,
-      },
-    );
+    resolved.insert(key, ResolvedAction { action_ref });
   }
 
   Ok(resolved)

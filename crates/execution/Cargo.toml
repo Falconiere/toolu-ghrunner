@@ -22,6 +22,7 @@ async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
+base64 = "0.22"
 
 # Web / HTTP
 reqwest = { version = "0.12", default-features = false, features = ["http2", "json", "rustls-tls-native-roots", "stream"] }

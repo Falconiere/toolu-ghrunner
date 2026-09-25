@@ -15,6 +15,35 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use tar::{Builder, Header};
 
+async fn prefetch_refs(
+  fetcher: &ActionFetcher,
+  client: &reqwest::Client,
+  data_dir: &Path,
+  api_base: &str,
+  uses_refs: &[String],
+) {
+  let resolved = match resolve_action_refs(uses_refs) {
+    Ok(resolved) => resolved,
+    Err(error) => {
+      tracing::warn!(error = %error, "action prefetch ref resolution failed");
+      return;
+    },
+  };
+  stream::iter(resolved.into_values())
+    .for_each_concurrent(PREFETCH_CONCURRENCY, |action| async move {
+      let cache_key = action.action_ref.cache_key();
+      let cache_dir = action_cache_dir(data_dir, &cache_key);
+      let tarball_url = action.action_ref.tarball_url(api_base);
+      if let Err(error) = fetcher
+        .ensure(client, &cache_key, &tarball_url, &cache_dir)
+        .await
+      {
+        tracing::warn!(action = cache_key.as_str(), error = %error, "action prefetch failed");
+      }
+    })
+    .await;
+}
+
 fn tmp_dest(label: &str) -> PathBuf {
   let mut p = env::temp_dir();
   p.push(format!(
