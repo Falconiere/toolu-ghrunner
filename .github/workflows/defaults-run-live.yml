@@ -37,7 +37,7 @@ jobs:
       - name: Assert job defaults
         id: job
         run: |
-          test "$(ps -p $$ -o comm= | tr -d '[:space:]')" = sh
+          test "$(basename "$(ps -p $$ -o comm= | tr -d '[:space:]')")" = sh
           test "$(basename "$PWD")" = defaults-71-job
           printf job > job.marker
       - name: Assert explicit step overrides
@@ -45,7 +45,7 @@ jobs:
         shell: bash
         working-directory: defaults-71-step
         run: |
-          test "$(ps -p $$ -o comm= | tr -d '[:space:]')" = bash
+          test "$(basename "$(ps -p $$ -o comm= | tr -d '[:space:]')")" = bash
           test "$(basename "$PWD")" = defaults-71-step
           printf explicit > explicit.marker
       - name: Assert directory with spaces
@@ -62,7 +62,7 @@ jobs:
         uses: ./.github/actions/defaults-71-composite
       - name: Assert top-level scope restored
         run: |
-          test "$(ps -p $$ -o comm= | tr -d '[:space:]')" = sh
+          test "$(basename "$(ps -p $$ -o comm= | tr -d '[:space:]')")" = sh
           test "$(basename "$PWD")" = defaults-71-job
           test "$(cat job.marker)" = job
           test "$(cat ../defaults-71-step/explicit.marker)" = explicit

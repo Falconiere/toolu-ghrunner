@@ -234,6 +234,9 @@ both ordered TemplateToken mappings, all eight step IDs, and the envelope;
 27 credential, authorization, and mask values were replaced with deterministic
 UUIDs. `crates/execution/tests/defaults_run_evidence.json` pins the raw and
 sanitized hashes, workflow/action revisions, job ID, and run ID.
+In the first matrix run at `4715b2b`, toolu completed all steps; the
+GitHub-hosted job launched `/bin/sh` correctly but its raw `ps comm` value was
+`/bin/sh` rather than `sh`. The final workflow compares executable basenames.
 
 | Criterion / scenario | Captured input and exact observable result | Runnable check / current evidence |
 | --- | --- | --- |
