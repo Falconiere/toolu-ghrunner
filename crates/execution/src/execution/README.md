@@ -49,7 +49,7 @@ not part of it. Workflow YAML parsing/matrix/orchestration lives in the
 | `service_lifecycle.rs` | `ServiceHandle` | Generic start/shutdown lifecycle for a local axum HTTP service, plus shared 401/500 JSON responses and `Content-Range` parsing. |
 | `shadow.rs` | (mod decl) | Declares the `shadow` sub-module; see its own README. |
 | `step_env.rs` | `resolve_step_env` | Renders scalar template tokens for step env/script/working-directory/action inputs and applies file-command results back onto the context. |
-| `step_process_env.rs` | `apply` | Forces GitHub Actions process flags after child environment precedence is resolved. |
+| `step_process_env.rs` | `apply` | Unconditionally sets `GITHUB_ACTIONS=true` at child launch; fills `CI` only when absent after child, container, and runner precedence. |
 | `step_naming.rs` | `PostStep` / `PostStepQueue` | The registered-post-step record, its LIFO queue, and `derive_step_name` for step display names. |
 | `step_state.rs` | `StepState` | Per-step recorded outputs/state/outcome/conclusion, and `build_steps_context` for the `steps.*` expression context. |
 | `step_timeout.rs` | `wait_bounded` | Bounded child-process wait shared by the script and node handlers: races `timeout-minutes` against the job `CancellationToken`. |

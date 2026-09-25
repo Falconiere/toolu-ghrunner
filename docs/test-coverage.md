@@ -409,8 +409,9 @@ Node pre/main/post, and nested composite shells; process stdout is the oracle.
 | AC-4 / 72-S3 container | Container shell and verification shell retain declaration `CI=false`; Node stages and nested composite step override it with empty `CI`; all print `GITHUB_ACTIONS=true` and hostname `container-73-probe`. Absent declaration uses runner `CI` or `true`. | `job_container_ci_test.rs` has two Linux-only ignored-by-default tests; the explicit wrapper above requires Linux and a real Docker socket and runs both tests with absent, false, and distinct `runner` values for runner `CI`. A Darwin zero-test result does not count. |
 | AC-5 | `./tools/check.sh all` must pass without suppressions. | Full gate result is recorded in the evidence JSON and PR verification. |
 
-The workflow runs the same committed action revision on GitHub-hosted macOS,
-Linux, and Linux job-container jobs. Matching self-hosted toolu lanes require
+The [GitHub-hosted workflow run](https://github.com/Falconiere/toolu-ghrunner/actions/runs/36184411746)
+passed the committed process assertions on macOS, Linux, and a Linux job
+container at revision `60ad9fb`. Matching self-hosted toolu lanes require
 registered runners; the GitHub API currently reports zero. The
 [evidence checker](../scripts/test/step_process_ci_evidence_check.py) verifies
 capture/file hashes and any recorded GitHub run IDs; `--require-live` fails on
