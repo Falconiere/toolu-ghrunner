@@ -46,8 +46,14 @@
   "required_live": {
     "linux_docker_resources": {
       "status": "unverified",
-      "evidence": null,
-      "reason": "Full host-process regression passed; live Docker teardown probe pending."
+      "evidence": "docs/test-coverage.md#issue-100--conditional-cleanup",
+      "reason": "Four real Docker lifecycle regressions passed; the full mixed service/container/unrelated-sentinel scenario and pinned reference comparison remain unverified.",
+      "partial_tests": [
+        "cancellation_after_exec_starts_keeps_container_for_post_then_cleans_up",
+        "timeout_after_exec_starts_keeps_container_for_post_then_cleans_up",
+        "missing_exec_program_fails_and_owned_resources_are_removed",
+        "pull_create_and_start_failures_leave_no_owned_resources"
+      ]
     },
     "macos_sigterm": {
       "status": "unverified",

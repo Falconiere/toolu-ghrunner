@@ -104,3 +104,10 @@ unverified. There is no GHES endpoint or credential for this epic run; GHES
 cannot be exercised. Linux full gate plus GitHub ci/ci-macos are authoritative
 when macOS process startup stalls in _dyld_start. This supersedes the original
 live-evidence delivery prerequisite, without treating unverified lanes as passed.
+
+Available live Docker probe: all four existing job_container_failures tests passed
+against real Colima, including cancellation/timeout post execution and removal.
+Full mixed-service/sentinel comparison is still unverified. No online paired
+issue-100 runner exists for GitHub.com/reference or acquired-job SIGTERM; the API
+lists only offline toolu-70-final. GHES has no endpoint/credential by explicit
+orchestrator confirmation. These are recorded gaps, not passing lanes.
