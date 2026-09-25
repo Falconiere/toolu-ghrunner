@@ -8,6 +8,7 @@
         "actions",
         "artifacts",
         "handlers",
+        "job_runner",
         "oidc",
         "shadow",
         "workflow"
@@ -30,6 +31,7 @@
       "execution/artifacts",
       "execution/artifacts/service",
       "execution/handlers",
+      "execution/job_runner",
       "execution/oidc",
       "execution/shadow",
       "execution/workflow",

@@ -186,6 +186,12 @@ left orphaned.
 | **Services** | artifacts, cache, and OIDC — forwarded to real GitHub by default, hosted locally in `offline` mode, or a local content-addressed cache accelerator in `accelerated` mode |
 | **Safety** | secret masking across logs, stdout, and the journal; strict-mode clippy (no `unwrap`, no `panic`, no `unsafe`) |
 
+For top-level `run:` steps, the runner reads ordered `defaults.run.shell` and
+`defaults.run.working-directory` from the acquired job. A job `run` mapping
+replaces the workflow `run` mapping; an explicit step value wins. Relative
+directories resolve from that job's workspace, and a missing directory fails
+the step with its path in the diagnostic. Composite steps keep their own scope.
+
 ### Service modes
 
 `[services] mode` decides where artifacts, cache, and OIDC go.

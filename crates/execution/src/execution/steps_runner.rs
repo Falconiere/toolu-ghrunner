@@ -344,8 +344,15 @@ async fn render_script_step(
     .map(|token| env_token_to_string(token, ctx, &eval_ctx))
     .transpose()?
     .unwrap_or_default();
-  // Shell precedence: step `shell:` > job/workflow `defaults.run.shell`.
-  let shell = step.shell_name().or_else(|| job.job.defaults.shell.clone());
+  // An empty step shell falls through; a nonempty explicit shell wins.
+  let shell = step
+    .inputs
+    .to_map()
+    .get("shell")
+    .map(|token| env_token_to_string(token, ctx, &eval_ctx))
+    .transpose()?
+    .filter(|value| !value.is_empty())
+    .or_else(|| job.job.defaults.shell.clone());
   let (env, file_cmds) = build_step_env_and_file_commands(step, ctx, &eval_ctx, job).await?;
   let working_dir = resolve_working_dir(step, ctx, &eval_ctx, job.workspace, &job.job.defaults)?;
   Ok(StepRender {
@@ -552,7 +559,7 @@ fn resolve_working_dir(
   let resolved = if let Some(token) = inputs.get("workingDirectory") {
     env_token_to_string(token, ctx, eval_ctx)?
   } else if let Some(default) = &defaults.working_directory {
-    ctx.interpolate_with(eval_ctx, default)?
+    default.clone()
   } else {
     return Ok(workspace.to_path_buf());
   };

@@ -12,7 +12,16 @@ defaults:
 
 jobs:
   defaults:
-    runs-on: [self-hosted, toolu-71]
+    name: defaults-${{ matrix.lane }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: toolu
+            runner: [self-hosted, toolu-71]
+          - lane: reference
+            runner: macos-15
+    runs-on: ${{ matrix.runner }}
     defaults:
       run:
         shell: sh
@@ -47,7 +56,7 @@ jobs:
       - name: Assert absolute directory
         working-directory: ${{ runner.temp }}/defaults-71-absolute
         run: |
-          test "$PWD" = "$RUNNER_TEMP/defaults-71-absolute"
+          test "$(pwd -P)" = "$(cd "$RUNNER_TEMP/defaults-71-absolute" && pwd -P)"
           printf absolute > absolute.marker
       - name: Assert composite scope
         uses: ./.github/actions/defaults-71-composite
