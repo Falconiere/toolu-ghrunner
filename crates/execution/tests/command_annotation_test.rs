@@ -106,7 +106,13 @@ async fn real_shell_commands_keep_ranges_titles_and_masks() -> Result<(), Box<dy
     invalid_line,
   ] = seen.as_slice()
   else {
-    return Err(format!("expected 10 nonblank annotations, got {}", seen.len()).into());
+    return Err(
+      format!(
+        "expected 10 annotations (1 blank command dropped), got {}",
+        seen.len()
+      )
+      .into(),
+    );
   };
   assert_eq!(
     full,
