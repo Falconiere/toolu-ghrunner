@@ -33,10 +33,10 @@ async fn job_container_real_mounts_env_metadata_and_cleanup()
     ..RunnerConfig::default()
   };
   let workspace = config.workspace_root.join("job one");
-  std::fs::create_dir_all(&workspace)?;
-  std::fs::write(workspace.join("input file"), "real Docker mount\n")?;
+  tokio::fs::create_dir_all(&workspace).await?;
+  tokio::fs::write(workspace.join("input file"), "real Docker mount\n").await?;
   let user_volume = workspace.join("user volume");
-  std::fs::create_dir_all(&user_volume)?;
+  tokio::fs::create_dir_all(&user_volume).await?;
   let spec = ContainerSpec {
     image: IMAGE.to_owned(),
     credentials: None,
@@ -75,8 +75,8 @@ async fn job_container_real_mounts_env_metadata_and_cleanup()
     while let Some(event) = event_rx.recv().await { diagnostics.push(format!("{event:?}")); }
     while let Some(line) = stdout_rx.recv().await { diagnostics.push(line); }
     assert_eq!(result, shared::Conclusion::Success, "{diagnostics:?}");
-    assert_eq!(std::fs::read_to_string(workspace.join("output file"))?, "real Docker mount\n");
-    assert_eq!(std::fs::read_to_string(workspace.join("opaque"))?, opaque);
+    assert_eq!(tokio::fs::read_to_string(workspace.join("output file")).await?, "real Docker mount\n");
+    assert_eq!(tokio::fs::read_to_string(workspace.join("opaque")).await?, opaque);
     let inspect = tokio::process::Command::new("docker").args([
       "inspect", "--format", "{{.Id}} {{.HostConfig.NetworkMode}}", container.id(),
     ]).output().await?;
@@ -100,7 +100,7 @@ async fn job_container_real_mounts_env_metadata_and_cleanup()
   result.map_err(|_panic| "container assertion failed; owned resources cleaned")??;
   cleanup?;
   assert_eq!(
-    std::fs::read_to_string(user_volume.join("marker"))?,
+    tokio::fs::read_to_string(user_volume.join("marker")).await?,
     "volume-preserved"
   );
   let inspect = tokio::process::Command::new("docker")
@@ -134,7 +134,7 @@ async fn job_container_real_host_hook_maps_github_path_back_to_host()
     ..RunnerConfig::default()
   };
   let workspace = config.workspace_root.join("job one");
-  std::fs::create_dir_all(&workspace)?;
+  tokio::fs::create_dir_all(&workspace).await?;
   let masker = Arc::new(Mutex::new(SecretMasker::new()));
   let cancel = CancellationToken::new();
   let spec = ContainerSpec {
@@ -191,10 +191,10 @@ async fn job_container_real_host_hook_maps_github_path_back_to_host()
     ctx.set_env("OPAQUE_CONTAINER_VALUE", "/github/runner_temp/bin");
     let host_hook_marker = workspace.join("host-hook-marker");
     let hook = workspace.join("host-hook.sh");
-    std::fs::write(
+    tokio::fs::write(
       &hook,
       "test \"$OPAQUE_CONTAINER_VALUE\" = /github/runner_temp/bin\nhost-hook-helper > \"$HOST_HOOK_MARKER\"\n",
-    )?;
+    ).await?;
     ctx.set_env("HOST_HOOK_MARKER", host_hook_marker.to_string_lossy().as_ref());
     let host_env = ctx.build_host_step_env();
     assert!(host_env.get("PATH").is_some_and(|path| path.starts_with(runner_temp.join("bin").to_string_lossy().as_ref())), "host hook PATH must start with the mounted host directory");
@@ -215,7 +215,7 @@ async fn job_container_real_host_hook_maps_github_path_back_to_host()
       .await?,
       Some(shared::Conclusion::Success)
     );
-    assert_eq!(std::fs::read_to_string(host_hook_marker)?, "hook-helper-ran");
+    assert_eq!(tokio::fs::read_to_string(host_hook_marker).await?, "hook-helper-ran");
     Ok::<(), Box<dyn std::error::Error>>(())
   })
   .catch_unwind()

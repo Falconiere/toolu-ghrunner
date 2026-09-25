@@ -17,11 +17,11 @@ type TestResult = Result<(), Box<dyn std::error::Error>>;
 const IMAGE: &str =
   "ubuntu@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3";
 
-fn write_actions(workspace: &Path) -> TestResult {
+async fn write_actions(workspace: &Path) -> TestResult {
   let node = workspace.join("node action");
   let composite = workspace.join("composite action");
-  std::fs::create_dir_all(&node)?;
-  std::fs::create_dir_all(&composite)?;
+  tokio::fs::create_dir_all(&node).await?;
+  tokio::fs::create_dir_all(&composite).await?;
   for (name, source) in [
     (
       "action.yml",
@@ -40,12 +40,13 @@ fn write_actions(workspace: &Path) -> TestResult {
       include_str!("../../../.github/actions/container-node-probe/post.js"),
     ),
   ] {
-    std::fs::write(node.join(name), source)?;
+    tokio::fs::write(node.join(name), source).await?;
   }
-  std::fs::write(
+  tokio::fs::write(
     composite.join("action.yml"),
     include_str!("../../../.github/actions/container-composite-probe/action.yml"),
-  )?;
+  )
+  .await?;
   Ok(())
 }
 
@@ -123,7 +124,7 @@ async fn job_container_real_production_shell_node_composite_and_posts() -> TestR
     }),
   )?);
   let workspace = config.workspace_root.join(&job.job_id);
-  write_actions(&workspace)?;
+  write_actions(&workspace).await?;
   job.steps = steps();
   let runner = Runner::new(config, Arc::new(Mutex::new(SecretMasker::new())));
   // Job context construction registers fixture secrets and mask hints. Events
