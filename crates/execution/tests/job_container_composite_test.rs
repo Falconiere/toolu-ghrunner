@@ -1,4 +1,4 @@
-//! Real-daemon composite shell routing with host-readable file commands.
+//! Opt-in real-daemon composite shell routing with host-readable file commands.
 
 use std::collections::HashMap;
 use std::panic::AssertUnwindSafe;

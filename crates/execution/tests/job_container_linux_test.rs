@@ -1,4 +1,4 @@
-//! Linux production job dispatch through real shell, Node, composite and post stages.
+//! Opt-in Linux production dispatch through real shell, Node, composite and post stages.
 #![cfg(target_os = "linux")]
 
 use std::path::Path;

@@ -1,4 +1,4 @@
-//! Production entrypoint checks for job-container dispatch and isolation.
+//! Automatic entrypoint checks: host dispatch plus target-specific rejection/cancellation.
 
 use std::sync::{Arc, Mutex};
 
