@@ -437,11 +437,16 @@ fn spawn_event_forwarder(
     if let Some(queue) = state.step_queue.take() {
       queue.drain().await;
     }
-    let _ = outcome_tx.send(ForwarderOutcome {
-      conclusion: final_conclusion(&state),
-      outputs: state.outputs,
-      job_log_upload,
-    });
+    if outcome_tx
+      .send(ForwarderOutcome {
+        conclusion: final_conclusion(&state),
+        outputs: state.outputs,
+        job_log_upload,
+      })
+      .is_err()
+    {
+      tracing::warn!("event forwarder conclusion receiver dropped before delivery");
+    }
   })
 }
 
