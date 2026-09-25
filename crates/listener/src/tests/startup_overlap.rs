@@ -73,6 +73,7 @@ fn job_message(
   job_id: &str,
 ) -> AgentJobRequestMessage {
   AgentJobRequestMessage {
+    job_service_containers: None,
     job_container: None,
     job_outputs: None,
     message_type: "PipelineAgentJobRequest".to_owned(),

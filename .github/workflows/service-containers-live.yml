@@ -1,0 +1,76 @@
+name: service-containers-live
+run-name: services-74-${{ github.sha }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      toolu_label:
+        description: Dedicated Linux toolu runner label
+        required: true
+        default: toolu-services-74
+      reference_label:
+        description: Dedicated Linux official runner 2.337.0 label
+        required: true
+        default: official-services-74
+
+permissions:
+  contents: read
+
+jobs:
+  host:
+    strategy:
+      fail-fast: false
+      matrix:
+        label: ['${{ inputs.toolu_label }}', '${{ inputs.reference_label }}']
+    runs-on: [self-hosted, Linux, '${{ matrix.label }}']
+    timeout-minutes: 10
+    services:
+      web:
+        image: nginx@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
+        ports: ['80']
+        options: >-
+          --health-cmd "wget -q -O /dev/null http://localhost"
+          --health-interval 1s --health-retries 5
+    steps:
+      - name: Connect through published context port
+        shell: bash
+        env:
+          SERVICE_ID: ${{ job.services.web.id }}
+          SERVICE_NETWORK: ${{ job.services.web.network }}
+          SERVICE_PORT: ${{ job.services.web.ports['80'] }}
+        run: |
+          test -n "$SERVICE_ID"
+          test -n "$SERVICE_NETWORK"
+          test -n "$SERVICE_PORT"
+          curl --fail --silent "http://127.0.0.1:$SERVICE_PORT" > response
+          grep -Fq 'Welcome to nginx' response
+          printf 'SERVICE_74_HOST_OK\n'
+          printf 'SERVICE_74_RESOURCES %s %s\n' "$SERVICE_ID" "$SERVICE_NETWORK"
+  container:
+    strategy:
+      fail-fast: false
+      matrix:
+        label: ['${{ inputs.toolu_label }}', '${{ inputs.reference_label }}']
+    runs-on: [self-hosted, Linux, '${{ matrix.label }}']
+    timeout-minutes: 10
+    container: nginx@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
+    services:
+      web:
+        image: nginx@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
+        options: >-
+          --health-cmd "wget -q -O /dev/null http://localhost"
+          --health-interval 1s --health-retries 5
+    steps:
+      - name: Connect through service DNS alias
+        shell: sh
+        env:
+          SERVICE_ID: ${{ job.services.web.id }}
+          SERVICE_NETWORK: ${{ job.services.web.network }}
+          JOB_NETWORK: ${{ job.container.network }}
+        run: |
+          test -n "$SERVICE_ID"
+          test "$SERVICE_NETWORK" = "$JOB_NETWORK"
+          wget -q -O response http://web
+          grep -Fq 'Welcome to nginx' response
+          printf 'SERVICE_74_CONTAINER_OK\n'
+          printf 'SERVICE_74_RESOURCES %s %s\n' "$SERVICE_ID" "$SERVICE_NETWORK"

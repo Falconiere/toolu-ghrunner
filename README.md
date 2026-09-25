@@ -253,6 +253,31 @@ Service-container and Docker-action integration, live GitHub.com comparison,
 and GHES acceptance are **unverified**; see the
 [#73 coverage map](docs/test-coverage.md#job-containers-73).
 
+### Workflow service containers
+
+Linux runners start acquired `services:` declarations before user steps. Host
+jobs connect through `localhost:${{ job.services.<id>.ports[<container-port>] }}`;
+job-container steps connect using the service ID as a DNS alias. Each service
+context contains its actual Docker `id`, shared `network`, and published `ports`.
+Services remain available through post actions. Logs are added to the job log
+before owned containers and networks are removed, including setup failures and
+cancellation. User-provided volumes and unrelated Docker resources are preserved.
+
+Image credentials, environment, ports, volumes and the documented restricted
+container options are evaluated before creation. Health options include
+`--health-cmd`, `--health-interval`, `--health-timeout`, `--health-retries`,
+`--health-start-period`, `--health-start-interval` and `--no-healthcheck`.
+Health durations accept Docker duration syntax (for example `500ms`, `0.5s`,
+`1m30s`). A service without a health check starts without an application-readiness
+guarantee. A starting health check is retried with 2–32-second backoff, up to
+300 seconds per service; unhealthy or timed-out services fail the job before
+steps. This explicit bound differs from the pinned official runner's wait until
+health resolves or the job is cancelled. Nonempty service declarations fail
+explicitly on macOS. Empty or disabled services require no Docker daemon.
+
+See [the service evidence map](docs/test-coverage.md#service-containers-issue-74)
+for verified real-Docker scenarios and outstanding live/reference/GHES evidence.
+
 ### Service modes
 
 `[services] mode` decides where artifacts, cache, and OIDC go.

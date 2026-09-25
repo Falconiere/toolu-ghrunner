@@ -30,6 +30,36 @@ fn parses_documented_options_with_quotes_as_distinct_argv_entries() {
   }
 }
 
+/// Docker health flags keep the command as one argv value, so the typed
+/// translator can send Docker's `CMD-SHELL` contract without invoking a shell.
+#[test]
+fn parses_health_options_with_quoted_command() {
+  let result = parse_container_options(
+    "--health-cmd 'curl --fail http://localhost:8080/ready' --health-interval=2s --health-retries 3 --health-start-period 1m --health-start-interval 500ms --health-timeout 1s",
+  );
+
+  assert!(result.is_ok(), "health options must parse: {result:?}");
+  if let Ok(arguments) = result {
+    assert_eq!(
+      arguments,
+      vec![
+        "--health-cmd".to_owned(),
+        "curl --fail http://localhost:8080/ready".to_owned(),
+        "--health-interval".to_owned(),
+        "2s".to_owned(),
+        "--health-retries".to_owned(),
+        "3".to_owned(),
+        "--health-start-period".to_owned(),
+        "1m".to_owned(),
+        "--health-start-interval".to_owned(),
+        "500ms".to_owned(),
+        "--health-timeout".to_owned(),
+        "1s".to_owned(),
+      ]
+    );
+  }
+}
+
 /// The runner owns container topology, identity, entrypoint, workdir, and
 /// mounts, so workflow options cannot replace them.
 #[test]

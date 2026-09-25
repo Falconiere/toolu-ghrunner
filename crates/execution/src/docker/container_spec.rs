@@ -91,7 +91,7 @@ impl ContainerSpec {
     })
   }
 
-  fn from_fields(mut fields: HashMap<String, ExprValue>) -> Result<Self, RunnerError> {
+  pub(super) fn from_fields(mut fields: HashMap<String, ExprValue>) -> Result<Self, RunnerError> {
     for key in fields.keys() {
       if !matches!(
         key.as_str(),
@@ -124,7 +124,10 @@ impl ContainerSpec {
   }
 }
 
-fn evaluate_token(token: &TemplateToken, ctx: &ExecutionContext) -> Result<ExprValue, RunnerError> {
+pub(super) fn evaluate_token(
+  token: &TemplateToken,
+  ctx: &ExecutionContext,
+) -> Result<ExprValue, RunnerError> {
   match token.token_type {
     0 => ctx
       .interpolate_string(token.lit.as_deref().unwrap_or_default())

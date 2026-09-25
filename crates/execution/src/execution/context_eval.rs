@@ -101,7 +101,7 @@ impl ExecutionContext {
   }
 
   /// Build runtime job status and the owned container identity when present.
-  /// Service metadata remains empty until service-container integration.
+  /// Includes actual service container IDs and published host ports.
   fn job_context(&self) -> HashMap<String, ExprValue> {
     let mut job = HashMap::new();
     job.insert(
@@ -118,7 +118,13 @@ impl ExecutionContext {
       ]))
     });
     job.insert("container".to_owned(), container);
-    job.insert("services".to_owned(), ExprValue::Object(HashMap::new()));
+    job.insert(
+      "services".to_owned(),
+      ExprValue::Object(self.services.as_deref().map_or_else(
+        HashMap::new,
+        crate::docker::services::ServiceContainers::context,
+      )),
+    );
     job
   }
 }

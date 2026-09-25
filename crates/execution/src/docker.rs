@@ -6,6 +6,7 @@ mod container_command;
 mod container_create_options;
 /// Attached container execution and bounded cancellation.
 pub mod container_exec;
+mod container_health_options;
 mod container_mounts;
 /// Validated Docker create options.
 pub mod container_options;
@@ -22,3 +23,10 @@ pub mod services;
 #[cfg(test)]
 #[path = "docker/tests/job_container_failures.rs"]
 mod job_container_failures;
+
+/// Service Docker requests and image authentication.
+mod service_create;
+/// Bounded service health readiness.
+mod service_health;
+/// Ordered acquired service declarations.
+pub(crate) mod service_spec;

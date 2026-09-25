@@ -19,11 +19,15 @@ which calls into this module. Job-level cgroup wiring lives in
 | `container_spec.rs` | `ContainerSpec` | Evaluates and validates job-container declarations. |
 | `container_options.rs` | `parse_container_options` | Parses the supported quoted options without a shell. |
 | `container_create_options.rs` | `apply_container_options` | Maps resource, identity and security options to Docker API fields. |
+| `container_health_options.rs` | `apply_health_options` | Maps health-check CLI options to Docker's typed `Healthcheck` create field. |
 | `container_ports.rs` | `apply_ports` | Validates and maps published port declarations. |
 | `container_mounts.rs` | `ContainerMounts` | Mounts individual workspace/runtime directories and a private job home. |
 | `container_exec.rs` | `ContainerExec` | Runs attached container processes with timeout/cancel and streamed output. |
 | `job_container.rs` | `JobContainer` | Owns the per-job container/network through post steps and explicit cleanup. |
-| `services.rs` | `start_service` | Starts a `services:` container on the job network, using `DockerClient` and `path_translator`'s naming conventions. |
+| `services.rs` | `ServiceContainers` | Owns service startup, context metadata, diagnostic logs and cleanup on shared or host-owned networks. |
+| `service_spec.rs` | `ServiceSpec` | Evaluates ordered acquired service declarations and validates platform support. |
+| `service_create.rs` | Service create helpers | Constructs Docker requests and pulls with registry credentials. |
+| `service_health.rs` | Health readiness | Waits with a cancellable, bounded health-check budget. |
 
 When you add a file here, add its row above so the index stays current. There
 is no `mod.rs`; the parent `docker.rs` is the module root and declares
