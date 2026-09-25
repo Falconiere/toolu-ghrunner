@@ -214,25 +214,28 @@ async fn run_single_step(
   }
   // Upstream env/condition evaluation failures happen before RunStepAsync and
   // cannot be recovered by continue-on-error.
-  let preparation = super::step_env::resolve_step_env(step, ctx, &ctx.eval_context())
-    .and_then(|_| evaluate_condition(step, ctx));
-  if let Err(error) = &preparation {
-    let _ = events
-      .send(RunnerEvent::StepStarted {
-        step_id: step.id.clone(),
-        step_name: derive_step_name(step),
-        step_number,
-      })
-      .await;
-    if let Some(name) = step.expression_name() {
-      ctx.set_step_outcome(name, Conclusion::Failure);
-      ctx.set_step_conclusion(name, Conclusion::Failure);
-    }
-    ctx.record_step_failure();
-    report_step_failure(events, &step.id, error).await;
-    return Ok(Conclusion::Failure);
-  }
-  if !preparation? {
+  let should_run = match super::step_env::resolve_step_env(step, ctx, &ctx.eval_context())
+    .and_then(|_| evaluate_condition(step, ctx))
+  {
+    Ok(should_run) => should_run,
+    Err(error) => {
+      let _ = events
+        .send(RunnerEvent::StepStarted {
+          step_id: step.id.clone(),
+          step_name: derive_step_name(step),
+          step_number,
+        })
+        .await;
+      if let Some(name) = step.expression_name() {
+        ctx.set_step_outcome(name, Conclusion::Failure);
+        ctx.set_step_conclusion(name, Conclusion::Failure);
+      }
+      ctx.record_step_failure();
+      report_step_failure(events, &step.id, &error).await;
+      return Ok(Conclusion::Failure);
+    },
+  };
+  if !should_run {
     report_skipped_step(step, step_number, ctx, events).await;
     return Ok(Conclusion::Success);
   }
