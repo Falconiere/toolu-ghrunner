@@ -6,11 +6,11 @@ runs:
     - id: sleeper
       shell: bash
       run: |
-        echo started > "$GITHUB_WORKSPACE/composite-102-bounds.started"
         echo $$ > "$GITHUB_WORKSPACE/composite-102-bounds.pid"
         sleep 5 &
         sleeper=$!
         echo "$sleeper" > "$GITHUB_WORKSPACE/composite-102-bounds.sleep-pid"
+        echo started > "$GITHUB_WORKSPACE/composite-102-bounds.started"
         wait "$sleeper"
         echo late > "$GITHUB_WORKSPACE/composite-102-bounds.late"
     - id: ordinary

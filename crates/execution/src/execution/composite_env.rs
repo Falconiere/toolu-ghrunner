@@ -79,7 +79,12 @@ pub(super) fn build_step_env(
 ) -> Result<HashMap<String, String>, RunnerError> {
   let temp_dir = runner_temp_dir(&params.config.data_dir);
   let mut env = ctx.build_step_env(&HashMap::new());
-  inherit_safe_process_env(ctx, &mut env);
+  // Container jobs use PATH and HOME from their image. Host values may name
+  // paths that do not exist inside the container, so only host steps inherit
+  // the runner process environment.
+  if ctx.job_container().is_none() {
+    inherit_safe_process_env(&mut env);
+  }
   env.extend(extra_env.clone());
   add_composite_inputs(&mut env, params.step_inputs);
   add_composite_action_path(&mut env, params);
@@ -90,11 +95,9 @@ pub(super) fn build_step_env(
   Ok(env)
 }
 
-fn inherit_safe_process_env(ctx: &ExecutionContext, env: &mut HashMap<String, String>) {
-  if ctx.job_container().is_none() {
-    for (key, value) in super::context::safe_process_env_vars() {
-      env.entry(key).or_insert(value);
-    }
+fn inherit_safe_process_env(env: &mut HashMap<String, String>) {
+  for (key, value) in super::context::safe_process_env_vars() {
+    env.entry(key).or_insert(value);
   }
 }
 

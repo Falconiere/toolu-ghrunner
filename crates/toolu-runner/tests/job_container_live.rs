@@ -1,9 +1,10 @@
 //! Bounded GitHub.com verification for issue 73 job containers.
 //!
 //! This deliberately uses only the `gh` and `docker` CLIs: it does not build,
-//! register, start, or authenticate a runner. Before selecting this ignored
-//! test, provision two distinct dedicated runners whose labels are supplied by
-//! `TOOLU_CONTAINER_TOOLU_LABEL` and `TOOLU_CONTAINER_REFERENCE_LABEL`.
+//! register, start, or authenticate a runner. Before selecting either ignored
+//! integration test, provision two distinct dedicated runners whose labels
+//! are supplied by `TOOLU_CONTAINER_TOOLU_LABEL` and
+//! `TOOLU_CONTAINER_REFERENCE_LABEL`.
 //! The test must run where its Docker daemon owns those runner containers.
 //! It cannot capture or sanitize acquired runner messages, and it does not
 //! authenticate an official runner build; those are separate validation
@@ -163,7 +164,7 @@ fn require_token_env() -> Result<(), Box<dyn Error>> {
   }
 }
 
-/// Read-only replay of the recorded toolu/plain and official/timestamped logs.
+/// Opt-in, read-only replay of recorded toolu/plain and official/timestamped logs.
 #[test]
 #[ignore = "requires GitHub.com token and access to the recorded issue 73 run logs"]
 fn job_container_recorded_logs_preserve_exact_markers() -> Result<(), Box<dyn Error>> {
@@ -402,6 +403,7 @@ fn assert_log_markers(run_id: u64) -> Result<(), Box<dyn Error>> {
 }
 
 fn log_line_is_marker(line: &str, marker: &str) -> bool {
+  // Match a whole message so a marker inside a secret or unrelated output cannot pass.
   let line = line.trim();
   line == marker
     || line.split_once(' ').is_some_and(|(timestamp, message)| {
