@@ -17,7 +17,7 @@ jobs:
       hidden: ${{ steps.produce.outputs.hidden }}
       post_value: ${{ env.POST_VALUE }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Write real GITHUB_OUTPUT
         id: produce
         shell: bash
@@ -63,7 +63,7 @@ jobs:
       hidden: ${{ steps.produce.outputs.hidden }}
       post_value: ${{ env.POST_VALUE }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Write real GITHUB_OUTPUT
         id: produce
         shell: bash
@@ -102,17 +102,18 @@ jobs:
   matrix_toolu:
     strategy:
       matrix:
-        tag: [alpha]
+        tag: [alpha, beta]
     runs-on: [self-hosted, toolu-70]
     outputs:
-      tag: ${{ steps.matrix.outputs.tag }}
+      alpha: ${{ steps.matrix.outputs.alpha }}
+      beta: ${{ steps.matrix.outputs.beta }}
     steps:
       - name: Write matrix output
         id: matrix
         shell: bash
         env:
           TAG: ${{ matrix.tag }}
-        run: printf 'tag=%s\n' "$TAG" >> "$GITHUB_OUTPUT"
+        run: printf '%s=%s\n' "$TAG" "$TAG" >> "$GITHUB_OUTPUT"
 
   consumer_matrix:
     needs: matrix_toolu
@@ -121,5 +122,37 @@ jobs:
       - name: Assert downstream matrix output
         shell: bash
         env:
-          TAG: ${{ needs.matrix_toolu.outputs.tag }}
-        run: test "$TAG" = alpha
+          ALPHA: ${{ needs.matrix_toolu.outputs.alpha }}
+          BETA: ${{ needs.matrix_toolu.outputs.beta }}
+        run: |
+          test "$ALPHA" = alpha
+          test "$BETA" = beta
+
+  matrix_reference:
+    strategy:
+      matrix:
+        tag: [alpha, beta]
+    runs-on: [self-hosted, official-70]
+    outputs:
+      alpha: ${{ steps.matrix.outputs.alpha }}
+      beta: ${{ steps.matrix.outputs.beta }}
+    steps:
+      - name: Write matrix output
+        id: matrix
+        shell: bash
+        env:
+          TAG: ${{ matrix.tag }}
+        run: printf '%s=%s\n' "$TAG" "$TAG" >> "$GITHUB_OUTPUT"
+
+  consumer_reference_matrix:
+    needs: matrix_reference
+    runs-on: ubuntu-latest
+    steps:
+      - name: Assert downstream reference matrix outputs
+        shell: bash
+        env:
+          ALPHA: ${{ needs.matrix_reference.outputs.alpha }}
+          BETA: ${{ needs.matrix_reference.outputs.beta }}
+        run: |
+          test "$ALPHA" = alpha
+          test "$BETA" = beta
