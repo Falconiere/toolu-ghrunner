@@ -258,7 +258,7 @@ async fn hard_main_error_still_completes_after_post_cleanup() -> TestResult {
 }
 
 #[tokio::test]
-async fn cancelled_posts_complete_job() -> TestResult {
+async fn cancelled_posts_retest_always_and_complete_job() -> TestResult {
   let dir = tempfile::tempdir()?;
   let config = test_config(&dir);
   let mut msg = local_action_message()?;
@@ -302,19 +302,10 @@ async fn cancelled_posts_complete_job() -> TestResult {
   cancel.cancel();
   let events = tokio::time::timeout(Duration::from_secs(6), collect_events(&mut receiver)).await?;
   assert!(cancelled_at.elapsed() < Duration::from_secs(5));
-  let timer_deadline = std::time::Instant::now() + Duration::from_millis(1200);
-  while std::time::Instant::now() < timer_deadline {
-    let text = std::fs::read_to_string(&marker)?;
-    assert!(
-      !text.contains("B:post-finished"),
-      "Node post timer survived: {text}"
-    );
-    tokio::time::sleep(Duration::from_millis(10)).await;
-  }
   let text = std::fs::read_to_string(marker)?;
   assert!(text.contains("A:post:STATE_k=A-state"), "{text}");
   assert!(text.contains("A:post-finished"), "{text}");
-  assert!(!text.contains("B:post-finished"), "{text}");
+  assert!(text.contains("B:post-finished"), "{text}");
   assert!(events.iter().any(|event| matches!(
     event,
     RunnerEvent::JobCompleted {

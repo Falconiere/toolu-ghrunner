@@ -595,3 +595,45 @@ for the branch run.
 | GitHub.com macOS toolu + official | Unverified: a 2026-09-25 repository API check found zero registered runners | Unverified | Unverified |
 | GitHub.com Linux toolu + official | Unverified: no paired online #82 runners provisioned | Unverified | Unverified |
 | Supported GHES toolu + official | Unverified: no GHES endpoint/token or paired runners configured | Unverified | Unverified |
+## Issue #100 — conditional cleanup
+
+Source: sanitized #68 acquisition `crates/execution/tests/incoming_contexts_matrix_0.json`.
+`conditional_cleanup_test.rs` substitutes real shell/action probes into its tokens,
+retains wire UUIDs, and changes the first generated contextName to `probe` so its
+raw/effective results can be read. It uses the production `Runner` job path.
+The policy oracle is static inspection of official runner
+`cab9d1c3901e45c7705889c4f88284fdd93f4ae5/StepsRunner.cs`; that is **not** reference execution.
+
+| AC / scenario | Exact test / observable evidence |
+| --- | --- |
+| AC-1, AC-5 / S1 | `execution_errors_follow_exit_failure_policy_and_continue_on_error`: exit 7, nonexistent cwd, missing Bash via PATH and missing local action; both continuation settings. Raw failure/effective success or failure, exact following markers, one completion per wire UUID. `condition_and_env_errors_fail_without_continue_adjustment_and_allow_cleanup` distinguishes pre-execution evaluation failures. `workspace_setup_failure_never_runs_user_steps_and_completes_once` uses a real file blocking workspace creation. |
+| AC-2 / S2 | Same error matrix and `real_step_timeout_is_failure_then_conditional_cleanup_runs`: actual one-minute timeout of sleep 300; failure/always/!cancelled markers present, ordinary/cancelled absent, final Failure. |
+| AC-3 / S3 | `observed_start_cancel_retests_current_condition_and_runs_cleanup`: cancel after actual stdout `started`, never a fixed sleep; current success()/!cancelled() interrupt, always() finishes after release; later always/cancelled markers and final Cancelled. |
+| AC-3, AC-4 / S4 | `cancellation_before_first_step_runs_only_eligible_cleanup`; `cancellation_during_real_action_resolution_runs_later_cleanup` waits for an actual HTTP request to a deliberately unresponsive loopback resolver (no fabricated successful service response); `shutdown_interrupts_always_and_skips_later_user_steps` exercises the independent shutdown API. Actual CLI SIGTERM and a deterministic between-step/timeout race remain unverified. |
+| AC-4, AC-5 / S5 | `cancellation_kills_owned_child_and_grandchild_but_not_unrelated_process`: real Bash/sh/sleep family; ps confirms death, independently spawned sleep survives. `job_cancellation::tests::cleanup_processes_share_one_deadline` uses real processes with a shortened shared deadline. `post_results_test` retains LIFO, hard-error and state/report identity checks; running always() posts now finish on graceful cancellation. Container/service-resource comparisons remain required. |
+
+Run `cargo test -p execution --test conditional_cleanup_test --test post_results_test`
+and the unchanged `./tools/check.sh all`. The initial macOS ARM64 replay reproduced
+missing-cwd early termination and pre-cancel cleanup omission. The first eight
+regressions subsequently passed, including the real 60-second timeout; composite
+bounds/semantics regressions also passed. Final gate and additional verification
+status must be recorded from the current revision before delivery.
+
+On 2026-09-25 the unchanged `./tools/check.sh all` passed in the Linux ARM64
+`toolu-72-gate-tools:local` container against an exact source snapshot of this
+worktree: 981 tests passed, zero failed, 25 were ignored by the existing suite.
+Log: `/tmp/issue100-linux-gate3.log`. All nine conditional-cleanup cases, the
+shared-deadline unit test and six `gh_compat_prepost` cases passed. The latter's
+old escaped-Err expectation was updated to exact `Ok(Failure)` while retaining
+the real Node post-state assertion. The macOS full gate was stopped after a test
+binary was sampled stalled in `_dyld_start`; targeted macOS tests passed, but
+that incomplete full run is not a pass. None of this certifies ignored/live lanes.
+
+`conditional_cleanup_evidence.json` records scenario mappings and outstanding
+lanes. `python3 scripts/test/conditional_cleanup_evidence_check.py --local` validates
+mapping only. Without `--local`, missing required lane evidence fails explicitly.
+Linux Docker resources, real CLI SIGTERM, GitHub.com UI/backend conclusions,
+pinned reference comparisons and GHES are **unverified** until their evidence is
+recorded. Supported GHES needs a supplied server/version/credentials; none is
+configured for this worker. Static source review, ignored tests, and local replay
+cannot close those requirements.

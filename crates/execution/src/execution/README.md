@@ -70,3 +70,5 @@ not part of it. Workflow YAML parsing/matrix/orchestration lives in the
 When you add a file here, add its row above so the index stays current. No
 `mod.rs` barrel — declare submodules from the parent file (`src/foo.rs`
 declares `mod bar;` for `src/foo/bar.rs`) and import concrete paths.
+
+| `job_cancellation.rs` | Separate graceful job cancellation from shutdown; share one cleanup deadline and re-evaluate running conditions. |

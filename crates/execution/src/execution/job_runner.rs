@@ -10,7 +10,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use super::actions::prefetch::ActionFetcher;
-use super::container_job::{evaluate_container, finish_container, start_container};
+use super::container_job::start_container;
 use super::context::ExecutionContext;
 pub use super::job_context::build_context;
 use super::job_context::{event_json, write_event_json};
@@ -30,6 +30,7 @@ use cache::trust::{TrustLevel, classify_trust};
 use cache::v1::{V1Inputs, V1State, v1_router};
 use shared::SecretMasker;
 
+mod entry;
 mod outputs;
 mod prepared;
 
@@ -71,49 +72,32 @@ pub async fn run_job(
   events: mpsc::Sender<RunnerEvent>,
   masker: Arc<Mutex<SecretMasker>>,
 ) -> Result<JobTeardown, RunnerError> {
-  let workspace = config.workspace_root.join(&msg.job_id);
-  let (msg, mut ctx) = build_job_context_async(msg, config, masker, workspace.clone()).await?;
-  let container_spec = evaluate_container(&msg, config, &ctx)?;
-  let (workspace, workspace_gc) = prepare_job_workspace(config, &msg.job_id, workspace).await?;
-  let (http, local) = start_job_services(config, &msg, &mut ctx).await?;
-  let (local, workspace_gc) = match start_job_container(ContainerStartParams {
-    spec: container_spec.as_ref(),
+  run_job_with_shutdown(
+    msg,
     config,
-    workspace: &workspace,
-    ctx: &mut ctx,
-    cancel: &cancel,
-    local,
-    events: &events,
-    job_id: &msg.job_id,
-    workspace_gc,
-  })
-  .await?
-  {
-    ContainerStart::Continue(local, workspace_gc) => (local, workspace_gc),
-    ContainerStart::Finished(teardown) => return Ok(teardown),
-  };
-  let inputs = prepared::Inputs {
-    msg: &msg,
-    config,
-    cancel: &cancel,
-    events: &events,
-    workspace: &workspace,
-    http: &http,
-  };
-  let body_result = prepared::execute(inputs, &mut ctx).await;
-  let (conclusion, outputs) = match finish_container(&ctx, body_result).await {
-    Ok(result) => result,
-    Err(error) => {
-      stop_local_services(local).await;
-      return Err(error);
-    },
-  };
-  let outcome = JobOutcome {
-    job_id: msg.job_id,
-    conclusion,
-    outputs,
-  };
-  Ok(finish_job(local, &events, outcome, workspace_gc).await)
+    cancel,
+    events,
+    masker,
+    CancellationToken::new(),
+  )
+  .await
+}
+
+/// Execute a job with separate graceful cancellation and runner shutdown signals.
+///
+/// # Errors
+/// Returns setup or teardown errors that prevent completing the job.
+pub async fn run_job_with_shutdown(
+  msg: AgentJobRequestMessage,
+  config: &RunnerConfig,
+  cancel: CancellationToken,
+  events: mpsc::Sender<RunnerEvent>,
+  masker: Arc<Mutex<SecretMasker>>,
+  shutdown: CancellationToken,
+) -> Result<JobTeardown, RunnerError> {
+  // Keep the setup/execution state machine off callers' stack frames. The
+  // compatibility entry point and listener otherwise inline it repeatedly.
+  Box::pin(entry::run(msg, config, cancel, events, masker, shutdown)).await
 }
 
 async fn build_job_context_async(
@@ -199,7 +183,15 @@ async fn start_job_container(
     Ok(false) => {
       let outcome = JobOutcome {
         job_id: job_id.to_owned(),
-        conclusion: Conclusion::Cancelled,
+        conclusion: if ctx
+          .cancellation
+          .as_ref()
+          .is_some_and(|signal| signal.shutdown.is_cancelled())
+        {
+          Conclusion::Failure
+        } else {
+          Conclusion::Cancelled
+        },
         outputs: HashMap::new(),
       };
       Ok(ContainerStart::Finished(

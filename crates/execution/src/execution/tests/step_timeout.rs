@@ -14,7 +14,6 @@ async fn blocked_resolution_obeys_parent_deadline() -> Result<(), Box<dyn std::e
   let (events, _receiver) = mpsc::channel(1);
   events.send("occupied").await?;
   let bounds = StepBounds {
-    timeout: Some(Duration::from_millis(30)),
     deadline: Some(Instant::now() + Duration::from_millis(30)),
     cancel: CancellationToken::new(),
   };
@@ -38,7 +37,6 @@ async fn blocked_resolution_obeys_cancellation() -> Result<(), Box<dyn std::erro
   events.send("occupied").await?;
   let cancel = CancellationToken::new();
   let bounds = StepBounds {
-    timeout: None,
     deadline: None,
     cancel: cancel.clone(),
   };

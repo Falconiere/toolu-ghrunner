@@ -36,6 +36,7 @@ pub mod depth_tracker;
 pub mod file_commands;
 /// Handler dispatch by `runs.using` (plugin → script → node → docker → composite).
 pub mod handlers;
+mod job_cancellation;
 mod job_context;
 /// Job-level `ACTIONS_RUNNER_HOOK_JOB_*` hooks (self-hosted job lifecycle scripts).
 pub mod job_hooks;

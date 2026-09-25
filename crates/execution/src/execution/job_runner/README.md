@@ -10,3 +10,4 @@ those stay in `job_runner.rs`.
 | --- | --- | --- |
 | `prepared.rs` | `execute` | Starts prefetch, resolves live job defaults, runs the job body, and stops future fetches. |
 | `outputs.rs` | `evaluate_final_outputs` | Resolves acquired job outputs after posts, emits secret warnings, and preserves cancellation. |
+| `entry.rs` | `run` | Initializes a job, runs main/posts, and tears down resources with separate job cancellation and shutdown. |

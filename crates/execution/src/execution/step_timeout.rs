@@ -21,22 +21,11 @@ mod tests;
 /// in-flight job `CancellationToken`. Computed once per step and threaded to
 /// every child-spawning handler so later children use only remaining time.
 pub(crate) struct StepBounds {
-  pub(crate) timeout: Option<Duration>,
   pub(crate) deadline: Option<Instant>,
   pub(crate) cancel: CancellationToken,
 }
 
 impl StepBounds {
-  /// Build bounds from a step's `timeout-minutes` and the job cancel token.
-  pub(crate) fn new(timeout_minutes: Option<u32>, cancel: CancellationToken) -> Self {
-    let timeout = timeout_duration(timeout_minutes);
-    Self {
-      timeout,
-      deadline: timeout.map(|duration| Instant::now() + duration),
-      cancel,
-    }
-  }
-
   /// Keep a nested action inside its parent's absolute deadline.
   pub(crate) fn nested(
     parent_deadline: Option<Instant>,
@@ -50,11 +39,7 @@ impl StepBounds {
       (Some(parent), None) => Some(parent),
       (None, child) => child,
     };
-    Self {
-      timeout: deadline.map(|at| at.saturating_duration_since(Instant::now())),
-      deadline,
-      cancel,
-    }
+    Self { deadline, cancel }
   }
 
   /// Duration left before the fixed deadline, for the next child process.
@@ -155,6 +140,7 @@ async fn kill_and_reap(
   const REAP_GRACE: Duration = Duration::from_secs(10);
   // `start_kill` sends SIGKILL; an already-exited child yields an error we
   // can safely ignore, since the goal is just to ensure it is not running.
+  kill_process_group(child.id());
   let _ = child.start_kill();
   match tokio::time::timeout(REAP_GRACE, child.wait()).await {
     Ok(status) => {
@@ -169,3 +155,22 @@ async fn kill_and_reap(
   }
   Ok(())
 }
+
+/// Kill only the process group whose leader is the owned step child.
+#[cfg(unix)]
+fn kill_process_group(group_id: Option<u32>) {
+  use nix::errno::Errno;
+  use nix::sys::signal::{Signal, killpg};
+  use nix::unistd::Pid;
+
+  let Some(pid) = group_id.and_then(|id| i32::try_from(id).ok()) else {
+    return;
+  };
+  match killpg(Pid::from_raw(pid), Signal::SIGKILL) {
+    Ok(()) | Err(Errno::ESRCH) => {},
+    Err(error) => tracing::warn!(pid, %error, "failed to kill owned step process group"),
+  }
+}
+
+#[cfg(not(unix))]
+fn kill_process_group(_group_id: Option<u32>) {}

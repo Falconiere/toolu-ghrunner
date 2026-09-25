@@ -55,6 +55,17 @@ impl Runner {
     job: AgentJobRequestMessage,
     cancel: CancellationToken,
   ) -> mpsc::Receiver<RunnerEvent> {
+    self.execute_job_with_shutdown(job, cancel, CancellationToken::new())
+  }
+
+  /// Execute with distinct GitHub job cancellation and runner shutdown signals.
+  /// Shutdown interrupts every condition and concludes the job as failure.
+  pub fn execute_job_with_shutdown(
+    &self,
+    job: AgentJobRequestMessage,
+    cancel: CancellationToken,
+    shutdown: CancellationToken,
+  ) -> mpsc::Receiver<RunnerEvent> {
     let (tx, rx) = mpsc::channel(1024);
     let config = self.config.clone();
     let masker = Arc::clone(&self.masker);
@@ -65,43 +76,46 @@ impl Runner {
       // same move, since a `run_job` error drops `job` before returning.
       let err_tx = tx.clone();
       let job_id = job.job_id.clone();
-      let teardown =
-        match crate::execution::job_runner::run_job(job, &config, cancel, tx, masker).await {
-          Ok(teardown) => teardown,
-          Err(err) => {
-            tracing::error!(error = %err, "job execution failed");
-            // Surface the failure in the GitHub job log too — `tracing::error!`
-            // above only reaches the local diag log — before the completion
-            // event, and report the real job id so the run/step actually
-            // resolves out of "in_progress" on GitHub's side.
-            // These are the last-resort diagnostics for a dead job, so a
-            // closed channel is worth a warn rather than the crate's usual
-            // silent best-effort send.
-            if err_tx
-              .send(RunnerEvent::Log {
-                step_id: String::new(),
-                line: format!("##[error]{err}"),
-                stream: LogStream::Stdout,
-              })
-              .await
-              .is_err()
-            {
-              tracing::warn!("event channel closed; job-failure log line was dropped");
-            }
-            if err_tx
-              .send(RunnerEvent::JobCompleted {
-                job_id,
-                conclusion: Conclusion::Failure,
-                outputs: HashMap::new(),
-              })
-              .await
-              .is_err()
-            {
-              tracing::warn!("event channel closed; job-failure completion event was dropped");
-            }
-            return;
-          },
-        };
+      let teardown = match crate::execution::job_runner::run_job_with_shutdown(
+        job, &config, cancel, tx, masker, shutdown,
+      )
+      .await
+      {
+        Ok(teardown) => teardown,
+        Err(err) => {
+          tracing::error!(error = %err, "job execution failed");
+          // Surface the failure in the GitHub job log too — `tracing::error!`
+          // above only reaches the local diag log — before the completion
+          // event, and report the real job id so the run/step actually
+          // resolves out of "in_progress" on GitHub's side.
+          // These are the last-resort diagnostics for a dead job, so a
+          // closed channel is worth a warn rather than the crate's usual
+          // silent best-effort send.
+          if err_tx
+            .send(RunnerEvent::Log {
+              step_id: String::new(),
+              line: format!("##[error]{err}"),
+              stream: LogStream::Stdout,
+            })
+            .await
+            .is_err()
+          {
+            tracing::warn!("event channel closed; job-failure log line was dropped");
+          }
+          if err_tx
+            .send(RunnerEvent::JobCompleted {
+              job_id,
+              conclusion: Conclusion::Failure,
+              outputs: HashMap::new(),
+            })
+            .await
+            .is_err()
+          {
+            tracing::warn!("event channel closed; job-failure completion event was dropped");
+          }
+          return;
+        },
+      };
       // Dropping the last sender closes the event channel, which is what
       // ultimately reports the job to GitHub. Cache GC and the workspace
       // sweep then overlap that round-trip instead of preceding it.

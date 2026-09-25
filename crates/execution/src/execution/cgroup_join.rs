@@ -26,6 +26,11 @@ pub async fn spawn_in_cgroup(
   cmd: &mut Command,
   cgroup_path: Option<&Path>,
 ) -> Result<Child, RunnerError> {
+  // Every host step owns its process group; killing one job never signals the
+  // runner's group or another registration's children.
+  #[cfg(unix)]
+  cmd.process_group(0);
+  cmd.kill_on_drop(true);
   let child = cmd.spawn().map_err(RunnerError::Io)?;
 
   if let Some(path) = cgroup_path {

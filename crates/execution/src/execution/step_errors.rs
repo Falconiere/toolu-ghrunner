@@ -11,21 +11,7 @@ pub(super) async fn report_step_failure(
   step_id: &str,
   err: &RunnerError,
 ) {
-  if events
-    .send(RunnerEvent::Log {
-      step_id: step_id.to_owned(),
-      line: format!("##[error]{err}"),
-      stream: LogStream::Stdout,
-    })
-    .await
-    .is_err()
-  {
-    tracing::warn!(
-      step_id,
-      error = %err,
-      "event channel closed; step-failure log line was dropped"
-    );
-  }
+  report_step_error(events, step_id, err).await;
   if events
     .send(RunnerEvent::StepCompleted {
       step_id: step_id.to_owned(),
@@ -39,6 +25,29 @@ pub(super) async fn report_step_failure(
       step_id,
       error = %err,
       "event channel closed; step-failure completion event was dropped"
+    );
+  }
+}
+
+/// Emit an execution error without completing the step before result adjustment.
+pub(super) async fn report_step_error(
+  events: &mpsc::Sender<RunnerEvent>,
+  step_id: &str,
+  err: &RunnerError,
+) {
+  if events
+    .send(RunnerEvent::Log {
+      step_id: step_id.to_owned(),
+      line: format!("##[error]{err}"),
+      stream: LogStream::Stdout,
+    })
+    .await
+    .is_err()
+  {
+    tracing::warn!(
+      step_id,
+      error = %err,
+      "event channel closed; step-failure log line was dropped"
     );
   }
 }
