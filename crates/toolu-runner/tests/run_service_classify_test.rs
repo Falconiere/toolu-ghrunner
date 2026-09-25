@@ -15,8 +15,9 @@ use std::time::Duration;
 
 use shared::RunnerError;
 use wire::net::run_service::{ERROR_BODY_READ_CAP, ERROR_BODY_SNIPPET_CHARS};
-use wire::reporting::ReportConclusion;
-use wire::reporting::run_service::{CompleteJobRequest, RenewJobRequest, complete_job, renew_job};
+use wire::reporting::run_service::{
+  CompleteJobRequest, JobConclusion, RenewJobRequest, complete_job, renew_job,
+};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -39,7 +40,7 @@ fn complete_request() -> CompleteJobRequest {
     plan_id: "plan-1".to_owned(),
     job_id: "job-1".to_owned(),
     request_id: 1,
-    conclusion: ReportConclusion::Success,
+    conclusion: JobConclusion::Succeeded,
     outputs: std::collections::HashMap::new(),
     step_results: Vec::new(),
     annotations: Vec::new(),

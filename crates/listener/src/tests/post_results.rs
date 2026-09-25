@@ -8,9 +8,8 @@ use execution::Runner;
 use execution::node::runtime::{node_binary_path, node_cache_dir, node_version_for};
 use shared::{AgentJobRequestMessage, Conclusion, RunnerConfig, RunnerEvent, SecretMasker};
 use tokio_util::sync::CancellationToken;
-use wire::reporting::run_service::CompleteJobRequest;
+use wire::reporting::run_service::{CompleteJobRequest, JobConclusion};
 
-use crate::helpers::map_conclusion;
 use crate::step_reporter::StepCollector;
 
 #[tokio::test]
@@ -119,7 +118,7 @@ async fn post_results_reach_distinct_completion_records() -> Result<(), Box<dyn 
     plan_id: msg.plan.plan_id,
     job_id: msg.job_id,
     request_id: msg.request_id,
-    conclusion: map_conclusion(conclusion),
+    conclusion: JobConclusion::Failed,
     outputs: std::collections::HashMap::new(),
     step_results: collector.collected_results().await,
     annotations: Vec::new(),
@@ -130,8 +129,8 @@ async fn post_results_reach_distinct_completion_records() -> Result<(), Box<dyn 
     .and_then(serde_json::Value::as_array)
     .ok_or("missing stepResults")?;
   assert_eq!(
-    json.get("conclusion").and_then(serde_json::Value::as_u64),
-    Some(3)
+    json.get("conclusion").and_then(serde_json::Value::as_str),
+    Some("failed")
   );
   assert_eq!(steps.len(), 2);
   let main = steps.first().ok_or("main step missing")?;

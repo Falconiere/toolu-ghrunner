@@ -1,11 +1,12 @@
 //! Build and send the Run Service completion request.
 
-use shared::RunnerError;
-use wire::reporting::run_service::{CompleteJobOutput, CompleteJobRequest, complete_job};
+use shared::{Conclusion, RunnerError};
+use wire::reporting::run_service::{
+  CompleteJobOutput, CompleteJobRequest, JobConclusion, complete_job,
+};
 
 use super::JobOutcome;
 use crate::SessionCtx;
-use crate::helpers::map_conclusion;
 
 /// Report a finished job, retrying transient Run Service failures.
 pub(super) async fn report_completion(
@@ -19,7 +20,7 @@ pub(super) async fn report_completion(
     plan_id,
     job_id: outcome.job_id,
     request_id: outcome.request_id,
-    conclusion: map_conclusion(outcome.conclusion),
+    conclusion: map_job_conclusion(outcome.conclusion),
     outputs: outcome
       .outputs
       .into_iter()
@@ -36,4 +37,13 @@ pub(super) async fn report_completion(
     "complete_job",
   )
   .await
+}
+
+fn map_job_conclusion(conclusion: Conclusion) -> JobConclusion {
+  match conclusion {
+    Conclusion::Success => JobConclusion::Succeeded,
+    Conclusion::Failure => JobConclusion::Failed,
+    Conclusion::Cancelled => JobConclusion::Canceled,
+    Conclusion::Skipped => JobConclusion::Skipped,
+  }
 }

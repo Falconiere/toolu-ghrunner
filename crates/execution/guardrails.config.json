@@ -70,6 +70,9 @@
   "secrets": {
     "neverTracked": [
       ".env"
+    ],
+    "scanExempt": [
+      "tests/job_outputs_message.json"
     ]
   },
   "shadowConfigs": [
