@@ -30,16 +30,22 @@
     "crates/toolu-runner/tests/fixtures/local_actions/ci-72-parent/action.yml": "b62d11330d59549d38645063efeb1852ad6206cd36394433b8e45c430ca650cc"
   },
   "runs": {
-    "reference-host-macos": null,
-    "reference-host-linux": null,
-    "reference-container-linux": null,
+    "reference-host-macos": {
+      "id": 36184411746,
+      "revision": "60ad9fb3089ed0d66d83341ab2471d6ba3631c7d"
+    },
+    "reference-host-linux": {
+      "id": 36184411746,
+      "revision": "60ad9fb3089ed0d66d83341ab2471d6ba3631c7d"
+    },
+    "reference-container-linux": {
+      "id": 36184411746,
+      "revision": "60ad9fb3089ed0d66d83341ab2471d6ba3631c7d"
+    },
     "toolu-host-macos": null,
     "toolu-container-linux": null
   },
   "unverified": {
-    "reference-host-macos": "Branch workflow has not run yet; GitHub-hosted runner binary is not pinned to the issue 67 source revision.",
-    "reference-host-linux": "Branch workflow has not run yet; GitHub-hosted runner binary is not pinned to the issue 67 source revision.",
-    "reference-container-linux": "Branch workflow has not run yet; GitHub-hosted runner binary is not pinned to the issue 67 source revision.",
     "toolu-host-macos": "GitHub API reports zero registered self-hosted runners; no toolu GitHub.com job was acquired.",
     "toolu-container-linux": "GitHub API reports zero registered self-hosted runners; no toolu Linux container job was acquired.",
     "ghes": "No GHES server or credentials are available in this worker environment.",

@@ -2,12 +2,17 @@
 
 use std::collections::HashMap;
 
-/// Apply the runner's process flags after job and step env precedence is settled.
+const GITHUB_ACTIONS_ENABLED: &str = "true";
+
+/// Force GitHub Actions mode and default absent `CI` after child env is built.
 ///
 /// `container_ci` is the job container's retained base value. A child that
 /// supplies its own `CI` keeps it, including an empty string.
 pub(crate) fn apply(env: &mut HashMap<String, String>, container_ci: Option<&str>) {
-  env.insert("GITHUB_ACTIONS".to_owned(), "true".to_owned());
+  env.insert(
+    "GITHUB_ACTIONS".to_owned(),
+    GITHUB_ACTIONS_ENABLED.to_owned(),
+  );
   env.entry("CI".to_owned()).or_insert_with(|| {
     container_ci
       .map(str::to_owned)
