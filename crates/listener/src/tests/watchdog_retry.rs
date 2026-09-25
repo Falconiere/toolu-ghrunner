@@ -15,8 +15,7 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use shared::RunnerError;
-use wire::reporting::ReportConclusion;
-use wire::reporting::run_service::{CompleteJobRequest, complete_job};
+use wire::reporting::run_service::{CompleteJobRequest, JobConclusion, complete_job};
 
 use crate::retry::{REPORT_RETRY_MAX, retry_transient};
 
@@ -30,7 +29,7 @@ fn complete_request() -> CompleteJobRequest {
     plan_id: "plan-1".to_owned(),
     job_id: "job-1".to_owned(),
     request_id: 1,
-    conclusion: ReportConclusion::Success,
+    conclusion: JobConclusion::Succeeded,
     outputs: std::collections::HashMap::new(),
     step_results: Vec::new(),
     annotations: Vec::new(),

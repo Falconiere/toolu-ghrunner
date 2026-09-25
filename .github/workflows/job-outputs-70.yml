@@ -1,9 +1,6 @@
 name: job-outputs-70
 run-name: job-outputs-70 verify ${{ github.sha }}
 on:
-  push:
-    branches:
-      - feat/70-evaluate-job-outputs-from-the
   workflow_dispatch:
 
 permissions:

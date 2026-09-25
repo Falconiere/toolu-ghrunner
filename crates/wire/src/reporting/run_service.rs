@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::types::{Annotation, Conclusion};
+use super::types::Annotation;
 use shared::RunnerError;
 
 /// Request body for `POST {run_service_url}/acquirejob`.
@@ -57,14 +57,29 @@ pub struct CompleteJobRequest {
   pub job_id: String,
   /// Id of the broker message that delivered the job, echoed back on completion.
   pub request_id: i64,
-  /// Final job conclusion.
-  pub conclusion: Conclusion,
+  /// Final job conclusion in the Run Service `TaskResult` wire format.
+  pub conclusion: JobConclusion,
   /// Job-level outputs to report back.
   pub outputs: HashMap<String, CompleteJobOutput>,
   /// Per-step results for the completed job.
   pub step_results: Vec<super::types::StepResult>,
   /// Job-level annotations (errors/warnings/notices) to report back.
   pub annotations: Vec<Annotation>,
+}
+
+/// Run Service job result, serialized as the upstream `TaskResult` name.
+/// The Results Service step conclusion uses a different numeric enum.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum JobConclusion {
+  /// The job succeeded.
+  Succeeded,
+  /// The job failed.
+  Failed,
+  /// The job was canceled.
+  Canceled,
+  /// The job was skipped.
+  Skipped,
 }
 
 /// One job-level output in the Run Service completion payload.
