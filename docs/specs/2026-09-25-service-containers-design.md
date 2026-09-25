@@ -53,7 +53,7 @@ Bad mapping/scalar/alias/config fails visibly without steps. Empty/null declarat
 | AC-5 | Observed first service start followed by real second-image failure, observed health wait cancellation, observed running-step cancellation; retain sentinel unrelated container/network | Same Linux real-Docker lane; inspect owned resource absence and sentinel survival |
 | AC-6 | Gate exit 0; committed scenario/workflow/fixture provenance matrix with commands, platform/backend and real passing links | `./tools/check.sh all`, README and docs/test-coverage.md review |
 
-Captured service payload and paired GitHub.com/reference runs must be obtained with the same workflow/action revisions. Existing captured job payload with explicit variations supports deterministic production replay, not a claim of an acquired service capture. GHES requires a real acquired job; absent infrastructure remains unverified. Linux ARM64 Docker is locally available. macOS supports the explicit rejection lane, not services. #75 integration is recorded as a dependency. No ignored test or zero-test Darwin invocation counts as evidence.
+Full parity evidence requires captured service payload and paired GitHub.com/reference runs using the same workflow/action revisions. Existing captured job payload with explicit variations supports deterministic production replay, not a claim of an acquired service capture. GHES requires a real acquired job; absent infrastructure remains unverified. Linux ARM64 Docker is locally available. macOS supports the explicit rejection lane, not services. #75 integration is recorded as a dependency. No ignored test or zero-test Darwin invocation counts as evidence.
 
 ## Documentation impact
 
@@ -61,4 +61,4 @@ README service support/options/readiness/platform rules; docs/architecture.md li
 
 ## Open Questions
 
-None for implementation. The issue requires bounded startup; use 300s with explicit upstream difference. Capture/reference/GHES availability is an evidence prerequisite, never inferred from local tests. The brief authorizes decisions without a human design round.
+None for implementation. The issue requires bounded startup; use 300s with explicit upstream difference. Capture/reference/GHES availability limits the parity evidence, never inferred from local tests. The orchestrator explicitly authorized delivery on 2026-09-25 with those unavailable lanes documented as unverified; no GHES endpoint/token exists for this epic run. This narrows the delivery gate, not the parity claim. The brief authorizes decisions without a human design round.
