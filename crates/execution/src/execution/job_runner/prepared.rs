@@ -57,8 +57,8 @@ pub(super) async fn execute(
   emit_job_started(events, &msg.job_id, &msg.job_display_name).await;
 
   // Later run mappings replace earlier workflow mappings, matching GitHub.
-  // Job outputs are populated by their separate message-wiring issue.
   let spec = JobSpec {
+    acquired_outputs: msg.job_outputs.clone(),
     defaults: JobSpec::from_message_defaults(&msg.defaults, ctx)?,
     ..JobSpec::default()
   };

@@ -31,7 +31,7 @@ fn complete_request() -> CompleteJobRequest {
     job_id: "job-1".to_owned(),
     request_id: 1,
     conclusion: ReportConclusion::Success,
-    outputs: serde_json::Value::Object(serde_json::Map::new()),
+    outputs: std::collections::HashMap::new(),
     step_results: Vec::new(),
     annotations: Vec::new(),
   }

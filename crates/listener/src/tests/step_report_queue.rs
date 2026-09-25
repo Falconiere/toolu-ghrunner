@@ -59,6 +59,7 @@ const WORKFLOW_STEPS_UPDATE_PATH: &str =
 fn job_message(broker_uri: &str, results_endpoint: &str, job_id: &str) -> AgentJobRequestMessage {
   AgentJobRequestMessage {
     job_container: None,
+    job_outputs: None,
     message_type: "PipelineAgentJobRequest".to_owned(),
     plan: TaskOrchestrationPlanReference {
       scope_identifier: None,

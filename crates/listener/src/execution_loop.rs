@@ -35,6 +35,7 @@ pub(super) struct JobRoute<'a> {
 /// the watchdog's trip flag before this struct is built.
 pub(super) struct JobExecution {
   pub(super) conclusion: Conclusion,
+  pub(super) outputs: HashMap<String, String>,
   pub(super) steps: Vec<wire::reporting::StepResult>,
   pub(super) annotations: Vec<wire::reporting::Annotation>,
   /// The live-log wrapper task's `JoinHandle`, produced by [`connect_live_log`]
@@ -73,19 +74,8 @@ pub(super) async fn execute_with_renewal(
     Arc::clone(&outage_tripped),
   );
 
-  // "Set up job" (step 1, matches C# runner order — real workflow steps
-  // start at number 2+) and the live-log WebSocket handshake have no mutual
-  // dependency, so run them concurrently instead of paying the sum of their
-  // round-trips. The engine (`run_forwarded_job` below) starts only once
-  // BOTH have resolved. Each leg is boxed: `tokio::join!` holds both
-  // futures' state for the join's own lifetime, and the two together
-  // otherwise push this fn's returned future past clippy's `large_futures`
-  // threshold (it is awaited inside a `tokio::time::timeout` at several
-  // call sites, which inlines the whole state machine).
-  let ((setup_result, setup_lines), (live_log_tx, live_log_handle)) = tokio::join!(
-    Box::pin(report_setup_step(rs_token, plan_id, job_msg, &ctx.client)),
-    Box::pin(connect_live_log(job_msg, rs_token)),
-  );
+  let (setup_result, setup_lines, live_log_tx, live_log_handle) =
+    connect_and_report_setup(ctx, job_msg, rs_token, plan_id).await;
 
   let collector = StepCollector::new();
   if let Some(result) = setup_result {
@@ -95,6 +85,7 @@ pub(super) async fn execute_with_renewal(
 
   let ForwarderOutcome {
     conclusion,
+    outputs,
     job_log_upload,
   } = run_forwarded_job(ctx, job_msg, &collector, cfg, job_cancel).await;
   renewal_cancel.cancel();
@@ -105,6 +96,7 @@ pub(super) async fn execute_with_renewal(
   let steps = collector.collected_results().await;
   JobExecution {
     conclusion,
+    outputs,
     steps,
     annotations,
     live_log_handle,
@@ -112,21 +104,29 @@ pub(super) async fn execute_with_renewal(
   }
 }
 
-/// Connect the live-log WebSocket for real-time log streaming to GitHub's
-/// UI. Returns `(None, None)` on failure — live logs are best-effort, so a
-/// connect failure never fails the job.
-///
-/// Run inside the same `tokio::join!` as [`report_setup_step`] (see
-/// [`execute_with_renewal`]) — the two share no state, and previously ran
-/// strictly in sequence (this fn's caller used to `.await` in full before
-/// `report_setup_step` was ever called), paying the sum of both round-trips
-/// instead of their max.
-///
-/// The second element of the returned tuple is the `JoinHandle` of the
-/// wrapper task spawned below (not `LiveLogStreamer::connect`'s inner
-/// handle) — threaded all the way up through [`JobExecution`] so
-/// `job_lifecycle::poll_and_execute` can stash it on `ctx` for
-/// `cleanup_session` to join, instead of it being dropped un-joined here.
+/// Start setup-step reporting and live-log connection at the same time.
+/// The engine starts after both finish, preserving step number and log order.
+async fn connect_and_report_setup(
+  ctx: &SessionCtx,
+  job_msg: &AgentJobRequestMessage,
+  rs_token: &str,
+  plan_id: &str,
+) -> (
+  Option<wire::reporting::StepResult>,
+  Vec<String>,
+  Option<mpsc::Sender<LiveLogLine>>,
+  Option<tokio::task::JoinHandle<()>>,
+) {
+  // Box both legs to keep the enclosing future below clippy's size limit.
+  let ((setup_result, setup_lines), (live_log_tx, live_log_handle)) = tokio::join!(
+    Box::pin(report_setup_step(rs_token, plan_id, job_msg, &ctx.client)),
+    Box::pin(connect_live_log(job_msg, rs_token)),
+  );
+  (setup_result, setup_lines, live_log_tx, live_log_handle)
+}
+
+/// Connect the live-log WebSocket, returning `(None, None)` on failure.
+/// The wrapper handle reaches session cleanup through [`JobExecution`].
 async fn connect_live_log(
   job_msg: &AgentJobRequestMessage,
   fallback_token: &str,
@@ -228,6 +228,7 @@ fn build_fwd_config(
 /// still in flight.
 struct ForwarderOutcome {
   conclusion: Conclusion,
+  outputs: HashMap<String, String>,
   /// `None` when no Results Service URL is configured — there is nowhere to
   /// upload the combined log to, so no task was spawned.
   job_log_upload: Option<tokio::task::JoinHandle<()>>,
@@ -265,6 +266,7 @@ async fn run_forwarded_job(
     tracing::error!("event forwarder dropped the conclusion sender");
     ForwarderOutcome {
       conclusion: Conclusion::Failure,
+      outputs: HashMap::new(),
       job_log_upload: None,
     }
   };
@@ -349,6 +351,7 @@ struct ForwarderState {
   upload_tasks: tokio::task::JoinSet<Option<(String, String, u64)>>,
   all_job_lines: Vec<String>,
   conclusion: Option<Conclusion>,
+  outputs: HashMap<String, String>,
   /// Set once the live-log WebSocket streamer task has gone away
   /// (`try_send` returned `Closed`). Latches off further live sends so
   /// we stop spinning, and is logged exactly once. Durable logs are
@@ -372,6 +375,7 @@ impl ForwarderState {
       upload_tasks: tokio::task::JoinSet::new(),
       all_job_lines: setup_lines,
       conclusion: None,
+      outputs: HashMap::new(),
       live_log_closed: false,
     }
   }
@@ -406,8 +410,14 @@ fn spawn_event_forwarder(
     let setup_lines = std::mem::take(&mut cfg.setup_lines);
     let mut state = ForwarderState::new(setup_lines, &cfg);
     while let Some(event) = events_rx.recv().await {
-      if let RunnerEvent::JobCompleted { conclusion: c, .. } = &event {
+      if let RunnerEvent::JobCompleted {
+        conclusion: c,
+        outputs,
+        ..
+      } = &event
+      {
         state.conclusion = Some(*c);
+        state.outputs = outputs.clone();
       }
       fwd_collector.record(&event).await;
       handle_event_arm(&mut state, &cfg, &event).await;
@@ -429,6 +439,7 @@ fn spawn_event_forwarder(
     }
     let _ = outcome_tx.send(ForwarderOutcome {
       conclusion: final_conclusion(&state),
+      outputs: state.outputs,
       job_log_upload,
     });
   })
@@ -563,21 +574,9 @@ async fn drain_step_uploads(state: &mut ForwarderState, collector: &StepCollecto
   }
 }
 
-/// Spawn the combined job-level log upload (signed URL → blob PUT →
-/// metadata, 3 round-trips) and hand back its `JoinHandle`.
-///
-/// Deliberately NOT awaited here. Nothing in `CompleteJobRequest` reads its
-/// result — unlike [`drain_step_uploads`], which backfills every step's
-/// `completed_log_url` — so it overlaps `report_completion` instead of
-/// preceding it. The handle rides `JobExecution` → `JobOutcome` →
-/// `SessionCtx::job_log_upload`, and `helpers::cleanup_session` awaits it on
-/// both the `Ok` and the `Err` path of `job_lifecycle::poll_and_execute`, so
-/// the listener still never returns before the upload finishes.
-///
-/// The task captures only owned Results-Service addressing plus the log
-/// lines themselves — never a clone of the listener-event sender. A detached
-/// task holding one would keep the journal channel open past `handler.rs`'s
-/// `drop(ctx)` and wedge the `journal.await` that follows it.
+/// Spawn the combined job-log upload without delaying `complete_job`.
+/// Session cleanup joins this handle on success and error paths. The task
+/// owns no listener sender, so it cannot keep the journal channel open.
 fn spawn_job_log_upload(
   state: &mut ForwarderState,
   cfg: &FwdConfig,
@@ -618,3 +617,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/multiline_mask.rs"]
 mod multiline_mask;
+
+#[cfg(test)]
+#[path = "tests/job_outputs.rs"]
+mod job_outputs;

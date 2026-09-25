@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 use super::types::{Annotation, Conclusion};
@@ -58,11 +60,18 @@ pub struct CompleteJobRequest {
   /// Final job conclusion.
   pub conclusion: Conclusion,
   /// Job-level outputs to report back.
-  pub outputs: serde_json::Value,
+  pub outputs: HashMap<String, CompleteJobOutput>,
   /// Per-step results for the completed job.
   pub step_results: Vec<super::types::StepResult>,
   /// Job-level annotations (errors/warnings/notices) to report back.
   pub annotations: Vec<Annotation>,
+}
+
+/// One job-level output in the Run Service completion payload.
+#[derive(Debug, Clone, Serialize)]
+pub struct CompleteJobOutput {
+  /// The resolved, non-secret output value.
+  pub value: String,
 }
 
 /// Acquire a job from the run service.

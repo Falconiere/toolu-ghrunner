@@ -1,0 +1,7 @@
+name: job-outputs-70-post
+description: Record a post-stage environment value for job output verification
+runs:
+  using: node20
+  main: main.js
+  post: post.js
+  post-if: always()

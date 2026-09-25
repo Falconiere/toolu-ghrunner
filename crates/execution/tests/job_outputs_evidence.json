@@ -1,0 +1,30 @@
+{
+  "capture": {
+    "source": "github.com Run Service acquirejob body",
+    "run_id": 36173987791,
+    "revision": "5b65420157885949e57c3daea4021e074049baee",
+    "runner": "toolu-70-capture",
+    "job_id": "3a1bd763-6b39-5b52-b583-2f2433c96e56",
+    "step_id": "a811e451-eda4-42c0-95d3-e04f5bf630c9",
+    "step_context_name": "produce",
+    "fixture": "crates/execution/tests/job_outputs_message.json",
+    "fixture_sha256": "b8d7c690afb5323581efd68350f0a23ce88303d61a2eda2422e88be3d19b5596",
+    "raw_sha256": "79ae3e28563e881137d586119650e3b341458cce3f367ea639ebe0f1e92d80d2",
+    "secret_fields_replaced": 27,
+    "producer_conclusion": "success",
+    "consumer_conclusion": "skipped"
+  },
+  "capture_workflow_sha256": "4373e60d1458650ea1904d47ce5f91705acd0211d9a8cc06688bfb2e8ddd3e01",
+  "workflow_sha256": "f81e564b866700acfb9ddecffebdfd18cabed19869c824af80f4c4cee05baa9f",
+  "action_sha256": {
+    ".github/actions/job-outputs-70-post/action.yml": "d3de29c8b40faec1688c29beeaf0ff4e2c98494a6d0c92338034afbe36bbf1c9",
+    ".github/actions/job-outputs-70-post/main.js": "db2323ac753c9f4d82c7bbd2e96f5339e92225f3926ee28a763fa5538465ef3f",
+    ".github/actions/job-outputs-70-post/post.js": "ea1491a38b7e81630c3503530da1606ae38e8a1a15bd6cb2e2d2b8bece816271"
+  },
+  "reference_source": "v2.337.0",
+  "runs": {
+    "toolu": null,
+    "reference": null
+  },
+  "unverified": ["Linux host", "GHES"]
+}

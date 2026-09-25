@@ -35,6 +35,9 @@ pub struct AgentJobRequestMessage {
   /// The job's ordered list of steps (`uses:` / `run:` entries).
   #[serde(default)]
   pub steps: Vec<ActionStep>,
+  /// Unevaluated job `outputs:` mapping from the acquired message.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub job_outputs: Option<TemplateToken>,
   /// Optional job-level `container:` declaration, evaluated before any step.
   #[serde(default, skip_serializing_if = "Option::is_none")]
   pub job_container: Option<TemplateToken>,

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::time::Duration;
 
 use tokio::sync::watch;
@@ -5,16 +6,17 @@ use tokio_util::sync::CancellationToken;
 
 use super::SessionCtx;
 use super::execution_loop::{JobExecution, execute_with_renewal};
-use super::helpers::map_conclusion;
 use protocol::messages::BrokerMessage;
 use shared::{AgentJobRequestMessage, Conclusion, ListenerEvent, RunnerError};
 use wire::net::{PollParams, acknowledge_message, poll_message};
-use wire::reporting::run_service::{
-  AcquireJobRequest, CompleteJobRequest, acquire_job, complete_job,
-};
+use wire::reporting::run_service::{AcquireJobRequest, acquire_job};
 
 use crate::broker_message::{PollOutcome, classify_received_message, log_skipped_control};
 use crate::broker_refresh::refresh_access_token;
+
+mod completion;
+
+use completion::report_completion;
 
 /// Starting backoff for a network error during the poll loop.
 const POLL_BACKOFF_START: Duration = Duration::from_secs(1);
@@ -56,27 +58,30 @@ pub(super) async fn poll_and_execute(
   // rationale + accepted risk on `acknowledge_best_effort`'s doc comment.
   acknowledge_best_effort(ctx, &body.runner_request_id).await;
 
+  let conclusion =
+    finish_acquired_job(ctx, &body.run_service_url, &acquired, rs_token, plan_id).await?;
+  Ok(Some(conclusion))
+}
+
+async fn finish_acquired_job(
+  ctx: &mut SessionCtx,
+  run_service_url: &str,
+  acquired: &wire::reporting::run_service::AcquireJobResponse,
+  rs_token: String,
+  plan_id: String,
+) -> Result<Conclusion, RunnerError> {
   let (mut outcome, refreshed_token) =
-    run_job_with_cancel_watch(ctx, &body.run_service_url, &rs_token, &acquired).await;
+    run_job_with_cancel_watch(ctx, run_service_url, &rs_token, acquired).await;
   if let Some(token) = refreshed_token {
     ctx.token = token;
   }
-  // Stash the two detached-task handles now, before any further `?` in this
-  // function — `ctx` is a full `&mut` borrow again here (the call above only
-  // reborrowed it immutably), so these assignments survive an early return
-  // below, and `cleanup_session` (called unconditionally by the caller) can
-  // join both on the `Ok` and `Err` paths. The job-log upload in particular
-  // is deliberately still in flight across `report_completion` below, whose
-  // `?` is the early return in question.
+  // Stash both handles before the fallible completion call so cleanup joins them.
   ctx.live_log = outcome.live_log_handle.take();
   ctx.job_log_upload = outcome.job_log_upload.take();
   let rs_token = outcome.job_token.clone().unwrap_or(rs_token);
-  // `Conclusion` is `Copy`; take it before `outcome` moves into the report so
-  // the caller still gets the job's verdict.
   let conclusion = outcome.conclusion;
-
-  report_completion(ctx, &body.run_service_url, plan_id, rs_token, outcome).await?;
-  Ok(Some(conclusion))
+  report_completion(ctx, run_service_url, plan_id, rs_token, outcome).await?;
+  Ok(conclusion)
 }
 
 /// Best-effort acknowledge of the broker message: single attempt,
@@ -97,39 +102,6 @@ async fn acknowledge_best_effort(ctx: &SessionCtx, runner_request_id: &str) {
   }
 }
 
-/// Report the job's outcome to the Run Service, retrying `RunnerError::Network`
-/// failures (see [`crate::retry::retry_transient`]) so the report survives a
-/// still-recovering connection instead of being lost when the always-online
-/// loop re-polls.
-async fn report_completion(
-  ctx: &SessionCtx,
-  run_service_url: &str,
-  plan_id: String,
-  rs_token: String,
-  outcome: JobOutcome,
-) -> Result<(), RunnerError> {
-  let complete_req = CompleteJobRequest {
-    plan_id,
-    job_id: outcome.job_id,
-    request_id: outcome.request_id,
-    conclusion: map_conclusion(outcome.conclusion),
-    outputs: serde_json::Value::Object(serde_json::Map::new()),
-    step_results: outcome.step_results,
-    annotations: outcome.annotations,
-  };
-  // `retry_transient` bounds its closure as `FnMut() -> Fut` with no `'static`
-  // on `Fut`, so each attempt can borrow these rather than clone them. The
-  // request in particular owns the step results and annotations — cloning it
-  // per retry allocated the whole job's reporting payload again each time.
-  crate::retry::retry_transient(
-    || complete_job(&ctx.client, run_service_url, &rs_token, &complete_req),
-    &ctx.cancel,
-    crate::retry::REPORT_RETRY_MAX,
-    "complete_job",
-  )
-  .await
-}
-
 /// Outcome of running (or failing to parse) an acquired job — everything
 /// `report_completion` needs to build the `CompleteJobRequest`.
 ///
@@ -138,6 +110,7 @@ async fn report_completion(
 /// [`execute_with_renewal`]) has a name instead of a positional slot.
 struct JobOutcome {
   conclusion: Conclusion,
+  outputs: HashMap<String, String>,
   job_id: String,
   request_id: i64,
   step_results: Vec<wire::reporting::StepResult>,
@@ -170,6 +143,7 @@ fn parse_job_message(
     tracing::error!(error = %e, "job message parse failed — completing with failure");
     Box::new(JobOutcome {
       conclusion: Conclusion::Failure,
+      outputs: HashMap::new(),
       job_id: "unknown".to_owned(),
       request_id: 0,
       step_results: Vec::new(),
@@ -373,13 +347,7 @@ async fn run_acquired_job(
 
   let job_token = extract_system_token(&job_msg);
 
-  let _ = ctx
-    .tx
-    .send(ListenerEvent::JobAcquired {
-      job_id: job_msg.job_id.clone(),
-      run_service_url: run_service_url.to_owned(),
-    })
-    .await;
+  send_job_acquired(ctx, run_service_url, &job_msg.job_id).await;
 
   let request_id = job_msg.request_id;
   let effective_token = job_token.as_deref().unwrap_or(rs_token);
@@ -397,6 +365,7 @@ async fn run_acquired_job(
   // `cleanup_session` to join, instead of being dropped un-joined here.
   let JobExecution {
     conclusion,
+    outputs,
     steps,
     annotations,
     live_log_handle,
@@ -404,6 +373,7 @@ async fn run_acquired_job(
   } = execute_with_renewal(ctx, &route, &job_msg, job_cancel).await;
   JobOutcome {
     conclusion,
+    outputs,
     job_id: job_msg.job_id,
     request_id,
     step_results: steps,
@@ -412,6 +382,16 @@ async fn run_acquired_job(
     live_log_handle,
     job_log_upload,
   }
+}
+
+async fn send_job_acquired(ctx: &SessionCtx, run_service_url: &str, job_id: &str) {
+  let _ = ctx
+    .tx
+    .send(ListenerEvent::JobAcquired {
+      job_id: job_id.to_owned(),
+      run_service_url: run_service_url.to_owned(),
+    })
+    .await;
 }
 
 async fn poll_until_job(ctx: &mut SessionCtx) -> Result<Option<BrokerMessage>, RunnerError> {
