@@ -385,13 +385,17 @@ async fn run_acquired_job(
 }
 
 async fn send_job_acquired(ctx: &SessionCtx, run_service_url: &str, job_id: &str) {
-  let _ = ctx
+  if ctx
     .tx
     .send(ListenerEvent::JobAcquired {
       job_id: job_id.to_owned(),
       run_service_url: run_service_url.to_owned(),
     })
-    .await;
+    .await
+    .is_err()
+  {
+    tracing::warn!("job acquired event receiver dropped before delivery");
+  }
 }
 
 async fn poll_until_job(ctx: &mut SessionCtx) -> Result<Option<BrokerMessage>, RunnerError> {
