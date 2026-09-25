@@ -93,10 +93,12 @@ def main():
     for lane in LANES:
         record = evidence['runs'][lane]
         if record is None:
-            assert evidence['unverified'].get(lane), f'{lane}: missing unverified reason'
+            reason = evidence['unverified'].get(lane)
+            if not reason:
+                parser.error(f'{lane}: missing unverified reason')
             if args.require_live:
-                parser.error(f'{lane}: unverified — {evidence["unverified"][lane]}')
-            print(f'{lane}: unverified — {evidence["unverified"][lane]}')
+                parser.error(f'{lane}: unverified — {reason}')
+            print(f'{lane}: unverified — {reason}')
         elif args.live or args.require_live:
             check_run(lane, record, evidence)
 
