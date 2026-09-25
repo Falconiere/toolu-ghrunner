@@ -10,15 +10,14 @@
 //!   3. POST still runs when a LATER step failed (`always()` semantics).
 //!   4. POST sees `STATE_k` set by its own step's MAIN stage (cross-stage).
 //!
-//! The action is seeded into the runner's on-disk action cache and the system
-//! `node` binary into the node cache, so the engine resolves both from disk —
+//! The action is installed in the workspace and the system `node` binary
+//! seeded into the node cache, so the engine resolves both from disk —
 //! no network, fully hermetic. If no real `node` is on `PATH`, the test skips.
 
 use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use execution::execution::actions::downloader::{action_cache_dir, watermark_path};
 use execution::execution::context::ExecutionContext;
 use execution::execution::steps_runner::run_steps;
 use execution::node::runtime::{node_binary_path, node_cache_dir, node_version_for};
@@ -77,13 +76,11 @@ fn seed_node(data_dir: &Path, node: &Path) -> TestResult<()> {
   Ok(())
 }
 
-/// Seed a copy of the fixture action into the action cache under
-/// `{owner}/{repo}/{ref}` with the `marker` input default rewritten, then
-/// drop the `.completed` watermark so `is_action_cached` returns true.
-fn seed_action(data_dir: &Path, repo: &str, marker: &str) -> TestResult<()> {
-  let cache_key = format!("toolu/{repo}/v1");
-  let cache_dir = action_cache_dir(data_dir, &cache_key);
-  std::fs::create_dir_all(&cache_dir)?;
+/// Install the committed fixture under `./{repo}` with its marker default
+/// rewritten for this action instance.
+fn install_action(workspace: &Path, repo: &str, marker: &str) -> TestResult<()> {
+  let action_dir = workspace.join(repo);
+  std::fs::create_dir_all(&action_dir)?;
 
   for name in ["action.yml", "pre.js", "main.js", "post.js"] {
     let src = Path::new(FIXTURE_DIR).join(name);
@@ -93,22 +90,19 @@ fn seed_action(data_dir: &Path, repo: &str, marker: &str) -> TestResult<()> {
     } else {
       contents
     };
-    std::fs::write(cache_dir.join(name), patched)?;
+    std::fs::write(action_dir.join(name), patched)?;
   }
-
-  std::fs::write(watermark_path(&cache_dir), "")?;
   Ok(())
 }
 
-/// Build an action step that resolves to the seeded `toolu/{repo}@v1` action.
+/// Build an action step that resolves to the installed local `./{repo}` action.
 fn action_step(id: &str, repo: &str) -> ActionStep {
   let mut step = ActionStep::with_ref_type(id, "repository");
-  step.reference.name = Some(format!("toolu/{repo}"));
-  step.reference.git_ref = Some("v1".to_owned());
+  step.reference.name = Some(format!("./{repo}"));
   step
 }
 
-/// Drive `steps` through the live step loop with a pre-seeded action+node
+/// Drive `steps` through the live step loop with local actions, a seeded Node
 /// cache and a `MARKER_FILE` env var; return the marker-file lines + events.
 async fn run_with_markers(
   steps: Vec<ActionStep>,
@@ -133,7 +127,7 @@ async fn run_with_markers(
 
   seed_node(&data_dir, &node)?;
   for (repo, marker) in repos {
-    seed_action(&data_dir, repo, marker)?;
+    install_action(&workspace, repo, marker)?;
   }
 
   let marker_file = data_dir.join("markers.txt");
@@ -352,7 +346,7 @@ fn seed_single_action_fixture(
     ..RunnerConfig::default()
   };
   seed_node(&data_dir, node)?;
-  seed_action(&data_dir, "act-a", "A")?;
+  install_action(&workspace, "act-a", "A")?;
   let marker_file = data_dir.join("markers.txt");
   std::fs::write(&marker_file, "")?;
   Ok((dir, workspace, config, marker_file))
@@ -440,9 +434,8 @@ async fn post_drains_with_grace_when_job_is_cancelled() -> TestResult<()> {
   };
 
   let (_dir, workspace, config, marker_file) = seed_single_action_fixture(&node)?;
-  // Swap the cached main for the slow variant AFTER seeding; pre/post stay real.
-  let cache_dir = action_cache_dir(&config.data_dir, "toolu/act-a/v1");
-  std::fs::write(cache_dir.join("main.js"), SLOW_MAIN_JS)?;
+  // Swap the local main for the slow variant AFTER installing; pre/post stay real.
+  std::fs::write(workspace.join("act-a/main.js"), SLOW_MAIN_JS)?;
 
   let cancel = CancellationToken::new();
   let canceller = cancel_when_main_starts(cancel.clone(), marker_file.clone());
