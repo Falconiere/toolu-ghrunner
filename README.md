@@ -216,6 +216,14 @@ post steps finish. Empty values are omitted. Values matching a registered
 secret mask are omitted with a warning; safe values reach downstream jobs as
 `needs.<job>.outputs.<name>`.
 
+`::error`, `::warning`, and `::notice` commands from shell and composite
+steps become annotations on the corresponding step result in the Run Service
+completion request. Their decoded title, source path and range are preserved;
+secret values are masked before reporting. The runner's job-level connection
+failure annotation remains attached to the job. The local payload replay is
+covered by [the #82 test map](docs/test-coverage.md#run-service-annotations-82);
+live Checks UI and GHES comparison require provisioned paired runners.
+
 ### Job containers
 
 On Linux, `jobs.<id>.container` selects one container for shell steps,

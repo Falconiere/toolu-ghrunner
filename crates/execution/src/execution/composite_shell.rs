@@ -42,6 +42,7 @@ pub struct ShellScriptParams<'a> {
 pub async fn run_shell_script(
   params: &ShellScriptParams<'_>,
   events: &mpsc::Sender<RunnerEvent>,
+  stdout_tx: mpsc::Sender<String>,
 ) -> Result<Conclusion, RunnerError> {
   let script_file = write_temp_script(params.script)?;
   let script_path = script_file.path().to_string_lossy().to_string();
@@ -66,8 +67,14 @@ pub async fn run_shell_script(
   let stdout = child.stdout.take();
   let stderr = child.stderr.take();
 
-  let stdout_task = stream_output(stdout, params.log_step_id, LogStream::Stdout, events);
-  let stderr_task = stream_output(stderr, params.log_step_id, LogStream::Stderr, events);
+  let stdout_task = stream_output(
+    stdout,
+    params.log_step_id,
+    LogStream::Stdout,
+    events,
+    Some(stdout_tx),
+  );
+  let stderr_task = stream_output(stderr, params.log_step_id, LogStream::Stderr, events, None);
 
   let outcome = wait_bounded(&mut child, params.timeout, params.cancel, |message| {
     RunnerError::StepExecution(format!("composite {message}"))
@@ -135,6 +142,7 @@ fn stream_output<R: tokio::io::AsyncRead + Unpin + Send + 'static>(
   step_id: &str,
   stream: LogStream,
   events: &mpsc::Sender<RunnerEvent>,
+  stdout_tx: Option<mpsc::Sender<String>>,
 ) -> Option<JoinHandle<()>> {
   let r = reader?;
   let tx = events.clone();
@@ -143,13 +151,17 @@ fn stream_output<R: tokio::io::AsyncRead + Unpin + Send + 'static>(
     let buf = BufReader::new(r);
     let mut lines = buf.lines();
     while let Ok(Some(line)) = lines.next_line().await {
-      let _ = tx
-        .send(RunnerEvent::Log {
-          step_id: sid.clone(),
-          line,
-          stream,
-        })
-        .await;
+      if let Some(ref output) = stdout_tx {
+        let _ = output.send(line).await;
+      } else {
+        let _ = tx
+          .send(RunnerEvent::Log {
+            step_id: sid.clone(),
+            line,
+            stream,
+          })
+          .await;
+      }
     }
   }))
 }

@@ -553,3 +553,43 @@ and guardrails passed, then stalled at the known host `_dyld_start` issue and
 was stopped under the orchestrator's instruction. GitHub Linux `ci` and
 `ci-macos` are the full gate for this PR. A live Linux toolu host and GHES were
 unavailable, so those lanes remain unverified.
+
+# Run Service annotations (#82)
+
+The #82 replay starts with the sanitized captured acquired job in
+`crates/execution/tests/incoming_contexts_matrix_0.json`. The shell probe
+prints real workflow commands; the listener replay also executes a local
+composite action. Its recording HTTP receiver inspects the actual
+`completejob` POST through the production transport. The local host is macOS
+arm64; the capture retains real step UUIDs, context names and token shapes.
+
+| Scenario | Check and observable | Evidence status |
+| --- | --- | --- |
+| 82-S1 | `cargo nextest run -p execution --test command_annotation_test`: escaped error, warning, notice, title/path/range, mask | Passed locally; payload checked below |
+| 82-S2 | Same probe: absent/end-only/invalid/descending/multiline ranges and blank message | Passed locally; upstream range normalization and omission checked |
+| 82-S3 | `cargo nextest run -p listener -E 'test(annotation_reporting) | test(watchdog_trip)'`: step results carry numeric 3/2/1 annotations and nested composite events use the enclosing step number; outage is job-level | Passed locally against the outgoing Run Service POST |
+| Journal and command compatibility | `cargo nextest run -p toolu-runner --test journal_types_test` and `--test gh_compat_commands` | Passed locally; journal v1 shape retained |
+| Gate | `./tools/check.sh all` | Passed locally on 2026-09-25; formatting, clippy, guardrails and workspace tests green |
+
+The branch-scoped [live workflow](../.github/workflows/annotation-82-live.yml)
+uses `toolu-82-tool` and `toolu-82-reference` self-hosted labels on one push
+SHA. Its ignored verifier `crates/toolu-runner/tests/annotation_live.rs`
+requires `GH_TOKEN`, both runner names, and expected binary versions as
+`TOOLU_ANNOTATION_{TOOLU,REFERENCE}_{NAME,VERSION}`. The GHES lane also needs
+`TOOLU_ANNOTATION_GHES_URL`, `_TOKEN`, `_REPO`, `_BRANCH`, and the corresponding
+`_TOOLU_NAME`, `_REFERENCE_NAME`, `_TOOLU_VERSION`, `_REFERENCE_VERSION` values.
+The verifier fails if the run, runner identity/version, matching OS and
+architecture labels, or Checks API annotations are missing or different.
+GitHub's Checks annotation API does not
+carry a step number; inspect the Checks UI for shell versus composite step
+association and record the run/check URLs, host OS/architecture, GitHub or
+GHES version, workflow SHA, runner revisions and a UI capture before marking
+a live lane verified. The selected live test checks that both named runners
+are online with their fixed labels and the same host platform before waiting
+for the branch run.
+
+| Live lane | Checks API | Checks UI and step association | Host/version proof |
+| --- | --- | --- | --- |
+| GitHub.com macOS toolu + official | Unverified: a 2026-09-25 repository API check found zero registered runners | Unverified | Unverified |
+| GitHub.com Linux toolu + official | Unverified: no paired online #82 runners provisioned | Unverified | Unverified |
+| Supported GHES toolu + official | Unverified: no GHES endpoint/token or paired runners configured | Unverified | Unverified |

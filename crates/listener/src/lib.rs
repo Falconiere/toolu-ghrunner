@@ -1,6 +1,9 @@
 //! GitHub Actions listener — full JIT runner protocol lifecycle.
 
 #[cfg(test)]
+#[path = "tests/annotation_reporting.rs"]
+mod annotation_reporting;
+#[cfg(test)]
 #[path = "tests/broker_control.rs"]
 mod broker_control;
 mod broker_message;
@@ -13,15 +16,22 @@ mod execution_loop;
 #[path = "tests/finalize_split.rs"]
 mod finalize_split;
 mod handler;
+/// Shared listener protocol and reporting helpers.
 pub mod helpers;
+/// Job acquisition, execution, and completion lifecycle.
 pub(crate) mod job_lifecycle;
+/// Per-step and combined job log upload streams.
 pub mod log_uploader;
+/// Decision policy for the persistent registration loop.
 pub mod loop_decision;
+/// Routing decisions for broker messages.
 pub mod message_route;
+/// Mid-job connection outage detection.
 pub mod outage;
 #[cfg(test)]
 #[path = "tests/post_results.rs"]
 mod post_results;
+/// Bounded retries for transient Run Service failures.
 pub(crate) mod retry;
 mod setup_step;
 #[cfg(test)]

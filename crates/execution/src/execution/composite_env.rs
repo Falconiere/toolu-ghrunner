@@ -194,7 +194,10 @@ pub(super) fn process_file_commands(
   if let Ok(content) = std::fs::read_to_string(&files.output) {
     let outputs = parse_output_file(&content);
     if !outputs.is_empty() {
-      step_outputs.insert(step_id.to_owned(), outputs);
+      step_outputs
+        .entry(step_id.to_owned())
+        .or_default()
+        .extend(outputs);
     }
   }
   if let Ok(content) = std::fs::read_to_string(&files.env) {

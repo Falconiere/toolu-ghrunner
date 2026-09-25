@@ -6,8 +6,8 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use super::helpers::map_conclusion;
-use shared::RunnerEvent;
-use wire::reporting::{Status, StepResult};
+use shared::{AnnotationLevel, RunnerEvent};
+use wire::reporting::{Annotation, ReportAnnotationLevel, Status, StepResult};
 
 /// Per-step metadata captured from `StepStarted`.
 struct CollectedMeta {
@@ -19,6 +19,7 @@ struct CollectedMeta {
 /// Inner state behind the Arc<Mutex>.
 struct CollectorState {
   meta: HashMap<String, CollectedMeta>,
+  pending_annotations: HashMap<String, Vec<Annotation>>,
   results: Vec<StepResult>,
 }
 
@@ -29,10 +30,12 @@ pub(super) struct StepCollector {
 }
 
 impl StepCollector {
+  /// Create an empty collector for one acquired job.
   pub(super) fn new() -> Self {
     Self {
       state: Arc::new(Mutex::new(CollectorState {
         meta: HashMap::new(),
+        pending_annotations: HashMap::new(),
         results: Vec::new(),
       })),
     }
@@ -60,32 +63,70 @@ impl StepCollector {
         conclusion,
         ..
       } => {
-        let c = map_conclusion(*conclusion);
-        let mut state = self.state.lock().await;
-        let meta = state.meta.remove(step_id);
-        let (number, name, started_at) = match meta {
-          Some(m) => (m.number, m.name, Some(m.started_at)),
-          None => (0, String::new(), None),
-        };
-        state.results.push(StepResult {
-          external_id: step_id.clone(),
-          number,
-          name,
-          status: Status::Completed,
-          conclusion: c,
-          outcome: c,
-          started_at,
-          completed_at: Some(chrono::Utc::now().to_rfc3339()),
-          completed_log_url: None,
-          completed_log_lines: None,
-        });
+        self.record_completion(step_id, *conclusion).await;
+      },
+      RunnerEvent::Annotation { step_id, .. } => {
+        self.record_annotation(step_id, event).await;
       },
       RunnerEvent::JobStarted { .. }
       | RunnerEvent::StepSkipped { .. }
       | RunnerEvent::Log { .. }
       | RunnerEvent::LogGroup { .. }
-      | RunnerEvent::Annotation { .. }
       | RunnerEvent::JobCompleted { .. } => {},
+    }
+  }
+
+  async fn record_completion(&self, step_id: &str, conclusion: shared::Conclusion) {
+    let c = map_conclusion(conclusion);
+    let mut state = self.state.lock().await;
+    let meta = state.meta.remove(step_id);
+    let (number, name, started_at) = match meta {
+      Some(m) => (m.number, m.name, Some(m.started_at)),
+      None => (0, String::new(), None),
+    };
+    let annotations = state
+      .pending_annotations
+      .remove(step_id)
+      .unwrap_or_default();
+    state.results.push(StepResult {
+      external_id: step_id.to_owned(),
+      number,
+      name,
+      status: Status::Completed,
+      conclusion: c,
+      outcome: c,
+      started_at,
+      completed_at: Some(chrono::Utc::now().to_rfc3339()),
+      completed_log_url: None,
+      completed_log_lines: None,
+      annotations,
+    });
+  }
+
+  async fn record_annotation(&self, step_id: &str, event: &RunnerEvent) {
+    let mut state = self.state.lock().await;
+    let number = state.meta.get(step_id).map(|meta| meta.number).or_else(|| {
+      state
+        .results
+        .iter()
+        .find(|result| result.external_id == step_id)
+        .map(|result| result.number)
+    });
+    let Some(annotation) = to_report_annotation(event, number) else {
+      return;
+    };
+    if let Some(result) = state
+      .results
+      .iter_mut()
+      .find(|result| result.external_id == step_id)
+    {
+      result.annotations.push(annotation);
+    } else {
+      state
+        .pending_annotations
+        .entry(step_id.to_owned())
+        .or_default()
+        .push(annotation);
     }
   }
 
@@ -108,6 +149,48 @@ impl StepCollector {
 
   /// Return all collected step results.
   pub(super) async fn collected_results(&self) -> Vec<StepResult> {
-    self.state.lock().await.results.clone()
+    let state = self.state.lock().await;
+    if !state.pending_annotations.is_empty() {
+      tracing::warn!(
+        steps = state.pending_annotations.len(),
+        "annotations have no completed step result and will be omitted"
+      );
+    }
+    state.results.clone()
   }
+}
+
+fn to_report_annotation(event: &RunnerEvent, number: Option<u32>) -> Option<Annotation> {
+  let RunnerEvent::Annotation {
+    level,
+    message,
+    file,
+    line,
+    end_line,
+    col,
+    end_column,
+    title,
+    ..
+  } = event
+  else {
+    return None;
+  };
+  let level = match level {
+    AnnotationLevel::Notice => ReportAnnotationLevel::Notice,
+    AnnotationLevel::Warning => ReportAnnotationLevel::Warning,
+    AnnotationLevel::Error => ReportAnnotationLevel::Failure,
+  };
+  Some(Annotation {
+    level,
+    message: message.clone(),
+    title: title.clone(),
+    raw_details: None,
+    path: file.clone(),
+    is_infrastructure_issue: false,
+    start_line: line.map_or(0, i64::from),
+    end_line: end_line.map_or(0, i64::from),
+    start_column: col.map_or(0, i64::from),
+    end_column: end_column.map_or(0, i64::from),
+    step_number: number.map_or(0, i64::from),
+  })
 }

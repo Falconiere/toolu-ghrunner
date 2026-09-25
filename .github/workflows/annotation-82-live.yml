@@ -1,0 +1,38 @@
+name: annotation-82-live
+run-name: annotation-82-${{ github.sha }}
+
+on:
+  push:
+    branches:
+      - feat/82-send-annotations-in-the-run
+  workflow_dispatch:
+
+jobs:
+  annotations:
+    name: annotation-82-${{ matrix.lane }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: toolu
+            runner: [self-hosted, toolu-82-tool]
+          - lane: reference
+            runner: [self-hosted, toolu-82-reference]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Runner revision
+        if: matrix.lane == 'toolu'
+        shell: bash
+        run: |
+          printf 'annotation-82-tool-version: '
+          toolu-runner --version
+      - name: Shell annotations
+        shell: bash
+        run: |
+          printf '%s\n' '::add-mask::annotation-82-secret'
+          printf '%s\n' '::error file=.github/annotation-82-source.txt,line=4,col=2,endLine=4,endColumn=8,title=Compile%3A detail::boom%0Aannotation-82-secret'
+          printf '%s\n' '::warning file=.github/annotation-82-source.txt,line=7,title=Warn%3A detail::warning text'
+          printf '%s\n' '::notice file=.github/annotation-82-source.txt,endLine=9,title=Notice%3A detail::notice text'
+      - name: Composite annotations
+        uses: ./.github/actions/annotation-82-live

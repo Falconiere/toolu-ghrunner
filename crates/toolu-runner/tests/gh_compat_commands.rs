@@ -137,7 +137,7 @@ fn step_log_lines(events: &[RunnerEvent], step_id: &str) -> Vec<String> {
 fn step_annotation(
   events: &[RunnerEvent],
   step_id: &str,
-) -> Option<(AnnotationLevel, String, Option<String>, Option<u32>)> {
+) -> Option<(AnnotationLevel, String, Option<String>, Option<i32>)> {
   for event in events {
     if let RunnerEvent::Annotation {
       step_id: id,
@@ -145,6 +145,7 @@ fn step_annotation(
       message,
       file,
       line,
+      ..
     } = event
       && id == step_id
     {

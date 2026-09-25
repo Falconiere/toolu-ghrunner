@@ -156,24 +156,9 @@ impl CommandDispatcher {
       },
       WorkflowCommand::Group { title } => self.apply_group(&title),
       WorkflowCommand::EndGroup => self.apply_endgroup(),
-      WorkflowCommand::Error {
-        message,
-        file,
-        line,
-        ..
-      } => self.push_annotation(AnnotationLevel::Error, &message, file, line),
-      WorkflowCommand::Warning {
-        message,
-        file,
-        line,
-        ..
-      } => self.push_annotation(AnnotationLevel::Warning, &message, file, line),
-      WorkflowCommand::Notice {
-        message,
-        file,
-        line,
-        ..
-      } => self.push_annotation(AnnotationLevel::Notice, &message, file, line),
+      annotation @ (WorkflowCommand::Error { .. }
+      | WorkflowCommand::Warning { .. }
+      | WorkflowCommand::Notice { .. }) => self.push_annotation(annotation),
       WorkflowCommand::Debug { message } => {
         tracing::debug!(
           step_id = self.step_id.as_str(),
@@ -222,7 +207,15 @@ impl CommandDispatcher {
   fn warn_disabled_stdout_command(&mut self, command: &str, file_var: &str) {
     let msg =
       format!("the `::{command}::` stdout command is disabled for security; use ${file_var}");
-    self.push_annotation(AnnotationLevel::Warning, &msg, None, None);
+    self.push_annotation(WorkflowCommand::Warning {
+      message: msg,
+      file: None,
+      line: None,
+      col: None,
+      end_line: None,
+      end_column: None,
+      title: None,
+    });
   }
 
   fn apply_add_mask(&self, value: &str) {
@@ -253,23 +246,34 @@ impl CommandDispatcher {
     });
   }
 
-  fn push_annotation(
-    &mut self,
-    level: AnnotationLevel,
-    message: &str,
-    file: Option<String>,
-    line: Option<u32>,
-  ) {
-    // Annotation messages are surfaced in the Results UI / live-log, which the
-    // forwarder does not mask; a secret printed inside `::error::`/`::warning::`/
-    // `::notice::` must be redacted here at the single producer chokepoint.
-    let message = self.mask(&unescape_data(message));
+  fn push_annotation(&mut self, annotation: WorkflowCommand) {
+    let Some(level) = annotation_level(&annotation) else {
+      return;
+    };
+    let Some(fields) = annotation_fields(annotation) else {
+      return;
+    };
+    // The journal and Run Service receive these fields without another mask.
+    // Decode first so escaped secrets in every string field are covered.
+    let message = self.mask(&unescape_data(&fields.message));
+    if message.trim().is_empty() {
+      return;
+    }
     self.pending.push(RunnerEvent::Annotation {
       step_id: self.log_step_id.clone(),
       level,
       message,
-      file: file.map(|f| unescape_property(&f)),
-      line,
+      file: fields
+        .file
+        .map(|value| self.mask(&unescape_property(&value)))
+        .filter(|value| !value.trim().is_empty()),
+      line: fields.line,
+      col: fields.col,
+      end_line: fields.end_line,
+      end_column: fields.end_column,
+      title: fields
+        .title
+        .map(|value| self.mask(&unescape_property(&value))),
     });
   }
 
@@ -279,6 +283,70 @@ impl CommandDispatcher {
       line,
       stream: shared::LogStream::Stdout,
     }
+  }
+}
+
+struct AnnotationFields {
+  message: String,
+  file: Option<String>,
+  line: Option<i32>,
+  col: Option<i32>,
+  end_line: Option<i32>,
+  end_column: Option<i32>,
+  title: Option<String>,
+}
+
+fn annotation_fields(annotation: WorkflowCommand) -> Option<AnnotationFields> {
+  let (WorkflowCommand::Error {
+    message,
+    file,
+    line,
+    col,
+    end_line,
+    end_column,
+    title,
+  }
+  | WorkflowCommand::Warning {
+    message,
+    file,
+    line,
+    col,
+    end_line,
+    end_column,
+    title,
+  }
+  | WorkflowCommand::Notice {
+    message,
+    file,
+    line,
+    col,
+    end_line,
+    end_column,
+    title,
+  }) = annotation
+  else {
+    return None;
+  };
+  Some(AnnotationFields {
+    message,
+    file,
+    line,
+    col,
+    end_line,
+    end_column,
+    title,
+  })
+}
+
+fn annotation_level(command: &WorkflowCommand) -> Option<AnnotationLevel> {
+  if matches!(command, WorkflowCommand::Error { .. }) {
+    Some(AnnotationLevel::Error)
+  } else if matches!(command, WorkflowCommand::Warning { .. }) {
+    Some(AnnotationLevel::Warning)
+  } else if matches!(command, WorkflowCommand::Notice { .. }) {
+    Some(AnnotationLevel::Notice)
+  } else {
+    None
   }
 }
 

@@ -11,4 +11,7 @@ mod results_types;
 pub mod run_service;
 mod types;
 
-pub use types::{Annotation, Conclusion as ReportConclusion, Status, StepResult};
+pub use types::{
+  Annotation, AnnotationLevel as ReportAnnotationLevel, Conclusion as ReportConclusion, Status,
+  StepResult,
+};

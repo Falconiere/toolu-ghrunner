@@ -64,23 +64,62 @@ pub struct StepResult {
   /// Number of lines in the step's uploaded log.
   #[serde(skip_serializing_if = "Option::is_none")]
   pub completed_log_lines: Option<u64>,
+  /// Workflow-command annotations emitted by this reported step.
+  #[serde(skip_serializing_if = "Vec::is_empty")]
+  pub annotations: Vec<Annotation>,
 }
 
-/// Annotation attached to a step result.
+/// Run Service annotation severity, encoded as the official numeric enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize_repr, Deserialize_repr)]
+#[repr(u8)]
+pub enum AnnotationLevel {
+  /// No severity was supplied.
+  Unknown = 0,
+  /// Informational annotation.
+  Notice = 1,
+  /// Warning annotation.
+  Warning = 2,
+  /// Error annotation (`::error::` maps to `FAILURE`).
+  Failure = 3,
+}
+
+fn is_default<T: Default + PartialEq>(value: &T) -> bool {
+  value == &T::default()
+}
+
+/// Annotation attached to a step result or to the completed job.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Annotation {
-  /// Annotation severity (`error` / `warning` / `notice`).
-  pub annotation_type: String,
+  /// Numeric Run Service severity (`NOTICE=1`, `WARNING=2`, `FAILURE=3`).
+  pub level: AnnotationLevel,
   /// The annotation text.
   pub message: String,
-  /// Path of the file the annotation points at, if any.
+  /// Optional short title shown with the annotation.
   #[serde(skip_serializing_if = "Option::is_none")]
-  pub file: Option<String>,
-  /// Line number in `file` the annotation points at, if any.
+  pub title: Option<String>,
+  /// Optional unformatted details from a runner-origin annotation.
   #[serde(skip_serializing_if = "Option::is_none")]
-  pub line: Option<u32>,
-  /// Column number in `file` the annotation points at, if any.
+  pub raw_details: Option<String>,
+  /// Repository-relative source path, if present.
   #[serde(skip_serializing_if = "Option::is_none")]
-  pub col: Option<u32>,
+  pub path: Option<String>,
+  /// Whether the runner itself caused this issue.
+  #[serde(skip_serializing_if = "is_default")]
+  pub is_infrastructure_issue: bool,
+  /// First source line, omitted when absent or zero.
+  #[serde(skip_serializing_if = "is_default")]
+  pub start_line: i64,
+  /// Last source line, omitted when absent or zero.
+  #[serde(skip_serializing_if = "is_default")]
+  pub end_line: i64,
+  /// First source column, omitted when absent or zero.
+  #[serde(skip_serializing_if = "is_default")]
+  pub start_column: i64,
+  /// Last source column, omitted when absent or zero.
+  #[serde(skip_serializing_if = "is_default")]
+  pub end_column: i64,
+  /// Number of the reporting step, omitted for job-level issues.
+  #[serde(skip_serializing_if = "is_default")]
+  pub step_number: i64,
 }

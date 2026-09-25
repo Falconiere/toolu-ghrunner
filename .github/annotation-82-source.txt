@@ -1,0 +1,12 @@
+Issue 82 source anchor.
+The following lines are stable targets.
+Line three.
+Line four.
+Line five.
+Line six.
+Line seven.
+Line eight.
+Line nine.
+Line ten.
+Line eleven.
+Line twelve.

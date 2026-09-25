@@ -122,7 +122,15 @@ pub enum RunnerEvent {
     /// The file the annotation refers to, if any.
     file: Option<String>,
     /// The line number in `file` the annotation refers to, if any.
-    line: Option<u32>,
+    line: Option<i32>,
+    /// Last line in the annotated source range, if any.
+    end_line: Option<i32>,
+    /// First column in the annotated source range, if any.
+    col: Option<i32>,
+    /// Last column in the annotated source range, if any.
+    end_column: Option<i32>,
+    /// Annotation title, if supplied by the workflow command.
+    title: Option<String>,
   },
   /// The job has finished executing.
   JobCompleted {

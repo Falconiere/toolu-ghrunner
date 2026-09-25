@@ -52,6 +52,9 @@ pub(super) struct JobExecution {
   pub(super) job_log_upload: Option<tokio::task::JoinHandle<()>>,
 }
 
+/// Run setup reporting and the live-log handshake concurrently before starting
+/// the engine. Both futures are boxed because the join otherwise makes this
+/// function's future too large at its timeout-wrapped call sites.
 pub(super) async fn execute_with_renewal(
   ctx: &SessionCtx,
   route: &JobRoute<'_>,
@@ -62,8 +65,6 @@ pub(super) async fn execute_with_renewal(
     rs_token, plan_id, ..
   } = *route;
   let renewal_cancel = CancellationToken::new();
-  // Shared write-once trip flag: set by the renewal task's outage watchdog,
-  // read below only after the renewal task is joined (no teardown race).
   let outage_tripped = Arc::new(AtomicBool::new(false));
   let renewal_handle = start_renewal(
     ctx,
@@ -183,11 +184,17 @@ pub(crate) fn apply_outage_override(
     return (conclusion, Vec::new());
   }
   let annotation = wire::reporting::Annotation {
-    annotation_type: "error".to_owned(),
+    level: wire::reporting::ReportAnnotationLevel::Failure,
     message: LOST_CONNECTION_MESSAGE.to_owned(),
-    file: None,
-    line: None,
-    col: None,
+    title: None,
+    raw_details: None,
+    path: None,
+    is_infrastructure_issue: false,
+    start_line: 0,
+    end_line: 0,
+    start_column: 0,
+    end_column: 0,
+    step_number: 0,
   };
   (Conclusion::Failure, vec![annotation])
 }

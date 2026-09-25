@@ -88,7 +88,7 @@ pub enum JournalEvent {
     /// The file path the annotation refers to, if any.
     file: Option<String>,
     /// The line number in `file` the annotation refers to, if any.
-    line: Option<u32>,
+    line: Option<i32>,
   },
   /// A step finished.
   StepCompleted {
@@ -180,6 +180,7 @@ impl From<&RunnerEvent> for JournalEvent {
         message,
         file,
         line,
+        ..
       } => annotation(step_id, *level, message, file.as_deref(), *line),
       R::StepCompleted {
         step_id,
@@ -232,7 +233,7 @@ fn annotation(
   level: AnnotationLevel,
   message: &str,
   file: Option<&str>,
-  line: Option<u32>,
+  line: Option<i32>,
 ) -> JournalEvent {
   JournalEvent::Annotation {
     step_id: step_id.to_owned(),
