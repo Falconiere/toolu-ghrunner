@@ -82,9 +82,12 @@ def main():
     parser.add_argument('--live', action='store_true', help='Verify recorded runs through GitHub API')
     parser.add_argument('--require-live', action='store_true', help='Fail if any applicable lane is unverified')
     args = parser.parse_args()
-    evidence = json.loads(args.evidence.read_text())
+    try:
+        evidence = json.loads(args.evidence.read_text())
+    except (OSError, json.JSONDecodeError) as error:
+        parser.error(f'cannot read evidence {args.evidence}: {error}')
     check_capture(evidence)
-    assert set(evidence['runs']) == set(LANES), 'live lane inventory changed'
+    assert set(evidence['runs']) == set(LANES), 'update evidence file: runs keys must match required live lanes'
     for lane in LANES:
         record = evidence['runs'][lane]
         if record is None:
