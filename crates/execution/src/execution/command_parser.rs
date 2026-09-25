@@ -10,13 +10,13 @@ pub enum WorkflowCommand {
     /// File the annotation points at, if any.
     file: Option<String>,
     /// Start line, if any.
-    line: Option<u32>,
+    line: Option<i32>,
     /// Start column, if any.
-    col: Option<u32>,
+    col: Option<i32>,
     /// End line, if any.
-    end_line: Option<u32>,
+    end_line: Option<i32>,
     /// End column, if any.
-    end_column: Option<u32>,
+    end_column: Option<i32>,
     /// Annotation title, if any.
     title: Option<String>,
   },
@@ -27,13 +27,13 @@ pub enum WorkflowCommand {
     /// File the annotation points at, if any.
     file: Option<String>,
     /// Start line, if any.
-    line: Option<u32>,
+    line: Option<i32>,
     /// Start column, if any.
-    col: Option<u32>,
+    col: Option<i32>,
     /// End line, if any.
-    end_line: Option<u32>,
+    end_line: Option<i32>,
     /// End column, if any.
-    end_column: Option<u32>,
+    end_column: Option<i32>,
     /// Annotation title, if any.
     title: Option<String>,
   },
@@ -44,13 +44,13 @@ pub enum WorkflowCommand {
     /// File the annotation points at, if any.
     file: Option<String>,
     /// Start line, if any.
-    line: Option<u32>,
+    line: Option<i32>,
     /// Start column, if any.
-    col: Option<u32>,
+    col: Option<i32>,
     /// End line, if any.
-    end_line: Option<u32>,
+    end_line: Option<i32>,
     /// End column, if any.
-    end_column: Option<u32>,
+    end_column: Option<i32>,
     /// Annotation title, if any.
     title: Option<String>,
   },
@@ -195,10 +195,7 @@ fn build_annotation(
   kind: AnnotationKind,
 ) -> WorkflowCommand {
   let file = props.get("file").cloned();
-  let line = props.get("line").and_then(|v| v.parse().ok());
-  let col = props.get("col").and_then(|v| v.parse().ok());
-  let end_line = props.get("endLine").and_then(|v| v.parse().ok());
-  let end_column = props.get("endColumn").and_then(|v| v.parse().ok());
+  let (line, col, end_line, end_column) = normalized_range(props);
   let title = props.get("title").cloned();
   let message = message.to_owned();
 
@@ -231,4 +228,49 @@ fn build_annotation(
       title,
     },
   }
+}
+
+/// Match the official runner's `ValidateLinesAndColumns` order, then apply
+/// `IssueExtensions.ToAnnotation`'s end-value defaults. The official parser
+/// uses signed 32-bit integers even though the Run Service fields are `long`.
+fn normalized_range(
+  props: &HashMap<String, String>,
+) -> (Option<i32>, Option<i32>, Option<i32>, Option<i32>) {
+  let start_line_raw = props.get("line");
+  let end_line_raw = props.get("endLine");
+  let mut line = start_line_raw.and_then(|v| v.parse().ok());
+  let mut end_line = end_line_raw.and_then(|v| v.parse().ok());
+  let mut col = props.get("col").and_then(|v| v.parse().ok());
+  let mut end_column = props.get("endColumn").and_then(|v| v.parse().ok());
+
+  if end_line.is_some() && line.is_none() {
+    line = end_line;
+  }
+  if end_column.is_some() && col.is_none() {
+    col = end_column;
+  }
+  if line.is_none() {
+    col = None;
+    end_column = None;
+  }
+  let effective_start_raw = if start_line_raw.and_then(|v| v.parse::<i32>().ok()).is_some() {
+    start_line_raw
+  } else {
+    end_line_raw
+  };
+  if end_line.is_some() && effective_start_raw != end_line_raw && col.is_some() {
+    col = None;
+    end_column = None;
+  }
+  if line.zip(end_line).is_some_and(|(start, end)| end < start) {
+    line = None;
+    end_line = None;
+  }
+  if col.zip(end_column).is_some_and(|(start, end)| end < start) {
+    col = None;
+    end_column = None;
+  }
+  end_line = end_line.or(line);
+  end_column = end_column.or(col);
+  (line, col, end_line, end_column)
 }

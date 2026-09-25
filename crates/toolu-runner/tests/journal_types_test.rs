@@ -67,6 +67,10 @@ fn runner_events() -> Vec<RunnerEvent> {
       message: "deprecated input".to_owned(),
       file: Some(".github/workflows/ci.yml".to_owned()),
       line: Some(12),
+      end_line: Some(12),
+      col: None,
+      end_column: None,
+      title: None,
     },
     RunnerEvent::StepCompleted {
       step_id: "step-1".to_owned(),
@@ -167,6 +171,10 @@ fn conversion_maps_enums_to_lowercase_strings() {
     message: "m".to_owned(),
     file: None,
     line: None,
+    end_line: None,
+    col: None,
+    end_column: None,
+    title: None,
   });
   assert!(
     matches!(&ev, JournalEvent::Annotation { level, .. } if level == "error"),

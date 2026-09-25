@@ -6,6 +6,7 @@
 
 | File | Purpose |
 | --- | --- |
+| `annotation_reporting.rs` | Captured-job shell/composite annotations through a recorded Run Service POST. |
 | `early_ack.rs` | Broker acknowledgment ordering. |
 | `execution_loop.rs` | Execution and renewal behavior. |
 | `finalize_split.rs` | Completion and teardown ordering. |

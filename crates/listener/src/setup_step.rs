@@ -26,20 +26,7 @@ pub(super) async fn report_setup_step(
   let now = chrono::Utc::now().to_rfc3339();
   let (run_backend_id, job_backend_id) = super::helpers::resolve_backend_ids(job_msg, plan_id);
 
-  let request = WorkflowStepsUpdateRequest {
-    steps: vec![StepUpdateEntry {
-      external_id: external_id.clone(),
-      number: 1,
-      name: "Set up job".to_owned(),
-      status: Status::Completed,
-      conclusion: Some(ReportConclusion::Success),
-      started_at: Some(now.clone()),
-      completed_at: Some(now.clone()),
-    }],
-    change_order: 0,
-    workflow_run_backend_id: run_backend_id.clone(),
-    workflow_job_run_backend_id: job_backend_id.clone(),
-  };
+  let request = setup_update_request(&external_id, &now, &run_backend_id, &job_backend_id);
 
   if let Err(e) = update_workflow_steps(client, results_url, token, &request).await {
     tracing::warn!(error = %e, "setup step report failed");
@@ -58,19 +45,43 @@ pub(super) async fn report_setup_step(
   let log_result =
     super::log_uploader::upload_compressed_step_logs(&rctx, &external_id, &lines).await;
 
-  (
-    Some(StepResult {
-      external_id,
+  (Some(setup_result(external_id, now, log_result)), lines)
+}
+
+fn setup_update_request(
+  external_id: &str,
+  now: &str,
+  run_backend_id: &str,
+  job_backend_id: &str,
+) -> WorkflowStepsUpdateRequest {
+  WorkflowStepsUpdateRequest {
+    steps: vec![StepUpdateEntry {
+      external_id: external_id.to_owned(),
       number: 1,
       name: "Set up job".to_owned(),
       status: Status::Completed,
-      conclusion: ReportConclusion::Success,
-      outcome: ReportConclusion::Success,
-      started_at: Some(now.clone()),
-      completed_at: Some(now),
-      completed_log_url: log_result.as_ref().map(|(url, _)| url.clone()),
-      completed_log_lines: log_result.map(|(_, count)| count),
-    }),
-    lines,
-  )
+      conclusion: Some(ReportConclusion::Success),
+      started_at: Some(now.to_owned()),
+      completed_at: Some(now.to_owned()),
+    }],
+    change_order: 0,
+    workflow_run_backend_id: run_backend_id.to_owned(),
+    workflow_job_run_backend_id: job_backend_id.to_owned(),
+  }
+}
+
+fn setup_result(external_id: String, now: String, log_result: Option<(String, u64)>) -> StepResult {
+  StepResult {
+    external_id,
+    number: 1,
+    name: "Set up job".to_owned(),
+    status: Status::Completed,
+    conclusion: ReportConclusion::Success,
+    outcome: ReportConclusion::Success,
+    started_at: Some(now.clone()),
+    completed_at: Some(now),
+    completed_log_url: log_result.as_ref().map(|(url, _)| url.clone()),
+    completed_log_lines: log_result.map(|(_, count)| count),
+    annotations: Vec::new(),
+  }
 }

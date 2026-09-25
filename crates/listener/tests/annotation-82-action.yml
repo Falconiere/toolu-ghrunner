@@ -1,0 +1,11 @@
+name: annotation-82-probe
+description: Emits two workflow annotations from nested composite steps.
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        printf '%s\n' '::notice file=src/composite.rs,line=11,col=3,title=Nested%3A first::composite one'
+    - shell: bash
+      run: |
+        printf '%s\n' '::warning file=src/composite.rs,line=12,title=Nested%3A second::composite two probe-mask-82'

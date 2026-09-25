@@ -405,7 +405,7 @@ fn body_conclusion(body: &serde_json::Value) -> TestResult<&str> {
 /// `wire::reporting::ReportConclusion::Failure` discriminant —
 /// `ReportConclusion` is `serde_repr`, not a string; see
 /// `crates/wire/src/reporting/types.rs`) and exactly the "lost connection"
-/// annotation the watchdog trip emits, with `annotationType: "error"`.
+/// annotation the watchdog trip emits, with numeric failure level 3.
 fn assert_failure_with_lost_connection(body: &serde_json::Value) -> TestResult<()> {
   let conclusion = body_conclusion(body)?;
   let expected = "failed";
@@ -416,14 +416,12 @@ fn assert_failure_with_lost_connection(body: &serde_json::Value) -> TestResult<(
   }
   let annotation = find_lost_connection_annotation(body)?
     .ok_or_else(|| format!("no annotation with the exact lost-connection message: {body}"))?;
-  let annotation_type = annotation
-    .get("annotationType")
-    .and_then(serde_json::Value::as_str)
-    .ok_or_else(|| format!("annotation missing annotationType field: {annotation}"))?;
-  if annotation_type != "error" {
-    return Err(
-      format!("expected annotationType \"error\", got {annotation_type:?}: {annotation}").into(),
-    );
+  let level = annotation
+    .get("level")
+    .and_then(serde_json::Value::as_i64)
+    .ok_or_else(|| format!("annotation missing numeric level field: {annotation}"))?;
+  if level != 3 {
+    return Err(format!("expected failure level 3, got {level}: {annotation}").into());
   }
   Ok(())
 }
@@ -627,7 +625,7 @@ mod override_rules {
 
   /// (c) A tripped flag alongside a non-`Success` conclusion (e.g. a
   /// GH-initiated `Cancelled` racing the trip) overrides to `Failure` with
-  /// exactly one `annotation_type: "error"` annotation carrying the exact
+  /// exactly one failure-level annotation carrying the exact
   /// production message.
   #[test]
   fn tripped_non_success_overrides_to_failure_with_error_annotation() {
@@ -640,7 +638,10 @@ mod override_rules {
       assert_eq!(conclusion, Conclusion::Failure);
       assert_eq!(annotations.len(), 1);
       let annotation = annotations.first().expect("checked len() == 1 above");
-      assert_eq!(annotation.annotation_type, "error");
+      assert_eq!(
+        annotation.level,
+        wire::reporting::ReportAnnotationLevel::Failure
+      );
       assert_eq!(annotation.message, LOST_CONNECTION_MESSAGE);
     }
   }

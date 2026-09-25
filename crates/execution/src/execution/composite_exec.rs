@@ -14,6 +14,7 @@ use tokio::sync::mpsc;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
+use super::command_dispatch::stream_dispatch_stdout;
 pub use super::composite_env::{CompositeParams, CompositeResult};
 use super::composite_env::{build_step_env, create_file_command_files, process_file_commands};
 use super::composite_expr::{
@@ -246,7 +247,8 @@ async fn run_run_step(
     &eval_ctx,
     CompositeField::Step,
   )?;
-  let conclusion = run_step_shell(run, &shell, &interpolated, &full_env).await?;
+  let conclusion =
+    execute_composite_script(run, &step_id, &shell, &interpolated, &full_env).await?;
 
   emit_log(params.events, params.parent_step_id, "##[endgroup]").await;
   process_file_commands(
@@ -259,6 +261,53 @@ async fn run_run_step(
   apply_run_file_commands(run, &step_id);
 
   Ok(conclusion)
+}
+
+async fn execute_composite_script(
+  run: &mut CompositeRun<'_>,
+  step_id: &str,
+  shell: &str,
+  script: &str,
+  env: &HashMap<String, String>,
+) -> Result<Conclusion, RunnerError> {
+  let params = run.params;
+  let cancel = run.active_cancel();
+  let deadline = run.active_deadline();
+  let cgroup_path = run.ctx.cgroup_path().map(Path::to_path_buf);
+  let container = run.ctx.job_container().cloned();
+  let shell_params = ShellScriptParams {
+    shell,
+    script,
+    env,
+    working_dir: params.workspace,
+    log_step_id: params.parent_step_id,
+    cgroup_path: cgroup_path.as_deref(),
+    timeout: deadline.map(|at| at.saturating_duration_since(Instant::now())),
+    cancel: &cancel,
+  };
+  let (stdout_tx, mut stdout_rx) = mpsc::channel(256);
+  let execute = run_step_shell(
+    &shell_params,
+    container.as_deref(),
+    params.events,
+    stdout_tx,
+  );
+  let dispatch = stream_dispatch_stdout(
+    step_id,
+    params.parent_step_id,
+    Some(step_id),
+    &mut stdout_rx,
+    run.ctx,
+    params.events,
+  );
+  let (result, stdout_outputs) = tokio::join!(execute, dispatch);
+  run
+    .state
+    .step_outputs
+    .entry(step_id.to_owned())
+    .or_default()
+    .extend(stdout_outputs);
+  result
 }
 
 fn apply_run_file_commands(run: &mut CompositeRun<'_>, step_id: &str) {
@@ -279,62 +328,42 @@ async fn emit_run_group(events: &mpsc::Sender<RunnerEvent>, parent_step_id: &str
 
 /// Spawn the shell subprocess for a composite `run:` step.
 async fn run_step_shell(
-  run: &CompositeRun<'_>,
-  shell: &str,
-  script: &str,
-  env: &HashMap<String, String>,
+  shell_params: &ShellScriptParams<'_>,
+  container: Option<&crate::docker::job_container::JobContainer>,
+  events: &mpsc::Sender<RunnerEvent>,
+  stdout_tx: mpsc::Sender<String>,
 ) -> Result<Conclusion, RunnerError> {
-  if run.ctx.job_container().is_some() {
-    return run_container_shell(run, shell, script, env).await;
+  if let Some(container) = container {
+    return run_container_shell(shell_params, container, events, stdout_tx).await;
   }
-  let params = run.params;
-  let cancel = run.active_cancel();
-  let shell_params = ShellScriptParams {
-    shell,
-    script,
-    env,
-    working_dir: params.workspace,
-    log_step_id: params.parent_step_id,
-    cgroup_path: run.ctx.cgroup_path(),
-    timeout: run
-      .active_deadline()
-      .map(|deadline| deadline.saturating_duration_since(Instant::now())),
-    cancel: &cancel,
-  };
-  run_shell_script(&shell_params, params.events).await
+  run_shell_script(shell_params, events, stdout_tx).await
 }
 
 async fn run_container_shell(
-  run: &CompositeRun<'_>,
-  shell: &str,
-  script: &str,
-  env: &HashMap<String, String>,
+  shell_params: &ShellScriptParams<'_>,
+  container: &crate::docker::job_container::JobContainer,
+  events: &mpsc::Sender<RunnerEvent>,
+  stdout_tx: mpsc::Sender<String>,
 ) -> Result<Conclusion, RunnerError> {
   use super::handlers::script::{ScriptHandler, ScriptParams};
-  let params = run.params;
-  let cancel = run.active_cancel();
-  let deadline = run.active_deadline();
   let shell_params = ScriptParams {
-    script,
-    shell: Some(shell),
-    env,
-    working_dir: params.workspace,
-    step_id: params.parent_step_id,
+    script: shell_params.script,
+    shell: Some(shell_params.shell),
+    env: shell_params.env,
+    working_dir: shell_params.working_dir,
+    step_id: shell_params.log_step_id,
     cgroup_path: None,
-    timeout: deadline.map(|deadline| deadline.saturating_duration_since(Instant::now())),
-    cancel: &cancel,
-    container: run.ctx.job_container().map(AsRef::as_ref),
+    timeout: shell_params.timeout,
+    cancel: shell_params.cancel,
+    container: Some(container),
   };
-  let (stdout, mut receiver) = mpsc::channel(256);
   let handler = ScriptHandler::new();
-  let run = handler.execute(&shell_params, params.events, stdout);
-  let logs = async {
-    while let Some(line) = receiver.recv().await {
-      emit_log(params.events, params.parent_step_id, &line).await;
-    }
-  };
-  let (result, ()) = tokio::join!(run, logs);
-  Ok(result?.conclusion)
+  Ok(
+    handler
+      .execute(&shell_params, events, stdout_tx)
+      .await?
+      .conclusion,
+  )
 }
 
 /// Run a nested composite `uses:` step, recursing through the action engine.
