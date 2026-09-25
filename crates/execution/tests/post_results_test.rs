@@ -36,7 +36,7 @@ async fn post_failure_reaches_job_completed() -> TestResult {
     post_script,
     format!("{post_code}\nconsole.log('POST_LOG:A');\n"),
   )?;
-  seed_node(&config.data_dir)?;
+  seed_node(&config.data_dir).await?;
 
   let runner = Runner::new(config, Arc::new(Mutex::new(SecretMasker::new())));
   let cancel = CancellationToken::new();
@@ -114,7 +114,7 @@ async fn repeated_posts_keep_state_and_report_identity() -> TestResult {
   let workspace = config.workspace_root.join(&msg.job_id);
   seed_action(&workspace, "post-a", "A", false, false)?;
   seed_action(&workspace, "post-b", "B", false, false)?;
-  seed_node(&config.data_dir)?;
+  seed_node(&config.data_dir).await?;
 
   let runner = Runner::new(config, Arc::new(Mutex::new(SecretMasker::new())));
   let cancel = CancellationToken::new();
@@ -158,7 +158,7 @@ async fn hard_post_error_keeps_draining_lifo() -> TestResult {
   let workspace = config.workspace_root.join(&msg.job_id);
   seed_action(&workspace, "post-a", "A", false, false)?;
   seed_action(&workspace, "post-b", "B", false, true)?;
-  seed_node(&config.data_dir)?;
+  seed_node(&config.data_dir).await?;
 
   let runner = Runner::new(config, Arc::new(Mutex::new(SecretMasker::new())));
   let mut receiver = runner.execute_job(msg, CancellationToken::new());
@@ -284,7 +284,7 @@ async fn cancelled_posts_complete_job() -> TestResult {
     b_manifest,
     b_text.replace("default: '0'", "default: '1000'"),
   )?;
-  seed_node(&config.data_dir)?;
+  seed_node(&config.data_dir).await?;
   let runner = Runner::new(config, Arc::new(Mutex::new(SecretMasker::new())));
   let cancel = CancellationToken::new();
   let mut receiver = runner.execute_job(msg, cancel.clone());
@@ -354,7 +354,7 @@ async fn cancelled_main_keeps_failure_post_and_final_cancelled() -> TestResult {
     skipped_manifest,
     skipped_text.replace("post-if: always()", "post-if: success()"),
   )?;
-  seed_node(&config.data_dir)?;
+  seed_node(&config.data_dir).await?;
   let runner = Runner::new(config, Arc::new(Mutex::new(SecretMasker::new())));
   let cancel = CancellationToken::new();
   let mut receiver = runner.execute_job(msg, cancel.clone());
@@ -444,7 +444,7 @@ async fn run_condition_case(
     manifest_path,
     manifest.replace("post-if: always()", &format!("post-if: {condition}")),
   )?;
-  seed_node(&config.data_dir)?;
+  seed_node(&config.data_dir).await?;
   let runner = Runner::new(config, Arc::new(Mutex::new(SecretMasker::new())));
   let mut receiver = runner.execute_job(msg, CancellationToken::new());
   let events = tokio::time::timeout(Duration::from_secs(30), collect_events(&mut receiver)).await?;
@@ -506,10 +506,11 @@ fn seed_action(
   Ok(())
 }
 
-fn seed_node(data: &Path) -> TestResult {
-  let output = std::process::Command::new("node")
+async fn seed_node(data: &Path) -> TestResult {
+  let output = tokio::process::Command::new("node")
     .args(["-e", "process.stdout.write(process.execPath)"])
-    .output()?;
+    .output()
+    .await?;
   assert!(output.status.success(), "Node is required for this test");
   let path = String::from_utf8(output.stdout)?;
   let binary = node_binary_path(&node_cache_dir(data, node_version_for(20)));
