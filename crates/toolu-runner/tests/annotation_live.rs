@@ -8,10 +8,10 @@
 
 use std::collections::BTreeMap;
 use std::error::Error;
-use std::process::Command;
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
+use tokio::process::Command;
 
 type TestResult<T> = Result<T, Box<dyn Error>>;
 
@@ -69,7 +69,7 @@ impl Host {
     })
   }
 
-  fn gh(&self, endpoint: &str, binary: bool) -> TestResult<Vec<u8>> {
+  async fn gh(&self, endpoint: &str, binary: bool) -> TestResult<Vec<u8>> {
     let mut command = Command::new("gh");
     command
       .arg("api")
@@ -83,19 +83,21 @@ impl Host {
     if binary {
       command.arg("--allow-escape-sequences");
     }
-    let output = command.output()?;
+    let output = command.output().await?;
     if !output.status.success() {
       return Err(format!("gh api failed for {endpoint}: {}", output.status).into());
     }
     Ok(output.stdout)
   }
 
-  fn api(&self, endpoint: &str) -> TestResult<Value> {
-    Ok(serde_json::from_slice(&self.gh(endpoint, false)?)?)
+  async fn api(&self, endpoint: &str) -> TestResult<Value> {
+    Ok(serde_json::from_slice(&self.gh(endpoint, false).await?)?)
   }
 
-  fn branch_sha(&self) -> TestResult<String> {
-    let row = self.api(&format!("repos/{}/commits/{}", self.repo, self.branch))?;
+  async fn branch_sha(&self) -> TestResult<String> {
+    let row = self
+      .api(&format!("repos/{}/commits/{}", self.repo, self.branch))
+      .await?;
     let sha = field_str(&row, "sha")?.to_owned();
     if sha.len() != 40 || !sha.bytes().all(|byte| byte.is_ascii_hexdigit()) {
       return Err("branch SHA is not a 40-character hexadecimal revision".into());
@@ -103,8 +105,10 @@ impl Host {
     Ok(sha)
   }
 
-  fn verify_runners(&self) -> TestResult<()> {
-    let listing = self.api(&format!("repos/{}/actions/runners?per_page=100", self.repo))?;
+  async fn verify_runners(&self) -> TestResult<()> {
+    let listing = self
+      .api(&format!("repos/{}/actions/runners?per_page=100", self.repo))
+      .await?;
     let runners = field_array(&listing, "runners")?;
     let mut platform = None;
     for (name, label) in [
@@ -143,10 +147,12 @@ impl Host {
 
   async fn run_at_sha(&self, sha: &str, deadline: Instant) -> TestResult<Value> {
     loop {
-      let listing = self.api(&format!(
-        "repos/{}/actions/workflows/{WORKFLOW}/runs?branch={}&per_page=100",
-        self.repo, self.branch
-      ))?;
+      let listing = self
+        .api(&format!(
+          "repos/{}/actions/workflows/{WORKFLOW}/runs?branch={}&per_page=100",
+          self.repo, self.branch
+        ))
+        .await?;
       let rows = field_array(&listing, "workflow_runs")?;
       if let Some(run) = rows.iter().find(|run| {
         run.get("head_sha").and_then(Value::as_str) == Some(sha)
@@ -163,7 +169,9 @@ impl Host {
 
   async fn completed_run(&self, run_id: u64, sha: &str, deadline: Instant) -> TestResult<Value> {
     loop {
-      let run = self.api(&format!("repos/{}/actions/runs/{run_id}", self.repo))?;
+      let run = self
+        .api(&format!("repos/{}/actions/runs/{run_id}", self.repo))
+        .await?;
       if field_str(&run, "head_sha")? != sha {
         return Err(format!("run {run_id} moved to a different SHA").into());
       }
@@ -227,8 +235,11 @@ fn field_array<'a>(value: &'a Value, key: &str) -> TestResult<&'a [Value]> {
     .ok_or_else(|| format!("missing array {key}: {value}").into())
 }
 
-fn local_sha() -> TestResult<String> {
-  let output = Command::new("git").args(["rev-parse", "HEAD"]).output()?;
+async fn local_sha() -> TestResult<String> {
+  let output = Command::new("git")
+    .args(["rev-parse", "HEAD"])
+    .output()
+    .await?;
   if !output.status.success() {
     return Err("git rev-parse HEAD failed".into());
   }
@@ -239,19 +250,21 @@ async fn verify(host: &Host) -> TestResult<()> {
   if host.toolu_name == host.reference_name {
     return Err("toolu and reference runner names must differ".into());
   }
-  let sha = host.branch_sha()?;
-  if sha != local_sha()? {
+  let sha = host.branch_sha().await?;
+  if sha != local_sha().await? {
     return Err(format!("live branch SHA {sha} does not match this checkout").into());
   }
-  host.verify_runners()?;
+  host.verify_runners().await?;
   let deadline = Instant::now() + RUN_TIMEOUT;
   let run = host.run_at_sha(&sha, deadline).await?;
   let run_id = field_u64(&run, "id")?;
   host.completed_run(run_id, &sha, deadline).await?;
-  let listing = host.api(&format!(
-    "repos/{}/actions/runs/{run_id}/jobs?per_page=100",
-    host.repo
-  ))?;
+  let listing = host
+    .api(&format!(
+      "repos/{}/actions/runs/{run_id}/jobs?per_page=100",
+      host.repo
+    ))
+    .await?;
   let jobs = field_array(&listing, "jobs")?;
   let toolu = lane(
     host,
@@ -260,7 +273,8 @@ async fn verify(host: &Host) -> TestResult<()> {
     &host.toolu_name,
     &host.toolu_version,
     &sha,
-  )?;
+  )
+  .await?;
   let reference = lane(
     host,
     jobs,
@@ -268,7 +282,8 @@ async fn verify(host: &Host) -> TestResult<()> {
     &host.reference_name,
     &host.reference_version,
     &sha,
-  )?;
+  )
+  .await?;
   if toolu != reference {
     return Err("toolu and pinned official runner Checks annotations differ".into());
   }
@@ -279,7 +294,7 @@ async fn verify(host: &Host) -> TestResult<()> {
   Ok(())
 }
 
-fn lane(
+async fn lane(
   host: &Host,
   jobs: &[Value],
   name: &str,
@@ -305,10 +320,14 @@ fn lane(
     }
   }
   let job_id = field_u64(job, "id")?;
-  let log = String::from_utf8(host.gh(
-    &format!("repos/{}/actions/jobs/{job_id}/logs", host.repo),
-    true,
-  )?)?;
+  let log = String::from_utf8(
+    host
+      .gh(
+        &format!("repos/{}/actions/jobs/{job_id}/logs", host.repo),
+        true,
+      )
+      .await?,
+  )?;
   if !log.contains(version) {
     return Err(format!("{job_name} log does not prove required binary version {version}").into());
   }
@@ -317,14 +336,18 @@ fn lane(
     .rsplit('/')
     .next()
     .ok_or("check_run_url has no id")?;
-  let check = host.api(&format!("repos/{}/check-runs/{check_id}", host.repo))?;
+  let check = host
+    .api(&format!("repos/{}/check-runs/{check_id}", host.repo))
+    .await?;
   if field_str(&check, "head_sha")? != sha {
     return Err(format!("{job_name} check run has the wrong SHA").into());
   }
-  let annotations = host.api(&format!(
-    "repos/{}/check-runs/{check_id}/annotations?per_page=100",
-    host.repo
-  ))?;
+  let annotations = host
+    .api(&format!(
+      "repos/{}/check-runs/{check_id}/annotations?per_page=100",
+      host.repo
+    ))
+    .await?;
   let rows = annotations
     .as_array()
     .ok_or("Checks annotations response is not an array")?;
