@@ -154,8 +154,11 @@ pub fn build_uses_ref(reference: &ActionStepDefinitionReference) -> String {
   }
 }
 
-/// Resolve a local or cached/downloaded action to its directory and manifest.
+/// Resolve a local or cached remote action to its directory and manifest.
 /// Uses the job HTTP client and routes logs through `run.log_step_id`.
+///
+/// # Errors
+///
 /// Returns `RunnerError` on resolution, download, or manifest parse failure.
 async fn resolve_action(
   step: &ActionStep,
@@ -237,29 +240,8 @@ async fn dispatch_action(
   resolved: &ResolvedStep,
   depth: &mut DepthTracker,
 ) -> Result<ActionOutcome, RunnerError> {
-  let ResolvedStep {
-    client,
-    action_dir,
-    manifest,
-  } = resolved;
-
-  match manifest.runs.using {
-    RunsUsing::Node { major } => {
-      let node_ctx = NodeActionCtx {
-        step,
-        ctx,
-        events: env.events,
-        workspace: env.workspace,
-        config: env.config,
-        client,
-        action_dir,
-        manifest,
-        major,
-        bounds: env.bounds,
-        log_step_id: env.log_step_id,
-      };
-      run_node_action(node_ctx).await
-    },
+  match resolved.manifest.runs.using {
+    RunsUsing::Node { major } => run_resolved_node(step, ctx, env, resolved, major).await,
     RunsUsing::Composite => {
       let result = run_composite_action(step, ctx, env, resolved, depth).await?;
       Ok(ActionOutcome {
@@ -284,6 +266,29 @@ async fn unsupported_docker_action(env: &ActionEnv<'_>) -> ActionOutcome {
     post: None,
     outputs: std::collections::HashMap::new(),
   }
+}
+
+async fn run_resolved_node(
+  step: &ActionStep,
+  ctx: &mut ExecutionContext,
+  env: &ActionEnv<'_>,
+  resolved: &ResolvedStep,
+  major: u8,
+) -> Result<ActionOutcome, RunnerError> {
+  run_node_action(NodeActionCtx {
+    step,
+    ctx,
+    events: env.events,
+    workspace: env.workspace,
+    config: env.config,
+    client: &resolved.client,
+    action_dir: &resolved.action_dir,
+    manifest: &resolved.manifest,
+    major,
+    bounds: env.bounds,
+    log_step_id: env.log_step_id,
+  })
+  .await
 }
 
 /// RAII guard that exits the composite-action depth level on drop.
@@ -445,7 +450,6 @@ fn build_post_step(c: &NodeActionCtx<'_>) -> Option<PostStep> {
     step: c.step.clone(),
     report_id: uuid::Uuid::new_v4().to_string(),
     scope_path: c.ctx.scope_path(),
-    action_name: c.manifest.name.clone(),
     action_dir: c.action_dir.to_path_buf(),
     manifest: c.manifest.clone(),
     major: c.major,
