@@ -46,7 +46,14 @@
     "Assert restored outer environment"
   ],
   "runs": {
-    "hosted": null,
+    "hosted": {
+      "id": 36197284069,
+      "revision": "137ac88d304b487b6ae303ec15454eb5d5f34007",
+      "runners": [
+        "GitHub Actions 1000017803",
+        "GitHub Actions 1000017804"
+      ]
+    },
     "toolu": null,
     "pinned_reference": null
   },
