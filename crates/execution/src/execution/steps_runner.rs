@@ -13,7 +13,7 @@ use super::depth_tracker::DepthTracker;
 use super::file_commands::{FileCommandManager, create_file_command_dir};
 use super::handlers::script::{ScriptHandler, ScriptParams};
 use super::job_spec::JobSpec;
-use super::post_drain::drain_post_steps;
+use super::post_drain::{drain_post_steps, post_number};
 use super::shadow::ShadowObserver;
 use super::shadow::record::StepKey;
 use super::step_env::{
@@ -96,13 +96,7 @@ pub async fn run_steps(
     shadow: run.shadow,
     http: run.http,
     fetcher: run.fetcher,
-    first_post_number: u32::try_from(steps.len().saturating_add(2)).unwrap_or_else(|_| {
-      tracing::warn!(
-        step_count = steps.len(),
-        "post timeline number overflow; saturating at u32::MAX"
-      );
-      u32::MAX
-    }),
+    first_post_number: post_number(2, steps.len()),
   };
 
   let mut job_state = JobState {
