@@ -39,7 +39,9 @@ impl ExecutionContext {
 
   /// Restore the parent environment after a nested action returns.
   pub(in crate::execution) fn pop_step_env(&mut self) {
-    let _ = self.step_env_overlays.pop();
+    if self.step_env_overlays.pop().is_none() {
+      tracing::warn!("nested step environment stack was empty during restoration");
+    }
   }
 
   /// Register a nested Node post for the job's LIFO cleanup queue.

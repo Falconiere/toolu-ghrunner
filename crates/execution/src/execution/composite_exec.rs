@@ -58,6 +58,7 @@ pub async fn execute_composite_action(
 async fn run_composite_steps(run: &mut CompositeRun<'_>, depth: &mut DepthTracker) -> Conclusion {
   let mut aggregate = Conclusion::Success;
   for (idx, step) in run.params.manifest.runs.steps.iter().enumerate() {
+    // Previous inner steps can change steps.*, env, and condition status.
     let eval_ctx = composite_eval_context(run.ctx, run.params.step_inputs, None);
     match evaluate_composite_condition(step.condition.as_deref(), &eval_ctx) {
       Ok(false) => {

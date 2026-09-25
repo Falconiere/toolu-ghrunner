@@ -11,7 +11,7 @@
   "files_sha256": {
     ".github/workflows/composite-semantics-102.yml": "c8c164c4d1fb10ec073613d9aa46c9cc79aac40984e67fe248ce22a5cce0264b",
     "crates/execution/tests/composite_semantics_test.rs": "9c8e3bb50301625aded675660be4933a56899a97607ebaaa871974e9e5b649cb",
-    "crates/execution/tests/composite_bounds_test.rs": "f1c44f804a1a77b636bed7e30213521d476616d8f5a061dff2df04c8a7457ca9",
+    "crates/execution/tests/composite_bounds_test.rs": "93bf576a3f62ecd8ee2b137a4d418a960c09d03f80d991b385e5178e8c092f44",
     "crates/toolu-runner/tests/fixtures/local_actions/composite-102-bad-if/action.yml": "3252004996275402663354bc6bbf3ab82f083f032fd7fed8ce1052bf9b0521da",
     "crates/toolu-runner/tests/fixtures/local_actions/composite-102-bounds/action.yml": "c008ec9a0138bd503edc9284e24cffd22600054f27bb695333846c28085893ae",
     "crates/toolu-runner/tests/fixtures/local_actions/composite-102-continue/action.yml": "610d8f04f932b5f8a92d784eed3ded1055de7f9dc396a6c9078edd50661e1f16",
@@ -49,6 +49,6 @@
     "host": "macOS ARM64",
     "backend": "sanitized GitHub.com acquisition replay",
     "command": "./tools/check.sh all",
-    "status": "./tools/check.sh all passed after the resolution-bound and cancellation regressions"
+    "status": "review fixes and focused deadline test passed; full gate pending"
   }
 }
