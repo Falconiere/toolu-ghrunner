@@ -1,6 +1,5 @@
-//! Acquired-message and real archive checks for issue #76 action downloads.
+//! Acquired-job action resolution and real HTTP archive download checks.
 
-use base64::Engine;
 use execution::execution::actions::download_info::ActionDownloadContext;
 use execution::execution::actions::downloader::download_and_extract_action;
 use execution::execution::actions::prefetch::ActionFetcher;
@@ -416,8 +415,10 @@ async fn archive_redirect_keeps_basic_auth_on_origin_and_drops_it_cross_origin()
   assert!(error.to_string().contains("403"));
   assert!(!error.to_string().contains(token));
   let source_auth = source_rx.recv().await.expect("source request auth");
-  let expected =
-    base64::engine::general_purpose::STANDARD.encode(format!("x-access-token:{token}"));
+  let expected = base64::Engine::encode(
+    &base64::engine::general_purpose::STANDARD,
+    format!("x-access-token:{token}"),
+  );
   assert_eq!(
     source_auth.as_deref(),
     Some(format!("Basic {expected}").as_str())
