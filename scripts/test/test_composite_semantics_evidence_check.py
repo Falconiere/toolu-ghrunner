@@ -53,6 +53,20 @@ class CompositeSemanticsEvidenceTest(unittest.TestCase):
         self.assertIn('runs keys', result.stderr)
         self.assertNotIn('Traceback', result.stderr)
 
+    def test_missing_unverified_reason_reports_a_cli_error_without_traceback(self):
+        evidence = json.loads(EVIDENCE.read_text())
+        evidence['unverified'].pop('toolu-macos')
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'evidence.json'
+            path.write_text(json.dumps(evidence))
+            result = subprocess.run(
+                [sys.executable, str(Path(checker.__file__)), str(path)],
+                capture_output=True, text=True, check=False,
+            )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('toolu-macos: missing unverified reason', result.stderr)
+        self.assertNotIn('Traceback', result.stderr)
+
     def test_missing_evidence_reports_a_cli_error_without_traceback(self):
         with tempfile.TemporaryDirectory() as temp:
             missing = Path(temp) / 'missing.json'
