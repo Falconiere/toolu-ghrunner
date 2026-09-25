@@ -11,6 +11,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::resolver::ActionRef;
 
+// Resource identifier matched against the GHES connectionData advertisement.
 const RESOURCE_ID: &str = "27d7f831-88c1-4719-8ca1-6a061dad90eb";
 
 /// Acquired legacy job fields needed to resolve the server's V1 resource.

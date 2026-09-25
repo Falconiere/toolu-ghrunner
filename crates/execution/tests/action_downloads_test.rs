@@ -131,6 +131,27 @@ fn acquired_api_url_variants_share_one_canonical_cache_host() {
   );
 }
 
+#[test]
+fn github_server_url_with_uppercase_scheme_and_host_uses_public_api() {
+  let mut raw: serde_json::Value =
+    serde_json::from_str(include_str!("defaults_run_job.json")).expect("captured job JSON");
+  let github = raw
+    .get_mut("contextData")
+    .and_then(|value| value.get_mut("github"))
+    .and_then(|value| value.get_mut("d"))
+    .and_then(serde_json::Value::as_array_mut)
+    .expect("captured github context");
+  github.retain(|entry| entry.get("k").and_then(serde_json::Value::as_str) != Some("api_url"));
+  for entry in github {
+    if entry.get("k").and_then(serde_json::Value::as_str) == Some("server_url") {
+      *entry.get_mut("v").expect("server_url value") = serde_json::json!("HTTPS://GITHUB.COM/");
+    }
+  }
+  let msg: AgentJobRequestMessage = serde_json::from_value(raw).expect("acquired job");
+  let context = ActionDownloadContext::from_message(&msg).expect("download context");
+  assert_eq!(context.api_url(), "https://api.github.com");
+}
+
 #[tokio::test]
 async fn remote_action_requires_a_valid_acquired_host_only_when_fetched() {
   let mut raw: serde_json::Value =
