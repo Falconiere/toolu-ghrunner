@@ -1,5 +1,5 @@
 //! Job-level execution inputs that live above the per-step loop: the job's
-//! `outputs:` expression map and the merged `defaults.run` (shell +
+//! `outputs:` expression map and the resolved `defaults.run` (shell +
 //! working-directory) fallback.
 //!
 //! Ordered `defaults` mappings from the acquired message supply the live
@@ -15,9 +15,9 @@ use super::workflow::types::WorkflowDefaults;
 
 /// Job-level fallback shell + working-directory for `run:` steps.
 ///
-/// Holds the final mapping from ordered workflow/job `defaults.run`. Steps that set
-/// their own `shell:`/`working-directory:` still win over both (applied at the
-/// step site).
+/// Holds the final mapping from ordered workflow/job `defaults.run`. Each later
+/// run mapping replaces the preceding mapping, even when it omits a key. Steps
+/// that set their own `shell:`/`working-directory:` still win at the step site.
 #[derive(Debug, Clone, Default)]
 pub struct RunDefaultsResolved {
   /// Fallback shell name (e.g. `bash`) when a run-step omits `shell:`.

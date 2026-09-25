@@ -542,8 +542,9 @@ async fn build_step_env_and_file_commands(
 /// The value arrives as the `workingDirectory` step input (the wire shape the
 /// orchestrator emits for `working-directory:`). Precedence: step value >
 /// job/workflow `defaults.run.working-directory` > workspace root. The chosen
-/// value is `${{ }}`-interpolated, then a relative path is joined onto the
-/// workspace and an absolute path is used as-is.
+/// step value is `${{ }}`-interpolated here; the acquired default was evaluated
+/// once by `JobSpec::from_message_defaults`. A relative path is then joined
+/// onto the workspace and an absolute path is used as-is.
 ///
 /// # Errors
 ///
