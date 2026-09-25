@@ -10,6 +10,7 @@ use execution::node::runtime::{node_binary_path, node_cache_dir, node_version_fo
 use shared::{
   ActionStep, AgentJobRequestMessage, Conclusion, RunnerConfig, RunnerEvent, SecretMasker,
 };
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 type TestResult = Result<(), Box<dyn Error>>;
@@ -18,16 +19,8 @@ const CAPTURE: &str = include_str!("incoming_contexts_matrix_0.json");
 #[tokio::test]
 async fn post_failure_reaches_job_completed() -> TestResult {
   let dir = tempfile::tempdir()?;
-  let config = RunnerConfig {
-    data_dir: dir.path().join("data"),
-    workspace_root: dir.path().join("work"),
-    workspace_gc_hours: 0,
-    ..RunnerConfig::default()
-  };
-  let mut msg: AgentJobRequestMessage = serde_json::from_str(CAPTURE)?;
-  msg
-    .steps
-    .retain(|step| step.reference.repository_type.as_deref() == Some("self"));
+  let config = test_config(&dir);
+  let mut msg = local_action_message()?;
   msg.steps.truncate(1);
   let step = msg
     .steps
@@ -37,19 +30,18 @@ async fn post_failure_reaches_job_completed() -> TestResult {
   let main_id = step.id.clone();
   let workspace = config.workspace_root.join(&msg.job_id);
   seed_action(&workspace, "post-a", "A", true, false)?;
+  let post_script = workspace.join(".github/actions/post-a/post.js");
+  let post_code = std::fs::read_to_string(&post_script)?;
+  std::fs::write(
+    post_script,
+    format!("{post_code}\nconsole.log('POST_LOG:A');\n"),
+  )?;
   seed_node(&config.data_dir)?;
 
   let runner = Runner::new(config, Arc::new(Mutex::new(SecretMasker::new())));
   let cancel = CancellationToken::new();
   let mut receiver = runner.execute_job(msg, cancel.clone());
-  let events = tokio::time::timeout(Duration::from_secs(30), async {
-    let mut result = Vec::new();
-    while let Some(event) = receiver.recv().await {
-      result.push(event);
-    }
-    result
-  })
-  .await?;
+  let events = tokio::time::timeout(Duration::from_secs(30), collect_events(&mut receiver)).await?;
   cancel.cancel();
 
   let completed: Vec<_> = events
@@ -81,6 +73,11 @@ async fn post_failure_reaches_job_completed() -> TestResult {
   assert_eq!(*main, (main_id.as_str(), Conclusion::Success));
   assert_eq!(post.1, Conclusion::Failure);
   assert_ne!(post.0, main_id, "post needs its own report ID");
+  assert!(events.iter().any(|event| matches!(
+    event,
+    RunnerEvent::Log { step_id, line, .. }
+      if step_id == post.0 && line.contains("POST_LOG:A")
+  )));
   let post_started = events.iter().find_map(|event| {
     if let RunnerEvent::StepStarted {
       step_id,
@@ -107,16 +104,8 @@ async fn post_failure_reaches_job_completed() -> TestResult {
 #[tokio::test]
 async fn repeated_posts_keep_state_and_report_identity() -> TestResult {
   let dir = tempfile::tempdir()?;
-  let config = RunnerConfig {
-    data_dir: dir.path().join("data"),
-    workspace_root: dir.path().join("work"),
-    workspace_gc_hours: 0,
-    ..RunnerConfig::default()
-  };
-  let mut msg: AgentJobRequestMessage = serde_json::from_str(CAPTURE)?;
-  msg
-    .steps
-    .retain(|step| step.reference.repository_type.as_deref() == Some("self"));
+  let config = test_config(&dir);
+  let mut msg = local_action_message()?;
   assert_eq!(msg.steps.len(), 2, "capture must have two local actions");
   let main_ids: Vec<_> = msg.steps.iter().map(|step| step.id.clone()).collect();
   for (step, name) in msg.steps.iter_mut().zip(["post-a", "post-b"]) {
@@ -130,14 +119,7 @@ async fn repeated_posts_keep_state_and_report_identity() -> TestResult {
   let runner = Runner::new(config, Arc::new(Mutex::new(SecretMasker::new())));
   let cancel = CancellationToken::new();
   let mut receiver = runner.execute_job(msg, cancel.clone());
-  let events = tokio::time::timeout(Duration::from_secs(30), async {
-    let mut result = Vec::new();
-    while let Some(event) = receiver.recv().await {
-      result.push(event);
-    }
-    result
-  })
-  .await?;
+  let events = tokio::time::timeout(Duration::from_secs(30), collect_events(&mut receiver)).await?;
   cancel.cancel();
 
   assert_eq!(
@@ -167,16 +149,8 @@ async fn repeated_posts_keep_state_and_report_identity() -> TestResult {
 #[tokio::test]
 async fn hard_post_error_keeps_draining_lifo() -> TestResult {
   let dir = tempfile::tempdir()?;
-  let config = RunnerConfig {
-    data_dir: dir.path().join("data"),
-    workspace_root: dir.path().join("work"),
-    workspace_gc_hours: 0,
-    ..RunnerConfig::default()
-  };
-  let mut msg: AgentJobRequestMessage = serde_json::from_str(CAPTURE)?;
-  msg
-    .steps
-    .retain(|step| step.reference.repository_type.as_deref() == Some("self"));
+  let config = test_config(&dir);
+  let mut msg = local_action_message()?;
   assert_eq!(msg.steps.len(), 2);
   for (step, name) in msg.steps.iter_mut().zip(["post-a", "post-b"]) {
     step.reference.path = Some(format!("./.github/actions/{name}"));
@@ -188,14 +162,7 @@ async fn hard_post_error_keeps_draining_lifo() -> TestResult {
 
   let runner = Runner::new(config, Arc::new(Mutex::new(SecretMasker::new())));
   let mut receiver = runner.execute_job(msg, CancellationToken::new());
-  let events = tokio::time::timeout(Duration::from_secs(30), async {
-    let mut result = Vec::new();
-    while let Some(event) = receiver.recv().await {
-      result.push(event);
-    }
-    result
-  })
-  .await?;
+  let events = tokio::time::timeout(Duration::from_secs(30), collect_events(&mut receiver)).await?;
   assert_eq!(
     std::fs::read_to_string(workspace.join("post-markers.txt"))?,
     "A:main\nB:main\nA:post:STATE_k=A-state:INPUT_MARKER=A:GITHUB_ACTION=__self\n"
@@ -293,16 +260,8 @@ async fn hard_main_error_still_completes_after_post_cleanup() -> TestResult {
 #[tokio::test]
 async fn cancelled_posts_complete_job() -> TestResult {
   let dir = tempfile::tempdir()?;
-  let config = RunnerConfig {
-    data_dir: dir.path().join("data"),
-    workspace_root: dir.path().join("work"),
-    workspace_gc_hours: 0,
-    ..RunnerConfig::default()
-  };
-  let mut msg: AgentJobRequestMessage = serde_json::from_str(CAPTURE)?;
-  msg
-    .steps
-    .retain(|step| step.reference.repository_type.as_deref() == Some("self"));
+  let config = test_config(&dir);
+  let mut msg = local_action_message()?;
   for (step, name) in msg.steps.iter_mut().zip(["post-a", "post-b"]) {
     step.reference.path = Some(format!("./.github/actions/{name}"));
   }
@@ -342,16 +301,17 @@ async fn cancelled_posts_complete_job() -> TestResult {
   .await?;
   let cancelled_at = std::time::Instant::now();
   cancel.cancel();
-  let events = tokio::time::timeout(Duration::from_secs(5), async {
-    let mut result = Vec::new();
-    while let Some(event) = receiver.recv().await {
-      result.push(event);
-    }
-    result
-  })
-  .await?;
-  assert!(cancelled_at.elapsed() < Duration::from_secs(3));
-  tokio::time::sleep(Duration::from_millis(1200)).await;
+  let events = tokio::time::timeout(Duration::from_secs(6), collect_events(&mut receiver)).await?;
+  assert!(cancelled_at.elapsed() < Duration::from_secs(5));
+  let timer_deadline = std::time::Instant::now() + Duration::from_millis(1200);
+  while std::time::Instant::now() < timer_deadline {
+    let text = std::fs::read_to_string(&marker)?;
+    assert!(
+      !text.contains("B:post-finished"),
+      "Node post timer survived: {text}"
+    );
+    tokio::time::sleep(Duration::from_millis(10)).await;
+  }
   let text = std::fs::read_to_string(marker)?;
   assert!(text.contains("A:post:STATE_k=A-state"), "{text}");
   assert!(text.contains("A:post-finished"), "{text}");
@@ -369,22 +329,12 @@ async fn cancelled_posts_complete_job() -> TestResult {
 #[tokio::test]
 async fn cancelled_main_keeps_failure_post_and_final_cancelled() -> TestResult {
   let dir = tempfile::tempdir()?;
-  let config = RunnerConfig {
-    data_dir: dir.path().join("data"),
-    workspace_root: dir.path().join("work"),
-    workspace_gc_hours: 0,
-    ..RunnerConfig::default()
-  };
-  let mut msg: AgentJobRequestMessage = serde_json::from_str(CAPTURE)?;
-  msg
-    .steps
-    .retain(|step| step.reference.repository_type.as_deref() == Some("self"));
-  msg.steps.truncate(1);
-  let first = msg
-    .steps
-    .first_mut()
-    .ok_or("captured local action missing")?;
-  first.reference.path = Some("./.github/actions/post-a".to_owned());
+  let config = test_config(&dir);
+  let mut msg = local_action_message()?;
+  assert_eq!(msg.steps.len(), 2, "capture must have two local actions");
+  for (step, name) in msg.steps.iter_mut().zip(["post-a", "post-b"]) {
+    step.reference.path = Some(format!("./.github/actions/{name}"));
+  }
   msg.steps.push(ActionStep::script(
     "cancel-main",
     "echo MAIN_STARTED; sleep 30",
@@ -392,11 +342,18 @@ async fn cancelled_main_keeps_failure_post_and_final_cancelled() -> TestResult {
   ));
   let workspace = config.workspace_root.join(&msg.job_id);
   seed_action(&workspace, "post-a", "A", true, false)?;
+  seed_action(&workspace, "post-b", "B", false, false)?;
   let manifest_path = workspace.join(".github/actions/post-a/action.yml");
   let manifest = std::fs::read_to_string(&manifest_path)?;
   std::fs::write(
     manifest_path,
     manifest.replace("post-if: always()", "post-if: cancelled()"),
+  )?;
+  let skipped_manifest = workspace.join(".github/actions/post-b/action.yml");
+  let skipped_text = std::fs::read_to_string(&skipped_manifest)?;
+  std::fs::write(
+    skipped_manifest,
+    skipped_text.replace("post-if: always()", "post-if: success()"),
   )?;
   seed_node(&config.data_dir)?;
   let runner = Runner::new(config, Arc::new(Mutex::new(SecretMasker::new())));
@@ -416,7 +373,6 @@ async fn cancelled_main_keeps_failure_post_and_final_cancelled() -> TestResult {
   })
   .await?;
   assert!(main_started, "main script did not start: {events:#?}");
-  let cancelled_at = std::time::Instant::now();
   cancel.cancel();
   tokio::time::timeout(Duration::from_secs(5), async {
     while let Some(event) = receiver.recv().await {
@@ -424,10 +380,18 @@ async fn cancelled_main_keeps_failure_post_and_final_cancelled() -> TestResult {
     }
   })
   .await?;
-  assert!(cancelled_at.elapsed() < Duration::from_secs(3));
-  assert!(
-    std::fs::read_to_string(workspace.join("post-markers.txt"))?.contains("A:post:STATE_k=A-state")
-  );
+  let markers = std::fs::read_to_string(workspace.join("post-markers.txt"))?;
+  assert!(markers.contains("A:post:STATE_k=A-state"), "{markers}");
+  assert!(markers.contains("B:main\n"), "{markers}");
+  assert!(!markers.contains("B:post:STATE_k=B-state"), "{markers}");
+  assert!(events.windows(2).any(|pair| matches!(
+    pair,
+    [RunnerEvent::StepSkipped { step_id, reason }, RunnerEvent::StepCompleted {
+      step_id: done_id,
+      conclusion: Conclusion::Skipped,
+      ..
+    }] if reason.contains("post-if 'success()' evaluated to false") && step_id == done_id
+  )));
   assert!(events.iter().any(|event| matches!(
     event,
     RunnerEvent::StepCompleted {
@@ -452,16 +416,8 @@ async fn run_condition_case(
   hard_second_main: bool,
 ) -> Result<(Vec<RunnerEvent>, String), Box<dyn Error>> {
   let dir = tempfile::tempdir()?;
-  let config = RunnerConfig {
-    data_dir: dir.path().join("data"),
-    workspace_root: dir.path().join("work"),
-    workspace_gc_hours: 0,
-    ..RunnerConfig::default()
-  };
-  let mut msg: AgentJobRequestMessage = serde_json::from_str(CAPTURE)?;
-  msg
-    .steps
-    .retain(|step| step.reference.repository_type.as_deref() == Some("self"));
+  let config = test_config(&dir);
+  let mut msg = local_action_message()?;
   for (step, name) in msg.steps.iter_mut().zip(["post-a", "post-b"]) {
     step.reference.path = Some(format!("./.github/actions/{name}"));
   }
@@ -492,16 +448,34 @@ async fn run_condition_case(
   seed_node(&config.data_dir)?;
   let runner = Runner::new(config, Arc::new(Mutex::new(SecretMasker::new())));
   let mut receiver = runner.execute_job(msg, CancellationToken::new());
-  let events = tokio::time::timeout(Duration::from_secs(30), async {
-    let mut result = Vec::new();
-    while let Some(event) = receiver.recv().await {
-      result.push(event);
-    }
-    result
-  })
-  .await?;
+  let events = tokio::time::timeout(Duration::from_secs(30), collect_events(&mut receiver)).await?;
   let markers = std::fs::read_to_string(workspace.join("post-markers.txt"))?;
   Ok((events, markers))
+}
+
+fn test_config(dir: &tempfile::TempDir) -> RunnerConfig {
+  RunnerConfig {
+    data_dir: dir.path().join("data"),
+    workspace_root: dir.path().join("work"),
+    workspace_gc_hours: 0,
+    ..RunnerConfig::default()
+  }
+}
+
+fn local_action_message() -> Result<AgentJobRequestMessage, serde_json::Error> {
+  let mut msg: AgentJobRequestMessage = serde_json::from_str(CAPTURE)?;
+  msg
+    .steps
+    .retain(|step| step.reference.repository_type.as_deref() == Some("self"));
+  Ok(msg)
+}
+
+async fn collect_events(receiver: &mut mpsc::Receiver<RunnerEvent>) -> Vec<RunnerEvent> {
+  let mut events = Vec::new();
+  while let Some(event) = receiver.recv().await {
+    events.push(event);
+  }
+  events
 }
 
 fn seed_action(

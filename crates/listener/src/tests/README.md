@@ -11,7 +11,7 @@
 | `finalize_split.rs` | Completion and teardown ordering. |
 | `helpers.rs` | Listener helper behavior. |
 | `multiline_mask.rs` | Real job masking through listener sinks. |
-| `post_results.rs` | Captured job replay through step collection and completion JSON. |
+| `post_results.rs` | Captured job replay through `StepCollector` and `CompleteJobRequest` serialization. |
 | `startup_overlap.rs` | Startup reporting overlap. |
 | `step_report_queue.rs` | Queued reporting against a broker endpoint. |
 | `step_report_queue_unit.rs` | Report queue deadline and batching behavior. |

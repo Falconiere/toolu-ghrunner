@@ -41,7 +41,12 @@ def check_live(data):
             capture_output=True,
             text=True,
         )
-        run = json.loads(response.stdout)
+        try:
+            run = json.loads(response.stdout)
+        except json.JSONDecodeError as error:
+            raise ValueError(
+                f"{lane} returned invalid run JSON: {response.stdout[:500]!r}"
+            ) from error
         assert run["event"] == "workflow_dispatch"
         assert run["path"].split("@", 1)[0] == ".github/workflows/post-results-live.yml"
         assert run["status"] == "completed", f"{lane} is still running"

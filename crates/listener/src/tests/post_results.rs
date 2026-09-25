@@ -65,8 +65,9 @@ async fn post_results_reach_distinct_completion_records() -> Result<(), Box<dyn 
 
   let runner = Runner::new(config, Arc::new(Mutex::new(SecretMasker::new())));
   let collector = StepCollector::new();
-  let mut receiver = runner.execute_job(msg.clone(), CancellationToken::new());
-  let conclusion = tokio::time::timeout(Duration::from_secs(30), async {
+  let cancellation = CancellationToken::new();
+  let mut receiver = runner.execute_job(msg.clone(), cancellation.clone());
+  let completion = tokio::time::timeout(Duration::from_secs(30), async {
     let mut conclusion = None;
     while let Some(event) = receiver.recv().await {
       collector.record(&event).await;
@@ -79,7 +80,14 @@ async fn post_results_reach_distinct_completion_records() -> Result<(), Box<dyn 
     }
     conclusion
   })
-  .await?
+  .await;
+  let conclusion = match completion {
+    Ok(conclusion) => conclusion,
+    Err(error) => {
+      cancellation.cancel();
+      return Err(error.into());
+    },
+  }
   .ok_or("missing JobCompleted event")?;
   assert_eq!(conclusion, Conclusion::Failure);
   let request = CompleteJobRequest {
