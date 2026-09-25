@@ -151,10 +151,10 @@ fn evaluate_acquired_value(
     Ok(guard) => guard,
     Err(poisoned) => poisoned.into_inner(),
   };
-  if guard.mask(&value).as_ref() != value {
-    Ok(AcquiredValue::Secret)
-  } else {
+  if guard.mask(&value).as_ref() == value {
     Ok(AcquiredValue::Value(value))
+  } else {
+    Ok(AcquiredValue::Secret)
   }
 }
 
