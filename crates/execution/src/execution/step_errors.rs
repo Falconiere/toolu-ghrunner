@@ -1,4 +1,4 @@
-//! Reports a hard top-level step error before its timeline completion.
+//! Reports a hard job-step error, including nested failures attributed to its parent.
 
 use std::collections::HashMap;
 
