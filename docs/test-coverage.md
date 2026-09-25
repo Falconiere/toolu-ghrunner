@@ -701,6 +701,7 @@ registered when checked; an offline `toolu-70-final` macOS registration cannot
 satisfy the Linux service lane. These missing live lanes are not passing evidence
 and do not establish complete epic parity.
 
-GHES access is an external acceptance prerequisite: the local GHES URL/token
-variables are absent and the repository secret listing contains no GHES endpoint
-or token. The local gates and real-daemon replay do not close this missing lane.
+The orchestrator confirmed on 2026-09-25 that no GHES endpoint/token exists for
+this epic run and authorized delivery with GHES, acquired-service and reference
+lanes recorded as unverified. The local gates and real-daemon replay do not close
+those missing lanes or establish full parity.
