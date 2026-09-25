@@ -7,7 +7,7 @@
 
 use std::error::Error;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 
 use execution::Runner;
@@ -25,6 +25,15 @@ use tokio_util::sync::CancellationToken;
 type TestResult<T> = Result<T, Box<dyn Error + Send + Sync>>;
 
 const CAPTURED_JOB: &str = include_str!("../../toolu-runner/tests/fixtures/job_message.json");
+static CAPTURED_MESSAGE: LazyLock<Result<AgentJobRequestMessage, serde_json::Error>> =
+  LazyLock::new(|| serde_json::from_str(CAPTURED_JOB));
+
+fn captured_message() -> TestResult<AgentJobRequestMessage> {
+  let message = CAPTURED_MESSAGE
+    .as_ref()
+    .map_err(|error| std::io::Error::other(error.to_string()))?;
+  Ok(message.clone())
+}
 
 fn captured_script(
   index: usize,
@@ -32,7 +41,7 @@ fn captured_script(
   script: &str,
   condition: &str,
 ) -> TestResult<ActionStep> {
-  let message: AgentJobRequestMessage = serde_json::from_str(CAPTURED_JOB)?;
+  let message = captured_message()?;
   captured_script_from_message(&message, index, name, script, condition)
 }
 
@@ -50,7 +59,7 @@ fn captured_script_from_message(
 }
 
 fn captured_action(index: usize, name: &str, path: &str) -> TestResult<ActionStep> {
-  let message: AgentJobRequestMessage = serde_json::from_str(CAPTURED_JOB)?;
+  let message = captured_message()?;
   let captured = message.steps.get(index).ok_or("captured step missing")?;
   let mut step = ActionStep::with_ref_type(&captured.id, "repository");
   step.context_name = Some(name.to_owned());
@@ -462,7 +471,7 @@ async fn repeated_nested_composites_do_not_leak_inner_step_outputs() -> TestResu
 
 #[tokio::test]
 async fn acquired_message_replay_keeps_wire_ids_through_job_completion() -> TestResult<()> {
-  let mut message: AgentJobRequestMessage = serde_json::from_str(CAPTURED_JOB)?;
+  let mut message = captured_message()?;
   let producer = captured_script_from_message(
     &message,
     0,
