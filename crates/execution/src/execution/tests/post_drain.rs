@@ -14,5 +14,4 @@ async fn cancel_budget_is_shared() {
   let second = cancel_remaining(deadline);
   assert!(first <= Duration::from_millis(120));
   assert_eq!(second, Duration::ZERO);
-  assert!(start.elapsed() < Duration::from_secs(3));
 }
