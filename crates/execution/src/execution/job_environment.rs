@@ -63,9 +63,12 @@ fn scalar(
     // containing `${{ ... }}` into unintended expression execution.
     0 => ExprValue::String(token.lit.clone().unwrap_or_default()),
     3 => ctx.evaluate_with(snapshot, token.expr.as_deref().ok_or_else(invalid_token)?)?,
+    // Upstream omits false/zero payloads. Null is a valid empty env string.
     5 => ExprValue::Bool(token.bool_val.unwrap_or_default()),
     6 => ExprValue::Number(token.num_val.unwrap_or_default()),
     7 => ExprValue::Null,
+    // Numeric wire tags are open-ended; mappings, sequences, directives and
+    // unknown tags cannot be scalar environment keys or values.
     _ => return Err(invalid_token()),
   };
   match value {

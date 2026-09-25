@@ -22,11 +22,18 @@ def api(path):
     if path.endswith('/logs'):
         # Capture ANSI-bearing logs for assertions; never print them to a terminal.
         command.append('--allow-escape-sequences')
-    return subprocess.check_output(command)
+    try:
+        return subprocess.check_output(command)
+    except subprocess.CalledProcessError as error:
+        raise SystemExit(f'gh api {path} failed (exit {error.returncode})') from None
+    except OSError as error:
+        raise SystemExit(f'cannot run gh api {path}: {error}') from None
 
 
 def check_files(evidence):
     source = evidence['source_capture']
+    assert evidence['reference_source_repository'] == 'actions/runner'
+    assert source['repository'] == REPO
     original = json.loads((ROOT / 'crates/execution/tests/incoming_contexts_evidence.json').read_text())
     filename = Path(source['path']).name
     assert source['sha256'] == original['captures'][filename]['sha256']
