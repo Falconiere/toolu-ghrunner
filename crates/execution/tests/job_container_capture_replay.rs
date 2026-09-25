@@ -1,4 +1,4 @@
-//! Captured GitHub job-container message parsing and real Linux replay.
+//! Automatic captured-message parsing checks and opt-in real Linux replay.
 
 use execution::execution::action_exec::build_uses_ref;
 use shared::{AgentJobRequestMessage, TemplateToken};
@@ -185,7 +185,7 @@ async fn captured_job_container_replays_shell_node_composite_and_verify() -> Tes
     "CONTAINER_73_NODE_POST_OK",
   ] {
     assert!(
-      logs.iter().any(|line| line.contains(stage)),
+      logs.iter().any(|line| line.trim() == stage),
       "{stage}: {logs:#?}"
     );
   }
