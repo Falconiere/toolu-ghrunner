@@ -245,7 +245,7 @@ GitHub-hosted job launched `/bin/sh` correctly but its raw `ps comm` value was
 | AC-3, 71-S2 | A capture-derived absent-default job writes `root.marker` at the job workspace root. Relative job path, step path with spaces, and `${{ runner.temp }}` absolute path run in their selected directory. A nonexistent default cwd fails the correct step and its log names the full path. | `paths_and_absence`, `nonexistent_default_directory_fails_its_step_with_path`; passing Linux production replay. Host-shell fallback parity remains with #80. |
 | AC-4, 71-S3 | The captured local composite writes `.defaults-71-composite.marker` at the workspace root; the next top-level `sh` step reads it from its job-default directory. | `composite_scope`; passing Linux production replay. Composite's own cwd behavior belongs to #81. |
 | AC-5, 71-S3 | Linux job-container shell, cwd, and container identity require #73/#80 integration and a Docker-capable Linux self-hosted runner. | **Unverified**; macOS job containers are not applicable to this epic. |
-| AC-6 | The capture checker validates ordered wire types, synthetic credentials, fixture/workflow SHA-256, and recorded live runs against GitHub's jobs API. | `python3 scripts/test/defaults_run_capture_check.py` and `python3 -m unittest discover -s scripts/test -p 'test_defaults_run_capture_check.py'` pass locally; `--live` is pending the final workflow revision. The full Linux `./tools/check.sh all` gate passed before the final live evidence update. |
+| AC-6 | The capture checker validates ordered wire types, synthetic credentials, fixture/workflow SHA-256, and recorded live runs against GitHub's jobs API. | `python3 scripts/test/defaults_run_capture_check.py --live` and `python3 -m unittest discover -s scripts/test -p 'test_defaults_run_capture_check.py'` pass. The full Linux `./tools/check.sh all` gate passed on the final source. |
 
 The replay removes only the remote checkout step and copies the checked-in
 local composite when needed. The captured absolute-path assertion is adjusted
@@ -255,7 +255,14 @@ transformations are identified in the test. The pinned reference contract is
 [actions/runner `JobExtension.cs` at cab9d1c](https://github.com/actions/runner/blob/cab9d1c3901e45c7705889c4f88284fdd93f4ae5/src/Runner.Worker/JobExtension.cs)
 and its top-level/composite scope rule in
 [`ScriptHandler.cs`](https://github.com/actions/runner/blob/cab9d1c3901e45c7705889c4f88284fdd93f4ae5/src/Runner.Worker/Handlers/ScriptHandler.cs).
-The live macOS toolu/GitHub-hosted comparison uses the same matrix job and
-workflow/action revision. Linux host, GHES, container, and full absent-shell
+The [live macOS matrix run](https://github.com/Falconiere/toolu-ghrunner/actions/runs/36095548084)
+passed both `defaults-toolu` and `defaults-reference` at revision `48d6386`,
+with every issue 71 assertion green. Both jobs used the same workflow and
+composite-action revision. `actions/checkout@v4` emits a Node 20 deprecation
+warning on the GitHub-hosted lane. A later optional trial of `checkout@v5`
+([run 36096230974](https://github.com/Falconiere/toolu-ghrunner/actions/runs/36096230974))
+passed the hosted lane, but its Node 24 child on this macOS toolu host remained
+in `_dyld_start` before action code ran; that trial was cancelled, and the
+workflow retained the fully passing `checkout@v4` revision. Linux host, GHES, container, and full absent-shell
 comparisons remain **unverified** until their respective runners or dependency
 issues are available.
