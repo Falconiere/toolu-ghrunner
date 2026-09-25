@@ -1,0 +1,31 @@
+name: job-outputs-70
+run-name: job-outputs-70 capture ${{ github.sha }}
+on:
+  push:
+    branches:
+      - feat/70-evaluate-job-outputs-from-the
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  producer:
+    runs-on: [self-hosted, toolu-70]
+    outputs:
+      value: ${{ steps.produce.outputs.value }}
+    steps:
+      - name: Write real GITHUB_OUTPUT
+        id: produce
+        shell: bash
+        run: printf 'value=hello-output\n' >> "$GITHUB_OUTPUT"
+
+  consumer:
+    needs: producer
+    runs-on: ubuntu-latest
+    steps:
+      - name: Assert downstream needs output
+        shell: bash
+        env:
+          VALUE: ${{ needs.producer.outputs.value }}
+        run: test "$VALUE" = hello-output
