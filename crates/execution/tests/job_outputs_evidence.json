@@ -23,11 +23,35 @@
   },
   "reference_source": "v2.337.0",
   "runs": {
-    "toolu": null,
-    "reference": null
+    "toolu": {
+      "id": 36184896428,
+      "revision": "1b37a9cc7102effda467297fcdb32b55e4711676",
+      "runner": "toolu-70-final",
+      "producer": "producer_toolu",
+      "consumer": "consumer_toolu",
+      "matrix_jobs": [
+        "matrix_toolu (alpha)",
+        "matrix_toolu (beta)"
+      ],
+      "matrix_consumer": "consumer_matrix"
+    },
+    "reference": {
+      "id": 36184896428,
+      "revision": "1b37a9cc7102effda467297fcdb32b55e4711676",
+      "runner": "official-70",
+      "producer": "producer_reference",
+      "consumer": "consumer_reference",
+      "matrix_jobs": [
+        "matrix_reference (alpha)",
+        "matrix_reference (beta)"
+      ],
+      "matrix_consumer": "consumer_reference_matrix"
+    }
   },
   "unverified": [
     "Linux host",
     "GHES"
-  ]
+  ],
+  "reference_binary_commit": "397b032cbf865e9c3ddfab89d533ec19325e1273",
+  "reference_asset_sha256": "5a2cd92908a93d7276a194e1de6008099f3e7946f3f8e14aa7a1a7b4a31fdec2"
 }
