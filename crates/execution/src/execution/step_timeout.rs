@@ -51,7 +51,7 @@ impl StepBounds {
       (None, child) => child,
     };
     Self {
-      timeout: own_timeout,
+      timeout: deadline.map(|at| at.saturating_duration_since(Instant::now())),
       deadline,
       cancel,
     }
