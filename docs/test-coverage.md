@@ -390,6 +390,37 @@ must be recorded before claiming pinned-reference parity. A Linux toolu host
 and a GHES server are unavailable here, so those applicable lanes are also
 **unverified**. Issue #81 remains open and owns composite cwd parsing and
 resolution; #102 must consume and test its expression site after it lands.
+
+## Step process CI flags (#72)
+
+The [captured GitHub.com job](../crates/execution/tests/incoming_contexts_matrix_0.json)
+from #68 and the [captured Linux job-container message](../crates/toolu-runner/tests/fixtures/job_container_message.json)
+from #73 retain their wire IDs and template-token types. The [evidence record](../crates/execution/tests/step_process_ci_evidence.json)
+pins their hashes, the committed [probe actions](../crates/toolu-runner/tests/fixtures/local_actions/ci-72-node/action.yml),
+the [parity workflow](../.github/workflows/step-process-ci-72.yml), and the
+current status of each live lane. The production replay executes real Bash,
+Node pre/main/post, and nested composite shells; process stdout is the oracle.
+
+| Acceptance / scenario | Exact process result | Proof and applicability |
+| --- | --- | --- |
+| AC-1 / 72-S1 | With no `CI`, a child prints `true`; runner `CI=false` remains `false`; captured job `CI=job` and step `CI=step` win in order; a step's empty value remains empty. | `env -u CI cargo test -p execution --test step_process_ci_test` and `CI=false cargo test -p execution --test step_process_ci_test`; `host_script_defaults_and_preserves_ci_precedence`, macOS ARM64 host replay. |
+| AC-2 / 72-S2 | Attempts to set `GITHUB_ACTIONS=false` at job, step, or container declaration still print `true` from the child. | Same host replay plus `bash scripts/test/step_process_ci_linux.sh`; real Docker on Linux ARM64. |
+| AC-3 / 72-S3 | Node pre/main/post each print empty `CI` and `true`; the post retains its originating step value after a later `GITHUB_ENV` write. Nested composite inner and parent shells print the same pair. Nested Node posts retain both their own step `CI` and an inherited parent-step `CI`. A malformed `CI` expression visibly fails before starting an action child. | `node_pre_main_post_keep_originating_empty_step_ci`, `composite_shell_nested_empty_ci_and_forced_github_actions`, `nested_node_post_keeps_its_composite_step_ci`, `nested_node_post_keeps_inherited_parent_step_ci`, `malformed_action_ci_expression_fails_visibly`; both isolated runner-CI modes pass. |
+| AC-4 / 72-S3 container | Container shell and verification shell retain declaration `CI=false`; Node stages and nested composite step override it with empty `CI`; all print `GITHUB_ACTIONS=true` and hostname `container-73-probe`. Absent declaration uses runner `CI` or `true`. | `job_container_ci_test.rs` has two Linux-only ignored-by-default tests; the explicit wrapper above requires Linux and a real Docker socket and runs both tests with absent, false, and distinct `runner` values for runner `CI`. A Darwin zero-test result does not count. |
+| AC-5 | `./tools/check.sh all` must pass without suppressions. | Full gate result is recorded in the evidence JSON and PR verification. |
+
+The workflow runs the same committed action revision on GitHub-hosted macOS,
+Linux, and Linux job-container jobs. Matching self-hosted toolu lanes require
+registered runners; the GitHub API currently reports zero. The
+[evidence checker](../scripts/test/step_process_ci_evidence_check.py) verifies
+capture/file hashes and any recorded GitHub run IDs; `--require-live` fails on
+missing lanes. GitHub-hosted runner binaries have not been shown to equal the
+epic's pinned official source revision `cab9d1c`, so hosted runs alone do not
+establish pinned-reference parity. Toolu GitHub.com acquisition, GHES, and the
+Docker-action half of 72-S3 remain **unverified**; Docker actions belong to
+open #75. macOS job containers are not applicable because this runner supports
+them on Linux only.
+
 ## Job containers (#73)
 
 Local component evidence uses real Docker output and actual shell/action code.

@@ -78,10 +78,9 @@ pub async fn run_nested_uses_step(
     return Ok((Conclusion::Success, HashMap::new()));
   };
 
-  let synthetic = build_nested_step(params.step, params.idx, uses, params.inputs, params.ctx)?;
-
+  let mut synthetic = build_nested_step(params.step, params.idx, uses, params.inputs, params.ctx)?;
   let step_env = render_nested_env(params.step, params.inputs, params.ctx)?;
-  params.ctx.push_step_env(step_env);
+  attach_rendered_env(&mut synthetic, step_env);
 
   // Recursive call: a nested composite re-enters `execute_action`, which
   // enters the depth tracker again, so the chain is bounded by `MAX_COMPOSITE_DEPTH`.
@@ -108,7 +107,6 @@ pub async fn run_nested_uses_step(
     params.depth,
   ))
   .await;
-  params.ctx.pop_step_env();
   let outcome = outcome?;
 
   record_nested_result(params.ctx, &synthetic, &outcome);
@@ -116,6 +114,22 @@ pub async fn run_nested_uses_step(
     params.ctx.register_nested_post(post);
   }
   Ok((outcome.conclusion, outcome.outputs))
+}
+
+fn attach_rendered_env(step: &mut ActionStep, env: HashMap<String, String>) {
+  step.environment = Some(TemplateToken {
+    token_type: 2,
+    d: Some(
+      env
+        .into_iter()
+        .map(|(key, value)| DictEntry {
+          key: literal_token(&key),
+          value: literal_token(&value),
+        })
+        .collect(),
+    ),
+    ..TemplateToken::default()
+  });
 }
 
 fn render_nested_env(

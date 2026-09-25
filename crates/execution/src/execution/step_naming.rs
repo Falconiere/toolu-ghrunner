@@ -16,6 +16,8 @@ use super::actions::manifest::ActionDefinition;
 pub struct PostStep {
   /// The originating action step (same id/scope as `main`).
   pub step: ActionStep,
+  /// Resolved step environment retained for the post stage.
+  pub step_env: std::collections::HashMap<String, String>,
   /// Independent timeline/report identity for the post stage.
   pub report_id: String,
   /// Composite invocation path captured when this post was registered.

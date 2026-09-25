@@ -1,0 +1,7 @@
+name: ci-72-node
+description: Reports CI flags from real Node pre, main, and post processes.
+runs:
+  using: node20
+  pre: pre.js
+  main: main.js
+  post: post.js

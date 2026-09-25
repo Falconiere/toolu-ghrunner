@@ -202,6 +202,15 @@ replaces the workflow `run` mapping; an explicit step value wins. Relative
 directories resolve from that job's workspace, and a missing directory fails
 the step with its path in the diagnostic. Composite steps keep their own scope.
 
+Each launched shell, Node action stage (pre/main/post), and nested composite
+shell receives `GITHUB_ACTIONS=true`. The runner supplies `CI=true` only when
+`CI` is absent from the child environment and the runner environment. Existing
+workflow, job, action-step, and runner values such as `CI=false` or an empty
+`CI` are preserved. Linux job-container processes follow the same rule, with a
+container declaration supplying the fallback when no job or step `CI` is present.
+Docker actions are still unsupported; see [test coverage](docs/test-coverage.md)
+for measured platforms and live parity status.
+
 ### Job containers
 
 On Linux, `jobs.<id>.container` selects one container for shell steps,

@@ -48,11 +48,13 @@ pub async fn run_shell_script(
   let (program, args) = shell_args(params.shell, &script_path);
 
   let mut cmd = tokio::process::Command::new(program);
+  let mut env = params.env.clone();
+  super::step_process_env::apply(&mut env, None);
   cmd
     .args(&args)
     .current_dir(params.working_dir)
     .env_clear()
-    .envs(params.env)
+    .envs(&env)
     .stdout(Stdio::piped())
     .stderr(Stdio::piped());
   #[cfg(unix)]

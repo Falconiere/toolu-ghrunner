@@ -32,6 +32,15 @@ impl ExecutionContext {
     env
   }
 
+  /// Capture only active step scopes for a deferred post; later job env stays live.
+  pub(in crate::execution) fn snapshot_step_env(&self) -> HashMap<String, String> {
+    let mut env = HashMap::new();
+    for overlay in &self.step_env_overlays {
+      env.extend(overlay.clone());
+    }
+    env
+  }
+
   /// Make one nested `uses:` step's env visible only for its action stages.
   pub(in crate::execution) fn push_step_env(&mut self, env: HashMap<String, String>) {
     self.step_env_overlays.push(env);
