@@ -22,7 +22,7 @@ const IMAGE: &str =
 #[ignore = "requires a real local Linux Docker daemon and TOOLU_CONTAINER_TEST_ROOT"]
 async fn cancellation_after_exec_starts_keeps_container_for_post_then_cleans_up()
 -> Result<(), Box<dyn std::error::Error>> {
-  let (root, config, workspace) = test_paths()?;
+  let (root, config, workspace) = test_paths().await?;
   let cancel = CancellationToken::new();
   let container = start_container(&config, &workspace, ContainerSpec::image_only(IMAGE)).await?;
   let result = AssertUnwindSafe(async {
@@ -56,7 +56,7 @@ async fn cancellation_after_exec_starts_keeps_container_for_post_then_cleans_up(
       .await?,
       Conclusion::Success
     );
-    assert!(workspace.join("cancellation-post").is_file());
+    assert!(tokio::fs::metadata(workspace.join("cancellation-post")).await?.is_file());
     Ok::<(), Box<dyn std::error::Error>>(())
   })
   .catch_unwind()
@@ -71,7 +71,7 @@ async fn cancellation_after_exec_starts_keeps_container_for_post_then_cleans_up(
 #[ignore = "requires a real local Linux Docker daemon and TOOLU_CONTAINER_TEST_ROOT"]
 async fn timeout_after_exec_starts_keeps_container_for_post_then_cleans_up()
 -> Result<(), Box<dyn std::error::Error>> {
-  let (root, config, workspace) = test_paths()?;
+  let (root, config, workspace) = test_paths().await?;
   let cancel = CancellationToken::new();
   let container = start_container(&config, &workspace, ContainerSpec::image_only(IMAGE)).await?;
   let result = AssertUnwindSafe(async {
@@ -83,7 +83,11 @@ async fn timeout_after_exec_starts_keeps_container_for_post_then_cleans_up()
       "printf started > timeout-started; sleep 30",
     )
     .await?;
-    assert!(workspace.join("timeout-started").is_file());
+    assert!(
+      tokio::fs::metadata(workspace.join("timeout-started"))
+        .await?
+        .is_file()
+    );
     assert_eq!(conclusion, Conclusion::Failure);
     assert_eq!(
       execute_script(
@@ -96,7 +100,11 @@ async fn timeout_after_exec_starts_keeps_container_for_post_then_cleans_up()
       .await?,
       Conclusion::Success
     );
-    assert!(workspace.join("timeout-post").is_file());
+    assert!(
+      tokio::fs::metadata(workspace.join("timeout-post"))
+        .await?
+        .is_file()
+    );
     Ok::<(), Box<dyn std::error::Error>>(())
   })
   .catch_unwind()
@@ -111,7 +119,7 @@ async fn timeout_after_exec_starts_keeps_container_for_post_then_cleans_up()
 #[ignore = "requires a real local Linux Docker daemon and TOOLU_CONTAINER_TEST_ROOT"]
 async fn pull_create_and_start_failures_leave_no_owned_resources()
 -> Result<(), Box<dyn std::error::Error>> {
-  let (root, config, workspace) = test_paths()?;
+  let (root, config, workspace) = test_paths().await?;
   let before = owned_resources().await?;
   let pull_failure = ContainerSpec::image_only("127.0.0.1:1/toolu-missing-image:never");
   let pull = start_container(&config, &workspace, pull_failure).await;
@@ -163,7 +171,7 @@ async fn pull_create_and_start_failures_leave_no_owned_resources()
 #[ignore = "requires a real local Linux Docker daemon and TOOLU_CONTAINER_TEST_ROOT"]
 async fn missing_exec_program_fails_and_owned_resources_are_removed()
 -> Result<(), Box<dyn std::error::Error>> {
-  let (_root, config, workspace) = test_paths()?;
+  let (_root, config, workspace) = test_paths().await?;
   let container = start_container(&config, &workspace, ContainerSpec::image_only(IMAGE)).await?;
   let (events, _events_rx) = mpsc::channel(8);
   let (stdout, _stdout_rx) = mpsc::channel(8);
@@ -193,7 +201,7 @@ async fn missing_exec_program_fails_and_owned_resources_are_removed()
   cleanup
 }
 
-fn test_paths()
+async fn test_paths()
 -> Result<(tempfile::TempDir, RunnerConfig, std::path::PathBuf), Box<dyn std::error::Error>> {
   let base = std::env::var_os("TOOLU_CONTAINER_TEST_ROOT").ok_or_else(|| {
     std::io::Error::new(
@@ -210,7 +218,7 @@ fn test_paths()
     ..RunnerConfig::default()
   };
   let workspace = config.workspace_root.join("job one");
-  std::fs::create_dir_all(&workspace)?;
+  tokio::fs::create_dir_all(&workspace).await?;
   Ok((root, config, workspace))
 }
 
@@ -264,12 +272,18 @@ async fn execute_script(
 
 async fn wait_for_file(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
   tokio::time::timeout(Duration::from_secs(10), async {
-    while !path.is_file() {
+    loop {
+      match tokio::fs::metadata(path).await {
+        Ok(metadata) if metadata.is_file() => return Ok::<(), std::io::Error>(()),
+        Ok(_) => {},
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
+        Err(error) => return Err(error),
+      }
       tokio::time::sleep(Duration::from_millis(25)).await;
     }
   })
   .await
-  .map_err(|_timeout| format!("timed out waiting for {}", path.display()))?;
+  .map_err(|_timeout| format!("timed out waiting for {}", path.display()))??;
   Ok(())
 }
 
