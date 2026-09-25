@@ -120,7 +120,7 @@ async fn post_results_reach_distinct_completion_records() -> Result<(), Box<dyn 
     job_id: msg.job_id,
     request_id: msg.request_id,
     conclusion: map_conclusion(conclusion),
-    outputs: serde_json::json!({}),
+    outputs: std::collections::HashMap::new(),
     step_results: collector.collected_results().await,
     annotations: Vec::new(),
   };

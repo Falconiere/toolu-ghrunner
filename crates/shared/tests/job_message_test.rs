@@ -154,6 +154,28 @@ fn agent_job_request_message_minimal_deserialize() {
   assert!(job.steps.is_empty());
   assert!(job.run_service_url().is_none());
   assert!(job.server_url().is_none());
+  assert!(job.job_outputs.is_none());
+}
+
+#[test]
+fn acquired_job_outputs_preserve_expression_token_and_step_identity() {
+  let job: AgentJobRequestMessage = serde_json::from_str(include_str!(
+    "../../execution/tests/job_outputs_message.json"
+  ))
+  .unwrap();
+  let outputs = job.job_outputs.as_ref().unwrap();
+  assert_eq!(outputs.token_type, 2);
+  let entries = outputs.d.as_ref().unwrap();
+  assert_eq!(entries.len(), 1);
+  assert_eq!(entries[0].key.to_string_value(), Some("value"));
+  assert_eq!(
+    entries[0].value.to_expr_string(),
+    Some("steps.produce.outputs.value")
+  );
+  assert_ne!(
+    job.steps[0].id,
+    job.steps[0].context_name.as_deref().unwrap()
+  );
 }
 
 #[test]

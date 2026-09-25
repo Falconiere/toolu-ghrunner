@@ -1,5 +1,5 @@
 name: job-outputs-70
-run-name: job-outputs-70 capture ${{ github.sha }}
+run-name: job-outputs-70 verify ${{ github.sha }}
 on:
   push:
     branches:
@@ -10,22 +10,119 @@ permissions:
   contents: read
 
 jobs:
-  producer:
+  producer_toolu:
     runs-on: [self-hosted, toolu-70]
     outputs:
       value: ${{ steps.produce.outputs.value }}
+      empty: ${{ steps.produce.outputs.empty }}
+      multiline: ${{ steps.produce.outputs.multiline }}
+      unicode: ${{ steps.produce.outputs.unicode }}
+      hidden: ${{ steps.produce.outputs.hidden }}
+      post_value: ${{ env.POST_VALUE }}
     steps:
+      - uses: actions/checkout@v4
       - name: Write real GITHUB_OUTPUT
         id: produce
         shell: bash
-        run: printf 'value=hello-output\n' >> "$GITHUB_OUTPUT"
+        run: |
+          echo "::add-mask::snowfox-70-secret"
+          {
+            printf 'value=hello-output\n'
+            printf 'empty=\n'
+            printf 'unicode=水🌊\n'
+            printf 'hidden=snowfox-70-secret\n'
+            printf 'multiline<<EOF\nfirst\ncafé 🌍\nEOF\n'
+          } >> "$GITHUB_OUTPUT"
+      - uses: ./.github/actions/job-outputs-70-post
 
-  consumer:
-    needs: producer
+  consumer_toolu:
+    needs: producer_toolu
     runs-on: ubuntu-latest
     steps:
-      - name: Assert downstream needs output
+      - name: Assert downstream toolu outputs
         shell: bash
         env:
-          VALUE: ${{ needs.producer.outputs.value }}
-        run: test "$VALUE" = hello-output
+          VALUE: ${{ needs.producer_toolu.outputs.value }}
+          EMPTY: ${{ needs.producer_toolu.outputs.empty }}
+          MULTILINE: ${{ needs.producer_toolu.outputs.multiline }}
+          UNICODE: ${{ needs.producer_toolu.outputs.unicode }}
+          HIDDEN: ${{ needs.producer_toolu.outputs.hidden }}
+          POST_VALUE: ${{ needs.producer_toolu.outputs.post_value }}
+        run: |
+          test "$VALUE" = hello-output
+          test -z "$EMPTY"
+          test "$MULTILINE" = $'first\ncafé 🌍'
+          test "$UNICODE" = '水🌊'
+          test -z "$HIDDEN"
+          test "$POST_VALUE" = after-post
+
+  producer_reference:
+    runs-on: [self-hosted, official-70]
+    outputs:
+      value: ${{ steps.produce.outputs.value }}
+      empty: ${{ steps.produce.outputs.empty }}
+      multiline: ${{ steps.produce.outputs.multiline }}
+      unicode: ${{ steps.produce.outputs.unicode }}
+      hidden: ${{ steps.produce.outputs.hidden }}
+      post_value: ${{ env.POST_VALUE }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Write real GITHUB_OUTPUT
+        id: produce
+        shell: bash
+        run: |
+          echo "::add-mask::snowfox-70-secret"
+          {
+            printf 'value=hello-output\n'
+            printf 'empty=\n'
+            printf 'unicode=水🌊\n'
+            printf 'hidden=snowfox-70-secret\n'
+            printf 'multiline<<EOF\nfirst\ncafé 🌍\nEOF\n'
+          } >> "$GITHUB_OUTPUT"
+      - uses: ./.github/actions/job-outputs-70-post
+
+  consumer_reference:
+    needs: producer_reference
+    runs-on: ubuntu-latest
+    steps:
+      - name: Assert downstream reference outputs
+        shell: bash
+        env:
+          VALUE: ${{ needs.producer_reference.outputs.value }}
+          EMPTY: ${{ needs.producer_reference.outputs.empty }}
+          MULTILINE: ${{ needs.producer_reference.outputs.multiline }}
+          UNICODE: ${{ needs.producer_reference.outputs.unicode }}
+          HIDDEN: ${{ needs.producer_reference.outputs.hidden }}
+          POST_VALUE: ${{ needs.producer_reference.outputs.post_value }}
+        run: |
+          test "$VALUE" = hello-output
+          test -z "$EMPTY"
+          test "$MULTILINE" = $'first\ncafé 🌍'
+          test "$UNICODE" = '水🌊'
+          test -z "$HIDDEN"
+          test "$POST_VALUE" = after-post
+
+  matrix_toolu:
+    strategy:
+      matrix:
+        tag: [alpha]
+    runs-on: [self-hosted, toolu-70]
+    outputs:
+      tag: ${{ steps.matrix.outputs.tag }}
+    steps:
+      - name: Write matrix output
+        id: matrix
+        shell: bash
+        env:
+          TAG: ${{ matrix.tag }}
+        run: printf 'tag=%s\n' "$TAG" >> "$GITHUB_OUTPUT"
+
+  consumer_matrix:
+    needs: matrix_toolu
+    runs-on: ubuntu-latest
+    steps:
+      - name: Assert downstream matrix output
+        shell: bash
+        env:
+          TAG: ${{ needs.matrix_toolu.outputs.tag }}
+        run: test "$TAG" = alpha

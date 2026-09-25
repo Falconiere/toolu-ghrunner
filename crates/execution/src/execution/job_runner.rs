@@ -15,7 +15,7 @@ use super::context::ExecutionContext;
 pub use super::job_context::build_context;
 use super::job_context::{event_json, write_event_json};
 use super::job_hooks::{JobHookStage, run_job_hook};
-use super::job_spec::{JobSpec, evaluate_job_outputs};
+use super::job_spec::JobSpec;
 use super::job_teardown::{CacheMaintenance, JobTeardown};
 use super::service_endpoints::{ServiceUrls, extract_service_urls, forward_env};
 use super::shadow::ShadowObserver;
@@ -30,7 +30,10 @@ use cache::trust::{TrustLevel, classify_trust};
 use cache::v1::{V1Inputs, V1State, v1_router};
 use shared::SecretMasker;
 
+mod outputs;
 mod prepared;
+
+use outputs::evaluate_final_outputs;
 
 /// The local services a job's configured mode brought up, threaded from the
 /// startup match through `setup_job_env` and shut down at job end.
@@ -443,7 +446,8 @@ async fn run_job_body(
   let conclusion = run_steps(&msg.steps, ctx, events, cancel.clone(), &run).await?;
 
   // Evaluate job `outputs:` against the final context (after main + post steps).
-  let outputs = evaluate_job_outputs(spec, ctx)?;
+  let (conclusion, outputs) =
+    evaluate_final_outputs(spec, ctx, events, &msg.job_id, conclusion).await?;
 
   run_completed_hook_best_effort(ctx, events, workspace, cancel).await;
 

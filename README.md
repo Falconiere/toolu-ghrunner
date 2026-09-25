@@ -186,7 +186,7 @@ left orphaned.
 | | |
 |---|---|
 | **Steps** | `run:` shell, `uses:` Node.js actions (runtime auto-downloaded + cached), composite actions, plugins — `uses: docker://` is not yet supported (the step fails with an explicit log line) |
-| **Workflows** | matrices, `needs:` job graphs, reusable workflows, `if:` conditions, `timeout-minutes`, `working-directory`, `defaults.run` |
+| **Workflows** | matrices, `needs:` job graphs and job outputs, reusable workflows, `if:` conditions, `timeout-minutes`, `working-directory`, `defaults.run` |
 | **Expressions** | the full `${{ }}` engine — lexer, parser, evaluator, `hashFiles`, `fromJSON`/`toJSON`, `contains`, `startsWith`, … |
 | **Services** | artifacts, cache, and OIDC — forwarded to real GitHub by default, hosted locally in `offline` mode, or a local content-addressed cache accelerator in `accelerated` mode |
 | **Safety** | secret masking across logs, stdout, and the journal; strict-mode clippy (no `unwrap`, no `panic`, no `unsafe`) |
@@ -210,6 +210,11 @@ workflow, job, action-step, and runner values such as `CI=false` or an empty
 container declaration supplying the fallback when no job or step `CI` is present.
 Docker actions are still unsupported; see [test coverage](docs/test-coverage.md)
 for measured platforms and live parity status.
+
+Job `outputs:` arrive in the acquired job message and resolve after main and
+post steps finish. Empty values are omitted. Values matching a registered
+secret mask are omitted with a warning; safe values reach downstream jobs as
+`needs.<job>.outputs.<name>`.
 
 ### Job containers
 

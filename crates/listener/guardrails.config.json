@@ -6,9 +6,15 @@
     "nested": {
       "*": [
         "tests"
+      ],
+      ".": [
+        "job_lifecycle",
+        "log_uploader",
+        "tests"
       ]
     },
     "requireReadme": [
+      "job_lifecycle",
       "log_uploader",
       "tests"
     ]

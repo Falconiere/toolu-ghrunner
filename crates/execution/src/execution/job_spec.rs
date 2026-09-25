@@ -32,6 +32,9 @@ pub struct JobSpec {
   /// Job-level `outputs:` map: name → `${{ }}` expression string. Evaluated
   /// against the final context after all steps + post-steps complete.
   pub outputs: HashMap<String, String>,
+  /// Ordered, unevaluated `jobOutputs` token from the acquired job message.
+  /// This takes precedence over locally parsed workflow outputs when present.
+  pub acquired_outputs: Option<TemplateToken>,
   /// Final `defaults.run` mapping applied to run-steps that omit their own.
   pub defaults: RunDefaultsResolved,
 }
@@ -46,6 +49,7 @@ impl JobSpec {
   ) -> Self {
     Self {
       outputs,
+      acquired_outputs: None,
       defaults: merge_run_defaults(workflow_defaults, job_defaults),
     }
   }
@@ -70,6 +74,99 @@ impl JobSpec {
       }
     }
     Ok(resolved)
+  }
+}
+
+/// Evaluated acquired outputs, including suppression and evaluation failures.
+pub(super) struct AcquiredOutputResult {
+  /// Safe values to send to the Run Service, including values before an error.
+  pub(super) outputs: HashMap<String, String>,
+  /// Names of secret-bearing output values omitted from the result.
+  pub(super) skipped_secret_names: Vec<String>,
+  /// The first malformed token or expression error, if any.
+  pub(super) error: Option<RunnerError>,
+}
+
+enum AcquiredValue {
+  Empty,
+  Secret,
+  Value(String),
+}
+
+/// Evaluate acquired job outputs in their wire order against the final context.
+///
+/// The upstream runner skips empty and secret-bearing values. It retains values
+/// accepted before an evaluation error, which then fails the job. Names are
+/// compared without ASCII case so duplicate names follow the upstream map.
+pub(super) fn evaluate_acquired_outputs(
+  token: &TemplateToken,
+  ctx: &ExecutionContext,
+) -> AcquiredOutputResult {
+  let mut result = AcquiredOutputResult {
+    outputs: HashMap::new(),
+    skipped_secret_names: Vec::new(),
+    error: None,
+  };
+  let entries = match mapping_entries(token, "jobOutputs") {
+    Ok(entries) => entries,
+    Err(error) => {
+      result.error = Some(error);
+      return result;
+    },
+  };
+  let eval_ctx = ctx.eval_context();
+  for (name, value_token) in entries {
+    if name.is_empty() {
+      continue;
+    }
+    match evaluate_acquired_value(name, value_token, ctx, &eval_ctx) {
+      Ok(AcquiredValue::Empty) => {},
+      Ok(AcquiredValue::Secret) => result.skipped_secret_names.push(name.to_owned()),
+      Ok(AcquiredValue::Value(value)) => insert_output(&mut result.outputs, name, value),
+      Err(error) => {
+        result.error = Some(error);
+        break;
+      },
+    }
+  }
+  result
+}
+
+fn evaluate_acquired_value(
+  name: &str,
+  token: &TemplateToken,
+  ctx: &ExecutionContext,
+  eval_ctx: &expressions::evaluator::EvalContext,
+) -> Result<AcquiredValue, RunnerError> {
+  if !matches!(token.token_type, 0 | 3 | 5 | 6 | 7) {
+    return Err(RunnerError::Protocol(format!(
+      "jobOutputs.{name} must be a scalar token"
+    )));
+  }
+  let value = env_token_to_string(token, ctx, eval_ctx)?;
+  if value.is_empty() {
+    return Ok(AcquiredValue::Empty);
+  }
+  let guard = match ctx.masker().lock() {
+    Ok(guard) => guard,
+    Err(poisoned) => poisoned.into_inner(),
+  };
+  if guard.mask(&value).as_ref() != value {
+    Ok(AcquiredValue::Secret)
+  } else {
+    Ok(AcquiredValue::Value(value))
+  }
+}
+
+fn insert_output(outputs: &mut HashMap<String, String>, name: &str, value: String) {
+  if let Some(existing) = outputs
+    .keys()
+    .find(|key| key.eq_ignore_ascii_case(name))
+    .cloned()
+  {
+    outputs.insert(existing, value);
+  } else {
+    outputs.insert(name.to_owned(), value);
   }
 }
 
