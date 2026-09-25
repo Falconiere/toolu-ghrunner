@@ -12,6 +12,7 @@
         "job_runner",
         "oidc",
         "shadow",
+        "steps_runner",
         "workflow"
       ],
       "execution/artifacts": [
@@ -36,6 +37,7 @@
       "execution/job_runner",
       "execution/oidc",
       "execution/shadow",
+      "execution/steps_runner",
       "execution/tests",
       "execution/workflow",
       "execution/workflow/parser",
