@@ -9,6 +9,7 @@ on:
 
 jobs:
   annotations:
+    if: ${{ vars.TOOLU_ANNOTATION_82_LIVE == 'true' }}
     name: annotation-82-${{ matrix.lane }}
     strategy:
       fail-fast: false
