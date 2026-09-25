@@ -19,7 +19,7 @@
 //! step that resolves a real executable placed ONLY in the exported PATH
 //! entry (bare `fixture-tool`, not a full path — exactly how `bun`/`node`
 //! commands are invoked by later steps) and reads the exported env var. The
-//! action's real `node` binary and manifest are seeded on disk (no network,
+//! action's real `node` binary and manifest are installed on disk (no network,
 //! fully hermetic); the test skips if no system `node` is available.
 //!
 //! `main.js` itself guards the contract: it throws a named
@@ -33,7 +33,6 @@ use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use execution::execution::actions::downloader::{action_cache_dir, watermark_path};
 use execution::execution::actions::prefetch::ActionFetcher;
 use execution::execution::context::ExecutionContext;
 use execution::execution::steps_runner::{JobRun, run_steps};
@@ -95,13 +94,11 @@ fn seed_node(data_dir: &Path, node: &Path) -> TestResult<()> {
   Ok(())
 }
 
-/// Seed a copy of the fixture action into the action cache under
-/// `toolu/path-env-action/v1`, with the `bin_dir` input default rewritten to
-/// `bin_dir` (a real, empty-at-seed-time directory the test controls).
-fn seed_action(data_dir: &Path, bin_dir: &Path) -> TestResult<()> {
-  let cache_key = "toolu/path-env-action/v1";
-  let cache_dir = action_cache_dir(data_dir, cache_key);
-  std::fs::create_dir_all(&cache_dir)?;
+/// Install the committed local action with its bin-dir input pointing to the
+/// real, empty-at-install-time directory controlled by this test.
+fn install_action(workspace: &Path, bin_dir: &Path) -> TestResult<()> {
+  let action_dir = workspace.join("path-env-action");
+  std::fs::create_dir_all(&action_dir)?;
 
   for name in ["action.yml", "main.js"] {
     let src = Path::new(FIXTURE_DIR).join(name);
@@ -111,18 +108,15 @@ fn seed_action(data_dir: &Path, bin_dir: &Path) -> TestResult<()> {
     } else {
       contents
     };
-    std::fs::write(cache_dir.join(name), patched)?;
+    std::fs::write(action_dir.join(name), patched)?;
   }
-
-  std::fs::write(watermark_path(&cache_dir), "")?;
   Ok(())
 }
 
-/// Build the node-action step (`uses: toolu/path-env-action@v1`).
+/// Build the node-action step (`uses: ./path-env-action`).
 fn action_step(id: &str) -> ActionStep {
   let mut step = ActionStep::with_ref_type(id, "repository");
-  step.reference.name = Some("toolu/path-env-action".to_owned());
-  step.reference.git_ref = Some("v1".to_owned());
+  step.reference.name = Some("./path-env-action".to_owned());
   step
 }
 
@@ -141,8 +135,8 @@ fn write_fixture_tool(bin_dir: &Path) -> TestResult<()> {
   Ok(())
 }
 
-/// Drive `steps` through the live step loop with a pre-seeded action+node
-/// cache, returning the run-step's captured stdout `Log` lines.
+/// Drive `steps` through the live step loop with a local action and seeded
+/// Node cache, returning the run-step's captured stdout `Log` lines.
 async fn drive(
   steps: &[ActionStep],
   workspace: &Path,
@@ -217,7 +211,7 @@ async fn node_action_path_and_env_exports_reach_the_next_step() -> TestResult<()
   };
 
   seed_node(&data_dir, &node)?;
-  seed_action(&data_dir, &bin_dir)?;
+  install_action(&workspace, &bin_dir)?;
 
   let mut verify = ActionStep::script(
     "verify",
