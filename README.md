@@ -186,6 +186,11 @@ left orphaned.
 | **Services** | artifacts, cache, and OIDC — forwarded to real GitHub by default, hosted locally in `offline` mode, or a local content-addressed cache accelerator in `accelerated` mode |
 | **Safety** | secret masking across logs, stdout, and the journal; strict-mode clippy (no `unwrap`, no `panic`, no `unsafe`) |
 
+Remote `uses:` actions are resolved with the acquired job's GitHub service,
+then cached by the server-resolved revision. On older servers without action
+resolution, the runner uses that job's GitHub API host and token. Archive
+credentials are masked and are not sent across a redirect to another origin.
+
 For top-level `run:` steps, the runner reads ordered `defaults.run.shell` and
 `defaults.run.working-directory` from the acquired job. A job `run` mapping
 replaces the workflow `run` mapping; an explicit step value wins. Relative

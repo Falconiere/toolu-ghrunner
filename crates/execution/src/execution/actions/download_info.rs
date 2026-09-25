@@ -111,44 +111,17 @@ impl ActionDownloadContext {
         let token = self.service_token.as_deref().ok_or_else(|| {
           RunnerError::ActionDownload("legacy action service credential unavailable".to_owned())
         })?;
+        match masker.lock() {
+          Ok(mut guard) => guard.add_secret(token),
+          Err(poisoned) => poisoned.into_inner().add_secret(token),
+        }
         if let Some(body) = legacy.resolve(client, action, token, cancel).await? {
           return Ok(body);
         }
       }
       return self.resolve_fallback(client, action, masker, cancel).await;
     }
-    let url = self.launch_url.as_deref().ok_or_else(|| {
-      RunnerError::ActionDownload("action download-info endpoint unavailable".to_owned())
-    })?;
-    let token = self.service_token.as_deref().ok_or_else(|| {
-      RunnerError::ActionDownload("action download-info credential unavailable".to_owned())
-    })?;
-    match masker.lock() {
-      Ok(mut guard) => guard.add_secret(token),
-      Err(poisoned) => poisoned.into_inner().add_secret(token),
-    }
-    let request = client
-      .post(url)
-      .bearer_auth(token)
-      .json(&self.launch_request(std::slice::from_ref(action)));
-    let response = tokio::select! {
-      () = cancel.cancelled() => return Err(RunnerError::ActionDownload("action resolution cancelled".to_owned())),
-      result = request.send() => result.map_err(|error| {
-        RunnerError::ActionDownload(format!("action download-info request failed: timeout={}", error.is_timeout()))
-      })?,
-    };
-    if !response.status().is_success() {
-      return Err(RunnerError::ActionDownload(format!(
-        "action download-info status {}",
-        response.status()
-      )));
-    }
-    tokio::select! {
-      () = cancel.cancelled() => Err(RunnerError::ActionDownload("action resolution cancelled".to_owned())),
-      result = response.json::<Value>() => result.map_err(|error| {
-        RunnerError::ActionDownload(format!("action download-info JSON invalid: {error}"))
-      }),
-    }
+    self.resolve_launch(client, action, masker, cancel).await
   }
 
   /// Resolve and validate the archive location for a remote action.
@@ -197,6 +170,47 @@ impl ActionDownloadContext {
 }
 
 impl ActionDownloadContext {
+  async fn resolve_launch(
+    &self,
+    client: &reqwest::Client,
+    action: &ActionRef,
+    masker: &Arc<Mutex<SecretMasker>>,
+    cancel: &CancellationToken,
+  ) -> Result<Value, RunnerError> {
+    let url = self.launch_url.as_deref().ok_or_else(|| {
+      RunnerError::ActionDownload("action download-info endpoint unavailable".to_owned())
+    })?;
+    let token = self.service_token.as_deref().ok_or_else(|| {
+      RunnerError::ActionDownload("action download-info credential unavailable".to_owned())
+    })?;
+    match masker.lock() {
+      Ok(mut guard) => guard.add_secret(token),
+      Err(poisoned) => poisoned.into_inner().add_secret(token),
+    }
+    let request = client
+      .post(url)
+      .bearer_auth(token)
+      .json(&self.launch_request(std::slice::from_ref(action)));
+    let response = tokio::select! {
+      () = cancel.cancelled() => return Err(RunnerError::ActionDownload("action resolution cancelled".to_owned())),
+      result = request.send() => result.map_err(|error| {
+        RunnerError::ActionDownload(format!("action download-info request failed: timeout={}", error.is_timeout()))
+      })?,
+    };
+    if !response.status().is_success() {
+      return Err(RunnerError::ActionDownload(format!(
+        "action download-info status {}",
+        response.status()
+      )));
+    }
+    tokio::select! {
+      () = cancel.cancelled() => Err(RunnerError::ActionDownload("action resolution cancelled".to_owned())),
+      result = response.json::<Value>() => result.map_err(|_error| {
+        RunnerError::ActionDownload("action download-info JSON invalid".to_owned())
+      }),
+    }
+  }
+
   async fn resolve_fallback(
     &self,
     client: &reqwest::Client,
@@ -375,7 +389,14 @@ fn launch_url_from_message(msg: &AgentJobRequestMessage) -> Result<Option<String
       let url = reqwest::Url::parse(base).map_err(|e| {
         RunnerError::ActionResolution(format!("invalid launch endpoint in acquired job: {e}"))
       })?;
-      if !matches!(url.scheme(), "https" | "http") || url.host_str().is_none() {
+      let loopback = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
+      if (url.scheme() != "https" && !(url.scheme() == "http" && loopback))
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+      {
         return Err(RunnerError::ActionResolution(
           "invalid launch endpoint in acquired job".to_owned(),
         ));

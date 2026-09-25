@@ -302,6 +302,7 @@ async fn request_archive(
 ) -> Result<reqwest::Response, RunnerError> {
   let archive_client = reqwest::Client::builder()
     .redirect(reqwest::redirect::Policy::none())
+    .timeout(std::time::Duration::from_secs(120))
     .build()
     .map_err(|_error| RunnerError::ActionDownload("archive HTTP client failed".to_owned()))?;
   let initial = reqwest::Url::parse(tarball_url)
