@@ -284,6 +284,7 @@ The full gate is `./tools/check.sh all`. On this macOS host, test binaries
 have stalled in `_dyld_start` before Rust test code runs; GitHub Linux `ci`
 and `ci-macos` are the authorized gate evidence for this branch. Actual
 GitHub.com and GHES control-message behavior remains unverified.
+
 ## Post-action cleanup (#101)
 
 `crates/execution/tests/post_results_test.rs` replays the sanitized acquired
@@ -295,8 +296,8 @@ observed running post. `crates/listener/src/tests/post_results.rs` consumes the
 real event stream through `StepCollector` and serializes the actual
 `CompleteJobRequest`, checking separate main/post results and failed job status.
 `execution::post_drain::tests::cancel_budget_is_shared` checks that later posts
-use the remaining time on a single deadline. The exact local pass/fail evidence is the repository
-gate and issue-specific test commands, recorded with the worker report.
+use the remaining time on a single deadline. The exact local pass/fail evidence
+is the repository gate and issue-specific test commands, recorded with the worker report.
 
 | Issue scenario | Exact local observation required | Test and runnable check | Evidence status |
 | --- | --- | --- | --- |
@@ -304,7 +305,7 @@ gate and issue-specific test commands, recorded with the worker report.
 | S2 / hard error drain | A/B mains then B missing-script failure followed by `A:post` with A-state and A input; four completion records, final Failure. | `hard_post_error_keeps_draining_lifo`; `cargo test -p execution --test post_results_test hard_post_error_keeps_draining_lifo` | Local production replay. |
 | S3 / live conditions | After B post failure, A `failure()` runs and A `success()` skips. After A main failure, B `failure()` runs and B `success()` skips. A hard B main error still completes after A `failure()` cleanup. Cancelling a running main keeps `Cancelled` even when A's eligible post fails. | `post_conditions_follow_live_status`, `hard_main_error_still_completes_after_post_cleanup`, `cancelled_main_keeps_failure_post_and_final_cancelled`; `cargo test -p execution --test post_results_test post_conditions_follow_live_status && cargo test -p execution --test post_results_test hard_main_error_still_completes_after_post_cleanup && cargo test -p execution --test post_results_test cancelled_main_keeps_failure_post_and_final_cancelled` | Local production replay; pinned reference unverified. |
 | S4 / state and report isolation | B post reads B-state/B/`__self_2` before A reads A-state/A/`__self`; four distinct report IDs. | `repeated_posts_keep_state_and_report_identity`; `cargo test -p execution --test post_results_test repeated_posts_keep_state_and_report_identity` | Repeated top-level local production replay; nested pending #102. |
-| S5 / cancellation budget | B's observed post start precedes cancel; A's later `cancelled()` post finishes, B never writes a late finish marker, job `Cancelled`, completion within 5 s. A 120 ms shared deadline reaches zero after elapsed time. | `cancelled_posts_complete_job`, `cancel_budget_is_shared`; `cargo test -p execution --test post_results_test cancelled_posts_complete_job && cargo test -p execution cancel_budget_is_shared` | Local real processes plus deadline unit check; multi-post expiry unverified. |
+| S5 / cancellation budget | B's observed post start precedes cancel; A's later `cancelled()` post finishes, B never writes a late finish marker, job `Cancelled`, completion within 5 s. A 120 ms shared deadline reaches zero after elapsed time. | `cancelled_posts_complete_job`, `cancel_budget_is_shared`; `cargo test -p execution --test post_results_test cancelled_posts_complete_job && cargo test -p execution --lib cancel_budget_is_shared` | Local real processes plus deadline unit check; multi-post expiry unverified. |
 
 These tests use the #68 sanitized acquired message and real Node 26.9.0 on
 macOS ARM64, with local action files preseeded at its captured workspace path.
