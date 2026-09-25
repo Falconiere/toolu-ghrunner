@@ -1,0 +1,11 @@
+name: defaults-71-composite
+description: Proves a composite run step does not inherit caller job defaults.
+runs:
+  using: composite
+  steps:
+    - name: Write marker from composite scope
+      shell: bash
+      run: |
+        test "$(ps -p $$ -o comm= | tr -d '[:space:]')" = bash
+        test -d defaults-71-job
+        printf composite > .defaults-71-composite.marker
