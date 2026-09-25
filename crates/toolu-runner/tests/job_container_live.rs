@@ -163,6 +163,17 @@ fn require_token_env() -> Result<(), Box<dyn Error>> {
   }
 }
 
+/// Read-only replay of the recorded toolu/plain and official/timestamped logs.
+#[test]
+#[ignore = "requires GitHub.com token and access to the recorded issue 73 run logs"]
+fn job_container_recorded_logs_preserve_exact_markers() -> Result<(), Box<dyn Error>> {
+  require_token_env()?;
+  for run_id in [36_060_108_843, 36_060_157_439] {
+    assert_log_markers(run_id)?;
+  }
+  Ok(())
+}
+
 fn required_label(name: &str) -> Result<String, Box<dyn Error>> {
   let label =
     std::env::var(name).map_err(|error| format!("invalid live test label {name}: {error}"))?;
@@ -383,11 +394,19 @@ fn assert_log_markers(run_id: u64) -> Result<(), Box<dyn Error>> {
   }
   let log = std::str::from_utf8(&output.stdout)?;
   for marker in MARKERS {
-    if !log.contains(marker) {
+    if !log.lines().any(|line| log_line_is_marker(line, marker)) {
       return Err(format!("owned run {run_id} log is missing marker {marker}").into());
     }
   }
   Ok(())
+}
+
+fn log_line_is_marker(line: &str, marker: &str) -> bool {
+  let line = line.trim();
+  line == marker
+    || line.split_once(' ').is_some_and(|(timestamp, message)| {
+      message == marker && chrono::DateTime::parse_from_rfc3339(timestamp).is_ok()
+    })
 }
 
 fn download_lane_artifact(run_id: u64) -> Result<LaneResult, Box<dyn Error>> {
