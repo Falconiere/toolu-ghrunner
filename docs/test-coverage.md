@@ -747,6 +747,10 @@ recorded hosted run's exact action/workflow revision, runner identities, require
 successful steps and masked secret markers. `--live` fails closed until both
 toolu and pinned-reference evidence are recorded. Fresh env-bearing acquisition,
 pinned comparison, live toolu GitHub.com verification, and GHES remain unverified.
+Hosted Linux/macOS probes passed in
+[run 36197284069](https://github.com/Falconiere/toolu-ghrunner/actions/runs/36197284069)
+at `137ac88`. The `--hosted` checker verified exact action/workflow hashes,
+successful required steps, runner identities and masked log markers.
 Linux/macOS host execution is applicable; Windows is outside the epic. Container
 transport is unchanged (#73/#75 own that lane); this change evaluates env before
 container declarations so subsequent setup sees the same ordered values.

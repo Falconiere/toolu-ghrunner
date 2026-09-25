@@ -18,7 +18,11 @@ def digest(data):
 
 
 def api(path):
-    return subprocess.check_output(['gh', 'api', f'repos/{REPO}/{path}'])
+    command = ['gh', 'api', f'repos/{REPO}/{path}']
+    if path.endswith('/logs'):
+        # Capture ANSI-bearing logs for assertions; never print them to a terminal.
+        command.append('--allow-escape-sequences')
+    return subprocess.check_output(command)
 
 
 def check_files(evidence):
