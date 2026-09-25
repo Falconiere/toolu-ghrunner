@@ -37,7 +37,6 @@ use shared::{
   ActionStep, AgentJobRequestMessage, Conclusion, JobAuthorization, JobEndpoint, JobResources,
   ListenerEvent, RunnerConfig, RunnerError, SecretMasker, TaskOrchestrationPlanReference,
 };
-use wire::reporting::ReportConclusion;
 
 use crate::SessionCtx;
 use crate::execution_loop::LOST_CONNECTION_MESSAGE;
@@ -395,11 +394,11 @@ fn find_lost_connection_annotation(
   }))
 }
 
-fn body_conclusion(body: &serde_json::Value) -> TestResult<i64> {
+fn body_conclusion(body: &serde_json::Value) -> TestResult<&str> {
   body
     .get("conclusion")
-    .and_then(serde_json::Value::as_i64)
-    .ok_or_else(|| format!("completejob body missing numeric conclusion: {body}").into())
+    .and_then(serde_json::Value::as_str)
+    .ok_or_else(|| format!("completejob body missing string conclusion: {body}").into())
 }
 
 /// Assert the completejob body carries `conclusion: Failure` (the real
@@ -409,7 +408,7 @@ fn body_conclusion(body: &serde_json::Value) -> TestResult<i64> {
 /// annotation the watchdog trip emits, with `annotationType: "error"`.
 fn assert_failure_with_lost_connection(body: &serde_json::Value) -> TestResult<()> {
   let conclusion = body_conclusion(body)?;
-  let expected = ReportConclusion::Failure as i64;
+  let expected = "failed";
   if conclusion != expected {
     return Err(
       format!("expected conclusion {expected} (Failure), got {conclusion}: {body}").into(),
@@ -533,7 +532,7 @@ async fn ac10_definitive_renew_error_never_trips() -> TestResult<()> {
     .ok_or("no completejob requests recorded")?;
   let body = first.body_json::<serde_json::Value>()?;
   let conclusion = body_conclusion(&body)?;
-  let expected = ReportConclusion::Success as i64;
+  let expected = "succeeded";
   if conclusion != expected {
     return Err(
       format!("expected conclusion {expected} (Success), got {conclusion}: {body}").into(),
@@ -582,7 +581,7 @@ async fn ack_failure_does_not_block_completion() -> TestResult<()> {
     .ok_or("no completejob requests recorded")?;
   let body = first.body_json::<serde_json::Value>()?;
   let conclusion = body_conclusion(&body)?;
-  let expected = ReportConclusion::Success as i64;
+  let expected = "succeeded";
   if conclusion != expected {
     return Err(
       format!("expected conclusion {expected} (Success), got {conclusion}: {body}").into(),
