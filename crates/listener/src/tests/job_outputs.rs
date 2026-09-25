@@ -39,7 +39,7 @@ async fn forwarder_keeps_real_job_outputs_for_completion() -> TestResult {
     Some("hello-output")
   );
   let mut completed = None;
-  while let Ok(event) = fwd_rx.try_recv() {
+  while let Some(event) = fwd_rx.recv().await {
     if let ListenerEvent::Runner(RunnerEvent::JobCompleted { outputs, .. }) = event {
       completed = Some(outputs);
     }

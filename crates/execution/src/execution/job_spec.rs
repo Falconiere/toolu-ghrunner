@@ -132,13 +132,23 @@ pub(super) fn evaluate_acquired_outputs(
   result
 }
 
+// Wire discriminants from `shared::TemplateToken`: containers are 1 and 2.
+const LITERAL_TOKEN: i32 = 0;
+const EXPRESSION_TOKEN: i32 = 3;
+const BOOLEAN_TOKEN: i32 = 5;
+const NUMBER_TOKEN: i32 = 6;
+const NULL_TOKEN: i32 = 7;
+
 fn evaluate_acquired_value(
   name: &str,
   token: &TemplateToken,
   ctx: &ExecutionContext,
   eval_ctx: &expressions::evaluator::EvalContext,
 ) -> Result<AcquiredValue, RunnerError> {
-  if !matches!(token.token_type, 0 | 3 | 5 | 6 | 7) {
+  if !matches!(
+    token.token_type,
+    LITERAL_TOKEN | EXPRESSION_TOKEN | BOOLEAN_TOKEN | NUMBER_TOKEN | NULL_TOKEN
+  ) {
     return Err(RunnerError::Protocol(format!(
       "jobOutputs.{name} must be a scalar token"
     )));
