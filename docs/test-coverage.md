@@ -515,3 +515,41 @@ probe pass (12.490 s), with all identity/path/output/post/cleanup assertions
 unchanged. Incoming contexts and fallible Node input evaluation are retained
 alongside container translation. The live-run links above describe the earlier
 workflow/source revisions; this rebase evidence is local Linux replay.
+
+## Job outputs from the acquired message (#70)
+
+`crates/execution/tests/job_outputs_message.json` is a sanitized Run Service
+`acquirejob` body from [run 36173987791](https://github.com/Falconiere/toolu-ghrunner/actions/runs/36173987791)
+at `5b65420157885949e57c3daea4021e074049baee`. It retains the real
+`jobOutputs` token, step UUID, distinct `contextName`, and context shape. Its
+27 credential fields are deterministic synthetic UUIDv5 replacements. The
+fixture hash and replacement derivation are checked by
+`python3 scripts/test/job_outputs_evidence_check.py --capture`.
+
+| Scenario | Production-path check | Live GitHub.com observation |
+| --- | --- | --- |
+| 70-S1: real step output reaches `needs` | `execution/tests/job_outputs_test.rs::captured_output_is_evaluated_after_real_github_output_step`; `listener/src/tests/job_outputs.rs` carries the final map; `wire/tests/job_outputs_test.rs` pins `CompleteJobRequest.outputs` as `{value: string}` | Toolu and official producers plus dependent consumers passed, checking `hello-output`. |
+| 70-S2: empty, multiline, Unicode, skip, failure, cancellation | `empty_multiline_and_unicode_values_follow_github_output_file`, `skipped_producer_step_omits_its_job_output`, `failed_step_keeps_output_and_later_expression_error_keeps_prior_output`, and `cancelled_job_evaluates_output_written_before_cleanup` in the captured-message engine test | Both normal consumers checked empty, multiline, and Unicode values. Skipped/failed/cancelled producers have local replay coverage only; live parity for those paths remains unverified. |
+| 70-S3: secret-containing output is omitted | `message_secret_and_dynamic_add_mask_are_skipped_with_warnings` checks omission of a message secret and `::add-mask::` value, with warning events | Both consumers checked absence of the dynamically masked output. Message-secret and post-registered-mask cases have no live comparison. |
+| 70-S4: matrix cells and post-stage finalization | `captured_matrix_and_strategy_are_visible_at_job_output_time`, `job_output_hash_waits_for_real_node_post_step`, and `post_action_env_is_available_to_final_job_output` in the captured-message engine test | Each lane ran `alpha` and `beta` producers; the dependent consumer checked both aggregated keys. Both normal consumers checked `POST_VALUE=after-post`, set by the Node post action. |
+
+[Paired run 36184896428](https://github.com/Falconiere/toolu-ghrunner/actions/runs/36184896428)
+completed with all ten jobs successful at runner revision
+`1b37a9cc7102effda467297fcdb32b55e4711676`. The toolu macOS JIT runner
+was `toolu-70-final`; the official macOS JIT runner was `official-70`, from
+actions/runner v2.337.0 binary commit
+`397b032cbf865e9c3ddfab89d533ec19325e1273` (asset SHA-256
+`5a2cd92908a93d7276a194e1de6008099f3e7946f3f8e14aa7a1a7b4a31fdec2`).
+Both lanes used the same workflow revision and checkout pin
+`11d5960a326750d5838078e36cf38b85af677262`. The runner-specific jobs
+executed on the named JIT runners; downstream assertions ran on GitHub-hosted
+Ubuntu. `python3 scripts/test/job_outputs_evidence_check.py --live` verifies
+the run/job conclusions and runner identities against GitHub, plus the recorded
+workflow/action hashes. Full run metadata is in
+`crates/execution/tests/job_outputs_evidence.json`.
+
+The local macOS `./tools/check.sh all` reached cargo tests after fmt, clippy,
+and guardrails passed, then stalled at the known host `_dyld_start` issue and
+was stopped under the orchestrator's instruction. GitHub Linux `ci` and
+`ci-macos` are the full gate for this PR. A live Linux toolu host and GHES were
+unavailable, so those lanes remain unverified.
