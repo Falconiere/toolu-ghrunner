@@ -296,6 +296,8 @@ async fn fetch_tarball_reader(
   Ok(tokio_util::io::SyncIoBridge::new(stream_reader))
 }
 
+/// Follow bounded archive redirects, forwarding Basic auth only on the
+/// resolver-selected origin and rejecting insecure or credentialed targets.
 async fn request_archive(
   tarball_url: &str,
   token: Option<&str>,
@@ -308,7 +310,7 @@ async fn request_archive(
   let initial = reqwest::Url::parse(tarball_url)
     .map_err(|_error| RunnerError::ActionDownload("archive URL invalid".to_owned()))?;
   let mut current = initial.clone();
-  for hop in 0..=5 {
+  for redirect_count in 0..=5 {
     validate_archive_hop(&current, &initial)?;
     let mut request = archive_client
       .get(current.clone())
@@ -324,7 +326,7 @@ async fn request_archive(
       ))
     })?;
     if received.status().is_redirection() {
-      if hop == 5 {
+      if redirect_count == 5 {
         return Err(RunnerError::ActionDownload(
           "archive redirect limit exceeded".to_owned(),
         ));

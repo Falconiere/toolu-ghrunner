@@ -24,13 +24,14 @@ use crate::execution::action_exec::build_uses_ref;
 /// Concurrency cap for job-start action prefetch (Open Question 3 in the
 /// design spec: revisit only with evidence).
 const PREFETCH_CONCURRENCY: usize = 4;
+const ARCHIVE_ATTEMPTS: usize = 2;
 
 /// Per-job fetcher shared by prefetch and step execution, keyed by resolved
 /// action revision and API host.
 #[derive(Default)]
 pub struct ActionFetcher {
   inflight: Mutex<HashMap<String, Arc<OnceCell<PathBuf>>>>,
-  context: Option<ActionDownloadContext>,
+  context: Option<Result<ActionDownloadContext, String>>,
   masker: Option<Arc<Mutex<SecretMasker>>>,
   cancel: Option<CancellationToken>,
 }
@@ -44,20 +45,20 @@ impl ActionFetcher {
 
   /// Build the production fetcher from the acquired job and its shared masker.
   ///
-  /// # Errors
-  ///
-  /// Returns an action resolution error for an invalid acquired API location.
+  /// Context validation is deferred until a remote action needs it, so
+  /// shell-only jobs do not require GitHub action-service fields.
+  #[must_use]
   pub fn for_job(
     msg: &AgentJobRequestMessage,
     masker: Arc<Mutex<SecretMasker>>,
     cancel: CancellationToken,
-  ) -> Result<Self, RunnerError> {
-    Ok(Self {
+  ) -> Self {
+    Self {
       inflight: Mutex::new(HashMap::new()),
-      context: Some(ActionDownloadContext::from_message(msg)?),
+      context: Some(ActionDownloadContext::from_message(msg).map_err(action_context_error)),
       masker: Some(masker),
       cancel: Some(cancel),
-    })
+    }
   }
 
   /// Resolve one action with the job's service, then fetch its exact revision.
@@ -71,9 +72,9 @@ impl ActionFetcher {
     action: &ActionRef,
     data_dir: &Path,
   ) -> Result<PathBuf, RunnerError> {
-    for attempt in 0..2 {
+    for attempt in 0..ARCHIVE_ATTEMPTS {
       let result = self.ensure_action_once(client, action, data_dir).await;
-      if attempt != 0 || !result.as_ref().is_err_and(archive_auth_error) {
+      if attempt != 0 || !result.as_ref().is_err_and(is_archive_auth_error) {
         return result;
       }
     }
@@ -88,9 +89,15 @@ impl ActionFetcher {
     action: &ActionRef,
     data_dir: &Path,
   ) -> Result<PathBuf, RunnerError> {
-    let context = self.context.as_ref().ok_or_else(|| {
-      RunnerError::ActionDownload("action fetcher has no acquired job".to_owned())
-    })?;
+    let context = match self.context.as_ref() {
+      Some(Ok(context)) => context,
+      Some(Err(message)) => return Err(RunnerError::ActionResolution(message.clone())),
+      None => {
+        return Err(RunnerError::ActionDownload(
+          "action fetcher has no acquired job".to_owned(),
+        ));
+      },
+    };
     let masker = self.masker.as_ref().ok_or_else(|| {
       RunnerError::ActionDownload("action fetcher has no secret masker".to_owned())
     })?;
@@ -177,7 +184,14 @@ impl ActionFetcher {
   }
 }
 
-fn archive_auth_error(error: &RunnerError) -> bool {
+fn action_context_error(error: RunnerError) -> String {
+  match error {
+    RunnerError::ActionResolution(message) => message,
+    other => other.to_string(),
+  }
+}
+
+fn is_archive_auth_error(error: &RunnerError) -> bool {
   if let RunnerError::ActionDownload(message) = error {
     message.starts_with("archive status 401") || message.starts_with("archive status 403")
   } else {
