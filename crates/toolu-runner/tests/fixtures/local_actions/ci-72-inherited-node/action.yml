@@ -1,0 +1,9 @@
+name: ci-72-inherited-node
+description: Checks that a deferred nested Node post retains its parent step CI.
+runs:
+  using: composite
+  steps:
+    - id: inherited_node
+      uses: ./.github/actions/ci-72-node
+      env:
+        GITHUB_ACTIONS: 'false'

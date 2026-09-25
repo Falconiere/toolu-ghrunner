@@ -17,6 +17,7 @@ use super::composite_exec::{CompositeParams, CompositeResult, execute_composite_
 use super::context::ExecutionContext;
 use super::depth_tracker::DepthTracker;
 use super::node_stage::{NodeStage, emit_stage_endgroup, run_node_stage};
+use super::step_env::resolve_step_env;
 use super::step_naming::PostStep;
 use super::step_timeout::StepBounds;
 
@@ -105,6 +106,8 @@ pub(crate) async fn execute_action(
     .bounds
     .resolve_within_bounds(resolve_action(step, run))
     .await?;
+  let step_env = resolve_step_env(step, ctx, &ctx.eval_context())?;
+  ctx.push_step_env(step_env.clone());
   let env = ActionEnv {
     events: run.events,
     workspace: run.workspace,
@@ -114,7 +117,9 @@ pub(crate) async fn execute_action(
     fetcher: run.fetcher,
     log_step_id: run.log_step_id,
   };
-  dispatch_action(step, ctx, &env, &resolved, depth).await
+  let result = dispatch_action(step, ctx, &env, &resolved, depth).await;
+  ctx.pop_step_env();
+  result
 }
 
 /// Reassemble the `uses:` string GitHub reports as split wire fields —
@@ -444,6 +449,7 @@ fn build_post_step(c: &NodeActionCtx<'_>) -> Option<PostStep> {
   c.manifest.runs.post.as_ref()?;
   Some(PostStep {
     step: c.step.clone(),
+    step_env: c.ctx.snapshot_step_env(),
     report_id: uuid::Uuid::new_v4().to_string(),
     scope_path: c.ctx.scope_path(),
     action_dir: c.action_dir.to_path_buf(),

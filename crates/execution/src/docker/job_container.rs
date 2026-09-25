@@ -28,6 +28,8 @@ pub struct JobContainer {
   network: String,
   mounts: ContainerMounts,
   image_path: String,
+  /// Effective container CI value inherited by execs without a step override.
+  pub(crate) base_ci: String,
 }
 
 impl JobContainer {
@@ -61,6 +63,12 @@ impl JobContainer {
       return Ok(None);
     }
     let suffix = uuid::Uuid::new_v4().simple().to_string();
+    let base_ci = spec
+      .env
+      .get("CI")
+      .cloned()
+      .or_else(|| crate::config::var("CI"))
+      .unwrap_or_else(|| "true".to_owned());
     let mut container = Self {
       transport,
       name: format!("toolu_job_{suffix}"),
@@ -68,6 +76,7 @@ impl JobContainer {
       network: format!("toolu_network_{suffix}"),
       mounts,
       image_path: String::new(),
+      base_ci,
     };
     if let Err(error) = container.initialize(spec, cancel).await {
       if let Err(cleanup) = container.cleanup().await {
@@ -147,8 +156,7 @@ impl JobContainer {
   fn create_body(&self, spec: &ContainerSpec) -> Result<ContainerCreateBody, RunnerError> {
     let mut env = spec.env.clone();
     env.insert("HOME".to_owned(), "/github/home".to_owned());
-    env.insert("GITHUB_ACTIONS".to_owned(), "true".to_owned());
-    env.insert("CI".to_owned(), "true".to_owned());
+    crate::execution::step_process_env::apply(&mut env, Some(&self.base_ci));
     let mut body = ContainerCreateBody {
       image: Some(spec.image.clone()),
       entrypoint: Some(vec!["tail".to_owned()]),

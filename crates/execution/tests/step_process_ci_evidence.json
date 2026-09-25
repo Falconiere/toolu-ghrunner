@@ -1,0 +1,67 @@
+{
+  "issue": 72,
+  "reference_source": "cab9d1c3901e45c7705889c4f88284fdd93f4ae5",
+  "reference_runner_binary": null,
+  "capture": {
+    "path": "crates/execution/tests/incoming_contexts_matrix_0.json",
+    "sha256": "3e1728e44d095f07a07b1d54bfa7bbc2ab75b4866cb1a57e032106061c83e1b5",
+    "job_id": "af60f1ed-e283-516c-8d88-01cc3ee1c589",
+    "run_id": 36038637634,
+    "action_step_id": "f8bcd552-f40d-4cdc-94de-8f9fbf4dd191"
+  },
+  "container_capture": {
+    "path": "crates/toolu-runner/tests/fixtures/job_container_message.json",
+    "sha256": "87b385dc27cee5dc9d1fa91b5137ef70bb8789085b89196d72289b313b845a34",
+    "job_id": "4aa16dce-0f2f-5feb-bdd5-b2e8df68b8ef"
+  },
+  "files_sha256": {
+    ".github/actionlint.yaml": "8a64dbea5c94ce8fb50dbd63621c04253b053584bb0f41b1d1f90d702cea4ec1",
+    ".github/workflows/step-process-ci-72.yml": "81ffdcfda8c8920e1aa19f29dadad13fa80d6aff3a1ea69726d100fea85b2514",
+    "crates/execution/tests/step_process_ci_test.rs": "3f68d4bddce0a4463437e4db43e711205eba29356fd74f6a28693923bdac5892",
+    "crates/execution/tests/job_container_ci_test.rs": "a3fe623ed50caf976a1d8ae28816c4a8ea859eeee5b4400ac0e82528e184b02f",
+    "scripts/test/step_process_ci_linux.sh": "5789eb739cdd670796cd6e0f74ed56996866a92b58704358060f9bc20c552aff",
+    "crates/toolu-runner/tests/fixtures/local_actions/ci-72-child/action.yml": "b4046a0e004e1869ffd944deecb03568f7a8d6d48f08b59a1918211b6e1c9c08",
+    "crates/toolu-runner/tests/fixtures/local_actions/ci-72-inherited-node/action.yml": "2dec92c279a646388721ca1f4b6a898d3bb9c2666ecd0cae0320984682a9e6af",
+    "crates/toolu-runner/tests/fixtures/local_actions/ci-72-nested-node/action.yml": "6696cd5a1773525b1edf98f9d6f740098641512e91738ed5b6c65a7f77f1b6f2",
+    "crates/toolu-runner/tests/fixtures/local_actions/ci-72-node/action.yml": "ff876fcef635d39064d4c5562955435d98861f0ec23d5852b9fde6914ed6a7f9",
+    "crates/toolu-runner/tests/fixtures/local_actions/ci-72-node/main.js": "cb1a691b4fc08f402856a8f41fe3696023d1cc8213fc8bb2d0bb1e25fb17b5c4",
+    "crates/toolu-runner/tests/fixtures/local_actions/ci-72-node/post.js": "eae4e9bfbf0b9f1f9acbb1867e9adcbcae0cfee17e8330be085cc153d91bdc6d",
+    "crates/toolu-runner/tests/fixtures/local_actions/ci-72-node/pre.js": "aecdc10a2d814652f3df538da0ba02e24f259050800f98e04dfd01416863612a",
+    "crates/toolu-runner/tests/fixtures/local_actions/ci-72-parent/action.yml": "b62d11330d59549d38645063efeb1852ad6206cd36394433b8e45c430ca650cc"
+  },
+  "runs": {
+    "reference-host-macos": null,
+    "reference-host-linux": null,
+    "reference-container-linux": null,
+    "toolu-host-macos": null,
+    "toolu-container-linux": null
+  },
+  "unverified": {
+    "reference-host-macos": "Branch workflow has not run yet; GitHub-hosted runner binary is not pinned to the issue 67 source revision.",
+    "reference-host-linux": "Branch workflow has not run yet; GitHub-hosted runner binary is not pinned to the issue 67 source revision.",
+    "reference-container-linux": "Branch workflow has not run yet; GitHub-hosted runner binary is not pinned to the issue 67 source revision.",
+    "toolu-host-macos": "GitHub API reports zero registered self-hosted runners; no toolu GitHub.com job was acquired.",
+    "toolu-container-linux": "GitHub API reports zero registered self-hosted runners; no toolu Linux container job was acquired.",
+    "ghes": "No GHES server or credentials are available in this worker environment.",
+    "docker-action": "Issue 75 Docker action handler remains open; no Docker action process exists to test."
+  },
+  "local": {
+    "host": "macOS ARM64",
+    "container": "Linux ARM64, real Colima Docker daemon",
+    "backend": "sanitized GitHub.com acquisition replay",
+    "host_commands": [
+      "env -u CI cargo test -p execution --test step_process_ci_test",
+      "CI=false cargo test -p execution --test step_process_ci_test"
+    ],
+    "container_command": "bash scripts/test/step_process_ci_linux.sh",
+    "status": "Host replay: 6/6 tests passed with runner CI absent and CI=false; empty runner CI also passed the script precedence case. Linux ARM64 real-Docker replay: 2/2 ignored tests passed explicitly with runner CI absent, false, and runner after the final post snapshot change.",
+    "gate_image": "toolu-72-gate-tools:local: Rust 1.94.1, jq 1.7, ast-grep 0.45.3, Node 20.20.2; Node copied from node:20-bookworm-slim@sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc0",
+    "gate": {
+      "command": "./tools/check.sh all",
+      "platform": "Linux ARM64",
+      "image_id": "sha256:95334f95d25a1a28d369fa6030b9588d95b8dad3843045b55ee7b85943983f7d",
+      "exit_code": 0,
+      "status": "passed"
+    }
+  }
+}

@@ -105,7 +105,9 @@ async fn run_one_post(
 ) -> Result<Conclusion, RunnerError> {
   let prior_scope = ctx.scope_path();
   ctx.restore_step_scope(post.scope_path.clone());
+  ctx.push_step_env(post.step_env.clone());
   let result = run_scoped_post(post, report, ctx, events, job).await;
+  ctx.pop_step_env();
   ctx.restore_step_scope(prior_scope);
   result
 }

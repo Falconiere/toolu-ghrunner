@@ -134,6 +134,8 @@ async fn execute_in_container(
 /// Build the `node {script}` command with the step's cwd and environment.
 fn build_node_command(params: &NodeExecParams<'_>) -> tokio::process::Command {
   let mut cmd = tokio::process::Command::new(params.node_binary);
+  let mut env = params.env.clone();
+  crate::execution::step_process_env::apply(&mut env, None);
   cmd.arg(params.script_path);
   cmd.current_dir(params.working_dir);
   // A cancelled post can drop the whole stage future while it is waiting;
@@ -143,7 +145,7 @@ fn build_node_command(params: &NodeExecParams<'_>) -> tokio::process::Command {
   // inherited process env for PATH/HOME, so inherit — but strip the runner's
   // private `TOOLU_RUNNER_*` namespace (incl. the admin re-mint bearer) first.
   cmd.envs(crate::execution::context::safe_process_env_vars());
-  cmd.envs(params.env);
+  cmd.envs(&env);
   cmd.stdout(Stdio::piped());
   cmd.stderr(Stdio::piped());
   cmd

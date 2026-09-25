@@ -1,0 +1,12 @@
+name: ci-72-parent
+description: Invokes a nested composite to report real shell process flags.
+runs:
+  using: composite
+  steps:
+    - id: nested
+      uses: ./.github/actions/ci-72-child
+    - id: parent
+      run: |
+        test "${CI+x}" = x && test -z "$CI" && test "$GITHUB_ACTIONS" = true
+        printf 'CI72|composite-parent|%s|%s|%s\n' "$CI" "$GITHUB_ACTIONS" "$(hostname)"
+      shell: bash

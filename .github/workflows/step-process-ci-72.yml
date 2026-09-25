@@ -1,0 +1,179 @@
+name: step-process-ci-72
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_toolu:
+        description: Run the toolu self-hosted lanes when matching runners are registered
+        type: boolean
+        default: false
+  push:
+    branches:
+      - feat/72-set-ci-true-and-github
+
+jobs:
+  reference-host:
+    name: reference-host-${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    env:
+      CI: job
+      GITHUB_ACTIONS: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install committed probe actions
+        shell: bash
+        run: |
+          mkdir -p .github/actions
+          cp -R crates/toolu-runner/tests/fixtures/local_actions/ci-72-* .github/actions/
+      - name: Shell keeps job CI and forces GitHub Actions
+        shell: bash
+        run: |
+          test "$CI" = job && test "$GITHUB_ACTIONS" = true
+          printf 'CI72|shell-job|%s|%s|%s\n' "$CI" "$GITHUB_ACTIONS" "$(hostname)"
+      - name: Shell keeps false step CI
+        shell: bash
+        env: {CI: 'false', GITHUB_ACTIONS: 'false'}
+        run: |
+          test "$CI" = false && test "$GITHUB_ACTIONS" = true
+          printf 'CI72|shell-false|%s|%s|%s\n' "$CI" "$GITHUB_ACTIONS" "$(hostname)"
+      - name: Shell keeps empty step CI
+        shell: bash
+        env: {CI: '', GITHUB_ACTIONS: 'false'}
+        run: |
+          test "${CI+x}" = x && test -z "$CI" && test "$GITHUB_ACTIONS" = true
+          printf 'CI72|shell-empty|%s|%s|%s\n' "$CI" "$GITHUB_ACTIONS" "$(hostname)"
+      - name: Node pre main post
+        uses: ./.github/actions/ci-72-node
+        env: {CI: '', GITHUB_ACTIONS: 'false'}
+      - name: Nested composite shells
+        uses: ./.github/actions/ci-72-parent
+        env: {CI: '', GITHUB_ACTIONS: 'false'}
+      - name: Nested Node pre main post
+        uses: ./.github/actions/ci-72-nested-node
+        env: {CI: '', GITHUB_ACTIONS: 'false'}
+      - name: Nested Node inherits parent step CI
+        uses: ./.github/actions/ci-72-inherited-node
+        env: {CI: '', GITHUB_ACTIONS: 'false'}
+      - name: Later job env does not replace Node post step env
+        shell: bash
+        run: echo 'CI=later' >> "$GITHUB_ENV"
+
+  toolu-host:
+    if: github.event_name == 'workflow_dispatch' && inputs.run_toolu
+    name: toolu-host-macos
+    runs-on: [self-hosted, toolu-72-macos]
+    env:
+      CI: job
+      GITHUB_ACTIONS: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install committed probe actions
+        shell: bash
+        run: |
+          mkdir -p .github/actions
+          cp -R crates/toolu-runner/tests/fixtures/local_actions/ci-72-* .github/actions/
+      - name: Shell keeps job CI and forces GitHub Actions
+        shell: bash
+        run: |
+          test "$CI" = job && test "$GITHUB_ACTIONS" = true
+          printf 'CI72|shell-job|%s|%s|%s\n' "$CI" "$GITHUB_ACTIONS" "$(hostname)"
+      - name: Shell keeps false step CI
+        shell: bash
+        env: {CI: 'false', GITHUB_ACTIONS: 'false'}
+        run: |
+          test "$CI" = false && test "$GITHUB_ACTIONS" = true
+          printf 'CI72|shell-false|%s|%s|%s\n' "$CI" "$GITHUB_ACTIONS" "$(hostname)"
+      - name: Shell keeps empty step CI
+        shell: bash
+        env: {CI: '', GITHUB_ACTIONS: 'false'}
+        run: |
+          test "${CI+x}" = x && test -z "$CI" && test "$GITHUB_ACTIONS" = true
+          printf 'CI72|shell-empty|%s|%s|%s\n' "$CI" "$GITHUB_ACTIONS" "$(hostname)"
+      - name: Node pre main post
+        uses: ./.github/actions/ci-72-node
+        env: {CI: '', GITHUB_ACTIONS: 'false'}
+      - name: Nested composite shells
+        uses: ./.github/actions/ci-72-parent
+        env: {CI: '', GITHUB_ACTIONS: 'false'}
+      - name: Nested Node pre main post
+        uses: ./.github/actions/ci-72-nested-node
+        env: {CI: '', GITHUB_ACTIONS: 'false'}
+      - name: Nested Node inherits parent step CI
+        uses: ./.github/actions/ci-72-inherited-node
+        env: {CI: '', GITHUB_ACTIONS: 'false'}
+      - name: Later job env does not replace Node post step env
+        shell: bash
+        run: echo 'CI=later' >> "$GITHUB_ENV"
+
+  reference-container:
+    name: reference-container-ubuntu-24.04
+    runs-on: ubuntu-24.04
+    container:
+      image: ubuntu@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3
+      env: {CI: 'false', GITHUB_ACTIONS: 'false'}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install committed probe actions
+        shell: bash
+        run: |
+          mkdir -p .github/actions
+          cp -R crates/toolu-runner/tests/fixtures/local_actions/ci-72-* .github/actions/
+      - name: Shell keeps container CI and forces GitHub Actions
+        shell: bash
+        run: |
+          test "$CI" = false && test "$GITHUB_ACTIONS" = true
+          printf 'CI72|container-shell|%s|%s|%s\n' "$CI" "$GITHUB_ACTIONS" "$(hostname)"
+      - name: Node pre main post in container
+        uses: ./.github/actions/ci-72-node
+        env: {CI: '', GITHUB_ACTIONS: 'false'}
+      - name: Nested composite shells in container
+        uses: ./.github/actions/ci-72-parent
+        env: {CI: '', GITHUB_ACTIONS: 'false'}
+      - name: Nested Node pre main post in container
+        uses: ./.github/actions/ci-72-nested-node
+        env: {CI: '', GITHUB_ACTIONS: 'false'}
+      - name: Nested Node inherits parent step CI in container
+        uses: ./.github/actions/ci-72-inherited-node
+        env: {CI: '', GITHUB_ACTIONS: 'false'}
+      - name: Later job env does not replace Node post step env
+        shell: bash
+        run: echo 'CI=later' >> "$GITHUB_ENV"
+
+  toolu-container:
+    if: github.event_name == 'workflow_dispatch' && inputs.run_toolu
+    name: toolu-container-linux
+    runs-on: [self-hosted, toolu-72-linux]
+    container:
+      image: ubuntu@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3
+      env: {CI: 'false', GITHUB_ACTIONS: 'false'}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install committed probe actions
+        shell: bash
+        run: |
+          mkdir -p .github/actions
+          cp -R crates/toolu-runner/tests/fixtures/local_actions/ci-72-* .github/actions/
+      - name: Shell keeps container CI and forces GitHub Actions
+        shell: bash
+        run: |
+          test "$CI" = false && test "$GITHUB_ACTIONS" = true
+          printf 'CI72|container-shell|%s|%s|%s\n' "$CI" "$GITHUB_ACTIONS" "$(hostname)"
+      - name: Node pre main post in container
+        uses: ./.github/actions/ci-72-node
+        env: {CI: '', GITHUB_ACTIONS: 'false'}
+      - name: Nested composite shells in container
+        uses: ./.github/actions/ci-72-parent
+        env: {CI: '', GITHUB_ACTIONS: 'false'}
+      - name: Nested Node pre main post in container
+        uses: ./.github/actions/ci-72-nested-node
+        env: {CI: '', GITHUB_ACTIONS: 'false'}
+      - name: Nested Node inherits parent step CI in container
+        uses: ./.github/actions/ci-72-inherited-node
+        env: {CI: '', GITHUB_ACTIONS: 'false'}
+      - name: Later job env does not replace Node post step env
+        shell: bash
+        run: echo 'CI=later' >> "$GITHUB_ENV"

@@ -1,0 +1,13 @@
+name: ci-72-child
+description: Reports nested composite shell flags with explicit empty CI.
+runs:
+  using: composite
+  steps:
+    - id: inner
+      env:
+        CI: ''
+        GITHUB_ACTIONS: 'false'
+      run: |
+        test "${CI+x}" = x && test -z "$CI" && test "$GITHUB_ACTIONS" = true
+        printf 'CI72|composite-inner|%s|%s|%s\n' "$CI" "$GITHUB_ACTIONS" "$(hostname)"
+      shell: bash

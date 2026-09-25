@@ -1,0 +1,10 @@
+name: ci-72-nested-node
+description: Reports flags from a nested Node action including its deferred post.
+runs:
+  using: composite
+  steps:
+    - id: nested_node
+      uses: ./.github/actions/ci-72-node
+      env:
+        CI: ''
+        GITHUB_ACTIONS: 'false'

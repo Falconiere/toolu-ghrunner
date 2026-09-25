@@ -242,6 +242,8 @@ async fn spawn_step_shell(
 ) -> Result<tokio::process::Child, RunnerError> {
   let (program, args) = build_shell_args(shell_name, script_path);
   let mut cmd = tokio::process::Command::new(program);
+  let mut env = params.env.clone();
+  crate::execution::step_process_env::apply(&mut env, None);
   // `params.env` already carries a COMPLETE, filtered process env (both
   // constructors fold `context::safe_process_env_vars` — PATH/HOME/LANG
   // included, `TOOLU_RUNNER_*` stripped). Clear inherited env and set only
@@ -251,7 +253,7 @@ async fn spawn_step_shell(
     .args(&args)
     .current_dir(params.working_dir)
     .env_clear()
-    .envs(params.env)
+    .envs(&env)
     .stdout(Stdio::piped())
     .stderr(Stdio::piped());
   spawn_in_cgroup(&mut cmd, params.cgroup_path)

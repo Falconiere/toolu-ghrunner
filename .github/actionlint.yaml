@@ -4,3 +4,5 @@
 self-hosted-runner:
   labels:
     - toolu-runner-v1
+    - toolu-72-macos
+    - toolu-72-linux

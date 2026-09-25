@@ -59,6 +59,8 @@ pub mod service_lifecycle;
 pub mod shadow;
 mod step_env;
 mod step_naming;
+/// Finalizes `CI` and `GITHUB_ACTIONS` at each step process boundary.
+pub(crate) mod step_process_env;
 mod step_state;
 /// Bounded child-process wait shared by the script and node handlers.
 pub mod step_timeout;
