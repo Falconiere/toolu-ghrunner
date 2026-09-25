@@ -52,9 +52,12 @@ async fn post_results_reach_distinct_completion_records() -> Result<(), Box<dyn 
     action.join("post.js"),
     include_str!("../../../execution/tests/post_results_post.js"),
   )?;
-  let node = std::process::Command::new("node")
-    .args(["-e", "process.stdout.write(process.execPath)"])
-    .output()?;
+  let node = tokio::task::spawn_blocking(|| {
+    std::process::Command::new("node")
+      .args(["-e", "process.stdout.write(process.execPath)"])
+      .output()
+  })
+  .await??;
   assert!(node.status.success());
   let binary = node_binary_path(&node_cache_dir(&config.data_dir, node_version_for(20)));
   std::fs::create_dir_all(binary.parent().ok_or("node cache parent missing")?)?;
