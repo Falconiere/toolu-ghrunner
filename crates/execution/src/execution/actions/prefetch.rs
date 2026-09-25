@@ -62,6 +62,8 @@ impl ActionFetcher {
   }
 
   /// Resolve one action with the job's service, then fetch its exact revision.
+  /// A failed archive authorization is retried once. Concurrent callers share
+  /// one download, and cancellation stops a caller waiting for that download.
   ///
   /// # Errors
   ///
@@ -74,7 +76,7 @@ impl ActionFetcher {
   ) -> Result<PathBuf, RunnerError> {
     for attempt in 0..ARCHIVE_ATTEMPTS {
       let result = self.ensure_action_once(client, action, data_dir).await;
-      if attempt != 0 || !result.as_ref().is_err_and(is_archive_auth_error) {
+      if attempt + 1 == ARCHIVE_ATTEMPTS || !result.as_ref().is_err_and(is_archive_auth_error) {
         return result;
       }
     }
