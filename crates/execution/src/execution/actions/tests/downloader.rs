@@ -400,3 +400,23 @@ async fn download_and_extract_action_leaves_no_dest_or_staging_on_extraction_fai
     "no staging dir must remain after a failed extraction"
   );
 }
+
+#[test]
+fn archive_redirect_validation_rejects_downgrades_and_embedded_credentials() {
+  let initial = reqwest::Url::parse("https://api.github.com/repos/actions/checkout/tarball/v4")
+    .expect("initial archive URL");
+  for raw in [
+    "http://127.0.0.1/archive",
+    "https://user:secret@objects.githubusercontent.com/archive",
+    "ftp://objects.githubusercontent.com/archive",
+  ] {
+    let target = reqwest::Url::parse(raw).expect("redirect target URL");
+    assert!(
+      validate_archive_hop(&target, &initial).is_err(),
+      "accepted {raw}"
+    );
+  }
+  let signed = reqwest::Url::parse("https://objects.githubusercontent.com/archive")
+    .expect("signed archive URL");
+  assert!(validate_archive_hop(&signed, &initial).is_ok());
+}

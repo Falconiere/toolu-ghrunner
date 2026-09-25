@@ -3,6 +3,7 @@
 use base64::Engine;
 use execution::execution::actions::download_info::ActionDownloadContext;
 use execution::execution::actions::downloader::download_and_extract_action;
+use execution::execution::actions::prefetch::ActionFetcher;
 use execution::execution::actions::resolver::parse_action_ref;
 use shared::{AgentJobRequestMessage, SecretMasker};
 use std::sync::{Arc, Mutex};
@@ -128,6 +129,99 @@ fn acquired_api_url_variants_share_one_canonical_cache_host() {
     variants,
     ["https://api.github.com", "https://api.github.com"]
   );
+}
+
+#[tokio::test]
+async fn remote_action_requires_a_valid_acquired_host_only_when_fetched() {
+  let mut raw: serde_json::Value =
+    serde_json::from_str(include_str!("defaults_run_job.json")).expect("captured job JSON");
+  let github = raw
+    .get_mut("contextData")
+    .and_then(|value| value.get_mut("github"))
+    .and_then(|value| value.get_mut("d"))
+    .and_then(serde_json::Value::as_array_mut)
+    .expect("captured github context");
+  github.retain(|entry| {
+    !matches!(
+      entry.get("k").and_then(serde_json::Value::as_str),
+      Some("api_url" | "server_url")
+    )
+  });
+  let msg: AgentJobRequestMessage = serde_json::from_value(raw).expect("boundary job");
+  let fetcher = ActionFetcher::for_job(
+    &msg,
+    Arc::new(Mutex::new(SecretMasker::new())),
+    CancellationToken::new(),
+  );
+  let action = parse_action_ref("actions/checkout@v4").expect("remote action");
+  let error = fetcher
+    .ensure_action(&reqwest::Client::new(), &action, &std::env::temp_dir())
+    .await
+    .expect_err("remote action must require acquired API host");
+  assert!(
+    error
+      .to_string()
+      .contains("acquired job has no GitHub API host")
+  );
+}
+
+#[tokio::test]
+async fn cancelled_remote_action_does_not_request_download_info() {
+  let msg: AgentJobRequestMessage = serde_json::from_str(include_str!("defaults_run_job.json"))
+    .expect("captured acquired job parses");
+  let cancel = CancellationToken::new();
+  cancel.cancel();
+  let fetcher = ActionFetcher::for_job(&msg, Arc::new(Mutex::new(SecretMasker::new())), cancel);
+  let action = parse_action_ref("actions/checkout@v4").expect("remote action");
+  let error = fetcher
+    .ensure_action(&reqwest::Client::new(), &action, &std::env::temp_dir())
+    .await
+    .expect_err("cancelled action must stop before resolution");
+  assert!(error.to_string().contains("cancelled"));
+}
+
+#[tokio::test]
+async fn archive_redirect_loop_and_missing_location_fail_closed() {
+  let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+    .await
+    .expect("bind redirect probe");
+  let address = listener.local_addr().expect("redirect probe address");
+  let app = axum::Router::new()
+    .route(
+      "/loop",
+      axum::routing::get(|| async {
+        (
+          axum::http::StatusCode::FOUND,
+          [(axum::http::header::LOCATION, "/loop")],
+        )
+      }),
+    )
+    .route(
+      "/missing",
+      axum::routing::get(|| async { axum::http::StatusCode::FOUND }),
+    );
+  tokio::spawn(async move {
+    let _ = axum::serve(listener, app).await;
+  });
+  for (path, expected) in [
+    ("loop", "archive redirect limit exceeded"),
+    ("missing", "archive redirect omitted location"),
+  ] {
+    let destination = std::env::temp_dir().join(format!(
+      "toolu-action-redirect-error-{}",
+      uuid::Uuid::new_v4()
+    ));
+    let error = download_and_extract_action(
+      &reqwest::Client::new(),
+      &format!("http://{address}/{path}"),
+      None,
+      &destination,
+    )
+    .await
+    .expect_err("invalid redirect must fail");
+    assert!(error.to_string().contains(expected), "{error}");
+    assert!(!destination.exists(), "failed redirect created cache");
+  }
 }
 
 #[tokio::test]
