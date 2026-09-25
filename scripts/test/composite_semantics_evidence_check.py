@@ -11,6 +11,7 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
 REPO = 'Falconiere/toolu-ghrunner'
+# Upstream source revision only; live lane verification is recorded in evidence['runs'].
 PIN = 'cab9d1c3901e45c7705889c4f88284fdd93f4ae5'
 LANES = ('toolu-macos', 'reference-macos', 'reference-linux')
 REQUIRED_STEPS = {
@@ -87,13 +88,14 @@ def main():
     except (OSError, json.JSONDecodeError) as error:
         parser.error(f'cannot read evidence {args.evidence}: {error}')
     check_capture(evidence)
-    assert set(evidence['runs']) == set(LANES), 'update evidence file: runs keys must match required live lanes'
+    if set(evidence['runs']) != set(LANES):
+        parser.error('update evidence file: runs keys must match required live lanes')
     for lane in LANES:
         record = evidence['runs'][lane]
         if record is None:
             assert evidence['unverified'].get(lane), f'{lane}: missing unverified reason'
             if args.require_live:
-                raise SystemExit(f'{lane}: unverified — {evidence["unverified"][lane]}')
+                parser.error(f'{lane}: unverified — {evidence["unverified"][lane]}')
             print(f'{lane}: unverified — {evidence["unverified"][lane]}')
         elif args.live or args.require_live:
             check_run(lane, record, evidence)
