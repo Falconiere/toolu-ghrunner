@@ -9,7 +9,6 @@
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::process::Command;
-use std::thread;
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
@@ -142,7 +141,7 @@ impl Host {
     Ok(())
   }
 
-  fn run_at_sha(&self, sha: &str, deadline: Instant) -> TestResult<Value> {
+  async fn run_at_sha(&self, sha: &str, deadline: Instant) -> TestResult<Value> {
     loop {
       let listing = self.api(&format!(
         "repos/{}/actions/workflows/{WORKFLOW}/runs?branch={}&per_page=100",
@@ -158,11 +157,11 @@ impl Host {
       if Instant::now() >= deadline {
         return Err(format!("no pushed {WORKFLOW} run appeared at {sha}").into());
       }
-      thread::sleep(POLL);
+      tokio::time::sleep(POLL).await;
     }
   }
 
-  fn completed_run(&self, run_id: u64, sha: &str, deadline: Instant) -> TestResult<Value> {
+  async fn completed_run(&self, run_id: u64, sha: &str, deadline: Instant) -> TestResult<Value> {
     loop {
       let run = self.api(&format!("repos/{}/actions/runs/{run_id}", self.repo))?;
       if field_str(&run, "head_sha")? != sha {
@@ -178,7 +177,7 @@ impl Host {
       if Instant::now() >= deadline {
         return Err(format!("run {run_id} did not complete within {RUN_TIMEOUT:?}").into());
       }
-      thread::sleep(POLL);
+      tokio::time::sleep(POLL).await;
     }
   }
 }
@@ -236,7 +235,7 @@ fn local_sha() -> TestResult<String> {
   Ok(String::from_utf8(output.stdout)?.trim().to_owned())
 }
 
-fn verify(host: &Host) -> TestResult<()> {
+async fn verify(host: &Host) -> TestResult<()> {
   if host.toolu_name == host.reference_name {
     return Err("toolu and reference runner names must differ".into());
   }
@@ -246,9 +245,9 @@ fn verify(host: &Host) -> TestResult<()> {
   }
   host.verify_runners()?;
   let deadline = Instant::now() + RUN_TIMEOUT;
-  let run = host.run_at_sha(&sha, deadline)?;
+  let run = host.run_at_sha(&sha, deadline).await?;
   let run_id = field_u64(&run, "id")?;
-  host.completed_run(run_id, &sha, deadline)?;
+  host.completed_run(run_id, &sha, deadline).await?;
   let listing = host.api(&format!(
     "repos/{}/actions/runs/{run_id}/jobs?per_page=100",
     host.repo
@@ -400,14 +399,14 @@ fn validate_annotations(rows: &[Value]) -> TestResult<BTreeMap<String, Value>> {
   Ok(found)
 }
 
-#[test]
+#[tokio::test]
 #[ignore = "requires pushed branch, online paired runners and explicit version pins"]
-fn annotation_matches_reference() -> TestResult<()> {
-  verify(&Host::github()?)
+async fn annotation_matches_reference() -> TestResult<()> {
+  verify(&Host::github()?).await
 }
 
-#[test]
+#[tokio::test]
 #[ignore = "requires a supported GHES repo with this pushed branch and paired runners"]
-fn annotation_matches_ghes_reference() -> TestResult<()> {
-  verify(&Host::ghes()?)
+async fn annotation_matches_ghes_reference() -> TestResult<()> {
+  verify(&Host::ghes()?).await
 }

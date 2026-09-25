@@ -24,7 +24,7 @@ observability = { path = "../observability" }
 listener = { path = "../listener" }
 
 # Async runtime (bin: #[tokio::main] + SIGINT/SIGTERM signal bridge)
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "time"] }
 tokio-util = "0.7"
 
 # Web / HTTP (register `generate-jitconfig` + device-flow login clients)
