@@ -32,6 +32,25 @@ struct PostReport<'a> {
   cancellation_deadline: Option<Instant>,
 }
 
+/// Keep overflow visible when assigning the post's timeline step number.
+fn post_number(first: u32, index: usize) -> u32 {
+  let index = u32::try_from(index).unwrap_or_else(|_| {
+    tracing::warn!(
+      post_index = index,
+      "post timeline index overflow; saturating"
+    );
+    u32::MAX
+  });
+  first.checked_add(index).unwrap_or_else(|| {
+    tracing::warn!(
+      first_post_number = first,
+      post_index = index,
+      "post timeline number overflow; saturating"
+    );
+    u32::MAX
+  })
+}
+
 /// Drain the post-step queue LIFO and run each post that passes its condition.
 pub(super) async fn drain_post_steps(
   posts: &mut super::step_naming::PostStepQueue,
@@ -46,9 +65,7 @@ pub(super) async fn drain_post_steps(
       ctx.record_job_cancelled();
       cancellation_deadline.get_or_insert_with(|| Instant::now() + CANCELLED_POST_GRACE);
     }
-    let number = job
-      .first_post_number
-      .saturating_add(u32::try_from(index).unwrap_or(u32::MAX));
+    let number = post_number(job.first_post_number, index);
     let report = PostReport {
       id: &post.report_id,
       number,
@@ -139,13 +156,20 @@ async fn run_scoped_post(
 }
 
 async fn report_post_error(events: &mpsc::Sender<RunnerEvent>, step_id: &str, error: &RunnerError) {
-  let _ = events
+  if events
     .send(RunnerEvent::Log {
       step_id: step_id.to_owned(),
       line: format!("##[error]post-step failed: {error}"),
       stream: shared::LogStream::Stdout,
     })
-    .await;
+    .await
+    .is_err()
+  {
+    tracing::warn!(
+      step_id,
+      "event receiver closed while reporting post-step error"
+    );
+  }
   complete_post(events, step_id, Conclusion::Failure).await;
 }
 
@@ -160,13 +184,21 @@ async fn skip_post(events: &mpsc::Sender<RunnerEvent>, step_id: &str, reason: St
 }
 
 async fn complete_post(events: &mpsc::Sender<RunnerEvent>, step_id: &str, conclusion: Conclusion) {
-  let _ = events
+  if events
     .send(RunnerEvent::StepCompleted {
       step_id: step_id.to_owned(),
       conclusion,
       outputs: std::collections::HashMap::new(),
     })
-    .await;
+    .await
+    .is_err()
+  {
+    tracing::warn!(
+      step_id,
+      ?conclusion,
+      "event receiver closed while reporting post-step completion"
+    );
+  }
 }
 
 /// Cleanup grace budget for post-steps draining after a job cancel.
@@ -180,6 +212,7 @@ const CANCELLED_POST_GRACE: Duration = Duration::from_secs(5 * 60);
 /// fresh token bounded by the remaining shared [`CANCELLED_POST_GRACE`]
 /// deadline (or the step's own tighter `timeout-minutes`). An uncancelled drain keeps the live job token
 /// so SIGINT/SIGTERM still interrupts posts normally.
+/// If no duration remains, [`run_one_post`] reports the post as skipped without running it.
 fn post_bounds(post: &PostStep, job: &JobCtx<'_>, deadline: Option<Instant>) -> StepBounds {
   if !job.cancel.is_cancelled() {
     return StepBounds::new(post.step.timeout_in_minutes, job.cancel.clone());

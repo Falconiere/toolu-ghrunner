@@ -96,7 +96,13 @@ pub async fn run_steps(
     shadow: run.shadow,
     http: run.http,
     fetcher: run.fetcher,
-    first_post_number: u32::try_from(steps.len().saturating_add(2)).unwrap_or(u32::MAX),
+    first_post_number: u32::try_from(steps.len().saturating_add(2)).unwrap_or_else(|_| {
+      tracing::warn!(
+        step_count = steps.len(),
+        "post timeline number overflow; saturating at u32::MAX"
+      );
+      u32::MAX
+    }),
   };
 
   let mut job_state = JobState {
