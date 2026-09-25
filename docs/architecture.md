@@ -1198,7 +1198,8 @@ listener's session/shutdown token independently. `execute_job` remains available
 for callers with graceful job cancellation only. `job_runner/entry.rs` installs a
 job-scoped `JobCancellation`; its deadline starts on observed cancellation and
 its forced token fires on shutdown or expiry of the single five-minute cleanup
-budget. Setup and hooks also observe shutdown. Main steps and posts receive
+budget. Container setup and hooks also observe shutdown; local context/filesystem
+initialization is awaited to retain ownership. Main steps and posts receive
 fresh step tokens: a watcher re-evaluates the step-start expression scope with
 cancelled job status and interrupts only when the running condition becomes
 false or invalid. The live context exposes cancelled/failed status to later steps.
