@@ -46,9 +46,9 @@
     "composite-working-directory": "Issue #81 still owns composite working-directory parsing and resolution and is open."
   },
   "local": {
-    "host": "macOS ARM64",
+    "host": "macOS ARM64 and Linux ARM64 container",
     "backend": "sanitized GitHub.com acquisition replay",
     "command": "./tools/check.sh all",
-    "status": "review fixes and focused deadline test passed; full gate pending"
+    "status": "full gate passed in Rust 1.94.1 Linux ARM64 container; focused deadline test passed on macOS; local macOS full gate was interrupted after host-wide dyld stalls"
   }
 }
