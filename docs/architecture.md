@@ -1168,4 +1168,3 @@ Individual step `timeout-minutes` can shorten it. Once the shared deadline is
 spent, unstarted posts are reported skipped and teardown continues. The local
 replay and live comparison scope are documented in
 [test-coverage.md](test-coverage.md#post-action-cleanup-101).
-
