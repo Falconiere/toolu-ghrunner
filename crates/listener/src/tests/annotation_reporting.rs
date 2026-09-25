@@ -9,9 +9,8 @@ use axum::http::Method;
 use execution::Runner;
 use shared::{AgentJobRequestMessage, Conclusion, RunnerConfig, RunnerEvent, SecretMasker};
 use tokio_util::sync::CancellationToken;
-use wire::reporting::run_service::{CompleteJobRequest, complete_job};
+use wire::reporting::run_service::{CompleteJobRequest, JobConclusion, complete_job};
 
-use crate::helpers::map_conclusion;
 use crate::step_reporter::StepCollector;
 use crate::support::RecordingServer;
 
@@ -109,8 +108,8 @@ async fn posted_completion() -> TestResult<(serde_json::Value, HashMap<String, u
     plan_id: msg.plan.plan_id,
     job_id: msg.job_id,
     request_id: msg.request_id,
-    conclusion: map_conclusion(conclusion),
-    outputs: serde_json::json!({}),
+    conclusion: JobConclusion::Succeeded,
+    outputs: HashMap::new(),
     step_results: collector.collected_results().await,
     annotations: Vec::new(),
   };
