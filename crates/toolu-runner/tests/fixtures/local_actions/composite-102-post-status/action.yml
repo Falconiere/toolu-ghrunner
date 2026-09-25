@@ -1,0 +1,9 @@
+name: composite-102-post-status
+description: A nested Node post-if observes a later top-level job failure.
+runs:
+  using: composite
+  steps:
+    - id: nested
+      uses: ./.github/actions/node-102-post-failure
+      with:
+        who: world

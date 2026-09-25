@@ -1,0 +1,17 @@
+name: composite-102-hard-error
+runs:
+  using: composite
+  steps:
+    - id: broken
+      uses: ./.github/actions/broken-no-manifest
+    - id: ordinary
+      run: echo ordinary >> "$GITHUB_WORKSPACE/composite-102-hard-error.marker"
+      shell: bash
+    - id: failure_cleanup
+      if: failure()
+      run: echo failure-cleanup >> "$GITHUB_WORKSPACE/composite-102-hard-error.marker"
+      shell: bash
+    - id: always_cleanup
+      if: always()
+      run: echo always-cleanup >> "$GITHUB_WORKSPACE/composite-102-hard-error.marker"
+      shell: bash

@@ -300,8 +300,10 @@ Handler priority: **plugin → script → node → docker → composite**.
   `data_dir/_node/<version>` on first use.
 - `docker` — Docker container actions via bollard. Mounts the
   workspace and streams container logs.
-- `composite` — composite actions (`runs.using: composite`). Walks
-  the inner steps and runs them through the same handlers.
+- `composite` — composite actions (`runs.using: composite`). Evaluates
+  each inner condition and supported field through the expression engine,
+  then dispatches shell or nested `uses:` steps. A failed inner step updates
+  local status and still permits later `failure()`/`always()` cleanup.
 - `plugin` — `RunnerPlugin` extension point. New addition not in
   upstream `actions/runner`.
 
@@ -1125,8 +1127,8 @@ Composite invocation inputs remain separate from workflow inputs and from
 other invocations. Acquired local actions identify their repository as `self`
 and carry the local path separately from the optional remote action name.
 
-Deferred display names/timeouts are tracked in #99; full composite expressions
-and cleanup conditions are tracked in #102. The measured scope and reference
+Deferred display names/timeouts are tracked in #99. Composite field evaluation,
+local failure status, and cleanup conditions are covered by #102. The measured scope and reference
 run evidence are in [test-coverage.md](test-coverage.md#incoming-contexts-acceptance-68).
 
 ## Step expression identity
@@ -1141,7 +1143,13 @@ using the wire ID. `continue-on-error` preserves the real outcome while its
 effective conclusion can be success.
 
 Composite invocations have separate `steps` maps keyed by their invocation
-path. Only the declared composite outputs flow to the parent step. Action
+path, resolved `inputs`, and `github.action_status` values. Their step-only
+`env` overlays unwind on return; file-command `GITHUB_ENV` and `GITHUB_PATH`
+updates persist for later inner and outer steps. The composite uses one parent
+deadline across sequential shell and nested action children. On Unix, a timed
+out or cancelled shell runs in its own process group; the runner kills that
+group and reaps the shell before completing the parent step. Only the declared
+composite outputs flow to the parent step. Action
 `save-state` is private to its instance and feeds the post entrypoint through
 `STATE_*`; it is not part of `steps.*`. Node pre and post stages have their own
 report IDs, and their outputs and results do not overwrite the main step's
@@ -1156,6 +1164,9 @@ cancellation. Each post keeps its registered report ID and gets a timeline numbe
 `STATE_*`, action inputs, and action metadata still come from the originating
 main step; the separate report ID keeps the main outcome intact in the
 `steps` expression context and creates its own Results Service record/log.
+Nested Node actions register their posts in the same job LIFO queue, retaining
+the nested invocation path. Post conditions use the live global job status even
+while their action inputs and state come from that saved path.
 
 Each post condition sees the current aggregate status. A failed post marks the
 job failed before the next condition; cancellation remains the highest-priority

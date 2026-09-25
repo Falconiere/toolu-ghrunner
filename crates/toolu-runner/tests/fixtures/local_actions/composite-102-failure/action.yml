@@ -1,0 +1,21 @@
+name: composite-102-failure
+runs:
+  using: composite
+  steps:
+    - id: fail
+      run: |
+        printf 'INNER_LOG=fail\n'
+        echo fail >> "$GITHUB_WORKSPACE/composite-102-failure.marker"
+        exit 1
+      shell: bash
+    - id: ordinary
+      run: echo ordinary >> "$GITHUB_WORKSPACE/composite-102-failure.marker"
+      shell: bash
+    - id: failure_cleanup
+      if: failure()
+      run: echo failure-cleanup >> "$GITHUB_WORKSPACE/composite-102-failure.marker"
+      shell: bash
+    - id: always_cleanup
+      if: always()
+      run: echo always-cleanup >> "$GITHUB_WORKSPACE/composite-102-failure.marker"
+      shell: bash

@@ -331,11 +331,12 @@ async fn run_composite_inner(
     parent_step_id: env.log_step_id,
     action_dir: &resolved.action_dir,
     cancel: &env.bounds.cancel,
+    deadline: env.bounds.deadline,
     http: env.http,
     fetcher: env.fetcher,
   };
   let prior_scope = ctx.scope_path();
-  ctx.enter_step_scope(&step.id);
+  ctx.enter_step_scope(&step.id, &step_inputs, &resolved.action_dir);
   let result = execute_composite_action(&params, ctx, depth).await;
   ctx.restore_step_scope(prior_scope);
   let result = result?;

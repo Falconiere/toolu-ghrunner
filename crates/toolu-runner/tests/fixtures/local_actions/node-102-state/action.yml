@@ -1,0 +1,11 @@
+name: node-102-state
+description: Real pre/main/post action recording instance-private state.
+inputs:
+  who:
+    description: Instance name.
+    required: true
+runs:
+  using: node20
+  pre: pre.js
+  main: main.js
+  post: post.js

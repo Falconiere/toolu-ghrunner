@@ -126,7 +126,7 @@ async fn run_scoped_post(
   )
   .await;
 
-  if !ctx.evaluate_expression(condition)?.is_truthy() {
+  if !evaluate_post_condition(ctx, condition)? {
     skip_post(
       events,
       report.id,
@@ -157,6 +157,14 @@ async fn run_scoped_post(
 
   complete_post(events, report.id, conclusion).await;
   Ok(conclusion)
+}
+
+fn evaluate_post_condition(ctx: &ExecutionContext, condition: &str) -> Result<bool, RunnerError> {
+  let mut eval_ctx = ctx.eval_context();
+  // A queued post evaluates after all main steps, against the live job status.
+  // Its saved composite scope still supplies inputs, steps, and STATE_*.
+  eval_ctx.job_status = ctx.job_status();
+  Ok(ctx.evaluate_with(&eval_ctx, condition)?.is_truthy())
 }
 
 async fn report_post_error(events: &mpsc::Sender<RunnerEvent>, step_id: &str, error: &RunnerError) {
@@ -225,6 +233,7 @@ fn post_bounds(post: &PostStep, job: &JobCtx<'_>, deadline: Option<Instant>) -> 
   let step_timeout = super::step_timeout::timeout_duration(post.step.timeout_in_minutes);
   StepBounds {
     timeout: Some(step_timeout.map_or(remaining, |limit| limit.min(remaining))),
+    deadline: Some(Instant::now() + step_timeout.map_or(remaining, |limit| limit.min(remaining))),
     cancel: CancellationToken::new(),
   }
 }

@@ -8,6 +8,7 @@ use shared::{ActionStep, LogStream, RunnerConfig, RunnerError, RunnerEvent};
 use tokio::sync::mpsc;
 
 use super::actions::manifest::ActionDefinition;
+use super::composite_expr::{CompositeField, interpolate_composite_expr};
 use super::context::{ExecutionContext, runner_temp_dir, runner_tool_cache_dir};
 use super::handlers::node::build_action_env;
 use super::step_env::env_token_to_string;
@@ -109,12 +110,15 @@ pub(super) fn build_composite_inputs(
   let user_inputs = collect_step_inputs(step, ctx, &ctx.eval_context())?;
 
   let mut result = HashMap::new();
+  let eval_ctx = ctx.eval_context();
   for (name, input_def) in &manifest.inputs {
-    let value = user_inputs
-      .get(name)
-      .cloned()
-      .or_else(|| input_def.default.clone())
-      .unwrap_or_default();
+    let value = if let Some(value) = user_inputs.get(name) {
+      value.clone()
+    } else if let Some(default) = &input_def.default {
+      interpolate_composite_expr(default, &eval_ctx, CompositeField::InputDefault)?
+    } else {
+      String::new()
+    };
     result.insert(name.clone(), value);
   }
   // Also include any user inputs not declared in manifest

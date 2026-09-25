@@ -115,7 +115,7 @@ pub(super) async fn run_node_stage(
     working_dir: s.workspace,
     step_id: s.log_step_id,
     cgroup_path: cgroup.as_deref(),
-    timeout: s.bounds.timeout,
+    timeout: s.bounds.remaining_timeout(),
     cancel: &s.bounds.cancel,
   };
 
@@ -150,8 +150,14 @@ async fn run_stage_process(
   );
   let (output, stdout_outputs) = tokio::join!(exec, dispatch);
   let conclusion = output?.conclusion;
-  let outputs =
-    apply_file_commands_and_merge_outputs(output_name, stdout_outputs, file_cmds, s.ctx).await;
+  let outputs = apply_file_commands_and_merge_outputs(
+    output_name,
+    Some(&s.step.id),
+    stdout_outputs,
+    file_cmds,
+    s.ctx,
+  )
+  .await;
   Ok((conclusion, outputs))
 }
 

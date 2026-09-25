@@ -1,0 +1,23 @@
+name: composite-102-continue
+runs:
+  using: composite
+  steps:
+    - id: fail
+      continue-on-error: true
+      run: |
+        echo fail >> "$GITHUB_WORKSPACE/composite-102-continue.marker"
+        exit 1
+      shell: bash
+    - id: ordinary
+      run: echo ordinary >> "$GITHUB_WORKSPACE/composite-102-continue.marker"
+      shell: bash
+    - id: failure_cleanup
+      if: failure()
+      run: echo failure-cleanup >> "$GITHUB_WORKSPACE/composite-102-continue.marker"
+      shell: bash
+    - id: always_cleanup
+      if: always()
+      run: |
+        echo always-cleanup >> "$GITHUB_WORKSPACE/composite-102-continue.marker"
+        printf '%s' "${{ steps.fail.outcome }}/${{ steps.fail.conclusion }}" > "$GITHUB_WORKSPACE/composite-102-continue.result"
+      shell: bash

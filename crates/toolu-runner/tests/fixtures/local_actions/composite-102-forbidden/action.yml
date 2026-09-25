@@ -1,0 +1,14 @@
+name: composite-102-forbidden
+description: An unavailable composite context must fail visibly.
+runs:
+  using: composite
+  steps:
+    - id: bad
+      shell: bash
+      env:
+        VALUE: ${{ secrets.UNAVAILABLE }}
+      run: echo "$VALUE"
+    - id: cleanup
+      if: failure()
+      shell: bash
+      run: echo cleaned > "$GITHUB_WORKSPACE/composite-102-forbidden.marker"

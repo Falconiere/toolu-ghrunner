@@ -1,0 +1,13 @@
+name: composite-102-bad-if
+description: A malformed if expression stops the inner loop.
+runs:
+  using: composite
+  steps:
+    - id: bad
+      if: "${{ contains(inputs.who, 'x' }}"
+      shell: bash
+      run: echo unexpected
+    - id: cleanup
+      if: always()
+      shell: bash
+      run: echo unexpected > "$GITHUB_WORKSPACE/composite-102-bad-if.marker"

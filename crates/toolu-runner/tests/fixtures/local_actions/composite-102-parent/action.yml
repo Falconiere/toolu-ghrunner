@@ -1,0 +1,28 @@
+name: composite-102-parent
+inputs:
+  who:
+    description: Parent value
+    required: true
+outputs:
+  result:
+    description: Combined child outputs
+    value: "${{ format('{0}/{1}', steps.one.outputs.result, steps.two.outputs.result) }}"
+runs:
+  using: composite
+  steps:
+    - id: one
+      uses: ./.github/actions/composite-102-nested
+      with:
+        who: "${{ format('{0}-one', inputs.who) }}"
+    - id: two
+      uses: ./.github/actions/composite-102-nested
+      with:
+        who: "${{ format('{0}-two', inputs.who) }}"
+    - id: verify
+      env:
+        CURRENT_ACTION_PATH: ${{ github.action_path }}
+      run: |
+        test "$CURRENT_ACTION_PATH" = "$GITHUB_ACTION_PATH"
+        printf '%s' "${{ steps.one.outputs.result }}/${{ steps.two.outputs.result }}" > "$GITHUB_WORKSPACE/composite-102-parent.out"
+        printf '%s' "${{ inputs.who }}/${{ steps.one.outcome }}/${{ steps.two.conclusion }}/${{ steps.first.outputs.answer }}" > "$GITHUB_WORKSPACE/composite-102-parent.scope"
+      shell: bash

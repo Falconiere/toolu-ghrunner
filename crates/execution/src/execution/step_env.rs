@@ -74,6 +74,7 @@ pub(super) fn env_token_to_string(
 async fn apply_file_commands(
   file_cmds: &FileCommandManager,
   ctx: &mut ExecutionContext,
+  state_id: Option<&str>,
 ) -> HashMap<String, String> {
   let Ok(results) = file_cmds.process().await else {
     tracing::warn!("failed to process file commands; step outputs/env will be empty");
@@ -85,6 +86,11 @@ async fn apply_file_commands(
   for dir in results.path_additions {
     ctx.prepend_path(&dir);
   }
+  if let Some(id) = state_id {
+    for (key, value) in results.state {
+      ctx.set_step_state(id, &key, &value);
+    }
+  }
   results.outputs
 }
 
@@ -92,11 +98,12 @@ async fn apply_file_commands(
 /// Stdout outputs take precedence over file outputs with the same key.
 pub(super) async fn apply_file_commands_and_merge_outputs(
   expression_name: Option<&str>,
+  state_id: Option<&str>,
   stdout_outputs: HashMap<String, String>,
   file_cmds: &FileCommandManager,
   ctx: &mut ExecutionContext,
 ) -> HashMap<String, String> {
-  let mut outputs = apply_file_commands(file_cmds, ctx).await;
+  let mut outputs = apply_file_commands(file_cmds, ctx, state_id).await;
   outputs.extend(stdout_outputs);
   if let Some(name) = expression_name {
     for (key, value) in &outputs {

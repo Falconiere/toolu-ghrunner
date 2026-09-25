@@ -1,0 +1,39 @@
+name: composite-102-file-commands
+description: Real shell file commands and two nested Node action instances.
+outputs:
+  result:
+    value: ${{ steps.exports.outputs.answer }}
+runs:
+  using: composite
+  steps:
+    - id: exports
+      shell: bash
+      env:
+        LOCAL_ONLY: one
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        test "$LOCAL_ONLY" = one
+        test "$ACTION_PATH" = "$GITHUB_ACTION_PATH"
+        printf 'COMPOSITE_VALUE=inner\n' >> "$GITHUB_ENV"
+        printf 'answer=42\n' >> "$GITHUB_OUTPUT"
+        mkdir -p "$GITHUB_WORKSPACE/bin"
+        printf '#!/bin/sh\nexit 0\n' > "$GITHUB_WORKSPACE/bin/composite-102-tool"
+        chmod +x "$GITHUB_WORKSPACE/bin/composite-102-tool"
+        printf '%s\n' "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
+    - id: one
+      uses: ./.github/actions/node-102-state
+      with:
+        who: one
+      env:
+        LOCAL_ONLY: node-one
+    - id: two
+      uses: ./.github/actions/node-102-state
+      with:
+        who: two
+      env:
+        LOCAL_ONLY: node-two
+    - id: verify
+      shell: bash
+      run: |
+        command -v composite-102-tool
+        printf '%s/%s/%s' "$COMPOSITE_VALUE" "${LOCAL_ONLY:-absent}" '${{ steps.exports.outputs.answer }}' > "$GITHUB_WORKSPACE/composite-102-file-commands.out"

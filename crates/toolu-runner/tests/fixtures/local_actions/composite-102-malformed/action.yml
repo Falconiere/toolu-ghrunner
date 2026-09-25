@@ -1,0 +1,19 @@
+name: composite-102-malformed
+description: A malformed run expression followed by eligible cleanup.
+runs:
+  using: composite
+  steps:
+    - id: bad
+      shell: bash
+      run: "echo ${{ format('missing' }}"
+    - id: ordinary
+      shell: bash
+      run: echo ordinary >> "$GITHUB_WORKSPACE/composite-102-malformed.marker"
+    - id: failure_cleanup
+      if: failure()
+      shell: bash
+      run: echo failure-cleanup >> "$GITHUB_WORKSPACE/composite-102-malformed.marker"
+    - id: always_cleanup
+      if: always()
+      shell: bash
+      run: echo always-cleanup >> "$GITHUB_WORKSPACE/composite-102-malformed.marker"
