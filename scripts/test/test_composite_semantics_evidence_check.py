@@ -38,6 +38,29 @@ class CompositeSemanticsEvidenceTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('unverified', result.stdout + result.stderr)
 
+    def test_missing_evidence_reports_a_cli_error_without_traceback(self):
+        with tempfile.TemporaryDirectory() as temp:
+            missing = Path(temp) / 'missing.json'
+            result = subprocess.run(
+                [sys.executable, str(Path(checker.__file__)), str(missing)],
+                capture_output=True, text=True, check=False,
+            )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('cannot read evidence', result.stderr)
+        self.assertNotIn('Traceback', result.stderr)
+
+    def test_malformed_evidence_reports_a_cli_error_without_traceback(self):
+        with tempfile.TemporaryDirectory() as temp:
+            malformed = Path(temp) / 'malformed.json'
+            malformed.write_text('{')
+            result = subprocess.run(
+                [sys.executable, str(Path(checker.__file__)), str(malformed)],
+                capture_output=True, text=True, check=False,
+            )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('cannot read evidence', result.stderr)
+        self.assertNotIn('Traceback', result.stderr)
+
 
 if __name__ == '__main__':
     unittest.main()
