@@ -55,6 +55,9 @@ jobs:
           # Jev finding assessment + risk routing (toolu-ghactions >= 8.0.0).
           # Reuses API_KEY (OpenRouter-only) and the shared review deadline.
           JEV_ENABLED: 'true'
+          # AGENTS.md is over the action's 32 KiB default; keep the reviewed
+          # base-branch rules in the model context instead of dropping them.
+          RULES_MAX_BYTES: '65536'
           # Repo-tuned checklist. Replaces the generic 8-dimension default with
           # the failure modes that actually bite this codebase: unmasked sinks,
           # swallowed errors, blocking I/O on the async runtime, durability

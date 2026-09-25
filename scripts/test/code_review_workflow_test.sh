@@ -88,6 +88,18 @@ want "keeps Jev assessments on"           "$WF" \
 want "action is v8 or later (Jev input)"  "$WF" \
   "toolu-ghactions/code-review@v([89]|[1-9][0-9]+)(\.|[[:space:]]|$)"
 
+# The action drops a convention file in its entirety when it exceeds the byte
+# cap. Keep AGENTS.md inside the configured cap so the reviewer reads the
+# project's real runner and GHES contracts.
+rules_cap=$(awk '/^[[:space:]]+RULES_MAX_BYTES:/ {gsub(/[^0-9]/, "", $2); print $2; exit}' "$WF")
+agents_bytes=$(wc -c < AGENTS.md)
+if [[ $rules_cap =~ ^[0-9]+$ ]] && ((rules_cap >= agents_bytes)); then
+  echo "ok: project rules cap includes AGENTS.md"
+else
+  echo "FAIL: project rules cap ($rules_cap) excludes AGENTS.md ($agents_bytes bytes)" >&2
+  fail=1
+fi
+
 # --- the prompt cannot re-derive either false positive ---
 want "prompt: changelog is generated"     "$PROMPT" "generated, never hand-written"
 want "prompt: release heading is sibling" "$PROMPT" "sibling"
