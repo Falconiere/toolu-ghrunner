@@ -69,8 +69,17 @@ async fn post_results_reach_distinct_completion_records() -> Result<(), Box<dyn 
   let mut receiver = runner.execute_job(msg.clone(), cancellation.clone());
   let completion = tokio::time::timeout(Duration::from_secs(30), async {
     let mut conclusion = None;
+    let mut step_completions = Vec::new();
     while let Some(event) = receiver.recv().await {
       collector.record(&event).await;
+      if let RunnerEvent::StepCompleted {
+        step_id,
+        conclusion: result,
+        ..
+      } = &event
+      {
+        step_completions.push((step_id.clone(), *result));
+      }
       if let RunnerEvent::JobCompleted {
         conclusion: result, ..
       } = event
@@ -78,17 +87,26 @@ async fn post_results_reach_distinct_completion_records() -> Result<(), Box<dyn 
         conclusion = Some(result);
       }
     }
-    conclusion
+    (conclusion, step_completions)
   })
   .await;
-  let conclusion = match completion {
+  let (conclusion, step_completions) = match completion {
     Ok(conclusion) => conclusion,
     Err(error) => {
       cancellation.cancel();
       return Err(error.into());
     },
-  }
-  .ok_or("missing JobCompleted event")?;
+  };
+  let conclusion = conclusion.ok_or("missing JobCompleted event")?;
+  assert_eq!(step_completions.len(), 2);
+  let (reported_main_id, main_conclusion) =
+    step_completions.first().ok_or("main completion missing")?;
+  let (reported_post_id, post_conclusion) =
+    step_completions.get(1).ok_or("post completion missing")?;
+  assert_eq!(reported_main_id, &main_id);
+  assert_eq!(*main_conclusion, Conclusion::Success);
+  assert_ne!(reported_post_id, &main_id);
+  assert_eq!(*post_conclusion, Conclusion::Failure);
   assert_eq!(conclusion, Conclusion::Failure);
   let request = CompleteJobRequest {
     plan_id: msg.plan.plan_id,
