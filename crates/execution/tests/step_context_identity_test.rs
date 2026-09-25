@@ -33,6 +33,16 @@ fn captured_script(
   condition: &str,
 ) -> TestResult<ActionStep> {
   let message: AgentJobRequestMessage = serde_json::from_str(CAPTURED_JOB)?;
+  captured_script_from_message(&message, index, name, script, condition)
+}
+
+fn captured_script_from_message(
+  message: &AgentJobRequestMessage,
+  index: usize,
+  name: Option<&str>,
+  script: &str,
+  condition: &str,
+) -> TestResult<ActionStep> {
   let captured = message.steps.get(index).ok_or("captured step missing")?;
   let mut step = ActionStep::script(&captured.id, script, condition);
   step.context_name = name.map(str::to_owned);
@@ -453,13 +463,15 @@ async fn repeated_nested_composites_do_not_leak_inner_step_outputs() -> TestResu
 #[tokio::test]
 async fn acquired_message_replay_keeps_wire_ids_through_job_completion() -> TestResult<()> {
   let mut message: AgentJobRequestMessage = serde_json::from_str(CAPTURED_JOB)?;
-  let producer = captured_script(
+  let producer = captured_script_from_message(
+    &message,
     0,
     Some("build"),
     "echo 'value=hello' >> \"$GITHUB_OUTPUT\"",
     "success()",
   )?;
-  let consumer = captured_script(
+  let consumer = captured_script_from_message(
+    &message,
     1,
     Some("inspect"),
     "echo \"${{ steps.build.outputs.value }}\"",
