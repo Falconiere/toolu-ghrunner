@@ -187,9 +187,10 @@ impl ActionFetcher {
 }
 
 fn action_context_error(error: RunnerError) -> String {
-  match error {
-    RunnerError::ActionResolution(message) => message,
-    other => other.to_string(),
+  if let RunnerError::ActionResolution(message) = &error {
+    message.clone()
+  } else {
+    error.to_string()
   }
 }
 
