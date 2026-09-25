@@ -104,11 +104,24 @@ def check_live(evidence):
         )
         jobs = api(f"actions/runs/{record['id']}/jobs?per_page=100")["jobs"]
         by_name = {job["name"]: job for job in jobs}
-        for name in (record["producer"], record["consumer"]):
+        matrix_jobs = record["matrix_jobs"]
+        assert len(matrix_jobs) == 2 and len(set(matrix_jobs)) == 2, (
+            f"{lane}: expected two distinct matrix producers"
+        )
+        for name in (
+            record["producer"],
+            record["consumer"],
+            *matrix_jobs,
+            record["matrix_consumer"],
+        ):
             assert by_name[name]["conclusion"] == "success", f"{lane}/{name}: job did not succeed"
         assert by_name[record["producer"]]["runner_name"] == record["runner"], (
             f"{lane}: wrong producer runner"
         )
+        for name in matrix_jobs:
+            assert by_name[name]["runner_name"] == record["runner"], (
+                f"{lane}/{name}: wrong matrix runner"
+            )
         for name, expected in {
             ".github/workflows/job-outputs-70.yml": evidence["workflow_sha256"],
             **evidence["action_sha256"],
@@ -116,7 +129,7 @@ def check_live(evidence):
             remote = api(f"contents/{name}?ref={record['revision']}")
             actual = hashlib.sha256(base64.b64decode(remote["content"])).hexdigest()
             assert actual == expected, f"{lane}/{name}: remote digest mismatch"
-        print(f"{lane}: {run['html_url']} producer and downstream consumer passed.")
+        print(f"{lane}: {run['html_url']} producer, matrix cells and consumers passed.")
 
 
 def main():

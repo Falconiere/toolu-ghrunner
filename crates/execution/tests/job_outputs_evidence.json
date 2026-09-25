@@ -15,7 +15,7 @@
     "consumer_conclusion": "skipped"
   },
   "capture_workflow_sha256": "4373e60d1458650ea1904d47ce5f91705acd0211d9a8cc06688bfb2e8ddd3e01",
-  "workflow_sha256": "b332b1904c9eeef5abcde14588877cc83fe85a40fe82ae88762c29a2e3e528ce",
+  "workflow_sha256": "78bf52dc4786c88bbd98016bc0877bc9fe4642f1a12e576c0fb7c11cf7f1ec40",
   "action_sha256": {
     ".github/actions/job-outputs-70-post/action.yml": "d3de29c8b40faec1688c29beeaf0ff4e2c98494a6d0c92338034afbe36bbf1c9",
     ".github/actions/job-outputs-70-post/main.js": "db2323ac753c9f4d82c7bbd2e96f5339e92225f3926ee28a763fa5538465ef3f",

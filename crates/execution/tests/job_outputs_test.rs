@@ -132,6 +132,22 @@ async fn captured_output_is_evaluated_after_real_github_output_step() -> TestRes
 }
 
 #[tokio::test]
+async fn skipped_producer_step_omits_its_job_output() -> TestResult {
+  let mut message = captured()?;
+  let step = message.steps.first_mut().ok_or("captured step missing")?;
+  let step_id = step.id.clone();
+  step.condition = Some("false".to_owned());
+  let events = replay(message).await?;
+  let (conclusion, outputs) = completed(&events)?;
+  assert_eq!(conclusion, Conclusion::Success, "{events:?}");
+  assert!(outputs.is_empty(), "{events:?}");
+  assert!(events.iter().any(|event| {
+    matches!(event, RunnerEvent::StepSkipped { step_id: skipped, .. } if skipped == &step_id)
+  }));
+  Ok(())
+}
+
+#[tokio::test]
 async fn empty_multiline_and_unicode_values_follow_github_output_file() -> TestResult {
   let mut message = captured()?;
   set_script(
