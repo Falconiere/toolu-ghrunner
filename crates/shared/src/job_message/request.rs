@@ -41,6 +41,9 @@ pub struct AgentJobRequestMessage {
   /// Optional job-level `container:` declaration, evaluated before any step.
   #[serde(default, skip_serializing_if = "Option::is_none")]
   pub job_container: Option<TemplateToken>,
+  /// Optional mapping of service IDs to container declarations.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub job_service_containers: Option<TemplateToken>,
   /// Job-level `env:`/variable values, keyed by variable name.
   #[serde(default)]
   pub variables: HashMap<String, VariableValue>,

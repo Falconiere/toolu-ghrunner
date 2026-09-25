@@ -21,6 +21,7 @@ use super::service_endpoints::{ServiceUrls, extract_service_urls, forward_env};
 use super::shadow::ShadowObserver;
 use super::steps_runner::{JobRun, run_steps};
 use crate::docker::container_spec::ContainerSpec;
+use crate::docker::service_spec::ServiceSpec;
 use cache::accelerated::{AcceleratedInputs, accelerated_app};
 use cache::blob::BlobRegistry;
 use cache::cas::{CacheIndex, CasStore, LeaseSet};
@@ -122,6 +123,7 @@ enum ContainerStart {
 
 struct ContainerStartParams<'a> {
   spec: Option<&'a ContainerSpec>,
+  services: &'a [ServiceSpec],
   config: &'a RunnerConfig,
   workspace: &'a std::path::Path,
   ctx: &'a mut ExecutionContext,
@@ -169,6 +171,7 @@ async fn start_job_container(
 ) -> Result<ContainerStart, RunnerError> {
   let ContainerStartParams {
     spec,
+    services,
     config,
     workspace,
     ctx,
@@ -178,7 +181,7 @@ async fn start_job_container(
     job_id,
     workspace_gc,
   } = params;
-  match start_container(spec, config, workspace, ctx, cancel).await {
+  match start_container((spec, services), config, workspace, ctx, cancel, events).await {
     Ok(true) => Ok(ContainerStart::Continue(local, workspace_gc)),
     Ok(false) => {
       let outcome = JobOutcome {

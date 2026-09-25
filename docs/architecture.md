@@ -1213,3 +1213,22 @@ ordinary step/post results as cancelled. Registered posts retain LIFO ordering
 and their originating scope. Composites consume the shared forced token/deadline
 when entering cleanup. `spawn_in_cgroup` also creates a dedicated Unix process
 group; bounded waits kill only that owned group before reaping the leader.
+
+### Workflow service-container lifecycle
+
+`jobServiceContainers` is an optional acquired template mapping. `service_spec`
+evaluates it before workspace setup; `service_create` reuses the typed container
+option/port and mount validators. `services::ServiceContainers` owns service
+names before each Docker create request. Host jobs receive an owned network;
+container jobs borrow `JobContainer::network`. Service IDs become network aliases.
+Masked Docker transport sends registry credentials on image pulls.
+
+`container_job` starts the job container, then services, then `service_health`
+waits for readiness. `ExecutionContext` retains the service group and exposes
+inspected IDs, network and published ports in `job.services`. Explicit teardown
+collects service logs and removes services before removing a job container and
+its network. Partial startup failures and cancellation use the same cleanup;
+cleanup does not use the cancelled token. A missing resource is already clean,
+other cleanup failures remain visible alongside the primary error. Health waits
+are bounded to 300 seconds per service and cancellable; log collection has a
+30-second budget per service so a stalled log stream cannot prevent removal.

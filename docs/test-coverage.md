@@ -657,3 +657,50 @@ online paired issue-100 toolu/official runner. Consequently acquired-job SIGTERM
 GitHub.com backend/UI comparison, and pinned-reference/GHES lanes are unverified.
 Per explicit orchestrator direction these gaps do not block PR delivery; the
 Linux gate and GitHub `ci`/`ci-macos` determine code delivery readiness.
+
+
+## Service containers (issue #74)
+
+Production replay is in `crates/execution/tests/service_containers_test.rs`.
+It reads the captured #73 GitHub.com envelope at
+`crates/toolu-runner/tests/fixtures/job_container_message.json`, preserving its
+wire types/IDs and explicitly replacing steps/container declarations with service
+probes. **These service tokens are replay variations, not a newly acquired
+service payload.** The source capture's provenance remains in its sibling `.md`.
+Real Docker nginx responses, inspect results, health commands and an authenticated
+local registry are the oracles; no successful service or registry response is
+mocked. nginx is `1.27-alpine` (observed manifest
+`sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10`).
+
+Run `bash scripts/test/service_containers_linux.sh` on a Docker host. It builds
+inside Linux, shares the daemon, provisions a disposable htpasswd-authenticated
+`registry:2`, pushes an nginx fixture, and checks actual production replay.
+The optional `TOOLU_SERVICE_TEST_ROOT` selects the daemon-visible mount root;
+`TOOLU_SERVICE_TEST_IMAGE` selects a Rust image (default `rust:1.94.1`). Registry
+credentials are disposable local test values only. macOS production rejects
+nonempty services, even when its Docker daemon is Linux.
+
+| AC / scenario | Test and exact observable result | Evidence / applicability |
+| --- | --- | --- |
+| AC-1 / 74-S5 | `services_reject_unsupported_host_before_user_steps`: macOS completion Failure, no StepStarted or marker. `malformed_services_fail_before_user_steps` rejects a scalar mapping; `empty_services_do_not_require_docker` writes exact marker. | Passed on Linux ARM64 and macOS ARM64; macOS rejects before user steps. |
+| AC-2 / 74-S1 | `services_host_dynamic_port_connects_and_cleans_up`: curl uses inspected expression port and receives nginx HTML; container/network inspect returns 404. `services_container_dns_connects_on_shared_network`: Alpine wget reaches `web`, network matches job container, both containers/network gone. | Passed on real Linux ARM64 Docker 29.5.2. |
+| AC-3 / 74-S2 | `services_unhealthy_prevents_steps_and_retains_logs`, `services_delayed_health_and_no_healthcheck_permit_steps`: false fails without steps and retains nginx logs; delayed success and disabled check permit steps. `docker::service_health::tests::never_healthy_service_respects_budget` uses a real starting container and a short explicit helper budget. | Passed; production budget is 300s, helper test budget 150ms. No claim of exact upstream timing parity. |
+| AC-4 / 74-S3 | `services_multiple_evaluated_env_volumes_and_unrelated_resources_survive`: real health command asserts evaluated env, bind-file bytes and hostname for two services; both respond. `services_fixed_port_conflict_is_actionable`: real listener forces Docker start error. `services_private_registry_auth_and_masked_credentials`: correct auth pulls/runs, wrong auth fails before steps; registered credential output is `***`. | Passed using actual registry:2 auth and daemon pulls, not mocked HTTP. |
+| AC-5 / 74-S4 | `services_second_start_failure_cleans_first`, `services_cancellation_during_health_and_job_cleans_resources`: observed service/step triggers cause cancellation, conclusion Cancelled and inspect 404; failed second image removes first. Multiple-service test preserves an unrelated container, its network and the bind file. | Passed on Linux ARM64; cancellation is event-triggered, not timing-only. |
+| AC-6 / gate | `./tools/check.sh all`; health option parser/typed-request tests live in docker/tests. | Passed on macOS ARM64 (995 tests) and Linux ARM64 (993 tests); ignored Docker/live cases are not counted as passes. |
+
+On 2026-09-25 the Linux real-Docker lane passed 11 production replay tests,
+four health-option tests, and the never-healthy timeout test (16 passed, zero ignored in this explicit lane). Both full gates exited 0. The real-Docker command used `TOOLU_SERVICE_TEST_IMAGE=toolu-72-gate-tools:local` (Rust 1.94.1); the Linux gate ran the same `./tools/check.sh all` in that image. Base revision: `40840a16bb6bf889bea0c3269a37fb7009b698f4`. The dispatch-only `.github/workflows/service-containers-live.yml` defines identical
+pinned-image host/DNS probes for dedicated toolu and official labels. Dispatch
+only after both Linux lanes are provisioned; compare exact `SERVICE_74_*_OK`
+markers and inspect the printed resource IDs after completion. It has not run.
+The captured service acquisition, paired workflow comparison against official runner
+`cab9d1c3901e45c7705889c4f88284fdd93f4ae5` (2.337.0), GHES and #75 Docker-action
+cross-feature lane remain **unverified**. No suitable paired online runners were
+registered when checked; an offline `toolu-70-final` macOS registration cannot
+satisfy the Linux service lane. These missing live lanes are not passing evidence
+and do not establish complete epic parity.
+
+GHES access is an external acceptance prerequisite: the local GHES URL/token
+variables are absent and the repository secret listing contains no GHES endpoint
+or token. The local gates and real-daemon replay do not close this missing lane.

@@ -12,6 +12,7 @@ use super::context_build::{build_strategy, runner_debug_on};
 use super::step_naming::PostStep;
 use super::step_state::StepState;
 use crate::docker::job_container::JobContainer;
+use crate::docker::services::ServiceContainers;
 use expressions::evaluator::{EvalContext, JobStatus, evaluate};
 use expressions::template::interpolate;
 use expressions::types::ExprValue;
@@ -60,6 +61,7 @@ pub struct ExecutionContext {
   /// Per-job workspace root; `hashFiles()` resolves its patterns against it.
   workspace: Option<std::path::PathBuf>,
   container: Option<Arc<JobContainer>>,
+  services: Option<Box<ServiceContainers>>,
 }
 
 impl ExecutionContext {
@@ -102,6 +104,7 @@ impl ExecutionContext {
       cgroup_path: None,
       workspace: None,
       container: None,
+      services: None,
     }
   }
 
@@ -151,6 +154,16 @@ impl ExecutionContext {
   /// Container shared by shell, Node and composite stages, if this job has one.
   pub fn job_container(&self) -> Option<&Arc<JobContainer>> {
     self.container.as_ref()
+  }
+
+  /// Retain service ownership through all main and post steps.
+  pub(crate) fn set_services(&mut self, services: ServiceContainers) {
+    self.services = Some(Box::new(services));
+  }
+
+  /// Service group for explicit teardown.
+  pub(crate) fn services(&self) -> Option<&ServiceContainers> {
+    self.services.as_deref()
   }
 
   /// Set the per-job cgroup-v2 directory that spawned steps are moved into.

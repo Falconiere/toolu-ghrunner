@@ -101,11 +101,17 @@ fn value_flag(flag: &str) -> bool {
       | "--cap-add"
       | "--cap-drop"
       | "--security-opt"
+      | "--health-cmd"
+      | "--health-interval"
+      | "--health-timeout"
+      | "--health-retries"
+      | "--health-start-period"
+      | "--health-start-interval"
   )
 }
 
 fn switch_flag(flag: &str) -> bool {
-  matches!(flag, "--privileged" | "--read-only")
+  matches!(flag, "--privileged" | "--read-only" | "--no-healthcheck")
 }
 
 fn reserved_flag(flag: &str) -> bool {

@@ -12,6 +12,7 @@ use super::{
   ContainerStart, ContainerStartParams, JobOutcome, build_job_context_async, finish_job,
   prepare_job_workspace, prepared, start_job_container, start_job_services, stop_local_services,
 };
+use crate::docker::service_spec::evaluate_services;
 use crate::execution::container_job::{evaluate_container, finish_container};
 use crate::execution::context::ExecutionContext;
 use crate::execution::job_cancellation::JobCancellation;
@@ -34,21 +35,24 @@ pub(super) async fn run(
   let (msg, mut ctx) = build_job_context_async(msg, config, masker, workspace.clone()).await?;
   ctx.cancellation = Some(JobCancellation::new(cancel.clone(), shutdown));
   let container_spec = evaluate_container(&msg, config, &ctx)?;
+  let service_specs = evaluate_services(msg.job_service_containers.as_ref(), &ctx)?;
   let (workspace, workspace_gc) = prepare_job_workspace(config, &msg.job_id, workspace).await?;
   let (http, local) = start_job_services(config, &msg, &mut ctx).await?;
-  let (local, workspace_gc) = match start_job_container(ContainerStartParams {
-    spec: container_spec.as_ref(),
-    config,
-    workspace: &workspace,
-    ctx: &mut ctx,
-    cancel: &cancel,
-    local,
-    events: &events,
-    job_id: &msg.job_id,
-    workspace_gc,
-  })
-  .await?
-  {
+  let (local, workspace_gc) = match Box::pin(
+    start_job_container(ContainerStartParams {
+      spec: container_spec.as_ref(),
+      services: &service_specs,
+      config,
+      workspace: &workspace,
+      ctx: &mut ctx,
+      cancel: &cancel,
+      local,
+      events: &events,
+      job_id: &msg.job_id,
+      workspace_gc,
+    })
+    .await,
+  )? {
     ContainerStart::Continue(local, workspace_gc) => (local, workspace_gc),
     ContainerStart::Finished(teardown) => return Ok(teardown),
   };
@@ -60,8 +64,8 @@ pub(super) async fn run(
     workspace: &workspace,
     http: &http,
   };
-  let body_result = prepared::execute(inputs, &mut ctx).await;
-  let (conclusion, outputs) = match finish_container(&ctx, body_result).await {
+  let body_result = Box::pin(prepared::execute(inputs, &mut ctx)).await;
+  let (conclusion, outputs) = match finish_container(&ctx, body_result, &events).await {
     Ok(result) => result,
     Err(error) => {
       stop_local_services(local).await;

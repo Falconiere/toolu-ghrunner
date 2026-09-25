@@ -4,12 +4,17 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use shared::{AgentJobRequestMessage, Conclusion, RunnerConfig, RunnerError, ServicesMode};
+use shared::{
+  AgentJobRequestMessage, Conclusion, RunnerConfig, RunnerError, RunnerEvent, ServicesMode,
+};
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use super::context::ExecutionContext;
 use crate::docker::container_spec::ContainerSpec;
 use crate::docker::job_container::JobContainer;
+use crate::docker::service_spec::ServiceSpec;
+use crate::docker::services::ServiceContainers;
 
 /// Evaluate the declaration and reject unsupported hosts before workspace setup.
 pub(super) fn evaluate_container(
@@ -33,19 +38,47 @@ pub(super) fn evaluate_container(
 
 /// Attach one container for main/post steps; return false on clean cancellation.
 pub(super) async fn start_container(
-  spec: Option<&ContainerSpec>,
+  specs: (Option<&ContainerSpec>, &[ServiceSpec]),
   config: &RunnerConfig,
   workspace: &Path,
   ctx: &mut ExecutionContext,
   cancel: &CancellationToken,
+  events: &mpsc::Sender<RunnerEvent>,
 ) -> Result<bool, RunnerError> {
-  if let Some(spec) = spec {
+  if let Some(spec) = specs.0 {
     let Some(container) =
       JobContainer::start(spec, config, workspace, Arc::clone(ctx.masker()), cancel).await?
     else {
       return Ok(false);
     };
     ctx.set_job_container(Arc::new(container));
+  }
+  if !specs.1.is_empty() {
+    let network = ctx
+      .job_container()
+      .map(|container| container.network().to_owned());
+    let result = ServiceContainers::start(
+      specs.1,
+      network.as_deref(),
+      Arc::clone(ctx.masker()),
+      cancel,
+      events,
+    )
+    .await;
+    match result {
+      Ok(Some(services)) => ctx.set_services(services),
+      Ok(None) => {
+        if let Some(container) = ctx.job_container() {
+          container.cleanup().await?;
+        }
+        return Ok(false);
+      },
+      Err(error) => {
+        return finish_container(ctx, Err(error), events)
+          .await
+          .map(|_| false);
+      },
+    }
   }
   Ok(true)
 }
@@ -54,10 +87,19 @@ pub(super) async fn start_container(
 pub(super) async fn finish_container(
   ctx: &ExecutionContext,
   body: Result<(Conclusion, HashMap<String, String>), RunnerError>,
+  events: &mpsc::Sender<RunnerEvent>,
 ) -> Result<(Conclusion, HashMap<String, String>), RunnerError> {
+  let services_cleanup = match ctx.services() {
+    Some(services) => services.cleanup(events).await,
+    None => Ok(()),
+  };
   let cleanup = match ctx.job_container() {
     Some(container) => container.cleanup().await,
     None => Ok(()),
+  };
+  let cleanup = match (services_cleanup, cleanup) {
+    (Ok(()), result) | (result, Ok(())) => result,
+    (Err(service), Err(container)) => Err(RunnerError::Docker(format!("{service}; {container}"))),
   };
   match (body, cleanup) {
     (Ok(result), Ok(())) => Ok(result),

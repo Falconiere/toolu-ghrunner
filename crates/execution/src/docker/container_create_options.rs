@@ -3,6 +3,8 @@
 use bollard::models::{ContainerCreateBody, HostConfig, ResourcesUlimits};
 use shared::RunnerError;
 
+use super::container_health_options::{apply_health_options, is_health_option};
+
 /// Apply validated job-container option argv to a Docker create request.
 ///
 /// The input must have been produced by
@@ -17,9 +19,16 @@ pub(crate) fn apply_container_options(
   options: &[String],
   body: &mut ContainerCreateBody,
 ) -> Result<(), RunnerError> {
+  apply_health_options(options, body)?;
   let mut values = options.iter();
   while let Some(flag) = values.next() {
-    apply_option(flag, &mut values, body)?;
+    if is_health_option(flag) {
+      if flag != "--no-healthcheck" {
+        next_value(flag, &mut values)?;
+      }
+    } else {
+      apply_option(flag, &mut values, body)?;
+    }
   }
   Ok(())
 }
