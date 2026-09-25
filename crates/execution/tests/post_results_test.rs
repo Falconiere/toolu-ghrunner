@@ -1,4 +1,4 @@
-//! Captured-message replay through real Node post stages and the production job path.
+//! Captured GitHub job messages drive real Node actions through the production job path.
 
 use std::error::Error;
 use std::path::Path;
