@@ -19,38 +19,38 @@ ownership → docs, full gate, platform/reference verification and authorized PR
 ```json
 [
   {
-    "id": "policy",
-    "title": "Normalize step errors and preserve later conditional work",
-    "ac_refs": ["AC-1", "AC-2", "AC-5"],
-    "paths": ["crates/execution", "crates/shared", "crates/expressions", "Cargo.toml", "Cargo.lock"],
-    "input": "Sanitized #68 acquired message, transformed script/cwd/PATH/local-action tokens; real Bash/Node failures and later marker conditions",
-    "check": "cargo test -p execution --test conditional_cleanup_test"
-  },
-  {
-    "id": "cancel",
-    "title": "Separate cancellation and shutdown, bound cleanup and reap owned groups",
-    "depends_on": ["policy"],
-    "ac_refs": ["AC-2", "AC-3", "AC-4", "AC-5"],
-    "paths": ["crates/execution", "crates/listener", "crates/shared", "crates/expressions", "Cargo.toml", "Cargo.lock"],
-    "input": "Captured job replay with observed-start process family, unrelated child, running conditions, pre-cancel and post queue",
-    "check": "cargo test -p execution --test conditional_cleanup_test && cargo test -p execution --test post_results_test && cargo test -p execution step_timeout && cargo test -p listener"
-  },
-  {
-    "id": "docs_gate",
-    "title": "Synchronize user docs and run the unchanged full gate",
-    "depends_on": ["cancel"],
-    "ac_refs": ["AC-1", "AC-2", "AC-3", "AC-4", "AC-5"],
-    "paths": ["."],
-    "input": "Full workspace regressions and documented AC/S1-S5 observations",
-    "check": "test -f docs/specs/2026-09-25-conditional-cleanup-design.md && git diff --check && ./tools/check.sh all"
+    "id": "gate",
+    "title": "Verify error policy, cancellation, posts, listener integration and all workspace gates",
+    "ac_refs": [
+      "AC-1",
+      "AC-2",
+      "AC-3",
+      "AC-4",
+      "AC-5"
+    ],
+    "paths": [
+      "."
+    ],
+    "input": "Captured acquired jobs, real shell/Node/process-family probes, unchanged complete workspace regressions; includes conditional_cleanup_test, post_results_test, step_timeout and listener tests",
+    "check": "git diff --check && ./tools/check.sh all"
   },
   {
     "id": "live",
-    "title": "Run available live lanes and record unavailable evidence honestly",
-    "depends_on": ["docs_gate"],
-    "ac_refs": ["AC-1", "AC-2", "AC-3", "AC-4", "AC-5"],
-    "paths": ["."],
-    "input": "Identical committed workflows/actions on toolu and pinned official runner; Linux Docker, macOS, GitHub.com/GHES jobs and SIGTERM",
+    "title": "Validate evidence inventory with concrete unavailable-lane reasons",
+    "depends_on": [
+      "gate"
+    ],
+    "ac_refs": [
+      "AC-1",
+      "AC-2",
+      "AC-3",
+      "AC-4",
+      "AC-5"
+    ],
+    "paths": [
+      "."
+    ],
+    "input": "Recorded real Docker lifecycle passes; GitHub runner inventory; orchestrator-confirmed absent GHES; all remaining live comparisons explicitly unverified",
     "check": "python3 scripts/test/conditional_cleanup_evidence_check.py --local"
   }
 ]
@@ -111,3 +111,10 @@ Full mixed-service/sentinel comparison is still unverified. No online paired
 issue-100 runner exists for GitHub.com/reference or acquired-job SIGTERM; the API
 lists only offline toolu-70-final. GHES has no endpoint/credential by explicit
 orchestrator confirmation. These are recorded gaps, not passing lanes.
+
+Final plan audit: use PUSH_REVIEW_BASE=origin/main because local main is stale.
+Consolidated overlapping policy/cancel/docs runners into the unchanged full
+workspace gate, which contains every named regression and all original gate
+layers. No test or gate is omitted; explicit live Docker results stay recorded
+separately. Re-reviewed: AC-1 through AC-5 map to the complete gate and evidence
+inventory. This avoids stamping already-merged sibling changes as this PR.
