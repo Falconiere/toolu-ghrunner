@@ -33,22 +33,26 @@ struct PostReport<'a> {
 }
 
 /// Keep overflow visible when assigning the post's timeline step number.
-fn post_number(first: u32, index: usize) -> u32 {
-  let index = u32::try_from(index).unwrap_or_else(|_| {
+pub(super) fn post_number(first: u32, index: usize) -> u32 {
+  let index = if let Ok(number) = u32::try_from(index) {
+    number
+  } else {
     tracing::warn!(
       post_index = index,
       "post timeline index overflow; saturating"
     );
     u32::MAX
-  });
-  first.checked_add(index).unwrap_or_else(|| {
+  };
+  if let Some(number) = first.checked_add(index) {
+    number
+  } else {
     tracing::warn!(
       first_post_number = first,
       post_index = index,
       "post timeline number overflow; saturating"
     );
     u32::MAX
-  })
+  }
 }
 
 /// Drain the post-step queue LIFO and run each post that passes its condition.
