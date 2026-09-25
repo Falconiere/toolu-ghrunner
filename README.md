@@ -623,10 +623,6 @@ sibling `tests/` folder, never in the same file as the logic. Every new
 `guardrails.config.json` `src.requireReadme`. See `AGENTS.md` →
 "House Conventions & The Gate".
 
-## License
-
-MIT — see [LICENSE](LICENSE).
-
 ### Step failure and cancellation cleanup
 
 A step execution error (including a missing shell/cwd or action manifest) is
@@ -646,3 +642,8 @@ processes that deliberately detach from that group remain outside this guarantee
 Reaping allows up to ten seconds and each output pipe up to two seconds after
 termination. See [the evidence map](docs/test-coverage.md#issue-100--conditional-cleanup)
 for verified cases and remaining live/reference lanes.
+
+
+## License
+
+MIT — see [LICENSE](LICENSE).

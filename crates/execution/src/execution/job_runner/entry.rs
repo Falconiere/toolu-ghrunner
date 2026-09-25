@@ -24,7 +24,8 @@ pub(super) async fn run(
   masker: Arc<Mutex<SecretMasker>>,
   shutdown: CancellationToken,
 ) -> Result<JobTeardown, RunnerError> {
-  // Shutdown also interrupts setup/hooks, without cancelling the caller's token.
+  // Shutdown interrupts container setup/hooks without cancelling the caller's token.
+  // Local context/filesystem initialization is awaited to retain resource ownership.
   let cancel = cancel.child_token();
   let workspace = config.workspace_root.join(&msg.job_id);
   let (msg, mut ctx) = build_job_context_async(msg, config, masker, workspace.clone()).await?;
