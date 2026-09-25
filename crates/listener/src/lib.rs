@@ -1,6 +1,11 @@
 //! GitHub Actions listener — full JIT runner protocol lifecycle.
 
 #[cfg(test)]
+#[path = "tests/broker_control.rs"]
+mod broker_control;
+mod broker_message;
+mod broker_refresh;
+#[cfg(test)]
 #[path = "tests/early_ack.rs"]
 mod early_ack;
 mod execution_loop;

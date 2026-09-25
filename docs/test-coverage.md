@@ -266,3 +266,21 @@ in `_dyld_start` before action code ran; that trial was cancelled, and the
 workflow retained the fully passing `checkout@v4` revision. Linux host, GHES, container, and full absent-shell
 comparisons remain **unverified** until their respective runners or dependency
 issues are available.
+## Broker control messages (#77)
+
+The checked-in V2 broker job and migration envelopes are synthetic,
+capture-shaped fixtures. Tests change only their wire type (and, for cursor
+ordering, message ID) to exercise the production parser and listener
+classifier. They do not claim an unknown control was captured from GitHub.
+
+| Scenario | Checked behavior | Evidence limit |
+| --- | --- | --- |
+| 77-S1 | `message_types`, `broker_poll_parser`, and `broker_control` preserve a future type's original envelope and choose the unknown route without decrypting an opaque body. | An actual unknown broker response, subsequent live poll cursor, and following job acquisition remain unverified. |
+| 77-S2 | `broker_control` checks repeated/older IDs against the listener cursor rule. Existing `early_ack` coverage retains job-only acknowledgement. | Broker redelivery and acknowledgement failure against GitHub remain unverified. |
+| 77-S3 | Production refresh signs a JIT assertion, bounds transient exchange attempts, and publishes only a nonempty successful token. `cargo check -p listener --lib --tests` verifies code integration. | No real `ForceTokenRefresh` message or OAuth fault sequence is available; live rotation, retry and cancellation remain unverified. |
+| 77-S4 | Capture-derived type variants distinguish `RunnerRefresh`, `AgentRefresh`, `RunnerRefreshConfig`, `HostedRunnerShutdown`, and future names. | Live control-message injection and the pinned reference-runner comparison remain unverified. |
+
+The full gate is `./tools/check.sh all`. On this macOS host, test binaries
+have stalled in `_dyld_start` before Rust test code runs; GitHub Linux `ci`
+and `ci-macos` are the authorized gate evidence for this branch. Actual
+GitHub.com and GHES control-message behavior remains unverified.

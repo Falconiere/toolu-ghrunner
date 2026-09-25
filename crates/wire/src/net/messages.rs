@@ -48,7 +48,17 @@ pub fn build_poll_url(params: &PollParams<'_>) -> String {
   )
 }
 
-/// Long-poll the broker for a job assignment.
+/// Parse one HTTP 200 broker envelope, retaining an unrecognized message type.
+///
+/// # Errors
+///
+/// Returns `RunnerError::Protocol` when the envelope itself is malformed.
+pub fn parse_broker_message(body: &[u8]) -> Result<protocol::BrokerMessage, RunnerError> {
+  serde_json::from_slice(body)
+    .map_err(|e| RunnerError::Protocol(format!("message parse failed: {e}")))
+}
+
+/// Long-poll the broker for a job or control message.
 ///
 /// Returns:
 /// - `Ok(None)` on HTTP 202 (no work, caller should re-poll).
@@ -74,11 +84,13 @@ pub async fn poll_message(
   let status = response.status().as_u16();
   match status {
     202 => Ok(None),
-    200 => response
-      .json::<protocol::BrokerMessage>()
-      .await
-      .map(Some)
-      .map_err(|e| RunnerError::Protocol(format!("message parse failed: {e}"))),
+    200 => {
+      let body = response
+        .bytes()
+        .await
+        .map_err(|e| RunnerError::Protocol(format!("message read failed: {e}")))?;
+      parse_broker_message(&body).map(Some)
+    },
     other => {
       let body = response.text().await.unwrap_or_default();
       tracing::debug!(status = other, body_len = body.len(), "message poll failed");

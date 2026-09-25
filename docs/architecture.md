@@ -207,8 +207,9 @@ through this module.
   delete is logged but treated as success (broker may have already
   expired the session).
 - `messages::poll_message` / `messages::acknowledge_message` — long
-  poll on `GET /message?sessionId=…` (202 = no work, 200 = job),
-  `DELETE /message/{id}` to ack.
+  poll on `GET /message?sessionId=…` (202 = no work, 200 = an envelope).
+  `lastMessageId` advances past control and unknown envelopes; acquired jobs
+  use the broker's job-only `POST /message/{id}/acknowledge` request.
 - `run_service::acquire_job` / `renew_job` / `complete_job` —
   `POST /acquirejob`, `POST /renewjob`, `POST /completejob`. Reads
   `x-plan-id` and `x-actions-results-token` headers.
@@ -237,6 +238,14 @@ The entry point is `handler::GitHubListener::run`. It wires:
   continue.
 - HTTP 200 with `RunnerJobRequest` → acquire the job, run it,
   acknowledge, complete.
+- HTTP 200 with an unknown type → WARN without the raw type/body, advance
+  `lastMessageId`, and continue polling. Repeated or older IDs back off.
+- HTTP 200 with `ForceTokenRefresh` → exchange the JIT assertion for a new
+  OAuth token, then use that token on later broker operations. Transient
+  exchange errors retry within a bounded budget; terminal errors return.
+- HTTP 200 with `RunnerRefresh`, `AgentRefresh`, or `RunnerRefreshConfig` →
+  WARN and advance the cursor; local update handling is deferred to #78.
+- HTTP 200 with `HostedRunnerShutdown` → cancel the listener lifecycle.
 - Network error → exponential backoff (1s → 60s cap), continue.
 
 A successful job acquires via `acquire_job`, parses the body into
@@ -650,7 +659,7 @@ SIGINT/SIGTERM        toolu-runner run             GH broker         Run Service
  │                          │ │ ├─────────────────────────── Azure blob  │
  │                          │ │<┘                          │                  │
  │                          │ │                          │                  │
- │                          │ │ DELETE /message/{id}     │                  │
+ │                          │ │ POST /message/{id}/acknowledge                  │
  │                          │ ├───────────────────────>│                  │
  │                          │ │ POST /completejob        │                  │
  │                          │ ├───────────────────────────────────────────>│

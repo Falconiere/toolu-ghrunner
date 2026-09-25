@@ -15,6 +15,14 @@ pub enum MessageRoute {
   /// `JobCancellation` — cancel the in-flight token (no broker ack: the
   /// poll's `lastMessageId` cursor prevents redelivery).
   Cancel,
+  /// `ForceTokenRefresh` — re-exchange the session OAuth token.
+  RefreshToken,
+  /// A known update/configuration message without a supported local updater.
+  UnsupportedControl,
+  /// `HostedRunnerShutdown` — end this listener lifecycle.
+  Shutdown,
+  /// An unrecognized future type — log and advance the broker cursor.
+  SkipUnknown,
 }
 
 /// Map a broker message type to its routing decision.
@@ -23,5 +31,11 @@ pub fn route(message_type: &MessageType) -> MessageRoute {
     MessageType::RunnerJobRequest => MessageRoute::AcquireJob,
     MessageType::BrokerMigration => MessageRoute::Migrate,
     MessageType::JobCancellation => MessageRoute::Cancel,
+    MessageType::ForceTokenRefresh => MessageRoute::RefreshToken,
+    MessageType::RunnerRefresh | MessageType::AgentRefresh | MessageType::RunnerRefreshConfig => {
+      MessageRoute::UnsupportedControl
+    },
+    MessageType::HostedRunnerShutdown => MessageRoute::Shutdown,
+    MessageType::Unknown(_) => MessageRoute::SkipUnknown,
   }
 }
