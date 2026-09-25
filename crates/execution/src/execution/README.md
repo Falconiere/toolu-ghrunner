@@ -38,6 +38,7 @@ not part of it. Workflow YAML parsing/matrix/orchestration lives in the
 | `job_hooks.rs` | `run_job_hook` | Runs the self-hosted `ACTIONS_RUNNER_HOOK_JOB_STARTED`/`_COMPLETED` scripts around a job; started is a hard gate, completed is best-effort. |
 | `container_job.rs` | Job-container lifecycle | Validates the host and wraps main/post execution in container setup/cleanup. |
 | `job_context.rs` | Job context construction | Extracts message variables/context and materializes the event payload. |
+| `job_environment.rs` | `apply_job_environment` | Evaluates acquired workflow/job env mappings in order, before container setup, using one snapshot per layer. |
 | `job_runner.rs` | `run_job` | The job entry point: prepares dirs, starts local services per `ServicesMode`, seeds job env, wraps the prepared job body in optional container lifecycle, and returns a `JobTeardown`; `job_runner/` contains the prepared body. |
 | `job_spec.rs` | `JobSpec` | Job-level `outputs:` expression map plus merged `defaults.run` (shell/working-directory), and `evaluate_job_outputs` to resolve them post-run. |
 | `job_teardown.rs` | `JobTeardown` | Deferred post-completion work returned by `run_job`: cache staging sweep + GC pass, and joining the workspace-sweep task, run only after the event sender is dropped. |

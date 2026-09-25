@@ -211,6 +211,14 @@ container declaration supplying the fallback when no job or step `CI` is present
 Docker actions are still unsupported; see [test coverage](docs/test-coverage.md)
 for measured platforms and live parity status.
 
+Workflow and job `env:` mappings from the acquired message are evaluated in
+order. A job layer can read the previous layer through `env`; step `env` wins
+for that step in both expressions and child processes. `GITHUB_ENV` updates
+become visible to later steps and remain separate from temporary step overrides.
+Malformed environment tokens fail setup before steps start. See
+[test coverage](docs/test-coverage.md#workflow-and-job-environment-issue-69) for
+measured replay coverage and pending live parity lanes.
+
 Job `outputs:` arrive in the acquired job message and resolve after main and
 post steps finish. Empty values are omitted. Values matching a registered
 secret mask are omitted with a warning; safe values reach downstream jobs as

@@ -15,7 +15,7 @@ use super::job_spec::JobSpec;
 use super::post_drain::{drain_post_steps, post_number};
 use super::shadow::ShadowObserver;
 use super::shadow::record::StepKey;
-use super::step_env::env_token_to_string;
+use super::step_env::{env_token_to_string, resolve_step_env};
 use super::step_naming::derive_step_name;
 use super::step_timeout::StepBounds;
 use expressions::evaluator::EvalContext;
@@ -400,12 +400,22 @@ struct StepRender {
   working_dir: PathBuf,
 }
 
-/// Build ONE `EvalContext` snapshot for the step and resolve the script
-/// body, shell, env, and working-dir against it — matching GitHub semantics
-/// (every `${{ }}` in a step evaluates against the same step-start state)
-/// and replacing a context rebuild per value with a single rebuild. `ctx`
-/// holds no `&mut` borrow between these calls, so reuse here is safe.
+/// Resolve step env against the job snapshot, then render script fields with
+/// that temporary overlay. Always restore it, including on rendering errors.
 async fn render_script_step(
+  step: &ActionStep,
+  ctx: &mut ExecutionContext,
+  job: &JobCtx<'_>,
+) -> Result<StepRender, RunnerError> {
+  let step_env = resolve_step_env(step, ctx, &ctx.eval_context())?;
+  ctx.push_step_env(step_env);
+  let result = render_scoped_script_step(step, ctx, job).await;
+  ctx.pop_step_env();
+  result
+}
+
+/// Render body, shell, cwd and process environment from the resolved step scope.
+async fn render_scoped_script_step(
   step: &ActionStep,
   ctx: &ExecutionContext,
   job: &JobCtx<'_>,
@@ -427,7 +437,7 @@ async fn render_script_step(
     .transpose()?
     .filter(|value| !value.is_empty())
     .or_else(|| job.job.defaults.shell.clone());
-  let (env, file_cmds) = build_step_env_and_file_commands(step, ctx, &eval_ctx, job).await?;
+  let (env, file_cmds) = build_step_env_and_file_commands(ctx, job).await?;
   let working_dir = resolve_working_dir(step, ctx, &eval_ctx, job.workspace, &job.job.defaults)?;
   Ok(StepRender {
     script: interpolated,

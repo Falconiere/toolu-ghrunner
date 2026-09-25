@@ -1,0 +1,60 @@
+{
+  "reference_source": "cab9d1c3901e45c7705889c4f88284fdd93f4ae5",
+  "reference_binary_revision": null,
+  "source_capture": {
+    "path": "crates/execution/tests/incoming_contexts_matrix_0.json",
+    "sha256": "3e1728e44d095f07a07b1d54bfa7bbc2ab75b4866cb1a57e032106061c83e1b5",
+    "run_id": 36038637634,
+    "revision": "e607a7aae26e113aa3d8ecf1c26c62e0d74192eb"
+  },
+  "layers_are_transformed_probe_data": true,
+  "transformations": [
+    "Preserve acquisition envelope and incoming context wire types; replace step list with local shell/action probes.",
+    "Add explicit workflow/job env mappings and a vars.PROBE value for boundary replay.",
+    "Use installed real Node in runtime cache to isolate env behavior from downloading."
+  ],
+  "files": {
+    ".github/actions/env-69-composite/action.yml": "b043e90a6b6e3ef7b2035e29966fec5bc25201dd49af1f82bd18f9e96e3ad07c",
+    ".github/actions/env-69-node/action.yml": "782d53f181428520e4d672a7839283643758b78e1596536190c40cf691c8a607",
+    ".github/actions/env-69-node/main.js": "42de9947a29fb6911f1cef74769b9f60bdf153fb8ca1847cab7db4a581f54dbd",
+    ".github/actions/env-69-node/post.js": "ee59fdb049d41a2c1b6b193893c6996efb9c4ed9a77d622e4cd07c23a49ef3c8",
+    ".github/workflows/job-environment-69.yml": "487744e78dc5c5f227617978763e6e301a1c34e45fb94140db19fa71f0c3f72a",
+    "crates/execution/tests/job_environment_layers.json": "2d606473f9d194505967abf12f3ced9db487806a5216ec92ea9f734f54787d1c"
+  },
+  "tests": {
+    "crates/execution/src/execution/tests/job_environment.rs": [
+      "job_environment_layers_and_step_expressions_reach_real_shell",
+      "job_environment_file_updates_and_successive_jobs_are_isolated",
+      "job_environment_invalid_layers_fail_before_any_step",
+      "job_environment_absent_empty_and_null_layers_are_noops",
+      "job_environment_scalar_coercion_and_expression_keys",
+      "job_environment_malformed_token_details_do_not_leak_secrets",
+      "job_environment_upstream_omitted_default_payloads_keep_their_values"
+    ],
+    "crates/execution/src/execution/tests/job_environment_actions.rs": [
+      "job_environment_node_and_nested_composite_actions_keep_scopes_and_file_updates"
+    ]
+  },
+  "required_steps": [
+    "Assert workflow and job values",
+    "Write job environment",
+    "Assert temporary step override",
+    "Assert file command survives step override",
+    "Node environment",
+    "First nested environment",
+    "Second nested environment",
+    "Assert restored outer environment"
+  ],
+  "runs": {
+    "hosted": null,
+    "toolu": null,
+    "pinned_reference": null
+  },
+  "unverified": [
+    "Fresh acquired message with nonempty environmentVariables",
+    "Pinned official runner comparison",
+    "Live toolu GitHub.com jobs and logs",
+    "GHES live execution",
+    "macOS local gate (host dyld startup stall; CI pending)"
+  ]
+}

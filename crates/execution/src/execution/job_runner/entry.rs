@@ -17,6 +17,7 @@ use crate::docker::service_spec::evaluate_services;
 use crate::execution::container_job::{evaluate_container, finish_container};
 use crate::execution::context::ExecutionContext;
 use crate::execution::job_cancellation::JobCancellation;
+use crate::execution::job_environment::apply_job_environment;
 use crate::execution::job_teardown::JobTeardown;
 
 /// Initialize, execute, and tear down one acquired job.
@@ -35,6 +36,7 @@ pub(super) async fn run(
   let workspace = config.workspace_root.join(&msg.job_id);
   let (msg, mut ctx) = build_job_context_async(msg, config, masker, workspace.clone()).await?;
   ctx.cancellation = Some(JobCancellation::new(cancel.clone(), shutdown));
+  apply_job_environment(&msg.environment_variables, &mut ctx)?;
   let container_spec = evaluate_container(&msg, config, &ctx)?;
   let service_specs = evaluate_services(msg.job_service_containers.as_ref(), &ctx)?;
   let (workspace, workspace_gc) = prepare_job_workspace(config, &msg.job_id, workspace).await?;

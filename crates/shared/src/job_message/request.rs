@@ -62,9 +62,9 @@ pub struct AgentJobRequestMessage {
   /// Workspace layout options for this job, if specified.
   #[serde(default)]
   pub workspace: Option<WorkspaceOptions>,
-  /// Wire field `environmentVariables`; raw (unparsed) job environment entries.
+  /// Ordered workflow and job `env:` template mappings, evaluated during setup.
   #[serde(default, rename = "environmentVariables")]
-  pub environment_variables: Vec<serde_json::Value>,
+  pub environment_variables: Vec<TemplateToken>,
   /// Ordered workflow and job `defaults:` template mappings.
   #[serde(default)]
   pub defaults: Vec<TemplateToken>,

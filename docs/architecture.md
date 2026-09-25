@@ -445,6 +445,21 @@ user — see the spec's threat-model boundary).
 
 ### Step env injection
 
+Before container evaluation, `job_environment::apply_job_environment` evaluates
+acquired `environmentVariables` template mappings in wire order. Context import
+and secret registration have already completed. Each mapping uses one snapshot
+of the previous layer; a failed mapping is not partially merged. Wire literals
+remain literal, and scalar expression results are evaluated only once. Errors
+identify the layer without copying expression source or values into diagnostics.
+
+Persistent job env and temporary action/script env overlays are distinct.
+Scripts resolve their env before rendering body, shell and working directory,
+then discard the rendering overlay on success or error. File commands update the
+persistent job map after process completion. The next step inherits those updates,
+and its own overlay still wins without changing the persistent map. Each job
+constructs a fresh context, so no job env is retained by the reusable Runner.
+
+
 `service_endpoints::forward_env` (via `job_runner::setup_job_env`)
 seeds every step:
 

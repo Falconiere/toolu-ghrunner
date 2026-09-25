@@ -9,9 +9,8 @@ use super::super::command_dispatch::stream_dispatch_stdout;
 use super::super::context::ExecutionContext;
 use super::super::file_commands::{FileCommandManager, create_file_command_dir};
 use super::super::handlers::script::{ScriptHandler, ScriptParams};
-use super::super::step_env::{apply_file_commands_and_merge_outputs, resolve_step_env};
+use super::super::step_env::apply_file_commands_and_merge_outputs;
 use super::JobCtx;
-use expressions::evaluator::EvalContext;
 
 /// Run the shell child and stream-dispatch its stdout concurrently.
 ///
@@ -71,13 +70,10 @@ pub(super) async fn merge_step_outputs(
 /// filesystem work is batched onto Tokio's blocking pool by the shared
 /// file-command helpers.
 pub(super) async fn build_step_env_and_file_commands(
-  step: &ActionStep,
   ctx: &ExecutionContext,
-  eval_ctx: &EvalContext,
   job: &JobCtx<'_>,
 ) -> Result<(HashMap<String, String>, FileCommandManager), RunnerError> {
-  let step_env = resolve_step_env(step, ctx, eval_ctx)?;
-  let mut env = ctx.build_step_env(&step_env);
+  let mut env = ctx.build_step_env(&HashMap::new());
   let tmp_dir = job.config.data_dir.join("tmp");
   create_file_command_dir(&tmp_dir).await?;
   let (file_cmds, file_cmd_env) = FileCommandManager::create(&tmp_dir).await?;

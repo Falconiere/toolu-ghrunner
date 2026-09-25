@@ -1,0 +1,25 @@
+name: Environment 69 Node probe
+description: Records exact workflow and action environment values across Node main and post.
+inputs:
+  marker:
+    description: Unique call marker written with every stage record.
+    required: true
+  expected-shared:
+    description: Expected action-scoped SHARED value for main and post.
+    required: true
+  expected-empty:
+    description: Expected empty-string environment value.
+    required: true
+  expected-multiline:
+    description: Expected multiline environment value.
+    required: true
+  expected-literal:
+    description: Expected literal expression-looking environment value.
+    required: true
+  expected-secret:
+    description: Expected secret-bearing env value, used only for equality assertions.
+    required: true
+runs:
+  using: node20
+  main: main.js
+  post: post.js
