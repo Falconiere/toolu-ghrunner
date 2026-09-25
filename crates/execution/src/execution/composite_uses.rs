@@ -85,8 +85,8 @@ pub async fn run_nested_uses_step(
 
   // Recursive call: a nested composite re-enters `execute_action`, which
   // enters the depth tracker again, so the chain is bounded by `MAX_COMPOSITE_DEPTH`.
-  // The nested step's own `timeout-minutes` bounds its node children; the job
-  // cancel token is shared so a top-level cancel kills the nested action too.
+  // The enclosing step's deadline bounds nested subprocesses; the job cancel
+  // token is shared so a top-level cancel kills the nested action too.
   let bounds = StepBounds::nested(
     params.deadline,
     synthetic.timeout_in_minutes,
