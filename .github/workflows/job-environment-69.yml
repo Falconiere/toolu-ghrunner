@@ -1,0 +1,126 @@
+name: job-environment-69
+
+on:
+  push:
+    branches: [feat/69-apply-workflow-and-job-level]
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: 'Runner JSON string or labels array; empty uses hosted Linux/macOS (not pinned-reference evidence)'
+        type: string
+        default: ''
+      who:
+        type: string
+        default: world
+
+permissions:
+  contents: read
+
+env:
+  SHARED: workflow
+  WORKFLOW_ONLY: workflow-only
+  EMPTY: ''
+  MULTILINE: |
+    first
+    second
+  LITERAL: plain-literal
+
+jobs:
+  producer:
+    runs-on: ubuntu-24.04
+    outputs:
+      artifact: ${{ steps.value.outputs.artifact }}
+    steps:
+      - id: value
+        run: echo 'artifact=artifact-68' >> "$GITHUB_OUTPUT"
+  environment:
+    needs: producer
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, macos-14]
+        tag: [alpha]
+    runs-on: ${{ fromJSON(inputs.runner || toJSON(matrix.runner)) }}
+    env:
+      SHARED: job
+      GITHUB_VALUE: ${{ github.repository }}
+      SECRET_VALUE: ${{ secrets.GITHUB_TOKEN }}
+      VARS_VALUE: ${{ vars.ENV_69_PROBE || 'vars-value' }}
+      INPUT_VALUE: ${{ inputs.who || 'world' }}
+      MATRIX_VALUE: ${{ matrix.tag }}
+      NEEDS_VALUE: ${{ needs.producer.outputs.artifact }}
+      STRATEGY_VALUE: ${{ strategy.job-total }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assert workflow and job values
+        shell: bash
+        run: |
+          test "$SHARED" = job
+          test '${{ env.SHARED }}' = job
+          test "$WORKFLOW_ONLY" = workflow-only
+          test "$EMPTY" = ''
+          test "$MULTILINE" = $'first\nsecond\n'
+          test "$GITHUB_VALUE" = Falconiere/toolu-ghrunner
+          test "$INPUT_VALUE" = world
+          test "$MATRIX_VALUE" = alpha
+          test "$NEEDS_VALUE" = artifact-68
+          test "$STRATEGY_VALUE" = 2
+          test -n "$SECRET_VALUE"
+          printf 'env69-secret:%s\n' "$SECRET_VALUE"
+      - name: Write job environment
+        shell: bash
+        run: |
+          printf 'SHARED=file\n' >> "$GITHUB_ENV"
+          test "$SHARED" = job
+      - name: Assert temporary step override
+        env:
+          SHARED: step
+        shell: bash
+        run: |
+          test "$SHARED" = step
+          test '${{ env.SHARED }}' = step
+      - name: Assert file command survives step override
+        shell: bash
+        run: |
+          test "$SHARED" = file
+          test '${{ env.SHARED }}' = file
+      - name: Node environment
+        uses: ./.github/actions/env-69-node
+        env:
+          SHARED: action-direct
+        with:
+          marker: direct
+          expected-shared: action-direct
+          expected-empty: ''
+          expected-secret: ${{ env.SECRET_VALUE }}
+          expected-multiline: ${{ env.MULTILINE }}
+          expected-literal: ${{ env.LITERAL }}
+      - name: First nested environment
+        uses: ./.github/actions/env-69-composite
+        env:
+          SHARED: action-first
+        with:
+          marker: first
+          expected-shared: action-first
+          expected-empty: ''
+          expected-secret: ${{ env.SECRET_VALUE }}
+          expected-multiline: ${{ env.MULTILINE }}
+          expected-literal: ${{ env.LITERAL }}
+      - name: Second nested environment
+        uses: ./.github/actions/env-69-composite
+        env:
+          SHARED: action-second
+        with:
+          marker: second
+          expected-shared: action-second
+          expected-empty: ''
+          expected-secret: ${{ env.SECRET_VALUE }}
+          expected-multiline: ${{ env.MULTILINE }}
+          expected-literal: ${{ env.LITERAL }}
+      - name: Assert restored outer environment
+        shell: bash
+        run: |
+          test "$SHARED" = file
+          test '${{ env.SHARED }}' = file
+          test "$ACTION_FILE" = from-second-nested
+          test "$COMPOSITE_FILE" = from-second

@@ -1,0 +1,182 @@
+[
+  {
+    "type": 2,
+    "map": [
+      {
+        "Key": {
+          "type": 0,
+          "lit": "SHARED"
+        },
+        "Value": {
+          "type": 0,
+          "lit": "workflow"
+        }
+      },
+      {
+        "Key": {
+          "type": 0,
+          "lit": "WORKFLOW_ONLY"
+        },
+        "Value": {
+          "type": 0,
+          "lit": "workflow-only"
+        }
+      },
+      {
+        "Key": {
+          "type": 0,
+          "lit": "EMPTY"
+        },
+        "Value": {
+          "type": 0,
+          "lit": ""
+        }
+      },
+      {
+        "Key": {
+          "type": 0,
+          "lit": "MULTILINE"
+        },
+        "Value": {
+          "type": 0,
+          "lit": "first\nsecond\n"
+        }
+      },
+      {
+        "Key": {
+          "type": 0,
+          "lit": "LITERAL"
+        },
+        "Value": {
+          "type": 0,
+          "lit": "${{ matrix.tag }}"
+        }
+      }
+    ]
+  },
+  {
+    "type": 2,
+    "map": [
+      {
+        "Key": {
+          "type": 0,
+          "lit": "SHARED"
+        },
+        "Value": {
+          "type": 0,
+          "lit": "job"
+        }
+      },
+      {
+        "Key": {
+          "type": 0,
+          "lit": "PRIOR"
+        },
+        "Value": {
+          "type": 3,
+          "expr": "env.SHARED"
+        }
+      },
+      {
+        "Key": {
+          "type": 0,
+          "lit": "SAME_LAYER"
+        },
+        "Value": {
+          "type": 3,
+          "expr": "env.SHARED"
+        }
+      },
+      {
+        "Key": {
+          "type": 0,
+          "lit": "GITHUB_VALUE"
+        },
+        "Value": {
+          "type": 3,
+          "expr": "github.repository"
+        }
+      },
+      {
+        "Key": {
+          "type": 0,
+          "lit": "SECRET_VALUE"
+        },
+        "Value": {
+          "type": 3,
+          "expr": "secrets.github_token"
+        }
+      },
+      {
+        "Key": {
+          "type": 0,
+          "lit": "VARS_VALUE"
+        },
+        "Value": {
+          "type": 3,
+          "expr": "vars.PROBE"
+        }
+      },
+      {
+        "Key": {
+          "type": 0,
+          "lit": "INPUT_VALUE"
+        },
+        "Value": {
+          "type": 3,
+          "expr": "inputs.who"
+        }
+      },
+      {
+        "Key": {
+          "type": 0,
+          "lit": "MATRIX_VALUE"
+        },
+        "Value": {
+          "type": 3,
+          "expr": "matrix.tag"
+        }
+      },
+      {
+        "Key": {
+          "type": 0,
+          "lit": "NEEDS_VALUE"
+        },
+        "Value": {
+          "type": 3,
+          "expr": "needs.producer.outputs.artifact"
+        }
+      },
+      {
+        "Key": {
+          "type": 0,
+          "lit": "STRATEGY_VALUE"
+        },
+        "Value": {
+          "type": 3,
+          "expr": "strategy.job-total"
+        }
+      },
+      {
+        "Key": {
+          "type": 0,
+          "lit": "CI"
+        },
+        "Value": {
+          "type": 0,
+          "lit": ""
+        }
+      },
+      {
+        "Key": {
+          "type": 0,
+          "lit": "FROM_MISSING"
+        },
+        "Value": {
+          "type": 3,
+          "expr": "env.MISSING"
+        }
+      }
+    ]
+  }
+]

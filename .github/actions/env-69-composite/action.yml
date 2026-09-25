@@ -1,0 +1,43 @@
+name: Environment 69 composite probe
+description: Verifies a call-scoped action environment reaches a nested Node action and file commands return to the job.
+inputs:
+  marker:
+    description: Unique marker forwarded to the nested Node action.
+    required: true
+  expected-shared:
+    description: Expected call-scoped SHARED value.
+    required: true
+  expected-empty:
+    description: Expected empty-string environment value.
+    required: true
+  expected-multiline:
+    description: Expected multiline environment value.
+    required: true
+  expected-literal:
+    description: Expected literal expression-looking environment value.
+    required: true
+  expected-secret:
+    description: Expected secret-bearing env value forwarded to the nested probe.
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        test "$SHARED" = '${{ inputs.expected-shared }}'
+        test "$EMPTY" = '${{ inputs.expected-empty }}'
+        test "$MULTILINE" = '${{ inputs.expected-multiline }}'
+        test "$LITERAL" = '${{ inputs.expected-literal }}'
+        printf 'composite:%s\n' '${{ inputs.marker }}' >> composite-env-69.log
+    - uses: ./.github/actions/env-69-node
+      with:
+        marker: '${{ inputs.marker }}-nested'
+        expected-shared: '${{ inputs.expected-shared }}'
+        expected-empty: '${{ inputs.expected-empty }}'
+        expected-multiline: '${{ inputs.expected-multiline }}'
+        expected-literal: '${{ inputs.expected-literal }}'
+        expected-secret: '${{ inputs.expected-secret }}'
+    - shell: bash
+      run: |
+        test "$ACTION_FILE" = 'from-${{ inputs.marker }}-nested'
+        printf 'COMPOSITE_FILE=from-${{ inputs.marker }}\n' >> "$GITHUB_ENV"

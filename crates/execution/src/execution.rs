@@ -38,6 +38,7 @@ pub mod file_commands;
 pub mod handlers;
 mod job_cancellation;
 mod job_context;
+mod job_environment;
 /// Job-level `ACTIONS_RUNNER_HOOK_JOB_*` hooks (self-hosted job lifecycle scripts).
 pub mod job_hooks;
 /// The job execution entry point (`run_job`) and per-job directory setup.
@@ -71,3 +72,11 @@ pub mod steps_runner;
 pub mod workflow;
 /// Age-based garbage collection of per-job workspace directories.
 pub mod workspace_gc;
+
+#[cfg(test)]
+#[path = "execution/tests/job_environment.rs"]
+mod job_environment_tests;
+
+#[cfg(test)]
+#[path = "execution/tests/job_environment_actions.rs"]
+mod job_environment_actions_tests;

@@ -705,3 +705,48 @@ The orchestrator confirmed on 2026-09-25 that no GHES endpoint/token exists for
 this epic run and authorized delivery with GHES, acquired-service and reference
 lanes recorded as unverified. The local gates and real-daemon replay do not close
 those missing lanes or establish full parity.
+
+## Workflow and job environment (issue 69)
+
+The production `Runner::execute_job` replay deserializes the sanitized issue-68
+acquisition from run [36038637634](https://github.com/Falconiere/toolu-ghrunner/actions/runs/36038637634),
+revision `e607a7aae26e113aa3d8ecf1c26c62e0d74192eb`. Its original
+`environmentVariables` is empty: `job_environment_layers.json` and the replacement
+probe steps are **documented transformations**, not a fresh env-bearing server
+capture. The replay keeps incoming context types and differing step UUID/context
+names. Bash, Node main/post, composites, and file commands execute for real;
+there is no mocked action or successful service response.
+
+| AC / scenario | Observable result | Test / command |
+| --- | --- | --- |
+| AC-1 / 69-S1 | Workflow `SHARED=workflow`, job `SHARED=job`, later-layer `PRIOR=workflow`, same-layer reference remains workflow; explicit step process and expression both see `step`. All seven incoming roots resolve exactly. | `job_environment_layers_and_step_expressions_reach_real_shell` in `crates/execution/src/execution/tests/job_environment.rs` |
+| AC-2 / 69-S2 | Real shell gets empty string, trailing-newline multiline, literal expression-looking text and masked secret probe. Node main/post and nested composite scopes preserve exact empty/multiline/literal bytes. | Above test plus `job_environment_node_and_nested_composite_actions_keep_scopes_and_file_updates` in sibling `job_environment_actions.rs`; existing `secret_sink_coverage_test` covers journal/listener/diagnostic masking paths. |
+| AC-3 / 69-S3 | Writer sees job value; next explicit override sees override in process/expression; following step sees file value. | `job_environment_file_updates_and_successive_jobs_are_isolated` |
+| AC-3 / 69-S4 | Direct and two nested Node calls see their own action override in main and LIFO posts; file commands persist to outer job while outer SHARED returns to job. Second job sees no first-job SHARED. | Action replay plus successive-jobs test above |
+| AC-4 | Absent, empty list, null layer, empty mapping succeed. Scalar bool/number/null coerce to true/42/empty; expression keys work; literal/expression-produced `${{ matrix.tag }}` stays literal. Omitted default wire payloads retain empty/false/zero values. Malformed mapping/value/expression fails setup with no step start; diagnostics omit sensitive expression text. | `job_environment_absent_empty_and_null_layers_are_noops`, `job_environment_scalar_coercion_and_expression_keys`, `job_environment_invalid_layers_fail_before_any_step`, `job_environment_malformed_token_details_do_not_leak_secrets`, `job_environment_upstream_omitted_default_payloads_keep_their_values` |
+| AC-5 | Workspace formatting, clippy, suppression ban, guardrails and tests; fixture/action hashes and scenario map are verifiable. | `./tools/check.sh all`; `python3 scripts/test/job_environment_evidence_check.py` |
+
+Focused replay: `cargo test -p execution --lib job_environment` (use the full gate
+or approved Docker route in toolu sessions that prohibit the bare command).
+All eight focused tests passed in Linux ARM64 Docker using Rust 1.94.1 and real Node 20.
+The first three tests were observed failing before the production fix. The host
+macOS gate stalled before Cargo in `/usr/bin/env` `_dyld_start`; it is not recorded
+as a pass. GitHub `ci` and `ci-macos` validate their respective supported platforms.
+
+`.github/workflows/job-environment-69.yml` runs the same committed probes on hosted
+Linux/macOS when this branch is pushed. `workflow_dispatch.inputs.runner` accepts
+a JSON runner label or label array for a paired toolu/pinned-reference host. Hosted
+runs are **not** proof of the epic's pinned official binary. The workflow tests
+service-owned log masking with an actual GitHub token; the token is never written
+to the probe output files. Node local `pre` is deliberately absent because the
+pinned official runner does not register pre stages for local actions.
+
+`job_environment_evidence.json` records fixture hashes and live-run slots.
+`python3 scripts/test/job_environment_evidence_check.py --hosted` verifies a
+recorded hosted run's exact action/workflow revision, runner identities, required
+successful steps and masked secret markers. `--live` fails closed until both
+toolu and pinned-reference evidence are recorded. Fresh env-bearing acquisition,
+pinned comparison, live toolu GitHub.com verification, and GHES remain unverified.
+Linux/macOS host execution is applicable; Windows is outside the epic. Container
+transport is unchanged (#73/#75 own that lane); this change evaluates env before
+container declarations so subsequent setup sees the same ordered values.
