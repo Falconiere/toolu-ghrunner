@@ -63,8 +63,8 @@ pub(crate) fn classify_received_message(ctx: &SessionCtx, mut msg: BrokerMessage
     route(&msg.message_type),
     MessageRoute::AcquireJob | MessageRoute::Migrate | MessageRoute::Cancel
   );
-  if needs_body && let Err(e) = decrypt_body_if_needed(ctx, &mut msg) {
-    tracing::warn!(message_id = msg.message_id, error = %e, "broker message decrypt failed");
+  if needs_body && decrypt_body_if_needed(ctx, &mut msg).is_err() {
+    tracing::warn!(message_id = msg.message_id, "broker message decrypt failed");
     return PollOutcome::Skip {
       message_id: msg.message_id,
     };
@@ -79,14 +79,14 @@ pub(crate) fn classify_received_message(ctx: &SessionCtx, mut msg: BrokerMessage
 pub(crate) fn classify_message(msg: BrokerMessage) -> PollOutcome {
   let message_id = msg.message_id;
   match route(&msg.message_type) {
-    MessageRoute::Migrate => match parse_migration(&msg.body) {
-      Ok(url) => PollOutcome::Migrated { url, message_id },
-      // An unparseable control message must not wedge the cursor: skip it.
-      // A job request is never dropped here — `AcquireJob` is returned intact.
-      Err(e) => {
-        tracing::warn!(message_id, error = %e, "broker migration message unparseable");
+    MessageRoute::Migrate => {
+      if let Ok(url) = parse_migration(&msg.body) {
+        PollOutcome::Migrated { url, message_id }
+      } else {
+        // An unparseable control message must not wedge the cursor.
+        tracing::warn!(message_id, "broker migration message unparseable");
         PollOutcome::Skip { message_id }
-      },
+      }
     },
     MessageRoute::AcquireJob => PollOutcome::Job(msg),
     MessageRoute::RefreshToken => PollOutcome::RefreshToken { message_id },
@@ -106,12 +106,13 @@ pub(crate) fn classify_message(msg: BrokerMessage) -> PollOutcome {
     },
     MessageRoute::Shutdown => PollOutcome::Shutdown { message_id },
     MessageRoute::SkipUnknown => PollOutcome::Unknown { message_id },
-    MessageRoute::Cancel => match parse_cancel(&msg.body) {
-      Ok(job_id) => PollOutcome::Cancel { msg, job_id },
-      Err(e) => {
-        tracing::warn!(message_id, error = %e, "broker cancel message unparseable");
+    MessageRoute::Cancel => {
+      if let Ok(job_id) = parse_cancel(&msg.body) {
+        PollOutcome::Cancel { msg, job_id }
+      } else {
+        tracing::warn!(message_id, "broker cancel message unparseable");
         PollOutcome::Skip { message_id }
-      },
+      }
     },
   }
 }
