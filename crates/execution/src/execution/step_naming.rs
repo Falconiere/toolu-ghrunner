@@ -20,8 +20,6 @@ pub struct PostStep {
   pub report_id: String,
   /// Composite invocation path captured when this post was registered.
   pub scope_path: Vec<String>,
-  /// Human-readable action name (for the `Post <name>` step header).
-  pub action_name: String,
   /// Resolved on-disk action directory (the cached action root).
   pub action_dir: PathBuf,
   /// Parsed action manifest (carries the `post` entrypoint + inputs).
