@@ -35,8 +35,23 @@ class CompositeSemanticsEvidenceTest(unittest.TestCase):
                 [sys.executable, str(Path(checker.__file__)), str(path), '--require-live'],
                 capture_output=True, text=True, check=False,
             )
-        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.returncode, 2)
         self.assertIn('unverified', result.stdout + result.stderr)
+        self.assertNotIn('Traceback', result.stderr)
+
+    def test_extra_live_lane_reports_a_cli_error_without_traceback(self):
+        evidence = json.loads(EVIDENCE.read_text())
+        evidence['runs']['unexpected-lane'] = None
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'evidence.json'
+            path.write_text(json.dumps(evidence))
+            result = subprocess.run(
+                [sys.executable, str(Path(checker.__file__)), str(path)],
+                capture_output=True, text=True, check=False,
+            )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('runs keys', result.stderr)
+        self.assertNotIn('Traceback', result.stderr)
 
     def test_missing_evidence_reports_a_cli_error_without_traceback(self):
         with tempfile.TemporaryDirectory() as temp:
