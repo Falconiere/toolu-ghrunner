@@ -108,13 +108,14 @@ fn captured_job_container_preserves_step_identities_and_action_references() -> T
 }
 
 #[cfg(target_os = "linux")]
-fn write_composite_action(workspace: &std::path::Path) -> std::io::Result<()> {
+async fn write_composite_action(workspace: &std::path::Path) -> std::io::Result<()> {
   let action = workspace.join(".github/actions/container-composite-probe");
-  std::fs::create_dir_all(&action)?;
-  std::fs::write(
+  tokio::fs::create_dir_all(&action).await?;
+  tokio::fs::write(
     action.join("action.yml"),
     include_str!("../../../.github/actions/container-composite-probe/action.yml"),
   )
+  .await
 }
 
 #[cfg(target_os = "linux")]
@@ -134,7 +135,7 @@ async fn captured_job_container_replays_shell_node_composite_and_verify() -> Tes
   };
   let mut job = captured_job()?;
   let workspace = config.workspace_root.join(&job.job_id);
-  write_composite_action(&workspace)?;
+  write_composite_action(&workspace).await?;
   job.steps.remove(5);
   job.steps.remove(0);
 
