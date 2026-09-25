@@ -268,6 +268,8 @@ async fn cancelled_posts_complete_job() -> TestResult {
   let workspace = config.workspace_root.join(&msg.job_id);
   seed_action(&workspace, "post-a", "A", false, false)?;
   seed_action(&workspace, "post-b", "B", false, false)?;
+  let marker = workspace.join("post-markers.txt");
+  std::fs::write(&marker, "")?;
   let a_manifest = workspace.join(".github/actions/post-a/action.yml");
   let a_text = std::fs::read_to_string(&a_manifest)?;
   std::fs::write(
@@ -286,19 +288,16 @@ async fn cancelled_posts_complete_job() -> TestResult {
   let runner = Runner::new(config, Arc::new(Mutex::new(SecretMasker::new())));
   let cancel = CancellationToken::new();
   let mut receiver = runner.execute_job(msg, cancel.clone());
-  let marker = workspace.join("post-markers.txt");
   tokio::time::timeout(Duration::from_secs(5), async {
     loop {
-      if std::fs::read_to_string(&marker)
-        .unwrap_or_default()
-        .contains("B:post-start")
-      {
+      if std::fs::read_to_string(&marker)?.contains("B:post-start") {
         break;
       }
       tokio::time::sleep(Duration::from_millis(10)).await;
     }
+    Ok::<(), std::io::Error>(())
   })
-  .await?;
+  .await??;
   let cancelled_at = std::time::Instant::now();
   cancel.cancel();
   let events = tokio::time::timeout(Duration::from_secs(6), collect_events(&mut receiver)).await?;

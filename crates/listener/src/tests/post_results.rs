@@ -94,6 +94,10 @@ async fn post_results_reach_distinct_completion_records() -> Result<(), Box<dyn 
     Ok(conclusion) => conclusion,
     Err(error) => {
       cancellation.cancel();
+      let _ = tokio::time::timeout(Duration::from_secs(5), async {
+        while receiver.recv().await.is_some() {}
+      })
+      .await;
       return Err(error.into());
     },
   };
