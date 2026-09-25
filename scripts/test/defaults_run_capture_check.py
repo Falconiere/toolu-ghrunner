@@ -25,11 +25,11 @@ def api(path):
 
 
 def literal_mapping(token):
-    assert token['type'] == 2
+    assert token['type'] == 2, f"expected mapping token type 2, got {token['type']}"
     result = {}
     for entry in token['map']:
         key = entry['Key']
-        assert key['type'] == 0
+        assert key['type'] == 0, f"expected literal key type 0, got {key['type']}"
         result[key['lit']] = entry['Value']
     return result
 
@@ -37,14 +37,14 @@ def literal_mapping(token):
 def check_capture(evidence):
     record = evidence['capture']
     path = ROOT / record['fixture']
-    assert digest(path) == record['fixture_sha256']
+    assert digest(path) == record['fixture_sha256'], f'{path}: fixture hash mismatch'
     job = json.loads(path.read_text())
-    assert job['jobId'] == record['job_id']
-    assert len(job['defaults']) == record['defaults_layers'] == 2
-    assert len(job['steps']) == record['steps'] == 8
+    assert job['jobId'] == record['job_id'], 'captured job ID mismatch'
+    assert len(job['defaults']) == record['defaults_layers'] == 2, 'defaults layer count mismatch'
+    assert len(job['steps']) == record['steps'] == 8, 'captured step count mismatch'
     github = {entry['k']: entry['v'] for entry in job['contextData']['github']['d']}
-    assert str(github['run_id']) == str(record['run_id'])
-    assert github['sha'] == record['revision']
+    assert str(github['run_id']) == str(record['run_id']), 'captured run ID mismatch'
+    assert github['sha'] == record['revision'], 'captured revision mismatch'
     layers = [literal_mapping(token)['run'] for token in job['defaults']]
     assert [
         {key: value['lit'] for key, value in literal_mapping(layer).items()}
@@ -52,8 +52,8 @@ def check_capture(evidence):
     ] == [
         {'shell': 'bash', 'working-directory': 'defaults-71-workflow'},
         {'shell': 'sh', 'working-directory': 'defaults-71-job'},
-    ]
-    assert all(step['id'] for step in job['steps'])
+    ], 'captured defaults.run mappings differ'
+    assert all(step['id'] for step in job['steps']), 'captured step ID missing'
     fields = {}
     for name, item in job['variables'].items():
         if item.get('isSecret'):
@@ -63,30 +63,36 @@ def check_capture(evidence):
     for index, endpoint in enumerate(job['resources']['endpoints']):
         for name, value in endpoint.get('authorization', {}).get('parameters', {}).items():
             fields[f'resources/endpoints/{index}/authorization/parameters/{name}'] = value
-    assert len(fields) == record['secret_fields_replaced']
+    assert len(fields) == record['secret_fields_replaced'], (
+        f"expected {record['secret_fields_replaced']} synthetic secret fields, got {len(fields)}"
+    )
     for field, actual in fields.items():
         expected = str(uuid5(NAMESPACE_URL, f'toolu-ghrunner/71/defaults_run_job.json/{field}'))
-        assert actual == expected, field
+        assert actual == expected, f'{field}: expected deterministic UUID placeholder'
     serialized = path.read_text()
-    assert 'ghs_' not in serialized and 'ghp_' not in serialized
+    assert 'ghs_' not in serialized and 'ghp_' not in serialized, 'token-like prefix in fixture'
     for name, expected in evidence['workflow_sha256'].items():
-        assert digest(ROOT / name) == expected, name
-    assert evidence['reference_source'] == PIN
+        assert digest(ROOT / name) == expected, f'{name}: local workflow/action hash mismatch'
+    assert evidence['reference_source'] == PIN, 'pinned reference source mismatch'
     print('Captured defaults, provenance, hashes, and synthetic credentials verified.')
 
 
 def check_run(record, evidence, lane):
     assert record is not None, f'{lane} live run is unverified'
     run = api(f"actions/runs/{record['id']}")
-    assert run['head_sha'] == record['revision']
-    assert run['status'] == 'completed' and run['conclusion'] == 'success', lane
+    assert run['head_sha'] == record['revision'], f'{lane}: run revision mismatch'
+    assert run['status'] == 'completed' and run['conclusion'] == 'success', (
+        f"{lane}: status={run['status']}, conclusion={run['conclusion']}"
+    )
     jobs = api(f"actions/runs/{record['id']}/jobs?per_page=100")
-    assert jobs['total_count'] == 2, lane
+    assert jobs['total_count'] == 2, f"{lane}: expected 2 jobs, got {jobs['total_count']}"
     matching = [job for job in jobs['jobs'] if job['name'] == record['job_name']]
-    assert len(matching) == 1, lane
+    assert len(matching) == 1, f'{lane}: expected 1 matching job, got {len(matching)}'
     job = matching[0]
-    assert job['runner_name'] == record['runner'], lane
-    assert job['conclusion'] == 'success', lane
+    assert job['runner_name'] == record['runner'], (
+        f"{lane}: expected runner {record['runner']}, got {job['runner_name']}"
+    )
+    assert job['conclusion'] == 'success', f"{lane}: expected success, got {job['conclusion']}"
     required = {
         'Prepare distinct directories', 'Assert job defaults',
         'Assert explicit step overrides', 'Assert directory with spaces',
@@ -94,11 +100,11 @@ def check_run(record, evidence, lane):
         'Assert top-level scope restored',
     }
     passed = {step['name'] for step in job['steps'] if step['conclusion'] == 'success'}
-    assert required <= passed, (lane, required - passed)
+    assert required <= passed, f'{lane}: missing steps: {required - passed}'
     for name, expected in evidence['workflow_sha256'].items():
         remote = api(f"contents/{name}?ref={record['revision']}")
         actual = hashlib.sha256(base64.b64decode(remote['content'])).hexdigest()
-        assert actual == expected, (lane, name)
+        assert actual == expected, f'{lane}/{name}: remote workflow/action hash mismatch'
     print(f"{lane}: {run['html_url']} passed all issue 71 steps.")
 
 
@@ -116,7 +122,7 @@ def main():
         for name, expected in evidence['capture_workflow_sha256'].items():
             remote = api(f"contents/{name}?ref={capture['revision']}")
             actual = hashlib.sha256(base64.b64decode(remote['content'])).hexdigest()
-            assert actual == expected, ('capture', name)
+            assert actual == expected, f'capture/{name}: remote workflow/action hash mismatch'
         for lane in ('toolu', 'reference'):
             check_run(evidence['runs'][lane], evidence, lane)
 
