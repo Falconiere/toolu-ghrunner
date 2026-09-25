@@ -278,46 +278,91 @@ fn promote_staging(staging: &Path, dest: &Path) -> Result<(), RunnerError> {
 /// Returns `RunnerError::ActionDownload` on a request failure or a
 /// non-success HTTP status.
 async fn fetch_tarball_reader(
-  client: &reqwest::Client,
+  _client: &reqwest::Client,
   tarball_url: &str,
   token: Option<&str>,
 ) -> Result<impl Read + use<>, RunnerError> {
-  let mut req = client
-    .get(tarball_url)
-    .header(reqwest::header::USER_AGENT, "toolu-runner")
-    .header(reqwest::header::ACCEPT, "application/vnd.github+json");
-  if let Some(t) = token {
-    req = req.bearer_auth(t);
-  }
-
-  let response = req
-    .send()
-    .await
-    .map_err(|e| RunnerError::ActionDownload(format!("fetch {tarball_url}: {e}")))?;
-
+  let response = request_archive(tarball_url, token).await?;
   let status = response.status();
   if !status.is_success() {
-    // A failed body read is reported, not swallowed: "status 500: <nothing>"
-    // and "status 500: <could not be read>" are different diagnoses.
-    let body = match response.text().await {
-      Ok(body) => body,
-      Err(e) => format!("(body read failed: {e})"),
-    };
     return Err(RunnerError::ActionDownload(format!(
-      "tarball {tarball_url} status {status}: {body}"
+      "archive status {status}"
     )));
   }
-
-  // The stream's `std::io::Error` surfaces from inside `extract_tarball`,
-  // where nothing knows which URL the bytes came from — so name it here.
-  let stream_url = tarball_url.to_owned();
-  let stream = response.bytes_stream().map(move |chunk| {
-    chunk.map_err(|e| std::io::Error::other(format!("tarball stream from {stream_url}: {e}")))
-  });
+  let stream = response
+    .bytes_stream()
+    .map(move |chunk| chunk.map_err(|_error| std::io::Error::other("archive stream interrupted")));
   let stream_reader = tokio_util::io::StreamReader::new(stream);
-  // Constructed here (an async context) so it captures the current Tokio
-  // runtime handle, then moved into `spawn_blocking` — its documented use.
   Ok(tokio_util::io::SyncIoBridge::new(stream_reader))
+}
+
+async fn request_archive(
+  tarball_url: &str,
+  token: Option<&str>,
+) -> Result<reqwest::Response, RunnerError> {
+  let archive_client = reqwest::Client::builder()
+    .redirect(reqwest::redirect::Policy::none())
+    .build()
+    .map_err(|_error| RunnerError::ActionDownload("archive HTTP client failed".to_owned()))?;
+  let initial = reqwest::Url::parse(tarball_url)
+    .map_err(|_error| RunnerError::ActionDownload("archive URL invalid".to_owned()))?;
+  let mut current = initial.clone();
+  for hop in 0..=5 {
+    validate_archive_hop(&current, &initial)?;
+    let mut request = archive_client
+      .get(current.clone())
+      .header(reqwest::header::USER_AGENT, "toolu-runner")
+      .header(reqwest::header::ACCEPT, "application/vnd.github+json");
+    if let Some(value) = token.filter(|_| current.origin() == initial.origin()) {
+      request = request.basic_auth("x-access-token", Some(value));
+    }
+    let received = request.send().await.map_err(|error| {
+      RunnerError::ActionDownload(format!(
+        "archive request failed: timeout={}",
+        error.is_timeout()
+      ))
+    })?;
+    if received.status().is_redirection() {
+      if hop == 5 {
+        return Err(RunnerError::ActionDownload(
+          "archive redirect limit exceeded".to_owned(),
+        ));
+      }
+      let location = received
+        .headers()
+        .get(reqwest::header::LOCATION)
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| {
+          RunnerError::ActionDownload("archive redirect omitted location".to_owned())
+        })?;
+      current = current
+        .join(location)
+        .map_err(|_error| RunnerError::ActionDownload("archive redirect URL invalid".to_owned()))?;
+      continue;
+    }
+    return Ok(received);
+  }
+  Err(RunnerError::ActionDownload(
+    "archive redirect limit exceeded".to_owned(),
+  ))
+}
+
+fn validate_archive_hop(current: &reqwest::Url, initial: &reqwest::Url) -> Result<(), RunnerError> {
+  let loopback = matches!(
+    current.host_str(),
+    Some("localhost" | "127.0.0.1" | "[::1]")
+  );
+  if (current.scheme() != "https" && !(current.scheme() == "http" && loopback))
+    || (initial.scheme() == "https" && current.scheme() != "https")
+    || current.host_str().is_none()
+    || !current.username().is_empty()
+    || current.password().is_some()
+  {
+    return Err(RunnerError::ActionDownload(
+      "archive redirect target rejected".to_owned(),
+    ));
+  }
+  Ok(())
 }
 
 /// Download an action tarball + extract to its cache directory.

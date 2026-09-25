@@ -25,24 +25,19 @@ use std::sync::{Arc, Mutex};
 
 use futures_util::StreamExt;
 use futures_util::stream;
-use shared::{ActionStep, RunnerError};
+use shared::{ActionStep, AgentJobRequestMessage, RunnerError, SecretMasker};
 use tokio::sync::OnceCell;
 use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 
+use super::download_info::ActionDownloadContext;
 use super::downloader::{action_cache_dir, download_and_extract_action};
-use super::resolver::resolve_action_refs;
+use super::resolver::{ActionRef, resolve_action_refs};
 use crate::execution::action_exec::build_uses_ref;
 
 /// Concurrency cap for job-start action prefetch (Open Question 3 in the
 /// design spec: revisit only with evidence).
 const PREFETCH_CONCURRENCY: usize = 4;
-
-/// The real GitHub API base every production prefetch/download call resolves
-/// tarball URLs against. `prefetch_refs` takes the base as a parameter (this
-/// constant is the only production value it is ever called with) so its
-/// tests can point the SAME dedupe + fetch path at a local HTTP server
-/// instead of `api.github.com`.
-const GITHUB_API_BASE: &str = "https://api.github.com";
 
 /// Single-flight download cache, keyed by the resolved action ref's
 /// `{owner}/{repo}/{ref}` cache key
@@ -54,6 +49,9 @@ const GITHUB_API_BASE: &str = "https://api.github.com";
 #[derive(Default)]
 pub struct ActionFetcher {
   inflight: Mutex<HashMap<String, Arc<OnceCell<PathBuf>>>>,
+  context: Option<ActionDownloadContext>,
+  masker: Option<Arc<Mutex<SecretMasker>>>,
+  cancel: Option<CancellationToken>,
 }
 
 impl ActionFetcher {
@@ -61,6 +59,63 @@ impl ActionFetcher {
   #[must_use]
   pub fn new() -> Self {
     Self::default()
+  }
+
+  /// Build the production fetcher from the acquired job and its shared masker.
+  ///
+  /// # Errors
+  ///
+  /// Returns an action resolution error for an invalid acquired API location.
+  pub fn for_job(
+    msg: &AgentJobRequestMessage,
+    masker: Arc<Mutex<SecretMasker>>,
+    cancel: CancellationToken,
+  ) -> Result<Self, RunnerError> {
+    Ok(Self {
+      inflight: Mutex::new(HashMap::new()),
+      context: Some(ActionDownloadContext::from_message(msg)?),
+      masker: Some(masker),
+      cancel: Some(cancel),
+    })
+  }
+
+  /// Resolve one action with the job's service, then fetch its exact revision.
+  ///
+  /// # Errors
+  ///
+  /// Returns a sanitized resolution or archive failure.
+  pub async fn ensure_action(
+    &self,
+    client: &reqwest::Client,
+    action: &ActionRef,
+    data_dir: &Path,
+  ) -> Result<PathBuf, RunnerError> {
+    let context = self.context.as_ref().ok_or_else(|| {
+      RunnerError::ActionDownload("action fetcher has no acquired job".to_owned())
+    })?;
+    let masker = self.masker.as_ref().ok_or_else(|| {
+      RunnerError::ActionDownload("action fetcher has no secret masker".to_owned())
+    })?;
+    let cancel = self.cancel.as_ref().ok_or_else(|| {
+      RunnerError::ActionDownload("action fetcher has no cancellation token".to_owned())
+    })?;
+    let info = context.resolve_info(client, action, masker, cancel).await?;
+    let dest = action_cache_dir(data_dir, &info.cache_key);
+    let cell = self.cell_for(&info.cache_key);
+    let result = cell
+      .get_or_try_init(|| async {
+        download_and_extract_action(client, &info.tarball_url, info.token.as_deref(), &dest)
+          .await?;
+        Ok::<PathBuf, RunnerError>(dest)
+      })
+      .await;
+    match result {
+      Ok(path) => Ok(path.clone()),
+      Err(error) => {
+        self.evict(&info.cache_key);
+        Err(error)
+      },
+    }
   }
 
   /// Ensure the action at `cache_key` is downloaded and extracted, returning
@@ -158,8 +213,28 @@ pub fn spawn_prefetch(
 ) -> JoinHandle<()> {
   let uses_refs = top_level_uses_refs(steps);
   tokio::spawn(async move {
-    prefetch_refs(&fetcher, &client, &data_dir, GITHUB_API_BASE, &uses_refs).await;
+    prefetch_job_refs(&fetcher, &client, &data_dir, &uses_refs).await;
   })
+}
+
+async fn prefetch_job_refs(
+  fetcher: &ActionFetcher,
+  client: &reqwest::Client,
+  data_dir: &Path,
+  uses_refs: &[String],
+) {
+  let resolved = match resolve_action_refs(uses_refs) {
+    Ok(resolved) => resolved,
+    Err(error) => {
+      tracing::warn!(error = %error, "action prefetch ref resolution failed");
+      return;
+    },
+  };
+  stream::iter(resolved.into_values()).for_each_concurrent(PREFETCH_CONCURRENCY, |item| async move {
+    if let Err(error) = fetcher.ensure_action(client, &item.action_ref, data_dir).await {
+      tracing::warn!(action = %item.action_ref.cache_key(), error = %error, "action prefetch failed");
+    }
+  }).await;
 }
 
 /// Collect the `uses:` string for every non-`run:` (action) step. Local and
@@ -171,54 +246,6 @@ fn top_level_uses_refs(steps: &[ActionStep]) -> Vec<String> {
     .filter(|step| !step.is_run_step())
     .map(|step| build_uses_ref(&step.reference))
     .collect()
-}
-
-/// Resolve `uses_refs` to their distinct remote actions (via
-/// [`resolve_action_refs`] — the existing dedupe helper, reused rather than
-/// reinvented) and prefetch each through `fetcher`, at most
-/// [`PREFETCH_CONCURRENCY`] downloads in flight. `api_base` is a parameter
-/// rather than hardcoded so this exact function can be driven against a
-/// local HTTP server in tests; [`spawn_prefetch`] always calls it with
-/// [`GITHUB_API_BASE`].
-///
-/// A malformed ref or a per-ref download failure is WARN-logged and
-/// swallowed here — this function never fails the job; step-time resolution
-/// (through the same `fetcher`) is what actually needs the tarball on disk.
-async fn prefetch_refs(
-  fetcher: &ActionFetcher,
-  client: &reqwest::Client,
-  data_dir: &Path,
-  api_base: &str,
-  uses_refs: &[String],
-) {
-  let resolved = match resolve_action_refs(uses_refs) {
-    Ok(resolved) => resolved,
-    Err(err) => {
-      tracing::warn!(
-        error = %err,
-        "action prefetch: ref resolution failed; step-time resolution will retry"
-      );
-      return;
-    },
-  };
-
-  stream::iter(resolved.into_values())
-    .for_each_concurrent(PREFETCH_CONCURRENCY, |action| async move {
-      let cache_key = action.action_ref.cache_key();
-      let cache_dir = action_cache_dir(data_dir, &cache_key);
-      let tarball_url = action.action_ref.tarball_url(api_base);
-      if let Err(err) = fetcher
-        .ensure(client, &cache_key, &tarball_url, &cache_dir)
-        .await
-      {
-        tracing::warn!(
-          action = cache_key.as_str(),
-          error = %err,
-          "action prefetch failed; step-time resolution will retry"
-        );
-      }
-    })
-    .await;
 }
 
 #[cfg(test)]
