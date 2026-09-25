@@ -70,7 +70,8 @@ pub(super) fn evaluate_composite_condition(
   condition: Option<&str>,
   eval_ctx: &EvalContext,
 ) -> Result<bool, RunnerError> {
-  let condition = condition.unwrap_or("success()").trim();
+  let condition = condition.unwrap_or("success()");
+  let condition = condition.trim();
   let expression = if let Some(inner) = condition.strip_prefix("${{") {
     inner
       .strip_suffix("}}")

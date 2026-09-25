@@ -18,7 +18,7 @@ Use `expressions::evaluator` and `expressions::template` for all composite field
 
 | Composite field | Permitted roots | Extra functions |
 | --- | --- | --- |
-| `run`, `env`, `with`, `shell`, `working-directory`, `name`, `continue-on-error` | `github`, `inputs`, `strategy`, `matrix`, `steps`, `job`, `runner`, `env` | `hashFiles` |
+| `run`, `env`, `with`, `shell`, `working-directory`, `name`, `continue-on-error` | `github`, `inputs`, `strategy`, `matrix`, `steps`, `job`, `runner`, `env`; `github.action_path` only in step `env` | `hashFiles` |
 | `if` | Same roots | `always`, `failure`, `cancelled`, `success`, `hashFiles` |
 | mapped output value | `github`, `strategy`, `matrix`, `steps`, `inputs`, `job`, `runner`, `env` | None beyond ordinary expression functions |
 | input default | `github`, `strategy`, `matrix`, `job`, `runner` | `hashFiles` |

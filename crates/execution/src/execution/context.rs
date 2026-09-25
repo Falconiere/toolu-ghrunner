@@ -479,9 +479,11 @@ impl ExecutionContext {
     );
   }
 
-  /// Update only the current composite invocation's condition status.
+  /// Update the active composite's condition status, or the job when unscoped.
   pub(super) fn set_scope_status(&mut self, status: JobStatus) {
-    if !self.scope_path.is_empty() {
+    if self.scope_path.is_empty() {
+      self.job_status = status;
+    } else {
       self.scoped_status.insert(self.scope_path.clone(), status);
     }
   }

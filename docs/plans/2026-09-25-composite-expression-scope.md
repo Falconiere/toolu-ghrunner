@@ -4,7 +4,7 @@
 
 ## Evidence and approach
 
-The pinned upstream `CompositeActionHandler.RunStepsAsync` merges an ordinary failed inner result, updates its scoped step context, and continues condition evaluation; it breaks on a condition evaluation error. Its `action_yaml.json` defines field-specific roots and functions. Current toolu `composite_exec` returns on failure, `composite_expr` erases valid expressions, `composite_uses` drops a nested post, and `composite_shell` waits without the parent bound. `ExecutionContext` already owns scoped steps and action state, and #68 provides sanitized acquired messages and a production replay path. Extend these existing paths, keep scope restoration explicit, and leave #81's cwd path precedence with #81.
+The pinned upstream `CompositeActionHandler.RunStepsAsync` merges an ordinary failed inner result, updates its scoped step context, and continues condition evaluation; it reports failure and ends that composite loop on a condition evaluation error. Its `action_yaml.json` defines field-specific roots and functions. Current toolu `composite_exec` returns on failure, `composite_expr` erases valid expressions, `composite_uses` drops a nested post, and `composite_shell` waits without the parent bound. `ExecutionContext` already owns scoped steps and action state, and #68 provides sanitized acquired messages and a production replay path. Extend these existing paths, keep scope restoration explicit, and leave #81's cwd path precedence with #81.
 
 ## Workstream summary
 

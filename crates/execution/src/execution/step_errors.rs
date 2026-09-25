@@ -22,6 +22,7 @@ pub(super) async fn report_step_failure(
   {
     tracing::warn!(
       step_id,
+      error = %err,
       "event channel closed; step-failure log line was dropped"
     );
   }
@@ -36,6 +37,7 @@ pub(super) async fn report_step_failure(
   {
     tracing::warn!(
       step_id,
+      error = %err,
       "event channel closed; step-failure completion event was dropped"
     );
   }

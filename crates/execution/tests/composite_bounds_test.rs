@@ -32,7 +32,7 @@ async fn parent_deadline_kills_real_composite_child_without_late_work() -> Resul
   let manifest = parse_action_manifest(ACTION)?;
   let inputs = HashMap::new();
   let (events, mut receiver) = mpsc::channel::<RunnerEvent>(64);
-  tokio::spawn(async move { while receiver.recv().await.is_some() {} });
+  let drain = tokio::spawn(async move { while receiver.recv().await.is_some() {} });
   let cancel = CancellationToken::new();
   let http = reqwest::Client::new();
   let fetcher = ActionFetcher::new();
@@ -71,5 +71,7 @@ async fn parent_deadline_kills_real_composite_child_without_late_work() -> Resul
       "timed-out process still alive: {pid} {state}"
     );
   }
+  drop(events);
+  tokio::time::timeout(Duration::from_secs(1), drain).await??;
   Ok(())
 }
