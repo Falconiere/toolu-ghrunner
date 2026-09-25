@@ -106,7 +106,13 @@ fn completed(
         outputs,
         ..
       } => Some((*conclusion, outputs)),
-      _ => None,
+      RunnerEvent::JobStarted { .. }
+      | RunnerEvent::StepStarted { .. }
+      | RunnerEvent::StepCompleted { .. }
+      | RunnerEvent::StepSkipped { .. }
+      | RunnerEvent::Log { .. }
+      | RunnerEvent::LogGroup { .. }
+      | RunnerEvent::Annotation { .. } => None,
     })
     .ok_or_else(|| "JobCompleted missing".into())
 }

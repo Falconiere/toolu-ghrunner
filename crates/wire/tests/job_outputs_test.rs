@@ -1,4 +1,4 @@
-//! CompleteJobRequest's job output wire shape from the issue 70 capture.
+//! `CompleteJobRequest`'s job output wire shape from the issue 70 capture.
 
 use std::collections::HashMap;
 
@@ -22,9 +22,11 @@ fn complete_job_outputs_are_value_objects_without_secret_flags() {
     annotations: Vec::new(),
   };
   let json = serde_json::to_value(request).unwrap();
+  let outputs = json.get("outputs").unwrap();
+  let value = outputs.get("value").unwrap();
   assert_eq!(
-    json["outputs"],
-    serde_json::json!({"value":{"value":"hello-output"}})
+    outputs,
+    &serde_json::json!({"value":{"value":"hello-output"}})
   );
-  assert!(json["outputs"]["value"].get("isSecret").is_none());
+  assert!(value.get("isSecret").is_none());
 }

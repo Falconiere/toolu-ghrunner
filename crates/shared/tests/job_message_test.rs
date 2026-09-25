@@ -167,15 +167,14 @@ fn acquired_job_outputs_preserve_expression_token_and_step_identity() {
   assert_eq!(outputs.token_type, 2);
   let entries = outputs.d.as_ref().unwrap();
   assert_eq!(entries.len(), 1);
-  assert_eq!(entries[0].key.to_string_value(), Some("value"));
+  let entry = entries.first().unwrap();
+  assert_eq!(entry.key.to_string_value(), Some("value"));
   assert_eq!(
-    entries[0].value.to_expr_string(),
+    entry.value.to_expr_string(),
     Some("steps.produce.outputs.value")
   );
-  assert_ne!(
-    job.steps[0].id,
-    job.steps[0].context_name.as_deref().unwrap()
-  );
+  let step = job.steps.first().unwrap();
+  assert_ne!(step.id, step.context_name.as_deref().unwrap());
 }
 
 #[test]
