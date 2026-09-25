@@ -112,7 +112,7 @@ runs:
     );
     assert_eq!(output.path_additions, vec!["/opt/composite-tools"]);
     assert_eq!(
-      std::fs::read_to_string(workspace.join("marker"))?,
+      tokio::fs::read_to_string(workspace.join("marker")).await?,
       "container\n"
     );
     Ok::<(), Box<dyn std::error::Error>>(())

@@ -39,7 +39,10 @@ async fn job_container_absent_preserves_host_execution() -> TestResult {
     }
   }
   assert_eq!(conclusion, Some(Conclusion::Success));
-  assert_eq!(std::fs::read_to_string(workspace.join("marker"))?, "host");
+  assert_eq!(
+    tokio::fs::read_to_string(workspace.join("marker")).await?,
+    "host"
+  );
   Ok(())
 }
 

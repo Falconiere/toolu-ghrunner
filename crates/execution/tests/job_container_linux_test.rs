@@ -148,16 +148,16 @@ async fn job_container_real_production_shell_node_composite_and_posts() -> TestR
   }
   assert_eq!(conclusion, Some(Conclusion::Success), "{logs:#?}");
   assert_eq!(
-    std::fs::read_to_string(workspace.join("post-marker"))?,
+    tokio::fs::read_to_string(workspace.join("post-marker")).await?,
     "post-value"
   );
   assert_eq!(
-    std::fs::read_to_string(workspace.join("artifact"))?,
+    tokio::fs::read_to_string(workspace.join("artifact")).await?,
     "artifact-bytes"
   );
   let docker = bollard::Docker::connect_with_local_defaults()?;
-  let container = std::fs::read_to_string(workspace.join("container-id"))?;
-  let network = std::fs::read_to_string(workspace.join("network-id"))?;
+  let container = tokio::fs::read_to_string(workspace.join("container-id")).await?;
+  let network = tokio::fs::read_to_string(workspace.join("network-id")).await?;
   assert!(matches!(
     docker.inspect_container(&container, None).await,
     Err(bollard::errors::Error::DockerResponseServerError {

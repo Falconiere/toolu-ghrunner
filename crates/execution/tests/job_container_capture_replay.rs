@@ -190,15 +190,15 @@ async fn captured_job_container_replays_shell_node_composite_and_verify() -> Tes
     );
   }
   assert_eq!(
-    std::fs::read_to_string(workspace.join("container-73.txt"))?,
+    tokio::fs::read_to_string(workspace.join("container-73.txt")).await?,
     "container-73-artifact\n"
   );
   assert_eq!(
-    std::fs::read_to_string(workspace.join("post-marker"))?,
+    tokio::fs::read_to_string(workspace.join("post-marker")).await?,
     "post-value"
   );
 
-  let identities = std::fs::read_to_string(workspace.join("container-73-runtime.txt"))?;
+  let identities = tokio::fs::read_to_string(workspace.join("container-73-runtime.txt")).await?;
   let mut ids = identities.lines();
   let container = ids
     .next()
