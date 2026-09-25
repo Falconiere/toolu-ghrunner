@@ -147,7 +147,7 @@ impl StepCollector {
     }
   }
 
-  /// Return all collected step results.
+  /// Return completed step results; omit annotations without a completed step.
   pub(super) async fn collected_results(&self) -> Vec<StepResult> {
     let state = self.state.lock().await;
     if !state.pending_annotations.is_empty() {

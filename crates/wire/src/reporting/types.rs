@@ -64,7 +64,7 @@ pub struct StepResult {
   /// Number of lines in the step's uploaded log.
   #[serde(skip_serializing_if = "Option::is_none")]
   pub completed_log_lines: Option<u64>,
-  /// Workflow-command annotations emitted by this reported step.
+  /// Workflow-command annotations emitted by this step; empty for "Set up job".
   #[serde(skip_serializing_if = "Vec::is_empty")]
   pub annotations: Vec<Annotation>,
 }

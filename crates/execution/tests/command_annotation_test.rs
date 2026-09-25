@@ -91,6 +91,7 @@ async fn real_shell_commands_keep_ranges_titles_and_masks() -> Result<(), Box<dy
   })
   .await?;
   cancel.cancel();
+  // An error workflow command annotates the step; the shell still exits successfully.
   assert_eq!(conclusion, Some(Conclusion::Success));
   let [
     full,
