@@ -75,6 +75,7 @@ pub(super) async fn execute_with_renewal(
     Arc::clone(&outage_tripped),
   );
 
+  // The helper boxes both concurrent legs to bound this timeout-wrapped future.
   let (setup_result, setup_lines, live_log_tx, live_log_handle) =
     connect_and_report_setup(ctx, job_msg, rs_token, plan_id).await;
 
