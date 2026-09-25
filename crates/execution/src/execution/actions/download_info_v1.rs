@@ -148,6 +148,11 @@ impl LegacyContext {
       .replace("{scopeIdentifier}", &self.scope)
       .replace("{hubName}", &self.hub)
       .replace("{planId}", &self.plan);
+    if !valid_relative_resource_path(&path) {
+      return Err(RunnerError::ActionDownload(
+        "legacy action resource path invalid".to_owned(),
+      ));
+    }
     if path.contains('{') || path.contains('}') {
       return Err(RunnerError::ActionDownload(
         "legacy action resource path unknown".to_owned(),
