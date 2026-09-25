@@ -65,8 +65,8 @@ pub(super) async fn merge_step_outputs(
   .await
 }
 
-/// Build the step's env map (global + step env + file-command paths + inherited
-/// process env) and create the per-step file-command temp files. Synchronous
+/// Build process env from the caller's already-resolved step overlay and job
+/// env, then add inherited env and new per-step file-command paths. Synchronous
 /// filesystem work is batched onto Tokio's blocking pool by the shared
 /// file-command helpers.
 pub(super) async fn build_step_env_and_file_commands(

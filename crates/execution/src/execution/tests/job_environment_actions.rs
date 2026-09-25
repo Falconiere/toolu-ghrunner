@@ -166,7 +166,8 @@ fn job_environment_node_and_nested_composite_actions_keep_scopes_and_file_update
   let workspace = config.workspace_root.join(&job.job_id);
   write_actions(&workspace)?;
   seed_node(&config.data_dir)?;
-  let runner = crate::Runner::new(config, Arc::new(Mutex::new(SecretMasker::new())));
+  let masker = Arc::new(Mutex::new(SecretMasker::new()));
+  let runner = crate::Runner::new(config, Arc::clone(&masker));
   let runtime = tokio::runtime::Builder::new_current_thread()
     .enable_all()
     .build()?;
@@ -179,7 +180,13 @@ fn job_environment_node_and_nested_composite_actions_keep_scopes_and_file_update
       while let Some(event) = events.recv().await {
         match event {
           RunnerEvent::JobCompleted { conclusion, .. } => result = Some(conclusion),
-          RunnerEvent::Log { line, .. } => logs.push(line),
+          RunnerEvent::Log { line, .. } => logs.push(
+            masker
+              .lock()
+              .map_err(|error| error.to_string())?
+              .mask(&line)
+              .into_owned(),
+          ),
           RunnerEvent::JobStarted { .. }
           | RunnerEvent::StepStarted { .. }
           | RunnerEvent::StepCompleted { .. }
@@ -195,6 +202,13 @@ fn job_environment_node_and_nested_composite_actions_keep_scopes_and_file_update
     result
   })?;
   assert_eq!(conclusion, Some(Conclusion::Success), "{logs:?}");
+  assert_eq!(
+    logs
+      .iter()
+      .filter(|line| *line == "env69-node-secret:***")
+      .count(),
+    6
+  );
   let records: Vec<serde_json::Value> =
     std::fs::read_to_string(workspace.join("env-69-node.jsonl"))?
       .lines()
