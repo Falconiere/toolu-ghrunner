@@ -1,0 +1,62 @@
+name: defaults-run-71
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/71-apply-defaults-run-shell-working
+
+defaults:
+  run:
+    shell: bash
+    working-directory: defaults-71-workflow
+
+jobs:
+  defaults:
+    runs-on: [self-hosted, toolu-71]
+    defaults:
+      run:
+        shell: sh
+        working-directory: defaults-71-job
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare distinct directories
+        shell: bash
+        working-directory: .
+        run: |
+          mkdir -p defaults-71-workflow defaults-71-job defaults-71-step 'defaults-71 with spaces'
+          mkdir -p "$RUNNER_TEMP/defaults-71-absolute"
+      - name: Assert job defaults
+        id: job
+        run: |
+          test "$(ps -p $$ -o comm= | tr -d '[:space:]')" = sh
+          test "$(basename "$PWD")" = defaults-71-job
+          printf job > job.marker
+      - name: Assert explicit step overrides
+        id: explicit
+        shell: bash
+        working-directory: defaults-71-step
+        run: |
+          test "$(ps -p $$ -o comm= | tr -d '[:space:]')" = bash
+          test "$(basename "$PWD")" = defaults-71-step
+          printf explicit > explicit.marker
+      - name: Assert directory with spaces
+        working-directory: defaults-71 with spaces
+        run: |
+          test "$(basename "$PWD")" = 'defaults-71 with spaces'
+          printf spaces > spaces.marker
+      - name: Assert absolute directory
+        working-directory: ${{ runner.temp }}/defaults-71-absolute
+        run: |
+          test "$PWD" = "$RUNNER_TEMP/defaults-71-absolute"
+          printf absolute > absolute.marker
+      - name: Assert composite scope
+        uses: ./.github/actions/defaults-71-composite
+      - name: Assert top-level scope restored
+        run: |
+          test "$(ps -p $$ -o comm= | tr -d '[:space:]')" = sh
+          test "$(basename "$PWD")" = defaults-71-job
+          test "$(cat job.marker)" = job
+          test "$(cat ../defaults-71-step/explicit.marker)" = explicit
+          test "$(cat '../defaults-71 with spaces/spaces.marker')" = spaces
+          test "$(cat "$RUNNER_TEMP/defaults-71-absolute/absolute.marker")" = absolute
+          test "$(cat ../.defaults-71-composite.marker)" = composite
