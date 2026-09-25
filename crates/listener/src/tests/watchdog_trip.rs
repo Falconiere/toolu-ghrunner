@@ -401,7 +401,7 @@ fn body_conclusion(body: &serde_json::Value) -> TestResult<&str> {
     .ok_or_else(|| format!("completejob body missing string conclusion: {body}").into())
 }
 
-/// Assert the completejob body carries `conclusion: Failure` (the real
+/// Assert the completejob body carries `conclusion: "failed"` (the real
 /// `wire::reporting::ReportConclusion::Failure` discriminant —
 /// `ReportConclusion` is `serde_repr`, not a string; see
 /// `crates/wire/src/reporting/types.rs`) and exactly the "lost connection"
