@@ -55,7 +55,9 @@ impl ActionFetcher {
   ) -> Self {
     Self {
       inflight: Mutex::new(HashMap::new()),
-      context: Some(ActionDownloadContext::from_message(msg).map_err(action_context_error)),
+      context: Some(
+        ActionDownloadContext::from_message(msg).map_err(|error| action_context_error(&error)),
+      ),
       masker: Some(masker),
       cancel: Some(cancel),
     }
@@ -186,8 +188,8 @@ impl ActionFetcher {
   }
 }
 
-fn action_context_error(error: RunnerError) -> String {
-  if let RunnerError::ActionResolution(message) = &error {
+fn action_context_error(error: &RunnerError) -> String {
+  if let RunnerError::ActionResolution(message) = error {
     message.clone()
   } else {
     error.to_string()

@@ -246,3 +246,7 @@ fn transport_error(error: &reqwest::Error) -> RunnerError {
     error.is_timeout()
   ))
 }
+
+#[cfg(test)]
+#[path = "tests/download_info_v1.rs"]
+mod tests;
