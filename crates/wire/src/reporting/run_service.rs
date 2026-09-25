@@ -59,7 +59,8 @@ pub struct CompleteJobRequest {
   pub request_id: i64,
   /// Final job conclusion in the Run Service `TaskResult` wire format.
   pub conclusion: JobConclusion,
-  /// Job-level outputs to report back.
+  /// Nonempty, non-secret job outputs as Run Service value objects.
+  /// The execution engine filters candidate values before constructing this request.
   pub outputs: HashMap<String, CompleteJobOutput>,
   /// Per-step results for the completed job.
   pub step_results: Vec<super::types::StepResult>,

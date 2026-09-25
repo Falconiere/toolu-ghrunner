@@ -20,21 +20,7 @@ pub(super) async fn evaluate_final_outputs(
   };
   let evaluated = evaluate_acquired_outputs(token, ctx);
   for name in &evaluated.skipped_secret_names {
-    let safe_name = match ctx.masker().lock() {
-      Ok(guard) => guard.mask(name).into_owned(),
-      Err(poisoned) => poisoned.into_inner().mask(name).into_owned(),
-    };
-    let message = format!("Skip output '{safe_name}' since it may contain a secret");
-    tracing::warn!("{message}");
-    let _ = events
-      .send(RunnerEvent::Annotation {
-        step_id: job_id.to_owned(),
-        level: AnnotationLevel::Warning,
-        message,
-        file: None,
-        line: None,
-      })
-      .await;
+    emit_secret_warning(name, ctx, events, job_id).await;
   }
   let conclusion = if evaluated.error.is_some() && conclusion != Conclusion::Cancelled {
     tracing::error!("job output evaluation failed");
@@ -43,4 +29,31 @@ pub(super) async fn evaluate_final_outputs(
     conclusion
   };
   Ok((conclusion, evaluated.outputs))
+}
+
+async fn emit_secret_warning(
+  name: &str,
+  ctx: &ExecutionContext,
+  events: &mpsc::Sender<RunnerEvent>,
+  job_id: &str,
+) {
+  let safe_name = match ctx.masker().lock() {
+    Ok(guard) => guard.mask(name).into_owned(),
+    Err(poisoned) => poisoned.into_inner().mask(name).into_owned(),
+  };
+  let message = format!("Skip output '{safe_name}' since it may contain a secret");
+  tracing::warn!("{message}");
+  if events
+    .send(RunnerEvent::Annotation {
+      step_id: job_id.to_owned(),
+      level: AnnotationLevel::Warning,
+      message,
+      file: None,
+      line: None,
+    })
+    .await
+    .is_err()
+  {
+    tracing::warn!("job output annotation receiver dropped before delivery");
+  }
 }
