@@ -444,3 +444,19 @@ fn malformed_defaults() -> TestResult {
   );
   Ok(())
 }
+
+#[test]
+fn non_scalar_default_value_is_an_error() -> TestResult {
+  let mut message = captured(&[])?;
+  job_run_value(&mut message, "shell")?.token_type = 2;
+  let error = parsed_defaults(&message.defaults)
+    .err()
+    .ok_or("non-scalar shell default accepted")?;
+  assert!(
+    error
+      .to_string()
+      .contains("defaults.run.shell must be a scalar token"),
+    "{error}"
+  );
+  Ok(())
+}

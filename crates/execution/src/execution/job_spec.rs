@@ -120,6 +120,8 @@ fn parse_value(
   ctx: &ExecutionContext,
   eval_ctx: &expressions::evaluator::EvalContext,
 ) -> Result<Option<String>, RunnerError> {
+  // The generic step-env converter warns and returns an empty string for
+  // non-scalars; acquired defaults must reject that malformed wire value.
   if !matches!(token.token_type, 0 | 3 | 5 | 6 | 7) {
     return Err(RunnerError::Protocol(format!(
       "defaults.run.{name} must be a scalar token"
