@@ -35,7 +35,7 @@ not part of it. Workflow YAML parsing/matrix/orchestration lives in the
 | `file_commands.rs` | `FileCommandManager` | Creates/reads/resets a step's `$GITHUB_ENV`/`OUTPUT`/`PATH`/`STATE`/`STEP_SUMMARY` temp files and parses their contents. |
 | `handlers.rs` | (mod decl) | Declares the `handlers` sub-module (script/node/node_exec/docker/composite/resolve) and its dispatch order. |
 | `job_hooks.rs` | `run_job_hook` | Runs the self-hosted `ACTIONS_RUNNER_HOOK_JOB_STARTED`/`_COMPLETED` scripts around a job; started is a hard gate, completed is best-effort. |
-| `job_runner.rs` | `run_job` | The job entry point: prepares dirs, starts local services per `ServicesMode`, seeds job env, runs hooks + the step loop, and returns a `JobTeardown`. |
+| `job_runner.rs` | `run_job` | The job entry point: prepares dirs, starts local services per `ServicesMode`, seeds job env, and returns a `JobTeardown`; its `job_runner/` child runs the prepared job body. |
 | `job_spec.rs` | `JobSpec` | Job-level `outputs:` expression map plus merged `defaults.run` (shell/working-directory), and `evaluate_job_outputs` to resolve them post-run. |
 | `job_teardown.rs` | `JobTeardown` | Deferred post-completion work returned by `run_job`: cache staging sweep + GC pass, and joining the workspace-sweep task, run only after the event sender is dropped. |
 | `node_stage.rs` | `run_node_stage` | Runs one Node.js action entrypoint (`pre`/`main`/`post`), rebuilding env per stage and dispatching its stdout workflow commands. |

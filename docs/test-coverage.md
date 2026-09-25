@@ -222,3 +222,37 @@ not Node 20 runtime-parity evidence. The full `./tools/check.sh all` gate must
 be recorded from the final source tree before marking the workspace lane green.
 GitHub.com/GHES backend, the pinned reference-runner execution, and Linux/macOS
 cross-host comparisons for #98 are **unverified**.
+
+## Acquired run defaults (#71)
+
+The source is GitHub.com's actual Run Service `acquirejob` body from the
+[`defaults-run-71` capture run](https://github.com/Falconiere/toolu-ghrunner/actions/runs/36091513712)
+at revision `1e8954a0f87927ceeeb693167a59676fab3256b6`. The initial toolu
+run failed at **Assert job defaults**, proving the old live path ignored the
+payload. The sanitized `crates/execution/tests/defaults_run_job.json` retains
+both ordered TemplateToken mappings, all eight step IDs, and the envelope;
+27 credential, authorization, and mask values were replaced with deterministic
+UUIDs. `crates/execution/tests/defaults_run_evidence.json` pins the raw and
+sanitized hashes, workflow/action revisions, job ID, and run ID.
+
+| Criterion / scenario | Captured input and exact observable result | Runnable check / current evidence |
+| --- | --- | --- |
+| AC-1, 71-S1 | Workflow `bash`/`defaults-71-workflow`, then job `sh`/`defaults-71-job`; real shell identifies `sh` and writes only `defaults-71-job/job.marker`. A capture-derived partial job layer clears the workflow shell. | `cargo test -p execution --test job_message_run_defaults_test job_defaults_override_workflow` and `later_partial_mapping_clears_earlier_shell`; passing Linux production replay. |
+| AC-2, 71-S1 | Captured explicit step uses Bash and `defaults-71-step`; `explicit.marker` exists there, not in the job directory. An empty explicit shell falls through to job `sh`. | `step_values_override_defaults`, `empty_explicit_shell_uses_job_shell`; passing Linux production replay. |
+| AC-3, 71-S2 | A capture-derived absent-default job writes `root.marker` at the job workspace root. Relative job path, step path with spaces, and `${{ runner.temp }}` absolute path run in their selected directory. A nonexistent default cwd fails the correct step and its log names the full path. | `paths_and_absence`, `nonexistent_default_directory_fails_its_step_with_path`; passing Linux production replay. Host-shell fallback parity remains with #80. |
+| AC-4, 71-S3 | The captured local composite writes `.defaults-71-composite.marker` at the workspace root; the next top-level `sh` step reads it from its job-default directory. | `composite_scope`; passing Linux production replay. Composite's own cwd behavior belongs to #81. |
+| AC-5, 71-S3 | Linux job-container shell, cwd, and container identity require #73/#80 integration and a Docker-capable Linux self-hosted runner. | **Unverified**; macOS job containers are not applicable to this epic. |
+| AC-6 | The capture checker validates ordered wire types, synthetic credentials, fixture/workflow SHA-256, and recorded live runs against GitHub's jobs API. | `python3 scripts/test/defaults_run_capture_check.py` and `python3 -m unittest discover -s scripts/test -p 'test_defaults_run_capture_check.py'` pass locally; `--live` is pending the final workflow revision. The full Linux `./tools/check.sh all` gate passed before the final live evidence update. |
+
+The replay removes only the remote checkout step and copies the checked-in
+local composite when needed. The captured absolute-path assertion is adjusted
+to compare physical paths: macOS resolves `/var` to `/private/var` in `PWD`.
+All default layers and step IDs come from the acquisition; named boundary
+transformations are identified in the test. The pinned reference contract is
+[actions/runner `JobExtension.cs` at cab9d1c](https://github.com/actions/runner/blob/cab9d1c3901e45c7705889c4f88284fdd93f4ae5/src/Runner.Worker/JobExtension.cs)
+and its top-level/composite scope rule in
+[`ScriptHandler.cs`](https://github.com/actions/runner/blob/cab9d1c3901e45c7705889c4f88284fdd93f4ae5/src/Runner.Worker/Handlers/ScriptHandler.cs).
+The live macOS toolu/GitHub-hosted comparison uses the same matrix job and
+workflow/action revision. Linux host, GHES, container, and full absent-shell
+comparisons remain **unverified** until their respective runners or dependency
+issues are available.

@@ -9,7 +9,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
-use super::actions::prefetch::{ActionFetcher, spawn_prefetch};
+use super::actions::prefetch::ActionFetcher;
 use super::context::ExecutionContext;
 use super::job_hooks::{JobHookStage, run_job_hook};
 use super::job_spec::{JobSpec, evaluate_job_outputs};
@@ -26,6 +26,8 @@ use cache::trust::{TrustLevel, classify_trust};
 use cache::v1::{V1Inputs, V1State, v1_router};
 use expressions::context_data::pipeline_data_to_expr_value;
 use shared::SecretMasker;
+
+mod prepared;
 
 /// The local services a job's configured mode brought up, threaded from the
 /// startup match through `setup_job_env` and shut down at job end.
@@ -70,58 +72,17 @@ pub async fn run_job(
   // fetch / post-drain in this job instead of a fresh connection (and TLS
   // handshake) per call. 120 s: downloads can be large.
   let http = build_job_client()?;
-  // One job-scope single-flight action fetcher (S6), shared by the
-  // background prefetch task below and every step-time `uses:` resolution.
-  let fetcher = Arc::new(ActionFetcher::new());
-
   let local = start_local_services(config, &msg, &ctx).await?;
   setup_job_env(&mut ctx, &msg, config, &local)?;
-
-  // Kick job-start action prefetch in the background (S6): dedupes every
-  // top-level remote `uses:` ref and downloads it ahead of step time, so a
-  // step's own resolution usually finds it already cached. Aborted below
-  // once the step loop is done, purely for resource hygiene — an abort
-  // cannot (and does not need to) stop an in-flight extraction; see
-  // `prefetch::spawn_prefetch`'s doc for why that's safe.
-  let prefetch_handle = spawn_prefetch(
-    &msg.steps,
-    Arc::clone(&fetcher),
-    http.clone(),
-    config.data_dir.clone(),
-  );
-
-  // Shadow-mode step observer (approach C): records only, never serves.
-  let shadow = build_shadow_observer(config, &msg.job_id, &ctx);
-
-  emit_job_started(&events, &msg.job_id, &msg.job_display_name).await;
-
-  // TODO: the wire `AgentJobRequestMessage` does not yet carry typed job
-  // `outputs:`/`defaults:`; populate `JobSpec` from the message once its wire
-  // shape is confirmed from a captured live job. Empty spec is a no-op for
-  // both on the live path.
-  let spec = JobSpec::default();
-
-  let body = JobBody {
+  let inputs = prepared::Inputs {
     msg: &msg,
     config,
     cancel: &cancel,
     events: &events,
     workspace: &workspace,
-    spec: &spec,
-    shadow: &shadow,
     http: &http,
-    fetcher: fetcher.as_ref(),
   };
-  let body_result = run_job_body(&body, &mut ctx).await;
-  // Resource hygiene, not a correctness guarantee: stops any future fetch
-  // this task would otherwise start, whether it finished on its own or is
-  // still fetching a ref no step needed. An in-flight extraction's
-  // `spawn_blocking` closure keeps running regardless — safe because it
-  // extracts into a private staging dir and only atomically renames onto
-  // the shared cache dir when done (see `prefetch::spawn_prefetch`'s doc).
-  prefetch_handle.abort();
-  let (conclusion, outputs) = body_result?;
-
+  let (conclusion, outputs) = prepared::execute(inputs, &mut ctx).await?;
   let outcome = JobOutcome {
     job_id: msg.job_id,
     conclusion,

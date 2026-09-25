@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use super::context_data::PipelineContextData;
 use super::resource::{JobResources, MaskHint, VariableValue, WorkspaceOptions};
 use super::step::ActionStep;
+use super::template_token::TemplateToken;
 
 /// The full job request message received from GitHub after `acquirejob`.
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -55,9 +56,9 @@ pub struct AgentJobRequestMessage {
   /// Wire field `environmentVariables`; raw (unparsed) job environment entries.
   #[serde(default, rename = "environmentVariables")]
   pub environment_variables: Vec<serde_json::Value>,
-  /// Job-level `defaults:` entries (e.g. `defaults.run`), unparsed.
+  /// Ordered workflow and job `defaults:` template mappings.
   #[serde(default)]
-  pub defaults: Vec<serde_json::Value>,
+  pub defaults: Vec<TemplateToken>,
   /// Wire field `fileTable`; index-to-path mapping used by step file references.
   #[serde(default, rename = "fileTable")]
   pub file_table: Vec<serde_json::Value>,

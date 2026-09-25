@@ -1,0 +1,40 @@
+{
+  "baseline_run": {
+    "conclusion": "failure",
+    "failed_step": "Assert job defaults",
+    "id": 36091513712,
+    "revision": "1e8954a0f87927ceeeb693167a59676fab3256b6"
+  },
+  "capture": {
+    "defaults_layers": 2,
+    "fixture": "crates/execution/tests/defaults_run_job.json",
+    "fixture_sha256": "62a92dd45b20cadbba1cb68c351278d789d738783dc521b41d6f614a6731bb24",
+    "job_id": "bb41062b-c851-580e-8bb3-8fc916af5814",
+    "raw_sha256": "6f3657015f4185033563c26aa75696332c8a4ed37def45328f0af2a22f29080e",
+    "revision": "1e8954a0f87927ceeeb693167a59676fab3256b6",
+    "run_id": 36091513712,
+    "runner": "toolu-71-capture",
+    "secret_fields_replaced": 27,
+    "source": "github.com Run Service acquirejob body",
+    "steps": 8
+  },
+  "capture_workflow_sha256": {
+    ".github/actions/defaults-71-composite/action.yml": "a5572064b2460187243a39ec7ac62a1510373e30491a6ac15426407432122753",
+    ".github/workflows/defaults-run-live.yml": "043d2f7f67524e0d3222cb90263ea4e1320a8d2a0cda9a80cd5b849e6ce1c5bb"
+  },
+  "reference_source": "cab9d1c3901e45c7705889c4f88284fdd93f4ae5",
+  "runs": {
+    "reference": null,
+    "toolu": null
+  },
+  "unverified": [
+    "Linux host",
+    "GHES",
+    "job container",
+    "missing-shell fallback pending #80"
+  ],
+  "workflow_sha256": {
+    ".github/actions/defaults-71-composite/action.yml": "a5572064b2460187243a39ec7ac62a1510373e30491a6ac15426407432122753",
+    ".github/workflows/defaults-run-live.yml": "b4146d336fef300a4b89b919445d979c1613574779ae15cbd5ada27b34e98d19"
+  }
+}
