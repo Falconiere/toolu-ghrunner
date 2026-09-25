@@ -1,23 +1,9 @@
-//! Single-flight action tarball prefetcher (S6).
+//! Per-job action prefetch and revision-qualified single-flight downloads.
 //!
-//! [`ActionFetcher`] dedupes concurrent downloads of the SAME remote action
-//! ref: the first `ensure` call for a given cache key runs the download, and
-//! any concurrent caller for that same key awaits the same in-flight
-//! attempt instead of starting a second one. [`spawn_prefetch`] kicks a
-//! background job-start prefetch of every distinct top-level remote `uses:`
-//! ref (bounded concurrency), so step-time resolution
-//! (`action_exec::resolve_remote_action`, which routes through the SAME
-//! fetcher) usually finds the tarball already on disk.
-//!
-//! Failure semantics (spec-pinned): a failed `ensure` call never sticks — the
-//! NEXT `ensure` for that key starts a fresh download instead of replaying the
-//! failure forever. That retry comes from `tokio::sync::OnceCell` itself,
-//! which leaves the cell UNINITIALIZED when `get_or_try_init` returns an
-//! error; the explicit eviction on the failure path is belt-and-braces that
-//! also drops the map slot for a key nothing may ask about again. A
-//! background prefetch's failure is WARN-logged and swallowed here — it never
-//! fails the job; step-time resolution simply retries what prefetch failed to
-//! fetch.
+//! Prefetch and step execution share one fetcher. Each resolves the action
+//! against the acquired job service; concurrent downloads of one revision
+//! join the same attempt. Failed prefetches are logged, then retried at step
+//! time without failing the job early.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -39,13 +25,8 @@ use crate::execution::action_exec::build_uses_ref;
 /// design spec: revisit only with evidence).
 const PREFETCH_CONCURRENCY: usize = 4;
 
-/// Single-flight download cache, keyed by the resolved action ref's
-/// `{owner}/{repo}/{ref}` cache key
-/// ([`super::resolver::ActionRef::cache_key`]). One instance is created per
-/// job ([`crate::execution::job_runner::run_job`]) and shared by the
-/// job-start prefetch and every step-time `uses:` resolution, so a step
-/// waiting on `ensure` joins a prefetch already in flight for the same ref
-/// instead of downloading it again.
+/// Per-job fetcher shared by prefetch and step execution, keyed by resolved
+/// action revision and API host.
 #[derive(Default)]
 pub struct ActionFetcher {
   inflight: Mutex<HashMap<String, Arc<OnceCell<PathBuf>>>>,
@@ -55,7 +36,7 @@ pub struct ActionFetcher {
 }
 
 impl ActionFetcher {
-  /// Create an empty fetcher (one per job).
+  /// Create an empty fetcher for direct archive tests and local-only jobs.
   #[must_use]
   pub fn new() -> Self {
     Self::default()
@@ -90,6 +71,23 @@ impl ActionFetcher {
     action: &ActionRef,
     data_dir: &Path,
   ) -> Result<PathBuf, RunnerError> {
+    for attempt in 0..2 {
+      let result = self.ensure_action_once(client, action, data_dir).await;
+      if attempt != 0 || !result.as_ref().is_err_and(archive_auth_error) {
+        return result;
+      }
+    }
+    Err(RunnerError::ActionDownload(
+      "archive credential refresh exhausted".to_owned(),
+    ))
+  }
+
+  async fn ensure_action_once(
+    &self,
+    client: &reqwest::Client,
+    action: &ActionRef,
+    data_dir: &Path,
+  ) -> Result<PathBuf, RunnerError> {
     let context = self.context.as_ref().ok_or_else(|| {
       RunnerError::ActionDownload("action fetcher has no acquired job".to_owned())
     })?;
@@ -102,13 +100,14 @@ impl ActionFetcher {
     let info = context.resolve_info(client, action, masker, cancel).await?;
     let dest = action_cache_dir(data_dir, &info.cache_key);
     let cell = self.cell_for(&info.cache_key);
-    let result = cell
-      .get_or_try_init(|| async {
+    let result = tokio::select! {
+      () = cancel.cancelled() => Err(RunnerError::ActionDownload("action download cancelled".to_owned())),
+      fetched = cell.get_or_try_init(|| async {
         download_and_extract_action(client, &info.tarball_url, info.token.as_deref(), &dest)
           .await?;
         Ok::<PathBuf, RunnerError>(dest)
-      })
-      .await;
+      }) => fetched,
+    };
     match result {
       Ok(path) => Ok(path.clone()),
       Err(error) => {
@@ -118,20 +117,8 @@ impl ActionFetcher {
     }
   }
 
-  /// Ensure the action at `cache_key` is downloaded and extracted, returning
-  /// its cache directory (`action_cache_dir(data_dir, cache_key)`); a no-op
-  /// if already cached (the watermark check inside
-  /// [`download_and_extract_action`]).
-  ///
-  /// The first caller for `cache_key` runs the download; a concurrent
-  /// `ensure` call for the same key awaits that same in-flight attempt
-  /// instead of starting a second one and gets back the same `PathBuf`. A
-  /// failed attempt is not cached: `OnceCell::get_or_try_init` leaves the
-  /// cell uninitialized on error, so the next `ensure` call — from prefetch
-  /// or from step-time resolution — retries fresh on its own; the [`evict`]
-  /// call on the error path only drops the now-pointless map slot.
-  ///
-  /// [`evict`]: Self::evict
+  /// Download a supplied archive URL once per key. Used by direct archive
+  /// callers; production remote `uses:` steps call [`Self::ensure_action`].
   ///
   /// # Errors
   ///
@@ -187,6 +174,14 @@ impl ActionFetcher {
       Err(poisoned) => poisoned.into_inner(),
     };
     guard.remove(cache_key);
+  }
+}
+
+fn archive_auth_error(error: &RunnerError) -> bool {
+  if let RunnerError::ActionDownload(message) = error {
+    message.starts_with("archive status 401") || message.starts_with("archive status 403")
+  } else {
+    false
   }
 }
 

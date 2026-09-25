@@ -37,6 +37,20 @@ fn captured_run_service_job_targets_the_launch_resolution_api() {
 }
 
 #[test]
+fn captured_job_rejects_an_unsafe_launch_credential_target() {
+  let mut raw: serde_json::Value =
+    serde_json::from_str(include_str!("defaults_run_job.json")).expect("captured job JSON");
+  let launch = raw
+    .get_mut("variables")
+    .and_then(|value| value.get_mut("system.github.launch_endpoint"))
+    .and_then(|value| value.get_mut("value"))
+    .expect("captured launch URL");
+  *launch = serde_json::json!("http://ghe.example.internal");
+  let msg: AgentJobRequestMessage = serde_json::from_value(raw).expect("boundary job");
+  assert!(ActionDownloadContext::from_message(&msg).is_err());
+}
+
+#[test]
 fn remote_ref_components_cannot_escape_archive_cache_or_rest_route() {
   for input in [
     "../checkout@v4",

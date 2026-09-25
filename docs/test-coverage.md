@@ -336,3 +336,26 @@ GitHub currently reports zero registered runners for this repository, so the
 GitHub.com UI, official-runner comparison, Linux host execution, and GHES
 lanes are **unverified**. Local replay on macOS ARM64 tests the execution and
 report serialization paths, but does not claim remote acceptance.
+
+## Authenticated action downloads (#76)
+
+The acquired job fixture `crates/execution/tests/defaults_run_job.json` came
+from [GitHub.com run 36091513712](https://github.com/Falconiere/toolu-ghrunner/actions/runs/36091513712).
+Its Launch URL, API host, plan and job identifiers, action ref, and sanitized
+tokens drive `crates/execution/tests/action_downloads_test.rs`. The
+[pinned runner source](https://github.com/actions/runner/blob/cab9d1c3901e45c7705889c4f88284fdd93f4ae5/src/Runner.Worker/ActionManager.cs)
+provides the Launch and legacy GHES request contracts. The same fixture's
+provenance and hash are in `crates/execution/tests/defaults_run_evidence.json`.
+
+| Scenario | Current evidence | Evidence still needed |
+| --- | --- | --- |
+| 76-S1 | The captured `actions/checkout@v4` job selects its exact Launch path and sends `{action,version}`. Production prefetch and step execution share the acquired-job resolver and a revision-qualified cache. | A sanitized real Launch response and public/private/internal SHA, tag, branch, subpath, and local-action live runs. |
+| 76-S2 | A capture-derived host variant selects its GHES API URL; legacy discovery uses the action-download resource from connection data. | A real GHES and GitHub Connect job, including the returned cross-host archive URL, plus an older-server fallback run. |
+| 76-S3 | Local HTTP failure and redirect probes check 401/403 propagation, Basic archive auth on the source origin, and no auth at a different origin. | Live token expiry, rate limiting, transient failure, retry, and durable log redaction observations. |
+| 76-S4 | Existing downloader tests cover streaming extraction, corrupt archive cleanup and concurrent staging; the new parser rejects traversal and the fetcher keys by resolved SHA. | Live moved-ref, cancellation, and same-revision concurrent execution observations. |
+
+Run `cargo test -p execution --test action_downloads_test` and
+`./tools/check.sh all`. Local newly built test binaries on the development
+macOS host have stalled in `_dyld_start` before Rust code executes. The
+GitHub Linux `ci` and `ci-macos` PR checks are the authorized gate evidence
+for this branch. The missing live lanes above remain **unverified**.

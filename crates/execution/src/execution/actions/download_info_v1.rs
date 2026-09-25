@@ -91,6 +91,18 @@ impl LegacyContext {
   ) -> Result<Option<Url>, RunnerError> {
     let base = Url::parse(&self.base_url)
       .map_err(|_error| RunnerError::ActionDownload("legacy service URL invalid".to_owned()))?;
+    let loopback = matches!(base.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
+    if (base.scheme() != "https" && !(base.scheme() == "http" && loopback))
+      || base.host_str().is_none()
+      || !base.username().is_empty()
+      || base.password().is_some()
+      || base.query().is_some()
+      || base.fragment().is_some()
+    {
+      return Err(RunnerError::ActionDownload(
+        "legacy service URL invalid".to_owned(),
+      ));
+    }
     let discovery_url = format!(
       "{}/_apis/connectionData",
       self.base_url.trim_end_matches('/')
