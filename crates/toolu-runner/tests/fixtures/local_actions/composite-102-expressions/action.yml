@@ -1,0 +1,23 @@
+name: composite-102-expressions
+inputs:
+  who:
+    description: Person to greet
+    required: true
+outputs:
+  result:
+    description: Rendered expression result
+    value: "${{ format('{0}/{1}', inputs.who, steps.first.outputs.answer) }}"
+runs:
+  using: composite
+  steps:
+    - id: first
+      run: echo 'answer=42' >> "$GITHUB_OUTPUT"
+      shell: "${{ format('{0}', 'bash') }}"
+    - id: second
+      if: "${{ contains(github['repository'], 'toolu-ghrunner') && steps.first.outputs.answer == '42' }}"
+      env:
+        COMPUTED: "${{ format('hello {0}', inputs['who']) }}"
+      run: |
+        test "$COMPUTED" = 'hello world'
+        printf '%s' "${{ format('hello {0}', inputs['who']) }}" > "$GITHUB_WORKSPACE/composite-102-expressions.out"
+      shell: bash

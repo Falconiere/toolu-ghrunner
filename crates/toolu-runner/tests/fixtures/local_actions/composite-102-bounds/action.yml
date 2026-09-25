@@ -1,0 +1,24 @@
+name: composite-102-bounds
+description: A real child process for parent timeout and cancellation checks.
+runs:
+  using: composite
+  steps:
+    - id: sleeper
+      shell: bash
+      run: |
+        echo started > "$GITHUB_WORKSPACE/composite-102-bounds.started"
+        echo $$ > "$GITHUB_WORKSPACE/composite-102-bounds.pid"
+        sleep 5 &
+        sleeper=$!
+        echo "$sleeper" > "$GITHUB_WORKSPACE/composite-102-bounds.sleep-pid"
+        wait "$sleeper"
+        echo late > "$GITHUB_WORKSPACE/composite-102-bounds.late"
+    - id: ordinary
+      shell: bash
+      run: echo ordinary > "$GITHUB_WORKSPACE/composite-102-bounds.ordinary"
+    - id: cleanup
+      if: always()
+      shell: bash
+      run: |
+        echo cleanup > "$GITHUB_WORKSPACE/composite-102-bounds.cleanup"
+        exit 1

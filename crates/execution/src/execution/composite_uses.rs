@@ -15,10 +15,12 @@ use shared::{
   RunnerEvent, TemplateToken,
 };
 use tokio::sync::mpsc;
+use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use super::actions::manifest::CompositeStep;
 use super::actions::prefetch::ActionFetcher;
+use super::composite_expr::{CompositeField, composite_eval_context, interpolate_composite_expr};
 use super::context::ExecutionContext;
 use super::depth_tracker::DepthTracker;
 use super::step_timeout::StepBounds;
@@ -31,8 +33,6 @@ pub struct NestedUsesParams<'a> {
   pub idx: usize,
   /// The composite's resolved inputs (for `${{ inputs.X }}` in `with:`).
   pub inputs: &'a HashMap<String, String>,
-  /// Outputs of earlier composite steps (for `${{ steps.X.outputs.Y }}`).
-  pub step_outputs: &'a HashMap<String, HashMap<String, String>>,
   /// Live execution context (env, secrets, masking).
   pub ctx: &'a mut ExecutionContext,
   /// Event sink.
@@ -45,6 +45,8 @@ pub struct NestedUsesParams<'a> {
   pub depth: &'a mut DepthTracker,
   /// Job-level cancellation token; nested actions must stop on SIGINT/SIGTERM.
   pub cancel: &'a CancellationToken,
+  /// Fixed enclosing step deadline.
+  pub deadline: Option<Instant>,
   /// The job-scope HTTP client, reused for the nested action's resolution.
   pub http: &'a reqwest::Client,
   /// The job-scope single-flight action fetcher — the nested action's
@@ -62,43 +64,34 @@ pub struct NestedUsesParams<'a> {
 
 /// Resolve and run a composite `uses:` step recursively.
 ///
-/// Honors the step's `if` (via `should_skip`), `with:` (as the nested action's
-/// inputs), per-step `env`, and `id`. Returns the nested action's conclusion;
-/// `Success` when skipped by `if`.
+/// The composite loop evaluates `if` before calling this function. Render
+/// `with:` and step-local `env`, dispatch the nested action, and register its
+/// post stage under the action instance's saved scope.
 ///
 /// # Errors
 ///
 /// Returns `RunnerError` if the nested action fails to resolve or execute.
 pub async fn run_nested_uses_step(
   params: NestedUsesParams<'_>,
-  should_skip: bool,
 ) -> Result<(Conclusion, HashMap<String, String>), RunnerError> {
-  if should_skip {
-    record_skipped_nested(params.ctx, params.step);
-    return Ok((Conclusion::Success, HashMap::new()));
-  }
-
   let Some(uses) = params.step.uses.as_deref() else {
     return Ok((Conclusion::Success, HashMap::new()));
   };
 
-  let synthetic = build_nested_step(
-    params.step,
-    params.idx,
-    uses,
-    params.inputs,
-    params.step_outputs,
-    params.ctx,
-  )?;
+  let synthetic = build_nested_step(params.step, params.idx, uses, params.inputs, params.ctx)?;
 
-  // Per-step `env` is applied to the live context for the nested action's run.
-  apply_nested_env(params.ctx, &params.step.env);
+  let step_env = render_nested_env(params.step, params.inputs, params.ctx)?;
+  params.ctx.push_step_env(step_env);
 
   // Recursive call: a nested composite re-enters `execute_action`, which
   // enters the depth tracker again, so the chain is bounded by `MAX_COMPOSITE_DEPTH`.
   // The nested step's own `timeout-minutes` bounds its node children; the job
   // cancel token is shared so a top-level cancel kills the nested action too.
-  let bounds = StepBounds::new(synthetic.timeout_in_minutes, params.cancel.clone());
+  let bounds = StepBounds::nested(
+    params.deadline,
+    synthetic.timeout_in_minutes,
+    params.cancel.clone(),
+  );
   let run = super::action_exec::ActionRun {
     events: params.events,
     workspace: params.workspace,
@@ -114,27 +107,31 @@ pub async fn run_nested_uses_step(
     &run,
     params.depth,
   ))
-  .await?;
+  .await;
+  params.ctx.pop_step_env();
+  let outcome = outcome?;
 
   record_nested_result(params.ctx, &synthetic, &outcome);
+  if let Some(post) = outcome.post {
+    params.ctx.register_nested_post(post);
+  }
   Ok((outcome.conclusion, outcome.outputs))
 }
 
-fn apply_nested_env(ctx: &mut ExecutionContext, env: &HashMap<String, String>) {
-  for (key, value) in env {
-    ctx.set_env(key, value);
-  }
-}
-
-fn record_skipped_nested(ctx: &mut ExecutionContext, step: &CompositeStep) {
-  if let Some(name) = step
-    .id
-    .as_deref()
-    .filter(|name| !name.is_empty() && !name.starts_with("__"))
-  {
-    ctx.set_step_outcome(name, Conclusion::Skipped);
-    ctx.set_step_conclusion(name, Conclusion::Skipped);
-  }
+fn render_nested_env(
+  step: &CompositeStep,
+  inputs: &HashMap<String, String>,
+  ctx: &ExecutionContext,
+) -> Result<HashMap<String, String>, RunnerError> {
+  let eval_ctx = composite_eval_context(ctx, inputs, None);
+  step
+    .env
+    .iter()
+    .map(|(key, value)| {
+      interpolate_composite_expr(value, &eval_ctx, CompositeField::Env)
+        .map(|rendered| (key.clone(), rendered))
+    })
+    .collect()
 }
 
 fn record_nested_result(
@@ -166,7 +163,6 @@ fn build_nested_step(
   idx: usize,
   uses: &str,
   inputs: &HashMap<String, String>,
-  step_outputs: &HashMap<String, HashMap<String, String>>,
   ctx: &ExecutionContext,
 ) -> Result<ActionStep, RunnerError> {
   let id = step
@@ -177,7 +173,7 @@ fn build_nested_step(
   let action_ref = super::actions::resolver::parse_action_ref(uses)?;
   let (name, git_ref) = nested_ref_parts(&action_ref);
 
-  let inputs_token = build_inputs_token(&step.with, inputs, step_outputs, ctx);
+  let inputs_token = build_inputs_token(&step.with, inputs, ctx)?;
 
   Ok(ActionStep {
     id,
@@ -223,31 +219,25 @@ fn nested_ref_parts(action_ref: &super::actions::resolver::ActionRef) -> (String
 fn build_inputs_token(
   with: &HashMap<String, String>,
   inputs: &HashMap<String, String>,
-  step_outputs: &HashMap<String, HashMap<String, String>>,
   ctx: &ExecutionContext,
-) -> TemplateToken {
+) -> Result<TemplateToken, RunnerError> {
+  let eval_ctx = composite_eval_context(ctx, inputs, None);
   let entries: Vec<DictEntry<TemplateToken>> = with
     .iter()
     .map(|(k, v)| {
-      let value = super::composite_expr::interpolate_composite_expr(
-        v,
-        inputs,
-        step_outputs,
-        &HashMap::new(),
-        ctx,
-      );
-      DictEntry {
+      let value = interpolate_composite_expr(v, &eval_ctx, CompositeField::Step)?;
+      Ok(DictEntry {
         key: literal_token(k),
         value: literal_token(&value),
-      }
+      })
     })
-    .collect();
+    .collect::<Result<_, RunnerError>>()?;
 
-  TemplateToken {
+  Ok(TemplateToken {
     token_type: 2,
     d: Some(entries),
     ..TemplateToken::default()
-  }
+  })
 }
 
 /// A type-0 literal string template token.

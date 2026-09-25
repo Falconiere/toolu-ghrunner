@@ -1,0 +1,53 @@
+{
+  "issue": 102,
+  "reference_source": "cab9d1c3901e45c7705889c4f88284fdd93f4ae5",
+  "capture": {
+    "path": "crates/execution/tests/incoming_contexts_matrix_0.json",
+    "sha256": "3e1728e44d095f07a07b1d54bfa7bbc2ab75b4866cb1a57e032106061c83e1b5",
+    "job_id": "af60f1ed-e283-516c-8d88-01cc3ee1c589",
+    "run_id": 36038637634,
+    "parent_step_id": "f8bcd552-f40d-4cdc-94de-8f9fbf4dd191"
+  },
+  "files_sha256": {
+    ".github/workflows/composite-semantics-102.yml": "c8c164c4d1fb10ec073613d9aa46c9cc79aac40984e67fe248ce22a5cce0264b",
+    "crates/execution/tests/composite_semantics_test.rs": "aba93086962d361ad93824783e38c5c7fe23e7a30335380cc6081d9ae28cfa1f",
+    "crates/execution/tests/composite_bounds_test.rs": "f1c44f804a1a77b636bed7e30213521d476616d8f5a061dff2df04c8a7457ca9",
+    "crates/toolu-runner/tests/fixtures/local_actions/composite-102-bad-if/action.yml": "3252004996275402663354bc6bbf3ab82f083f032fd7fed8ce1052bf9b0521da",
+    "crates/toolu-runner/tests/fixtures/local_actions/composite-102-bounds/action.yml": "c008ec9a0138bd503edc9284e24cffd22600054f27bb695333846c28085893ae",
+    "crates/toolu-runner/tests/fixtures/local_actions/composite-102-continue/action.yml": "610d8f04f932b5f8a92d784eed3ded1055de7f9dc396a6c9078edd50661e1f16",
+    "crates/toolu-runner/tests/fixtures/local_actions/composite-102-expressions/action.yml": "68bbfff20a066c1f4fdd5fb257e1f4ec1aec8aec1bf2b9de6dc052568aac6651",
+    "crates/toolu-runner/tests/fixtures/local_actions/composite-102-failure/action.yml": "45ce786dda974a850ff2b4ef309fe7307b155b9a1ee1a7988cd93605c2e68a3b",
+    "crates/toolu-runner/tests/fixtures/local_actions/composite-102-file-commands/action.yml": "588b8613327a3bb3a3481a8afbdc3af71330e1cdc946fa720a6571cef909199c",
+    "crates/toolu-runner/tests/fixtures/local_actions/composite-102-forbidden/action.yml": "cd9a3f1afa5ed3fa352f27a5bc192158728884be7d21644786e488b691c3492a",
+    "crates/toolu-runner/tests/fixtures/local_actions/composite-102-hard-error/action.yml": "569fcfa803f87e0084f09d606b83d02137b41c3f95c3bea9e578a786034e7c75",
+    "crates/toolu-runner/tests/fixtures/local_actions/composite-102-malformed/action.yml": "e83111a36f586875e377fbab75f87442ea288f6239e6dfed76154cce2e159bd8",
+    "crates/toolu-runner/tests/fixtures/local_actions/composite-102-nested/action.yml": "1d4da8a2c7135672cb3344208237e7018e45713454f099919bb98c66f34741fa",
+    "crates/toolu-runner/tests/fixtures/local_actions/composite-102-parent/action.yml": "81028d3df100868fd3f7954158c7721f2ef7be0f824740cf6cae441da1dbcbe8",
+    "crates/toolu-runner/tests/fixtures/local_actions/composite-102-post-status/action.yml": "18aab7e31e35ce947580dababd5ddce5983f3d7ab49d8ec166fb806cc95a66e6",
+    "crates/toolu-runner/tests/fixtures/local_actions/node-102-post-failure/action.yml": "959ebe90e1f446f6a204952fbba024bf9a4ef692e88ba34c9d90e9431f911c85",
+    "crates/toolu-runner/tests/fixtures/local_actions/node-102-post-failure/main.js": "41e4e34338c55b79267e17276d772a152b699569f6341c3e9f6fff88f7474573",
+    "crates/toolu-runner/tests/fixtures/local_actions/node-102-post-failure/post.js": "19784154551a116f61250e512f7f5d1fd9ecaa3e2ce3208efac40b548ad75e83",
+    "crates/toolu-runner/tests/fixtures/local_actions/node-102-state/action.yml": "2fb6d1c8ad78912f29220d4b1a6358cb04ec7921c777a19227f77055c7387bd4",
+    "crates/toolu-runner/tests/fixtures/local_actions/node-102-state/main.js": "d8a1de21ed1ac03b1c6848baf87637cb1c20dc2d7b94b071ed923d26fc646a0d",
+    "crates/toolu-runner/tests/fixtures/local_actions/node-102-state/post.js": "19784154551a116f61250e512f7f5d1fd9ecaa3e2ce3208efac40b548ad75e83",
+    "crates/toolu-runner/tests/fixtures/local_actions/node-102-state/pre.js": "e4fa288e036dca6539a9a78075d44070690d870e34d6f01d2fa8405693e60462"
+  },
+  "runs": {
+    "toolu-macos": null,
+    "reference-macos": null,
+    "reference-linux": null
+  },
+  "unverified": {
+    "toolu-macos": "No self-hosted runner is registered for the repository yet.",
+    "reference-macos": "Committed workflow has not run on macos-15 yet.",
+    "reference-linux": "Committed workflow has not run on ubuntu-24.04 yet.",
+    "ghes": "No GHES instance or credentials are available in this worker environment.",
+    "composite-working-directory": "Issue #81 still owns composite working-directory parsing and resolution and is open."
+  },
+  "local": {
+    "host": "macOS ARM64",
+    "backend": "sanitized GitHub.com acquisition replay",
+    "command": "./tools/check.sh all",
+    "status": "./tools/check.sh all passed on the scoped composite implementation and regression tests"
+  }
+}

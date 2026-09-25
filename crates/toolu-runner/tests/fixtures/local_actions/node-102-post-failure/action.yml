@@ -1,0 +1,11 @@
+name: node-102-post-failure
+description: A real Node post stage gated by the final job status.
+inputs:
+  who:
+    description: Instance name.
+    required: true
+runs:
+  using: node20
+  main: main.js
+  post: post.js
+  post-if: failure()

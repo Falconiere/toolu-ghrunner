@@ -312,11 +312,9 @@ macOS ARM64, with local action files preseeded at its captured workspace path.
 They preserve the captured job IDs, context names and wire token types; the
 action paths and manifest defaults are labelled test transformations.
 
-The repeated-instance check covers two top-level local actions. Nested Node
-post registration is still unverified because `composite_uses` currently drops
-the nested `ActionOutcome.post`; #102 explicitly owns nested pre/post
-registration. This #101 branch leaves that composite execution path to #102
-and must be replayed against its merged change before closing nested S4.
+The #101 repeated-instance check covers two top-level local actions. Issue
+#102 adds a captured-job replay with nested Node pre/main/post stages and
+checks LIFO order, distinct report IDs, and instance-private `STATE_*` values.
 The cancellation process test starts a slow post, cancels after its observed
 start marker, checks a second slow `cancelled()` post runs, and verifies the
 first process produces no late marker. The multi-slow-post expiry case is
@@ -359,3 +357,36 @@ Run `cargo test -p execution --test action_downloads_test` and
 macOS host have stalled in `_dyld_start` before Rust code executes. The
 GitHub Linux `ci` and `ci-macos` PR checks are the authorized gate evidence
 for this branch. The missing live lanes above remain **unverified**.
+
+## Composite expression and scope parity (#102)
+
+`crates/execution/tests/composite_semantics_test.rs` replays the sanitized real
+#68 GitHub.com acquisition through `Runner::execute_job`. Its parent wire ID,
+`contextName`, and type-3 `with.who` expression token are preserved; the local
+action path and optional final script body are the labelled test
+transformations. The checked-in `composite-102-*` and `node-102-*` actions run
+real Bash and Node stages. `composite_bounds_test.rs` invokes the production
+composite executor with the committed sleeper action and a short fixed
+deadline. The capture and all fixture hashes are checked by
+`python3 scripts/test/composite_semantics_evidence_check.py crates/execution/tests/composite_semantics_evidence.json`.
+
+| AC / scenario | Exact expected observation | Test / runnable check | Current evidence |
+| --- | --- | --- | --- |
+| AC-1 / S1 | `format`, `contains`, bracket access, shell expression, `github.action_path` in step `env`, and output mapping produce `hello world`, `world/42`; malformed syntax and forbidden `secrets.*` emit a parent error instead of an empty string. | `expressions_render_functions_brackets_conditions_and_outputs`, `malformed_run_expression_fails_step_then_runs_cleanup`, `forbidden_context_fails_visibly_then_runs_cleanup`; `cargo test -p execution --test composite_semantics_test` | Captured-job macOS replay passes; expression-valued composite cwd awaits #81. |
+| AC-2 / S2, S4 | Exit 1 without continuation writes `fail`, `failure-cleanup`, `always-cleanup` and ends Failure. With continuation it writes `fail`, `ordinary`, `always-cleanup`, exposes `failure/success` and ends Success. A malformed `if` stops the loop; a hard nested error runs cleanup with a parent-scoped `##[error]`. | `conditions_run_failure_and_always_cleanup_after_inner_exit_one`, `continue_on_error_keeps_raw_failure_and_runs_ordinary_and_always`, `hard_nested_error_keeps_parent_attribution_and_runs_failure_cleanup`, `malformed_if_expression_stops_composite_loop`; same test binary | Captured-job macOS replay passes; GitHub UI pending. |
+| AC-3 / S3 | Reusing child input/step names exports `world-one/world-two`; parent still reads `world/success/success/` with no child `steps.first` leakage. Nested and parent `github.action_path` each match their own action directory. | `nested_repeated_names_keep_distinct_inputs_and_outputs`; same test binary | Captured-job macOS replay passes. |
+| AC-4 / S5 | `GITHUB_ENV` and `GITHUB_PATH` reach later inner and outer steps; `LOCAL_ONLY` does not. Only declared output `result=42` escapes. Two nested Node posts log `STATE_POST=two`, then `STATE_POST=one`, under distinct successful report IDs. A nested `post-if: failure()` sees a later global job failure. | `file_commands_step_env_and_nested_posts_are_scoped`, `nested_post_if_failure_sees_later_global_job_failure`; same test binary | Real Bash/Node macOS replay passes; remote post records pending. |
+| AC-5 / S4, S5 | An observed-start cancellation returns Cancelled, skips ordinary work, writes `always()` cleanup, and never writes `late`. A short parent deadline returns Failure and prevents `late`/ordinary work. On both paths the Bash and descendant `sleep` PIDs are no longer live; inner logs and hard errors use the captured parent ID. | `observed_start_cancel_kills_child_and_runs_always_cleanup`, `parent_deadline_kills_real_composite_child_without_late_work`, `conditions_run_failure_and_always_cleanup_after_inner_exit_one`; `cargo test -p execution --test composite_semantics_test && cargo test -p execution --test composite_bounds_test` | Captured-job cancel plus real short-deadline subprocess pass locally; composite cwd awaits #81. |
+
+The committed [parity workflow](../.github/workflows/composite-semantics-102.yml)
+runs identical action files on macOS toolu and GitHub-hosted macOS/Linux lanes.
+`--require-live` on the evidence checker refuses to call missing runs passing.
+GitHub currently reports zero registered self-hosted runners; its toolu lane,
+both hosted reference runs, remote log/timeline verification, and GHES are
+**unverified** until run URLs and runner identities are recorded in the
+evidence JSON. GitHub-hosted runners may differ from the source pin
+`cab9d1c3901e45c7705889c4f88284fdd93f4ae5`; their actual binary version
+must be recorded before claiming pinned-reference parity. A Linux toolu host
+and a GHES server are unavailable here, so those applicable lanes are also
+**unverified**. Issue #81 remains open and owns composite cwd parsing and
+resolution; #102 must consume and test its expression site after it lands.

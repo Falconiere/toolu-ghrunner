@@ -23,6 +23,10 @@ use super::step_naming::derive_step_name;
 use super::step_timeout::StepBounds;
 use expressions::evaluator::EvalContext;
 
+#[path = "step_errors.rs"]
+mod step_errors;
+use step_errors::report_step_failure;
+
 // Re-export post-step types so callers don't need to change imports.
 pub use super::step_naming::{PostStep, PostStepQueue};
 
@@ -318,11 +322,15 @@ async fn execute_step(
       fetcher: job.fetcher,
       log_step_id: &step.id,
     };
+    let action_result = execute_action(step, ctx, &run, &mut job_state.depth).await;
+    for nested_post in ctx.take_nested_posts() {
+      job_state.posts.register(nested_post);
+    }
     let ActionOutcome {
       conclusion,
       post,
       outputs,
-    } = execute_action(step, ctx, &run, &mut job_state.depth).await?;
+    } = action_result?;
     if let Some(name) = step.expression_name() {
       for (key, value) in &outputs {
         ctx.set_step_output(name, key, value);
@@ -421,7 +429,7 @@ async fn run_script_step(
     working_dir: &working_dir,
     step_id: &step.id,
     cgroup_path: cgroup.as_deref(),
-    timeout: bounds.timeout,
+    timeout: bounds.remaining_timeout(),
     cancel: &bounds.cancel,
   };
 
@@ -531,8 +539,14 @@ async fn merge_step_outputs(
   file_cmds: &FileCommandManager,
   ctx: &mut ExecutionContext,
 ) -> HashMap<String, String> {
-  apply_file_commands_and_merge_outputs(step.expression_name(), stdout_outputs, file_cmds, ctx)
-    .await
+  apply_file_commands_and_merge_outputs(
+    step.expression_name(),
+    None,
+    stdout_outputs,
+    file_cmds,
+    ctx,
+  )
+  .await
 }
 
 /// Build the step's env map (global + step env + file-command paths + inherited
@@ -615,44 +629,6 @@ fn apply_continue_on_error(
     ctx.record_step_failure();
   }
   outcome
-}
-
-/// Report a step that died mid-execution: its `##[error]` line, then a
-/// failing `StepCompleted`, in that order — the listener's `forward_log_line`
-/// only forwards a `Log` to the step's uploader while `step_id` matches, and
-/// it flushes/removes that uploader on `StepCompleted`, so a `Log` sent after
-/// would never reach GitHub. Direct sends rather than `emit_log`: these are
-/// the dead step's only diagnostics, so a closed channel is worth a warn —
-/// the job-fatal arm in `lib.rs` makes the same trade.
-async fn report_step_failure(events: &mpsc::Sender<RunnerEvent>, step_id: &str, err: &RunnerError) {
-  if events
-    .send(RunnerEvent::Log {
-      step_id: step_id.to_owned(),
-      line: format!("##[error]{err}"),
-      stream: LogStream::Stdout,
-    })
-    .await
-    .is_err()
-  {
-    tracing::warn!(
-      step_id,
-      "event channel closed; step-failure log line was dropped"
-    );
-  }
-  if events
-    .send(RunnerEvent::StepCompleted {
-      step_id: step_id.to_owned(),
-      conclusion: Conclusion::Failure,
-      outputs: HashMap::new(),
-    })
-    .await
-    .is_err()
-  {
-    tracing::warn!(
-      step_id,
-      "event channel closed; step-failure completion event was dropped"
-    );
-  }
 }
 
 async fn emit_log(events: &mpsc::Sender<RunnerEvent>, step_id: &str, line: &str) {

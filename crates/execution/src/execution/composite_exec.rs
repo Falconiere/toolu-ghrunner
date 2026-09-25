@@ -6,15 +6,19 @@
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::time::Duration;
 
+use expressions::evaluator::JobStatus;
 use shared::{Conclusion, LogStream, RunnerError, RunnerEvent};
 use tokio::sync::mpsc;
+use tokio::time::Instant;
+use tokio_util::sync::CancellationToken;
 
 pub use super::composite_env::{CompositeParams, CompositeResult};
-use super::composite_env::{
-  build_step_env, create_file_command_files, process_file_commands, should_skip_step,
+use super::composite_env::{build_step_env, create_file_command_files, process_file_commands};
+use super::composite_expr::{
+  CompositeField, composite_eval_context, evaluate_composite_condition, interpolate_composite_expr,
 };
-use super::composite_expr::interpolate_composite_expr;
 use super::composite_shell::{ShellScriptParams, run_shell_script};
 use super::composite_uses::{NestedUsesParams, run_nested_uses_step};
 use super::context::ExecutionContext;
@@ -43,48 +47,91 @@ pub async fn execute_composite_action(
     ctx,
     temp_dir: &temp_dir,
     state: &mut state,
+    cleanup_token: None,
+    cleanup_deadline: None,
   };
 
-  for (idx, step) in params.manifest.runs.steps.iter().enumerate() {
-    let Some(conclusion) = run_one_step(&mut run, step, idx, depth).await else {
-      continue;
-    };
-
-    if conclusion == Conclusion::Failure && !step.continue_on_error {
-      return Ok(run.state.result(Conclusion::Failure, params, run.ctx));
-    }
-    // A cancelled nested step means the job cancel token fired: stop the
-    // composite and surface `Cancelled` so the parent stops too.
-    if conclusion == Conclusion::Cancelled {
-      return Ok(run.state.result(Conclusion::Cancelled, params, run.ctx));
-    }
-  }
-
-  Ok(run.state.result(Conclusion::Success, params, run.ctx))
+  let aggregate = run_composite_steps(&mut run, depth).await;
+  run.state.result(aggregate, params, run.ctx)
 }
 
-/// Dispatch one composite step (`uses:` or `run:`) and return its
-/// conclusion; `None` when `if:` skips it or it is neither kind.
+async fn run_composite_steps(run: &mut CompositeRun<'_>, depth: &mut DepthTracker) -> Conclusion {
+  let mut aggregate = Conclusion::Success;
+  for (idx, step) in run.params.manifest.runs.steps.iter().enumerate() {
+    let eval_ctx = composite_eval_context(run.ctx, run.params.step_inputs, None);
+    match evaluate_composite_condition(step.condition.as_deref(), &eval_ctx) {
+      Ok(false) => {
+        record_inner_result(run.ctx, step, Conclusion::Skipped, Conclusion::Skipped);
+        continue;
+      },
+      Err(err) => {
+        report_composite_step_error(run.params.events, run.params.parent_step_id, &err).await;
+        record_inner_result(run.ctx, step, Conclusion::Failure, Conclusion::Failure);
+        if aggregate != Conclusion::Cancelled {
+          aggregate = Conclusion::Failure;
+        }
+        break;
+      },
+      Ok(true) => {},
+    }
+    let Some(outcome) = run_one_step(run, step, idx, depth).await else {
+      continue;
+    };
+    let conclusion = if outcome == Conclusion::Failure && step.continue_on_error {
+      Conclusion::Success
+    } else {
+      outcome
+    };
+    record_inner_result(run.ctx, step, outcome, conclusion);
+    if conclusion == Conclusion::Failure {
+      if aggregate != Conclusion::Cancelled {
+        aggregate = Conclusion::Failure;
+        run.ctx.set_scope_status(JobStatus::Failure);
+      }
+    } else if conclusion == Conclusion::Cancelled {
+      aggregate = Conclusion::Cancelled;
+      run.ctx.set_scope_status(JobStatus::Cancelled);
+      run.cleanup_token = Some(CancellationToken::new());
+      run.cleanup_deadline = Some(
+        run
+          .params
+          .deadline
+          .unwrap_or_else(|| Instant::now() + Duration::from_secs(300)),
+      );
+    }
+  }
+  aggregate
+}
+
+fn record_inner_result(
+  ctx: &mut ExecutionContext,
+  step: &super::actions::manifest::CompositeStep,
+  outcome: Conclusion,
+  conclusion: Conclusion,
+) {
+  if let Some(name) = step.id.as_deref().filter(|name| !name.is_empty()) {
+    ctx.set_step_outcome(name, outcome);
+    ctx.set_step_conclusion(name, conclusion);
+  }
+}
+
+/// Dispatch one eligible composite step; `None` when it has no run or uses body.
 async fn run_one_step(
   run: &mut CompositeRun<'_>,
   step: &super::actions::manifest::CompositeStep,
   idx: usize,
   depth: &mut DepthTracker,
 ) -> Option<Conclusion> {
-  let skip = should_skip_step(step);
   let params = run.params;
 
   if step.uses.is_some() {
-    match run_uses_step(run, step, idx, depth, skip).await {
+    match run_uses_step(run, step, idx, depth).await {
       Ok(c) => Some(c),
       Err(err) => {
         Some(report_composite_step_error(params.events, params.parent_step_id, &err).await)
       },
     }
   } else if let Some(script) = &step.run {
-    if skip {
-      return None;
-    }
     match run_run_step(run, step, idx, script).await {
       Ok(c) => Some(c),
       Err(err) => {
@@ -110,6 +157,21 @@ struct CompositeRun<'a> {
   ctx: &'a mut ExecutionContext,
   temp_dir: &'a Path,
   state: &'a mut CompositeState,
+  cleanup_token: Option<CancellationToken>,
+  cleanup_deadline: Option<Instant>,
+}
+
+impl CompositeRun<'_> {
+  fn active_cancel(&self) -> CancellationToken {
+    self
+      .cleanup_token
+      .clone()
+      .unwrap_or_else(|| self.params.cancel.clone())
+  }
+
+  fn active_deadline(&self) -> Option<Instant> {
+    self.cleanup_deadline.or(self.params.deadline)
+  }
 }
 
 /// Mutable state threaded across composite steps: per-step outputs and the
@@ -127,32 +189,23 @@ impl CompositeState {
     conclusion: Conclusion,
     params: &CompositeParams<'_>,
     ctx: &ExecutionContext,
-  ) -> CompositeResult {
-    let outputs = params
-      .manifest
-      .outputs
-      .iter()
-      .filter_map(|(name, output)| {
-        output.value.as_ref().map(|value| {
-          (
-            name.clone(),
-            interpolate_composite_expr(
-              value,
-              params.step_inputs,
-              &self.step_outputs,
-              &self.extra_env,
-              ctx,
-            ),
-          )
-        })
-      })
-      .collect();
-    CompositeResult {
+  ) -> Result<CompositeResult, RunnerError> {
+    let eval_ctx = composite_eval_context(ctx, params.step_inputs, None);
+    let mut outputs = HashMap::new();
+    for (name, output) in &params.manifest.outputs {
+      if let Some(value) = &output.value {
+        outputs.insert(
+          name.clone(),
+          interpolate_composite_expr(value, &eval_ctx, CompositeField::Output)?,
+        );
+      }
+    }
+    Ok(CompositeResult {
       conclusion,
       outputs,
       env_additions: self.extra_env.clone(),
       path_additions: self.path_additions.clone(),
-    }
+    })
   }
 }
 
@@ -180,18 +233,18 @@ async fn run_run_step(
     step,
     &run.state.extra_env,
     &run.state.path_additions,
-  );
+  )?;
   let file_paths = create_file_command_files(run.temp_dir, &step_id)?;
   let full_env = merge_file_command_env(&env, &file_paths);
 
-  let interpolated = interpolate_composite_expr(
-    script,
-    params.step_inputs,
-    &run.state.step_outputs,
-    &env,
-    run.ctx,
-  );
-  let conclusion = run_step_shell(params, run.ctx, step, &interpolated, &full_env).await?;
+  let eval_ctx = composite_eval_context(run.ctx, params.step_inputs, Some(&env));
+  let interpolated = interpolate_composite_expr(script, &eval_ctx, CompositeField::Step)?;
+  let shell = interpolate_composite_expr(
+    step.shell.as_deref().unwrap_or("bash"),
+    &eval_ctx,
+    CompositeField::Step,
+  )?;
+  let conclusion = run_step_shell(run, &shell, &interpolated, &full_env).await?;
 
   emit_log(params.events, params.parent_step_id, "##[endgroup]").await;
   process_file_commands(
@@ -201,8 +254,20 @@ async fn run_run_step(
     &mut run.state.extra_env,
     &mut run.state.path_additions,
   );
+  apply_run_file_commands(run, &step_id);
 
   Ok(conclusion)
+}
+
+fn apply_run_file_commands(run: &mut CompositeRun<'_>, step_id: &str) {
+  if let Some(outputs) = run.state.step_outputs.get(step_id) {
+    for (key, value) in outputs {
+      run.ctx.set_step_output(step_id, key, value);
+    }
+  }
+  for (key, value) in &run.state.extra_env {
+    run.ctx.set_env(key, value);
+  }
 }
 
 /// Append `##[group]Run {name}` for a composite step.
@@ -212,20 +277,24 @@ async fn emit_run_group(events: &mpsc::Sender<RunnerEvent>, parent_step_id: &str
 
 /// Spawn the shell subprocess for a composite `run:` step.
 async fn run_step_shell(
-  params: &CompositeParams<'_>,
-  ctx: &ExecutionContext,
-  step: &super::actions::manifest::CompositeStep,
+  run: &CompositeRun<'_>,
+  shell: &str,
   script: &str,
   env: &HashMap<String, String>,
 ) -> Result<Conclusion, RunnerError> {
-  let shell = step.shell.as_deref().unwrap_or("bash");
+  let params = run.params;
+  let cancel = run.active_cancel();
   let shell_params = ShellScriptParams {
     shell,
     script,
     env,
     working_dir: params.workspace,
     log_step_id: params.parent_step_id,
-    cgroup_path: ctx.cgroup_path(),
+    cgroup_path: run.ctx.cgroup_path(),
+    timeout: run
+      .active_deadline()
+      .map(|deadline| deadline.saturating_duration_since(Instant::now())),
+    cancel: &cancel,
   };
   run_shell_script(&shell_params, params.events).await
 }
@@ -236,25 +305,26 @@ async fn run_uses_step(
   step: &super::actions::manifest::CompositeStep,
   idx: usize,
   depth: &mut DepthTracker,
-  skip: bool,
 ) -> Result<Conclusion, RunnerError> {
   let params = run.params;
+  let cancel = run.active_cancel();
+  let deadline = run.active_deadline();
   let nested = NestedUsesParams {
     step,
     idx,
     inputs: params.step_inputs,
-    step_outputs: &run.state.step_outputs,
     ctx: run.ctx,
     events: params.events,
     workspace: params.workspace,
     config: params.config,
     depth,
-    cancel: params.cancel,
+    cancel: &cancel,
+    deadline,
     http: params.http,
     fetcher: params.fetcher,
     parent_step_id: params.parent_step_id,
   };
-  let (conclusion, outputs) = run_nested_uses_step(nested, skip).await?;
+  let (conclusion, outputs) = run_nested_uses_step(nested).await?;
   if let Some(name) = step.id.as_deref() {
     run.state.step_outputs.insert(name.to_owned(), outputs);
   }
@@ -287,10 +357,9 @@ fn merge_file_command_env(
 /// one. The composite's own parent step is still `in_progress` on GitHub —
 /// no per-inner-step `StepCompleted` exists to close out (composite inner
 /// steps have no GH step of their own) — so this emits only the `##[error]`
-/// line, scoped to the parent step id, and returns `Failure` so the caller's
-/// existing `continue-on-error` check treats a hard error exactly like a
-/// normal step failure (surviving it when `continue-on-error: true`, ending
-/// the composite gracefully via `Ok` otherwise).
+/// line, scoped to the parent step id, and returns `Failure`. The caller
+/// records the failed outcome, applies `continue-on-error`, and evaluates
+/// later eligible cleanup conditions.
 async fn report_composite_step_error(
   events: &mpsc::Sender<RunnerEvent>,
   parent_step_id: &str,

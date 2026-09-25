@@ -5,19 +5,28 @@ use shared::platform::{runner_arch, runner_os};
 use shared::{Conclusion, RunnerError, SecretMasker};
 
 use super::context_build::{build_strategy, runner_debug_on};
+use super::step_naming::PostStep;
 use super::step_state::{StepState, build_steps_context};
 use expressions::evaluator::{EvalContext, JobStatus, evaluate};
 use expressions::template::interpolate;
 use expressions::types::ExprValue;
 
+#[path = "context_scopes.rs"]
+mod context_scopes;
+
 /// Mutable execution state for a job run: context objects, environment,
 /// step outputs/conclusions, and job-level status.
 pub struct ExecutionContext {
   env: HashMap<String, String>,
+  step_env_overlays: Vec<HashMap<String, String>>,
+  nested_posts: Vec<PostStep>,
   steps: HashMap<String, StepState>,
   /// Inner `steps` maps keyed by the composite invocation path.
   scoped_steps: HashMap<Vec<String>, HashMap<String, StepState>>,
   scope_path: Vec<String>,
+  scoped_inputs: HashMap<Vec<String>, HashMap<String, String>>,
+  scoped_status: HashMap<Vec<String>, JobStatus>,
+  scoped_action_paths: HashMap<Vec<String>, String>,
   /// `save-state` is private action-instance data, independent of `steps.*`.
   action_states: HashMap<(Vec<String>, String), HashMap<String, String>>,
   github: HashMap<String, ExprValue>,
@@ -60,9 +69,14 @@ impl ExecutionContext {
 
     Self {
       env: HashMap::new(),
+      step_env_overlays: Vec::new(),
+      nested_posts: Vec::new(),
       steps: HashMap::new(),
       scoped_steps: HashMap::new(),
       scope_path: Vec::new(),
+      scoped_inputs: HashMap::new(),
+      scoped_status: HashMap::new(),
+      scoped_action_paths: HashMap::new(),
       action_states: HashMap::new(),
       github: HashMap::new(),
       runner_context: runner_ctx,
@@ -259,10 +273,9 @@ impl ExecutionContext {
   /// Get a string value from the runner context (`runner.*`) by key — the
   /// exact map [`Self::set_runner_context`] populates (via the private
   /// `set_runner_value`) and [`Self::eval_context`] hands to the real
-  /// `${{ }}` evaluator. Composite-action interpolation
-  /// (`composite_expr::resolve_runner`) reads back through this accessor
-  /// instead of a second hand-rolled copy, so it cannot diverge from the
-  /// real evaluator's `runner.*` answers (B-005). `None` for a field the
+  /// `${{ }}` evaluator. Composite-action interpolation uses the same
+  /// `eval_context` runner map, so it cannot diverge from the real
+  /// evaluator's `runner.*` answers (B-005). `None` for a field the
   /// context does not carry — a genuinely unknown field, or `debug` when
   /// step-debug is off.
   pub fn runner_value(&self, key: &str) -> Option<&str> {
@@ -275,13 +288,19 @@ impl ExecutionContext {
   /// Build an `EvalContext` snapshot for the expression evaluator.
   pub fn eval_context(&self) -> EvalContext {
     let mut contexts = self.incoming_contexts.clone();
+    if let Some(inputs) = self.scoped_inputs.get(&self.scope_path) {
+      contexts.insert(
+        "inputs".to_owned(),
+        ExprValue::Object(string_map_to_obj(inputs)),
+      );
+    }
 
     // github context
-    contexts.insert("github".to_owned(), ExprValue::Object(self.github.clone()));
+    contexts.insert("github".to_owned(), self.scoped_github_context());
 
     // env context
     let env_obj: HashMap<String, ExprValue> = self
-      .env
+      .visible_env()
       .iter()
       .map(|(k, v)| (k.clone(), ExprValue::String(v.clone())))
       .collect();
@@ -313,9 +332,17 @@ impl ExecutionContext {
 
     EvalContext {
       contexts,
-      job_status: self.job_status,
+      job_status: self.scoped_job_status(),
       workspace: self.workspace.clone(),
     }
+  }
+
+  fn scoped_job_status(&self) -> JobStatus {
+    self
+      .scoped_status
+      .get(&self.scope_path)
+      .copied()
+      .unwrap_or(self.job_status)
   }
 
   fn steps_context(&self) -> ExprValue {
@@ -421,7 +448,7 @@ impl ExecutionContext {
 
   /// Read a job-level environment variable (e.g. a job-hook script path).
   pub fn env_var(&self, key: &str) -> Option<String> {
-    self.env.get(key).cloned()
+    self.visible_env().get(key).cloned()
   }
 
   /// Prepend a directory to `PATH` for subsequent steps.
@@ -433,8 +460,30 @@ impl ExecutionContext {
 /// Per-step output / state / conclusion recording.
 impl ExecutionContext {
   /// Enter one composite invocation's isolated expression scope.
-  pub(super) fn enter_step_scope(&mut self, wire_id: &str) {
+  pub(super) fn enter_step_scope(
+    &mut self,
+    wire_id: &str,
+    inputs: &HashMap<String, String>,
+    action_dir: &std::path::Path,
+  ) {
     self.scope_path.push(wire_id.to_owned());
+    self
+      .scoped_inputs
+      .insert(self.scope_path.clone(), inputs.clone());
+    self
+      .scoped_status
+      .insert(self.scope_path.clone(), JobStatus::Success);
+    self.scoped_action_paths.insert(
+      self.scope_path.clone(),
+      action_dir.to_string_lossy().into_owned(),
+    );
+  }
+
+  /// Update only the current composite invocation's condition status.
+  pub(super) fn set_scope_status(&mut self, status: JobStatus) {
+    if !self.scope_path.is_empty() {
+      self.scoped_status.insert(self.scope_path.clone(), status);
+    }
   }
 
   /// Snapshot the current scope for a post action registered inside a composite.
@@ -622,7 +671,7 @@ impl ExecutionContext {
 
   /// Merge global env + step env + PATH additions into a full env map.
   pub fn build_step_env(&self, step_env: &HashMap<String, String>) -> HashMap<String, String> {
-    let mut result = self.env.clone();
+    let mut result = self.visible_env();
     result.extend(step_env.clone());
 
     // Prepend path additions (reverse order) to existing PATH. The job env

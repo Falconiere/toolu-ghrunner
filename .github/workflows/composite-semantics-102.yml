@@ -1,0 +1,91 @@
+name: composite-semantics-102
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/102-complete-composite-expression-scope-and
+
+jobs:
+  semantics:
+    name: composite-${{ matrix.lane }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: toolu-macos
+            runner: [self-hosted, toolu-102]
+          - lane: reference-macos
+            runner: macos-15
+          - lane: reference-linux
+            runner: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the committed local actions
+        shell: bash
+        run: |
+          mkdir -p .github/actions
+          cp -R crates/toolu-runner/tests/fixtures/local_actions/composite-102-* .github/actions/
+          cp -R crates/toolu-runner/tests/fixtures/local_actions/node-102-state .github/actions/
+      - name: Expressions and field scopes
+        id: expressions
+        uses: ./.github/actions/composite-102-expressions
+        with:
+          who: world
+      - name: Check expression values
+        shell: bash
+        run: |
+          test '${{ steps.expressions.outputs.result }}' = 'world/42'
+          test "$(cat composite-102-expressions.out)" = 'hello world'
+      - name: Continue on error inside composite
+        uses: ./.github/actions/composite-102-continue
+      - name: Check continued outcome
+        shell: bash
+        run: |
+          printf 'fail\nordinary\nalways-cleanup\n' > expected-continue
+          diff -u expected-continue composite-102-continue.marker
+          test "$(cat composite-102-continue.result)" = failure/success
+      - name: Uncontinued inner failure with cleanup
+        id: failure
+        uses: ./.github/actions/composite-102-failure
+        continue-on-error: true
+      - name: Check failure cleanup and reporting
+        shell: bash
+        run: |
+          test '${{ steps.failure.outcome }}' = failure
+          test '${{ steps.failure.conclusion }}' = success
+          printf 'fail\nfailure-cleanup\nalways-cleanup\n' > expected-failure
+          diff -u expected-failure composite-102-failure.marker
+      - name: Hard nested action error with cleanup
+        id: hard_error
+        uses: ./.github/actions/composite-102-hard-error
+        continue-on-error: true
+      - name: Check hard error cleanup
+        shell: bash
+        run: |
+          test '${{ steps.hard_error.outcome }}' = failure
+          printf 'failure-cleanup\nalways-cleanup\n' > expected-hard-error
+          diff -u expected-hard-error composite-102-hard-error.marker
+      - name: Repeated nested action scope
+        id: nested
+        uses: ./.github/actions/composite-102-parent
+        with:
+          who: world
+      - name: Check nested scope
+        shell: bash
+        run: |
+          test '${{ steps.nested.outputs.result }}' = world-one/world-two
+          test "$(cat composite-102-parent.out)" = world-one/world-two
+          test "$(cat composite-102-parent.scope)" = world/success/success/
+      - name: File commands and Node state
+        id: file_commands
+        uses: ./.github/actions/composite-102-file-commands
+      - name: Check exported env and PATH
+        shell: bash
+        run: |
+          test '${{ steps.file_commands.outputs.result }}' = 42
+          test "$(cat composite-102-file-commands.out)" = inner/absent/42
+          test "$COMPOSITE_VALUE" = inner
+          test -z "${LOCAL_ONLY:-}"
+          command -v composite-102-tool

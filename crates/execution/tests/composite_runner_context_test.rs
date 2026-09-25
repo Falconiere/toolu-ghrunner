@@ -103,6 +103,7 @@ impl Fixture {
       parent_step_id: "parent",
       action_dir: self.data_dir.path(),
       cancel: &self.cancel,
+      deadline: None,
       http: &self.http,
       fetcher: &self.fetcher,
     }

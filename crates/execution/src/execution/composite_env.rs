@@ -1,4 +1,4 @@
-//! Composite action environment: step skipping, environment building,
+//! Composite action environment: environment building,
 //! file command path management, and result types.
 
 use std::collections::HashMap;
@@ -6,11 +6,12 @@ use std::path::{Path, PathBuf};
 
 use shared::{Conclusion, RunnerConfig, RunnerError, RunnerEvent};
 use tokio::sync::mpsc;
+use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use super::actions::manifest::{ActionDefinition, CompositeStep};
 use super::actions::prefetch::ActionFetcher;
-use super::composite_expr::interpolate_composite_expr;
+use super::composite_expr::{CompositeField, composite_eval_context, interpolate_composite_expr};
 use super::context::{ExecutionContext, runner_temp_dir};
 use super::file_commands::{parse_env_file, parse_output_file, parse_path_file, strip_blocked_env};
 use super::handlers::node::input_env_key;
@@ -37,6 +38,8 @@ pub struct CompositeParams<'a> {
   /// Job-level cancellation token, threaded to nested `uses:` steps so a
   /// top-level cancel interrupts actions running inside a composite.
   pub cancel: &'a CancellationToken,
+  /// Fixed top-level step deadline shared by every nested child.
+  pub deadline: Option<Instant>,
   /// The job-scope HTTP client, threaded to nested `uses:` steps so their
   /// action resolution reuses the same connection pool.
   pub http: &'a reqwest::Client,
@@ -58,27 +61,6 @@ pub struct CompositeResult {
   pub path_additions: Vec<String>,
 }
 
-/// Decide whether a composite step's `if` condition skips it (best-effort
-/// evaluation of `false` and `runner.os == 'Windows'` style guards).
-pub(super) fn should_skip_step(step: &CompositeStep) -> bool {
-  let Some(cond) = &step.condition else {
-    return false;
-  };
-  let trimmed = cond.trim();
-  if trimmed.eq_ignore_ascii_case("false") {
-    return true;
-  }
-  // runner.os == 'Windows' on non-Windows
-  if trimmed.contains("runner.os == 'Windows'") || trimmed.contains("runner.os == \"Windows\"") {
-    return std::env::consts::OS != "windows";
-  }
-  // runner.os != 'Windows' on Windows
-  if trimmed.contains("runner.os != 'Windows'") || trimmed.contains("runner.os != \"Windows\"") {
-    return std::env::consts::OS == "windows";
-  }
-  false
-}
-
 /// Build the environment for a composite `run:` step: inherited job env plus
 /// the step's own `env`, accumulated path additions, and runner paths.
 ///
@@ -94,7 +76,7 @@ pub(super) fn build_step_env(
   step: &CompositeStep,
   extra_env: &HashMap<String, String>,
   path_additions: &[String],
-) -> HashMap<String, String> {
+) -> Result<HashMap<String, String>, RunnerError> {
   let temp_dir = runner_temp_dir(&params.config.data_dir);
   let mut env = ctx.build_step_env(&HashMap::new());
 
@@ -118,9 +100,9 @@ pub(super) fn build_step_env(
   );
 
   // Step-level env (interpolated)
+  let eval_ctx = composite_eval_context(ctx, params.step_inputs, Some(&env));
   for (k, v) in &step.env {
-    let interpolated =
-      interpolate_composite_expr(v, params.step_inputs, &HashMap::new(), &env, ctx);
+    let interpolated = interpolate_composite_expr(v, &eval_ctx, CompositeField::Env)?;
     env.insert(k.clone(), interpolated);
   }
 
@@ -135,7 +117,7 @@ pub(super) fn build_step_env(
     temp_dir.to_string_lossy().into_owned(),
   );
 
-  env
+  Ok(env)
 }
 
 /// Prepend composite `GITHUB_PATH` additions ahead of the inherited `PATH`.

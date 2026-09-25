@@ -31,6 +31,11 @@ long-poll → execute → report. It runs your real workflows: shell steps,
 Node.js actions, composite actions, reusable workflows,
 matrices, `${{ }}` expressions, artifacts, cache, and OIDC.
 
+Composite action steps evaluate expressions against their own inputs and inner
+step results. A failing inner step still allows eligible `failure()` and
+`always()` cleanup, while nested action state and post actions stay scoped to
+their invocation. Composite `working-directory` support is tracked in #81.
+
 The nightly [`live`](.github/workflows/live.yml) workflow above is not a
 mock. It dispatches a real job to a real `toolu-runner` on a real repo,
 every morning at 06:00 UTC.

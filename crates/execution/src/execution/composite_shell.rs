@@ -1,12 +1,18 @@
+//! Bounded subprocess execution and parent-scoped logs for composite run steps.
+
 use std::collections::HashMap;
 use std::path::Path;
 use std::process::Stdio;
+use std::time::Duration;
 
 use shared::{Conclusion, LogStream, RunnerError, RunnerEvent};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 
 use super::cgroup_join::spawn_in_cgroup;
+use super::step_timeout::{WaitOutcome, wait_bounded};
 
 /// Parameters for running a composite-action shell script.
 pub struct ShellScriptParams<'a> {
@@ -22,6 +28,10 @@ pub struct ShellScriptParams<'a> {
   pub log_step_id: &'a str,
   /// Per-job cgroup directory to move the spawned step into (`None` = no isolation).
   pub cgroup_path: Option<&'a Path>,
+  /// Time left in the enclosing top-level step.
+  pub timeout: Option<Duration>,
+  /// Job cancellation token shared by the enclosing step.
+  pub cancel: &'a CancellationToken,
 }
 
 /// Run a shell script as a subprocess, streaming output as log events.
@@ -45,26 +55,50 @@ pub async fn run_shell_script(
     .envs(params.env)
     .stdout(Stdio::piped())
     .stderr(Stdio::piped());
+  #[cfg(unix)]
+  cmd.process_group(0);
 
   let mut child = spawn_in_cgroup(&mut cmd, params.cgroup_path).await?;
+  let group_id = child.id();
 
   let stdout = child.stdout.take();
   let stderr = child.stderr.take();
 
-  stream_output(stdout, params.log_step_id, LogStream::Stdout, events);
-  stream_output(stderr, params.log_step_id, LogStream::Stderr, events);
+  let stdout_task = stream_output(stdout, params.log_step_id, LogStream::Stdout, events);
+  let stderr_task = stream_output(stderr, params.log_step_id, LogStream::Stderr, events);
 
-  let status = child
-    .wait()
-    .await
-    .map_err(|e| RunnerError::StepExecution(format!("composite wait failed: {e}")))?;
-
-  if status.success() {
-    Ok(Conclusion::Success)
-  } else {
-    Ok(Conclusion::Failure)
+  let outcome = wait_bounded(&mut child, params.timeout, params.cancel, |message| {
+    RunnerError::StepExecution(format!("composite {message}"))
+  })
+  .await;
+  if matches!(&outcome, Ok(WaitOutcome::TimedOut | WaitOutcome::Cancelled)) {
+    kill_process_group(group_id);
+  }
+  let ((), ()) = tokio::join!(finish_stream(stdout_task), finish_stream(stderr_task));
+  match outcome? {
+    WaitOutcome::Exited(status) if status.success() => Ok(Conclusion::Success),
+    WaitOutcome::Exited(_) | WaitOutcome::TimedOut => Ok(Conclusion::Failure),
+    WaitOutcome::Cancelled => Ok(Conclusion::Cancelled),
   }
 }
+
+#[cfg(unix)]
+fn kill_process_group(group_id: Option<u32>) {
+  use nix::errno::Errno;
+  use nix::sys::signal::{Signal, killpg};
+  use nix::unistd::Pid;
+
+  let Some(pid) = group_id.and_then(|id| i32::try_from(id).ok()) else {
+    return;
+  };
+  match killpg(Pid::from_raw(pid), Signal::SIGKILL) {
+    Ok(()) | Err(Errno::ESRCH) => {},
+    Err(error) => tracing::warn!(pid, %error, "failed to kill composite process group"),
+  }
+}
+
+#[cfg(not(unix))]
+fn kill_process_group(_group_id: Option<u32>) {}
 
 fn write_temp_script(script: &str) -> Result<tempfile::NamedTempFile, RunnerError> {
   let mut file = tempfile::Builder::new()
@@ -99,11 +133,11 @@ fn stream_output<R: tokio::io::AsyncRead + Unpin + Send + 'static>(
   step_id: &str,
   stream: LogStream,
   events: &mpsc::Sender<RunnerEvent>,
-) {
-  let Some(r) = reader else { return };
+) -> Option<JoinHandle<()>> {
+  let r = reader?;
   let tx = events.clone();
   let sid = step_id.to_owned();
-  tokio::spawn(async move {
+  Some(tokio::spawn(async move {
     let buf = BufReader::new(r);
     let mut lines = buf.lines();
     while let Ok(Some(line)) = lines.next_line().await {
@@ -115,5 +149,17 @@ fn stream_output<R: tokio::io::AsyncRead + Unpin + Send + 'static>(
         })
         .await;
     }
-  });
+  }))
+}
+
+async fn finish_stream(task: Option<JoinHandle<()>>) {
+  let Some(mut task) = task else { return };
+  match tokio::time::timeout(Duration::from_secs(2), &mut task).await {
+    Ok(Ok(())) => {},
+    Ok(Err(error)) => tracing::warn!(%error, "composite output stream task failed"),
+    Err(_) => {
+      task.abort();
+      tracing::warn!("composite output stream remained open after child exit");
+    },
+  }
 }

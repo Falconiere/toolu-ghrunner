@@ -6,26 +6,57 @@
 
 use std::process::ExitStatus;
 use std::time::Duration;
+use tokio::time::Instant;
 
 use shared::RunnerError;
 use tokio::process::Child;
 use tokio_util::sync::CancellationToken;
 
-/// Per-step run bounds: the `timeout-minutes` duration (if any) and the
+/// Per-step run bounds: one absolute timeout deadline (if any) and the
 /// in-flight job `CancellationToken`. Computed once per step and threaded to
-/// every child-spawning handler so timeouts and cancellation are honored.
+/// every child-spawning handler so later children use only remaining time.
 pub(crate) struct StepBounds {
   pub(crate) timeout: Option<Duration>,
+  pub(crate) deadline: Option<Instant>,
   pub(crate) cancel: CancellationToken,
 }
 
 impl StepBounds {
   /// Build bounds from a step's `timeout-minutes` and the job cancel token.
   pub(crate) fn new(timeout_minutes: Option<u32>, cancel: CancellationToken) -> Self {
+    let timeout = timeout_duration(timeout_minutes);
     Self {
-      timeout: timeout_duration(timeout_minutes),
+      timeout,
+      deadline: timeout.map(|duration| Instant::now() + duration),
       cancel,
     }
+  }
+
+  /// Keep a nested action inside its parent's absolute deadline.
+  pub(crate) fn nested(
+    parent_deadline: Option<Instant>,
+    timeout_minutes: Option<u32>,
+    cancel: CancellationToken,
+  ) -> Self {
+    let own_timeout = timeout_duration(timeout_minutes);
+    let own_deadline = own_timeout.map(|duration| Instant::now() + duration);
+    let deadline = match (parent_deadline, own_deadline) {
+      (Some(parent), Some(child)) => Some(parent.min(child)),
+      (Some(parent), None) => Some(parent),
+      (None, child) => child,
+    };
+    Self {
+      timeout: own_timeout,
+      deadline,
+      cancel,
+    }
+  }
+
+  /// Duration left before the fixed deadline, for the next child process.
+  pub(crate) fn remaining_timeout(&self) -> Option<Duration> {
+    self
+      .deadline
+      .map(|deadline| deadline.saturating_duration_since(Instant::now()))
   }
 }
 

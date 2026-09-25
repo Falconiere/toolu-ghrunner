@@ -1,0 +1,19 @@
+name: composite-102-nested
+inputs:
+  who:
+    description: Scoped child value
+    required: true
+outputs:
+  result:
+    description: Child output
+    value: "${{ steps.first.outputs.answer }}"
+runs:
+  using: composite
+  steps:
+    - id: first
+      env:
+        CURRENT_ACTION_PATH: ${{ github.action_path }}
+      run: |
+        test "$CURRENT_ACTION_PATH" = "$GITHUB_ACTION_PATH"
+        echo "answer=${{ inputs.who }}" >> "$GITHUB_OUTPUT"
+      shell: bash
