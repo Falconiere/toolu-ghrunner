@@ -161,6 +161,7 @@ fn evaluate_acquired_value(
     Ok(guard) => guard,
     Err(poisoned) => poisoned.into_inner(),
   };
+  // Match upstream ValueSecret.GetPositions: its substring search is ordinal.
   if guard.mask(&value).as_ref() == value {
     Ok(AcquiredValue::Value(value))
   } else {
