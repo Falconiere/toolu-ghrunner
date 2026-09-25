@@ -31,5 +31,6 @@ fn complete_job_outputs_are_value_objects_without_secret_flags() {
     outputs,
     &serde_json::json!({"value":{"value":"hello-output"}})
   );
+  // Secret filtering belongs to the execution engine; this pins the wire object shape.
   assert!(value.get("isSecret").is_none());
 }
