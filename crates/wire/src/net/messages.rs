@@ -92,8 +92,7 @@ pub async fn poll_message(
       parse_broker_message(&body).map(Some)
     },
     other => {
-      let body = response.text().await.unwrap_or_default();
-      tracing::debug!(status = other, body_len = body.len(), "message poll failed");
+      tracing::debug!(status = other, "message poll failed");
       Err(RunnerError::Protocol(format!(
         "message poll returned status {other}: see debug log"
       )))

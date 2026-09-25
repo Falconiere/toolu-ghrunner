@@ -32,12 +32,22 @@ pub async fn exchange_token(
     .form(&params)
     .send()
     .await
-    .map_err(|_err| RunnerError::Network("token exchange request failed".to_owned()))?;
+    .map_err(|err| {
+      let kind = if err.is_timeout() {
+        "timed out"
+      } else if err.is_connect() {
+        "connection failed"
+      } else if err.is_body() {
+        "body failed"
+      } else {
+        "request failed"
+      };
+      RunnerError::Network(format!("token exchange {kind}"))
+    })?;
 
   let status = response.status();
   if !status.is_success() {
-    let body = response.text().await.unwrap_or_default();
-    tracing::debug!(status = %status, body_len = body.len(), "token exchange failed");
+    tracing::debug!(status = %status, "token exchange failed");
     let message = format!("token exchange failed with status {status}: see debug log");
     return Err(if status.as_u16() == 401 || status.as_u16() == 403 {
       RunnerError::Auth(message)
