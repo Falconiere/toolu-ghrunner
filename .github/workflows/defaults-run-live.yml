@@ -27,7 +27,7 @@ jobs:
         shell: sh
         working-directory: defaults-71-job
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v4
       - name: Prepare distinct directories
         shell: bash
         working-directory: .
