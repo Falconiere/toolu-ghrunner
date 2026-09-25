@@ -45,7 +45,7 @@ pub(super) async fn execute(
     msg,
     Arc::clone(ctx.masker()),
     cancel.clone(),
-  )?);
+  ));
   // A failed prefetch never fails the job; step-time resolution can retry.
   let prefetch_handle = spawn_prefetch(
     &msg.steps,

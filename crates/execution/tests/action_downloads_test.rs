@@ -98,6 +98,38 @@ fn capture_derived_enterprise_job_uses_its_own_api_host() {
   assert_eq!(context.api_url(), "https://ghe.example.internal/api/v3");
 }
 
+#[test]
+fn acquired_api_url_variants_share_one_canonical_cache_host() {
+  let raw: serde_json::Value =
+    serde_json::from_str(include_str!("defaults_run_job.json")).expect("captured job JSON");
+  let mut variants = Vec::new();
+  for api_url in ["https://API.GITHUB.COM", "https://api.github.com/"] {
+    let mut variant = raw.clone();
+    let github = variant
+      .get_mut("contextData")
+      .and_then(|value| value.get_mut("github"))
+      .and_then(|value| value.get_mut("d"))
+      .and_then(serde_json::Value::as_array_mut)
+      .expect("captured github context");
+    for entry in github {
+      if entry.get("k").and_then(serde_json::Value::as_str) == Some("api_url") {
+        *entry.get_mut("v").expect("api_url value") = serde_json::json!(api_url);
+      }
+    }
+    let msg: AgentJobRequestMessage = serde_json::from_value(variant).expect("acquired job");
+    variants.push(
+      ActionDownloadContext::from_message(&msg)
+        .expect("download context")
+        .api_url()
+        .to_owned(),
+    );
+  }
+  assert_eq!(
+    variants,
+    ["https://api.github.com", "https://api.github.com"]
+  );
+}
+
 #[tokio::test]
 async fn denied_launch_resolution_does_not_fall_back_to_an_archive_api() {
   // A controlled 403 is a failure-propagation probe, not a mock successful
@@ -151,7 +183,7 @@ async fn absent_launch_endpoint_uses_the_acquired_api_host_and_job_token() {
       let auth = request
         .headers()
         .get(axum::http::header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
+        .map(|value| value.to_str().expect("request auth must be UTF-8"))
         .unwrap_or_default()
         .to_owned();
       let _ = tx.send((path, auth)).await;
@@ -218,7 +250,7 @@ async fn archive_redirect_keeps_basic_auth_on_origin_and_drops_it_cross_origin()
       let auth = request
         .headers()
         .get(axum::http::header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
+        .map(|value| value.to_str().expect("request auth must be UTF-8"))
         .map(str::to_owned);
       let _ = tx.send(auth).await;
       axum::http::StatusCode::FORBIDDEN
@@ -239,7 +271,7 @@ async fn archive_redirect_keeps_basic_auth_on_origin_and_drops_it_cross_origin()
       let auth = request
         .headers()
         .get(axum::http::header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
+        .map(|value| value.to_str().expect("request auth must be UTF-8"))
         .map(str::to_owned);
       let _ = source_tx.send(auth).await;
       (
@@ -255,7 +287,7 @@ async fn archive_redirect_keeps_basic_auth_on_origin_and_drops_it_cross_origin()
     let _ = axum::serve(source_listener, source).await;
   });
 
-  let token = "989329ac-43af-5d06-80e3-d5ce0deb6334";
+  let token = "synthetic-archive-token";
   let destination =
     std::env::temp_dir().join(format!("toolu-action-redirect-{}", uuid::Uuid::new_v4()));
   let result = download_and_extract_action(

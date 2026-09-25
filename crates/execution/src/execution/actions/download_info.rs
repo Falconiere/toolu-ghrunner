@@ -1,4 +1,8 @@
-//! Action download service location and request data from an acquired job.
+//! Resolve remote action metadata using service locations in an acquired job.
+//!
+//! The job supplies the API host, optional Launch endpoint, and scoped
+//! credentials. The resolver validates the selected revision and archive URL
+//! before the downloader writes a revision-qualified cache entry.
 
 use base64::Engine;
 use serde_json::{Value, json};
@@ -376,7 +380,12 @@ fn api_url_from_message(msg: &AgentJobRequestMessage) -> Result<String, RunnerEr
     }
   };
   validate_api_url(&api_url)?;
-  Ok(api_url)
+  let mut url = reqwest::Url::parse(&api_url).map_err(|_error| {
+    RunnerError::ActionResolution("invalid GitHub API URL in acquired job".to_owned())
+  })?;
+  let path = url.path().trim_end_matches('/').to_owned();
+  url.set_path(&path);
+  Ok(url.to_string().trim_end_matches('/').to_owned())
 }
 
 fn launch_url_from_message(msg: &AgentJobRequestMessage) -> Result<Option<String>, RunnerError> {

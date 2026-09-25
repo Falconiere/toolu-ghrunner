@@ -90,9 +90,9 @@ pub fn parse_action_ref(uses: &str) -> Result<ActionRef, RunnerError> {
     )));
   };
 
-  if !valid_git_ref(git_ref) {
+  if !is_valid_git_ref(git_ref) {
     return Err(RunnerError::ActionResolution(format!(
-      "invalid action ref '{uses}': unsafe ref"
+      "invalid action ref '{uses}': invalid git ref"
     )));
   }
 
@@ -101,9 +101,9 @@ pub fn parse_action_ref(uses: &str) -> Result<ActionRef, RunnerError> {
   let owner = parts.first().copied().unwrap_or_default();
   let repo = parts.get(1).copied().unwrap_or_default();
 
-  if !valid_repo_component(owner) || !valid_repo_component(repo) {
+  if !is_valid_repo_component(owner) || !is_valid_repo_component(repo) {
     return Err(RunnerError::ActionResolution(format!(
-      "invalid action ref '{uses}': need owner/repo"
+      "invalid action ref '{uses}': invalid owner or repo"
     )));
   }
 
@@ -119,14 +119,16 @@ pub fn parse_action_ref(uses: &str) -> Result<ActionRef, RunnerError> {
   })
 }
 
-fn valid_repo_component(value: &str) -> bool {
+/// Accept a nonempty repository component without path separators or traversal.
+fn is_valid_repo_component(value: &str) -> bool {
   !matches!(value, "" | "." | "..")
     && value
       .bytes()
       .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
 }
 
-fn valid_git_ref(value: &str) -> bool {
+/// Accept a ref made of safe path components without empty or parent segments.
+fn is_valid_git_ref(value: &str) -> bool {
   !value.is_empty()
     && value
       .split('/')

@@ -1,4 +1,8 @@
 //! Legacy GHES action download-info discovery and response decoding.
+//!
+//! Older servers advertise the download-info resource through connection
+//! data. This module keeps the discovery URL on the acquired service origin
+//! and decodes its `Actions` reply for the requested repository.
 
 use reqwest::{Client, Url};
 use serde_json::{Value, json};
@@ -121,17 +125,7 @@ impl LegacyContext {
     let body: Value = response.json().await.map_err(|_error| {
       RunnerError::ActionDownload("legacy service discovery JSON invalid".to_owned())
     })?;
-    let service = body
-      .pointer("/locationServiceData/serviceDefinitions")
-      .and_then(Value::as_array)
-      .and_then(|entries| {
-        entries.iter().find(|entry| {
-          entry
-            .get("identifier")
-            .and_then(Value::as_str)
-            .is_some_and(|value| value.eq_ignore_ascii_case(RESOURCE_ID))
-        })
-      });
+    let service = resource_entry(&body);
     service
       .map(|entry| self.resource_url(entry, &base))
       .transpose()
@@ -144,7 +138,7 @@ impl LegacyContext {
       .ok_or_else(|| {
         RunnerError::ActionDownload("legacy action resource omitted path".to_owned())
       })?;
-    if !relative.starts_with('/') || relative.contains("..") || relative.contains("://") {
+    if !valid_relative_resource_path(relative) {
       return Err(RunnerError::ActionDownload(
         "legacy action resource path invalid".to_owned(),
       ));
@@ -162,7 +156,7 @@ impl LegacyContext {
     let mut url = Url::parse(&raw).map_err(|_error| {
       RunnerError::ActionDownload("legacy action resource URL invalid".to_owned())
     })?;
-    if url.origin() != base.origin() || url.username() != "" || url.password().is_some() {
+    if url.origin() != base.origin() || !url.username().is_empty() || url.password().is_some() {
       return Err(RunnerError::ActionDownload(
         "legacy action resource host invalid".to_owned(),
       ));
@@ -173,6 +167,30 @@ impl LegacyContext {
       .append_pair("api-version", "6.0-preview.1");
     Ok(url)
   }
+}
+
+fn valid_relative_resource_path(relative: &str) -> bool {
+  let lower = relative.to_ascii_lowercase();
+  relative.starts_with('/')
+    && !relative.contains("..")
+    && !relative.contains("://")
+    && !lower.contains("%2e")
+    && !lower.contains("%2f")
+    && !lower.contains("%5c")
+}
+
+fn resource_entry(body: &Value) -> Option<&Value> {
+  body
+    .pointer("/locationServiceData/serviceDefinitions")
+    .and_then(Value::as_array)
+    .and_then(|entries| {
+      entries.iter().find(|entry| {
+        entry
+          .get("identifier")
+          .and_then(Value::as_str)
+          .is_some_and(|value| value.eq_ignore_ascii_case(RESOURCE_ID))
+      })
+    })
 }
 
 /// Decode the V1 `Actions` map for the requested action.
