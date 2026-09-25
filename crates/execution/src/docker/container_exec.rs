@@ -220,6 +220,8 @@ async fn forward_line(
   if !*open {
     return;
   }
+  // Both channels carry text logs/workflow commands, not binary output. Replace
+  // invalid UTF-8 with U+FFFD so arbitrary process bytes do not fail the job.
   let line = String::from_utf8_lossy(bytes).into_owned();
   let closed = if stderr {
     events
@@ -233,8 +235,13 @@ async fn forward_line(
   } else {
     stdout.send(line).await.is_err()
   };
-  if closed {
-    *open = false;
-    tracing::warn!(stderr, "job container output receiver dropped; continuing");
+  if !closed {
+    return;
+  }
+  *open = false;
+  if stderr {
+    tracing::warn!("job container stderr event receiver dropped; continuing");
+  } else {
+    tracing::warn!("job container stdout receiver dropped; continuing");
   }
 }

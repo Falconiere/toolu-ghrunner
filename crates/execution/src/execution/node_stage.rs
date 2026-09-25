@@ -133,6 +133,7 @@ async fn run_stage_process(
   let (output, stdout_outputs) = tokio::join!(exec, dispatch);
   let conclusion = output?.conclusion;
   let outputs = apply_file_commands_and_merge_outputs(
+    &s.step.id,
     output_name,
     Some(&s.step.id),
     stdout_outputs,
