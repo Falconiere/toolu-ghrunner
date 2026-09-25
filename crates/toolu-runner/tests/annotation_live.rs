@@ -39,7 +39,7 @@ impl Host {
       hostname: "github.com".to_owned(),
       repo: "Falconiere/toolu-ghrunner".to_owned(),
       branch: BRANCH.to_owned(),
-      token: std::env::var("GH_TOKEN").or_else(|_| std::env::var("GITHUB_TOKEN"))?,
+      token: required("GH_TOKEN").or_else(|_| required("GITHUB_TOKEN"))?,
       toolu_name: required("TOOLU_ANNOTATION_TOOLU_NAME")?,
       reference_name: required("TOOLU_ANNOTATION_REFERENCE_NAME")?,
       toolu_version: required("TOOLU_ANNOTATION_TOOLU_VERSION")?,
