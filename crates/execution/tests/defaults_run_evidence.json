@@ -22,6 +22,13 @@
     ".github/actions/defaults-71-composite/action.yml": "a5572064b2460187243a39ec7ac62a1510373e30491a6ac15426407432122753",
     ".github/workflows/defaults-run-live.yml": "043d2f7f67524e0d3222cb90263ea4e1320a8d2a0cda9a80cd5b849e6ce1c5bb"
   },
+  "diagnostic_run": {
+    "id": 36094891882,
+    "reference_conclusion": "failure",
+    "reference_failure": "Raw ps comm included /bin/sh; shell and cwd had correct values",
+    "revision": "4715b2b4ae122411eb25be1b0ea2396b8f05bd1e",
+    "toolu_conclusion": "success"
+  },
   "reference_source": "cab9d1c3901e45c7705889c4f88284fdd93f4ae5",
   "runs": {
     "reference": null,
@@ -34,7 +41,7 @@
     "missing-shell fallback pending #80"
   ],
   "workflow_sha256": {
-    ".github/actions/defaults-71-composite/action.yml": "a5572064b2460187243a39ec7ac62a1510373e30491a6ac15426407432122753",
-    ".github/workflows/defaults-run-live.yml": "b4146d336fef300a4b89b919445d979c1613574779ae15cbd5ada27b34e98d19"
+    ".github/actions/defaults-71-composite/action.yml": "518a22e5606be4d6744d8657c73117b900ffeed6561976f2ee3c8945cd4b4637",
+    ".github/workflows/defaults-run-live.yml": "c08ed7171810b78767d50104f7b907caba73f43af9c7d77b930bfdbb69124b4d"
   }
 }
