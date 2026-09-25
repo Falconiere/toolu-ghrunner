@@ -36,8 +36,8 @@ fn captured(indices: &[usize]) -> TestResult<AgentJobRequestMessage> {
 }
 
 fn set_step_input(step: &mut ActionStep, name: &str, value: &str) -> TestResult {
-  let entry = step
-    .inputs
+  let inputs: &mut TemplateToken = &mut step.inputs;
+  let entry = inputs
     .d
     .as_mut()
     .ok_or("step inputs missing")?
@@ -53,15 +53,15 @@ fn job_run_value<'a>(
   message: &'a mut AgentJobRequestMessage,
   name: &str,
 ) -> TestResult<&'a mut TemplateToken> {
-  let layer = message.defaults.get_mut(1).ok_or("job defaults missing")?;
+  let layer: &mut TemplateToken = message.defaults.get_mut(1).ok_or("job defaults missing")?;
   let run = layer
     .d
     .as_mut()
     .ok_or("layer entries missing")?
     .first_mut()
     .ok_or("run entry missing")?;
-  run
-    .value
+  let value: &mut TemplateToken = &mut run.value;
+  value
     .d
     .as_mut()
     .ok_or("run entries missing")?
@@ -225,6 +225,35 @@ async fn paths_and_absence() -> TestResult {
 }
 
 #[tokio::test]
+async fn job_default_directory_expression_is_evaluated() -> TestResult {
+  let mut message = captured(&[1, 2])?;
+  job_run_value(&mut message, "working-directory")?.lit =
+    Some("${{ runner.temp }}/defaults-71-absolute".to_owned());
+  let step = message.steps.get_mut(1).ok_or("job step missing")?;
+  set_step_input(
+    step,
+    "script",
+    "test \"$(pwd -P)\" = \"$(cd \"$RUNNER_TEMP/defaults-71-absolute\" && pwd -P)\"; printf job > job.marker",
+  )?;
+  let ids = message
+    .steps
+    .iter()
+    .map(|step| step.id.clone())
+    .collect::<Vec<_>>();
+  let (dir, _workspace, events) = replay(message, false).await?;
+  assert_success(&events, &ids);
+  assert_eq!(
+    std::fs::read_to_string(
+      dir
+        .path()
+        .join("data/_temp/defaults-71-absolute/job.marker")
+    )?,
+    "job"
+  );
+  Ok(())
+}
+
+#[tokio::test]
 async fn empty_explicit_shell_uses_job_shell() -> TestResult {
   let mut message = captured(&[1, 3])?;
   let step = message.steps.get_mut(1).ok_or("explicit step missing")?;
@@ -303,15 +332,15 @@ fn parsed_defaults(defaults: &[TemplateToken]) -> TestResult<RunDefaultsResolved
 #[test]
 fn later_partial_mapping_clears_earlier_shell() -> TestResult {
   let mut message = captured(&[])?;
-  let layer = message.defaults.get_mut(1).ok_or("job defaults missing")?;
+  let layer: &mut TemplateToken = message.defaults.get_mut(1).ok_or("job defaults missing")?;
   let run = layer
     .d
     .as_mut()
     .ok_or("layer entries missing")?
     .first_mut()
     .ok_or("run entry missing")?;
-  run
-    .value
+  let value: &mut TemplateToken = &mut run.value;
+  value
     .d
     .as_mut()
     .ok_or("run entries missing")?
@@ -322,6 +351,28 @@ fn later_partial_mapping_clears_earlier_shell() -> TestResult {
     resolved.working_directory.as_deref(),
     Some("defaults-71-job")
   );
+  Ok(())
+}
+
+#[test]
+fn later_partial_mapping_clears_earlier_working_directory() -> TestResult {
+  let mut message = captured(&[])?;
+  let layer: &mut TemplateToken = message.defaults.get_mut(1).ok_or("job defaults missing")?;
+  let run = layer
+    .d
+    .as_mut()
+    .ok_or("layer entries missing")?
+    .first_mut()
+    .ok_or("run entry missing")?;
+  let value: &mut TemplateToken = &mut run.value;
+  value
+    .d
+    .as_mut()
+    .ok_or("run entries missing")?
+    .retain(|entry| entry.key.to_string_value() != Some("working-directory"));
+  let resolved = parsed_defaults(&message.defaults)?;
+  assert_eq!(resolved.shell.as_deref(), Some("sh"));
+  assert_eq!(resolved.working_directory, None);
   Ok(())
 }
 
@@ -341,7 +392,7 @@ fn empty_job_value_clears_earlier_workflow_value() -> TestResult {
 #[test]
 fn keys_are_ascii_case_insensitive() -> TestResult {
   let mut message = captured(&[])?;
-  let layer = message.defaults.get_mut(1).ok_or("job defaults missing")?;
+  let layer: &mut TemplateToken = message.defaults.get_mut(1).ok_or("job defaults missing")?;
   let run = layer
     .d
     .as_mut()
@@ -349,7 +400,8 @@ fn keys_are_ascii_case_insensitive() -> TestResult {
     .first_mut()
     .ok_or("run entry missing")?;
   run.key.lit = Some("RUN".to_owned());
-  for entry in run.value.d.as_mut().ok_or("run entries missing")? {
+  let value: &mut TemplateToken = &mut run.value;
+  for entry in value.d.as_mut().ok_or("run entries missing")? {
     entry.key.lit = entry.key.lit.as_ref().map(|name| name.to_ascii_uppercase());
   }
   let resolved = parsed_defaults(&message.defaults)?;
