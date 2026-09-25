@@ -39,9 +39,9 @@
     "reference-linux": null
   },
   "unverified": {
-    "toolu-macos": "No self-hosted runner is registered for the repository yet.",
-    "reference-macos": "Committed workflow has not run on macos-15 yet.",
-    "reference-linux": "Committed workflow has not run on ubuntu-24.04 yet.",
+    "toolu-macos": "Run 36131177953 reached the temporary runner but failed to deserialize the continueOnError wire map; open issue #99 owns that contract.",
+    "reference-macos": "The macos-15 job in run 36131177953 passed all assertions; the run failed overall because the toolu lane hit issue #99, so the live evidence checker cannot mark this lane verified.",
+    "reference-linux": "The ubuntu-24.04 job in run 36131177953 passed all assertions; the run failed overall because the toolu lane hit issue #99, so the live evidence checker cannot mark this lane verified.",
     "ghes": "No GHES instance or credentials are available in this worker environment.",
     "composite-working-directory": "Issue #81 still owns composite working-directory parsing and resolution and is open."
   },
