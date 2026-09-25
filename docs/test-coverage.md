@@ -637,3 +637,23 @@ pinned reference comparisons and GHES are **unverified** until their evidence is
 recorded. Supported GHES needs a supplied server/version/credentials; none is
 configured for this worker. Static source review, ignored tests, and local replay
 cannot close those requirements.
+
+Available live Docker validation (2026-09-25): the four ignored
+`execution::docker::job_container_failures` cases were explicitly run on Linux
+ARM64 against the real Colima daemon with shared `TOOLU_CONTAINER_TEST_ROOT`,
+`DOCKER_HOST=unix:///var/run/docker.sock`, and the fixture's pinned Ubuntu digest.
+Command: `cargo test -p execution --lib docker::job_container_failures -- --ignored --test-threads=1`.
+All four passed: observed-start cancellation and timeout keep the container for
+post execution, then remove its container/network; missing executable and real
+pull/create/start failures leave no owned resources. Log:
+`/tmp/issue100-docker-resources2.log`. The first attempt never exercised the runner
+because the image lacked Docker CLI; installing `docker-cli` resolved that setup
+error. Full mixed-service/sentinel and pinned-reference S5 comparisons remain
+unverified.
+
+The orchestrator confirms no GHES endpoint/credential exists for this epic run.
+A fresh repository runner API check found only offline `toolu-70-final`, with no
+online paired issue-100 toolu/official runner. Consequently acquired-job SIGTERM,
+GitHub.com backend/UI comparison, and pinned-reference/GHES lanes are unverified.
+Per explicit orchestrator direction these gaps do not block PR delivery; the
+Linux gate and GitHub `ci`/`ci-macos` determine code delivery readiness.
