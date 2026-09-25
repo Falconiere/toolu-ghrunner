@@ -13,6 +13,8 @@ use tokio_util::sync::CancellationToken;
 use super::download_info_v1::{LegacyContext, legacy_info};
 use super::resolver::ActionRef;
 
+const USER_AGENT: &str = concat!("toolu-runner/", env!("CARGO_PKG_VERSION"));
+
 /// Per-job location of the server API that resolves action download details.
 #[derive(Clone)]
 pub struct ActionDownloadContext {
@@ -101,7 +103,7 @@ impl ActionDownloadContext {
   ///
   /// # Errors
   ///
-  /// Returns `ActionDownload` on authorization, transport, status, or decode
+  /// Returns `RunnerError::ActionDownload` on authorization, transport, status, or decode
   /// failure. Response bodies and credentials are omitted from errors.
   pub async fn resolve(
     &self,
@@ -245,7 +247,7 @@ impl ActionDownloadContext {
     let request = client
       .get(url)
       .bearer_auth(token)
-      .header(reqwest::header::USER_AGENT, "toolu-runner");
+      .header(reqwest::header::USER_AGENT, USER_AGENT);
     let response = tokio::select! {
       () = cancel.cancelled() => return Err(RunnerError::ActionDownload("action resolution cancelled".to_owned())),
       result = request.send() => result.map_err(|error| {
@@ -373,7 +375,10 @@ fn api_url_from_message(msg: &AgentJobRequestMessage) -> Result<String, RunnerEr
     let server = github_value(msg, "server_url").ok_or_else(|| {
       RunnerError::ActionResolution("acquired job has no GitHub API host".to_owned())
     })?;
-    if server.trim_end_matches('/') == "https://github.com" {
+    if server
+      .trim_end_matches('/')
+      .eq_ignore_ascii_case("https://github.com")
+    {
       "https://api.github.com".to_owned()
     } else {
       format!("{}/api/v3", server.trim_end_matches('/'))
