@@ -5,6 +5,8 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 inputs="$root/crates/expressions/src/tests/expression_inputs.json"
 reference="$root/crates/expressions/src/tests/expression_reference.json"
 provenance="$root/crates/expressions/src/tests/expression_reference.provenance.json"
+# These pins are authoritative: generated provenance must match them. Reading
+# expected values from that same provenance would make this check tautological.
 expected_sha=cab9d1c3901e45c7705889c4f88284fdd93f4ae5
 expected_source_sdk_sha256=8031e25c0ad2e813cdbe1cce25d010a70387890d7d16a6e45b6bd28cdf8c1e45
 
