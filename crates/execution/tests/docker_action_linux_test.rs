@@ -496,7 +496,7 @@ while test ! -f docker-peer-removed; do sleep 0.1; done
     "{events:#?}"
   );
   assert_eq!(
-    std::fs::read_to_string(workspace.join("docker-network.txt"))?,
+    tokio::fs::read_to_string(workspace.join("docker-network.txt")).await?,
     "network-ok"
   );
   assert!(is_missing(
