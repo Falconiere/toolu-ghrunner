@@ -30,6 +30,7 @@ runs:
       uses: ./.github/actions/expression-79-child
       with:
         value: ${{ format('{0}:{1}', inputs.who, steps.prepare.outputs.answer) }}
+    # Missing properties are null; loose equality converts null and '' to zero.
     - if: ${{ github.repository == 'Falconiere/toolu-ghrunner' && github.missing == '' }}
       env:
         RESULT: ${{ format('{0}/{1}', inputs.who, steps.child.outputs.value) }}

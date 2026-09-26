@@ -77,28 +77,7 @@ pub fn lex(input: &str) -> Result<Vec<Token>, RunnerError> {
       i += 1;
       let s = lex_string(bytes, &mut i)?;
       tokens.push(Token::StringLit(s));
-    } else if ch.is_ascii_digit()
-      || matches!(ch, b'+' | b'-')
-      || ch == b'.'
-        && matches!(
-          tokens.last(),
-          None
-            | Some(
-              Token::Comma
-                | Token::LParen
-                | Token::LBracket
-                | Token::Eq
-                | Token::Neq
-                | Token::Lt
-                | Token::Le
-                | Token::Gt
-                | Token::Ge
-                | Token::And
-                | Token::Or
-                | Token::Not
-            )
-        )
-    {
+    } else if is_number_start(ch, tokens.last()) {
       let n = lex_number(bytes, &mut i)?;
       tokens.push(Token::NumberLit(n));
     } else if is_ident_start(ch) {
@@ -168,6 +147,30 @@ fn is_ident_start(ch: u8) -> bool {
   ch.is_ascii_alphabetic() || ch == b'_'
 }
 
+fn is_number_start(ch: u8, previous: Option<&Token>) -> bool {
+  ch.is_ascii_digit()
+    || matches!(ch, b'+' | b'-')
+    || ch == b'.'
+      && matches!(
+        previous,
+        None
+          | Some(
+            Token::Comma
+              | Token::LParen
+              | Token::LBracket
+              | Token::Eq
+              | Token::Neq
+              | Token::Lt
+              | Token::Le
+              | Token::Gt
+              | Token::Ge
+              | Token::And
+              | Token::Or
+              | Token::Not
+          )
+      )
+}
+
 fn is_ident_continue(ch: u8) -> bool {
   ch.is_ascii_alphanumeric() || ch == b'_' || ch == b'-'
 }
@@ -189,7 +192,13 @@ fn lex_string(bytes: &[u8], i: &mut usize) -> Result<String, RunnerError> {
         s.push(b'\'');
         *i += 1;
       } else {
-        return String::from_utf8(s).map_err(|err| RunnerError::Expression(err.to_string()));
+        return String::from_utf8(s).map_err(|err| {
+          RunnerError::Expression(format!(
+            "invalid UTF-8 in string literal at byte {}: {}",
+            err.utf8_error().valid_up_to(),
+            err.utf8_error()
+          ))
+        });
       }
     } else {
       s.push(ch);
@@ -206,13 +215,14 @@ fn lex_number(bytes: &[u8], i: &mut usize) -> Result<f64, RunnerError> {
     }
     *i += 1;
   }
-  let text = std::str::from_utf8(bytes.get(start..*i).unwrap_or_default()).unwrap_or_default();
-  let value = crate::number::parse_number(text);
-  if value.is_nan() {
-    Err(RunnerError::Expression(format!("invalid number '{text}'")))
-  } else {
-    Ok(value)
-  }
+  let slice = bytes
+    .get(start..*i)
+    .ok_or_else(|| RunnerError::Expression(format!("invalid number boundary at byte {start}")))?;
+  let text = std::str::from_utf8(slice).map_err(|err| {
+    RunnerError::Expression(format!("invalid UTF-8 number at byte {start}: {err}"))
+  })?;
+  crate::number::parse_number_checked(text)
+    .map_err(|reason| RunnerError::Expression(format!("invalid number at byte {start}: {reason}")))
 }
 
 fn lex_ident(bytes: &[u8], i: &mut usize) -> String {
