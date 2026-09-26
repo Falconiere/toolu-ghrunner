@@ -1,0 +1,8 @@
+{
+  "dotnet_runtime_version": "8.0.31",
+  "dotnet_sdk_version": "8.0.425",
+  "input_sha256": "7bae408f316ea55e6ecde0f578101663cb1b678060265a2a74a502efe2c13c52",
+  "reference_sha256": "ec60fa20622f7c0afac96770bb164ecc6c67811417a478f1708617a718a6ebc8",
+  "source_sdk_sha256": "8031e25c0ad2e813cdbe1cce25d010a70387890d7d16a6e45b6bd28cdf8c1e45",
+  "upstream_sha": "cab9d1c3901e45c7705889c4f88284fdd93f4ae5"
+}

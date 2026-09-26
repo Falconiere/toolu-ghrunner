@@ -15,7 +15,7 @@ pub fn pipeline_data_to_expr_value(data: &PipelineContextData) -> ExprValue {
     return ExprValue::String(s.clone());
   }
   if let Some(entries) = &data.d {
-    let mut map = std::collections::HashMap::new();
+    let mut map = crate::object::ExprObject::default();
     for entry in entries {
       let key = pipeline_data_to_expr_value(&entry.key).coerce_to_string();
       let value = pipeline_data_to_expr_value(&entry.value);
@@ -24,7 +24,7 @@ pub fn pipeline_data_to_expr_value(data: &PipelineContextData) -> ExprValue {
     return ExprValue::Object(map);
   }
   if let Some(arr) = &data.a {
-    return ExprValue::Array(arr.iter().map(pipeline_data_to_expr_value).collect());
+    return ExprValue::array(arr.iter().map(pipeline_data_to_expr_value));
   }
   if let Some(b) = data.b {
     return ExprValue::Bool(b);

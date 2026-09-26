@@ -1,0 +1,11 @@
+name: expression-79-bad
+inputs:
+  who:
+    required: true
+  expected:
+    required: true
+runs:
+  using: composite
+  steps:
+    - run: echo ${{ unknown.root }}
+      shell: bash

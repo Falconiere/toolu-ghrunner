@@ -44,11 +44,10 @@ pub(super) fn composite_eval_context(
 }
 
 fn string_object(values: &HashMap<String, String>) -> ExprValue {
-  ExprValue::Object(
+  ExprValue::object(
     values
       .iter()
-      .map(|(key, value)| (key.clone(), ExprValue::String(value.clone())))
-      .collect(),
+      .map(|(key, value)| (key.clone(), ExprValue::String(value.clone()))),
   )
 }
 
@@ -90,8 +89,7 @@ fn validate_template(text: &str, field: CompositeField) -> Result<(), RunnerErro
   let mut rest = text;
   while let Some(start) = rest.find("${{") {
     let after_open = rest.get(start + 3..).unwrap_or_default();
-    let end = after_open
-      .find("}}")
+    let end = expressions::template::expression_end(after_open)
       .ok_or_else(|| RunnerError::Expression("unclosed ${{ expression".to_owned()))?;
     validate_expression(after_open.get(..end).unwrap_or_default().trim(), field)?;
     rest = after_open.get(end + 2..).unwrap_or_default();

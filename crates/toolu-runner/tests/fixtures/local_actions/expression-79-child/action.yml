@@ -1,0 +1,14 @@
+name: expression-79-child
+inputs:
+  value:
+    required: true
+outputs:
+  value:
+    value: ${{ steps.emit.outputs.value }}
+runs:
+  using: composite
+  steps:
+    - id: emit
+      if: ${{ inputs.value == 'world:42' }}
+      run: echo "value=${{ inputs.value }}" >> "$GITHUB_OUTPUT"
+      shell: ${{ format('{0}', 'bash') }}

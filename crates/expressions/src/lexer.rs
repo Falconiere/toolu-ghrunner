@@ -1,3 +1,5 @@
+//! Tokenization of Actions literals and operators.
+
 use shared::RunnerError;
 
 /// Token produced by the expression lexer.
@@ -75,12 +77,37 @@ pub fn lex(input: &str) -> Result<Vec<Token>, RunnerError> {
       i += 1;
       let s = lex_string(bytes, &mut i)?;
       tokens.push(Token::StringLit(s));
-    } else if ch.is_ascii_digit() {
+    } else if ch.is_ascii_digit()
+      || matches!(ch, b'+' | b'-')
+      || ch == b'.'
+        && matches!(
+          tokens.last(),
+          None
+            | Some(
+              Token::Comma
+                | Token::LParen
+                | Token::LBracket
+                | Token::Eq
+                | Token::Neq
+                | Token::Lt
+                | Token::Le
+                | Token::Gt
+                | Token::Ge
+                | Token::And
+                | Token::Or
+                | Token::Not
+            )
+        )
+    {
       let n = lex_number(bytes, &mut i)?;
       tokens.push(Token::NumberLit(n));
     } else if is_ident_start(ch) {
       let word = lex_ident(bytes, &mut i);
-      tokens.push(keyword_or_ident(word));
+      tokens.push(if matches!(tokens.last(), Some(Token::Dot)) {
+        Token::Ident(word)
+      } else {
+        keyword_or_ident(word)
+      });
     } else {
       let tok = lex_operator(bytes, &mut i)?;
       tokens.push(tok);
@@ -131,6 +158,8 @@ fn keyword_or_ident(word: String) -> Token {
     "true" => Token::BoolLit(true),
     "false" => Token::BoolLit(false),
     "null" => Token::Null,
+    "NaN" => Token::NumberLit(f64::NAN),
+    "Infinity" => Token::NumberLit(f64::INFINITY),
     _ => Token::Ident(word),
   }
 }
@@ -144,7 +173,7 @@ fn is_ident_continue(ch: u8) -> bool {
 }
 
 fn lex_string(bytes: &[u8], i: &mut usize) -> Result<String, RunnerError> {
-  let mut s = String::new();
+  let mut s = Vec::new();
 
   loop {
     let Some(&ch) = bytes.get(*i) else {
@@ -157,13 +186,13 @@ fn lex_string(bytes: &[u8], i: &mut usize) -> Result<String, RunnerError> {
       *i += 1;
       // Escaped quote: '' → '
       if bytes.get(*i).copied() == Some(b'\'') {
-        s.push('\'');
+        s.push(b'\'');
         *i += 1;
       } else {
-        return Ok(s);
+        return String::from_utf8(s).map_err(|err| RunnerError::Expression(err.to_string()));
       }
     } else {
-      s.push(char::from(ch));
+      s.push(ch);
       *i += 1;
     }
   }
@@ -171,23 +200,19 @@ fn lex_string(bytes: &[u8], i: &mut usize) -> Result<String, RunnerError> {
 
 fn lex_number(bytes: &[u8], i: &mut usize) -> Result<f64, RunnerError> {
   let start = *i;
-  let mut has_dot = false;
-
   while let Some(&ch) = bytes.get(*i) {
-    if ch.is_ascii_digit() {
-      *i += 1;
-    } else if ch == b'.' && !has_dot {
-      has_dot = true;
-      *i += 1;
-    } else {
+    if ch.is_ascii_whitespace() || b"[](),!<>=&|".contains(&ch) {
       break;
     }
+    *i += 1;
   }
-
-  let s = std::str::from_utf8(bytes.get(start..*i).unwrap_or_default()).unwrap_or_default();
-
-  s.parse::<f64>()
-    .map_err(|e| RunnerError::Expression(format!("invalid number '{s}': {e}")))
+  let text = std::str::from_utf8(bytes.get(start..*i).unwrap_or_default()).unwrap_or_default();
+  let value = crate::number::parse_number(text);
+  if value.is_nan() {
+    Err(RunnerError::Expression(format!("invalid number '{text}'")))
+  } else {
+    Ok(value)
+  }
 }
 
 fn lex_ident(bytes: &[u8], i: &mut usize) -> String {

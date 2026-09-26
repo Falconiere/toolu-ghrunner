@@ -6,9 +6,9 @@ use super::super::types::ExprValue;
 
 pub(super) fn fn_to_json(args: &[ExprValue]) -> Result<ExprValue, RunnerError> {
   let val = arg1("toJSON", args)?;
-  let json = expr_value_to_json(val);
-  let s = serde_json::to_string(&json).map_err(RunnerError::Json)?;
-  Ok(ExprValue::String(s))
+  let mut output = String::new();
+  write_json(val, 0, &mut output)?;
+  Ok(ExprValue::String(output))
 }
 
 pub(super) fn fn_from_json(args: &[ExprValue]) -> Result<ExprValue, RunnerError> {
@@ -35,23 +35,45 @@ fn arg1<'a>(name: &str, args: &'a [ExprValue]) -> Result<&'a ExprValue, RunnerEr
     .ok_or_else(|| RunnerError::Expression(format!("{name} expects 1 arg, got 0")))
 }
 
-fn expr_value_to_json(val: &ExprValue) -> serde_json::Value {
-  match val {
-    ExprValue::Null => serde_json::Value::Null,
-    ExprValue::Bool(b) => serde_json::Value::Bool(*b),
-    ExprValue::Number(n) => {
-      serde_json::Number::from_f64(*n).map_or(serde_json::Value::Null, serde_json::Value::Number)
+fn write_json(value: &ExprValue, depth: usize, out: &mut String) -> Result<(), RunnerError> {
+  match value {
+    ExprValue::Null => out.push_str("null"),
+    ExprValue::Bool(_) | ExprValue::Number(_) => out.push_str(&value.coerce_to_string()),
+    ExprValue::String(s) => out.push_str(&serde_json::to_string(s)?),
+    ExprValue::Array(array) => {
+      out.push('[');
+      for (index, item) in array.iter().enumerate() {
+        newline(out, depth + 1, index > 0);
+        write_json(item, depth + 1, out)?;
+      }
+      if !array.is_empty() {
+        newline(out, depth, false);
+      }
+      out.push(']');
     },
-    ExprValue::String(s) => serde_json::Value::String(s.clone()),
-    ExprValue::Array(arr) => serde_json::Value::Array(arr.iter().map(expr_value_to_json).collect()),
-    ExprValue::Object(map) => {
-      let obj = map
-        .iter()
-        .map(|(k, v)| (k.clone(), expr_value_to_json(v)))
-        .collect();
-      serde_json::Value::Object(obj)
+    ExprValue::Object(object) => {
+      out.push('{');
+      for (index, (key, item)) in object.iter().enumerate() {
+        newline(out, depth + 1, index > 0);
+        out.push_str(&serde_json::to_string(key)?);
+        out.push_str(": ");
+        write_json(item, depth + 1, out)?;
+      }
+      if !object.is_empty() {
+        newline(out, depth, false);
+      }
+      out.push('}');
     },
   }
+  Ok(())
+}
+
+fn newline(out: &mut String, depth: usize, comma: bool) {
+  if comma {
+    out.push(',');
+  }
+  out.push('\n');
+  out.push_str(&"  ".repeat(depth));
 }
 
 fn json_to_expr_value(val: &serde_json::Value) -> ExprValue {
@@ -60,9 +82,9 @@ fn json_to_expr_value(val: &serde_json::Value) -> ExprValue {
     serde_json::Value::Bool(b) => ExprValue::Bool(*b),
     serde_json::Value::Number(n) => ExprValue::Number(n.as_f64().unwrap_or(0.0)),
     serde_json::Value::String(s) => ExprValue::String(s.clone()),
-    serde_json::Value::Array(arr) => ExprValue::Array(arr.iter().map(json_to_expr_value).collect()),
+    serde_json::Value::Array(arr) => ExprValue::array(arr.iter().map(json_to_expr_value)),
     serde_json::Value::Object(map) => {
-      let obj = map
+      let obj: crate::object::ExprObject = map
         .iter()
         .map(|(k, v)| (k.clone(), json_to_expr_value(v)))
         .collect();

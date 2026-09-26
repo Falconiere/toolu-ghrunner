@@ -3,7 +3,7 @@
 use shared::RunnerError;
 
 use super::super::evaluator::{EvalContext, JobStatus};
-use super::super::types::ExprValue;
+use super::super::types::{ExprValue, ordinal_upper};
 
 /// Call a built-in GitHub Actions expression function.
 ///
@@ -17,6 +17,7 @@ pub fn call_function(
   args: &[ExprValue],
   ctx: &EvalContext,
 ) -> Result<ExprValue, RunnerError> {
+  crate::validation::validate_arity(name, args.len())?;
   match name.to_ascii_lowercase().as_str() {
     "success" => Ok(ExprValue::Bool(ctx.job_status == JobStatus::Success)),
     "failure" => Ok(ExprValue::Bool(ctx.job_status == JobStatus::Failure)),
@@ -26,6 +27,7 @@ pub fn call_function(
     "startswith" => fn_starts_with(args),
     "endswith" => fn_ends_with(args),
     "format" => fn_format(args),
+    "case" => fn_case(args),
     "join" => fn_join(args),
     "tojson" => super::json_convert::fn_to_json(args),
     "fromjson" => super::json_convert::fn_from_json(args),
@@ -70,90 +72,83 @@ fn arg2<'a>(
 fn fn_contains(args: &[ExprValue]) -> Result<ExprValue, RunnerError> {
   let (search, item) = arg2("contains", args)?;
   match search {
-    ExprValue::String(haystack) => {
-      let needle = item.coerce_to_string();
+    ExprValue::String(_) | ExprValue::Null | ExprValue::Bool(_) | ExprValue::Number(_) => {
+      if !item.is_primitive() {
+        return Ok(ExprValue::Bool(false));
+      }
+      let haystack = ordinal_upper(&search.coerce_to_string());
+      let needle = ordinal_upper(&item.coerce_to_string());
       Ok(ExprValue::Bool(
-        haystack
-          .to_ascii_lowercase()
-          .contains(&needle.to_ascii_lowercase()),
+        needle.is_empty() || haystack.windows(needle.len()).any(|part| part == needle),
       ))
     },
     ExprValue::Array(arr) => {
       let found = arr.iter().any(|el| el.loose_eq(item));
       Ok(ExprValue::Bool(found))
     },
-    ExprValue::Null | ExprValue::Bool(_) | ExprValue::Number(_) | ExprValue::Object(_) => {
-      Ok(ExprValue::Bool(false))
-    },
+    ExprValue::Object(_) => Ok(ExprValue::Bool(false)),
   }
 }
 
 fn fn_starts_with(args: &[ExprValue]) -> Result<ExprValue, RunnerError> {
   let (a, b) = arg2("startsWith", args)?;
-  let s = a.coerce_to_string().to_ascii_lowercase();
-  let prefix = b.coerce_to_string().to_ascii_lowercase();
+  if !a.is_primitive() || !b.is_primitive() {
+    return Ok(ExprValue::Bool(false));
+  }
+  let s = ordinal_upper(&a.coerce_to_string());
+  let prefix = ordinal_upper(&b.coerce_to_string());
   Ok(ExprValue::Bool(s.starts_with(&prefix)))
 }
 
 fn fn_ends_with(args: &[ExprValue]) -> Result<ExprValue, RunnerError> {
   let (a, b) = arg2("endsWith", args)?;
-  let s = a.coerce_to_string().to_ascii_lowercase();
-  let suffix = b.coerce_to_string().to_ascii_lowercase();
+  if !a.is_primitive() || !b.is_primitive() {
+    return Ok(ExprValue::Bool(false));
+  }
+  let s = ordinal_upper(&a.coerce_to_string());
+  let suffix = ordinal_upper(&b.coerce_to_string());
   Ok(ExprValue::Bool(s.ends_with(&suffix)))
 }
 
 fn fn_format(args: &[ExprValue]) -> Result<ExprValue, RunnerError> {
-  let template_val = args
+  let template = args
     .first()
-    .ok_or_else(|| RunnerError::Expression("format requires at least 1 argument".to_owned()))?;
-  let template = template_val.coerce_to_string();
-  let replacements = args.get(1..).unwrap_or_default();
-  let mut result = String::with_capacity(template.len());
-  let chars: Vec<char> = template.chars().collect();
-  let mut i = 0;
-
-  while i < chars.len() {
-    let Some(&ch) = chars.get(i) else { break };
-    if ch == '{' {
-      if chars.get(i + 1).copied() == Some('{') {
-        result.push('{');
-        i += 2;
-      } else {
-        let (idx, end) = parse_format_index(&chars, i + 1)?;
-        let val = replacements
-          .get(idx)
-          .map(ExprValue::coerce_to_string)
-          .unwrap_or_default();
-        result.push_str(&val);
-        i = end + 1;
-      }
-    } else if ch == '}' && chars.get(i + 1).copied() == Some('}') {
-      result.push('}');
-      i += 2;
-    } else {
-      result.push(ch);
-      i += 1;
-    }
-  }
-
-  Ok(ExprValue::String(result))
+    .ok_or_else(|| RunnerError::Expression("format requires an argument".to_owned()))?
+    .coerce_to_string();
+  super::format::render(&template, args.len().saturating_sub(1), |index| {
+    args
+      .get(index + 1)
+      .cloned()
+      .ok_or_else(|| RunnerError::Expression("format argument out of range".to_owned()))
+  })
 }
 
-fn parse_format_index(chars: &[char], start: usize) -> Result<(usize, usize), RunnerError> {
-  let mut end = start;
-  while end < chars.len() && chars.get(end).copied() != Some('}') {
-    end += 1;
-  }
-  if end >= chars.len() {
+fn fn_case(args: &[ExprValue]) -> Result<ExprValue, RunnerError> {
+  if args.len().is_multiple_of(2) {
     return Err(RunnerError::Expression(
-      "unclosed { in format string".to_owned(),
+      "case requires an odd number of arguments".to_owned(),
     ));
   }
-  let num_str: String = chars.get(start..end).unwrap_or_default().iter().collect();
-  let idx = num_str
-    .parse::<usize>()
-    .map_err(|_err| RunnerError::Expression(format!("invalid format index: {num_str}")))?;
-  Ok((idx, end))
+  for pair in args.chunks_exact(2) {
+    match pair.first() {
+      Some(ExprValue::Bool(true)) => {
+        return pair
+          .get(1)
+          .cloned()
+          .ok_or_else(|| RunnerError::Expression("case missing result".to_owned()));
+      },
+      Some(ExprValue::Bool(false)) => {},
+      _ => {
+        return Err(RunnerError::Expression(
+          "case predicate must evaluate to a boolean".to_owned(),
+        ));
+      },
+    }
+  }
+  args
+    .last()
+    .cloned()
+    .ok_or_else(|| RunnerError::Expression("case missing default".to_owned()))
 }
 
 fn fn_join(args: &[ExprValue]) -> Result<ExprValue, RunnerError> {
@@ -164,6 +159,7 @@ fn fn_join(args: &[ExprValue]) -> Result<ExprValue, RunnerError> {
   }
   let separator = args
     .get(1)
+    .filter(|value| value.is_primitive())
     .map_or_else(|| ",".to_owned(), ExprValue::coerce_to_string);
 
   let first = args
@@ -175,10 +171,9 @@ fn fn_join(args: &[ExprValue]) -> Result<ExprValue, RunnerError> {
       let parts: Vec<String> = arr.iter().map(ExprValue::coerce_to_string).collect();
       Ok(ExprValue::String(parts.join(&separator)))
     },
-    ExprValue::Null
-    | ExprValue::Bool(_)
-    | ExprValue::Number(_)
-    | ExprValue::String(_)
-    | ExprValue::Object(_) => Ok(ExprValue::String(first.coerce_to_string())),
+    ExprValue::Null | ExprValue::Bool(_) | ExprValue::Number(_) | ExprValue::String(_) => {
+      Ok(ExprValue::String(first.coerce_to_string()))
+    },
+    ExprValue::Object(_) => Ok(ExprValue::String(String::new())),
   }
 }

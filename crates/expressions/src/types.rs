@@ -1,4 +1,8 @@
-use std::collections::HashMap;
+//! Values and coercions of the Actions expression language.
+
+use crate::array::ExprArray;
+use crate::number::{format_number, parse_number};
+use crate::object::ExprObject;
 use std::fmt;
 
 /// Runtime value in the GitHub Actions expression language.
@@ -18,18 +22,33 @@ pub enum ExprValue {
   /// A string value.
   String(String),
   /// An ordered list of values.
-  Array(Vec<ExprValue>),
+  Array(ExprArray),
   /// A map from string keys to values.
-  Object(HashMap<String, ExprValue>),
+  Object(ExprObject),
 }
 
 impl ExprValue {
+  /// Collect an array with new identity; cloning it preserves that identity.
+  pub fn array(values: impl IntoIterator<Item = Self>) -> Self {
+    Self::Array(values.into_iter().collect())
+  }
+
+  /// Collect an object in iteration order with new identity.
+  pub fn object(values: impl IntoIterator<Item = (String, Self)>) -> Self {
+    Self::Object(values.into_iter().collect())
+  }
+
+  /// Whether this value can be converted to an object index.
+  pub(crate) fn is_primitive(&self) -> bool {
+    !matches!(self, Self::Array(_) | Self::Object(_))
+  }
+
   /// GitHub Actions truthiness rules.
   pub fn is_truthy(&self) -> bool {
     match self {
       Self::Null => false,
       Self::Bool(b) => *b,
-      Self::Number(n) => *n != 0.0,
+      Self::Number(n) => *n != 0.0 && !n.is_nan(),
       Self::String(s) => !s.is_empty(),
       Self::Array(_) | Self::Object(_) => true,
     }
@@ -41,7 +60,9 @@ impl ExprValue {
       Self::Bool(b) => if *b { "true" } else { "false" }.to_owned(),
       Self::Number(n) => format_number(*n),
       Self::String(s) => s.clone(),
-      Self::Null | Self::Array(_) | Self::Object(_) => String::new(),
+      Self::Null => String::new(),
+      Self::Array(_) => "Array".to_owned(),
+      Self::Object(_) => "Object".to_owned(),
     }
   }
 
@@ -57,7 +78,7 @@ impl ExprValue {
         }
       },
       Self::Number(n) => *n,
-      Self::String(s) => parse_number_str(s),
+      Self::String(s) => parse_number(s),
       Self::Array(_) | Self::Object(_) => f64::NAN,
     }
   }
@@ -71,7 +92,9 @@ impl ExprValue {
       (Self::Null, Self::Null) => true,
       (Self::Bool(a), Self::Bool(b)) => a == b,
       (Self::Number(a), Self::Number(b)) => float_eq(*a, *b),
-      (Self::String(a), Self::String(b)) => a.eq_ignore_ascii_case(b),
+      (Self::String(a), Self::String(b)) => ordinal_compare(a, b).is_eq(),
+      (Self::Array(a), Self::Array(b)) => a.same_reference(b),
+      (Self::Object(a), Self::Object(b)) => a.same_reference(b),
       // Mixed types: coerce both to number
       _ => {
         let a = self.coerce_to_number();
@@ -119,21 +142,27 @@ impl fmt::Display for ExprValue {
 }
 
 fn float_eq(a: f64, b: f64) -> bool {
-  if a.is_nan() && b.is_nan() {
-    return true;
-  }
-  (a - b).abs() < f64::EPSILON
+  a.partial_cmp(&b) == Some(std::cmp::Ordering::Equal)
 }
 
-fn format_number(n: f64) -> String {
-  let s = format!("{n}");
-  s.strip_suffix(".0").map(ToOwned::to_owned).unwrap_or(s)
+/// Compare strings using invariant ordinal-ignore-case UTF-16 ordering.
+pub(crate) fn ordinal_compare(a: &str, b: &str) -> std::cmp::Ordering {
+  ordinal_upper(a).cmp(&ordinal_upper(b))
 }
 
-fn parse_number_str(s: &str) -> f64 {
-  let trimmed = s.trim();
-  if trimmed.is_empty() {
-    return 0.0;
-  }
-  trimmed.parse::<f64>().unwrap_or(f64::NAN)
+/// Invariant simple uppercase units used by ordinal-ignore-case operations.
+pub(crate) fn ordinal_upper(s: &str) -> Vec<u16> {
+  s.chars()
+    .map(|ch| {
+      // .NET ordinal casing excludes the two non-ASCII-to-ASCII mappings.
+      if matches!(ch, '\u{0131}' | '\u{017f}') {
+        return ch;
+      }
+      let mut chars = ch.to_uppercase();
+      let first = chars.next().unwrap_or(ch);
+      if chars.next().is_some() { ch } else { first }
+    })
+    .collect::<String>()
+    .encode_utf16()
+    .collect()
 }

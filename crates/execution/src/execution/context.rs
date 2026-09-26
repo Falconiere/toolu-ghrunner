@@ -14,6 +14,7 @@ use super::step_state::StepState;
 use crate::docker::job_container::JobContainer;
 use crate::docker::services::ServiceContainers;
 use expressions::evaluator::{EvalContext, JobStatus, evaluate};
+use expressions::object::ExprObject;
 use expressions::template::interpolate;
 use expressions::types::ExprValue;
 
@@ -39,8 +40,8 @@ pub struct ExecutionContext {
   scoped_action_paths: HashMap<Vec<String>, String>,
   /// `save-state` is private action-instance data, independent of `steps.*`.
   action_states: HashMap<(Vec<String>, String), HashMap<String, String>>,
-  github: HashMap<String, ExprValue>,
-  runner_context: HashMap<String, ExprValue>,
+  github: ExprObject,
+  runner_context: ExprObject,
   job_status: JobStatus,
   /// Live job cancellation policy shared by main, composite and post execution.
   pub(crate) cancellation: Option<Arc<super::job_cancellation::JobCancellation>>,
@@ -74,7 +75,7 @@ impl ExecutionContext {
   /// the listener, which also shares the same Arc with the tracing
   /// file sink's redactor).
   pub fn with_masker(masker: Arc<Mutex<SecretMasker>>) -> Self {
-    let mut runner_ctx = HashMap::new();
+    let mut runner_ctx = ExprObject::default();
     runner_ctx.insert("os".to_owned(), ExprValue::String(runner_os().to_owned()));
     runner_ctx.insert(
       "arch".to_owned(),
@@ -92,13 +93,16 @@ impl ExecutionContext {
       scoped_status: HashMap::new(),
       scoped_action_paths: HashMap::new(),
       action_states: HashMap::new(),
-      github: HashMap::new(),
+      github: ExprObject::default(),
       runner_context: runner_ctx,
       job_status: JobStatus::Success,
       cancellation: None,
       secrets: HashMap::new(),
       vars: HashMap::new(),
-      incoming_contexts: HashMap::new(),
+      incoming_contexts: ["matrix", "strategy", "needs", "inputs"]
+        .into_iter()
+        .map(|name| (name.to_owned(), ExprValue::Null))
+        .collect(),
       masker,
       path_additions: Vec::new(),
       cgroup_path: None,
@@ -258,7 +262,7 @@ impl ExecutionContext {
   ) {
     self.incoming_contexts.insert(
       "strategy".to_owned(),
-      ExprValue::Object(build_strategy(
+      ExprValue::object(build_strategy(
         job_index,
         job_total,
         fail_fast,

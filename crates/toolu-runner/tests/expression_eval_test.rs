@@ -26,11 +26,11 @@ fn object_from(pairs: &[(&str, ExprValue)]) -> ExprValue {
   for (k, v) in pairs {
     map.insert((*k).to_owned(), v.clone());
   }
-  ExprValue::Object(map)
+  ExprValue::object(map)
 }
 
 fn array_from(values: &[ExprValue]) -> ExprValue {
-  ExprValue::Array(values.to_vec())
+  ExprValue::array(values.to_vec())
 }
 
 fn context(pairs: &[(&str, ExprValue)]) -> EvalContext {

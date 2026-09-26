@@ -1,5 +1,13 @@
 //! The GitHub Actions `${{ }}` expression evaluator: lexer, parser, evaluator, and templating.
 
+mod access;
+/// Shared arrays with reference identity.
+pub mod array;
+mod number;
+/// Shared insertion-ordered object values.
+pub mod object;
+mod validation;
+
 /// Context objects (`github`, `env`, `secrets`, `steps`, `matrix`, etc.) fed to expression evaluation.
 pub mod context_data;
 /// Evaluates a parsed expression AST against an [`EvalContext`](evaluator::EvalContext).
@@ -14,3 +22,7 @@ pub mod parser;
 pub mod template;
 /// The dynamic value type (`ExprValue`) expressions evaluate to.
 pub mod types;
+
+#[cfg(test)]
+#[path = "tests/parity.rs"]
+mod tests;

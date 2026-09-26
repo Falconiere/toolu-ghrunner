@@ -1,0 +1,44 @@
+name: expression-parity-79
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/79-expression-engine-parity-with-actions
+
+permissions:
+  contents: read
+
+jobs:
+  parity:
+    name: expression-${{ matrix.lane }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: toolu-macos
+            runner: [self-hosted, toolu-79]
+          - lane: pinned-reference-macos
+            runner: [self-hosted, reference-79]
+          - lane: hosted-linux
+            runner: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install local parity actions
+        shell: bash
+        run: |
+          mkdir -p .github/actions
+          cp -R crates/toolu-runner/tests/fixtures/local_actions/expression-79* .github/actions/
+      - id: parity
+        uses: ./.github/actions/expression-79
+        with:
+          who: world
+          expected: world
+      - name: Assert runner-visible results
+        shell: bash
+        env:
+          RESULT: ${{ steps.parity.outputs.result }}
+        run: |
+          test "$RESULT" = world/world:42/
+          test "$(cat expression-79.composite)" = world/world:42

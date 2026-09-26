@@ -63,25 +63,25 @@ fn pull_request_event(body_len: usize) -> ExprValue {
   pr.insert("body".to_owned(), ExprValue::String("x".repeat(body_len)));
   pr.insert("state".to_owned(), ExprValue::String("open".to_owned()));
   pr.insert("draft".to_owned(), ExprValue::Bool(false));
-  pr.insert("user".to_owned(), ExprValue::Object(actor("octocat", 1.0)));
+  pr.insert("user".to_owned(), ExprValue::object(actor("octocat", 1.0)));
   pr.insert(
     "base".to_owned(),
-    ExprValue::Object(branch("main", "d6cd1e2bd19e03a81132a23b2025920577f84e37")),
+    ExprValue::object(branch("main", "d6cd1e2bd19e03a81132a23b2025920577f84e37")),
   );
   pr.insert(
     "head".to_owned(),
-    ExprValue::Object(branch(
+    ExprValue::object(branch(
       "feature/cache",
       "a1b2c3d4e5f60718293a4b5c6d7e8f9091a2b3c4",
     )),
   );
-  pr.insert("labels".to_owned(), ExprValue::Array(labels()));
+  pr.insert("labels".to_owned(), ExprValue::array(labels()));
 
   let mut event = HashMap::new();
   event.insert("action".to_owned(), ExprValue::String("opened".to_owned()));
   event.insert("number".to_owned(), ExprValue::Number(42.0));
-  event.insert("pull_request".to_owned(), ExprValue::Object(pr));
-  ExprValue::Object(event)
+  event.insert("pull_request".to_owned(), ExprValue::object(pr));
+  ExprValue::object(event)
 }
 
 fn actor(login: &str, id: f64) -> HashMap<String, ExprValue> {
@@ -104,7 +104,7 @@ fn labels() -> Vec<ExprValue> {
     .map(|name| {
       let mut label = HashMap::new();
       label.insert("name".to_owned(), ExprValue::String((*name).to_owned()));
-      ExprValue::Object(label)
+      ExprValue::object(label)
     })
     .collect()
 }

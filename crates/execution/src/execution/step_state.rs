@@ -29,7 +29,7 @@ pub(super) fn build_steps_context(steps: &HashMap<String, StepState>) -> ExprVal
       .iter()
       .map(|(k, v)| (k.clone(), ExprValue::String(v.clone())))
       .collect();
-    step_obj.insert("outputs".to_owned(), ExprValue::Object(outputs));
+    step_obj.insert("outputs".to_owned(), ExprValue::object(outputs));
 
     // outcome = real result; conclusion = continue-on-error-adjusted result.
     // They differ when a step failed under `continue-on-error: true`.
@@ -47,9 +47,9 @@ pub(super) fn build_steps_context(steps: &HashMap<String, StepState>) -> ExprVal
       ExprValue::String(conclusion_str.to_owned()),
     );
 
-    steps_map.insert(id.clone(), ExprValue::Object(step_obj));
+    steps_map.insert(id.clone(), ExprValue::object(step_obj));
   }
-  ExprValue::Object(steps_map)
+  ExprValue::object(steps_map)
 }
 
 fn conclusion_to_string(c: Conclusion) -> &'static str {

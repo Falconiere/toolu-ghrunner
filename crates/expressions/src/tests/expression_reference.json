@@ -1,0 +1,7012 @@
+[
+  {
+    "expression": "-1",
+    "kind": "number",
+    "value": "-1"
+  },
+  {
+    "expression": "\u002B1",
+    "kind": "number",
+    "value": "1"
+  },
+  {
+    "expression": "-.5",
+    "kind": "number",
+    "value": "-0.5"
+  },
+  {
+    "expression": "\u002B.5",
+    "kind": "number",
+    "value": "0.5"
+  },
+  {
+    "expression": ".5",
+    "kind": "number",
+    "value": "0.5"
+  },
+  {
+    "expression": "1.",
+    "kind": "number",
+    "value": "1"
+  },
+  {
+    "expression": "1e3",
+    "kind": "number",
+    "value": "1000"
+  },
+  {
+    "expression": "1E-3",
+    "kind": "number",
+    "value": "0.001"
+  },
+  {
+    "expression": "0xff",
+    "kind": "number",
+    "value": "255"
+  },
+  {
+    "expression": "0xFFFFFFFF",
+    "kind": "number",
+    "value": "-1"
+  },
+  {
+    "expression": "0x80000000",
+    "kind": "number",
+    "value": "-2147483648"
+  },
+  {
+    "expression": "0o377",
+    "kind": "number",
+    "value": "255"
+  },
+  {
+    "expression": "0o37777777777",
+    "kind": "number",
+    "value": "-1"
+  },
+  {
+    "expression": "0Xff",
+    "kind": "error",
+    "value": "Unexpected symbol: \u00270Xff\u0027. Located at position 1 within expression: 0Xff"
+  },
+  {
+    "expression": "-0xff",
+    "kind": "error",
+    "value": "Unexpected symbol: \u0027-0xff\u0027. Located at position 1 within expression: -0xff"
+  },
+  {
+    "expression": "0x100000000",
+    "kind": "error",
+    "value": "Unexpected symbol: \u00270x100000000\u0027. Located at position 1 within expression: 0x100000000"
+  },
+  {
+    "expression": "NaN",
+    "kind": "number",
+    "value": "NaN"
+  },
+  {
+    "expression": "Infinity",
+    "kind": "number",
+    "value": "Infinity"
+  },
+  {
+    "expression": "-Infinity",
+    "kind": "number",
+    "value": "-Infinity"
+  },
+  {
+    "expression": "\u002BInfinity",
+    "kind": "number",
+    "value": "Infinity"
+  },
+  {
+    "expression": "nan",
+    "kind": "error",
+    "value": "Unrecognized named-value: \u0027nan\u0027. Located at position 1 within expression: nan"
+  },
+  {
+    "expression": "inf",
+    "kind": "error",
+    "value": "Unrecognized named-value: \u0027inf\u0027. Located at position 1 within expression: inf"
+  },
+  {
+    "expression": "-NaN",
+    "kind": "error",
+    "value": "Unexpected symbol: \u0027-NaN\u0027. Located at position 1 within expression: -NaN"
+  },
+  {
+    "expression": "1e",
+    "kind": "error",
+    "value": "Unexpected symbol: \u00271e\u0027. Located at position 1 within expression: 1e"
+  },
+  {
+    "expression": "1.2.3",
+    "kind": "error",
+    "value": "Unexpected symbol: \u00271.2.3\u0027. Located at position 1 within expression: 1.2.3"
+  },
+  {
+    "expression": "1e309",
+    "kind": "number",
+    "value": "Infinity"
+  },
+  {
+    "expression": "\u0027caf\u00E9 \uD83D\uDE00\u0027",
+    "kind": "string",
+    "value": "caf\u00E9 \uD83D\uDE00"
+  },
+  {
+    "expression": "github.true",
+    "kind": "null",
+    "value": ""
+  },
+  {
+    "expression": "github.NaN",
+    "kind": "null",
+    "value": ""
+  },
+  {
+    "expression": "github.repository",
+    "kind": "string",
+    "value": "Falconiere/toolu-ghrunner"
+  },
+  {
+    "expression": "github.absent",
+    "kind": "null",
+    "value": ""
+  },
+  {
+    "expression": "vars.absent",
+    "kind": "null",
+    "value": ""
+  },
+  {
+    "expression": "unknown.absent",
+    "kind": "error",
+    "value": "Unrecognized named-value: \u0027unknown\u0027. Located at position 1 within expression: unknown.absent"
+  },
+  {
+    "expression": "false \u0026\u0026 unknown.absent",
+    "kind": "error",
+    "value": "Unrecognized named-value: \u0027unknown\u0027. Located at position 10 within expression: false \u0026\u0026 unknown.absent"
+  },
+  {
+    "expression": "false \u0026\u0026 fromJSON(\u0027bad\u0027)",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true || fromJSON(\u0027bad\u0027)",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "case(true, 42, 0)",
+    "kind": "number",
+    "value": "42"
+  },
+  {
+    "expression": "case(false, 1, 2)",
+    "kind": "number",
+    "value": "2"
+  },
+  {
+    "expression": "case(false, fromJSON(\u0027bad\u0027), true, 42, 0)",
+    "kind": "number",
+    "value": "42"
+  },
+  {
+    "expression": "case(true, 42, 1, 7, fromJSON(\u0027bad\u0027))",
+    "kind": "number",
+    "value": "42"
+  },
+  {
+    "expression": "case(1, \u0027yes\u0027, \u0027no\u0027)",
+    "kind": "error",
+    "value": "case predicate must evaluate to a boolean value"
+  },
+  {
+    "expression": "case()",
+    "kind": "error",
+    "value": "Too few parameters supplied: \u0027(\u0027. Located at position 5 within expression: case()"
+  },
+  {
+    "expression": "case(42)",
+    "kind": "error",
+    "value": "Too few parameters supplied: \u0027(\u0027. Located at position 5 within expression: case(42)"
+  },
+  {
+    "expression": "case(true, 1)",
+    "kind": "error",
+    "value": "Too few parameters supplied: \u0027(\u0027. Located at position 5 within expression: case(true, 1)"
+  },
+  {
+    "expression": "case(true, 1, false, 2)",
+    "kind": "error",
+    "value": "Even number of parameters supplied, requires an odd number of parameters: \u0027(\u0027. Located at position 5 within expression: case(true, 1, false, 2)"
+  },
+  {
+    "expression": "case(false, 1, \u0027default\u0027)",
+    "kind": "string",
+    "value": "default"
+  },
+  {
+    "expression": "null == null",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "null != null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null \u003C null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null \u003C= null",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "null \u003E null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null \u003E= null",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "null == false",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "null != false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null \u003C false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null \u003C= false",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "null \u003E false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null \u003E= false",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "null == true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null != true",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "null \u003C true",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "null \u003C= true",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "null \u003E true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null \u003E= true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null == 0",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "null != 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null \u003C 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null \u003C= 0",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "null \u003E 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null \u003E= 0",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "null == 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null != 1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "null \u003C 1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "null \u003C= 1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "null \u003E 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null \u003E= 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null == -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null != -1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "null \u003C -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null \u003C= -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null \u003E -1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "null \u003E= -1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "null == \u0027\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "null != \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null \u003C \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null \u003C= \u0027\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "null \u003E \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null \u003E= \u0027\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "null == \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null != \u00271\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "null \u003C \u00271\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "null \u003C= \u00271\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "null \u003E \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null \u003E= \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null == \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null != \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "null \u003C \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null \u003C= \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null \u003E \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null \u003E= \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null == NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null != NaN",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "null \u003C NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null \u003C= NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null \u003E NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null \u003E= NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null == Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null != Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "null \u003C Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "null \u003C= Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "null \u003E Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null \u003E= Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null == -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null != -Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "null \u003C -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null \u003C= -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null \u003E -Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "null \u003E= -Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "null == github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null != github.array",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "null \u003C github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null \u003C= github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null \u003E github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null \u003E= github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null == github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null != github.object",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "null \u003C github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null \u003C= github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null \u003E github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "null \u003E= github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false == null",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "false != null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false \u003C null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false \u003C= null",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "false \u003E null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false \u003E= null",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "false == false",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "false != false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false \u003C false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false \u003C= false",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "false \u003E false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false \u003E= false",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "false == true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false != true",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "false \u003C true",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "false \u003C= true",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "false \u003E true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false \u003E= true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false == 0",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "false != 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false \u003C 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false \u003C= 0",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "false \u003E 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false \u003E= 0",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "false == 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false != 1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "false \u003C 1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "false \u003C= 1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "false \u003E 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false \u003E= 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false == -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false != -1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "false \u003C -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false \u003C= -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false \u003E -1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "false \u003E= -1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "false == \u0027\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "false != \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false \u003C \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false \u003C= \u0027\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "false \u003E \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false \u003E= \u0027\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "false == \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false != \u00271\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "false \u003C \u00271\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "false \u003C= \u00271\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "false \u003E \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false \u003E= \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false == \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false != \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "false \u003C \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false \u003C= \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false \u003E \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false \u003E= \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false == NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false != NaN",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "false \u003C NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false \u003C= NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false \u003E NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false \u003E= NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false == Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false != Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "false \u003C Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "false \u003C= Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "false \u003E Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false \u003E= Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false == -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false != -Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "false \u003C -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false \u003C= -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false \u003E -Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "false \u003E= -Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "false == github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false != github.array",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "false \u003C github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false \u003C= github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false \u003E github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false \u003E= github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false == github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false != github.object",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "false \u003C github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false \u003C= github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false \u003E github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "false \u003E= github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true == null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true != null",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "true \u003C null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true \u003C= null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true \u003E null",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "true \u003E= null",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "true == false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true != false",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "true \u003C false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true \u003C= false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true \u003E false",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "true \u003E= false",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "true == true",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "true != true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true \u003C true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true \u003C= true",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "true \u003E true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true \u003E= true",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "true == 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true != 0",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "true \u003C 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true \u003C= 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true \u003E 0",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "true \u003E= 0",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "true == 1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "true != 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true \u003C 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true \u003C= 1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "true \u003E 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true \u003E= 1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "true == -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true != -1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "true \u003C -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true \u003C= -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true \u003E -1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "true \u003E= -1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "true == \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true != \u0027\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "true \u003C \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true \u003C= \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true \u003E \u0027\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "true \u003E= \u0027\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "true == \u00271\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "true != \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true \u003C \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true \u003C= \u00271\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "true \u003E \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true \u003E= \u00271\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "true == \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true != \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "true \u003C \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true \u003C= \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true \u003E \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true \u003E= \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true == NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true != NaN",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "true \u003C NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true \u003C= NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true \u003E NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true \u003E= NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true == Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true != Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "true \u003C Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "true \u003C= Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "true \u003E Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true \u003E= Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true == -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true != -Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "true \u003C -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true \u003C= -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true \u003E -Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "true \u003E= -Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "true == github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true != github.array",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "true \u003C github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true \u003C= github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true \u003E github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true \u003E= github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true == github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true != github.object",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "true \u003C github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true \u003C= github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true \u003E github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "true \u003E= github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 == null",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "0 != null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 \u003C null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 \u003C= null",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "0 \u003E null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 \u003E= null",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "0 == false",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "0 != false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 \u003C false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 \u003C= false",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "0 \u003E false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 \u003E= false",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "0 == true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 != true",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "0 \u003C true",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "0 \u003C= true",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "0 \u003E true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 \u003E= true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 == 0",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "0 != 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 \u003C 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 \u003C= 0",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "0 \u003E 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 \u003E= 0",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "0 == 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 != 1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "0 \u003C 1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "0 \u003C= 1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "0 \u003E 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 \u003E= 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 == -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 != -1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "0 \u003C -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 \u003C= -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 \u003E -1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "0 \u003E= -1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "0 == \u0027\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "0 != \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 \u003C \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 \u003C= \u0027\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "0 \u003E \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 \u003E= \u0027\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "0 == \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 != \u00271\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "0 \u003C \u00271\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "0 \u003C= \u00271\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "0 \u003E \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 \u003E= \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 == \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 != \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "0 \u003C \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 \u003C= \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 \u003E \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 \u003E= \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 == NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 != NaN",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "0 \u003C NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 \u003C= NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 \u003E NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 \u003E= NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 == Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 != Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "0 \u003C Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "0 \u003C= Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "0 \u003E Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 \u003E= Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 == -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 != -Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "0 \u003C -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 \u003C= -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 \u003E -Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "0 \u003E= -Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "0 == github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 != github.array",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "0 \u003C github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 \u003C= github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 \u003E github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 \u003E= github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 == github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 != github.object",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "0 \u003C github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 \u003C= github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 \u003E github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 \u003E= github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 == null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 != null",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "1 \u003C null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 \u003C= null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 \u003E null",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "1 \u003E= null",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "1 == false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 != false",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "1 \u003C false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 \u003C= false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 \u003E false",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "1 \u003E= false",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "1 == true",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "1 != true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 \u003C true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 \u003C= true",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "1 \u003E true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 \u003E= true",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "1 == 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 != 0",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "1 \u003C 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 \u003C= 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 \u003E 0",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "1 \u003E= 0",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "1 == 1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "1 != 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 \u003C 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 \u003C= 1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "1 \u003E 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 \u003E= 1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "1 == -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 != -1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "1 \u003C -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 \u003C= -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 \u003E -1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "1 \u003E= -1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "1 == \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 != \u0027\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "1 \u003C \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 \u003C= \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 \u003E \u0027\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "1 \u003E= \u0027\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "1 == \u00271\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "1 != \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 \u003C \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 \u003C= \u00271\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "1 \u003E \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 \u003E= \u00271\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "1 == \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 != \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "1 \u003C \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 \u003C= \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 \u003E \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 \u003E= \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 == NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 != NaN",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "1 \u003C NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 \u003C= NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 \u003E NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 \u003E= NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 == Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 != Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "1 \u003C Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "1 \u003C= Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "1 \u003E Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 \u003E= Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 == -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 != -Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "1 \u003C -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 \u003C= -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 \u003E -Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "1 \u003E= -Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "1 == github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 != github.array",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "1 \u003C github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 \u003C= github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 \u003E github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 \u003E= github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 == github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 != github.object",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "1 \u003C github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 \u003C= github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 \u003E github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "1 \u003E= github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 == null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 != null",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-1 \u003C null",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-1 \u003C= null",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-1 \u003E null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 \u003E= null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 == false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 != false",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-1 \u003C false",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-1 \u003C= false",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-1 \u003E false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 \u003E= false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 == true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 != true",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-1 \u003C true",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-1 \u003C= true",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-1 \u003E true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 \u003E= true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 == 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 != 0",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-1 \u003C 0",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-1 \u003C= 0",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-1 \u003E 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 \u003E= 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 == 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 != 1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-1 \u003C 1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-1 \u003C= 1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-1 \u003E 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 \u003E= 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 == -1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-1 != -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 \u003C -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 \u003C= -1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-1 \u003E -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 \u003E= -1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-1 == \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 != \u0027\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-1 \u003C \u0027\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-1 \u003C= \u0027\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-1 \u003E \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 \u003E= \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 == \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 != \u00271\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-1 \u003C \u00271\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-1 \u003C= \u00271\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-1 \u003E \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 \u003E= \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 == \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 != \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-1 \u003C \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 \u003C= \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 \u003E \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 \u003E= \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 == NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 != NaN",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-1 \u003C NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 \u003C= NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 \u003E NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 \u003E= NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 == Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 != Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-1 \u003C Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-1 \u003C= Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-1 \u003E Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 \u003E= Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 == -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 != -Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-1 \u003C -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 \u003C= -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 \u003E -Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-1 \u003E= -Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-1 == github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 != github.array",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-1 \u003C github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 \u003C= github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 \u003E github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 \u003E= github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 == github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 != github.object",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-1 \u003C github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 \u003C= github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 \u003E github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-1 \u003E= github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 == null",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u0027 != null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 \u003C null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 \u003C= null",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u0027 \u003E null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 \u003E= null",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u0027 == false",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u0027 != false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 \u003C false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 \u003C= false",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u0027 \u003E false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 \u003E= false",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u0027 == true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 != true",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u0027 \u003C true",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u0027 \u003C= true",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u0027 \u003E true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 \u003E= true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 == 0",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u0027 != 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 \u003C 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 \u003C= 0",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u0027 \u003E 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 \u003E= 0",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u0027 == 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 != 1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u0027 \u003C 1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u0027 \u003C= 1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u0027 \u003E 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 \u003E= 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 == -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 != -1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u0027 \u003C -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 \u003C= -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 \u003E -1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u0027 \u003E= -1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u0027 == \u0027\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u0027 != \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 \u003C \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 \u003C= \u0027\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u0027 \u003E \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 \u003E= \u0027\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u0027 == \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 != \u00271\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u0027 \u003C \u00271\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u0027 \u003C= \u00271\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u0027 \u003E \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 \u003E= \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 == \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 != \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u0027 \u003C \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u0027 \u003C= \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u0027 \u003E \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 \u003E= \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 == NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 != NaN",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u0027 \u003C NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 \u003C= NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 \u003E NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 \u003E= NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 == Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 != Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u0027 \u003C Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u0027 \u003C= Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u0027 \u003E Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 \u003E= Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 == -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 != -Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u0027 \u003C -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 \u003C= -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 \u003E -Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u0027 \u003E= -Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u0027 == github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 != github.array",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u0027 \u003C github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 \u003C= github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 \u003E github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 \u003E= github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 == github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 != github.object",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u0027 \u003C github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 \u003C= github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 \u003E github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0027 \u003E= github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 == null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 != null",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u00271\u0027 \u003C null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 \u003C= null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 \u003E null",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u00271\u0027 \u003E= null",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u00271\u0027 == false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 != false",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u00271\u0027 \u003C false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 \u003C= false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 \u003E false",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u00271\u0027 \u003E= false",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u00271\u0027 == true",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u00271\u0027 != true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 \u003C true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 \u003C= true",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u00271\u0027 \u003E true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 \u003E= true",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u00271\u0027 == 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 != 0",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u00271\u0027 \u003C 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 \u003C= 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 \u003E 0",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u00271\u0027 \u003E= 0",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u00271\u0027 == 1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u00271\u0027 != 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 \u003C 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 \u003C= 1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u00271\u0027 \u003E 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 \u003E= 1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u00271\u0027 == -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 != -1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u00271\u0027 \u003C -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 \u003C= -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 \u003E -1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u00271\u0027 \u003E= -1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u00271\u0027 == \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 != \u0027\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u00271\u0027 \u003C \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 \u003C= \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 \u003E \u0027\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u00271\u0027 \u003E= \u0027\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u00271\u0027 == \u00271\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u00271\u0027 != \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 \u003C \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 \u003C= \u00271\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u00271\u0027 \u003E \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 \u003E= \u00271\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u00271\u0027 == \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 != \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u00271\u0027 \u003C \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u00271\u0027 \u003C= \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u00271\u0027 \u003E \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 \u003E= \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 == NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 != NaN",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u00271\u0027 \u003C NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 \u003C= NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 \u003E NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 \u003E= NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 == Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 != Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u00271\u0027 \u003C Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u00271\u0027 \u003C= Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u00271\u0027 \u003E Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 \u003E= Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 == -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 != -Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u00271\u0027 \u003C -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 \u003C= -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 \u003E -Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u00271\u0027 \u003E= -Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u00271\u0027 == github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 != github.array",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u00271\u0027 \u003C github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 \u003C= github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 \u003E github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 \u003E= github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 == github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 != github.object",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u00271\u0027 \u003C github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 \u003C= github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 \u003E github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271\u0027 \u003E= github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 == null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 != null",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003C null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003C= null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003E null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003E= null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 == false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 != false",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003C false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003C= false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003E false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003E= false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 == true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 != true",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003C true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003C= true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003E true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003E= true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 == 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 != 0",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003C 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003C= 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003E 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003E= 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 == 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 != 1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003C 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003C= 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003E 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003E= 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 == -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 != -1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003C -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003C= -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003E -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003E= -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 == \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 != \u0027\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003C \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003C= \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003E \u0027\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003E= \u0027\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027bad\u0027 == \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 != \u00271\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003C \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003C= \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003E \u00271\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003E= \u00271\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027bad\u0027 == \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027bad\u0027 != \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003C \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003C= \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003E \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003E= \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027bad\u0027 == NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 != NaN",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003C NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003C= NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003E NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003E= NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 == Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 != Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003C Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003C= Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003E Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003E= Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 == -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 != -Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003C -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003C= -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003E -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003E= -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 == github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 != github.array",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003C github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003C= github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003E github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003E= github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 == github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 != github.object",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003C github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003C= github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003E github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027bad\u0027 \u003E= github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN == null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN != null",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "NaN \u003C null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN \u003C= null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN \u003E null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN \u003E= null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN == false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN != false",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "NaN \u003C false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN \u003C= false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN \u003E false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN \u003E= false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN == true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN != true",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "NaN \u003C true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN \u003C= true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN \u003E true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN \u003E= true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN == 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN != 0",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "NaN \u003C 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN \u003C= 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN \u003E 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN \u003E= 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN == 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN != 1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "NaN \u003C 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN \u003C= 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN \u003E 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN \u003E= 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN == -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN != -1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "NaN \u003C -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN \u003C= -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN \u003E -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN \u003E= -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN == \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN != \u0027\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "NaN \u003C \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN \u003C= \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN \u003E \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN \u003E= \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN == \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN != \u00271\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "NaN \u003C \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN \u003C= \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN \u003E \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN \u003E= \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN == \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN != \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "NaN \u003C \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN \u003C= \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN \u003E \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN \u003E= \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN == NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN != NaN",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "NaN \u003C NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN \u003C= NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN \u003E NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN \u003E= NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN == Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN != Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "NaN \u003C Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN \u003C= Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN \u003E Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN \u003E= Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN == -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN != -Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "NaN \u003C -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN \u003C= -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN \u003E -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN \u003E= -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN == github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN != github.array",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "NaN \u003C github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN \u003C= github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN \u003E github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN \u003E= github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN == github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN != github.object",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "NaN \u003C github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN \u003C= github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN \u003E github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "NaN \u003E= github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity == null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity != null",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "Infinity \u003C null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity \u003C= null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity \u003E null",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "Infinity \u003E= null",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "Infinity == false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity != false",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "Infinity \u003C false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity \u003C= false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity \u003E false",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "Infinity \u003E= false",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "Infinity == true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity != true",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "Infinity \u003C true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity \u003C= true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity \u003E true",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "Infinity \u003E= true",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "Infinity == 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity != 0",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "Infinity \u003C 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity \u003C= 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity \u003E 0",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "Infinity \u003E= 0",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "Infinity == 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity != 1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "Infinity \u003C 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity \u003C= 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity \u003E 1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "Infinity \u003E= 1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "Infinity == -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity != -1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "Infinity \u003C -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity \u003C= -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity \u003E -1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "Infinity \u003E= -1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "Infinity == \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity != \u0027\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "Infinity \u003C \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity \u003C= \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity \u003E \u0027\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "Infinity \u003E= \u0027\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "Infinity == \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity != \u00271\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "Infinity \u003C \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity \u003C= \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity \u003E \u00271\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "Infinity \u003E= \u00271\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "Infinity == \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity != \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "Infinity \u003C \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity \u003C= \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity \u003E \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity \u003E= \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity == NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity != NaN",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "Infinity \u003C NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity \u003C= NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity \u003E NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity \u003E= NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity == Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "Infinity != Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity \u003C Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity \u003C= Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "Infinity \u003E Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity \u003E= Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "Infinity == -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity != -Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "Infinity \u003C -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity \u003C= -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity \u003E -Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "Infinity \u003E= -Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "Infinity == github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity != github.array",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "Infinity \u003C github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity \u003C= github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity \u003E github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity \u003E= github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity == github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity != github.object",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "Infinity \u003C github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity \u003C= github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity \u003E github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "Infinity \u003E= github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity == null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity != null",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-Infinity \u003C null",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-Infinity \u003C= null",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-Infinity \u003E null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity \u003E= null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity == false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity != false",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-Infinity \u003C false",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-Infinity \u003C= false",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-Infinity \u003E false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity \u003E= false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity == true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity != true",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-Infinity \u003C true",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-Infinity \u003C= true",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-Infinity \u003E true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity \u003E= true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity == 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity != 0",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-Infinity \u003C 0",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-Infinity \u003C= 0",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-Infinity \u003E 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity \u003E= 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity == 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity != 1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-Infinity \u003C 1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-Infinity \u003C= 1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-Infinity \u003E 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity \u003E= 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity == -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity != -1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-Infinity \u003C -1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-Infinity \u003C= -1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-Infinity \u003E -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity \u003E= -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity == \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity != \u0027\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-Infinity \u003C \u0027\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-Infinity \u003C= \u0027\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-Infinity \u003E \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity \u003E= \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity == \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity != \u00271\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-Infinity \u003C \u00271\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-Infinity \u003C= \u00271\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-Infinity \u003E \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity \u003E= \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity == \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity != \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-Infinity \u003C \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity \u003C= \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity \u003E \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity \u003E= \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity == NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity != NaN",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-Infinity \u003C NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity \u003C= NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity \u003E NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity \u003E= NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity == Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity != Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-Infinity \u003C Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-Infinity \u003C= Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-Infinity \u003E Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity \u003E= Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity == -Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-Infinity != -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity \u003C -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity \u003C= -Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-Infinity \u003E -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity \u003E= -Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-Infinity == github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity != github.array",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-Infinity \u003C github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity \u003C= github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity \u003E github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity \u003E= github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity == github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity != github.object",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "-Infinity \u003C github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity \u003C= github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity \u003E github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "-Infinity \u003E= github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array == null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array != null",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "github.array \u003C null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array \u003C= null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array \u003E null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array \u003E= null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array == false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array != false",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "github.array \u003C false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array \u003C= false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array \u003E false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array \u003E= false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array == true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array != true",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "github.array \u003C true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array \u003C= true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array \u003E true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array \u003E= true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array == 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array != 0",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "github.array \u003C 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array \u003C= 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array \u003E 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array \u003E= 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array == 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array != 1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "github.array \u003C 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array \u003C= 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array \u003E 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array \u003E= 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array == -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array != -1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "github.array \u003C -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array \u003C= -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array \u003E -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array \u003E= -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array == \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array != \u0027\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "github.array \u003C \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array \u003C= \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array \u003E \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array \u003E= \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array == \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array != \u00271\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "github.array \u003C \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array \u003C= \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array \u003E \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array \u003E= \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array == \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array != \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "github.array \u003C \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array \u003C= \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array \u003E \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array \u003E= \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array == NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array != NaN",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "github.array \u003C NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array \u003C= NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array \u003E NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array \u003E= NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array == Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array != Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "github.array \u003C Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array \u003C= Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array \u003E Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array \u003E= Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array == -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array != -Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "github.array \u003C -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array \u003C= -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array \u003E -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array \u003E= -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array == github.array",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "github.array != github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array \u003C github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array \u003C= github.array",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "github.array \u003E github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array \u003E= github.array",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "github.array == github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array != github.object",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "github.array \u003C github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array \u003C= github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array \u003E github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array \u003E= github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object == null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object != null",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "github.object \u003C null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object \u003C= null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object \u003E null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object \u003E= null",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object == false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object != false",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "github.object \u003C false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object \u003C= false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object \u003E false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object \u003E= false",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object == true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object != true",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "github.object \u003C true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object \u003C= true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object \u003E true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object \u003E= true",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object == 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object != 0",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "github.object \u003C 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object \u003C= 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object \u003E 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object \u003E= 0",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object == 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object != 1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "github.object \u003C 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object \u003C= 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object \u003E 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object \u003E= 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object == -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object != -1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "github.object \u003C -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object \u003C= -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object \u003E -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object \u003E= -1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object == \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object != \u0027\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "github.object \u003C \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object \u003C= \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object \u003E \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object \u003E= \u0027\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object == \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object != \u00271\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "github.object \u003C \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object \u003C= \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object \u003E \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object \u003E= \u00271\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object == \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object != \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "github.object \u003C \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object \u003C= \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object \u003E \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object \u003E= \u0027bad\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object == NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object != NaN",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "github.object \u003C NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object \u003C= NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object \u003E NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object \u003E= NaN",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object == Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object != Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "github.object \u003C Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object \u003C= Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object \u003E Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object \u003E= Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object == -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object != -Infinity",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "github.object \u003C -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object \u003C= -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object \u003E -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object \u003E= -Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object == github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object != github.array",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "github.object \u003C github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object \u003C= github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object \u003E github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object \u003E= github.array",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object == github.object",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "github.object != github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object \u003C github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object \u003C= github.object",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "github.object \u003E github.object",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object \u003E= github.object",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027A\u0027 == \u0027b\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027A\u0027 != \u0027b\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027A\u0027 \u003C \u0027b\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027A\u0027 \u003C= \u0027b\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027A\u0027 \u003E \u0027b\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027A\u0027 \u003E= \u0027b\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u00E9\u0027 == \u0027\u00C9\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u00E9\u0027 != \u0027\u00C9\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u00E9\u0027 \u003C \u0027\u00C9\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u00E9\u0027 \u003C= \u0027\u00C9\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u00E9\u0027 \u003E \u0027\u00C9\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u00E9\u0027 \u003E= \u0027\u00C9\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u00DF\u0027 == \u0027SS\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u00DF\u0027 != \u0027SS\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u00DF\u0027 \u003C \u0027SS\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u00DF\u0027 \u003C= \u0027SS\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u00DF\u0027 \u003E \u0027SS\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u00DF\u0027 \u003E= \u0027SS\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u0130\u0027 == \u0027i\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0130\u0027 != \u0027i\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u0130\u0027 \u003C \u0027i\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0130\u0027 \u003C= \u0027i\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u0130\u0027 \u003E \u0027i\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u0130\u0027 \u003E= \u0027i\u0027",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u00271e2\u0027 == 100",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u00271e2\u0027 != 100",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271e2\u0027 \u003C 100",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271e2\u0027 \u003C= 100",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u00271e2\u0027 \u003E 100",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00271e2\u0027 \u003E= 100",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u00270xff\u0027 == 255",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u00270xff\u0027 != 255",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00270xff\u0027 \u003C 255",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00270xff\u0027 \u003C= 255",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u00270xff\u0027 \u003E 255",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u00270xff\u0027 \u003E= 255",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "fromJSON(\u0027[1]\u0027) == fromJSON(\u0027[1]\u0027)",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "fromJSON(\u0027[1]\u0027) != fromJSON(\u0027[1]\u0027)",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "fromJSON(\u0027[1]\u0027) \u003C fromJSON(\u0027[1]\u0027)",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "fromJSON(\u0027[1]\u0027) \u003C= fromJSON(\u0027[1]\u0027)",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "fromJSON(\u0027[1]\u0027) \u003E fromJSON(\u0027[1]\u0027)",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "fromJSON(\u0027[1]\u0027) \u003E= fromJSON(\u0027[1]\u0027)",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "fromJSON(\u0027{}\u0027) == fromJSON(\u0027{}\u0027)",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "fromJSON(\u0027{}\u0027) != fromJSON(\u0027{}\u0027)",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "fromJSON(\u0027{}\u0027) \u003C fromJSON(\u0027{}\u0027)",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "fromJSON(\u0027{}\u0027) \u003C= fromJSON(\u0027{}\u0027)",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "fromJSON(\u0027{}\u0027) \u003E fromJSON(\u0027{}\u0027)",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "fromJSON(\u0027{}\u0027) \u003E= fromJSON(\u0027{}\u0027)",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array[0] == 1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "github.array[0] != 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array[0] \u003C 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array[0] \u003C= 1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "github.array[0] \u003E 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.array[0] \u003E= 1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "github.object.z == 1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "github.object.z != 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object.z \u003C 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object.z \u003C= 1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "github.object.z \u003E 1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "github.object.z \u003E= 1",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "format(\u0027{0}\u0027, 0)",
+    "kind": "string",
+    "value": "0"
+  },
+  {
+    "expression": "toJSON(0)",
+    "kind": "string",
+    "value": "0"
+  },
+  {
+    "expression": "!0",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "format(\u0027{0}\u0027, -0)",
+    "kind": "string",
+    "value": "-0"
+  },
+  {
+    "expression": "toJSON(-0)",
+    "kind": "string",
+    "value": "-0"
+  },
+  {
+    "expression": "!-0",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "format(\u0027{0}\u0027, 1)",
+    "kind": "string",
+    "value": "1"
+  },
+  {
+    "expression": "toJSON(1)",
+    "kind": "string",
+    "value": "1"
+  },
+  {
+    "expression": "!1",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "format(\u0027{0}\u0027, 1.2345678901234567)",
+    "kind": "string",
+    "value": "1.23456789012346"
+  },
+  {
+    "expression": "toJSON(1.2345678901234567)",
+    "kind": "string",
+    "value": "1.23456789012346"
+  },
+  {
+    "expression": "!1.2345678901234567",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "format(\u0027{0}\u0027, 0.0001)",
+    "kind": "string",
+    "value": "0.0001"
+  },
+  {
+    "expression": "toJSON(0.0001)",
+    "kind": "string",
+    "value": "0.0001"
+  },
+  {
+    "expression": "!0.0001",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "format(\u0027{0}\u0027, 0.00001)",
+    "kind": "string",
+    "value": "1E-05"
+  },
+  {
+    "expression": "toJSON(0.00001)",
+    "kind": "string",
+    "value": "1E-05"
+  },
+  {
+    "expression": "!0.00001",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "format(\u0027{0}\u0027, 1e14)",
+    "kind": "string",
+    "value": "100000000000000"
+  },
+  {
+    "expression": "toJSON(1e14)",
+    "kind": "string",
+    "value": "100000000000000"
+  },
+  {
+    "expression": "!1e14",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "format(\u0027{0}\u0027, 1e15)",
+    "kind": "string",
+    "value": "1E\u002B15"
+  },
+  {
+    "expression": "toJSON(1e15)",
+    "kind": "string",
+    "value": "1E\u002B15"
+  },
+  {
+    "expression": "!1e15",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "format(\u0027{0}\u0027, 1e20)",
+    "kind": "string",
+    "value": "1E\u002B20"
+  },
+  {
+    "expression": "toJSON(1e20)",
+    "kind": "string",
+    "value": "1E\u002B20"
+  },
+  {
+    "expression": "!1e20",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "format(\u0027{0}\u0027, 1e-100)",
+    "kind": "string",
+    "value": "1E-100"
+  },
+  {
+    "expression": "toJSON(1e-100)",
+    "kind": "string",
+    "value": "1E-100"
+  },
+  {
+    "expression": "!1e-100",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "format(\u0027{0}\u0027, 1.7976931348623157e308)",
+    "kind": "string",
+    "value": "1.79769313486232E\u002B308"
+  },
+  {
+    "expression": "toJSON(1.7976931348623157e308)",
+    "kind": "string",
+    "value": "1.79769313486232E\u002B308"
+  },
+  {
+    "expression": "!1.7976931348623157e308",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "format(\u0027{0}\u0027, 5e-324)",
+    "kind": "string",
+    "value": "4.94065645841247E-324"
+  },
+  {
+    "expression": "toJSON(5e-324)",
+    "kind": "string",
+    "value": "4.94065645841247E-324"
+  },
+  {
+    "expression": "!5e-324",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "format(\u0027{0}\u0027, 2.2250738585072014e-308)",
+    "kind": "string",
+    "value": "2.2250738585072E-308"
+  },
+  {
+    "expression": "toJSON(2.2250738585072014e-308)",
+    "kind": "string",
+    "value": "2.2250738585072E-308"
+  },
+  {
+    "expression": "!2.2250738585072014e-308",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "format(\u0027{0}\u0027, 9.999999999999995)",
+    "kind": "string",
+    "value": "9.99999999999999"
+  },
+  {
+    "expression": "toJSON(9.999999999999995)",
+    "kind": "string",
+    "value": "9.99999999999999"
+  },
+  {
+    "expression": "!9.999999999999995",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "format(\u0027{0}\u0027, 999999999999999.5)",
+    "kind": "string",
+    "value": "1E\u002B15"
+  },
+  {
+    "expression": "toJSON(999999999999999.5)",
+    "kind": "string",
+    "value": "1E\u002B15"
+  },
+  {
+    "expression": "!999999999999999.5",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "format(\u0027{0}\u0027, NaN)",
+    "kind": "string",
+    "value": "NaN"
+  },
+  {
+    "expression": "toJSON(NaN)",
+    "kind": "string",
+    "value": "NaN"
+  },
+  {
+    "expression": "!NaN",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "format(\u0027{0}\u0027, Infinity)",
+    "kind": "string",
+    "value": "Infinity"
+  },
+  {
+    "expression": "toJSON(Infinity)",
+    "kind": "string",
+    "value": "Infinity"
+  },
+  {
+    "expression": "!Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "format(\u0027{0}\u0027, -Infinity)",
+    "kind": "string",
+    "value": "-Infinity"
+  },
+  {
+    "expression": "toJSON(-Infinity)",
+    "kind": "string",
+    "value": "-Infinity"
+  },
+  {
+    "expression": "!-Infinity",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "toJSON(fromJSON(\u0027{\u0022z\u0022:1,\u0022a\u0022:2}\u0027))",
+    "kind": "string",
+    "value": "{\n  \u0022z\u0022: 1,\n  \u0022a\u0022: 2\n}"
+  },
+  {
+    "expression": "toJSON(fromJSON(\u0027{\u0022z\u0022:[1,true,null,{},[]],\u0022a\u0022:\u0022\u00E9\\n\u0022}\u0027))",
+    "kind": "string",
+    "value": "{\n  \u0022z\u0022: [\n    1,\n    true,\n    null,\n    {},\n    []\n  ],\n  \u0022a\u0022: \u0022\u00E9\\n\u0022\n}"
+  },
+  {
+    "expression": "toJSON(fromJSON(toJSON(github.object)))",
+    "kind": "string",
+    "value": "{\n  \u0022z\u0022: 1,\n  \u0022a\u0022: 2\n}"
+  },
+  {
+    "expression": "format(\u0027{{{0}}}\u0027, \u0027a\u0027)",
+    "kind": "string",
+    "value": "{a}"
+  },
+  {
+    "expression": "format(\u0027{2}\u0027, \u0027a\u0027)",
+    "kind": "error",
+    "value": "The following format string references more arguments than were supplied: {2}"
+  },
+  {
+    "expression": "format(\u0027}\u0027, \u0027a\u0027)",
+    "kind": "error",
+    "value": "The following format string is invalid: }"
+  },
+  {
+    "expression": "format(\u0027{0:}\u0027, \u0027a\u0027)",
+    "kind": "string",
+    "value": "a"
+  },
+  {
+    "expression": "format(\u0027{0:x}\u0027, \u0027a\u0027)",
+    "kind": "error",
+    "value": "The format specifiers \u0027x\u0027 are not valid for objects of type \u0027String\u0027"
+  },
+  {
+    "expression": "format(\u0027{\u002B0}\u0027, \u0027a\u0027)",
+    "kind": "error",
+    "value": "The following format string is invalid: {\u002B0}"
+  },
+  {
+    "expression": "format(\u0027{ 0}\u0027, \u0027a\u0027)",
+    "kind": "error",
+    "value": "The following format string is invalid: { 0}"
+  },
+  {
+    "expression": "format(\u0027{00}\u0027, \u0027a\u0027)",
+    "kind": "string",
+    "value": "a"
+  },
+  {
+    "expression": "format(\u0027{256}\u0027, \u0027a\u0027)",
+    "kind": "error",
+    "value": "The following format string is invalid: {256}"
+  },
+  {
+    "expression": "format(\u0027literal\u0027, fromJSON(\u0027bad\u0027))",
+    "kind": "string",
+    "value": "literal"
+  },
+  {
+    "expression": "format(\u0027{0}{0}\u0027, \u0027a\u0027, fromJSON(\u0027bad\u0027))",
+    "kind": "string",
+    "value": "aa"
+  },
+  {
+    "expression": "format(\u0027{0}\u0027, fromJSON(\u0027bad\u0027))",
+    "kind": "error",
+    "value": "Unexpected character encountered while parsing value: b. Path \u0027\u0027, line 0, position 0."
+  },
+  {
+    "expression": "toJSON(github.array[*])",
+    "kind": "string",
+    "value": "[\n  1,\n  2\n]"
+  },
+  {
+    "expression": "toJSON(github.array.*)",
+    "kind": "string",
+    "value": "[\n  1,\n  2\n]"
+  },
+  {
+    "expression": "toJSON(null[*])",
+    "kind": "error",
+    "value": "Unexpected symbol: \u0027[\u0027. Located at position 12 within expression: toJSON(null[*])"
+  },
+  {
+    "expression": "toJSON(fromJSON(\u0027[{\u0022x\u0022:1},{\u0022y\u0022:2},{\u0022x\u0022:null},3]\u0027).*.x)",
+    "kind": "string",
+    "value": "[\n  1,\n  null\n]"
+  },
+  {
+    "expression": "toJSON(fromJSON(\u0027[[1,2],[3],4]\u0027).*.*)",
+    "kind": "string",
+    "value": "[\n  1,\n  2,\n  3\n]"
+  },
+  {
+    "expression": "toJSON(fromJSON(\u0027[[1,2],[3],4]\u0027)[*][0])",
+    "kind": "string",
+    "value": "[\n  1,\n  3\n]"
+  },
+  {
+    "expression": "toJSON(fromJSON(\u0027[1,2]\u0027)[0.9])",
+    "kind": "string",
+    "value": "1"
+  },
+  {
+    "expression": "toJSON(fromJSON(\u0027[1,2]\u0027)[1e100])",
+    "kind": "string",
+    "value": "null"
+  },
+  {
+    "expression": "toJSON(fromJSON(\u0027{\u0022\u0022:42}\u0027)[fromJSON(\u0027[]\u0027)])",
+    "kind": "string",
+    "value": "null"
+  },
+  {
+    "expression": "contains(github.array, 1)",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "success(1)",
+    "kind": "error",
+    "value": "Unrecognized function: \u0027success\u0027. Located at position 1 within expression: success(1)"
+  },
+  {
+    "expression": "false \u0026\u0026 unknownFunction()",
+    "kind": "error",
+    "value": "Unrecognized function: \u0027unknownFunction\u0027. Located at position 10 within expression: false \u0026\u0026 unknownFunction()"
+  },
+  {
+    "expression": "toJSON((null)[*])",
+    "kind": "string",
+    "value": "[]"
+  },
+  {
+    "expression": "toJSON(github.array[-0])",
+    "kind": "string",
+    "value": "1"
+  },
+  {
+    "expression": "0 == 1e-20",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "0 != 1e-20",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "toJSON((true).x)",
+    "kind": "string",
+    "value": "null"
+  },
+  {
+    "expression": "\u0027x\u0027[0]",
+    "kind": "error",
+    "value": "Unexpected symbol: \u0027[\u0027. Located at position 4 within expression: \u0027x\u0027[0]"
+  },
+  {
+    "expression": "(null)[fromJSON(\u0027bad\u0027)]",
+    "kind": "null",
+    "value": ""
+  },
+  {
+    "expression": "case(true, github.array, null) == github.array",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "format(\u0027{0}\u0027, github.array)",
+    "kind": "string",
+    "value": "Array"
+  },
+  {
+    "expression": "format(\u0027{0}\u0027, github.object)",
+    "kind": "string",
+    "value": "Object"
+  },
+  {
+    "expression": "false \u0026\u0026 case(true, 1, false, 2)",
+    "kind": "error",
+    "value": "Even number of parameters supplied, requires an odd number of parameters: \u0027(\u0027. Located at position 14 within expression: false \u0026\u0026 case(true, 1, false, 2)"
+  },
+  {
+    "expression": "false \u0026\u0026 case(1)",
+    "kind": "error",
+    "value": "Too few parameters supplied: \u0027(\u0027. Located at position 14 within expression: false \u0026\u0026 case(1)"
+  },
+  {
+    "expression": "toJSON(github.object[*])",
+    "kind": "string",
+    "value": "[\n  1,\n  2\n]"
+  },
+  {
+    "expression": "format(\u0027{0}\u0027, 1e-4)",
+    "kind": "string",
+    "value": "0.0001"
+  },
+  {
+    "expression": "format(\u0027{0}\u0027, -1e15)",
+    "kind": "string",
+    "value": "-1E\u002B15"
+  },
+  {
+    "expression": "contains(123, \u00272\u0027)",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "contains(true, \u0027RU\u0027)",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "contains(null, \u0027\u0027)",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "contains(\u0027Object\u0027, fromJSON(\u0027{}\u0027))",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "startsWith(fromJSON(\u0027[]\u0027), \u0027A\u0027)",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "endsWith(fromJSON(\u0027{}\u0027), \u0027t\u0027)",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "contains(\u0027\u00C4\u0027, \u0027\u00E4\u0027)",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "startsWith(\u0027\u00C9clair\u0027, \u0027\u00E9\u0027)",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "endsWith(\u0027CAF\u00C9\u0027, \u0027\u00E9\u0027)",
+    "kind": "boolean",
+    "value": "true"
+  },
+  {
+    "expression": "\u0027\u0131\u0027 == \u0027I\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u017F\u0027 == \u0027S\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "\u0027\u212A\u0027 == \u0027k\u0027",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "contains(\u0027\u0131\u0027, \u0027I\u0027)",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "contains(\u0027\u017F\u0027, \u0027S\u0027)",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "contains(\u0027\u212A\u0027, \u0027k\u0027)",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "contains(fromJSON(\u0027[]\u0027), fromJSON(\u0027bad\u0027))",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "contains(fromJSON(\u0027{}\u0027), fromJSON(\u0027bad\u0027))",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "startsWith(fromJSON(\u0027[]\u0027), fromJSON(\u0027bad\u0027))",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "endsWith(fromJSON(\u0027{}\u0027), fromJSON(\u0027bad\u0027))",
+    "kind": "boolean",
+    "value": "false"
+  },
+  {
+    "expression": "join(fromJSON(\u0027{}\u0027))",
+    "kind": "string",
+    "value": ""
+  },
+  {
+    "expression": "join(fromJSON(\u0027[1,2]\u0027), fromJSON(\u0027{}\u0027))",
+    "kind": "string",
+    "value": "1,2"
+  },
+  {
+    "expression": "join(fromJSON(\u0027[]\u0027), fromJSON(\u0027bad\u0027))",
+    "kind": "string",
+    "value": ""
+  },
+  {
+    "expression": "join(fromJSON(\u0027[1]\u0027), fromJSON(\u0027bad\u0027))",
+    "kind": "string",
+    "value": "1"
+  },
+  {
+    "expression": "join(\u0027abc\u0027, fromJSON(\u0027bad\u0027))",
+    "kind": "string",
+    "value": "abc"
+  }
+]

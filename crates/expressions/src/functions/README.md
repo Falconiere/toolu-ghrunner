@@ -13,6 +13,7 @@ runtime value type these functions operate on is `../types.rs`.
 
 | File | Primary item | Purpose |
 | --- | --- | --- |
+| `format.rs` | `render` | Validates format placeholders and evaluates only referenced arguments. |
 | `builtins.rs` | `call_function` | Case-insensitive dispatch of a built-in function name to its implementation (`success`, `contains`, `format`, `join`, etc.). |
 | `glob_walk.rs` | `literal_prefix`, `search_roots`, `walk` | Directory traversal for `hashFiles()`, reproducing `@actions/glob`'s depth-first, byte-order-sorted `globGenerator` walk. |
 | `hash.rs` | `hash_files` | GitHub-compatible `hashFiles()`: folds per-file SHA-256 digests (raw bytes) into one outer SHA-256, hex-encoded, in `glob_walk` traversal order. |
