@@ -34,7 +34,11 @@ matrices, `${{ }}` expressions, artifacts, cache, and OIDC.
 Composite action steps evaluate expressions against their own inputs and inner
 step results. A failing inner step still allows eligible `failure()` and
 `always()` cleanup, while nested action state and post actions stay scoped to
-their invocation. Composite `working-directory` support is tracked in #81.
+their invocation. Composite `working-directory` values are expression-evaluated
+for each run step.
+Relative paths resolve from the workspace; absolute paths are preserved. Missing
+or empty values use the workspace, independently of caller `defaults.run`.
+A missing directory fails that inner step and still permits eligible cleanup.
 
 The nightly [`live`](.github/workflows/live.yml) workflow above is not a
 mock. It dispatches a real job to a real `toolu-runner` on a real repo,

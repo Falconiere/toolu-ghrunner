@@ -243,7 +243,7 @@ GitHub-hosted job launched `/bin/sh` correctly but its raw `ps comm` value was
 | AC-1, 71-S1 | Workflow `bash`/`defaults-71-workflow`, then job `sh`/`defaults-71-job`; real shell identifies `sh` and writes only `defaults-71-job/job.marker`. A capture-derived partial job layer clears the workflow shell. | `cargo test -p execution --test job_message_run_defaults_test job_defaults_override_workflow` and `later_partial_mapping_clears_earlier_shell`; passing Linux production replay. |
 | AC-2, 71-S1 | Captured explicit step uses Bash and `defaults-71-step`; `explicit.marker` exists there, not in the job directory. An empty explicit shell falls through to job `sh`. | `step_values_override_defaults`, `empty_explicit_shell_uses_job_shell`; passing Linux production replay. |
 | AC-3, 71-S2 | A capture-derived absent-default job writes `root.marker` at the job workspace root. Relative job path, step path with spaces, and `${{ runner.temp }}` absolute path run in their selected directory. A nonexistent default cwd fails the correct step and its log names the full path. | `paths_and_absence`, `nonexistent_default_directory_fails_its_step_with_path`; passing Linux production replay. Host-shell fallback parity remains with #80. |
-| AC-4, 71-S3 | The captured local composite writes `.defaults-71-composite.marker` at the workspace root; the next top-level `sh` step reads it from its job-default directory. | `composite_scope`; passing Linux production replay. Composite's own cwd behavior belongs to #81. |
+| AC-4, 71-S3 | The captured local composite writes `.defaults-71-composite.marker` at the workspace root; the next top-level `sh` step reads it from its job-default directory. | `composite_scope`; passing Linux production replay. Composite cwd coverage is recorded in the #81 section below. |
 | AC-5, 71-S3 | Linux job-container shell, cwd, and container identity require #73/#80 integration and a Docker-capable Linux self-hosted runner. | **Unverified**; macOS job containers are not applicable to this epic. |
 | AC-6 | The capture checker validates ordered wire types, synthetic credentials, fixture/workflow SHA-256, and recorded live runs against GitHub's jobs API. | `python3 scripts/test/defaults_run_capture_check.py --live` and `python3 -m unittest discover -s scripts/test -p 'test_defaults_run_capture_check.py'` pass. The full Linux `./tools/check.sh all` gate passed on the final source. |
 
@@ -372,7 +372,7 @@ deadline. The capture and all fixture hashes are checked by
 
 | AC / scenario | Exact expected observation | Test / runnable check | Current evidence |
 | --- | --- | --- | --- |
-| AC-1 / S1 | `format`, `contains`, bracket access, shell expression, `github.action_path` in step `env`, and output mapping produce `hello world`, `world/42`; malformed syntax and forbidden `secrets.*` emit a parent error instead of an empty string. | `expressions_render_functions_brackets_conditions_and_outputs`, `malformed_run_expression_fails_step_then_runs_cleanup`, `forbidden_context_fails_visibly_then_runs_cleanup`; `cargo test -p execution --test composite_semantics_test` | Captured-job macOS replay passes; expression-valued composite cwd awaits #81. |
+| AC-1 / S1 | `format`, `contains`, bracket access, shell expression, `github.action_path` in step `env`, and output mapping produce `hello world`, `world/42`; malformed syntax and forbidden `secrets.*` emit a parent error instead of an empty string. | `expressions_render_functions_brackets_conditions_and_outputs`, `malformed_run_expression_fails_step_then_runs_cleanup`, `forbidden_context_fails_visibly_then_runs_cleanup`; `cargo test -p execution --test composite_semantics_test` | Captured-job macOS replay passes; expression-valued composite cwd is covered by the #81 replay below. |
 | AC-2 / S2, S4 | Exit 1 without continuation writes `fail`, `failure-cleanup`, `always-cleanup` and ends Failure. With continuation it writes `fail`, `ordinary`, `always-cleanup`, exposes `failure/success` and ends Success. A malformed `if` stops the loop; a hard nested error runs cleanup with a parent-scoped `##[error]`. | `conditions_run_failure_and_always_cleanup_after_inner_exit_one`, `continue_on_error_keeps_raw_failure_and_runs_ordinary_and_always`, `hard_nested_error_keeps_parent_attribution_and_runs_failure_cleanup`, `malformed_if_expression_stops_composite_loop`; same test binary | Captured-job macOS replay passes; GitHub UI pending. |
 | AC-3 / S3 | Reusing child input/step names exports `world-one/world-two`; parent still reads `world/success/success/` with no child `steps.first` leakage. Nested and parent `github.action_path` each match their own action directory. | `nested_repeated_names_keep_distinct_inputs_and_outputs`; same test binary | Captured-job macOS replay passes. |
 | AC-4 / S5 | `GITHUB_ENV` and `GITHUB_PATH` reach later inner and outer steps; `LOCAL_ONLY` does not. Only declared output `result=42` escapes. Two nested Node posts log `STATE_POST=two`, then `STATE_POST=one`, under distinct successful report IDs. A nested `post-if: failure()` sees a later global job failure. | `file_commands_step_env_and_nested_posts_are_scoped`, `nested_post_if_failure_sees_later_global_job_failure`; same test binary | Real Bash/Node macOS replay passes; remote post records pending. |
@@ -856,3 +856,53 @@ exact output assertions, and checkout cleanup all succeeded. The pinned ARM64
 release archive SHA-256 is
 `5a2cd92908a93d7276a194e1de6008099f3e7946f3f8e14aa7a1a7b4a31fdec2`.
 Hosted Linux is supplementary execution evidence, not a pinned-reference claim.
+
+
+## Composite working directories (#81)
+
+Production replay: `cargo test -p execution --lib composite_working_directory`.
+Tests live in `crates/execution/src/execution/tests/composite_working_directory.rs`;
+the committed `composite-81-*` action manifests run actual Bash through
+`Runner::execute_job`, manifest parsing, expression evaluation and process spawn.
+The source acquisition `crates/execution/tests/incoming_contexts_matrix_0.json`
+comes from GitHub.com run [36038637634](https://github.com/Falconiere/toolu-ghrunner/actions/runs/36038637634)
+(#68); default mapping tokens come from `defaults_run_job.json`, run
+[36091513712](https://github.com/Falconiere/toolu-ghrunner/actions/runs/36091513712)
+(#71). Transformations retain wire IDs/contextNames and input expression types:
+select the local action plus optional final caller step, replace action path and
+caller script, and select a dedicated cwd in captured defaults. Setup copies the
+exact committed action manifests; it does not construct an ExecutionContext.
+
+| AC / scenario | Exact observable | Test |
+| --- | --- | --- |
+| AC-1 / 81-S1 | Real `pwd -P` files land in literal, input `world`, `space dir`, prior-output and env directories; absolute `runner.temp` stays absolute; absent, empty and missing-input cwd use workspace. `literal/..` resolves normally. | `literal_expression_absolute_spaces_and_empty_directories` |
+| AC-2 / 81-S2 | Repeated child invocations write in `inner` and `second`; child and parent action-path probes remain distinct; root steps ignore caller defaults; the following caller script writes in `caller-default`. | `nested_directories_ignore_caller_defaults_and_restore_scope` |
+| AC-3 / 81-S3 | Missing/not-directory paths and malformed expressions prevent the bad script, emit parent-attributed error, return `failure/failure/skipped`, and write exactly `failure\nalways\n` cleanup. | `missing_directory_fails_inner_step_and_runs_cleanup`, `regular_file_directory_fails_inner_step_and_runs_cleanup`, `malformed_directory_expression_fails_inner_step_and_runs_cleanup` |
+| AC-3 / 81-S3 continued | Missing cwd retains `failure/success/success`, runs ordinary/always steps, and never runs the invalid-directory script. | `continued_directory_failure_keeps_outcome_and_runs_successors` |
+| AC-4 | Format, workspace clippy, no-allow, all guardrails and all workspace tests. | `./tools/check.sh all` |
+
+Expected host semantics match the static upstream contract at
+`actions/runner@cab9d1c3901e45c7705889c4f88284fdd93f4ae5` (v2.337.0),
+`ScriptHandler.RunAsync`: workspace-relative cwd, no job-default inheritance in
+composite scopes. Static comparison is not live parity evidence. Linux/macOS host
+behavior applies to both GitHub.com and GHES; no service-owned behavior changes.
+GHES acquired-job execution and pinned official-runner comparisons remain
+unverified without their external lanes. Container execution reuses the existing
+cwd translator; this host replay alone does not prove Docker behavior.
+
+Validation on 2026-09-26: all six focused tests failed before the implementation
+and passed afterward on Linux ARM64 with Rust 1.94.1 (0 ignored). The full
+`./tools/check.sh all` passed formatting, clippy, no-allow and guardrails, then
+failed linking workspace integration tests because the Docker filesystem was
+100% full (197 GiB used, 0 available). The full gate is **not passing**.
+Native macOS ARM64 compilation was stopped after a build-script sample showed
+`_dyld_start` stalled before main. Docker's /Volumes bind mount was unavailable;
+the Linux tests used a copied worktree. No stalled, skipped or missing lane counts
+as passing. Logs from this worker are `/tmp/issue81-linux-red.log`,
+`/tmp/issue81-focused.log` and `/tmp/issue81-gate.log`; these are local evidence,
+not durable CI or reference-runner evidence links.
+
+The orchestrator authorized GitHub CI as the full gate after the local dyld/disk
+failures. The existing `ci` workflow runs all gate layers on Linux plus clippy and
+workspace tests on macOS. These runs, linked from the issue #81 PR, are required
+before readiness; local full-gate success is not claimed.

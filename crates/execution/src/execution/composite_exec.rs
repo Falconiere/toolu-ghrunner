@@ -4,6 +4,10 @@
 //! managing `GITHUB_OUTPUT`, `GITHUB_ENV`, and `GITHUB_PATH` file commands
 //! between steps.
 
+#[cfg(test)]
+#[path = "tests/composite_working_directory.rs"]
+mod composite_working_directory;
+
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
@@ -268,8 +272,23 @@ async fn run_run_step(
     &eval_ctx,
     CompositeField::Step,
   )?;
-  let conclusion =
-    execute_composite_script(run, &step_id, &shell, &interpolated, &full_env).await?;
+  let directory = interpolate_composite_expr(
+    step.working_directory.as_deref().unwrap_or_default(),
+    &eval_ctx,
+    CompositeField::Step,
+  )?;
+  // Composite scopes do not inherit caller defaults.run. Each step starts
+  // from the immutable workspace; an absolute directory replaces that base.
+  let working_dir = params.workspace.join(directory);
+  let conclusion = execute_composite_script(
+    run,
+    &step_id,
+    &shell,
+    &interpolated,
+    &full_env,
+    &working_dir,
+  )
+  .await?;
 
   emit_log(params.events, params.parent_step_id, "##[endgroup]").await;
   process_file_commands(
@@ -290,6 +309,7 @@ async fn execute_composite_script(
   shell: &str,
   script: &str,
   env: &HashMap<String, String>,
+  working_dir: &Path,
 ) -> Result<Conclusion, RunnerError> {
   let params = run.params;
   let cancel = run.active_cancel();
@@ -300,7 +320,7 @@ async fn execute_composite_script(
     shell,
     script,
     env,
-    working_dir: params.workspace,
+    working_dir,
     log_step_id: params.parent_step_id,
     cgroup_path: cgroup_path.as_deref(),
     timeout: deadline.map(|at| at.saturating_duration_since(Instant::now())),
