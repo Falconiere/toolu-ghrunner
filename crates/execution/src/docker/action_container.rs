@@ -460,6 +460,8 @@ impl<'a> OutputSinks<'a> {
       }
       return;
     }
+    // This is an engine event, not a durable sink. The listener and journal
+    // mask stderr Log events exactly like stdout, per Runner's stream contract.
     if self.stderr_open
       && self
         .events

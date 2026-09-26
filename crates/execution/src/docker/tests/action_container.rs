@@ -26,8 +26,11 @@ fn daemon() -> Result<Docker, bollard::errors::Error> {
 }
 
 fn test_root(prefix: &str) -> Result<tempfile::TempDir, std::io::Error> {
-  let base =
-    crate::config::var("TOOLU_CONTAINER_TEST_ROOT").map_or_else(std::env::temp_dir, PathBuf::from);
+  let base = crate::config::var("TOOLU_CONTAINER_TEST_ROOT")
+    .map(PathBuf::from)
+    .ok_or_else(|| {
+      std::io::Error::other("TOOLU_CONTAINER_TEST_ROOT is required for real-daemon tests")
+    })?;
   std::fs::create_dir_all(&base)?;
   tempfile::Builder::new().prefix(prefix).tempdir_in(base)
 }
