@@ -37,8 +37,9 @@ SHA, Dockerfile path and platform; cache hits must resolve to an existing image.
 The production dispatch rejects non-Linux hosts before Docker setup. Tests of the
 actual production path run in a Linux carrier on the available real Linux daemon;
 macOS exercises explicit rejection. Registry preparation does not enter the remote
-GitHub action prefetch. Existing job.container.network is the attachment contract
-for job and future service-only networks; #74 owns creating such networks.
+GitHub action prefetch. Actions borrow the job-container network when present,
+otherwise the service-container network supplied by #74. Neither lookup creates
+or owns a network.
 
 ## Interfaces / Schema
 
@@ -66,8 +67,10 @@ for job and future service-only networks; #74 owns creating such networks.
 Missing image/Dockerfile, malformed args, failed pull/build/create/start/attach/wait,
 nonzero exit, and cleanup failure are visible step failures. A cancelled step is
 Cancelled; a timeout is Failure. Owned containers are removed after success,
-failure, timeout and cancellation; unrelated containers/networks survive. No
-network is created or removed by the action adapter. Local actions skip pre with the upstream warning; remote pre failure prevents main.
+failure, timeout and cancellation; unrelated containers/networks survive.
+Anonymous volumes created for the action are removed with its container;
+unrelated named volumes survive. No network is created or removed by the action
+adapter. Local actions skip pre with the upstream warning; remote pre failure prevents main.
 Post is queued before an applicable pre stage, so pre failure/cancellation still
 runs eligible cleanup with the state written by pre.
 Posts also survive main failure or cancellation. Pre/post conditions use job context, without the action inputs context. Posts
@@ -162,3 +165,9 @@ contract. Jev selected the upstream contract at 0.97 after this new evidence.
 The same pinned [ActionRunner pre/post registration](https://github.com/actions/runner/blob/cab9d1c3901e45c7705889c4f88284fdd93f4ae5/src/Runner.Worker/ActionRunner.cs#L111-L137)
 queues post during either Pre or Main before handler execution. Post registration
 therefore precedes Docker pre, preserving cleanup after a pre error or cancellation.
+
+After #74 merged, its service-only host jobs exposed a separate owned network
+while `job.container` remained null. A real nginx replay reproduced main and post
+connection failure. Docker stages now read the typed job/service owners directly,
+preferring the job-container network and falling back to the service network.
+Jev selected this approach at 1.0 over inspecting an arbitrary service alias.

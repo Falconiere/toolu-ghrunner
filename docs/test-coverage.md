@@ -695,8 +695,9 @@ pinned-image host/DNS probes for dedicated toolu and official labels. Dispatch
 only after both Linux lanes are provisioned; compare exact `SERVICE_74_*_OK`
 markers and inspect the printed resource IDs after completion. It has not run.
 The captured service acquisition, paired workflow comparison against official runner
-`cab9d1c3901e45c7705889c4f88284fdd93f4ae5` (2.337.0), GHES and #75 Docker-action
-cross-feature lane remain **unverified**. No suitable paired online runners were
+`cab9d1c3901e45c7705889c4f88284fdd93f4ae5` (2.337.0) and GHES remain
+**unverified**. The local #75 Docker-action cross-feature replay is recorded below.
+No suitable paired online runners were
 registered when checked; an offline `toolu-70-final` macOS registration cannot
 satisfy the Linux service lane. These missing live lanes are not passing evidence
 and do not establish complete epic parity.
@@ -869,9 +870,11 @@ These substitutions exercise production dispatch; they are not a new acquisition
 | --- | --- | --- |
 | Docker manifest and raw registry references | `actions::manifest::tests::preserves_docker_stage_and_argument_contract`; `execution/tests/docker_action_test.rs` | Default suite |
 | Dockerfile build, immutable cache, registry pull, bad images/builds, timeout and cleanup | `docker::action_container` real-daemon tests | Explicit Linux runtime lane |
+| Image-declared anonymous volume removed on cancellation, unrelated named volume preserved | `cleanup_removes_owned_anonymous_volume_but_preserves_unrelated_named_volume` | Explicit Linux runtime lane |
 | Exact argv, inputs/default env, mounts, output/env/PATH/state files, workflow commands, LIFO posts | `local_actions_preserve_argv_env_commands_state_and_lifo_posts` | Production Linux replay |
 | Absent versus empty manifest args and registry `with.args` | `registry_and_manifest_arg_variants_execute_exact_argv` | Production Linux replay |
 | Job network and real peer reachability | `action_joins_job_network_and_reaches_real_peer` | Production Linux replay; service orchestration is #74 |
+| Service-only host job: main/output and post reach nginx by alias; service/container network removed afterward | `docker_action_joins_service_only_network_through_main_and_post` | Production Linux replay across #74/#75 |
 | Invalid entrypoint, failed-main post, observed-start cancellation, owned-resource cleanup and unrelated-container survival | `entrypoint_failure_and_cancellation_fail_visibly_without_leaking_containers` | Production Linux replay |
 | Remote downloader, image reuse, pre/main/post state and cleanup after failed pre | `remote_repository_action_runs_pre_main_post_and_reuses_image` | Explicit post-push remote replay |
 | Non-Linux rejection | `execution/tests/docker_action_test.rs` platform-specific test | Default macOS suite |
@@ -883,11 +886,15 @@ image defaults to Rust 1.94.1 and can be supplied through
 explicitly selected because ordinary workspace tests ignore the Linux probes.
 The unchanged full repository gate remains `./tools/check.sh all`.
 
-The real-daemon runtime tests and four production replay tests passed on
-Linux ARM64 against the local daemon on 2026-09-25. The Ubuntu `ci` job explicitly
+The real-daemon runtime tests and five production replay tests passed on
+Linux ARM64 against the local daemon on 2026-09-25. After rebasing onto #74,
+the service-only test reproduced the missing-network failure with a corrected
+port-80 probe, then passed for both main and post with the typed network fallback.
+The Ubuntu `ci` job explicitly
 runs both ignored lanes after the default workspace tests; an ordinary ignored
-result is not counted. The unchanged full gate passed in the Linux carrier at
-commit `7b03bee`; review fixes receive a fresh gate before delivery.
+result is not counted. The initial implementation passed the unchanged full gate
+in the Linux carrier; the final rebased diff reruns that gate before delivery and
+is checked by `ci`/`ci-macos` on the PR.
 The host gate passed formatting, Clippy and guardrails, then was stopped after
 `sample` confirmed `context_secret_batch_test` stalled in `_dyld_start` before
 the harness. This is an incomplete host run, not a test pass.

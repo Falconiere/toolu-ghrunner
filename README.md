@@ -304,9 +304,10 @@ in reverse order and their failures affect the job result.
 
 Actions mount `/github/workspace`, `/github/home`, `/github/workflow`,
 `/github/file_commands`, runner temp and `/var/run/docker.sock`. They join the
-job network when one exists. File commands and stdout workflow commands use the
+job or service-only network when one exists. File commands and stdout workflow commands use the
 normal runner handlers; command paths are translated across mounts. Each stage's
-container is removed after success, failure, timeout or cancellation. A missing
+container and its anonymous volumes are removed after success, failure, timeout
+or cancellation. A missing
 image, failed build or invalid entrypoint fails the step. macOS and Windows
 reject Docker actions explicitly.
 

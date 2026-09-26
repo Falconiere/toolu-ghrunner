@@ -31,6 +31,8 @@ The failure-post variant uses `post-if: failure()` and a real exit 17 from main.
 The remote replay also requests exit 18 from pre and verifies its saved state
 reaches post while main never runs. Summary content is checked through the real
 file-command mount; backend summary upload is outside this probe's evidence.
+The service-only replay adds the pinned nginx service declaration used by #74;
+main and post both resolve its `web` alias before service teardown.
 
 The local Linux carrier can supply evidence for the production engine on Linux
 ARM64. It defaults to `rust:1.94.1`; set

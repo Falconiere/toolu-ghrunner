@@ -57,6 +57,7 @@ docker run --rm \
         local_actions_preserve_argv_env_commands_state_and_lifo_posts \
         registry_and_manifest_arg_variants_execute_exact_argv \
         action_joins_job_network_and_reaches_real_peer \
+        docker_action_joins_service_only_network_through_main_and_post \
         entrypoint_failure_and_cancellation_fail_visibly_without_leaking_containers
       do
         case "$listed" in
