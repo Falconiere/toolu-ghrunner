@@ -3,25 +3,33 @@
 set -euo pipefail
 repo_root=$(git rev-parse --show-toplevel)
 linux_root=${TOOLU_SERVICE_TEST_ROOT:-"$HOME/.cache/toolu-ghrunner-services74"}
-mkdir -p "$linux_root/source" "$linux_root/tmp" "$linux_root/auth" "$linux_root/docker-config"
+mkdir -p "$linux_root/source" "$linux_root/tmp"
 rsync -a --delete --exclude=.git --exclude=target "$repo_root/" "$linux_root/source/"
 daemon_host=${DOCKER_HOST:-$(docker context inspect --format '{{.Endpoints.docker.Host}}')}
 registry_id=''
 registry_image=''
+credentials_dir=''
 cleanup() {
-  if [[ -n "$registry_id" ]]; then docker rm -fv "$registry_id"; fi
-  if [[ -n "$registry_image" ]]; then docker image rm "$registry_image"; fi
+  local status=$?
+  local cleanup_status=0
+  if [[ -n "$registry_id" ]] && ! docker rm -fv "$registry_id"; then cleanup_status=1; fi
+  if [[ -n "$registry_image" ]] && ! docker image rm "$registry_image"; then cleanup_status=1; fi
+  if [[ -n "$credentials_dir" ]] && ! rm -rf -- "$credentials_dir"; then cleanup_status=1; fi
+  if [[ "$status" -ne 0 ]]; then exit "$status"; fi
+  return "$cleanup_status"
 }
 trap cleanup EXIT
+credentials_dir=$(mktemp -d "$linux_root/.credentials-74.XXXXXX")
+mkdir -p "$credentials_dir/auth" "$credentials_dir/docker-config"
 # Disposable local credentials; neither authenticates to any external service.
-docker run --rm httpd:2-alpine htpasswd -Bbn service-user service-password > "$linux_root/auth/htpasswd"
+docker run --rm httpd:2-alpine htpasswd -Bbn service-user service-password > "$credentials_dir/auth/htpasswd"
 registry_id=$(docker run -d -p 127.0.0.1::5000 \
-  --mount "type=bind,src=$linux_root/auth,dst=/auth,readonly" \
+  --mount "type=bind,src=$credentials_dir/auth,dst=/auth,readonly" \
   -e REGISTRY_AUTH=htpasswd -e REGISTRY_AUTH_HTPASSWD_REALM=service-test \
   -e REGISTRY_AUTH_HTPASSWD_PATH=/auth/htpasswd registry:2)
 registry_port=$(docker port "$registry_id" 5000/tcp | awk -F: '{print $NF}')
 registry_image="127.0.0.1:$registry_port/service74:fixture"
-python3 - "$linux_root/docker-config/config.json" "127.0.0.1:$registry_port" <<'PYAUTH'
+python3 - "$credentials_dir/docker-config/config.json" "127.0.0.1:$registry_port" <<'PYAUTH'
 import base64, json, os, sys
 with open(sys.argv[1], 'w') as output:
     json.dump({'auths': {sys.argv[2]: {'auth': base64.b64encode(b'service-user:service-password').decode()}}}, output)
@@ -35,7 +43,7 @@ for attempt in {1..30}; do
 done
 docker pull nginx:1.27-alpine
 docker tag nginx:1.27-alpine "$registry_image"
-docker --host "$daemon_host" --config "$linux_root/docker-config" push "$registry_image"
+docker --host "$daemon_host" --config "$credentials_dir/docker-config" push "$registry_image"
 docker run --rm --network host \
   --mount "type=bind,src=$linux_root,dst=$linux_root" \
   --mount type=volume,src=toolu_services74_target,dst=/cargo-target \
