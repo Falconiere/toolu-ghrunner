@@ -9,4 +9,3 @@ runs:
   image: Dockerfile
   entrypoint: /probe/main.sh
   args: []
-

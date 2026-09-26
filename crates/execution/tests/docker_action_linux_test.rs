@@ -60,6 +60,16 @@ fn captured_job() -> TestResult<AgentJobRequestMessage> {
   Ok(job)
 }
 
+fn service_token() -> TestResult<TemplateToken> {
+  Ok(serde_json::from_value(serde_json::json!({"type":2,"map":[
+    {"key":{"type":0,"lit":"web"},"value":{"type":2,"map":[
+      {"key":{"type":0,"lit":"image"},"value":{"type":0,"lit":"nginx@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10"}},
+      {"key":{"type":0,"lit":"ports"},"value":{"type":1,"seq":[{"type":0,"lit":"80"}]}},
+      {"key":{"type":0,"lit":"options"},"value":{"type":0,"lit":"--health-cmd 'wget -q -O /dev/null http://localhost' --health-interval 1s --health-retries 3"}}
+    ]}}
+  ]}))?)
+}
+
 fn local_step(id: &str, path: &str, inputs: &[(&str, &str)]) -> ActionStep {
   let mut step = ActionStep::with_ref_type(id, "repository");
   step.reference.repository_type = Some("self".to_owned());
@@ -492,6 +502,77 @@ while test ! -f docker-peer-removed; do sleep 0.1; done
   assert!(is_missing(
     &docker
       .inspect_network(&network, None::<InspectNetworkOptions>)
+      .await
+  ));
+  Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires Linux, real Docker, and a daemon-shared test root"]
+async fn docker_action_joins_service_only_network_through_main_and_post() -> TestResult {
+  let root = linux_root()?;
+  let config = config_for(root.path());
+  let mut job = captured_job()?;
+  job.job_service_containers = Some(service_token()?);
+  let workspace = config.workspace_root.join(&job.job_id);
+  seed_probe(&workspace, "service-network", "action.yml")?;
+  job.steps = vec![
+    local_step(
+      "service_action",
+      "./.github/actions/service-network",
+      &[
+        ("marker", "SERVICE"),
+        ("peer", "web"),
+        ("peer_port", "80"),
+        ("post_peer", "web"),
+      ],
+    ),
+    ActionStep::script(
+      "verify_service_action",
+      r"
+test '${{ steps.service_action.outputs.probe_output }}' = SERVICE-output
+grep -q 'Welcome to nginx' docker-network.txt
+printf service-host-verified > service-host-verified
+",
+      "",
+    ),
+  ];
+
+  let events = collect_job(config, job, CancellationToken::new()).await?;
+  assert_eq!(
+    job_conclusion(&events),
+    Some(Conclusion::Success),
+    "{events:#?}"
+  );
+  assert_eq!(
+    std::fs::read_to_string(workspace.join("service-host-verified"))?,
+    "service-host-verified"
+  );
+  assert_eq!(
+    std::fs::read_to_string(workspace.join("docker-network-post.txt"))?,
+    "SERVICE-post-peer-ok"
+  );
+  let (service_id, service_network) = events
+    .iter()
+    .find_map(|event| {
+      if let RunnerEvent::Log { line, .. } = event {
+        line
+          .strip_prefix("Service web created: ")
+          .and_then(|resources| resources.split_once(" on "))
+      } else {
+        None
+      }
+    })
+    .ok_or("service creation log absent")?;
+  let docker = bollard::Docker::connect_with_local_defaults()?;
+  assert!(is_missing(
+    &docker
+      .inspect_container(service_id, None::<InspectContainerOptions>)
+      .await
+  ));
+  assert!(is_missing(
+    &docker
+      .inspect_network(service_network, None::<InspectNetworkOptions>)
       .await
   ));
   Ok(())

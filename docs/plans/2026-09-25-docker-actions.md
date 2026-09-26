@@ -5,7 +5,7 @@
 ## Evidence and approach
 
 The approved spec follows ContainerActionHandler at cab9d1c. Existing code exposes
-ContainerCommand, JobContainer::network, PathTranslator, StepBounds, command
+ContainerCommand, JobContainer::network, ServiceContainers, PathTranslator, StepBounds, command
 handlers, captured #73 job fixtures and scoped PostStepQueue. Use these contracts
 and retain Linux-only dispatch. No service orchestration (#74) is added here.
 
@@ -150,3 +150,8 @@ The host full gate passed fmt/clippy/guardrails and reached workspace tests, the
 Under the explicit orchestrator instruction, the gate ledger uses the unchanged
 `./tools/check.sh all` inside the Linux carrier (with jq and ast-grep installed);
 no layer is omitted. CI/ci-macos still decide delivery readiness.
+
+The branch was rebased onto merged #74 before delivery. Runtime/dispatch include
+its service-only network attachment: a real nginx replay proves action main and
+post can reach the service before owned service/network teardown. This fulfills
+the existing AC-4 / 75-S4 boundary; it does not add service orchestration here.

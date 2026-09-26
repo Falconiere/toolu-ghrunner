@@ -512,7 +512,8 @@ to that list requires proving the value is not a real credential.
   `execution/docker_action` and `docker_stage` connect these to production
   dispatch, inputs, workflow/file commands, and pre/main/post state. Docker
   actions are Linux-only; local actions skip pre, and remote pre failures
-  retain eligible posts for cleanup.
+  retain eligible posts for cleanup. Stages borrow the job-container network or,
+  for host jobs with services, the service network through main and post.
 - `node/` — Node.js runtime detection + caching. `runtime` (version
   detection, download, cache at `data_dir/node/{version}`).
 - `plugin/` — `RunnerPlugin` trait + `PluginRegistry`. New

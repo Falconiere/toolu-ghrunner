@@ -37,7 +37,8 @@ printf '::warning file=probe.sh,line=7,title=Docker probe::annotation-%s\n' "$ma
 
 if [ -n "${INPUT_PEER:-}" ]; then
   attempt=0
-  while ! wget -qO "$GITHUB_WORKSPACE/docker-network.txt" "http://$INPUT_PEER:8080"; do
+  while ! wget -qO "$GITHUB_WORKSPACE/docker-network.txt" \
+    "http://$INPUT_PEER:${INPUT_PEER_PORT:-8080}"; do
     attempt=$((attempt + 1))
     test "$attempt" -lt 50
     sleep 0.1
