@@ -84,7 +84,7 @@ pub fn build_session_request(agent_id: i64, agent_name: &str) -> CreateSessionRe
     agent: AgentInfo {
       id: agent_id,
       name: agent_name.to_owned(),
-      version: "3.0.0".to_owned(),
+      version: crate::runner_version::COMPATIBILITY_VERSION.to_owned(),
       os_description: get_os_description(),
       ephemeral: true,
     },

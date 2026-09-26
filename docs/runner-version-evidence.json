@@ -1,0 +1,61 @@
+{
+  "issue": 78,
+  "captured_at": "2026-09-26",
+  "compatibility_version": "2.337.0",
+  "workflow_sha": "fcb7f14ad3f238ebc3c0ed4bac1c1ff3a9324fc5",
+  "workflow": ".github/workflows/noop-live.yml",
+  "epic_source_snapshot": "cab9d1c3901e45c7705889c4f88284fdd93f4ae5",
+  "runner_source_base": "fcb7f14ad3f238ebc3c0ed4bac1c1ff3a9324fc5",
+  "source_description": "This branch changes on the recorded base; source_sha256 binds the final identity and refresh source files, while workflow_sha identifies the unchanged canary workflow.",
+  "container_image_id": "sha256:95334f95d25a1a28d369fa6030b9588d95b8dad3843045b55ee7b85943983f7d",
+  "toolu": {
+    "run_id": 36213645647,
+    "url": "https://github.com/Falconiere/toolu-ghrunner/actions/runs/36213645647",
+    "workflow_sha": "fcb7f14ad3f238ebc3c0ed4bac1c1ff3a9324fc5",
+    "runner_name": "toolu-78-linux",
+    "runner_id": 129,
+    "job_id": 108325168511,
+    "conclusion": "success",
+    "labels": [
+      "self-hosted",
+      "toolu-runner-v1"
+    ],
+    "platform": "Linux ARM64",
+    "container_image": "toolu-72-gate-tools:local",
+    "product_version": "0.9.2",
+    "compatibility_version": "2.337.0",
+    "binary_sha256": "63e988f5f55fba8e78c215f44683409dd7590bd222dc75541614d3d45081de55",
+    "command": "toolu-runner register; toolu-runner run --once"
+  },
+  "official": {
+    "run_id": 36212900907,
+    "url": "https://github.com/Falconiere/toolu-ghrunner/actions/runs/36212900907",
+    "workflow_sha": "fcb7f14ad3f238ebc3c0ed4bac1c1ff3a9324fc5",
+    "runner_name": "official-78-linux",
+    "runner_id": 128,
+    "job_id": 108323002028,
+    "conclusion": "success",
+    "labels": [
+      "self-hosted",
+      "toolu-runner-v1"
+    ],
+    "platform": "Linux ARM64",
+    "container_image": "toolu-72-gate-tools:local",
+    "product_version": "2.337.0",
+    "binary_commit": "397b032cbf865e9c3ddfab89d533ec19325e1273",
+    "asset": "actions-runner-linux-arm64-2.337.0.tar.gz",
+    "asset_sha256": "9b1dc70626422526e3c94767cf024896beb15da5342a3f4819bf2feac13e0393",
+    "command": "Runner.Listener run with ACTIONS_RUNNER_INPUT_JITCONFIG"
+  },
+  "ghes": "unverified: no endpoint or credentials supplied",
+  "live_refresh_delivery": "unverified; local handler replay only",
+  "source_sha256": {
+    "crates/listener/src/broker_message.rs": "250edf270097c9a7335cd3cc1bff78bdc02619d21e3c507e40367f9ca37253f8",
+    "crates/listener/src/handler.rs": "bbc8b40f05ad5ec0b94b9130b9bde0d01b72247c8c2db91906c8fccb67d9a3f1",
+    "crates/listener/src/job_lifecycle.rs": "fe47009627c1c285856c1baa2cfa4b5e571ddb0fa25cc8b1c4e1ee673c430b97",
+    "crates/protocol/src/lib.rs": "a0f0f7f7aa1c46c98825f2895ac1a67fa45a89f612b369aa7e177b6189933728",
+    "crates/protocol/src/runner_version.rs": "4898bee4440172f49699f833b7c1e0a3ed7e2a6d3ed9b43d06c85e7654ab7e55",
+    "crates/protocol/src/session.rs": "72e2cf3625d9462c6eb4e96d01a541198a95e4a6f6107a7ac67b7578f5dc8c6c",
+    "crates/wire/src/net/messages.rs": "6461c8efa3d9b54f8b8db82f05ef650a12ac78098d9402f5a5cfd2437b57d5d4"
+  }
+}

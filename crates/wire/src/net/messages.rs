@@ -18,8 +18,6 @@ pub struct PollParams<'a> {
   pub token: &'a str,
   /// The broker session id this poll is scoped to.
   pub session_id: &'a str,
-  /// This runner's version string, sent for the broker's `runnerVersion` query param.
-  pub runner_version: &'a str,
   /// This host's OS label, sent for the broker's `os` query param.
   pub os: &'a str,
   /// This host's architecture label, sent for the broker's `architecture` query param.
@@ -41,7 +39,7 @@ pub fn build_poll_url(params: &PollParams<'_>) -> String {
      &lastMessageId={}&disableUpdate=true",
     params.server_url_v2,
     params.session_id,
-    params.runner_version,
+    protocol::runner_version::COMPATIBILITY_VERSION,
     params.os,
     params.architecture,
     params.last_message_id
@@ -134,7 +132,10 @@ pub async fn acknowledge_message(
       ("status", "Online"),
       ("os", shared::platform::runner_os()),
       ("architecture", shared::platform::runner_arch()),
-      ("runnerVersion", env!("CARGO_PKG_VERSION")),
+      (
+        "runnerVersion",
+        protocol::runner_version::COMPATIBILITY_VERSION,
+      ),
     ])
     .bearer_auth(token)
     .json(&serde_json::json!({ "runnerRequestId": runner_request_id }))

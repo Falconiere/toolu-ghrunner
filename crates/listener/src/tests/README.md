@@ -19,3 +19,4 @@
 | `support.rs` | Recording endpoint and shared test support. |
 | `watchdog_retry.rs` | Watchdog retry behavior. |
 | `watchdog_trip.rs` | Watchdog cancellation behavior. |
+| `runner_update_policy.rs` | Idle/busy refresh warning, safe opaque bodies, cancellation and cursor continuity. |

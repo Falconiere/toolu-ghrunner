@@ -680,3 +680,12 @@ for verified cases and remaining live/reference lanes.
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+## Runner version and updates
+
+Toolu reports the pinned GitHub compatibility baseline `2.337.0` consistently
+for session, poll and acknowledgement; `toolu-runner --version` reports the
+separate toolu product release. Updates are operator-managed. Refresh messages
+warn and continue; operators must track GitHub's 30-day update requirement and
+critical security updates. See [runner updates](docs/runner-updates.md) for
+ownership, deployment, version-gating limits and revalidation.

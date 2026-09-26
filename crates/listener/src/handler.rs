@@ -122,6 +122,7 @@ impl GitHubListener {
   ///
   /// Returns `RunnerError::Protocol` on auth or session creation failure.
   pub async fn run(&self, cancel: CancellationToken) -> Result<Option<Conclusion>, RunnerError> {
+    log_runner_identity();
     let (tx, rx) = mpsc::channel(256);
     // Sink the listener-event channel into the per-job journal
     // (`<data_dir>/_diag/jobs/`). The writer doubles as the drain: the
@@ -234,6 +235,15 @@ impl GitHubListener {
       watchdog: WatchdogConfig::default(),
     })
   }
+}
+
+/// Report the independently versioned product and GitHub compatibility target.
+fn log_runner_identity() {
+  tracing::info!(
+    product_version = env!("CARGO_PKG_VERSION"),
+    compatibility_version = protocol::runner_version::COMPATIBILITY_VERSION,
+    "starting toolu listener; updates are operator-managed"
+  );
 }
 
 /// Log a job-execution error, distinguishing expected deregistration from real failures.

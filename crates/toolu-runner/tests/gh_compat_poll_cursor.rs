@@ -12,7 +12,6 @@ fn params(last_message_id: i64) -> PollParams<'static> {
     server_url_v2: "https://broker.example.com/v2",
     token: "tok",
     session_id: "11111111-1111-1111-1111-111111111111",
-    runner_version: "3.0.0",
     os: "linux",
     architecture: "x64",
     last_message_id,
@@ -49,7 +48,7 @@ fn poll_url_keeps_required_params() {
   for expected in [
     "/message?sessionId=11111111-1111-1111-1111-111111111111",
     "status=Online",
-    "runnerVersion=3.0.0",
+    "runnerVersion=2.337.0",
     "os=linux",
     "architecture=x64",
     "lastMessageId=5",
