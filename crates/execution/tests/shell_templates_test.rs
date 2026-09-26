@@ -2,7 +2,6 @@
 
 use std::collections::HashMap;
 use std::error::Error;
-use std::path::Path;
 
 use execution::execution::handlers::script::{ScriptHandler, ScriptParams};
 use shared::{Conclusion, RunnerError};
@@ -48,22 +47,23 @@ async fn run(
   Ok((result, lines))
 }
 
-fn path() -> String {
-  std::env::var("PATH").unwrap_or_default()
+fn path() -> TestResult<String> {
+  std::env::var("PATH")
+    .map_err(|error| format!("PATH must be set for shell-template tests: {error}").into())
 }
 
 #[tokio::test]
 async fn default_pipeline_succeeds_explicit_bash_fails() -> TestResult {
   assert_eq!(
-    run(None, "false | true", &path()).await?.0?,
+    run(None, "false | true", &path()?).await?.0?,
     Conclusion::Success
   );
   assert_eq!(
-    run(Some(""), "false | true", &path()).await?.0?,
+    run(Some(""), "false | true", &path()?).await?.0?,
     Conclusion::Success
   );
   assert_eq!(
-    run(Some("bash"), "false | true", &path()).await?.0?,
+    run(Some("bash"), "false | true", &path()?).await?.0?,
     Conclusion::Failure
   );
   Ok(())
@@ -105,7 +105,7 @@ async fn custom_perl_and_quoted_arguments_use_requested_interpreter() -> TestRes
   let (result, lines) = run(
     Some("perl {0} 'hello world'"),
     "print join('|', @ARGV), qq(\\n);",
-    &path(),
+    &path()?,
   )
   .await?;
   assert_eq!(result?, Conclusion::Success);
@@ -113,11 +113,19 @@ async fn custom_perl_and_quoted_arguments_use_requested_interpreter() -> TestRes
   let (result, lines) = run(
     Some("bash {0} 'one two' \"three four\""),
     "printf '%s|%s\\n' \"$1\" \"$2\"",
-    &path(),
+    &path()?,
   )
   .await?;
   assert_eq!(result?, Conclusion::Success);
   assert_eq!(lines, ["one two|three four"]);
+  let (result, lines) = run(
+    Some("bash {0} ~ $HOME"),
+    "printf '%s|%s\\n' \"$1\" \"$2\"",
+    &path()?,
+  )
+  .await?;
+  assert_eq!(result?, Conclusion::Success);
+  assert_eq!(lines, ["~|$HOME"]);
   Ok(())
 }
 
@@ -130,14 +138,15 @@ async fn invalid_shells_fail_before_running_script() -> TestResult {
     "bash '{0}",
     "bash {1}",
     "bash {0} {",
+    "bash {0}\\",
     " ",
     "bash {0}\0",
   ] {
-    let (result, lines) = run(Some(shell), "echo SHOULD_NOT_RUN", &path()).await?;
+    let (result, lines) = run(Some(shell), "echo SHOULD_NOT_RUN", &path()?).await?;
     assert!(result.is_err(), "{shell:?}: {result:?}");
     assert!(lines.is_empty(), "{shell:?}: {lines:?}");
   }
-  let (result, lines) = run(Some("missing-shell80 {0}"), "echo SHOULD_NOT_RUN", &path()).await?;
+  let (result, lines) = run(Some("missing-shell80 {0}"), "echo SHOULD_NOT_RUN", &path()?).await?;
   assert!(
     result
       .err()
@@ -154,7 +163,7 @@ async fn repeated_placeholder_and_literal_braces_preserve_arguments() -> TestRes
   let (result, lines) = run(
     Some("bash {0} {0} '{{literal}}'"),
     "test \"$0\" = \"$1\"; printf '%s\\n' \"$2\"",
-    &path(),
+    &path()?,
   )
   .await?;
   assert_eq!(result?, Conclusion::Success);
@@ -170,7 +179,7 @@ async fn custom_executable_path_with_spaces_is_preserved() -> TestResult {
   std::os::unix::fs::symlink("/bin/bash", &exe)?;
   let template = format!("'{}' {{0}}", exe.display());
   assert_eq!(
-    run(Some(&template), "printf 'custom-path\\n'", &path())
+    run(Some(&template), "printf 'custom-path\\n'", &path()?)
       .await?
       .1,
     ["custom-path"]
@@ -204,16 +213,53 @@ async fn python_uses_python_and_py_extension_and_native_exit() -> TestResult {
 #[tokio::test]
 #[ignore = "requires pwsh on PATH; run explicitly for interpreter acceptance"]
 async fn pwsh_extension_errors_and_native_exit() -> TestResult {
-  let (result, lines) = run(Some("pwsh"), "if ([IO.Path]::GetExtension($PSCommandPath) -ne '.ps1') { throw 'extension' }; Write-Output 'pwsh80'; /bin/sh -c 'exit 7'", &path()).await?;
+  let (result, lines) = run(Some("pwsh"), "if ([IO.Path]::GetExtension($PSCommandPath) -ne '.ps1') { throw 'extension' }; Write-Output 'pwsh80'; /bin/sh -c 'exit 7'", &path()?).await?;
   assert_eq!(result?, Conclusion::Failure);
   assert_eq!(lines, ["pwsh80"]);
-  let (success, output) = run(Some("pwsh"), "Write-Output 'success80'", &path()).await?;
+  let (success, output) = run(Some("pwsh"), "Write-Output 'success80'", &path()?).await?;
   assert_eq!(success?, Conclusion::Success);
   assert_eq!(output, ["success80"]);
   let (result, lines) = run(
     Some("pwsh"),
     "Write-Error 'expected80'; Write-Output 'SHOULD_NOT_RUN'",
-    &path(),
+    &path()?,
+  )
+  .await?;
+  assert_eq!(result?, Conclusion::Failure);
+  assert!(lines.is_empty());
+  Ok(())
+}
+
+#[cfg(unix)]
+#[tokio::test]
+#[ignore = "requires pwsh on PATH; run explicitly for interpreter acceptance"]
+async fn uppercase_pwsh_builtin_and_custom_templates_keep_fixups() -> TestResult {
+  let interpreter = std::process::Command::new("pwsh")
+    .args([
+      "-NoProfile",
+      "-Command",
+      "[Console]::Out.Write([System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName)",
+    ])
+    .output()?;
+  assert!(interpreter.status.success());
+  let executable = String::from_utf8(interpreter.stdout)?;
+  let bin = tempfile::tempdir()?;
+  std::os::unix::fs::symlink(executable.trim(), bin.path().join("PWSH"))?;
+  let path = bin.path().to_str().ok_or("nonunicode pwsh path")?;
+
+  let (result, lines) = run(
+    Some("PWSH"),
+    "if ([IO.Path]::GetExtension($PSCommandPath) -ne '.ps1') { throw 'extension' }; Write-Output 'builtin80'; /bin/sh -c 'exit 7'",
+    path,
+  )
+  .await?;
+  assert_eq!(result?, Conclusion::Failure);
+  assert_eq!(lines, ["builtin80"]);
+
+  let (result, lines) = run(
+    Some("PWSH -command \". '{0}'\""),
+    "Write-Error 'expected80'; Write-Output 'SHOULD_NOT_RUN'",
+    path,
   )
   .await?;
   assert_eq!(result?, Conclusion::Failure);
@@ -239,6 +285,5 @@ async fn explicit_missing_interpreters_do_not_fallback() -> TestResult {
         .contains(shell)
     );
   }
-  assert!(Path::new("/bin/sh").is_file());
   Ok(())
 }

@@ -71,7 +71,8 @@ impl ScriptHandler {
       params.env,
       params.working_dir,
       false,
-    )?;
+    )
+    .await?;
     let script_file = shell.write_script(params.script, None)?;
     let script_path = script_file.path().to_string_lossy().to_string();
 
@@ -112,12 +113,9 @@ async fn execute_in_container(
   events: &mpsc::Sender<RunnerEvent>,
   stdout_tx: mpsc::Sender<String>,
 ) -> Result<ScriptOutput, RunnerError> {
-  let shell = super::shell_command::ShellCommand::resolve(
-    params.shell,
-    params.env,
-    params.working_dir,
-    true,
-  )?;
+  let shell =
+    super::shell_command::ShellCommand::resolve(params.shell, params.env, params.working_dir, true)
+      .await?;
   let script_file = shell.write_script(params.script, Some(container.temp_dir()))?;
   let script_path = container
     .translator()
