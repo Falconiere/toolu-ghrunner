@@ -135,6 +135,7 @@ impl ActionContainer {
       return Ok(Conclusion::Failure);
     }
     tokio::select! {
+      // Poll cancellation first so it wins when the deadline is also ready.
       biased;
       () = params.cancel.cancelled() => Ok(Conclusion::Cancelled),
       () = wait_for_deadline(deadline) => {

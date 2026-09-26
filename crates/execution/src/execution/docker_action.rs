@@ -168,9 +168,9 @@ async fn run_pre(
 }
 
 async fn emit_pre_event(events: &tokio::sync::mpsc::Sender<RunnerEvent>, event: RunnerEvent) {
-  if events.send(event).await.is_err() {
+  if let Err(error) = events.send(event).await {
     // The receiver was dropped or explicitly closed. A synthetic completion
     // cannot enter that channel either; preserve the action cleanup path.
-    tracing::warn!("Docker pre-stage event receiver dropped; continuing");
+    tracing::warn!(%error, "Docker pre-stage event channel closed; continuing cleanup");
   }
 }

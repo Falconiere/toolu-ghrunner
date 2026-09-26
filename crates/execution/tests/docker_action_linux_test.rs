@@ -101,10 +101,10 @@ fn config_for(root: &Path) -> RunnerConfig {
   }
 }
 
-fn seed_probe(workspace: &Path, name: &str, manifest: &str) -> TestResult {
+async fn seed_probe(workspace: &Path, name: &str, manifest: &str) -> TestResult {
   let source = Path::new(PROBE);
   let target = workspace.join(".github/actions").join(name);
-  std::fs::create_dir_all(&target)?;
+  tokio::fs::create_dir_all(&target).await?;
   for file in [
     "Dockerfile",
     "pre.sh",
@@ -112,9 +112,9 @@ fn seed_probe(workspace: &Path, name: &str, manifest: &str) -> TestResult {
     "post.sh",
     "docker-probe-tool",
   ] {
-    std::fs::copy(source.join(file), target.join(file))?;
+    tokio::fs::copy(source.join(file), target.join(file)).await?;
   }
-  std::fs::copy(source.join(manifest), target.join("action.yml"))?;
+  tokio::fs::copy(source.join(manifest), target.join("action.yml")).await?;
   Ok(())
 }
 
@@ -229,9 +229,9 @@ async fn local_actions_preserve_argv_env_commands_state_and_lifo_posts() -> Test
   let config = config_for(root.path());
   let mut job = captured_job()?;
   let workspace = config.workspace_root.join(&job.job_id);
-  seed_probe(&workspace, "probe-a", "action.yml")?;
-  seed_probe(&workspace, "probe-b", "action.yml")?;
-  seed_probe(&workspace, "probe-c", "action-false-stages.yml")?;
+  seed_probe(&workspace, "probe-a", "action.yml").await?;
+  seed_probe(&workspace, "probe-b", "action.yml").await?;
+  seed_probe(&workspace, "probe-c", "action-false-stages.yml").await?;
 
   let mut first = local_step("docker_a", "./.github/actions/probe-a", &[("marker", "A")]);
   first.environment = Some(token_map(&[("OVERRIDE_ME", "step-override")]));
@@ -339,13 +339,14 @@ async fn registry_and_manifest_arg_variants_execute_exact_argv() -> TestResult {
   let config = config_for(root.path());
   let mut job = captured_job()?;
   let workspace = config.workspace_root.join(&job.job_id);
-  seed_probe(&workspace, "absent", "action-absent-args.yml")?;
-  seed_probe(&workspace, "empty", "action-empty-args.yml")?;
+  seed_probe(&workspace, "absent", "action-absent-args.yml").await?;
+  seed_probe(&workspace, "empty", "action-empty-args.yml").await?;
   seed_probe(
     &workspace,
     "composite-registry",
     "action-composite-registry.yml",
-  )?;
+  )
+  .await?;
   job.steps = vec![
     local_step(
       "absent_args",
