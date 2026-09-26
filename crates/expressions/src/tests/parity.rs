@@ -35,13 +35,11 @@ fn captured_malformed_literals_report_reason_and_byte_offset() {
     ("0x100000000", "number too large to fit in target type"),
     ("1e", "invalid float literal"),
   ] {
-    for prefix in ["", "  "] {
-      let error = evaluate(&format!("{prefix}{expression}"), &context())
+    for (prefix, suffix, offset) in [("", "", 0), ("  ", "", 2), ("contains('é', ", ")", 15)] {
+      let error = evaluate(&format!("{prefix}{expression}{suffix}"), &context())
         .expect_err("captured malformed literal must fail");
-      let expected = shared::RunnerError::Expression(format!(
-        "invalid number at byte {}: {reason}",
-        prefix.len()
-      ));
+      let expected =
+        shared::RunnerError::Expression(format!("invalid number at byte {offset}: {reason}"));
       assert_eq!(error.to_string(), expected.to_string());
     }
   }
