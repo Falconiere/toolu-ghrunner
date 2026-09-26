@@ -26,7 +26,10 @@ owned container, attaches output before start, waits under cancellation/deadline
 and force-removes the container before returning on all exits. Setup mutations
 are awaited before cancellation cleanup so removal cannot race an unfinished create.
 Image build/pull errors propagate as step failures. Build contexts are tar archives
-of the action Dockerfile directory. Only immutable remote SHA actions reuse a
+of the action Dockerfile directory, filtered by `.dockerignore` or the selected
+Dockerfile's more specific ignore file. Ordered negation and recursive patterns
+apply before upload; symlinks are archived without following their targets.
+Only immutable remote SHA actions reuse a
 successfully inspected build image; local actions build against current contents.
 Docker's own layer cache remains enabled. Build cache tags include action identity,
 SHA, Dockerfile path and platform; cache hits must resolve to an existing image.
@@ -65,7 +68,9 @@ nonzero exit, and cleanup failure are visible step failures. A cancelled step is
 Cancelled; a timeout is Failure. Owned containers are removed after success,
 failure, timeout and cancellation; unrelated containers/networks survive. No
 network is created or removed by the action adapter. Local actions skip pre with the upstream warning; remote pre failure prevents main.
-A started main registers post even when main fails or is cancelled. Pre/post conditions use job context, without the action inputs context. Posts
+Post is queued before an applicable pre stage, so pre failure/cancellation still
+runs eligible cleanup with the state written by pre.
+Posts also survive main failure or cancellation. Pre/post conditions use job context, without the action inputs context. Posts
 use live job status, drain LIFO, and retain originating scoped state and resolved
 inputs for their process environment and args.
 Pre/post command outputs do not overwrite the main step output namespace.
@@ -153,3 +158,7 @@ for pre/post conditions. The probe therefore uses job-context conditions and
 local replay asserts the pre warning/skip. Remote pre requires a repository
 action replay. This corrects an initial probe assumption, not the upstream
 contract. Jev selected the upstream contract at 0.97 after this new evidence.
+
+The same pinned [ActionRunner pre/post registration](https://github.com/actions/runner/blob/cab9d1c3901e45c7705889c4f88284fdd93f4ae5/src/Runner.Worker/ActionRunner.cs#L111-L137)
+queues post during either Pre or Main before handler execution. Post registration
+therefore precedes Docker pre, preserving cleanup after a pre error or cancellation.

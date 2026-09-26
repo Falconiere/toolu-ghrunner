@@ -13,6 +13,7 @@ into this module. Job-level cgroup wiring lives in
 
 | File | Primary item | Purpose |
 | --- | --- | --- |
+| `action_archive.rs` | `archive_context` | Builds Docker contexts using Docker-compatible `.dockerignore` matching and Dockerfile-specific precedence. |
 | `action_container.rs` | `ActionContainer` | Owns one attached Docker container per action stage, including timeout/cancellation cleanup. |
 | `action_image.rs` | `ActionContainer::prepare_image` | Pulls registry images and builds action Dockerfiles with inspected immutable-cache tags. |
 | `action_mounts.rs` | `ActionMounts`, `action_path_to_host` | Mounts standard `/github` paths and translates action-emitted paths back to host coordinates. |

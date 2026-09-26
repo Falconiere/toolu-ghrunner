@@ -8,6 +8,7 @@ use futures_util::StreamExt;
 use shared::RunnerError;
 use tokio_util::sync::CancellationToken;
 
+use super::action_archive::archive_context;
 use super::action_container::ActionContainer;
 
 impl ActionContainer {
@@ -74,14 +75,13 @@ impl ActionContainer {
     cache_key: Option<&str>,
     cancel: &CancellationToken,
   ) -> Result<String, RunnerError> {
-    let (context_dir, dockerfile_name) = resolve_dockerfile(dockerfile, action_dir)?;
+    let (context_dir, dockerfile_name) =
+      resolve_dockerfile(dockerfile.to_owned(), action_dir.to_path_buf()).await?;
     let tag = self.build_tag(cache_key, dockerfile).await?;
     if cache_key.is_some() && self.image_exists(&tag).await? {
       return Ok(tag);
     }
-    let archive = tokio::task::spawn_blocking(move || archive_context(&context_dir))
-      .await
-      .map_err(|error| RunnerError::Docker(format!("archive Docker action context: {error}")))??;
+    let archive = archive_action_context(context_dir, dockerfile_name.clone()).await?;
     check_cancel(cancel)?;
     let options = BuildImageOptionsBuilder::default()
       .dockerfile(&dockerfile_name)
@@ -160,7 +160,26 @@ impl ActionContainer {
   }
 }
 
-fn resolve_dockerfile(
+async fn archive_action_context(
+  context_dir: std::path::PathBuf,
+  dockerfile: String,
+) -> Result<Vec<u8>, RunnerError> {
+  tokio::task::spawn_blocking(move || archive_context(&context_dir, &dockerfile))
+    .await
+    .map_err(|error| RunnerError::Docker(format!("archive Docker action context: {error}")))?
+    .map_err(RunnerError::from)
+}
+
+async fn resolve_dockerfile(
+  dockerfile: String,
+  action_dir: std::path::PathBuf,
+) -> Result<(std::path::PathBuf, String), RunnerError> {
+  tokio::task::spawn_blocking(move || resolve_dockerfile_sync(&dockerfile, &action_dir))
+    .await
+    .map_err(|error| RunnerError::Docker(format!("resolve Docker action context: {error}")))?
+}
+
+fn resolve_dockerfile_sync(
   dockerfile: &str,
   action_dir: &Path,
 ) -> Result<(std::path::PathBuf, String), RunnerError> {
@@ -193,12 +212,6 @@ fn resolve_dockerfile(
     .and_then(std::ffi::OsStr::to_str)
     .ok_or_else(|| RunnerError::Docker("Dockerfile name is not valid Unicode".to_owned()))?;
   Ok((context.to_path_buf(), name.to_owned()))
-}
-
-fn archive_context(action_dir: &Path) -> Result<Vec<u8>, std::io::Error> {
-  let mut builder = tar::Builder::new(Vec::new());
-  builder.append_dir_all(".", action_dir)?;
-  builder.into_inner()
 }
 
 fn check_cancel(cancel: &CancellationToken) -> Result<(), RunnerError> {

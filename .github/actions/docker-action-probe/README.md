@@ -20,10 +20,17 @@ changes only these acquired fields:
 `action.yml` covers pre/main/post, fixed manifest argv, default environment, file
 commands, annotations, state, mounts, failure, and cancellation. The absent and
 empty variants differ only in the `runs.args` field so fallback behavior is
-observable without synthesizing a manifest in test code. The false-stages variant
-uses literal false pre/post conditions, avoiding an inputs context the official
-runner does not expose to those fields. `DOCKER75|...` output is the live/reference
-log contract; `docker-stages.txt` is the local replay contract.
+observable without synthesizing a manifest in test code. The composite-registry
+variant invokes pinned Alpine through nested `docker://`, writes a real workspace
+marker, and maps the nested action's `GITHUB_OUTPUT` value through the composite
+output. The false-stages variant uses literal false pre/post conditions, avoiding
+an inputs context the official runner does not expose to those fields.
+`DOCKER75|...` output is the live/reference log contract; `docker-stages.txt` is
+the local replay contract.
+The failure-post variant uses `post-if: failure()` and a real exit 17 from main.
+The remote replay also requests exit 18 from pre and verifies its saved state
+reaches post while main never runs. Summary content is checked through the real
+file-command mount; backend summary upload is outside this probe's evidence.
 
 The local Linux carrier can supply evidence for the production engine on Linux
 ARM64. It defaults to `rust:1.94.1`; set
