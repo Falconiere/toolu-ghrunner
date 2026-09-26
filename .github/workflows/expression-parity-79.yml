@@ -5,6 +5,11 @@ on:
   push:
     branches:
       - feat/79-expression-engine-parity-with-actions
+    paths:
+      - .github/workflows/expression-parity-79.yml
+      - crates/expressions/**
+      - crates/execution/**
+      - crates/toolu-runner/tests/fixtures/local_actions/expression-79*/**
 
 permissions:
   contents: read
