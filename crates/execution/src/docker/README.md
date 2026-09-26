@@ -28,6 +28,7 @@ which calls into this module. Job-level cgroup wiring lives in
 | `service_spec.rs` | `ServiceSpec` | Evaluates ordered acquired service declarations and validates platform support. |
 | `service_create.rs` | Service create helpers | Constructs Docker requests and pulls with registry credentials. |
 | `service_health.rs` | Health readiness | Waits with a cancellable, bounded health-check budget. |
+| `tests/service_containers_resources.rs` | Integration resource cases | Included by the service-container integration target for real Docker options, sentinel ownership and registry-auth checks. |
 
 When you add a file here, add its row above so the index stays current. There
 is no `mod.rs`; the parent `docker.rs` is the module root and declares
