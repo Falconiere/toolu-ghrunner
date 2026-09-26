@@ -252,6 +252,57 @@ async fn remote_repository_action_runs_pre_main_post_and_reuses_image() -> TestR
   Ok(())
 }
 
+#[tokio::test]
+async fn missing_registry_images_fail_action_resolution_before_platform_or_daemon() -> TestResult {
+  for image in [
+    None,
+    Some(""),
+    Some("   "),
+    Some("docker://"),
+    Some("docker://  "),
+  ] {
+    let root = tempfile::tempdir()?;
+    let config = RunnerConfig {
+      data_dir: root.path().join("runner data"),
+      workspace_root: root.path().join("work root"),
+      workspace_gc_hours: 0,
+      ..RunnerConfig::default()
+    };
+    let mut job = captured_job()?;
+    job.job_container = None;
+    let mut step = registry_step();
+    step.reference.image = image.map(str::to_owned);
+    job.steps = vec![step];
+    let runner = Runner::new(config, Arc::new(Mutex::new(SecretMasker::new())));
+    let redactor = MaskerRedactor(Arc::clone(runner.masker()));
+    let mut events = runner.execute_job(job, CancellationToken::new());
+    let mut conclusion = None;
+    let mut logs = Vec::new();
+    while let Some(event) = events.recv().await {
+      match event {
+        RunnerEvent::Log { line, .. } => logs.push(redactor.redact(&line)),
+        RunnerEvent::JobCompleted {
+          conclusion: result, ..
+        } => conclusion = Some(result),
+        RunnerEvent::JobStarted { .. }
+        | RunnerEvent::StepStarted { .. }
+        | RunnerEvent::StepCompleted { .. }
+        | RunnerEvent::StepSkipped { .. }
+        | RunnerEvent::LogGroup { .. }
+        | RunnerEvent::Annotation { .. } => {},
+      }
+    }
+    assert_eq!(conclusion, Some(Conclusion::Failure), "{logs:#?}");
+    assert!(
+      logs
+        .iter()
+        .any(|line| line.contains("action manifest error: Docker action registry image is empty")),
+      "missing early action-resolution diagnostic for {image:?}: {logs:#?}"
+    );
+  }
+  Ok(())
+}
+
 #[cfg(not(target_os = "linux"))]
 #[tokio::test]
 async fn docker_registry_action_rejects_non_linux_without_running_host_code() -> TestResult {

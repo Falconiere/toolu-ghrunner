@@ -869,6 +869,7 @@ These substitutions exercise production dispatch; they are not a new acquisition
 | Scenario | Exact check | Evidence lane |
 | --- | --- | --- |
 | Docker manifest and raw registry references | `actions::manifest::tests::preserves_docker_stage_and_argument_contract`; `execution/tests/docker_action_test.rs` | Default suite |
+| Missing, empty, or whitespace-only registry image rejected before platform/daemon setup | `missing_registry_images_fail_action_resolution_before_platform_or_daemon` | Default suite; also verified without a Docker socket |
 | Dockerfile build, immutable cache, registry pull, bad images/builds, timeout and cleanup | `docker::action_container` real-daemon tests | Explicit Linux runtime lane |
 | Image-declared anonymous volume removed on cancellation, unrelated named volume preserved | `cleanup_removes_owned_anonymous_volume_but_preserves_unrelated_named_volume` | Explicit Linux runtime lane |
 | Exact argv, inputs/default env, mounts, output/env/PATH/state files, workflow commands, LIFO posts | `local_actions_preserve_argv_env_commands_state_and_lifo_posts` | Production Linux replay |

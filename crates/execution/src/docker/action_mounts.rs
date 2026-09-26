@@ -14,6 +14,7 @@ pub(super) struct ActionMounts {
 
 impl ActionMounts {
   /// Create the standard action mounts and their shared translator.
+  /// Performs blocking filesystem I/O; async callers must use `spawn_blocking`.
   pub(super) fn create(
     config: &RunnerConfig,
     workspace: &Path,
@@ -93,6 +94,7 @@ fn stable_mappings(
   mappings
 }
 
+// Called by `create` on the blocking pool; directory creation is synchronous.
 fn add_mount(
   volumes: &mut Vec<String>,
   host: &Path,
