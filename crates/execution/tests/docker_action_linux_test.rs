@@ -164,6 +164,7 @@ fn job_conclusion(events: &[RunnerEvent]) -> Option<Conclusion> {
     | RunnerEvent::StepCompleted { .. }
     | RunnerEvent::StepSkipped { .. }
     | RunnerEvent::Log { .. }
+    | RunnerEvent::StepSummary { .. }
     | RunnerEvent::LogGroup { .. }
     | RunnerEvent::Annotation { .. } => None,
   })
@@ -317,6 +318,7 @@ printf verified > docker-verify
       | RunnerEvent::StepCompleted { .. }
       | RunnerEvent::StepSkipped { .. }
       | RunnerEvent::Log { .. }
+      | RunnerEvent::StepSummary { .. }
       | RunnerEvent::LogGroup { .. }
       | RunnerEvent::Annotation { .. } => None,
     })
