@@ -21,6 +21,8 @@ mod jit_config;
 pub mod messages;
 /// RSA-OAEP unwrap of the session AES key.
 pub mod rsa_oaep;
+/// Pinned GitHub protocol compatibility version, separate from product releases.
+pub mod runner_version;
 /// Session lifecycle request/response shapes and the encryption key.
 pub mod session;
 mod types;

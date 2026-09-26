@@ -547,7 +547,6 @@ async fn poll_once(ctx: &SessionCtx, token: &str, last_message_id: i64) -> PollO
     server_url_v2: &ctx.broker_url,
     token,
     session_id: &ctx.session_id,
-    runner_version: "3.0.0",
     // Derive os/arch from the same helpers the acknowledge path uses so a
     // single runner advertises one consistent identity on both calls
     // (the raw `std::env::consts` values "linux"/"x86_64" differed from the
@@ -625,3 +624,7 @@ fn extract_system_token(job_msg: &AgentJobRequestMessage) -> Option<String> {
   }
   token
 }
+
+#[cfg(test)]
+#[path = "tests/runner_update_policy.rs"]
+mod runner_update_policy;

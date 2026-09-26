@@ -36,6 +36,7 @@ flate2 = "1"
 fastrand = "2"
 
 [dev-dependencies]
+tracing-subscriber = { version = "0.3", features = ["fmt"] }
 # `net` + `io-util` for the `cleanup_session` test's real local TcpListener
 # (AsyncWriteExt to write a raw 404 response). The crate's normal `tokio`
 # features (rt-multi-thread, macros, sync, time) have neither.

@@ -1247,3 +1247,13 @@ cleanup does not use the cancelled token. A missing resource is already clean,
 other cleanup failures remain visible alongside the primary error. Health waits
 are bounded to 300 seconds per service and cancellable; log collection has a
 30-second budget per service so a stalled log stream cannot prevent removal.
+
+## Runner compatibility identity
+
+`protocol::runner_version::COMPATIBILITY_VERSION` owns the pinned official-runner
+baseline used by the session builder and both broker transports. Poll callers
+cannot override it. Listener startup logs the separate Cargo product version
+and compatibility target. `disableUpdate=true` selects operator-managed updates;
+RunnerRefresh/AgentRefresh warn, advance the existing cursor and continue in
+both idle and busy paths. See [runner updates](runner-updates.md) for the
+maintenance contract and service-eligibility limitations.

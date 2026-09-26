@@ -183,9 +183,18 @@ fn log_unknown_message(message_id: i64) {
 }
 
 fn log_unsupported_control(message_id: i64, kind: &str) {
-  tracing::warn!(
-    message_id,
-    kind,
-    "broker control request has no local updater"
-  );
+  if matches!(kind, "RunnerRefresh" | "AgentRefresh") {
+    tracing::warn!(
+      message_id,
+      kind,
+      compatibility_version = protocol::runner_version::COMPATIBILITY_VERSION,
+      "ignoring runner refresh: updates are operator-managed; install a validated toolu release (docs/runner-updates.md)"
+    );
+  } else {
+    tracing::warn!(
+      message_id,
+      kind,
+      "broker control request has no local updater"
+    );
+  }
 }

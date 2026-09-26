@@ -102,7 +102,6 @@ async fn poll_message_returns_none_on_202() {
     server_url_v2: &server.uri(),
     token: "t",
     session_id: "test-session",
-    runner_version: "3.0.0",
     os: "linux",
     architecture: "x64",
     last_message_id: 0,

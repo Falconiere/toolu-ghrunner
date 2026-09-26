@@ -754,3 +754,63 @@ successful required steps, runner identities and masked log markers.
 Linux/macOS host execution is applicable; Windows is outside the epic. Container
 transport is unchanged (#73/#75 own that lane); this change evaluates env before
 container declarations so subsequent setup sees the same ordered values.
+
+## Runner version and updates (issue #78)
+
+The protocol compatibility target is **2.337.0**, pinned to official release
+`397b032cbf865e9c3ddfab89d533ec19325e1273`. The epic source-inspection snapshot
+`cab9d1c3901e45c7705889c4f88284fdd93f4ae5` retains the same version. Toolu's product version is separate
+(`0.9.2` in this validation). [Runner updates](runner-updates.md) defines the
+operator-managed policy and its eligibility limits.
+
+| Original AC / scenario | Production path and exact result | Runnable evidence |
+| --- | --- | --- |
+| One version source / 78-S1 | `protocol::build_session_request`, `wire::net::{create_session,poll_message,acknowledge_message}` emit session JSON `agent.version=2.337.0` and poll/ack `runnerVersion=2.337.0`; poll cursor 0/99 and `disableUpdate=true` remain present. The loopback recorder captures real HTTP requests and closes without fabricating successful GitHub responses; all disconnects remain errors. | `cargo test -p wire --test runner_version`; test `one_build_emits_one_compatibility_identity_on_all_broker_requests`. Existing `gh_compat_poll_cursor` and `net_test` regressions also pass. |
+| Advertised-version rationale / 78-S1, 78-S2 | Protocol constant documents the official baseline; listener startup reports both product and compatibility versions. Same-workflow real GitHub.com canaries compare toolu with the actual official 2.337.0 binary. | `docs/runner-version-evidence.json`; `python3 scripts/test/runner_version_evidence_check.py` checks actual run/job APIs and source checksums. Matching strings alone are not eligibility proof. |
+| Refresh decision / 78-S3 | Actual idle and busy handlers ignore RunnerRefresh/AgentRefresh, emit operator guidance, return continue/reset backoff, preserve uncancelled tokens and permit the next job route. Repeated/older IDs are rejected by the production cursor helper. Opaque/empty update bodies bypass decryption and never appear in captured warnings. | `cargo test -p listener --lib runner_update_policy`; `refresh_warns_and_continues_in_idle_and_busy_handlers_without_reading_body`. Input is an explicitly labelled variation of the existing capture-shaped broker envelope; no real refresh delivery is claimed. |
+| 30-day policy / 78-S4 | Release maintainer owns baseline/security review and publication; fleet operator deploys/restarts/remints and verifies a canary. Docs describe GitHub's 30-day limit, critical-update exception and queued-job recovery. | `docs/runner-updates.md`, official GitHub policy link, and evidence check's documentation assertions. No local time simulation is offered as service-policy evidence. |
+| Real-data coverage / 78-S1–S3 | Actual serialized requests, real toolu/official executables and real GitHub completion results. Refresh replay proves local policy only. | Wire crate sibling integration test, listener sibling tests, committed `.github/workflows/noop-live.yml`, and recorded canary metadata. |
+| Required gate / all | Unmodified format, clippy, suppression ban, guardrails and workspace tests. | `./tools/check.sh all`; final result recorded below. |
+
+Both live runners used Linux ARM64 in the same pinned local Rust/gate image and
+identical `.github/workflows/noop-live.yml` revision. The workflow has one real
+shell step, `echo hello`, with no external actions. This establishes observed
+GitHub.com queue/acquire/completion acceptance for that canary at that time; it
+is not a guarantee of future eligibility or general workflow parity. The official
+2.337.0 release binary reports commit `397b032cbf865e9c3ddfab89d533ec19325e1273`
+(the epic's source-inspection commit is separately recorded above). Its Linux
+ARM64 archive SHA-256 is
+`9b1dc70626422526e3c94767cf024896beb15da5342a3f4819bf2feac13e0393`.
+
+The macOS ARM64 wire and refresh tests passed after intermittent `_dyld_start`
+launch stalls; full macOS gate and live macOS comparison remain unverified here.
+The authoritative full local gate runs on Linux ARM64. Real GitHub delivery of
+refresh controls, a version-gating incident, elapsed 30-day enforcement and GHES
+remain unverified. No GHES endpoint/token was supplied; this change makes no new
+GHES eligibility claim. Those missing observations are not passing test evidence.
+
+On 2026-09-26, after rebasing onto `c466e41` (PR #136), the unchanged
+`./tools/check.sh all` passed on Linux ARM64: **1,012 passed, zero failed,
+35 existing ignored tests** (165 test/doctest suites).
+The ignored cases are not claimed as live evidence. The worker used Rust 1.94.1
+with `CARGO_PROFILE_DEV_DEBUG=0` / `CARGO_PROFILE_TEST_DEBUG=0` after the shared VM
+ran out of disk while linking debug symbols; every gate layer remained enabled.
+`CARGO_INCREMENTAL=0` bounds cache growth. Log: `/tmp/issue78-gate-last.log`. `python3 -m unittest discover -s scripts/test -p
+test_runner_version_evidence_check.py` also checks that empty, omitted, extra and
+stale source-checksum maps are rejected against the actual recorded fixture.
+
+Final observed GitHub.com runs: [toolu 36213645647](https://github.com/Falconiere/toolu-ghrunner/actions/runs/36213645647)
+and [official 36212900907](https://github.com/Falconiere/toolu-ghrunner/actions/runs/36212900907),
+both successful at workflow SHA `fcb7f14ad3f238ebc3c0ed4bac1c1ff3a9324fc5`.
+The toolu binary was built from this branch's recorded identity sources on that
+base; workflow revision and runner source are distinct. Binary hash, image ID,
+runner/job IDs and all seven identity source hashes are committed in
+`runner-version-evidence.json`. The final startup log reports product `0.9.2`
+and compatibility `2.337.0`; registration, session and acquisition succeeded,
+with no acknowledgement-failure warning and a GitHub `success` conclusion.
+Both worker-owned ephemeral registrations were cleaned up after the runs.
+
+The post-rebase gate checks integration with #69. The canaries above retain
+their actual earlier build base; all seven recorded identity source hashes
+remain unchanged after the rebase. They are not a claim that a new binary of
+the entire rebased tree was deployed.

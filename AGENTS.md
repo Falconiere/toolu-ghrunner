@@ -226,6 +226,10 @@ to that list requires proving the value is not a real credential.
   exp=now+4m30s), `AccessToken` (OAuth2 response shape).
 - `jit_config.rs` — `JitConfig` (parses the 3-blob base64
   envelope: `.runner` / `.credentials` / `.credentials_rsaparams`).
+- `runner_version.rs` — `COMPATIBILITY_VERSION`, the pinned official-runner
+  compatibility identity shared by session, poll and acknowledgement. Toolu
+  product version stays separate; operator-managed update policy is documented
+  in `docs/runner-updates.md`.
 - `session.rs` — `CreateSessionRequest` / `CreateSessionResponse`,
   `AgentInfo`, `EncryptionKey` (encrypted-or-raw AES key),
   `TaskAgentSession`, `build_session_request` (builds the
