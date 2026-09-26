@@ -28,7 +28,9 @@ docker run --rm \
   --mount type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock \
   --workdir "$linux_root/source" \
   --env CARGO_TARGET_DIR=/cargo-target \
-  --env CARGO_BUILD_JOBS=2 \
+  --env CARGO_BUILD_JOBS="${TOOLU_DOCKER_ACTIONS_BUILD_JOBS:-2}" \
+  --env CARGO_INCREMENTAL \
+  --env RUST_TEST_THREADS \
   --env DOCKER_HOST=unix:///var/run/docker.sock \
   --env TOOLU_CONTAINER_TEST_ROOT="$linux_root/tmp" \
   --env TOOLU_DOCKER_ACTIONS_MODE="$mode" \
