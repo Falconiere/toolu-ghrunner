@@ -128,6 +128,7 @@ fn probe_manifest(probe_dir: &Path) -> ActionDefinition {
         name: Some("probe runner.temp".to_owned()),
         run: Some(script),
         shell: Some("bash".to_owned()),
+        working_directory: None,
         env: HashMap::from([("MY_TEMP".to_owned(), RUNNER_TEMP_EXPR.to_owned())]),
         condition: None,
         uses: None,
