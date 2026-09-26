@@ -16,7 +16,7 @@ pub(super) struct ShellCommand {
 
 impl ShellCommand {
   /// Resolve explicit or default shell semantics without spawning a process.
-  pub(super) fn resolve(
+  pub(super) async fn resolve(
     shell: Option<&str>,
     env: &HashMap<String, String>,
     working_dir: &Path,
@@ -24,7 +24,7 @@ impl ShellCommand {
   ) -> Result<Self, RunnerError> {
     let (name, arguments, builtin_pwsh) = match shell.filter(|value| !value.is_empty()) {
       None => {
-        let name = if !container && find_executable("bash", env, working_dir).is_some() {
+        let name = if !container && find_executable("bash", env, working_dir).await.is_some() {
           "bash"
         } else {
           "sh"
@@ -40,12 +40,14 @@ impl ShellCommand {
     let program = if container {
       PathBuf::from(&name)
     } else {
-      find_executable(&name, env, working_dir).ok_or_else(|| {
-        RunnerError::ScriptHandler(format!(
-          "shell executable '{name}' was not found or is not executable (cwd: {})",
-          working_dir.display()
-        ))
-      })?
+      find_executable(&name, env, working_dir)
+        .await
+        .ok_or_else(|| {
+          RunnerError::ScriptHandler(format!(
+            "shell executable '{name}' was not found or is not executable (cwd: {})",
+            working_dir.display()
+          ))
+        })?
     };
     Ok(Self {
       program,
@@ -88,7 +90,7 @@ impl ShellCommand {
       None => builder.tempfile(),
     }
     .map_err(|error| RunnerError::ScriptHandler(format!("temp script: {error}")))?;
-    let contents = if self.name == "pwsh" {
+    let contents = if self.name.eq_ignore_ascii_case("pwsh") {
       format!(
         "$ErrorActionPreference = 'stop'\n{script}\nif ((Test-Path -LiteralPath variable:\\LASTEXITCODE)) {{ exit $LASTEXITCODE }}"
       )
@@ -164,19 +166,28 @@ fn format_argument(template: &str, path: &str) -> Result<(String, bool), RunnerE
   Ok((result, has_path))
 }
 
-fn find_executable(name: &str, env: &HashMap<String, String>, cwd: &Path) -> Option<PathBuf> {
+async fn find_executable(name: &str, env: &HashMap<String, String>, cwd: &Path) -> Option<PathBuf> {
   if name.contains('/') {
     let path = cwd.join(name);
-    return executable(&path).then_some(path);
+    return executable(&path).await.then_some(path);
   }
-  let path = env.get("PATH").cloned().or_else(crate::config::path)?;
-  std::env::split_paths(&path)
-    .map(|directory| cwd.join(directory).join(name))
-    .find(|path| executable(path))
+  let Some(path) = env.get("PATH").cloned().or_else(crate::config::path) else {
+    tracing::warn!(
+      shell = name,
+      "shell executable lookup skipped because PATH is unavailable"
+    );
+    return None;
+  };
+  for candidate in std::env::split_paths(&path).map(|directory| cwd.join(directory).join(name)) {
+    if executable(&candidate).await {
+      return Some(candidate);
+    }
+  }
+  None
 }
 
-fn executable(path: &Path) -> bool {
-  let Ok(metadata) = path.metadata() else {
+async fn executable(path: &Path) -> bool {
+  let Ok(metadata) = tokio::fs::metadata(path).await else {
     return false;
   };
   if !metadata.is_file() {
