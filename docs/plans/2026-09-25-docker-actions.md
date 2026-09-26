@@ -69,6 +69,7 @@ paired live validation → full gate and authorized PR delivery.
     "input": "Issue 75 criteria and real test results",
     "check": "git diff --check && test -s docs/test-coverage.md && test -s .github/workflows/docker-actions-live.yml",
     "paths": [
+      "AGENTS.md",
       "README.md",
       "docs",
       ".github",

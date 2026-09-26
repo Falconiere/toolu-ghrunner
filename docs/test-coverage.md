@@ -872,7 +872,8 @@ These substitutions exercise production dispatch; they are not a new acquisition
 | Exact argv, inputs/default env, mounts, output/env/PATH/state files, workflow commands, LIFO posts | `local_actions_preserve_argv_env_commands_state_and_lifo_posts` | Production Linux replay |
 | Absent versus empty manifest args and registry `with.args` | `registry_and_manifest_arg_variants_execute_exact_argv` | Production Linux replay |
 | Job network and real peer reachability | `action_joins_job_network_and_reaches_real_peer` | Production Linux replay; service orchestration is #74 |
-| Invalid entrypoint, observed-start cancellation, owned-resource cleanup | `entrypoint_failure_and_cancellation_fail_visibly_without_leaking_containers` | Production Linux replay |
+| Invalid entrypoint, failed-main post, observed-start cancellation, owned-resource cleanup and unrelated-container survival | `entrypoint_failure_and_cancellation_fail_visibly_without_leaking_containers` | Production Linux replay |
+| Remote downloader, image reuse, pre/main/post state and cleanup after failed pre | `remote_repository_action_runs_pre_main_post_and_reuses_image` | Explicit post-push remote replay |
 | Non-Linux rejection | `execution/tests/docker_action_test.rs` platform-specific test | Default macOS suite |
 
 Run `bash scripts/test/docker_actions_linux.sh all` with a local Linux Docker
@@ -882,10 +883,11 @@ image defaults to Rust 1.94.1 and can be supplied through
 explicitly selected because ordinary workspace tests ignore the Linux probes.
 The unchanged full repository gate remains `./tools/check.sh all`.
 
-The four real-daemon runtime tests and four production replay tests passed on
+The real-daemon runtime tests and four production replay tests passed on
 Linux ARM64 against the local daemon on 2026-09-25. The Ubuntu `ci` job explicitly
 runs both ignored lanes after the default workspace tests; an ordinary ignored
-result is not counted. Final full-gate evidence is recorded after completion.
+result is not counted. The unchanged full gate passed in the Linux carrier at
+commit `7b03bee`; review fixes receive a fresh gate before delivery.
 The host gate passed formatting, Clippy and guardrails, then was stopped after
 `sample` confirmed `context_secret_batch_test` stalled in `_dyld_start` before
 the harness. This is an incomplete host run, not a test pass.

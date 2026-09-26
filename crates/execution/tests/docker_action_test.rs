@@ -190,7 +190,7 @@ async fn remote_repository_action_runs_pre_main_post_and_reuses_image() -> TestR
     .await?
     .id
     .ok_or("cached image has no id")?;
-  let second = run_remote_job(config, job).await?;
+  let second = run_remote_job(config.clone(), job.clone()).await?;
   assert!(
     second.iter().any(|event| matches!(
       event,
@@ -222,6 +222,35 @@ async fn remote_repository_action_runs_pre_main_post_and_reuses_image() -> TestR
   ] {
     assert_eq!(stages.matches(expected).count(), 2, "{expected}:\n{stages}");
   }
+  let mut pre_failure_job = job;
+  let mut pre_failure = remote_step("remote_pre_failure", "REMOTE_PRE_FAILURE", &sha);
+  pre_failure.inputs = string_map(&[("marker", "REMOTE_PRE_FAILURE"), ("fail_pre", "true")]);
+  pre_failure_job.steps = vec![pre_failure];
+  let pre_failure_events = run_remote_job(config, pre_failure_job).await?;
+  assert!(
+    pre_failure_events.iter().any(|event| matches!(
+      event,
+      RunnerEvent::JobCompleted {
+        conclusion: Conclusion::Failure,
+        ..
+      }
+    )),
+    "{pre_failure_events:#?}"
+  );
+  let stages = std::fs::read_to_string(workspace.join("docker-stages.txt"))?;
+  assert_eq!(
+    stages.matches("REMOTE_PRE_FAILURE:pre").count(),
+    1,
+    "{stages}"
+  );
+  assert_eq!(
+    stages
+      .matches("REMOTE_PRE_FAILURE:post:STATE_saved=<unset>:STATE_pre_saved=REMOTE_PRE_FAILURE-pre")
+      .count(),
+    1,
+    "{stages}"
+  );
+  assert!(!stages.contains("REMOTE_PRE_FAILURE:main"), "{stages}");
   Ok(())
 }
 

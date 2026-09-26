@@ -36,7 +36,9 @@ jobs:
       - name: Docker action runtime and production replay
         env:
           DOCKER_HOST: unix:///var/run/docker.sock
+          TOOLU_CONTAINER_TEST_ROOT: /tmp/toolu-docker-action-tests
         run: |
+          mkdir -p "$TOOLU_CONTAINER_TEST_ROOT"
           cargo test -p execution --lib docker::action_container -- --ignored --test-threads=1
           cargo test -p execution --test docker_action_linux_test -- --ignored --test-threads=1
       - name: Protocol crate is sync + I/O-free (AC #22)

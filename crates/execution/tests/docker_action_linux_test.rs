@@ -8,8 +8,8 @@ use std::time::Duration;
 
 use bollard::models::{ContainerCreateBody, HostConfig};
 use bollard::query_parameters::{
-  CreateContainerOptions, CreateImageOptions, InspectNetworkOptions, ListContainersOptions,
-  RemoveContainerOptions, StartContainerOptions,
+  CreateContainerOptions, CreateImageOptions, InspectContainerOptions, InspectNetworkOptions,
+  ListContainersOptions, RemoveContainerOptions, StartContainerOptions,
 };
 use execution::Runner;
 use futures_util::StreamExt;
@@ -237,6 +237,9 @@ test '${{ steps.docker_a.outputs.probe_output }}' = A-output
 test '${{ steps.docker_b.outputs.probe_output }}' = B-output
 test '${{ steps.docker_c.outputs.probe_output }}' = C-output
 test "$(docker-probe-tool)" = docker-probe-tool-ok
+test "$(cat docker-summary-A.txt)" = summary-A
+test "$(cat docker-summary-B.txt)" = summary-B
+test "$(cat docker-summary-C.txt)" = summary-C
 printf verified > docker-verify
 "#,
       "",
@@ -252,6 +255,10 @@ printf verified > docker-verify
   assert_eq!(
     std::fs::read_to_string(workspace.join("docker-verify"))?,
     "verified"
+  );
+  assert_eq!(
+    std::fs::read_to_string(workspace.join("docker-summary-B.txt"))?,
+    "summary-B\n"
   );
   let stages = std::fs::read_to_string(workspace.join("docker-stages.txt"))?;
   for expected in [
@@ -316,6 +323,11 @@ async fn registry_and_manifest_arg_variants_execute_exact_argv() -> TestResult {
   let workspace = config.workspace_root.join(&job.job_id);
   seed_probe(&workspace, "absent", "action-absent-args.yml")?;
   seed_probe(&workspace, "empty", "action-empty-args.yml")?;
+  seed_probe(
+    &workspace,
+    "composite-registry",
+    "action-composite-registry.yml",
+  )?;
   job.steps = vec![
     local_step(
       "absent_args",
@@ -332,6 +344,20 @@ async fn registry_and_manifest_arg_variants_execute_exact_argv() -> TestResult {
       "/bin/sh",
       "-c 'printf registry-ok > \"$GITHUB_WORKSPACE/registry-marker\"'",
     ),
+    local_step(
+      "composite_registry",
+      "./.github/actions/composite-registry",
+      &[],
+    ),
+    ActionStep::script(
+      "verify_composite_registry",
+      r#"
+test '${{ steps.composite_registry.outputs.marker }}' = composite-output
+test "$(cat composite-registry-marker)" = composite-registry-ok
+printf composite-verified > composite-registry-verified
+"#,
+      "",
+    ),
   ];
 
   let events = collect_job(config, job, CancellationToken::new()).await?;
@@ -343,6 +369,14 @@ async fn registry_and_manifest_arg_variants_execute_exact_argv() -> TestResult {
   assert_eq!(
     std::fs::read_to_string(workspace.join("registry-marker"))?,
     "registry-ok"
+  );
+  assert_eq!(
+    std::fs::read_to_string(workspace.join("composite-registry-marker"))?,
+    "composite-registry-ok"
+  );
+  assert_eq!(
+    std::fs::read_to_string(workspace.join("composite-registry-verified"))?,
+    "composite-verified"
   );
   let stages = std::fs::read_to_string(workspace.join("docker-stages.txt"))?;
   assert!(
@@ -414,12 +448,15 @@ while test ! -f docker-peer-removed; do sleep 0.1; done
       },
     )
     .await?;
-  docker
-    .start_container(&created.id, None::<StartContainerOptions>)
-    .await?;
-  std::fs::write(workspace.join("docker-peer-ready"), "ready")?;
-  wait_for_file(&workspace.join("docker-peer-remove")).await?;
-  docker
+  let peer_scenario: TestResult = async {
+    docker
+      .start_container(&created.id, None::<StartContainerOptions>)
+      .await?;
+    std::fs::write(workspace.join("docker-peer-ready"), "ready")?;
+    wait_for_file(&workspace.join("docker-peer-remove")).await
+  }
+  .await;
+  let peer_cleanup = docker
     .remove_container(
       &created.id,
       Some(RemoveContainerOptions {
@@ -427,8 +464,13 @@ while test ! -f docker-peer-removed; do sleep 0.1; done
         ..Default::default()
       }),
     )
-    .await?;
-  std::fs::write(workspace.join("docker-peer-removed"), "removed")?;
+    .await;
+  let ready_signal = std::fs::write(workspace.join("docker-peer-ready"), "ready");
+  let removed_signal = std::fs::write(workspace.join("docker-peer-removed"), "removed");
+  peer_scenario?;
+  peer_cleanup?;
+  ready_signal?;
+  removed_signal?;
   let events = tokio::time::timeout(Duration::from_secs(180), async {
     let mut events = Vec::new();
     while let Some(mut event) = receiver.recv().await {
@@ -460,57 +502,128 @@ while test ! -f docker-peer-removed; do sleep 0.1; done
 async fn entrypoint_failure_and_cancellation_fail_visibly_without_leaking_containers() -> TestResult
 {
   let docker = bollard::Docker::connect_with_local_defaults()?;
+  pull_alpine(&docker).await?;
+  let sentinel = docker
+    .create_container(
+      None::<CreateContainerOptions>,
+      ContainerCreateBody {
+        image: Some(ALPINE.to_owned()),
+        cmd: Some(vec!["sleep".to_owned(), "300".to_owned()]),
+        ..Default::default()
+      },
+    )
+    .await?;
+  let scenario: TestResult = async {
+    docker
+      .start_container(&sentinel.id, None::<StartContainerOptions>)
+      .await?;
 
-  let failed_root = linux_root()?;
-  let failed_config = config_for(failed_root.path());
-  let mut failed_job = captured_job()?;
-  failed_job.steps = vec![registry_step(
-    "missing_entrypoint",
-    "/missing-entrypoint",
-    "",
-  )];
-  let failed_events = collect_job(failed_config, failed_job, CancellationToken::new()).await?;
-  assert_eq!(
-    job_conclusion(&failed_events),
-    Some(Conclusion::Failure),
-    "{failed_events:#?}"
-  );
+    let failed_root = linux_root()?;
+    let failed_config = config_for(failed_root.path());
+    let mut failed_job = captured_job()?;
+    let invalid_id = format!("invalid-entrypoint-{}", uuid::Uuid::new_v4().simple());
+    failed_job.steps = vec![registry_step(&invalid_id, "/missing-entrypoint", "")];
+    let failed_events = collect_job(failed_config, failed_job, CancellationToken::new()).await?;
+    assert_eq!(
+      job_conclusion(&failed_events),
+      Some(Conclusion::Failure),
+      "{failed_events:#?}"
+    );
+    assert!(
+      action_container_ids(&docker, &invalid_id).await?.is_empty(),
+      "invalid entrypoint left an owned container"
+    );
 
-  let cancel_root = linux_root()?;
-  let cancel_config = config_for(cancel_root.path());
-  let mut cancel_job = captured_job()?;
-  let workspace = cancel_config.workspace_root.join(&cancel_job.job_id);
-  seed_probe(&workspace, "cancel", "action.yml")?;
-  let cancel_step_id = format!("cancel-action-{}", uuid::Uuid::new_v4().simple());
-  cancel_job.steps = vec![local_step(
-    &cancel_step_id,
-    "./.github/actions/cancel",
-    &[("marker", "CANCEL"), ("sleep_main", "true")],
-  )];
-  let cancel = CancellationToken::new();
-  let runner = Runner::new(cancel_config, Arc::new(Mutex::new(SecretMasker::new())));
-  let redactor = MaskerRedactor(Arc::clone(runner.masker()));
-  let mut receiver = runner.execute_job(cancel_job, cancel.clone());
-  wait_for_file(&workspace.join("docker-cancel-started")).await?;
-  cancel.cancel();
-  let cancelled_events = tokio::time::timeout(Duration::from_secs(60), async {
-    let mut events = Vec::new();
-    while let Some(mut event) = receiver.recv().await {
-      mask_event(&redactor, &mut event);
-      events.push(event);
-    }
-    events
-  })
-  .await?;
-  assert_eq!(
-    job_conclusion(&cancelled_events),
-    Some(Conclusion::Cancelled),
-    "{cancelled_events:#?}"
-  );
-  let leaked = action_container_ids(&docker, &cancel_step_id).await?;
-  assert!(
-    leaked.is_empty(),
-    "Docker action left containers: {leaked:?}"
-  );
+    let main_fail_root = linux_root()?;
+    let main_fail_config = config_for(main_fail_root.path());
+    let mut main_fail_job = captured_job()?;
+    let main_fail_workspace = main_fail_config.workspace_root.join(&main_fail_job.job_id);
+    seed_probe(
+      &main_fail_workspace,
+      "main-failure",
+      "action-failure-post.yml",
+    )?;
+    main_fail_job.steps = vec![local_step(
+      "main_failure",
+      "./.github/actions/main-failure",
+      &[("marker", "MAINFAIL"), ("fail_main", "true")],
+    )];
+    let main_fail_events =
+      collect_job(main_fail_config, main_fail_job, CancellationToken::new()).await?;
+    assert_eq!(
+      job_conclusion(&main_fail_events),
+      Some(Conclusion::Failure),
+      "{main_fail_events:#?}"
+    );
+    let stages = std::fs::read_to_string(main_fail_workspace.join("docker-stages.txt"))?;
+    let post = stages
+      .lines()
+      .find(|line| line.starts_with("MAINFAIL:post:"))
+      .ok_or("failure() post marker absent")?;
+    assert_eq!(
+      post,
+      "MAINFAIL:post:STATE_saved=MAINFAIL-state:STATE_pre_saved=<unset>"
+    );
+
+    let cancel_root = linux_root()?;
+    let cancel_config = config_for(cancel_root.path());
+    let mut cancel_job = captured_job()?;
+    let workspace = cancel_config.workspace_root.join(&cancel_job.job_id);
+    seed_probe(&workspace, "cancel", "action.yml")?;
+    let cancel_step_id = format!("cancel-action-{}", uuid::Uuid::new_v4().simple());
+    cancel_job.steps = vec![local_step(
+      &cancel_step_id,
+      "./.github/actions/cancel",
+      &[("marker", "CANCEL"), ("sleep_main", "true")],
+    )];
+    let cancel = CancellationToken::new();
+    let runner = Runner::new(cancel_config, Arc::new(Mutex::new(SecretMasker::new())));
+    let redactor = MaskerRedactor(Arc::clone(runner.masker()));
+    let mut receiver = runner.execute_job(cancel_job, cancel.clone());
+    wait_for_file(&workspace.join("docker-cancel-started")).await?;
+    cancel.cancel();
+    let cancelled_events = tokio::time::timeout(Duration::from_secs(60), async {
+      let mut events = Vec::new();
+      while let Some(mut event) = receiver.recv().await {
+        mask_event(&redactor, &mut event);
+        events.push(event);
+      }
+      events
+    })
+    .await?;
+    assert_eq!(
+      job_conclusion(&cancelled_events),
+      Some(Conclusion::Cancelled),
+      "{cancelled_events:#?}"
+    );
+    let leaked = action_container_ids(&docker, &cancel_step_id).await?;
+    assert!(
+      leaked.is_empty(),
+      "Docker action left containers: {leaked:?}"
+    );
+    let sentinel_state = docker
+      .inspect_container(&sentinel.id, None::<InspectContainerOptions>)
+      .await?
+      .state
+      .and_then(|state| state.running);
+    assert_eq!(
+      sentinel_state,
+      Some(true),
+      "action cleanup removed sentinel"
+    );
+    Ok(())
+  }
+  .await;
+  let sentinel_cleanup = docker
+    .remove_container(
+      &sentinel.id,
+      Some(RemoveContainerOptions {
+        force: true,
+        ..Default::default()
+      }),
+    )
+    .await;
+  scenario?;
+  sentinel_cleanup?;
   Ok(())
 }

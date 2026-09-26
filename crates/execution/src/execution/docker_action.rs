@@ -35,30 +35,15 @@ pub(super) async fn run_docker_action(
     inputs: Some(&inputs),
     ..s
   };
-  if s.manifest.runs.pre_entrypoint.is_some() && cache_key.is_none() {
-    emit_log(
-      s.events,
-      s.log_step_id,
-      "##[warning]Pre execution is not supported for local actions.",
-    )
-    .await;
-  }
-  if cache_key.is_some()
-    && s.manifest.runs.pre_entrypoint.is_some()
-    && ctx
-      .evaluate_expression(s.manifest.runs.pre_if.as_deref().unwrap_or("always()"))?
-      .is_truthy()
-  {
-    let result = run_pre(&s, ctx, &runtime, &image).await?;
-    if result != Conclusion::Success {
-      return Ok(ActionOutcome {
-        conclusion: result,
-        post: None,
-        outputs: HashMap::new(),
-      });
-    }
-  }
   register_post(&s, ctx, &image, &inputs);
+  let pre = run_applicable_pre(&s, ctx, &runtime, &image, cache_key.is_some()).await?;
+  if pre != Conclusion::Success {
+    return Ok(ActionOutcome {
+      conclusion: pre,
+      post: None,
+      outputs: HashMap::new(),
+    });
+  }
   emit_log(s.events, s.log_step_id, "##[endgroup]").await;
   let (conclusion, outputs) = run_docker_stage(&s, ctx, &runtime, &image).await?;
   Ok(ActionOutcome {
@@ -66,6 +51,34 @@ pub(super) async fn run_docker_action(
     post: None,
     outputs,
   })
+}
+
+async fn run_applicable_pre(
+  s: &DockerStage<'_>,
+  ctx: &mut ExecutionContext,
+  runtime: &ActionContainer,
+  image: &str,
+  remote: bool,
+) -> Result<Conclusion, RunnerError> {
+  if s.manifest.runs.pre_entrypoint.is_none() {
+    return Ok(Conclusion::Success);
+  }
+  if !remote {
+    emit_log(
+      s.events,
+      s.log_step_id,
+      "##[warning]Pre execution is not supported for local actions.",
+    )
+    .await;
+    return Ok(Conclusion::Success);
+  }
+  if !ctx
+    .evaluate_expression(s.manifest.runs.pre_if.as_deref().unwrap_or("always()"))?
+    .is_truthy()
+  {
+    return Ok(Conclusion::Success);
+  }
+  run_pre(s, ctx, runtime, image).await
 }
 
 async fn prepare(
@@ -97,7 +110,7 @@ fn register_post(
   image: &str,
   inputs: &HashMap<String, String>,
 ) {
-  // The caller drains this queue even when main returns a hard error.
+  // The caller drains this queue even when pre or main returns a hard error.
   if s.manifest.runs.post_entrypoint.is_some() {
     ctx.register_nested_post(PostStep {
       step: s.step.clone(),
@@ -121,14 +134,15 @@ async fn run_pre(
   image: &str,
 ) -> Result<Conclusion, RunnerError> {
   let id = uuid::Uuid::new_v4().to_string();
-  let _ = s
-    .events
-    .send(RunnerEvent::StepStarted {
+  emit_pre_event(
+    s.events,
+    RunnerEvent::StepStarted {
       step_id: id.clone(),
       step_name: format!("Pre {}", s.manifest.name),
       step_number: 0,
-    })
-    .await;
+    },
+  )
+  .await;
   let pre = DockerStage {
     stage: "pre",
     log_step_id: &id,
@@ -140,13 +154,20 @@ async fn run_pre(
     Err(RunnerError::Cancelled) => Conclusion::Cancelled,
     Err(_) => Conclusion::Failure,
   };
-  let _ = s
-    .events
-    .send(RunnerEvent::StepCompleted {
+  emit_pre_event(
+    s.events,
+    RunnerEvent::StepCompleted {
       step_id: id,
       conclusion,
       outputs: HashMap::new(),
-    })
-    .await;
+    },
+  )
+  .await;
   result.map(|(conclusion, _)| conclusion)
+}
+
+async fn emit_pre_event(events: &tokio::sync::mpsc::Sender<RunnerEvent>, event: RunnerEvent) {
+  if events.send(event).await.is_err() {
+    tracing::warn!("Docker pre-stage event receiver dropped; continuing");
+  }
 }

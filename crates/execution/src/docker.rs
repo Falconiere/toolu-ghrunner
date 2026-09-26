@@ -1,5 +1,6 @@
 //! Docker client wrapper (bollard).
 
+mod action_archive;
 /// Owned Docker action container lifecycle.
 pub(crate) mod action_container;
 mod action_image;
