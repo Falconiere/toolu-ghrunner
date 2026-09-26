@@ -1,0 +1,77 @@
+name: docker-actions-live
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_toolu:
+        description: Run the toolu Linux lane when its dedicated runner is registered
+        type: boolean
+        default: false
+
+jobs:
+  reference:
+    name: official-runner-reference
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Local Docker action A
+        id: docker_a
+        uses: ./.github/actions/docker-action-probe
+        with:
+          marker: A
+        env:
+          OVERRIDE_ME: step-override
+      - name: Local Docker action B
+        id: docker_b
+        uses: ./.github/actions/docker-action-probe
+        with:
+          marker: B
+        env:
+          OVERRIDE_ME: step-override
+      - name: Registry Docker action
+        uses: docker://alpine@sha256:ce64758a109eb420d874a118f87920e625e12d3634e03b4a5573fd9f6e5d3507
+        with:
+          args: sh -c 'printf DOCKER75\|registry\|main'
+      - name: Verify propagated commands
+        shell: bash
+        run: |
+          test "$FROM_DOCKER" = B-env
+          test '${{ steps.docker_a.outputs.probe_output }}' = A-output
+          test '${{ steps.docker_b.outputs.probe_output }}' = B-output
+          test "$(docker-probe-tool)" = docker-probe-tool-ok
+          test -f docker-stages.txt
+          printf 'DOCKER75|reference|verify\n'
+
+  toolu:
+    if: inputs.run_toolu
+    name: toolu-runner-under-test
+    runs-on: [self-hosted, toolu-75-linux]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Local Docker action A
+        id: docker_a
+        uses: ./.github/actions/docker-action-probe
+        with:
+          marker: A
+        env:
+          OVERRIDE_ME: step-override
+      - name: Local Docker action B
+        id: docker_b
+        uses: ./.github/actions/docker-action-probe
+        with:
+          marker: B
+        env:
+          OVERRIDE_ME: step-override
+      - name: Registry Docker action
+        uses: docker://alpine@sha256:ce64758a109eb420d874a118f87920e625e12d3634e03b4a5573fd9f6e5d3507
+        with:
+          args: sh -c 'printf DOCKER75\|registry\|main'
+      - name: Verify propagated commands
+        shell: bash
+        run: |
+          test "$FROM_DOCKER" = B-env
+          test '${{ steps.docker_a.outputs.probe_output }}' = A-output
+          test '${{ steps.docker_b.outputs.probe_output }}' = B-output
+          test "$(docker-probe-tool)" = docker-probe-tool-ok
+          test -f docker-stages.txt
+          printf 'DOCKER75|toolu|verify\n'

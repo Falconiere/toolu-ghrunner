@@ -1,0 +1,11 @@
+name: Docker action absent args probe
+description: Proves absent manifest argv falls back to with.args parsing
+inputs:
+  marker:
+    description: Per-invocation marker
+    required: true
+runs:
+  using: docker
+  image: Dockerfile
+  entrypoint: /probe/main.sh
+

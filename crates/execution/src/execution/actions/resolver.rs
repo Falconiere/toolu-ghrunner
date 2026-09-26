@@ -199,6 +199,9 @@ pub fn resolve_action_refs(
   let mut resolved = HashMap::new();
 
   for uses in uses_refs {
+    if uses.starts_with("docker://") {
+      continue;
+    }
     let action_ref = parse_action_ref(uses)?;
 
     if action_ref.kind == ActionRefKind::Local {

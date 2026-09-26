@@ -32,6 +32,8 @@ not part of it. Workflow YAML parsing/matrix/orchestration lives in the
 | `context.rs` | `ExecutionContext` | Mutable per-job execution state: env, per-step outputs/state/conclusions, runtime-owned contexts plus typed incoming server roots (`matrix`/`needs`/`inputs`/`strategy` and future keys), the shared `SecretMasker`, and expression evaluation. |
 | `context/` | Scoped state helpers | Keeps expression-visible step scopes separate from private action state. |
 | `context_build.rs` | `build_strategy` | Pure helpers for `ExecutionContext`: `runner.debug` detection and the `strategy.*` object, split out to keep `context.rs`'s `impl` blocks small. |
+| `docker_action.rs` | `run_docker_action` | Linux Docker action image preparation, conditional pre stage and deferred post registration. |
+| `docker_stage.rs` | `run_docker_stage` | Container argv/env evaluation and normal workflow/file-command dispatch. |
 | `depth_tracker.rs` | `DepthTracker` | Tracks composite-action nesting depth and errors past `MAX_COMPOSITE_DEPTH` (10) to prevent infinite recursion. |
 | `file_commands.rs` | `FileCommandManager` | Creates/reads/resets a step's `$GITHUB_ENV`/`OUTPUT`/`PATH`/`STATE`/`STEP_SUMMARY` temp files and parses their contents. |
 | `handlers.rs` | (mod decl) | Declares the `handlers` sub-module (script/node/node_exec/docker/composite/resolve) and its dispatch order. |
