@@ -28,6 +28,7 @@ mod context_scopes;
 /// Mutable execution state for a job run: context objects, environment,
 /// step outputs/conclusions, and job-level status.
 pub struct ExecutionContext {
+  /// Job-wide problem matcher definitions shared by process output dispatchers.
   pub(crate) matchers: super::problem_matcher::MatcherRegistry,
   env: HashMap<String, String>,
   step_env_overlays: Vec<HashMap<String, String>>,
