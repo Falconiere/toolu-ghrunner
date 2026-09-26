@@ -755,10 +755,11 @@ for verified lanes and remaining reference/backend evidence.
 
 ### Problem matchers
 
-`::add-matcher::<file.json>` registers GitHub Actions problem matchers for the
-current job. Registrations persist into later steps and nested actions.
-`::remove-matcher owner=<owner>::` removes an owner case-insensitively; the file
-form `::remove-matcher::<file.json>` removes all owners listed in that document.
+`::add-matcher::tsc.json` registers GitHub Actions problem matchers for the
+current job. Registrations persist into later steps and nested actions, as verified
+by the [captured-message replay tests](crates/execution/src/execution/tests/problem_matcher_replay.rs).
+`::remove-matcher owner=tsc::` removes an owner case-insensitively; the file
+form `::remove-matcher::tsc.json` removes all owners listed in that document.
 Adding an existing owner replaces it atomically. Shell, Node and composite
 stdout/stderr are matched, preserving their original log text. Annotations use
 the existing masked per-step reporting path; an error-severity match alone does
