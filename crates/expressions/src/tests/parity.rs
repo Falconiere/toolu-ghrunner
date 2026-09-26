@@ -27,6 +27,27 @@ fn signed_literals_and_lazy_case_follow_pinned_runner() -> Result<(), shared::Ru
 }
 
 #[test]
+fn captured_malformed_literals_report_reason_and_byte_offset() {
+  // These malformed expressions also appear in the pinned SDK corpus. Unlike
+  // the cross-language corpus check, this pins our Rust diagnostic contract.
+  for (expression, reason) in [
+    ("0Xff", "invalid numeric syntax"),
+    ("0x100000000", "number too large to fit in target type"),
+    ("1e", "invalid float literal"),
+  ] {
+    for prefix in ["", "  "] {
+      let error = evaluate(&format!("{prefix}{expression}"), &context())
+        .expect_err("captured malformed literal must fail");
+      let expected = shared::RunnerError::Expression(format!(
+        "invalid number at byte {}: {reason}",
+        prefix.len()
+      ));
+      assert_eq!(error.to_string(), expected.to_string());
+    }
+  }
+}
+
+#[test]
 fn distinct_json_objects_are_not_equal() -> Result<(), shared::RunnerError> {
   assert!(matches!(
     evaluate("fromJSON('{}') == fromJSON('{}')", &context())?,
