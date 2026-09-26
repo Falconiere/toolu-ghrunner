@@ -71,6 +71,63 @@ async fn default_pipeline_succeeds_explicit_bash_fails() -> TestResult {
 
 #[cfg(unix)]
 #[tokio::test]
+async fn missing_path_does_not_search_the_working_directory() -> TestResult {
+  const CHILD: &str = "TOOLU_SHELL_TEMPLATES_NO_PATH_CHILD";
+  if std::env::var_os(CHILD).is_none() {
+    let output = std::process::Command::new(std::env::current_exe()?)
+      .args([
+        "--exact",
+        "missing_path_does_not_search_the_working_directory",
+      ])
+      .env(CHILD, "1")
+      .env_remove("PATH")
+      .output()?;
+    assert!(
+      output.status.success(),
+      "child stdout:\n{}\nchild stderr:\n{}",
+      String::from_utf8_lossy(&output.stdout),
+      String::from_utf8_lossy(&output.stderr)
+    );
+    return Ok(());
+  }
+
+  assert!(std::env::var_os("PATH").is_none());
+  let cwd = tempfile::tempdir()?;
+  std::os::unix::fs::symlink("/bin/bash", cwd.path().join("bash"))?;
+  std::os::unix::fs::symlink("/bin/sh", cwd.path().join("sh"))?;
+  let env = HashMap::new();
+  for (shell, expected) in [(Some("bash"), "bash"), (None, "sh")] {
+    let cancel = CancellationToken::new();
+    let (events, _events_rx) = mpsc::channel(8);
+    let (stdout, mut output) = mpsc::channel(8);
+    let result = ScriptHandler::new()
+      .execute(
+        &ScriptParams {
+          script: "printf 'SHOULD_NOT_RUN\\n'",
+          shell,
+          env: &env,
+          working_dir: cwd.path(),
+          step_id: "missing-path",
+          cgroup_path: None,
+          timeout: None,
+          cancel: &cancel,
+          container: None,
+        },
+        &events,
+        stdout,
+      )
+      .await;
+    let error = result
+      .err()
+      .ok_or("missing PATH unexpectedly ran a shell")?;
+    assert!(error.to_string().contains(expected), "{error}");
+    assert!(output.recv().await.is_none());
+  }
+  Ok(())
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn default_search_falls_back_to_real_sh_and_skips_nonexecutable_bash() -> TestResult {
   use std::os::unix::fs::{PermissionsExt, symlink};
   let bin = tempfile::tempdir()?;
