@@ -505,6 +505,14 @@ to that list requires proving the value is not a real credential.
   endpoint, defaulting to `unix:///var/run/docker.sock`, so Colima / OrbStack /
   Podman / Rancher Desktop are reachable), `services` (service container
   lifecycle), `path_translator` (host ↔ container path mapping).
+  Container actions use `action_container` (owned stage lifecycle/output),
+  `action_image` (registry pulls and Dockerfile image reuse), `action_archive`
+  (Docker ignore rules and symlink-preserving build contexts), and
+  `action_mounts` (standard action mounts and path translation).
+  `execution/docker_action` and `docker_stage` connect these to production
+  dispatch, inputs, workflow/file commands, and pre/main/post state. Docker
+  actions are Linux-only; local actions skip pre, and remote pre failures
+  retain eligible posts for cleanup.
 - `node/` — Node.js runtime detection + caching. `runtime` (version
   detection, download, cache at `data_dir/node/{version}`).
 - `plugin/` — `RunnerPlugin` trait + `PluginRegistry`. New

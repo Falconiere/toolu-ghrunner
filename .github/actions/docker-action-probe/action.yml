@@ -10,6 +10,9 @@ inputs:
   fail_main:
     description: Exit nonzero after registering post state
     default: 'false'
+  fail_pre:
+    description: Exit nonzero after registering pre state
+    default: 'false'
   sleep_main:
     description: Block until the acceptance test cancels the job
     default: 'false'

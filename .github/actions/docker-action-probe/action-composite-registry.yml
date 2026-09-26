@@ -1,0 +1,15 @@
+name: Composite registry Docker action probe
+description: Proves a local composite can invoke a registry Docker action
+outputs:
+  marker:
+    description: Value emitted by the nested Docker action
+    value: ${{ steps.nested_registry.outputs.marker }}
+runs:
+  using: composite
+  steps:
+    - id: nested_registry
+      uses: docker://alpine@sha256:ce64758a109eb420d874a118f87920e625e12d3634e03b4a5573fd9f6e5d3507
+      with:
+        entrypoint: /bin/sh
+        args: >-
+          -c 'echo marker=composite-output >> "$GITHUB_OUTPUT"; printf composite-registry-ok > "$GITHUB_WORKSPACE/composite-registry-marker"'

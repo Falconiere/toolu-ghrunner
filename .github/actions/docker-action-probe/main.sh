@@ -6,7 +6,6 @@ test "$GITHUB_WORKSPACE" = /github/workspace
 test "$HOME" = /github/home
 test "$RUNNER_TEMP" = /github/runner_temp
 test -f "$GITHUB_EVENT_PATH"
-test -d "$GITHUB_ACTION_PATH"
 test -S /var/run/docker.sock
 printf '%s-home\n' "$marker" > "$HOME/docker-home-$marker"
 {
@@ -32,6 +31,8 @@ cp /probe/docker-probe-tool "$GITHUB_WORKSPACE/.docker-probe-bin/docker-probe-to
 chmod 0755 "$GITHUB_WORKSPACE/.docker-probe-bin/docker-probe-tool"
 printf '%s\n' "$GITHUB_WORKSPACE/.docker-probe-bin" >> "$GITHUB_PATH"
 printf 'saved=%s-state\n' "$marker" >> "$GITHUB_STATE"
+printf 'summary-%s\n' "$marker" >> "$GITHUB_STEP_SUMMARY"
+cp "$GITHUB_STEP_SUMMARY" "$GITHUB_WORKSPACE/docker-summary-$marker.txt"
 printf '::warning file=probe.sh,line=7,title=Docker probe::annotation-%s\n' "$marker"
 
 if [ -n "${INPUT_PEER:-}" ]; then

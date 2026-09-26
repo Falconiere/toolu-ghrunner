@@ -221,6 +221,64 @@ async fn prepares_registry_and_reuses_only_keyed_dockerfile_builds() -> TestResu
 
 #[tokio::test]
 #[ignore = "requires the authorized Linux Docker carrier and real local daemon"]
+async fn dockerignore_excludes_files_from_the_action_build_context() -> TestResult {
+  let root = test_root("toolu action dockerignore ")?;
+  let config = config(root.path());
+  let workspace = config.workspace_root.join("job");
+  let action_dir = root.path().join("action");
+  tokio::fs::create_dir_all(&workspace).await?;
+  tokio::fs::create_dir_all(&action_dir).await?;
+  tokio::fs::write(action_dir.join("included"), "visible\n").await?;
+  tokio::fs::write(action_dir.join("sentinel"), "must-not-be-sent\n").await?;
+  tokio::fs::write(action_dir.join(".dockerignore"), "sentinel\n").await?;
+  tokio::fs::write(
+    action_dir.join("Dockerfile"),
+    format!("FROM {IMAGE}\nCOPY . /ctx\n"),
+  )
+  .await?;
+
+  let runtime = ActionContainer::connect(Arc::new(Mutex::new(SecretMasker::new()))).await?;
+  let cancel = CancellationToken::new();
+  let image = runtime
+    .prepare_image("Dockerfile", &action_dir, None, &cancel)
+    .await?;
+  let args = vec![
+    "-ec".to_owned(),
+    "test -e /ctx/included && test ! -e /ctx/sentinel".to_owned(),
+  ];
+  let env = HashMap::new();
+  let additions = Vec::new();
+  let step_id = format!("dockerignore-probe-{}", uuid::Uuid::new_v4().simple());
+  let (events, _event_rx) = mpsc::channel(16);
+  let (stdout, _stdout_rx) = mpsc::channel(16);
+  let conclusion = runtime
+    .run(
+      &ActionContainerParams {
+        image: &image,
+        entrypoint: Some("/bin/sh"),
+        args: Some(&args),
+        env: &env,
+        path_additions: &additions,
+        config: &config,
+        workspace: &workspace,
+        action_dir: &action_dir,
+        network: None,
+        step_id: &step_id,
+        timeout: Some(Duration::from_secs(30)),
+        cancel: &cancel,
+      },
+      &events,
+      stdout,
+    )
+    .await?;
+  remove_image(&image).await;
+  assert_eq!(conclusion, Conclusion::Success);
+  assert_eq!(owned_containers(&step_id).await?, 0);
+  Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires the authorized Linux Docker carrier and real local daemon"]
 async fn action_run_preserves_image_path_mounts_streams_and_cleans_up() -> TestResult {
   let root = test_root("toolu action run ")?;
   let config = config(root.path());

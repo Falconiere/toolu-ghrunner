@@ -1,0 +1,19 @@
+name: Docker action failure-condition post probe
+description: Proves post-if failure runs after a nonzero main container
+inputs:
+  marker:
+    description: Per-invocation marker
+    required: true
+  fail_main:
+    description: Exit nonzero after saving state
+    default: 'true'
+runs:
+  using: docker
+  image: Dockerfile
+  entrypoint: /probe/main.sh
+  post-entrypoint: /probe/post.sh
+  post-if: failure()
+  args:
+    - ''
+    - two words
+    - ${{ inputs.marker }}
