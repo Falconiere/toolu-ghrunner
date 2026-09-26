@@ -106,6 +106,12 @@ decision rather than drift.
 | `knip` / `jscpd` | absent on Rust by design | absent | Node tools; clippy's `dead_code`/`unused_imports` and cargo cover the ground. The kit says the same. |
 | Code-review workflow | `deepseek` + generic checklist | `openrouter` + `.github/code-review-prompt.md`, `JEV_ENABLED`; the `review` job is skipped for the generated `release-pr` PR, and only when it is same-repo (a fork branch of that name is still reviewed) | Repo-tuned; strictly more configured than the template. The release PR is 100% git-cliff/`sed` output, so reviewing it only ever produced false positives; `scripts/test/code_review_workflow_test.sh` pins the skip and its fork guard. |
 
+The `unwrap_used` / `expect_used` lints ban the panicking `.unwrap()` /
+`.expect()` methods. Non-panicking `Option` / `Result` fallbacks such as
+`.unwrap_or(...)`, `.unwrap_or_else(...)`, and `.unwrap_or_default()` are
+permitted and preferred over redundant matches that express the same default.
+Keep the lints enabled; these fallback methods do not suppress them.
+
 `secrets.scanExempt` in `crates/config` and `crates/toolu-runner`
 lists the **synthetic** credential fixtures (`MIIphony`,
 `ghs_EXAMPLE…`, `ghp_deadbeef…`) used to test secret masking. Adding
