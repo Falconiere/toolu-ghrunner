@@ -844,3 +844,15 @@ all 1,402 reference cases and all three captured-job replays. The host gate pass
 its static checks and many test groups, then CLI subprocesses stalled entirely in
 macOS `_dyld_start`; GitHub `ci` / `ci-macos` are the explicitly authorized final
 gate for this host limitation. The local full gate is not claimed as passing.
+
+Live comparison at `b6d4a67` passed in
+[run 36216397520](https://github.com/Falconiere/toolu-ghrunner/actions/runs/36216397520):
+`expression-toolu-macos` on `issue79-toolu-macos`,
+`expression-pinned-reference-macos` on `issue79-reference-macos` (official
+v2.337.0, updates disabled), and `expression-hosted-linux` on Ubuntu 24.04.
+Both self-hosted lanes used this same macOS ARM64 host and the identical checkout,
+workflow and action revision. Checkout, fixture installation, composite execution,
+exact output assertions, and checkout cleanup all succeeded. The pinned ARM64
+release archive SHA-256 is
+`5a2cd92908a93d7276a194e1de6008099f3e7946f3f8e14aa7a1a7b4a31fdec2`.
+Hosted Linux is supplementary execution evidence, not a pinned-reference claim.
