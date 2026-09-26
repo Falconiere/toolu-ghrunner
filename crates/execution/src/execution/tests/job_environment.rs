@@ -235,6 +235,12 @@ fn job_environment_file_updates_and_successive_jobs_are_isolated() -> TestResult
 fn job_environment_invalid_layers_fail_before_any_step() -> TestResult {
   for bad in [
     literal("not a mapping"),
+    serde_json::json!("malformed layer"),
+    mapping(&[(
+      "BAD",
+      serde_json::json!({"type":0,"lit":["sensitive-wire-probe-69"]}),
+    )]),
+    mapping(&[("BAD", serde_json::json!({"type":99,"future":"payload"}))]),
     mapping(&[("BAD", serde_json::json!({"type":1,"seq":[]}))]),
     mapping(&[("BAD", serde_json::json!({"type":3,"expr":"inputs["}))]),
   ] {
@@ -249,6 +255,9 @@ fn job_environment_invalid_layers_fail_before_any_step() -> TestResult {
       observed.logs
     );
     assert_eq!(observed.starts, 0);
+    let logs = observed.logs.join("\n");
+    assert!(logs.contains("environmentVariables layer 0:"));
+    assert!(!logs.contains("sensitive-wire-probe-69"));
   }
   Ok(())
 }

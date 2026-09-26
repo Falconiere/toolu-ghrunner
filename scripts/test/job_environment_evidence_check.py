@@ -81,7 +81,7 @@ def check_run(record, evidence, lane):
         content = json.loads(api(f"contents/{path}?ref={record['revision']}"))
         assert digest(base64.b64decode(content['content'])) == expected, f'{lane}/{path}: revision hash mismatch'
     for job in parity:
-        job_logs = api(f"actions/jobs/{job['id']}/logs").decode()
+        job_logs = api(f"actions/jobs/{job['id']}/logs").decode('utf-8', errors='replace')
         assert 'env69-secret:***' in job_logs, f"{lane}/{job['name']}: masked secret marker missing"
     print(f"{lane}: {run['html_url']} verified (runner versions require separate provenance).")
 
