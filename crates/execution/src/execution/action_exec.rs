@@ -188,7 +188,12 @@ async fn resolve_action(
 ) -> Result<ResolvedStep, RunnerError> {
   let uses_full = build_uses_ref(&step.reference);
 
-  if uses_full.starts_with("docker://") {
+  if let Some(image) = uses_full.strip_prefix("docker://") {
+    if image.trim().is_empty() {
+      return Err(RunnerError::ActionManifest(
+        "Docker action registry image is empty".to_owned(),
+      ));
+    }
     let manifest = super::actions::manifest::parse_action_manifest(
       &serde_json::json!({"runs": {"using": "docker", "image": uses_full}}).to_string(),
     )?;
