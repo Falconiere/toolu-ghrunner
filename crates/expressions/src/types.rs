@@ -10,7 +10,7 @@ use std::fmt;
 /// Follows GitHub's type coercion rules exactly:
 /// - Null → false/0/""
 /// - Bool → 0|1/"true"|"false"
-/// - String comparisons are case-insensitive
+/// - String comparisons use invariant ordinal ignore-case (UTF-16).
 #[derive(Debug, Clone)]
 pub enum ExprValue {
   /// The `null` value.
@@ -86,7 +86,8 @@ impl ExprValue {
   /// GitHub Actions loose equality (`==`).
   ///
   /// When types differ, both sides are coerced to a number (null -> 0,
-  /// false -> 0, "" -> 0, true -> 1). Strings compared case-insensitively.
+  /// false -> 0, "" -> 0, true -> 1). Strings use invariant ordinal
+  /// ignore-case comparison (UTF-16).
   pub fn loose_eq(&self, other: &Self) -> bool {
     match (self, other) {
       (Self::Null, Self::Null) => true,
