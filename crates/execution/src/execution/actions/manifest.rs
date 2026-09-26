@@ -290,7 +290,3 @@ fn parse_composite_steps(raw: Option<&Vec<RawCompositeStep>>) -> Vec<CompositeSt
     })
     .collect()
 }
-
-#[cfg(test)]
-#[path = "tests/manifest_docker.rs"]
-mod docker_tests;

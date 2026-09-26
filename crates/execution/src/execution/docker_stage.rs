@@ -18,6 +18,10 @@ use crate::docker::action_container::{ActionContainer, ActionContainerParams};
 use crate::docker::action_mounts::action_path_to_host;
 use expressions::types::ExprValue;
 
+#[cfg(test)]
+#[path = "actions/tests/manifest_docker.rs"]
+mod manifest_tests;
+
 /// Inputs shared by the pre, main and post stages of one Docker action.
 #[derive(Clone, Copy)]
 pub(super) struct DockerStage<'a> {
