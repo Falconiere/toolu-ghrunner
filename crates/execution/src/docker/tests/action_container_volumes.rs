@@ -89,10 +89,16 @@ async fn volume_exists(name: &str) -> TestResult<bool> {
 }
 
 async fn remove_volume(name: &str) -> TestResult {
-  daemon()?
+  match daemon()?
     .remove_volume(name, Some(RemoveVolumeOptions { force: true }))
-    .await?;
-  Ok(())
+    .await
+  {
+    Ok(())
+    | Err(bollard::errors::Error::DockerResponseServerError {
+      status_code: 404, ..
+    }) => Ok(()),
+    Err(error) => Err(error.into()),
+  }
 }
 
 async fn remove_image(image: &str) -> TestResult {
@@ -128,63 +134,120 @@ async fn cleanup_removes_owned_anonymous_volume_but_preserves_unrelated_named_vo
     .prepare_image("Dockerfile", &action_dir, None, &cancel)
     .await?;
   let named = format!("toolu-unrelated-{}", uuid::Uuid::new_v4().simple());
-  daemon()?
-    .create_volume(VolumeCreateRequest {
-      name: Some(named.clone()),
-      ..Default::default()
-    })
-    .await?;
+  let mut failures = Vec::new();
+  let named_created = match daemon() {
+    Ok(docker) => match docker
+      .create_volume(VolumeCreateRequest {
+        name: Some(named.clone()),
+        ..Default::default()
+      })
+      .await
+    {
+      Ok(_) => true,
+      Err(error) => {
+        failures.push(format!("create named sentinel volume: {error}"));
+        false
+      },
+    },
+    Err(error) => {
+      failures.push(format!("connect for named sentinel volume: {error}"));
+      false
+    },
+  };
+  let mut conclusion = None;
+  let mut owned = None;
+  let mut owned_remains = None;
+  let mut named_remains = None;
 
-  let args = vec!["-ec".to_owned(), "sleep 60".to_owned()];
-  let env = HashMap::new();
-  let additions = Vec::new();
-  let step_id = format!("volume-probe-{}", uuid::Uuid::new_v4().simple());
-  let (events, _event_rx) = mpsc::channel(16);
-  let (stdout, _stdout_rx) = mpsc::channel(16);
-  let params = ActionContainerParams {
-    image: &image,
-    entrypoint: Some("/bin/sh"),
-    args: Some(&args),
-    env: &env,
-    path_additions: &additions,
-    config: &config,
-    workspace: &workspace,
-    action_dir: &action_dir,
-    network: None,
-    step_id: &step_id,
-    timeout: Some(Duration::from_secs(30)),
-    cancel: &cancel,
-  };
-  let capture_volume = async {
-    for _attempt in 0..100 {
-      if let Some(volume) = owned_volume(&step_id, "/action-owned").await? {
-        cancel.cancel();
-        return Ok::<String, Box<dyn std::error::Error>>(volume);
+  if named_created {
+    let args = vec!["-ec".to_owned(), "sleep 60".to_owned()];
+    let env = HashMap::new();
+    let additions = Vec::new();
+    let step_id = format!("volume-probe-{}", uuid::Uuid::new_v4().simple());
+    let (events, _event_rx) = mpsc::channel(16);
+    let (stdout, _stdout_rx) = mpsc::channel(16);
+    let params = ActionContainerParams {
+      image: &image,
+      entrypoint: Some("/bin/sh"),
+      args: Some(&args),
+      env: &env,
+      path_additions: &additions,
+      config: &config,
+      workspace: &workspace,
+      action_dir: &action_dir,
+      network: None,
+      step_id: &step_id,
+      timeout: Some(Duration::from_secs(30)),
+      cancel: &cancel,
+    };
+    let capture_volume = async {
+      for _attempt in 0..100 {
+        if let Some(volume) = owned_volume(&step_id, "/action-owned").await? {
+          cancel.cancel();
+          return Ok::<String, Box<dyn std::error::Error>>(volume);
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
       }
-      tokio::time::sleep(Duration::from_millis(50)).await;
+      Err("action container anonymous volume was not observed".into())
+    };
+    let (run_result, capture_result) =
+      tokio::join!(runtime.run(&params, &events, stdout), capture_volume);
+    match run_result {
+      Ok(value) => conclusion = Some(value),
+      Err(error) => failures.push(format!("run action container: {error}")),
     }
-    Err("action container anonymous volume was not observed".into())
+    match capture_result {
+      Ok(volume) => {
+        match volume_exists(&volume).await {
+          Ok(exists) => owned_remains = Some(exists),
+          Err(error) => failures.push(format!("inspect owned volume {volume}: {error}")),
+        }
+        owned = Some(volume);
+      },
+      Err(error) => failures.push(format!("capture owned anonymous volume: {error}")),
+    }
+    match volume_exists(&named).await {
+      Ok(exists) => named_remains = Some(exists),
+      Err(error) => failures.push(format!("inspect named sentinel volume {named}: {error}")),
+    }
+    match owned_containers(&step_id).await {
+      Ok(0) => {},
+      Ok(count) => failures.push(format!("{count} owned action containers remained")),
+      Err(error) => failures.push(format!("list owned action containers: {error}")),
+    }
+  }
+
+  if let Some(volume) = owned.as_deref()
+    && let Err(error) = remove_volume(volume).await
+  {
+    failures.push(format!("remove owned anonymous volume {volume}: {error}"));
+  }
+  if let Err(error) = remove_volume(&named).await {
+    failures.push(format!("remove named sentinel volume {named}: {error}"));
+  }
+  if let Err(error) = remove_image(&image).await {
+    failures.push(format!("remove action image {image}: {error}"));
+  }
+  if !failures.is_empty() {
+    return Err(failures.join("; ").into());
+  }
+
+  let Some(conclusion) = conclusion else {
+    return Err("action conclusion was not recorded".into());
   };
-  let (result, owned) = tokio::join!(runtime.run(&params, &events, stdout), capture_volume);
-  let conclusion = result?;
-  let owned = owned?;
-  let owned_remains = volume_exists(&owned).await?;
-  let named_remains = volume_exists(&named).await?;
-  let remove_owned = if owned_remains {
-    remove_volume(&owned).await
-  } else {
-    Ok(())
+  let Some(owned) = owned else {
+    return Err("owned anonymous volume was not recorded".into());
   };
-  let remove_named = remove_volume(&named).await;
-  let remove_image = remove_image(&image).await;
-  remove_owned?;
-  remove_named?;
-  remove_image?;
+  let Some(owned_remains) = owned_remains else {
+    return Err("owned anonymous volume survival was not recorded".into());
+  };
+  let Some(named_remains) = named_remains else {
+    return Err("named sentinel volume survival was not recorded".into());
+  };
 
   assert_eq!(conclusion, Conclusion::Cancelled);
   assert!(!owned_remains, "owned anonymous volume {owned} leaked");
   assert!(named_remains, "unrelated named volume {named} was removed");
-  assert_eq!(owned_containers(&step_id).await?, 0);
   Ok(())
 }
 
