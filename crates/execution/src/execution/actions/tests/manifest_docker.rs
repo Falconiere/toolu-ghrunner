@@ -5,6 +5,7 @@
 //! - `action.yml`: `local_actions_preserve_argv_env_commands_state_and_lifo_posts`;
 //! - `action-absent-args.yml` and `action-empty-args.yml`:
 //!   `registry_and_manifest_arg_variants_execute_exact_argv`.
+//!
 //! That suite's `seed_probe` copies each selected manifest verbatim to the local
 //! action's `action.yml`; renaming the variants does not change their contents.
 
