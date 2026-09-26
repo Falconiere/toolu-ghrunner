@@ -121,6 +121,8 @@ async fn run_scoped_post(
   )
   .await;
 
+  // This check latches the shared force token on expiry/shutdown, stopping all
+  // remaining posts as well as this one; each post uses the same job budget.
   if job.cancellation.is_forced() || !evaluate_post_condition(ctx, condition)? {
     skip_post(
       events,

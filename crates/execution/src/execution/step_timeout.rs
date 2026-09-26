@@ -138,8 +138,9 @@ async fn kill_and_reap(
   err: &impl Fn(String) -> RunnerError,
 ) -> Result<(), RunnerError> {
   const REAP_GRACE: Duration = Duration::from_secs(10);
-  // `start_kill` sends SIGKILL; an already-exited child yields an error we
-  // can safely ignore, since the goal is just to ensure it is not running.
+  // On Unix, kill the owned process group first so descendants receive SIGKILL.
+  // Then best-effort kill the direct child on every platform before bounded reaping;
+  // an already-exited child's `start_kill` error is safe to ignore.
   kill_process_group(child.id());
   let _ = child.start_kill();
   match tokio::time::timeout(REAP_GRACE, child.wait()).await {
