@@ -208,7 +208,7 @@ async fn remote_repository_action_runs_pre_main_post_and_reuses_image() -> TestR
     second_id, first_id,
     "immutable remote action rebuilt its image"
   );
-  let stages = std::fs::read_to_string(workspace.join("docker-stages.txt"))?;
+  let stages = tokio::fs::read_to_string(workspace.join("docker-stages.txt")).await?;
   for expected in [
     "REMOTE_A:pre",
     "REMOTE_A:main",
@@ -235,7 +235,7 @@ async fn remote_repository_action_runs_pre_main_post_and_reuses_image() -> TestR
     )),
     "{pre_failure_events:#?}"
   );
-  let stages = std::fs::read_to_string(workspace.join("docker-stages.txt"))?;
+  let stages = tokio::fs::read_to_string(workspace.join("docker-stages.txt")).await?;
   assert_eq!(
     stages.matches("REMOTE_PRE_FAILURE:pre").count(),
     1,
