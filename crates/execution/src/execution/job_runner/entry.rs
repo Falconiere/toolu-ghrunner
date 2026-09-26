@@ -3,6 +3,7 @@
 use shared::{
   AgentJobRequestMessage, Conclusion, RunnerConfig, RunnerError, RunnerEvent, SecretMasker,
 };
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -12,10 +13,14 @@ use super::{
   prepare_job_workspace, prepared, start_job_container, start_job_services, stop_local_services,
 };
 use crate::execution::container_job::{evaluate_container, finish_container};
+use crate::execution::context::ExecutionContext;
 use crate::execution::job_cancellation::JobCancellation;
 use crate::execution::job_teardown::JobTeardown;
 
 /// Initialize, execute, and tear down one acquired job.
+/// The job child observes caller cancellation without propagating it to its parent.
+/// Shutdown can thus interrupt setup/hooks without mutating the caller's token.
+/// Local context/filesystem initialization is awaited to retain resource ownership.
 pub(super) async fn run(
   msg: AgentJobRequestMessage,
   config: &RunnerConfig,
@@ -24,8 +29,6 @@ pub(super) async fn run(
   masker: Arc<Mutex<SecretMasker>>,
   shutdown: CancellationToken,
 ) -> Result<JobTeardown, RunnerError> {
-  // Shutdown interrupts container setup/hooks without cancelling the caller's token.
-  // Local context/filesystem initialization is awaited to retain resource ownership.
   let cancel = cancel.child_token();
   let workspace = config.workspace_root.join(&msg.job_id);
   let (msg, mut ctx) = build_job_context_async(msg, config, masker, workspace.clone()).await?;
@@ -65,6 +68,17 @@ pub(super) async fn run(
       return Err(error);
     },
   };
+  let outcome = job_outcome(&ctx, msg.job_id, conclusion, outputs);
+  Ok(finish_job(local, &events, outcome, workspace_gc).await)
+}
+
+/// Preserve shutdown precedence when packaging the completed job's result.
+fn job_outcome(
+  ctx: &ExecutionContext,
+  job_id: String,
+  conclusion: Conclusion,
+  outputs: HashMap<String, String>,
+) -> JobOutcome {
   let conclusion = if ctx
     .cancellation
     .as_ref()
@@ -74,10 +88,9 @@ pub(super) async fn run(
   } else {
     conclusion
   };
-  let outcome = JobOutcome {
-    job_id: msg.job_id,
+  JobOutcome {
+    job_id,
     conclusion,
     outputs,
-  };
-  Ok(finish_job(local, &events, outcome, workspace_gc).await)
+  }
 }

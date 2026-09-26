@@ -106,6 +106,7 @@ async fn collect(
   )
 }
 
+// Collect only later-step markers and context results, not probe synchronization logs.
 fn markers(events: &[RunnerEvent]) -> Vec<&str> {
   events
     .iter()
@@ -154,9 +155,7 @@ async fn execution_errors_follow_exit_failure_policy_and_continue_on_error() -> 
     for continued in [false, true] {
       let msg = probe_message(kind, continued)?;
       let (_temp, _workspace, runner) = runner_for(&msg)?;
-      let cancel = CancellationToken::new();
-      let events = collect(runner.execute_job(msg.clone(), cancel.clone())).await?;
-      cancel.cancel();
+      let events = collect(runner.execute_job(msg.clone(), CancellationToken::new())).await?;
       let expected = if continued {
         vec!["marker-1", "marker-3", "result=failure/success", "marker-4"]
       } else {
@@ -297,6 +296,12 @@ async fn shutdown_interrupts_always_and_skips_later_user_steps() -> TestResult {
     events
   })
   .await?;
+  assert!(
+    events
+      .iter()
+      .any(|e| matches!(e, RunnerEvent::Log {line, ..} if line == "started")),
+    "shutdown must follow the observed probe start: {events:?}"
+  );
   assert!(markers(&events).is_empty(), "{events:?}");
   assert!(
     !events

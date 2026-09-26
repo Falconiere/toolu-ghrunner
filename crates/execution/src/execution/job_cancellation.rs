@@ -1,4 +1,10 @@
-//! Distinguishes graceful job cancellation from shutdown and bounds all cleanup.
+//! `request` starts one five-minute budget shared by running work and main/post cleanup.
+//! `watch_step` re-evaluates its saved scope with cancelled job status: false/error
+//! interrupts that step, while true may continue until the shared `force` fires.
+//! `force` is a child of `shutdown` and also fires at the fixed job deadline.
+//! Shutdown thus interrupts even `always()`; before a graceful request, it also
+//! cancels the job-local request token to interrupt container setup and hooks.
+//! Dropping controllers aborts watchers; subprocess owners still kill/reap children.
 
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -73,6 +79,8 @@ impl JobCancellation {
   }
 
   /// Whether user work must stop even when its condition is still true.
+  /// Latches `force` on shutdown or deadline expiry, cancelling all step children.
+  /// This check can therefore stop remaining main/post work before the watcher runs.
   pub(crate) fn is_forced(&self) -> bool {
     if self.shutdown.is_cancelled() || self.deadline().is_some_and(|at| at <= Instant::now()) {
       self.force.cancel();
