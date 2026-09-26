@@ -1,0 +1,54 @@
+name: step-summary-83
+run-name: step-summary-83-${{ github.sha }}
+on:
+  push:
+    branches: [feat/83-upload-github-step-summary-to]
+  workflow_dispatch:
+jobs:
+  summary:
+    if: ${{ vars.TOOLU_SUMMARY_83_LIVE == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [toolu, reference]
+        os: [linux, macos]
+    runs-on: [self-hosted, '${{ matrix.os }}', 'summary-83-${{ matrix.lane }}']
+    steps:
+      - uses: actions/checkout@v4
+      - name: Append and overwrite
+        shell: bash
+        run: |
+          printf 'discarded\n' > "$GITHUB_STEP_SUMMARY"
+          printf '# Summary 83 first\n' > "$GITHUB_STEP_SUMMARY"
+          printf 'appended\n' >> "$GITHUB_STEP_SUMMARY"
+      - name: Absent
+        shell: bash
+        run: 'true'
+      - name: Deleted
+        shell: bash
+        run: rm "$GITHUB_STEP_SUMMARY"
+      - name: Byte limit accepted
+        shell: bash
+        run: python3 -c 'import os; open(os.environ["GITHUB_STEP_SUMMARY"], "wb").write("é".encode()*524287+b"!\n")'
+      - name: Byte limit rejected without changing conclusion
+        shell: bash
+        run: python3 -c 'import os; open(os.environ["GITHUB_STEP_SUMMARY"], "wb").write("é".encode()*524288+b"!")'
+      - uses: ./.github/actions/step-summary-83-node
+      - uses: ./.github/actions/step-summary-83-composite
+      - name: Later failure preserves all completed summaries
+        shell: bash
+        run: |
+          printf '# Later failure\n' >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+  container:
+    if: ${{ vars.TOOLU_SUMMARY_83_LIVE == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [toolu, reference]
+    runs-on: [self-hosted, linux, 'summary-83-${{ matrix.lane }}']
+    container: ubuntu:24.04
+    steps:
+      - name: Container summary
+        shell: bash
+        run: printf '# Container summary 83\n' > "$GITHUB_STEP_SUMMARY"

@@ -68,7 +68,8 @@ impl StepCollector {
       RunnerEvent::Annotation { step_id, .. } => {
         self.record_annotation(step_id, event).await;
       },
-      RunnerEvent::JobStarted { .. }
+      RunnerEvent::StepSummary { .. }
+      | RunnerEvent::JobStarted { .. }
       | RunnerEvent::StepSkipped { .. }
       | RunnerEvent::Log { .. }
       | RunnerEvent::LogGroup { .. }

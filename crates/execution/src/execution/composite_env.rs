@@ -166,6 +166,7 @@ pub(super) struct FileCommandPaths {
   pub(super) output: PathBuf,
   pub(super) env: PathBuf,
   pub(super) path: PathBuf,
+  pub(super) summary: PathBuf,
 }
 
 /// Create empty file-command files for a composite step under `temp_dir`.
@@ -177,10 +178,12 @@ pub(super) fn create_file_command_files(
     output: temp_dir.join(format!("composite_output_{step_id}")),
     env: temp_dir.join(format!("composite_env_{step_id}")),
     path: temp_dir.join(format!("composite_path_{step_id}")),
+    summary: temp_dir.join(format!("composite_summary_{step_id}")),
   };
   std::fs::write(&paths.output, "")?;
   std::fs::write(&paths.env, "")?;
   std::fs::write(&paths.path, "")?;
+  std::fs::write(&paths.summary, "")?;
   Ok(paths)
 }
 

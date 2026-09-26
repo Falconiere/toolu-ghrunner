@@ -1,0 +1,13 @@
+name: Summary 83 composite probe
+description: Distinct embedded summary files with overwrite/append
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        printf 'discard me\n' > "$GITHUB_STEP_SUMMARY"
+        printf '# Composite first\n' > "$GITHUB_STEP_SUMMARY"
+        printf 'appended\n' >> "$GITHUB_STEP_SUMMARY"
+    - shell: bash
+      run: printf '# Composite second\n' > "$GITHUB_STEP_SUMMARY"
+    - uses: ./.github/actions/step-summary-83-node
