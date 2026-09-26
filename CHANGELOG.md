@@ -7,6 +7,93 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-26
+
+### Added
+- *(actions)* resolve downloads from acquired job services
+- *(execution)* run job steps inside owned containers
+- *(execution)* report acquired job outputs
+- *(reporting)* send Run Service annotations (#82)
+- *(execution)* run workflow service containers
+
+### Changed
+- *(execution)* remove unused post action name
+- *(execution)* share saturated post numbering
+- *(execution)* split job container setup helpers
+- *(execution)* split script step runner support
+- *(execution)* name output token wire kinds
+
+### Documentation
+- *(execution)* clarify real Node post test scope
+- normalize merged evidence sections
+- preserve post cleanup evidence after broker rebase
+- *(actions)* explain fetch retry and cancellation
+- *(execution)* describe inherited composite deadline accurately
+- *(execution)* record hosted parity and wire blocker
+- *(execution)* record completed Linux gate
+- *(execution)* clarify parent step error attribution
+- *(shared)* clarify captured local action references
+- *(ci)* record issue 72 hosted run and clarify process flags
+- *(listener)* name watchdog completion wire result
+- *(execution)* cite upstream ordinal secret matching
+- record paired job output parity evidence
+- *(reporting)* clarify annotation test and step results
+- *(test)* clarify annotation review wording
+- *(execution)* clarify shutdown during local initialization
+- *(test)* record live Docker cleanup evidence and unavailable lanes
+- *(plan)* consolidate complete workspace verification
+- record service-container live evidence limitations
+- *(ci)* document service image digest provenance
+- *(expressions)* clarify replay and reference provenance checks
+
+### Fixed
+- *(execution)* mask every nonempty line of add-mask values
+- *(execution)* preserve incoming job contexts
+- *(execution)* use context names for step expressions
+- *(execution)* address PR review feedback
+- *(execution)* apply acquired run defaults to script steps
+- *(listener)* tolerate broker control messages and refresh tokens
+- *(listener)* keep broker error diagnostics secret-safe
+- *(execution)* merge post failures into job results
+- *(execution)* address #101 post-result review feedback
+- *(actions)* protect resolver credentials and document evidence
+- *(actions)* defer context validation and address review findings
+- *(actions)* satisfy exhaustive error conversion lint
+- normalize github.com action API host and review details
+- *(review)* clarify action cache docs and explicit base64 call
+- *(review)* load project rules and validate expanded GHES paths
+- *(execution)* complete composite expression scope and cleanup
+- *(execution)* bound action resolution by step deadline
+- *(execution)* keep unscoped composite failure status
+- *(execution)* align nested timeout with parent deadline
+- *(test)* clarify composite evidence validation errors
+- *(test)* unify composite evidence CLI errors
+- *(test)* report missing evidence reason as CLI error
+- *(execution)* preserve captured action and step identities
+- *(execution)* address container startup review findings
+- *(execution)* report recovered masker locks after release
+- *(execution)* preserve scoped state after container rebase
+- *(execution)* preserve composite container bounds
+- *(execution)* set step process CI and GitHub Actions flags
+- *(wire)* serialize run job conclusions as TaskResult names
+- *(listener)* warn when completion receiver drops
+- diagnose closed job event channels
+- *(reporting)* clarify annotation review and opt in live probe
+- *(test)* name missing live verifier tokens
+- *(test)* await live annotation polling
+- *(test)* await live verifier subprocesses
+- *(reporting)* adapt annotations to typed job completion
+- *(execution)* preserve conditional cleanup across errors and cancellation
+- *(execution)* clarify preparation errors and deadline assertions
+- *(execution)* clarify cancellation ownership and cleanup evidence
+- *(execution)* preserve service setup across cancellation rebase
+- *(execution)* apply workflow and job environment layers
+- *(execution)* report malformed environment payloads during setup
+- *(protocol)* report a consistent runner compatibility version
+- *(expressions)* match pinned Actions evaluator semantics
+- *(expressions)* preserve numeric parse diagnostics
+- *(expressions)* tighten parity review contracts
+
 ## [0.9.2] - 2026-09-23
 
 ### Documentation
