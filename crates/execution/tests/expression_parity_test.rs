@@ -166,7 +166,7 @@ async fn bad_root_expression_is_visible_and_fails_the_captured_environment() -> 
   assert!(
     events
       .iter()
-      .any(|event| matches!(event, RunnerEvent::Log { line, .. } if line.starts_with("##[error]") && line.contains("unknown named value: unknown"))),
+      .any(|event| matches!(event, RunnerEvent::Log { line, .. } if line == "##[error]expression evaluation failed: unknown named value: unknown")),
     "{events:?}"
   );
   Ok(())
@@ -176,6 +176,6 @@ async fn bad_root_expression_is_visible_and_fails_the_captured_environment() -> 
 async fn bad_composite_root_is_visible_and_fails() -> TestResult {
   let (_temp, _workspace, events) = replay("expression-79-bad", false).await?;
   assert_eq!(conclusion(&events), Some(Conclusion::Failure));
-  assert!(events.iter().any(|event| matches!(event, RunnerEvent::Log { line, .. } if line.contains("unavailable in composite metadata"))), "{events:?}");
+  assert!(events.iter().any(|event| matches!(event, RunnerEvent::Log { line, .. } if line == "##[error]expression evaluation failed: context 'unknown' is unavailable in composite metadata")), "{events:?}");
   Ok(())
 }

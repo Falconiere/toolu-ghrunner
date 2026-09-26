@@ -1,8 +1,10 @@
 name: expression-parity-79
 
 on:
+  # Manual replay requires provisioning the two labelled comparison runners.
   workflow_dispatch:
   push:
+    # Issue-specific acceptance run; these temporary runners are not a main gate.
     branches:
       - feat/79-expression-engine-parity-with-actions
     paths:

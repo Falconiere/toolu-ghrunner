@@ -46,6 +46,24 @@ fn captured_malformed_literals_report_reason_and_byte_offset() {
 }
 
 #[test]
+fn direct_builtin_dispatch_validates_case_arity() {
+  // The same invalid call is captured as case(true, 1, false, 2) in the oracle.
+  let args = [
+    ExprValue::Bool(true),
+    ExprValue::Number(1.0),
+    ExprValue::Bool(false),
+    ExprValue::Number(2.0),
+  ];
+  let error = crate::functions::call_function("case", &args, &context())
+    .expect_err("public dispatch must validate even without an AST");
+  assert_eq!(
+    error.to_string(),
+    shared::RunnerError::Expression("case expects an odd number of arguments".to_owned())
+      .to_string()
+  );
+}
+
+#[test]
 fn distinct_json_objects_are_not_equal() -> Result<(), shared::RunnerError> {
   assert!(matches!(
     evaluate("fromJSON('{}') == fromJSON('{}')", &context())?,
