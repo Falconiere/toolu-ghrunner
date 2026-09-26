@@ -689,3 +689,24 @@ separate toolu product release. Updates are operator-managed. Refresh messages
 warn and continue; operators must track GitHub's 30-day update requirement and
 critical security updates. See [runner updates](docs/runner-updates.md) for
 ownership, deployment, version-gating limits and revalidation.
+
+### Step shells
+
+On Linux and macOS, a `run:` step without a shell uses bash when executable on
+its step `PATH`, otherwise sh, with `-e`. Linux job containers default to sh.
+Explicit `shell: bash` uses `--noprofile --norc -e -o pipefail`; `shell: sh`
+uses `-e`. Job/workflow `defaults.run.shell` supplies the shell for steps that
+omit it; composite `run:` steps require their own `shell:`.
+
+Use a custom template such as `shell: perl {0}` or `shell: python3 {0}` to run
+another interpreter. `{0}` is the script path; quoted arguments and paths with
+spaces stay intact. Templates are argument lists, without shell expansion.
+Literal braces in arguments use `{{` and `}}`. Unknown bare shells, missing
+`{0}`, malformed templates and unavailable executables fail the step explicitly.
+
+The `python` built-in runs `python` with a `.py` script, so that executable must
+be installed. `pwsh` runs a `.ps1` script with terminating PowerShell errors and
+propagation of the last native-command exit code. These rules also apply to
+composite steps and container execution. Windows shells are outside the current
+support scope. See [measured shell coverage](docs/test-coverage.md#shell-templates-80)
+for verified lanes and remaining reference/backend evidence.

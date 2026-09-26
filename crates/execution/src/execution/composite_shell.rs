@@ -2,21 +2,15 @@
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::process::Stdio;
 use std::time::Duration;
 
-use shared::{Conclusion, LogStream, RunnerError, RunnerEvent};
-use tokio::io::{AsyncBufReadExt, BufReader};
+use shared::{Conclusion, RunnerError, RunnerEvent};
 use tokio::sync::mpsc;
-use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
-
-use super::cgroup_join::spawn_in_cgroup;
-use super::step_timeout::{WaitOutcome, wait_bounded};
 
 /// Parameters for running a composite-action shell script.
 pub struct ShellScriptParams<'a> {
-  /// Shell to invoke (`bash`, `sh`, `pwsh`, ...).
+  /// Built-in shell or executable argument template containing `{0}`.
   pub shell: &'a str,
   /// Script body to run under that shell.
   pub script: &'a str,
@@ -44,111 +38,22 @@ pub async fn run_shell_script(
   events: &mpsc::Sender<RunnerEvent>,
   stdout_tx: mpsc::Sender<String>,
 ) -> Result<Conclusion, RunnerError> {
-  let script_file = write_temp_script(params.script)?;
-  let script_path = script_file.path().to_string_lossy().to_string();
-  let (program, args) = shell_args(params.shell, &script_path);
-
-  let mut cmd = tokio::process::Command::new(program);
-  let mut env = params.env.clone();
-  super::step_process_env::apply(&mut env, None);
-  cmd
-    .args(&args)
-    .current_dir(params.working_dir)
-    .env_clear()
-    .envs(&env)
-    .stdout(Stdio::piped())
-    .stderr(Stdio::piped());
-  let mut child = spawn_in_cgroup(&mut cmd, params.cgroup_path).await?;
-
-  let stdout = child.stdout.take();
-  let stderr = child.stderr.take();
-
-  let stdout_task = stream_output(
-    stdout,
-    params.log_step_id,
-    LogStream::Stdout,
-    events,
-    Some(stdout_tx),
-  );
-  let stderr_task = stream_output(stderr, params.log_step_id, LogStream::Stderr, events, None);
-
-  let outcome = wait_bounded(&mut child, params.timeout, params.cancel, |message| {
-    RunnerError::StepExecution(format!("composite {message}"))
-  })
-  .await;
-  let ((), ()) = tokio::join!(finish_stream(stdout_task), finish_stream(stderr_task));
-  match outcome? {
-    WaitOutcome::Exited(status) if status.success() => Ok(Conclusion::Success),
-    WaitOutcome::Exited(_) | WaitOutcome::TimedOut => Ok(Conclusion::Failure),
-    WaitOutcome::Cancelled => Ok(Conclusion::Cancelled),
-  }
-}
-
-fn write_temp_script(script: &str) -> Result<tempfile::NamedTempFile, RunnerError> {
-  let mut file = tempfile::Builder::new()
-    .suffix(".sh")
-    .tempfile()
-    .map_err(|e| RunnerError::StepExecution(format!("temp script: {e}")))?;
-  std::io::Write::write_all(&mut file, script.as_bytes())
-    .map_err(|e| RunnerError::StepExecution(format!("write script: {e}")))?;
-  Ok(file)
-}
-
-fn shell_args(shell: &str, script_path: &str) -> (&'static str, Vec<String>) {
-  match shell {
-    "bash" => (
-      "bash",
-      vec![
-        "--noprofile".to_owned(),
-        "--norc".to_owned(),
-        "-e".to_owned(),
-        "-o".to_owned(),
-        "pipefail".to_owned(),
-        script_path.to_owned(),
-      ],
-    ),
-    "sh" => ("sh", vec!["-e".to_owned(), script_path.to_owned()]),
-    _ => ("bash", vec!["-e".to_owned(), script_path.to_owned()]),
-  }
-}
-
-fn stream_output<R: tokio::io::AsyncRead + Unpin + Send + 'static>(
-  reader: Option<R>,
-  step_id: &str,
-  stream: LogStream,
-  events: &mpsc::Sender<RunnerEvent>,
-  stdout_tx: Option<mpsc::Sender<String>>,
-) -> Option<JoinHandle<()>> {
-  let r = reader?;
-  let tx = events.clone();
-  let sid = step_id.to_owned();
-  Some(tokio::spawn(async move {
-    let buf = BufReader::new(r);
-    let mut lines = buf.lines();
-    while let Ok(Some(line)) = lines.next_line().await {
-      if let Some(ref output) = stdout_tx {
-        let _ = output.send(line).await;
-      } else {
-        let _ = tx
-          .send(RunnerEvent::Log {
-            step_id: sid.clone(),
-            line,
-            stream,
-          })
-          .await;
-      }
-    }
-  }))
-}
-
-async fn finish_stream(task: Option<JoinHandle<()>>) {
-  let Some(mut task) = task else { return };
-  match tokio::time::timeout(Duration::from_secs(2), &mut task).await {
-    Ok(Ok(())) => {},
-    Ok(Err(error)) => tracing::warn!(%error, "composite output stream task failed"),
-    Err(_) => {
-      task.abort();
-      tracing::warn!("composite output stream remained open after child exit");
-    },
-  }
+  let output = super::handlers::script::ScriptHandler::new()
+    .execute(
+      &super::handlers::script::ScriptParams {
+        script: params.script,
+        shell: Some(params.shell),
+        env: params.env,
+        working_dir: params.working_dir,
+        step_id: params.log_step_id,
+        cgroup_path: params.cgroup_path,
+        timeout: params.timeout,
+        cancel: params.cancel,
+        container: None,
+      },
+      events,
+      stdout_tx,
+    )
+    .await?;
+  Ok(output.conclusion)
 }

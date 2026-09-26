@@ -27,7 +27,7 @@ not part of it. Workflow YAML parsing/matrix/orchestration lives in the
 | `composite_exec.rs` | `execute_composite_action` | Runs a composite action's `steps:` sequentially as shell subprocesses or nested `uses:`, threading `GITHUB_OUTPUT`/`ENV`/`PATH` file commands between steps. |
 | `composite_expr.rs` | `interpolate_composite_expr` | Minimal `${{ }}` interpolation for composite steps (`inputs.*`, `steps.*.outputs.*`, `runner.*`, `env.*`). |
 | `composite_scope.rs` | `ScopeName` / `CompositeOutputs` | Output-isolation scope identifier and a composite manifest's `outputs:` expression map. |
-| `composite_shell.rs` | `run_shell_script` | Spawns a composite `run:` step's shell script as a subprocess and streams its stdout/stderr as log events. |
+| `composite_shell.rs` | `run_shell_script` | Adapts a composite `run:` step to the shared `ScriptHandler` shell/template, streaming, timeout and cancellation contract. |
 | `composite_uses.rs` | `run_nested_uses_step` | Builds a synthetic `ActionStep` for a composite's nested `uses:` step and recurses through `action_exec::execute_action`, bounded by `DepthTracker`. |
 | `context.rs` | `ExecutionContext` | Mutable per-job execution state: env, per-step outputs/state/conclusions, runtime-owned contexts plus typed incoming server roots (`matrix`/`needs`/`inputs`/`strategy` and future keys), the shared `SecretMasker`, and expression evaluation. |
 | `context/` | Scoped state helpers | Keeps expression-visible step scopes separate from private action state. |
