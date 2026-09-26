@@ -27,7 +27,7 @@ async fn action_joins_job_network_and_reaches_real_peer() -> TestResult {
   let config = config_for(root.path());
   let mut job: AgentJobRequestMessage = serde_json::from_str(CAPTURE)?;
   let workspace = config.workspace_root.join(&job.job_id);
-  seed_probe(&workspace, "network", "action.yml")?;
+  seed_probe(&workspace, "network", "action.yml").await?;
   let peer_name = format!("docker75-peer-{}", uuid::Uuid::new_v4().simple());
   job.steps = vec![
     ActionStep::script(
@@ -138,7 +138,7 @@ async fn docker_action_joins_service_only_network_through_main_and_post() -> Tes
   let mut job = captured_job()?;
   job.job_service_containers = Some(service_token()?);
   let workspace = config.workspace_root.join(&job.job_id);
-  seed_probe(&workspace, "service-network", "action.yml")?;
+  seed_probe(&workspace, "service-network", "action.yml").await?;
   job.steps = vec![
     local_step(
       "service_action",
@@ -246,7 +246,8 @@ async fn entrypoint_failure_and_cancellation_fail_visibly_without_leaking_contai
       &main_fail_workspace,
       "main-failure",
       "action-failure-post.yml",
-    )?;
+    )
+    .await?;
     main_fail_job.steps = vec![local_step(
       "main_failure",
       "./.github/actions/main-failure",
@@ -273,7 +274,7 @@ async fn entrypoint_failure_and_cancellation_fail_visibly_without_leaking_contai
     let cancel_config = config_for(cancel_root.path());
     let mut cancel_job = captured_job()?;
     let workspace = cancel_config.workspace_root.join(&cancel_job.job_id);
-    seed_probe(&workspace, "cancel", "action.yml")?;
+    seed_probe(&workspace, "cancel", "action.yml").await?;
     let cancel_step_id = format!("cancel-action-{}", uuid::Uuid::new_v4().simple());
     cancel_job.steps = vec![local_step(
       &cancel_step_id,
