@@ -35,6 +35,7 @@ pub(super) async fn stream_process(
   let mut dispatcher = dispatcher;
   let mut stdout_open = true;
   let mut events_open = true;
+  let mut delivery_warned = false;
   while stdout_open || events_open {
     let received = tokio::select! {
       line = stdout.recv(), if stdout_open => if let Some(line) = line {
@@ -45,23 +46,36 @@ pub(super) async fn stream_process(
       },
       event = process_events.recv(), if events_open => match event {
         Some(RunnerEvent::Log { line, stream, .. }) => Some((line, stream)),
-        Some(event) => { let _ = events.send(event).await; None },
+        Some(event) => { forward_event(events, event, &mut delivery_warned).await; None },
         None => { events_open = false; None }
       }
     };
     if let Some((line, stream)) = received {
       let disposition = dispatcher.on_output_line(&line, stream, ctx);
       for event in dispatcher.take_events() {
-        let _ = events.send(event).await;
+        forward_event(events, event, &mut delivery_warned).await;
       }
       if let LineDisposition::PassThrough(line) = disposition {
-        let _ = events.send(dispatcher.output_log(line, stream)).await;
+        forward_event(
+          events,
+          dispatcher.output_log(line, stream),
+          &mut delivery_warned,
+        )
+        .await;
       }
     }
   }
   ProcessOutput {
     failed: dispatcher.command_failed(),
     outputs: dispatcher.take_set_outputs().into_iter().collect(),
+  }
+}
+
+async fn forward_event(events: &mpsc::Sender<RunnerEvent>, event: RunnerEvent, warned: &mut bool) {
+  if events.send(event).await.is_err() && !*warned {
+    *warned = true;
+    // Keep draining the child, but never include its possibly secret event data.
+    tracing::warn!("process event receiver closed; continuing to drain child output");
   }
 }
 
