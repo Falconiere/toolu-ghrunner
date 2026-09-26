@@ -1,4 +1,13 @@
 //! Issue #79 expression replay through the real execution engine.
+//!
+//! Replays the captured `incoming_contexts_matrix_0.json` job through
+//! `Runner::execute_job` and real Bash, copying local action fixtures into
+//! the workspace. The replay substitutes expression payloads while preserving
+//! captured UUIDs, context data, and token shapes.
+//!
+//! The positive case covers top-level and composite expression fields and
+//! output propagation. Two negative cases require visible unknown-root errors
+//! in the top-level environment and a composite script, respectively.
 
 use std::error::Error;
 use std::path::{Path, PathBuf};
