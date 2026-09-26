@@ -349,5 +349,11 @@ async fn docker_registry_action_rejects_non_linux_without_running_host_code() ->
     !workspace.join("host-marker").exists(),
     "Docker action command escaped onto the host"
   );
+  assert!(
+    logs
+      .iter()
+      .any(|line| line.contains(&format!("current host: {}", shared::platform::runner_os()))),
+    "missing actual host OS in Linux-only diagnostic: {logs:#?}"
+  );
   Ok(())
 }

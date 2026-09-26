@@ -52,6 +52,8 @@ pub(super) async fn run_docker_stage(
     &resolved_inputs
   };
   let (mut env, args, entrypoint) = stage_values(s, ctx, inputs)?;
+  // stage_values already put the explicit PATH in env; build_env uses it
+  // before the image PATH and prepends these GITHUB_PATH additions.
   let (_, path_additions) = ctx.docker_action_path();
   let tmp = s.config.data_dir.join("tmp");
   create_file_command_dir(&tmp).await?;
