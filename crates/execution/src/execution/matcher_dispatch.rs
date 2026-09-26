@@ -79,7 +79,7 @@ impl CommandDispatcher {
       let level = match result
         .severity
         .as_deref()
-        .unwrap_or("")
+        .unwrap_or_default()
         .to_ascii_lowercase()
         .as_str()
       {
