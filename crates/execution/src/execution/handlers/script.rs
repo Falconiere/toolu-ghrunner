@@ -54,7 +54,8 @@ impl ScriptHandler {
   ///
   /// # Errors
   ///
-  /// Returns `RunnerError::ScriptHandler` if the process cannot be spawned.
+  /// Returns `RunnerError::ScriptHandler` for an invalid/unavailable shell,
+  /// script-file errors, or a process that cannot be spawned or waited on.
   pub async fn execute(
     &self,
     params: &ScriptParams<'_>,
@@ -65,11 +66,16 @@ impl ScriptHandler {
       return execute_in_container(container, params, events, stdout_tx).await;
     }
 
-    let shell_name = params.shell.unwrap_or("bash");
-    let script_file = write_script_file(params.script, shell_name, None)?;
+    let shell = super::shell_command::ShellCommand::resolve(
+      params.shell,
+      params.env,
+      params.working_dir,
+      false,
+    )?;
+    let script_file = shell.write_script(params.script, None)?;
     let script_path = script_file.path().to_string_lossy().to_string();
 
-    let mut child = spawn_step_shell(params, shell_name, &script_path).await?;
+    let mut child = spawn_step_shell(params, &shell, &script_path).await?;
 
     let stdout_handle = forward_lines(child.stdout.take(), stdout_tx);
     let stderr_handle = stream_output(
@@ -106,18 +112,23 @@ async fn execute_in_container(
   events: &mpsc::Sender<RunnerEvent>,
   stdout_tx: mpsc::Sender<String>,
 ) -> Result<ScriptOutput, RunnerError> {
-  let shell_name = params.shell.unwrap_or("sh");
-  let script_file = write_script_file(params.script, shell_name, Some(container))?;
+  let shell = super::shell_command::ShellCommand::resolve(
+    params.shell,
+    params.env,
+    params.working_dir,
+    true,
+  )?;
+  let script_file = shell.write_script(params.script, Some(container.temp_dir()))?;
   let script_path = container
     .translator()
     .to_container(script_file.path())
     .to_string_lossy()
     .into_owned();
-  let (program, args) = build_shell_args(shell_name, &script_path);
+  let args = shell.args(&script_path)?;
   let conclusion = container
     .execute(
       &ContainerExec {
-        program: Path::new(program),
+        program: &shell.program,
         args: &args,
         env: params.env,
         working_dir: params.working_dir,
@@ -209,38 +220,17 @@ impl Default for ScriptHandler {
   }
 }
 
-fn write_script_file(
-  script: &str,
-  shell: &str,
-  container: Option<&JobContainer>,
-) -> Result<tempfile::NamedTempFile, RunnerError> {
-  let suffix = match shell {
-    "python" | "python3" => ".py",
-    "pwsh" | "powershell" => ".ps1",
-    _ => ".sh",
-  };
-  let mut builder = tempfile::Builder::new();
-  builder.suffix(suffix);
-  let mut file = match container {
-    Some(container) => builder.tempfile_in(container.temp_dir()),
-    None => builder.tempfile(),
-  }
-  .map_err(|e| RunnerError::ScriptHandler(format!("temp file: {e}")))?;
-  std::io::Write::write_all(&mut file, script.as_bytes())
-    .map_err(|e| RunnerError::ScriptHandler(format!("write script: {e}")))?;
-  Ok(file)
-}
-
 /// Build the shell command for a step script and spawn it, mapping a
 /// spawn failure to a `ScriptHandler` error that names the program and
 /// working directory (a bare `Io` ENOENT is undiagnosable — it names
 /// neither the missing executable nor the missing cwd).
 async fn spawn_step_shell(
   params: &ScriptParams<'_>,
-  shell_name: &str,
+  shell: &super::shell_command::ShellCommand,
   script_path: &str,
 ) -> Result<tokio::process::Child, RunnerError> {
-  let (program, args) = build_shell_args(shell_name, script_path);
+  let args = shell.args(script_path)?;
+  let program = &shell.program;
   let mut cmd = tokio::process::Command::new(program);
   let mut env = params.env.clone();
   crate::execution::step_process_env::apply(&mut env, None);
@@ -260,33 +250,11 @@ async fn spawn_step_shell(
     .await
     .map_err(|e| {
       RunnerError::ScriptHandler(format!(
-        "spawning step shell '{program}' (cwd: {}): {e}",
+        "spawning step shell '{}' (cwd: {}): {e}",
+        program.display(),
         params.working_dir.display()
       ))
     })
-}
-
-fn build_shell_args(shell: &str, script_path: &str) -> (&'static str, Vec<String>) {
-  match shell {
-    "bash" => (
-      "bash",
-      vec![
-        "--noprofile".to_owned(),
-        "--norc".to_owned(),
-        "-e".to_owned(),
-        "-o".to_owned(),
-        "pipefail".to_owned(),
-        script_path.to_owned(),
-      ],
-    ),
-    "sh" => ("sh", vec!["-e".to_owned(), script_path.to_owned()]),
-    "python" | "python3" => ("python3", vec![script_path.to_owned()]),
-    "pwsh" => (
-      "pwsh",
-      vec!["-command".to_owned(), format!(". '{script_path}'")],
-    ),
-    _ => ("bash", vec!["-e".to_owned(), script_path.to_owned()]),
-  }
 }
 
 /// Spawn a task that forwards every line read from `reader` as a `Log` event

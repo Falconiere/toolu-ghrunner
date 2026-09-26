@@ -89,6 +89,22 @@ async fn replay(
       "test \"$(pwd -P)\" = \"$(cd \"$RUNNER_TEMP/defaults-71-absolute\" && pwd -P)\"; printf absolute > absolute.marker",
     )?;
   }
+  // Resolved shell executables appear as absolute paths in macOS ps output.
+  // Normalize only that observation; keep captured identities and cwd checks.
+  for step in &mut message.steps {
+    if let Some(entries) = &mut step.inputs.d {
+      for entry in entries {
+        if entry.key.to_string_value() == Some("script")
+          && let Some(script) = &mut entry.value.lit
+        {
+          *script = script.replace(
+            "$(ps -p $$ -o comm= | tr -d '[:space:]')",
+            "$(basename \"$(ps -p $$ -o comm= | tr -d '[:space:]')\")",
+          );
+        }
+      }
+    }
+  }
   let dir = tempfile::tempdir()?;
   let config = RunnerConfig {
     data_dir: dir.path().join("data"),

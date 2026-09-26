@@ -24,5 +24,7 @@ pub mod node_exec;
 pub mod resolve;
 /// Built-in `run:` shell handler.
 pub mod script;
+/// Shared shell command contract and script preparation.
+mod shell_command;
 
 pub use resolve::{HandlerKind, resolve_handler};

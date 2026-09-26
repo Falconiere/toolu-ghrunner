@@ -21,6 +21,7 @@ holds the depth-tracked scope/output-evaluation scaffolding).
 | `node.rs` | `build_action_env` | Node.js action env building: `determine_script` picks the pre/main/post entrypoint, `input_env_key` does the `INPUT_*` name transform, and this assembles `GITHUB_ACTION_PATH`/`INPUT_*`/`STATE_*`. |
 | `node_exec.rs` | `execute_node_action` | Spawns `node {script}` for one stage, streams stdout/stderr live, and waits bounded by timeout/cancellation via `step_timeout::wait_bounded`. |
 | `resolve.rs` | `resolve_handler` | Picks which handler runs a step: plugin registry first (by `runs.using` name), then the built-in script/node/docker/composite match. |
+| `shell_command.rs` | `ShellCommand` | Shared default/explicit shell resolution, argv templates, script extensions and PowerShell fixups. |
 | `script.rs` | `ScriptHandler` | Spawns a `run:` step's shell script, streams stdout/stderr live, and waits bounded by timeout/cancellation; also hosts the `stream_output`/`forward_lines`/`bounded_drain` helpers shared with `node_exec`. |
 
 When you add a file here, add its row above so the index stays current. No
