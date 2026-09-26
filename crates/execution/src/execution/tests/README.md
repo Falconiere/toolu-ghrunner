@@ -11,3 +11,4 @@
 | `step_timeout.rs` | Checks stalled action resolution against a parent deadline and cancellation. |
 | `job_cancellation.rs` | Real cleanup processes share one cancellation deadline and are reaped on expiry. |
 | `composite_working_directory.rs` | Issue 81 captured-job replay through real Bash, per-step cwd, nested defaults and failure cleanup. |
+| `docker_action_lifecycle.rs` | Real-Docker network and cleanup cases included by the opt-in `docker_action_linux_test` integration target. |

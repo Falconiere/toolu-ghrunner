@@ -19,9 +19,10 @@ pub(super) async fn run_docker_action(
   cache_key: Option<&str>,
 ) -> Result<ActionOutcome, RunnerError> {
   if !cfg!(target_os = "linux") {
-    return Err(RunnerError::Docker(
-      "Container actions are only supported on Linux".to_owned(),
-    ));
+    return Err(RunnerError::Docker(format!(
+      "Container actions are only supported on Linux (current host: {})",
+      shared::platform::runner_os()
+    )));
   }
   let (runtime, image) = prepare(&s, ctx, cache_key).await?;
   emit_log(
@@ -168,6 +169,8 @@ async fn run_pre(
 
 async fn emit_pre_event(events: &tokio::sync::mpsc::Sender<RunnerEvent>, event: RunnerEvent) {
   if events.send(event).await.is_err() {
+    // The receiver was dropped or explicitly closed. A synthetic completion
+    // cannot enter that channel either; preserve the action cleanup path.
     tracing::warn!("Docker pre-stage event receiver dropped; continuing");
   }
 }

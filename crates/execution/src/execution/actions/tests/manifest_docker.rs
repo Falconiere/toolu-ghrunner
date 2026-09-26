@@ -57,7 +57,8 @@ fn preserves_docker_stage_and_argument_contract() -> Result<(), Box<dyn std::err
     "/../toolu-runner/tests/fixtures/job_container_message.json"
   )))?;
   let step = job.steps.first().ok_or("captured job has no steps")?;
-  let ctx = crate::execution::context::ExecutionContext::new_for_test();
+  let mut ctx = crate::execution::context::ExecutionContext::new_for_test();
+  ctx.set_env("PATH", "/probe");
   let config = shared::RunnerConfig::default();
   let action_dir = std::path::Path::new(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -104,6 +105,7 @@ fn preserves_docker_stage_and_argument_contract() -> Result<(), Box<dyn std::err
       ])
     );
     assert_eq!(env.get("INPUT_MARKER"), Some(&action.name));
+    assert_eq!(env.get("PATH").map(String::as_str), Some("/probe"));
     assert_eq!(
       env.get("DEFAULT_ONLY").map(String::as_str),
       Some("manifest-default")
