@@ -49,6 +49,8 @@ pub struct CompositeStep {
   pub run: Option<String>,
   /// Shell to run the script under.
   pub shell: Option<String>,
+  /// Working directory expression, resolved relative to the job workspace.
+  pub working_directory: Option<String>,
   /// `KEY=VALUE` environment entries for the step.
   pub env: HashMap<String, String>,
   /// `if:` expression gating whether the step runs.
@@ -230,6 +232,8 @@ struct RawCompositeStep {
   name: Option<String>,
   run: Option<String>,
   shell: Option<String>,
+  #[serde(rename = "working-directory")]
+  working_directory: Option<String>,
   #[serde(default)]
   env: HashMap<String, String>,
   #[serde(rename = "if")]
@@ -252,6 +256,7 @@ fn parse_composite_steps(raw: Option<&Vec<RawCompositeStep>>) -> Vec<CompositeSt
       name: s.name.clone(),
       run: s.run.clone(),
       shell: s.shell.clone(),
+      working_directory: s.working_directory.clone(),
       env: s.env.clone(),
       condition: s.condition.clone(),
       uses: s.uses.clone(),

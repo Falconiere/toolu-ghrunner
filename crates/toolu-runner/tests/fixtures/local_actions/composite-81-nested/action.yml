@@ -1,0 +1,17 @@
+name: Nested working directory scope
+inputs:
+  directory:
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      working-directory: ${{ inputs.directory }}
+      run: pwd -P > nested.pwd
+    - shell: bash
+      run: pwd -P > nested-root.pwd
+    - shell: bash
+      working-directory: ${{ env.ACTION_PATH }}
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+      run: pwd -P > action.pwd

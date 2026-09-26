@@ -1,0 +1,21 @@
+name: Continued directory failure
+outputs:
+  result:
+    value: ${{ steps.bad.outcome }}/${{ steps.bad.conclusion }}/${{ steps.ordinary.conclusion }}
+runs:
+  using: composite
+  steps:
+    - id: bad
+      continue-on-error: true
+      shell: bash
+      working-directory: missing-directory-81
+      run: echo should-not-run > unexpected.marker
+    - id: ordinary
+      shell: bash
+      run: echo ordinary >> cleanup.marker
+    - shell: bash
+      if: failure()
+      run: echo failure >> cleanup.marker
+    - shell: bash
+      if: always()
+      run: echo always >> cleanup.marker
