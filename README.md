@@ -752,3 +752,29 @@ propagation of the last native-command exit code. These rules also apply to
 composite steps and container execution. Windows shells are outside the current
 support scope. See [measured shell coverage](docs/test-coverage.md#shell-templates-80)
 for verified lanes and remaining reference/backend evidence.
+
+### Problem matchers
+
+`::add-matcher::<file.json>` registers GitHub Actions problem matchers for the
+current job. Registrations persist into later steps and nested actions.
+`::remove-matcher owner=<owner>::` removes an owner case-insensitively; the file
+form `::remove-matcher::<file.json>` removes all owners listed in that document.
+Adding an existing owner replaces it atomically. Shell, Node and composite
+stdout/stderr are matched, preserving their original log text. Annotations use
+the existing masked per-step reporting path; an error-severity match alone does
+not change the process conclusion. Invalid matcher commands fail the step.
+
+Matchers support capture fields, default severity, `fromPath` and multiline
+final-pattern `loop`. Relative matcher-file paths use the job workspace.
+Relative diagnostic paths use the parent of `fromPath` and then the workspace,
+independently of the process working directory. File links require an existing
+file under a checkout whose `.git/config` identifies the workflow repository.
+Partial multiline state is isolated per process stream; registrations are job-wide.
+
+The regex engine supports Rust `regex` syntax, not unrestricted .NET regex:
+lookaround and backreferences are rejected explicitly. Limits are 1 MiB per JSON
+file, 64 owners, 32 patterns per owner, 16 KiB regex source and 256 KiB compiled
+regex per pattern. Lines over 64 KiB remain in logs but skip matching and reset
+partial state, with one warning per process. These bounds protect execution from
+pathological patterns. Live GitHub/GHES UI and pinned reference-runner parity
+remain **unverified**; see [test coverage](docs/test-coverage.md).

@@ -12,7 +12,10 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use shared::{AnnotationLevel, RunnerEvent};
+use shared::{AnnotationLevel, LogStream, RunnerEvent};
+
+#[path = "matcher_dispatch.rs"]
+mod matcher_dispatch;
 use tokio::sync::mpsc;
 
 use super::command_parser::{WorkflowCommand, parse_command};
@@ -59,6 +62,11 @@ pub struct CommandDispatcher {
   /// run-local map so last-writer-wins ordering is respected and stale
   /// outputs from a reused step id do not leak.
   set_outputs: Vec<(String, String)>,
+  matcher_stdout: super::problem_matcher_state::MatcherState,
+  matcher_stderr: super::problem_matcher_state::MatcherState,
+  output_stream: LogStream,
+  failed: bool,
+  long_line_warned: bool,
 }
 
 impl CommandDispatcher {
@@ -83,6 +91,11 @@ impl CommandDispatcher {
       group_depth: 0,
       pending: Vec::new(),
       set_outputs: Vec::new(),
+      matcher_stdout: super::problem_matcher_state::MatcherState::default(),
+      matcher_stderr: super::problem_matcher_state::MatcherState::default(),
+      output_stream: LogStream::Stdout,
+      failed: false,
+      long_line_warned: false,
     }
   }
 
@@ -93,17 +106,28 @@ impl CommandDispatcher {
   /// props and data `%XX`-unescaped, then applied to `ctx`. Plain lines and
   /// lines seen while `stop-commands` is active return `PassThrough`.
   pub fn on_stdout_line(&mut self, line: &str, ctx: &mut ExecutionContext) -> LineDisposition {
+    self.on_output_line(line, LogStream::Stdout, ctx)
+  }
+
+  /// Dispatch commands and match diagnostics on either process output stream.
+  pub(crate) fn on_output_line(
+    &mut self,
+    line: &str,
+    stream: LogStream,
+    ctx: &mut ExecutionContext,
+  ) -> LineDisposition {
+    self.output_stream = stream;
     // While suspended, only the exact resume token re-enables processing.
     if let Some(token) = self.stop_token.as_deref() {
       if is_resume_marker(line, token) {
         self.stop_token = None;
         return LineDisposition::Consumed;
       }
-      return LineDisposition::PassThrough(line.to_owned());
+      return self.match_output(line, ctx);
     }
 
     let Some(command) = parse_command(line) else {
-      return LineDisposition::PassThrough(line.to_owned());
+      return self.match_output(line, ctx);
     };
 
     if self.echo_on {
@@ -131,7 +155,7 @@ impl CommandDispatcher {
   /// The `set-output` values applied during this run, in emission order.
   /// The caller merges these so last-writer-wins ordering holds and stale
   /// outputs on a reused step id do not leak.
-  fn take_set_outputs(&mut self) -> Vec<(String, String)> {
+  pub(super) fn take_set_outputs(&mut self) -> Vec<(String, String)> {
     std::mem::take(&mut self.set_outputs)
   }
 
@@ -146,6 +170,10 @@ impl CommandDispatcher {
       WorkflowCommand::SetOutput { name, value } => self.apply_set_output(&name, &value, ctx),
       WorkflowCommand::SaveState { name, value } => self.apply_save_state(&name, &value, ctx),
       WorkflowCommand::AddMask { value } => self.apply_add_mask(&value),
+      WorkflowCommand::AddMatcher { path } => self.add_matcher(&path, ctx),
+      WorkflowCommand::RemoveMatcher { owner, path } => {
+        self.remove_matcher(owner.as_deref(), &path, ctx);
+      },
       // Refused: mutating the runner's live PATH/env from untrusted step stdout
       // re-opens CVE-2020-15228. Warn and apply nothing (no `ctx` mutation).
       WorkflowCommand::AddPath { .. } => {
@@ -278,11 +306,21 @@ impl CommandDispatcher {
   }
 
   fn log_event(&self, line: String) -> RunnerEvent {
+    self.output_log(line, self.output_stream)
+  }
+
+  /// Construct a log retaining the original process stream.
+  pub(super) fn output_log(&self, line: String, stream: LogStream) -> RunnerEvent {
     RunnerEvent::Log {
       step_id: self.log_step_id.clone(),
       line,
-      stream: shared::LogStream::Stdout,
+      stream,
     }
+  }
+
+  /// Whether any matcher command failed during this process invocation.
+  pub(super) fn command_failed(&self) -> bool {
+    self.failed
   }
 }
 
@@ -369,7 +407,7 @@ fn validated_stop_token(token: String, step_id: &str) -> Option<String> {
 /// name (the resume marker would parse as that command) plus `pause-logging`
 /// (a legacy alias). Case-insensitive, matching `ValidateStopToken`.
 fn is_reserved_stop_token(token: &str) -> bool {
-  const RESERVED: [&str; 14] = [
+  const RESERVED: [&str; 16] = [
     "error",
     "warning",
     "notice",
@@ -384,6 +422,8 @@ fn is_reserved_stop_token(token: &str) -> bool {
     "echo",
     "stop-commands",
     "pause-logging",
+    "add-matcher",
+    "remove-matcher",
   ];
   RESERVED.iter().any(|r| token.eq_ignore_ascii_case(r))
 }
@@ -407,14 +447,14 @@ fn is_resume_marker(line: &str, token: &str) -> bool {
 /// `%0D` → `\r`, `%0A` → `\n` (case-insensitive hex). `%3A`/`%2C` are
 /// *property-only* escapes and are left verbatim in data. Unrecognized `%XX`
 /// sequences pass through unchanged.
-fn unescape_data(value: &str) -> String {
+pub(super) fn unescape_data(value: &str) -> String {
   unescape_with(value, decode_data_escape)
 }
 
 /// Unescape command **property** values per `UnescapeProperty`: the data set
 /// plus `%3A` → `:` and `%2C` → `,` (a property value is delimited by `:`/`,`,
 /// so those are escaped on the wire and must be restored here).
-fn unescape_property(value: &str) -> String {
+pub(super) fn unescape_property(value: &str) -> String {
   unescape_with(value, decode_property_escape)
 }
 

@@ -18,7 +18,6 @@ use tokio::sync::mpsc;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
-use super::command_dispatch::stream_dispatch_stdout;
 pub use super::composite_env::{CompositeParams, CompositeResult};
 use super::composite_env::{build_step_env, create_file_command_files, process_file_commands};
 use super::composite_expr::{
@@ -28,6 +27,7 @@ use super::composite_shell::{ShellScriptParams, run_shell_script};
 use super::composite_uses::{NestedUsesParams, run_nested_uses_step};
 use super::context::ExecutionContext;
 use super::depth_tracker::DepthTracker;
+use super::process_dispatch::{dispatcher, stream_process};
 
 /// Execute a composite action's steps sequentially.
 ///
@@ -358,27 +358,28 @@ async fn execute_composite_script(
     cancel: &cancel,
   };
   let (stdout_tx, mut stdout_rx) = mpsc::channel(256);
-  let execute = run_step_shell(
-    &shell_params,
-    container.as_deref(),
-    params.events,
-    stdout_tx,
-  );
-  let dispatch = stream_dispatch_stdout(
-    step_id,
-    params.parent_step_id,
-    Some(step_id),
+  let (process_tx, mut process_rx) = mpsc::channel(256);
+  let commands = dispatcher(step_id, params.parent_step_id, Some(step_id), run.ctx);
+  let execute = async {
+    let result = run_step_shell(&shell_params, container.as_deref(), &process_tx, stdout_tx).await;
+    drop(process_tx);
+    result
+  };
+  let dispatch = stream_process(
+    commands,
     &mut stdout_rx,
+    &mut process_rx,
     run.ctx,
     params.events,
   );
   let (result, stdout_outputs) = tokio::join!(execute, dispatch);
+  let result = result.map(|conclusion| stdout_outputs.conclusion(conclusion));
   run
     .state
     .step_outputs
     .entry(step_id.to_owned())
     .or_default()
-    .extend(stdout_outputs);
+    .extend(stdout_outputs.outputs);
   result
 }
 

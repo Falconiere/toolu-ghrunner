@@ -83,3 +83,17 @@ mod job_environment_tests;
 #[cfg(test)]
 #[path = "execution/tests/job_environment_actions.rs"]
 mod job_environment_actions_tests;
+
+#[cfg(test)]
+#[path = "execution/tests/problem_matcher_replay.rs"]
+mod problem_matcher_replay_tests;
+
+mod problem_matcher;
+mod problem_matcher_model;
+mod problem_matcher_path;
+mod problem_matcher_state;
+mod process_dispatch;
+
+#[cfg(test)]
+#[path = "execution/tests/problem_matcher.rs"]
+mod problem_matcher_tests;

@@ -1012,3 +1012,27 @@ runner comparisons are **unverified/skipped**, not inferred from replay and not
 blocking this delivery. macOS Docker is not applicable (unsupported platform).
 The pinned upstream contract inspected is actions/runner
 `cab9d1c3901e45c7705889c4f88284fdd93f4ae5`; the tests do not claim reference parity.
+
+## Issue #84 — problem matchers
+
+Run `cargo test -p execution problem_matcher` and `./tools/check.sh all`.
+The sibling tests under `crates/execution/src/execution/tests/` use setup-node
+49933ea5288caeca8642d1e84afbd3f7d6820020 definitions with captured TypeScript 5.9.3
+and ESLint 8.57.1 output. `problem_matcher_provenance.md` records exact capture
+commands and normalization. No mocked service success is used.
+
+| Criterion/scenario | Input and production evidence | Expected result |
+| --- | --- | --- |
+| JSON loading, annotation matching; 84-S1 | `problem_matcher` component tests and `problem_matcher_real_tsc_stderr_and_nested_scope`, `problem_matcher_real_eslint_loop_and_remove` | TSC error at src/example.ts:1:7; ESLint warning at src/example.js:1:5 and error at 2:13, assigned to actual report UUID. |
+| Multiline, paths, ANSI; 84-S2 | Captured ESLint loop; `problem_matcher_from_path_ignores_process_cwd`, `problem_matcher_partial_loop_does_not_cross_steps`; colored captured text component test | Loops retain filename, new process state resets, fromPath uses its parent and workspace despite changed cwd. |
+| Lifecycle/invalid/pathological; 84-S3 | Registry tests mutate pinned definitions; `problem_matcher_bad_json_fails_command_step`; bounded long-line component test | Atomic owner replacement, case-insensitive removal, invalid JSON fails step, long lines do not advance state. |
+| Masking/nested actions; 84-S4 | `problem_matcher_masks_real_diagnostic_and_file_removal`, nested TSC replay | Masked diagnostic and parent report UUID; registration persists into nested action. |
+| Gate/platform applicability | Full repository gate and existing github.com `ci` / `ci-macos` jobs | Linux/macOS production replay and workspace regressions; CI link supplied in PR when verified. |
+
+Replay imports the existing sanitized `incoming_contexts_matrix_0.json` acquired
+message, preserving UUID/contextName and map token structure while replacing
+selected probe scripts and action path. Bash executes the real captured output
+files; these tests cover production execution/event wiring, not GitHub-owned
+rendering. Live GitHub.com/GHES service/UI and the official-runner comparison
+lanes are **unverified/skipped** under the orchestrator's delivery scope. No GHES
+version, Docker runtime, or universal .NET regex parity is claimed by these tests.

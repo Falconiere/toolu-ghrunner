@@ -76,3 +76,14 @@ When you add a file here, add its row above so the index stays current. No
 declares `mod bar;` for `src/foo/bar.rs`) and import concrete paths.
 
 | `job_cancellation.rs` | Separate graceful job cancellation from shutdown; share one cleanup deadline and re-evaluate running conditions. |
+
+Problem matcher output support:
+
+| File | Purpose |
+| --- | --- |
+| `problem_matcher.rs` | Job-wide, case-insensitive registration and atomic replacement/removal. |
+| `problem_matcher_model.rs` | Bounded JSON and capture-schema validation, compiled regex definitions. |
+| `problem_matcher_state.rs` | Per-process-stream multiline matching, loops and ANSI removal. |
+| `problem_matcher_path.rs` | Bounded regular-file loading and workflow-checkout path resolution. |
+| `matcher_dispatch.rs` | Matcher command effects and masked annotation emission. |
+| `process_dispatch.rs` | Bounded stdout/stderr event bridge shared by shell, Node and composite stages. |
