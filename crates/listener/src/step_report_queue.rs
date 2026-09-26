@@ -230,7 +230,8 @@ pub(crate) fn build_step_entry(
       conclusion,
       ..
     } => Some(entry_for_completed(step_meta, step_id, *conclusion)),
-    RunnerEvent::JobStarted { .. }
+    RunnerEvent::StepSummary { .. }
+    | RunnerEvent::JobStarted { .. }
     | RunnerEvent::JobCompleted { .. }
     | RunnerEvent::StepSkipped { .. }
     | RunnerEvent::Log { .. }

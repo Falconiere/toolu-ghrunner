@@ -736,3 +736,12 @@ to that list requires proving the value is not a real credential.
   — always-online `run` loop + `install-service` design spec.
 - [docs/toolu/plans/2026-07-14-always-online-run-loop.md](docs/toolu/plans/2026-07-14-always-online-run-loop.md)
   — always-online `run` loop build plan.
+
+### Step summary events (#83)
+
+`RunnerEvent::StepSummary` carries an immutable masked document and a backend
+UUID. The listener masks again and drains its serial Results Service upload
+queue before completion. Unlike log events, summary bodies must never be
+written to diagnostic sinks; journal events contain only the ID and byte size.
+Summary read/size/upload errors do not change the execution conclusion. See
+`docs/step-summaries.md` for verification scope and GHES's skipped status.

@@ -158,6 +158,7 @@ async fn execute(
         | RunnerEvent::StepCompleted { .. }
         | RunnerEvent::StepSkipped { .. }
         | RunnerEvent::LogGroup { .. }
+        | RunnerEvent::StepSummary { .. }
         | RunnerEvent::Annotation { .. } => {},
       }
     }

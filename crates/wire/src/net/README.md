@@ -29,6 +29,7 @@ Higher-level domain wrappers and reporting-only types live in
 | `session.rs` | `create_session` / `delete_session` | HTTP transport for creating and deleting the broker session. |
 | `v1.rs` | `fetch_connection_data` / `fetch_timeline` / `post_timeline_record` | HTTP fetches for GHES V1 service discovery and timeline reporting; pure URL resolvers live in `protocol::v1`. |
 
+| `step_summary.rs` | `upload_step_summary` | Safe bounded summary signed-URL, blob and metadata requests. |
 When you add a file here, add its row above so the index stays current. No
 `mod.rs` barrel — declare submodules from the parent file (`src/foo.rs`
 declares `mod bar;` for `src/foo/bar.rs`) and import concrete paths.

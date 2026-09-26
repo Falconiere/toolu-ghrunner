@@ -71,6 +71,7 @@ not part of it. Workflow YAML parsing/matrix/orchestration lives in the
 - `tests/` — flat sibling test files for execution module internals.
 - `workflow/` — workflow YAML parsing, matrix expansion, orchestration, and reusable-workflow resolution.
 
+| `step_summary.rs` | `collect` | Bounded, masked summary snapshots and non-fatal error annotations. |
 When you add a file here, add its row above so the index stays current. No
 `mod.rs` barrel — declare submodules from the parent file (`src/foo.rs`
 declares `mod bar;` for `src/foo/bar.rs`) and import concrete paths.

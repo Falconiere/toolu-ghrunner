@@ -133,6 +133,21 @@ async fn run_stage_process(
   let commands = dispatcher(&s.step.id, s.log_step_id, output_name, s.ctx);
   let dispatch = stream_process(commands, &mut stdout_rx, &mut process_rx, s.ctx, s.events);
   let (output, stdout_outputs) = tokio::join!(exec, dispatch);
+  // Embedded main stages share their parent's log identity, but each needs
+  // its own summary. Pre/post stages already have distinct timeline IDs.
+  let summary_id = if s.stage == "main" && s.log_step_id != s.step.id {
+    uuid::Uuid::new_v4().to_string()
+  } else {
+    s.log_step_id.to_owned()
+  };
+  super::step_summary::collect(
+    &file_cmds.summary_path,
+    s.log_step_id,
+    &summary_id,
+    s.ctx,
+    s.events,
+  )
+  .await;
   let conclusion = stdout_outputs.conclusion(output?.conclusion);
   let outputs = apply_file_commands_and_merge_outputs(
     &s.step.id,

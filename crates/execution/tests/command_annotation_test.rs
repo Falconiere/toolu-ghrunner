@@ -84,7 +84,8 @@ async fn real_shell_commands_keep_ranges_titles_and_masks() -> Result<(), Box<dy
         | RunnerEvent::StepCompleted { .. }
         | RunnerEvent::StepSkipped { .. }
         | RunnerEvent::Log { .. }
-        | RunnerEvent::LogGroup { .. } => {},
+        | RunnerEvent::LogGroup { .. }
+        | RunnerEvent::StepSummary { .. } => {},
       }
     }
     (seen, conclusion)

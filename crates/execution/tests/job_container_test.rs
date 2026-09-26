@@ -82,7 +82,8 @@ async fn job_container_non_linux_fails_before_workspace_or_step() -> TestResult 
       | RunnerEvent::StepCompleted { .. }
       | RunnerEvent::StepSkipped { .. }
       | RunnerEvent::LogGroup { .. }
-      | RunnerEvent::Annotation { .. } => {},
+      | RunnerEvent::Annotation { .. }
+      | RunnerEvent::StepSummary { .. } => {},
     }
   }
   assert_eq!(conclusion, Some(Conclusion::Failure));

@@ -239,6 +239,7 @@ fn replay(source: &str, matrix: bool) -> TestResult {
           | RunnerEvent::StepStarted { .. }
           | RunnerEvent::StepSkipped { .. }
           | RunnerEvent::LogGroup { .. }
+          | RunnerEvent::StepSummary { .. }
           | RunnerEvent::Annotation { .. } => {},
         }
       }

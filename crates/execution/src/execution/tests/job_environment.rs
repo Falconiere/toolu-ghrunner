@@ -126,7 +126,8 @@ fn replay(raw: serde_json::Value, cfg: RunnerConfig) -> Result<Observed, Box<dyn
           | RunnerEvent::StepCompleted { .. }
           | RunnerEvent::StepSkipped { .. }
           | RunnerEvent::LogGroup { .. }
-          | RunnerEvent::Annotation { .. } => {},
+          | RunnerEvent::Annotation { .. }
+          | RunnerEvent::StepSummary { .. } => {},
         }
       }
       Ok::<_, Box<dyn Error>>(observed)

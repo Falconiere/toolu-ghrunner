@@ -45,6 +45,7 @@ mod step_report_queue;
 #[path = "tests/step_report_queue.rs"]
 mod step_report_queue_test;
 mod step_reporter;
+mod step_summary;
 #[cfg(test)]
 #[path = "tests/support.rs"]
 mod support;

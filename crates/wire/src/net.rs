@@ -26,6 +26,8 @@ pub mod register;
 pub mod results_service;
 pub mod run_service;
 pub mod session;
+/// Bounded Results Service step-summary upload.
+pub mod step_summary;
 pub mod v1;
 
 pub use app_manifest::{CallbackServer, convert_manifest_code};

@@ -3815,6 +3815,7 @@ dependencies = [
 name = "wire"
 version = "0.10.0"
 dependencies = [
+ "chrono",
  "futures-util",
  "protocol",
  "reqwest",
