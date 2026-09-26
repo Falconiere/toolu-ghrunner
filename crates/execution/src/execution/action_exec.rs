@@ -24,6 +24,7 @@ use super::step_timeout::StepBounds;
 /// Resolved action ready for execution.
 struct ResolvedStep {
   client: reqwest::Client,
+  image_cache_key: Option<String>,
   action_dir: std::path::PathBuf,
   manifest: super::actions::manifest::ActionDefinition,
 }
@@ -134,6 +135,18 @@ pub(crate) async fn execute_action(
 /// Local `repositoryType: self` references carry their complete `./path`
 /// in `path`, with no repository `name`.
 pub fn build_uses_ref(reference: &ActionStepDefinitionReference) -> String {
+  if reference
+    .ref_type
+    .as_deref()
+    .is_some_and(|kind| kind.eq_ignore_ascii_case("containerRegistry"))
+  {
+    let image = reference.image.as_deref().unwrap_or_default();
+    return if image.starts_with("docker://") {
+      image.to_owned()
+    } else {
+      format!("docker://{image}")
+    };
+  }
   // Acquired local references carry their complete path without a name.
   if reference.repository_type.as_deref() == Some("self") {
     return reference.path.clone().unwrap_or_default();
@@ -175,6 +188,23 @@ async fn resolve_action(
 ) -> Result<ResolvedStep, RunnerError> {
   let uses_full = build_uses_ref(&step.reference);
 
+  if let Some(image) = uses_full.strip_prefix("docker://") {
+    if image.trim().is_empty() {
+      return Err(RunnerError::ActionManifest(
+        "Docker action registry image is empty".to_owned(),
+      ));
+    }
+    let manifest = super::actions::manifest::parse_action_manifest(
+      &serde_json::json!({"runs": {"using": "docker", "image": uses_full}}).to_string(),
+    )?;
+    emit_action_header(run.log_step_id, step, &uses_full, run.events).await;
+    return Ok(ResolvedStep {
+      client: run.http.clone(),
+      image_cache_key: None,
+      action_dir: run.workspace.to_path_buf(),
+      manifest,
+    });
+  }
   let action_ref = parse_action_ref(&uses_full)?;
 
   if action_ref.kind == ActionRefKind::Local {
@@ -199,6 +229,7 @@ async fn resolve_local_action(
 
   Ok(ResolvedStep {
     client: run.http.clone(),
+    image_cache_key: None,
     action_dir,
     manifest,
   })
@@ -228,6 +259,7 @@ async fn resolve_remote_action(
 
   Ok(ResolvedStep {
     client: run.http.clone(),
+    image_cache_key: Some(action_dir.to_string_lossy().into_owned()),
     action_dir,
     manifest,
   })
@@ -250,21 +282,25 @@ async fn dispatch_action(
         outputs: result.outputs,
       })
     },
-    RunsUsing::Docker => Ok(unsupported_docker_action(env).await),
-  }
-}
-
-async fn unsupported_docker_action(env: &ActionEnv<'_>) -> ActionOutcome {
-  emit_log(
-    env.events,
-    env.log_step_id,
-    "  (docker actions not yet supported)",
-  )
-  .await;
-  ActionOutcome {
-    conclusion: Conclusion::Failure,
-    post: None,
-    outputs: std::collections::HashMap::new(),
+    RunsUsing::Docker => {
+      super::docker_action::run_docker_action(
+        super::docker_stage::DockerStage {
+          step,
+          events: env.events,
+          workspace: env.workspace,
+          config: env.config,
+          action_dir: &resolved.action_dir,
+          manifest: &resolved.manifest,
+          bounds: env.bounds,
+          stage: "main",
+          log_step_id: env.log_step_id,
+          inputs: None,
+        },
+        ctx,
+        resolved.image_cache_key.as_deref(),
+      )
+      .await
+    },
   }
 }
 
@@ -455,6 +491,8 @@ fn build_post_step(c: &NodeActionCtx<'_>) -> Option<PostStep> {
     action_dir: c.action_dir.to_path_buf(),
     manifest: c.manifest.clone(),
     major: c.major,
+    docker_image: None,
+    docker_inputs: None,
     condition: c.manifest.runs.post_if.clone(),
   })
 }

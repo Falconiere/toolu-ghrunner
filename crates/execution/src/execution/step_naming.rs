@@ -8,7 +8,7 @@ use super::actions::manifest::ActionDefinition;
 
 /// A registered post-step to execute after main steps complete (LIFO).
 ///
-/// Carries everything needed to re-run the action's `post` node entrypoint in
+/// Carries everything needed to run the action's Node or Docker post entrypoint in
 /// the same step scope at job end. `STATE_*` is *not* snapshotted here — it is
 /// read fresh from the live context at drain time so `post` sees whatever
 /// `main` saved.
@@ -28,6 +28,10 @@ pub struct PostStep {
   pub manifest: ActionDefinition,
   /// Node major version (`runs.using: node20` → 20).
   pub major: u8,
+  /// Prepared Docker image retained across main and deferred post stages.
+  pub docker_image: Option<String>,
+  /// Resolved Docker inputs retained from the originating main invocation.
+  pub docker_inputs: Option<std::collections::HashMap<String, String>>,
   /// Explicit `post-if`, if any; otherwise the effective default applies.
   pub condition: Option<String>,
 }

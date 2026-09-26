@@ -220,6 +220,11 @@ impl ServiceContainers {
   pub(crate) fn context(&self) -> HashMap<String, ExprValue> {
     self.context.clone()
   }
+
+  /// Shared network available to Docker actions, including service-only jobs.
+  pub(crate) fn network(&self) -> &str {
+    &self.network
+  }
 }
 
 impl ServiceContainers {

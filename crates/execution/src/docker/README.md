@@ -5,14 +5,18 @@ connecting, image pull/inspect, container lifecycle, and service-container
 startup, plus host/container path translation.
 
 **What does NOT belong here:** dispatching a job step to a container action —
-that is `execution::handlers::docker` (the `runs.using: docker` handler),
-which calls into this module. Job-level cgroup wiring lives in
+that is `execution::docker_action` and `execution::docker_stage`, which call
+into this module. Job-level cgroup wiring lives in
 `execution::cgroup_join`, not here.
 
 ## Contents
 
 | File | Primary item | Purpose |
 | --- | --- | --- |
+| `action_archive.rs` | `archive_context` | Builds Docker contexts using Docker-compatible `.dockerignore` matching and Dockerfile-specific precedence. |
+| `action_container.rs` | `ActionContainer` | Owns one attached Docker container per action stage, including timeout/cancellation cleanup. |
+| `action_image.rs` | `ActionContainer::prepare_image` | Pulls registry images and builds action Dockerfiles with inspected immutable-cache tags. |
+| `action_mounts.rs` | `ActionMounts`, `action_path_to_host` | Mounts standard `/github` paths and translates action-emitted paths back to host coordinates. |
 | `client.rs` | `DockerClient`, `resolve_docker_host` | Thin async wrapper over bollard: resolve the daemon endpoint from `DOCKER_HOST` (default `unix:///var/run/docker.sock`) and connect, pull/inspect images, create/start/wait/remove/kill containers. |
 | `path_translator.rs` | `PathTranslator` | Maps host paths (workspace, temp) to their `/github/workspace` and `/github/runner_temp` container equivalents and back. |
 | `container_command.rs` | `ContainerCommand` | Connects the local Docker socket and masks daemon diagnostics. |

@@ -5,6 +5,14 @@ use std::collections::HashMap;
 use super::ExecutionContext;
 
 impl ExecutionContext {
+  /// Explicit workflow PATH and additions, excluding the host or job image default.
+  pub(crate) fn docker_action_path(&self) -> (Option<String>, Vec<String>) {
+    (
+      self.visible_env().get("PATH").cloned(),
+      self.path_additions.clone(),
+    )
+  }
+
   /// Merge global env + step env + PATH additions into a full env map.
   pub fn build_step_env(&self, step_env: &HashMap<String, String>) -> HashMap<String, String> {
     let mut base = self.visible_env();

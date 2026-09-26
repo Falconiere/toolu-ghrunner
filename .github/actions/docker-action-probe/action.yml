@@ -1,0 +1,42 @@
+name: Docker action probe
+description: Real container action for argv, environment, command files, state, and mount checks
+inputs:
+  marker:
+    description: Per-invocation marker
+    required: true
+  peer:
+    description: Optional Docker-network peer hostname
+    default: ''
+  peer_port:
+    description: Optional Docker-network peer port
+    default: '8080'
+  post_peer:
+    description: Optional Docker-network peer hostname checked during post
+    default: ''
+  fail_main:
+    description: Exit nonzero after registering post state
+    default: 'false'
+  fail_pre:
+    description: Exit nonzero after registering pre state
+    default: 'false'
+  sleep_main:
+    description: Block until the acceptance test cancels the job
+    default: 'false'
+  fail_post:
+    description: Exit nonzero after recording post state
+    default: 'false'
+runs:
+  using: docker
+  image: Dockerfile
+  pre-entrypoint: /probe/pre.sh
+  entrypoint: /probe/main.sh
+  post-entrypoint: /probe/post.sh
+  pre-if: runner.os == 'Linux'
+  post-if: always()
+  args:
+    - ''
+    - two words
+    - ${{ inputs.marker }}
+  env:
+    DEFAULT_ONLY: manifest-default
+    OVERRIDE_ME: manifest-default

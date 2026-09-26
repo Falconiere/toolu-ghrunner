@@ -116,6 +116,11 @@ fn probe_manifest(probe_dir: &Path) -> ActionDefinition {
     inputs: HashMap::new(),
     outputs: HashMap::new(),
     runs: ActionRuns {
+      args: None,
+      env: HashMap::new(),
+      entrypoint: None,
+      pre_entrypoint: None,
+      post_entrypoint: None,
       using: RunsUsing::Composite,
       main: None,
       pre: None,

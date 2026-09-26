@@ -1,3 +1,5 @@
+//! Parsed action manifests and execution metadata.
+
 use std::collections::HashMap;
 
 use serde::Deserialize;
@@ -78,6 +80,16 @@ pub struct ActionRuns {
   pub post_if: Option<String>,
   /// Docker image reference, for a docker action.
   pub image: Option<String>,
+  /// Explicit container command arguments; absence allows the legacy input fallback.
+  pub args: Option<Vec<String>>,
+  /// Container environment defaults; step environment takes precedence.
+  pub env: HashMap<String, String>,
+  /// Container main entrypoint override.
+  pub entrypoint: Option<String>,
+  /// Container pre-stage entrypoint.
+  pub pre_entrypoint: Option<String>,
+  /// Container post-stage entrypoint.
+  pub post_entrypoint: Option<String>,
   /// The composite action's `steps:` array.
   pub steps: Vec<CompositeStep>,
 }
@@ -128,6 +140,11 @@ pub fn parse_action_manifest(yaml_content: &str) -> Result<ActionDefinition, Run
       pre_if: runs_raw.pre_if,
       post_if: runs_raw.post_if,
       image: runs_raw.image,
+      args: runs_raw.args,
+      env: runs_raw.env,
+      entrypoint: runs_raw.entrypoint,
+      pre_entrypoint: runs_raw.pre_entrypoint,
+      post_entrypoint: runs_raw.post_entrypoint,
       steps,
     },
   })
@@ -220,6 +237,14 @@ struct RawRuns {
   #[serde(rename = "post-if")]
   post_if: Option<String>,
   image: Option<String>,
+  args: Option<Vec<String>>,
+  #[serde(default)]
+  env: HashMap<String, String>,
+  entrypoint: Option<String>,
+  #[serde(rename = "pre-entrypoint")]
+  pre_entrypoint: Option<String>,
+  #[serde(rename = "post-entrypoint")]
+  post_entrypoint: Option<String>,
   #[serde(default)]
   steps: Option<Vec<RawCompositeStep>>,
 }
@@ -260,3 +285,7 @@ fn parse_composite_steps(raw: Option<&Vec<RawCompositeStep>>) -> Vec<CompositeSt
     })
     .collect()
 }
+
+#[cfg(test)]
+#[path = "tests/manifest_docker.rs"]
+mod docker_tests;

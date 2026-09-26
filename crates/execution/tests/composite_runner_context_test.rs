@@ -145,6 +145,11 @@ fn probe_manifest(steps: Vec<CompositeStep>) -> ActionDefinition {
     inputs: HashMap::new(),
     outputs: HashMap::new(),
     runs: ActionRuns {
+      args: None,
+      env: HashMap::new(),
+      entrypoint: None,
+      pre_entrypoint: None,
+      post_entrypoint: None,
       using: RunsUsing::Composite,
       main: None,
       pre: None,

@@ -18,7 +18,7 @@ that is `execution::action_exec` (top-level dispatch) and
 | `downloader.rs` | `download_and_extract_action` | Downloads an action tarball (watermark-cached), extracts it with GitHub's-prefix stripping and a tar-slip guard, and marks the cache complete. |
 | `download_info.rs` | `ActionDownloadContext` | Resolves actions with the acquired Launch service or host-aware REST fallback and validates archive metadata. |
 | `download_info_v1.rs` | `LegacyContext` | Discovers the GHES V1 action-download resource and decodes its response. |
-| `manifest.rs` | `parse_action_manifest` | Parses `action.yml`/`action.yaml` YAML into `ActionDefinition` (inputs, outputs, `runs` — `RunsUsing::Node`/`Composite`/`Docker`, composite `steps:`). |
+| `manifest.rs` | `parse_action_manifest` | Parses `action.yml`/`action.yaml` YAML into `ActionDefinition` (inputs, outputs, `runs` — `RunsUsing::Node`/`Composite`/`Docker`, composite `steps:`, Docker args/env and pre/main/post entrypoints). |
 | `prefetch.rs` | `ActionFetcher` | Shares single-flight fetches between job-start prefetch and step-time execution; completed archives use the `<16-character API-host hash>/<owner>/<repo>/<resolved SHA>` cache path. |
 | `resolver.rs` | `parse_action_ref` | Parses a `uses:` string into an `ActionRef` (remote `owner/repo[/subpath]@ref` or local `./path`), with cache-key/tarball-URL builders and traversal guards. |
 

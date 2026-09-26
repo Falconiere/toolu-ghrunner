@@ -35,6 +35,26 @@ pub(super) fn build_node_env(
     }
   }
 
+  Ok(build_resolved_action_env(
+    (step, &step_inputs),
+    ctx,
+    manifest,
+    action_dir,
+    workspace,
+    config,
+  ))
+}
+
+/// Build action process environment using inputs resolved at invocation time.
+pub(super) fn build_resolved_action_env(
+  invocation: (&ActionStep, &HashMap<String, String>),
+  ctx: &ExecutionContext,
+  manifest: &ActionDefinition,
+  action_dir: &Path,
+  workspace: &Path,
+  config: &RunnerConfig,
+) -> HashMap<String, String> {
+  let (step, step_inputs) = invocation;
   // The step's `save-state` values surface as `STATE_*` to its own
   // pre/main/post stages (keyed by step id), so post can read what main saved.
   let state = ctx.step_state(&step.id);
@@ -45,13 +65,13 @@ pub(super) fn build_node_env(
   );
   env.extend(build_action_env(
     manifest,
-    &step_inputs,
+    step_inputs,
     &action_dir.to_string_lossy(),
     &state,
   ));
 
   apply_runner_paths(&mut env, workspace, config);
-  Ok(env)
+  env
 }
 
 /// Evaluate supplied `with:` inputs once; type-0 values are final literals.

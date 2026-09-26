@@ -1,0 +1,11 @@
+name: Docker action explicit empty args probe
+description: Proves an explicit empty manifest argv overrides with.args
+inputs:
+  marker:
+    description: Per-invocation marker
+    required: true
+runs:
+  using: docker
+  image: Dockerfile
+  entrypoint: /probe/main.sh
+  args: []
