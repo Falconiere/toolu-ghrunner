@@ -160,8 +160,11 @@ pub(crate) fn ordinal_upper(s: &str) -> Vec<u16> {
         return ch;
       }
       let mut chars = ch.to_uppercase();
-      let first = chars.next().unwrap_or(ch);
-      if chars.next().is_some() { ch } else { first }
+      // Ordinal casing uses only a single-scalar mapping, never an expansion.
+      match (chars.next(), chars.next()) {
+        (Some(upper), None) => upper,
+        _ => ch,
+      }
     })
     .collect::<String>()
     .encode_utf16()

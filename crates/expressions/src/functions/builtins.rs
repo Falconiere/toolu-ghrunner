@@ -17,6 +17,7 @@ pub fn call_function(
   args: &[ExprValue],
   ctx: &EvalContext,
 ) -> Result<ExprValue, RunnerError> {
+  // This public entry point also supports callers without an expression AST.
   crate::validation::validate_arity(name, args.len())?;
   match name.to_ascii_lowercase().as_str() {
     "success" => Ok(ExprValue::Bool(ctx.job_status == JobStatus::Success)),
@@ -124,11 +125,6 @@ fn fn_format(args: &[ExprValue]) -> Result<ExprValue, RunnerError> {
 }
 
 fn fn_case(args: &[ExprValue]) -> Result<ExprValue, RunnerError> {
-  if args.len().is_multiple_of(2) {
-    return Err(RunnerError::Expression(
-      "case requires an odd number of arguments".to_owned(),
-    ));
-  }
   for pair in args.chunks_exact(2) {
     match pair.first() {
       Some(ExprValue::Bool(true)) => {
