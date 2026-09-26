@@ -9,8 +9,9 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use super::{
-  ContainerStart, ContainerStartParams, JobOutcome, build_job_context_async, finish_job,
-  prepare_job_workspace, prepared, start_job_container, start_job_services, stop_local_services,
+  ContainerStart, ContainerStartParams, JobOutcome, LocalServices, build_job_context_async,
+  finish_job, prepare_job_workspace, prepared, start_job_container, start_job_services,
+  stop_local_services,
 };
 use crate::docker::service_spec::evaluate_services;
 use crate::execution::container_job::{evaluate_container, finish_container};
@@ -38,21 +39,20 @@ pub(super) async fn run(
   let service_specs = evaluate_services(msg.job_service_containers.as_ref(), &ctx)?;
   let (workspace, workspace_gc) = prepare_job_workspace(config, &msg.job_id, workspace).await?;
   let (http, local) = start_job_services(config, &msg, &mut ctx).await?;
-  let (local, workspace_gc) = match Box::pin(
-    start_job_container(ContainerStartParams {
-      spec: container_spec.as_ref(),
-      services: &service_specs,
-      config,
-      workspace: &workspace,
-      ctx: &mut ctx,
-      cancel: &cancel,
-      local,
-      events: &events,
-      job_id: &msg.job_id,
-      workspace_gc,
-    })
-    .await,
-  )? {
+  let (local, workspace_gc) = match Box::pin(start_job_container(ContainerStartParams {
+    spec: container_spec.as_ref(),
+    services: &service_specs,
+    config,
+    workspace: &workspace,
+    ctx: &mut ctx,
+    cancel: &cancel,
+    local,
+    events: &events,
+    job_id: &msg.job_id,
+    workspace_gc,
+  }))
+  .await?
+  {
     ContainerStart::Continue(local, workspace_gc) => (local, workspace_gc),
     ContainerStart::Finished(teardown) => return Ok(teardown),
   };
@@ -65,15 +65,27 @@ pub(super) async fn run(
     http: &http,
   };
   let body_result = Box::pin(prepared::execute(inputs, &mut ctx)).await;
-  let (conclusion, outputs) = match finish_container(&ctx, body_result, &events).await {
+  finish_execution(&ctx, msg.job_id, body_result, local, &events, workspace_gc).await
+}
+
+/// Remove containers and local services before reporting the final job outcome.
+async fn finish_execution(
+  ctx: &ExecutionContext,
+  job_id: String,
+  body_result: Result<(Conclusion, HashMap<String, String>), RunnerError>,
+  local: LocalServices,
+  events: &mpsc::Sender<RunnerEvent>,
+  workspace_gc: Option<tokio::task::JoinHandle<()>>,
+) -> Result<JobTeardown, RunnerError> {
+  let (conclusion, outputs) = match finish_container(ctx, body_result, events).await {
     Ok(result) => result,
     Err(error) => {
       stop_local_services(local).await;
       return Err(error);
     },
   };
-  let outcome = job_outcome(&ctx, msg.job_id, conclusion, outputs);
-  Ok(finish_job(local, &events, outcome, workspace_gc).await)
+  let outcome = job_outcome(ctx, job_id, conclusion, outputs);
+  Ok(finish_job(local, events, outcome, workspace_gc).await)
 }
 
 /// Preserve shutdown precedence when packaging the completed job's result.
