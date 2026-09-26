@@ -1,0 +1,48 @@
+name: Working directory paths
+inputs:
+  who:
+    default: world
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: mkdir -p literal 'space dir' world output-dir env-dir
+    - shell: bash
+      working-directory: literal
+      run: pwd -P > literal.pwd
+    - shell: bash
+      working-directory: ${{ format('{0}', inputs.who) }}
+      run: pwd -P > input.pwd
+    - shell: bash
+      working-directory: space dir
+      run: pwd -P > spaces.pwd
+    - shell: bash
+      working-directory: ${{ runner.temp }}
+      run: pwd -P > absolute.pwd
+    - id: select
+      shell: bash
+      run: |
+        echo 'directory=output-dir' >> "$GITHUB_OUTPUT"
+        echo 'CWD_FROM_ENV=env-dir' >> "$GITHUB_ENV"
+    - shell: bash
+      working-directory: ${{ steps.select.outputs.directory }}
+      run: pwd -P > output.pwd
+    - shell: bash
+      working-directory: ${{ env.CWD_FROM_ENV }}
+      run: pwd -P > env.pwd
+    - shell: bash
+      working-directory: ${{ env.LOCAL_DIRECTORY }}
+      env:
+        LOCAL_DIRECTORY: space dir
+      run: pwd -P > local-env.pwd
+    - shell: bash
+      working-directory: ''
+      run: pwd -P > empty.pwd
+    - shell: bash
+      working-directory: ${{ inputs.absent }}
+      run: pwd -P > missing-input.pwd
+    - shell: bash
+      run: pwd -P > absent.pwd
+    - shell: bash
+      working-directory: literal/..
+      run: pwd -P > parent.pwd

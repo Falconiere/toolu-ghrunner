@@ -1,0 +1,20 @@
+name: Malformed directory keeps cleanup
+outputs:
+  result:
+    value: ${{ steps.bad.outcome }}/${{ steps.bad.conclusion }}/${{ steps.ordinary.conclusion }}
+runs:
+  using: composite
+  steps:
+    - id: bad
+      shell: bash
+      working-directory: "${{ format('broken' }}"
+      run: echo should-not-run > unexpected.marker
+    - id: ordinary
+      shell: bash
+      run: echo ordinary > unexpected-success.marker
+    - shell: bash
+      if: failure()
+      run: echo failure >> cleanup.marker
+    - shell: bash
+      if: always()
+      run: echo always >> cleanup.marker

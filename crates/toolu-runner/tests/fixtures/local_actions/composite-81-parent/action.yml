@@ -1,0 +1,25 @@
+name: Parent working directory scope
+inputs:
+  who:
+    default: world
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: mkdir -p outer inner second
+    - shell: bash
+      working-directory: outer
+      run: pwd -P > outer.pwd
+    - uses: ./.github/actions/composite-81-nested
+      with:
+        directory: inner
+    - uses: ./.github/actions/composite-81-nested
+      with:
+        directory: second
+    - shell: bash
+      run: pwd -P > parent-restored.pwd
+    - shell: bash
+      working-directory: ${{ env.ACTION_PATH }}
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+      run: pwd -P > action.pwd
