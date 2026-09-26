@@ -263,14 +263,14 @@ printf verified > docker-verify
     "{events:#?}"
   );
   assert_eq!(
-    std::fs::read_to_string(workspace.join("docker-verify"))?,
+    tokio::fs::read_to_string(workspace.join("docker-verify")).await?,
     "verified"
   );
   assert_eq!(
-    std::fs::read_to_string(workspace.join("docker-summary-B.txt"))?,
+    tokio::fs::read_to_string(workspace.join("docker-summary-B.txt")).await?,
     "summary-B\n"
   );
-  let stages = std::fs::read_to_string(workspace.join("docker-stages.txt"))?;
+  let stages = tokio::fs::read_to_string(workspace.join("docker-stages.txt")).await?;
   for expected in [
     "A:main",
     "argc=3",
@@ -377,18 +377,18 @@ printf composite-verified > composite-registry-verified
     "{events:#?}"
   );
   assert_eq!(
-    std::fs::read_to_string(workspace.join("registry-marker"))?,
+    tokio::fs::read_to_string(workspace.join("registry-marker")).await?,
     "registry-ok"
   );
   assert_eq!(
-    std::fs::read_to_string(workspace.join("composite-registry-marker"))?,
+    tokio::fs::read_to_string(workspace.join("composite-registry-marker")).await?,
     "composite-registry-ok"
   );
   assert_eq!(
-    std::fs::read_to_string(workspace.join("composite-registry-verified"))?,
+    tokio::fs::read_to_string(workspace.join("composite-registry-verified")).await?,
     "composite-verified"
   );
-  let stages = std::fs::read_to_string(workspace.join("docker-stages.txt"))?;
+  let stages = tokio::fs::read_to_string(workspace.join("docker-stages.txt")).await?;
   assert!(
     stages.contains("ABSENT:main\nargc=3\narg0=<one>\narg1=<>\narg2=<two words>"),
     "{stages}"
@@ -436,7 +436,7 @@ while test ! -f docker-peer-removed; do sleep 0.1; done
   let mut receiver = runner.execute_job(job, CancellationToken::new());
   let network_file = workspace.join("docker-network-name");
   wait_for_file(&network_file).await?;
-  let network = std::fs::read_to_string(&network_file)?;
+  let network = tokio::fs::read_to_string(&network_file).await?;
   let created = docker
     .create_container(
       Some(CreateContainerOptions {
@@ -462,7 +462,7 @@ while test ! -f docker-peer-removed; do sleep 0.1; done
     docker
       .start_container(&created.id, None::<StartContainerOptions>)
       .await?;
-    std::fs::write(workspace.join("docker-peer-ready"), "ready")?;
+    tokio::fs::write(workspace.join("docker-peer-ready"), "ready").await?;
     wait_for_file(&workspace.join("docker-peer-remove")).await
   }
   .await;
@@ -475,8 +475,8 @@ while test ! -f docker-peer-removed; do sleep 0.1; done
       }),
     )
     .await;
-  let ready_signal = std::fs::write(workspace.join("docker-peer-ready"), "ready");
-  let removed_signal = std::fs::write(workspace.join("docker-peer-removed"), "removed");
+  let ready_signal = tokio::fs::write(workspace.join("docker-peer-ready"), "ready").await;
+  let removed_signal = tokio::fs::write(workspace.join("docker-peer-removed"), "removed").await;
   peer_scenario?;
   peer_cleanup?;
   ready_signal?;
@@ -545,11 +545,11 @@ printf service-host-verified > service-host-verified
     "{events:#?}"
   );
   assert_eq!(
-    std::fs::read_to_string(workspace.join("service-host-verified"))?,
+    tokio::fs::read_to_string(workspace.join("service-host-verified")).await?,
     "service-host-verified"
   );
   assert_eq!(
-    std::fs::read_to_string(workspace.join("docker-network-post.txt"))?,
+    tokio::fs::read_to_string(workspace.join("docker-network-post.txt")).await?,
     "SERVICE-post-peer-ok"
   );
   let (service_id, service_network) = events
@@ -636,7 +636,7 @@ async fn entrypoint_failure_and_cancellation_fail_visibly_without_leaking_contai
       Some(Conclusion::Failure),
       "{main_fail_events:#?}"
     );
-    let stages = std::fs::read_to_string(main_fail_workspace.join("docker-stages.txt"))?;
+    let stages = tokio::fs::read_to_string(main_fail_workspace.join("docker-stages.txt")).await?;
     let post = stages
       .lines()
       .find(|line| line.starts_with("MAINFAIL:post:"))
