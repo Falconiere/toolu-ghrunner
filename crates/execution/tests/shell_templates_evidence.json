@@ -1,0 +1,77 @@
+{
+  "issue": 80,
+  "reference_source": "cab9d1c3901e45c7705889c4f88284fdd93f4ae5",
+  "fixtures": {
+    "crates/execution/tests/incoming_contexts_matrix_0.json": "3e1728e44d095f07a07b1d54bfa7bbc2ab75b4866cb1a57e032106061c83e1b5",
+    "crates/toolu-runner/tests/fixtures/job_container_message.json": "87b385dc27cee5dc9d1fa91b5137ef70bb8789085b89196d72289b313b845a34"
+  },
+  "scenarios": {
+    "80-S1": {
+      "expected": "Host bash when executable else sh, both -e; container sh.",
+      "command": "cargo test -p execution --test shell_templates_test; bash scripts/test/shell_templates_linux.sh",
+      "files": [
+        "crates/execution/tests/shell_templates_test.rs",
+        "crates/execution/tests/shell_templates_container_test.rs"
+      ]
+    },
+    "80-S2": {
+      "expected": "Default false | true succeeds; explicit bash fails.",
+      "command": "cargo test -p execution --test shell_templates_replay_test",
+      "files": [
+        "crates/execution/tests/shell_templates_replay_test.rs"
+      ]
+    },
+    "80-S3": {
+      "expected": "Perl/custom commands preserve quoted arguments and script paths; unknown/missing/invalid shells fail without running body.",
+      "command": "TMPDIR='/tmp/toolu shell80 temp' cargo test -p execution --test shell_templates_test",
+      "files": [
+        "crates/execution/tests/shell_templates_test.rs"
+      ]
+    },
+    "80-S4": {
+      "expected": "python uses .py; pwsh uses .ps1, terminating errors and native exit propagation; missing interpreters fail.",
+      "command": "cargo test -p execution --test shell_templates_test -- --include-ignored",
+      "files": [
+        "crates/execution/tests/shell_templates_test.rs"
+      ]
+    },
+    "80-S5": {
+      "expected": "Captured-message defaults, explicit overrides and composite/container execution share the shell contract.",
+      "command": "cargo test -p execution --test shell_templates_replay_test; bash scripts/test/shell_templates_linux.sh",
+      "files": [
+        "crates/execution/tests/shell_templates_replay_test.rs",
+        "crates/execution/tests/shell_templates_container_test.rs"
+      ]
+    }
+  },
+  "lanes": {
+    "macos-arm64-host": {
+      "status": "passed",
+      "evidence": "9/9 real process tests, including Python 3 via isolated python symlink and official PowerShell 7.4.13 osx-arm64 release; TMPDIR=/tmp/toolu shell80 temp. 4/4 captured GitHub.com replay tests."
+    },
+    "linux-arm64-container": {
+      "status": "passed",
+      "evidence": "bash scripts/test/shell_templates_linux.sh: 5/5 tests passed (0 ignored), real Colima Docker daemon, Rust 1.94.1 Linux ARM64. Captured container image and mounted runner-temp paths exercised."
+    },
+    "linux-host": {
+      "status": "passed",
+      "evidence": "Linux ARM64 Rust 1.94.1 container: 7/7 ordinary real host-process tests and 4/4 captured-message replay tests passed via shell_templates_linux.sh. Python/pwsh ignored here and explicitly verified separately on macOS; Linux interpreter lane remains unverified until branch CI."
+    },
+    "pinned-reference": {
+      "status": "unverified",
+      "evidence": "Contract compared to pinned source. No dedicated v2.337.0 runner available to this issue; hosted workflow reference probes do not establish exact binary-version parity."
+    },
+    "github-com-live-toolu": {
+      "status": "unverified",
+      "evidence": "Production replay uses real sanitized GitHub.com captures. No issue-80 runner registered for acquisition on this branch."
+    },
+    "ghes": {
+      "status": "unverified",
+      "evidence": "No GHES server or credentials supplied; same host-shell implementation but acquisition not exercised."
+    },
+    "windows": {
+      "status": "not-applicable",
+      "evidence": "Explicitly outside epic scope."
+    }
+  }
+}

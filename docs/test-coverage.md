@@ -856,3 +856,28 @@ exact output assertions, and checkout cleanup all succeeded. The pinned ARM64
 release archive SHA-256 is
 `5a2cd92908a93d7276a194e1de6008099f3e7946f3f8e14aa7a1a7b4a31fdec2`.
 Hosted Linux is supplementary execution evidence, not a pinned-reference claim.
+
+## Shell templates (#80)
+
+Contract: actions/runner `cab9d1c3901e45c7705889c4f88284fdd93f4ae5`
+(v2.337.0), `ScriptHandler.cs` / `ScriptHandlerHelpers.cs`.
+
+| Criteria / scenarios | Real input and expected observable | Runner |
+| --- | --- | --- |
+| AC-1, 80-S1/S2 | Real bash/sh isolated PATH: default `false \| true` succeeds, explicit bash fails; no bash/nonexecutable bash selects sh | `cargo test -p execution --test shell_templates_test` |
+| AC-2, 80-S3 | Perl and custom bash print exact quoted arguments; repeated placeholder and space paths survive; invalid template/unknown shell/missing executable run no marker | same host test |
+| AC-3, 80-S4 | Installed python executes `.py` and exits 7; pwsh executes `.ps1`, propagates native exit 7 and stops on Write-Error | `cargo test -p execution --test shell_templates_test -- --ignored` (requires both interpreters) |
+| AC-4, 80-S5 | Captured GitHub.com message replay through Runner proves job defaults, explicit override, composite scope and visible failure | `cargo test -p execution --test shell_templates_replay_test` |
+| AC-1/AC-4, 80-S1/S5 | Captured Linux container replay proves default sh, explicit bash, translated temp paths and composite custom shell | `bash scripts/test/shell_templates_linux.sh` (real Docker) |
+| AC-5 | Complete repository gate, prose and traceable evidence | `./tools/check.sh all`; `python3 scripts/test/shell_templates_evidence_check.py` |
+
+Replay uses `incoming_contexts_matrix_0.json` (GitHub.com run 36038637634,
+existing #68 sanitized capture) and `job_container_message.json` (existing #73
+capture and adjacent provenance document). Tests retain captured IDs and token
+shapes, substituting labelled script/default/shell probe values. Generated local
+composite manifests execute real processes; they are not acquired-message claims.
+The evidence artifact `crates/execution/tests/shell_templates_evidence.json`
+records actual platform results and unresolved lanes. Host semantics apply to
+Linux/macOS and GitHub.com/GHES. Job containers are Linux-only. An ignored test,
+missing interpreter, unrun live workflow, or absent pinned reference runner is
+unverified and cannot establish acceptance parity.
