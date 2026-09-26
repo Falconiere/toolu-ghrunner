@@ -184,8 +184,12 @@ fn build_nested_step(
     .clone()
     .unwrap_or_else(|| format!("__composite_uses_{idx}"));
 
-  let action_ref = super::actions::resolver::parse_action_ref(uses)?;
-  let (name, git_ref) = nested_ref_parts(&action_ref);
+  let (name, git_ref) = if uses.starts_with("docker://") {
+    (uses.to_owned(), None)
+  } else {
+    let action_ref = super::actions::resolver::parse_action_ref(uses)?;
+    nested_ref_parts(&action_ref)
+  };
 
   let inputs_token = build_inputs_token(&step.with, inputs, ctx)?;
 

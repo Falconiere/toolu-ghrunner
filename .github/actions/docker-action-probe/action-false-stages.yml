@@ -1,0 +1,21 @@
+name: Docker action false stage conditions probe
+description: Proves false pre/post conditions skip only those stages
+inputs:
+  marker:
+    description: Per-invocation marker
+    required: true
+runs:
+  using: docker
+  image: Dockerfile
+  pre-entrypoint: /probe/pre.sh
+  entrypoint: /probe/main.sh
+  post-entrypoint: /probe/post.sh
+  pre-if: false
+  post-if: false
+  args:
+    - ''
+    - two words
+    - ${{ inputs.marker }}
+  env:
+    DEFAULT_ONLY: manifest-default
+    OVERRIDE_ME: manifest-default

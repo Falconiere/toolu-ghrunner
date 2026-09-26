@@ -298,8 +298,12 @@ Handler priority: **plugin → script → node → docker → composite**.
 - `node` / `node_exec` — JavaScript actions (e.g.
   `actions/checkout@v4`). Auto-downloads Node.js into
   `data_dir/_node/<version>` on first use.
-- `docker` — Docker container actions via bollard. Mounts the
-  workspace and streams container logs.
+- `docker_action` / `docker_stage` — Linux container action preparation,
+  pre/main/post dispatch and normal file/workflow commands. Registry references
+  bypass repository resolution; remote Dockerfiles use revision-qualified image
+  caching. `docker::action_container` owns each stage container and removes it
+  after every result; actions borrow the job network without owning its teardown.
+  `PostStep` retains the prepared image and scoped action identity through cleanup.
 - `composite` — composite actions (`runs.using: composite`). Evaluates
   each inner condition and supported field through the expression engine,
   then dispatches shell or nested `uses:` steps. A failed inner step updates

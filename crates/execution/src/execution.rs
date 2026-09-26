@@ -32,6 +32,8 @@ pub mod context;
 pub(crate) mod context_build;
 /// Tracks composite-action nesting depth against `MAX_COMPOSITE_DEPTH`.
 pub mod depth_tracker;
+mod docker_action;
+mod docker_stage;
 /// Parses the `GITHUB_ENV` / `GITHUB_PATH` / `GITHUB_OUTPUT` / `GITHUB_STATE` file commands.
 pub mod file_commands;
 /// Handler dispatch by `runs.using` (plugin → script → node → docker → composite).
