@@ -16,6 +16,9 @@ on:
 permissions:
   contents: read
 
+# All nginx pins below use the real nginx:1.27-alpine manifest observed on 2026-09-25.
+# Refresh with `docker buildx imagetools inspect nginx:1.27-alpine`, update all
+# three digest references together, then rerun both toolu and reference lanes.
 jobs:
   host:
     strategy:
