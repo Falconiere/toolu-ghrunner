@@ -7,9 +7,7 @@ use std::time::Duration;
 use execution::Runner;
 use execution::execution::action_exec::build_uses_ref;
 use execution::execution::actions::resolver::resolve_action_refs;
-#[cfg(target_os = "linux")]
 use shared::MaskerRedactor;
-#[cfg(target_os = "linux")]
 use shared::startup::SecretRedactor;
 use shared::{
   ActionStep, AgentJobRequestMessage, Conclusion, DictEntry, RunnerConfig, RunnerEvent,
@@ -269,6 +267,7 @@ async fn docker_registry_action_rejects_non_linux_without_running_host_code() ->
   job.steps = vec![rejection_step()];
   let workspace = config.workspace_root.join(&job.job_id);
   let runner = Runner::new(config, Arc::new(Mutex::new(SecretMasker::new())));
+  let redactor = MaskerRedactor(Arc::clone(runner.masker()));
   let mut events = runner.execute_job(job, CancellationToken::new());
   let mut conclusion = None;
   let mut logs = Vec::new();
@@ -277,7 +276,7 @@ async fn docker_registry_action_rejects_non_linux_without_running_host_code() ->
       RunnerEvent::JobCompleted {
         conclusion: result, ..
       } => conclusion = Some(result),
-      RunnerEvent::Log { line, .. } => logs.push(line),
+      RunnerEvent::Log { line, .. } => logs.push(redactor.redact(&line)),
       RunnerEvent::JobStarted { .. }
       | RunnerEvent::StepStarted { .. }
       | RunnerEvent::StepCompleted { .. }

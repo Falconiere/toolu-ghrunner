@@ -38,6 +38,9 @@ The local Linux carrier can supply evidence for the production engine on Linux
 ARM64. It defaults to `rust:1.94.1`; set
 `TOOLU_DOCKER_ACTIONS_TEST_IMAGE=toolu-72-gate-tools:local` to reuse the local
 gate-tools image.
+On a resource-constrained Docker VM, set `TOOLU_DOCKER_ACTIONS_BUILD_JOBS=1`,
+`CARGO_INCREMENTAL=0`, and `RUST_TEST_THREADS=1` to serialize compilation and
+tests without accumulating incremental build data. Every gate layer still runs.
 `scripts/test/docker_actions_linux.sh remote` separately replays the pushed
 action through the production GitHub downloader. It requires a 40-character
 `TOOLU_DOCKER_ACTIONS_REMOTE_REF` and an authorized
