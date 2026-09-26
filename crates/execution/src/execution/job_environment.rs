@@ -4,26 +4,33 @@ use std::collections::HashMap;
 
 use expressions::evaluator::EvalContext;
 use expressions::types::ExprValue;
+use serde::Deserialize;
 use shared::{RunnerError, TemplateToken};
 
 use super::context::ExecutionContext;
 
 /// Evaluate each complete mapping against the preceding layer's snapshot.
 pub(super) fn apply_job_environment(
-  layers: &[TemplateToken],
+  layers: &[serde_json::Value],
   ctx: &mut ExecutionContext,
 ) -> Result<(), RunnerError> {
   for (index, layer) in layers.iter().enumerate() {
-    let values = evaluate_layer(layer, ctx).map_err(|error| {
-      // Expression errors may contain source literals, including secrets. Keep
-      // the setup diagnostic useful without copying the untrusted expression.
-      let reason = if matches!(error, RunnerError::Protocol(_)) {
-        "expected a mapping with scalar keys and values"
-      } else {
-        "expression evaluation failed"
-      };
-      RunnerError::Expression(format!("environmentVariables layer {index}: {reason}"))
-    })?;
+    // Decode inside setup so malformed wire payloads still produce a reported
+    // job failure, rather than failing acquisition-message deserialization.
+    let values = TemplateToken::deserialize(layer)
+      // Serde diagnostics may embed the rejected secret-bearing wire value.
+      .map_err(|_sensitive_wire_error| invalid_token())
+      .and_then(|token| evaluate_layer(&token, ctx))
+      .map_err(|error| {
+        // Expression errors may contain source literals, including secrets. Keep
+        // the setup diagnostic useful without copying the untrusted expression.
+        let reason = if matches!(error, RunnerError::Protocol(_)) {
+          "expected a mapping with scalar keys and values"
+        } else {
+          "expression evaluation failed"
+        };
+        RunnerError::Expression(format!("environmentVariables layer {index}: {reason}"))
+      })?;
     for (key, value) in values {
       ctx.set_env(&key, &value);
     }

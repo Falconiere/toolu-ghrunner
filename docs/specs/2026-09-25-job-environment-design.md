@@ -32,10 +32,11 @@ overlays and composite scope machinery remain authoritative for nested actions.
 
 ## Interfaces / Schema
 
-- `AgentJobRequestMessage.environment_variables: Vec<TemplateToken>` replaces raw
-  JSON; the wire name and order stay unchanged and absent means an empty list.
-- Internal `apply_job_environment(&[TemplateToken], &mut ExecutionContext) ->
-  Result<(), RunnerError>` validates mapping/key/scalar shapes, evaluates expressions
+- `AgentJobRequestMessage.environment_variables: Vec<serde_json::Value>` preserves
+  raw JSON; the wire name and order stay unchanged and absent means an empty list.
+- Internal `apply_job_environment(&[serde_json::Value], &mut ExecutionContext) ->
+  Result<(), RunnerError>` decodes each layer into `TemplateToken` during setup,
+  validates mapping/key/scalar shapes, evaluates expressions
   once, and merges a whole layer only after it succeeds.
 - Literal strings remain literal, including expression-looking text returned by
   an expression. Expression scalar results use GitHub string coercion; mapping or
@@ -50,7 +51,7 @@ overlays and composite scope machinery remain authoritative for nested actions.
 Absent/empty env is unchanged. Empty strings, multiline strings, booleans, numbers,
 and null scalar values preserve their string coercion. Later layers override earlier
 ones; entries in one layer cannot observe each other's assignments. Missing allowed
-properties become empty. Invalid expressions or non-mapping layers fail job setup
+properties become empty. Malformed wire payloads, invalid expressions or non-mapping layers fail job setup
 before any process starts. Errors identify the layer without embedding secret
 values. Secret registration precedes evaluation; logs retain existing sink masking.
 Step overrides are discarded after the step, including errors, while file commands
