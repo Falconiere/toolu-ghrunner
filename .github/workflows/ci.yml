@@ -33,6 +33,12 @@ jobs:
         run: bash scripts/guardrails/run.sh
       - name: Test
         run: cargo test --workspace
+      - name: Docker action runtime and production replay
+        env:
+          DOCKER_HOST: unix:///var/run/docker.sock
+        run: |
+          cargo test -p execution --lib docker::action_container -- --ignored --test-threads=1
+          cargo test -p execution --test docker_action_linux_test -- --ignored --test-threads=1
       - name: Protocol crate is sync + I/O-free (AC #22)
         run: |
           if cargo tree -p protocol | grep -qE 'reqwest|tokio|opendal|bollard|axum'; then

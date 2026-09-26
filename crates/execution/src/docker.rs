@@ -1,5 +1,10 @@
 //! Docker client wrapper (bollard).
 
+/// Owned Docker action container lifecycle.
+pub(crate) mod action_container;
+mod action_image;
+/// Standard Docker action mounts and path translation.
+pub(crate) mod action_mounts;
 /// The bollard Docker daemon client wrapper.
 pub mod client;
 mod container_command;
@@ -30,3 +35,7 @@ mod service_create;
 mod service_health;
 /// Ordered acquired service declarations.
 pub(crate) mod service_spec;
+
+#[cfg(test)]
+#[path = "docker/tests/action_container.rs"]
+mod action_container_tests;

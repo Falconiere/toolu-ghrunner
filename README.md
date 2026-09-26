@@ -42,9 +42,9 @@ every morning at 06:00 UTC.
 
 > [!WARNING]
 > **Pre-1.0.** The live path is green nightly, but rough edges remain:
-> `uses: docker://` container actions fail as unsupported, and the
-> tool-cache/temp paths differ between `run:` steps and node-action
-> steps (B-004). See [docs/known-bugs.md](docs/known-bugs.md) before
+> Container actions require Linux and a local Docker daemon. Acceptance
+> evidence and remaining platform gaps are tracked in
+> [docs/test-coverage.md](docs/test-coverage.md). See [docs/known-bugs.md](docs/known-bugs.md) before
 > you point this at anything you care about.
 
 ## Install
@@ -185,7 +185,7 @@ left orphaned.
 
 | | |
 |---|---|
-| **Steps** | `run:` shell, `uses:` Node.js actions (runtime auto-downloaded + cached), composite actions, plugins — `uses: docker://` is not yet supported (the step fails with an explicit log line) |
+| **Steps** | `run:` shell, `uses:` Node.js actions (runtime auto-downloaded + cached), composite actions, plugins, Linux Docker actions (`runs.using: docker` and `uses: docker://`) |
 | **Workflows** | matrices, `needs:` job graphs and job outputs, reusable workflows, `if:` conditions, `timeout-minutes`, `working-directory`, `defaults.run` |
 | **Expressions** | `${{ }}` with signed/radix numbers, reference equality, lazy `case()` and `format()`, insertion-ordered pretty `toJSON`, G15 number rendering, and `.*` / `[*]` filters; unknown named values fail visibly |
 | **Services** | artifacts, cache, and OIDC — forwarded to real GitHub by default, hosted locally in `offline` mode, or a local content-addressed cache accelerator in `accelerated` mode |
@@ -208,7 +208,7 @@ shell receives `GITHUB_ACTIONS=true`. The runner supplies `CI=true` only when
 workflow, job, action-step, and runner values such as `CI=false` or an empty
 `CI` are preserved. Linux job-container processes follow the same rule, with a
 container declaration supplying the fallback when no job or step `CI` is present.
-Docker actions are still unsupported; see [test coverage](docs/test-coverage.md)
+Docker action containers follow this environment rule too; see [test coverage](docs/test-coverage.md)
 for measured platforms and live parity status.
 
 Workflow and job `env:` mappings from the acquired message are evaluated in
@@ -285,6 +285,33 @@ explicitly on macOS. Empty or disabled services require no Docker daemon.
 
 See [the service evidence map](docs/test-coverage.md#service-containers-issue-74)
 for verified real-Docker scenarios and outstanding live/reference/GHES evidence.
+
+### Docker actions
+
+On Linux, `uses: docker://image:tag` pulls and executes the image. Repository
+and local actions with `runs.using: docker` may use `image: Dockerfile` or a
+`docker://` image. Successful builds from immutable resolved remote revisions
+are reused while their images exist; local actions build against current files.
+
+Manifest `args` preserves argument boundaries and empty values. When absent,
+`with.args` supplies shell-quoted arguments without executing a host shell.
+Manifest `entrypoint` wins over `with.entrypoint`; step environment wins over
+`runs.env` defaults. Inputs, GitHub context, runtime service variables and private
+stage state are passed into the container. Conditional `pre-entrypoint` and
+`post-entrypoint` stages use job-context `pre-if`/`post-if` (default `always()`);
+local actions skip pre with a warning, matching the official runner. Posts drain
+in reverse order and their failures affect the job result.
+
+Actions mount `/github/workspace`, `/github/home`, `/github/workflow`,
+`/github/file_commands`, runner temp and `/var/run/docker.sock`. They join the
+job network when one exists. File commands and stdout workflow commands use the
+normal runner handlers; command paths are translated across mounts. Each stage's
+container is removed after success, failure, timeout or cancellation. A missing
+image, failed build or invalid entrypoint fails the step. macOS and Windows
+reject Docker actions explicitly.
+
+See the [#75 evidence map](docs/test-coverage.md#docker-container-actions-75)
+for real-Docker replay and the separately recorded live/reference limitations.
 
 ### Service modes
 
@@ -404,7 +431,7 @@ clock, a socket, or tokio.
 | Artifacts / OIDC | C# | `execution::{artifacts,oidc}` |
 | Content-addressed cache | C# | `cache` *(own crate)* |
 | Secret masking | C# | `shared::SecretMasker` + tracing layer |
-| Docker | C# | `execution::docker::client` *(bollard; endpoint from `DOCKER_HOST`; `uses: docker://` step dispatch not yet wired — such steps fail as unsupported)* |
+| Docker | C# | `execution::docker::action_container` *(bollard; Linux actions with image build/pull, mounts and cleanup)* |
 | Node.js auto-download | C# | `execution::node::runtime` |
 | Plugin system | — | **`execution::plugin::RunnerPlugin`** |
 

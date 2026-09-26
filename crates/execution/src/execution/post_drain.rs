@@ -123,7 +123,9 @@ async fn run_scoped_post(
 
   // This check latches the shared force token on expiry/shutdown, stopping all
   // remaining posts as well as this one; each post uses the same job budget.
-  if job.cancellation.is_forced() || !evaluate_post_condition(ctx, condition)? {
+  let mut eval = ctx.eval_context();
+  eval.job_status = ctx.job_status();
+  if job.cancellation.is_forced() || !ctx.evaluate_with(&eval, condition)?.is_truthy() {
     skip_post(
       events,
       report.id,
@@ -133,31 +135,34 @@ async fn run_scoped_post(
     return Ok(Conclusion::Skipped);
   }
 
-  let RunsUsing::Node { .. } = post.manifest.runs.using else {
-    // Only node actions register a post entrypoint today.
-    return Err(RunnerError::ActionManifest(
-      "post stage requires a node action".to_owned(),
-    ));
-  };
-
   let watch = job.cancellation.watch_step(ctx.eval_context(), condition);
   let bounds = StepBounds::nested(
     job.cancellation.deadline(),
     post.step.timeout_in_minutes,
     watch.cancel.clone(),
   );
-  let conclusion = run_post_node_stage(post, report, ctx, events, job, &bounds).await?;
-
+  let conclusion = execute_post(post, report, ctx, events, job, &bounds).await?;
   complete_post(events, report.id, conclusion).await;
   Ok(conclusion)
 }
 
-fn evaluate_post_condition(ctx: &ExecutionContext, condition: &str) -> Result<bool, RunnerError> {
-  let mut eval_ctx = ctx.eval_context();
-  // A queued post evaluates after all main steps, against the live job status.
-  // Its saved composite scope still supplies inputs, steps, and STATE_*.
-  eval_ctx.job_status = ctx.job_status();
-  Ok(ctx.evaluate_with(&eval_ctx, condition)?.is_truthy())
+async fn execute_post(
+  post: &PostStep,
+  report: &PostReport<'_>,
+  ctx: &mut ExecutionContext,
+  events: &mpsc::Sender<RunnerEvent>,
+  job: &JobCtx<'_>,
+  bounds: &StepBounds,
+) -> Result<Conclusion, RunnerError> {
+  Ok(match post.manifest.runs.using {
+    RunsUsing::Node { .. } => run_post_node_stage(post, report, ctx, events, job, bounds).await?,
+    RunsUsing::Docker => run_post_docker_stage(post, report, ctx, events, job, bounds).await?,
+    RunsUsing::Composite => {
+      return Err(RunnerError::ActionManifest(
+        "composite action cannot register its own post".to_owned(),
+      ));
+    },
+  })
 }
 
 async fn report_post_error(events: &mpsc::Sender<RunnerEvent>, step_id: &str, error: &RunnerError) {
@@ -265,4 +270,38 @@ async fn emit_post_header(
     })
     .await;
   emit_stage_endgroup(events, step_id).await;
+}
+
+/// Run a prepared Docker image in the original action's state and env scope.
+async fn run_post_docker_stage(
+  post: &PostStep,
+  report: &PostReport<'_>,
+  ctx: &mut ExecutionContext,
+  events: &mpsc::Sender<RunnerEvent>,
+  job: &JobCtx<'_>,
+  bounds: &StepBounds,
+) -> Result<Conclusion, RunnerError> {
+  let image = post
+    .docker_image
+    .as_deref()
+    .ok_or_else(|| RunnerError::ActionManifest("Docker post has no prepared image".to_owned()))?;
+  let runtime = bounds
+    .resolve_within_bounds(crate::docker::action_container::ActionContainer::connect(
+      std::sync::Arc::clone(ctx.masker()),
+    ))
+    .await?;
+  let stage = super::docker_stage::DockerStage {
+    step: &post.step,
+    events,
+    workspace: job.workspace,
+    config: job.config,
+    action_dir: &post.action_dir,
+    manifest: &post.manifest,
+    bounds,
+    stage: "post",
+    log_step_id: report.id,
+    inputs: post.docker_inputs.as_ref(),
+  };
+  let (conclusion, _) = super::docker_stage::run_docker_stage(&stage, ctx, &runtime, image).await?;
+  Ok(conclusion)
 }

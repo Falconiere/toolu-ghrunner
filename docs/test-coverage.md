@@ -856,3 +856,40 @@ exact output assertions, and checkout cleanup all succeeded. The pinned ARM64
 release archive SHA-256 is
 `5a2cd92908a93d7276a194e1de6008099f3e7946f3f8e14aa7a1a7b4a31fdec2`.
 Hosted Linux is supplementary execution evidence, not a pinned-reference claim.
+
+## Docker container actions (#75)
+
+The design contract is `docs/specs/2026-09-25-docker-actions-design.md`.
+`execution/tests/docker_action_linux_test.rs` replays the sanitized acquired
+job from #73 through `Runner::execute_job`, substituting the committed executable
+`.github/actions/docker-action-probe` and documented registry/local step tokens.
+These substitutions exercise production dispatch; they are not a new acquisition.
+
+| Scenario | Exact check | Evidence lane |
+| --- | --- | --- |
+| Docker manifest and raw registry references | `actions::manifest::tests::preserves_docker_stage_and_argument_contract`; `execution/tests/docker_action_test.rs` | Default suite |
+| Dockerfile build, immutable cache, registry pull, bad images/builds, timeout and cleanup | `docker::action_container` real-daemon tests | Explicit Linux runtime lane |
+| Exact argv, inputs/default env, mounts, output/env/PATH/state files, workflow commands, LIFO posts | `local_actions_preserve_argv_env_commands_state_and_lifo_posts` | Production Linux replay |
+| Absent versus empty manifest args and registry `with.args` | `registry_and_manifest_arg_variants_execute_exact_argv` | Production Linux replay |
+| Job network and real peer reachability | `action_joins_job_network_and_reaches_real_peer` | Production Linux replay; service orchestration is #74 |
+| Invalid entrypoint, observed-start cancellation, owned-resource cleanup | `entrypoint_failure_and_cancellation_fail_visibly_without_leaking_containers` | Production Linux replay |
+| Non-Linux rejection | `execution/tests/docker_action_test.rs` platform-specific test | Default macOS suite |
+
+Run `bash scripts/test/docker_actions_linux.sh all` with a local Linux Docker
+daemon whose bind mounts can access `TOOLU_DOCKER_ACTIONS_LINUX_ROOT`. The carrier
+image defaults to Rust 1.94.1 and can be supplied through
+`TOOLU_DOCKER_ACTIONS_TEST_IMAGE`; runtime/replay use real containers and must be
+explicitly selected because ordinary workspace tests ignore the Linux probes.
+The unchanged full repository gate remains `./tools/check.sh all`.
+
+The four real-daemon runtime tests and four production replay tests passed on
+Linux ARM64 against the local daemon on 2026-09-25. The Ubuntu `ci` job explicitly
+runs both ignored lanes after the default workspace tests; an ordinary ignored
+result is not counted. Final full-gate evidence is recorded after completion.
+The host gate passed formatting, Clippy and guardrails, then was stopped after
+`sample` confirmed `context_secret_batch_test` stalled in `_dyld_start` before
+the harness. This is an incomplete host run, not a test pass.
+The branch-scoped `docker-actions-live.yml` workflow
+is an executable live probe; its presence does not establish a live pass. Paired
+toolu/reference execution, a newly acquired Docker-action payload, and GHES
+remain unverified until their run identities and observations are recorded.
