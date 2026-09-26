@@ -80,7 +80,7 @@ fn absent_null_and_empty_roots_remain_distinct() -> TestResult {
       (Some(serde_json::Value::Null), ExprValue::Null),
       (
         Some(serde_json::json!({"t": 2, "d": []})),
-        ExprValue::Object(std::collections::HashMap::new()),
+        ExprValue::object(std::collections::HashMap::new()),
       ),
     ] {
       let mut raw: serde_json::Value = serde_json::from_str(MATRIX_0)?;
@@ -149,7 +149,7 @@ fn new_roots_keep_nested_types_and_cannot_shadow_runtime_roots() -> TestResult {
   );
   assert_value_eq!(
     ctx.evaluate_expression("futurenested.event.repository.topics")?,
-    ExprValue::Array(Vec::new())
+    ExprValue::array(Vec::new())
   );
   for root in ["env", "secrets", "steps", "runner", "job", "github", "vars"] {
     assert_value_eq!(

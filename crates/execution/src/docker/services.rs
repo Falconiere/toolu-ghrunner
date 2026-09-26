@@ -204,13 +204,13 @@ impl ServiceContainers {
     }
     self.context.insert(
       alias.to_owned(),
-      ExprValue::Object(HashMap::from([
+      ExprValue::object(HashMap::from([
         ("id".to_owned(), ExprValue::String(id.to_owned())),
         (
           "network".to_owned(),
           ExprValue::String(self.network.clone()),
         ),
-        ("ports".to_owned(), ExprValue::Object(ports)),
+        ("ports".to_owned(), ExprValue::object(ports)),
       ])),
     );
     Ok(())

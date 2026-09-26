@@ -67,7 +67,7 @@ impl ContainerSpec {
     match value {
       ExprValue::Null => Ok(None),
       ExprValue::String(image) => Self::from_image(image).map(Some),
-      ExprValue::Object(fields) => Self::from_fields(fields).map(Some),
+      ExprValue::Object(fields) => Self::from_fields(fields.into_iter().collect()).map(Some),
       other @ (ExprValue::Bool(_) | ExprValue::Number(_) | ExprValue::Array(_)) => {
         Err(spec_error(&format!(
           "container must be a string or object, got {}",
@@ -140,7 +140,7 @@ pub(super) fn evaluate_token(
       .iter()
       .map(|entry| evaluate_token(entry, ctx))
       .collect::<Result<Vec<_>, _>>()
-      .map(ExprValue::Array),
+      .map(ExprValue::array),
     2 => {
       let mut fields = HashMap::new();
       for entry in token.d.as_deref().unwrap_or_default() {
@@ -150,7 +150,7 @@ pub(super) fn evaluate_token(
         };
         fields.insert(key, evaluate_token(&entry.value, ctx)?);
       }
-      Ok(ExprValue::Object(fields))
+      Ok(ExprValue::object(fields))
     },
     3 => ctx
       .evaluate_expression(token.expr.as_deref().unwrap_or_default())
@@ -186,7 +186,7 @@ fn take_credentials(
   if matches!(value, ExprValue::Null) {
     return Ok(None);
   }
-  let ExprValue::Object(mut credentials) = value else {
+  let ExprValue::Object(credentials) = value else {
     return Err(field_type_error("credentials", "object", &value));
   };
   for key in credentials.keys() {
@@ -196,6 +196,7 @@ fn take_credentials(
       )));
     }
   }
+  let mut credentials = credentials.into_iter().collect();
   let username = take_string(&mut credentials, "username", true)?;
   let password = take_string(&mut credentials, "password", true)?;
   Ok(Some(ContainerCredentials { username, password }))

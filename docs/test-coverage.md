@@ -814,3 +814,33 @@ The post-rebase gate checks integration with #69. The canaries above retain
 their actual earlier build base; all seven recorded identity source hashes
 remain unchanged after the rebase. They are not a claim that a new binary of
 the entire rebased tree was deployed.
+
+## Issue #79 — expression engine parity
+
+The 1,402-case reference corpus is real output from the official SDK at
+`cab9d1c3901e45c7705889c4f88284fdd93f4ae5`, evaluated with .NET SDK 8.0.425 /
+runtime 8.0.31 on macOS ARM64. `crates/expressions/src/tests/` contains the input
+expressions, captured typed values/errors and source/input/output hash provenance.
+`scripts/expression-reference/generate.sh` reproduces it from that checkout;
+`check.sh` validates the committed corpus offline. The oracle context is component
+coverage; the production replay below separately proves captured-message wiring.
+
+| Criteria / scenario | Exact evidence and expected observation | Runnable check |
+| --- | --- | --- |
+| Numeric literals, case arity/types / 79-S1 | `tests::official_runner_corpus_matches_types_values_and_failures`: signed decimal/exponent, radix overflow/two's-complement, NaN/infinities; strict boolean predicates, odd 3–255 arity and lazy selected results match captured typed output/error status. | `cargo test -p expressions` (CI or approved Docker route) |
+| Reference equality and NaN / 79-S2 | Exhaustive primitive/container operator pairs in the same corpus. Same context array/object references equal themselves; independently parsed equal containers differ. NaN equality and order false, inequality true. Tiny unequal numbers remain unequal. | Same crate test |
+| Case-insensitive ordering, coercion, short circuit, unknown root / 79-S3 | Corpus includes Unicode/ASCII string order and search, primitive-only string builtin coercion, lazy builtin arguments, join separators, null/bool/string/number coercion, absent allowed property → null, unknown root → error even in an unselected branch, unselected `fromJSON('bad')` → no runtime error. | Same crate test |
+| JSON/G15/format/filter / 79-S4 | Corpus asserts exact two-space JSON and z-before-a insertion order, nonfinite spellings, signed zero, subnormal/extreme/rounding/exponent boundaries, escaped braces and bad indexes, `.*`/`[*]` projection with absent members omitted. `tests::escaped_format_braces_survive_template_delimiters` asserts `value={a}`. | Same crate test |
+| Production fields / 79-S5 | `expression_parity_test::captured_job_replays_expression_fields_through_composite_and_root_script` replays the sanitized #68 `incoming_contexts_matrix_0.json` acquisition through `Runner::execute_job` and real Bash. Documented substitutions retain token types/UUIDs and assign the companion workflow’s authored `parity` action ID (the captured `__self` ID is generated and unavailable in `steps`): top-level if/env/script/with, composite run/env/with/if/shell/outputs, root output `world/world:42/`, missing property empty suffix, escaped braces `{world}`. Negative tests require visible unknown-root failure. | `cargo test -p execution --test expression_parity_test` (CI or Docker) |
+| Sibling unit tests and full gate / all | Expression unit tests live in `crates/expressions/src/tests/`; production tests in `crates/execution/tests/`. Required gate retains fmt, clippy, no-allow, guardrails and workspace tests. | `./tools/check.sh all` |
+
+The expression engine is shared on Linux/macOS and GitHub.com/GHES. CI runs
+platform gates separately. These results do not establish a GHES service/version
+claim; no service or UI behavior changes here. The dispatch workflow
+`.github/workflows/expression-parity-79.yml` supports equivalent official/toolu
+runs at the same workflow/action revision. Live-run links and final gate results
+are recorded with the PR; absent live lanes remain unverified. Local Docker passes
+all 1,402 reference cases and all three captured-job replays. The host gate passed
+its static checks and many test groups, then CLI subprocesses stalled entirely in
+macOS `_dyld_start`; GitHub `ci` / `ci-macos` are the explicitly authorized final
+gate for this host limitation. The local full gate is not claimed as passing.

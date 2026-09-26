@@ -6,10 +6,6 @@ use super::super::lexer::Token;
 use super::super::types::ExprValue;
 use super::ast::{Expr, Parser};
 
-const CONTEXT_NAMES: &[&str] = &[
-  "github", "env", "secrets", "steps", "matrix", "strategy", "needs", "inputs", "runner", "job",
-];
-
 impl Parser {
   pub(super) fn parse_primary(&mut self) -> Result<Expr, RunnerError> {
     match self.peek().cloned() {
@@ -54,13 +50,6 @@ impl Parser {
       return Ok(Expr::FunctionCall { name, args });
     }
 
-    // Context name
-    let lower = name.to_ascii_lowercase();
-    if CONTEXT_NAMES.contains(&lower.as_str()) {
-      return Ok(Expr::Context { name });
-    }
-
-    // Bare identifier treated as context for flexibility
     Ok(Expr::Context { name })
   }
 

@@ -66,7 +66,7 @@ pub(crate) fn evaluate_services(
       ExprValue::String(image) => {
         std::collections::HashMap::from([("image".to_owned(), ExprValue::String(image))])
       },
-      ExprValue::Object(fields) => fields,
+      ExprValue::Object(fields) => fields.into_iter().collect(),
       ExprValue::Bool(_) | ExprValue::Number(_) | ExprValue::Array(_) => {
         return Err(invalid(
           "service must be an image string or container mapping",

@@ -1,0 +1,39 @@
+name: expression-79
+inputs:
+  who:
+    required: true
+  expected:
+    required: true
+outputs:
+  result:
+    value: ${{ format('{0}/{1}/{2}', inputs.who, steps.child.outputs.value, github.missing) }}
+runs:
+  using: composite
+  steps:
+    - id: prepare
+      if: ${{ case(true, -1 < 0 && 0xff == 255 && NaN != NaN && !(NaN <= 0), false) }}
+      env:
+        ANSWER: ${{ case(false, fromJSON('bad'), true, fromJSON('42'), 0) }}
+        ESCAPED: ${{ format('{{{0}}}', inputs.who) }}
+        FILTERED: ${{ join(fromJSON('[{"v":"a"},{},{"v":"b"}]')[*].v, '/') }}
+        ORDERED: ${{ toJSON(fromJSON('{"z":1,"a":2}')) }}
+        NUMBER: ${{ format('{0}', 1e20) }}
+      run: |
+        test "$ANSWER" = 42
+        test "$ESCAPED" = '{world}'
+        test "$FILTERED" = a/b
+        test "$ORDERED" = "$(printf '{\n  "z": 1,\n  "a": 2\n}')"
+        test "$NUMBER" = 1E+20
+        echo 'answer=42' >> "$GITHUB_OUTPUT"
+      shell: ${{ format('{0}', 'bash') }}
+    - id: child
+      uses: ./.github/actions/expression-79-child
+      with:
+        value: ${{ format('{0}:{1}', inputs.who, steps.prepare.outputs.answer) }}
+    - if: ${{ github.repository == 'Falconiere/toolu-ghrunner' && github.missing == '' }}
+      env:
+        RESULT: ${{ format('{0}/{1}', inputs.who, steps.child.outputs.value) }}
+      run: |
+        test "$RESULT" = world/world:42
+        printf '%s' "$RESULT" > "$GITHUB_WORKSPACE/expression-79.composite"
+      shell: bash

@@ -134,9 +134,9 @@ fn evaluates_an_expression_produced_object() {
   );
   container.insert(
     "ports".to_owned(),
-    ExprValue::Array(vec![ExprValue::String("3000".to_owned())]),
+    ExprValue::array(vec![ExprValue::String("3000".to_owned())]),
   );
-  ctx.set_github_context_value("container_declaration", ExprValue::Object(container));
+  ctx.set_github_context_value("container_declaration", ExprValue::object(container));
 
   match ContainerSpec::evaluate(Some(&expression("github.container_declaration")), &ctx) {
     Ok(Some(spec)) => {

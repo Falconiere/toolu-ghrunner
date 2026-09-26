@@ -81,7 +81,16 @@ impl Parser {
 
 impl Parser {
   pub(super) fn parse_postfix(&mut self) -> Result<Expr, RunnerError> {
+    let literal = matches!(
+      self.peek(),
+      Some(Token::Null | Token::BoolLit(_) | Token::NumberLit(_) | Token::StringLit(_))
+    );
     let mut expr = self.parse_primary()?;
+    if literal && matches!(self.peek(), Some(Token::Dot | Token::LBracket)) {
+      return Err(RunnerError::Expression(
+        "literal cannot be indexed directly".to_owned(),
+      ));
+    }
 
     loop {
       match self.peek() {
@@ -91,12 +100,20 @@ impl Parser {
         },
         Some(Token::LBracket) => {
           self.advance();
-          let index = self.parse_or()?;
-          self.expect_token(&Token::RBracket)?;
-          expr = Expr::IndexAccess {
-            object: Box::new(expr),
-            index: Box::new(index),
-          };
+          if matches!(self.peek(), Some(Token::Star)) {
+            self.advance();
+            self.expect_token(&Token::RBracket)?;
+            expr = Expr::WildcardAccess {
+              object: Box::new(expr),
+            };
+          } else {
+            let index = self.parse_or()?;
+            self.expect_token(&Token::RBracket)?;
+            expr = Expr::IndexAccess {
+              object: Box::new(expr),
+              index: Box::new(index),
+            };
+          }
         },
         _ => break,
       }

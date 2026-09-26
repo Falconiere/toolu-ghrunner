@@ -16,7 +16,7 @@ impl ExecutionContext {
       | ExprValue::Bool(_)
       | ExprValue::Number(_)
       | ExprValue::String(_)
-      | ExprValue::Array(_) => HashMap::new(),
+      | ExprValue::Array(_) => expressions::object::ExprObject::default(),
     };
     if let Some(container) = &self.container {
       for key in ["workspace", "action_path"] {
@@ -42,7 +42,7 @@ impl ExecutionContext {
         )
       })
       .collect();
-    ExprValue::Object(env_obj)
+    ExprValue::object(env_obj)
   }
 
   /// Build an `EvalContext` snapshot for the expression evaluator.
@@ -51,7 +51,7 @@ impl ExecutionContext {
     if let Some(inputs) = self.scoped_inputs.get(&self.scope_path) {
       contexts.insert(
         "inputs".to_owned(),
-        ExprValue::Object(string_map_to_obj(inputs)),
+        ExprValue::object(string_map_to_obj(inputs)),
       );
     }
     contexts.insert("github".to_owned(), self.github_expression_context());
@@ -63,13 +63,13 @@ impl ExecutionContext {
     );
     contexts.insert(
       "secrets".to_owned(),
-      ExprValue::Object(string_map_to_obj(&self.secrets)),
+      ExprValue::object(string_map_to_obj(&self.secrets)),
     );
     contexts.insert(
       "vars".to_owned(),
-      ExprValue::Object(string_map_to_obj(&self.vars)),
+      ExprValue::object(string_map_to_obj(&self.vars)),
     );
-    contexts.insert("job".to_owned(), ExprValue::Object(self.job_context()));
+    contexts.insert("job".to_owned(), ExprValue::object(self.job_context()));
 
     EvalContext {
       contexts,
@@ -96,7 +96,7 @@ impl ExecutionContext {
       self
         .scoped_steps
         .get(&self.scope_path)
-        .map_or_else(|| ExprValue::Object(HashMap::new()), build_steps_context)
+        .map_or_else(|| ExprValue::object(HashMap::new()), build_steps_context)
     }
   }
 
@@ -109,7 +109,7 @@ impl ExecutionContext {
       ExprValue::String(job_status_str(self.job_status()).to_owned()),
     );
     let container = self.container.as_ref().map_or(ExprValue::Null, |host| {
-      ExprValue::Object(HashMap::from([
+      ExprValue::object(HashMap::from([
         ("id".to_owned(), ExprValue::String(host.id().to_owned())),
         (
           "network".to_owned(),
@@ -120,7 +120,7 @@ impl ExecutionContext {
     job.insert("container".to_owned(), container);
     job.insert(
       "services".to_owned(),
-      ExprValue::Object(self.services.as_deref().map_or_else(
+      ExprValue::object(self.services.as_deref().map_or_else(
         HashMap::new,
         crate::docker::services::ServiceContainers::context,
       )),
