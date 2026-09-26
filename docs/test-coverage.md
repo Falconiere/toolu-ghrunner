@@ -1031,8 +1031,8 @@ commands and normalization. No mocked service success is used.
 
 Replay imports the existing sanitized `incoming_contexts_matrix_0.json` acquired
 message, preserving UUID/contextName and map token structure while replacing
-selected probe scripts and action path. Bash executes the real captured output
-files; these tests cover production execution/event wiring, not GitHub-owned
-rendering. Live GitHub.com/GHES service/UI and the official-runner comparison
+selected probe scripts. The nested-action replay also substitutes a local action
+path. Bash executes the real captured output files; these tests cover production
+execution/event wiring, not GitHub-owned rendering. Live GitHub.com/GHES service/UI and the official-runner comparison
 lanes are **unverified/skipped** under the orchestrator's delivery scope. No GHES
 version, Docker runtime, or universal .NET regex parity is claimed by these tests.
