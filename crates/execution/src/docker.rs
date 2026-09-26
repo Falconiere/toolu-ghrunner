@@ -40,3 +40,7 @@ pub(crate) mod service_spec;
 #[cfg(test)]
 #[path = "docker/tests/action_container.rs"]
 mod action_container_tests;
+
+#[cfg(test)]
+#[path = "docker/tests/action_container_volumes.rs"]
+mod action_container_volume_tests;

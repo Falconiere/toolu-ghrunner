@@ -54,8 +54,9 @@ pub(super) async fn run_docker_stage(
   let (commands, command_env) = FileCommandManager::create(&tmp).await?;
   env.extend(command_env);
   let network = ctx
-    .evaluate_expression("job.container.network")?
-    .coerce_to_string();
+    .job_container()
+    .map(|container| container.network().to_owned())
+    .or_else(|| ctx.services().map(|services| services.network().to_owned()));
   let params = ActionContainerParams {
     image,
     entrypoint: entrypoint.as_deref(),
@@ -65,7 +66,7 @@ pub(super) async fn run_docker_stage(
     config: s.config,
     workspace: s.workspace,
     action_dir: s.action_dir,
-    network: (!network.is_empty()).then_some(network.as_str()),
+    network: network.as_deref(),
     step_id: s.log_step_id,
     timeout: s.bounds.remaining_timeout(),
     cancel: &s.bounds.cancel,

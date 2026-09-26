@@ -275,6 +275,7 @@ impl ActionContainer {
       .remove_container(
         id,
         Some(RemoveContainerOptions {
+          v: true,
           force: true,
           ..Default::default()
         }),

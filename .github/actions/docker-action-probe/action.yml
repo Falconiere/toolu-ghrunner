@@ -7,6 +7,12 @@ inputs:
   peer:
     description: Optional Docker-network peer hostname
     default: ''
+  peer_port:
+    description: Optional Docker-network peer port
+    default: '8080'
+  post_peer:
+    description: Optional Docker-network peer hostname checked during post
+    default: ''
   fail_main:
     description: Exit nonzero after registering post state
     default: 'false'
