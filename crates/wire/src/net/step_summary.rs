@@ -149,6 +149,7 @@ async fn put_blob(
 ) -> Result<(), RunnerError> {
   // Pinned actions/runner ResultsHttpClient: three Azure blob retries and a
   // 30-second network timeout. Never replay the surrounding RPC transaction.
+  let body = bytes::Bytes::copy_from_slice(content);
   for attempt in 0..=3_u32 {
     let mut request = client
       .put(&signed.summary_url)
@@ -157,7 +158,7 @@ async fn put_blob(
     if signed.blob_storage_type == super::results_service::BLOB_STORAGE_AZURE {
       request = request.header("x-ms-blob-type", "BlockBlob");
     }
-    let response = request.body(content.to_vec()).send().await;
+    let response = request.body(body.clone()).send().await;
     let retryable = match &response {
       Ok(response) => matches!(
         response.status().as_u16(),
