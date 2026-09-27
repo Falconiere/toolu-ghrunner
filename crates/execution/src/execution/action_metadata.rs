@@ -62,6 +62,8 @@ pub(super) fn set_reference(ctx: &mut ExecutionContext, reference: &ActionStepDe
 }
 
 /// Script and local/image actions must not inherit the previous action's repository.
+/// Upstream `SetGitHubContext` wraps null in `StringContextData`, whose `Value` and
+/// `IString.GetString` normalize it to an empty string for expressions and env.
 pub(super) fn clear_repository(ctx: &mut ExecutionContext) {
   ctx.set_github_context("action_repository", "");
   ctx.set_github_context("action_ref", "");

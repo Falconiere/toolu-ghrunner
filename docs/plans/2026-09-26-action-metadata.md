@@ -24,7 +24,7 @@ extend Docker acceptance, synchronize documentation, verify and deliver.
     "id": "metadata",
     "title": "Preserve wire identity and scoped metadata through real action execution",
     "ac_refs": ["AC-1", "AC-2", "AC-3"],
-    "check": "tar --no-xattrs --no-acls --exclude=./target --exclude=./.git --exclude=./.claude/tmp --exclude=./.codex/tmp -cf - . | docker cp - issue85-verification:/issue85 && docker exec -w /issue85 issue85-verification cargo test -p execution action_metadata",
+    "check": "tar --no-xattrs --no-acls --exclude=./target --exclude=./.git --exclude=./.claude/tmp --exclude=./.codex/tmp -cf - . | docker cp - issue85-verification:/issue85 && docker exec -w /issue85 issue85-verification cargo test --workspace --lib action_metadata",
     "paths": ["crates", "Cargo.toml", "Cargo.lock", ".github/actions/action-metadata-probe"],
     "input": "Sanitized incoming_contexts_matrix_0.json replay through Runner, real Bash/Node actions; named/generated/repeated names, cleared repo/ref, pre/main/post, nesting and failure restoration"
   },
@@ -88,3 +88,8 @@ error. Upstream ActionRunner installs reference metadata before EvaluateStepInpu
 A new probe first failed, then validates this path with actual composite/Node code.
 Host quality hooks also required splitting existing oversized functions/impls
 in the touched step/composite/context files; their behavior is retained.
+
+PR review prompted an additional captured-job probe for absent action identity
+through composite pre/main/post stages, within AC-1/AC-2. Adjacent comments explain
+upstream null-to-empty normalization and the metadata test's caller-owned masker.
+These clarify the existing contract without changing production behavior.

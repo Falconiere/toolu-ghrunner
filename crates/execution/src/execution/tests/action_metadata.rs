@@ -140,6 +140,23 @@ async fn action_metadata_captured_names_nested_stages_and_restoration() -> TestR
 }
 
 #[tokio::test]
+async fn action_metadata_absent_identity_survives_composite_posts() -> TestResult {
+  let mut msg = job()?;
+  msg.steps.retain(|step| !step.is_run_step());
+  msg.steps.truncate(1);
+  let step = msg.steps.first_mut().ok_or("composite step absent")?;
+  step.name = None;
+  step.context_name = None;
+  let (actual, _) = replay(msg).await?;
+  let expected = [
+    "pre", "main", "child", "pre", "main", "child", "parent", "post", "post",
+  ]
+  .map(|stage| format!("{stage}||||self-hosted"));
+  assert_eq!(actual.lines().collect::<Vec<_>>(), expected);
+  Ok(())
+}
+
+#[tokio::test]
 async fn action_metadata_wire_name_named_skipped_and_legacy_absence() -> TestResult {
   let mut msg = job()?;
   msg.steps.retain(shared::ActionStep::is_run_step);
@@ -198,6 +215,8 @@ async fn action_metadata_remote_dispatch_repeated_refs_and_parent_restore() -> T
   };
   let workspace = temp.path().join("workspace");
   copy_probes(&workspace)?;
+  // build_context requires and retains its caller's masker; this probe asserts
+  // metadata only, not the separate durable-sink masking contract.
   let mut ctx = build_context(&msg, &config, Arc::new(Mutex::new(SecretMasker::new())));
   let client = reqwest::Client::new();
   let fetcher = ActionFetcher::new();
