@@ -215,6 +215,7 @@ fn make_ctx(
   let (tx, mut rx) = mpsc::channel::<ListenerEvent>(256);
   tokio::spawn(async move { while rx.recv().await.is_some() {} });
   Ok(SessionCtx {
+    runner_name: None,
     client,
     token: "session-token".to_owned(),
     broker_url: server_uri,

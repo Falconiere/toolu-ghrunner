@@ -1558,6 +1558,7 @@ dependencies = [
  "fastrand",
  "flate2",
  "futures-util",
+ "hostname",
  "observability",
  "protocol",
  "reqwest",

@@ -14,6 +14,7 @@ use shared::{RunnerConfig, SecretMasker};
 fn context() -> SessionCtx {
   let (tx, _) = tokio::sync::mpsc::channel(8);
   SessionCtx {
+    runner_name: None,
     client: reqwest::Client::new(),
     token: String::new(),
     broker_url: String::new(),
