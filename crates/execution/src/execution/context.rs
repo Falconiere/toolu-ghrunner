@@ -61,7 +61,7 @@ pub struct ExecutionContext {
   masker: Arc<Mutex<SecretMasker>>,
   path_additions: Vec<String>,
   cgroup_path: Option<std::path::PathBuf>,
-  /// Per-job workspace root; `hashFiles()` resolves its patterns against it.
+  /// Per-job workspace root shared within execution for `hashFiles()` and matcher paths.
   pub(super) workspace: Option<std::path::PathBuf>,
   container: Option<Arc<JobContainer>>,
   services: Option<Box<ServiceContainers>>,
