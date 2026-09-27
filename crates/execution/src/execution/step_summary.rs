@@ -66,7 +66,9 @@ fn read_summary(path: &Path) -> Result<Option<String>, String> {
   if bytes.is_empty() {
     return Ok(None);
   }
-  let bytes = bytes.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(&bytes);
+  let bytes = bytes
+    .strip_prefix(&[0xef, 0xbb, 0xbf])
+    .unwrap_or(bytes.as_slice());
   let decoded = String::from_utf8_lossy(bytes);
   let normalized = decoded.replace("\r\n", "\n").replace('\r', "\n");
   let newline = if cfg!(windows) { "\r\n" } else { "\n" };
