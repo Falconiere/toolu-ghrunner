@@ -28,6 +28,8 @@ mod context_scopes;
 /// Mutable execution state for a job run: context objects, environment,
 /// step outputs/conclusions, and job-level status.
 pub struct ExecutionContext {
+  /// Job-wide problem matcher definitions shared by process output dispatchers.
+  pub(crate) matchers: super::problem_matcher::MatcherRegistry,
   env: HashMap<String, String>,
   step_env_overlays: Vec<HashMap<String, String>>,
   nested_posts: Vec<PostStep>,
@@ -59,8 +61,8 @@ pub struct ExecutionContext {
   masker: Arc<Mutex<SecretMasker>>,
   path_additions: Vec<String>,
   cgroup_path: Option<std::path::PathBuf>,
-  /// Per-job workspace root; `hashFiles()` resolves its patterns against it.
-  workspace: Option<std::path::PathBuf>,
+  /// Per-job workspace root shared within execution for `hashFiles()` and matcher paths.
+  pub(super) workspace: Option<std::path::PathBuf>,
   container: Option<Arc<JobContainer>>,
   services: Option<Box<ServiceContainers>>,
 }
@@ -87,6 +89,7 @@ impl ExecutionContext {
     );
 
     Self {
+      matchers: super::problem_matcher::MatcherRegistry::default(),
       env: HashMap::new(),
       step_env_overlays: Vec::new(),
       nested_posts: Vec::new(),
@@ -183,7 +186,10 @@ impl ExecutionContext {
   pub fn cgroup_path(&self) -> Option<&std::path::Path> {
     self.cgroup_path.as_deref()
   }
+}
 
+/// Populate server and runner context values.
+impl ExecutionContext {
   /// Set a string value in the github context.
   pub fn set_github_context(&mut self, key: &str, value: &str) {
     self

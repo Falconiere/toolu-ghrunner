@@ -54,6 +54,18 @@ pub enum WorkflowCommand {
     /// Annotation title, if any.
     title: Option<String>,
   },
+  /// Register problem matchers from a JSON file.
+  AddMatcher {
+    /// Matcher document path.
+    path: String,
+  },
+  /// Remove problem matchers by owner or JSON file.
+  RemoveMatcher {
+    /// Owner to remove, when specified.
+    owner: Option<String>,
+    /// Matcher document path, when owner is absent.
+    path: String,
+  },
   /// `::debug::` — a debug-level log line.
   Debug {
     /// Debug message text.
@@ -127,6 +139,13 @@ pub fn parse_command(line: &str) -> Option<WorkflowCommand> {
     "error" => Some(build_annotation(value, &props, AnnotationKind::Error)),
     "warning" => Some(build_annotation(value, &props, AnnotationKind::Warning)),
     "notice" => Some(build_annotation(value, &props, AnnotationKind::Notice)),
+    "add-matcher" => Some(WorkflowCommand::AddMatcher {
+      path: value.to_owned(),
+    }),
+    "remove-matcher" => Some(WorkflowCommand::RemoveMatcher {
+      owner: props.get("owner").cloned(),
+      path: value.to_owned(),
+    }),
     "debug" => Some(WorkflowCommand::Debug {
       message: value.to_owned(),
     }),

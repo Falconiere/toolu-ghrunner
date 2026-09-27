@@ -5,17 +5,17 @@ use std::collections::HashMap;
 use shared::{ActionStep, Conclusion, RunnerError, RunnerEvent};
 use tokio::sync::mpsc;
 
-use super::super::command_dispatch::stream_dispatch_stdout;
 use super::super::context::ExecutionContext;
 use super::super::file_commands::{FileCommandManager, create_file_command_dir};
 use super::super::handlers::script::{ScriptHandler, ScriptParams};
+use super::super::process_dispatch::{dispatcher, stream_process};
 use super::super::step_env::apply_file_commands_and_merge_outputs;
 use super::JobCtx;
 
 /// Run the shell child and stream-dispatch its stdout concurrently.
 ///
 /// The handler forwards each stdout line onto `stdout_tx` as it is read, while
-/// `stream_dispatch_stdout` (owning `&mut ctx`) dispatches commands and emits
+/// `stream_process` (owning `&mut ctx`) dispatches commands and emits
 /// `Log` events in realtime. `execute` borrows only params/events/sender, so
 /// it does not conflict with the concurrent `&mut ctx` consumer. Returns the
 /// exit conclusion and the `set-output` map.
@@ -30,17 +30,19 @@ pub(super) async fn run_and_dispatch_script(
   // `execute` takes the sender by value and owns the only producer copy; when
   // its future completes (after EOF) the sender drops, so the dispatcher's
   // `recv` sees channel close and returns its `set-output` map.
-  let exec = handler.execute(params, events, stdout_tx);
-  let dispatch = stream_dispatch_stdout(
-    &step.id,
-    &step.id,
-    step.expression_name(),
-    &mut stdout_rx,
-    ctx,
-    events,
-  );
+  let (process_tx, mut process_rx) = mpsc::channel(256);
+  let commands = dispatcher(&step.id, &step.id, step.expression_name(), ctx);
+  let exec = async {
+    let result = handler.execute(params, &process_tx, stdout_tx).await;
+    drop(process_tx);
+    result
+  };
+  let dispatch = stream_process(commands, &mut stdout_rx, &mut process_rx, ctx, events);
   let (exec_result, stdout_outputs) = tokio::join!(exec, dispatch);
-  Ok((exec_result?.conclusion, stdout_outputs))
+  Ok((
+    stdout_outputs.conclusion(exec_result?.conclusion),
+    stdout_outputs.outputs,
+  ))
 }
 
 /// Merge a script step's stdout `set-output` outputs (already applied to `ctx`

@@ -30,7 +30,7 @@ not part of it. Workflow YAML parsing/matrix/orchestration lives in the
 | `composite_scope.rs` | `ScopeName` / `CompositeOutputs` | Output-isolation scope identifier and a composite manifest's `outputs:` expression map. |
 | `composite_shell.rs` | `run_shell_script` | Adapts a composite `run:` step to the shared `ScriptHandler` shell/template, streaming, timeout and cancellation contract. |
 | `composite_uses.rs` | `run_nested_uses_step` | Builds a synthetic `ActionStep` for a composite's nested `uses:` step and recurses through `action_exec::execute_action`, bounded by `DepthTracker`. |
-| `context.rs` | `ExecutionContext` | Mutable per-job execution state: env, per-step outputs/state/conclusions, runtime-owned contexts plus typed incoming server roots (`matrix`/`needs`/`inputs`/`strategy` and future keys), the shared `SecretMasker`, and expression evaluation. |
+| `context.rs` | `ExecutionContext` | Mutable per-job execution state: env, per-step outputs/state/conclusions, runtime-owned contexts plus typed incoming server roots (`matrix`/`needs`/`inputs`/`strategy` and future keys), the shared `SecretMasker`, and expression evaluation. Its execution-only workspace root also anchors problem-matcher paths. |
 | `context/` | Scoped state helpers | Keeps expression-visible step scopes separate from private action state. |
 | `context_build.rs` | `build_strategy` | Pure helpers for `ExecutionContext`: `runner.debug` detection and the `strategy.*` object, split out to keep `context.rs`'s `impl` blocks small. |
 | `docker_action.rs` | `run_docker_action` | Linux Docker action image preparation, conditional pre stage and deferred post registration. |
@@ -76,3 +76,14 @@ When you add a file here, add its row above so the index stays current. No
 declares `mod bar;` for `src/foo/bar.rs`) and import concrete paths.
 
 | `job_cancellation.rs` | Separate graceful job cancellation from shutdown; share one cleanup deadline and re-evaluate running conditions. |
+
+Problem matcher output support:
+
+| File | Purpose |
+| --- | --- |
+| `problem_matcher.rs` | Job-wide, case-insensitive registration and atomic replacement/removal. |
+| `problem_matcher_model.rs` | Bounded JSON and capture-schema validation, compiled regex definitions. |
+| `problem_matcher_state.rs` | Per-process-stream multiline matching, loops and ANSI removal. |
+| `problem_matcher_path.rs` | Bounded regular-file loading and workflow-checkout path resolution. |
+| `matcher_dispatch.rs` | Matcher command effects and masked annotation emission. |
+| `process_dispatch.rs` | Bounded stdout/stderr event bridge shared by shell, Node and composite stages. |
