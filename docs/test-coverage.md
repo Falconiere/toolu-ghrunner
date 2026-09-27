@@ -1036,3 +1036,17 @@ path. Bash executes the real captured output files; these tests cover production
 execution/event wiring, not GitHub-owned rendering. Live GitHub.com/GHES service/UI and the official-runner comparison
 lanes are **unverified/skipped** under the orchestrator's delivery scope. No GHES
 version, Docker runtime, or universal .NET regex parity is claimed by these tests.
+
+## Step summaries (#83)
+
+- `cargo test -p execution --lib step_summary`: captured acquisition replay with
+  real shell and committed Node/composite actions; append/overwrite, no content,
+  deletion with preserved outputs, UTF-8 byte limit, registered/dynamic masking,
+  later failure and cancellation, distinct document IDs (83-S1–S4).
+- `cargo test -p listener step_summary`: failed HTTP uploads still drain later
+  queued documents. This is failure-path coverage, not successful-service proof.
+- `cargo test -p observability step_summary`: journal includes only summary ID
+  and byte count, never document text.
+- `.github/workflows/step-summary-83.yml`: opt-in GitHub.com live toolu/reference
+  Linux/macOS and Linux-container probes. Live evidence pending; GHES explicitly
+  unverified/skipped. See [step summaries](step-summaries.md).

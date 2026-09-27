@@ -192,7 +192,8 @@ fn job_environment_node_and_nested_composite_actions_keep_scopes_and_file_update
           | RunnerEvent::StepCompleted { .. }
           | RunnerEvent::StepSkipped { .. }
           | RunnerEvent::LogGroup { .. }
-          | RunnerEvent::Annotation { .. } => {},
+          | RunnerEvent::Annotation { .. }
+          | RunnerEvent::StepSummary { .. } => {},
         }
       }
       Ok::<_, Box<dyn Error>>((result, logs))

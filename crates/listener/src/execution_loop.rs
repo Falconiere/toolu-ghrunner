@@ -355,6 +355,7 @@ struct ForwarderState {
   /// `report_step_to_results`'s own `results_url` guard, now hoisted to a
   /// single check at construction instead of per event.
   step_queue: Option<StepReportQueue>,
+  summary_queue: Option<super::step_summary::StepSummaryQueue>,
   uploaders: HashMap<String, mpsc::Sender<String>>,
   upload_tasks: tokio::task::JoinSet<Option<(String, String, u64)>>,
   all_job_lines: Vec<String>,
@@ -379,6 +380,15 @@ impl ForwarderState {
     Self {
       step_meta: StepMetaMap::new(),
       step_queue,
+      summary_queue: cfg.results_url.as_ref().map(|url| {
+        super::step_summary::StepSummaryQueue::spawn(StepReportQueueConfig {
+          client: cfg.results_client.clone(),
+          results_url: url.clone(),
+          token: cfg.results_token.clone(),
+          run_backend_id: cfg.run_backend_id.clone(),
+          job_backend_id: cfg.job_backend_id.clone(),
+        })
+      }),
       uploaders: HashMap::new(),
       upload_tasks: tokio::task::JoinSet::new(),
       all_job_lines: setup_lines,
@@ -439,6 +449,9 @@ fn spawn_event_forwarder(
     // job-log upload feeds nothing in that payload, so it only gets spawned.
     drain_step_uploads(&mut state, &fwd_collector).await;
     let job_log_upload = spawn_job_log_upload(&mut state, &cfg);
+    if let Some(queue) = state.summary_queue.take() {
+      queue.drain().await;
+    }
     // Close the queue and wait (bounded) for its final flush BEFORE the
     // conclusion is sent — otherwise `complete_job` could race a step's
     // last-known status still sitting in the queue.
@@ -463,6 +476,13 @@ fn spawn_event_forwarder(
 /// `StepCompleted`. Other events carry no forwarder-local side effect.
 async fn handle_event_arm(state: &mut ForwarderState, cfg: &FwdConfig, event: &RunnerEvent) {
   match event {
+    RunnerEvent::StepSummary { step_id, content } => {
+      if let Some(queue) = &state.summary_queue {
+        queue
+          .enqueue(step_id, mask_line(&cfg.masker, content))
+          .await;
+      }
+    },
     RunnerEvent::StepStarted {
       step_id, step_name, ..
     } => spawn_step_uploader(state, cfg, step_id, step_name),

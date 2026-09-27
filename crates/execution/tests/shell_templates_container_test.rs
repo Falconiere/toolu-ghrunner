@@ -127,6 +127,7 @@ async fn replay(
         | RunnerEvent::StepCompleted { .. }
         | RunnerEvent::StepSkipped { .. }
         | RunnerEvent::LogGroup { .. }
+        | RunnerEvent::StepSummary { .. }
         | RunnerEvent::Annotation { .. } => {},
       }
     }

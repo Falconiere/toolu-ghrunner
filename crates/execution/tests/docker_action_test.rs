@@ -288,6 +288,7 @@ async fn missing_registry_images_fail_action_resolution_before_platform_or_daemo
         | RunnerEvent::StepStarted { .. }
         | RunnerEvent::StepCompleted { .. }
         | RunnerEvent::StepSkipped { .. }
+        | RunnerEvent::StepSummary { .. }
         | RunnerEvent::LogGroup { .. }
         | RunnerEvent::Annotation { .. } => {},
       }
@@ -332,6 +333,7 @@ async fn docker_registry_action_rejects_non_linux_without_running_host_code() ->
       | RunnerEvent::StepStarted { .. }
       | RunnerEvent::StepCompleted { .. }
       | RunnerEvent::StepSkipped { .. }
+      | RunnerEvent::StepSummary { .. }
       | RunnerEvent::LogGroup { .. }
       | RunnerEvent::Annotation { .. } => {},
     }

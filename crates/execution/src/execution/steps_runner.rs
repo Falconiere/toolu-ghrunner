@@ -508,8 +508,9 @@ async fn run_script_step(
   // runs and record a would-hit / false-hit after. Observation only — it never
   // changes execution and never serves a cached result.
   let pre = shadow_pre(job)?;
-  let (result, stdout_outputs) =
-    run_and_dispatch_script(&job.handler, &params, step, ctx, events).await?;
+  let execution = run_and_dispatch_script(&job.handler, &params, step, ctx, events).await;
+  super::step_summary::collect(&file_cmds.summary_path, &step.id, &step.id, ctx, events).await;
+  let (result, stdout_outputs) = execution?;
   shadow_post(job, &step.id, &interpolated, &env, &working_dir, pre)?;
   let outputs = merge_step_outputs(step, stdout_outputs, &file_cmds, ctx).await;
 

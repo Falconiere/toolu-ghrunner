@@ -97,3 +97,10 @@ mod process_dispatch;
 #[cfg(test)]
 #[path = "execution/tests/problem_matcher.rs"]
 mod problem_matcher_tests;
+
+#[cfg(test)]
+#[path = "execution/tests/step_summary.rs"]
+mod step_summary_tests;
+
+/// Bounded collection of completed step summary files.
+pub(crate) mod step_summary;

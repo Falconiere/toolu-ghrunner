@@ -159,6 +159,7 @@ async fn captured_job_container_replays_shell_node_composite_and_verify() -> Tes
         | RunnerEvent::StepCompleted { .. }
         | RunnerEvent::StepSkipped { .. }
         | RunnerEvent::LogGroup { .. }
+        | RunnerEvent::StepSummary { .. }
         | RunnerEvent::Annotation { .. } => {},
       }
     }

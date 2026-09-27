@@ -60,6 +60,13 @@ pub enum AnnotationLevel {
 /// Events emitted during job execution via `Runner::execute_job()`.
 #[derive(Debug, Clone)]
 pub enum RunnerEvent {
+  /// A completed, secret-masked Markdown document for the Results Service.
+  StepSummary {
+    /// Unique summary backend UUID (embedded steps have their own identity).
+    step_id: String,
+    /// Complete masked content; durable diagnostics must record only its size.
+    content: String,
+  },
   /// The job has started executing.
   JobStarted {
     /// The GitHub Actions job id.

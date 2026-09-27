@@ -17,3 +17,4 @@
 | `problem_matcher_tsc.json`, `problem_matcher_eslint.json` | Pinned setup-node matcher definitions. |
 | `problem_matcher_tsc.txt`, `problem_matcher_eslint.txt` | TypeScript 5.9.3 and ESLint 8.57.1 output captures. |
 | `problem_matcher_provenance.md` | Fixture source revisions, capture commands and normalization. |
+| `step_summary.rs` | Issue 83 captured-job replay with real shell/Node/composite summaries, masking, limits and cancellation. |

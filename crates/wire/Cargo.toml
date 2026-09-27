@@ -16,10 +16,15 @@ tokio = { version = "1", features = ["rt", "macros", "sync", "time", "net", "io-
 futures-util = "0.3"
 
 # HTTP transport
+bytes = "1"
 reqwest = { version = "0.12", default-features = false, features = ["http2", "json", "rustls-tls-native-roots"] }
 
 # WebSocket for the live-log streamer
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-native-roots"] }
+
+# Upload metadata timestamps; same 0.4 constraint/features as shared.
+# Direct use requires a direct dependency; shared does not re-export chrono.
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

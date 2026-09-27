@@ -31,6 +31,13 @@ pub struct JournalLine {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum JournalEvent {
+  /// A summary was collected; bodies never enter the diagnostic journal.
+  StepSummary {
+    /// Unique summary backend ID.
+    step_id: String,
+    /// Size of the masked document in UTF-8 bytes.
+    size: usize,
+  },
   /// The broker session was created; long-polling for jobs is starting.
   SessionCreated {
     /// The broker session id.
@@ -158,6 +165,10 @@ impl From<&RunnerEvent> for JournalEvent {
   fn from(ev: &RunnerEvent) -> Self {
     use RunnerEvent as R;
     match ev {
+      R::StepSummary { step_id, content } => Self::StepSummary {
+        step_id: step_id.clone(),
+        size: content.len(),
+      },
       R::JobStarted { job_id, job_name } => job_started(job_id, job_name),
       R::StepStarted {
         step_id,
@@ -296,3 +307,7 @@ fn level_str(l: AnnotationLevel) -> &'static str {
 pub fn conclusion_str(c: Conclusion) -> &'static str {
   c.to_report_string()
 }
+
+#[cfg(test)]
+#[path = "tests/step_summary.rs"]
+mod step_summary_tests;
