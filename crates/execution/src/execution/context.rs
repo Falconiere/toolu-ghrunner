@@ -76,6 +76,10 @@ impl ExecutionContext {
   /// file sink's redactor).
   pub fn with_masker(masker: Arc<Mutex<SecretMasker>>) -> Self {
     let mut runner_ctx = ExprObject::default();
+    runner_ctx.insert(
+      "environment".to_owned(),
+      ExprValue::String("self-hosted".to_owned()),
+    );
     runner_ctx.insert("os".to_owned(), ExprValue::String(runner_os().to_owned()));
     runner_ctx.insert(
       "arch".to_owned(),
@@ -191,7 +195,9 @@ impl ExecutionContext {
   pub fn set_github_context_value(&mut self, key: &str, value: ExprValue) {
     self.github.insert(key.to_owned(), value);
   }
+}
 
+impl ExecutionContext {
   /// Populate the host/config-derived `runner.*` context and mirror it to env.
   ///
   /// `os`/`arch` come from the host, in GitHub's spelling (`Linux`/`macOS`,
@@ -227,6 +233,7 @@ impl ExecutionContext {
     self.set_runner_value("tool_cache", &tool_cache);
 
     self.set_env("RUNNER_OS", &os);
+    self.set_env("RUNNER_ENVIRONMENT", "self-hosted");
     self.set_env("RUNNER_ARCH", &arch);
     self.set_env("RUNNER_NAME", name);
     self.set_env("RUNNER_TEMP", &temp);

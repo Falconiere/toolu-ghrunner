@@ -1,5 +1,9 @@
 //! Download and execute GitHub Actions (`uses:` steps).
 
+#[cfg(test)]
+#[path = "tests/action_metadata.rs"]
+mod action_metadata;
+
 use std::path::Path;
 
 use shared::{
@@ -272,6 +276,20 @@ async fn dispatch_action(
   resolved: &ResolvedStep,
   depth: &mut DepthTracker,
 ) -> Result<ActionOutcome, RunnerError> {
+  let prior = super::action_metadata::ActionMetadata::capture(ctx);
+  super::action_metadata::set_reference(ctx, &step.reference);
+  let result = dispatch_scoped_action(step, ctx, env, resolved, depth).await;
+  prior.restore(ctx);
+  result
+}
+
+async fn dispatch_scoped_action(
+  step: &ActionStep,
+  ctx: &mut ExecutionContext,
+  env: &ActionEnv<'_>,
+  resolved: &ResolvedStep,
+  depth: &mut DepthTracker,
+) -> Result<ActionOutcome, RunnerError> {
   match resolved.manifest.runs.using {
     RunsUsing::Node { major } => run_resolved_node(step, ctx, env, resolved, major).await,
     RunsUsing::Composite => {
@@ -485,6 +503,11 @@ fn build_post_step(c: &NodeActionCtx<'_>) -> Option<PostStep> {
   c.manifest.runs.post.as_ref()?;
   Some(PostStep {
     step: c.step.clone(),
+    action_name: c
+      .ctx
+      .github_context("action")
+      .unwrap_or_default()
+      .to_owned(),
     step_env: c.ctx.snapshot_step_env(),
     report_id: uuid::Uuid::new_v4().to_string(),
     scope_path: c.ctx.scope_path(),

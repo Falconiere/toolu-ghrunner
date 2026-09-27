@@ -1,0 +1,25 @@
+name: Action metadata child probe
+description: Exercises Node stages and an inner failure before an always step.
+inputs:
+  repository:
+    description: Child repository context rendered at the input boundary.
+runs:
+  using: composite
+  steps:
+    - id: leaf
+      uses: ./.github/actions/action-metadata-probe/node
+    - id: missing
+      continue-on-error: true
+      uses: ./.github/actions/action-metadata-probe/missing
+    - if: always()
+      shell: bash
+      env:
+        GITHUB_ACTION: stale
+        GITHUB_ACTION_REPOSITORY: stale
+        GITHUB_ACTION_REF: stale
+        RUNNER_ENVIRONMENT: stale
+      run: |
+        printf 'child|%s|%s|%s|%s\n' "$GITHUB_ACTION" "$GITHUB_ACTION_REPOSITORY" "$GITHUB_ACTION_REF" "$RUNNER_ENVIRONMENT" >> metadata.log
+        test -z '${{ inputs.repository }}'
+        test '${{ github.action }}' = "$GITHUB_ACTION"
+        test '${{ runner.environment }}' = "$RUNNER_ENVIRONMENT"

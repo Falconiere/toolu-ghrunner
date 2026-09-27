@@ -177,7 +177,7 @@ fn build_nested_step(
   idx: usize,
   uses: &str,
   inputs: &HashMap<String, String>,
-  ctx: &ExecutionContext,
+  ctx: &mut ExecutionContext,
 ) -> Result<ActionStep, RunnerError> {
   let id = step
     .id
@@ -191,9 +191,23 @@ fn build_nested_step(
     nested_ref_parts(&action_ref)
   };
 
-  let inputs_token = build_inputs_token(&step.with, inputs, ctx)?;
+  let reference = ActionStepDefinitionReference {
+    ref_type: Some("repository".to_owned()),
+    image: None,
+    name: Some(name),
+    git_ref,
+    repository_type: None,
+    path: None,
+  };
+  // ActionRunner installs its own repository/ref before evaluating with inputs.
+  // Step env remains evaluated in the enclosing context by the caller.
+  let prior = super::action_metadata::ActionMetadata::capture(ctx);
+  super::action_metadata::set_reference(ctx, &reference);
+  let inputs_token = build_inputs_token(&step.with, inputs, ctx);
+  prior.restore(ctx);
 
   Ok(ActionStep {
+    name: None,
     id,
     step_type: Some("action".to_owned()),
     display_name_token: None,
@@ -201,15 +215,8 @@ fn build_nested_step(
     condition: step.condition.clone(),
     continue_on_error: Some(step.continue_on_error),
     timeout_in_minutes: None,
-    reference: ActionStepDefinitionReference {
-      ref_type: Some("repository".to_owned()),
-      image: None,
-      name: Some(name),
-      git_ref,
-      repository_type: None,
-      path: None,
-    },
-    inputs: inputs_token,
+    reference,
+    inputs: inputs_token?,
     environment: None,
   })
 }

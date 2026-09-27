@@ -1,0 +1,21 @@
+name: Action metadata parent probe
+description: Exercises repeated nested action metadata and parent restoration.
+outputs:
+  metadata:
+    description: Parent metadata after children return.
+    value: ${{ github.action }}|${{ github.action_repository }}|${{ github.action_ref }}
+runs:
+  using: composite
+  steps:
+    - uses: ./.github/actions/action-metadata-probe/child
+      with:
+        repository: ${{ github.action_repository }}
+    - uses: ./.github/actions/action-metadata-probe/child
+      with:
+        repository: ${{ github.action_repository }}
+    - shell: bash
+      run: |
+        printf 'parent|%s|%s|%s|%s\n' "$GITHUB_ACTION" "$GITHUB_ACTION_REPOSITORY" "$GITHUB_ACTION_REF" "$RUNNER_ENVIRONMENT" >> metadata.log
+        test '${{ github.action }}' = "$GITHUB_ACTION"
+        test '${{ github.action_repository }}' = "$GITHUB_ACTION_REPOSITORY"
+        test '${{ runner.environment }}' = "$RUNNER_ENVIRONMENT"

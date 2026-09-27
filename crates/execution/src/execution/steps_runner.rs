@@ -178,7 +178,12 @@ async fn run_main_steps(
 
     // Step 1 is "Set up job" (reported by setup_step.rs). Workflow steps start at 2.
     let step_number = u32::try_from(index + 2).unwrap_or(0);
-    let step_conclusion = run_single_step(step, step_number, ctx, events, job, job_state).await?;
+    let prior = super::action_metadata::ActionMetadata::capture(ctx);
+    super::action_metadata::set_name(ctx, step);
+    super::action_metadata::clear_repository(ctx);
+    let result = run_single_step(step, step_number, ctx, events, job, job_state).await;
+    prior.restore(ctx);
+    let step_conclusion = result?;
 
     if step_conclusion == Conclusion::Failure && job_conclusion != Conclusion::Cancelled {
       job_conclusion = Conclusion::Failure;
@@ -219,19 +224,7 @@ async fn run_single_step(
   {
     Ok(should_run) => should_run,
     Err(error) => {
-      let _ = events
-        .send(RunnerEvent::StepStarted {
-          step_id: step.id.clone(),
-          step_name: derive_step_name(step),
-          step_number,
-        })
-        .await;
-      if let Some(name) = step.expression_name() {
-        ctx.set_step_outcome(name, Conclusion::Failure);
-        ctx.set_step_conclusion(name, Conclusion::Failure);
-      }
-      ctx.record_step_failure();
-      report_step_failure(events, &step.id, &error).await;
+      record_condition_failure(step, step_number, ctx, events, &error).await;
       return Ok(Conclusion::Failure);
     },
   };
@@ -239,13 +232,7 @@ async fn run_single_step(
     report_skipped_step(step, step_number, ctx, events).await;
     return Ok(Conclusion::Success);
   }
-  let _ = events
-    .send(RunnerEvent::StepStarted {
-      step_id: step.id.clone(),
-      step_name: derive_step_name(step),
-      step_number,
-    })
-    .await;
+  start_step(step, step_number, events).await;
 
   let watch = job.cancellation.watch_step(
     ctx.eval_context(),
@@ -264,7 +251,16 @@ async fn run_single_step(
     },
   };
   let conclusion = record_step_result(step, outcome, ctx);
+  complete_step(step, conclusion, outputs, events).await;
+  Ok(conclusion)
+}
 
+async fn complete_step(
+  step: &ActionStep,
+  conclusion: Conclusion,
+  outputs: HashMap<String, String>,
+  events: &mpsc::Sender<RunnerEvent>,
+) {
   let _ = events
     .send(RunnerEvent::StepCompleted {
       step_id: step.id.clone(),
@@ -272,7 +268,33 @@ async fn run_single_step(
       outputs,
     })
     .await;
-  Ok(conclusion)
+}
+
+/// Report failure before handler execution, where continue-on-error cannot apply.
+async fn record_condition_failure(
+  step: &ActionStep,
+  step_number: u32,
+  ctx: &mut ExecutionContext,
+  events: &mpsc::Sender<RunnerEvent>,
+  error: &RunnerError,
+) {
+  start_step(step, step_number, events).await;
+  if let Some(name) = step.expression_name() {
+    ctx.set_step_outcome(name, Conclusion::Failure);
+    ctx.set_step_conclusion(name, Conclusion::Failure);
+  }
+  ctx.record_step_failure();
+  report_step_failure(events, &step.id, error).await;
+}
+
+async fn start_step(step: &ActionStep, step_number: u32, events: &mpsc::Sender<RunnerEvent>) {
+  let _ = events
+    .send(RunnerEvent::StepStarted {
+      step_id: step.id.clone(),
+      step_name: derive_step_name(step),
+      step_number,
+    })
+    .await;
 }
 
 async fn report_skipped_step(
@@ -298,13 +320,7 @@ async fn report_skipped_step(
       reason: "condition evaluated to false".to_owned(),
     })
     .await;
-  let _ = events
-    .send(RunnerEvent::StepCompleted {
-      step_id: step.id.clone(),
-      conclusion: Conclusion::Skipped,
-      outputs: HashMap::new(),
-    })
-    .await;
+  complete_step(step, Conclusion::Skipped, HashMap::new(), events).await;
 }
 
 fn record_step_result(

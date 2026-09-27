@@ -111,6 +111,7 @@ async fn failing_job_reports_error_log_and_real_job_id() -> TestResult {
 /// goes through `execute_action`, not `run_script_step`.
 fn broken_local_action_step(step_id: &str) -> ActionStep {
   ActionStep {
+    name: None,
     id: step_id.to_owned(),
     step_type: Some("node20".to_owned()),
     display_name_token: None,

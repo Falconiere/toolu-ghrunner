@@ -97,11 +97,15 @@ async fn run_one_post(
   job: &JobCtx<'_>,
 ) -> Result<Conclusion, RunnerError> {
   let prior_scope = ctx.scope_path();
+  let prior_metadata = super::action_metadata::ActionMetadata::capture(ctx);
+  ctx.set_github_context("action", &post.action_name);
+  super::action_metadata::set_reference(ctx, &post.step.reference);
   ctx.restore_step_scope(post.scope_path.clone());
   ctx.push_step_env(post.step_env.clone());
   let result = run_scoped_post(post, report, ctx, events, job).await;
   ctx.pop_step_env();
   ctx.restore_step_scope(prior_scope);
+  prior_metadata.restore(ctx);
   result
 }
 

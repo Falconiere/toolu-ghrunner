@@ -115,6 +115,7 @@ fn register_post(
   if s.manifest.runs.post_entrypoint.is_some() {
     ctx.register_nested_post(PostStep {
       step: s.step.clone(),
+      action_name: ctx.github_context("action").unwrap_or_default().to_owned(),
       step_env: ctx.snapshot_step_env(),
       report_id: uuid::Uuid::new_v4().to_string(),
       scope_path: ctx.scope_path(),

@@ -977,3 +977,38 @@ The branch-scoped `docker-actions-live.yml` workflow
 is an executable live probe; its presence does not establish a live pass. Paired
 toolu/reference execution, a newly acquired Docker-action payload, and GHES
 remain unverified until their run identities and observations are recorded.
+
+## Action metadata (issue #85)
+
+The replay starts from `crates/execution/tests/incoming_contexts_matrix_0.json`,
+a sanitized GitHub.com #68 acquisition. It preserves wire UUID/name/contextName
+and template-token structure, removes remote checkout, substitutes committed
+`.github/actions/action-metadata-probe` actions and shell probes, and runs
+`Runner::execute_job`. Named/absent-name variants are explicit mutations of that
+capture. Probes use actual Bash/Node processes and files, not mocked responses.
+
+| AC / scenario | Check and exact result | Lane |
+| --- | --- | --- |
+| AC-1 / 85-S1 | `action_metadata_captured_names_nested_stages_and_restoration`: `__run`, `__run_2`, `__self`, `__self_2`, `__run_3` in exact process-file order; empty repo/ref on run/local steps. | Linux/macOS workspace tests |
+| AC-1 / 85-S1 | `action_metadata_wire_name_named_skipped_and_legacy_absence`: wire `explicit_name` wins over `output_scope`; skipped step never executes; absent name/context exports empty, never UUID; `action_metadata_empty_wire_name_uses_legacy_context_name` verifies legacy fallback. | Linux/macOS workspace tests |
+| AC-1–2 / 85-S1–S2 | `action_metadata_remote_dispatch_repeated_refs_and_parent_restore`: captured remote `actions/checkout` reference through production resolved-action dispatch with the real committed probe; exact v4 and topic/branch refs, subpath excluded, child with-input repo empty, remote composite parent output restored after local children and after a missing pre script. | Linux/macOS component integration; **does not verify live download resolution** |
+| AC-2 / 85-S2 | Captured replay records distinct pre/main/post markers, two nested child calls per composite and two composite invocations, including continued missing-action failure and always cleanup. Posts inherit their originating top-level name in LIFO order. | Linux/macOS workspace tests |
+| AC-1–2 / 85-S1–S2 | `action_metadata_absent_identity_survives_composite_posts`: removing both wire name and contextName from a captured composite keeps the action identity empty in both child invocations and deferred posts; exact pre/main/child/parent/post marker order. | Linux/macOS workspace tests |
+| AC-3 / 85-S3 | Each shell probe compares github metadata and runner.environment expressions with actual process variables. Every stage records self-hosted. | Linux/macOS workspace tests |
+| AC-1,3 / 85-S1,S3 | `action_metadata_host_job_container_and_docker_actions`: real pinned Alpine registry/local Docker actions, plus shell steps before/after, with and without the captured Ubuntu job container; exact names, empty repo/ref and self-hosted. | Linux Docker, explicitly invoked by CI |
+| AC-4 | `./tools/check.sh all`; GitHub.com `ci` and `ci-macos` workspace tests, plus the existing Linux Docker replay step. | Required gate and CI |
+
+Host checks live in `crates/execution/src/execution/tests/action_metadata.rs`:
+`cargo test -p execution action_metadata`. Docker checks live in sibling
+`action_metadata_docker.rs`, included by `docker_action_linux_test.rs`:
+`TOOLU_CONTAINER_TEST_ROOT=/tmp/toolu-docker-action-tests cargo test -p execution
+--test docker_action_linux_test action_metadata -- --ignored --test-threads=1`.
+The test root must be shared with the Docker daemon; absent tools/access fail.
+Node probes may download the pinned Node 20 runtime when not cached.
+
+Local and CI results are recorded in the issue PR. Per the orchestrator's
+2026-09-26 decision, GHES, new live acquisitions and equivalent pinned official
+runner comparisons are **unverified/skipped**, not inferred from replay and not
+blocking this delivery. macOS Docker is not applicable (unsupported platform).
+The pinned upstream contract inspected is actions/runner
+`cab9d1c3901e45c7705889c4f88284fdd93f4ae5`; the tests do not claim reference parity.

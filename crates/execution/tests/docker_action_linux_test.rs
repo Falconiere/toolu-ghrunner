@@ -408,3 +408,6 @@ printf composite-verified > composite-registry-verified
 
 #[path = "../src/execution/tests/docker_action_lifecycle.rs"]
 mod lifecycle;
+
+#[path = "../src/execution/tests/action_metadata_docker.rs"]
+mod action_metadata;
