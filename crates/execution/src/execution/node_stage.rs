@@ -133,6 +133,22 @@ async fn run_stage_process(
   let commands = dispatcher(&s.step.id, s.log_step_id, output_name, s.ctx);
   let dispatch = stream_process(commands, &mut stdout_rx, &mut process_rx, s.ctx, s.events);
   let (output, stdout_outputs) = tokio::join!(exec, dispatch);
+  collect_stage_summary(&s, file_cmds).await;
+  let conclusion = stdout_outputs.conclusion(output?.conclusion);
+  let outputs = apply_file_commands_and_merge_outputs(
+    &s.step.id,
+    output_name,
+    Some(&s.step.id),
+    stdout_outputs.outputs,
+    file_cmds,
+    s.ctx,
+  )
+  .await;
+  Ok((conclusion, outputs))
+}
+
+/// Collect each stage's summary before propagating process errors.
+async fn collect_stage_summary(s: &NodeStage<'_>, file_cmds: &FileCommandManager) {
   // Embedded main stages share their parent's log identity, but each needs
   // its own summary. Pre/post stages already have distinct timeline IDs.
   let summary_id = if s.stage == "main" && s.log_step_id != s.step.id {
@@ -148,17 +164,6 @@ async fn run_stage_process(
     s.events,
   )
   .await;
-  let conclusion = stdout_outputs.conclusion(output?.conclusion);
-  let outputs = apply_file_commands_and_merge_outputs(
-    &s.step.id,
-    output_name,
-    Some(&s.step.id),
-    stdout_outputs.outputs,
-    file_cmds,
-    s.ctx,
-  )
-  .await;
-  Ok((conclusion, outputs))
 }
 
 /// Give every pre/main/post stage its own host-readable command files.
