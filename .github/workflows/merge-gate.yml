@@ -1,0 +1,40 @@
+name: Merge Gate
+
+# Re-evaluates the `merge-gate` required check between pushes. The first
+# verdict for each commit comes from the `merge-gate` job in code-review.yml,
+# after the reviewer has posted; this workflow answers only the events that can
+# turn it green afterwards: a reply on a review thread, or a label added or
+# removed by hand. Branch protection reads the newest `merge-gate` check on the
+# head commit, whichever workflow produced it.
+#
+# Resolving a thread is not a workflow trigger, so resolution is left to branch
+# protection's required conversation resolution rather than checked here: a
+# verdict taken before the resolve could never refresh.
+#
+# release-pr is exempt exactly as `review` is: the release PR is not reviewed,
+# so it never gets the label, and a skipped check passes.
+on:
+  pull_request:
+    types: [labeled, unlabeled]
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+  pull_request_review_comment:
+    types: [created, edited, deleted]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+# Replying in the UI fires both a review and a review-comment event; only the
+# newest evaluation matters.
+concurrency:
+  group: merge-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  merge-gate:
+    if: ${{ github.event.pull_request.base.ref == 'main' && !github.event.pull_request.draft && (github.event.pull_request.head.ref != 'release-pr' || github.event.pull_request.head.repo.full_name != github.repository) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: falconiere/toolu-ghactions/merge-gate@v8
