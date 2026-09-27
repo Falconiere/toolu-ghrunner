@@ -24,7 +24,9 @@ impl ExecutionContext {
         .entry("HOME".to_owned())
         .or_insert_with(|| "/github/home".to_owned());
     }
-    self.merge_step_env(base, step_env)
+    let mut env = self.merge_step_env(base, step_env);
+    super::super::action_metadata::export(self, &mut env);
+    env
   }
 
   /// Environment for host hooks, without container HOME or image PATH defaults.

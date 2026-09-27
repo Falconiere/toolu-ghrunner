@@ -215,6 +215,16 @@ container declaration supplying the fallback when no job or step `CI` is present
 Docker action containers follow this environment rule too; see [test coverage](docs/test-coverage.md)
 for measured platforms and live parity status.
 
+Steps export `GITHUB_ACTION` from the acquired action name (including generated
+`__run`, `__run_2`, and `__owner_repo` names). Remote repository actions also
+export `GITHUB_ACTION_REPOSITORY` and `GITHUB_ACTION_REF`; run, local, and
+registry-image actions receive empty values for those two fields. Composite
+children inherit the enclosing action name, scope repository/ref to their own
+handler, and restore parent metadata on return. Deferred posts retain the
+originating action identity. `RUNNER_ENVIRONMENT` and `${{ runner.environment }}`
+are always `self-hosted`. See [metadata evidence](docs/test-coverage.md#action-metadata-issue-85)
+for the measured host/container paths and unverified live lanes.
+
 Workflow and job `env:` mappings from the acquired message are evaluated in
 order. A job layer can read the previous layer through `env`; step `env` wins
 for that step in both expressions and child processes. `GITHUB_ENV` updates

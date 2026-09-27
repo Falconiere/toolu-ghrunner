@@ -97,37 +97,46 @@ async fn run_composite_steps(run: &mut CompositeRun<'_>, depth: &mut DepthTracke
       outcome
     };
     record_inner_result(run.ctx, step, outcome, conclusion);
-    if conclusion == Conclusion::Failure {
-      if aggregate != Conclusion::Cancelled {
-        aggregate = Conclusion::Failure;
-        run.ctx.set_scope_status(JobStatus::Failure);
-      }
-    } else if conclusion == Conclusion::Cancelled {
-      aggregate = Conclusion::Cancelled;
-      run.ctx.set_scope_status(JobStatus::Cancelled);
-      run.cleanup_token = Some(
-        run
-          .ctx
-          .cancellation
-          .as_ref()
-          .map_or_else(CancellationToken::new, |signal| signal.force.child_token()),
-      );
-      run.cleanup_deadline = Some(
-        run
-          .params
-          .deadline
-          .or_else(|| {
-            run
-              .ctx
-              .cancellation
-              .as_ref()
-              .and_then(|signal| signal.deadline())
-          })
-          .unwrap_or_else(|| Instant::now() + Duration::from_secs(300)),
-      );
-    }
+    update_composite_status(run, conclusion, &mut aggregate);
   }
   aggregate
+}
+
+/// Retain failure/cancellation and prepare the existing cleanup budget.
+fn update_composite_status(
+  run: &mut CompositeRun<'_>,
+  conclusion: Conclusion,
+  aggregate: &mut Conclusion,
+) {
+  if conclusion == Conclusion::Failure {
+    if *aggregate != Conclusion::Cancelled {
+      *aggregate = Conclusion::Failure;
+      run.ctx.set_scope_status(JobStatus::Failure);
+    }
+  } else if conclusion == Conclusion::Cancelled {
+    *aggregate = Conclusion::Cancelled;
+    run.ctx.set_scope_status(JobStatus::Cancelled);
+    run.cleanup_token = Some(
+      run
+        .ctx
+        .cancellation
+        .as_ref()
+        .map_or_else(CancellationToken::new, |signal| signal.force.child_token()),
+    );
+    run.cleanup_deadline = Some(
+      run
+        .params
+        .deadline
+        .or_else(|| {
+          run
+            .ctx
+            .cancellation
+            .as_ref()
+            .and_then(|signal| signal.deadline())
+        })
+        .unwrap_or_else(|| Instant::now() + Duration::from_secs(300)),
+    );
+  }
 }
 
 fn record_inner_result(
@@ -160,7 +169,11 @@ async fn run_one_step(
       },
     }
   } else if let Some(script) = &step.run {
-    match run_run_step(run, step, idx, script).await {
+    let prior = super::action_metadata::ActionMetadata::capture(run.ctx);
+    super::action_metadata::clear_repository(run.ctx);
+    let result = run_run_step(run, step, idx, script).await;
+    prior.restore(run.ctx);
+    match result {
       Ok(c) => Some(c),
       Err(err) => {
         Some(report_composite_step_error(params.events, params.parent_step_id, &err).await)
@@ -245,15 +258,7 @@ async fn run_run_step(
   script: &str,
 ) -> Result<Conclusion, RunnerError> {
   let params = run.params;
-  let step_id = step
-    .id
-    .clone()
-    .unwrap_or_else(|| format!("__composite_{idx}"));
-  let step_name = step
-    .name
-    .as_deref()
-    .unwrap_or_else(|| script.lines().next().unwrap_or("(composite step)"));
-  emit_run_group(params.events, params.parent_step_id, step_name).await;
+  let step_id = start_run_step(params, step, idx, script).await;
 
   let env = build_step_env(
     params,
@@ -290,17 +295,43 @@ async fn run_run_step(
   )
   .await?;
 
+  finish_run_step(run, &step_id, &file_paths).await;
+
+  Ok(conclusion)
+}
+
+async fn start_run_step(
+  params: &CompositeParams<'_>,
+  step: &super::actions::manifest::CompositeStep,
+  idx: usize,
+  script: &str,
+) -> String {
+  let step_name = step
+    .name
+    .as_deref()
+    .unwrap_or_else(|| script.lines().next().unwrap_or("(composite step)"));
+  emit_run_group(params.events, params.parent_step_id, step_name).await;
+  step
+    .id
+    .clone()
+    .unwrap_or_else(|| format!("__composite_{idx}"))
+}
+
+async fn finish_run_step(
+  run: &mut CompositeRun<'_>,
+  step_id: &str,
+  file_paths: &super::composite_env::FileCommandPaths,
+) {
+  let params = run.params;
   emit_log(params.events, params.parent_step_id, "##[endgroup]").await;
   process_file_commands(
-    &file_paths,
-    &step_id,
+    file_paths,
+    step_id,
     &mut run.state.step_outputs,
     &mut run.state.extra_env,
     &mut run.state.path_additions,
   );
-  apply_run_file_commands(run, &step_id);
-
-  Ok(conclusion)
+  apply_run_file_commands(run, step_id);
 }
 
 async fn execute_composite_script(

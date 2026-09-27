@@ -16,6 +16,8 @@ use super::actions::manifest::ActionDefinition;
 pub struct PostStep {
   /// The originating action step (same id/scope as `main`).
   pub step: ActionStep,
+  /// Top-level action identity inherited by embedded stages and retained for post.
+  pub action_name: String,
   /// Resolved step environment retained for the post stage.
   pub step_env: std::collections::HashMap<String, String>,
   /// Independent timeline/report identity for the post stage.

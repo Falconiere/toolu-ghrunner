@@ -11,6 +11,9 @@ use super::template_token::TemplateToken;
 pub struct ActionStep {
   /// The step's id within the job.
   pub id: String,
+  /// Server-assigned action identity exported as `GITHUB_ACTION`, not the UUID.
+  #[serde(default)]
+  pub name: Option<String>,
   /// Wire field `type`; the step's handler kind (e.g. `"script"`), if reported.
   #[serde(default, rename = "type")]
   pub step_type: Option<String>,
@@ -115,6 +118,7 @@ impl ActionStep {
 
     Self {
       id: id.to_owned(),
+      name: None,
       step_type: Some("script".to_owned()),
       display_name_token: None,
       context_name: Some(id.to_owned()),
@@ -135,6 +139,7 @@ impl ActionStep {
   pub fn with_ref_type(id: &str, ref_type: &str) -> Self {
     Self {
       id: id.to_owned(),
+      name: None,
       step_type: Some(ref_type.to_owned()),
       display_name_token: None,
       context_name: Some(id.to_owned()),

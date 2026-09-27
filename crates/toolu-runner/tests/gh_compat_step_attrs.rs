@@ -59,6 +59,7 @@ fn script_step(id: &str, body: &str, working_dir: Option<&str>) -> ActionStep {
     entries.push(lit_entry("workingDirectory", wd));
   }
   ActionStep {
+    name: None,
     id: id.to_owned(),
     step_type: Some("script".to_owned()),
     display_name_token: None,
