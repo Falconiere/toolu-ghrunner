@@ -139,7 +139,7 @@ async fn rpc<T: Serialize, R: serde::de::DeserializeOwned>(
   response
     .json()
     .await
-    .map_err(|error| request_error(method, &error))
+    .map_err(|_decode_error| RunnerError::Reporting(format!("{method} failed: invalid response")))
 }
 
 async fn put_blob(

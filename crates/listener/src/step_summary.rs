@@ -14,7 +14,8 @@ pub(crate) struct StepSummaryQueue {
 impl StepSummaryQueue {
   /// Start one serial uploader; per-request deadlines are enforced by wire.
   pub(crate) fn spawn(cfg: StepReportQueueConfig) -> Self {
-    let (tx, mut rx) = mpsc::channel::<(String, String)>(8);
+    // Documents may be MiB-sized; keep this smaller than the status-only queue.
+    let (tx, mut rx) = mpsc::channel::<(String, String)>(16);
     let handle = tokio::spawn(async move {
       while let Some((step_id, content)) = rx.recv().await {
         if let Err(error) = wire::net::step_summary::upload_step_summary(

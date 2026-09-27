@@ -22,8 +22,9 @@ reqwest = { version = "0.12", default-features = false, features = ["http2", "js
 # WebSocket for the live-log streamer
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-native-roots"] }
 
-# Upload metadata timestamps
-chrono = "0.4"
+# Upload metadata timestamps; same 0.4 constraint/features as shared.
+# Direct use requires a direct dependency; shared does not re-export chrono.
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
