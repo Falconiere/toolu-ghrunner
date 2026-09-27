@@ -20,3 +20,5 @@
 | `watchdog_retry.rs` | Watchdog retry behavior. |
 | `watchdog_trip.rs` | Watchdog cancellation behavior. |
 | `runner_update_policy.rs` | Idle/busy refresh warning, safe opaque bodies, cancellation and cursor continuity. |
+| `setup_step.rs` | Captured permissions, identity and secret-source diagnostics. |
+| `setup_forwarding.rs` | Production replay, masked setup logs, early failure and cancellation. |

@@ -165,6 +165,7 @@ fn make_ctx(server_uri: String, config: RunnerConfig) -> SessionCtx {
   let (tx, mut rx) = mpsc::channel::<ListenerEvent>(256);
   tokio::spawn(async move { while rx.recv().await.is_some() {} });
   SessionCtx {
+    runner_name: None,
     client: reqwest::Client::new(),
     token: "session-token".to_owned(),
     broker_url: server_uri,

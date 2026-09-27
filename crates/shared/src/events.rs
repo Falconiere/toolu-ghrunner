@@ -1,3 +1,6 @@
+/// Reserved routing ID for engine preparation diagnostics; listener maps it to its setup UUID.
+pub const SETUP_STEP_ID: &str = "__toolu_setup_job";
+
 use std::collections::HashMap;
 
 /// Conclusion of a step or job execution.

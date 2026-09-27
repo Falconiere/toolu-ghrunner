@@ -19,6 +19,8 @@ fn masker_with_secret(secret: &str) -> Arc<Mutex<SecretMasker>> {
 /// Results Service fields are never read by it.
 fn test_fwd_config(masker: Arc<Mutex<SecretMasker>>) -> FwdConfig {
   FwdConfig {
+    setup_cancel: CancellationToken::new(),
+    setup_id: None,
     results_url: None,
     results_client: reqwest::Client::new(),
     results_token: String::new(),

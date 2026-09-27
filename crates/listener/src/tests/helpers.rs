@@ -128,6 +128,7 @@ async fn spawn_404_listener() -> (SocketAddr, tokio::sync::oneshot::Receiver<Str
 fn test_ctx(broker_url: String, live_log: Option<tokio::task::JoinHandle<()>>) -> SessionCtx {
   let (tx, _rx) = mpsc::channel(1);
   SessionCtx {
+    runner_name: None,
     client: reqwest::Client::new(),
     token: "test-token".to_owned(),
     broker_url,

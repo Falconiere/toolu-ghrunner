@@ -59,6 +59,8 @@ fn fixture(config: &RunnerConfig) -> TestResult<AgentJobRequestMessage> {
 
 fn forwarder(masker: Arc<Mutex<SecretMasker>>, live_tx: mpsc::Sender<LiveLogLine>) -> FwdConfig {
   FwdConfig {
+    setup_cancel: CancellationToken::new(),
+    setup_id: None,
     results_url: None,
     results_client: reqwest::Client::new(),
     results_token: String::new(),
