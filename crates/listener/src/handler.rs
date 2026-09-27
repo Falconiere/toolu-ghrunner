@@ -21,6 +21,8 @@ pub(crate) struct RefreshAuth {
 
 /// Shared state threaded through the listener lifecycle after authentication.
 pub(crate) struct SessionCtx {
+  /// Runner display name from the JIT registration.
+  pub(crate) runner_name: Option<String>,
   pub(crate) client: reqwest::Client,
   pub(crate) token: String,
   pub(crate) broker_url: String,
@@ -215,6 +217,7 @@ impl GitHubListener {
     let (access_token, session_response) = self.authenticate_and_create_session(&tx).await?;
 
     Ok(SessionCtx {
+      runner_name: Some(self.jit_config.runner_settings.agent_name.clone()),
       client: self.client.clone(),
       token: access_token,
       broker_url: self.jit_config.runner_settings.server_url_v2.clone(),

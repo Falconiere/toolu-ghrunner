@@ -21,7 +21,9 @@ pub mod startup;
 
 pub use config::{CacheConfig, L2Config, RunnerConfig, ServicesMode};
 pub use error::RunnerError;
-pub use events::{AnnotationLevel, Conclusion, ListenerEvent, LogStream, RunnerEvent};
+pub use events::{
+  AnnotationLevel, Conclusion, ListenerEvent, LogStream, RunnerEvent, SETUP_STEP_ID,
+};
 pub use job_message::{
   ActionStep, ActionStepDefinitionReference, AgentJobRequestMessage, DictEntry, JobAuthorization,
   JobEndpoint, JobResources, MaskHint, PipelineContextData, TaskOrchestrationPlanReference,

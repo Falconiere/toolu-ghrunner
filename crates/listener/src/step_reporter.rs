@@ -130,11 +130,6 @@ impl StepCollector {
     }
   }
 
-  /// Append a pre-built `StepResult` (e.g. setup step).
-  pub(super) async fn push_result(&self, result: StepResult) {
-    self.state.lock().await.results.push(result);
-  }
-
   /// Backfill log URL and line count onto an already-recorded step result.
   ///
   /// Called after background log upload completes. Finds the result by

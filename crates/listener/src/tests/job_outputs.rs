@@ -19,6 +19,8 @@ async fn forwarder_keeps_real_job_outputs_for_completion() -> TestResult {
   let runner = Runner::new(config, Arc::clone(&masker));
   let engine_rx = runner.execute_job(message, CancellationToken::new());
   let cfg = FwdConfig {
+    setup_cancel: CancellationToken::new(),
+    setup_id: None,
     results_url: None,
     results_client: reqwest::Client::new(),
     results_token: String::new(),

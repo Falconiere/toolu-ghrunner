@@ -1036,3 +1036,43 @@ path. Bash executes the real captured output files; these tests cover production
 execution/event wiring, not GitHub-owned rendering. Live GitHub.com/GHES service/UI and the official-runner comparison
 lanes are **unverified/skipped** under the orchestrator's delivery scope. No GHES
 version, Docker runtime, or universal .NET regex parity is claimed by these tests.
+
+## Set up job diagnostics (#87)
+
+The listener replay uses the sanitized GitHub.com acquisition
+`crates/execution/tests/incoming_contexts_matrix_0.json` (provenance in
+`incoming_contexts_evidence.json`). It preserves acquired metadata and wire
+structure, replaces workflow steps with a real shell probe, removes remote
+checkout and live endpoint routing, and introduces a real filesystem obstruction
+or an actual cancelled token for failure cases. Metadata absence and malformed
+permissions are explicit boundary transformations of that capture.
+
+| AC / scenario | Test and observable result | Applicable lane |
+| --- | --- | --- |
+| Original identity/permissions/source criteria; AC-1 / 87-S1 | `setup_capture_keeps_metadata_without_results_endpoint`: `Default`, `Contents: read`, `Metadata: read`, `Secret source: Actions`, permission group despite no results URL. `setup_capture_has_actual_host_identity_and_explicit_absence`: actual version/OS/arch/hostname; missing group/name unavailable, absent optional blocks omitted. | Linux/macOS workspace |
+| AC-1 / 87-S1 | `setup_capture_malformed_permissions_are_not_reflected`: fixed parse diagnostic, no reflected malformed input or unclosed group. | Linux/macOS workspace |
+| Original action SHA criterion; AC-2 / 87-S2 | `setup_action_real_archive_cold_warm_dedup_and_subpath`: real captured REST revision response and unmodified archive through `ActionFetcher::for_job` / `ensure_action`; one archive request across duplicate/subpath and new-job disk cache; exact ref/SHA lines, no service URL. | Linux/macOS recorded public-service replay |
+| AC-2 / 87-S2 | `setup_deferred_action_log_retains_upload_and_live_identity`: post-completion diagnostics retain setup UUID in live/upload channels and combined log; serialized completion preserves setup name, number and start time. | Linux/macOS component test with captured revision |
+| AC-2 / 87-S2 | `setup_action_production_prefetch_emits_resolved_sha`: captured message → `Runner::execute_job` → production prefetch; real shell observes completed extraction; exact immutable SHA log emitted. Remote execution is condition-skipped, so this is not Docker runtime evidence. | Linux/macOS workspace |
+| AC-2 / 87-S2 | `setup_action_failed_download_has_no_success_identity`: closed real socket causes failure, no invented successful download line. | Linux/macOS workspace |
+| AC-1,3 / 87-S3 | `setup_production_replay_streams_metadata_and_completes_before_shell`: actual listener startup, Runner, collector and forwarder; captured secret in group name becomes `***` in live output; setup completion precedes real shell start. | Linux/macOS workspace |
+| AC-3 / 87-S3 | `setup_production_failure_preserves_partial_masked_live_log`, `setup_production_cancellation_preserves_metadata`, `setup_failed_real_hook_keeps_named_preparation_output`: real failing shell hook/filesystem failure/pre-cancel retains source/permissions and masked output; setup reports Failure/Cancelled respectively. | Linux/macOS workspace |
+| Original real-data/gate criteria; AC-4 | `./tools/check.sh all`; GitHub.com `ci` and `ci-macos`. | Full gate and CI; PR records results |
+
+Listener tests are in sibling `crates/listener/src/tests/setup_step.rs` and
+`setup_forwarding.rs`; action tests are in
+`crates/execution/src/execution/actions/tests/setup_actions.rs`. The public action
+is `actions/hello-world-docker-action` at
+`8bcd8e1af3c095561f1043123848fc8b2db0f189`, captured 2026-09-27. The committed
+`setup_action_commit.json` is the real REST response; `setup_action.tar.gz` contains
+unmodified codeload bytes and upstream LICENSE. `setup_action_revision.json`
+records URL and archive digest. Local static endpoints replay those captures;
+only job API routing is redirected. No successful resolver response is invented.
+
+Private/scoped download acquisition, GHES, live GitHub UI/service delivery and an
+equivalent pinned official-runner comparison are **unverified/skipped**, per the
+orchestrator policy. Public recorded-response replay cannot prove those lanes.
+The live-output assertions inspect the actual outgoing channel, not a GitHub UI.
+The upstream contract inspected is actions/runner
+`cab9d1c3901e45c7705889c4f88284fdd93f4ae5` JobExtension.cs. Current self-hosted OS
+and architecture come from the host, not hosted-runner image metadata.

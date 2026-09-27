@@ -5,18 +5,18 @@
 //! join the same attempt. Failed prefetches are logged, then retried at step
 //! time without failing the job early.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use futures_util::StreamExt;
 use futures_util::stream;
 use shared::{ActionStep, AgentJobRequestMessage, RunnerError, SecretMasker};
-use tokio::sync::OnceCell;
+use tokio::sync::{OnceCell, mpsc};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use super::download_info::ActionDownloadContext;
+use super::download_info::{ActionDownloadContext, ActionDownloadInfo};
 use super::downloader::{action_cache_dir, download_and_extract_action};
 use super::resolver::{ActionRef, resolve_action_refs};
 use crate::execution::action_exec::build_uses_ref;
@@ -30,6 +30,8 @@ const ARCHIVE_ATTEMPTS: usize = 2;
 /// action revision and API host.
 #[derive(Default)]
 pub struct ActionFetcher {
+  events: Option<mpsc::Sender<shared::RunnerEvent>>,
+  reported: Mutex<HashSet<String>>,
   inflight: Mutex<HashMap<String, Arc<OnceCell<PathBuf>>>>,
   context: Option<Result<ActionDownloadContext, String>>,
   masker: Option<Arc<Mutex<SecretMasker>>>,
@@ -54,6 +56,8 @@ impl ActionFetcher {
     cancel: CancellationToken,
   ) -> Self {
     Self {
+      events: None,
+      reported: Mutex::new(HashSet::new()),
       inflight: Mutex::new(HashMap::new()),
       context: Some(
         ActionDownloadContext::from_message(msg).map_err(|error| action_context_error(&error)),
@@ -61,6 +65,13 @@ impl ActionFetcher {
       masker: Some(masker),
       cancel: Some(cancel),
     }
+  }
+
+  /// Send successful resolved-action diagnostics to the job's setup log.
+  #[must_use]
+  pub fn with_events(mut self, events: mpsc::Sender<shared::RunnerEvent>) -> Self {
+    self.events = Some(events);
+    self
   }
 
   /// Resolve one action with the job's service, then fetch its exact revision.
@@ -109,6 +120,19 @@ impl ActionFetcher {
       RunnerError::ActionDownload("action fetcher has no cancellation token".to_owned())
     })?;
     let info = context.resolve_info(client, action, masker, cancel).await?;
+    self
+      .ensure_resolved(client, action, &info, data_dir, cancel)
+      .await
+  }
+
+  async fn ensure_resolved(
+    &self,
+    client: &reqwest::Client,
+    action: &ActionRef,
+    info: &ActionDownloadInfo,
+    data_dir: &Path,
+    cancel: &CancellationToken,
+  ) -> Result<PathBuf, RunnerError> {
     let dest = action_cache_dir(data_dir, &info.cache_key);
     let cell = self.cell_for(&info.cache_key);
     let result = tokio::select! {
@@ -120,11 +144,45 @@ impl ActionFetcher {
       }) => fetched,
     };
     match result {
-      Ok(path) => Ok(path.clone()),
+      Ok(path) => {
+        self.report_action(action, &info.resolved_sha).await;
+        Ok(path.clone())
+      },
       Err(error) => {
         self.evict(&info.cache_key);
         Err(error)
       },
+    }
+  }
+
+  async fn report_action(&self, action: &ActionRef, sha: &str) {
+    let Some(events) = &self.events else {
+      return;
+    };
+    let subpath = action
+      .subpath
+      .as_ref()
+      .map_or_else(String::new, |path| format!("/{path}"));
+    let line = format!(
+      "Prepare action '{}/{}{subpath}@{}' (SHA:{sha})",
+      action.owner, action.repo, action.git_ref
+    );
+    let first = self
+      .reported
+      .lock()
+      .unwrap_or_else(std::sync::PoisonError::into_inner)
+      .insert(line.clone());
+    if first
+      && events
+        .send(shared::RunnerEvent::Log {
+          step_id: shared::SETUP_STEP_ID.to_owned(),
+          line,
+          stream: shared::LogStream::Stdout,
+        })
+        .await
+        .is_err()
+    {
+      tracing::warn!("setup action diagnostic receiver closed");
     }
   }
 
@@ -265,3 +323,7 @@ fn top_level_uses_refs(steps: &[ActionStep]) -> Vec<String> {
 #[cfg(test)]
 #[path = "tests/prefetch.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/setup_actions.rs"]
+mod setup_tests;

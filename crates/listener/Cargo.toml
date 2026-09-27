@@ -28,6 +28,7 @@ serde_json = "1"
 tracing = "0.1"
 
 # Utilities
+hostname = "0.4"
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
 flate2 = "1"
