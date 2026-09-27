@@ -87,3 +87,22 @@ jobs:
             crates/*/benches/fixtures/**
             crates/*/tests/fixtures/**
             docs/toolu/**
+
+  # The `merge-gate` required check: the PR carries `merge-approved` and every
+  # review thread has a reply from someone other than its opener. Evaluated
+  # after the reviewer has posted, so a push is never judged against the
+  # previous commit's findings; merge-gate.yml re-evaluates it on thread replies
+  # and label changes. `!cancelled()`, not `always()`: a red `review` still
+  # gets a verdict, but a run superseded by a newer push does not.
+  # release-pr is exempt exactly as `review` is: the release PR is not reviewed,
+  # so it never gets the label, and a skipped check passes.
+  merge-gate:
+    needs: review
+    if: ${{ !cancelled() && !github.event.pull_request.draft && (github.event.pull_request.head.ref != 'release-pr' || github.event.pull_request.head.repo.full_name != github.repository) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: falconiere/toolu-ghactions/merge-gate@v8
