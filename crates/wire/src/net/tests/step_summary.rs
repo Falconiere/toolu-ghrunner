@@ -5,19 +5,20 @@ use tokio::net::TcpListener;
 
 /// A Results Service failure never exposes summary content or a signed URL.
 #[tokio::test]
-async fn step_summary_rpc_failure_is_safe() {
+async fn step_summary_rpc_failure_is_safe() -> Result<(), Box<dyn std::error::Error>> {
   let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
   let address = listener.local_addr().unwrap();
   let server = tokio::spawn(async move {
-    let (mut stream, _) = listener.accept().await.unwrap();
+    let (mut stream, _) = listener.accept().await?;
     let mut request = [0_u8; 4096];
-    let _ = stream.read(&mut request).await.unwrap();
+    let received = stream.read(&mut request).await?;
+    assert!(received > 0, "client must send a summary RPC request");
     stream
       .write_all(
         b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 70\r\nConnection: close\r\n\r\nsummary-secret https://blob.example.invalid/summary?sig=secret-signature",
       )
-      .await
-      .unwrap();
+      .await?;
+    Ok::<_, std::io::Error>(())
   });
 
   let error = super::upload_step_summary(
@@ -35,11 +36,12 @@ async fn step_summary_rpc_failure_is_safe() {
   .unwrap_err()
   .to_string();
 
-  server.await.unwrap();
+  server.await??;
   assert!(error.contains("GetStepSummarySignedBlobURL"));
   assert!(!error.contains("summary-secret"));
   assert!(!error.contains("secret-signature"));
   assert!(!error.contains("runtime-token"));
+  Ok(())
 }
 
 #[tokio::test]

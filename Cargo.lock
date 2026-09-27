@@ -3814,6 +3814,7 @@ dependencies = [
 name = "wire"
 version = "0.9.2"
 dependencies = [
+ "bytes",
  "chrono",
  "futures-util",
  "protocol",
