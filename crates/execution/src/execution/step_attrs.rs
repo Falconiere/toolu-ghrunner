@@ -4,13 +4,15 @@
 //! Mirrors upstream `PipelineTemplateEvaluator.EvaluateStepTimeout` /
 //! `EvaluateStepContinueOnError`: an expression token is evaluated against
 //! the live context and its result must already be a number / boolean — no
-//! coercion. Any failure becomes a [`StepAttrError`] that the caller logs
-//! after the matching preface, falling back to no timeout / `false`.
+//! coercion. Any failure becomes a [`StepAttrError`]; the `resolve_*`
+//! wrappers log it after the matching preface as two `##[error]` lines and
+//! fall back to no timeout / `false`, so the step itself still runs.
 
 use std::time::Duration;
 
 use expressions::types::ExprValue;
-use shared::{RunnerError, TemplateToken};
+use shared::{LogStream, RunnerError, RunnerEvent, TemplateToken};
+use tokio::sync::mpsc;
 
 use super::context::ExecutionContext;
 
@@ -127,6 +129,57 @@ pub fn evaluate_continue_on_error(
     Ok(b)
   } else {
     Err(unexpected(token, &value))
+  }
+}
+
+/// [`evaluate_timeout`], logging a failure to `step_id` and applying no timeout.
+pub(crate) async fn resolve_timeout(
+  step_id: &str,
+  token: Option<&TemplateToken>,
+  ctx: &ExecutionContext,
+  events: &mpsc::Sender<RunnerEvent>,
+) -> Option<Duration> {
+  match evaluate_timeout(token, ctx) {
+    Ok(timeout) => timeout,
+    Err(error) => {
+      let rendered = error.render(ctx.file_table());
+      emit_errors(events, step_id, [TIMEOUT_ERROR_PREFACE, &rendered]).await;
+      None
+    },
+  }
+}
+
+/// [`evaluate_continue_on_error`] for a failed step, logging a failure to
+/// `step_id` and answering `false`.
+pub(crate) async fn resolve_continue_on_error(
+  step_id: &str,
+  token: Option<&TemplateToken>,
+  ctx: &ExecutionContext,
+  events: &mpsc::Sender<RunnerEvent>,
+) -> bool {
+  match evaluate_continue_on_error(token, ctx) {
+    Ok(continue_on_error) => continue_on_error,
+    Err(error) => {
+      let rendered = error.render(ctx.file_table());
+      emit_errors(events, step_id, [CONTINUE_ON_ERROR_PREFACE, &rendered]).await;
+      false
+    },
+  }
+}
+
+async fn emit_errors(events: &mpsc::Sender<RunnerEvent>, step_id: &str, lines: [&str; 2]) {
+  for line in lines {
+    let event = RunnerEvent::Log {
+      step_id: step_id.to_owned(),
+      line: format!("##[error]{line}"),
+      stream: LogStream::Stdout,
+    };
+    if events.send(event).await.is_err() {
+      tracing::warn!(
+        step_id,
+        "event channel closed; step attribute error was dropped"
+      );
+    }
   }
 }
 

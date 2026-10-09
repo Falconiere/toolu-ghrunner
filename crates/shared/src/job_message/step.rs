@@ -26,12 +26,12 @@ pub struct ActionStep {
   /// The step's `if:` condition expression, if specified.
   #[serde(default)]
   pub condition: Option<String>,
-  /// The step's `continue-on-error:` setting, if specified.
+  /// The step's `continue-on-error:` token (boolean or deferred expression).
   #[serde(default)]
-  pub continue_on_error: Option<bool>,
-  /// The step's `timeout-minutes:` setting, if specified.
+  pub continue_on_error: Option<TemplateToken>,
+  /// The step's `timeout-minutes:` token (number or deferred expression).
   #[serde(default)]
-  pub timeout_in_minutes: Option<u32>,
+  pub timeout_in_minutes: Option<TemplateToken>,
   /// Reference to the action/script this step runs.
   pub reference: ActionStepDefinitionReference,
   /// The step's `with:` input values.
@@ -51,9 +51,9 @@ impl ActionStep {
       .filter(|name| !name.is_empty() && !name.starts_with("__"))
   }
 
-  /// Set the continue-on-error flag.
+  /// Set a literal continue-on-error flag.
   pub fn set_continue_on_error(&mut self, value: bool) {
-    self.continue_on_error = Some(value);
+    self.continue_on_error = Some(TemplateToken::boolean(value));
   }
 
   /// Extract the script body from step inputs.

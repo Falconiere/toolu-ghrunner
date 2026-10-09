@@ -220,7 +220,7 @@ async fn node_action_path_and_env_exports_reach_the_next_step() -> TestResult<()
      echo \"MULTILINE=$FIXTURE_MULTILINE\"",
     "",
   );
-  verify.continue_on_error = Some(false);
+  verify.set_continue_on_error(false);
   let steps = vec![action_step("setup"), verify];
 
   let lines = drive(&steps, &workspace, &config).await?;

@@ -405,7 +405,8 @@ async fn real_step_timeout_is_failure_then_conditional_cleanup_runs() -> TestRes
     "echo timeout-started\nsleep 300\necho unreachable",
     "success()",
   )?;
-  msg.steps.first_mut().ok_or("first")?.timeout_in_minutes = Some(1);
+  msg.steps.first_mut().ok_or("first")?.timeout_in_minutes =
+    Some(shared::TemplateToken::number(1.0));
   let (_temp, _workspace, runner) = runner_for(&msg)?;
   let mut rx = runner.execute_job(msg.clone(), CancellationToken::new());
   let events = tokio::time::timeout(Duration::from_secs(80), async {

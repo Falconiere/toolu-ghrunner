@@ -258,7 +258,7 @@ async fn post_runs_even_when_a_later_step_failed() -> TestResult<()> {
   // flip the job status, so `success()` posts would skip while `always()`
   // (the post-if default) must still fire.
   let mut failing = ActionStep::script("boom", "exit 1", "");
-  failing.continue_on_error = Some(false);
+  failing.set_continue_on_error(false);
   steps.push(failing);
 
   let Some((lines, _events)) = run_with_markers(steps, &[("act-a", "A")]).await? else {
@@ -271,6 +271,64 @@ async fn post_runs_even_when_a_later_step_failed() -> TestResult<()> {
     Some("A:post:STATE_k=A-state"),
     "post (always()) must run after a later step failed; markers={lines:?}"
   );
+  Ok(())
+}
+
+/// 3b: like upstream, a post stage applies its step's `continue-on-error`
+/// independently: a failing post with `continue-on-error: true` concludes
+/// `success` and leaves the job green; without it the post fails the job.
+#[tokio::test]
+async fn failing_post_honors_continue_on_error() -> TestResult<()> {
+  let Some(node) = system_node() else {
+    eprintln!("SKIP: no system `node` on PATH; pre/post test needs a real node runtime");
+    return Ok(());
+  };
+  for (continue_on_error, expected) in [
+    (true, shared::Conclusion::Success),
+    (false, shared::Conclusion::Failure),
+  ] {
+    let dir = tempfile::tempdir()?;
+    let (workspace, data_dir) = (dir.path().join("work"), dir.path().join("data"));
+    std::fs::create_dir_all(&workspace)?;
+    std::fs::create_dir_all(&data_dir)?;
+    let config = RunnerConfig {
+      data_dir: data_dir.clone(),
+      workspace_root: workspace.clone(),
+      ..RunnerConfig::default()
+    };
+    seed_node(&data_dir, &node)?;
+    install_action(&workspace, "act-a", "A")?;
+    std::fs::write(workspace.join("act-a/post.js"), "process.exit(3);\n")?;
+    let mut step = action_step("a", "act-a");
+    step.set_continue_on_error(continue_on_error);
+    let marker_file = data_dir.join("markers.txt");
+
+    let (conclusion, events) = drive_with_cancel(
+      &[step],
+      &workspace,
+      &config,
+      &marker_file,
+      CancellationToken::new(),
+    )
+    .await?;
+
+    let post = events.iter().rev().find_map(|event| {
+      if let RunnerEvent::StepCompleted { conclusion, .. } = event {
+        Some(*conclusion)
+      } else {
+        None
+      }
+    });
+    assert_eq!(
+      post,
+      Some(expected),
+      "post conclusion, continue-on-error={continue_on_error}"
+    );
+    assert_eq!(
+      conclusion, expected,
+      "job conclusion, continue-on-error={continue_on_error}"
+    );
+  }
   Ok(())
 }
 

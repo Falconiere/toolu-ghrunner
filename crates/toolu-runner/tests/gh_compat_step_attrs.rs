@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 
 use execution::execution::context::ExecutionContext;
 use execution::execution::handlers::node::input_env_key;
-use execution::execution::step_timeout::{WaitOutcome, timeout_duration, wait_bounded};
+use execution::execution::step_timeout::{WaitOutcome, wait_bounded};
 use execution::execution::steps_runner::run_steps;
 use shared::SecretMasker;
 use shared::{
@@ -216,15 +216,6 @@ fn steps_field(ctx: &ExecutionContext, id: &str, field: &str) -> Option<String> 
 // ---------------------------------------------------------------------------
 // timeout-minutes
 // ---------------------------------------------------------------------------
-
-/// `timeout-minutes` maps to a whole-minute `Duration` (or unbounded).
-#[test]
-fn timeout_duration_is_whole_minutes() {
-  assert_eq!(timeout_duration(Some(5)), Some(Duration::from_secs(300)));
-  assert_eq!(timeout_duration(Some(1)), Some(Duration::from_secs(60)));
-  assert_eq!(timeout_duration(Some(0)), None);
-  assert_eq!(timeout_duration(None), None);
-}
 
 /// A real child that exceeds its (tiny, injected) timeout bound is KILLED and
 /// the wait returns `TimedOut` promptly — never hanging for the wall-clock
@@ -441,7 +432,7 @@ async fn per_step_snapshot_renders_env_script_and_working_dir_byte_identical() -
 #[tokio::test]
 async fn continue_on_error_splits_outcome_and_conclusion() -> TestResult<()> {
   let mut failing = script_step("bad", "exit 1", None);
-  failing.continue_on_error = Some(true);
+  failing.set_continue_on_error(true);
   let next = script_step("good", "echo ran", None);
 
   let result = run_steps_collect(vec![failing, next], |_ws| Ok(())).await?;
@@ -495,6 +486,143 @@ async fn failure_without_continue_on_error_matches() -> TestResult<()> {
   assert_eq!(
     steps_field(&result.ctx, "bad", "conclusion").as_deref(),
     Some("failure")
+  );
+  Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Deferred tokens (#99): captured from a live github.com job message
+// (`step-attrs-99.yml`, run 37992025403); diagnostics are the reference
+// runner's log lines from the same run.
+// ---------------------------------------------------------------------------
+
+const CAPTURED_FILE: &str = ".github/workflows/step-attrs-99.yml";
+
+/// A step writing `flag=true` and `minutes=1` to `steps.prior.outputs`.
+fn prior_step() -> ActionStep {
+  script_step(
+    "prior",
+    "echo flag=true >> \"$GITHUB_OUTPUT\"\necho minutes=1 >> \"$GITHUB_OUTPUT\"",
+    None,
+  )
+}
+
+fn captured(json: &str) -> TestResult<Option<TemplateToken>> {
+  Ok(Some(serde_json::from_str(json)?))
+}
+
+async fn run_captured(steps: Vec<ActionStep>) -> TestResult<RunResult> {
+  run_steps_collect_with_ctx(
+    steps,
+    |_ws| Ok(()),
+    |ctx| ctx.set_file_table(vec![CAPTURED_FILE.into()]),
+  )
+  .await
+}
+
+/// `continue-on-error: ${{ fromJSON(steps.prior.outputs.flag) }}` reads an
+/// output written earlier in the same job.
+#[tokio::test]
+async fn deferred_continue_on_error_reads_prior_step_output() -> TestResult<()> {
+  let mut failing = script_step("bad", "exit 1", None);
+  failing.continue_on_error = captured(
+    r#"{"col":28,"expr":"fromJSON(steps.prior.outputs.flag)","file":1,"line":52,"type":3}"#,
+  )?;
+  let result = run_captured(vec![prior_step(), failing]).await?;
+
+  assert_eq!(
+    step_conclusion(&result.events, "bad"),
+    Some(Conclusion::Success)
+  );
+  assert_eq!(
+    steps_field(&result.ctx, "bad", "outcome").as_deref(),
+    Some("failure")
+  );
+  assert_eq!(
+    steps_field(&result.ctx, "bad", "conclusion").as_deref(),
+    Some("success")
+  );
+  Ok(())
+}
+
+/// A string `continue-on-error` result logs upstream's two error lines and
+/// leaves the failure in place.
+#[tokio::test]
+async fn string_continue_on_error_logs_reference_diagnostic() -> TestResult<()> {
+  let mut failing = script_step("bad", "exit 6", None);
+  failing.continue_on_error =
+    captured(r#"{"col":28,"expr":"steps.prior.outputs.flag","file":1,"line":185,"type":3}"#)?;
+  let result = run_captured(vec![prior_step(), failing]).await?;
+
+  assert_eq!(
+    step_conclusion(&result.events, "bad"),
+    Some(Conclusion::Failure)
+  );
+  let logs = step_logs(&result.events, "bad");
+  let tail: Vec<&str> = logs
+    .iter()
+    .rev()
+    .take(2)
+    .rev()
+    .map(String::as_str)
+    .collect();
+  assert_eq!(
+    tail,
+    [
+      "##[error]The step failed and an error occurred when attempting to determine whether to continue on error.",
+      "##[error]The template is not valid. .github/workflows/step-attrs-99.yml (Line: 185, Col: 28): Unexpected value 'true'",
+    ]
+  );
+  Ok(())
+}
+
+/// `continue-on-error` is only evaluated for a failed step: an invalid token
+/// on a passing step logs nothing.
+#[tokio::test]
+async fn continue_on_error_is_not_evaluated_on_success() -> TestResult<()> {
+  let mut passing = script_step("ok", "true", None);
+  passing.continue_on_error =
+    captured(r#"{"col":28,"expr":"steps.prior.outputs.flag","file":1,"line":185,"type":3}"#)?;
+  let result = run_captured(vec![prior_step(), passing]).await?;
+
+  assert_eq!(
+    step_conclusion(&result.events, "ok"),
+    Some(Conclusion::Success)
+  );
+  assert!(
+    !step_logs(&result.events, "ok")
+      .iter()
+      .any(|l| l.starts_with("##[error]")),
+    "a passing step must not evaluate continue-on-error"
+  );
+  Ok(())
+}
+
+/// A string `timeout-minutes` result logs upstream's two error lines first,
+/// then the step still runs with no timeout.
+#[tokio::test]
+async fn string_timeout_logs_reference_diagnostic_and_still_runs() -> TestResult<()> {
+  let mut step = script_step("timed", "echo ran", None);
+  step.timeout_in_minutes =
+    captured(r#"{"col":26,"expr":"steps.prior.outputs.minutes","file":1,"line":118,"type":3}"#)?;
+  let result = run_captured(vec![prior_step(), step]).await?;
+
+  assert_eq!(
+    step_conclusion(&result.events, "timed"),
+    Some(Conclusion::Success)
+  );
+  let logs = step_logs(&result.events, "timed");
+  let head: Vec<&str> = logs.iter().take(2).map(String::as_str).collect();
+  assert_eq!(
+    head,
+    [
+      "##[error]An error occurred when attempting to determine the step timeout.",
+      "##[error]The template is not valid. .github/workflows/step-attrs-99.yml (Line: 118, Col: 26): Unexpected value '1'",
+    ]
+  );
+  assert!(
+    logs.iter().any(|l| l == "ran"),
+    "the step must still run: {logs:?}"
   );
   Ok(())
 }

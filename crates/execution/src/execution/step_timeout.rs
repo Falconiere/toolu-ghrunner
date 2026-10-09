@@ -29,10 +29,9 @@ impl StepBounds {
   /// Keep a nested action inside its parent's absolute deadline.
   pub(crate) fn nested(
     parent_deadline: Option<Instant>,
-    timeout_minutes: Option<u32>,
+    own_timeout: Option<Duration>,
     cancel: CancellationToken,
   ) -> Self {
-    let own_timeout = timeout_duration(timeout_minutes);
     let own_deadline = own_timeout.map(|duration| Instant::now() + duration);
     let deadline = match (parent_deadline, own_deadline) {
       (Some(parent), Some(child)) => Some(parent.min(child)),
@@ -76,15 +75,6 @@ pub enum WaitOutcome {
   TimedOut,
   /// The job-level `CancellationToken` fired; the child was killed.
   Cancelled,
-}
-
-/// Convert `timeout-minutes` (whole minutes, `0`/`None` = unbounded) to a
-/// `Duration`. Returns `None` when no finite bound applies.
-pub fn timeout_duration(minutes: Option<u32>) -> Option<Duration> {
-  match minutes {
-    Some(m) if m > 0 => Some(Duration::from_secs(u64::from(m) * 60)),
-    _ => None,
-  }
 }
 
 /// Wait for `child` to exit, bounded by `timeout` and `cancel`.
