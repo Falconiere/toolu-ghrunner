@@ -30,6 +30,8 @@ struct Replay {
   job: Option<Conclusion>,
   conclusions: HashMap<String, Conclusion>,
   logs: HashMap<String, Vec<String>>,
+  /// The `StepStarted` display name.
+  started: HashMap<String, String>,
 }
 
 impl Replay {
@@ -98,6 +100,7 @@ fn replay(msg: AgentJobRequestMessage) -> TestResult<Replay> {
     job: None,
     conclusions: HashMap::new(),
     logs: HashMap::new(),
+    started: HashMap::new(),
   };
   runtime.block_on(async {
     let mut events = runner.execute_job(msg, cancel.clone());
@@ -116,9 +119,14 @@ fn replay(msg: AgentJobRequestMessage) -> TestResult<Replay> {
             let name = name_of(&step_id);
             replay.conclusions.insert(name, conclusion);
           },
+          RunnerEvent::StepStarted {
+            step_id, step_name, ..
+          } => {
+            let name = names.get(&step_id).cloned().unwrap_or(step_id);
+            replay.started.insert(name, step_name);
+          },
           RunnerEvent::JobCompleted { conclusion, .. } => replay.job = Some(conclusion),
           RunnerEvent::JobStarted { .. }
-          | RunnerEvent::StepStarted { .. }
           | RunnerEvent::StepSkipped { .. }
           | RunnerEvent::LogGroup { .. }
           | RunnerEvent::StepSummary { .. }
@@ -163,6 +171,60 @@ fn captured_literal_deferred_and_matrix_attributes() -> TestResult {
   ];
   let replay = replay(select(ATTRS, &names)?)?;
   assert_all_succeeded(&replay, &names);
+  Ok(())
+}
+
+/// S4: display names match the reference lane's jobs-API names (its matrix
+/// lane swapped in): `steps.*` names evaluate before the step runs, a name
+/// that fails there keeps its prettified job-start text, and one that
+/// already failed at job start reports `run`. Each failure logs upstream's
+/// warning where the reference did: "Set up job", then the step itself.
+#[test]
+fn captured_display_names_match_the_reference() -> TestResult {
+  let steps = [
+    "prior",
+    "deferred_coe",
+    "matrix_attrs",
+    "__run_7",
+    "__run_8",
+    "__run_9",
+    "__run_10",
+  ];
+  let replay = replay(select(ATTRS, &steps)?)?;
+  assert_all_succeeded(&replay, &steps);
+  let expected = [
+    ("prior", "Prior outputs"),
+    ("deferred_coe", "Deferred from-prior"),
+    ("matrix_attrs", "Matrix toolu-linux input "),
+    ("__run_7", "Bad ${{ fromJSON(steps.prior.outputs.bad) }}"),
+    ("__run_8", "run"),
+    ("__run_9", "Run echo lane toolu-linux"),
+    ("__run_10", "Run echo prior from-prior"),
+  ];
+  for (step, name) in expected {
+    assert_eq!(
+      replay.started.get(step).map(String::as_str),
+      Some(name),
+      "{step}"
+    );
+  }
+  let bad = "##[warning]Encountered an error when evaluating display name ${{ format('Bad {0}', \
+             fromJSON(steps.prior.outputs.bad)) }}. The template is not valid. \
+             .github/workflows/step-attrs-99.yml (Line: 154, Col: 15): ";
+  let nope = "##[warning]Encountered an error when evaluating display name ${{ \
+              fromJSON('nope') }}. The template is not valid. \
+              .github/workflows/step-attrs-99.yml (Line: 157, Col: 15): ";
+  for (step, warning) in [
+    (shared::SETUP_STEP_ID, nope),
+    ("__run_7", bad),
+    ("__run_8", nope),
+  ] {
+    let logs = replay.logs(step);
+    assert!(
+      logs.iter().any(|line| line.starts_with(warning)),
+      "{step}: {logs:?}"
+    );
+  }
   Ok(())
 }
 
