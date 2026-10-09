@@ -65,6 +65,8 @@ pub struct ExecutionContext {
   pub(super) workspace: Option<std::path::PathBuf>,
   container: Option<Arc<JobContainer>>,
   services: Option<Box<ServiceContainers>>,
+  /// The job message's `fileTable`, resolving template-token file ids.
+  file_table: Vec<serde_json::Value>,
 }
 
 impl ExecutionContext {
@@ -116,6 +118,7 @@ impl ExecutionContext {
       workspace: None,
       container: None,
       services: None,
+      file_table: Vec::new(),
     }
   }
 
@@ -185,6 +188,16 @@ impl ExecutionContext {
   /// Per-job cgroup directory, if cgroup isolation is active for this run.
   pub fn cgroup_path(&self) -> Option<&std::path::Path> {
     self.cgroup_path.as_deref()
+  }
+
+  /// Set the job message's `fileTable`.
+  pub fn set_file_table(&mut self, file_table: Vec<serde_json::Value>) {
+    self.file_table = file_table;
+  }
+
+  /// The job message's `fileTable`, for rendering positioned diagnostics.
+  pub fn file_table(&self) -> &[serde_json::Value] {
+    &self.file_table
   }
 }
 
