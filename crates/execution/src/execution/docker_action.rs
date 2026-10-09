@@ -46,6 +46,11 @@ pub(super) async fn run_docker_action(
     });
   }
   emit_log(s.events, s.log_step_id, "##[endgroup]").await;
+  let main_bounds = s.bounds.restarted();
+  let s = DockerStage {
+    bounds: &main_bounds,
+    ..s
+  };
   let (conclusion, outputs) = run_docker_stage(&s, ctx, &runtime, &image).await?;
   Ok(ActionOutcome {
     conclusion,
@@ -145,17 +150,26 @@ async fn run_pre(
     },
   )
   .await;
+  let pre_bounds = s.bounds.restarted();
   let pre = DockerStage {
     stage: "pre",
     log_step_id: &id,
+    bounds: &pre_bounds,
     ..*s
   };
   let result = run_docker_stage(&pre, ctx, runtime, image).await;
-  let conclusion = match &result {
+  let mut conclusion = match &result {
     Ok((conclusion, _)) => *conclusion,
     Err(RunnerError::Cancelled) => Conclusion::Cancelled,
     Err(_) => Conclusion::Failure,
   };
+  let token = s.step.continue_on_error.as_ref();
+  if result.is_ok()
+    && conclusion == Conclusion::Failure
+    && super::step_attrs::resolve_continue_on_error(&id, token, ctx, s.events).await
+  {
+    conclusion = Conclusion::Success;
+  }
   emit_pre_event(
     s.events,
     RunnerEvent::StepCompleted {
@@ -165,7 +179,7 @@ async fn run_pre(
     },
   )
   .await;
-  result.map(|(conclusion, _)| conclusion)
+  result.map(|_| conclusion)
 }
 
 async fn emit_pre_event(events: &tokio::sync::mpsc::Sender<RunnerEvent>, event: RunnerEvent) {

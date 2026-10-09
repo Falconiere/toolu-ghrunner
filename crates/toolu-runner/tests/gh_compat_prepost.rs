@@ -274,44 +274,92 @@ async fn post_runs_even_when_a_later_step_failed() -> TestResult<()> {
   Ok(())
 }
 
+/// Run one step against the fixture action installed as `./act-a` with the
+/// named stage scripts replaced, returning the job conclusion, every event
+/// and the marker lines. `None` when no real node runtime is available.
+async fn run_patched(
+  step: ActionStep,
+  patches: &[(&str, &str)],
+) -> TestResult<Option<(shared::Conclusion, Vec<RunnerEvent>, Vec<String>)>> {
+  let Some(node) = system_node() else {
+    eprintln!("SKIP: no system `node` on PATH; pre/post test needs a real node runtime");
+    return Ok(None);
+  };
+  let dir = tempfile::tempdir()?;
+  let (workspace, data_dir) = (dir.path().join("work"), dir.path().join("data"));
+  std::fs::create_dir_all(&workspace)?;
+  std::fs::create_dir_all(&data_dir)?;
+  let config = RunnerConfig {
+    data_dir: data_dir.clone(),
+    workspace_root: workspace.clone(),
+    ..RunnerConfig::default()
+  };
+  seed_node(&data_dir, &node)?;
+  install_action(&workspace, "act-a", "A")?;
+  for (name, script) in patches {
+    std::fs::write(workspace.join("act-a").join(name), script)?;
+  }
+  let marker_file = data_dir.join("markers.txt");
+  std::fs::write(&marker_file, "")?;
+  let (conclusion, events) = drive_with_cancel(
+    &[step],
+    &workspace,
+    &config,
+    &marker_file,
+    CancellationToken::new(),
+  )
+  .await?;
+  let markers = std::fs::read_to_string(&marker_file)?
+    .lines()
+    .map(ToOwned::to_owned)
+    .collect();
+  Ok(Some((conclusion, events, markers)))
+}
+
+/// The conclusion reported for the step started under `name`.
+fn reported(events: &[RunnerEvent], name: &str) -> Option<shared::Conclusion> {
+  let id = events.iter().find_map(|event| {
+    if let RunnerEvent::StepStarted {
+      step_id, step_name, ..
+    } = event
+      && step_name == name
+    {
+      Some(step_id)
+    } else {
+      None
+    }
+  })?;
+  events.iter().find_map(|event| {
+    if let RunnerEvent::StepCompleted {
+      step_id,
+      conclusion,
+      ..
+    } = event
+      && step_id == id
+    {
+      Some(*conclusion)
+    } else {
+      None
+    }
+  })
+}
+
 /// 3b: like upstream, a post stage applies its step's `continue-on-error`
 /// independently: a failing post with `continue-on-error: true` concludes
 /// `success` and leaves the job green; without it the post fails the job.
 #[tokio::test]
 async fn failing_post_honors_continue_on_error() -> TestResult<()> {
-  let Some(node) = system_node() else {
-    eprintln!("SKIP: no system `node` on PATH; pre/post test needs a real node runtime");
-    return Ok(());
-  };
   for (continue_on_error, expected) in [
     (true, shared::Conclusion::Success),
     (false, shared::Conclusion::Failure),
   ] {
-    let dir = tempfile::tempdir()?;
-    let (workspace, data_dir) = (dir.path().join("work"), dir.path().join("data"));
-    std::fs::create_dir_all(&workspace)?;
-    std::fs::create_dir_all(&data_dir)?;
-    let config = RunnerConfig {
-      data_dir: data_dir.clone(),
-      workspace_root: workspace.clone(),
-      ..RunnerConfig::default()
-    };
-    seed_node(&data_dir, &node)?;
-    install_action(&workspace, "act-a", "A")?;
-    std::fs::write(workspace.join("act-a/post.js"), "process.exit(3);\n")?;
     let mut step = action_step("a", "act-a");
     step.set_continue_on_error(continue_on_error);
-    let marker_file = data_dir.join("markers.txt");
-
-    let (conclusion, events) = drive_with_cancel(
-      &[step],
-      &workspace,
-      &config,
-      &marker_file,
-      CancellationToken::new(),
-    )
-    .await?;
-
+    let Some((conclusion, events, _)) =
+      run_patched(step, &[("post.js", "process.exit(3);\n")]).await?
+    else {
+      return Ok(());
+    };
     let post = events.iter().rev().find_map(|event| {
       if let RunnerEvent::StepCompleted { conclusion, .. } = event {
         Some(*conclusion)
@@ -329,6 +377,68 @@ async fn failing_post_honors_continue_on_error() -> TestResult<()> {
       "job conclusion, continue-on-error={continue_on_error}"
     );
   }
+  Ok(())
+}
+
+/// 3c: a failing `pre` applies the step's `continue-on-error` as its own
+/// step. Without it the failure becomes the step's conclusion: `main` does
+/// not run and no `post` registers. With it, `pre` concludes `success` and
+/// `main`/`post` run normally.
+#[tokio::test]
+async fn failing_pre_honors_continue_on_error() -> TestResult<()> {
+  for (continue_on_error, expected, ran_main) in [
+    (true, shared::Conclusion::Success, true),
+    (false, shared::Conclusion::Failure, false),
+  ] {
+    let mut step = action_step("a", "act-a");
+    step.set_continue_on_error(continue_on_error);
+    let Some((conclusion, events, markers)) =
+      run_patched(step, &[("pre.js", "process.exit(2);\n")]).await?
+    else {
+      return Ok(());
+    };
+    assert_eq!(reported(&events, "Pre prepost-fixture"), Some(expected));
+    assert_eq!(
+      conclusion, expected,
+      "continue-on-error={continue_on_error}"
+    );
+    assert_eq!(
+      markers.iter().any(|m| m == "A:main"),
+      ran_main,
+      "{markers:?}"
+    );
+    assert_eq!(
+      markers.iter().any(|m| m.starts_with("A:post:")),
+      ran_main,
+      "{markers:?}"
+    );
+  }
+  Ok(())
+}
+
+/// 3d: `pre` and `main` each get the step's full `timeout-minutes` budget,
+/// like upstream's separate pre step: two 35 s stages both finish under
+/// `timeout-minutes: 1` even though together they exceed it.
+#[tokio::test]
+async fn pre_and_main_get_separate_timeout_budgets() -> TestResult<()> {
+  let mut step = action_step("a", "act-a");
+  step.timeout_in_minutes = Some(shared::TemplateToken::number(1.0));
+  let stage = |name: &str| {
+    format!(
+      "setTimeout(() => require('fs').appendFileSync(process.env.MARKER_FILE, '{name}-done\\n'), 35000);\n"
+    )
+  };
+  let Some((conclusion, _events, markers)) = run_patched(
+    step,
+    &[("pre.js", &stage("pre")), ("main.js", &stage("main"))],
+  )
+  .await?
+  else {
+    return Ok(());
+  };
+  assert_eq!(conclusion, shared::Conclusion::Success, "{markers:?}");
+  assert!(markers.iter().any(|m| m == "pre-done"), "{markers:?}");
+  assert!(markers.iter().any(|m| m == "main-done"), "{markers:?}");
   Ok(())
 }
 

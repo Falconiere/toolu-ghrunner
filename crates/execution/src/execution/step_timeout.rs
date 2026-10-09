@@ -23,6 +23,10 @@ mod tests;
 pub(crate) struct StepBounds {
   pub(crate) deadline: Option<Instant>,
   pub(crate) cancel: CancellationToken,
+  /// The enclosing deadline [`Self::restarted`] keeps honoring.
+  pub(crate) parent_deadline: Option<Instant>,
+  /// This step's own evaluated `timeout-minutes`, re-armed by [`Self::restarted`].
+  pub(crate) own_timeout: Option<Duration>,
 }
 
 impl StepBounds {
@@ -38,7 +42,20 @@ impl StepBounds {
       (Some(parent), None) => Some(parent),
       (None, child) => child,
     };
-    Self { deadline, cancel }
+    Self {
+      deadline,
+      cancel,
+      parent_deadline,
+      own_timeout,
+    }
+  }
+
+  /// A fresh budget for another stage of the same step: upstream runs an
+  /// action's `pre` and `main` as separate steps, each with its own
+  /// `timeout-minutes`. Bounds without an own timeout (composite children)
+  /// keep sharing the enclosing deadline.
+  pub(crate) fn restarted(&self) -> Self {
+    Self::nested(self.parent_deadline, self.own_timeout, self.cancel.clone())
   }
 
   /// Duration left before the fixed deadline, for the next child process.

@@ -432,14 +432,26 @@ struct NodeActionCtx<'a> {
 
 /// Run a Node.js action: `pre` (if defined and `pre-if` holds) then `main`,
 /// dispatching each stage's stdout workflow commands onto the live context.
-/// Returns the `main` conclusion plus the `post` registration (if any).
+/// Returns the `main` conclusion plus the `post` registration (if any). Like
+/// the Docker path, a `pre` that does not succeed (after `continue-on-error`)
+/// becomes the step's conclusion: `main` does not run and no `post` registers.
 async fn run_node_action(mut c: NodeActionCtx<'_>) -> Result<ActionOutcome, RunnerError> {
-  run_node_pre_if_present(&mut c).await?;
+  let pre = run_node_pre_if_present(&mut c).await?;
+  if pre != Conclusion::Success {
+    return Ok(ActionOutcome {
+      conclusion: pre,
+      post: None,
+      outputs: std::collections::HashMap::new(),
+    });
+  }
 
   emit_stage_endgroup(c.events, c.log_step_id).await;
   // The `main` stage's stdout `::set-output::` values are surfaced on the
   // `StepCompleted` event (consistent with `ctx`).
-  let (conclusion, outputs) = run_node_stage(c.stage("main")).await?;
+  let main_bounds = c.bounds.restarted();
+  let mut main = c.stage("main");
+  main.bounds = &main_bounds;
+  let (conclusion, outputs) = run_node_stage(main).await?;
 
   let post = build_post_step(&c);
   Ok(ActionOutcome {
@@ -452,20 +464,24 @@ async fn run_node_action(mut c: NodeActionCtx<'_>) -> Result<ActionOutcome, Runn
 /// Run the action's `pre` entrypoint when present and `pre-if` evaluates true.
 ///
 /// The built-in default for an action's `pre-if` is `always()` (the pre step
-/// runs unconditionally unless an explicit `pre-if` is given).
-async fn run_node_pre_if_present(c: &mut NodeActionCtx<'_>) -> Result<(), RunnerError> {
+/// runs unconditionally unless an explicit `pre-if` is given). `Success` when
+/// no `pre` runs.
+async fn run_node_pre_if_present(c: &mut NodeActionCtx<'_>) -> Result<Conclusion, RunnerError> {
   if c.manifest.runs.pre.is_none() {
-    return Ok(());
+    return Ok(Conclusion::Success);
   }
   let condition = c.manifest.runs.pre_if.as_deref().unwrap_or("always()");
   if !c.ctx.evaluate_expression(condition)?.is_truthy() {
-    return Ok(());
+    return Ok(Conclusion::Success);
   }
 
   report_pre_stage(c).await
 }
 
-async fn report_pre_stage(c: &mut NodeActionCtx<'_>) -> Result<(), RunnerError> {
+/// Run `pre` as its own reported step with a fresh `timeout-minutes` budget,
+/// applying the step's `continue-on-error` to a failure like upstream's
+/// separate pre step.
+async fn report_pre_stage(c: &mut NodeActionCtx<'_>) -> Result<Conclusion, RunnerError> {
   let report_id = uuid::Uuid::new_v4().to_string();
   let _ = c
     .events
@@ -477,13 +493,23 @@ async fn report_pre_stage(c: &mut NodeActionCtx<'_>) -> Result<(), RunnerError> 
     .await;
   emit_log(c.events, &report_id, "##[group]Pre Run").await;
   emit_stage_endgroup(c.events, &report_id).await;
+  let pre_bounds = c.bounds.restarted();
   let mut stage = c.stage("pre");
   stage.log_step_id = &report_id;
+  stage.bounds = &pre_bounds;
   let result = run_node_stage(stage).await;
-  let conclusion = match &result {
+  let mut conclusion = match &result {
     Ok((conclusion, _)) => *conclusion,
+    Err(RunnerError::Cancelled) => Conclusion::Cancelled,
     Err(_) => Conclusion::Failure,
   };
+  let token = c.step.continue_on_error.as_ref();
+  if result.is_ok()
+    && conclusion == Conclusion::Failure
+    && super::step_attrs::resolve_continue_on_error(&report_id, token, c.ctx, c.events).await
+  {
+    conclusion = Conclusion::Success;
+  }
   let _ = c
     .events
     .send(RunnerEvent::StepCompleted {
@@ -492,10 +518,7 @@ async fn report_pre_stage(c: &mut NodeActionCtx<'_>) -> Result<(), RunnerError> 
       outputs: std::collections::HashMap::new(),
     })
     .await;
-  match result {
-    Ok(_) => Ok(()),
-    Err(error) => Err(error),
-  }
+  result.map(|_| conclusion)
 }
 
 /// Build the post-step registration for a node action that defines `runs.post`.
