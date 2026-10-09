@@ -1,0 +1,191 @@
+name: step-attrs-99
+
+on:
+  workflow_dispatch:
+    inputs:
+      who:
+        description: Display-name input probe
+        default: dispatch
+  push:
+    branches:
+      - capture/99-step-attrs
+
+jobs:
+  attrs:
+    name: attrs-${{ matrix.lane }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: toolu-linux
+            runner: [self-hosted, toolu-99]
+            coe: true
+            minutes: 2
+          - lane: reference-linux
+            runner: ubuntu-24.04
+            coe: true
+            minutes: 2
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prior outputs
+        id: prior
+        shell: bash
+        run: |
+          {
+            echo flag=true
+            echo minutes=1
+            echo label=from-prior
+            echo bad=not-json
+          } >> "$GITHUB_OUTPUT"
+
+      # S1/S2: literal, deferred and matrix attribute forms.
+      - name: Literal continue-on-error
+        id: literal_coe
+        continue-on-error: true
+        timeout-minutes: 5
+        shell: bash
+        run: exit 3
+      - name: Deferred ${{ steps.prior.outputs.label }}
+        id: deferred_coe
+        continue-on-error: ${{ fromJSON(steps.prior.outputs.flag) }}
+        shell: bash
+        run: exit 4
+      - name: Matrix ${{ matrix.lane }} input ${{ inputs.who }}
+        id: matrix_attrs
+        continue-on-error: ${{ matrix.coe }}
+        timeout-minutes: ${{ matrix.minutes }}
+        shell: bash
+        run: exit 5
+      - name: Literal false and zero
+        id: literal_false
+        continue-on-error: false
+        timeout-minutes: 0
+        shell: bash
+        run: "true"
+      - name: Negative timeout
+        id: negative_timeout
+        timeout-minutes: ${{ fromJSON('-1') }}
+        shell: bash
+        run: sleep 2
+      - name: Check attribute results
+        shell: bash
+        run: |
+          test '${{ steps.literal_coe.outcome }}/${{ steps.literal_coe.conclusion }}' = failure/success
+          test '${{ steps.deferred_coe.outcome }}/${{ steps.deferred_coe.conclusion }}' = failure/success
+          test '${{ steps.matrix_attrs.outcome }}/${{ steps.matrix_attrs.conclusion }}' = failure/success
+          test '${{ steps.literal_false.outcome }}/${{ steps.literal_false.conclusion }}' = success/success
+          test '${{ steps.negative_timeout.outcome }}' = success
+
+      # S2/S3: deferred, fractional and invalid timeouts against real processes.
+      - name: Deferred timeout start
+        id: deferred_start
+        shell: bash
+        run: echo "at=$(date +%s)" >> "$GITHUB_OUTPUT"
+      - name: Deferred timeout
+        id: deferred_timeout
+        continue-on-error: true
+        timeout-minutes: ${{ fromJSON(steps.prior.outputs.minutes) }}
+        shell: bash
+        run: sleep 600
+      - name: Check deferred timeout
+        shell: bash
+        run: |
+          elapsed=$(( $(date +%s) - ${{ steps.deferred_start.outputs.at }} ))
+          echo "elapsed=$elapsed"
+          test '${{ steps.deferred_timeout.outcome }}/${{ steps.deferred_timeout.conclusion }}' = failure/success
+          test "$elapsed" -ge 55 && test "$elapsed" -le 100
+      - name: Fractional timeout start
+        id: fractional_start
+        shell: bash
+        run: echo "at=$(date +%s)" >> "$GITHUB_OUTPUT"
+      - name: Fractional timeout
+        id: fractional_timeout
+        continue-on-error: true
+        timeout-minutes: 1.9
+        shell: bash
+        run: sleep 100
+      - name: Check fractional timeout
+        shell: bash
+        run: |
+          elapsed=$(( $(date +%s) - ${{ steps.fractional_start.outputs.at }} ))
+          echo "elapsed=$elapsed"
+          test '${{ steps.fractional_timeout.outcome }}' = failure
+          test "$elapsed" -ge 55 && test "$elapsed" -le 95
+      - name: String timeout is an error without a bound
+        id: string_timeout
+        timeout-minutes: ${{ steps.prior.outputs.minutes }}
+        shell: bash
+        run: sleep 70
+      - name: Check string timeout
+        shell: bash
+        run: test '${{ steps.string_timeout.outcome }}' = success
+
+      # S5: one budget across composite children; separate Node pre/main budgets.
+      - name: Composite start
+        id: composite_start
+        shell: bash
+        run: echo "at=$(date +%s)" >> "$GITHUB_OUTPUT"
+      - name: Composite children share one budget
+        id: composite_budget
+        continue-on-error: true
+        timeout-minutes: 1
+        uses: ./.github/actions/step-attrs-99-composite
+      - name: Check composite budget
+        shell: bash
+        run: |
+          elapsed=$(( $(date +%s) - ${{ steps.composite_start.outputs.at }} ))
+          echo "elapsed=$elapsed"
+          test '${{ steps.composite_budget.outcome }}/${{ steps.composite_budget.conclusion }}' = failure/success
+          test ! -e step-attrs-99-composite-finished.marker
+          test "$elapsed" -ge 55 && test "$elapsed" -le 95
+      - name: Node pre and main stages
+        id: node_stages
+        timeout-minutes: 1
+        uses: Falconiere/toolu-ghrunner/.github/actions/step-attrs-99-node@7ac4fa2e45c8c4725a9ad44db4eb6b9682064260
+      - name: Check Node stages
+        shell: bash
+        run: |
+          test '${{ steps.node_stages.outcome }}' = success
+          test -n '${{ steps.node_stages.outputs.finished }}'
+
+      # S4: display names; checked against the jobs API after the run.
+      - name: Bad ${{ fromJSON(steps.prior.outputs.bad) }}
+        shell: bash
+        run: "true"
+      - name: ${{ fromJSON('nope') }}
+        shell: bash
+        run: "true"
+      - shell: bash
+        run: echo lane ${{ matrix.lane }}
+      - shell: bash
+        run: echo prior ${{ steps.prior.outputs.label }}
+
+  invalid:
+    name: invalid-${{ matrix.lane }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: toolu-linux
+            runner: [self-hosted, toolu-99]
+          - lane: reference-linux
+            runner: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    steps:
+      - name: Prior outputs
+        id: prior
+        shell: bash
+        run: echo flag=true >> "$GITHUB_OUTPUT"
+      # S3: a string is not a boolean; the failed step stays failed.
+      - name: String continue-on-error
+        id: string_coe
+        continue-on-error: ${{ steps.prior.outputs.flag }}
+        shell: bash
+        run: exit 6
+      - name: Check string continue-on-error
+        if: always()
+        shell: bash
+        run: test '${{ steps.string_coe.outcome }}/${{ steps.string_coe.conclusion }}' = failure/failure
