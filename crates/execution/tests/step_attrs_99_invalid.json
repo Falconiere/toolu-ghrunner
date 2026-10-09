@@ -1,0 +1,1468 @@
+{
+  "billingOwnerId": "U_kgDOAH-IyQ",
+  "contextData": {
+    "github": {
+      "d": [
+        {
+          "k": "ref",
+          "v": "refs/heads/capture/99-step-attrs"
+        },
+        {
+          "k": "sha",
+          "v": "f8096e84245b40eb4426bd9d63eebb1cd791436c"
+        },
+        {
+          "k": "repository",
+          "v": "Falconiere/toolu-ghrunner"
+        },
+        {
+          "k": "repository_owner",
+          "v": "Falconiere"
+        },
+        {
+          "k": "repository_owner_id",
+          "v": "8358089"
+        },
+        {
+          "k": "repositoryUrl",
+          "v": "git://github.com/Falconiere/toolu-ghrunner.git"
+        },
+        {
+          "k": "run_id",
+          "v": "37992025403"
+        },
+        {
+          "k": "run_number",
+          "v": "1"
+        },
+        {
+          "k": "retention_days",
+          "v": "90"
+        },
+        {
+          "k": "run_attempt",
+          "v": "1"
+        },
+        {
+          "k": "artifact_cache_size_limit",
+          "v": "10"
+        },
+        {
+          "k": "repository_visibility",
+          "v": "public"
+        },
+        {
+          "k": "actor_id",
+          "v": "8358089"
+        },
+        {
+          "k": "actor",
+          "v": "Falconiere"
+        },
+        {
+          "k": "workflow",
+          "v": "step-attrs-99"
+        },
+        {
+          "k": "head_ref",
+          "v": ""
+        },
+        {
+          "k": "base_ref",
+          "v": ""
+        },
+        {
+          "k": "event_name",
+          "v": "push"
+        },
+        {
+          "k": "server_url",
+          "v": "https://github.com"
+        },
+        {
+          "k": "api_url",
+          "v": "https://api.github.com"
+        },
+        {
+          "k": "graphql_url",
+          "v": "https://api.github.com/graphql"
+        },
+        {
+          "k": "ref_name",
+          "v": "capture/99-step-attrs"
+        },
+        {
+          "k": "ref_protected",
+          "v": false
+        },
+        {
+          "k": "ref_type",
+          "v": "branch"
+        },
+        {
+          "k": "secret_source",
+          "v": "Actions"
+        },
+        {
+          "k": "event",
+          "v": {
+            "d": [
+              {
+                "k": "after",
+                "v": "f8096e84245b40eb4426bd9d63eebb1cd791436c"
+              },
+              {
+                "k": "base_ref",
+                "v": null
+              },
+              {
+                "k": "before",
+                "v": "0000000000000000000000000000000000000000"
+              },
+              {
+                "k": "commits",
+                "v": {
+                  "a": [
+                    {
+                      "d": [
+                        {
+                          "k": "author",
+                          "v": {
+                            "d": [
+                              {
+                                "k": "email",
+                                "v": "root@agents.codasignal.com"
+                              },
+                              {
+                                "k": "name",
+                                "v": "root"
+                              }
+                            ],
+                            "t": 2
+                          }
+                        },
+                        {
+                          "k": "committer",
+                          "v": {
+                            "d": [
+                              {
+                                "k": "email",
+                                "v": "root@agents.codasignal.com"
+                              },
+                              {
+                                "k": "name",
+                                "v": "root"
+                              }
+                            ],
+                            "t": 2
+                          }
+                        },
+                        {
+                          "k": "distinct",
+                          "v": true
+                        },
+                        {
+                          "k": "id",
+                          "v": "7ac4fa2e45c8c4725a9ad44db4eb6b9682064260"
+                        },
+                        {
+                          "k": "message",
+                          "v": "test(99): add step attribute probe actions\n\nCo-authored-by: Cursor <cursoragent@cursor.com>"
+                        },
+                        {
+                          "k": "timestamp",
+                          "v": "2026-10-09T21:10:57Z"
+                        },
+                        {
+                          "k": "tree_id",
+                          "v": "62dc193838d3e93a7cbac15bcb6f9ef3f0b97cce"
+                        },
+                        {
+                          "k": "url",
+                          "v": "https://github.com/Falconiere/toolu-ghrunner/commit/7ac4fa2e45c8c4725a9ad44db4eb6b9682064260"
+                        }
+                      ],
+                      "t": 2
+                    },
+                    {
+                      "d": [
+                        {
+                          "k": "author",
+                          "v": {
+                            "d": [
+                              {
+                                "k": "email",
+                                "v": "root@agents.codasignal.com"
+                              },
+                              {
+                                "k": "name",
+                                "v": "root"
+                              }
+                            ],
+                            "t": 2
+                          }
+                        },
+                        {
+                          "k": "committer",
+                          "v": {
+                            "d": [
+                              {
+                                "k": "email",
+                                "v": "root@agents.codasignal.com"
+                              },
+                              {
+                                "k": "name",
+                                "v": "root"
+                              }
+                            ],
+                            "t": 2
+                          }
+                        },
+                        {
+                          "k": "distinct",
+                          "v": true
+                        },
+                        {
+                          "k": "id",
+                          "v": "f8096e84245b40eb4426bd9d63eebb1cd791436c"
+                        },
+                        {
+                          "k": "message",
+                          "v": "test(99): add live step attribute workflow\n\nCo-authored-by: Cursor <cursoragent@cursor.com>"
+                        },
+                        {
+                          "k": "timestamp",
+                          "v": "2026-10-09T21:12:36Z"
+                        },
+                        {
+                          "k": "tree_id",
+                          "v": "2461d5769525b3e1517cbfb388b04daa30d3b21b"
+                        },
+                        {
+                          "k": "url",
+                          "v": "https://github.com/Falconiere/toolu-ghrunner/commit/f8096e84245b40eb4426bd9d63eebb1cd791436c"
+                        }
+                      ],
+                      "t": 2
+                    }
+                  ],
+                  "t": 1
+                }
+              },
+              {
+                "k": "compare",
+                "v": "https://github.com/Falconiere/toolu-ghrunner/compare/7ac4fa2e45c8^...f8096e84245b"
+              },
+              {
+                "k": "created",
+                "v": true
+              },
+              {
+                "k": "deleted",
+                "v": false
+              },
+              {
+                "k": "forced",
+                "v": false
+              },
+              {
+                "k": "head_commit",
+                "v": {
+                  "d": [
+                    {
+                      "k": "author",
+                      "v": {
+                        "d": [
+                          {
+                            "k": "email",
+                            "v": "root@agents.codasignal.com"
+                          },
+                          {
+                            "k": "name",
+                            "v": "root"
+                          }
+                        ],
+                        "t": 2
+                      }
+                    },
+                    {
+                      "k": "committer",
+                      "v": {
+                        "d": [
+                          {
+                            "k": "email",
+                            "v": "root@agents.codasignal.com"
+                          },
+                          {
+                            "k": "name",
+                            "v": "root"
+                          }
+                        ],
+                        "t": 2
+                      }
+                    },
+                    {
+                      "k": "distinct",
+                      "v": true
+                    },
+                    {
+                      "k": "id",
+                      "v": "f8096e84245b40eb4426bd9d63eebb1cd791436c"
+                    },
+                    {
+                      "k": "message",
+                      "v": "test(99): add live step attribute workflow\n\nCo-authored-by: Cursor <cursoragent@cursor.com>"
+                    },
+                    {
+                      "k": "timestamp",
+                      "v": "2026-10-09T21:12:36Z"
+                    },
+                    {
+                      "k": "tree_id",
+                      "v": "2461d5769525b3e1517cbfb388b04daa30d3b21b"
+                    },
+                    {
+                      "k": "url",
+                      "v": "https://github.com/Falconiere/toolu-ghrunner/commit/f8096e84245b40eb4426bd9d63eebb1cd791436c"
+                    }
+                  ],
+                  "t": 2
+                }
+              },
+              {
+                "k": "pusher",
+                "v": {
+                  "d": [
+                    {
+                      "k": "email",
+                      "v": "Falconiere@users.noreply.github.com"
+                    },
+                    {
+                      "k": "name",
+                      "v": "Falconiere"
+                    }
+                  ],
+                  "t": 2
+                }
+              },
+              {
+                "k": "ref",
+                "v": "refs/heads/capture/99-step-attrs"
+              },
+              {
+                "k": "repository",
+                "v": {
+                  "d": [
+                    {
+                      "k": "allow_forking",
+                      "v": true
+                    },
+                    {
+                      "k": "archive_url",
+                      "v": "https://api.github.com/repos/Falconiere/toolu-ghrunner/{archive_format}{/ref}"
+                    },
+                    {
+                      "k": "archived",
+                      "v": false
+                    },
+                    {
+                      "k": "assignees_url",
+                      "v": "https://api.github.com/repos/Falconiere/toolu-ghrunner/assignees{/user}"
+                    },
+                    {
+                      "k": "blobs_url",
+                      "v": "https://api.github.com/repos/Falconiere/toolu-ghrunner/git/blobs{/sha}"
+                    },
+                    {
+                      "k": "branches_url",
+                      "v": "https://api.github.com/repos/Falconiere/toolu-ghrunner/branches{/branch}"
+                    },
+                    {
+                      "k": "clone_url",
+                      "v": "https://github.com/Falconiere/toolu-ghrunner.git"
+                    },
+                    {
+                      "k": "collaborators_url",
+                      "v": "https://api.github.com/repos/Falconiere/toolu-ghrunner/collaborators{/collaborator}"
+                    },
+                    {
+                      "k": "comments_url",
+                      "v": "https://api.github.com/repos/Falconiere/toolu-ghrunner/comments{/number}"
+                    },
+                    {
+                      "k": "commits_url",
+                      "v": "https://api.github.com/repos/Falconiere/toolu-ghrunner/commits{/sha}"
+                    },
+                    {
+                      "k": "compare_url",
+                      "v": "https://api.github.com/repos/Falconiere/toolu-ghrunner/compare/{base}...{head}"
+                    },
+                    {
+                      "k": "contents_url",
+                      "v": "https://api.github.com/repos/Falconiere/toolu-ghrunner/contents/{+path}"
+                    },
+                    {
+                      "k": "contributors_url",
+                      "v": "https://api.github.com/repos/Falconiere/toolu-ghrunner/contributors"
+                    },
+                    {
+                      "k": "created_at",
+                      "v": 1781765037
+                    },
+                    {
+                      "k": "default_branch",
+                      "v": "main"
+                    },
+                    {
+                      "k": "deployments_url",
+                      "v": "https://api.github.com/repos/Falconiere/toolu-ghrunner/deployments"
+                    },
+                    {
+                      "k": "description",
+                      "v": null
+                    },
+                    {
+                      "k": "disabled",
+                      "v": false
+                    },
+                    {
+                      "k": "downloads_url",
+                      "v": "https://api.github.com/repos/Falconiere/toolu-ghrunner/downloads"
+                    },
+                    {
+                      "k": "events_url",
+                      "v": "https://api.github.com/repos/Falconiere/toolu-ghrunner/events"
+                    },
+                    {
+                      "k": "fork",
+                      "v": false
+                    },
+                    {
+                      "k": "forks",
+                      "v": 0
+                    },
+                    {
+                      "k": "forks_count",
+                      "v": 0
+                    },
+                    {
+                      "k": "forks_url",
+                      "v": "https://api.github.com/repos/Falconiere/toolu-ghrunner/forks"
+                    },
+                    {
+                      "k": "full_name",
+                      "v": "Falconiere/toolu-ghrunner"
+                    },
+                    {
+                      "k": "git_commits_url",
+                      "v": "https://api.github.com/repos/Falconiere/toolu-ghrunner/git/commits{/sha}"
+                    },
+                    {
+                      "k": "git_refs_url",
+                      "v": "https://api.github.com/repos/Falconiere/toolu-ghrunner/git/refs{/sha}"
+                    },
+                    {
+                      "k": "git_tags_url",
+                      "v": "https://api.github.com/repos/Falconiere/toolu-ghrunner/git/tags{/sha}"
+                    },
+                    {
+                      "k": "git_url",
+                      "v": "git://github.com/Falconiere/toolu-ghrunner.git"
+                    },
+                    {
+                      "k": "has_discussions",
+                      "v": false
+                    },
+                    {
+                      "k": "has_downloads",
+                      "v": true
+                    },
+                    {
+                      "k": "has_issues",
+                      "v": true
+                    },
+                    {
+                      "k": "has_pages",
+                      "v": false
+                    },
+                    {
+                      "k": "has_projects",
+                      "v": true
+                    },
+                    {
+                      "k": "has_pull_requests",
+                      "v": true
+                    },
+                    {
+                      "k": "has_wiki",
+                      "v": true
+                    },
+                    {
+                      "k": "homepage",
+                      "v": null
+                    },
+                    {
+                      "k": "hooks_url",
+                      "v": "https://api.github.com/repos/Falconiere/toolu-ghrunner/hooks"
+                    },
+                    {
+                      "k": "html_url",
+                      "v": "https://github.com/Falconiere/toolu-ghrunner"
+                    },
+                    {
+                      "k": "id",
+                      "v": 1273038000
+                    },
+                    {
+                      "k": "is_template",
+                      "v": false
+                    },
+                    {
+                      "k": "issue_comment_url",
+                      "v": "https://api.github.com/repos/Falconiere/toolu-ghrunner/issues/comments{/number}"
+                    },
+                    {
+                      "k": "issue_events_url",
+                      "v": "https://api.github.com/repos/Falconiere/toolu-ghrunner/issues/events{/number}"
+                    },
+                    {
+                      "k": "issues_url",
+                      "v": "https://api.github.com/repos/Falconiere/toolu-ghrunner/issues{/number}"
+                    },
+                    {
+                      "k": "keys_url",
+                      "v": "https://api.github.com/repos/Falconiere/toolu-ghrunner/keys{/key_id}"
+                    },
+                    {
+                      "k": "labels_url",
+                      "v": "https://api.github.com/repos/Falconiere/toolu-ghrunner/labels{/name}"
+                    },
+                    {
+                      "k": "language",
+                      "v": "Rust"
+                    },
+                    {
+                      "k": "languages_url",
+                      "v": "https://api.github.com/repos/Falconiere/toolu-ghrunner/languages"
+                    },
+                    {
+                      "k": "license",
+                      "v": {
+                        "d": [
+                          {
+                            "k": "key",
+                            "v": "mit"
+                          },
+                          {
+                            "k": "name",
+                            "v": "MIT License"
+                          },
+                          {
+                            "k": "node_id",
+                            "v": "MDc6TGljZW5zZTEz"
+                          },
+                          {
+                            "k": "spdx_id",
+                            "v": "MIT"
+                          },
+                          {
+                            "k": "url",
+                            "v": "https://api.github.com/licenses/mit"
+                          }
+                        ],
+                        "t": 2
+                      }
+                    },
+                    {
+                      "k": "master_branch",
+                      "v": "main"
+                    },
+                    {
+                      "k": "merges_url",
+                      "v": "https://api.github.com/repos/Falconiere/toolu-ghrunner/merges"
+                    },
+                    {
+                      "k": "milestones_url",
+                      "v": "https://api.github.com/repos/Falconiere/toolu-ghrunner/milestones{/number}"
+                    },
+                    {
+                      "k": "mirror_url",
+                      "v": null
+                    },
+                    {
+                      "k": "name",
+                      "v": "toolu-ghrunner"
+                    },
+                    {
+                      "k": "node_id",
+                      "v": "R_kgDOS-EEsA"
+                    },
+                    {
+                      "k": "notifications_url",
+                      "v": "https://api.github.com/repos/Falconiere/toolu-ghrunner/notifications{?since,all,participating}"
+                    },
+                    {
+                      "k": "open_issues",
+                      "v": 30
+                    },
+                    {
+                      "k": "open_issues_count",
+                      "v": 30
+                    },
+                    {
+                      "k": "owner",
+                      "v": {
+                        "d": [
+                          {
+                            "k": "avatar_url",
+                            "v": "https://avatars.githubusercontent.com/u/8358089?v=4"
+                          },
+                          {
+                            "k": "email",
+                            "v": "Falconiere@users.noreply.github.com"
+                          },
+                          {
+                            "k": "events_url",
+                            "v": "https://api.github.com/users/Falconiere/events{/privacy}"
+                          },
+                          {
+                            "k": "followers_url",
+                            "v": "https://api.github.com/users/Falconiere/followers"
+                          },
+                          {
+                            "k": "following_url",
+                            "v": "https://api.github.com/users/Falconiere/following{/other_user}"
+                          },
+                          {
+                            "k": "gists_url",
+                            "v": "https://api.github.com/users/Falconiere/gists{/gist_id}"
+                          },
+                          {
+                            "k": "gravatar_id",
+                            "v": ""
+                          },
+                          {
+                            "k": "html_url",
+                            "v": "https://github.com/Falconiere"
+                          },
+                          {
+                            "k": "id",
+                            "v": 8358089
+                          },
+                          {
+                            "k": "login",
+                            "v": "Falconiere"
+                          },
+                          {
+                            "k": "name",
+                            "v": "Falconiere"
+                          },
+                          {
+                            "k": "node_id",
+                            "v": "MDQ6VXNlcjgzNTgwODk="
+                          },
+                          {
+                            "k": "organizations_url",
+                            "v": "https://api.github.com/users/Falconiere/orgs"
+                          },
+                          {
+                            "k": "received_events_url",
+                            "v": "https://api.github.com/users/Falconiere/received_events"
+                          },
+                          {
+                            "k": "repos_url",
+                            "v": "https://api.github.com/users/Falconiere/repos"
+                          },
+                          {
+                            "k": "site_admin",
+                            "v": false
+                          },
+                          {
+                            "k": "starred_url",
+                            "v": "https://api.github.com/users/Falconiere/starred{/owner}{/repo}"
+                          },
+                          {
+                            "k": "subscriptions_url",
+                            "v": "https://api.github.com/users/Falconiere/subscriptions"
+                          },
+                          {
+                            "k": "type",
+                            "v": "User"
+                          },
+                          {
+                            "k": "url",
+                            "v": "https://api.github.com/users/Falconiere"
+                          },
+                          {
+                            "k": "user_view_type",
+                            "v": "public"
+                          }
+                        ],
+                        "t": 2
+                      }
+                    },
+                    {
+                      "k": "private",
+                      "v": false
+                    },
+                    {
+                      "k": "pull_request_creation_policy",
+                      "v": "all"
+                    },
+                    {
+                      "k": "pulls_url",
+                      "v": "https://api.github.com/repos/Falconiere/toolu-ghrunner/pulls{/number}"
+                    },
+                    {
+                      "k": "pushed_at",
+                      "v": 1791580357
+                    },
+                    {
+                      "k": "releases_url",
+                      "v": "https://api.github.com/repos/Falconiere/toolu-ghrunner/releases{/id}"
+                    },
+                    {
+                      "k": "size",
+                      "v": 2924
+                    },
+                    {
+                      "k": "ssh_url",
+                      "v": "git@github.com:Falconiere/toolu-ghrunner.git"
+                    },
+                    {
+                      "k": "stargazers",
+                      "v": 0
+                    },
+                    {
+                      "k": "stargazers_count",
+                      "v": 0
+                    },
+                    {
+                      "k": "stargazers_url",
+                      "v": "https://api.github.com/repos/Falconiere/toolu-ghrunner/stargazers"
+                    },
+                    {
+                      "k": "statuses_url",
+                      "v": "https://api.github.com/repos/Falconiere/toolu-ghrunner/statuses/{sha}"
+                    },
+                    {
+                      "k": "subscribers_url",
+                      "v": "https://api.github.com/repos/Falconiere/toolu-ghrunner/subscribers"
+                    },
+                    {
+                      "k": "subscription_url",
+                      "v": "https://api.github.com/repos/Falconiere/toolu-ghrunner/subscription"
+                    },
+                    {
+                      "k": "svn_url",
+                      "v": "https://github.com/Falconiere/toolu-ghrunner"
+                    },
+                    {
+                      "k": "tags_url",
+                      "v": "https://api.github.com/repos/Falconiere/toolu-ghrunner/tags"
+                    },
+                    {
+                      "k": "teams_url",
+                      "v": "https://api.github.com/repos/Falconiere/toolu-ghrunner/teams"
+                    },
+                    {
+                      "k": "topics",
+                      "v": {
+                        "a": [],
+                        "t": 1
+                      }
+                    },
+                    {
+                      "k": "trees_url",
+                      "v": "https://api.github.com/repos/Falconiere/toolu-ghrunner/git/trees{/sha}"
+                    },
+                    {
+                      "k": "updated_at",
+                      "v": "2026-10-09T21:01:30Z"
+                    },
+                    {
+                      "k": "url",
+                      "v": "https://api.github.com/repos/Falconiere/toolu-ghrunner"
+                    },
+                    {
+                      "k": "visibility",
+                      "v": "public"
+                    },
+                    {
+                      "k": "watchers",
+                      "v": 0
+                    },
+                    {
+                      "k": "watchers_count",
+                      "v": 0
+                    },
+                    {
+                      "k": "web_commit_signoff_required",
+                      "v": false
+                    }
+                  ],
+                  "t": 2
+                }
+              },
+              {
+                "k": "sender",
+                "v": {
+                  "d": [
+                    {
+                      "k": "avatar_url",
+                      "v": "https://avatars.githubusercontent.com/u/8358089?v=4"
+                    },
+                    {
+                      "k": "events_url",
+                      "v": "https://api.github.com/users/Falconiere/events{/privacy}"
+                    },
+                    {
+                      "k": "followers_url",
+                      "v": "https://api.github.com/users/Falconiere/followers"
+                    },
+                    {
+                      "k": "following_url",
+                      "v": "https://api.github.com/users/Falconiere/following{/other_user}"
+                    },
+                    {
+                      "k": "gists_url",
+                      "v": "https://api.github.com/users/Falconiere/gists{/gist_id}"
+                    },
+                    {
+                      "k": "gravatar_id",
+                      "v": ""
+                    },
+                    {
+                      "k": "html_url",
+                      "v": "https://github.com/Falconiere"
+                    },
+                    {
+                      "k": "id",
+                      "v": 8358089
+                    },
+                    {
+                      "k": "login",
+                      "v": "Falconiere"
+                    },
+                    {
+                      "k": "node_id",
+                      "v": "MDQ6VXNlcjgzNTgwODk="
+                    },
+                    {
+                      "k": "organizations_url",
+                      "v": "https://api.github.com/users/Falconiere/orgs"
+                    },
+                    {
+                      "k": "received_events_url",
+                      "v": "https://api.github.com/users/Falconiere/received_events"
+                    },
+                    {
+                      "k": "repos_url",
+                      "v": "https://api.github.com/users/Falconiere/repos"
+                    },
+                    {
+                      "k": "site_admin",
+                      "v": false
+                    },
+                    {
+                      "k": "starred_url",
+                      "v": "https://api.github.com/users/Falconiere/starred{/owner}{/repo}"
+                    },
+                    {
+                      "k": "subscriptions_url",
+                      "v": "https://api.github.com/users/Falconiere/subscriptions"
+                    },
+                    {
+                      "k": "type",
+                      "v": "User"
+                    },
+                    {
+                      "k": "url",
+                      "v": "https://api.github.com/users/Falconiere"
+                    },
+                    {
+                      "k": "user_view_type",
+                      "v": "public"
+                    }
+                  ],
+                  "t": 2
+                }
+              }
+            ],
+            "t": 2
+          }
+        },
+        {
+          "k": "workflow_ref",
+          "v": "Falconiere/toolu-ghrunner/.github/workflows/step-attrs-99.yml@refs/heads/capture/99-step-attrs"
+        },
+        {
+          "k": "workflow_sha",
+          "v": "f8096e84245b40eb4426bd9d63eebb1cd791436c"
+        },
+        {
+          "k": "repository_id",
+          "v": "1273038000"
+        },
+        {
+          "k": "triggering_actor",
+          "v": "Falconiere"
+        }
+      ],
+      "t": 2
+    },
+    "inputs": {
+      "d": [],
+      "t": 2
+    },
+    "job": {
+      "d": [
+        {
+          "k": "check_run_id",
+          "v": 114028380451
+        },
+        {
+          "k": "workflow_ref",
+          "v": "Falconiere/toolu-ghrunner/.github/workflows/step-attrs-99.yml@refs/heads/capture/99-step-attrs"
+        },
+        {
+          "k": "workflow_sha",
+          "v": "f8096e84245b40eb4426bd9d63eebb1cd791436c"
+        },
+        {
+          "k": "workflow_repository",
+          "v": "Falconiere/toolu-ghrunner"
+        },
+        {
+          "k": "workflow_file_path",
+          "v": ".github/workflows/step-attrs-99.yml"
+        }
+      ],
+      "t": 2
+    },
+    "matrix": {
+      "d": [
+        {
+          "k": "lane",
+          "v": "toolu-linux"
+        },
+        {
+          "k": "runner",
+          "v": {
+            "a": [
+              "self-hosted",
+              "toolu-99"
+            ],
+            "t": 1
+          }
+        }
+      ],
+      "t": 2
+    },
+    "needs": {
+      "d": [],
+      "t": 2
+    },
+    "strategy": {
+      "d": [
+        {
+          "k": "fail-fast",
+          "v": false
+        },
+        {
+          "k": "job-index",
+          "v": 0
+        },
+        {
+          "k": "job-total",
+          "v": 2
+        },
+        {
+          "k": "max-parallel",
+          "v": 2
+        }
+      ],
+      "t": 2
+    },
+    "vars": {
+      "d": [],
+      "t": 2
+    }
+  },
+  "defaults": [],
+  "environmentVariables": [],
+  "fileTable": [
+    ".github/workflows/step-attrs-99.yml"
+  ],
+  "jobContainer": null,
+  "jobDisplayName": "invalid-toolu-linux",
+  "jobId": "3f664462-f49e-5daf-b258-91cb0794cf77",
+  "jobName": "toolu-linux_self-hosted_t",
+  "jobOutputs": null,
+  "jobServiceContainers": null,
+  "lockedUntil": "0001-01-01T00:00:00",
+  "mask": [
+    {
+      "type": "regex",
+      "value": "255cf969-13ac-5ff8-9020-3fce65e45907"
+    },
+    {
+      "type": "regex",
+      "value": "ee437c54-6cb5-5395-b267-33a61f869028"
+    },
+    {
+      "type": "regex",
+      "value": "4f64708b-11ab-568c-ba4d-86b1c1c9a39b"
+    },
+    {
+      "type": "regex",
+      "value": "cd289b48-02d6-51b1-8293-64ad0e59eef0"
+    },
+    {
+      "type": "regex",
+      "value": "393d58c9-86c2-58e2-847c-6d5156de0d75"
+    },
+    {
+      "type": "regex",
+      "value": "1f2cd2ff-170c-599e-808c-638578bab50f"
+    },
+    {
+      "type": "regex",
+      "value": "c91dfce7-169b-5687-950f-af3d42ead9fb"
+    },
+    {
+      "type": "regex",
+      "value": "12f00f26-cda7-5756-9a11-b8ee5c7b6cee"
+    },
+    {
+      "type": "regex",
+      "value": "233ca9e8-4c9e-55ac-96e9-9e02d59c3830"
+    },
+    {
+      "type": "regex",
+      "value": "5f4d4b0d-f6cc-54b0-9496-c1cec3308eae"
+    },
+    {
+      "type": "regex",
+      "value": "1cf302be-d004-5df2-b7ea-7c42d9aa3e9e"
+    },
+    {
+      "type": "regex",
+      "value": "b1562a91-1450-5d28-af9a-004eeac846e6"
+    },
+    {
+      "type": "regex",
+      "value": "fde3485a-c53c-5e26-8be6-ccdc1c8c9998"
+    },
+    {
+      "type": "regex",
+      "value": "dda3588c-55cb-52cc-ba31-3656b48ff1ec"
+    },
+    {
+      "type": "regex",
+      "value": "55f31316-e33b-58b6-888d-053096028346"
+    },
+    {
+      "type": "regex",
+      "value": "b96d21bd-10b6-5127-9f39-ae7d01fabecb"
+    },
+    {
+      "type": "regex",
+      "value": "6ef39937-2730-5d81-a2ec-250b7a9610f5"
+    },
+    {
+      "type": "regex",
+      "value": "3b331f87-d161-5c0f-8a11-9dcc43c4e7ac"
+    },
+    {
+      "type": "regex",
+      "value": "f59b8e6c-5baa-593d-ba79-248710987562"
+    },
+    {
+      "type": "regex",
+      "value": "2626b98a-5a90-5926-be05-77d997a213b4"
+    },
+    {
+      "type": "regex",
+      "value": "b822eec8-5b8f-5a42-b076-3ccb3b613fbe"
+    },
+    {
+      "type": "regex",
+      "value": "16c4d99c-97bb-5ba1-9484-ef74ddc67c66"
+    },
+    {
+      "type": "regex",
+      "value": "e4ddde59-118c-5e97-8d09-8565d70cb6bb"
+    },
+    {
+      "type": "regex",
+      "value": "f13be460-4d17-5157-a24a-53111cbf65a6"
+    }
+  ],
+  "messageType": "RunnerJobRequest",
+  "plan": {
+    "artifactLocation": "",
+    "artifactUri": "",
+    "planId": "da9ad4cf-3c38-8095-b926-23ffe6a615bf",
+    "planType": "actions",
+    "version": 0
+  },
+  "requestId": 0,
+  "resources": {
+    "endpoints": [
+      {
+        "authorization": {
+          "parameters": {
+            "AccessToken": "8bf7ecc0-4398-5330-a519-5bfda14a4d69"
+          },
+          "scheme": "OAuth"
+        },
+        "data": {
+          "CacheServerUrl": "https://artifactcache.actions.githubusercontent.com/twrs8lbit9ZyitUezKDbXAEbXCYgAu956eDKeMRtkIO6zAuW11/",
+          "ConnectivityAndDNSChecks": "[\"https://github.com/_dns\",\"https://api.github.com/_dns\",\"https://codeload.github.com/_dns\",\"https://pkg.github.com/_dns\",\"https://copilot-proxy.githubusercontent.com/_dns\"]",
+          "ConnectivityChecks": "[\"https://broker.actions.githubusercontent.com/health\",\"https://token.actions.githubusercontent.com/ready\",\"https://run.actions.githubusercontent.com/health\"]",
+          "FeedStreamUrl": "wss://results-receiver.actions.githubusercontent.com/_ws/ingest.sock",
+          "GenerateIdTokenUrl": "",
+          "PipelinesServiceUrl": "https://pipelinesghubeus9.actions.githubusercontent.com/twrs8lbit9ZyitUezKDbXAEbXCYgAu956eDKeMRtkIO6zAuW11/",
+          "ResultsServiceUrl": "https://results-receiver.actions.githubusercontent.com/",
+          "ServerId": "",
+          "ServerName": ""
+        },
+        "isReady": true,
+        "isShared": false,
+        "name": "SystemVssConnection",
+        "url": "https://run-actions-1-azure-eastus.actions.githubusercontent.com/153/"
+      }
+    ]
+  },
+  "snapshot": null,
+  "steps": [
+    {
+      "condition": "success()",
+      "contextName": "prior",
+      "continueOnError": null,
+      "displayNameToken": {
+        "col": 15,
+        "file": 1,
+        "line": 178,
+        "lit": "Prior outputs",
+        "type": 0
+      },
+      "id": "83e0d46b-254e-4968-a864-338de4fc7bfa",
+      "inputs": {
+        "map": [
+          {
+            "Key": {
+              "lit": "script",
+              "type": 0
+            },
+            "Value": {
+              "col": 14,
+              "file": 1,
+              "line": 181,
+              "lit": "echo flag=true >> \"$GITHUB_OUTPUT\"",
+              "type": 0
+            }
+          },
+          {
+            "Key": {
+              "lit": "shell",
+              "type": 0
+            },
+            "Value": {
+              "col": 16,
+              "file": 1,
+              "line": 180,
+              "lit": "bash",
+              "type": 0
+            }
+          }
+        ],
+        "type": 2
+      },
+      "name": "prior",
+      "reference": {
+        "type": "script"
+      },
+      "timeoutInMinutes": null,
+      "type": "action"
+    },
+    {
+      "condition": "success()",
+      "contextName": "string_coe",
+      "continueOnError": {
+        "col": 28,
+        "expr": "steps.prior.outputs.flag",
+        "file": 1,
+        "line": 185,
+        "type": 3
+      },
+      "displayNameToken": {
+        "col": 15,
+        "file": 1,
+        "line": 183,
+        "lit": "String continue-on-error",
+        "type": 0
+      },
+      "id": "4a33959f-b3ee-4614-9453-0f349eadb903",
+      "inputs": {
+        "map": [
+          {
+            "Key": {
+              "lit": "script",
+              "type": 0
+            },
+            "Value": {
+              "col": 14,
+              "file": 1,
+              "line": 187,
+              "lit": "exit 6",
+              "type": 0
+            }
+          },
+          {
+            "Key": {
+              "lit": "shell",
+              "type": 0
+            },
+            "Value": {
+              "col": 16,
+              "file": 1,
+              "line": 186,
+              "lit": "bash",
+              "type": 0
+            }
+          }
+        ],
+        "type": 2
+      },
+      "name": "string_coe",
+      "reference": {
+        "type": "script"
+      },
+      "timeoutInMinutes": null,
+      "type": "action"
+    },
+    {
+      "condition": "always()",
+      "contextName": "__run",
+      "continueOnError": null,
+      "displayNameToken": {
+        "col": 15,
+        "file": 1,
+        "line": 188,
+        "lit": "Check string continue-on-error",
+        "type": 0
+      },
+      "id": "57a0f112-223b-495f-b8c7-8cba554f8de1",
+      "inputs": {
+        "map": [
+          {
+            "Key": {
+              "lit": "script",
+              "type": 0
+            },
+            "Value": {
+              "col": 14,
+              "expr": "format('test ''{0}/{1}'' = failure/failure', steps.string_coe.outcome, steps.string_coe.conclusion)",
+              "file": 1,
+              "line": 191,
+              "type": 3
+            }
+          },
+          {
+            "Key": {
+              "lit": "shell",
+              "type": 0
+            },
+            "Value": {
+              "col": 16,
+              "file": 1,
+              "line": 190,
+              "lit": "bash",
+              "type": 0
+            }
+          }
+        ],
+        "type": 2
+      },
+      "name": "__run",
+      "reference": {
+        "type": "script"
+      },
+      "timeoutInMinutes": null,
+      "type": "action"
+    }
+  ],
+  "timeline": {
+    "changeId": 0,
+    "id": "da9ad4cf-3c38-8095-b926-23ffe6a615bf",
+    "location": null
+  },
+  "variables": {
+    "Actions.EnableHttpRedirects": {
+      "value": "true"
+    },
+    "DistributedTask.AddWarningToNode12Action": {
+      "value": "true"
+    },
+    "DistributedTask.AddWarningToNode16Action": {
+      "value": "true"
+    },
+    "DistributedTask.AllowRunnerContainerHooks": {
+      "value": "true"
+    },
+    "DistributedTask.DeprecateStepOutputCommands": {
+      "value": "true"
+    },
+    "DistributedTask.DetailUntarFailure": {
+      "value": "true"
+    },
+    "DistributedTask.EnableCompositeActions": {
+      "value": "true"
+    },
+    "DistributedTask.EnableJobServerQueueTelemetry": {
+      "value": "true"
+    },
+    "DistributedTask.EnhancedAnnotations": {
+      "value": "true"
+    },
+    "DistributedTask.ForceGithubJavascriptActionsToNode16": {
+      "value": "true"
+    },
+    "DistributedTask.ForceGithubJavascriptActionsToNode20": {
+      "value": "true"
+    },
+    "DistributedTask.LogTemplateErrorsAsDebugMessages": {
+      "value": "true"
+    },
+    "DistributedTask.MarkJobAsFailedOnWorkerCrash": {
+      "value": "true"
+    },
+    "DistributedTask.NewActionMetadata": {
+      "value": "true"
+    },
+    "DistributedTask.UploadStepSummary": {
+      "value": "true"
+    },
+    "DistributedTask.UseActionArchiveCache": {
+      "value": "true"
+    },
+    "DistributedTask.UseWhich2": {
+      "value": "true"
+    },
+    "RunService.FixEmbeddedIssues": {
+      "value": "true"
+    },
+    "actions.runner.requirenode24": {
+      "value": "true"
+    },
+    "actions.runner.usenode24bydefault": {
+      "value": "true"
+    },
+    "actions.runner.warnonnode20": {
+      "value": "true"
+    },
+    "actions_add_check_run_id_to_job_context": {
+      "value": "true"
+    },
+    "actions_batch_action_resolution": {
+      "value": "false"
+    },
+    "actions_cache_mode": {
+      "value": "write"
+    },
+    "actions_container_action_runner_temp": {
+      "value": "true"
+    },
+    "actions_display_helpful_actions_download_errors": {
+      "value": "true"
+    },
+    "actions_runner_allow_artifacts_file": {
+      "value": "true"
+    },
+    "actions_runner_compare_workflow_parser": {
+      "value": "false"
+    },
+    "actions_runner_deprecate_linux_arm32": {
+      "value": "true"
+    },
+    "actions_runner_emit_composite_markers": {
+      "value": "true"
+    },
+    "actions_runner_kill_linux_arm32": {
+      "value": "true"
+    },
+    "actions_runner_node20_removal_date": {
+      "value": "September 23rd, 2026"
+    },
+    "actions_runner_node24_default_date": {
+      "value": "June 16th, 2026"
+    },
+    "actions_self_repository": {
+      "value": "true"
+    },
+    "actions_service_container_command": {
+      "value": "true"
+    },
+    "actions_set_orchestration_id_env_for_actions": {
+      "value": "true"
+    },
+    "actions_skip_retry_complete_job_upon_known_errors": {
+      "value": "true"
+    },
+    "actions_snapshot_preflight_hosted_runner_check": {
+      "value": "false"
+    },
+    "actions_snapshot_preflight_image_gen_pool_check": {
+      "value": "false"
+    },
+    "actions_use_bearer_token_for_codeload": {
+      "value": "false"
+    },
+    "actions_uses_cache_service_v2": {
+      "value": "true"
+    },
+    "github_token": {
+      "isSecret": true,
+      "value": "9b943e6c-be68-555a-b0b6-46d8c45cd766"
+    },
+    "system.from_run_service": {
+      "value": "true"
+    },
+    "system.github.job": {
+      "value": "invalid"
+    },
+    "system.github.launch_endpoint": {
+      "value": "https://launch.actions.githubusercontent.com"
+    },
+    "system.github.results_endpoint": {
+      "value": "https://results-receiver.actions.githubusercontent.com/"
+    },
+    "system.github.results_upload_with_sdk": {
+      "value": "true"
+    },
+    "system.github.token": {
+      "isSecret": true,
+      "value": "60aca1a9-79e2-5151-919f-2b4fd478e3e3"
+    },
+    "system.github.token.permissions": {
+      "value": "{\"Contents\":\"read\",\"Metadata\":\"read\",\"Packages\":\"read\"}"
+    },
+    "system.orchestrationId": {
+      "value": "da9ad4cf-3c38-8095-b926-23ffe6a615bf.invalid.toolu-linux_self-hosted_t"
+    },
+    "system.phaseDisplayName": {
+      "value": "invalid-toolu-linux"
+    },
+    "system.runner.lowdiskspacethreshold": {
+      "value": "100"
+    },
+    "system.runnerEnvironment": {
+      "value": "self-hosted"
+    },
+    "system.runnerGroupName": {
+      "value": "Default"
+    }
+  }
+}
