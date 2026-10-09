@@ -167,11 +167,14 @@ impl ActionFetcher {
       "Prepare action '{}/{}{subpath}@{}' (SHA:{sha})",
       action.owner, action.repo, action.git_ref
     );
-    let first = self
-      .reported
-      .lock()
-      .unwrap_or_else(std::sync::PoisonError::into_inner)
-      .insert(line.clone());
+    // The guard is scoped to this block, so it is released before the await.
+    let first = {
+      let mut reported = self
+        .reported
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+      reported.insert(line.clone())
+    };
     if first
       && events
         .send(shared::RunnerEvent::Log {
