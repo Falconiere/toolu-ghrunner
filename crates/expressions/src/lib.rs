@@ -10,6 +10,8 @@ mod validation;
 
 /// Context objects (`github`, `env`, `secrets`, `steps`, `matrix`, etc.) fed to expression evaluation.
 pub mod context_data;
+/// Upstream's step display-name helpers: prettified fallback text and referenced names.
+pub mod display;
 /// Evaluates a parsed expression AST against an [`EvalContext`](evaluator::EvalContext).
 pub mod evaluator;
 /// Built-in expression functions (`contains`, `format`, `hashFiles`, etc.) and their dispatch.

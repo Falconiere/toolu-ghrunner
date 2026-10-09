@@ -381,8 +381,12 @@ to that list requires proving the value is not a real credential.
 
 - The full `${{ }}` evaluator: `lexer`, `parser` (AST + precedence +
   primary), `evaluator`, `template`, `functions` (builtins,
-  `hashFiles` — registered with the dispatcher; `glob_walk` + `hash`
-  back it — plus JSON convert), `context_data`, `types` (`ExprValue`).
+  ` hashFiles` — registered with the dispatcher; `glob_walk` + `hash`
+ back it — plus JSON convert), `context_data`, `types` (`ExprValue`),
+ `display` (upstream's step display-name helpers: `display_string` —
+ the prettified `ToDisplayString` fallback that unrolls `format()` back
+ into `${{ }}` template text — `references` for the
+ `CheckHasRequiredContext` gate, and `first_line`).
 
 ### `cache/` — content-addressed CI cache (deps: shared)
 
