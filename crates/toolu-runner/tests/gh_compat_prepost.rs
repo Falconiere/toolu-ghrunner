@@ -347,6 +347,7 @@ fn reported(events: &[RunnerEvent], name: &str) -> Option<shared::Conclusion> {
 /// 3b: like upstream, a post stage applies its step's `continue-on-error`
 /// independently: a failing post with `continue-on-error: true` concludes
 /// `success` and leaves the job green; without it the post fails the job.
+/// It is named after the step's main-stage display name.
 #[tokio::test]
 async fn failing_post_honors_continue_on_error() -> TestResult<()> {
   for (continue_on_error, expected) in [
@@ -355,11 +356,16 @@ async fn failing_post_honors_continue_on_error() -> TestResult<()> {
   ] {
     let mut step = action_step("a", "act-a");
     step.set_continue_on_error(continue_on_error);
+    step.display_name_token = Some(shared::TemplateToken::expression(
+      "format('Deferred {0}', steps.prior.outputs.label)",
+    ));
     let Some((conclusion, events, _)) =
       run_patched(step, &[("post.js", "process.exit(3);\n")]).await?
     else {
       return Ok(());
     };
+    // The post takes the name the step reported after its main-stage update.
+    assert_eq!(reported(&events, "Post Deferred "), Some(expected));
     let post = events.iter().rev().find_map(|event| {
       if let RunnerEvent::StepCompleted { conclusion, .. } = event {
         Some(*conclusion)
@@ -397,7 +403,7 @@ async fn failing_pre_honors_continue_on_error() -> TestResult<()> {
     else {
       return Ok(());
     };
-    assert_eq!(reported(&events, "Pre prepost-fixture"), Some(expected));
+    assert_eq!(reported(&events, "Pre Run ./act-a"), Some(expected));
     assert_eq!(
       conclusion, expected,
       "continue-on-error={continue_on_error}"
@@ -443,19 +449,26 @@ async fn pre_and_main_get_separate_timeout_budgets() -> TestResult<()> {
 }
 
 /// 3e: a `pre` that outlives its budget is killed and reported under its own
-/// `Pre` name, like upstream's separate pre step; `main` never runs.
+/// `Pre` name, like upstream's separate pre step; `main` never runs. The pre
+/// keeps the job-start name, where `steps.*` is still unevaluated, while the
+/// step itself is renamed with its live contexts.
 #[tokio::test]
 async fn pre_timeout_reports_the_pre_step() -> TestResult<()> {
   let mut step = action_step("a", "act-a");
   step.timeout_in_minutes = Some(shared::TemplateToken::number(1.0));
+  step.display_name_token = Some(shared::TemplateToken::expression(
+    "format('Deferred {0}', steps.prior.outputs.label)",
+  ));
   let Some((conclusion, events, markers)) =
     run_patched(step, &[("pre.js", "setTimeout(() => {}, 90000);\n")]).await?
   else {
     return Ok(());
   };
   assert_eq!(conclusion, shared::Conclusion::Failure, "{markers:?}");
+  let pre = "Pre Deferred ${{ steps.prior.outputs.label }}";
+  assert_eq!(reported(&events, pre), Some(shared::Conclusion::Failure));
   assert_eq!(
-    reported(&events, "Pre prepost-fixture"),
+    reported(&events, "Deferred "),
     Some(shared::Conclusion::Failure)
   );
   let timeouts: Vec<&str> = events
@@ -472,7 +485,9 @@ async fn pre_timeout_reports_the_pre_step() -> TestResult<()> {
     .collect();
   assert_eq!(
     timeouts,
-    ["##[error]The action 'Pre prepost-fixture' has timed out after 1 minutes."]
+    [format!(
+      "##[error]The action '{pre}' has timed out after 1 minutes."
+    )]
   );
   assert!(!markers.iter().any(|m| m == "A:main"), "{markers:?}");
   Ok(())

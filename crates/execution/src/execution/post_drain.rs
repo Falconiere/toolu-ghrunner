@@ -14,7 +14,8 @@ use tokio::sync::mpsc;
 use super::actions::manifest::RunsUsing;
 use super::context::ExecutionContext;
 use super::node_stage::{NodeStage, emit_stage_endgroup, run_node_stage};
-use super::step_naming::{PostStep, derive_step_name};
+use super::step_display::display_for;
+use super::step_naming::PostStep;
 use super::step_timeout::{StepBounds, step_timeout_message, with_timeout_message};
 use super::steps_runner::JobCtx;
 
@@ -120,7 +121,7 @@ async fn run_scoped_post(
   let post_name = emit_post_header(
     events,
     report.id,
-    &derive_step_name(&post.step),
+    &display_for(&post.step, ctx).current,
     report.number,
   )
   .await;
