@@ -1,4 +1,4 @@
-//! Per-step environment, output, state, and path file commands.
+//! Per-step environment, output, state, path, and summary file commands.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

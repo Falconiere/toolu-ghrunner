@@ -131,6 +131,15 @@ fn summaries(events: &[RunnerEvent]) -> Vec<(&str, &str)> {
     .collect()
 }
 
+/// Expected summary text: the engine ends every line with the platform newline.
+fn platform_lines(text: &str) -> String {
+  if cfg!(windows) {
+    text.replace('\n', "\r\n")
+  } else {
+    text.to_owned()
+  }
+}
+
 #[tokio::test]
 async fn step_summary_append_overwrite_absent_deleted_and_failure() -> Result<(), Box<dyn Error>> {
   let dir = tempfile::tempdir()?;
@@ -143,7 +152,10 @@ async fn step_summary_append_overwrite_absent_deleted_and_failure() -> Result<()
   let docs = summaries(&events);
   assert_eq!(
     docs.iter().map(|(_, text)| *text).collect::<Vec<_>>(),
-    vec!["# first\nappended\n", "# last\n"]
+    vec![
+      platform_lines("# first\nappended\n"),
+      platform_lines("# last\n")
+    ]
   );
   assert_ne!(
     docs.first().map(|(id, _)| id),
@@ -170,8 +182,7 @@ async fn step_summary_utf8_byte_limit_rejects_without_failing_job() -> Result<()
   let docs = summaries(&events);
   assert_eq!(docs.len(), 1);
   let body = docs.first().ok_or("missing boundary summary")?.1;
-  assert_eq!(body.len(), 1_048_576);
-  assert_eq!(body, format!("{}!\n", "é".repeat(524_287)));
+  assert_eq!(body, platform_lines(&format!("{}!\n", "é".repeat(524_287))));
   assert!(events.iter().any(|event| matches!(event, RunnerEvent::Annotation { level: shared::AnnotationLevel::Error, message, .. } if message.starts_with("$GITHUB_STEP_SUMMARY upload aborted, supports content up to a size of 1024k, got 1024k."))));
   assert!(events.iter().any(|event| matches!(
     event,
@@ -194,7 +205,7 @@ async fn step_summary_dynamic_masks_and_line_normalization() -> Result<(), Box<d
       .iter()
       .map(|(_, text)| *text)
       .collect::<Vec<_>>(),
-    vec!["first\n***\nlast\n"]
+    vec![platform_lines("first\n***\nlast\n")]
   );
   Ok(())
 }
@@ -254,7 +265,7 @@ async fn step_summary_real_node_and_composite_keep_distinct_documents() -> Resul
   let docs = summaries(&events);
   assert_eq!(
     docs.iter().map(|(_, text)| *text).collect::<Vec<_>>(),
-    vec![
+    [
       "# Node pre\n",
       "# Node main\n***\n",
       "# Composite first\nappended\n",
@@ -264,6 +275,7 @@ async fn step_summary_real_node_and_composite_keep_distinct_documents() -> Resul
       "# Node post\n",
       "# Node post\n",
     ]
+    .map(platform_lines)
   );
   let ids: std::collections::HashSet<_> = docs.iter().map(|(id, _)| *id).collect();
   assert_eq!(ids.len(), docs.len());
@@ -298,7 +310,7 @@ async fn step_summary_registered_secret_is_masked() -> Result<(), Box<dyn Error>
       .iter()
       .map(|(_, text)| *text)
       .collect::<Vec<_>>(),
-    vec!["***\n"]
+    vec![platform_lines("***\n")]
   );
   Ok(())
 }
@@ -336,7 +348,10 @@ async fn step_summary_completed_documents_survive_cancellation() -> Result<(), B
       .iter()
       .map(|(_, text)| *text)
       .collect::<Vec<_>>(),
-    vec!["# completed\n", "# interrupted\n"]
+    vec![
+      platform_lines("# completed\n"),
+      platform_lines("# interrupted\n")
+    ]
   );
   assert!(events.iter().any(|event| matches!(
     event,
