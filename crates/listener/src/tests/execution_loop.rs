@@ -19,6 +19,8 @@ fn masker_with_secret(secret: &str) -> Arc<Mutex<SecretMasker>> {
 /// Results Service fields are never read by it.
 fn test_fwd_config(masker: Arc<Mutex<SecretMasker>>) -> FwdConfig {
   FwdConfig {
+    // `setup_cancel` and `setup_id` are unused by the paths under test; setup
+    // routing is covered in `tests/setup_forwarding.rs`.
     setup_cancel: CancellationToken::new(),
     setup_id: None,
     results_url: None,

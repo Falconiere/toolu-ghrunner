@@ -325,7 +325,12 @@ fn start_renewal(
 }
 
 struct FwdConfig {
+  /// Placeholder from `build_fwd_config`; `run_forwarded_job` rebinds it to
+  /// the per-job token before the forwarder starts, so setup is concluded as
+  /// cancelled exactly when the job is.
   setup_cancel: CancellationToken,
+  /// `None` from `build_fwd_config`; the caller sets it to the reported
+  /// "Set up job" step id once setup has been reported.
   setup_id: Option<String>,
   results_url: Option<String>,
   results_client: reqwest::Client,
