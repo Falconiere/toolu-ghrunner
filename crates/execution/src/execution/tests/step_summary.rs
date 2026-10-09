@@ -157,6 +157,31 @@ async fn step_summary_symlink_to_host_file_is_not_uploaded() -> Result<(), Box<d
   Ok(())
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn step_summary_fifo_is_rejected_without_blocking() -> Result<(), Box<dyn Error>> {
+  let dir = tempfile::tempdir()?;
+  let events = replay(
+    dir.path(),
+    message(&["rm \"$GITHUB_STEP_SUMMARY\"; mkfifo \"$GITHUB_STEP_SUMMARY\""])?,
+  )
+  .await?;
+  assert!(summaries(&events).is_empty());
+  assert!(events.iter().any(|event| matches!(
+    event,
+    RunnerEvent::Annotation { level: shared::AnnotationLevel::Error, message, .. }
+      if message.contains("unable to read summary file (not a regular file)")
+  )));
+  assert!(events.iter().any(|event| matches!(
+    event,
+    RunnerEvent::JobCompleted {
+      conclusion: Conclusion::Success,
+      ..
+    }
+  )));
+  Ok(())
+}
+
 fn summaries(events: &[RunnerEvent]) -> Vec<(&str, &str)> {
   events
     .iter()

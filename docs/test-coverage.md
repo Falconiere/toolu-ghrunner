@@ -1083,8 +1083,8 @@ and architecture come from the host, not hosted-runner image metadata.
   real shell and committed Node/composite actions; append/overwrite, no content,
   deletion with preserved outputs, UTF-8 byte limit, registered/dynamic masking,
   later failure and cancellation, distinct document IDs (83-S1–S4); a BOM-only
-  file contributes nothing, and a symlink at the summary path is rejected
-  without uploading the file it points at.
+  file contributes nothing, a symlink at the summary path is rejected without
+  uploading the file it points at, and a FIFO there is rejected without blocking.
 - `cargo test -p listener step_summary`: failed HTTP uploads still drain later
   queued documents. This is failure-path coverage, not successful-service proof.
 - `cargo test -p wire step_summary`: local TCP stubs cover a failed RPC, a

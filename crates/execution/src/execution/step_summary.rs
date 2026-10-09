@@ -73,13 +73,17 @@ fn open_regular(path: &Path) -> Result<Option<(std::fs::File, u64)>, String> {
     Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
     Err(error) => return Err(read_error(&error)),
   };
+  // Checked before opening: opening a FIFO would block the runner forever.
+  if !link.file_type().is_file() {
+    return Err(not_regular_error());
+  }
   let file = match std::fs::File::open(path) {
     Ok(file) => file,
     Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
     Err(error) => return Err(read_error(&error)),
   };
   let metadata = file.metadata().map_err(|error| read_error(&error))?;
-  if !link.file_type().is_file() || !metadata.is_file() || !same_file(&link, &metadata) {
+  if !metadata.is_file() || !same_file(&link, &metadata) {
     return Err(not_regular_error());
   }
   Ok(Some((file, metadata.len())))
