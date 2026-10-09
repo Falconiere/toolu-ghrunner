@@ -3,10 +3,15 @@
 Write Markdown to `$GITHUB_STEP_SUMMARY` in a shell, Node action, or embedded
 composite step. Each completed handler contributes a separate document to the
 GitHub job summary. Appending and overwriting follow ordinary file semantics;
-empty or deleted files contribute nothing. Completed documents survive later
-step failure or cancellation. Node pre/main/post stages capture their own files.
+empty or deleted files (and files holding only a UTF-8 BOM) contribute nothing.
+Completed documents survive later step failure or cancellation. Node pre/main/post
+stages capture their own files. Docker container actions are not collected yet:
+their `$GITHUB_STEP_SUMMARY` file is created but never read.
 
-The runner rejects files larger than 1,048,576 raw bytes with an error annotation.
+The runner reads only the regular file it created. A symlink or any other file
+type at that path is rejected with an error annotation, because job and action
+containers can replace the file and the host must not upload what a link points at.
+It also rejects files larger than 1,048,576 raw bytes with an error annotation.
 It never truncates them and the annotation alone does not fail the step or job.
 The accepted content uses replacement decoding for invalid UTF-8, strips a UTF-8
 BOM, and normalizes line endings. Registered secrets and `::add-mask::` values

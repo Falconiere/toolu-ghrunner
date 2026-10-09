@@ -78,9 +78,9 @@ async fn forward_log_line_masks_both_the_job_log_and_the_step_upload_channel() {
 /// S3 single-pass guard: the SAME masked line reaches all three of
 /// `forward_log_line`'s sinks — the combined job log, the per-step upload
 /// channel, and the live-log WebSocket feed — from one automaton pass.
-/// `forward_log_line` calls `mask_line` exactly once (the only call site,
-/// per the fn's own doc comment); this test pins the observable half of
-/// that contract by asserting byte-identical masked output on all three
+/// `forward_log_line` calls `mask_line` exactly once per line (summary
+/// documents are masked separately, in `handle_event_arm`); this test pins
+/// the observable half of that contract by asserting byte-identical masked output on all three
 /// sinks in a single invocation, closing the coverage gap the two tests
 /// above leave (neither exercises `live_log_tx`).
 #[tokio::test]

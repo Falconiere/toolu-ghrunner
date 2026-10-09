@@ -1082,9 +1082,14 @@ and architecture come from the host, not hosted-runner image metadata.
 - `cargo test -p execution --lib step_summary`: captured acquisition replay with
   real shell and committed Node/composite actions; append/overwrite, no content,
   deletion with preserved outputs, UTF-8 byte limit, registered/dynamic masking,
-  later failure and cancellation, distinct document IDs (83-S1–S4).
+  later failure and cancellation, distinct document IDs (83-S1–S4); a BOM-only
+  file contributes nothing, and a symlink at the summary path is rejected
+  without uploading the file it points at.
 - `cargo test -p listener step_summary`: failed HTTP uploads still drain later
   queued documents. This is failure-path coverage, not successful-service proof.
+- `cargo test -p wire step_summary`: local TCP stubs cover a failed RPC, a
+  malformed reply that never exposes values, and blob 503 retries without
+  leaking the signed URL. The successful three-call upload is not exercised.
 - `cargo test -p observability step_summary`: journal includes only summary ID
   and byte count, never document text.
 - `.github/workflows/step-summary-83.yml`: opt-in GitHub.com live toolu/reference

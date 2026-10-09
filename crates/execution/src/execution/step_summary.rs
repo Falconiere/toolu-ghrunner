@@ -44,12 +44,9 @@ pub(crate) async fn collect(
 }
 
 fn read_summary(path: &Path) -> Result<Option<String>, String> {
-  let file = match std::fs::File::open(path) {
-    Ok(file) => file,
-    Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
-    Err(error) => return Err(read_error(&error)),
+  let Some((file, size)) = open_regular(path)? else {
+    return Ok(None);
   };
-  let size = file.metadata().map_err(|error| read_error(&error))?.len();
   if size > MAX_BYTES {
     return Err(oversized(size));
   }
@@ -63,12 +60,35 @@ fn read_summary(path: &Path) -> Result<Option<String>, String> {
   if size > MAX_BYTES {
     return Err(oversized(size));
   }
-  if bytes.is_empty() {
-    return Ok(None);
+  Ok(render(&bytes))
+}
+
+/// Open the summary file, refusing anything but the regular file the runner
+/// created. A job or action container can replace it (its directory is mounted
+/// read-write), and following a symlink would make the host upload whatever the
+/// link points at.
+fn open_regular(path: &Path) -> Result<Option<(std::fs::File, u64)>, String> {
+  let link = match std::fs::symlink_metadata(path) {
+    Ok(link) => link,
+    Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+    Err(error) => return Err(read_error(&error)),
+  };
+  let file = match std::fs::File::open(path) {
+    Ok(file) => file,
+    Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+    Err(error) => return Err(read_error(&error)),
+  };
+  let metadata = file.metadata().map_err(|error| read_error(&error))?;
+  if !link.file_type().is_file() || !metadata.is_file() || !same_file(&link, &metadata) {
+    return Err(not_regular_error());
   }
-  let bytes = bytes
-    .strip_prefix(&[0xef, 0xbb, 0xbf])
-    .unwrap_or(bytes.as_slice());
+  Ok(Some((file, metadata.len())))
+}
+
+/// Strip a BOM, normalize line endings to the platform newline, and drop a file
+/// that holds no text (empty, or only a BOM).
+fn render(bytes: &[u8]) -> Option<String> {
+  let bytes = bytes.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(bytes);
   let decoded = String::from_utf8_lossy(bytes);
   let normalized = decoded.replace("\r\n", "\n").replace('\r', "\n");
   let newline = if cfg!(windows) { "\r\n" } else { "\n" };
@@ -77,7 +97,24 @@ fn read_summary(path: &Path) -> Result<Option<String>, String> {
     content.push_str(line);
     content.push_str(newline);
   }
-  Ok(Some(content))
+  (!content.is_empty()).then_some(content)
+}
+
+/// The path and the opened handle must name one inode, so a file swapped for a
+/// symlink between the two lookups is rejected rather than followed.
+#[cfg(unix)]
+fn same_file(link: &std::fs::Metadata, opened: &std::fs::Metadata) -> bool {
+  use std::os::unix::fs::MetadataExt;
+  link.dev() == opened.dev() && link.ino() == opened.ino()
+}
+
+#[cfg(not(unix))]
+fn same_file(_link: &std::fs::Metadata, _opened: &std::fs::Metadata) -> bool {
+  true
+}
+
+fn not_regular_error() -> String {
+  "$GITHUB_STEP_SUMMARY upload aborted: unable to read summary file (not a regular file)".to_owned()
 }
 
 fn read_error(error: &std::io::Error) -> String {

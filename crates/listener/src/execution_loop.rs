@@ -350,7 +350,8 @@ struct FwdConfig {
   masker: Arc<Mutex<SecretMasker>>,
 }
 
-/// Mask a single log line through the shared `SecretMasker`.
+/// Mask one log line, or one whole step-summary document, through the shared
+/// `SecretMasker`.
 ///
 /// Recovered from a poisoned Mutex the same way the production
 /// `ExecutionContext::register_secret` and `MaskerRedactor::redact`

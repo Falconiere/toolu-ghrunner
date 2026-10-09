@@ -103,14 +103,57 @@ async fn step_summary_real_shell_produces_document_without_changing_conclusion()
       ..
     }
   )));
-  // Initially assert the public event stream without referencing the not-yet
-  // implemented variant, so the red test demonstrates missing behavior.
-  assert!(
-    events
+  assert_eq!(
+    summaries(&events)
       .iter()
-      .any(|event| format!("{event:?}").starts_with("StepSummary {")),
-    "no summary event"
+      .map(|(_, text)| *text)
+      .collect::<Vec<_>>(),
+    vec![platform_lines("# summary-83\n")]
   );
+  Ok(())
+}
+
+#[tokio::test]
+async fn step_summary_bom_only_file_contributes_nothing() -> Result<(), Box<dyn Error>> {
+  let dir = tempfile::tempdir()?;
+  let events = replay(
+    dir.path(),
+    message(&["printf '\\357\\273\\277' > \"$GITHUB_STEP_SUMMARY\""])?,
+  )
+  .await?;
+  assert!(summaries(&events).is_empty());
+  assert!(!events.iter().any(|event| matches!(
+    event,
+    RunnerEvent::Annotation { message, .. } if message.contains("GITHUB_STEP_SUMMARY")
+  )));
+  Ok(())
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn step_summary_symlink_to_host_file_is_not_uploaded() -> Result<(), Box<dyn Error>> {
+  let dir = tempfile::tempdir()?;
+  let secret = dir.path().join("host-secret.txt");
+  std::fs::write(&secret, "host-only-credential-8f3a\n")?;
+  let script = format!(
+    "rm \"$GITHUB_STEP_SUMMARY\"; ln -s '{}' \"$GITHUB_STEP_SUMMARY\"",
+    secret.display()
+  );
+  let events = replay(dir.path(), message(&[script.as_str()])?).await?;
+  assert!(summaries(&events).is_empty());
+  assert!(!format!("{events:?}").contains("host-only-credential-8f3a"));
+  assert!(events.iter().any(|event| matches!(
+    event,
+    RunnerEvent::Annotation { level: shared::AnnotationLevel::Error, message, .. }
+      if message.contains("unable to read summary file (not a regular file)")
+  )));
+  assert!(events.iter().any(|event| matches!(
+    event,
+    RunnerEvent::JobCompleted {
+      conclusion: Conclusion::Success,
+      ..
+    }
+  )));
   Ok(())
 }
 

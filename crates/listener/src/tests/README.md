@@ -22,3 +22,4 @@
 | `runner_update_policy.rs` | Idle/busy refresh warning, safe opaque bodies, cancellation and cursor continuity. |
 | `setup_step.rs` | Captured permissions, identity and secret-source diagnostics. |
 | `setup_forwarding.rs` | Production replay, masked setup logs, early failure and cancellation. |
+| `step_summary.rs` | Failed summary uploads still drain later queued documents. |
