@@ -267,7 +267,8 @@ async fn run_run_step(
     &run.state.extra_env,
     &run.state.path_additions,
   )?;
-  let file_paths = create_file_command_files(run.temp_dir, &step_id)?;
+  let summary_id = uuid::Uuid::new_v4().to_string();
+  let file_paths = create_file_command_files(run.temp_dir, &summary_id)?;
   let full_env = merge_file_command_env(&env, &file_paths);
 
   let eval_ctx = composite_eval_context(run.ctx, params.step_inputs, Some(&env));
@@ -293,7 +294,16 @@ async fn run_run_step(
     &full_env,
     &working_dir,
   )
-  .await?;
+  .await;
+  super::step_summary::collect(
+    &file_paths.summary,
+    params.parent_step_id,
+    &summary_id,
+    run.ctx,
+    params.events,
+  )
+  .await;
+  let conclusion = conclusion?;
 
   finish_run_step(run, &step_id, &file_paths).await;
 
@@ -476,6 +486,10 @@ fn merge_file_command_env(
   files: &super::composite_env::FileCommandPaths,
 ) -> HashMap<String, String> {
   let mut env = base.clone();
+  env.insert(
+    "GITHUB_STEP_SUMMARY".to_owned(),
+    files.summary.to_string_lossy().into_owned(),
+  );
   env.insert(
     "GITHUB_OUTPUT".to_owned(),
     files.output.to_string_lossy().into_owned(),

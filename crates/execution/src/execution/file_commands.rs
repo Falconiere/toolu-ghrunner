@@ -1,3 +1,5 @@
+//! Per-step environment, output, state, path, and summary file commands.
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -56,8 +58,6 @@ pub struct FileCommandResults {
   pub path_additions: Vec<String>,
   /// State saved via `GITHUB_STATE`, for the action's post step.
   pub state: HashMap<String, String>,
-  /// Contents written to `GITHUB_STEP_SUMMARY`, truncated to the 1 MiB limit.
-  pub summary: String,
 }
 
 impl FileCommandManager {
@@ -120,7 +120,7 @@ impl FileCommandManager {
     Ok((mgr, env_map))
   }
 
-  /// Read and parse all file command files after a step. The five synchronous
+  /// Read environment, output, path, and state files after a step. The four synchronous
   /// reads run as one task on Tokio's blocking pool.
   ///
   /// # Errors
@@ -133,17 +133,15 @@ impl FileCommandManager {
       self.output_path.clone(),
       self.path_path.clone(),
       self.state_path.clone(),
-      self.summary_path.clone(),
     ];
-    let (env_content, output_content, path_content, state_content, summary) =
+    let (env_content, output_content, path_content, state_content) =
       run_blocking_file_io("file-command file read", move || {
-        let [env_path, output_path, path_path, state_path, summary_path] = paths;
+        let [env_path, output_path, path_path, state_path] = paths;
         Ok((
           std::fs::read_to_string(env_path)?,
           std::fs::read_to_string(output_path)?,
           std::fs::read_to_string(path_path)?,
           std::fs::read_to_string(state_path)?,
-          std::fs::read_to_string(summary_path)?,
         ))
       })
       .await?;
@@ -156,7 +154,6 @@ impl FileCommandManager {
       outputs: parse_output_file(&output_content),
       path_additions: parse_path_file(&path_content),
       state: parse_kv_file(&state_content),
-      summary: truncate_summary(summary),
     })
   }
 
@@ -274,17 +271,4 @@ fn parse_heredoc_start(line: &str) -> Option<(&str, &str)> {
     return None;
   }
   Some((key, delimiter))
-}
-
-/// Truncate summary to 1 MiB limit.
-fn truncate_summary(summary: String) -> String {
-  const MAX_SUMMARY_BYTES: usize = 1024 * 1024;
-  if summary.len() <= MAX_SUMMARY_BYTES {
-    return summary;
-  }
-  let mut end = MAX_SUMMARY_BYTES;
-  while end > 0 && !summary.is_char_boundary(end) {
-    end -= 1;
-  }
-  summary.get(..end).unwrap_or_default().to_owned()
 }

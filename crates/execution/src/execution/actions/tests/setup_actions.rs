@@ -207,6 +207,7 @@ exit 1
         | shared::RunnerEvent::StepCompleted { .. }
         | shared::RunnerEvent::StepSkipped { .. }
         | shared::RunnerEvent::Log { .. }
+        | shared::RunnerEvent::StepSummary { .. }
         | shared::RunnerEvent::LogGroup { .. }
         | shared::RunnerEvent::Annotation { .. } => {},
       }

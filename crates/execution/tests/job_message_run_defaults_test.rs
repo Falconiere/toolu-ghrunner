@@ -147,6 +147,7 @@ fn assert_success(events: &[RunnerEvent], step_ids: &[String]) {
       | RunnerEvent::StepSkipped { .. }
       | RunnerEvent::Log { .. }
       | RunnerEvent::LogGroup { .. }
+      | RunnerEvent::StepSummary { .. }
       | RunnerEvent::Annotation { .. }
       | RunnerEvent::JobCompleted { .. } => None,
     })

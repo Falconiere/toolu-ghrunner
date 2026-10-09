@@ -56,6 +56,7 @@ not part of it. Workflow YAML parsing/matrix/orchestration lives in the
 | `step_process_env.rs` | `apply` | Unconditionally sets `GITHUB_ACTIONS=true` at child launch; fills `CI` only when absent after child, container, and runner precedence. |
 | `step_naming.rs` | `PostStep` / `PostStepQueue` | The registered-post-step record, its LIFO queue, and `derive_step_name` for step display names. |
 | `step_state.rs` | `StepState` | Per-step recorded outputs/state/outcome/conclusion, and `build_steps_context` for the `steps.*` expression context. |
+| `step_summary.rs` | `collect` | Bounded, masked summary snapshots; refuses non-regular summary files; non-fatal error annotations. |
 | `step_timeout.rs` | `wait_bounded` | Bounded child-process wait shared by the script and node handlers: races `timeout-minutes` against the job `CancellationToken`. |
 | `steps_runner.rs` | `run_steps` | The per-job step loop: condition evaluation, dispatch to action/script execution, continue-on-error, and post-step draining. |
 | `workflow.rs` | (mod decl) | Declares the `workflow` sub-module; see its own README. |

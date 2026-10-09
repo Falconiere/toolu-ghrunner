@@ -30,7 +30,8 @@ fn runner_event_job_started() {
       assert_eq!(job_id, "job-1");
       assert_eq!(job_name, "build");
     },
-    RunnerEvent::StepStarted { .. }
+    RunnerEvent::StepSummary { .. }
+    | RunnerEvent::StepStarted { .. }
     | RunnerEvent::StepCompleted { .. }
     | RunnerEvent::StepSkipped { .. }
     | RunnerEvent::Log { .. }

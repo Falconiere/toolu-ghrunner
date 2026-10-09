@@ -144,6 +144,7 @@ async fn job_container_real_production_shell_node_composite_and_posts() -> TestR
       | RunnerEvent::StepCompleted { .. }
       | RunnerEvent::StepSkipped { .. }
       | RunnerEvent::LogGroup { .. }
+      | RunnerEvent::StepSummary { .. }
       | RunnerEvent::Annotation { .. } => {},
     }
   }
