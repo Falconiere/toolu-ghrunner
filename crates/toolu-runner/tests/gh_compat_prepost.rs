@@ -442,6 +442,42 @@ async fn pre_and_main_get_separate_timeout_budgets() -> TestResult<()> {
   Ok(())
 }
 
+/// 3e: a `pre` that outlives its budget is killed and reported under its own
+/// `Pre` name, like upstream's separate pre step; `main` never runs.
+#[tokio::test]
+async fn pre_timeout_reports_the_pre_step() -> TestResult<()> {
+  let mut step = action_step("a", "act-a");
+  step.timeout_in_minutes = Some(shared::TemplateToken::number(1.0));
+  let Some((conclusion, events, markers)) =
+    run_patched(step, &[("pre.js", "setTimeout(() => {}, 90000);\n")]).await?
+  else {
+    return Ok(());
+  };
+  assert_eq!(conclusion, shared::Conclusion::Failure, "{markers:?}");
+  assert_eq!(
+    reported(&events, "Pre prepost-fixture"),
+    Some(shared::Conclusion::Failure)
+  );
+  let timeouts: Vec<&str> = events
+    .iter()
+    .filter_map(|event| {
+      if let RunnerEvent::Log { line, .. } = event
+        && line.contains("timed out")
+      {
+        Some(line.as_str())
+      } else {
+        None
+      }
+    })
+    .collect();
+  assert_eq!(
+    timeouts,
+    ["##[error]The action 'Pre prepost-fixture' has timed out after 1 minutes."]
+  );
+  assert!(!markers.iter().any(|m| m == "A:main"), "{markers:?}");
+  Ok(())
+}
+
 /// Sanity: the committed fixture parses and declares pre/main/post.
 #[test]
 fn fixture_declares_all_three_stages() -> TestResult<()> {

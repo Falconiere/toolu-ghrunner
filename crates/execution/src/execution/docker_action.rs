@@ -10,6 +10,7 @@ use super::action_support::emit_log;
 use super::context::ExecutionContext;
 use super::docker_stage::{DockerStage, run_docker_stage};
 use super::step_naming::PostStep;
+use super::step_timeout::{step_timeout_message, with_timeout_message};
 use crate::docker::action_container::ActionContainer;
 
 /// Prepare one image and run its applicable pre/main stages on Linux.
@@ -141,11 +142,13 @@ async fn run_pre(
   image: &str,
 ) -> Result<Conclusion, RunnerError> {
   let id = uuid::Uuid::new_v4().to_string();
+  let pre_name = format!("Pre {}", s.manifest.name);
+  let message = step_timeout_message(&pre_name, s.bounds.own_timeout);
   emit_pre_event(
     s.events,
     RunnerEvent::StepStarted {
       step_id: id.clone(),
-      step_name: format!("Pre {}", s.manifest.name),
+      step_name: pre_name,
       step_number: 0,
     },
   )
@@ -157,7 +160,8 @@ async fn run_pre(
     bounds: &pre_bounds,
     ..*s
   };
-  let result = run_docker_stage(&pre, ctx, runtime, image).await;
+  let stage = Box::pin(run_docker_stage(&pre, ctx, runtime, image));
+  let result = with_timeout_message(message, stage).await;
   let mut conclusion = match &result {
     Ok((conclusion, _)) => *conclusion,
     Err(RunnerError::Cancelled) => Conclusion::Cancelled,

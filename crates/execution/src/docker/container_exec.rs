@@ -59,13 +59,7 @@ impl JobContainer {
       biased;
       () = params.cancel.cancelled() => Ok(Conclusion::Cancelled),
       () = deadline => {
-        if events.send(RunnerEvent::Log {
-          step_id: params.step_id.to_owned(),
-          line: "##[error]Container step timed out; execution detached and remaining processes will be removed at job teardown.".to_owned(),
-          stream: LogStream::Stderr,
-        }).await.is_err() {
-          tracing::warn!("job container timeout event receiver dropped; continuing");
-        }
+        send_timeout(events, params.step_id).await;
         Ok(Conclusion::Failure)
       },
       code = self.run_exec(params, events, &stdout) => {
@@ -244,5 +238,23 @@ async fn forward_line(
     tracing::warn!("job container stderr event receiver dropped; continuing");
   } else {
     tracing::warn!("job container stdout receiver dropped; continuing");
+  }
+}
+
+/// Upstream's timeout error for the enclosing step, then why the step can
+/// finish before its container processes do.
+async fn send_timeout(events: &mpsc::Sender<RunnerEvent>, step_id: &str) {
+  crate::execution::handlers::script::emit_timeout(events, step_id).await;
+  if events
+    .send(RunnerEvent::Log {
+      step_id: step_id.to_owned(),
+      line: "Execution detached; remaining container processes will be removed at job teardown."
+        .to_owned(),
+      stream: LogStream::Stderr,
+    })
+    .await
+    .is_err()
+  {
+    tracing::warn!("job container timeout event receiver dropped; continuing");
   }
 }

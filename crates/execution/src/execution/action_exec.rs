@@ -23,7 +23,7 @@ use super::depth_tracker::DepthTracker;
 use super::node_stage::{NodeStage, emit_stage_endgroup, run_node_stage};
 use super::step_env::resolve_step_env;
 use super::step_naming::PostStep;
-use super::step_timeout::StepBounds;
+use super::step_timeout::{StepBounds, step_timeout_message, with_timeout_message};
 
 /// Resolved action ready for execution.
 struct ResolvedStep {
@@ -483,11 +483,13 @@ async fn run_node_pre_if_present(c: &mut NodeActionCtx<'_>) -> Result<Conclusion
 /// separate pre step.
 async fn report_pre_stage(c: &mut NodeActionCtx<'_>) -> Result<Conclusion, RunnerError> {
   let report_id = uuid::Uuid::new_v4().to_string();
+  let pre_name = format!("Pre {}", c.manifest.name);
+  let message = step_timeout_message(&pre_name, c.bounds.own_timeout);
   let _ = c
     .events
     .send(RunnerEvent::StepStarted {
       step_id: report_id.clone(),
-      step_name: format!("Pre {}", c.manifest.name),
+      step_name: pre_name,
       step_number: 0,
     })
     .await;
@@ -497,7 +499,7 @@ async fn report_pre_stage(c: &mut NodeActionCtx<'_>) -> Result<Conclusion, Runne
   let mut stage = c.stage("pre");
   stage.log_step_id = &report_id;
   stage.bounds = &pre_bounds;
-  let result = run_node_stage(stage).await;
+  let result = with_timeout_message(message, Box::pin(run_node_stage(stage))).await;
   let mut conclusion = match &result {
     Ok((conclusion, _)) => *conclusion,
     Err(RunnerError::Cancelled) => Conclusion::Cancelled,

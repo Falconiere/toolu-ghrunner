@@ -7,13 +7,14 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures_util::FutureExt;
-use shared::{Conclusion, RunnerConfig, SecretMasker};
+use shared::{Conclusion, RunnerConfig, RunnerEvent, SecretMasker};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use super::container_exec::ContainerExec;
 use super::container_spec::ContainerSpec;
 use super::job_container::JobContainer;
+use crate::execution::step_timeout::{step_timeout_message, with_timeout_message};
 
 const IMAGE: &str =
   "ubuntu@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3";
@@ -75,14 +76,25 @@ async fn timeout_after_exec_starts_keeps_container_for_post_then_cleans_up()
   let cancel = CancellationToken::new();
   let container = start_container(&config, &workspace, ContainerSpec::image_only(IMAGE)).await?;
   let result = AssertUnwindSafe(async {
-    let conclusion = execute_script(
-      &container,
-      &workspace,
-      &cancel,
-      Some(Duration::from_millis(750)),
-      "printf started > timeout-started; sleep 30",
+    let message = step_timeout_message("Container step", Some(Duration::from_secs(60)));
+    let (conclusion, lines) = with_timeout_message(
+      message,
+      execute_script_logged(
+        &container,
+        &workspace,
+        &cancel,
+        Some(Duration::from_millis(750)),
+        "printf started > timeout-started; sleep 30",
+      ),
     )
     .await?;
+    assert_eq!(
+      lines,
+      [
+        "##[error]The action 'Container step' has timed out after 1 minutes.",
+        "Execution detached; remaining container processes will be removed at job teardown.",
+      ]
+    );
     assert!(
       tokio::fs::metadata(workspace.join("timeout-started"))
         .await?
@@ -247,27 +259,48 @@ async fn execute_script(
   timeout: Option<Duration>,
   script: &str,
 ) -> Result<Conclusion, Box<dyn std::error::Error>> {
+  Ok(
+    execute_script_logged(container, workspace, cancel, timeout, script)
+      .await?
+      .0,
+  )
+}
+
+/// [`execute_script`], also returning the step's `Log` lines.
+async fn execute_script_logged(
+  container: &JobContainer,
+  workspace: &Path,
+  cancel: &CancellationToken,
+  timeout: Option<Duration>,
+  script: &str,
+) -> Result<(Conclusion, Vec<String>), Box<dyn std::error::Error>> {
   let args = vec!["-ec".to_owned(), script.to_owned()];
   let env = HashMap::new();
-  let (events, _events_rx) = mpsc::channel(8);
+  let (events, mut events_rx) = mpsc::channel(8);
   let (stdout, _stdout_rx) = mpsc::channel(8);
-  Ok(
-    container
-      .execute(
-        &ContainerExec {
-          program: Path::new("sh"),
-          args: &args,
-          env: &env,
-          working_dir: workspace,
-          step_id: "real-failure-probe",
-          timeout,
-          cancel,
-        },
-        &events,
-        stdout,
-      )
-      .await?,
-  )
+  let conclusion = container
+    .execute(
+      &ContainerExec {
+        program: Path::new("sh"),
+        args: &args,
+        env: &env,
+        working_dir: workspace,
+        step_id: "real-failure-probe",
+        timeout,
+        cancel,
+      },
+      &events,
+      stdout,
+    )
+    .await?;
+  drop(events);
+  let mut lines = Vec::new();
+  while let Some(event) = events_rx.recv().await {
+    if let RunnerEvent::Log { line, .. } = event {
+      lines.push(line);
+    }
+  }
+  Ok((conclusion, lines))
 }
 
 async fn wait_for_file(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
