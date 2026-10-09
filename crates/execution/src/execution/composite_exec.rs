@@ -28,6 +28,7 @@ use super::composite_uses::{NestedUsesParams, run_nested_uses_step};
 use super::context::ExecutionContext;
 use super::depth_tracker::DepthTracker;
 use super::process_dispatch::{dispatcher, stream_process};
+use super::step_timeout::{NESTED_TIMEOUT_MESSAGE, with_timeout_message};
 
 /// Execute a composite action's steps sequentially.
 ///
@@ -56,7 +57,8 @@ pub async fn execute_composite_action(
     cleanup_deadline: None,
   };
 
-  let aggregate = run_composite_steps(&mut run, depth).await;
+  let steps = Box::pin(run_composite_steps(&mut run, depth));
+  let aggregate = with_timeout_message(NESTED_TIMEOUT_MESSAGE.to_owned(), steps).await;
   run.state.result(aggregate, params, run.ctx)
 }
 

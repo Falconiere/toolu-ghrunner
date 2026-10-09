@@ -20,6 +20,10 @@ use tokio_util::sync::CancellationToken;
 type TestResult<T = ()> = Result<T, Box<dyn Error>>;
 const ATTRS: &str = include_str!("step_attrs_99_attrs.json");
 const INVALID: &str = include_str!("step_attrs_99_invalid.json");
+/// The local action the captured `composite_budget` step uses, seeded into
+/// the replay workspace in place of the job's checkout.
+const COMPOSITE_ACTION: &str =
+  include_str!("../../../.github/actions/step-attrs-99-composite/action.yml");
 
 /// Per-`contextName` results of one replayed job.
 struct Replay {
@@ -79,6 +83,12 @@ fn replay(msg: AgentJobRequestMessage) -> TestResult<Replay> {
     workspace_gc_hours: 0,
     ..RunnerConfig::default()
   };
+  let action_dir = config
+    .workspace_root
+    .join(&msg.job_id)
+    .join(".github/actions/step-attrs-99-composite");
+  std::fs::create_dir_all(&action_dir)?;
+  std::fs::write(action_dir.join("action.yml"), COMPOSITE_ACTION)?;
   let runner = Runner::new(config, Arc::new(Mutex::new(SecretMasker::new())));
   let cancel = CancellationToken::new();
   let runtime = tokio::runtime::Builder::new_current_thread()
@@ -164,6 +174,37 @@ fn captured_deferred_timeout_bounds_a_real_process() -> TestResult {
   let names = ["prior", "deferred_start", "deferred_timeout", "__run_2"];
   let replay = replay(select(ATTRS, &names)?)?;
   assert_all_succeeded(&replay, &names);
+  assert_timeout_line(
+    &replay,
+    "deferred_timeout",
+    "##[error]The action 'Deferred timeout' has timed out after 1 minutes.",
+  );
+  Ok(())
+}
+
+/// The reference runner's timeout line for `name`, logged exactly once.
+fn assert_timeout_line(replay: &Replay, name: &str, expected: &str) {
+  let timeouts: Vec<&String> = replay
+    .logs(name)
+    .iter()
+    .filter(|line| line.contains("timed out"))
+    .collect();
+  assert_eq!(timeouts, [expected], "{:?}", replay.logs(name));
+}
+
+/// S4: composite children share the step's one-minute budget. The second
+/// inner `sleep 40` is killed with upstream's nested message, and the
+/// composite step itself adds no top-level timeout line.
+#[test]
+fn captured_composite_children_share_one_budget() -> TestResult {
+  let names = ["composite_start", "composite_budget", "__run_5"];
+  let replay = replay(select(ATTRS, &names)?)?;
+  assert_all_succeeded(&replay, &names);
+  assert_timeout_line(
+    &replay,
+    "composite_budget",
+    "##[error]The action has timed out.",
+  );
   Ok(())
 }
 
@@ -174,6 +215,11 @@ fn captured_fractional_timeout_truncates_to_whole_minutes() -> TestResult {
   let names = ["fractional_start", "fractional_timeout", "__run_3"];
   let replay = replay(select(ATTRS, &names)?)?;
   assert_all_succeeded(&replay, &names);
+  assert_timeout_line(
+    &replay,
+    "fractional_timeout",
+    "##[error]The action 'Fractional timeout' has timed out after 1 minutes.",
+  );
   Ok(())
 }
 

@@ -424,7 +424,7 @@ async fn real_step_timeout_is_failure_then_conditional_cleanup_runs() -> TestRes
   assert!(
     events
       .iter()
-      .any(|e| matches!(e, RunnerEvent::Log {line, ..} if line.contains("exceeded its timeout")))
+      .any(|e| matches!(e, RunnerEvent::Log {line, ..} if line.starts_with("##[error]The action '") && line.ends_with("' has timed out after 1 minutes.")))
   );
   assert_completions(&msg, &events, Conclusion::Failure);
   Ok(())

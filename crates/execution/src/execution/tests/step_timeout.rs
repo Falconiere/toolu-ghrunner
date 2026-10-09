@@ -7,7 +7,9 @@ use tokio::sync::mpsc;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
-use super::StepBounds;
+use super::{
+  NESTED_TIMEOUT_MESSAGE, StepBounds, step_timeout_message, timeout_message, with_timeout_message,
+};
 
 #[tokio::test]
 async fn blocked_resolution_obeys_parent_deadline() -> Result<(), Box<dyn std::error::Error>> {
@@ -91,4 +93,39 @@ async fn restarted_bounds_keep_the_enclosing_deadline() {
     CancellationToken::new(),
   );
   assert_eq!(capped.restarted().deadline, Some(parent));
+}
+
+/// Upstream's `StepsRunner` names the step and its evaluated whole minutes.
+#[test]
+fn top_level_message_names_the_step_and_its_minutes() {
+  assert_eq!(
+    step_timeout_message("Deferred timeout", Some(Duration::from_secs(60))),
+    "The action 'Deferred timeout' has timed out after 1 minutes."
+  );
+  assert_eq!(
+    step_timeout_message("Post Build", Some(Duration::from_secs(5 * 60))),
+    "The action 'Post Build' has timed out after 5 minutes."
+  );
+  assert_eq!(
+    step_timeout_message("No budget", None),
+    NESTED_TIMEOUT_MESSAGE
+  );
+}
+
+/// The innermost scope wins, so a composite child inside a top-level step
+/// reports upstream's nested wording; outside any scope the fallback applies.
+#[tokio::test]
+async fn innermost_scope_supplies_the_message() {
+  assert_eq!(timeout_message(), NESTED_TIMEOUT_MESSAGE);
+  let top = "The action 'Composite' has timed out after 1 minutes.".to_owned();
+  let (outer, inner) = with_timeout_message(top.clone(), async {
+    let inner = with_timeout_message(NESTED_TIMEOUT_MESSAGE.to_owned(), async {
+      timeout_message()
+    })
+    .await;
+    (timeout_message(), inner)
+  })
+  .await;
+  assert_eq!(outer, top);
+  assert_eq!(inner, NESTED_TIMEOUT_MESSAGE);
 }

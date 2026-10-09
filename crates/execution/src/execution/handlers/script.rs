@@ -96,7 +96,7 @@ impl ScriptHandler {
     let conclusion = match outcome {
       WaitOutcome::Exited(status) => conclusion_for(status.success()),
       WaitOutcome::TimedOut => {
-        emit_timeout(events, params.step_id, params.timeout).await;
+        emit_timeout(events, params.step_id).await;
         Conclusion::Failure
       },
       WaitOutcome::Cancelled => Conclusion::Cancelled,
@@ -149,20 +149,17 @@ async fn execute_in_container(
 /// the downstream `recv()` loop closes, completing the step.
 pub(crate) const DRAIN_GRACE: Duration = Duration::from_secs(2);
 
-/// Emit the standard "timed out" log line so the cause is visible in the UI.
+/// Emit upstream's "timed out" error line for the enclosing step so the cause
+/// is visible in the UI.
 ///
 /// Shared with the node-action handler (`handlers::node_exec`) so both child
 /// runners emit an identical timeout line.
-pub(crate) async fn emit_timeout(
-  events: &mpsc::Sender<RunnerEvent>,
-  step_id: &str,
-  timeout: Option<Duration>,
-) {
-  let secs = timeout.map_or(0, |d| d.as_secs());
+pub(crate) async fn emit_timeout(events: &mpsc::Sender<RunnerEvent>, step_id: &str) {
+  let message = crate::execution::step_timeout::timeout_message();
   let _ = events
     .send(RunnerEvent::Log {
       step_id: step_id.to_owned(),
-      line: format!("##[error]The step exceeded its timeout of {secs}s and was terminated."),
+      line: format!("##[error]{message}"),
       stream: LogStream::Stderr,
     })
     .await;

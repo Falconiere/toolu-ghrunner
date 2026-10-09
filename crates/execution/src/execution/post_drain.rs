@@ -15,7 +15,7 @@ use super::actions::manifest::RunsUsing;
 use super::context::ExecutionContext;
 use super::node_stage::{NodeStage, emit_stage_endgroup, run_node_stage};
 use super::step_naming::{PostStep, derive_step_name};
-use super::step_timeout::StepBounds;
+use super::step_timeout::{StepBounds, step_timeout_message, with_timeout_message};
 use super::steps_runner::JobCtx;
 
 /// Reporting identity and shared cleanup bound for one queued post.
@@ -117,7 +117,7 @@ async fn run_scoped_post(
   job: &JobCtx<'_>,
 ) -> Result<Conclusion, RunnerError> {
   let condition = post.effective_condition();
-  emit_post_header(
+  let post_name = emit_post_header(
     events,
     report.id,
     &derive_step_name(&post.step),
@@ -148,7 +148,9 @@ async fn run_scoped_post(
   )
   .await;
   let bounds = StepBounds::nested(job.cancellation.deadline(), timeout, watch.cancel.clone());
-  let mut conclusion = match execute_post(post, report, ctx, events, job, &bounds).await {
+  let message = step_timeout_message(&post_name, timeout);
+  let execution = Box::pin(execute_post(post, report, ctx, events, job, &bounds));
+  let mut conclusion = match with_timeout_message(message, execution).await {
     Ok(conclusion) => conclusion,
     Err(RunnerError::Cancelled) => return Err(RunnerError::Cancelled),
     Err(error) => {
@@ -267,13 +269,14 @@ async fn run_post_node_stage(
   Ok(conclusion)
 }
 
-/// Emit the `Post <action>` group header before a post stage runs.
+/// Emit the `Post <action>` group header before a post stage runs and return
+/// that display name.
 async fn emit_post_header(
   events: &mpsc::Sender<RunnerEvent>,
   step_id: &str,
   main_name: &str,
   step_number: u32,
-) {
+) -> String {
   let name = if main_name.is_empty() {
     "Post".to_owned()
   } else {
@@ -294,6 +297,7 @@ async fn emit_post_header(
     })
     .await;
   emit_stage_endgroup(events, step_id).await;
+  name
 }
 
 /// Run a prepared Docker image in the original action's state and env scope.
