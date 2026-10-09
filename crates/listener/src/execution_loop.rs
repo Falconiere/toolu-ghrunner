@@ -6,6 +6,9 @@ use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
+#[path = "setup_forwarding.rs"]
+mod setup_forwarding;
+
 use super::SessionCtx;
 use super::helpers::{RenewalParams, ResultsCtx, resolve_backend_ids, spawn_renewal};
 use super::log_uploader::StreamerConfig;
@@ -76,14 +79,12 @@ pub(super) async fn execute_with_renewal(
   );
 
   // The helper boxes both concurrent legs to bound this timeout-wrapped future.
-  let (setup_result, setup_lines, live_log_tx, live_log_handle) =
+  let (setup_id, setup_lines, live_log_tx, live_log_handle) =
     connect_and_report_setup(ctx, job_msg, rs_token, plan_id).await;
 
   let collector = StepCollector::new();
-  if let Some(result) = setup_result {
-    collector.push_result(result).await;
-  }
-  let cfg = build_fwd_config(ctx, rs_token, plan_id, job_msg, setup_lines, live_log_tx);
+  let mut cfg = build_fwd_config(ctx, rs_token, plan_id, job_msg, setup_lines, live_log_tx);
+  cfg.setup_id = Some(setup_id);
 
   let ForwarderOutcome {
     conclusion,
@@ -114,17 +115,28 @@ async fn connect_and_report_setup(
   rs_token: &str,
   plan_id: &str,
 ) -> (
-  Option<wire::reporting::StepResult>,
+  String,
   Vec<String>,
   Option<mpsc::Sender<LiveLogLine>>,
   Option<tokio::task::JoinHandle<()>>,
 ) {
+  {
+    let mut masker = ctx
+      .masker
+      .lock()
+      .unwrap_or_else(std::sync::PoisonError::into_inner);
+    super::setup_step::register_masks(job_msg, &mut masker);
+  }
   // Box both legs to keep the enclosing future below clippy's size limit.
-  let ((setup_result, setup_lines), (live_log_tx, live_log_handle)) = tokio::join!(
+  let ((setup_id, mut setup_lines), (live_log_tx, live_log_handle)) = tokio::join!(
     Box::pin(report_setup_step(rs_token, plan_id, job_msg, &ctx.client)),
     Box::pin(connect_live_log(job_msg, rs_token)),
   );
-  (setup_result, setup_lines, live_log_tx, live_log_handle)
+  setup_lines.push(format!(
+    "Runner name: '{}'",
+    super::setup_step::available(ctx.runner_name.as_deref())
+  ));
+  (setup_id, setup_lines, live_log_tx, live_log_handle)
 }
 
 /// Connect the live-log WebSocket, returning `(None, None)` on failure.
@@ -216,12 +228,14 @@ fn build_fwd_config(
     .map(|v| v.value.trim_end_matches('/').to_owned());
   let (run_backend_id, job_backend_id) = resolve_backend_ids(job_msg, plan_id);
   FwdConfig {
+    setup_cancel: CancellationToken::new(),
     results_url,
     results_client: ctx.client.clone(),
     results_token: rs_token.to_owned(),
     run_backend_id,
     job_backend_id,
     setup_lines,
+    setup_id: None,
     live_log_tx,
     masker: Arc::clone(&ctx.masker),
   }
@@ -250,9 +264,10 @@ async fn run_forwarded_job(
   ctx: &SessionCtx,
   job_msg: &AgentJobRequestMessage,
   collector: &StepCollector,
-  cfg: FwdConfig,
+  mut cfg: FwdConfig,
   job_cancel: &CancellationToken,
 ) -> ForwarderOutcome {
+  cfg.setup_cancel = job_cancel.clone();
   let runner = Runner::new(ctx.config.clone(), Arc::clone(&ctx.masker));
   let engine_rx = runner
     // The per-job token (child of the session token) so a mid-job
@@ -310,6 +325,13 @@ fn start_renewal(
 }
 
 struct FwdConfig {
+  /// Placeholder from `build_fwd_config`; `run_forwarded_job` rebinds it to
+  /// the per-job token before the forwarder starts, so setup concludes as
+  /// cancelled when the job was cancelled before its first step started.
+  setup_cancel: CancellationToken,
+  /// `None` from `build_fwd_config`; the caller sets it to the reported
+  /// "Set up job" step id once setup has been reported.
+  setup_id: Option<String>,
   results_url: Option<String>,
   results_client: reqwest::Client,
   results_token: String,
@@ -350,6 +372,7 @@ fn mask_line(masker: &Arc<Mutex<SecretMasker>>, line: &str) -> String {
 /// job log, the step-report queue and its step-metadata cursor, and
 /// the latched job conclusion.
 struct ForwarderState {
+  setup_pending: bool,
   step_meta: StepMetaMap,
   /// `None` when no Results Service URL is configured — matches the old
   /// `report_step_to_results`'s own `results_url` guard, now hoisted to a
@@ -377,6 +400,7 @@ impl ForwarderState {
       .as_ref()
       .map(|url| spawn_step_queue(cfg, url));
     Self {
+      setup_pending: cfg.setup_id.is_some(),
       step_meta: StepMetaMap::new(),
       step_queue,
       uploaders: HashMap::new(),
@@ -416,8 +440,10 @@ fn spawn_event_forwarder(
 ) -> tokio::task::JoinHandle<()> {
   tokio::spawn(async move {
     let setup_lines = std::mem::take(&mut cfg.setup_lines);
-    let mut state = ForwarderState::new(setup_lines, &cfg);
-    while let Some(event) = events_rx.recv().await {
+    let mut state = ForwarderState::new(Vec::new(), &cfg);
+    setup_forwarding::start(&mut state, &cfg, &fwd_collector, &fwd_tx, setup_lines).await;
+    while let Some(mut event) = events_rx.recv().await {
+      setup_forwarding::before_event(&mut state, &cfg, &fwd_collector, &fwd_tx, &mut event).await;
       if let RunnerEvent::JobCompleted {
         conclusion: c,
         outputs,
@@ -434,6 +460,14 @@ fn spawn_event_forwarder(
         break;
       }
     }
+    setup_forwarding::finish(
+      &mut state,
+      &cfg,
+      &fwd_collector,
+      &fwd_tx,
+      Conclusion::Failure,
+    )
+    .await;
     // Ordering is load-bearing: the per-step drain backfills the log URLs
     // `report_completion` ships, so it MUST finish first; the combined
     // job-log upload feeds nothing in that payload, so it only gets spawned.
@@ -468,7 +502,9 @@ async fn handle_event_arm(state: &mut ForwarderState, cfg: &FwdConfig, event: &R
     } => spawn_step_uploader(state, cfg, step_id, step_name),
     RunnerEvent::Log { step_id, line, .. } => forward_log_line(state, cfg, step_id, line).await,
     RunnerEvent::StepCompleted { step_id, .. } => {
-      state.uploaders.remove(step_id);
+      if cfg.setup_id.as_deref() != Some(step_id.as_str()) {
+        state.uploaders.remove(step_id);
+      }
     },
     RunnerEvent::JobStarted { .. }
     | RunnerEvent::JobCompleted { .. }
@@ -634,3 +670,7 @@ mod multiline_mask;
 #[cfg(test)]
 #[path = "tests/job_outputs.rs"]
 mod job_outputs;
+
+#[cfg(test)]
+#[path = "tests/setup_forwarding.rs"]
+mod setup_tests;

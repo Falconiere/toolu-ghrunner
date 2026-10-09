@@ -1,0 +1,8 @@
+{
+  "sha": "8bcd8e1af3c095561f1043123848fc8b2db0f189",
+  "html_url": "https://github.com/actions/hello-world-docker-action/commit/8bcd8e1af3c095561f1043123848fc8b2db0f189",
+  "archive_url": "https://codeload.github.com/actions/hello-world-docker-action/tar.gz/8bcd8e1af3c095561f1043123848fc8b2db0f189",
+  "archive_sha256": "8615bbda0f701a58778c4178f21091e64e64b6d40567e176a6007a5c8e94c85e",
+  "captured_on": "2026-09-27",
+  "provenance": "sha and html_url projected unchanged from GitHub REST GET repos/actions/hello-world-docker-action/commits/main; archive is unmodified codeload bytes, includes upstream MIT LICENSE."
+}

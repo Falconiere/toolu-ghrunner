@@ -779,3 +779,20 @@ regex per pattern. Lines over 64 KiB remain in logs but skip matching and reset
 partial state, with one warning per process. These bounds protect execution from
 pathological patterns. Live GitHub/GHES UI and pinned reference-runner parity
 remain **unverified**; see [test coverage](docs/test-coverage.md).
+
+### Set up job diagnostics
+
+The **Set up job** log reports the toolu version and GitHub compatibility version,
+actual host OS/architecture/machine name, JIT runner name, and job-supplied runner
+group. Missing identity metadata is shown as `unavailable`. When supplied by
+GitHub, token permission scopes appear in a collapsible group and the secret
+source is listed; token values are never intentionally printed.
+
+Successful remote action preparation lists the intended `owner/repo[/path]@ref`
+and resolved immutable SHA, including cached actions. Repeated identical ref/SHA
+pairs are listed once per job. Background and nested action preparation can append
+these diagnostics after the first workflow step starts. Setup completes at that
+first step; early setup failure or cancellation keeps its diagnostics and reports
+the corresponding conclusion. Setup output uses the same masking and live/durable
+log paths as step output. See [setup evidence](docs/test-coverage.md#set-up-job-diagnostics-87)
+for tested cases and unverified backend lanes.
