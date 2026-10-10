@@ -87,10 +87,7 @@ pub(crate) fn name_at_main(
   step: &ActionStep,
   ctx: &mut ExecutionContext,
 ) -> (String, Option<String>) {
-  let mut display = ctx
-    .step_display(&step.id)
-    .cloned()
-    .unwrap_or_else(|| initial(step, ctx).0);
+  let mut display = display_for(step, ctx);
   let mut warning = None;
   if !display.evaluated {
     match generate(step, ctx, &ctx.eval_context(), true) {
