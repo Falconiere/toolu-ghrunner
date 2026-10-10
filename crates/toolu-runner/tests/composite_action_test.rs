@@ -189,6 +189,32 @@ runs:
   assert!(manifest::parse_action_manifest(mapping).is_err());
 }
 
+/// Out-of-range numbers are never dropped as if `continue-on-error` were
+/// absent: an overflowing float stays literal text (rejected when evaluated)
+/// and a `u64` widens to a number token.
+#[test]
+fn parse_action_manifest_composite_step_continue_on_error_large_numbers() {
+  let yaml = "runs:\n  using: composite\n  steps:\n    - continue-on-error: 1e400\n      run: exit 1\n    - continue-on-error: 18446744073709551615\n      run: exit 1\n";
+  let def = manifest::parse_action_manifest(yaml).expect("parse");
+  let numbers: Vec<_> = def
+    .runs
+    .steps
+    .into_iter()
+    .map(|step| {
+      step
+        .continue_on_error
+        .map(|t| (t.token_type, t.lit, t.num_val))
+    })
+    .collect();
+  assert_eq!(
+    numbers,
+    [
+      Some((0, Some("1e400".to_owned()), None)),
+      Some((6, None, Some(18_446_744_073_709_552_000_f64))),
+    ]
+  );
+}
+
 #[test]
 fn parse_action_manifest_unsupported_using_returns_error() {
   let yaml = r"
