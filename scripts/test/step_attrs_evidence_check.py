@@ -51,6 +51,18 @@ def uses_ref(workflow, ref):
                for line in workflow.splitlines())
 
 
+def git_show(commit, path):
+    """The file at `commit`, failing with git's own error when it cannot be read."""
+    command = ["git", "-C", str(ROOT), "show", f"{commit}:{path}"]
+    try:
+        return subprocess.run(command, capture_output=True, check=True).stdout
+    except FileNotFoundError as error:
+        raise SystemExit("git is required to compare pinned actions") from error
+    except subprocess.CalledProcessError as error:
+        raise SystemExit(f"git show {commit}:{path} failed: {error.stderr.decode().strip()} "
+                         f"(if the commit is missing, run `git fetch origin {commit}`)") from error
+
+
 def strings(value):
     if isinstance(value, str):
         yield value
@@ -95,12 +107,8 @@ def main():
         for path, digest in data["actions"].items():
             if not path.startswith(local_dir + "/"):
                 continue
-            pinned = subprocess.run(["git", "-C", str(ROOT), "show", f"{commit}:{path}"],
-                                    capture_output=True, check=False)
-            assert pinned.returncode == 0, (
-                f"git show {commit}:{path} failed: {pinned.stderr.decode().strip()} "
-                f"(if the commit is missing, run `git fetch origin {commit}`)")
-            assert hashlib.sha256(pinned.stdout).hexdigest() == digest, (
+            pinned = git_show(commit, path)
+            assert hashlib.sha256(pinned).hexdigest() == digest, (
                 f"{path} differs from the pinned {commit}; re-pin the workflow")
     assert set(data["scenarios"]) == {f"S{i}" for i in range(1, 6)}
     covered = set()
