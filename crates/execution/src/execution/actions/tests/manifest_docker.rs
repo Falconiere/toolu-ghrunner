@@ -64,10 +64,11 @@ fn preserves_docker_stage_and_argument_contract() -> Result<(), Box<dyn std::err
     env!("CARGO_MANIFEST_DIR"),
     "/../../.github/actions/docker-action-probe"
   ));
-  let bounds = crate::execution::step_timeout::StepBounds {
-    deadline: None,
-    cancel: tokio_util::sync::CancellationToken::new(),
-  };
+  let bounds = crate::execution::step_timeout::StepBounds::nested(
+    None,
+    None,
+    tokio_util::sync::CancellationToken::new(),
+  );
   let (events, _receiver) = tokio::sync::mpsc::channel(1);
   let inputs = std::collections::HashMap::from([("marker".to_owned(), action.name.clone())]);
   let stage = DockerStage {
