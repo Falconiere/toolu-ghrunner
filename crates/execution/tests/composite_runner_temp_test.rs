@@ -137,7 +137,7 @@ fn probe_manifest(probe_dir: &Path) -> ActionDefinition {
         env: HashMap::from([("MY_TEMP".to_owned(), RUNNER_TEMP_EXPR.to_owned())]),
         condition: None,
         uses: None,
-        continue_on_error: false,
+        continue_on_error: None,
         with: HashMap::new(),
       }],
     },

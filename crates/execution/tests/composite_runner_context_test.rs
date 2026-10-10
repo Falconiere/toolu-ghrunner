@@ -179,7 +179,7 @@ async fn tool_cache_interpolates_in_run_body_and_step_env() -> TestResult {
       env: HashMap::from([("MY_TOOL_CACHE".to_owned(), TOOL_CACHE_EXPR.to_owned())]),
       condition: None,
       uses: None,
-      continue_on_error: false,
+      continue_on_error: None,
       with: HashMap::new(),
     }
   })?;
@@ -224,7 +224,7 @@ async fn documented_fields_match_set_runner_context_and_unknown_field_is_empty()
       env: HashMap::new(),
       condition: None,
       uses: None,
-      continue_on_error: false,
+      continue_on_error: None,
       with: HashMap::new(),
     }
   })?;

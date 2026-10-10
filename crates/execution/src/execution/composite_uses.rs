@@ -209,7 +209,7 @@ fn build_nested_step(
     display_name_token: None,
     context_name: step.id.clone(),
     condition: step.condition.clone(),
-    continue_on_error: Some(TemplateToken::boolean(step.continue_on_error)),
+    continue_on_error: step.continue_on_error.clone(),
     timeout_in_minutes: None,
     reference,
     inputs: inputs_token?,
