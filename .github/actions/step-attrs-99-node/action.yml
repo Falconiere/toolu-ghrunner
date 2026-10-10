@@ -1,0 +1,6 @@
+name: step-attrs-99-node
+description: Node pre and main stages that each fit a one-minute step timeout but not together
+runs:
+  using: node20
+  pre: pre.js
+  main: main.js

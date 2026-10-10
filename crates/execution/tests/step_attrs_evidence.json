@@ -1,0 +1,109 @@
+{
+  "issue": 99,
+  "official_runner_commit": "cab9d1c3901e45c7705889c4f88284fdd93f4ae5",
+  "workflow": ".github/workflows/step-attrs-99.yml",
+  "workflow_transformations": "The committed copy adds only a per-job `if:` gate (capture branch or vars.TOOLU_STEP_ATTRS_99_LIVE) to the workflow that ran, so captured token positions and run diagnostics point 1-3 lines above the same step in the committed copy.",
+  "captures": {
+    "crates/execution/tests/step_attrs_99_attrs.json": "0cd6c1336e3a9bf3b9046186d7cc94e1772219fe7db92ca85d809b53b7c3e495",
+    "crates/execution/tests/step_attrs_99_invalid.json": "f4d1f4e179996dfbe9cc17738d66f49335f80bb717a242e78e2ae20bc7787a16"
+  },
+  "capture_transformations": "Acquired toolu-lane job messages from run 37992025403; secret variables and mask values replaced by deterministic version-5 UUID placeholders, and endpoint AccessToken values by `redacted`. Replays select steps by contextName; the composite replay swaps the captured composite_budget step's local path and drops its timeout.",
+  "actions": {
+    ".github/actions/step-attrs-99-composite/action.yml": "b3d8a81b74936ae678c80e4af435db8e6a752c01e9f761b10645e4c246dda02b",
+    ".github/actions/step-attrs-99-composite-coe/action.yml": "be18998cc9186534bc43797dea06309a1530eb73e850678f8e0abb93a3318420",
+    ".github/actions/step-attrs-99-node/action.yml": "179f87958adc5a23f20936ac7e3a74ed9939e565e5bb519cc85ec958d4677fd9",
+    ".github/actions/step-attrs-99-node/main.js": "cd60136960459aa6447209744edde4c515a08179ea0f4d136456c707f67b8d14",
+    ".github/actions/step-attrs-99-node/pre.js": "b25504d6f94a50b190fd8bd7c259d8d6cf6efa02a750ba5e6dfe34135649d8f5"
+  },
+  "pinned_actions": {
+    "Falconiere/toolu-ghrunner/.github/actions/step-attrs-99-node@7ac4fa2e45c8c4725a9ad44db4eb6b9682064260": ".github/actions/step-attrs-99-node"
+  },
+  "scenarios": {
+    "S1": {
+      "ac": ["AC-1", "AC-5"],
+      "expected": "Absent, literal, deferred (steps.*) and matrix attributes deserialize with their wire types; literal and expression continue-on-error give failure/success, literal false/0 and a negative timeout stay unbounded and green.",
+      "tests": [
+        ["crates/shared/tests/template_token_test.rs", "captured_typed_boolean_keeps_type_and_value"],
+        ["crates/shared/tests/template_token_test.rs", "captured_typed_numbers_keep_integer_zero_and_fraction"],
+        ["crates/shared/tests/template_token_test.rs", "captured_expressions_keep_unevaluated_text"],
+        ["crates/execution/tests/step_attrs_replay_test.rs", "captured_literal_deferred_and_matrix_attributes"]
+      ],
+      "live": "attrs-*: steps 'Literal continue-on-error' through 'Check attribute results' succeed on both lanes."
+    },
+    "S2": {
+      "ac": ["AC-2", "AC-5"],
+      "expected": "fromJSON(steps.prior.outputs.minutes) kills a real sleep 600 after one minute with \"The action 'Deferred timeout' has timed out after 1 minutes.\"; outcome failure, conclusion success.",
+      "tests": [
+        ["crates/execution/src/execution/tests/step_attrs.rs", "deferred_expressions_read_step_outputs"],
+        ["crates/execution/tests/step_attrs_replay_test.rs", "captured_deferred_timeout_bounds_a_real_process"],
+        ["crates/toolu-runner/tests/gh_compat_step_attrs.rs", "deferred_continue_on_error_reads_prior_step_output"],
+        ["crates/toolu-runner/tests/gh_compat_prepost.rs", "failing_post_honors_continue_on_error"],
+        ["crates/toolu-runner/tests/gh_compat_prepost.rs", "failing_pre_honors_continue_on_error"]
+      ],
+      "live": "Identical timeout line on both lanes; 'Check deferred timeout' asserts the elapsed window and failure/success."
+    },
+    "S3": {
+      "ac": ["AC-2"],
+      "expected": "Zero/negative disable the bound, 1.9 truncates to one minute, a string timeout logs the two reference error lines and applies no bound, a string continue-on-error logs its two lines and keeps the failure; composite action.yml expressions behave the same.",
+      "tests": [
+        ["crates/execution/src/execution/tests/step_attrs.rs", "zero_negative_and_fractional_timeouts_truncate"],
+        ["crates/execution/src/execution/tests/step_attrs.rs", "string_timeout_matches_reference_diagnostic"],
+        ["crates/execution/src/execution/tests/step_attrs.rs", "string_continue_on_error_matches_reference_diagnostic"],
+        ["crates/execution/src/execution/tests/step_attrs.rs", "out_of_range_timeouts_are_rejected"],
+        ["crates/execution/tests/step_attrs_replay_test.rs", "captured_fractional_timeout_truncates_to_whole_minutes"],
+        ["crates/execution/tests/step_attrs_replay_test.rs", "captured_string_timeout_logs_error_and_applies_no_bound"],
+        ["crates/execution/tests/step_attrs_replay_test.rs", "captured_string_continue_on_error_keeps_the_failure"],
+        ["crates/execution/tests/step_attrs_replay_test.rs", "composite_continue_on_error_expressions"],
+        ["crates/toolu-runner/tests/composite_action_test.rs", "parse_action_manifest_composite_step_continue_on_error_tokens"]
+      ],
+      "live": "Timeout/continue-on-error error lines identical on both lanes (invalid-* fails on both); composite-coe-* succeeds on both with the same two lines, apart from the location prefix noted in differences."
+    },
+    "S4": {
+      "ac": ["AC-3"],
+      "expected": "Job-API names: 'Deferred from-prior', 'Matrix <lane> input ', 'Bad ${{ fromJSON(steps.prior.outputs.bad) }}', 'run', 'Run echo lane <lane>', 'Run echo prior from-prior', 'Pre Node pre and main stages', 'Post Run actions/checkout@v4'; failures warn in Set up job and again at the step; execution unaffected.",
+      "tests": [
+        ["crates/expressions/src/tests/display.rs", "captured_format_unrolls_to_the_reference_name"],
+        ["crates/execution/src/execution/tests/step_display.rs", "job_start_evaluates_message_contexts_and_defers_step_contexts"],
+        ["crates/execution/src/execution/tests/step_display.rs", "main_stage_evaluates_live_contexts_and_keeps_names_on_failure"],
+        ["crates/execution/src/execution/tests/step_display.rs", "evaluated_names_are_masked"],
+        ["crates/execution/tests/step_attrs_replay_test.rs", "captured_display_names_match_the_reference"],
+        ["crates/toolu-runner/tests/gh_compat_prepost.rs", "pre_timeout_reports_the_pre_step"]
+      ],
+      "live": "Every step name and conclusion in the jobs API matches the reference lane (matrix lane substituted)."
+    },
+    "S5": {
+      "ac": ["AC-4"],
+      "expected": "Composite children share one one-minute budget (the second sleep 40 is killed with 'The action has timed out.'); Node pre and main each get the full budget and both finish.",
+      "tests": [
+        ["crates/execution/src/execution/tests/step_timeout.rs", "restarted_bounds_keep_the_enclosing_deadline"],
+        ["crates/execution/src/execution/tests/step_timeout.rs", "innermost_scope_supplies_the_message"],
+        ["crates/execution/tests/step_attrs_replay_test.rs", "captured_composite_children_share_one_budget"],
+        ["crates/toolu-runner/tests/gh_compat_prepost.rs", "pre_and_main_get_separate_timeout_budgets"]
+      ],
+      "live": "'Check composite budget' and 'Check Node stages' succeed on both lanes; the nested timeout line is identical."
+    }
+  },
+  "differences": [
+    "fromJSON parse failures in display-name warnings carry serde_json's message ('JSON error: expected ident at line 1 column 2') instead of Newtonsoft's; the warning prefix, token and position match.",
+    "Composite action.yml attribute errors omit upstream's '<action dir>/action.yml (Line: L, Col: C): ' prefix; the action manifest is parsed without positions.",
+    "Out of scope (step reporting, see #88): the toolu lane numbers the pre step 0, lists the checkout post twice, has no 'Complete job' row, and its exit-code trailer reports 1 without ##[error]."
+  ],
+  "required_live": {
+    "github_com_linux": {
+      "status": "passed",
+      "evidence": "https://github.com/Falconiere/toolu-ghrunner/actions/runs/38007470498",
+      "toolu": "stack head 9a23d5f, debug build, runner toolu-99-verify on Linux x86_64",
+      "reference": "GitHub-hosted ubuntu-24.04, runner 2.337.0 (newer than the source pin)"
+    },
+    "macos": {
+      "status": "unverified",
+      "evidence": null,
+      "reason": "No macOS toolu runner was available; the evaluation is platform-independent, but real process timeouts were only run on Linux."
+    },
+    "ghes": {
+      "status": "unverified",
+      "evidence": null,
+      "reason": "No GHES server or credentials are configured; GHES uses the same job-message tokens."
+    }
+  }
+}
