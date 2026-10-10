@@ -189,3 +189,26 @@ jobs:
         if: always()
         shell: bash
         run: test '${{ steps.string_coe.outcome }}/${{ steps.string_coe.conclusion }}' = failure/failure
+
+  composite-coe:
+    name: composite-coe-${{ matrix.lane }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: toolu-linux
+            runner: [self-hosted, toolu-99]
+          - lane: reference-linux
+            runner: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      # Expression continue-on-error inside a composite action.yml.
+      - name: Composite continue-on-error
+        id: composite
+        continue-on-error: true
+        uses: ./.github/actions/step-attrs-99-composite-coe
+      - name: Check composite continue-on-error
+        shell: bash
+        run: test '${{ steps.composite.outcome }}/${{ steps.composite.conclusion }}' = failure/success
