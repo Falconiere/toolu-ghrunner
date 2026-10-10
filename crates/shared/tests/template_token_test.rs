@@ -31,6 +31,17 @@ fn bare_scalars_carry_no_position_and_round_trip_without_one() -> TestResult {
   assert_eq!((token.file, token.line, token.col), (None, None, None));
   let json = serde_json::to_value(&token)?;
   assert!(json.get("file").is_none() && json.get("line").is_none());
+  let back: TemplateToken = serde_json::from_value(json)?;
+  assert_eq!(
+    (
+      back.token_type,
+      back.bool_val,
+      back.file,
+      back.line,
+      back.col
+    ),
+    (5, Some(true), None, None, None)
+  );
   Ok(())
 }
 
