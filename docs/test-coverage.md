@@ -1095,3 +1095,41 @@ and architecture come from the host, not hosted-runner image metadata.
 - `.github/workflows/step-summary-83.yml`: opt-in GitHub.com live toolu/reference
   Linux/macOS and Linux-container probes. Live evidence pending; GHES explicitly
   unverified/skipped. See [step summaries](step-summaries.md).
+
+## Step attributes and display names (#99)
+
+`continue-on-error`, `timeout-minutes` and the display name are template tokens
+evaluated at execution time, like upstream's `StepsRunner` /
+`ActionRunner.GenerateDisplayName` at `cab9d1c3901e45c7705889c4f88284fdd93f4ae5`.
+The replays use the toolu-lane job messages acquired in run 37992025403
+(`crates/execution/tests/step_attrs_99_*.json`, sanitized to UUIDv5 placeholders)
+with real Bash and Node and the committed `step-attrs-99-*` actions. The
+[workflow](../.github/workflows/step-attrs-99.yml) runs each job on a toolu lane
+and a GitHub-hosted reference lane. Run
+`python3 scripts/test/step_attrs_evidence_check.py --local` to validate the
+mapping and hashes in `crates/execution/tests/step_attrs_evidence.json`. Without
+`--local`, it fails while a required lane is unverified.
+
+| AC / scenario | Exact observation | Tests | Live (run 38007470498) |
+| --- | --- | --- | --- |
+| AC-1, AC-5 / S1 | Absent, literal, `steps.*` and `matrix` attributes keep their wire types. Continue-on-error gives failure/success. Literal `false`/`0` and a negative timeout leave the step unbounded and green. | `template_token_test`, `captured_literal_deferred_and_matrix_attributes` | Both lanes pass every check step. |
+| AC-2, AC-5 / S2 | `fromJSON(steps.prior.outputs.minutes)` kills `sleep 600` after one minute with `The action 'Deferred timeout' has timed out after 1 minutes.` Pre and post stages apply continue-on-error separately. | `captured_deferred_timeout_bounds_a_real_process`, `deferred_continue_on_error_reads_prior_step_output`, `failing_pre_honors_continue_on_error`, `failing_post_honors_continue_on_error` | Identical timeout line on both lanes. |
+| AC-2 / S3 | `1.9` truncates to one minute. A string timeout logs the reference's two error lines and applies no bound. A string continue-on-error logs its two lines and keeps the failure, including in composite `action.yml`. | `step_attrs` unit tests, `captured_fractional_timeout_truncates_to_whole_minutes`, `captured_string_timeout_logs_error_and_applies_no_bound`, `captured_string_continue_on_error_keeps_the_failure`, `composite_continue_on_error_expressions` | Identical lines on both lanes. `invalid-*` fails on both and `composite-coe-*` passes on both. |
+| AC-3 / S4 | Job-start names come from message contexts. Before the condition, unevaluated names are retried with live contexts. A failure warns in "Set up job" and then at the step, and keeps the earlier name (`run` if job start already failed). Pre stages use the job-start name and post stages the final name. | `step_display` unit tests, `display` tests, `captured_display_names_match_the_reference`, `pre_timeout_reports_the_pre_step` | Every jobs-API step name and conclusion matches the reference. Warnings appear at the same places. |
+| AC-4 / S5 | Composite children share one budget: the second `sleep 40` gets `The action has timed out.` Node pre and main each get the full budget. | `captured_composite_children_share_one_budget`, `pre_and_main_get_separate_timeout_budgets`, `step_timeout` unit tests | Check steps pass on both lanes. The nested timeout line is identical. |
+
+Known differences from the reference:
+
+- `fromJSON` parse errors inside display-name warnings carry serde_json's message instead of Newtonsoft's.
+- Composite `action.yml` attribute errors omit the reference's `<action.yml> (Line, Col)` prefix.
+
+Step numbering and the exit-code trailer also differ (pre step reported as step 0, a duplicated post row, no "Complete job" row). Those belong to step reporting (#88), not this issue.
+
+Platform applicability: the GitHub.com Linux lane passed. The toolu lane ran the
+stack-head debug build on Linux x86_64; the reference lane was `ubuntu-24.04`
+runner 2.337.0, which is newer than the source pin. macOS live is **unverified**:
+evaluation is platform-independent, but real-process timeouts ran only on Linux.
+The gate's tests run on macOS CI. GHES is **unverified** because no server is
+configured; it uses the same job-message tokens. Docker pre stages share the
+naming path; the Docker-specific timeout lines were verified with the ignored
+real-Docker tests in `docker::job_container_failures`.

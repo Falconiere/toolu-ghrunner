@@ -493,7 +493,11 @@ to that list requires proving the value is not a real credential.
   `lifecycle`). `oidc/` (OIDC token server + claims). `context` (env,
   secrets, masking), `composite_*` (composite action scaffolding),
   `step_env` / `step_naming` / `step_state` (step
-  helpers), `action_exec` / `action_support` (action invocation
+  helpers), `step_attrs` (execution-time `timeout-minutes` /
+  `continue-on-error` tokens, workflow and composite `action.yml`, with
+  upstream's diagnostics), `step_display` (upstream's two-phase display
+  names: job-start message contexts, then live contexts before the
+  condition; pre stages keep the job-start name), `action_exec` / `action_support` (action invocation
   glue), `cgroup_join` (reserved), `command_parser`, `depth_tracker`,
   `file_commands`, `service_auth` / `service_lifecycle` (back
   OIDC/artifact/cache axum services). E0–E3 wired the live job path:
