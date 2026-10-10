@@ -67,6 +67,8 @@ pub struct ExecutionContext {
   services: Option<Box<ServiceContainers>>,
   /// The job message's `fileTable`, resolving template-token file ids.
   file_table: Vec<serde_json::Value>,
+  /// Display names of top-level steps, keyed by step id.
+  step_displays: HashMap<String, super::step_display::StepDisplay>,
 }
 
 impl ExecutionContext {
@@ -119,6 +121,7 @@ impl ExecutionContext {
       container: None,
       services: None,
       file_table: Vec::new(),
+      step_displays: HashMap::new(),
     }
   }
 
@@ -198,6 +201,20 @@ impl ExecutionContext {
   /// The job message's `fileTable`, for rendering positioned diagnostics.
   pub fn file_table(&self) -> &[serde_json::Value] {
     &self.file_table
+  }
+
+  /// The recorded display names of a top-level step.
+  pub(crate) fn step_display(&self, step_id: &str) -> Option<&super::step_display::StepDisplay> {
+    self.step_displays.get(step_id)
+  }
+
+  /// Record a top-level step's display names.
+  pub(crate) fn set_step_display(
+    &mut self,
+    step_id: &str,
+    display: super::step_display::StepDisplay,
+  ) {
+    self.step_displays.insert(step_id.to_owned(), display);
   }
 }
 

@@ -64,6 +64,7 @@ pub mod service_lifecycle;
 pub mod shadow;
 /// Execution-time evaluation of `timeout-minutes` / `continue-on-error`.
 pub mod step_attrs;
+mod step_display;
 mod step_env;
 mod step_naming;
 /// Finalizes `CI` and `GITHUB_ACTIONS` at each step process boundary.

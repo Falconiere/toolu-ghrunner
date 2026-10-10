@@ -10,3 +10,4 @@ those stay in `steps_runner.rs`.
 | File | Primary item | Purpose |
 | --- | --- | --- |
 | `script_support.rs` | script-step support functions | Builds script-step environment and file-command paths, dispatches stdout workflow commands, and merges step outputs. |
+| `step_reports.rs` | `StepName` / `start_step` | Step lifecycle events (start with any display-name warning, skip, pre-handler failure, completion). |

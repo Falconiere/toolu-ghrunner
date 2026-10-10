@@ -16,17 +16,21 @@ use super::post_drain::{drain_post_steps, post_number};
 use super::shadow::ShadowObserver;
 use super::shadow::record::StepKey;
 use super::step_attrs::{resolve_continue_on_error, resolve_timeout};
+use super::step_display::{display_for, name_at_job_start, name_at_main};
 use super::step_env::{env_token_to_string, resolve_step_env};
-use super::step_naming::derive_step_name;
 use super::step_timeout::{StepBounds, step_timeout_message, with_timeout_message};
 use expressions::evaluator::EvalContext;
 
 #[path = "step_errors.rs"]
 mod step_errors;
-use step_errors::{report_step_error, report_step_failure};
+use step_errors::report_step_error;
 mod script_support;
 use script_support::{
   build_step_env_and_file_commands, merge_step_outputs, run_and_dispatch_script,
+};
+mod step_reports;
+use step_reports::{
+  StepName, complete_step, record_condition_failure, report_skipped_step, start_step,
 };
 
 // Re-export post-step types so callers don't need to change imports.
@@ -114,6 +118,7 @@ pub async fn run_steps(
     // since top-level steps are not nested in one another).
     depth: DepthTracker::new(),
   };
+  name_at_job_start(steps, ctx, events).await;
   run_main_and_posts(steps, ctx, events, &cancel, &job, &mut job_state).await
 }
 
@@ -214,26 +219,33 @@ async fn run_single_step(
   job: &JobCtx<'_>,
   job_state: &mut JobState,
 ) -> Result<Conclusion, RunnerError> {
+  let mut name = StepName {
+    name: display_for(step, ctx).current,
+    warning: None,
+  };
   if job.cancellation.is_forced() {
-    report_skipped_step(step, step_number, ctx, events).await;
+    report_skipped_step(step, &name, step_number, ctx, events).await;
     return Ok(Conclusion::Skipped);
   }
   // Upstream env/condition evaluation failures happen before RunStepAsync and
-  // cannot be recovered by continue-on-error.
-  let should_run = match super::step_env::resolve_step_env(step, ctx, &ctx.eval_context())
-    .and_then(|_| evaluate_condition(step, ctx))
-  {
+  // cannot be recovered by continue-on-error. Its last display-name attempt
+  // sits between the two.
+  let env = super::step_env::resolve_step_env(step, ctx, &ctx.eval_context());
+  if env.is_ok() {
+    (name.name, name.warning) = name_at_main(step, ctx);
+  }
+  let should_run = match env.and_then(|_| evaluate_condition(step, ctx)) {
     Ok(should_run) => should_run,
     Err(error) => {
-      record_condition_failure(step, step_number, ctx, events, &error).await;
+      record_condition_failure(step, &name, step_number, ctx, events, &error).await;
       return Ok(Conclusion::Failure);
     },
   };
   if !should_run {
-    report_skipped_step(step, step_number, ctx, events).await;
+    report_skipped_step(step, &name, step_number, ctx, events).await;
     return Ok(Conclusion::Success);
   }
-  start_step(step, step_number, events).await;
+  start_step(step, &name, step_number, events).await;
 
   let watch = job.cancellation.watch_step(
     ctx.eval_context(),
@@ -241,7 +253,7 @@ async fn run_single_step(
   );
   let timeout = resolve_timeout(&step.id, step.timeout_in_minutes.as_ref(), ctx, events).await;
   let bounds = StepBounds::nested(job.cancellation.deadline(), timeout, watch.cancel.clone());
-  let message = step_timeout_message(&derive_step_name(step), timeout);
+  let message = step_timeout_message(&name.name, timeout);
   let execution = Box::pin(execute_step(step, ctx, events, job, job_state, &bounds));
   let (outcome, outputs) = match with_timeout_message(message, execution).await {
     Ok(result) => result,
@@ -253,74 +265,6 @@ async fn run_single_step(
   let conclusion = record_step_result(step, outcome, ctx, events).await;
   complete_step(step, conclusion, outputs, events).await;
   Ok(conclusion)
-}
-
-async fn complete_step(
-  step: &ActionStep,
-  conclusion: Conclusion,
-  outputs: HashMap<String, String>,
-  events: &mpsc::Sender<RunnerEvent>,
-) {
-  let _ = events
-    .send(RunnerEvent::StepCompleted {
-      step_id: step.id.clone(),
-      conclusion,
-      outputs,
-    })
-    .await;
-}
-
-/// Report failure before handler execution, where continue-on-error cannot apply.
-async fn record_condition_failure(
-  step: &ActionStep,
-  step_number: u32,
-  ctx: &mut ExecutionContext,
-  events: &mpsc::Sender<RunnerEvent>,
-  error: &RunnerError,
-) {
-  start_step(step, step_number, events).await;
-  if let Some(name) = step.expression_name() {
-    ctx.set_step_outcome(name, Conclusion::Failure);
-    ctx.set_step_conclusion(name, Conclusion::Failure);
-  }
-  ctx.record_step_failure();
-  report_step_failure(events, &step.id, error).await;
-}
-
-async fn start_step(step: &ActionStep, step_number: u32, events: &mpsc::Sender<RunnerEvent>) {
-  let _ = events
-    .send(RunnerEvent::StepStarted {
-      step_id: step.id.clone(),
-      step_name: derive_step_name(step),
-      step_number,
-    })
-    .await;
-}
-
-async fn report_skipped_step(
-  step: &ActionStep,
-  step_number: u32,
-  ctx: &mut ExecutionContext,
-  events: &mpsc::Sender<RunnerEvent>,
-) {
-  if let Some(name) = step.expression_name() {
-    ctx.set_step_outcome(name, Conclusion::Skipped);
-    ctx.set_step_conclusion(name, Conclusion::Skipped);
-  }
-  let _ = events
-    .send(RunnerEvent::StepStarted {
-      step_id: step.id.clone(),
-      step_name: derive_step_name(step),
-      step_number,
-    })
-    .await;
-  let _ = events
-    .send(RunnerEvent::StepSkipped {
-      step_id: step.id.clone(),
-      reason: "condition evaluated to false".to_owned(),
-    })
-    .await;
-  complete_step(step, Conclusion::Skipped, HashMap::new(), events).await;
 }
 
 /// Record a step's real `outcome` and return its `continue-on-error`-adjusted
