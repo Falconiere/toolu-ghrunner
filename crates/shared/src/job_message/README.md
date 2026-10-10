@@ -21,6 +21,7 @@ acknowledging this message over HTTP lives in `wire::net::messages`.
 | `resource.rs` | `JobResources`, `JobEndpoint`, `JobAuthorization`, `VariableValue`, `MaskHint`, `WorkspaceOptions` | Job resource types: variables, log-mask hints, endpoints, authorization data, and workspace options. |
 | `step.rs` | `ActionStep`, `ActionStepDefinitionReference` | A single job step and the reference to its action/script definition. |
 | `template_token.rs` | `TemplateToken` | Template token type (`type`-discriminated literal/sequence/mapping/expression/bool/number/null) used inside steps and inputs. |
+| `template_token_de.rs` | `Deserialize` impl for `TemplateToken` | Custom visitor handling GitHub sending a template token as either a typed object or a bare string/bool/number/null. |
 
 When you add a file here, add its row above so the index stays current. No
 `mod.rs` barrel — declare submodules from the parent file (`src/foo.rs` declares

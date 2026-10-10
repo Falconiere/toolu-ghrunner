@@ -21,6 +21,7 @@ mod request;
 mod resource;
 mod step;
 mod template_token;
+mod template_token_de;
 
 pub use context_data::{DictEntry, PipelineContextData};
 pub use request::{AgentJobRequestMessage, TaskOrchestrationPlanReference};
