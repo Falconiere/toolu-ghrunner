@@ -362,11 +362,13 @@ fn combine_result(
   }
 }
 
+/// Upstream's timeout error for the enclosing step, then the cleanup it causes.
 async fn send_timeout(events: &mpsc::Sender<RunnerEvent>, step_id: &str) {
+  crate::execution::handlers::script::emit_timeout(events, step_id).await;
   if events
     .send(RunnerEvent::Log {
       step_id: step_id.to_owned(),
-      line: "##[error]Docker action timed out; removing its container.".to_owned(),
+      line: "Removing the Docker action container.".to_owned(),
       stream: LogStream::Stderr,
     })
     .await

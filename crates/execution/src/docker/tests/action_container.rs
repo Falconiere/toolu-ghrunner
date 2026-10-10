@@ -509,11 +509,25 @@ async fn timeout_returns_failure_and_removes_owned_container() -> TestResult {
     )
     .await?;
   assert_eq!(conclusion, Conclusion::Failure);
-  assert!(matches!(
-    event_rx.recv().await,
-    Some(RunnerEvent::Log { line, stream: LogStream::Stderr, .. })
-      if line.contains("timed out")
-  ));
+  drop(events);
+  let mut lines = Vec::new();
+  while let Some(event) = event_rx.recv().await {
+    if let RunnerEvent::Log {
+      line,
+      stream: LogStream::Stderr,
+      ..
+    } = event
+    {
+      lines.push(line);
+    }
+  }
+  assert_eq!(
+    lines,
+    [
+      "##[error]The action has timed out.",
+      "Removing the Docker action container.",
+    ]
+  );
   assert_eq!(owned_containers(&step_id).await?, 0);
   Ok(())
 }
