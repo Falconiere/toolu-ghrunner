@@ -122,7 +122,7 @@ fn replay(msg: AgentJobRequestMessage) -> TestResult<Replay> {
           RunnerEvent::StepStarted {
             step_id, step_name, ..
           } => {
-            let name = names.get(&step_id).cloned().unwrap_or(step_id);
+            let name = name_of(&step_id);
             replay.started.insert(name, step_name);
           },
           RunnerEvent::JobCompleted { conclusion, .. } => replay.job = Some(conclusion),
