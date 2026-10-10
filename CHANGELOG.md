@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-10
+
+### Added
+- *(listener)* populate Set up job diagnostics (#147)
+- upload masked step summaries to Results Service (#144)
+- *(shared)* accept bare and typed template-token forms (#99, 1/9) (#149)
+- *(execution)* evaluate step timeout and continue-on-error tokens (#99, 2/9) (#150)
+- *(execution)* carry the job message fileTable on ExecutionContext (#99, 3/10) (#151)
+- *(execution)* evaluate deferred timeout-minutes and continue-on-error (#99, 4/10) (#152)
+- *(execution)* separate pre/main timeout budgets and pre continue-on-error (#99, 6/10) (#154)
+- *(execution)* report step timeouts with upstream's messages (#99, 7/N) (#155)
+- *(execution)* upstream timeout messages for pre stages and Docker paths (#99, 8/N) (#156)
+- *(expressions)* upstream step display-name helpers (#99, 9/N) (#157)
+- *(execution)* evaluate step display names in two phases (#99, 10/N) (#158)
+- *(execution)* name pre and post stages after step display names (#99, 11/N) (#159)
+- *(execution)* evaluate composite continue-on-error expressions (#99, 12/N) (#160)
+
+### Documentation
+- *(99)* record step attribute and display-name evidence (#99, 13/13) (#161)
+
 ## [0.10.0] - 2026-09-27
 
 ### Added
