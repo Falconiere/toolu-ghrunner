@@ -52,6 +52,7 @@ not part of it. Workflow YAML parsing/matrix/orchestration lives in the
 | `service_endpoints.rs` | `extract_service_urls` / `forward_env` | Extracts real GitHub service URLs + runtime token from the job message and builds the `ACTIONS_*` env vars for forwarder mode. |
 | `service_lifecycle.rs` | `ServiceHandle` | Generic start/shutdown lifecycle for a local axum HTTP service, plus shared 401/500 JSON responses and `Content-Range` parsing. |
 | `shadow.rs` | (mod decl) | Declares the `shadow` sub-module; see its own README. |
+| `step_attrs.rs` | `evaluate_timeout` / `evaluate_continue_on_error` | Evaluates step `timeout-minutes` / `continue-on-error` tokens at execution time with upstream's number/boolean-only validation and positioned `The template is not valid.` diagnostics. |
 | `step_env.rs` | `resolve_step_env` | Renders scalar template tokens for step env/script/working-directory/action inputs and applies file-command results back onto the context. |
 | `step_process_env.rs` | `apply` | Unconditionally sets `GITHUB_ACTIONS=true` at child launch; fills `CI` only when absent after child, container, and runner precedence. |
 | `step_naming.rs` | `PostStep` / `PostStepQueue` | The registered-post-step record, its LIFO queue, and `derive_step_name` for step display names. |
