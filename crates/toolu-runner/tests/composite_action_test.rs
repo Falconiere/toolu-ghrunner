@@ -131,14 +131,62 @@ runs:
   let def = manifest::parse_action_manifest(yaml).expect("parse");
   let steps = def.runs.steps;
   assert_eq!(steps.len(), 2);
-  assert!(
-    steps.first().expect("first step present").continue_on_error,
-    "continue-on-error: true must parse to continue_on_error == true"
+  let tokens: Vec<_> = steps
+    .into_iter()
+    .map(|step| shape(step.continue_on_error))
+    .collect();
+  assert_eq!(
+    tokens,
+    [Some((5, None, None, Some(true))), None],
+    "continue-on-error: true must parse to a boolean token; absent stays absent"
   );
-  assert!(
-    !steps.get(1).expect("second step present").continue_on_error,
-    "a step with no continue-on-error: must default to false"
+}
+
+type TokenShape = (i32, Option<String>, Option<String>, Option<bool>);
+
+/// A token's type, expression, literal and boolean, for comparison.
+fn shape(token: Option<shared::TemplateToken>) -> Option<TokenShape> {
+  token.map(|t| (t.token_type, t.expr, t.lit, t.bool_val))
+}
+
+/// Composite `continue-on-error` keeps upstream's token shape: one whole
+/// `${{ }}` is an expression, any other string stays literal (rejected when
+/// evaluated), and a mapping fails the manifest.
+#[test]
+fn parse_action_manifest_composite_step_continue_on_error_tokens() {
+  let yaml = r"
+name: 'Continue On Error'
+runs:
+  using: 'composite'
+  steps:
+    - continue-on-error: ${{ inputs.tolerate == 'true' }}
+      run: exit 1
+    - continue-on-error: 'true'
+      run: exit 1
+    - continue-on-error: ${{ inputs.a }}-${{ inputs.b }}
+      run: exit 1
+";
+  let def = manifest::parse_action_manifest(yaml).expect("parse");
+  let tokens: Vec<_> = def
+    .runs
+    .steps
+    .into_iter()
+    .map(|step| shape(step.continue_on_error))
+    .collect();
+  let expression = |expr: &str| Some((3, Some(expr.to_owned()), None, None));
+  let literal = |lit: &str| Some((0, None, Some(lit.to_owned()), None));
+  assert_eq!(
+    tokens,
+    [
+      expression("inputs.tolerate == 'true'"),
+      literal("true"),
+      literal("${{ inputs.a }}-${{ inputs.b }}"),
+    ]
   );
+
+  let mapping =
+    "runs:\n  using: composite\n  steps:\n    - continue-on-error: {a: 1}\n      run: exit 1\n";
+  assert!(manifest::parse_action_manifest(mapping).is_err());
 }
 
 #[test]

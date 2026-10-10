@@ -1,0 +1,31 @@
+name: step-attrs-99-composite-coe
+description: Expression continue-on-error on composite steps
+inputs:
+  tolerate:
+    description: Whether inner failures are tolerated
+    default: 'true'
+runs:
+  using: composite
+  steps:
+    - id: from_inputs
+      continue-on-error: ${{ inputs.tolerate == 'true' }}
+      shell: bash
+      run: exit 3
+    - id: prior
+      shell: bash
+      run: echo flag=true >> "$GITHUB_OUTPUT"
+    - id: from_steps
+      continue-on-error: ${{ fromJSON(steps.prior.outputs.flag) }}
+      shell: bash
+      run: exit 4
+    - id: string_input
+      continue-on-error: ${{ inputs.tolerate }}
+      shell: bash
+      run: exit 5
+    - if: always()
+      shell: bash
+      run: |
+        test '${{ steps.from_inputs.outcome }}/${{ steps.from_inputs.conclusion }}' = failure/success
+        test '${{ steps.from_steps.outcome }}/${{ steps.from_steps.conclusion }}' = failure/success
+        test '${{ steps.string_input.outcome }}/${{ steps.string_input.conclusion }}' = failure/failure
+        echo composite-coe-checks-passed

@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use serde::Deserialize;
-use shared::RunnerError;
+use shared::{RunnerError, TemplateToken};
 
 /// Parsed action definition from action.yml/action.yaml.
 #[derive(Debug, Clone)]
@@ -59,8 +59,8 @@ pub struct CompositeStep {
   pub condition: Option<String>,
   /// Nested action reference, for a `uses:` step.
   pub uses: Option<String>,
-  /// Whether a failure in this step should not fail the job.
-  pub continue_on_error: bool,
+  /// `continue-on-error`, evaluated after a failure like a workflow step's.
+  pub continue_on_error: Option<TemplateToken>,
   /// `with:` inputs passed to a nested `uses:` step.
   pub with: HashMap<String, String>,
 }
@@ -127,7 +127,7 @@ pub fn parse_action_manifest(yaml_content: &str) -> Result<ActionDefinition, Run
 
   let inputs = parse_inputs(raw.inputs);
   let outputs = parse_outputs(raw.outputs);
-  let steps = parse_composite_steps(runs_raw.steps.as_ref());
+  let steps = parse_composite_steps(runs_raw.steps.as_ref())?;
 
   Ok(ActionDefinition {
     name: raw.name.unwrap_or_default(),
@@ -265,28 +265,63 @@ struct RawCompositeStep {
   condition: Option<String>,
   uses: Option<String>,
   #[serde(default, rename = "continue-on-error")]
-  continue_on_error: bool,
+  continue_on_error: serde_yaml::Value,
   #[serde(default)]
   with: HashMap<String, String>,
 }
 
-fn parse_composite_steps(raw: Option<&Vec<RawCompositeStep>>) -> Vec<CompositeStep> {
+fn parse_composite_steps(
+  raw: Option<&Vec<RawCompositeStep>>,
+) -> Result<Vec<CompositeStep>, RunnerError> {
   let Some(steps) = raw else {
-    return Vec::new();
+    return Ok(Vec::new());
   };
   steps
     .iter()
-    .map(|s| CompositeStep {
-      id: s.id.clone(),
-      name: s.name.clone(),
-      run: s.run.clone(),
-      shell: s.shell.clone(),
-      working_directory: s.working_directory.clone(),
-      env: s.env.clone(),
-      condition: s.condition.clone(),
-      uses: s.uses.clone(),
-      continue_on_error: s.continue_on_error,
-      with: s.with.clone(),
+    .map(|s| {
+      Ok(CompositeStep {
+        id: s.id.clone(),
+        name: s.name.clone(),
+        run: s.run.clone(),
+        shell: s.shell.clone(),
+        working_directory: s.working_directory.clone(),
+        env: s.env.clone(),
+        condition: s.condition.clone(),
+        uses: s.uses.clone(),
+        continue_on_error: continue_on_error_token(&s.continue_on_error)?,
+        with: s.with.clone(),
+      })
     })
     .collect()
+}
+
+/// The token upstream's manifest reader produces for `continue-on-error`:
+/// a string that is one whole `${{ }}` is an expression; any other scalar
+/// stays literal and is validated when evaluated.
+fn continue_on_error_token(
+  value: &serde_yaml::Value,
+) -> Result<Option<TemplateToken>, RunnerError> {
+  use serde_yaml::Value;
+  Ok(match value {
+    Value::Null => None,
+    Value::Bool(flag) => Some(TemplateToken::boolean(*flag)),
+    Value::Number(number) => number.as_f64().map(TemplateToken::number),
+    Value::String(text) => Some(
+      whole_expression(text)
+        .map_or_else(|| TemplateToken::literal(text), TemplateToken::expression),
+    ),
+    Value::Sequence(_) | Value::Mapping(_) | Value::Tagged(_) => {
+      return Err(RunnerError::ActionManifest(
+        "continue-on-error must be a boolean or an expression".to_owned(),
+      ));
+    },
+  })
+}
+
+/// The expression inside `text` when it is exactly one `${{ }}`.
+fn whole_expression(text: &str) -> Option<&str> {
+  let inner = text.trim().strip_prefix("${{")?;
+  let end = expressions::template::expression_end(inner)?;
+  let (expression, rest) = (inner.get(..end)?, inner.get(end + 2..)?);
+  rest.is_empty().then(|| expression.trim())
 }

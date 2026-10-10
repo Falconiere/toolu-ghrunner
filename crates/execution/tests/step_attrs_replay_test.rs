@@ -20,10 +20,18 @@ use tokio_util::sync::CancellationToken;
 type TestResult<T = ()> = Result<T, Box<dyn Error>>;
 const ATTRS: &str = include_str!("step_attrs_99_attrs.json");
 const INVALID: &str = include_str!("step_attrs_99_invalid.json");
-/// The local action the captured `composite_budget` step uses, seeded into
-/// the replay workspace in place of the job's checkout.
-const COMPOSITE_ACTION: &str =
-  include_str!("../../../.github/actions/step-attrs-99-composite/action.yml");
+/// The local actions the replays use, seeded into the replay workspace in
+/// place of the job's checkout.
+const LOCAL_ACTIONS: [(&str, &str); 2] = [
+  (
+    "step-attrs-99-composite",
+    include_str!("../../../.github/actions/step-attrs-99-composite/action.yml"),
+  ),
+  (
+    "step-attrs-99-composite-coe",
+    include_str!("../../../.github/actions/step-attrs-99-composite-coe/action.yml"),
+  ),
+];
 
 /// Per-`contextName` results of one replayed job.
 struct Replay {
@@ -85,12 +93,15 @@ fn replay(msg: AgentJobRequestMessage) -> TestResult<Replay> {
     workspace_gc_hours: 0,
     ..RunnerConfig::default()
   };
-  let action_dir = config
-    .workspace_root
-    .join(&msg.job_id)
-    .join(".github/actions/step-attrs-99-composite");
-  std::fs::create_dir_all(&action_dir)?;
-  std::fs::write(action_dir.join("action.yml"), COMPOSITE_ACTION)?;
+  for (name, manifest) in LOCAL_ACTIONS {
+    let action_dir = config
+      .workspace_root
+      .join(&msg.job_id)
+      .join(".github/actions")
+      .join(name);
+    std::fs::create_dir_all(&action_dir)?;
+    std::fs::write(action_dir.join("action.yml"), manifest)?;
+  }
   let runner = Runner::new(config, Arc::new(Mutex::new(SecretMasker::new())));
   let cancel = CancellationToken::new();
   let runtime = tokio::runtime::Builder::new_current_thread()
@@ -266,6 +277,49 @@ fn captured_composite_children_share_one_budget() -> TestResult {
     &replay,
     "composite_budget",
     "##[error]The action has timed out.",
+  );
+  Ok(())
+}
+
+/// Composite `continue-on-error` expressions evaluate against the action's
+/// own `inputs` and inner `steps` after a failure. A string input logs the
+/// same two error lines as a workflow step and keeps the failure, which
+/// fails the composite; the captured step's own `continue-on-error: true`
+/// keeps the job green. The inner `always()` check asserts every pair.
+#[test]
+fn composite_continue_on_error_expressions() -> TestResult {
+  let mut msg = select(ATTRS, &["composite_budget"])?;
+  let step = msg
+    .steps
+    .first_mut()
+    .ok_or("captured composite step missing")?;
+  step.reference.path = Some("./.github/actions/step-attrs-99-composite-coe".to_owned());
+  step.timeout_in_minutes = None;
+  let replay = replay(msg)?;
+  assert_eq!(
+    replay.conclusion("composite_budget"),
+    Some(Conclusion::Success)
+  );
+  assert_eq!(replay.job, Some(Conclusion::Success));
+  let logs = replay.logs("composite_budget");
+  assert!(
+    logs
+      .iter()
+      .any(|line| line == "composite-coe-checks-passed"),
+    "{logs:?}"
+  );
+  let errors: Vec<&str> = logs
+    .iter()
+    .filter(|line| line.starts_with("##[error]The "))
+    .map(String::as_str)
+    .collect();
+  assert_eq!(
+    errors,
+    [
+      "##[error]The step failed and an error occurred when attempting to determine whether to continue on error.",
+      "##[error]The template is not valid. Unexpected value 'true'",
+    ],
+    "{logs:?}"
   );
   Ok(())
 }

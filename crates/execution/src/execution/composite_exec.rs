@@ -93,7 +93,15 @@ async fn run_composite_steps(run: &mut CompositeRun<'_>, depth: &mut DepthTracke
     let Some(outcome) = run_one_step(run, step, idx, depth).await else {
       continue;
     };
-    let conclusion = if outcome == Conclusion::Failure && step.continue_on_error {
+    let conclusion = if outcome == Conclusion::Failure
+      && super::step_attrs::resolve_continue_on_error(
+        run.params.parent_step_id,
+        step.continue_on_error.as_ref(),
+        run.ctx,
+        run.params.events,
+      )
+      .await
+    {
       Conclusion::Success
     } else {
       outcome
