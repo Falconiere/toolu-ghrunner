@@ -91,6 +91,7 @@ impl<'de> Deserialize<'de> for TemplateToken {
       }
     }
 
+    // Requires a self-describing format such as JSON; bincode cannot drive it.
     deserializer.deserialize_any(Visitor)
   }
 }
