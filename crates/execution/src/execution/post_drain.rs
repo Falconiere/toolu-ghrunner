@@ -140,12 +140,28 @@ async fn run_scoped_post(
   }
 
   let watch = job.cancellation.watch_step(ctx.eval_context(), condition);
-  let bounds = StepBounds::nested(
-    job.cancellation.deadline(),
-    post.step.timeout_in_minutes,
-    watch.cancel.clone(),
-  );
-  let conclusion = execute_post(post, report, ctx, events, job, &bounds).await?;
+  let timeout = super::step_attrs::resolve_timeout(
+    report.id,
+    post.step.timeout_in_minutes.as_ref(),
+    ctx,
+    events,
+  )
+  .await;
+  let bounds = StepBounds::nested(job.cancellation.deadline(), timeout, watch.cancel.clone());
+  let mut conclusion = match execute_post(post, report, ctx, events, job, &bounds).await {
+    Ok(conclusion) => conclusion,
+    Err(RunnerError::Cancelled) => return Err(RunnerError::Cancelled),
+    Err(error) => {
+      log_post_error(events, report.id, &error).await;
+      Conclusion::Failure
+    },
+  };
+  let token = post.step.continue_on_error.as_ref();
+  if conclusion == Conclusion::Failure
+    && super::step_attrs::resolve_continue_on_error(report.id, token, ctx, events).await
+  {
+    conclusion = Conclusion::Success;
+  }
   complete_post(events, report.id, conclusion).await;
   Ok(conclusion)
 }
@@ -170,6 +186,11 @@ async fn execute_post(
 }
 
 async fn report_post_error(events: &mpsc::Sender<RunnerEvent>, step_id: &str, error: &RunnerError) {
+  log_post_error(events, step_id, error).await;
+  complete_post(events, step_id, Conclusion::Failure).await;
+}
+
+async fn log_post_error(events: &mpsc::Sender<RunnerEvent>, step_id: &str, error: &RunnerError) {
   if events
     .send(RunnerEvent::Log {
       step_id: step_id.to_owned(),
@@ -184,7 +205,6 @@ async fn report_post_error(events: &mpsc::Sender<RunnerEvent>, step_id: &str, er
       "event receiver closed while reporting post-step error"
     );
   }
-  complete_post(events, step_id, Conclusion::Failure).await;
 }
 
 async fn skip_post(events: &mpsc::Sender<RunnerEvent>, step_id: &str, reason: String) {

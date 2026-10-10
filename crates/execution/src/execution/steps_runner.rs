@@ -15,6 +15,7 @@ use super::job_spec::JobSpec;
 use super::post_drain::{drain_post_steps, post_number};
 use super::shadow::ShadowObserver;
 use super::shadow::record::StepKey;
+use super::step_attrs::{resolve_continue_on_error, resolve_timeout};
 use super::step_env::{env_token_to_string, resolve_step_env};
 use super::step_naming::derive_step_name;
 use super::step_timeout::StepBounds;
@@ -238,11 +239,8 @@ async fn run_single_step(
     ctx.eval_context(),
     step.condition.as_deref().unwrap_or("success()"),
   );
-  let bounds = StepBounds::nested(
-    job.cancellation.deadline(),
-    step.timeout_in_minutes,
-    watch.cancel.clone(),
-  );
+  let timeout = resolve_timeout(&step.id, step.timeout_in_minutes.as_ref(), ctx, events).await;
+  let bounds = StepBounds::nested(job.cancellation.deadline(), timeout, watch.cancel.clone());
   let (outcome, outputs) = match execute_step(step, ctx, events, job, job_state, &bounds).await {
     Ok(result) => result,
     Err(err) => {
@@ -250,7 +248,7 @@ async fn run_single_step(
       (Conclusion::Failure, HashMap::new())
     },
   };
-  let conclusion = record_step_result(step, outcome, ctx);
+  let conclusion = record_step_result(step, outcome, ctx, events).await;
   complete_step(step, conclusion, outputs, events).await;
   Ok(conclusion)
 }
@@ -323,15 +321,30 @@ async fn report_skipped_step(
   complete_step(step, Conclusion::Skipped, HashMap::new(), events).await;
 }
 
-fn record_step_result(
+/// Record a step's real `outcome` and return its `continue-on-error`-adjusted
+/// conclusion: a failed step with `continue-on-error: true` concludes as
+/// `Success` so the job proceeds, while its `outcome` stays `Failure`. Like
+/// upstream, the token is only evaluated once the step has failed.
+async fn record_step_result(
   step: &ActionStep,
   outcome: Conclusion,
   ctx: &mut ExecutionContext,
+  events: &mpsc::Sender<RunnerEvent>,
 ) -> Conclusion {
   if let Some(name) = step.expression_name() {
     ctx.set_step_outcome(name, outcome);
   }
-  let conclusion = apply_continue_on_error(step, outcome, ctx);
+  let token = step.continue_on_error.as_ref();
+  let conclusion = if outcome == Conclusion::Failure
+    && resolve_continue_on_error(&step.id, token, ctx, events).await
+  {
+    Conclusion::Success
+  } else {
+    outcome
+  };
+  if conclusion == Conclusion::Failure {
+    ctx.record_step_failure();
+  }
   if let Some(name) = step.expression_name() {
     ctx.set_step_conclusion(name, conclusion);
   }
@@ -605,25 +618,6 @@ fn resolve_working_dir(
   } else {
     Ok(workspace.join(candidate))
   }
-}
-
-/// Split a step's real result from its effective conclusion. The outcome is
-/// recorded by the caller; this returns the `continue-on-error`-adjusted
-/// conclusion: a failed step with `continue-on-error: true` concludes as
-/// `Success` so the job proceeds, while its `outcome` stays `Failure`.
-fn apply_continue_on_error(
-  step: &ActionStep,
-  outcome: Conclusion,
-  ctx: &mut ExecutionContext,
-) -> Conclusion {
-  let continue_on_error = step.continue_on_error.unwrap_or(false);
-  if outcome == Conclusion::Failure && continue_on_error {
-    return Conclusion::Success;
-  }
-  if outcome == Conclusion::Failure {
-    ctx.record_step_failure();
-  }
-  outcome
 }
 
 async fn emit_log(events: &mpsc::Sender<RunnerEvent>, step_id: &str, line: &str) {

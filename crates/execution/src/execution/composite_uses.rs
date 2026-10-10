@@ -86,11 +86,7 @@ pub async fn run_nested_uses_step(
   // enters the depth tracker again, so the chain is bounded by `MAX_COMPOSITE_DEPTH`.
   // The enclosing step's deadline bounds nested subprocesses; the job cancel
   // token is shared so a top-level cancel kills the nested action too.
-  let bounds = StepBounds::nested(
-    params.deadline,
-    synthetic.timeout_in_minutes,
-    params.cancel.clone(),
-  );
+  let bounds = StepBounds::nested(params.deadline, None, params.cancel.clone());
   let run = super::action_exec::ActionRun {
     events: params.events,
     workspace: params.workspace,
@@ -213,7 +209,7 @@ fn build_nested_step(
     display_name_token: None,
     context_name: step.id.clone(),
     condition: step.condition.clone(),
-    continue_on_error: Some(step.continue_on_error),
+    continue_on_error: Some(TemplateToken::boolean(step.continue_on_error)),
     timeout_in_minutes: None,
     reference,
     inputs: inputs_token?,
