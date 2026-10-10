@@ -1,0 +1,17 @@
+name: step-attrs-99-composite
+description: Two slow inner processes that together exceed a one-minute step timeout
+runs:
+  using: composite
+  steps:
+    - name: First slow inner process
+      shell: bash
+      run: |
+        echo "first-start=$(date +%s)"
+        sleep 40
+        echo "first-end=$(date +%s)"
+    - name: Second slow inner process
+      shell: bash
+      run: |
+        echo "second-start=$(date +%s)"
+        sleep 40
+        echo "second-end=$(date +%s)" | tee step-attrs-99-composite-finished.marker

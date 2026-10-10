@@ -17,6 +17,39 @@ use tokio_util::sync::CancellationToken;
 #[path = "tests/step_timeout.rs"]
 mod tests;
 
+/// Upstream's wording for a timed-out composite child, also the fallback when
+/// no enclosing step scoped a message.
+pub(crate) const NESTED_TIMEOUT_MESSAGE: &str = "The action has timed out.";
+
+tokio::task_local! {
+  static TIMEOUT_MESSAGE: String;
+}
+
+/// Upstream's top-level wording, naming the step and its whole-minute budget.
+/// Without an own `timeout-minutes` only an enclosing deadline can fire.
+pub(crate) fn step_timeout_message(display_name: &str, timeout: Option<Duration>) -> String {
+  timeout.map_or_else(
+    || NESTED_TIMEOUT_MESSAGE.to_owned(),
+    |budget| {
+      let minutes = budget.as_secs() / 60;
+      format!("The action '{display_name}' has timed out after {minutes} minutes.")
+    },
+  )
+}
+
+/// Run `work` so a child it kills on a deadline reports `message`. The scope
+/// stays on this task: every handler awaits its child inline.
+pub(crate) async fn with_timeout_message<F: Future>(message: String, work: F) -> F::Output {
+  TIMEOUT_MESSAGE.scope(message, work).await
+}
+
+/// The message scoped by the innermost enclosing step.
+pub(crate) fn timeout_message() -> String {
+  TIMEOUT_MESSAGE
+    .try_with(Clone::clone)
+    .unwrap_or_else(|_| NESTED_TIMEOUT_MESSAGE.to_owned())
+}
+
 /// Per-step run bounds: one absolute timeout deadline (if any) and the
 /// in-flight job `CancellationToken`. Computed once per step and threaded to
 /// every child-spawning handler so later children use only remaining time.

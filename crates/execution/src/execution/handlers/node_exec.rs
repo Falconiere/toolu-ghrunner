@@ -93,7 +93,7 @@ pub async fn execute_node_action(
     WaitOutcome::Exited(status) if status.success() => Conclusion::Success,
     WaitOutcome::Exited(_) => Conclusion::Failure,
     WaitOutcome::TimedOut => {
-      emit_timeout(events, params.step_id, params.timeout).await;
+      emit_timeout(events, params.step_id).await;
       Conclusion::Failure
     },
     WaitOutcome::Cancelled => Conclusion::Cancelled,

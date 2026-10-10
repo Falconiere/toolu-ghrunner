@@ -18,7 +18,7 @@ use super::shadow::record::StepKey;
 use super::step_attrs::{resolve_continue_on_error, resolve_timeout};
 use super::step_env::{env_token_to_string, resolve_step_env};
 use super::step_naming::derive_step_name;
-use super::step_timeout::StepBounds;
+use super::step_timeout::{StepBounds, step_timeout_message, with_timeout_message};
 use expressions::evaluator::EvalContext;
 
 #[path = "step_errors.rs"]
@@ -241,7 +241,9 @@ async fn run_single_step(
   );
   let timeout = resolve_timeout(&step.id, step.timeout_in_minutes.as_ref(), ctx, events).await;
   let bounds = StepBounds::nested(job.cancellation.deadline(), timeout, watch.cancel.clone());
-  let (outcome, outputs) = match execute_step(step, ctx, events, job, job_state, &bounds).await {
+  let message = step_timeout_message(&derive_step_name(step), timeout);
+  let execution = Box::pin(execute_step(step, ctx, events, job, job_state, &bounds));
+  let (outcome, outputs) = match with_timeout_message(message, execution).await {
     Ok(result) => result,
     Err(err) => {
       report_step_error(events, &step.id, &err).await;
