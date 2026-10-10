@@ -76,6 +76,7 @@ async fn timeout_after_exec_starts_keeps_container_for_post_then_cleans_up()
   let cancel = CancellationToken::new();
   let container = start_container(&config, &workspace, ContainerSpec::image_only(IMAGE)).await?;
   let result = AssertUnwindSafe(async {
+    // The message names the step's declared limit; the 750 ms bound below keeps the test fast.
     let message = step_timeout_message("Container step", Some(Duration::from_secs(60)));
     let (conclusion, lines) = with_timeout_message(
       message,
