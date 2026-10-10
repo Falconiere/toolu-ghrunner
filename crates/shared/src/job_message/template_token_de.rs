@@ -5,6 +5,10 @@
 //! `bool` / `num` / `expr` / `seq` / `map`, usually with `file`/`line`/`col`)
 //! otherwise. A typed object without `type` is a string token. Source
 //! positions are retained for diagnostics.
+//!
+//! The shape is only known from the value itself, so this needs a
+//! self-describing format (`deserialize_any`). The job message is always
+//! JSON; non-self-describing formats such as bincode are unsupported.
 
 use serde::Deserialize;
 use serde::de;
