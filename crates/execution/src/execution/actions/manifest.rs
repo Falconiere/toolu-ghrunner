@@ -305,7 +305,10 @@ fn continue_on_error_token(
   Ok(match value {
     Value::Null => None,
     Value::Bool(flag) => Some(TemplateToken::boolean(*flag)),
-    Value::Number(number) => number.as_f64().map(TemplateToken::number),
+    Value::Number(number) => Some(number.as_f64().map_or_else(
+      || TemplateToken::literal(&number.to_string()),
+      TemplateToken::number,
+    )),
     Value::String(text) => Some(
       whole_expression(text)
         .map_or_else(|| TemplateToken::literal(text), TemplateToken::expression),
