@@ -27,13 +27,13 @@ def is_placeholder(value):
 
 
 def credential_shaped(text):
-    words = text.replace('"', " ").split()
+    words = "".join(c if c.isalnum() or c in "_-." else " " for c in text).split()
     return any((word.startswith(TOKEN_PREFIXES) and len(word) >= 24)
                or (word.startswith("eyJ") and word.count(".") == 2) for word in words)
 
 
 def is_test_fn(source, test):
-    """`fn test(` preceded by `#[test]` / `#[tokio::test…]`, past other attributes and docs."""
+    """True when the fn is annotated as a test, skipping other attributes and doc lines."""
     lines = [line.strip() for line in source.splitlines()]
     for index, line in enumerate(lines):
         if not line.startswith((f"fn {test}(", f"async fn {test}(")):
