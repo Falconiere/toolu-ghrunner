@@ -90,7 +90,8 @@ pub(crate) fn name_at_main(
   let mut display = display_for(step, ctx);
   let mut warning = None;
   if !display.evaluated {
-    match generate(step, ctx, &ctx.eval_context(), true) {
+    let live = ctx.eval_context();
+    match generate(step, ctx, &live, true) {
       Generated::Evaluated(name) => {
         display.current = or_fallback(mask(ctx, &name));
         display.evaluated = true;
