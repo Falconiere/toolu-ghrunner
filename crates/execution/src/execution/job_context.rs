@@ -10,9 +10,10 @@ use std::sync::{Arc, Mutex};
 /// Build the per-job `ExecutionContext` from the job message + runner config.
 ///
 /// Populates `runner.*` (host/config), `github.*` and `vars.*` (from the
-/// message `contextData`), `secrets.*` (from `variables` where `is_secret`),
-/// the message `fileTable`, and the secret masker. `pub` so hermetic tests can drive the real
-/// context-assembly path. Best-effort on `runner.*` dir creation: a failure
+/// message `contextData`), `secrets.*` (from `variables` where `is_secret`)
+/// and the secret masker, and keeps the message `fileTable` (not a context)
+/// to name the file in template-error positions. `pub` so hermetic tests can
+/// drive the real context-assembly path. Best-effort on `runner.*` dir creation: a failure
 /// is logged and the run continues without the env mirror.
 pub fn build_context(
   msg: &AgentJobRequestMessage,
