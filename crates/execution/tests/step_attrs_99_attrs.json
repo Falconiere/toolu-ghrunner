@@ -1121,7 +1121,7 @@
       {
         "authorization": {
           "parameters": {
-            "AccessToken": "a6306a24-eb69-57d9-a3b2-6cec1d299a12"
+            "AccessToken": "redacted"
           },
           "scheme": "OAuth"
         },

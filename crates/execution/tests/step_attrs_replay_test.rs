@@ -1,9 +1,9 @@
 //! Replay the issue-99 step-attribute captures (`step-attrs-99.yml`, run
 //! 37992025403, toolu lane) through the real engine and real `bash`.
 //!
-//! The fixtures are the acquired job messages with secret variables, mask
-//! values and endpoint authorization replaced by deterministic
-//! version-5 UUID placeholders. The only replay adaptation is selecting a subset of the
+//! The fixtures are the acquired job messages with secret variables and mask
+//! values replaced by deterministic version-5 UUID placeholders and the
+//! endpoint `AccessToken` by `redacted`. The only replay adaptation is selecting a subset of the
 //! captured steps by `contextName`, so each scenario's assertion steps run
 //! next to the steps they check. Expected diagnostics are the reference
 //! runner's log lines from the same run.
@@ -66,6 +66,12 @@ fn replay(msg: AgentJobRequestMessage) -> TestResult<Replay> {
     .iter()
     .filter_map(|step| Some((step.id.clone(), step.context_name.clone()?)))
     .collect();
+  let name_of = |step_id: &str| {
+    names
+      .get(step_id)
+      .cloned()
+      .unwrap_or_else(|| step_id.to_owned())
+  };
   let dir = tempfile::tempdir()?;
   let config = RunnerConfig {
     data_dir: dir.path().join("data"),
@@ -89,7 +95,7 @@ fn replay(msg: AgentJobRequestMessage) -> TestResult<Replay> {
       while let Some(event) = events.recv().await {
         match event {
           RunnerEvent::Log { step_id, line, .. } => {
-            let name = names.get(&step_id).cloned().unwrap_or(step_id);
+            let name = name_of(&step_id);
             replay.logs.entry(name).or_default().push(line);
           },
           RunnerEvent::StepCompleted {
@@ -97,7 +103,7 @@ fn replay(msg: AgentJobRequestMessage) -> TestResult<Replay> {
             conclusion,
             ..
           } => {
-            let name = names.get(&step_id).cloned().unwrap_or(step_id);
+            let name = name_of(&step_id);
             replay.conclusions.insert(name, conclusion);
           },
           RunnerEvent::JobCompleted { conclusion, .. } => replay.job = Some(conclusion),
