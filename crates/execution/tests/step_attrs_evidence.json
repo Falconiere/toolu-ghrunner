@@ -4,16 +4,19 @@
   "workflow": ".github/workflows/step-attrs-99.yml",
   "workflow_transformations": "The committed copy adds only a per-job `if:` gate (capture branch or vars.TOOLU_STEP_ATTRS_99_LIVE) to the workflow that ran, so captured token positions and run diagnostics point 1-3 lines above the same step in the committed copy.",
   "captures": {
-    "crates/execution/tests/step_attrs_99_attrs.json": "434da05e9e8ef71e94bed841afe5781e09e58f9b5948695dcb5872b287e4d1dc",
-    "crates/execution/tests/step_attrs_99_invalid.json": "803d4a97ea1bdb0c60a1a516fd0481bd7f0afe5918dc0ff8aa7aaa063ab4e4bc"
+    "crates/execution/tests/step_attrs_99_attrs.json": "0cd6c1336e3a9bf3b9046186d7cc94e1772219fe7db92ca85d809b53b7c3e495",
+    "crates/execution/tests/step_attrs_99_invalid.json": "f4d1f4e179996dfbe9cc17738d66f49335f80bb717a242e78e2ae20bc7787a16"
   },
-  "capture_transformations": "Acquired toolu-lane job messages from run 37992025403; secret variables, mask values and endpoint authorization replaced by deterministic version-5 UUID placeholders. Replays select steps by contextName; the composite replay swaps the captured composite_budget step's local path and drops its timeout.",
+  "capture_transformations": "Acquired toolu-lane job messages from run 37992025403; secret variables and mask values replaced by deterministic version-5 UUID placeholders, and endpoint AccessToken values by `redacted`. Replays select steps by contextName; the composite replay swaps the captured composite_budget step's local path and drops its timeout.",
   "actions": {
     ".github/actions/step-attrs-99-composite/action.yml": "b3d8a81b74936ae678c80e4af435db8e6a752c01e9f761b10645e4c246dda02b",
     ".github/actions/step-attrs-99-composite-coe/action.yml": "be18998cc9186534bc43797dea06309a1530eb73e850678f8e0abb93a3318420",
     ".github/actions/step-attrs-99-node/action.yml": "179f87958adc5a23f20936ac7e3a74ed9939e565e5bb519cc85ec958d4677fd9",
     ".github/actions/step-attrs-99-node/main.js": "cd60136960459aa6447209744edde4c515a08179ea0f4d136456c707f67b8d14",
     ".github/actions/step-attrs-99-node/pre.js": "b25504d6f94a50b190fd8bd7c259d8d6cf6efa02a750ba5e6dfe34135649d8f5"
+  },
+  "pinned_actions": {
+    "Falconiere/toolu-ghrunner/.github/actions/step-attrs-99-node@7ac4fa2e45c8c4725a9ad44db4eb6b9682064260": ".github/actions/step-attrs-99-node"
   },
   "scenarios": {
     "S1": {
