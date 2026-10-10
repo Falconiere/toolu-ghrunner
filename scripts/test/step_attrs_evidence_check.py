@@ -17,6 +17,8 @@ def sha256(path):
 
 
 def is_placeholder(value):
+    if not isinstance(value, str):
+        return False
     try:
         parsed = uuid.UUID(value)
     except ValueError:
