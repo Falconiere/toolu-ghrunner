@@ -116,7 +116,7 @@ jobs:
           test "$elapsed" -ge 55 && test "$elapsed" -le 95
       - name: String timeout is an error without a bound
         id: string_timeout
-        timeout-minutes: ${{ steps.prior.outputs.minutes }}
+        timeout-minutes: ${{ steps.prior.outputs.minutes }} # step outputs are always strings
         shell: bash
         run: sleep 70
       - name: Check string timeout
@@ -144,9 +144,7 @@ jobs:
       - name: Node pre and main stages
         id: node_stages
         timeout-minutes: 1
-        # Remote ref on purpose: runners skip a local action's pre stage. The
-        # evidence check fails unless this commit's files match the local copy.
-        uses: Falconiere/toolu-ghrunner/.github/actions/step-attrs-99-node@7ac4fa2e45c8c4725a9ad44db4eb6b9682064260
+        uses: Falconiere/toolu-ghrunner/.github/actions/step-attrs-99-node@7ac4fa2e45c8c4725a9ad44db4eb6b9682064260 # remote: local actions skip pre; an immutable SHA the evidence check matches to the local copy
       - name: Check Node stages
         shell: bash
         run: |
