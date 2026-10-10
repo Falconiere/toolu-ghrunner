@@ -268,3 +268,27 @@ fn replay(source: &str, matrix: bool) -> TestResult {
   }
   Ok(())
 }
+
+#[test]
+fn acquired_file_table_resolves_reusable_workflow_positions() -> TestResult {
+  use execution::execution::step_attrs::StepAttrError;
+
+  let msg: AgentJobRequestMessage = serde_json::from_str(CALL)?;
+  let dir = tempfile::tempdir()?;
+  let ctx = build_context(
+    &msg,
+    &config(dir.path()),
+    Arc::new(Mutex::new(SecretMasker::new())),
+  );
+  let err = StepAttrError::Template {
+    file: Some(2),
+    line: Some(12),
+    col: Some(9),
+    message: "Unexpected value 'x'".to_owned(),
+  };
+  assert_eq!(
+    err.render(ctx.file_table()),
+    "The template is not valid. Falconiere/toolu-ghrunner/.github/workflows/expression-context-call.yml@e607a7aae26e113aa3d8ecf1c26c62e0d74192eb (Line: 12, Col: 9): Unexpected value 'x'"
+  );
+  Ok(())
+}

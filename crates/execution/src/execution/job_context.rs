@@ -10,9 +10,10 @@ use std::sync::{Arc, Mutex};
 /// Build the per-job `ExecutionContext` from the job message + runner config.
 ///
 /// Populates `runner.*` (host/config), `github.*` and `vars.*` (from the
-/// message `contextData`), `secrets.*` (from `variables` where `is_secret`),
-/// and the secret masker. `pub` so hermetic tests can drive the real
-/// context-assembly path. Best-effort on `runner.*` dir creation: a failure
+/// message `contextData`), `secrets.*` (from `variables` where `is_secret`)
+/// and the secret masker, and keeps the message `fileTable` (not a context)
+/// to name the file in template-error positions. `pub` so hermetic tests can
+/// drive the real context-assembly path. Best-effort on `runner.*` dir creation: a failure
 /// is logged and the run continues without the env mirror.
 pub fn build_context(
   msg: &AgentJobRequestMessage,
@@ -25,6 +26,7 @@ pub fn build_context(
   // In Serve mode this carries the per-job cgroup so spawned steps are moved
   // into it for CPU/memory enforcement; `None` in listener/JIT mode.
   ctx.set_cgroup_path(config.cgroup_path.clone());
+  ctx.set_file_table(msg.file_table.clone());
 
   // Variables (secrets.* / env) plus the runtime service token → masker.
   register_message_variables(&mut ctx, msg);
