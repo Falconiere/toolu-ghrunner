@@ -9,6 +9,7 @@ use super::action_exec::ActionOutcome;
 use super::action_support::emit_log;
 use super::context::ExecutionContext;
 use super::docker_stage::{DockerStage, run_docker_stage};
+use super::step_display::display_for;
 use super::step_naming::PostStep;
 use super::step_timeout::{step_timeout_message, with_timeout_message};
 use crate::docker::action_container::ActionContainer;
@@ -142,7 +143,7 @@ async fn run_pre(
   image: &str,
 ) -> Result<Conclusion, RunnerError> {
   let id = uuid::Uuid::new_v4().to_string();
-  let pre_name = format!("Pre {}", s.manifest.name);
+  let pre_name = format!("Pre {}", display_for(s.step, ctx).initial);
   let message = step_timeout_message(&pre_name, s.bounds.own_timeout);
   emit_pre_event(
     s.events,

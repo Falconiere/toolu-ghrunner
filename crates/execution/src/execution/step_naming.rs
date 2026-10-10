@@ -69,38 +69,3 @@ impl PostStepQueue {
     result
   }
 }
-
-/// Produce a display name for a step, matching actions/runner conventions.
-pub(super) fn derive_step_name(step: &ActionStep) -> String {
-  if let Some(name) = step
-    .display_name_token
-    .as_ref()
-    .and_then(|t| t.to_string_value())
-  {
-    return name.to_owned();
-  }
-
-  if step.is_run_step() {
-    let script = step.script_body().unwrap_or_default();
-    let first_line = script.lines().next().unwrap_or("").trim();
-    if !first_line.is_empty() {
-      let truncated: String = first_line.chars().take(60).collect();
-      return format!("Run {truncated}");
-    }
-    return "Run".to_owned();
-  }
-
-  if let Some(action) = step
-    .reference
-    .name
-    .as_deref()
-    .or(step.reference.image.as_deref())
-  {
-    if let Some(ref_tag) = step.reference.git_ref.as_deref() {
-      return format!("Run {action}@{ref_tag}");
-    }
-    return format!("Run {action}");
-  }
-
-  step.id.clone()
-}

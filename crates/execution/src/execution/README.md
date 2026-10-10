@@ -56,7 +56,7 @@ not part of it. Workflow YAML parsing/matrix/orchestration lives in the
 | `step_display.rs` | `name_at_job_start` / `name_at_main` | Upstream's two-phase step display names: job-start message contexts, then live contexts before the condition; prettified pending names, warnings on failure, masked results. |
 | `step_env.rs` | `resolve_step_env` | Renders scalar template tokens for step env/script/working-directory/action inputs and applies file-command results back onto the context. |
 | `step_process_env.rs` | `apply` | Unconditionally sets `GITHUB_ACTIONS=true` at child launch; fills `CI` only when absent after child, container, and runner precedence. |
-| `step_naming.rs` | `PostStep` / `PostStepQueue` | The registered-post-step record, its LIFO queue, and `derive_step_name` for step display names. |
+| `step_naming.rs` | `PostStep` / `PostStepQueue` | The registered-post-step record and its LIFO queue. |
 | `step_state.rs` | `StepState` | Per-step recorded outputs/state/outcome/conclusion, and `build_steps_context` for the `steps.*` expression context. |
 | `step_summary.rs` | `collect` | Bounded, masked summary snapshots; refuses non-regular summary files; non-fatal error annotations. |
 | `step_timeout.rs` | `wait_bounded` | Bounded child-process wait shared by the script and node handlers: races `timeout-minutes` against the job `CancellationToken`. |
