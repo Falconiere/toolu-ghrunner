@@ -297,7 +297,7 @@ async fn fetch_tarball_reader(
   let flag = Arc::clone(&interrupted);
   let stream = response.bytes_stream().map(move |chunk| {
     chunk.map_err(|_error| {
-      flag.store(true, Ordering::SeqCst);
+      flag.store(true, Ordering::Release);
       std::io::Error::other("archive stream interrupted")
     })
   });
@@ -436,7 +436,9 @@ pub async fn download_and_extract_action(
     cleanup_staging(&staging);
     // A tar read error after the body stream failed is a download failure,
     // not corrupt content (upstream `FailedToDownloadActionException`).
-    if interrupted.load(Ordering::SeqCst) {
+    // Pairs with the stream's `Release` store; the blocking task's join
+    // already orders it, so a full `SeqCst` barrier buys nothing.
+    if interrupted.load(Ordering::Acquire) {
       let message = if let RunnerError::ActionFetch(fetch) = err {
         fetch.message
       } else {

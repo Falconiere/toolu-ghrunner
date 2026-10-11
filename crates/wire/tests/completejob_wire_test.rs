@@ -44,13 +44,15 @@ fn request(steps: Vec<StepResult>) -> CompleteJobRequest {
   }
 }
 
-fn keys(value: &Value) -> Vec<String> {
-  let mut keys: Vec<String> = value
+/// The sorted top-level keys of a serialized object; a non-object is an error
+/// so a serialization regression fails the test instead of comparing `[]`.
+fn keys(value: &Value) -> Result<Vec<String>, String> {
+  let object = value
     .as_object()
-    .map(|object| object.keys().cloned().collect())
-    .unwrap_or_default();
+    .ok_or_else(|| format!("expected a JSON object, got {value}"))?;
+  let mut keys: Vec<String> = object.keys().cloned().collect();
   keys.sort();
-  keys
+  Ok(keys)
 }
 
 #[test]
@@ -92,7 +94,7 @@ fn absent_step_metadata_is_omitted_but_annotations_are_always_sent() -> TestResu
   };
   let value = serde_json::to_value(bare)?;
   assert_eq!(
-    keys(&value),
+    keys(&value)?,
     [
       "annotations",
       "conclusion",
@@ -160,7 +162,7 @@ fn step_annotations_keep_the_run_service_annotation_shape() -> TestResult {
 fn completion_carries_environment_url_billing_owner_and_category() -> TestResult {
   let value = serde_json::to_value(request(vec![step(Vec::new())]))?;
   assert_eq!(
-    keys(&value),
+    keys(&value)?,
     [
       "annotations",
       "billingOwnerId",

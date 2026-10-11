@@ -78,12 +78,14 @@ pub struct StepResult {
   #[serde(skip_serializing_if = "Option::is_none")]
   pub completed_at: Option<String>,
   /// Blob URL from `GetStepLogsSignedBlobURL` — links uploaded logs to this step.
+  /// Sent as `completed_log_url`, upstream's `DataMember` name.
   #[serde(skip_serializing_if = "Option::is_none")]
   pub completed_log_url: Option<String>,
   /// Number of lines in the step's uploaded log.
   #[serde(skip_serializing_if = "Option::is_none")]
   pub completed_log_lines: Option<u64>,
-  /// Annotations attributed to this step; upstream always sends the list.
+  /// Annotations attributed to this step. Always serialized, as `[]` when
+  /// empty (no `skip_serializing_if`): upstream always sends the list.
   pub annotations: Vec<Annotation>,
 }
 
