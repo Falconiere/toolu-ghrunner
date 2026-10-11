@@ -1,6 +1,6 @@
 # CompleteJob / StepResult payload parity (#88) — Design
 
-**Date:** 2026-10-10   **Status:** Approved (rev 5)   **Author:** Claude (epic #67 worker)   **Topic:** `environmentUrl`, `billingOwnerId`, `infrastructureFailureCategory` and upstream-shaped `StepResult`s on `completejob`
+**Date:** 2026-10-10   **Status:** Approved   **Revision:** 5   **Author:** Claude (epic #67 worker)   **Topic:** `environmentUrl`, `billingOwnerId`, `infrastructureFailureCategory` and upstream-shaped `StepResult`s on `completejob`
 
 Brainstorm: `docs/toolu/brainstorms/2026-10-10-completejob-stepresult-parity.md`.
 Upstream pin: actions/runner `cab9d1c3901e45c7705889c4f88284fdd93f4ae5` (2.337.0).
