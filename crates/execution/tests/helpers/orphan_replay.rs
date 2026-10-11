@@ -182,7 +182,7 @@ impl Replay {
     let started = Instant::now();
     let mut receiver = runner.execute_job_with_shutdown(job, cancel.clone(), shutdown.clone());
     let mut events = Vec::new();
-    tokio::time::timeout(Duration::from_secs(240), async {
+    tokio::time::timeout(JOB_BOUND, async {
       while let Some(event) = receiver.recv().await {
         on_event(&event, &cancel, &shutdown);
         events.push(event);

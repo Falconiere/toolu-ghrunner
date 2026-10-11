@@ -11,6 +11,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use shared::{LogStream, RunnerEvent, VariableValue};
@@ -32,8 +33,9 @@ pub(crate) const ORPHAN_CLEANUP_TIMEOUT: Duration = Duration::from_secs(15);
 /// design can reclaim that blocking thread, so the trade-off is deliberate:
 /// finalization stops waiting after the backstop and the job completes, while
 /// the parked thread waits for the kernel. The thread holds no event sender
-/// (kills are returned, then logged by `sweep`), so it cannot keep the job's
-/// event channel — and with it job completion — open.
+/// (kills go into a shared list that `sweep` logs on every outcome, timeout
+/// included), so it cannot keep the job's event channel — and with it job
+/// completion — open.
 const JOIN_BACKSTOP: Duration = Duration::from_secs(2);
 /// Interval between exit polls of killed processes.
 const EXIT_POLL: Duration = Duration::from_millis(100);
@@ -136,25 +138,29 @@ pub(crate) async fn sweep(
   let own_pid = std::process::id();
   let deadline = Instant::now() + ORPHAN_CLEANUP_TIMEOUT;
   // The blocking closure owns no event sender: a thread parked in the kernel
-  // must never hold the job's event channel open past the backstop.
+  // must never hold the job's event channel open past the backstop. Kills are
+  // shared through a plain list instead, so every arm below can log them.
+  let kills = Arc::new(Mutex::new(Vec::new()));
+  let sink = Arc::clone(&kills);
   let task = tokio::task::spawn_blocking(move || {
-    let mut kills = Vec::new();
-    let report = sweep_blocking(&id, own_pid, deadline, |pid, name| {
-      kills.push((pid, name.to_owned()));
-    });
-    (report, kills)
+    sweep_blocking(&id, own_pid, deadline, |pid, name| {
+      sink
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .push((pid, name.to_owned()));
+    })
   });
-  let report = match tokio::time::timeout(ORPHAN_CLEANUP_TIMEOUT + JOIN_BACKSTOP, task).await {
-    Ok(Ok((report, kills))) => {
-      for (pid, name) in kills {
-        job_log(
-          events,
-          format!("Terminate orphan process: pid ({pid}) ({name})"),
-        )
-        .await;
-      }
-      report
-    },
+  let joined = tokio::time::timeout(ORPHAN_CLEANUP_TIMEOUT + JOIN_BACKSTOP, task).await;
+  let killed = std::mem::take(&mut *kills.lock().unwrap_or_else(PoisonError::into_inner));
+  for (pid, name) in killed {
+    job_log(
+      events,
+      format!("Terminate orphan process: pid ({pid}) ({name})"),
+    )
+    .await;
+  }
+  let report = match joined {
+    Ok(Ok(report)) => report,
     Ok(Err(error)) => {
       tracing::warn!(%error, "orphan cleanup task failed");
       CleanupReport::default()

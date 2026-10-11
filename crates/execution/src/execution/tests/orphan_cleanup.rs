@@ -8,7 +8,7 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use shared::VariableValue;
-use sysinfo::{Pid, ProcessStatus, ProcessesToUpdate, System};
+use sysinfo::{Pid, ProcessesToUpdate, System};
 
 use super::{
   CleanupReport, KillOutcome, ProcessTracking, carries_id, kill_verified, process_clean_enabled,
@@ -58,6 +58,22 @@ fn wait_until(pid: u32, ready: impl Fn(&sysinfo::Process) -> bool) -> TestResult
     std::thread::sleep(Duration::from_millis(50));
   }
   Err(format!("pid {pid} never reached the expected state").into())
+}
+
+/// Poll real `ps -o stat=` until `pid` is a zombie (`Z…`). Portable on purpose:
+/// macOS sysinfo drops a zombie from refreshes (its `KERN_PROCARGS2` read
+/// fails) instead of reporting `ProcessStatus::Zombie`.
+fn wait_for_zombie(pid: u32) -> TestResult {
+  for _ in 0..100 {
+    let output = Command::new("ps")
+      .args(["-o", "stat=", "-p", &pid.to_string()])
+      .output()?;
+    if String::from_utf8(output.stdout)?.trim().starts_with('Z') {
+      return Ok(());
+    }
+    std::thread::sleep(Duration::from_millis(50));
+  }
+  Err(format!("pid {pid} never became a zombie").into())
 }
 
 fn far_deadline() -> Instant {
@@ -168,7 +184,7 @@ fn unreaped_zombie_carrying_id_is_skipped() -> TestResult {
   let id = fresh_id();
   let mut child = spawn_tagged(&id, "sh", &["-c", "exit 0"])?;
   let pid = child.id();
-  wait_until(pid, |process| process.status() == ProcessStatus::Zombie)?;
+  wait_for_zombie(pid)?;
   let mut killed = Vec::new();
   let report = sweep_blocking(&id, std::process::id(), far_deadline(), |pid, _| {
     killed.push(pid);
