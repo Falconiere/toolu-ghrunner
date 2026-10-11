@@ -4,10 +4,9 @@ name: orphan-cleanup-89
 # orphan kinds behind as crates/execution/tests/orphan_cleanup_test.rs. The
 # runner's "Complete job" log (gh run view --log) must list
 # "Terminate orphan process: pid (N) (...)" for every ORPHAN89|tagged pid and
-# none for the ORPHAN89|opted-out pid. The push trigger exists because a
-# dispatch-only workflow cannot run before it reaches the default branch (same
-# as step-process-ci-72.yml); the toolu lane runs on a registered self-hosted
-# toolu runner when dispatched with run_toolu.
+# none for the ORPHAN89|opted-out pid (recorded for the official runner in
+# docs/test-coverage.md, run 38101935911). Dispatch-only: the toolu lane runs
+# on a registered self-hosted toolu runner when dispatched with run_toolu.
 
 on:
   workflow_dispatch:
@@ -16,9 +15,6 @@ on:
         description: Run the toolu self-hosted lane when a matching runner is registered
         type: boolean
         default: false
-  push:
-    branches:
-      - feat/89-clean-up-orphan-processes-after
 
 permissions:
   contents: read

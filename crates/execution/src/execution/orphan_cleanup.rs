@@ -26,6 +26,12 @@ const PROCESS_CLEAN_VARIABLE: &str = "process.clean";
 /// Shared deadline for every scan, kill and exit poll of one sweep.
 pub(crate) const ORPHAN_CLEANUP_TIMEOUT: Duration = Duration::from_secs(15);
 /// Liveness backstop for a blocking scan stuck inside one `/proc` read.
+///
+/// The cooperative `deadline` stops the sweep at its next check; this bound
+/// only matters when a single syscall never returns (a D-state target). No
+/// design can reclaim that blocking thread, so the trade-off is deliberate: the
+/// job still finishes (bounded) while the parked thread waits for the kernel,
+/// instead of finalization awaiting it forever (unbounded hang).
 const JOIN_BACKSTOP: Duration = Duration::from_secs(2);
 /// Interval between exit polls of killed processes.
 const EXIT_POLL: Duration = Duration::from_millis(100);
@@ -268,7 +274,8 @@ fn wait_for_exit(
         .extend(pending.iter().map(|candidate| candidate.pid));
       break;
     }
-    std::thread::sleep(EXIT_POLL);
+    // Never sleep past the deadline: the last poll lands on it, not after it.
+    std::thread::sleep(EXIT_POLL.min(deadline.saturating_duration_since(Instant::now())));
   }
   let survivors = std::mem::take(&mut report.survivors);
   for pid in survivors {
