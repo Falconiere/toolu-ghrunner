@@ -4,6 +4,7 @@
 //! empty body). The 401/500 replies are controlled failures proving that
 //! other errors stop the retry with their own classification.
 
+use std::num::NonZeroU32;
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
@@ -90,25 +91,30 @@ async fn attempt(
   .await
 }
 
-fn fast(max_attempts: u32) -> SessionConflictPolicy {
+fn fast(max_attempts: NonZeroU32) -> SessionConflictPolicy {
   SessionConflictPolicy {
     interval: Duration::from_millis(10),
     max_attempts,
   }
 }
 
+/// Upstream's eight attempts.
+fn eight() -> NonZeroU32 {
+  SessionConflictPolicy::default().max_attempts
+}
+
 #[test]
 fn default_policy_is_upstreams_thirty_seconds_by_eight_attempts() {
   let policy = SessionConflictPolicy::default();
   assert_eq!(policy.interval, Duration::from_secs(30));
-  assert_eq!(policy.max_attempts, 8);
+  assert_eq!(policy.max_attempts.get(), 8);
 }
 
 /// 91-S1: one captured conflict, then the broker frees the registration.
 #[tokio::test]
 async fn conflict_then_success_creates_the_session() -> TestResult<()> {
   let server = broker(captured_conflict()?, 1, session_created()).await;
-  let session = attempt(&server, &CancellationToken::new(), fast(8))
+  let session = attempt(&server, &CancellationToken::new(), fast(eight()))
     .await?
     .ok_or("not cancelled, so a session is expected")?;
   assert_eq!(session.session_id, "11111111-2222-3333-4444-555555555555");
@@ -120,7 +126,7 @@ async fn conflict_then_success_creates_the_session() -> TestResult<()> {
 #[tokio::test]
 async fn persistent_conflict_stops_after_max_attempts() -> TestResult<()> {
   let server = broker(captured_conflict()?, 1, captured_conflict()?).await;
-  let err = attempt(&server, &CancellationToken::new(), fast(8))
+  let err = attempt(&server, &CancellationToken::new(), fast(eight()))
     .await
     .err()
     .ok_or("a persistent conflict must fail")?;
@@ -134,7 +140,7 @@ async fn persistent_conflict_stops_after_max_attempts() -> TestResult<()> {
 async fn unrelated_failure_after_a_conflict_keeps_its_classification() -> TestResult<()> {
   for status in [401, 500] {
     let server = broker(captured_conflict()?, 1, ResponseTemplate::new(status)).await;
-    let err = attempt(&server, &CancellationToken::new(), fast(8))
+    let err = attempt(&server, &CancellationToken::new(), fast(eight()))
       .await
       .err()
       .ok_or("the follow-up failure must surface")?;

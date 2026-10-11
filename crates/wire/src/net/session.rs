@@ -28,8 +28,13 @@ pub async fn create_session(
 
   let status = response.status();
   if !status.is_success() {
-    let body = response.text().await.unwrap_or_default();
-    tracing::debug!(status = %status, body_len = body.len(), "create session failed");
+    // The body only feeds this diagnostic; a failed read is reported, not fatal.
+    match response.text().await {
+      Ok(body) => tracing::debug!(status = %status, body_len = body.len(), "create session failed"),
+      Err(e) => {
+        tracing::warn!(status = %status, error = %e, "create session failed; reading its body failed");
+      },
+    }
     // GitHub's broker answers 409 (empty body) while another session is live
     // for this registration — upstream's `TaskAgentSessionConflictException`.
     if status == reqwest::StatusCode::CONFLICT {

@@ -9,6 +9,7 @@
 //! unchanged so its own classification decides what happens next.
 
 use std::future::Future;
+use std::num::NonZeroU32;
 use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
@@ -18,15 +19,16 @@ use shared::RunnerError;
 /// Upstream's `_sessionCreationRetryInterval`.
 const DEFAULT_INTERVAL: Duration = Duration::from_secs(30);
 /// Upstream stops once `conflicts × 30 s ≥ 4 min`, i.e. on the 8th conflict.
-const DEFAULT_MAX_ATTEMPTS: u32 = 8;
+const DEFAULT_MAX_ATTEMPTS: NonZeroU32 = NonZeroU32::MIN.saturating_add(7);
 
 /// How long session creation keeps retrying a conflict before giving up.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SessionConflictPolicy {
   /// Sleep between a conflicted attempt and the next one.
   pub interval: Duration,
-  /// Total session attempts (the first included) before the conflict is final.
-  pub max_attempts: u32,
+  /// Total session attempts (the first included) before the conflict is
+  /// final. Non-zero by type: session creation is always attempted.
+  pub max_attempts: NonZeroU32,
 }
 
 impl Default for SessionConflictPolicy {
@@ -53,12 +55,12 @@ where
   F: FnMut() -> Fut,
   Fut: Future<Output = Result<T, RunnerError>>,
 {
-  let max_attempts = policy.max_attempts.max(1);
+  let max_attempts = policy.max_attempts.get();
   let mut attempt: u32 = 1;
   loop {
     match op().await {
       Ok(value) => return Ok(Some(value)),
-      Err(RunnerError::SessionConflict(msg)) if attempt >= max_attempts => {
+      Err(RunnerError::SessionConflict(msg)) if attempt == max_attempts => {
         log_spent(attempt);
         return Err(RunnerError::SessionConflict(msg));
       },

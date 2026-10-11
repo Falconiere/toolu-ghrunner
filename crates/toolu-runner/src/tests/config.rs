@@ -101,7 +101,8 @@ fn session_conflict_policy_child_probe() {
     std::time::Duration::from_millis(expected.parse().expect("expected ms"))
   );
   assert_eq!(
-    policy.max_attempts, 8,
+    policy.max_attempts.get(),
+    8,
     "the attempt count is not overridable"
   );
 }

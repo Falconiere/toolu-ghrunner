@@ -185,7 +185,8 @@ async fn assert_conflict_exit(
     "{stderr}"
   );
   assert!(stderr.contains(CONFLICT_MESSAGE), "{stderr}");
-  let diag = diag_logs(home);
+  let walk_root = home.to_path_buf();
+  let diag = tokio::task::spawn_blocking(move || diag_logs(&walk_root)).await?;
   for secret in [ACCESS_TOKEN, jit_config] {
     assert!(!stderr.contains(secret), "credential leaked to stderr");
     assert!(!diag.contains(secret), "credential leaked to the diag log");
