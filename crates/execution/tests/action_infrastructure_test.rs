@@ -34,7 +34,7 @@ const SHA: &str = "0123456789abcdef0123456789abcdef01234567";
 /// What the fault-injection archive endpoint serves on each request.
 #[derive(Clone, Copy)]
 enum Archive {
-  Status(u16),
+  Status(StatusCode),
   /// 401 on the first request, a valid action afterwards.
   UnauthorizedOnce,
   /// A valid gzip header, then the connection drops mid-body.
@@ -45,7 +45,7 @@ enum Archive {
 /// What the launch download-info endpoint answers.
 #[derive(Clone, Copy)]
 enum Launch {
-  Status(u16),
+  Status(StatusCode),
   Resolve(Archive),
 }
 
@@ -77,9 +77,7 @@ async fn serve(launch: Launch) -> TestResult<String> {
     let tar_url = tar_url.clone();
     async move {
       match launch {
-        Launch::Status(code) => StatusCode::from_u16(code)
-          .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
-          .into_response(),
+        Launch::Status(code) => code.into_response(),
         Launch::Resolve(_) => axum::Json(serde_json::json!({"actions": {
           "actions/checkout@v4": {
             "resolved_name": "actions/checkout",
@@ -100,9 +98,7 @@ async fn serve(launch: Launch) -> TestResult<String> {
         return StatusCode::NOT_FOUND.into_response();
       };
       match archive {
-        Archive::Status(code) => StatusCode::from_u16(code)
-          .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
-          .into_response(),
+        Archive::Status(code) => code.into_response(),
         Archive::UnauthorizedOnce if first => StatusCode::UNAUTHORIZED.into_response(),
         Archive::UnauthorizedOnce => tarball.into_response(),
         Archive::Corrupt => b"this is not a gzip archive".to_vec().into_response(),
@@ -221,18 +217,24 @@ async fn category_for(launch: Launch) -> TestResult<(Observed, String)> {
 #[tokio::test]
 async fn runner_side_fetch_failures_carry_upstream_categories() -> TestResult {
   for (launch, category) in [
-    (Launch::Status(500), "resolve_action"),
-    (Launch::Status(429), "resolve_action"),
     (
-      Launch::Resolve(Archive::Status(500)),
+      Launch::Status(StatusCode::INTERNAL_SERVER_ERROR),
+      "resolve_action",
+    ),
+    (
+      Launch::Status(StatusCode::TOO_MANY_REQUESTS),
+      "resolve_action",
+    ),
+    (
+      Launch::Resolve(Archive::Status(StatusCode::INTERNAL_SERVER_ERROR)),
       "error_download_action",
     ),
     (
-      Launch::Resolve(Archive::Status(404)),
+      Launch::Resolve(Archive::Status(StatusCode::NOT_FOUND)),
       "error_download_action",
     ),
     (
-      Launch::Resolve(Archive::Status(401)),
+      Launch::Resolve(Archive::Status(StatusCode::UNAUTHORIZED)),
       "error_download_action",
     ),
     (
@@ -260,9 +262,15 @@ async fn runner_side_fetch_failures_carry_upstream_categories() -> TestResult {
 async fn user_fetch_failures_and_recovered_auth_carry_no_category() -> TestResult {
   for (launch, conclusion) in [
     // LaunchHttpClient: 422 is "unresolvable" (missing repo or ref).
-    (Launch::Status(422), Conclusion::Failure),
+    (
+      Launch::Status(StatusCode::UNPROCESSABLE_ENTITY),
+      Conclusion::Failure,
+    ),
     // AccessDeniedException is the workflow's, not the runner's.
-    (Launch::Resolve(Archive::Status(403)), Conclusion::Failure),
+    (
+      Launch::Resolve(Archive::Status(StatusCode::FORBIDDEN)),
+      Conclusion::Failure,
+    ),
     // One auth refresh recovers a 401; nothing failed.
     (
       Launch::Resolve(Archive::UnauthorizedOnce),
@@ -282,7 +290,7 @@ async fn user_fetch_failures_and_recovered_auth_carry_no_category() -> TestResul
 
 #[tokio::test]
 async fn continue_on_error_fetch_failure_still_reports_the_error() -> TestResult {
-  let base = serve(Launch::Status(500)).await?;
+  let base = serve(Launch::Status(StatusCode::INTERNAL_SERVER_ERROR)).await?;
   let mut message = job(&base)?;
   let checkout = message.steps.first_mut().ok_or("checkout missing")?;
   checkout.continue_on_error = Some(TemplateToken {
@@ -301,7 +309,10 @@ async fn continue_on_error_fetch_failure_still_reports_the_error() -> TestResult
 
 #[tokio::test]
 async fn nested_composite_fetch_failure_is_attributed_to_the_enclosing_step() -> TestResult {
-  let base = serve(Launch::Resolve(Archive::Status(503))).await?;
+  let base = serve(Launch::Resolve(Archive::Status(
+    StatusCode::SERVICE_UNAVAILABLE,
+  )))
+  .await?;
   let mut message = job(&base)?;
   // Turn the captured checkout step into the local composite that nests it.
   let step = message.steps.first_mut().ok_or("checkout missing")?;

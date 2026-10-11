@@ -592,16 +592,30 @@ async fn infrastructure_error_message_is_masked_in_completejob_and_the_journal()
     checkout.pointer("/annotations/0/isInfrastructureIssue"),
     Some(&json!(true))
   );
-  let mut journaled = Vec::new();
+  let session_masker = harness.ctx.masker.lock().map_err(|e| e.to_string())?;
+  let (mut journaled, mut logged) = (Vec::new(), 0);
   while let Ok(event) = harness.journal.try_recv() {
-    if let shared::ListenerEvent::Runner(shared::RunnerEvent::InfrastructureError {
-      message, ..
-    }) = event
+    let shared::ListenerEvent::Runner(event) = event else {
+      continue;
+    };
+    if let shared::RunnerEvent::InfrastructureError { message, .. } = &event {
+      journaled.push(message.clone());
+    }
+    // The engine also logs the failure; every log sink masks the line.
+    if let shared::RunnerEvent::Log { line, .. } = &event
+      && line.contains("Internal Server Error")
     {
-      journaled.push(message);
+      logged += 1;
+      assert!(
+        session_masker
+          .mask(line)
+          .contains("download-info status 500 ***"),
+        "{line}"
+      );
     }
   }
   assert_eq!(journaled, vec![masked.to_owned()]);
+  assert!(logged > 0, "the engine must log the fetch failure");
   Ok(())
 }
 
