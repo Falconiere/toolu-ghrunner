@@ -131,8 +131,15 @@ def check_local():
     print('local captures ok')
 
 
+def gh(args, **kwargs):
+    try:
+        return subprocess.check_output(['gh', 'api', *args], **kwargs)
+    except (OSError, subprocess.CalledProcessError) as error:
+        sys.exit(f'gh api {" ".join(args)} failed: {error}')
+
+
 def api(path):
-    return json.loads(subprocess.check_output(['gh', 'api', path]))
+    return json.loads(gh([path]))
 
 
 def record(run_id):
@@ -148,8 +155,7 @@ def record(run_id):
             steps = [{'number': s['number'], 'name': s['name'], 'conclusion': s['conclusion']}
                      for s in job['steps']]
             annotations = api(f'repos/{REPO}/check-runs/{job["id"]}/annotations')
-            log = subprocess.check_output(
-                ['gh', 'api', '--allow-escape-sequences', f'repos/{REPO}/actions/jobs/{job["id"]}/logs'], text=True)
+            log = gh(['--allow-escape-sequences', f'repos/{REPO}/actions/jobs/{job["id"]}/logs'], text=True)
             result['jobs'][name] = {
                 'id': job['id'], 'conclusion': job['conclusion'], 'steps': steps,
                 'log_lines': len(log.splitlines()),
@@ -257,7 +263,7 @@ def check_docs():
     assert len(section) == 2, 'test-coverage.md lacks the #88 section'
     for ac in range(1, 9):
         assert f'AC-{ac}' in section[1], f'#88 section lacks AC-{ac}'
-    assert 'Those belong to step reporting (#88)' not in coverage, 'stale #99 Complete job note'
+    assert 'Those belong to step reporting (#88)' not in coverage, 'stale Complete job note in the #99 section'
     for readme, module in [
         ('crates/execution/src/execution/job_runner/README.md', 'complete_step.rs'),
         ('crates/execution/src/execution/README.md', 'environment_url.rs'),
