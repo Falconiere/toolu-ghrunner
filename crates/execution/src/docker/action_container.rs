@@ -302,7 +302,7 @@ fn build_env(
   image_path: Option<&str>,
 ) -> Vec<String> {
   let mut env = params.env.clone();
-  crate::execution::step_process_env::apply(&mut env, None);
+  crate::execution::step_process_env::apply(&mut env, None, None);
   let base_path = env
     .remove("PATH")
     .or_else(|| image_path.map(str::to_owned))

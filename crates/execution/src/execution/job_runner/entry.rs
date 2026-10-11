@@ -19,6 +19,7 @@ use crate::execution::context::ExecutionContext;
 use crate::execution::job_cancellation::JobCancellation;
 use crate::execution::job_environment::apply_job_environment;
 use crate::execution::job_teardown::JobTeardown;
+use crate::execution::orphan_cleanup::{ProcessTracking, sweep};
 
 /// Initialize, execute, and tear down one acquired job.
 /// The job child observes caller cancellation without propagating it to its parent.
@@ -36,6 +37,7 @@ pub(super) async fn run(
   let workspace = config.workspace_root.join(&msg.job_id);
   let (msg, mut ctx) = build_job_context_async(msg, config, masker, workspace.clone()).await?;
   ctx.cancellation = Some(JobCancellation::new(cancel.clone(), shutdown));
+  ctx.set_process_tracking(ProcessTracking::for_job(&msg.variables));
   apply_job_environment(&msg.environment_variables, &mut ctx)?;
   let container_spec = evaluate_container(&msg, config, &ctx)?;
   let service_specs = evaluate_services(msg.job_service_containers.as_ref(), &ctx)?;
@@ -70,7 +72,13 @@ pub(super) async fn run(
   finish_execution(&ctx, msg.job_id, body_result, local, &events, workspace_gc).await
 }
 
-/// Remove containers and local services before reporting the final job outcome.
+/// Remove containers, sweep tracked orphan processes, and stop local services
+/// before reporting the final job outcome.
+///
+/// The orphan sweep runs for every body outcome (success, failure, cancel,
+/// error) and after a container-teardown error, always before `JobCompleted`.
+/// No step process exists before the body starts, so earlier setup returns
+/// need no sweep.
 async fn finish_execution(
   ctx: &ExecutionContext,
   job_id: String,
@@ -79,7 +87,11 @@ async fn finish_execution(
   events: &mpsc::Sender<RunnerEvent>,
   workspace_gc: Option<tokio::task::JoinHandle<()>>,
 ) -> Result<JobTeardown, RunnerError> {
-  let (conclusion, outputs) = match finish_container(ctx, body_result, events).await {
+  let finished = finish_container(ctx, body_result, events).await;
+  if let Some(tracking) = ctx.process_tracking() {
+    sweep(tracking, events).await;
+  }
+  let (conclusion, outputs) = match finished {
     Ok(result) => result,
     Err(error) => {
       stop_local_services(local).await;

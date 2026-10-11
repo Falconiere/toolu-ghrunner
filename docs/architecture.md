@@ -322,6 +322,13 @@ and network on both body success and error before job completion. On exec
 cancellation, remote children can remain until that force-removal boundary.
 Only forwarder service URLs are supported; local loopback cache URLs are rejected.
 
+**Orphan process sweep.** `job_runner::entry::finish_execution` runs
+`orphan_cleanup::sweep` after `finish_container` and before `JobCompleted`, on
+every body outcome. Host step children carry the job's `RUNNER_TRACKING_ID`
+(added in `step_process_env::apply`, overridable by workflow env). The sweep
+re-scans and `SIGKILL`s every other process still carrying it, rechecking the
+id before each signal, under a 15 s shared deadline.
+
 **Job teardown order.** `run_job` returns a `JobTeardown`
 (`execution/job_teardown.rs`) rather than cleaning up inline: local
 cache servers are stopped and `JobCompleted` is emitted *before*

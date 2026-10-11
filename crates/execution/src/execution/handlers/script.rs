@@ -28,6 +28,8 @@ pub struct ScriptParams<'a> {
   pub step_id: &'a str,
   /// Per-job cgroup directory to move the spawned step into (`None` = no isolation).
   pub cgroup_path: Option<&'a Path>,
+  /// `RUNNER_TRACKING_ID` for a host child (`None` = untagged; issue #89).
+  pub tracking_id: Option<&'a str>,
   /// `timeout-minutes` bound for the child wait (`None` = unbounded).
   pub timeout: Option<Duration>,
   /// In-flight cancellation: a fired token kills the child mid-run.
@@ -228,7 +230,7 @@ async fn spawn_step_shell(
   let program = &shell.program;
   let mut cmd = tokio::process::Command::new(program);
   let mut env = params.env.clone();
-  crate::execution::step_process_env::apply(&mut env, None);
+  crate::execution::step_process_env::apply(&mut env, None, params.tracking_id);
   // `params.env` already carries a COMPLETE, filtered process env (both
   // constructors fold `context::safe_process_env_vars` — PATH/HOME/LANG
   // included, `TOOLU_RUNNER_*` stripped). Clear inherited env and set only

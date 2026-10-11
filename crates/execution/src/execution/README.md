@@ -32,6 +32,7 @@ not part of it. Workflow YAML parsing/matrix/orchestration lives in the
 | `composite_uses.rs` | `run_nested_uses_step` | Builds a synthetic `ActionStep` for a composite's nested `uses:` step and recurses through `action_exec::execute_action`, bounded by `DepthTracker`. |
 | `context.rs` | `ExecutionContext` | Mutable per-job execution state: env, per-step outputs/state/conclusions, runtime-owned contexts plus typed incoming server roots (`matrix`/`needs`/`inputs`/`strategy` and future keys), the shared `SecretMasker`, and expression evaluation. Its execution-only workspace root also anchors problem-matcher paths. |
 | `context/` | Scoped state helpers | Keeps expression-visible step scopes separate from private action state. |
+| `context_process.rs` | `process_tracking_env` | `ExecutionContext` accessors for the job's `RUNNER_TRACKING_ID` (issue #89); falls back to the runner's inherited value only when `process.clean=false`. |
 | `context_build.rs` | `build_strategy` | Pure helpers for `ExecutionContext`: `runner.debug` detection and the `strategy.*` object, split out to keep `context.rs`'s `impl` blocks small. |
 | `docker_action.rs` | `run_docker_action` | Linux Docker action image preparation, conditional pre stage and deferred post registration. |
 | `docker_stage.rs` | `run_docker_stage` | Container argv/env evaluation and normal workflow/file-command dispatch. |
@@ -46,6 +47,7 @@ not part of it. Workflow YAML parsing/matrix/orchestration lives in the
 | `job_spec.rs` | `JobSpec` | Job-level `outputs:` expression map plus merged `defaults.run` (shell/working-directory), and `evaluate_job_outputs` to resolve them post-run. |
 | `job_teardown.rs` | `JobTeardown` | Deferred post-completion work returned by `run_job`: cache staging sweep + GC pass, and joining the workspace-sweep task, run only after the event sender is dropped. |
 | `node_stage.rs` | `run_node_stage` | Runs one Node.js action entrypoint (`pre`/`main`/`post`), rebuilding env per stage and dispatching its stdout workflow commands. |
+| `orphan_cleanup.rs` | `ProcessTracking` / `sweep` | Issue #89: per-job `RUNNER_TRACKING_ID` (`process.clean=false` disables it) and the job-end sweep that `SIGKILL`s every other process still carrying it (Linux `/proc`, macOS `KERN_PROCARGS2`), deadline-bounded, never failing the job. |
 | `oidc.rs` | (mod decl) | Declares the `oidc` sub-module and re-exports `OidcClaims`/`OidcServer`/etc. |
 | `post_drain.rs` | `drain_post_steps` | Drains registered posts LIFO, gives each a distinct report ID, keeps draining after errors, and shares the cancellation deadline while reusing the originating action's state. |
 | `service_auth.rs` | `validate_bearer` | Bearer-token validation (constant-time compare) shared by the local OIDC/artifact/cache axum services. |
@@ -55,7 +57,7 @@ not part of it. Workflow YAML parsing/matrix/orchestration lives in the
 | `step_attrs.rs` | `evaluate_timeout` / `evaluate_continue_on_error` | Evaluates step `timeout-minutes` / `continue-on-error` tokens at execution time with upstream's number/boolean-only validation and positioned `The template is not valid.` diagnostics. |
 | `step_display.rs` | `name_at_job_start` / `name_at_main` | Upstream's two-phase step display names: job-start message contexts, then live contexts before the condition; prettified pending names, warnings on failure, masked results. |
 | `step_env.rs` | `resolve_step_env` | Renders scalar template tokens for step env/script/working-directory/action inputs and applies file-command results back onto the context. |
-| `step_process_env.rs` | `apply` | Unconditionally sets `GITHUB_ACTIONS=true` at child launch; fills `CI` only when absent after child, container, and runner precedence. |
+| `step_process_env.rs` | `apply` | Unconditionally sets `GITHUB_ACTIONS=true` at child launch; fills `CI` only when absent after child, container, and runner precedence; tags host children with the job's `RUNNER_TRACKING_ID` unless a workflow layer set one (container execs are never tagged). |
 | `step_naming.rs` | `PostStep` / `PostStepQueue` | The registered-post-step record and its LIFO queue. |
 | `step_state.rs` | `StepState` | Per-step recorded outputs/state/outcome/conclusion, and `build_steps_context` for the `steps.*` expression context. |
 | `step_summary.rs` | `collect` | Bounded, masked summary snapshots; refuses non-regular summary files; non-fatal error annotations. |
