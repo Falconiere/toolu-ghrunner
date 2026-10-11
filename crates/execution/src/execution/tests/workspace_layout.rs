@@ -77,7 +77,7 @@ fn stable_layout_reuses_one_mapping_and_records_the_owner() -> TestResult {
   assert_eq!(first.kind, WorkspaceKind::Stable);
   assert_eq!(first.workspace, work.join("hello-world/hello-world"));
   assert_eq!(first.pipeline, work.join("hello-world"));
-  assert_eq!(first.pipeline_name(), "hello-world");
+  assert_eq!(first.pipeline_name, "hello-world");
   drop(first);
   let second = prepare_workspace(&config, &message(Some("octocat/hello-world"), "job-2")?)?;
   assert_eq!(second.workspace, work.join("hello-world/hello-world"));
@@ -154,9 +154,9 @@ fn corrupt_or_escaping_tracking_file_is_recreated_inside_the_work_root() -> Test
   let work = root.path().join("work");
   let mapping = work.join("_PipelineMapping/octocat/hello-world/PipelineFolder.json");
   let escaping = serde_json::json!({
-    "RepositoryName": "octocat/hello-world",
-    "PipelineDirectory": "..",
-    "WorkspaceDirectory": "../outside",
+    "repositoryName": "octocat/hello-world",
+    "pipelineDirectory": "..",
+    "workspaceDirectory": "../outside",
   });
   for body in [b"not json".to_vec(), serde_json::to_vec(&escaping)?] {
     std::fs::create_dir_all(mapping.parent().ok_or("parent")?)?;

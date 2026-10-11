@@ -70,18 +70,33 @@ pub fn gc_workspaces(
     Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
     Err(e) => return Err(e.into()),
   };
+  // One scan of the tracking files serves both passes: the stable pass prunes
+  // from it, and whatever it keeps is the claimed set the fresh pass skips.
+  let mut claimed = Vec::new();
   let mut removed = 0usize;
-  if let Some(max_age) = policy.stable_max_age {
-    for file in tracking_files(workspace_root) {
-      if prune_stable(workspace_root, &file, &policy.data_dir, max_age, keep) {
-        removed += 1;
-      }
+  for file in tracking_files(workspace_root) {
+    let Some(tracking) = load_tracking(&file) else {
+      continue;
+    };
+    let pruned = policy.stable_max_age.is_some_and(|max_age| {
+      prune_stable(
+        workspace_root,
+        &file,
+        &tracking,
+        &policy.data_dir,
+        max_age,
+        keep,
+      )
+    });
+    if pruned {
+      removed += 1;
+    } else {
+      claimed.push(tracking.pipeline_directory.to_ascii_lowercase());
     }
   }
   let Some(max_age) = policy.job_max_age else {
     return Ok(removed);
   };
-  let claimed = claimed_dirs(workspace_root);
   let now = SystemTime::now();
   for entry in entries {
     match entry {
@@ -100,9 +115,17 @@ pub fn gc_workspaces(
   Ok(removed)
 }
 
-/// Remove one stale stable workspace and its tracking file when this
-/// registration owns it and can take its lease. `true` only when removed.
-fn prune_stable(root: &Path, file: &Path, data_dir: &Path, max_age: Duration, keep: &str) -> bool {
+/// Remove one stale stable workspace (`tracking`, read from `file`) and its
+/// tracking file when this registration owns it and can take its lease.
+/// `true` only when removed.
+fn prune_stable(
+  root: &Path,
+  file: &Path,
+  tracking: &TrackingConfig,
+  data_dir: &Path,
+  max_age: Duration,
+  keep: &str,
+) -> bool {
   let Some(repo_dir) = file.parent() else {
     return false;
   };
@@ -112,7 +135,7 @@ fn prune_stable(root: &Path, file: &Path, data_dir: &Path, max_age: Duration, ke
       && tracking.is_usable_for(&tracking.repository_name)
       && is_stale_unix(tracking.last_run_on_unix, max_age)
   };
-  if !load_tracking(file).is_some_and(|tracking| eligible(&tracking)) {
+  if !eligible(tracking) {
     return false;
   }
   let Ok(Some(_lease)) = WorkspaceLease::try_acquire(&repo_dir.join(LEASE_FILE)) else {
@@ -148,15 +171,6 @@ fn prune_job_dir(
     return false;
   };
   is_stale_dir(entry, now, max_age) && remove_tree(&entry.path()) && remove_file(&lease_path)
-}
-
-/// Pipeline directory names (lowercased) claimed by any tracking file.
-fn claimed_dirs(root: &Path) -> Vec<String> {
-  tracking_files(root)
-    .iter()
-    .filter_map(|file| load_tracking(file))
-    .map(|tracking| tracking.pipeline_directory.to_ascii_lowercase())
-    .collect()
 }
 
 fn load_tracking(file: &Path) -> Option<TrackingConfig> {

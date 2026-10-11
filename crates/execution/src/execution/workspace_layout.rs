@@ -41,18 +41,10 @@ pub struct PreparedWorkspace {
   pub pipeline: PathBuf,
   /// Stable or fresh.
   pub kind: WorkspaceKind,
+  /// The work-root child (`pipeline`'s name) GC must spare while this job
+  /// runs: the validated tracking `pipelineDirectory`, or the job directory.
+  pub pipeline_name: String,
   _lease: WorkspaceLease,
-}
-
-impl PreparedWorkspace {
-  /// The work-root child name GC must spare while this job runs.
-  pub fn pipeline_name(&self) -> String {
-    self
-      .pipeline
-      .file_name()
-      .map(|name| name.to_string_lossy().into_owned())
-      .unwrap_or_default()
-  }
 }
 
 /// `owner/name` from the job's `github.repository`, validated as path parts.
@@ -165,6 +157,7 @@ fn prepare_stable(
     workspace,
     pipeline,
     kind: WorkspaceKind::Stable,
+    pipeline_name: tracking.pipeline_directory,
     _lease: lease,
   }))
 }
@@ -246,6 +239,7 @@ fn prepare_fresh(config: &RunnerConfig, job_id: &str) -> Result<PreparedWorkspac
     pipeline: workspace.clone(),
     workspace,
     kind: WorkspaceKind::Fresh,
+    pipeline_name: job_dir,
     _lease: lease,
   })
 }

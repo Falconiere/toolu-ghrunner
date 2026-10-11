@@ -367,11 +367,11 @@ async fn stable_workspace_reuses_git_across_jobs_and_fresh_mode_stays_isolated()
     .work()
     .join("_PipelineMapping/alice/app/PipelineFolder.json");
   let tracking: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&mapping)?)?;
-  assert_eq!(field(&tracking, "/RepositoryName"), Some("alice/app"));
-  assert_eq!(field(&tracking, "/PipelineDirectory"), Some("app"));
-  assert_eq!(field(&tracking, "/WorkspaceDirectory"), Some("app/app"));
+  assert_eq!(field(&tracking, "/repositoryName"), Some("alice/app"));
+  assert_eq!(field(&tracking, "/pipelineDirectory"), Some("app"));
+  assert_eq!(field(&tracking, "/workspaceDirectory"), Some("app/app"));
   assert_eq!(
-    field(&tracking, "/Repositories/alice~1app/RepositoryPath"),
+    field(&tracking, "/repositories/alice~1app/repositoryPath"),
     Some("app/app")
   );
   assert_eq!(

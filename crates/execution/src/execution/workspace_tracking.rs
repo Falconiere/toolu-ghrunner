@@ -1,8 +1,11 @@
 //! `_PipelineMapping/<owner>/<repo>/PipelineFolder.json` tracking files.
 //!
-//! Upstream `TrackingConfig` key names (actions/runner `cab9d1c`), plus the
-//! toolu fields GC needs: `lastRunOnUnix` (upstream writes a locale-formatted
-//! `LastRunOn`) and `dataDir`, the registration that last used the workspace.
+//! Upstream `TrackingConfig` keys as the official runner writes them
+//! (camelCase: `repositoryName`, `pipelineDirectory`, `workspaceDirectory`,
+//! `repositories.*.repositoryPath`; observed in workspace-90 run 38177256043),
+//! plus the toolu fields GC needs: `lastRunOnUnix` (upstream writes a
+//! locale-formatted `lastRunOn`) and `dataDir`, the registration that last
+//! used the workspace.
 
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
@@ -23,32 +26,30 @@ pub const JOB_LEASES_DIR: &str = "_jobs";
 
 /// One repository's stable workspace, as recorded on disk.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TrackingConfig {
   /// `owner/repo`.
-  #[serde(rename = "RepositoryName")]
   pub repository_name: String,
   /// Work-root child holding the workspace (`runner.workspace`).
-  #[serde(rename = "PipelineDirectory")]
   pub pipeline_directory: String,
   /// Work-root-relative workspace (`github.workspace`): `<pipeline>/<repo>`.
-  #[serde(rename = "WorkspaceDirectory")]
   pub workspace_directory: String,
   /// Tracked repository paths, keyed by `owner/repo`.
-  #[serde(rename = "Repositories", default)]
+  #[serde(default)]
   pub repositories: BTreeMap<String, RepositoryTracking>,
   /// Unix seconds of the last job that used this workspace.
-  #[serde(rename = "lastRunOnUnix", default)]
+  #[serde(default)]
   pub last_run_on_unix: u64,
   /// `data_dir` of the registration that last used this workspace.
-  #[serde(rename = "dataDir", default)]
+  #[serde(default)]
   pub data_dir: PathBuf,
 }
 
 /// One tracked repository checkout inside the pipeline directory.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RepositoryTracking {
   /// Work-root-relative checkout path.
-  #[serde(rename = "RepositoryPath")]
   pub repository_path: String,
 }
 

@@ -1389,7 +1389,7 @@ Red evidence: before the implementation all four replays failed. The host
 
 | AC / scenario | Exact observation | Tests | Platforms |
 | --- | --- | --- | --- |
-| AC-1 / 90-S1 | Two sequential jobs for `alice/app` print the same `GITHUB_WORKSPACE` = `${{ github.workspace }}` = `<work>/app/app` and `RUNNER_WORKSPACE` = `${{ runner.workspace }}` = `<work>/app`. Job 1 clones. Job 2 finds `.git` (same inode as on disk) and fetches commit 2 (`id` = `alice/app@2`). A second repo checked out to `sub/lib` (checkout `path:`) is reused the same way. `_PipelineMapping/alice/app/PipelineFolder.json` has `RepositoryName`, `PipelineDirectory` `app`, `WorkspaceDirectory` `app/app`, `Repositories`, `dataDir`, `lastRunOnUnix`. | `cargo test -p execution --test stable_workspace_test stable_workspace_reuses_git_across_jobs_and_fresh_mode_stays_isolated` | Linux x86_64 local; CI `ubuntu-latest` + `macos-14` via `cargo test --workspace` |
+| AC-1 / 90-S1 | Two sequential jobs for `alice/app` print the same `GITHUB_WORKSPACE` = `${{ github.workspace }}` = `<work>/app/app` and `RUNNER_WORKSPACE` = `${{ runner.workspace }}` = `<work>/app`. Job 1 clones. Job 2 finds `.git` (same inode as on disk) and fetches commit 2 (`id` = `alice/app@2`). A second repo checked out to `sub/lib` (checkout `path:`) is reused the same way. `_PipelineMapping/alice/app/PipelineFolder.json` has the official runner's camelCase keys `repositoryName`, `pipelineDirectory` `app`, `workspaceDirectory` `app/app` and `repositories.*.repositoryPath`, plus `dataDir` and `lastRunOnUnix`. | `cargo test -p execution --test stable_workspace_test stable_workspace_reuses_git_across_jobs_and_fresh_mode_stays_isolated` | Linux x86_64 local; CI `ubuntu-latest` + `macos-14` via `cargo test --workspace` |
 | AC-2 / 90-S1 fresh | With `mode = "fresh"`, a third job gets `<work>/<job_id>` for both values (the pre-#90 layout), has no `.git`, and the stable `.git` inode and `HEAD` are unchanged. | same test | as AC-1 |
 | AC-3 / 90-S2 | `alice/app`, `bob/app`, `alice/lib` → `<work>/app/app`, `<work>/app_2/app`, `<work>/lib/lib`. None sees another's `.git`, and `rev-parse HEAD` / `id` name each origin. `bob/app` re-runs in `app_2` and moves to commit 2, while `app/app` keeps alice's commit 1. Unit level: a legacy dir with the repo's name, a repo named `_PipelineMapping`, and a claimed name each get a `_<n>` suffix. | `same_repository_name_under_two_owners_and_other_repos_never_collide`; `cargo test -p execution --lib workspace_layout` | as AC-1 |
 | AC-4 / 90-S3 | Job A (registration `repo-level`) holds `alice/app`. Concurrent job B (registration `org-level`, same work root) runs in `<work>/<job_id>` and sees only `marker-b`; A sees only `marker-a`. After A ends, job C gets the stable workspace again and sees `marker-a`. Unit level: a busy lease falls back to fresh with an owner-tagged job lease; an absent/unsafe `github.repository` (`../escape`, `a/b/c`) and an odd job id (`id/with:odd` → `id_with_odd`) stay inside the work root. | `concurrent_job_for_a_leased_repository_runs_in_a_fresh_workspace`; `workspace_layout` unit tests | as AC-1 |
@@ -1405,10 +1405,24 @@ prints `GITHUB_WORKSPACE`, `github.workspace`, `RUNNER_WORKSPACE`,
 (the official runner) and in two sequential `[self-hosted, toolu-90]` jobs,
 where the second must find the first job's `.git`. It runs on dispatch
 (`run_toolu`) or on a push to the #90 branch whose head commit says
-`[live-90]`. **Status: unverified** until a recorded run is linked here. GHES
-is **unverified** (no server); the layout does not depend on the server.
-macOS real-filesystem behavior is covered by the CI `macos-14`
-`cargo test --workspace` run only.
+`[live-90]`.
+
+Observed in [run 38177256043](https://github.com/Falconiere/toolu-ghrunner/actions/runs/38177256043)
+(head `ceda4f2`). toolu was built from this branch on Linux x86_64 and
+registered as `toolu-90-verify` with `[workspace] mode = "stable"`.
+
+| Check | toolu job 1 | toolu job 2 | reference `ubuntu-24.04` / `macos-15` (official runner) |
+| --- | --- | --- | --- |
+| `GITHUB_WORKSPACE` = `github.workspace` | `<work>/toolu-ghrunner/toolu-ghrunner` | same | `/home/runner/work/toolu-ghrunner/toolu-ghrunner`, `/Users/runner/work/toolu-ghrunner/toolu-ghrunner` |
+| `RUNNER_WORKSPACE` = `runner.workspace` | `<work>/toolu-ghrunner` | same | `…/work/toolu-ghrunner` |
+| `.git` before `actions/checkout@v4` | no; checkout runs `git init` | yes, inode 3504370 (job 1's); checkout runs `git clean -ffdx` + fetch, no `git init` | no (fresh VM) |
+| `PipelineFolder.json` | `repositoryName` / `pipelineDirectory` `toolu-ghrunner` / `workspaceDirectory` `toolu-ghrunner/toolu-ghrunner` | same, newer `lastRunOnUnix` | same keys and values, plus `repositories.*.lastRunOn` and `lastRunOn` (locale format) |
+
+That run is also how the camelCase tracking keys were corrected: an earlier
+revision of this branch wrote PascalCase. GHES is **unverified** (no server);
+the layout does not depend on the server. A macOS toolu live lane is
+**unverified**; macOS real-filesystem behavior is covered by the CI `macos-14`
+`cargo test --workspace` run.
 
 Entry paths (90-S3): `run` and `boot` share `run_job`, so both take the
 lease. The run `.lock` is not what protects a workspace: an org-level and a

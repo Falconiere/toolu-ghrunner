@@ -33,6 +33,10 @@ impl WorkspaceLease {
   /// when another open file still holds it after a short re-check window
   /// (≈200 ms, see [`CONTENTION_RETRIES`]). Creates the file and its parents.
   ///
+  /// Blocking (file I/O and `std::thread::sleep`): call it from a blocking
+  /// thread, as `job_runner::prepare_job_workspace` and the GC sweep do via
+  /// `tokio::task::spawn_blocking`, never directly on an async worker.
+  ///
   /// # Errors
   ///
   /// [`RunnerError::WorkspaceInit`] when the file cannot be created or the

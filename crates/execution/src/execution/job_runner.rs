@@ -152,7 +152,7 @@ async fn prepare_job_workspace(
         path: config.workspace_root.clone(),
         source: std::io::Error::other(format!("prepare job directories: {error}")),
       })??;
-  let workspace_gc = spawn_workspace_gc(config, &prepared.pipeline_name());
+  let workspace_gc = spawn_workspace_gc(config, &prepared.pipeline_name);
   Ok((prepared, workspace_gc))
 }
 
