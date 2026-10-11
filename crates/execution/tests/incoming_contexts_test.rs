@@ -225,22 +225,38 @@ fn replay(source: &str, matrix: bool) -> TestResult {
       let mut conclusion = None;
       let mut completed = 0;
       let mut logs = Vec::new();
+      // The trailing "Complete job" row (#88) is not an assertion step.
+      let mut complete_job = None;
       while let Some(event) = events.recv().await {
         match event {
           RunnerEvent::Log { line, .. } => logs.push(line),
-          RunnerEvent::StepCompleted { conclusion, .. } => {
+          RunnerEvent::StepStarted {
+            step_id, step_name, ..
+          } => {
+            if step_name == "Complete job" {
+              complete_job = Some(step_id);
+            }
+          },
+          RunnerEvent::StepCompleted {
+            step_id,
+            conclusion,
+            ..
+          } => {
             assert_eq!(conclusion, Conclusion::Success, "{logs:?}");
-            completed += 1;
+            if complete_job.as_deref() != Some(step_id.as_str()) {
+              completed += 1;
+            }
           },
           RunnerEvent::JobCompleted {
             conclusion: value, ..
           } => conclusion = Some(value),
           RunnerEvent::JobStarted { .. }
-          | RunnerEvent::StepStarted { .. }
           | RunnerEvent::StepSkipped { .. }
           | RunnerEvent::LogGroup { .. }
           | RunnerEvent::StepSummary { .. }
-          | RunnerEvent::Annotation { .. } => {},
+          | RunnerEvent::Annotation { .. }
+          | RunnerEvent::StepMetadata { .. }
+          | RunnerEvent::InfrastructureError { .. } => {},
         }
       }
       assert_eq!(conclusion, Some(Conclusion::Success), "{logs:?}");

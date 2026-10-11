@@ -15,8 +15,8 @@ that is `execution::action_exec` (top-level dispatch) and
 
 | File | Primary item | Purpose |
 | --- | --- | --- |
-| `downloader.rs` | `download_and_extract_action` | Downloads an action tarball (watermark-cached), extracts it with GitHub's-prefix stripping and a tar-slip guard, and marks the cache complete. |
-| `download_info.rs` | `ActionDownloadContext` | Resolves actions with the acquired Launch service or host-aware REST fallback and validates archive metadata. |
+| `downloader.rs` | `download_and_extract_action` | Downloads an action tarball (watermark-cached), extracts it with GitHub's-prefix stripping and a tar-slip guard, and marks the cache complete. Archive status, transport/mid-stream and corrupt-content failures are typed `ActionFetch` errors carrying upstream's infrastructure categories. |
+| `download_info.rs` | `ActionDownloadContext` | Resolves actions with the acquired Launch service or host-aware REST fallback and validates archive metadata; service failures are `resolve_action`, while user statuses (Launch 422; REST 401/403/404/422) keep their uncategorized error. |
 | `download_info_v1.rs` | `LegacyContext` | Discovers the GHES V1 action-download resource and decodes its response. |
 | `manifest.rs` | `parse_action_manifest` | Parses `action.yml`/`action.yaml` YAML into `ActionDefinition` (inputs, outputs, `runs` — `RunsUsing::Node`/`Composite`/`Docker`, composite `steps:`, Docker args/env and pre/main/post entrypoints). |
 | `prefetch.rs` | `ActionFetcher` | Shares single-flight fetches and emits deduplicated intended ref/resolved SHA setup diagnostics after successful preparation; completed archives use the `<16-character API-host hash>/<owner>/<repo>/<resolved SHA>` cache path. |

@@ -132,12 +132,15 @@ pub(super) fn evaluate_acquired_outputs(
   result
 }
 
-// Wire discriminants from `shared::TemplateToken`: containers are 1 and 2.
-const LITERAL_TOKEN: i32 = 0;
-const EXPRESSION_TOKEN: i32 = 3;
-const BOOLEAN_TOKEN: i32 = 5;
-const NUMBER_TOKEN: i32 = 6;
-const NULL_TOKEN: i32 = 7;
+// Wire discriminants from `shared::TemplateToken`, shared by every evaluator
+// of acquired tokens in this crate.
+pub(crate) const LITERAL_TOKEN: i32 = 0;
+pub(crate) const SEQUENCE_TOKEN: i32 = 1;
+pub(crate) const MAPPING_TOKEN: i32 = 2;
+pub(crate) const EXPRESSION_TOKEN: i32 = 3;
+pub(crate) const BOOLEAN_TOKEN: i32 = 5;
+pub(crate) const NUMBER_TOKEN: i32 = 6;
+pub(crate) const NULL_TOKEN: i32 = 7;
 
 fn evaluate_acquired_value(
   name: &str,

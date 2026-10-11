@@ -22,6 +22,9 @@ pub enum RunnerError {
   /// An action's source could not be downloaded.
   #[error("action download failed: {0}")]
   ActionDownload(String),
+  /// An action fetch failed for a runner-infrastructure reason.
+  #[error("action download failed: {0}")]
+  ActionFetch(ActionFetchError),
   /// An action's `action.yml` manifest was invalid or unreadable.
   #[error("action manifest error: {0}")]
   ActionManifest(String),
@@ -85,4 +88,42 @@ pub enum RunnerError {
   /// A wrapped `serde_json::Error`.
   #[error("JSON error: {0}")]
   Json(#[from] serde_json::Error),
+}
+
+/// Why an action fetch failed, typed where the status and phase are known.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActionFetchKind {
+  /// The download-info service failed (not a user error such as a missing repo).
+  ResolveService,
+  /// The archive request returned this non-success HTTP status.
+  ArchiveStatus(u16),
+  /// The archive transfer failed (transport, timeout, redirect, mid-body stream).
+  ArchiveTransport,
+  /// The archive content is not a valid gzip/tar.
+  ArchiveContent,
+}
+
+/// A typed action fetch failure; Display is the message.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{message}")]
+pub struct ActionFetchError {
+  /// The failure class.
+  pub kind: ActionFetchKind,
+  /// Human-readable detail (upstream's inner exception message).
+  pub message: String,
+}
+
+impl ActionFetchError {
+  /// Upstream `infrastructureFailureCategory` for this failure, or `None`
+  /// when the failure is the user's (an archive 403 is access denied).
+  pub fn infrastructure_category(&self) -> Option<&'static str> {
+    match self.kind {
+      ActionFetchKind::ResolveService => Some("resolve_action"),
+      ActionFetchKind::ArchiveStatus(403) => None,
+      ActionFetchKind::ArchiveStatus(_) | ActionFetchKind::ArchiveTransport => {
+        Some("error_download_action")
+      },
+      ActionFetchKind::ArchiveContent => Some("invalid_action_download"),
+    }
+  }
 }

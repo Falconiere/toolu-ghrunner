@@ -76,6 +76,8 @@ fn job_message(server_uri: &str, job_id: &str) -> AgentJobRequestMessage {
     environment_variables: Vec::new(),
     defaults: Vec::new(),
     file_table: Vec::new(),
+    actions_environment: None,
+    billing_owner_id: None,
   }
 }
 

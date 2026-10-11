@@ -100,6 +100,7 @@ pub async fn run_job_hook(
   let tracking = ctx.process_tracking_env();
   let params = ScriptParams {
     container: None,
+    report_metadata: false,
     script: &script,
     shell: Some(shell),
     env: &env,

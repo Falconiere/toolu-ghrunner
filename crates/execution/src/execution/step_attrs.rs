@@ -46,7 +46,7 @@ pub enum StepAttrError {
 }
 
 impl StepAttrError {
-  fn at(token: &TemplateToken, message: String) -> Self {
+  pub(crate) fn at(token: &TemplateToken, message: String) -> Self {
     Self::Template {
       file: token.file,
       line: token.line,

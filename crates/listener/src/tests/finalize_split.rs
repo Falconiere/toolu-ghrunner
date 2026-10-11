@@ -1,5 +1,5 @@
 //! S10 / AC-2: the finalize split — the per-step upload drain still runs
-//! before the conclusion (so every step keeps its `completedLogURL`), while
+//! before the conclusion (so every step keeps its `completed_log_url`), while
 //! the combined job-level log upload overlaps `report_completion` and is
 //! joined by `helpers::cleanup_session` before the listener returns.
 //!
@@ -72,7 +72,7 @@ const JOB_BLOB_PATH: &str = "/job-blob";
 ///
 /// The single step `echo`es, so it produces log lines and therefore a real
 /// per-step blob upload — without output the streamer returns `None` and
-/// the `completedLogURL` assertion would pass vacuously.
+/// the `completed_log_url` assertion would pass vacuously.
 fn job_message(results_base_url: &str, job_id: &str) -> AgentJobRequestMessage {
   AgentJobRequestMessage {
     job_service_containers: None,
@@ -133,6 +133,8 @@ fn job_message(results_base_url: &str, job_id: &str) -> AgentJobRequestMessage {
     environment_variables: Vec::new(),
     defaults: Vec::new(),
     file_table: Vec::new(),
+    actions_environment: None,
+    billing_owner_id: None,
   }
 }
 
@@ -429,7 +431,7 @@ async fn finalize_split_completes_the_job_while_the_job_log_upload_is_held() -> 
 }
 
 /// AC-2 (the finalize-split invariant): EVERY step in the recorded
-/// `complete_job` body carries a non-null `completedLogURL`, so the per-step
+/// `complete_job` body carries a non-null `completed_log_url`, so the per-step
 /// upload drain — the half of the old `finalize_job_logs` that stayed on the
 /// pre-conclusion path — still backfills the collector before
 /// `report_completion` ships its `step_results`. Dropping it, or spawning it
@@ -470,13 +472,13 @@ async fn finalize_split_keeps_a_log_url_on_every_completed_step() -> TestResult<
       .and_then(serde_json::Value::as_str)
       .unwrap_or("<unnamed>");
     match step
-      .get("completedLogURL")
+      .get("completed_log_url")
       .and_then(serde_json::Value::as_str)
     {
       Some(url) if !url.is_empty() => {},
       _ => {
         return Err(
-          format!("step {name:?} has no completedLogURL in the complete_job body: {step}").into(),
+          format!("step {name:?} has no completed_log_url in the complete_job body: {step}").into(),
         );
       },
     }

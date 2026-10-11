@@ -1,14 +1,13 @@
 //! Runs an initialized job with one action fetcher and its acquired defaults.
 
-use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use shared::{AgentJobRequestMessage, Conclusion, RunnerConfig, RunnerError, RunnerEvent};
+use shared::{AgentJobRequestMessage, RunnerConfig, RunnerError, RunnerEvent};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use super::{JobBody, build_shadow_observer, emit_job_started, run_job_body};
+use super::{JobBody, JobResult, build_shadow_observer, emit_job_started, run_job_body};
 use crate::execution::actions::prefetch::{ActionFetcher, spawn_prefetch};
 use crate::execution::context::ExecutionContext;
 use crate::execution::job_spec::JobSpec;
@@ -32,7 +31,7 @@ pub(super) struct Inputs<'a> {
 pub(super) async fn execute(
   inputs: Inputs<'_>,
   ctx: &mut ExecutionContext,
-) -> Result<(Conclusion, HashMap<String, String>), RunnerError> {
+) -> Result<JobResult, RunnerError> {
   let Inputs {
     msg,
     config,

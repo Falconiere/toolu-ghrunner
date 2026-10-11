@@ -6,6 +6,7 @@
 
 | File | Purpose |
 | --- | --- |
+| `completejob.rs` | Captured issue-88 jobs through `run_acquired_job` → `report_completion`: environment URL, secret suppression, billing owner, upstream `StepResult` keys and identity, infrastructure category latch, retry and cancellation. |
 | `annotation_reporting.rs` | Captured-job shell/composite annotations through a recorded Run Service POST. |
 | `early_ack.rs` | Broker acknowledgment ordering. |
 | `execution_loop.rs` | Execution and renewal behavior. |

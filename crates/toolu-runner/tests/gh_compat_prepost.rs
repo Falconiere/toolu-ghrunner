@@ -692,3 +692,67 @@ async fn post_drains_with_grace_when_job_is_cancelled() -> TestResult<()> {
   );
   Ok(())
 }
+
+/// Every `StepMetadata` `(type, action, ref)` reported for the row `name`.
+fn metadata(events: &[RunnerEvent], name: &str) -> Vec<(String, Option<String>, Option<String>)> {
+  let id = events.iter().find_map(|event| {
+    if let RunnerEvent::StepStarted {
+      step_id, step_name, ..
+    } = event
+      && step_name == name
+    {
+      Some(step_id)
+    } else {
+      None
+    }
+  });
+  events
+    .iter()
+    .filter_map(|event| {
+      if let RunnerEvent::StepMetadata {
+        step_id,
+        kind,
+        action,
+        git_ref,
+      } = event
+        && Some(step_id) == id
+      {
+        Some((kind.clone(), action.clone(), git_ref.clone()))
+      } else {
+        None
+      }
+    })
+    .collect()
+}
+
+/// Issue 88: the pre, main and post rows of a Node action each carry one
+/// `node20` + path label (upstream `Handler.PopulateActionTelemetry`); a post
+/// skipped by `post-if` is reported without one, since no handler ran.
+#[tokio::test]
+async fn pre_main_and_post_rows_carry_action_metadata_and_a_skipped_post_none() -> TestResult<()> {
+  let manifest = std::fs::read_to_string(Path::new(FIXTURE_DIR).join("action.yml"))?;
+  let label = vec![("node20".to_owned(), Some("./act-a".to_owned()), None)];
+  for (post_if, post_label) in [(None, label.clone()), (Some("failure()"), Vec::new())] {
+    let action = match post_if {
+      Some(condition) => format!("{manifest}  post-if: '{condition}'\n"),
+      None => manifest.clone(),
+    };
+    let Some((conclusion, events, _)) =
+      run_patched(action_step("a", "act-a"), &[("action.yml", &action)]).await?
+    else {
+      return Ok(());
+    };
+    assert_eq!(conclusion, shared::Conclusion::Success);
+    assert_eq!(metadata(&events, "Pre Run ./act-a"), label);
+    assert_eq!(metadata(&events, "Run ./act-a"), label);
+    let post = "Post Run ./act-a";
+    let expected = if post_if.is_some() {
+      shared::Conclusion::Skipped
+    } else {
+      shared::Conclusion::Success
+    };
+    assert_eq!(reported(&events, post), Some(expected), "{post_if:?}");
+    assert_eq!(metadata(&events, post), post_label, "{post_if:?}");
+  }
+  Ok(())
+}

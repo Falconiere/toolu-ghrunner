@@ -35,22 +35,42 @@ pub enum Conclusion {
   Skipped = 7,
 }
 
-/// Result for a single step, sent in completejob.
-#[derive(Debug, Clone, Serialize)]
+/// Run Service step record state, serialized as upstream's camelCase
+/// `TimelineRecordState` name. Every step result is sent once completed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub enum StepState {
+  /// The step has finished.
+  Completed,
+}
+
+/// Result for a single step, sent in completejob.
+///
+/// Mirrors upstream `StepResult.cs`, whose `[DataMember(Name = "…")]` keys
+/// are `snake_case` (Newtonsoft's camel-casing leaves explicit names
+/// unchanged): serde's default field names produce the same keys, with
+/// `rename` only for `ref`/`type`, and the enums serialize as strings.
+#[derive(Debug, Clone, Serialize)]
 pub struct StepResult {
-  /// Backend id of the step this result is for.
+  /// Backend UUID of the step this result is for (never the context name).
   pub external_id: String,
-  /// 1-based step index within the job.
+  /// 1-based step order within the job.
   pub number: u32,
   /// Display name of the step.
   pub name: String,
-  /// Final status of the step.
-  pub status: Status,
-  /// Final conclusion of the step.
-  pub conclusion: Conclusion,
-  /// Effective outcome of the step (may differ from `conclusion` for `continue-on-error`).
-  pub outcome: Conclusion,
+  /// Action identity (`owner/repo[/path]`, local path, image, shell or runner step).
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub action_name: Option<String>,
+  /// Git ref of a remote repository action.
+  #[serde(rename = "ref", skip_serializing_if = "Option::is_none")]
+  pub git_ref: Option<String>,
+  /// Handler kind (`run`, `node24`, `composite`, `Dockerfile`, `DockerHub`, `runner`).
+  #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+  pub kind: Option<String>,
+  /// Final record state of the step.
+  pub status: StepState,
+  /// Final conclusion of the step as an upstream `TaskResult` name.
+  pub conclusion: super::run_service::JobConclusion,
   /// ISO 8601 timestamp the step started.
   #[serde(skip_serializing_if = "Option::is_none")]
   pub started_at: Option<String>,
@@ -58,14 +78,14 @@ pub struct StepResult {
   #[serde(skip_serializing_if = "Option::is_none")]
   pub completed_at: Option<String>,
   /// Blob URL from `GetStepLogsSignedBlobURL` — links uploaded logs to this step.
-  /// C# field name is `CompletedLogURL` (capital URL), so override camelCase.
-  #[serde(rename = "completedLogURL", skip_serializing_if = "Option::is_none")]
+  /// Sent as `completed_log_url`, upstream's `DataMember` name.
+  #[serde(skip_serializing_if = "Option::is_none")]
   pub completed_log_url: Option<String>,
   /// Number of lines in the step's uploaded log.
   #[serde(skip_serializing_if = "Option::is_none")]
   pub completed_log_lines: Option<u64>,
-  /// Workflow-command annotations emitted by this step; empty for "Set up job".
-  #[serde(skip_serializing_if = "Vec::is_empty")]
+  /// Annotations attributed to this step. Always serialized, as `[]` when
+  /// empty (no `skip_serializing_if`): upstream always sends the list.
   pub annotations: Vec<Annotation>,
 }
 

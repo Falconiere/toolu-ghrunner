@@ -1,0 +1,8 @@
+name: completejob-88-composite
+description: Composite action for the issue-88 step metadata capture
+runs:
+  using: composite
+  steps:
+    - name: Composite child
+      shell: bash
+      run: echo "::notice title=completejob-88::composite child notice"

@@ -62,6 +62,16 @@ impl PostStepQueue {
     self.steps.push(step);
   }
 
+  /// Number of registered post-steps.
+  pub fn len(&self) -> usize {
+    self.steps.len()
+  }
+
+  /// Whether no post-step is registered.
+  pub fn is_empty(&self) -> bool {
+    self.steps.is_empty()
+  }
+
   /// Drain all post-steps in LIFO order (last registered runs first).
   pub fn drain_lifo(&mut self) -> Vec<PostStep> {
     let mut result = std::mem::take(&mut self.steps);

@@ -193,6 +193,8 @@ fn job_environment_node_and_nested_composite_actions_keep_scopes_and_file_update
           | RunnerEvent::StepSkipped { .. }
           | RunnerEvent::LogGroup { .. }
           | RunnerEvent::Annotation { .. }
+          | RunnerEvent::StepMetadata { .. }
+          | RunnerEvent::InfrastructureError { .. }
           | RunnerEvent::StepSummary { .. } => {},
         }
       }

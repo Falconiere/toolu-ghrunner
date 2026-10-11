@@ -4,6 +4,7 @@
 //!
 //! - [`AgentJobRequestMessage`] -- full job request message
 //! - [`TaskOrchestrationPlanReference`] -- plan reference in the job
+//! - [`ActionsEnvironment`] -- the job's deployment environment and URL template
 //! - [`ActionStep`] -- a single step in the job
 //! - [`ActionStepDefinitionReference`] -- reference to the action/script definition
 //! - [`VariableValue`] -- a variable in the job message
@@ -24,7 +25,7 @@ mod template_token;
 mod template_token_de;
 
 pub use context_data::{DictEntry, PipelineContextData};
-pub use request::{AgentJobRequestMessage, TaskOrchestrationPlanReference};
+pub use request::{ActionsEnvironment, AgentJobRequestMessage, TaskOrchestrationPlanReference};
 pub use resource::{
   JobAuthorization, JobEndpoint, JobResources, MaskHint, VariableValue, WorkspaceOptions,
 };

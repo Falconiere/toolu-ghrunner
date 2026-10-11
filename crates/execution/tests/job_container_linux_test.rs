@@ -145,7 +145,9 @@ async fn job_container_real_production_shell_node_composite_and_posts() -> TestR
       | RunnerEvent::StepSkipped { .. }
       | RunnerEvent::LogGroup { .. }
       | RunnerEvent::StepSummary { .. }
-      | RunnerEvent::Annotation { .. } => {},
+      | RunnerEvent::Annotation { .. }
+      | RunnerEvent::StepMetadata { .. }
+      | RunnerEvent::InfrastructureError { .. } => {},
     }
   }
   assert_eq!(conclusion, Some(Conclusion::Success), "{logs:#?}");

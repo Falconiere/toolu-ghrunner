@@ -154,6 +154,8 @@ async fn run_pre(
     },
   )
   .await;
+  let docker = super::actions::manifest::RunsUsing::Docker;
+  super::step_metadata::emit_action_metadata(s.events, &id, &s.step.reference, &docker).await;
   let pre_bounds = s.bounds.restarted();
   let pre = DockerStage {
     stage: "pre",
