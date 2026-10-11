@@ -126,6 +126,14 @@ pub(super) async fn run_complete_step(
   } else {
     outputs.conclusion
   };
+  // Upstream's row always carries log lines; reporting the final verdict
+  // guarantees this row is never an empty (log-less) result.
+  step
+    .log(&format!(
+      "Job conclusion: {}",
+      conclusion.to_report_string()
+    ))
+    .await;
   step
     .send(RunnerEvent::StepCompleted {
       step_id: step.id.clone(),

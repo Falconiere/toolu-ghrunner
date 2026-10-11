@@ -465,7 +465,39 @@ async fn collect_events(receiver: &mut mpsc::Receiver<RunnerEvent>) -> Vec<Runne
   while let Some(event) = receiver.recv().await {
     events.push(event);
   }
+  without_complete_job(events)
+}
+
+/// Drop the trailing "Complete job" row (#88): these tests count workflow
+/// main and post rows, and that row's id is minted per run.
+fn without_complete_job(events: Vec<RunnerEvent>) -> Vec<RunnerEvent> {
+  let complete: Vec<String> = events
+    .iter()
+    .filter_map(|event| {
+      if let RunnerEvent::StepStarted {
+        step_id, step_name, ..
+      } = event
+        && step_name == "Complete job"
+      {
+        Some(step_id.clone())
+      } else {
+        None
+      }
+    })
+    .collect();
   events
+    .into_iter()
+    .filter(|event| {
+      let id = if let RunnerEvent::StepStarted { step_id, .. }
+      | RunnerEvent::StepCompleted { step_id, .. } = event
+      {
+        Some(step_id)
+      } else {
+        None
+      };
+      !id.is_some_and(|id| complete.contains(id))
+    })
+    .collect()
 }
 
 fn seed_action(

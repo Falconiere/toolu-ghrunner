@@ -429,9 +429,14 @@ async fn run_job_body(
 
   // Job-started hook is a hard gate: its failure fails the job before any step.
   let started = run_job_hook(JobHookStage::Started, ctx, events, workspace, cancel).await?;
+  // A failed job-started hook concludes "Set up job" and ends the job there,
+  // before any row ("Complete job" included) starts.
   if matches!(started, Some(Conclusion::Failure | Conclusion::Cancelled)) {
-    let conclusion = started.unwrap_or(Conclusion::Failure);
-    return run_complete_step(spec, msg, ctx, events, conclusion).await;
+    return Ok(JobResult {
+      conclusion: started.unwrap_or(Conclusion::Failure),
+      outputs: HashMap::new(),
+      environment_url: None,
+    });
   }
 
   let run = JobRun {

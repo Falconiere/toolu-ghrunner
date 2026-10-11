@@ -120,7 +120,12 @@ fn replay(raw: serde_json::Value, cfg: RunnerConfig) -> Result<Observed, Box<dyn
               .mask(&line)
               .into_owned(),
           ),
-          RunnerEvent::StepStarted { .. } => observed.starts += 1,
+          // Workflow steps only: the trailing "Complete job" row (#88) is not one.
+          RunnerEvent::StepStarted { step_name, .. } => {
+            if step_name != "Complete job" {
+              observed.starts += 1;
+            }
+          },
           RunnerEvent::JobCompleted { conclusion, .. } => observed.conclusion = Some(conclusion),
           RunnerEvent::JobStarted { .. }
           | RunnerEvent::StepCompleted { .. }

@@ -234,7 +234,8 @@ async fn captured_url_is_evaluated_in_complete_job_after_every_step() -> TestRes
     job.complete_logs(),
     [
       "Evaluate and set environment url",
-      format!("Evaluated environment url: {CAPTURED_URL}").as_str()
+      format!("Evaluated environment url: {CAPTURED_URL}").as_str(),
+      "Job conclusion: success"
     ]
   );
   assert_eq!(job.complete_conclusion(), Some(Conclusion::Success));
@@ -280,7 +281,7 @@ async fn absent_environment_or_null_url_reports_nothing() -> TestResult {
     let job = run(message, None).await?;
     assert_eq!(job.conclusion, Conclusion::Success);
     assert_eq!(job.environment_url, None);
-    assert!(job.complete_logs().is_empty(), "{:?}", job.complete_logs());
+    assert_eq!(job.complete_logs(), ["Job conclusion: success"]);
   }
   Ok(())
 }
@@ -335,7 +336,7 @@ async fn invalid_results_fail_complete_job_and_the_job() -> TestResult {
     ),
     (expression("fromJSON('[1]')"), "A sequence was not expected"),
     (expression("secrets.GITHUB_TOKEN"), "secrets"),
-    (expression("fromJSON('{')"), "fromJSON"),
+    (expression("fromJSON('{')"), "JSON error"),
   ];
   for (token, detail) in cases {
     let job = run(with_url(token)?, None).await?;

@@ -42,6 +42,9 @@ Upstream pin: actions/runner `cab9d1c3901e45c7705889c4f88284fdd93f4ae5` (2.337.0
    error. Upstream's `StepsRunner` never throws; toolu's early-error path is
    unchanged here. Cancellation is not an error: `run_steps` returns
    `Ok(Cancelled)` and the step runs (AC-5).
+7. A failed job-started hook ends the job in "Set up job" (toolu folds hook
+   output into that row) before any row, "Complete job" included, starts —
+   unchanged behavior; no outputs or URL are evaluated then.
 6. Action preparation failures are attributed to the failing step, not to
    "Set up job": toolu resolves actions at step time (job-start prefetch
    failures never fail a job), upstream during setup.
@@ -59,7 +62,10 @@ Upstream pin: actions/runner `cab9d1c3901e45c7705889c4f88284fdd93f4ae5` (2.337.0
      this step with upstream's text `Skip output '<name>' since it may
      contain secret.` — intentional text change),
   2. environment URL (`environment_url.rs`, below),
-  3. `StepCompleted` (Success, or Failure when step 2 errored), then
+  3. a closing `Job conclusion: <conclusion>` line (upstream's row always
+     carries log lines, e.g. its cleanup output; this guarantees the row is
+     never an empty log),
+     `StepCompleted` (Success, or Failure when step 2 errored), then
      `JobCompleted { …, environment_url }`.
   The job-completed hook keeps its position after this step. `number` is one
   past the highest number the engine reported: `ExecutionContext` records the
