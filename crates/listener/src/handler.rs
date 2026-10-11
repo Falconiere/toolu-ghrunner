@@ -5,6 +5,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::helpers::WatchdogConfig;
 use super::job_lifecycle;
+use super::session_conflict::{SessionConflictPolicy, retry_session_conflict};
 use protocol::JitConfig;
 use protocol::auth::parse_rsa_private_key;
 use shared::SecretMasker;
@@ -75,6 +76,7 @@ pub struct GitHubListener {
   client: reqwest::Client,
   config: RunnerConfig,
   masker: Arc<Mutex<SecretMasker>>,
+  conflict_policy: SessionConflictPolicy,
 }
 
 impl GitHubListener {
@@ -100,7 +102,16 @@ impl GitHubListener {
       client,
       config,
       masker,
+      conflict_policy: SessionConflictPolicy::default(),
     })
+  }
+
+  /// Replace the session-conflict retry schedule (default: upstream's 30 s
+  /// interval, 8 attempts).
+  #[must_use]
+  pub fn with_session_conflict_policy(mut self, policy: SessionConflictPolicy) -> Self {
+    self.conflict_policy = policy;
+    self
   }
 
   /// Borrow the secret masker used to redact log output.
@@ -118,11 +129,14 @@ impl GitHubListener {
   /// `Ok(Some(conclusion))` — a job was acquired and completed (reported to
   /// GitHub) with this final [`Conclusion`], including `Failure`/`Cancelled`.
   /// `Ok(None)` — the lifecycle exited without ever acquiring a job
-  /// (cancelled while long-polling, or a control message with no job).
+  /// (cancelled while long-polling or while waiting to retry a session
+  /// conflict, or a control message with no job).
   ///
   /// # Errors
   ///
-  /// Returns `RunnerError::Protocol` on auth or session creation failure.
+  /// Returns `RunnerError::SessionConflict` when every bounded session
+  /// attempt conflicted, `RunnerError::Protocol` on other auth or session
+  /// creation failures.
   pub async fn run(&self, cancel: CancellationToken) -> Result<Option<Conclusion>, RunnerError> {
     log_runner_identity();
     let (tx, rx) = mpsc::channel(256);
@@ -137,7 +151,14 @@ impl GitHubListener {
       observability::journal::writer::jobs_dir_for(&self.config.data_dir),
       Arc::clone(&self.masker),
     );
-    let mut ctx = self.build_session_ctx(cancel, tx).await?;
+    let Some(mut ctx) = self.build_session_ctx(cancel, tx).await? else {
+      // Cancelled before any session existed: nothing to clean up, and the
+      // `tx` dropped with the attempt, so the journal channel is closed.
+      if let Err(e) = journal.await {
+        tracing::warn!(error = %e, "journal writer task did not join cleanly");
+      }
+      return Ok(None);
+    };
 
     let result = job_lifecycle::poll_and_execute(&mut ctx).await;
     if let Err(ref e) = result {
@@ -156,16 +177,45 @@ impl GitHubListener {
   }
 
   /// Authenticate against the broker and create the ephemeral session,
-  /// emitting the `SessionCreated` event. Split out of `build_session_ctx`
-  /// to keep that function short: returns just the pieces the caller needs
-  /// to assemble `SessionCtx`.
+  /// retrying a session conflict per `conflict_policy`, then emit the
+  /// `SessionCreated` event. Split out of `build_session_ctx` to keep that
+  /// function short: returns just the pieces the caller needs to assemble
+  /// `SessionCtx`, or `None` when cancelled while waiting out a conflict.
   ///
   /// # Errors
   ///
-  /// Returns `RunnerError::Protocol` on auth or session creation failure.
+  /// Returns `RunnerError::SessionConflict` once the conflict retries are
+  /// spent, `RunnerError::Protocol` on other auth or session failures.
   async fn authenticate_and_create_session(
     &self,
+    cancel: &CancellationToken,
     tx: &mpsc::Sender<ListenerEvent>,
+  ) -> Result<Option<(String, protocol::CreateSessionResponse)>, RunnerError> {
+    // Each attempt re-authenticates so the access token never ages out
+    // across the multi-minute conflict window.
+    let Some((access_token, session_response)) =
+      retry_session_conflict(|| self.create_session_once(), cancel, self.conflict_policy).await?
+    else {
+      return Ok(None);
+    };
+
+    let _ = tx
+      .send(ListenerEvent::SessionCreated {
+        session_id: session_response.session_id.clone(),
+      })
+      .await;
+    tracing::info!(session_id = %session_response.session_id, "session created — long-polling for jobs");
+
+    Ok(Some((access_token, session_response)))
+  }
+
+  /// One authenticate + create-session attempt.
+  ///
+  /// # Errors
+  ///
+  /// Propagates the auth and `create_session` classifications unchanged.
+  async fn create_session_once(
+    &self,
   ) -> Result<(String, protocol::CreateSessionResponse), RunnerError> {
     let jit = &self.jit_config;
     let client = &self.client;
@@ -190,33 +240,32 @@ impl GitHubListener {
     )
     .await?;
 
-    let _ = tx
-      .send(ListenerEvent::SessionCreated {
-        session_id: session_response.session_id.clone(),
-      })
-      .await;
-    tracing::info!(session_id = %session_response.session_id, "session created — long-polling for jobs");
-
     Ok((token.access_token, session_response))
   }
 
   /// Authenticate, create the broker session, and assemble the `SessionCtx`.
   /// Reconstructs the runner RSA key (PKCS#1 DER) so encrypted message
-  /// bodies can be decrypted on the poll path.
+  /// bodies can be decrypted on the poll path. `None` when cancelled while
+  /// waiting out a session conflict.
   ///
   /// # Errors
   ///
-  /// Returns `RunnerError::Protocol` on key reconstruction, auth, or
-  /// session creation failure.
+  /// Returns `RunnerError::SessionConflict` once conflict retries are spent,
+  /// `RunnerError::Protocol` on key reconstruction, auth, or other session
+  /// creation failure.
   async fn build_session_ctx(
     &self,
     cancel: CancellationToken,
     tx: mpsc::Sender<ListenerEvent>,
-  ) -> Result<SessionCtx, RunnerError> {
+  ) -> Result<Option<SessionCtx>, RunnerError> {
     let rsa_private_key_der = parse_rsa_private_key(&self.jit_config.rsa_key_params)?;
-    let (access_token, session_response) = self.authenticate_and_create_session(&tx).await?;
+    let Some((access_token, session_response)) =
+      self.authenticate_and_create_session(&cancel, &tx).await?
+    else {
+      return Ok(None);
+    };
 
-    Ok(SessionCtx {
+    Ok(Some(SessionCtx {
       runner_name: Some(self.jit_config.runner_settings.agent_name.clone()),
       client: self.client.clone(),
       token: access_token,
@@ -236,7 +285,7 @@ impl GitHubListener {
       live_log: None,
       job_log_upload: None,
       watchdog: WatchdogConfig::default(),
-    })
+    }))
   }
 }
 

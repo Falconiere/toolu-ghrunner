@@ -5,7 +5,7 @@
 //! live broker, a token store, or the filesystem. Mirrors `message_route` in
 //! spirit: one pure function over already-observed facts.
 
-use shared::RunnerError;
+use shared::{RunnerError, SESSION_CONFLICT_EXIT_CODE};
 
 /// What the run loop does after a listener lifecycle returns.
 #[derive(Debug, PartialEq, Eq)]
@@ -25,11 +25,15 @@ pub enum LoopAction {
 /// tells graceful shutdown from a completed job — both return `Ok`):
 ///
 /// 1. `cancelled` → `Exit(0)` (graceful shutdown).
-/// 2. `once` → `Exit(0)` on `Ok`, `Exit(1)` on `Err` (legacy single-job).
+/// 2. `once` → `Exit(0)` on `Ok`, `Exit(SESSION_CONFLICT_EXIT_CODE)` on
+///    `Err(SessionConflict(_))`, `Exit(1)` on any other `Err` (legacy
+///    single-job).
 /// 3. `pending_remove` → `Exit(0)` (a `remove` ran while the lock was held).
-/// 4. `Ok(())` → `Reregister` (JIT config spent; mint a fresh one).
-/// 5. `Err(Auth(_))` → `Reregister` (JIT config dead; retry can't succeed).
-/// 6. Any other `Err` → `BackoffRetry` (transient; same JIT config still valid).
+/// 4. `Err(SessionConflict(_))` → `Exit(SESSION_CONFLICT_EXIT_CODE)` — the
+///    listener already spent its bounded retry; the loop must not extend it.
+/// 5. `Ok(())` → `Reregister` (JIT config spent; mint a fresh one).
+/// 6. `Err(Auth(_))` → `Reregister` (JIT config dead; retry can't succeed).
+/// 7. Any other `Err` → `BackoffRetry` (transient; same JIT config still valid).
 pub fn next_action(
   outcome: &Result<(), RunnerError>,
   once: bool,
@@ -42,6 +46,7 @@ pub fn next_action(
   if once {
     return match outcome {
       Ok(()) => LoopAction::Exit(0),
+      Err(RunnerError::SessionConflict(_)) => LoopAction::Exit(SESSION_CONFLICT_EXIT_CODE),
       Err(_) => LoopAction::Exit(1),
     };
   }
@@ -49,8 +54,9 @@ pub fn next_action(
     return LoopAction::Exit(0);
   }
   match outcome {
-    // Rule 4 (job done, JIT spent) and rule 5 (auth-dead JIT) both recover by
-    // minting a fresh config; only rule 6's transient errors reuse the config.
+    Err(RunnerError::SessionConflict(_)) => LoopAction::Exit(SESSION_CONFLICT_EXIT_CODE),
+    // Rule 5 (job done, JIT spent) and rule 6 (auth-dead JIT) both recover by
+    // minting a fresh config; only rule 7's transient errors reuse the config.
     Ok(()) | Err(RunnerError::Auth(_)) => LoopAction::Reregister,
     Err(_) => LoopAction::BackoffRetry,
   }
