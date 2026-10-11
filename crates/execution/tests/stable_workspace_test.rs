@@ -8,6 +8,12 @@
 //! (clone when the workspace has no `.git`, fetch when it does), so the
 //! assertions observe actual `.git` reuse — inode, fetched revision, file
 //! content — not just path strings. No mocks.
+//!
+//! Unix-only, like the repo's other Unix-specific test items (`#[cfg(unix)]`):
+//! every replay runs real `bash`/`git` and the `.git` identity check reads the
+//! inode via `std::os::unix::fs::MetadataExt`. CI runs `ubuntu-latest` and
+//! `macos-14`; Windows is out of scope for epic #67.
+#![cfg(unix)]
 
 use std::error::Error;
 use std::path::{Path, PathBuf};
