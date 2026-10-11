@@ -11,6 +11,7 @@
 | `step_attrs.rs` | Evaluates captured timeout / continue-on-error tokens and pins the reference runner's diagnostics. |
 | `step_metadata.rs` | Maps captured remote, subpath, `self` and registry references to upstream's step telemetry. |
 | `step_display.rs` | Generates captured step display names at job start and main stage, including failure warnings and masking. |
+| `workspace_layout.rs` | Issue #90 stable/fresh allocation on a real work root: repository parsing, busy-lease fallback, corrupt/escaping tracking files, collision suffixes. |
 | `step_timeout.rs` | Checks stalled action resolution against a parent deadline and cancellation. |
 | `orphan_cleanup.rs` | Issue #89 sweep internals on real processes: kill of a tagged process, `exec` without the id between scan and kill (PID-reuse stand-in), unreaped zombie skip, expired deadline, `process.clean` parsing and id matching. |
 | `complete_step.rs` | Issue 88 "Complete job": a local output error still closes the row; output names and evaluation errors are masked. |

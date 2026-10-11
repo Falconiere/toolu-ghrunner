@@ -1370,3 +1370,47 @@ pinned upstream source plus the live GitHub behavior above. GHES: the same
 `generate-jitconfig` / unregister / token-exchange paths serve it, but no
 GHES server is available — **unverified**. macOS: the code is
 platform-neutral and the tests ran on Linux only — **unverified**.
+
+## Issue #90 — stable per-repository workspaces
+
+Layout and `workspace.clean` follow upstream `PipelineDirectoryManager` /
+`TrackingConfig` / `JobExtension` at actions/runner
+`cab9d1c3901e45c7705889c4f88284fdd93f4ae5`; see the
+[design](specs/2026-10-11-stable-per-repository-workspace-design.md). The
+replays drive the sanitized #68 GitHub.com acquisition
+(`crates/execution/tests/incoming_contexts_matrix_0.json`, `__run` step;
+only `github.repository` / `repository_owner`, the job id, `workspace.clean`
+and the script are rewritten) through the production `Runner` → `run_job`
+path. Each script checks out a real local bare origin with real `git`
+(clone into an empty workspace, fetch into an existing `.git`). No mocks.
+Red evidence: before the implementation all four replays failed. The host
+`run:` step had no `GITHUB_WORKSPACE` (`unbound variable`), and
+`${{ github.workspace }}` / `${{ runner.workspace }}` rendered empty.
+
+| AC / scenario | Exact observation | Tests | Platforms |
+| --- | --- | --- | --- |
+| AC-1 / 90-S1 | Two sequential jobs for `alice/app` print the same `GITHUB_WORKSPACE` = `${{ github.workspace }}` = `<work>/app/app` and `RUNNER_WORKSPACE` = `${{ runner.workspace }}` = `<work>/app`. Job 1 clones. Job 2 finds `.git` (same inode as on disk) and fetches commit 2 (`id` = `alice/app@2`). A second repo checked out to `sub/lib` (checkout `path:`) is reused the same way. `_PipelineMapping/alice/app/PipelineFolder.json` has `RepositoryName`, `PipelineDirectory` `app`, `WorkspaceDirectory` `app/app`, `Repositories`, `dataDir`, `lastRunOnUnix`. | `cargo test -p execution --test stable_workspace_test stable_workspace_reuses_git_across_jobs_and_fresh_mode_stays_isolated` | Linux x86_64 local; CI `ubuntu-latest` + `macos-14` via `cargo test --workspace` |
+| AC-2 / 90-S1 fresh | With `mode = "fresh"`, a third job gets `<work>/<job_id>` for both values (the pre-#90 layout), has no `.git`, and the stable `.git` inode and `HEAD` are unchanged. | same test | as AC-1 |
+| AC-3 / 90-S2 | `alice/app`, `bob/app`, `alice/lib` → `<work>/app/app`, `<work>/app_2/app`, `<work>/lib/lib`. None sees another's `.git`, and `rev-parse HEAD` / `id` name each origin. `bob/app` re-runs in `app_2` and moves to commit 2, while `app/app` keeps alice's commit 1. Unit level: a legacy dir with the repo's name, a repo named `_PipelineMapping`, and a claimed name each get a `_<n>` suffix. | `same_repository_name_under_two_owners_and_other_repos_never_collide`; `cargo test -p execution --lib workspace_layout` | as AC-1 |
+| AC-4 / 90-S3 | Job A (registration `repo-level`) holds `alice/app`. Concurrent job B (registration `org-level`, same work root) runs in `<work>/<job_id>` and sees only `marker-b`; A sees only `marker-a`. After A ends, job C gets the stable workspace again and sees `marker-a`. Unit level: a busy lease falls back to fresh with an owner-tagged job lease; an absent/unsafe `github.repository` (`../escape`, `a/b/c`) and an odd job id (`id/with:odd` → `id_with_odd`) stay inside the work root. | `concurrent_job_for_a_leased_repository_runs_in_a_fresh_workspace`; `workspace_layout` unit tests | as AC-1 |
+| AC-5 / 90-S4 clean | On a populated stable workspace: absent / `true` keep `.git` and the `<work>/app/sibling` dir. `all` removes both. `resources` removes `.git` and keeps the sibling. `outputs` / `OUTPUTS` keep `.git` and remove the sibling. The path stays `<work>/app/app`. A corrupt or escaping (`..`) `PipelineFolder.json` is recreated inside the work root. | `workspace_clean_options_follow_upstream`; `corrupt_or_escaping_tracking_file_is_recreated_inside_the_work_root` | as AC-1 |
+| AC-6 / 90-S4 GC | Shared root, registration A sweeping. Removed: A's `alice/app` unused for 100 h (its `PipelineFolder.json` too), A's stale unleased fresh dir (and its `_jobs` lease), and a pre-#90 lease-less dir. Kept: A's 1 h-old `alice/lib`, B's stale `bob/tool` and fresh dir, A's live leased `alice/held` and live fresh dir, the running job's dir, a claimed stable dir with a 48 h-old mtime, and `_PipelineMapping`. `stable_gc_after_hours = 0` (default) prunes nothing stable. A pruned repo gets `app/app` back. | `cargo test -p toolu-runner --test workspace_gc_test`; `--test job_teardown_order_test` | as AC-1 |
+| AC-7 | A pre-#90 `config.toml` loads as `stable` / never-prune with its `gc_after_hours` kept. `fresh` + `stable_gc_after_hours = 72` round-trips through `save_config`. `mode = "per-job"` fails `load_config` naming the file and the value. `run` / `boot` map `[workspace]` into `RunnerConfig.workspace`. | `cargo test -p config --test workspace_section_test`; `--test remint_test`; `cargo test -p shared --test config_test` | as AC-1 |
+| AC-8 | Gate and docs. | `./tools/check.sh all` | Linux local, CI |
+
+Entry paths (90-S3): `run` and `boot` share `run_job`, so both take the
+lease. The run `.lock` is not what protects a workspace: an org-level and a
+repo-level registration can run the same repository at once on the shared
+`~/.toolu-runner/_work`, and that case is AC-4. `boot` has no `.lock`. The
+daemon starts each job in its own container with no bind mounts, so its work
+roots are isolated. `install-service` only supervises `run`.
+
+Migration: existing `<work>/<job_id>` dirs are left in place and pruned by the
+pre-#90 mtime rule. The first stable job for a repository creates its mapping
+and skips any existing directory with the same name (suffix).
+
+Limits stated, not claimed: container jobs keep toolu's `/github/workspace`
+mount, and `runner.workspace` stays a host path there (upstream mounts `_work`
+at `/__w`). Upstream `UpdateRepositoryDirectory` (`internal-set-repo-path`)
+is not implemented. Workspaces of a removed registration are never pruned by
+other registrations.

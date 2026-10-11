@@ -148,6 +148,17 @@ to that list requires proving the value is not a real credential.
   Caveat: concurrent cross-repo runs in `offline` / `accelerated`
   services mode need a distinct `service_bind` per repo config
   (EADDRINUSE otherwise); default `forwarder` binds nothing.
+- **Stable per-repository workspaces (#90).** `[workspace] mode =
+  "stable"` (default) runs every job for `owner/repo` in
+  `<work>/<repo>/<repo>` (upstream `_work` layout; `runner.workspace` =
+  `<work>/<repo>`), tracked by `<work>/_PipelineMapping/<owner>/<repo>/
+  PipelineFolder.json`. The run `.lock` does NOT protect it (registrations
+  share the work root, `boot` has no lock): each job holds an `fs2` lease on
+  its mapping's `.lock` (fresh: `_PipelineMapping/_jobs/<job_id>.lock`) from
+  before context build until `run_job` returns, and a busy lease falls back to
+  a fresh `<work>/<job_id>`. `mode = "fresh"` keeps the pre-#90 per-job
+  layout. Test harnesses that pre-populate `<work>/<job_id>` pin
+  `WorkspaceMode::Fresh`.
 - **Cancellation token wiring.** `toolu-runner run` builds a
   `tokio_util::sync::CancellationToken` and bridges SIGINT / SIGTERM
   to it. The poll loop, the renewal task, and the in-flight job all
@@ -277,9 +288,10 @@ to that list requires proving the value is not a real credential.
 ### `shared/` — cross-cutting types + tracing init (no deps)
 
 - `config.rs` — `RunnerConfig` (data_dir, workspace_root, cgroup_path,
-  services_mode, service_bind, cache, workspace_gc_hours,
+  services_mode, service_bind, cache, workspace_gc_hours, workspace,
   shadow_enabled) + `ServicesMode` (forwarder / offline / accelerated),
-  `CacheConfig`, `L2Config`.
+  `WorkspaceConfig` (`mode`: `WorkspaceMode` stable / fresh,
+  `stable_gc_hours`), `CacheConfig`, `L2Config`.
 - `error.rs` — `RunnerError` enum (Protocol, Auth, Network, Config,
   StepExecution, ScriptHandler, Expression, Docker, Oidc, Artifact,
   Cache, ReusableWorkflow, Reporting, WorkspaceInit, LockHeld, etc.).
@@ -541,8 +553,11 @@ to that list requires proving the value is not a real credential.
   `process.clean=false` disables it) and, in `finish_execution` before
   `JobCompleted`, `SIGKILL`s every other process still carrying it (sysinfo:
   Linux `/proc`, macOS `KERN_PROCARGS2`; 15 s deadline; never fails the job).
-  `workspace_gc.rs` prunes `workspace_root/<job_id>` older than
-  `gc_after_hours` (never the running job's). `shadow/`
+  `workspace_layout.rs` (+ `workspace_tracking.rs`, `workspace_lease.rs`)
+  allocates and leases the job workspace (#90); `workspace_gc.rs` prunes
+  stable workspaces unused for `stable_gc_hours` (default never) and fresh
+  ones older than `gc_after_hours`, only when owned by this `data_dir` and
+  unleased (pre-#90 lease-less dirs: mtime only; never the running job's). `shadow/`
   (`fingerprint`, `record`) does off-by-default per-`run:`-step
   workspace fingerprinting, appending masked `would_hit` / `false_hit`
   records to `_diag/shadow/<job_id>.jsonl` — records only, never

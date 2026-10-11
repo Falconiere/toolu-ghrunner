@@ -116,12 +116,16 @@ fn absent_or_unsafe_repository_uses_a_sanitized_fresh_job_dir() -> TestResult {
   let root = tempfile::tempdir()?;
   let config = config(root.path(), WorkspaceMode::Stable);
   let work = root.path().join("work");
-  for repository in [None, Some("../escape"), Some("a/b/c")] {
-    let prepared = prepare_workspace(&config, &message(repository, "id/with:odd")?)?;
+  for (n, repository) in [None, Some("../escape"), Some("a/b/c")]
+    .into_iter()
+    .enumerate()
+  {
+    let job_id = format!("id/with:odd{n}");
+    let prepared = prepare_workspace(&config, &message(repository, &job_id)?)?;
     assert_eq!(prepared.kind, WorkspaceKind::Fresh, "{repository:?}");
     assert_eq!(
       prepared.workspace,
-      work.join("id_with_odd"),
+      work.join(format!("id_with_odd{n}")),
       "{repository:?}"
     );
     assert_eq!(prepared.pipeline, prepared.workspace);
