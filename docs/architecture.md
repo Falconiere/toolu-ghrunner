@@ -496,10 +496,14 @@ Workspaces (#90) follow upstream `PipelineDirectoryManager`:
 `workspace.clean` (`all` / `resources` / `outputs`). A same-name repository
 under another owner gets the first free `<repo>_<n>`. `[workspace] mode =
 "fresh"`, an absent or unsafe `github.repository`, or a busy lease gives a new
-`workspace_root/<job_id>`. Every job holds an `fs2` lease
-(`workspace_lease.rs`) on `_PipelineMapping/<owner>/<repo>/.lock` or
-`_PipelineMapping/_jobs/<job_id>.lock` from before its context is built until
-`run_job` returns, so registrations sharing a work root never share a
+`workspace_root/<job_id>`. Allocation is two-phase. `prepare_workspace`
+claims the paths before the context is built: a stable job takes its `fs2`
+lease (`workspace_lease.rs`) on `_PipelineMapping/<owner>/<repo>/.lock` and
+updates the tracking file. `PreparedWorkspace::create_dirs` applies
+`workspace.clean` and creates directories only after the container, services
+and environment evaluated, so a setup error leaves no workspace. A fresh job
+takes its `_PipelineMapping/_jobs/<job_id>.lock` there. Every lease is held
+until `run_job` returns, so registrations sharing a work root never share a
 workspace. `execution/workspace_gc.rs` prunes a stable workspace unused for
 `stable_gc_after_hours` (default `0` = never, as upstream) and a fresh one
 older than `gc_after_hours`, only when its record names this registration's

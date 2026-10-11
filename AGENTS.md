@@ -154,9 +154,11 @@ to that list requires proving the value is not a real credential.
   `<work>/<repo>`), tracked by `<work>/_PipelineMapping/<owner>/<repo>/
   PipelineFolder.json`. The run `.lock` does NOT protect it (registrations
   share the work root, `boot` has no lock): each job holds an `fs2` lease on
-  its mapping's `.lock` (fresh: `_PipelineMapping/_jobs/<job_id>.lock`) from
-  before context build until `run_job` returns, and a busy lease falls back to
-  a fresh `<work>/<job_id>`. `mode = "fresh"` keeps the pre-#90 per-job
+  its mapping's `.lock`, claimed before context build (fresh:
+  `_PipelineMapping/_jobs/<job_id>.lock`, taken when directories are created)
+  and held until `run_job` returns; a busy lease falls back to a fresh
+  `<work>/<job_id>`. Directories are created only after container/services/env
+  evaluation (`PreparedWorkspace::create_dirs`), so setup errors leave none. `mode = "fresh"` keeps the pre-#90 per-job
   layout. Test harnesses that pre-populate `<work>/<job_id>` pin
   `WorkspaceMode::Fresh`.
 - **Cancellation token wiring.** `toolu-runner run` builds a

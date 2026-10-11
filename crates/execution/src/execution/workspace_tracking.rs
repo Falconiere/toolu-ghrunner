@@ -98,7 +98,8 @@ impl TrackingConfig {
   }
 
   /// Write atomically (temp file in the same directory, then `rename`), so a
-  /// concurrent reader sees the old or the new document, never a torn one.
+  /// concurrent reader sees the old or the new document, never a torn one. A
+  /// failed write or rename removes the temp file (best effort, WARN).
   ///
   /// # Errors
   ///
@@ -109,9 +110,16 @@ impl TrackingConfig {
     let temp = path.with_extension("json.tmp");
     std::fs::write(&temp, body)
       .and_then(|()| std::fs::rename(&temp, path))
-      .map_err(|source| RunnerError::WorkspaceInit {
-        path: path.to_path_buf(),
-        source,
+      .map_err(|source| {
+        if let Err(error) = std::fs::remove_file(&temp)
+          && error.kind() != std::io::ErrorKind::NotFound
+        {
+          tracing::warn!(path = %temp.display(), error = %error, "cannot remove temp tracking file");
+        }
+        RunnerError::WorkspaceInit {
+          path: path.to_path_buf(),
+          source,
+        }
       })
   }
 }

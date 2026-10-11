@@ -80,8 +80,17 @@ fn message(repository: &str, job_id: &str) -> TestResult<AgentJobRequestMessage>
   Ok(msg)
 }
 
+/// Claim and create a workspace as `run_job` does, proving it is on disk
+/// before GC runs (a silently missing directory would make GC vacuous).
 fn prepare(config: &RunnerConfig, repository: &str, job_id: &str) -> TestResult<PreparedWorkspace> {
-  Ok(prepare_workspace(config, &message(repository, job_id)?)?)
+  let mut prepared = prepare_workspace(config, &message(repository, job_id)?)?;
+  prepared.create_dirs()?;
+  assert!(
+    prepared.workspace.is_dir(),
+    "{}",
+    prepared.workspace.display()
+  );
+  Ok(prepared)
 }
 
 /// Rewrite a stable workspace's last use to `hours` ago.

@@ -137,23 +137,40 @@ struct ContainerStartParams<'a> {
   workspace_gc: Option<tokio::task::JoinHandle<()>>,
 }
 
-/// Allocate and lease the job's workspace (stable or fresh, issue #90) and
-/// start the stale-workspace sweep, sparing this job's work-root child.
-async fn prepare_job_workspace(
+/// Claim the job's workspace (stable or fresh, issue #90) before its context
+/// is built: paths, the stable lease and tracking file, no directories yet.
+async fn claim_job_workspace(
   config: &RunnerConfig,
   msg: &AgentJobRequestMessage,
+) -> Result<PreparedWorkspace, RunnerError> {
+  let claim_config = config.clone();
+  let claim_msg = msg.clone();
+  tokio::task::spawn_blocking(move || prepare_workspace(&claim_config, &claim_msg))
+    .await
+    .map_err(|error| workspace_task_error(config, &error))?
+}
+
+/// Create the claimed workspace's directories and start the stale-workspace
+/// sweep, sparing this job's work-root child. Runs after the job's
+/// container/services/environment evaluated, so a setup error leaves no
+/// workspace behind.
+async fn prepare_job_workspace(
+  config: &RunnerConfig,
+  prepared: PreparedWorkspace,
 ) -> Result<(PreparedWorkspace, Option<tokio::task::JoinHandle<()>>), RunnerError> {
   let directory_config = config.clone();
-  let directory_msg = msg.clone();
-  let prepared =
-    tokio::task::spawn_blocking(move || prepare_job_dirs(&directory_config, &directory_msg))
-      .await
-      .map_err(|error| RunnerError::WorkspaceInit {
-        path: config.workspace_root.clone(),
-        source: std::io::Error::other(format!("prepare job directories: {error}")),
-      })??;
+  let prepared = tokio::task::spawn_blocking(move || prepare_job_dirs(&directory_config, prepared))
+    .await
+    .map_err(|error| workspace_task_error(config, &error))??;
   let workspace_gc = spawn_workspace_gc(config, &prepared.pipeline_name);
   Ok((prepared, workspace_gc))
+}
+
+fn workspace_task_error(config: &RunnerConfig, error: &tokio::task::JoinError) -> RunnerError {
+  RunnerError::WorkspaceInit {
+    path: config.workspace_root.clone(),
+    source: std::io::Error::other(format!("prepare job directories: {error}")),
+  }
 }
 
 async fn start_job_services(
@@ -342,9 +359,9 @@ async fn stop_local_services(local: LocalServices) -> Option<CacheMaintenance> {
 /// step payloads; a permissive umask must not leave it world-readable).
 fn prepare_job_dirs(
   config: &RunnerConfig,
-  msg: &AgentJobRequestMessage,
+  mut prepared: PreparedWorkspace,
 ) -> Result<PreparedWorkspace, RunnerError> {
-  let prepared = prepare_workspace(config, msg)?;
+  prepared.create_dirs()?;
   std::fs::create_dir_all(&config.data_dir)?;
   super::context::restrict_dir_permissions(&config.data_dir)?;
   Ok(prepared)

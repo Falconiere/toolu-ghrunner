@@ -6,8 +6,14 @@
 //! `workspace.clean` (`all` / `resources` / `outputs`) is applied as upstream
 //! does. Fresh mode — and the fallback when the repository is unknown or its
 //! stable workspace is leased by another live job — keeps the pre-#90
-//! `<work>/<job_id>` layout (`runner.workspace` is the same directory). Every
-//! job holds a [`WorkspaceLease`] until it drops the [`PreparedWorkspace`].
+//! `<work>/<job_id>` layout (`runner.workspace` is the same directory).
+//!
+//! Two phases keep setup failures side-effect free on the workspace:
+//! [`prepare_workspace`] claims (paths, the stable lease and tracking file)
+//! before the job context exists, and [`PreparedWorkspace::create_dirs`]
+//! creates directories only after the job's container/services/environment
+//! evaluated. Every job holds a [`WorkspaceLease`] until it drops the
+//! [`PreparedWorkspace`].
 
 use std::path::{Path, PathBuf};
 
@@ -32,7 +38,7 @@ pub enum WorkspaceKind {
   Fresh,
 }
 
-/// A job's prepared directories plus the lease that keeps them its own.
+/// A job's claimed directories plus the lease that keeps them its own.
 #[derive(Debug)]
 pub struct PreparedWorkspace {
   /// `github.workspace` / `GITHUB_WORKSPACE`.
@@ -44,7 +50,27 @@ pub struct PreparedWorkspace {
   /// The work-root child (`pipeline`'s name) GC must spare while this job
   /// runs: the validated tracking `pipelineDirectory`, or the job directory.
   pub pipeline_name: String,
-  _lease: WorkspaceLease,
+  /// Stable: upstream `workspace.clean`, applied by `create_dirs`.
+  clean: Option<String>,
+  /// Fresh: the job lease file `create_dirs` takes, and its owner body.
+  job_lease: Option<(PathBuf, PathBuf)>,
+  lease: Option<WorkspaceLease>,
+}
+
+impl PreparedWorkspace {
+  /// Create the claimed directories. Stable: apply `workspace.clean`, then
+  /// ensure the workspace exists. Fresh: take the job lease (recording this
+  /// registration's `data_dir`), then create `<work>/<job_id>`.
+  ///
+  /// # Errors
+  ///
+  /// [`RunnerError::WorkspaceInit`] when a lease, deletion or directory fails.
+  pub fn create_dirs(&mut self) -> Result<(), RunnerError> {
+    if let Some((lease_path, data_dir)) = self.job_lease.take() {
+      self.lease = Some(take_job_lease(&lease_path, &data_dir)?);
+    }
+    apply_clean(self.clean.as_deref(), &self.pipeline, &self.workspace)
+  }
 }
 
 /// `owner/name` from the job's `github.repository`, validated as path parts.
@@ -75,12 +101,14 @@ impl Repository {
   }
 }
 
-/// Create and lease the job's workspace.
+/// Claim the job's workspace: its paths and, in stable mode, the repository
+/// lease and tracking file. Creates no workspace directory (see
+/// [`PreparedWorkspace::create_dirs`]).
 ///
 /// # Errors
 ///
-/// [`RunnerError::WorkspaceInit`] when a directory, tracking file or lease
-/// cannot be created, or a `workspace.clean` deletion fails.
+/// [`RunnerError::WorkspaceInit`] when the tracking file or a lease cannot be
+/// written.
 pub fn prepare_workspace(
   config: &RunnerConfig,
   msg: &AgentJobRequestMessage,
@@ -88,7 +116,7 @@ pub fn prepare_workspace(
   if config.workspace.mode == WorkspaceMode::Stable
     && let Some(repository) = github_repository(msg)
   {
-    let clean = msg.workspace.as_ref().and_then(|w| w.clean.as_deref());
+    let clean = msg.workspace.as_ref().and_then(|w| w.clean.clone());
     if let Some(prepared) = prepare_stable(config, &repository, clean)? {
       return Ok(prepared);
     }
@@ -97,7 +125,7 @@ pub fn prepare_workspace(
       "stable workspace is in use by another job; using a fresh workspace"
     );
   }
-  prepare_fresh(config, &msg.job_id)
+  Ok(prepare_fresh(config, &msg.job_id))
 }
 
 /// `github.repository` from the message's context data, if usable.
@@ -121,7 +149,7 @@ fn github_repository(msg: &AgentJobRequestMessage) -> Option<Repository> {
 fn prepare_stable(
   config: &RunnerConfig,
   repository: &Repository,
-  clean: Option<&str>,
+  clean: Option<String>,
 ) -> Result<Option<PreparedWorkspace>, RunnerError> {
   let work = &config.workspace_root;
   let mapping_root = work.join(MAPPING_DIR);
@@ -150,15 +178,14 @@ fn prepare_stable(
   tracking.save(&tracking_path)?;
   drop(root_lock);
 
-  let pipeline = work.join(&tracking.pipeline_directory);
-  let workspace = work.join(&tracking.workspace_directory);
-  apply_clean(clean, &pipeline, &workspace)?;
   Ok(Some(PreparedWorkspace {
-    workspace,
-    pipeline,
+    workspace: work.join(&tracking.workspace_directory),
+    pipeline: work.join(&tracking.pipeline_directory),
     kind: WorkspaceKind::Stable,
     pipeline_name: tracking.pipeline_directory,
-    _lease: lease,
+    clean,
+    job_lease: None,
+    lease: Some(lease),
   }))
 }
 
@@ -216,32 +243,44 @@ fn apply_clean(clean: Option<&str>, pipeline: &Path, workspace: &Path) -> Result
   std::fs::create_dir_all(workspace).map_err(|source| init_error(workspace, source))
 }
 
-/// A new `<work>/<job_id>` under a job lease recording its owner.
-fn prepare_fresh(config: &RunnerConfig, job_id: &str) -> Result<PreparedWorkspace, RunnerError> {
+/// A new `<work>/<job_id>`; its job lease is taken by `create_dirs`.
+fn prepare_fresh(config: &RunnerConfig, job_id: &str) -> PreparedWorkspace {
   let job_dir = sanitize_job_id(job_id);
   let lease_path = config
     .workspace_root
     .join(MAPPING_DIR)
     .join(JOB_LEASES_DIR)
     .join(format!("{job_dir}{LEASE_FILE}"));
-  let mut lease = WorkspaceLease::try_acquire(&lease_path)?.ok_or_else(|| {
-    init_error(
-      &lease_path,
-      std::io::Error::other("job workspace lease already held"),
-    )
-  })?;
-  lease.write_body(&serde_json::to_vec(
-    &serde_json::json!({ "dataDir": config.data_dir }),
-  )?)?;
   let workspace = config.workspace_root.join(&job_dir);
-  std::fs::create_dir_all(&workspace).map_err(|source| init_error(&workspace, source))?;
-  Ok(PreparedWorkspace {
+  PreparedWorkspace {
     pipeline: workspace.clone(),
     workspace,
     kind: WorkspaceKind::Fresh,
     pipeline_name: job_dir,
-    _lease: lease,
-  })
+    clean: None,
+    job_lease: Some((lease_path, config.data_dir.clone())),
+    lease: None,
+  }
+}
+
+/// Take a fresh job's lease and record its owner (`{"dataDir": …}`).
+fn take_job_lease(lease_path: &Path, data_dir: &Path) -> Result<WorkspaceLease, RunnerError> {
+  let mut lease = WorkspaceLease::try_acquire(lease_path)?.ok_or_else(|| {
+    init_error(
+      lease_path,
+      std::io::Error::other("job workspace lease already held"),
+    )
+  })?;
+  let body = serde_json::to_vec(&serde_json::json!({ "dataDir": data_dir }))?;
+  if let Err(error) = lease.write_body(&body) {
+    // The directory is not created yet; drop the ownerless lease file too
+    // (job ids are unique, so nobody else can be waiting on it).
+    if let Err(remove) = std::fs::remove_file(lease_path) {
+      tracing::warn!(path = %lease_path.display(), error = %remove, "cannot remove job lease file");
+    }
+    return Err(error);
+  }
+  Ok(lease)
 }
 
 fn remove_dir(path: &Path) -> Result<(), RunnerError> {

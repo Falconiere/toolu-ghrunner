@@ -95,7 +95,8 @@ fn busy_lease_falls_back_to_a_fresh_workspace() -> TestResult {
   let root = tempfile::tempdir()?;
   let config = config(root.path(), WorkspaceMode::Stable);
   let holder = prepare_workspace(&config, &message(Some("octocat/hello-world"), "job-1")?)?;
-  let other = prepare_workspace(&config, &message(Some("octocat/hello-world"), "job-2")?)?;
+  let mut other = prepare_workspace(&config, &message(Some("octocat/hello-world"), "job-2")?)?;
+  other.create_dirs()?;
   let work = root.path().join("work");
   assert_eq!(other.kind, WorkspaceKind::Fresh);
   assert_eq!(other.workspace, work.join("job-2"));
@@ -208,5 +209,31 @@ fn a_held_job_lease_is_not_taken_twice() -> TestResult {
   assert!(WorkspaceLease::try_acquire(&path)?.is_none());
   drop(held);
   assert!(WorkspaceLease::try_acquire(&path)?.is_some());
+  Ok(())
+}
+
+#[test]
+fn claim_creates_no_workspace_until_create_dirs() -> TestResult {
+  let root = tempfile::tempdir()?;
+  let work = root.path().join("work");
+  for mode in [WorkspaceMode::Stable, WorkspaceMode::Fresh] {
+    let config = config(root.path(), mode);
+    let job_id = format!("job-{mode:?}");
+    let mut claimed = prepare_workspace(&config, &message(Some("octocat/hello-world"), &job_id)?)?;
+    // A setup error between claim and create must leave no workspace behind.
+    assert!(
+      !claimed.workspace.exists(),
+      "{mode:?} claim created {:?}",
+      claimed.workspace
+    );
+    assert!(
+      !work
+        .join("_PipelineMapping/_jobs")
+        .join(format!("{job_id}.lock"))
+        .exists()
+    );
+    claimed.create_dirs()?;
+    assert!(claimed.workspace.is_dir(), "{mode:?}");
+  }
   Ok(())
 }

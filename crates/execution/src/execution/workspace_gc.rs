@@ -164,6 +164,9 @@ fn prune_job_dir(
   if !lease_path.exists() {
     return is_stale_dir(entry, now, max_age) && remove_tree(&entry.path());
   }
+  // `lease_owner` is `Option<PathBuf>`; `as_deref` borrows it as
+  // `Option<&Path>` to compare with this registration's `data_dir`. An
+  // unreadable or ownerless lease is `None`, which never matches: skip it.
   if lease_owner(&lease_path).as_deref() != Some(data_dir) {
     return false;
   }
