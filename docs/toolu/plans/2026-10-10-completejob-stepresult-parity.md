@@ -161,7 +161,7 @@ listener completion → live verification → docs → gate.
   {
     "id": "S8-step-metadata",
     "title": "execution: emit StepMetadata for run (ShellCommand name), node{major}, composite, Dockerfile, docker:// (DockerHub), pre and post stages (Docker/network tests print a distinct UNVERIFIED marker when the prerequisite is absent)",
-    "check": "cargo test -p execution --test step_metadata_test -- --include-ignored && cargo test -p execution && cargo check --workspace --all-targets",
+    "check": "mkdir -p /tmp/toolu-docker-88 && TOOLU_CONTAINER_TEST_ROOT=/tmp/toolu-docker-88 cargo test -p execution --test step_metadata_test -- --include-ignored --test-threads=1 && cargo test -p execution && cargo check --workspace --all-targets",
     "ac_refs": [
       "AC-3"
     ],
@@ -380,3 +380,6 @@ numbers. All applied; no blockers remained.
   failed job-started hook keeps ending the job in "Set up job" without a
   "Complete job" row (spec Non-Goal 7). Existing tests that count workflow
   rows now skip the "Complete job" row by name.
+- S8: the Docker rows need the daemon-shared `TOOLU_CONTAINER_TEST_ROOT`
+  (same as CI's Docker step); the check now sets it.
+
