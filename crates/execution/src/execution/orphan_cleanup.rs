@@ -29,9 +29,11 @@ pub(crate) const ORPHAN_CLEANUP_TIMEOUT: Duration = Duration::from_secs(15);
 ///
 /// The cooperative `deadline` stops the sweep at its next check; this bound
 /// only matters when a single syscall never returns (a D-state target). No
-/// design can reclaim that blocking thread, so the trade-off is deliberate: the
-/// job still finishes (bounded) while the parked thread waits for the kernel,
-/// instead of finalization awaiting it forever (unbounded hang).
+/// design can reclaim that blocking thread, so the trade-off is deliberate:
+/// finalization stops waiting after the backstop and the job completes, while
+/// the parked thread waits for the kernel. The thread holds no event sender
+/// (kills are returned, then logged by `sweep`), so it cannot keep the job's
+/// event channel — and with it job completion — open.
 const JOIN_BACKSTOP: Duration = Duration::from_secs(2);
 /// Interval between exit polls of killed processes.
 const EXIT_POLL: Duration = Duration::from_millis(100);
@@ -131,22 +133,28 @@ pub(crate) async fn sweep(
 ) -> CleanupReport {
   job_log(events, HEADER.to_owned()).await;
   let id = tracking.id.clone();
-  let tx = events.clone();
   let own_pid = std::process::id();
   let deadline = Instant::now() + ORPHAN_CLEANUP_TIMEOUT;
+  // The blocking closure owns no event sender: a thread parked in the kernel
+  // must never hold the job's event channel open past the backstop.
   let task = tokio::task::spawn_blocking(move || {
-    sweep_blocking(&id, own_pid, deadline, |pid, name| {
-      let line = format!("Terminate orphan process: pid ({pid}) ({name})");
-      if tx.blocking_send(job_event(line)).is_err() {
-        tracing::warn!(
-          pid,
-          "event channel closed; orphan termination line was dropped"
-        );
-      }
-    })
+    let mut kills = Vec::new();
+    let report = sweep_blocking(&id, own_pid, deadline, |pid, name| {
+      kills.push((pid, name.to_owned()));
+    });
+    (report, kills)
   });
   let report = match tokio::time::timeout(ORPHAN_CLEANUP_TIMEOUT + JOIN_BACKSTOP, task).await {
-    Ok(Ok(report)) => report,
+    Ok(Ok((report, kills))) => {
+      for (pid, name) in kills {
+        job_log(
+          events,
+          format!("Terminate orphan process: pid ({pid}) ({name})"),
+        )
+        .await;
+      }
+      report
+    },
     Ok(Err(error)) => {
       tracing::warn!(%error, "orphan cleanup task failed");
       CleanupReport::default()
