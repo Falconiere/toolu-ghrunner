@@ -14,7 +14,9 @@ use std::ffi::OsString;
 use std::time::{Duration, Instant};
 
 use shared::{LogStream, RunnerEvent, VariableValue};
-use sysinfo::{Pid, ProcessRefreshKind, ProcessStatus, ProcessesToUpdate, Signal, System, UpdateKind};
+use sysinfo::{
+  Pid, ProcessRefreshKind, ProcessStatus, ProcessesToUpdate, Signal, System, UpdateKind,
+};
 use tokio::sync::mpsc;
 
 /// Environment variable carrying the per-job tracking id.
@@ -54,7 +56,8 @@ impl ProcessTracking {
 /// case-insensitive) `false` disables tracking; anything else enables it.
 pub(crate) fn process_clean_enabled(variables: &HashMap<String, VariableValue>) -> bool {
   !variables.iter().any(|(key, value)| {
-    key.eq_ignore_ascii_case(PROCESS_CLEAN_VARIABLE) && value.value.trim().eq_ignore_ascii_case("false")
+    key.eq_ignore_ascii_case(PROCESS_CLEAN_VARIABLE)
+      && value.value.trim().eq_ignore_ascii_case("false")
   })
 }
 
@@ -129,7 +132,10 @@ pub(crate) async fn sweep(
     sweep_blocking(&id, own_pid, deadline, |pid, name| {
       let line = format!("Terminate orphan process: pid ({pid}) ({name})");
       if tx.blocking_send(job_event(line)).is_err() {
-        tracing::warn!(pid, "event channel closed; orphan termination line was dropped");
+        tracing::warn!(
+          pid,
+          "event channel closed; orphan termination line was dropped"
+        );
       }
     })
   });
@@ -257,7 +263,9 @@ fn wait_for_exit(
     }
     if Instant::now() >= deadline {
       report.timed_out = true;
-      report.survivors.extend(pending.iter().map(|candidate| candidate.pid));
+      report
+        .survivors
+        .extend(pending.iter().map(|candidate| candidate.pid));
       break;
     }
     std::thread::sleep(EXIT_POLL);

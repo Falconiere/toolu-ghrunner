@@ -12,7 +12,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use execution::Runner;
-use shared::{AgentJobRequestMessage, Conclusion, RunnerConfig, RunnerEvent, SecretMasker, TemplateToken};
+use shared::{
+  AgentJobRequestMessage, Conclusion, RunnerConfig, RunnerEvent, SecretMasker, TemplateToken,
+};
 use tokio_util::sync::CancellationToken;
 
 type TestResult<T = ()> = Result<T, Box<dyn Error>>;
@@ -80,14 +82,21 @@ async fn container_step_is_untagged_and_host_sweep_still_runs() -> TestResult {
   })
   .await?;
   assert_eq!(conclusion, Some(Conclusion::Success), "{lines:?}");
-  let markers: Vec<&String> = lines.iter().filter(|line| line.starts_with("TRACK89|")).collect();
+  let markers: Vec<&String> = lines
+    .iter()
+    .filter(|line| line.starts_with("TRACK89|"))
+    .collect();
   assert_eq!(markers, ["TRACK89|container|unset"], "{lines:?}");
   assert!(
-    lines.iter().any(|line| line == "Cleaning up orphan processes"),
+    lines
+      .iter()
+      .any(|line| line == "Cleaning up orphan processes"),
     "{lines:?}"
   );
   assert!(
-    !lines.iter().any(|line| line.starts_with("Terminate orphan process")),
+    !lines
+      .iter()
+      .any(|line| line.starts_with("Terminate orphan process")),
     "{lines:?}"
   );
   Ok(())

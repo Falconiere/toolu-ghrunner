@@ -11,8 +11,8 @@ use shared::VariableValue;
 use sysinfo::{Pid, ProcessStatus, ProcessesToUpdate, System};
 
 use super::{
-  KillOutcome, ProcessTracking, carries_id, kill_verified, process_clean_enabled,
-  refresh_kind, scan_candidates, sweep_blocking,
+  KillOutcome, ProcessTracking, carries_id, kill_verified, process_clean_enabled, refresh_kind,
+  scan_candidates, sweep_blocking,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -72,7 +72,10 @@ fn process_clean_only_false_disables_tracking() {
       "{disabled:?}"
     );
   }
-  assert!(!process_clean_enabled(&variables(&[("Process.Clean", "false")])));
+  assert!(!process_clean_enabled(&variables(&[(
+    "Process.Clean",
+    "false"
+  )])));
   for enabled in ["true", "0", "no", "garbage", ""] {
     assert!(
       process_clean_enabled(&variables(&[("process.clean", enabled)])),
@@ -97,7 +100,10 @@ fn process_clean_enabled_jobs_get_fresh_github_ids() -> TestResult {
 fn carries_id_matches_exact_key_and_case_insensitive_value() {
   let id = "github_0a1b";
   let env = |entries: &[&str]| entries.iter().map(OsString::from).collect::<Vec<_>>();
-  assert!(carries_id(&env(&["PATH=/bin", "RUNNER_TRACKING_ID=github_0a1b"]), id));
+  assert!(carries_id(
+    &env(&["PATH=/bin", "RUNNER_TRACKING_ID=github_0a1b"]),
+    id
+  ));
   assert!(carries_id(&env(&["RUNNER_TRACKING_ID=GITHUB_0A1B"]), id));
   assert!(!carries_id(&env(&["RUNNER_TRACKING_ID="]), id));
   assert!(!carries_id(&env(&["RUNNER_TRACKING_ID=github_other"]), id));
@@ -150,7 +156,10 @@ fn exec_without_id_between_scan_and_kill_is_not_signalled() -> TestResult {
   child.kill()?;
   child.wait()?;
   assert_eq!(outcome, KillOutcome::Skipped);
-  assert!(still_running, "re-exec'd process without the id was signalled");
+  assert!(
+    still_running,
+    "re-exec'd process without the id was signalled"
+  );
   Ok(())
 }
 
@@ -166,7 +175,10 @@ fn unreaped_zombie_carrying_id_is_skipped() -> TestResult {
   });
   child.wait()?;
   assert!(killed.is_empty(), "{report:?}");
-  assert!(report.terminated.is_empty() && report.survivors.is_empty(), "{report:?}");
+  assert!(
+    report.terminated.is_empty() && report.survivors.is_empty(),
+    "{report:?}"
+  );
   assert!(!report.timed_out && !report.degraded);
   Ok(())
 }

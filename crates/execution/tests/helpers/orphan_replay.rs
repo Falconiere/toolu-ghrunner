@@ -93,11 +93,14 @@ pub fn script_job(body: &str) -> TestResult<AgentJobRequestMessage> {
 }
 
 /// The captured job reduced to its `run:` step plus the local Node action step.
-pub fn script_and_node_job(body: &str, node_env: &[(&str, &str)]) -> TestResult<AgentJobRequestMessage> {
+pub fn script_and_node_job(
+  body: &str,
+  node_env: &[(&str, &str)],
+) -> TestResult<AgentJobRequestMessage> {
   let mut job: AgentJobRequestMessage = serde_json::from_str(CAPTURE)?;
-  job.steps.retain(|step| {
-    matches!(step.context_name.as_deref(), Some("__run" | "__self"))
-  });
+  job
+    .steps
+    .retain(|step| matches!(step.context_name.as_deref(), Some("__run" | "__self")));
   let mut steps = job.steps.iter_mut();
   set_script(steps.next().ok_or("captured script step absent")?, body)?;
   let node = steps.next().ok_or("captured action step absent")?;
@@ -146,14 +149,21 @@ impl Replay {
       .join(&job.job_id)
       .join(".github/actions/orphan-89");
     std::fs::create_dir_all(&root)?;
-    std::fs::write(root.join("action.yml"), include_str!("../orphan_89_action.yml"))?;
+    std::fs::write(
+      root.join("action.yml"),
+      include_str!("../orphan_89_action.yml"),
+    )?;
     std::fs::write(root.join("main.js"), include_str!("../orphan_89_main.js"))?;
     std::fs::write(root.join("post.js"), include_str!("../orphan_89_post.js"))?;
     Ok(())
   }
 
   pub fn pid(&self, name: &str) -> TestResult<u32> {
-    Ok(std::fs::read_to_string(self.pids.join(name))?.trim().parse()?)
+    Ok(
+      std::fs::read_to_string(self.pids.join(name))?
+        .trim()
+        .parse()?,
+    )
   }
 
   /// Run `job` to the end of its event stream. `on_event` may fire the job's
@@ -179,7 +189,12 @@ impl Replay {
       }
     })
     .await
-    .map_err(|error| format!("replay timed out: {error}; last events: {:?}", events.iter().rev().take(8).collect::<Vec<_>>()))?;
+    .map_err(|error| {
+      format!(
+        "replay timed out: {error}; last events: {:?}",
+        events.iter().rev().take(8).collect::<Vec<_>>()
+      )
+    })?;
     Ok(Finished {
       events,
       elapsed: started.elapsed(),
@@ -357,7 +372,11 @@ pub async fn assert_orphans_cleaned(
   finished: &Finished,
   swept: &[&str],
 ) -> TestResult {
-  assert!(finished.has_line(HEADER), "cleanup header missing: {:?}", finished.lines());
+  assert!(
+    finished.has_line(HEADER),
+    "cleanup header missing: {:?}",
+    finished.lines()
+  );
   for name in ORPHANS {
     let pid = replay.pid(name)?;
     assert_dead(pid, name).await?;
@@ -374,4 +393,3 @@ pub async fn assert_orphans_cleaned(
   );
   Ok(())
 }
-

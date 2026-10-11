@@ -595,9 +595,8 @@ pub fn is_runner_private_env_key(key: &str) -> bool {
 /// stripped too: host spawns receive this job's id, or that inherited value
 /// only when `process.clean=false` (see `ExecutionContext::process_tracking_env`).
 pub fn safe_process_env_vars() -> impl Iterator<Item = (String, String)> {
-  std::env::vars().filter(|(k, _)| {
-    !is_runner_private_env_key(k) && k != super::orphan_cleanup::TRACKING_ENV
-  })
+  std::env::vars()
+    .filter(|(k, _)| !is_runner_private_env_key(k) && k != super::orphan_cleanup::TRACKING_ENV)
 }
 
 /// Map a `String → String` table to an `ExprValue::Object` of strings.

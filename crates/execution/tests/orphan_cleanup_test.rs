@@ -39,7 +39,12 @@ async fn tracking_markers(replay: &Replay) -> TestResult<Vec<(String, String)>> 
   );
   replay.install_node_action(&job)?;
   let finished = replay.run(job, |_, _, _| {}).await?;
-  assert_eq!(finished.conclusion(), Some(Conclusion::Success), "{:?}", finished.lines());
+  assert_eq!(
+    finished.conclusion(),
+    Some(Conclusion::Success),
+    "{:?}",
+    finished.lines()
+  );
   Ok(finished.markers())
 }
 
@@ -48,7 +53,11 @@ async fn tracking_id_reaches_hook_shell_and_node_stages() -> TestResult {
   let replay = Replay::new().await?;
   let first = tracking_markers(&replay).await?;
   let stages: Vec<&str> = first.iter().map(|(stage, _)| stage.as_str()).collect();
-  assert_eq!(stages, ["hook", "run", "node-main", "node-post"], "{first:?}");
+  assert_eq!(
+    stages,
+    ["hook", "run", "node-main", "node-post"],
+    "{first:?}"
+  );
   let id = &first.first().ok_or("no marker")?.1;
   assert!(is_tracking_id(id), "not a github_<uuid> id: {id}");
   assert!(first.iter().all(|(_, value)| value == id), "{first:?}");
@@ -64,7 +73,12 @@ async fn tracking_id_reaches_hook_shell_and_node_stages() -> TestResult {
 #[tokio::test]
 async fn tracking_id_replaces_inherited_outer_value() -> TestResult {
   let output = tokio::process::Command::new(std::env::current_exe()?)
-    .args(["--exact", "inherited_outer_id_child", "--ignored", "--nocapture"])
+    .args([
+      "--exact",
+      "inherited_outer_id_child",
+      "--ignored",
+      "--nocapture",
+    ])
     .env("RUNNER_TRACKING_ID", "github_outer89")
     .env("ORPHAN89_CHILD", "1")
     .output()
@@ -90,7 +104,10 @@ async fn inherited_outer_id_child() -> TestResult {
   let replay = Replay::new().await?;
   let enabled = replay.run(script_job(PROBE)?, |_, _, _| {}).await?;
   let value = &enabled.markers().first().ok_or("no marker")?.1.clone();
-  assert!(is_tracking_id(value) && value != "github_outer89", "{value}");
+  assert!(
+    is_tracking_id(value) && value != "github_outer89",
+    "{value}"
+  );
 
   let mut disabled = script_job(PROBE)?;
   variable(&mut disabled, "process.clean", "false");
@@ -139,8 +156,7 @@ async fn orphans_are_killed_after_cancelled_job() -> TestResult {
   let finished = replay
     .run(job, |event, cancel, _| {
       // Cancel once the step reports its orphans are in place.
-      if !fired && matches!(event, RunnerEvent::Log { line, .. } if line.starts_with("TRACK89|"))
-      {
+      if !fired && matches!(event, RunnerEvent::Log { line, .. } if line.starts_with("TRACK89|")) {
         fired = true;
         let cancel = cancel.clone();
         let ready = ready.clone();
@@ -173,7 +189,11 @@ async fn job_without_orphans_logs_header_and_no_termination() -> TestResult {
   let finished = replay.run(script_job(PROBE)?, |_, _, _| {}).await?;
   assert_eq!(finished.conclusion(), Some(Conclusion::Success));
   assert!(finished.has_line(HEADER), "{:?}", finished.lines());
-  assert!(!finished.has_line("Terminate orphan process"), "{:?}", finished.lines());
+  assert!(
+    !finished.has_line("Terminate orphan process"),
+    "{:?}",
+    finished.lines()
+  );
   Ok(())
 }
 
@@ -241,11 +261,8 @@ async fn concurrent_job_and_unrelated_process_survive_cleanup() -> TestResult {
 async fn empty_step_tracking_id_opts_out() -> TestResult {
   let replay = Replay::new().await?;
   let mut job = script_job(&detached_script(&replay.pids_dir(), "detached", "exit 0"))?;
-  job
-    .steps
-    .first_mut()
-    .ok_or("step absent")?
-    .environment = Some(mapping(&[("RUNNER_TRACKING_ID", "")]));
+  job.steps.first_mut().ok_or("step absent")?.environment =
+    Some(mapping(&[("RUNNER_TRACKING_ID", "")]));
   let finished = replay.run(job, |_, _, _| {}).await?;
   let pid = replay.pid("detached")?;
   let alive = ps_state(pid)?.is_some_and(|state| !state.starts_with('Z'));
@@ -322,7 +339,12 @@ async fn failing_node_post_orphan_is_killed() -> TestResult {
   )?;
   replay.install_node_action(&job)?;
   let finished = replay.run(job, |_, _, _| {}).await?;
-  assert_eq!(finished.conclusion(), Some(Conclusion::Failure), "{:?}", finished.lines());
+  assert_eq!(
+    finished.conclusion(),
+    Some(Conclusion::Failure),
+    "{:?}",
+    finished.lines()
+  );
   let pid = replay.pid("node-post")?;
   assert_dead(pid, "node post").await?;
   assert!(finished.terminated(pid), "{:?}", finished.lines());
