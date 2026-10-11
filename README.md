@@ -438,7 +438,8 @@ exclusive lease on its workspace, so a second job for the same repository
 instead of sharing it. The job message's `workspace.clean` (`all` /
 `resources` / `outputs`) is applied as upstream does. `mode = "fresh"` opts
 out: every job gets a new `_work/<job-id>`, as before. GC only removes
-workspaces this registration used, never one a live job holds.
+workspaces this registration used, never one a live job holds (pre-#90
+`_work/<job-id>` dirs keep the old age-only rule).
 
 `fsync_chunks` (default `false`) skips the per-chunk `fsync` before a
 chunk's atomic rename, trading it for save-path throughput. This does

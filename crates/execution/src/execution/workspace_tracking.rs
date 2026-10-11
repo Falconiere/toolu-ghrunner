@@ -101,6 +101,7 @@ impl TrackingConfig {
   ///
   /// # Errors
   ///
+  /// [`RunnerError::Json`] when it cannot be encoded,
   /// [`RunnerError::WorkspaceInit`] when the file cannot be written.
   pub fn save(&self, path: &Path) -> Result<(), RunnerError> {
     let body = serde_json::to_vec_pretty(self)?;

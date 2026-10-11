@@ -27,8 +27,8 @@ pub enum ServicesMode {
 ///   `<work>/<repo>/<repo>` and reuses it across jobs, like the official
 ///   runner's `_work/<repo>/<repo>`, so `actions/checkout` fetches
 ///   incrementally.
-/// - [`Fresh`](WorkspaceMode::Fresh) creates a new `<work>/<job_id>/<repo>`
-///   for every job.
+/// - [`Fresh`](WorkspaceMode::Fresh) creates a new `<work>/<job_id>` for
+///   every job (the pre-#90 layout).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum WorkspaceMode {
@@ -118,7 +118,7 @@ pub struct RunnerConfig {
   /// Root directory for caches (actions, node, tools).
   pub data_dir: PathBuf,
   /// Work root holding job workspaces (`<repo>/<repo>` stable or
-  /// `<job_id>/<repo>` fresh) and `_PipelineMapping/`.
+  /// `<job_id>` fresh) and `_PipelineMapping/`.
   pub workspace_root: PathBuf,
   /// Per-job cgroup-v2 directory used to enforce CPU/memory limits.
   ///
