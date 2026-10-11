@@ -6,7 +6,9 @@ use shared::RunnerError;
 ///
 /// # Errors
 ///
-/// Returns `RunnerError::Protocol` on HTTP or response parse failures.
+/// Returns `RunnerError::SessionConflict` for HTTP 409 (another session is
+/// live for this registration) and `RunnerError::Protocol` on any other HTTP
+/// or response parse failure.
 pub async fn create_session(
   client: &reqwest::Client,
   server_url: &str,
@@ -28,6 +30,13 @@ pub async fn create_session(
   if !status.is_success() {
     let body = response.text().await.unwrap_or_default();
     tracing::debug!(status = %status, body_len = body.len(), "create session failed");
+    // GitHub's broker answers 409 (empty body) while another session is live
+    // for this registration — upstream's `TaskAgentSessionConflictException`.
+    if status == reqwest::StatusCode::CONFLICT {
+      return Err(RunnerError::SessionConflict(format!(
+        "create session returned {status}"
+      )));
+    }
     return Err(RunnerError::Protocol(format!(
       "create session failed with status {status}: see debug log"
     )));
