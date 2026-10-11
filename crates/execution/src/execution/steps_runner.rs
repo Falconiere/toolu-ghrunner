@@ -450,6 +450,7 @@ async fn run_script_step(
   // Own the cgroup path so `params` doesn't borrow `ctx` — the concurrent
   // dispatcher needs `&mut ctx` while the child runs.
   let cgroup = ctx.cgroup_path().map(Path::to_path_buf);
+  let tracking = ctx.process_tracking_env();
   let container = ctx.job_container().cloned();
   let params = ScriptParams {
     container: container.as_deref(),
@@ -459,6 +460,7 @@ async fn run_script_step(
     working_dir: &working_dir,
     step_id: &step.id,
     cgroup_path: cgroup.as_deref(),
+    tracking_id: tracking.as_deref(),
     timeout: bounds.remaining_timeout(),
     cancel: &bounds.cancel,
   };

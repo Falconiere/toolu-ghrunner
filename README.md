@@ -215,6 +215,24 @@ container declaration supplying the fallback when no job or step `CI` is present
 Docker action containers follow this environment rule too; see [test coverage](docs/test-coverage.md)
 for measured platforms and live parity status.
 
+Every host step process — shells, Node action pre/main/post, composite shells
+and job hooks — starts with a per-job `RUNNER_TRACKING_ID=github_<uuid>`. Once
+the job's steps, posts and containers are done, the runner logs `Cleaning up
+orphan processes` and sends `SIGKILL` to every other process whose environment
+still carries that id, logging `Terminate orphan process: pid (N) (name)` for
+each. Background services started by one step therefore keep running for later
+steps, but `nohup`, `setsid` and other detached leftovers do not outlive the
+job. As with the official runner, a workflow value wins: `env:
+RUNNER_TRACKING_ID: ''` (or any other value) on a step opts that step's
+processes out, and the job variable `process.clean=false` disables tagging and
+cleanup entirely. The sweep is bounded at 15 seconds and never changes the job
+result. Linux reads `/proc/<pid>/environ` and macOS uses `KERN_PROCARGS2`.
+Both see only the environment a process was started with, and only for
+processes the runner's user may inspect. Processes started through `sudo`,
+`env -i`, or as another user are therefore not found. Processes inside Docker
+containers are never tagged; container teardown owns them. A runner crash, or
+the `boot` deadline watchdog's hard exit, skips the sweep.
+
 Steps export `GITHUB_ACTION` from the acquired action name (including generated
 `__run`, `__run_2`, and `__owner_repo` names). Remote repository actions also
 export `GITHUB_ACTION_REPOSITORY` and `GITHUB_ACTION_REF`; run, local, and
@@ -713,7 +731,8 @@ five-minute budget shared with action posts. Cleanup cannot change the final
 cancelled result. SIGINT/SIGTERM runner shutdown interrupts running work, skips
 later user steps/posts, tears down job resources, and reports failure.
 Timeout and cancellation kill the owned Unix process group and reap its leader;
-processes that deliberately detach from that group remain outside this guarantee.
+processes that deliberately detach from that group are terminated by the job-end
+`RUNNER_TRACKING_ID` sweep instead (see *What runs*).
 Reaping allows up to ten seconds and each output pipe up to two seconds after
 termination. See [the evidence map](docs/test-coverage.md#issue-100--conditional-cleanup)
 for verified cases and remaining live/reference lanes.

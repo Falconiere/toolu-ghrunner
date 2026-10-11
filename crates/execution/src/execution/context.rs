@@ -22,6 +22,8 @@ use expressions::types::ExprValue;
 mod context_env;
 #[path = "context_eval.rs"]
 mod context_eval;
+#[path = "context_process.rs"]
+mod context_process;
 #[path = "context_scopes.rs"]
 mod context_scopes;
 
@@ -61,6 +63,8 @@ pub struct ExecutionContext {
   masker: Arc<Mutex<SecretMasker>>,
   path_additions: Vec<String>,
   cgroup_path: Option<std::path::PathBuf>,
+  /// Per-job `RUNNER_TRACKING_ID` (issue #89); `None` when `process.clean=false`.
+  process_tracking: Option<super::orphan_cleanup::ProcessTracking>,
   /// Per-job workspace root shared within execution for `hashFiles()` and matcher paths.
   pub(super) workspace: Option<std::path::PathBuf>,
   container: Option<Arc<JobContainer>>,
@@ -117,6 +121,7 @@ impl ExecutionContext {
       masker,
       path_additions: Vec::new(),
       cgroup_path: None,
+      process_tracking: None,
       workspace: None,
       container: None,
       services: None,
@@ -586,9 +591,12 @@ pub fn is_runner_private_env_key(key: &str) -> bool {
 
 /// The current process env with the runner's private `TOOLU_RUNNER_*` namespace
 /// stripped — the only env iterator that may be folded or inherited into a
-/// job/step child.
+/// job/step child. An inherited `RUNNER_TRACKING_ID` (an outer runner's) is
+/// stripped too: host spawns receive this job's id, or that inherited value
+/// only when `process.clean=false` (see `ExecutionContext::process_tracking_env`).
 pub fn safe_process_env_vars() -> impl Iterator<Item = (String, String)> {
-  std::env::vars().filter(|(k, _)| !is_runner_private_env_key(k))
+  std::env::vars()
+    .filter(|(k, _)| !is_runner_private_env_key(k) && k != super::orphan_cleanup::TRACKING_ENV)
 }
 
 /// Map a `String → String` table to an `ExprValue::Object` of strings.

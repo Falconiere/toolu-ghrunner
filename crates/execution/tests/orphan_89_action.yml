@@ -1,0 +1,6 @@
+name: orphan-89-probe
+description: Real Node action that reports RUNNER_TRACKING_ID and detaches a child from its post stage (issue 89).
+runs:
+  using: node20
+  main: main.js
+  post: post.js

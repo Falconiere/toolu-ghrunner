@@ -11,6 +11,7 @@
 | `step_attrs.rs` | Evaluates captured timeout / continue-on-error tokens and pins the reference runner's diagnostics. |
 | `step_display.rs` | Generates captured step display names at job start and main stage, including failure warnings and masking. |
 | `step_timeout.rs` | Checks stalled action resolution against a parent deadline and cancellation. |
+| `orphan_cleanup.rs` | Issue #89 sweep internals on real processes: kill of a tagged process, `exec` without the id between scan and kill (PID-reuse stand-in), unreaped zombie skip, expired deadline, `process.clean` parsing and id matching. |
 | `job_cancellation.rs` | Real cleanup processes share one cancellation deadline and are reaped on expiry. |
 | `composite_working_directory.rs` | Issue 81 captured-job replay through real Bash, per-step cwd, nested defaults and failure cleanup. |
 | `docker_action_lifecycle.rs` | Real-Docker network and cleanup cases included by the opt-in `docker_action_linux_test` integration target. |

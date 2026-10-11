@@ -29,6 +29,9 @@ pub struct NodeExecParams<'a> {
   pub step_id: &'a str,
   /// Per-job cgroup directory to move the spawned step into (`None` = no isolation).
   pub cgroup_path: Option<&'a Path>,
+  /// `RUNNER_TRACKING_ID` for a host child (`None` = untagged; issue #89).
+  /// Ignored when the child runs in a job container, which is never tagged.
+  pub tracking_id: Option<&'a str>,
   /// `timeout-minutes` bound for the child wait (`None` = unbounded).
   pub timeout: Option<Duration>,
   /// In-flight cancellation: a fired token kills the child mid-run.
@@ -135,7 +138,7 @@ async fn execute_in_container(
 fn build_node_command(params: &NodeExecParams<'_>) -> tokio::process::Command {
   let mut cmd = tokio::process::Command::new(params.node_binary);
   let mut env = params.env.clone();
-  crate::execution::step_process_env::apply(&mut env, None);
+  crate::execution::step_process_env::apply(&mut env, None, params.tracking_id);
   cmd.arg(params.script_path);
   cmd.current_dir(params.working_dir);
   // A cancelled post can drop the whole stage future while it is waiting;

@@ -97,6 +97,7 @@ pub async fn run_job_hook(
   emit_log(events, stage.step_id(), &script_path).await;
   emit_log(events, stage.step_id(), "##[endgroup]").await;
 
+  let tracking = ctx.process_tracking_env();
   let params = ScriptParams {
     container: None,
     script: &script,
@@ -105,6 +106,7 @@ pub async fn run_job_hook(
     working_dir: workspace,
     step_id: stage.step_id(),
     cgroup_path: ctx.cgroup_path(),
+    tracking_id: tracking.as_deref(),
     timeout: None,
     cancel,
   };

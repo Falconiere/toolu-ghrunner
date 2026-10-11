@@ -124,7 +124,7 @@ impl JobContainer {
     ];
     command.extend_from_slice(params.args);
     let mut env = params.env.clone();
-    crate::execution::step_process_env::apply(&mut env, Some(&self.base_ci));
+    crate::execution::step_process_env::apply(&mut env, Some(&self.base_ci), None);
     ExecConfig {
       cmd: Some(command),
       env: Some(
