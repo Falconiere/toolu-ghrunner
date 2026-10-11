@@ -150,7 +150,17 @@ fn sweep_kills_a_live_tagged_process() -> TestResult {
 #[test]
 fn exec_without_id_between_scan_and_kill_is_not_signalled() -> TestResult {
   let id = fresh_id();
-  let mut child = spawn_tagged(&id, "sh", &["-c", "read _; exec env -i sleep 300"])?;
+  // One exec, straight to the id-less image (a two-step `exec env -i sleep`
+  // passes through an `env` image that still carries the id). The exported
+  // marker exists only in that final image's exec-time environment.
+  let mut child = spawn_tagged(
+    &id,
+    "sh",
+    &[
+      "-c",
+      "read _; unset RUNNER_TRACKING_ID; export ORPHAN89_EXECED=1; exec sleep 300",
+    ],
+  )?;
   let pid = child.id();
   wait_until(pid, |process| carries_id(process.environ(), &id))?;
 
@@ -164,8 +174,17 @@ fn exec_without_id_between_scan_and_kill_is_not_signalled() -> TestResult {
     .clone();
 
   // Same pid, new image, environment without the id: the PID-reuse stand-in.
+  // Wait for that final state only — the marker present and the id gone —
+  // never a transient empty read taken mid-exec. (sysinfo keeps a process's
+  // first-seen name, so the image name cannot be used to detect the exec.)
   child.stdin.take().ok_or("stdin")?.write_all(b"go\n")?;
-  wait_until(pid, |process| !carries_id(process.environ(), &id))?;
+  wait_until(pid, |process| {
+    process
+      .environ()
+      .iter()
+      .any(|entry| entry.as_encoded_bytes() == b"ORPHAN89_EXECED=1")
+      && !carries_id(process.environ(), &id)
+  })?;
 
   let outcome = kill_verified(&mut system, &id, &candidate);
   let still_running = child.try_wait()?.is_none();

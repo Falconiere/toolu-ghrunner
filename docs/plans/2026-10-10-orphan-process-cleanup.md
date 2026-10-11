@@ -149,7 +149,7 @@ The design is the spawn-time host flag, per the approved spec:
       "crates/execution/tests/orphan_cleanup_test.rs",
       "crates/execution/tests/shell_templates_test.rs"
     ],
-    "input": "Same captured replay: four orphan kinds dead after success, exit 1 and cancel, with a Terminate line per pid; concurrent job B's detached process (A's step blocks until the test has seen B's pid file) and the unrelated sleep survive A's sweep; '' opt-out survives, upper-cased id killed; hook-exit-1 and failing Node post orphans killed with Failure; cancel and shutdown fired on the cleanup header still kill. Unit tests on real processes: exec env -i between scan and kill means no signal and the process is alive; an unreaped zombie is skipped; a passed deadline gives timed_out.",
+    "input": "Same captured replay: four orphan kinds dead after success, exit 1 and cancel, with a Terminate line per pid; concurrent job B's detached process (A's step blocks until the test has seen B's pid file) and the unrelated sleep survive A's sweep; '' opt-out survives, upper-cased id killed; hook-exit-1 and failing Node post orphans killed with Failure; cancel and shutdown fired on the cleanup header still kill. Unit tests on real processes: an exec that drops the id between scan and kill means no signal and the process is alive; an unreaped zombie is skipped; a passed deadline gives timed_out.",
     "check": "cargo test -p execution --test orphan_cleanup_test && cargo test -p execution --lib orphan_cleanup"
   },
   {

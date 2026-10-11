@@ -289,7 +289,7 @@ This is in addition to the existing step-level costs of 10 s `REAP_GRACE` and
   detached process survives. The pure parser treats `False` and ` FALSE ` as
   disabled, and `0`, `no` and `garbage` as enabled.
 - **AC-5:** Given a real process that carried the id when scanned and then
-  `exec`s `env -i sleep` before the kill phase (same pid, environment without
+  `exec`s `sleep` with the variable unset before the kill phase (same pid, environment without
   the id, the observable stand-in for PID reuse), it is not signalled and stays
   alive. Given a real unreaped zombie child that carried the id, the sweep
   skips it without error. Given an already-passed deadline, the sweep returns
@@ -324,7 +324,7 @@ real `ps -o stat= -p <pid>`: empty output or a leading `Z` means dead.
 | AC-2 / 89-S1 | The four processes above; pid files; three conclusions; log lines; a no-orphan job | same |
 | AC-3 / 89-S2 | Jobs A and B on one runtime; A's step blocks until the test has seen B's pid file (B's detached process exists before A's sweep), B waits on a marker the test writes after A's stream closes; unrelated `sleep` spawned by the test | same |
 | AC-4 / 89-S3 | Step `environment` token `RUNNER_TRACKING_ID: ''`; upper-cased re-export; `process.clean=false` variable; parser table | same + sibling unit test `crates/execution/src/execution/tests/orphan_cleanup.rs` |
-| AC-5 / 89-S2 lookup failure | `sh -c 'read _; exec env -i sleep 300'` carrying the id: `scan_candidates` finds it, the test releases the exec, `kill_verified` skips, and `kill -0` still succeeds. An unreaped `Child` that exited gives a real zombie. Deadline `Instant::now()` gives `timed_out`. | `cargo test -p execution orphan_cleanup` (sibling unit tests, real processes, no mocks) |
+| AC-5 / 89-S2 lookup failure | `sh -c 'read _; unset RUNNER_TRACKING_ID; export ORPHAN89_EXECED=1; exec sleep 300'` carrying the id: `scan_candidates` finds it, the test releases the exec, `kill_verified` skips, and `kill -0` still succeeds. An unreaped `Child` that exited gives a real zombie. Deadline `Instant::now()` gives `timed_out`. | `cargo test -p execution orphan_cleanup` (sibling unit tests, real processes, no mocks) |
 | AC-6 / 89-S4 | Real `ACTIONS_RUNNER_HOOK_JOB_STARTED` script exiting 1 after detaching; the Node fixture's post detaching a child and exiting 1; cancel and shutdown fired upon seeing the cleanup header | `orphan_cleanup_test` |
 | AC-7 / Non-Goal 1 | Captured `crates/toolu-runner/tests/fixtures/job_container_message.json` with real Docker: the container step prints `TRACK89\|container\|unset` | `cargo test -p execution --test orphan_cleanup_container_test -- --ignored` (Linux + Docker; macOS not applicable). Ignored by default, so `./tools/check.sh all` does not run it; `docs/test-coverage.md` records it as a manual lane with command, platform and observed result, unverified-in-gate. |
 | AC-8 / gate + docs | Gate exits 0. The reference lane `.github/workflows/orphan-cleanup-89.yml` follows the `step-process-ci-72.yml` precedent: the same detach patterns on GitHub-hosted `ubuntu-24.04` and `macos-15` (official runner), plus a `workflow_dispatch` `run_toolu` self-hosted lane. Its run link is evidence only and is not reproduced by the gate. A missing toolu runner or a missing GHES acquisition is recorded as **unverified**. | `./tools/check.sh all`; run link in `docs/test-coverage.md` |
