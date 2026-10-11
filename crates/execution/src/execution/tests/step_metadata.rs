@@ -84,3 +84,25 @@ fn registry_step_is_dockerhub_with_its_image() -> TestResult {
   );
   Ok(())
 }
+
+#[test]
+fn registry_step_without_image_reports_no_action_name() -> TestResult {
+  let registry = reference(serde_json::json!({ "type": "containerRegistry" }))?;
+  assert_eq!(
+    action_metadata(&registry, &RunsUsing::Docker),
+    ("DockerHub".to_owned(), None, None)
+  );
+  Ok(())
+}
+
+#[test]
+fn remote_action_without_name_reports_no_action_name() -> TestResult {
+  let nameless = reference(serde_json::json!({
+    "type": "repository", "path": "init", "ref": "v3", "repositoryType": "GitHub"
+  }))?;
+  assert_eq!(
+    action_metadata(&nameless, &RunsUsing::Composite),
+    ("composite".to_owned(), None, Some("v3".to_owned()))
+  );
+  Ok(())
+}

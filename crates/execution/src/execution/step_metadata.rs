@@ -40,7 +40,8 @@ pub(crate) async fn emit_action_metadata(
 
 /// Upstream's telemetry for a `uses:` step: a `docker://` step is `DockerHub`
 /// with its image; a repository action reports `owner/repo[/path]` and its ref
-/// (a `self` action only its path) with the handler kind.
+/// (a `self` action only its path) with the handler kind. A reference missing
+/// its image or name reports no action name (with a WARN) rather than `""`.
 pub(crate) fn action_metadata(
   reference: &ActionStepDefinitionReference,
   using: &RunsUsing,
@@ -50,7 +51,10 @@ pub(crate) fn action_metadata(
     .as_deref()
     .is_some_and(|kind| kind.eq_ignore_ascii_case("containerRegistry"))
   {
-    let image = reference.image.as_deref().unwrap_or_default();
+    let Some(image) = reference.image.as_deref() else {
+      tracing::warn!("container registry step has no image; reporting no action name");
+      return ("DockerHub".to_owned(), None, None);
+    };
     let image = image.strip_prefix("docker://").unwrap_or(image);
     return ("DockerHub".to_owned(), Some(image.to_owned()), None);
   }
@@ -63,7 +67,10 @@ pub(crate) fn action_metadata(
   if reference.repository_type.as_deref() == Some("self") {
     return (kind, reference.path.clone(), None);
   }
-  let name = reference.name.clone().unwrap_or_default();
+  let Some(name) = reference.name.clone() else {
+    tracing::warn!("repository action has no name; reporting no action name");
+    return (kind, None, reference.git_ref.clone());
+  };
   let action = match reference.path.as_deref() {
     Some(path) if !path.is_empty() => format!("{name}/{path}"),
     _ => name,
