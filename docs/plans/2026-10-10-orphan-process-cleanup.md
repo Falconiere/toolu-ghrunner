@@ -184,7 +184,7 @@ The design is the spawn-time host flag, per the approved spec:
       ".github/actionlint.yaml"
     ],
     "input": "GitHub-hosted ubuntu-24.04 and macos-15 run the official runner pinned by the platform; step logs print the RUNNER_TRACKING_ID shape and detached pids, and the job's Complete-job log shows 'Terminate orphan process' lines fetched with gh run view --log. Post-push (babysit phase): `gh run view <id> --log` for both reference jobs must contain 'Terminate orphan process: pid' for each detached pid; the run URL is then recorded in docs/test-coverage.md. Without that observed log the lane is recorded unverified, never passing.",
-    "check": "python3 -c \"import yaml,sys; t=open('.github/workflows/orphan-cleanup-89.yml').read(); d=yaml.safe_load(t); need=['ubuntu-24.04','macos-15','RUNNER_TRACKING_ID','nohup','setsid','run_toolu']; miss=[n for n in need if n not in t]; sys.exit(1 if miss or not d.get('jobs') else 0)\""
+    "check": "python3 -c \"import yaml,sys; w=open('.github/workflows/orphan-cleanup-89.yml').read(); d=yaml.safe_load(w); t=w+open('scripts/test/orphan_cleanup_probe.sh').read(); need=['ubuntu-24.04','macos-15','RUNNER_TRACKING_ID','nohup','setsid','run_toolu']; miss=[n for n in need if n not in t]; sys.exit(1 if miss or not d.get('jobs') else 0)\""
   },
   {
     "id": "docs",
@@ -284,6 +284,9 @@ absent, the lane is recorded as unverified.
 - `container_lane` check: the Docker replay requires `TOOLU_CONTAINER_TEST_ROOT`
   (a Docker-visible temp root, same contract as `job_container_ci_test.rs`), so
   the check now creates `target/orphan89-ctr` and exports it.
+- `reference_workflow`: pre-push review asked to de-duplicate the two jobs'
+  inline orphan script, so it moved to `scripts/test/orphan_cleanup_probe.sh`;
+  the check now reads the workflow plus that script.
 
 ## Review record
 

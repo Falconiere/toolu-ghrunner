@@ -23,6 +23,7 @@ pub struct ShellScriptParams<'a> {
   /// Per-job cgroup directory to move the spawned step into (`None` = no isolation).
   pub cgroup_path: Option<&'a Path>,
   /// `RUNNER_TRACKING_ID` for a host child (`None` = untagged; issue #89).
+  /// Ignored when the child runs in a job container, which is never tagged.
   pub tracking_id: Option<&'a str>,
   /// Time left in the enclosing top-level step.
   pub timeout: Option<Duration>,

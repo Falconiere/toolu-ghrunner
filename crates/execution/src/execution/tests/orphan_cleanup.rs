@@ -11,8 +11,8 @@ use shared::VariableValue;
 use sysinfo::{Pid, ProcessStatus, ProcessesToUpdate, System};
 
 use super::{
-  KillOutcome, ProcessTracking, carries_id, kill_verified, process_clean_enabled, refresh_kind,
-  scan_candidates, sweep_blocking,
+  CleanupReport, KillOutcome, ProcessTracking, carries_id, kill_verified, process_clean_enabled,
+  refresh_kind, report_warnings, scan_candidates, sweep_blocking,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -196,4 +196,28 @@ fn expired_deadline_kills_nothing_and_reports_timeout() -> TestResult {
   assert!(report.terminated.is_empty());
   assert!(still_running);
   Ok(())
+}
+
+#[test]
+fn report_warnings_name_each_abnormal_outcome_once() {
+  assert!(report_warnings(&CleanupReport::default()).is_empty());
+  let clean_kill = CleanupReport {
+    terminated: vec![41],
+    ..CleanupReport::default()
+  };
+  assert!(report_warnings(&clean_kill).is_empty());
+  let everything = CleanupReport {
+    terminated: vec![41],
+    survivors: vec![42, 43],
+    timed_out: true,
+    degraded: true,
+  };
+  assert_eq!(
+    report_warnings(&everything),
+    [
+      "Orphan process cleanup could not enumerate processes on this host.",
+      "Orphan process cleanup stopped after 15s.",
+      "Orphan processes still running after cleanup: [42, 43]",
+    ]
+  );
 }

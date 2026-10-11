@@ -1158,11 +1158,11 @@ missing cleanup header); the two negative cases passed trivially.
 | AC-8 / gate + docs | `./tools/check.sh all` exits 0; README "What runs", `docs/architecture.md`, `AGENTS.md` and module READMEs describe the behavior and limits. | gate | Linux local, CI |
 
 Reference parity: [`orphan-cleanup-89.yml`](../.github/workflows/orphan-cleanup-89.yml)
-runs the same orphan kinds plus an opted-out process on GitHub-hosted
-`ubuntu-24.04` and `macos-15` (official runner); its "Complete job" log must
-show `Terminate orphan process` for each `ORPHAN89|tagged` pid and none for the
-`ORPHAN89|opted-out` pid. Reference run: pending first push (recorded below
-once observed).
+runs [`orphan_cleanup_probe.sh`](../scripts/test/orphan_cleanup_probe.sh) — the
+same orphan kinds plus an opted-out process — on GitHub-hosted `ubuntu-24.04`
+and `macos-15` (official runner); its "Complete job" log must show `Terminate
+orphan process` for each `ORPHAN89|tagged` pid and none for the
+`ORPHAN89|opted-out` pid.
 
 Limits stated, not claimed: only processes started with the variable and
 readable by the runner's user are found (Linux `/proc/<pid>/environ`, macOS

@@ -1,11 +1,13 @@
 name: orphan-cleanup-89
 
-# Issue #89 parity lane: leaves the same orphan kinds behind as
-# crates/execution/tests/orphan_cleanup_test.rs. The official runner's
-# "Complete job" log (gh run view --log) must list
+# Issue #89 parity lane: scripts/test/orphan_cleanup_probe.sh leaves the same
+# orphan kinds behind as crates/execution/tests/orphan_cleanup_test.rs. The
+# runner's "Complete job" log (gh run view --log) must list
 # "Terminate orphan process: pid (N) (...)" for every ORPHAN89|tagged pid and
-# none for the ORPHAN89|opted-out pid. The toolu lane runs the same steps on a
-# registered self-hosted toolu runner when dispatched with run_toolu.
+# none for the ORPHAN89|opted-out pid. The push trigger exists because a
+# dispatch-only workflow cannot run before it reaches the default branch (same
+# as step-process-ci-72.yml); the toolu lane runs on a registered self-hosted
+# toolu runner when dispatched with run_toolu.
 
 on:
   workflow_dispatch:
@@ -30,53 +32,23 @@ jobs:
         os: [macos-15, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
     steps:
+      - uses: actions/checkout@v4
       - name: Leave tagged orphans behind
-        shell: bash
-        run: |
-          set -euo pipefail
-          P="$RUNNER_TEMP/orphan89"; mkdir -p "$P"
-          printf 'ORPHAN89|id-shape|%s\n' "$(printf %s "${RUNNER_TRACKING_ID-unset}" | sed -E 's/[0-9a-f]/x/g')"
-          sleep 300 & echo $! > "$P/child"
-          bash -c 'sleep 301 >/dev/null 2>&1 & echo $! > "$1/grandchild"' _ "$P"
-          nohup sleep 302 >/dev/null 2>&1 & echo $! > "$P/nohup"
-          python3 -c 'import os,sys,time; os.setsid(); open(sys.argv[1],"w").write(str(os.getpid())); time.sleep(303)' "$P/detached" >/dev/null 2>&1 < /dev/null &
-          while [ ! -s "$P/detached" ] || [ ! -s "$P/grandchild" ]; do sleep 0.05; done
-          for name in child grandchild nohup detached; do printf 'ORPHAN89|tagged|%s|%s\n' "$name" "$(cat "$P/$name")"; done
+        run: bash scripts/test/orphan_cleanup_probe.sh tagged
       - name: Opted-out process survives
-        shell: bash
         env:
           RUNNER_TRACKING_ID: ''
-        run: |
-          set -euo pipefail
-          P="$RUNNER_TEMP/orphan89"
-          python3 -c 'import os,sys,time; os.setsid(); open(sys.argv[1],"w").write(str(os.getpid())); time.sleep(304)' "$P/opted-out" >/dev/null 2>&1 < /dev/null &
-          while [ ! -s "$P/opted-out" ]; do sleep 0.05; done
-          printf 'ORPHAN89|opted-out|%s|%s\n' "${RUNNER_TRACKING_ID-unset}" "$(cat "$P/opted-out")"
+        run: bash scripts/test/orphan_cleanup_probe.sh opted-out
 
   toolu-host:
     if: github.event_name == 'workflow_dispatch' && inputs.run_toolu
     name: toolu-host
     runs-on: [self-hosted, toolu-runner-v1]
     steps:
+      - uses: actions/checkout@v4
       - name: Leave tagged orphans behind
-        shell: bash
-        run: |
-          set -euo pipefail
-          P="$RUNNER_TEMP/orphan89"; mkdir -p "$P"
-          printf 'ORPHAN89|id-shape|%s\n' "$(printf %s "${RUNNER_TRACKING_ID-unset}" | sed -E 's/[0-9a-f]/x/g')"
-          sleep 300 & echo $! > "$P/child"
-          bash -c 'sleep 301 >/dev/null 2>&1 & echo $! > "$1/grandchild"' _ "$P"
-          nohup sleep 302 >/dev/null 2>&1 & echo $! > "$P/nohup"
-          python3 -c 'import os,sys,time; os.setsid(); open(sys.argv[1],"w").write(str(os.getpid())); time.sleep(303)' "$P/detached" >/dev/null 2>&1 < /dev/null &
-          while [ ! -s "$P/detached" ] || [ ! -s "$P/grandchild" ]; do sleep 0.05; done
-          for name in child grandchild nohup detached; do printf 'ORPHAN89|tagged|%s|%s\n' "$name" "$(cat "$P/$name")"; done
+        run: bash scripts/test/orphan_cleanup_probe.sh tagged
       - name: Opted-out process survives
-        shell: bash
         env:
           RUNNER_TRACKING_ID: ''
-        run: |
-          set -euo pipefail
-          P="$RUNNER_TEMP/orphan89"
-          python3 -c 'import os,sys,time; os.setsid(); open(sys.argv[1],"w").write(str(os.getpid())); time.sleep(304)' "$P/opted-out" >/dev/null 2>&1 < /dev/null &
-          while [ ! -s "$P/opted-out" ]; do sleep 0.05; done
-          printf 'ORPHAN89|opted-out|%s|%s\n' "${RUNNER_TRACKING_ID-unset}" "$(cat "$P/opted-out")"
+        run: bash scripts/test/orphan_cleanup_probe.sh opted-out
