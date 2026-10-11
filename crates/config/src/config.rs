@@ -13,7 +13,9 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use shared::{CacheConfig, L2Config, RunnerError, ServicesMode, paths};
+use shared::{
+  CacheConfig, L2Config, RunnerError, ServicesMode, WorkspaceConfig, WorkspaceMode, paths,
+};
 
 #[cfg(unix)]
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
@@ -53,7 +55,7 @@ pub struct RunnerRegistrationConfig {
   /// `[cache]` section: content-addressed cache settings.
   #[serde(default)]
   pub cache: CacheSection,
-  /// `[workspace]` section: per-job workspace GC.
+  /// `[workspace]` section: workspace layout mode and GC ages.
   #[serde(default)]
   pub workspace: WorkspaceSection,
   /// `[shadow]` section: step-observation mode.
@@ -80,6 +82,14 @@ impl RunnerRegistrationConfig {
   /// Age in hours after which a finished job's workspace is pruned.
   pub fn workspace_gc_hours(&self) -> u64 {
     self.workspace.gc_after_hours
+  }
+
+  /// Workspace layout mode and stable-workspace GC age.
+  pub fn workspace_config(&self) -> WorkspaceConfig {
+    WorkspaceConfig {
+      mode: self.workspace.mode,
+      stable_gc_hours: self.workspace.stable_gc_after_hours,
+    }
   }
 
   /// Whether shadow-mode step observation is enabled.
@@ -219,18 +229,30 @@ impl L2Section {
   }
 }
 
-/// `[workspace]` config section: per-job workspace GC.
+/// `[workspace]` config section: workspace layout mode and GC ages.
+///
+/// An unknown `mode` is a parse error (`load_config` names the file): a typo
+/// must not silently change whether workspaces are shared across jobs.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WorkspaceSection {
-  /// Age in hours after which a finished job's workspace is pruned.
+  /// `"stable"` (default; `<work>/<repo>/<repo>` reused) or `"fresh"`.
+  #[serde(default)]
+  pub mode: WorkspaceMode,
+  /// Age in hours after which a finished fresh per-job workspace is pruned.
   #[serde(default = "default_gc_after_hours")]
   pub gc_after_hours: u64,
+  /// Hours since a stable workspace's last job after which GC may prune it;
+  /// `0` (default) never prunes stable workspaces, as upstream.
+  #[serde(default)]
+  pub stable_gc_after_hours: u64,
 }
 
 impl Default for WorkspaceSection {
   fn default() -> Self {
     Self {
+      mode: WorkspaceMode::default(),
       gc_after_hours: default_gc_after_hours(),
+      stable_gc_after_hours: 0,
     }
   }
 }

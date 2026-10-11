@@ -16,7 +16,7 @@ use std::time::Duration;
 use listener::GitHubListener;
 use shared::{
   CacheConfig, Conclusion, RunnerConfig, RunnerError, SESSION_CONFLICT_EXIT_CODE, SecretMasker,
-  ServicesMode,
+  ServicesMode, WorkspaceConfig,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -257,6 +257,7 @@ fn build_boot_runner_config() -> RunnerConfig {
     service_bind: RunnerConfig::DEFAULT_SERVICE_BIND.to_owned(),
     cache: CacheConfig::default(),
     workspace_gc_hours: RunnerConfig::DEFAULT_WORKSPACE_GC_HOURS,
+    workspace: WorkspaceConfig::default(),
     shadow_enabled: false,
   }
 }

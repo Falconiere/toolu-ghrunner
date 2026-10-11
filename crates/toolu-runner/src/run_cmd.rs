@@ -390,6 +390,7 @@ fn build_runner_config(
     service_bind: cfg.service_bind(),
     cache: cfg.cache_config(),
     workspace_gc_hours: cfg.workspace_gc_hours(),
+    workspace: cfg.workspace_config(),
     shadow_enabled: cfg.shadow_enabled(),
   })
 }

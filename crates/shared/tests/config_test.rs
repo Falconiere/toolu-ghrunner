@@ -1,6 +1,6 @@
 //! Tests for `RunnerConfig` / `ServicesMode` defaults and mapping.
 
-use shared::{RunnerConfig, ServicesMode};
+use shared::{RunnerConfig, ServicesMode, WorkspaceConfig, WorkspaceMode};
 use std::path::PathBuf;
 
 #[test]
@@ -14,6 +14,14 @@ fn runner_config_default_values() {
   // Non-loopback so docker-container BuildKit reaches the cache server.
   assert_eq!(cfg.service_bind, "0.0.0.0");
   assert_eq!(cfg.workspace_gc_hours, 24);
+  // Stable per-repository workspaces by default (upstream), never GC'd.
+  assert_eq!(
+    cfg.workspace,
+    WorkspaceConfig {
+      mode: WorkspaceMode::Stable,
+      stable_gc_hours: 0,
+    }
+  );
   assert!(!cfg.shadow_enabled);
   // CacheConfig defaults: 100 GiB L1, GitHub-matching 7-day TTL, 64 KiB
   // FastCDC target, no S3 cold tier.
@@ -71,4 +79,16 @@ fn runner_config_clone() {
   assert_eq!(clone.data_dir, cfg.data_dir);
   assert_eq!(clone.workspace_root, cfg.workspace_root);
   assert_eq!(clone.cgroup_path, cfg.cgroup_path);
+}
+
+#[test]
+fn workspace_mode_uses_lowercase_names_and_rejects_unknown() {
+  let fresh: WorkspaceMode = serde_json::from_str("\"fresh\"").expect("fresh parses");
+  assert_eq!(fresh, WorkspaceMode::Fresh);
+  assert_eq!(
+    serde_json::to_string(&WorkspaceMode::Stable).expect("serializes"),
+    "\"stable\""
+  );
+  assert!(serde_json::from_str::<WorkspaceMode>("\"per-job\"").is_err());
+  assert!(serde_json::from_str::<WorkspaceMode>("\"Stable\"").is_err());
 }
