@@ -330,7 +330,8 @@ async fn warn_on_report(events: &mpsc::Sender<RunnerEvent>, report: &CleanupRepo
   }
 }
 
-/// One WARN line per abnormal sweep outcome: degraded scan, deadline, survivors.
+/// One WARN line per abnormal sweep outcome: failed sweep, degraded scan,
+/// deadline, survivors.
 fn report_warnings(report: &CleanupReport) -> Vec<String> {
   let mut warnings = Vec::new();
   if report.failed {
