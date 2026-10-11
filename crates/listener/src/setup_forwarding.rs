@@ -22,6 +22,13 @@ pub(super) async fn start(
     step_number: 1,
   };
   deliver(state, cfg, collector, tx, event).await;
+  let metadata = RunnerEvent::StepMetadata {
+    step_id: id.clone(),
+    kind: "runner".to_owned(),
+    action: Some("setup_job".to_owned()),
+    git_ref: None,
+  };
+  deliver(state, cfg, collector, tx, metadata).await;
   for line in lines {
     let event = RunnerEvent::Log {
       step_id: id.clone(),

@@ -14,7 +14,7 @@ itself is `shared::SecretMasker` — `writer` only calls it per line.
 | File | Primary item | Purpose |
 | --- | --- | --- |
 | `reader.rs` | `JournalReader` / `scan_jobs` | Incremental replay-then-tail reader over one journal file, plus a jobs-dir scanner that summarizes every `.jsonl` file for the job list. |
-| `types.rs` | `JournalLine` / `JournalEvent` | The on-disk v1 line contract: a version/seq/timestamp envelope wrapping a flattened, internally-tagged event enum, decoupled from `shared::events`; summary events record only ID and byte size. |
+| `types.rs` | `JournalLine` / `JournalEvent` | The on-disk v1 line contract: a version/seq/timestamp envelope wrapping a flattened, internally-tagged event enum, decoupled from `shared::events`; summary events record only ID and byte size; `step_metadata` lines carry a row's non-secret action identity and infrastructure errors are journaled as `error` annotations. |
 | `writer.rs` | `spawn` | Async sink task: masks and appends one JSON line per `ListenerEvent` to the job's journal file, buffering pre-acquire events and pruning to the newest 50; never fails the job. |
 
 When you add a file here, add its row above so the index stays current. No

@@ -26,9 +26,9 @@ pub(super) async fn report_completion(
       .collect(),
     step_results: outcome.step_results,
     annotations: outcome.annotations,
-    environment_url: None,
-    billing_owner_id: None,
-    infrastructure_failure_category: None,
+    environment_url: outcome.environment_url,
+    billing_owner_id: outcome.billing_owner_id,
+    infrastructure_failure_category: outcome.infrastructure_failure_category,
   };
   // Borrow the payload across retries instead of cloning its step results.
   crate::retry::retry_transient(

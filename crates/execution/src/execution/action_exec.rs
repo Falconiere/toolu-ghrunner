@@ -291,6 +291,12 @@ async fn dispatch_scoped_action(
   resolved: &ResolvedStep,
   depth: &mut DepthTracker,
 ) -> Result<ActionOutcome, RunnerError> {
+  // Only the reported row itself is labelled; composite children run under
+  // their parent's log id and are not separate step results.
+  if env.log_step_id == step.id {
+    let using = &resolved.manifest.runs.using;
+    super::step_metadata::emit_action_metadata(env.events, &step.id, &step.reference, using).await;
+  }
   match resolved.manifest.runs.using {
     RunsUsing::Node { major } => run_resolved_node(step, ctx, env, resolved, major).await,
     RunsUsing::Composite => {
@@ -494,6 +500,8 @@ async fn report_pre_stage(c: &mut NodeActionCtx<'_>) -> Result<Conclusion, Runne
       step_number: 0,
     })
     .await;
+  let using = RunsUsing::Node { major: c.major };
+  super::step_metadata::emit_action_metadata(c.events, &report_id, &c.step.reference, &using).await;
   emit_log(c.events, &report_id, "##[group]Pre Run").await;
   emit_stage_endgroup(c.events, &report_id).await;
   let pre_bounds = c.bounds.restarted();

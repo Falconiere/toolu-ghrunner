@@ -15,6 +15,11 @@ pub(super) struct ShellCommand {
 }
 
 impl ShellCommand {
+  /// The resolved shell command (`bash`, `sh`, `pwsh`, `python`, ...).
+  pub(crate) fn name(&self) -> &str {
+    &self.name
+  }
+
   /// Resolve explicit or default shell semantics without spawning a process.
   pub(super) async fn resolve(
     shell: Option<&str>,

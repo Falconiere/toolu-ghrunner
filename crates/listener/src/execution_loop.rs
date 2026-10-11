@@ -42,6 +42,10 @@ pub(super) struct JobExecution {
   pub(super) outputs: HashMap<String, String>,
   pub(super) steps: Vec<wire::reporting::StepResult>,
   pub(super) annotations: Vec<wire::reporting::Annotation>,
+  /// The engine's evaluated, secret-free `environment.url`.
+  pub(super) environment_url: Option<String>,
+  /// First infrastructure category of a step that ended failed.
+  pub(super) infrastructure_failure_category: Option<String>,
   /// The live-log wrapper task's `JoinHandle`, produced by [`connect_live_log`]
   /// inside the same `tokio::join!` that runs [`report_setup_step`] — threaded
   /// up so `job_lifecycle::run_acquired_job` can carry it into its
@@ -90,6 +94,7 @@ pub(super) async fn execute_with_renewal(
   let ForwarderOutcome {
     conclusion,
     outputs,
+    environment_url,
     job_log_upload,
   } = run_forwarded_job(ctx, job_msg, &collector, cfg, job_cancel).await;
   renewal_cancel.cancel();
@@ -105,6 +110,8 @@ pub(super) async fn execute_with_renewal(
     outputs,
     steps,
     annotations,
+    environment_url,
+    infrastructure_failure_category: collector.infrastructure_category().await,
     live_log_handle,
     job_log_upload,
   }
@@ -206,6 +213,7 @@ fn build_fwd_config(
 struct ForwarderOutcome {
   conclusion: Conclusion,
   outputs: HashMap<String, String>,
+  environment_url: Option<String>,
   /// `None` when no Results Service URL is configured — there is nowhere to
   /// upload the combined log to, so no task was spawned.
   job_log_upload: Option<tokio::task::JoinHandle<()>>,
@@ -245,6 +253,7 @@ async fn run_forwarded_job(
     ForwarderOutcome {
       conclusion: Conclusion::Failure,
       outputs: HashMap::new(),
+      environment_url: None,
       job_log_upload: None,
     }
   };
@@ -340,6 +349,7 @@ struct ForwarderState {
   all_job_lines: Vec<String>,
   conclusion: Option<Conclusion>,
   outputs: HashMap<String, String>,
+  environment_url: Option<String>,
   /// Set once the live-log WebSocket streamer task has gone away
   /// (`try_send` returned `Closed`). Latches off further live sends so
   /// we stop spinning, and is logged exactly once. Durable logs are
@@ -374,6 +384,7 @@ impl ForwarderState {
       all_job_lines: setup_lines,
       conclusion: None,
       outputs: HashMap::new(),
+      environment_url: None,
       live_log_closed: false,
     }
   }
@@ -413,11 +424,16 @@ fn spawn_event_forwarder(
       if let RunnerEvent::JobCompleted {
         conclusion: c,
         outputs,
+        environment_url,
         ..
       } = &event
       {
         state.conclusion = Some(*c);
         state.outputs = outputs.clone();
+        state.environment_url.clone_from(environment_url);
+      }
+      if let RunnerEvent::InfrastructureError { message, .. } = &mut event {
+        *message = mask_line(&cfg.masker, message);
       }
       fwd_collector.record(&event).await;
       handle_event_arm(&mut state, &cfg, &event).await;
@@ -452,6 +468,7 @@ fn spawn_event_forwarder(
       .send(ForwarderOutcome {
         conclusion: final_conclusion(&state),
         outputs: state.outputs,
+        environment_url: state.environment_url,
         job_log_upload,
       })
       .is_err()

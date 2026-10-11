@@ -1,0 +1,24 @@
+{
+  "issue": 88,
+  "official_runner_commit": "cab9d1c3901e45c7705889c4f88284fdd93f4ae5",
+  "captures": {
+    "crates/execution/tests/completejob_88_env_message.json": {
+      "job": "url-toolu",
+      "raw_sha256": "c791f289ed3747c5b816f6d67551c64e804fb12ed4f280fd838295ae575776e9",
+      "sha256": "5ecaec8d539f493c683d389c49a8085093c8e934804516052e569c06bb784c91",
+      "secret_fields_replaced": 26
+    },
+    "crates/execution/tests/completejob_88_steps_message.json": {
+      "job": "steps-toolu",
+      "raw_sha256": "68617f19fa746f1baeb1e86f3e274d08a450ffc4f9d902e1a1319f2e58958ce5",
+      "sha256": "bd6312c1bc641eff270a7170c008376d8241b6c629e59969b2e384cb47b4d593",
+      "secret_fields_replaced": 26
+    },
+    "crates/execution/tests/completejob_88_secret_message.json": {
+      "job": "secret-toolu",
+      "raw_sha256": "78abf97b8421c2d2745565dca5163190c05779a72ee6dcca9afbeb2ca8415b02",
+      "sha256": "8f04214825bcf34eda18511dc14b4c275326e9de40510ac8f0f9455f3e2b05d7",
+      "secret_fields_replaced": 26
+    }
+  }
+}

@@ -46,7 +46,7 @@ pub enum StepState {
 
 /// Result for a single step, sent in completejob.
 ///
-/// Mirrors upstream `StepResult.cs`: explicit snake_case member names
+/// Mirrors upstream `StepResult.cs`: explicit `snake_case` member names
 /// (Newtonsoft's camel-casing leaves them unchanged) and string enums.
 #[derive(Debug, Clone, Serialize)]
 pub struct StepResult {

@@ -9,6 +9,7 @@ use serde_json::{Value, json};
 use shared::{AgentJobRequestMessage, RunnerError};
 use tokio_util::sync::CancellationToken;
 
+use super::download_info::{REST_USER_STATUSES, resolution_status_error, resolve_service};
 use super::resolver::ActionRef;
 
 // Resource identifier matched against the GHES connectionData advertisement.
@@ -75,15 +76,16 @@ impl LegacyContext {
       return Ok(None);
     }
     if !response.status().is_success() {
-      return Err(RunnerError::ActionDownload(format!(
-        "legacy action resolution status {}",
-        response.status()
-      )));
+      return Err(resolution_status_error(
+        response.status(),
+        &REST_USER_STATUSES,
+        format!("legacy action resolution status {}", response.status()),
+      ));
     }
     tokio::select! {
       () = cancel.cancelled() => Err(cancelled()),
       result = response.json::<Value>() => result.map(Some).map_err(|_error| {
-        RunnerError::ActionDownload("legacy action resolution JSON invalid".to_owned())
+        resolve_service("legacy action resolution JSON invalid".to_owned())
       }),
     }
   }
@@ -118,14 +120,16 @@ impl LegacyContext {
       result = request.send() => result.map_err(|error| transport_error(&error))?,
     };
     if !response.status().is_success() {
-      return Err(RunnerError::ActionDownload(format!(
-        "legacy service discovery status {}",
-        response.status()
-      )));
+      return Err(resolution_status_error(
+        response.status(),
+        &REST_USER_STATUSES,
+        format!("legacy service discovery status {}", response.status()),
+      ));
     }
-    let body: Value = response.json().await.map_err(|_error| {
-      RunnerError::ActionDownload("legacy service discovery JSON invalid".to_owned())
-    })?;
+    let body: Value = response
+      .json()
+      .await
+      .map_err(|_error| resolve_service("legacy service discovery JSON invalid".to_owned()))?;
     let service = resource_entry(&body);
     service
       .map(|entry| self.resource_url(entry, &base))
@@ -209,15 +213,13 @@ pub(super) fn legacy_info(
   let entry = body
     .get("Actions")
     .and_then(|actions| actions.get(&key))
-    .ok_or_else(|| {
-      RunnerError::ActionDownload("legacy resolver omitted requested action".to_owned())
-    })?;
+    .ok_or_else(|| resolve_service("legacy resolver omitted requested action".to_owned()))?;
   let resolved = entry
     .get("ResolvedNameWithOwner")
     .and_then(Value::as_str)
-    .ok_or_else(|| RunnerError::ActionDownload("legacy resolver omitted repository".to_owned()))?;
+    .ok_or_else(|| resolve_service("legacy resolver omitted repository".to_owned()))?;
   if resolved != format!("{}/{}", action.owner, action.repo) {
-    return Err(RunnerError::ActionDownload(
+    return Err(resolve_service(
       "legacy resolver changed repository".to_owned(),
     ));
   }
@@ -239,7 +241,7 @@ fn required(value: &Value, key: &str) -> Result<String, RunnerError> {
     .and_then(Value::as_str)
     .filter(|text| !text.is_empty())
     .map(str::to_owned)
-    .ok_or_else(|| RunnerError::ActionDownload(format!("legacy resolver omitted {key}")))
+    .ok_or_else(|| resolve_service(format!("legacy resolver omitted {key}")))
 }
 
 fn cancelled() -> RunnerError {
@@ -247,7 +249,7 @@ fn cancelled() -> RunnerError {
 }
 
 fn transport_error(error: &reqwest::Error) -> RunnerError {
-  RunnerError::ActionDownload(format!(
+  resolve_service(format!(
     "legacy action service request failed: timeout={}",
     error.is_timeout()
   ))
