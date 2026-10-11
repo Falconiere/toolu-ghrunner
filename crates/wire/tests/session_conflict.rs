@@ -36,7 +36,10 @@ fn response_bytes(status: u16) -> Vec<u8> {
     _ => "Internal Server Error",
   };
   let mut out = format!("HTTP/1.1 {status} {reason}\r\n");
-  for (name, value) in at(&fixture, "/response/headers").as_object().expect("headers object") {
+  for (name, value) in at(&fixture, "/response/headers")
+    .as_object()
+    .expect("headers object")
+  {
     out.push_str(name);
     out.push_str(": ");
     out.push_str(value.as_str().expect("header str"));
@@ -68,7 +71,10 @@ async fn serve_once(listener: TcpListener, status: u16) {
   let mut body = vec![0; length];
   reader.read_exact(&mut body).await.expect("request body");
   let mut socket = reader.into_inner();
-  socket.write_all(&response_bytes(status)).await.expect("write");
+  socket
+    .write_all(&response_bytes(status))
+    .await
+    .expect("write");
   socket.shutdown().await.expect("shutdown");
 }
 

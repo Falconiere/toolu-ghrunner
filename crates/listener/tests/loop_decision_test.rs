@@ -71,10 +71,31 @@ fn exiting_cases() -> Vec<Row> {
     ("pending_remove exits 0", Done, false, false, true, Exit(0)),
     // A spent session-conflict retry exits 5, with or without --once, and
     // never falls through to the generic backoff (#91).
-    ("once conflict exits 5", Conflict, true, false, false, Exit(5)),
-    ("loop conflict exits 5", Conflict, false, false, false, Exit(5)),
+    (
+      "once conflict exits 5",
+      Conflict,
+      true,
+      false,
+      false,
+      Exit(5),
+    ),
+    (
+      "loop conflict exits 5",
+      Conflict,
+      false,
+      false,
+      false,
+      Exit(5),
+    ),
     // Cancel and pending_remove still win: a deliberate stop is a clean exit.
-    ("cancel beats conflict", Conflict, false, true, false, Exit(0)),
+    (
+      "cancel beats conflict",
+      Conflict,
+      false,
+      true,
+      false,
+      Exit(0),
+    ),
     (
       "pending_remove beats conflict",
       Conflict,

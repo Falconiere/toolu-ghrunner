@@ -77,6 +77,10 @@ fn session_conflict_interval_accepts_only_positive_milliseconds() {
     Some(std::time::Duration::from_secs(30))
   );
   for bad in ["0", "-5", "1.5", "30s", " 50", ""] {
-    assert_eq!(super::parse_interval_ms(bad), None, "{bad:?} must be rejected");
+    assert_eq!(
+      super::parse_interval_ms(bad),
+      None,
+      "{bad:?} must be rejected"
+    );
   }
 }

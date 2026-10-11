@@ -40,7 +40,11 @@ const ACCESS_TOKEN: &str = "fake-token";
 /// The captured 409 reply: its status, every recorded header, its empty body.
 fn captured_conflict() -> TestResult<ResponseTemplate> {
   let fixture: Value = serde_json::from_str(CAPTURE)?;
-  let field = |pointer: &str| fixture.pointer(pointer).ok_or(format!("fixture lacks {pointer}"));
+  let field = |pointer: &str| {
+    fixture
+      .pointer(pointer)
+      .ok_or(format!("fixture lacks {pointer}"))
+  };
   let status = u16::try_from(field("/response/status")?.as_u64().ok_or("status")?)?;
   let mut template = ResponseTemplate::new(status);
   for (name, value) in field("/response/headers")?.as_object().ok_or("headers")? {
@@ -176,7 +180,10 @@ async fn assert_conflict_exit(
   let stderr = String::from_utf8_lossy(&output.stderr);
   assert_eq!(output.status.code(), Some(5), "stderr: {stderr}");
   assert_eq!(session_posts(server).await?, 8, "stderr: {stderr}");
-  assert!(stderr.contains("session conflict on attempt 1/8"), "{stderr}");
+  assert!(
+    stderr.contains("session conflict on attempt 1/8"),
+    "{stderr}"
+  );
   assert!(stderr.contains(CONFLICT_MESSAGE), "{stderr}");
   let diag = diag_logs(home);
   for secret in [ACCESS_TOKEN, jit_config] {
@@ -208,7 +215,10 @@ async fn boot_recovers_when_the_conflict_clears_inside_the_window() -> TestResul
   let stderr = String::from_utf8_lossy(&output.stderr);
   assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
   assert_eq!(session_posts(&server).await?, 2, "stderr: {stderr}");
-  assert!(stderr.contains("session conflict on attempt 1/8"), "{stderr}");
+  assert!(
+    stderr.contains("session conflict on attempt 1/8"),
+    "{stderr}"
+  );
   Ok(())
 }
 

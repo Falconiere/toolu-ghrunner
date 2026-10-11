@@ -228,7 +228,9 @@ fn launchd_env_path_drops_empty_segments() {
 fn legacy_systemd_unit_does_not_restart_a_session_conflict() {
   let unit = include_str!("../../../scripts/toolu-runner.service");
   assert!(
-    unit.lines().any(|line| line == "RestartPreventExitStatus=5"),
+    unit
+      .lines()
+      .any(|line| line == "RestartPreventExitStatus=5"),
     "scripts/toolu-runner.service must carry RestartPreventExitStatus=5"
   );
 }

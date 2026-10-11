@@ -22,7 +22,11 @@ const CAPTURE: &str = include_str!("../../../wire/tests/session_conflict_409.jso
 /// The captured 409 reply: its status, every recorded header, its empty body.
 fn captured_conflict() -> TestResult<ResponseTemplate> {
   let fixture: Value = serde_json::from_str(CAPTURE)?;
-  let field = |pointer: &str| fixture.pointer(pointer).ok_or(format!("fixture lacks {pointer}"));
+  let field = |pointer: &str| {
+    fixture
+      .pointer(pointer)
+      .ok_or(format!("fixture lacks {pointer}"))
+  };
   let status = u16::try_from(field("/response/status")?.as_u64().ok_or("status")?)?;
   let mut template = ResponseTemplate::new(status);
   for (name, value) in field("/response/headers")?.as_object().ok_or("headers")? {
@@ -156,7 +160,11 @@ async fn cancel_during_the_retry_wait_returns_none_promptly() -> TestResult<()> 
   let started = Instant::now();
   let outcome = attempt(&server, &cancel, SessionConflictPolicy::default()).await?;
   assert!(outcome.is_none(), "cancelled retry must return None");
-  assert!(started.elapsed() < Duration::from_secs(2), "{:?}", started.elapsed());
+  assert!(
+    started.elapsed() < Duration::from_secs(2),
+    "{:?}",
+    started.elapsed()
+  );
   assert_eq!(session_posts(&server).await?, 1);
   Ok(())
 }
