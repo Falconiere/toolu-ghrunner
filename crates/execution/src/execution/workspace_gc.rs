@@ -138,7 +138,7 @@ fn prune_stable(
   if !eligible(tracking) {
     return false;
   }
-  let Ok(Some(_lease)) = WorkspaceLease::try_acquire(&repo_dir.join(LEASE_FILE)) else {
+  let Ok(Some(lease)) = WorkspaceLease::try_acquire(&repo_dir.join(LEASE_FILE)) else {
     return false;
   };
   // Re-read under the lease: a job may have used the workspace meanwhile.
@@ -146,7 +146,10 @@ fn prune_stable(
     return false;
   };
   let pipeline = root.join(&tracking.pipeline_directory);
-  remove_tree(&pipeline) && remove_file(file)
+  let removed = remove_tree(&pipeline) && remove_file(file);
+  // Released only after the deletion: no job can claim the workspace mid-delete.
+  drop(lease);
+  removed
 }
 
 /// Remove one stale fresh (or pre-#90) job directory. `true` only when removed.
@@ -170,10 +173,14 @@ fn prune_job_dir(
   if lease_owner(&lease_path).as_deref() != Some(data_dir) {
     return false;
   }
-  let Ok(Some(_lease)) = WorkspaceLease::try_acquire(&lease_path) else {
+  let Ok(Some(lease)) = WorkspaceLease::try_acquire(&lease_path) else {
     return false;
   };
-  is_stale_dir(entry, now, max_age) && remove_tree(&entry.path()) && remove_file(&lease_path)
+  let removed =
+    is_stale_dir(entry, now, max_age) && remove_tree(&entry.path()) && remove_file(&lease_path);
+  // Released only after the deletion (see `prune_stable`).
+  drop(lease);
+  removed
 }
 
 fn load_tracking(file: &Path) -> Option<TrackingConfig> {
