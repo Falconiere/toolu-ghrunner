@@ -131,6 +131,10 @@ async fn captured_job_container_replays_shell_node_composite_and_verify() -> Tes
     data_dir: root.path().join("runner data"),
     workspace_root: root.path().join("work root"),
     workspace_gc_hours: 0,
+    workspace: shared::WorkspaceConfig {
+      mode: shared::WorkspaceMode::Fresh,
+      stable_gc_hours: 0,
+    },
     ..RunnerConfig::default()
   };
   let mut job = captured_job()?;

@@ -135,6 +135,10 @@ async fn replay(job: AgentJobRequestMessage, actions: &[&str]) -> TestResult<Vec
     data_dir: root.path().join("runner data"),
     workspace_root: root.path().join("work root"),
     workspace_gc_hours: 0,
+    workspace: shared::WorkspaceConfig {
+      mode: shared::WorkspaceMode::Fresh,
+      stable_gc_hours: 0,
+    },
     ..RunnerConfig::default()
   };
   let workspace = config.workspace_root.join(&job.job_id);

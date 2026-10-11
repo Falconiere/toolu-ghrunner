@@ -448,6 +448,10 @@ fn test_config(dir: &tempfile::TempDir) -> RunnerConfig {
     data_dir: dir.path().join("data"),
     workspace_root: dir.path().join("work"),
     workspace_gc_hours: 0,
+    workspace: shared::WorkspaceConfig {
+      mode: shared::WorkspaceMode::Fresh,
+      stable_gc_hours: 0,
+    },
     ..RunnerConfig::default()
   }
 }

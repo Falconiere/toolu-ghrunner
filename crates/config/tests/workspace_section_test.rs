@@ -26,16 +26,17 @@ protocol_version = "v2"
 gc_after_hours = 48
 "#;
 
-fn write(dir: &TempDir, body: &str) -> std::path::PathBuf {
+fn write(dir: &TempDir, body: &str) -> std::io::Result<std::path::PathBuf> {
   let path = dir.path().join("config.toml");
-  std::fs::write(&path, body).expect("write config.toml");
-  path
+  std::fs::write(&path, body)?;
+  Ok(path)
 }
 
 #[test]
 fn pre_90_config_loads_as_stable_and_never_prunes_stable_workspaces() {
   let dir = TempDir::new().expect("tempdir");
-  let cfg = load_config(&write(&dir, PRE_90_CONFIG)).expect("pre-#90 config loads");
+  let cfg = load_config(&write(&dir, PRE_90_CONFIG).expect("write config.toml"))
+    .expect("pre-#90 config loads");
   assert_eq!(cfg.workspace_gc_hours(), 48);
   assert_eq!(
     cfg.workspace_config(),
@@ -53,7 +54,7 @@ fn fresh_mode_and_stable_gc_age_round_trip() {
     "gc_after_hours = 48\n",
     "mode = \"fresh\"\ngc_after_hours = 48\nstable_gc_after_hours = 72\n",
   );
-  let path = write(&dir, &body);
+  let path = write(&dir, &body).expect("write config.toml");
   let cfg = load_config(&path).expect("fresh config loads");
   assert_eq!(
     cfg.workspace_config(),
@@ -73,8 +74,10 @@ fn fresh_mode_and_stable_gc_age_round_trip() {
 fn unknown_mode_fails_loading_and_names_the_file() {
   let dir = TempDir::new().expect("tempdir");
   let body = PRE_90_CONFIG.replace("gc_after_hours = 48\n", "mode = \"per-job\"\n");
-  let path = write(&dir, &body);
-  let error = load_config(&path).expect_err("unknown mode is rejected").to_string();
+  let path = write(&dir, &body).expect("write config.toml");
+  let error = load_config(&path)
+    .expect_err("unknown mode is rejected")
+    .to_string();
   assert!(error.contains(&path.display().to_string()), "{error}");
   assert!(error.contains("per-job"), "{error}");
 }

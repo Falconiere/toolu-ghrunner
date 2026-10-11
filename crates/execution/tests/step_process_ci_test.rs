@@ -100,6 +100,10 @@ async fn run_job_events(
     data_dir: root.path().join("data"),
     workspace_root: root.path().join("work"),
     workspace_gc_hours: 0,
+    workspace: shared::WorkspaceConfig {
+      mode: shared::WorkspaceMode::Fresh,
+      stable_gc_hours: 0,
+    },
     ..RunnerConfig::default()
   };
   let workspace = config.workspace_root.join(&job.job_id);

@@ -97,6 +97,10 @@ fn config_for(root: &Path) -> RunnerConfig {
     data_dir: root.join("runner data"),
     workspace_root: root.join("work root"),
     workspace_gc_hours: 0,
+    workspace: shared::WorkspaceConfig {
+      mode: shared::WorkspaceMode::Fresh,
+      stable_gc_hours: 0,
+    },
     ..RunnerConfig::default()
   }
 }

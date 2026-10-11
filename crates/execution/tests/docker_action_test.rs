@@ -146,6 +146,10 @@ async fn remote_repository_action_runs_pre_main_post_and_reuses_image() -> TestR
     data_dir: root.path().join("runner data"),
     workspace_root: root.path().join("work root"),
     workspace_gc_hours: 0,
+    workspace: shared::WorkspaceConfig {
+      mode: shared::WorkspaceMode::Fresh,
+      stable_gc_hours: 0,
+    },
     ..RunnerConfig::default()
   };
   let mut job = captured_job()?;
@@ -266,6 +270,10 @@ async fn missing_registry_images_fail_action_resolution_before_platform_or_daemo
       data_dir: root.path().join("runner data"),
       workspace_root: root.path().join("work root"),
       workspace_gc_hours: 0,
+      workspace: shared::WorkspaceConfig {
+        mode: shared::WorkspaceMode::Fresh,
+        stable_gc_hours: 0,
+      },
       ..RunnerConfig::default()
     };
     let mut job = captured_job()?;
@@ -314,6 +322,10 @@ async fn docker_registry_action_rejects_non_linux_without_running_host_code() ->
     data_dir: root.path().join("runner data"),
     workspace_root: root.path().join("work root"),
     workspace_gc_hours: 0,
+    workspace: shared::WorkspaceConfig {
+      mode: shared::WorkspaceMode::Fresh,
+      stable_gc_hours: 0,
+    },
     ..RunnerConfig::default()
   };
   let mut job = captured_job()?;

@@ -78,6 +78,10 @@ async fn replay(action: &str, caller_defaults: bool, not_directory: bool) -> Tes
     data_dir: temp.path().join("data"),
     workspace_root: temp.path().join("work"),
     workspace_gc_hours: 0,
+    workspace: shared::WorkspaceConfig {
+      mode: shared::WorkspaceMode::Fresh,
+      stable_gc_hours: 0,
+    },
     ..RunnerConfig::default()
   };
   let workspace = config.workspace_root.join(&msg.job_id);

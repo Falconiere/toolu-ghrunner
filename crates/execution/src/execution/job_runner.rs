@@ -20,6 +20,7 @@ use super::job_teardown::{CacheMaintenance, JobTeardown};
 use super::service_endpoints::{ServiceUrls, extract_service_urls, forward_env};
 use super::shadow::ShadowObserver;
 use super::steps_runner::{JobRun, run_steps};
+use super::workspace_layout::{PreparedWorkspace, prepare_workspace};
 use crate::docker::container_spec::ContainerSpec;
 use crate::docker::service_spec::ServiceSpec;
 use cache::accelerated::{AcceleratedInputs, accelerated_app};
@@ -106,11 +107,12 @@ async fn build_job_context_async(
   msg: AgentJobRequestMessage,
   config: &RunnerConfig,
   masker: Arc<Mutex<SecretMasker>>,
-  workspace: std::path::PathBuf,
+  prepared: &PreparedWorkspace,
 ) -> Result<(AgentJobRequestMessage, ExecutionContext), RunnerError> {
   let context_config = config.clone();
+  let (workspace, pipeline) = (prepared.workspace.clone(), prepared.pipeline.clone());
   tokio::task::spawn_blocking(move || {
-    let ctx = job_context(&msg, &context_config, masker, &workspace);
+    let ctx = job_context(&msg, &context_config, masker, &workspace, &pipeline);
     (msg, ctx)
   })
   .await
@@ -135,22 +137,23 @@ struct ContainerStartParams<'a> {
   workspace_gc: Option<tokio::task::JoinHandle<()>>,
 }
 
+/// Allocate and lease the job's workspace (stable or fresh, issue #90) and
+/// start the stale-workspace sweep, sparing this job's work-root child.
 async fn prepare_job_workspace(
   config: &RunnerConfig,
-  job_id: &str,
-  fallback_path: std::path::PathBuf,
-) -> Result<(std::path::PathBuf, Option<tokio::task::JoinHandle<()>>), RunnerError> {
+  msg: &AgentJobRequestMessage,
+) -> Result<(PreparedWorkspace, Option<tokio::task::JoinHandle<()>>), RunnerError> {
   let directory_config = config.clone();
-  let directory_job_id = job_id.to_owned();
-  let workspace =
-    tokio::task::spawn_blocking(move || prepare_job_dirs(&directory_config, &directory_job_id))
+  let directory_msg = msg.clone();
+  let prepared =
+    tokio::task::spawn_blocking(move || prepare_job_dirs(&directory_config, &directory_msg))
       .await
       .map_err(|error| RunnerError::WorkspaceInit {
-        path: fallback_path,
+        path: config.workspace_root.clone(),
         source: std::io::Error::other(format!("prepare job directories: {error}")),
       })??;
-  let workspace_gc = spawn_workspace_gc(config, job_id);
-  Ok((workspace, workspace_gc))
+  let workspace_gc = spawn_workspace_gc(config, &prepared.pipeline_name());
+  Ok((prepared, workspace_gc))
 }
 
 async fn start_job_services(
@@ -250,9 +253,10 @@ fn job_context(
   config: &RunnerConfig,
   masker: Arc<Mutex<SecretMasker>>,
   workspace: &std::path::Path,
+  pipeline: &std::path::Path,
 ) -> ExecutionContext {
   let mut ctx = build_context(msg, config, masker);
-  ctx.set_workspace(Some(workspace.to_path_buf()));
+  ctx.set_job_workspace(workspace, pipeline);
   ctx
 }
 
@@ -333,53 +337,34 @@ async fn stop_local_services(local: LocalServices) -> Option<CacheMaintenance> {
   }
 }
 
-/// Create the per-job workspace and the data dir, restricting the data dir
+/// Create the job's workspace and the data dir, restricting the data dir
 /// to the runner user (0o700 — it holds credentials, caches, and `_temp`
 /// step payloads; a permissive umask must not leave it world-readable).
 fn prepare_job_dirs(
   config: &RunnerConfig,
-  job_id: &str,
-) -> Result<std::path::PathBuf, RunnerError> {
-  let workspace = config.workspace_root.join(job_id);
-  std::fs::create_dir_all(&workspace)?;
+  msg: &AgentJobRequestMessage,
+) -> Result<PreparedWorkspace, RunnerError> {
+  let prepared = prepare_workspace(config, msg)?;
   std::fs::create_dir_all(&config.data_dir)?;
   super::context::restrict_dir_permissions(&config.data_dir)?;
-  Ok(workspace)
+  Ok(prepared)
 }
 
-/// Ceiling on `workspace_gc_hours` (100 years) so the seconds conversion cannot
-/// saturate. A configured value at or above the cap means "never prune".
-const MAX_GC_HOURS: u64 = 100 * 365 * 24;
-
 /// Spawn the stale-workspace sweep on a blocking thread, sparing the running
-/// job `keep`. `None` when `workspace_gc_hours == 0` disables GC.
+/// job's work-root child `keep`. `None` when the config prunes nothing.
 ///
-/// The sweep is blocking `read_dir` + `remove_dir_all`, so it runs off the
-/// async worker and overlaps the job instead of delaying its first step. The
-/// handle is joined by [`JobTeardown::finish`]; an early `?` return between
-/// here and there drops it un-joined, but `spawn_blocking` is not cancelled on
-/// drop, so the sweep still completes.
-///
-/// GC failure must never fail the job, so an error is logged and the run
-/// continues; the count of pruned directories is logged at INFO.
+/// The sweep is blocking `read_dir` + `remove_dir_all`, so it overlaps the job
+/// instead of delaying its first step. [`JobTeardown::finish`] joins it; an
+/// early `?` return drops the handle, but `spawn_blocking` still completes.
+/// GC failure never fails the job: it is logged and the run continues.
 fn spawn_workspace_gc(config: &RunnerConfig, keep: &str) -> Option<tokio::task::JoinHandle<()>> {
-  // Zero disables GC. Without this guard `max_age` would be `Duration::ZERO`,
-  // and "prune anything older than zero seconds" sweeps every finished
-  // workspace — including ones created moments ago. Never-prune has two forms:
-  // the explicit `0` off switch here, and the `>= MAX_GC_HOURS` cap below.
-  if config.workspace_gc_hours == 0 {
-    return None;
-  }
-  let hours = config.workspace_gc_hours.min(MAX_GC_HOURS);
-  let max_age = Duration::from_secs(hours * 3600);
-  // Owned copies only — the closure must be 'static, and cloning the whole
-  // `RunnerConfig` for two fields would be wasteful.
+  let policy = super::workspace_gc::GcPolicy::from_config(config)?;
   let workspace_root = config.workspace_root.clone();
   let keep = keep.to_owned();
   Some(tokio::task::spawn_blocking(
-    move || match super::workspace_gc::gc_workspaces(&workspace_root, max_age, &keep) {
+    move || match super::workspace_gc::gc_workspaces(&workspace_root, &policy, &keep) {
       Ok(0) => {},
-      Ok(n) => info!(removed = n, "workspace GC pruned stale job workspaces"),
+      Ok(n) => info!(removed = n, "workspace GC pruned stale workspaces"),
       Err(e) => tracing::warn!(error = %e, "workspace GC failed; continuing"),
     },
   ))

@@ -33,14 +33,16 @@ pub(super) async fn run(
   shutdown: CancellationToken,
 ) -> Result<JobTeardown, RunnerError> {
   let cancel = cancel.child_token();
-  let workspace = config.workspace_root.join(&msg.job_id);
-  let (msg, mut ctx) = build_job_context_async(msg, config, masker, workspace.clone()).await?;
+  // Held until this function returns: no other job may enter the workspace
+  // before every step, post step, container and orphan sweep has finished.
+  let (prepared, workspace_gc) = prepare_job_workspace(config, &msg).await?;
+  let workspace = prepared.workspace.clone();
+  let (msg, mut ctx) = build_job_context_async(msg, config, masker, &prepared).await?;
   ctx.cancellation = Some(JobCancellation::new(cancel.clone(), shutdown));
   ctx.set_process_tracking(ProcessTracking::for_job(&msg.variables));
   apply_job_environment(&msg.environment_variables, &mut ctx)?;
   let container_spec = evaluate_container(&msg, config, &ctx)?;
   let service_specs = evaluate_services(msg.job_service_containers.as_ref(), &ctx)?;
-  let (workspace, workspace_gc) = prepare_job_workspace(config, &msg.job_id, workspace).await?;
   let (http, local) = start_job_services(config, &msg, &mut ctx).await?;
   let (local, workspace_gc) = match Box::pin(start_job_container(ContainerStartParams {
     spec: container_spec.as_ref(),

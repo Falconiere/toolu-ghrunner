@@ -146,6 +146,10 @@ async fn setup() -> TestResult<Harness> {
     workspace_root,
     cgroup_path: None,
     services_mode: ServicesMode::Offline,
+    workspace: shared::WorkspaceConfig {
+      mode: shared::WorkspaceMode::Fresh,
+      stable_gc_hours: 0,
+    },
     ..RunnerConfig::default()
   };
 

@@ -27,6 +27,10 @@ fn config(root: &std::path::Path) -> RunnerConfig {
     data_dir: root.join("data"),
     workspace_root: root.join("work"),
     workspace_gc_hours: 0,
+    workspace: shared::WorkspaceConfig {
+      mode: shared::WorkspaceMode::Fresh,
+      stable_gc_hours: 0,
+    },
     ..RunnerConfig::default()
   }
 }
