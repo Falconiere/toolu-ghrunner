@@ -1169,6 +1169,7 @@ readable by the runner's user are found (Linux `/proc/<pid>/environ`, macOS
 `KERN_PROCARGS2`, both exec-time snapshots), so `sudo`, `env -i` and other
 users' processes escape, as upstream. macOS real-process behavior is verified
 only by the CI `macos-14` test run; a macOS toolu live lane is **unverified**.
-The toolu self-hosted workflow lane (`run_toolu`) is **unverified** (no
+The official-runner reference lane's "Complete job" log is **unverified**
+until its first push-triggered run is observed and linked here. The toolu self-hosted workflow lane (`run_toolu`) is **unverified** (no
 registered runner). GHES is **unverified** (no server); the process rule does
 not depend on the server.

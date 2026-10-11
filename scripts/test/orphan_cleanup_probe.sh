@@ -11,6 +11,7 @@ P="${RUNNER_TEMP:?RUNNER_TEMP is set by the runner}/orphan89"
 mkdir -p "$P"
 
 detach() { # <pid-file> <seconds>
+  rm -f "$1" # a persistent RUNNER_TEMP must not satisfy the wait below with a stale pid
   python3 -c 'import os,sys,time; os.setsid(); open(sys.argv[1],"w").write(str(os.getpid())); time.sleep(int(sys.argv[2]))' "$1" "$2" >/dev/null 2>&1 < /dev/null &
   while [ ! -s "$1" ]; do sleep 0.05; done
 }
@@ -22,7 +23,6 @@ case "$mode" in
     bash -c 'sleep 301 >/dev/null 2>&1 & echo $! > "$1/grandchild"' _ "$P"
     nohup sleep 302 >/dev/null 2>&1 & echo $! > "$P/nohup"
     detach "$P/detached" 303
-    while [ ! -s "$P/grandchild" ]; do sleep 0.05; done
     for name in child grandchild nohup detached; do
       printf 'ORPHAN89|tagged|%s|%s\n' "$name" "$(cat "$P/$name")"
     done
