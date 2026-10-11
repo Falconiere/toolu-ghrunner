@@ -33,9 +33,9 @@ pub(crate) const ORPHAN_CLEANUP_TIMEOUT: Duration = Duration::from_secs(15);
 /// design can reclaim that blocking thread, so the trade-off is deliberate:
 /// finalization stops waiting after the backstop and the job completes, while
 /// the parked thread waits for the kernel. The thread holds no event sender
-/// (kills go into a shared list that `sweep` logs on every outcome, timeout
-/// included), so it cannot keep the job's event channel — and with it job
-/// completion — open.
+/// (kills go into a shared list that `sweep` drains once, after the join or
+/// the backstop, so every kill made by then is logged on every outcome), so it
+/// cannot keep the job's event channel — and with it job completion — open.
 const JOIN_BACKSTOP: Duration = Duration::from_secs(2);
 /// Interval between exit polls of killed processes.
 const EXIT_POLL: Duration = Duration::from_millis(100);

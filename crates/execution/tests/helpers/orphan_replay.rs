@@ -25,6 +25,9 @@ pub const PROBE: &str = "printf 'TRACK89|run|%s\\n' \"${RUNNER_TRACKING_ID-unset
 pub const HEADER: &str = "Cleaning up orphan processes";
 /// Step body + 2 s pipe drain + 15 s cleanup, with slack for a loaded host.
 const JOB_BOUND: Duration = Duration::from_secs(60);
+/// Replay deadline, derived from `JOB_BOUND` with headroom so a slow job
+/// fails the elapsed assertion rather than this timeout.
+const RUN_TIMEOUT: Duration = Duration::from_secs(JOB_BOUND.as_secs() * 4);
 
 // ---------------------------------------------------------------------------
 // Captured-message shaping
@@ -182,7 +185,7 @@ impl Replay {
     let started = Instant::now();
     let mut receiver = runner.execute_job_with_shutdown(job, cancel.clone(), shutdown.clone());
     let mut events = Vec::new();
-    tokio::time::timeout(JOB_BOUND, async {
+    tokio::time::timeout(RUN_TIMEOUT, async {
       while let Some(event) = receiver.recv().await {
         on_event(&event, &cancel, &shutdown);
         events.push(event);
