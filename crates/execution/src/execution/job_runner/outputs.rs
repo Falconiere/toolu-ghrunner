@@ -7,7 +7,9 @@ use shared::{AnnotationLevel, Conclusion, RunnerError};
 
 use super::complete_step::CompleteStep;
 use crate::execution::context::ExecutionContext;
-use crate::execution::job_spec::{JobSpec, evaluate_acquired_outputs, evaluate_job_outputs};
+use crate::execution::job_spec::{
+  JobSpec, NULL_TOKEN, evaluate_acquired_outputs, evaluate_job_outputs,
+};
 
 /// Resolved job outputs and whether their evaluation failed.
 pub(super) struct FinalOutputs {
@@ -25,7 +27,11 @@ pub(super) async fn evaluate_final_outputs(
   step: &CompleteStep<'_>,
   conclusion: Conclusion,
 ) -> Result<FinalOutputs, RunnerError> {
-  let Some(token) = spec.acquired_outputs.as_ref().filter(|t| t.token_type != 7) else {
+  let Some(token) = spec
+    .acquired_outputs
+    .as_ref()
+    .filter(|t| t.token_type != NULL_TOKEN)
+  else {
     return Ok(FinalOutputs {
       conclusion,
       outputs: evaluate_job_outputs(spec, ctx)?,
@@ -46,7 +52,8 @@ pub(super) async fn evaluate_final_outputs(
   let mut names: Vec<&String> = evaluated.outputs.keys().collect();
   names.sort();
   for name in names {
-    step.log(&format!("Set output '{name}'")).await;
+    let safe_name = step.mask(name);
+    step.log(&format!("Set output '{safe_name}'")).await;
   }
   let failed = evaluated.error.is_some();
   if let Some(error) = &evaluated.error {
@@ -54,7 +61,9 @@ pub(super) async fn evaluate_final_outputs(
     step
       .issue(AnnotationLevel::Error, "Fail to evaluate job outputs")
       .await;
-    step.issue(AnnotationLevel::Error, &error.to_string()).await;
+    step
+      .issue(AnnotationLevel::Error, &step.mask(&error.to_string()))
+      .await;
   }
   let conclusion = if failed && conclusion != Conclusion::Cancelled {
     Conclusion::Failure

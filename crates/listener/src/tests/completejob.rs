@@ -569,3 +569,116 @@ async fn infrastructure_category_is_sent_only_for_a_failed_runner_side_fetch() -
   assert_eq!(body.get("infrastructureFailureCategory"), None);
   Ok(())
 }
+
+#[tokio::test]
+async fn infrastructure_error_message_is_masked_in_completejob_and_the_journal() -> TestResult {
+  let launch = failing_resolver(500).await?;
+  let mut harness = harness()?;
+  let mut job = checkout_job(&launch, false)?;
+  // A registered secret that the resolver's status text happens to contain.
+  job
+    .get_mut("mask")
+    .and_then(Value::as_array_mut)
+    .ok_or("mask")?
+    .push(json!({"type": "regex", "value": "Internal Server Error"}));
+  let body = completed_body(&harness, job).await?;
+  let masked = "action download-info status 500 ***";
+  let checkout = step(&body, "Run actions/checkout@v4")?;
+  assert_eq!(
+    checkout.pointer("/annotations/0/message"),
+    Some(&json!(masked))
+  );
+  assert_eq!(
+    checkout.pointer("/annotations/0/isInfrastructureIssue"),
+    Some(&json!(true))
+  );
+  let mut journaled = Vec::new();
+  while let Ok(event) = harness.journal.try_recv() {
+    if let shared::ListenerEvent::Runner(shared::RunnerEvent::InfrastructureError {
+      message, ..
+    }) = event
+    {
+      journaled.push(message);
+    }
+  }
+  assert_eq!(journaled, vec![masked.to_owned()]);
+  Ok(())
+}
+
+#[tokio::test]
+async fn unparseable_job_still_echoes_the_billing_owner() -> TestResult {
+  let harness = harness()?;
+  let mut job = offline(ENV)?;
+  // Capture-derived: a body the runner cannot parse as a job message.
+  set(&mut job, "/steps", json!("not a step list"))?;
+  let body = completed_body(&harness, job).await?;
+  assert_eq!(body.get("conclusion"), Some(&json!("failed")));
+  assert_eq!(body.get("billingOwnerId"), Some(&json!("U_kgDOAH-IyQ")));
+  assert_eq!(body.get("environmentUrl"), None);
+  assert_eq!(body.get("infrastructureFailureCategory"), None);
+  Ok(())
+}
+
+#[tokio::test]
+async fn first_failed_step_category_wins_and_only_failures_latch() -> TestResult {
+  use shared::{Conclusion, RunnerEvent};
+  let started = |id: &str, step_number| RunnerEvent::StepStarted {
+    step_id: id.to_owned(),
+    step_name: id.to_owned(),
+    step_number,
+  };
+  let infra = |id: &str, category: &str| RunnerEvent::InfrastructureError {
+    step_id: id.to_owned(),
+    category: category.to_owned(),
+    message: format!("{category} fault"),
+  };
+  let completed = |id: &str, conclusion| RunnerEvent::StepCompleted {
+    step_id: id.to_owned(),
+    conclusion,
+    outputs: HashMap::new(),
+  };
+  for (events, expected) in [
+    // Upstream keeps the first category (`ExecutionContext.Complete`).
+    (
+      vec![
+        started("a", 2),
+        infra("a", "resolve_action"),
+        completed("a", Conclusion::Failure),
+        started("b", 3),
+        infra("b", "error_download_action"),
+        completed("b", Conclusion::Failure),
+      ],
+      Some("resolve_action"),
+    ),
+    // A cancelled step never latches, and does not block a later failure.
+    (
+      vec![
+        started("a", 2),
+        infra("a", "resolve_action"),
+        completed("a", Conclusion::Cancelled),
+      ],
+      None,
+    ),
+    (
+      vec![
+        started("a", 2),
+        infra("a", "resolve_action"),
+        completed("a", Conclusion::Cancelled),
+        started("b", 3),
+        infra("b", "invalid_action_download"),
+        completed("b", Conclusion::Failure),
+      ],
+      Some("invalid_action_download"),
+    ),
+  ] {
+    let collector = crate::step_reporter::StepCollector::new();
+    for event in &events {
+      collector.record(event).await;
+    }
+    assert_eq!(
+      collector.infrastructure_category().await.as_deref(),
+      expected
+    );
+  }
+  Ok(())
+}

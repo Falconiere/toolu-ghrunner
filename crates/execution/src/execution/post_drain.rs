@@ -125,13 +125,6 @@ async fn run_scoped_post(
     report.number,
   )
   .await;
-  super::step_metadata::emit_action_metadata(
-    events,
-    report.id,
-    &post.step.reference,
-    &post.manifest.runs.using,
-  )
-  .await;
 
   // This check latches the shared force token on expiry/shutdown, stopping all
   // remaining posts as well as this one; each post uses the same job budget.
@@ -146,6 +139,14 @@ async fn run_scoped_post(
     .await;
     return Ok(Conclusion::Skipped);
   }
+  // Upstream labels a row only once its handler runs: a skipped post has none.
+  super::step_metadata::emit_action_metadata(
+    events,
+    report.id,
+    &post.step.reference,
+    &post.manifest.runs.using,
+  )
+  .await;
 
   let watch = job.cancellation.watch_step(ctx.eval_context(), condition);
   let timeout = super::step_attrs::resolve_timeout(

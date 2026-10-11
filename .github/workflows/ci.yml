@@ -60,6 +60,13 @@ jobs:
           for t in assert_version changelog_extract package_release release_workflow release_finalize_workflow generate_homebrew_formula release_homebrew_workflow release_image_workflow release_macos_image_workflow macos_entrypoint docker_entrypoint release_pr_workflow release_pr_script code_review_workflow ci_workflow check_script daemon_live_workflow daemon_systemd; do
             bash "scripts/test/${t}_test.sh"
           done
+      # Committed #88 captures stay sanitized and hash-pinned, and the #88
+      # documentation keeps every acceptance row (the live lanes are recorded,
+      # not re-run, so only these two offline modes belong in CI).
+      - name: CompleteJob evidence (#88)
+        run: |
+          python3 scripts/test/completejob_evidence_check.py --local
+          python3 scripts/test/completejob_evidence_check.py --docs
 
   # The OS-dependent half of the gate on a real macOS host. Formatting, the
   # #[allow] ban and the guardrail structure checks are OS-independent and stay

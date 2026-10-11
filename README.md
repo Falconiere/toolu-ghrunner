@@ -817,4 +817,3 @@ action download or resolution caused by GitHub's service sets
 `infrastructureFailureCategory` (`resolve_action`, `error_download_action`,
 `invalid_action_download`). A missing repository, ref or permission does not
 set it. See `docs/test-coverage.md` (#88) for what is verified live.
-

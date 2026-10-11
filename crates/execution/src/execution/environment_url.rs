@@ -14,6 +14,10 @@ use expressions::types::ExprValue;
 use shared::{ActionsEnvironment, RunnerError, TemplateToken};
 
 use super::context::ExecutionContext;
+use super::job_spec::{
+  BOOLEAN_TOKEN, EXPRESSION_TOKEN, LITERAL_TOKEN, MAPPING_TOKEN, NULL_TOKEN, NUMBER_TOKEN,
+  SEQUENCE_TOKEN,
+};
 use super::step_attrs::StepAttrError;
 
 /// The contexts upstream's `string-runner-context-no-secrets` schema allows.
@@ -59,15 +63,6 @@ pub(crate) fn evaluate_environment_url(
     EnvironmentUrl::Secret
   }
 }
-
-// Wire discriminants from `shared::TemplateToken`.
-const LITERAL_TOKEN: i32 = 0;
-const SEQUENCE_TOKEN: i32 = 1;
-const MAPPING_TOKEN: i32 = 2;
-const EXPRESSION_TOKEN: i32 = 3;
-const BOOLEAN_TOKEN: i32 = 5;
-const NUMBER_TOKEN: i32 = 6;
-const NULL_TOKEN: i32 = 7;
 
 fn evaluate(token: &TemplateToken, ctx: &ExecutionContext) -> Result<String, StepAttrError> {
   let value = match token.token_type {

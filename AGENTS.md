@@ -771,4 +771,3 @@ context); a value the masker changes is dropped with upstream's warning.
 `infrastructureFailureCategory` only from a typed
 `RunnerError::ActionFetch` on a step that ended failed. See
 `docs/test-coverage.md` (#88) for the verified and unverified lanes.
-

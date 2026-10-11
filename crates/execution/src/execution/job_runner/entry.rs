@@ -96,7 +96,17 @@ fn job_outcome(ctx: &ExecutionContext, job_id: String, result: JobResult) -> Job
     outputs,
     environment_url,
   } = result;
-  let conclusion = if ctx
+  JobOutcome {
+    job_id,
+    conclusion: after_shutdown(ctx, conclusion),
+    outputs,
+    environment_url,
+  }
+}
+
+/// A runner shutdown fails the job whatever its steps concluded.
+pub(super) fn after_shutdown(ctx: &ExecutionContext, conclusion: Conclusion) -> Conclusion {
+  if ctx
     .cancellation
     .as_ref()
     .is_some_and(|signal| signal.shutdown.is_cancelled())
@@ -104,11 +114,5 @@ fn job_outcome(ctx: &ExecutionContext, job_id: String, result: JobResult) -> Job
     Conclusion::Failure
   } else {
     conclusion
-  };
-  JobOutcome {
-    job_id,
-    conclusion,
-    outputs,
-    environment_url,
   }
 }
