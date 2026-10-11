@@ -143,7 +143,7 @@ fn sweep_kills_a_live_tagged_process() -> TestResult {
   assert_eq!(status.signal(), Some(9), "{report:?}");
   assert_eq!(killed, [(pid, "sleep".to_owned())]);
   assert_eq!(report.terminated, [pid]);
-  assert!(report.survivors.is_empty() && !report.timed_out && !report.degraded);
+  assert!(report.survivors.is_empty() && !report.timed_out && !report.degraded && !report.failed);
   Ok(())
 }
 
@@ -227,10 +227,12 @@ fn report_warnings_name_each_abnormal_outcome_once() {
     survivors: vec![42, 43],
     timed_out: true,
     degraded: true,
+    failed: true,
   };
   assert_eq!(
     report_warnings(&everything),
     [
+      "Orphan process cleanup did not complete; see the runner diagnostics log.",
       "Orphan process cleanup could not enumerate processes on this host.",
       "Orphan process cleanup stopped after 15s.",
       "Orphan processes still running after cleanup: [42, 43]",

@@ -100,6 +100,8 @@ pub struct CleanupReport {
   pub timed_out: bool,
   /// The runner could not see its own process, so the scan saw nothing useful.
   pub degraded: bool,
+  /// The blocking sweep panicked or was cancelled before reporting.
+  pub failed: bool,
 }
 
 /// One process found carrying the id during a scan.
@@ -163,7 +165,10 @@ pub(crate) async fn sweep(
     Ok(Ok(report)) => report,
     Ok(Err(error)) => {
       tracing::warn!(%error, "orphan cleanup task failed");
-      CleanupReport::default()
+      CleanupReport {
+        failed: true,
+        ..CleanupReport::default()
+      }
     },
     Err(_elapsed) => CleanupReport {
       timed_out: true,
@@ -328,6 +333,10 @@ async fn warn_on_report(events: &mpsc::Sender<RunnerEvent>, report: &CleanupRepo
 /// One WARN line per abnormal sweep outcome: degraded scan, deadline, survivors.
 fn report_warnings(report: &CleanupReport) -> Vec<String> {
   let mut warnings = Vec::new();
+  if report.failed {
+    warnings
+      .push("Orphan process cleanup did not complete; see the runner diagnostics log.".to_owned());
+  }
   if report.degraded {
     warnings.push("Orphan process cleanup could not enumerate processes on this host.".to_owned());
   }
@@ -355,8 +364,9 @@ fn job_event(line: String) -> RunnerEvent {
 }
 
 async fn job_log(events: &mpsc::Sender<RunnerEvent>, line: String) {
-  if events.send(job_event(line)).await.is_err() {
-    tracing::warn!("event channel closed; orphan cleanup log line was dropped");
+  // `send` waits while the channel is full, so its only error is a closed channel.
+  if let Err(error) = events.send(job_event(line)).await {
+    tracing::warn!(%error, "orphan cleanup log line was dropped");
   }
 }
 
