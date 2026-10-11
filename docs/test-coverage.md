@@ -1167,6 +1167,29 @@ statuses are the faults under test.
 | AC-7 | Repository gate and this documentation. | `./tools/check.sh all`, `completejob_evidence_check.py --docs` |
 | AC-8 | The journal carries one `step_metadata` line per reported row (including "Complete job") and an `error` annotation line for an infrastructure failure. The canonical fixture is regenerated from a real engine run. | `journal_writer_test`, `journal_reader_test`, `journal_types_test` |
 
+Live comparison (AC-6): [run 38104866197](https://github.com/Falconiere/toolu-ghrunner/actions/runs/38104866197),
+toolu built from `5d727e4` on Linux x86_64 (`toolu-88-verify`) against the
+GitHub-hosted `ubuntu-24.04` official runner on the same workflow SHA. API
+results are recorded in `crates/listener/tests/completejob_88_evidence.json`;
+`python3 scripts/test/completejob_evidence_check.py` (and `--strict`) checks
+them.
+
+| Check | toolu | reference |
+| --- | --- | --- |
+| `url` job deployment `environment_url` | `https://toolu-88.example/toolu/38104866197` | `https://toolu-88.example/reference/38104866197` |
+| `secret` job deployment `environment_url` | absent | absent |
+| `secret` job check-run annotation | `Skip setting environment url as environment 'completejob-88-secret-toolu' may contain secret.` | same text for `…-reference` |
+| Last row of every job | "Complete job" | "Complete job" |
+| Job logs load (lines: url / steps / secret) | 22 / 111 / 20 | 42 / 199 / 39 |
+| `steps` job annotations | `step failed on purpose`, `composite child notice` | same, plus Node 20 deprecation and exit-code lines |
+
+GitHub accepted the upstream-shaped `StepResult`s (snake_case keys, string
+enums) on every toolu job. The capture run 38098611227, which already used
+the new shape, completed the same way. macOS and GHES are **unverified**: no
+macOS runner host or GHES server is available here (recorded in the evidence
+file). GitHub does not expose `action_name`/`ref`/`type`, so those fields are
+verified at the outgoing POST only.
+
 Known differences from the reference:
 
 - toolu attributes action fetch failures to the failing step. Upstream fetches

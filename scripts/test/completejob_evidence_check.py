@@ -148,8 +148,11 @@ def record(run_id):
             steps = [{'number': s['number'], 'name': s['name'], 'conclusion': s['conclusion']}
                      for s in job['steps']]
             annotations = api(f'repos/{REPO}/check-runs/{job["id"]}/annotations')
+            log = subprocess.check_output(
+                ['gh', 'api', '--allow-escape-sequences', f'repos/{REPO}/actions/jobs/{job["id"]}/logs'], text=True)
             result['jobs'][name] = {
                 'id': job['id'], 'conclusion': job['conclusion'], 'steps': steps,
+                'log_lines': len(log.splitlines()),
                 'annotations': [{'level': a['annotation_level'], 'message': a['message']}
                                 for a in annotations]}
         for kind in ('', 'secret-'):
@@ -190,6 +193,9 @@ def lane_status(evidence, lane):
         if not last or last['name'] != 'Complete job':
             problems.append(f'{name}: Complete job is not the highest-numbered row')
     for name in ('url', 'secret', 'steps'):
+        if not jobs.get(name, {}).get('log_lines'):
+            problems.append(f'{name}: job log did not load')
+    for name in ('url', 'secret', 'steps'):
         if jobs.get(name, {}).get('conclusion') != 'success':
             problems.append(f'{name}: conclusion {jobs.get(name, {}).get("conclusion")}')
     return ('passed' if not problems else 'failed'), problems
@@ -219,7 +225,7 @@ def check_docs():
     assert len(section) == 2, 'test-coverage.md lacks the #88 section'
     for ac in range(1, 9):
         assert f'AC-{ac}' in section[1], f'#88 section lacks AC-{ac}'
-    assert 'no "Complete job" row' not in coverage, 'stale #99 Complete job note'
+    assert 'Those belong to step reporting (#88)' not in coverage, 'stale #99 Complete job note'
     for readme, module in [
         ('crates/execution/src/execution/job_runner/README.md', 'complete_step.rs'),
         ('crates/execution/src/execution/README.md', 'environment_url.rs'),
