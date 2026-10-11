@@ -258,11 +258,13 @@ fn action_context_error(error: &RunnerError) -> String {
 }
 
 fn is_archive_auth_error(error: &RunnerError) -> bool {
-  if let RunnerError::ActionDownload(message) = error {
-    message.starts_with("archive status 401") || message.starts_with("archive status 403")
-  } else {
-    false
-  }
+  matches!(
+    error,
+    RunnerError::ActionFetch(shared::ActionFetchError {
+      kind: shared::ActionFetchKind::ArchiveStatus(401 | 403),
+      ..
+    })
+  )
 }
 
 /// Kick job-start action prefetch as a background task, returning its handle

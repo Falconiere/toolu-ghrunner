@@ -33,6 +33,15 @@ async fn run_journaled_job(
   jobs_dir: &Path,
   masker: SharedMasker,
 ) -> TestResult {
+  run_journaled_message(fixture_job(steps)?, jobs_dir, masker).await
+}
+
+/// [`run_journaled_job`] for a whole acquired message.
+async fn run_journaled_message(
+  msg: AgentJobRequestMessage,
+  jobs_dir: &Path,
+  masker: SharedMasker,
+) -> TestResult {
   let dir = tempfile::tempdir()?;
   let workspace_root = dir.path().join("work");
   let data_dir = dir.path().join("data");
@@ -46,7 +55,6 @@ async fn run_journaled_job(
     ..RunnerConfig::default()
   };
 
-  let msg = fixture_job(steps)?;
   let (jtx, jrx) = mpsc::channel::<ListenerEvent>(256);
   let sink = writer::spawn(jrx, jobs_dir.to_path_buf(), Arc::clone(&masker));
 
@@ -171,6 +179,91 @@ async fn journal_matches_contract_for_real_job() -> TestResult {
     e,
     JournalEvent::Log { line, .. } if line.contains("one")
   )));
+  // Issue 88: every reported row, "Complete job" included, is labelled once.
+  let started: Vec<&str> = lines
+    .iter()
+    .filter_map(|l| {
+      if let JournalEvent::StepStarted { step_id, .. } = &l.event {
+        Some(step_id.as_str())
+      } else {
+        None
+      }
+    })
+    .collect();
+  let labelled: Vec<(&str, &str, Option<&str>)> = lines
+    .iter()
+    .filter_map(|l| {
+      if let JournalEvent::StepMetadata {
+        step_id,
+        kind,
+        action,
+        ..
+      } = &l.event
+      {
+        Some((step_id.as_str(), kind.as_str(), action.as_deref()))
+      } else {
+        None
+      }
+    })
+    .collect();
+  assert_eq!(labelled.len(), started.len(), "{labelled:?}");
+  assert!(labelled.contains(&(
+    started.first().copied().unwrap_or_default(),
+    "run",
+    Some("bash")
+  )));
+  assert!(
+    labelled
+      .iter()
+      .any(|(_, kind, action)| *kind == "runner" && *action == Some("complete_job"))
+  );
+  Ok(())
+}
+
+/// Fault-injection action resolver answering every request with HTTP 500.
+async fn failing_resolver() -> TestResult<String> {
+  let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+  let base = format!("http://{}", listener.local_addr()?);
+  let app =
+    axum::Router::new().fallback(|| async { axum::http::StatusCode::INTERNAL_SERVER_ERROR });
+  tokio::spawn(async move {
+    if let Err(error) = axum::serve(listener, app).await {
+      eprintln!("resolver stand-in stopped: {error}");
+    }
+  });
+  Ok(base)
+}
+
+#[tokio::test]
+async fn infrastructure_failure_is_journaled_as_an_error_annotation() -> TestResult {
+  // Sanitized github.com acquisition (completejob-88 run 38098611227) with its
+  // captured `actions/checkout@v4` step; the resolver is a fault injection.
+  let mut msg: AgentJobRequestMessage = serde_json::from_str(include_str!(
+    "../../execution/tests/completejob_88_steps_message.json"
+  ))?;
+  msg.steps.truncate(1);
+  msg.variables.remove("system.github.results_endpoint");
+  let launch = msg
+    .variables
+    .get_mut("system.github.launch_endpoint")
+    .ok_or("captured launch endpoint missing")?;
+  launch.value = failing_resolver().await?;
+  let jobs_dir = tempfile::tempdir()?;
+  run_journaled_message(
+    msg,
+    jobs_dir.path(),
+    Arc::new(Mutex::new(SecretMasker::new())),
+  )
+  .await?;
+  let (_, lines) = read_single_journal(jobs_dir.path())?;
+  assert!(
+    lines.iter().any(|l| matches!(
+      &l.event,
+      JournalEvent::Annotation { level, message, .. }
+        if level == "error" && message.contains("download-info status 500")
+    )),
+    "no infrastructure annotation line"
+  );
   Ok(())
 }
 

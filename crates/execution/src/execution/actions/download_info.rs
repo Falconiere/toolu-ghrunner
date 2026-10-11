@@ -6,7 +6,9 @@
 
 use base64::Engine;
 use serde_json::{Value, json};
-use shared::{AgentJobRequestMessage, RunnerError, SecretMasker};
+use shared::{
+  ActionFetchError, ActionFetchKind, AgentJobRequestMessage, RunnerError, SecretMasker,
+};
 use std::sync::{Arc, Mutex};
 use tokio_util::sync::CancellationToken;
 
@@ -151,7 +153,7 @@ impl ActionDownloadContext {
       fallback_info(&body, action, &self.api_url, self.job_token.as_deref())?
     };
     if !valid_sha(&sha) {
-      return Err(RunnerError::ActionDownload(
+      return Err(resolve_service(
         "action resolver returned invalid revision".to_owned(),
       ));
     }
@@ -200,19 +202,20 @@ impl ActionDownloadContext {
     let response = tokio::select! {
       () = cancel.cancelled() => return Err(RunnerError::ActionDownload("action resolution cancelled".to_owned())),
       result = request.send() => result.map_err(|error| {
-        RunnerError::ActionDownload(format!("action download-info request failed: timeout={}", error.is_timeout()))
+        resolve_service(format!("action download-info request failed: timeout={}", error.is_timeout()))
       })?,
     };
     if !response.status().is_success() {
-      return Err(RunnerError::ActionDownload(format!(
-        "action download-info status {}",
-        response.status()
-      )));
+      return Err(resolution_status_error(
+        response.status(),
+        &LAUNCH_USER_STATUSES,
+        format!("action download-info status {}", response.status()),
+      ));
     }
     tokio::select! {
       () = cancel.cancelled() => Err(RunnerError::ActionDownload("action resolution cancelled".to_owned())),
       result = response.json::<Value>() => result.map_err(|_error| {
-        RunnerError::ActionDownload("action download-info JSON invalid".to_owned())
+        resolve_service("action download-info JSON invalid".to_owned())
       }),
     }
   }
@@ -251,19 +254,20 @@ impl ActionDownloadContext {
     let response = tokio::select! {
       () = cancel.cancelled() => return Err(RunnerError::ActionDownload("action resolution cancelled".to_owned())),
       result = request.send() => result.map_err(|error| {
-        RunnerError::ActionDownload(format!("action fallback request failed: timeout={}", error.is_timeout()))
+        resolve_service(format!("action fallback request failed: timeout={}", error.is_timeout()))
       })?,
     };
     if !response.status().is_success() {
-      return Err(RunnerError::ActionDownload(format!(
-        "action fallback status {}",
-        response.status()
-      )));
+      return Err(resolution_status_error(
+        response.status(),
+        &REST_USER_STATUSES,
+        format!("action fallback status {}", response.status()),
+      ));
     }
     tokio::select! {
       () = cancel.cancelled() => Err(RunnerError::ActionDownload("action resolution cancelled".to_owned())),
       result = response.json::<Value>() => result.map_err(|_error| {
-        RunnerError::ActionDownload("action fallback revision JSON invalid".to_owned())
+        resolve_service("action fallback revision JSON invalid".to_owned())
       }),
     }
   }
@@ -285,15 +289,13 @@ fn launch_info(
   let entry = body
     .get("actions")
     .and_then(|actions| actions.get(&key))
-    .ok_or_else(|| {
-      RunnerError::ActionDownload("action resolver omitted requested action".to_owned())
-    })?;
+    .ok_or_else(|| resolve_service("action resolver omitted requested action".to_owned()))?;
   let resolved = entry
     .get("resolved_name")
     .and_then(Value::as_str)
-    .ok_or_else(|| RunnerError::ActionDownload("action resolver omitted repository".to_owned()))?;
+    .ok_or_else(|| resolve_service("action resolver omitted repository".to_owned()))?;
   if resolved != format!("{}/{}", action.owner, action.repo) {
-    return Err(RunnerError::ActionDownload(
+    return Err(resolve_service(
       "action resolver changed repository".to_owned(),
     ));
   }
@@ -331,7 +333,7 @@ fn required_string(entry: &Value, key: &str) -> Result<String, RunnerError> {
     .and_then(Value::as_str)
     .filter(|value| !value.is_empty())
     .map(str::to_owned)
-    .ok_or_else(|| RunnerError::ActionDownload(format!("action resolver omitted {key}")))
+    .ok_or_else(|| resolve_service(format!("action resolver omitted {key}")))
 }
 
 fn valid_sha(sha: &str) -> bool {
@@ -340,16 +342,14 @@ fn valid_sha(sha: &str) -> bool {
 
 fn validate_archive_url(raw: &str) -> Result<(), RunnerError> {
   let url = reqwest::Url::parse(raw)
-    .map_err(|_error| RunnerError::ActionDownload("action archive URL invalid".to_owned()))?;
+    .map_err(|_error| resolve_service("action archive URL invalid".to_owned()))?;
   let loopback = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
   if (url.scheme() != "https" && !(url.scheme() == "http" && loopback))
     || url.host_str().is_none()
     || !url.username().is_empty()
     || url.password().is_some()
   {
-    return Err(RunnerError::ActionDownload(
-      "action archive URL invalid".to_owned(),
-    ));
+    return Err(resolve_service("action archive URL invalid".to_owned()));
   }
   Ok(())
 }
@@ -448,3 +448,32 @@ fn validate_api_url(raw: &str) -> Result<(), RunnerError> {
   }
   Ok(())
 }
+
+/// A resolve-phase failure GitHub's service owns (upstream
+/// `FailedToResolveActionDownloadInfoException` → `resolve_action`).
+pub(super) fn resolve_service(message: String) -> RunnerError {
+  RunnerError::ActionFetch(ActionFetchError {
+    kind: ActionFetchKind::ResolveService,
+    message,
+  })
+}
+
+/// Classify a non-success resolution status. `user` statuses are the
+/// workflow's own problem (missing or private repo, missing ref, no access)
+/// and keep today's user error; any other status is the service's.
+pub(super) fn resolution_status_error(
+  status: reqwest::StatusCode,
+  user: &[u16],
+  message: String,
+) -> RunnerError {
+  if user.contains(&status.as_u16()) {
+    RunnerError::ActionDownload(message)
+  } else {
+    resolve_service(message)
+  }
+}
+
+/// Launch download-info: only 422 means unresolvable (`LaunchHttpClient`).
+const LAUNCH_USER_STATUSES: [u16; 1] = [422];
+/// REST and legacy resolution cannot tell a missing repo from a private one.
+pub(super) const REST_USER_STATUSES: [u16; 4] = [401, 403, 404, 422];

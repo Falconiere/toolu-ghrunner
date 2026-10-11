@@ -3,15 +3,14 @@
 use shared::{
   AgentJobRequestMessage, Conclusion, RunnerConfig, RunnerError, RunnerEvent, SecretMasker,
 };
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use super::{
-  ContainerStart, ContainerStartParams, JobOutcome, LocalServices, build_job_context_async,
-  finish_job, prepare_job_workspace, prepared, start_job_container, start_job_services,
-  stop_local_services,
+  ContainerStart, ContainerStartParams, JobOutcome, JobResult, LocalServices,
+  build_job_context_async, finish_job, prepare_job_workspace, prepared, start_job_container,
+  start_job_services, stop_local_services,
 };
 use crate::docker::service_spec::evaluate_services;
 use crate::execution::container_job::{evaluate_container, finish_container};
@@ -74,29 +73,29 @@ pub(super) async fn run(
 async fn finish_execution(
   ctx: &ExecutionContext,
   job_id: String,
-  body_result: Result<(Conclusion, HashMap<String, String>), RunnerError>,
+  body_result: Result<JobResult, RunnerError>,
   local: LocalServices,
   events: &mpsc::Sender<RunnerEvent>,
   workspace_gc: Option<tokio::task::JoinHandle<()>>,
 ) -> Result<JobTeardown, RunnerError> {
-  let (conclusion, outputs) = match finish_container(ctx, body_result, events).await {
+  let result = match finish_container(ctx, body_result, events).await {
     Ok(result) => result,
     Err(error) => {
       stop_local_services(local).await;
       return Err(error);
     },
   };
-  let outcome = job_outcome(ctx, job_id, conclusion, outputs);
+  let outcome = job_outcome(ctx, job_id, result);
   Ok(finish_job(local, events, outcome, workspace_gc).await)
 }
 
 /// Preserve shutdown precedence when packaging the completed job's result.
-fn job_outcome(
-  ctx: &ExecutionContext,
-  job_id: String,
-  conclusion: Conclusion,
-  outputs: HashMap<String, String>,
-) -> JobOutcome {
+fn job_outcome(ctx: &ExecutionContext, job_id: String, result: JobResult) -> JobOutcome {
+  let JobResult {
+    conclusion,
+    outputs,
+    environment_url,
+  } = result;
   let conclusion = if ctx
     .cancellation
     .as_ref()
@@ -110,5 +109,6 @@ fn job_outcome(
     job_id,
     conclusion,
     outputs,
+    environment_url,
   }
 }

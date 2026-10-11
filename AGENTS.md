@@ -440,7 +440,9 @@ to that list requires proving the value is not a real credential.
   line contract (v1: `{"v":1,"seq":N,"ts":"…","type":"<snake_case
   event>",…}`, decoupled from `shared::events` — internally-tagged
   serde enum flattened into a version/seq/ts envelope). `writer` masks
-  every line through the job's `SecretMasker`, buffers pre-acquire
+  every line through the job's `SecretMasker` (a `step_metadata` line
+  records each row's non-secret action identity; infrastructure errors
+  land as `error` annotations), buffers pre-acquire
   events (cap 256), names the file `<UTC ts>-<job_id>.jsonl` under
   `data_dir/_diag/jobs/`, prunes to the newest 50, and NEVER fails
   the job (WARN once, keep draining). `reader` is the incremental
@@ -576,7 +578,8 @@ to that list requires proving the value is not a real credential.
   the job's `CancellationToken` and sets a write-once flag that
   `execute_with_renewal` reads (after joining the renewal task) to
   override a non-`Success` conclusion to `Failure` plus a "lost
-  connection" annotation. `outage.rs` is the pure `OutageWatchdog`
+  connection" annotation (folded by `outage_override::apply_outage_override`,
+  which owns `LOST_CONNECTION_MESSAGE`). `outage.rs` is the pure `OutageWatchdog`
   (300s threshold, latch; `pub`, tested from `crates/listener/tests/`).
   `retry.rs` (`pub(crate)`) has `retry_transient` — retries
   `RunnerError::Network` only with jittered 1s→60s backoff, cancel-aware,
@@ -754,3 +757,18 @@ Without an endpoint, it skips upload. Unlike log events, summary bodies must nev
 written to diagnostic sinks; journal events contain only the ID and byte size.
 Summary read/size/upload errors do not change the execution conclusion. See
 `docs/step-summaries.md` for verification scope and GHES's skipped status.
+
+### CompleteJob / StepResult payload (#88)
+
+`StepResult` follows upstream `StepResult.cs`: `snake_case` keys, string
+`status`/`conclusion`, `action_name`/`ref`/`type` from
+`RunnerEvent::StepMetadata` (`execution::step_metadata`), always-sent
+`annotations`. The engine reports a final "Complete job" row
+(`job_runner/complete_step.rs`) that evaluates job outputs and then
+`actionsEnvironment.url` (`execution::environment_url`, no `secrets`
+context); a value the masker changes is dropped with upstream's warning.
+`CompleteJobRequest` echoes `billingOwnerId` and sends
+`infrastructureFailureCategory` only from a typed
+`RunnerError::ActionFetch` on a step that ended failed. See
+`docs/test-coverage.md` (#88) for the verified and unverified lanes.
+

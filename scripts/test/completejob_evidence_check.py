@@ -173,7 +173,7 @@ def lane_status(evidence, lane):
         return 'unverified', [unverified[lane]]
     runs = evidence.get('runs')
     if not runs:
-        return 'unverified', ['no recorded run']
+        return 'failed', ['no recorded run and no recorded unverified reason']
     jobs = runs['lanes'][lane]['jobs']
     run_id = runs['id']
     problems = []

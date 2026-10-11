@@ -31,11 +31,12 @@ use cache::trust::{TrustLevel, classify_trust};
 use cache::v1::{V1Inputs, V1State, v1_router};
 use shared::SecretMasker;
 
+mod complete_step;
 mod entry;
 mod outputs;
 mod prepared;
 
-use outputs::evaluate_final_outputs;
+use complete_step::{JobResult, run_complete_step};
 
 /// The local services a job's configured mode brought up, threaded from the
 /// startup match through `setup_job_env` and shut down at job end.
@@ -196,6 +197,7 @@ async fn start_job_container(
           Conclusion::Cancelled
         },
         outputs: HashMap::new(),
+        environment_url: None,
       };
       Ok(ContainerStart::Finished(
         finish_job(local, events, outcome, workspace_gc).await,
@@ -254,11 +256,12 @@ fn job_context(
   ctx
 }
 
-/// What a finished job reports: its id, conclusion, and resolved outputs.
+/// What a finished job reports: its id, conclusion, outputs and URL.
 struct JobOutcome {
   job_id: String,
   conclusion: Conclusion,
   outputs: HashMap<String, String>,
+  environment_url: Option<String>,
 }
 
 /// Stop the local servers, emit `JobCompleted`, and package the deferred work.
@@ -274,7 +277,7 @@ async fn finish_job(
   workspace_gc: Option<tokio::task::JoinHandle<()>>,
 ) -> JobTeardown {
   let maintenance = stop_local_services(local).await;
-  emit_job_completed(events, outcome.job_id, outcome.conclusion, outcome.outputs).await;
+  emit_job_completed(events, outcome).await;
   JobTeardown::new(maintenance, workspace_gc)
 }
 
@@ -401,8 +404,8 @@ struct JobBody<'a> {
   fetcher: &'a ActionFetcher,
 }
 
-/// Run the job-started hook, the step loop, job-output evaluation, and the
-/// job-completed hook. Returns the job conclusion and resolved outputs.
+/// Run the job-started hook, the step loop, the "Complete job" step (job
+/// outputs and environment URL), and the job-completed hook.
 ///
 /// The job-started hook is a hard gate (its failure short-circuits to a failed
 /// job before any step); the job-completed hook is best-effort and never
@@ -411,7 +414,7 @@ struct JobBody<'a> {
 async fn run_job_body(
   body: &JobBody<'_>,
   ctx: &mut ExecutionContext,
-) -> Result<(Conclusion, HashMap<String, String>), RunnerError> {
+) -> Result<JobResult, RunnerError> {
   let JobBody {
     msg,
     config,
@@ -427,7 +430,8 @@ async fn run_job_body(
   // Job-started hook is a hard gate: its failure fails the job before any step.
   let started = run_job_hook(JobHookStage::Started, ctx, events, workspace, cancel).await?;
   if matches!(started, Some(Conclusion::Failure | Conclusion::Cancelled)) {
-    return Ok((started.unwrap_or(Conclusion::Failure), HashMap::new()));
+    let conclusion = started.unwrap_or(Conclusion::Failure);
+    return run_complete_step(spec, msg, ctx, events, conclusion).await;
   }
 
   let run = JobRun {
@@ -440,13 +444,12 @@ async fn run_job_body(
   };
   let conclusion = run_steps(&msg.steps, ctx, events, cancel.clone(), &run).await?;
 
-  // Evaluate job `outputs:` against the final context (after main + post steps).
-  let (conclusion, outputs) =
-    evaluate_final_outputs(spec, ctx, events, &msg.job_id, conclusion).await?;
+  // "Complete job" evaluates outputs and the URL after main + post steps.
+  let result = run_complete_step(spec, msg, ctx, events, conclusion).await?;
 
   run_completed_hook_best_effort(ctx, events, workspace, cancel).await;
 
-  Ok((conclusion, outputs))
+  Ok(result)
 }
 
 /// Run the job-completed hook best-effort (never overrides the job
@@ -558,18 +561,13 @@ async fn emit_job_started(events: &mpsc::Sender<RunnerEvent>, job_id: &str, job_
     .await;
 }
 
-async fn emit_job_completed(
-  events: &mpsc::Sender<RunnerEvent>,
-  job_id: String,
-  conclusion: Conclusion,
-  outputs: HashMap<String, String>,
-) {
+async fn emit_job_completed(events: &mpsc::Sender<RunnerEvent>, outcome: JobOutcome) {
   let _ = events
     .send(RunnerEvent::JobCompleted {
-      job_id,
-      conclusion,
-      outputs,
-      environment_url: None,
+      job_id: outcome.job_id,
+      conclusion: outcome.conclusion,
+      outputs: outcome.outputs,
+      environment_url: outcome.environment_url,
     })
     .await;
 }

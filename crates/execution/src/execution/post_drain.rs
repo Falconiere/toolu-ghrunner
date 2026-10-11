@@ -125,6 +125,13 @@ async fn run_scoped_post(
     report.number,
   )
   .await;
+  super::step_metadata::emit_action_metadata(
+    events,
+    report.id,
+    &post.step.reference,
+    &post.manifest.runs.using,
+  )
+  .await;
 
   // This check latches the shared force token on expiry/shutdown, stopping all
   // remaining posts as well as this one; each post uses the same job budget.

@@ -9,6 +9,7 @@
 | `job_environment.rs` | Issue 69 captured-envelope replay for environment layers, step precedence, file commands, and job isolation. |
 | `job_environment_actions.rs` | Issue 69 real Node stages and repeated nested composite environment probes. |
 | `step_attrs.rs` | Evaluates captured timeout / continue-on-error tokens and pins the reference runner's diagnostics. |
+| `step_metadata.rs` | Maps captured remote, subpath, `self` and registry references to upstream's step telemetry. |
 | `step_display.rs` | Generates captured step display names at job start and main stage, including failure warnings and masking. |
 | `step_timeout.rs` | Checks stalled action resolution against a parent deadline and cancellation. |
 | `job_cancellation.rs` | Real cleanup processes share one cancellation deadline and are reaped on expiry. |

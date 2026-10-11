@@ -67,6 +67,7 @@ pub mod shadow;
 pub mod step_attrs;
 mod step_display;
 mod step_env;
+mod step_metadata;
 mod step_naming;
 /// Finalizes `CI` and `GITHUB_ACTIONS` at each step process boundary.
 pub(crate) mod step_process_env;

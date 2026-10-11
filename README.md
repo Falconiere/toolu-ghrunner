@@ -166,7 +166,7 @@ sequenceDiagram
         Note over R: execute steps locally
         R->>RS: stream logs + step results
         R->>RS: renew lock (every 60s)
-        R->>RS: complete job (conclusion)
+        R->>RS: complete job (conclusion, outputs, step results, environment URL)
     end
 ```
 
@@ -796,3 +796,25 @@ first step; early setup failure or cancellation keeps its diagnostics and report
 the corresponding conclusion. Setup output uses the same masking and live/durable
 log paths as step output. See [setup evidence](docs/test-coverage.md#set-up-job-diagnostics-87)
 for tested cases and unverified backend lanes.
+
+### Completion payload and deployment links
+
+The last row of every job is **Complete job**, as on GitHub-hosted runners.
+It evaluates the job's `outputs:` and then its `environment.url` after every
+step and post has run, so a URL built from `steps.<id>.outputs` gives the
+deployment its "View deployment" link. The URL may use the `github`,
+`needs`, `strategy`, `matrix`, `steps`, `job`, `runner`, `env` and `vars`
+contexts, but not `secrets`. If the value contains a masked secret, the URL
+is dropped and the step warns
+`Skip setting environment url as environment '<name>' may contain secret.`.
+toolu also drops a literal URL that contains a secret, which the official
+runner would send.
+
+Each step result reported to GitHub carries upstream's action identity:
+`run` plus the shell, `node20`/`node24`, `composite`, `Dockerfile`, or
+`DockerHub` plus the image, along with the action's name and ref. A failed
+action download or resolution caused by GitHub's service sets
+`infrastructureFailureCategory` (`resolve_action`, `error_download_action`,
+`invalid_action_download`). A missing repository, ref or permission does not
+set it. See `docs/test-coverage.md` (#88) for what is verified live.
+

@@ -1,10 +1,11 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use flate2::read::GzDecoder;
 use futures_util::StreamExt;
-use shared::RunnerError;
+use shared::{ActionFetchError, ActionFetchKind, RunnerError};
 use tar::Archive;
 
 /// Cache directory for an action: `{data_dir}/actions/{cache_key}`.
@@ -52,15 +53,15 @@ pub fn extract_tarball(reader: impl Read, dest: &Path) -> Result<(), RunnerError
 
   let entries = archive
     .entries()
-    .map_err(|e| RunnerError::ActionDownload(format!("tar entries: {e}")))?;
+    .map_err(|e| archive_error(ActionFetchKind::ArchiveContent, format!("tar entries: {e}")))?;
 
   for entry_result in entries {
-    let mut entry =
-      entry_result.map_err(|e| RunnerError::ActionDownload(format!("tar entry: {e}")))?;
+    let mut entry = entry_result
+      .map_err(|e| archive_error(ActionFetchKind::ArchiveContent, format!("tar entry: {e}")))?;
 
     let path = entry
       .path()
-      .map_err(|e| RunnerError::ActionDownload(format!("entry path: {e}")))?
+      .map_err(|e| archive_error(ActionFetchKind::ArchiveContent, format!("entry path: {e}")))?
       .into_owned();
 
     // Strip the first component (GitHub's prefix directory)
@@ -120,7 +121,7 @@ fn extract_entry(entry: &mut tar::Entry<'_, impl Read>, target: &Path) -> Result
     let mut content = Vec::new();
     entry
       .read_to_end(&mut content)
-      .map_err(|e| RunnerError::ActionDownload(format!("read entry: {e}")))?;
+      .map_err(|e| archive_error(ActionFetchKind::ArchiveContent, format!("read entry: {e}")))?;
     std::fs::write(target, &content)
       .map_err(|e| RunnerError::ActionDownload(format!("write: {e}")))?;
 
@@ -275,25 +276,41 @@ fn promote_staging(staging: &Path, dest: &Path) -> Result<(), RunnerError> {
 ///
 /// # Errors
 ///
-/// Returns `RunnerError::ActionDownload` on a request failure or a
-/// non-success HTTP status.
+/// Returns `ActionFetch(ArchiveStatus)` for a non-success HTTP status and
+/// `ActionFetch(ArchiveTransport)` for a request failure. The returned flag
+/// is set when the body stream fails (including the whole-request timeout),
+/// so the caller can tell an interrupted download from corrupt content.
 async fn fetch_tarball_reader(
   _client: &reqwest::Client,
   tarball_url: &str,
   token: Option<&str>,
-) -> Result<impl Read + use<>, RunnerError> {
+) -> Result<(impl Read + use<>, Arc<AtomicBool>), RunnerError> {
   let response = request_archive(tarball_url, token).await?;
   let status = response.status();
   if !status.is_success() {
-    return Err(RunnerError::ActionDownload(format!(
-      "archive status {status}"
-    )));
+    return Err(archive_error(
+      ActionFetchKind::ArchiveStatus(status.as_u16()),
+      format!("archive status {status}"),
+    ));
   }
-  let stream = response
-    .bytes_stream()
-    .map(move |chunk| chunk.map_err(|_error| std::io::Error::other("archive stream interrupted")));
+  let interrupted = Arc::new(AtomicBool::new(false));
+  let flag = Arc::clone(&interrupted);
+  let stream = response.bytes_stream().map(move |chunk| {
+    chunk.map_err(|_error| {
+      flag.store(true, Ordering::SeqCst);
+      std::io::Error::other("archive stream interrupted")
+    })
+  });
   let stream_reader = tokio_util::io::StreamReader::new(stream);
-  Ok(tokio_util::io::SyncIoBridge::new(stream_reader))
+  Ok((
+    tokio_util::io::SyncIoBridge::new(stream_reader),
+    interrupted,
+  ))
+}
+
+/// A typed action archive failure (see [`ActionFetchError`]).
+fn archive_error(kind: ActionFetchKind, message: String) -> RunnerError {
+  RunnerError::ActionFetch(ActionFetchError { kind, message })
 }
 
 /// Follow bounded archive redirects, forwarding Basic auth only on the
@@ -320,14 +337,15 @@ async fn request_archive(
       request = request.basic_auth("x-access-token", Some(value));
     }
     let received = request.send().await.map_err(|error| {
-      RunnerError::ActionDownload(format!(
-        "archive request failed: timeout={}",
-        error.is_timeout()
-      ))
+      archive_error(
+        ActionFetchKind::ArchiveTransport,
+        format!("archive request failed: timeout={}", error.is_timeout()),
+      )
     })?;
     if received.status().is_redirection() {
       if redirect_count == 5 {
-        return Err(RunnerError::ActionDownload(
+        return Err(archive_error(
+          ActionFetchKind::ArchiveTransport,
           "archive redirect limit exceeded".to_owned(),
         ));
       }
@@ -336,7 +354,10 @@ async fn request_archive(
         .get(reqwest::header::LOCATION)
         .and_then(|value| value.to_str().ok())
         .ok_or_else(|| {
-          RunnerError::ActionDownload("archive redirect omitted location".to_owned())
+          archive_error(
+            ActionFetchKind::ArchiveTransport,
+            "archive redirect omitted location".to_owned(),
+          )
         })?;
       current = current
         .join(location)
@@ -345,7 +366,8 @@ async fn request_archive(
     }
     return Ok(received);
   }
-  Err(RunnerError::ActionDownload(
+  Err(archive_error(
+    ActionFetchKind::ArchiveTransport,
     "archive redirect limit exceeded".to_owned(),
   ))
 }
@@ -400,7 +422,7 @@ pub async fn download_and_extract_action(
     return Ok(());
   }
 
-  let sync_reader = fetch_tarball_reader(client, tarball_url, token).await?;
+  let (sync_reader, interrupted) = fetch_tarball_reader(client, tarball_url, token).await?;
 
   let staging = staging_dir_for(cache_dir);
   let staging_for_extract = staging.clone();
@@ -412,6 +434,16 @@ pub async fn download_and_extract_action(
 
   if let Err(err) = extract_result {
     cleanup_staging(&staging);
+    // A tar read error after the body stream failed is a download failure,
+    // not corrupt content (upstream `FailedToDownloadActionException`).
+    if interrupted.load(Ordering::SeqCst) {
+      let message = if let RunnerError::ActionFetch(fetch) = err {
+        fetch.message
+      } else {
+        err.to_string()
+      };
+      return Err(archive_error(ActionFetchKind::ArchiveTransport, message));
+    }
     return Err(err);
   }
 

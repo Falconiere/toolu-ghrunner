@@ -6,4 +6,4 @@
 
 | File | Primary item | Purpose |
 | --- | --- | --- |
-| `completion.rs` | `report_completion` | Serializes filtered outputs with the job verdict and retries transient reports. |
+| `completion.rs` | `report_completion` | Serializes filtered outputs, the evaluated `environmentUrl`, the echoed `billingOwnerId` and any `infrastructureFailureCategory` with the job verdict, and retries transient reports with the identical body. |
