@@ -1261,3 +1261,42 @@ Known differences from the reference:
 - GHES: toolu completes GHES jobs through the same Run Service call. The V1
   `JobEvent` completion is not implemented.
 
+
+## Session-create conflicts (#91)
+
+**Live capture.** On 2026-10-11 two throwaway github.com JIT registrations
+(runner ids 158 and 159 on this repo, label `toolu-91-probe-only`, deleted
+afterwards) ran the production `wire::net::authenticate` and
+`protocol::build_session_request`. A second `POST {server_url_v2}/session`
+while the first session was live returned **409, `content-length: 0`, empty
+body**. The verbatim reply (headers kept, no credential present) is
+`crates/wire/tests/session_conflict_409.json`, with a `provenance` block. After
+deleting the first session, `create_session` kept returning 409 for ~181 s,
+then succeeded. Upstream's 30 s × 8 window (pinned `cab9d1c`,
+`MessageListener.cs` / `Constants.cs` / `BrokerHttpClient.cs`) covers that.
+
+| Criterion / scenario | Real input and production path | Expected result | Runnable check |
+| --- | --- | --- | --- |
+| 409 → dedicated error | Captured reply replayed as raw HTTP to `create_session` | `RunnerError::SessionConflict`, Display "another runner session is active for this registration"; token not echoed | `cargo test -p wire --test session_conflict` (`captured_409_is_a_session_conflict`) |
+| Fixture is the capture | Committed fixture | status 409, empty body, `content-length: 0`, provenance recorded | same suite, `fixture_is_the_verbatim_live_capture` |
+| 91-S1 recover within budget | Capture then a session, through `retry_session_conflict` + `create_session`; and through the real `boot` binary to a completed job | 2 session POSTs, session created; `boot` exits 0 | `cargo test -p listener --lib session_conflict` (`conflict_then_success_creates_the_session`); `cargo test -p toolu-runner --test session_conflict_e2e_test` (`boot_recovers_when_the_conflict_clears_inside_the_window`) |
+| 91-S2 persistent conflict | Capture on every POST | exactly 8 attempts, then `SessionConflict`; `boot` exits **5** | `persistent_conflict_stops_after_max_attempts`; `boot_exits_5_on_a_persistent_conflict` |
+| 91-S2 unrelated failures | 401 / 403 / 500 directly, and 401 / 500 after a conflict | stay `Protocol`; retry stops after 2 POSTs | `other_failures_keep_the_protocol_classification`; `unrelated_failure_after_a_conflict_keeps_its_classification` |
+| 91-S2 cancellation | Cancel / SIGTERM during the default 30 s wait | `Ok(None)` in < 2 s; `boot` exits 0 in < 5 s after SIGTERM, 1 POST | `cancel_during_the_retry_wait_returns_none_promptly`; `sigterm_during_the_conflict_wait_exits_zero_promptly` |
+| 91-S3 default loop / `--once` | Persisted registration whose JIT points at the replaying broker; no login token | `run` and `run --once` exit **5** after exactly 8 POSTs. A re-mint would exit 2 without a token, so this also proves no generic backoff or re-mint | `default_run_loop_exits_5_without_backoff_or_remint`; `run_once_exits_5_on_a_persistent_conflict`; decision table `cargo test -p listener --test loop_decision_test` |
+| 91-S3 logs | Same runs | stderr has `session conflict on attempt 1/8` and the conflict message; the access token and JIT blob are absent from stderr and every `_diag` file | `assert_conflict_exit` in the e2e suite |
+| 91-S3 service restart | Rendered systemd unit + legacy `scripts/toolu-runner.service` | `RestartPreventExitStatus=5` in both | `cargo test -p config --test service_unit_test` |
+| Gate | Whole workspace | green, unmodified | `./tools/check.sh all` |
+
+Red evidence: before the fix the same e2e cases at `origin/main` exited **1**
+(`boot`) and **2** (`run --once`), and the wire test saw `Protocol`.
+
+**Unverified / not applicable.** A live persistent-conflict run of the full
+binary against github.com was not repeated: the live probe exercised the
+transport and recovery window only. No official-runner live comparison was
+run; parity is with upstream source. GHES: the same `create_session`
+transport serves it, but no GHES server is available, so this is
+**unverified**. launchd cannot condition `KeepAlive` on an exit code, so on
+macOS a supervised runner relaunches into a fresh bounded window; this is a
+documented limitation. The tests are platform-neutral (Linux run here); macOS
+is **unverified**.

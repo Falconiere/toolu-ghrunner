@@ -91,7 +91,7 @@ service units → docs → full gate.
     "check": "grep -q 'SessionConflict' AGENTS.md && grep -q 'RestartPreventExitStatus=5' AGENTS.md && grep -q '| `5` |' docs/container-image.md && grep -q 'TOOLU_RUNNER_SESSION_CONFLICT_INTERVAL_MS' docs/architecture.md && grep -q '## Session-create conflicts (#91)' docs/test-coverage.md && grep -q '91-S3' docs/test-coverage.md",
     "ac_refs": ["AC-6", "AC-7", "AC-9"],
     "depends_on": ["S5-bin-exit", "S6-service-units"],
-    "paths": ["AGENTS.md", "docs/architecture.md", "docs/container-image.md", "docs/test-coverage.md"],
+    "paths": ["AGENTS.md", "docs/architecture.md", "docs/container-image.md", "docs/macos-image.md", "docs/test-coverage.md"],
     "model": "inherit"
   },
   {
@@ -123,6 +123,13 @@ persistent, unrelated 401/500 inside the window, SIGTERM mid-sleep, `--once`,
 default loop, pending-remove precedence (table test). Docs synced in S7;
 `./tools/check.sh all` in S8. GHES and an official-runner live comparison remain
 recorded as unverified.
+
+## Deviations
+
+- S7: `docs/macos-image.md` carries the same `boot` exit-code table as
+  `docs/container-image.md`; it gained the `5` row and joined S7's paths.
+- S5: `tests/helpers/boot_fixtures.rs` gained `mount_auth` (auth without the
+  session mock) so the e2e broker can serve the captured 409 for `/session`.
 
 ## Plan review (2026-10-11)
 

@@ -101,6 +101,7 @@ Identical to the Linux image — see
 | `0` | Job completed Success/Skipped, or shutdown before any job was acquired. |
 | `1` | Job completed Failure/Cancelled, or the listener failed. |
 | `2` | Environment error before polling: no `TOOLU_JITCONFIG` **and** no registration, an unparseable JIT config, or a payload-less image. |
+| `5` | Session conflict: another runner session is active for this registration (HTTP 409 on all 8 attempts, 30 s apart). |
 | `124` | The `TOOLU_DEADLINE` watchdog fired. |
 
 Jobs report `RUNNER_OS=macOS` and `RUNNER_ARCH=ARM64`

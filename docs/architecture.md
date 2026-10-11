@@ -656,7 +656,7 @@ env-driven (`TOOLU_JITCONFIG` / `TOOLU_DEADLINE`, no flags, no persisted
 state — no `config.toml`, no `.lock`, no re-mint), one JIT lifecycle then
 exit. `boot_cmd::cmd_boot` builds the same authenticate → session →
 poll → acquire → execute → report → complete path as `run`, but returns
-a richer process exit code (`0`/`1`/`2`/`124`) reflecting the job outcome
+a richer process exit code (`0`/`1`/`2`/`5`/`124`) reflecting the job outcome
 for a provider reading container logs, plus an optional watchdog task
 that cancels the job and hard-exits 124 if `TOOLU_DEADLINE` (a
 provider-computed epoch-ms backstop, not a promise of remaining time) is
@@ -895,6 +895,31 @@ poll loop switches `ctx.broker_url` to the new URL and continues.
 For session expiry (`RunnerNotFound` 404), the listener logs a
 warn and returns — the user is expected to restart `run`.
 
+### Session-create conflicts (#91)
+
+`POST {server_url_v2}/session` answers **409 with an empty body** while
+another session is live for the registration, and github.com keeps
+answering 409 for roughly three minutes after that session is deleted
+(observed live: ~181 s). `run` hits that window whenever it retries the
+same JIT config after a transient listener error.
+`wire::net::create_session` maps 409 to `RunnerError::SessionConflict`
+("another runner session is active for this registration"); every other
+status keeps its classification. The listener re-authenticates and
+retries only that error, every 30 s for up to 8 attempts — upstream's
+`MessageListener` schedule (4 minutes of conflicts) — logging
+`session conflict on attempt n/8` without the token or body. SIGINT /
+SIGTERM during the wait returns `Ok(None)` (exit 0, like cancelling a
+long-poll). A conflict on all 8 attempts is final: `run` (default loop
+and `--once`) and `boot` exit **5**, upstream's
+`ReturnCode.SessionConflict`, and the generated systemd unit (plus the
+legacy `scripts/toolu-runner.service`) carries
+`RestartPreventExitStatus=5`, matching upstream's service that stops on
+it. launchd `KeepAlive` cannot condition a restart on an exit code, so a
+LaunchAgent relaunches and each launch gets one fresh bounded window.
+`TOOLU_RUNNER_SESSION_CONFLICT_INTERVAL_MS` overrides the 30 s wait (a
+positive integer; attempts stay 8) — the e2e tests use it to run the
+window in milliseconds.
+
 ## Storage layout
 
 ```
@@ -1122,6 +1147,7 @@ non-goal for v1 (logged + best-effort; no spec guarantee).
 | 10 | `run` mid-job, network drops > 5 min                         | **Known bug:** runner does not cancel with "lost connection". Tracked in [known-bugs.md](known-bugs.md) B-001. |
 | 11 | Disk full mid-job                                            | Current step fails with `RunnerError::Io`; step marked `failure`; job completes `failure`; `run` stays alive for next job. |
 | 12 | `remove` with no registration                                 | Exit 0 with "no registration found." |
+| 13 | Session create returns 409 (another live session)             | Retry every 30 s, 8 attempts; still conflicting → exit 5 (`run`, `--once`, `boot`); systemd does not restart it. See "Session-create conflicts (#91)". |
 
 The full failure-mode coverage lives in
 `crates/toolu-runner/tests/failure_modes_test.rs` (12 scenarios).
