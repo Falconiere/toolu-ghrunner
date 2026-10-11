@@ -106,6 +106,18 @@ pub enum JournalEvent {
     /// The step's declared outputs, by name.
     outputs: HashMap<String, String>,
   },
+  /// A reported step's action identity (non-secret: kind, name, ref).
+  StepMetadata {
+    /// The step's id.
+    step_id: String,
+    /// Handler kind (`run`, `node24`, `composite`, `Dockerfile`, `DockerHub`, `runner`).
+    kind: String,
+    /// Action name, when the step has one.
+    action: Option<String>,
+    /// Git ref of a remote action, when any.
+    #[serde(rename = "ref")]
+    git_ref: Option<String>,
+  },
   /// A step was skipped (its `if:` condition was falsy).
   StepSkipped {
     /// The skipped step's id.
@@ -203,7 +215,24 @@ impl From<&RunnerEvent> for JournalEvent {
         job_id,
         conclusion,
         outputs,
+        ..
       } => job_completed(job_id, *conclusion, outputs),
+      R::StepMetadata {
+        step_id,
+        kind,
+        action,
+        git_ref,
+      } => JournalEvent::StepMetadata {
+        step_id: step_id.clone(),
+        kind: kind.clone(),
+        action: action.clone(),
+        git_ref: git_ref.clone(),
+      },
+      // An infrastructure failure is journaled as the error annotation the
+      // step reports (the message is masked by the writer like every line).
+      R::InfrastructureError {
+        step_id, message, ..
+      } => annotation(step_id, AnnotationLevel::Error, message, None, None),
     }
   }
 }

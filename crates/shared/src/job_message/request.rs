@@ -71,6 +71,32 @@ pub struct AgentJobRequestMessage {
   /// Wire field `fileTable`; index-to-path mapping used by step file references.
   #[serde(default, rename = "fileTable")]
   pub file_table: Vec<serde_json::Value>,
+  /// Wire field `actionsEnvironment`: the job's `environment:` with its
+  /// unevaluated `url` template, evaluated by the runner at job end.
+  #[serde(
+    default,
+    rename = "actionsEnvironment",
+    skip_serializing_if = "Option::is_none"
+  )]
+  pub actions_environment: Option<ActionsEnvironment>,
+  /// Wire field `billingOwnerId`, echoed back on `completejob`.
+  #[serde(
+    default,
+    rename = "billingOwnerId",
+    skip_serializing_if = "Option::is_none"
+  )]
+  pub billing_owner_id: Option<String>,
+}
+
+/// The job's deployment environment (upstream `ActionsEnvironmentReference`).
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct ActionsEnvironment {
+  /// Evaluated environment name.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub name: Option<String>,
+  /// Unevaluated `environment.url` template token.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub url: Option<TemplateToken>,
 }
 
 impl AgentJobRequestMessage {

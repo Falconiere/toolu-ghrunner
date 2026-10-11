@@ -35,6 +35,7 @@ pub(crate) mod context_build;
 pub mod depth_tracker;
 mod docker_action;
 mod docker_stage;
+mod environment_url;
 /// Parses the `GITHUB_ENV` / `GITHUB_PATH` / `GITHUB_OUTPUT` / `GITHUB_STATE` file commands.
 pub mod file_commands;
 /// Handler dispatch by `runs.using` (plugin → script → node → docker → composite).

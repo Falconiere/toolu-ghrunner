@@ -33,7 +33,8 @@ pub(super) struct JobRoute<'a> {
 /// Result of running one acquired job to completion.
 ///
 /// `conclusion` and `annotations` may have been overridden by the outage
-/// watchdog's failure-override path (see [`apply_outage_override`]) after
+/// watchdog's failure-override path (see
+/// [`apply_outage_override`](super::outage_override::apply_outage_override)) after
 /// the renewal task was joined — the engine's own verdict is folded with
 /// the watchdog's trip flag before this struct is built.
 pub(super) struct JobExecution {
@@ -94,8 +95,10 @@ pub(super) async fn execute_with_renewal(
   renewal_cancel.cancel();
   let _ = renewal_handle.await;
 
-  let (conclusion, annotations) =
-    apply_outage_override(conclusion, outage_tripped.load(Ordering::SeqCst));
+  let (conclusion, annotations) = super::outage_override::apply_outage_override(
+    conclusion,
+    outage_tripped.load(Ordering::SeqCst),
+  );
   let steps = collector.collected_results().await;
   JobExecution {
     conclusion,
@@ -162,54 +165,6 @@ async fn connect_live_log(
     }
   });
   (Some(tx), Some(wrapper_handle))
-}
-
-/// The single source of truth for the outage annotation text — referenced
-/// by the `watchdog_trip` assertions so tests cannot drift from the
-/// message actually reported to GitHub.
-pub(crate) const LOST_CONNECTION_MESSAGE: &str =
-  "Runner lost connection to GitHub for more than 5 minutes; job was cancelled (lost connection).";
-
-/// Fold the outage watchdog's trip flag into the engine's conclusion.
-///
-/// Called only after the renewal task's `JoinHandle` has been awaited, so
-/// there is no race between "the watchdog is still writing the flag" and
-/// "we are reading it". A tripped flag overrides a non-`Success`
-/// conclusion to `Failure` plus the "lost connection" annotation (an
-/// honest verdict either way: a genuinely-failed step, or a GH-initiated
-/// cancel racing the trip, both happened during a real outage). A tripped
-/// flag alongside a `Success` conclusion can only be a
-/// trip-during-teardown race — the job finished before the cancel
-/// landed — so it is left as `Success`, WARN-logged once, with no
-/// annotation; rewriting a successful job's history would be dishonest.
-pub(crate) fn apply_outage_override(
-  conclusion: Conclusion,
-  outage_tripped: bool,
-) -> (Conclusion, Vec<wire::reporting::Annotation>) {
-  if !outage_tripped {
-    return (conclusion, Vec::new());
-  }
-  if conclusion == Conclusion::Success {
-    tracing::warn!(
-      "outage watchdog tripped after the job already completed successfully \
-       (trip-during-teardown race) — leaving conclusion as Success"
-    );
-    return (conclusion, Vec::new());
-  }
-  let annotation = wire::reporting::Annotation {
-    level: wire::reporting::ReportAnnotationLevel::Failure,
-    message: LOST_CONNECTION_MESSAGE.to_owned(),
-    title: None,
-    raw_details: None,
-    path: None,
-    is_infrastructure_issue: false,
-    start_line: 0,
-    end_line: 0,
-    start_column: 0,
-    end_column: 0,
-    step_number: 0,
-  };
-  (Conclusion::Failure, vec![annotation])
 }
 
 /// Build the forwarder config from the session context and job, deriving
@@ -531,7 +486,9 @@ async fn handle_event_arm(state: &mut ForwarderState, cfg: &FwdConfig, event: &R
     | RunnerEvent::JobCompleted { .. }
     | RunnerEvent::StepSkipped { .. }
     | RunnerEvent::LogGroup { .. }
-    | RunnerEvent::Annotation { .. } => {},
+    | RunnerEvent::Annotation { .. }
+    | RunnerEvent::StepMetadata { .. }
+    | RunnerEvent::InfrastructureError { .. } => {},
   }
 }
 

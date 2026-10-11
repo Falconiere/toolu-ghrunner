@@ -140,7 +140,10 @@ async fn setup_production_replay_streams_metadata_and_completes_before_shell()
     .find(|step| step.number == 1)
     .ok_or("setup result")?;
   assert_eq!(setup.name, "Set up job");
-  assert_eq!(setup.conclusion, wire::reporting::ReportConclusion::Success);
+  assert_eq!(
+    setup.conclusion,
+    wire::reporting::run_service::JobConclusion::Succeeded
+  );
   let lines: Vec<_> = live
     .iter()
     .filter(|line| line.step_id == setup.external_id)
@@ -167,7 +170,10 @@ async fn setup_production_failure_preserves_partial_masked_live_log() -> Result<
     .iter()
     .find(|step| step.number == 1)
     .ok_or("setup result")?;
-  assert_eq!(setup.conclusion, wire::reporting::ReportConclusion::Failure);
+  assert_eq!(
+    setup.conclusion,
+    wire::reporting::run_service::JobConclusion::Failed
+  );
   assert!(
     live
       .iter()
@@ -190,7 +196,7 @@ async fn setup_production_cancellation_preserves_metadata() -> Result<(), Box<dy
     .ok_or("setup result")?;
   assert_eq!(
     setup.conclusion,
-    wire::reporting::ReportConclusion::Cancelled
+    wire::reporting::run_service::JobConclusion::Canceled
   );
   assert!(
     live
@@ -290,7 +296,10 @@ async fn setup_failed_real_hook_keeps_named_preparation_output() -> Result<(), B
     .iter()
     .find(|result| result.number == 1)
     .ok_or("setup")?;
-  assert_eq!(setup.conclusion, wire::reporting::ReportConclusion::Failure);
+  assert_eq!(
+    setup.conclusion,
+    wire::reporting::run_service::JobConclusion::Failed
+  );
   assert!(
     live
       .iter()

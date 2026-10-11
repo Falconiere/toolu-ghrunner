@@ -127,6 +127,8 @@ fn replay(raw: serde_json::Value, cfg: RunnerConfig) -> Result<Observed, Box<dyn
           | RunnerEvent::StepSkipped { .. }
           | RunnerEvent::LogGroup { .. }
           | RunnerEvent::Annotation { .. }
+          | RunnerEvent::StepMetadata { .. }
+          | RunnerEvent::InfrastructureError { .. }
           | RunnerEvent::StepSummary { .. } => {},
         }
       }

@@ -115,6 +115,8 @@ fn job_message(
     environment_variables: Vec::new(),
     defaults: Vec::new(),
     file_table: Vec::new(),
+    actions_environment: None,
+    billing_owner_id: None,
   }
 }
 
