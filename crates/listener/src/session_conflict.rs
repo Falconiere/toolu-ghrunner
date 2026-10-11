@@ -19,7 +19,11 @@ use shared::RunnerError;
 /// Upstream's `_sessionCreationRetryInterval`.
 const DEFAULT_INTERVAL: Duration = Duration::from_secs(30);
 /// Upstream stops once `conflicts × 30 s ≥ 4 min`, i.e. on the 8th conflict.
-const DEFAULT_MAX_ATTEMPTS: NonZeroU32 = NonZeroU32::MIN.saturating_add(7);
+/// (`new(8)` is never `None`; the `match` keeps it a lint-clean `const`.)
+const DEFAULT_MAX_ATTEMPTS: NonZeroU32 = match NonZeroU32::new(8) {
+  Some(attempts) => attempts,
+  None => NonZeroU32::MIN,
+};
 
 /// How long session creation keeps retrying a conflict before giving up.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
