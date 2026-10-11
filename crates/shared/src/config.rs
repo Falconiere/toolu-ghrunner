@@ -29,6 +29,9 @@ pub enum ServicesMode {
 ///   incrementally.
 /// - [`Fresh`](WorkspaceMode::Fresh) creates a new `<work>/<job_id>` for
 ///   every job (the pre-#90 layout).
+///
+/// The default is [`Stable`](WorkspaceMode::Stable), so a config without
+/// `[workspace] mode` (and [`WorkspaceConfig::default`]) reuses workspaces.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum WorkspaceMode {
