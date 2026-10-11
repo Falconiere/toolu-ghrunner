@@ -240,7 +240,9 @@ fn replay(source: &str, matrix: bool) -> TestResult {
           | RunnerEvent::StepSkipped { .. }
           | RunnerEvent::LogGroup { .. }
           | RunnerEvent::StepSummary { .. }
-          | RunnerEvent::Annotation { .. } => {},
+          | RunnerEvent::Annotation { .. }
+          | RunnerEvent::StepMetadata { .. }
+          | RunnerEvent::InfrastructureError { .. } => {},
         }
       }
       assert_eq!(conclusion, Some(Conclusion::Success), "{logs:?}");

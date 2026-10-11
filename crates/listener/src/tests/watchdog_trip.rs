@@ -12,7 +12,7 @@
 //! `watchdog_tests::trip` before the tests moved into `tests/`.
 //!
 //! Also carries [`mod@override_rules`]: the pure unit tests for
-//! `execution_loop::apply_outage_override` — the non-network fold of the
+//! `outage_override::apply_outage_override` — the non-network fold of the
 //! watchdog's trip flag into the job's final conclusion (no wiremock: plain
 //! values in, plain values out). Both halves cover the same outage-trip
 //! seam (end to end here, pure-fold in `override_rules`), which is why they
@@ -39,9 +39,9 @@ use shared::{
 };
 
 use crate::SessionCtx;
-use crate::execution_loop::LOST_CONNECTION_MESSAGE;
 use crate::helpers::WatchdogConfig;
 use crate::job_lifecycle::poll_and_execute;
+use crate::outage_override::LOST_CONNECTION_MESSAGE;
 
 /// Boxed error alias for helpers that use `?` — see the module doc at the
 /// top of `watchdog_retry.rs`: `allow-expect-in-tests` only covers
@@ -90,6 +90,8 @@ fn job_message(server_uri: &str, job_id: &str, script: &str) -> AgentJobRequestM
     environment_variables: Vec::new(),
     defaults: Vec::new(),
     file_table: Vec::new(),
+    actions_environment: None,
+    billing_owner_id: None,
   }
 }
 
@@ -590,14 +592,14 @@ async fn ack_failure_does_not_block_completion() -> TestResult<()> {
   Ok(())
 }
 
-/// Pure unit tests for `execution_loop::apply_outage_override` — the
+/// Pure unit tests for `outage_override::apply_outage_override` — the
 /// non-network fold of the watchdog's trip flag into the job's final
 /// conclusion (no wiremock: plain values in, plain values out). Filtered
 /// by the s6 ledger check `test(/^watchdog_trip::override_rules/)`.
 mod override_rules {
   use shared::Conclusion;
 
-  use crate::execution_loop::{LOST_CONNECTION_MESSAGE, apply_outage_override};
+  use crate::outage_override::{LOST_CONNECTION_MESSAGE, apply_outage_override};
 
   /// (a) An untripped flag leaves the conclusion unchanged and adds no
   /// annotations, whatever the conclusion was.

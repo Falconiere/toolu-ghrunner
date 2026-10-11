@@ -236,7 +236,9 @@ pub(crate) fn build_step_entry(
     | RunnerEvent::StepSkipped { .. }
     | RunnerEvent::Log { .. }
     | RunnerEvent::LogGroup { .. }
-    | RunnerEvent::Annotation { .. } => None,
+    | RunnerEvent::Annotation { .. }
+    | RunnerEvent::StepMetadata { .. }
+    | RunnerEvent::InfrastructureError { .. } => None,
   }
 }
 

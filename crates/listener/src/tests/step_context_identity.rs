@@ -7,7 +7,8 @@ use std::collections::HashMap;
 use std::error::Error;
 
 use shared::{AgentJobRequestMessage, Conclusion, RunnerEvent};
-use wire::reporting::{ReportConclusion, Status};
+use wire::reporting::StepState;
+use wire::reporting::run_service::JobConclusion;
 
 use crate::step_report_queue::{StepMetaMap, build_step_entry};
 use crate::step_reporter::StepCollector;
@@ -57,11 +58,10 @@ async fn skipped_step_reports_captured_wire_id_and_skipped_conclusion() -> Resul
   assert_eq!(result.external_id, step.id);
   assert_eq!(result.number, 2);
   assert_eq!(result.name, "Checkout");
-  assert_eq!(result.status, Status::Completed);
-  assert_eq!(result.conclusion, ReportConclusion::Skipped);
-  assert_eq!(result.outcome, ReportConclusion::Skipped);
+  assert_eq!(result.status, StepState::Completed);
+  assert_eq!(result.conclusion, JobConclusion::Skipped);
   let json = serde_json::to_value(result)?;
-  assert_eq!(json.get("externalId"), Some(&serde_json::json!(step.id)));
-  assert_eq!(json.get("conclusion"), Some(&serde_json::json!(7)));
+  assert_eq!(json.get("external_id"), Some(&serde_json::json!(step.id)));
+  assert_eq!(json.get("conclusion"), Some(&serde_json::json!("skipped")));
   Ok(())
 }

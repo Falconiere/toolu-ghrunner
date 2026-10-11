@@ -5,9 +5,8 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
-use super::helpers::map_conclusion;
 use shared::{AnnotationLevel, RunnerEvent};
-use wire::reporting::{Annotation, ReportAnnotationLevel, Status, StepResult};
+use wire::reporting::{Annotation, ReportAnnotationLevel, StepResult, StepState};
 
 /// Per-step metadata captured from `StepStarted`.
 struct CollectedMeta {
@@ -73,12 +72,13 @@ impl StepCollector {
       | RunnerEvent::StepSkipped { .. }
       | RunnerEvent::Log { .. }
       | RunnerEvent::LogGroup { .. }
+      | RunnerEvent::StepMetadata { .. }
+      | RunnerEvent::InfrastructureError { .. }
       | RunnerEvent::JobCompleted { .. } => {},
     }
   }
 
   async fn record_completion(&self, step_id: &str, conclusion: shared::Conclusion) {
-    let c = map_conclusion(conclusion);
     let mut state = self.state.lock().await;
     let meta = state.meta.remove(step_id);
     let (number, name, started_at) = match meta {
@@ -93,9 +93,11 @@ impl StepCollector {
       external_id: step_id.to_owned(),
       number,
       name,
-      status: Status::Completed,
-      conclusion: c,
-      outcome: c,
+      action_name: None,
+      git_ref: None,
+      kind: None,
+      status: StepState::Completed,
+      conclusion: conclusion.into(),
       started_at,
       completed_at: Some(chrono::Utc::now().to_rfc3339()),
       completed_log_url: None,

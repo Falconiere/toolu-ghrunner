@@ -237,3 +237,41 @@ fn _check_compiles() {
   // dummy smoke check that the HashMap import isn't accidentally dropped
   let _: HashMap<String, i32> = HashMap::new();
 }
+
+#[test]
+fn captured_message_echoes_billing_owner_and_absent_environment() -> Result<(), serde_json::Error> {
+  // Sanitized github.com acquisition from issue 70 (run 36173987791).
+  let msg: AgentJobRequestMessage = serde_json::from_str(include_str!(
+    "../../execution/tests/job_outputs_message.json"
+  ))?;
+  assert_eq!(msg.billing_owner_id.as_deref(), Some("U_kgDOAH-IyQ"));
+  // The capture's `"actionsEnvironment": null` is an absent environment.
+  assert!(msg.actions_environment.is_none());
+  Ok(())
+}
+
+#[test]
+fn actions_environment_keeps_the_unevaluated_url_token() -> Result<(), serde_json::Error> {
+  let msg: serde_json::Value = serde_json::from_str(include_str!(
+    "../../execution/tests/job_outputs_message.json"
+  ))?;
+  let mut msg = msg;
+  if let Some(object) = msg.as_object_mut() {
+    object.insert(
+      "actionsEnvironment".to_owned(),
+      serde_json::json!({
+        "name": "toolu-88",
+        "url": {"type": 3, "expr": "steps.deploy.outputs.url", "file": 1, "line": 9, "col": 12}
+      }),
+    );
+    object.remove("billingOwnerId");
+  }
+  let msg: AgentJobRequestMessage = serde_json::from_value(msg)?;
+  let environment = msg.actions_environment.unwrap_or_default();
+  assert_eq!(environment.name.as_deref(), Some("toolu-88"));
+  let url = environment.url.unwrap_or_default();
+  assert_eq!(url.token_type, 3);
+  assert_eq!(url.expr.as_deref(), Some("steps.deploy.outputs.url"));
+  assert!(msg.billing_owner_id.is_none());
+  Ok(())
+}

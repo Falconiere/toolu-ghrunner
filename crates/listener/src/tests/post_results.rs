@@ -122,6 +122,9 @@ async fn post_results_reach_distinct_completion_records() -> Result<(), Box<dyn 
     outputs: std::collections::HashMap::new(),
     step_results: collector.collected_results().await,
     annotations: Vec::new(),
+    environment_url: None,
+    billing_owner_id: None,
+    infrastructure_failure_category: None,
   };
   let json = serde_json::to_value(&request)?;
   let steps = json
@@ -136,20 +139,20 @@ async fn post_results_reach_distinct_completion_records() -> Result<(), Box<dyn 
   let main = steps.first().ok_or("main step missing")?;
   let post = steps.get(1).ok_or("post step missing")?;
   assert_eq!(
-    main.get("externalId").and_then(serde_json::Value::as_str),
+    main.get("external_id").and_then(serde_json::Value::as_str),
     Some(main_id.as_str())
   );
   assert_ne!(
-    post.get("externalId").and_then(serde_json::Value::as_str),
+    post.get("external_id").and_then(serde_json::Value::as_str),
     Some(main_id.as_str())
   );
   assert_eq!(
-    main.get("conclusion").and_then(serde_json::Value::as_u64),
-    Some(2)
+    main.get("conclusion").and_then(serde_json::Value::as_str),
+    Some("succeeded")
   );
   assert_eq!(
-    post.get("conclusion").and_then(serde_json::Value::as_u64),
-    Some(3)
+    post.get("conclusion").and_then(serde_json::Value::as_str),
+    Some("failed")
   );
   assert_eq!(
     post.get("number").and_then(serde_json::Value::as_u64),

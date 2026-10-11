@@ -1,0 +1,98 @@
+name: completejob-88
+run-name: completejob-88 ${{ github.sha }}
+# Paired toolu / official-runner lanes for issue #88 (CompleteJob payload).
+# Runs only for a push to the issue branch whose head commit message carries
+# [live-88], so ordinary pushes queue nothing on the self-hosted label.
+on:
+  push:
+    branches:
+      - feat/88-completejob-stepresult-payload-parity-environmenturl
+
+permissions:
+  contents: read
+
+jobs:
+  url:
+    if: ${{ contains(github.event.head_commit.message, '[live-88]') }}
+    name: url-${{ matrix.lane }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: toolu
+            runner: [self-hosted, toolu-88]
+          - lane: reference
+            runner: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
+    environment:
+      name: completejob-88-${{ matrix.lane }}
+      url: ${{ steps.deploy.outputs.url }}
+    steps:
+      - name: Deploy
+        id: deploy
+        shell: bash
+        run: echo "url=https://toolu-88.example/${{ matrix.lane }}/${{ github.run_id }}" >> "$GITHUB_OUTPUT"
+      - name: After deploy
+        shell: bash
+        run: echo "deployed"
+
+  secret:
+    if: ${{ contains(github.event.head_commit.message, '[live-88]') }}
+    name: secret-${{ matrix.lane }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: toolu
+            runner: [self-hosted, toolu-88]
+          - lane: reference
+            runner: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
+    environment:
+      name: completejob-88-secret-${{ matrix.lane }}
+      url: ${{ steps.deploy.outputs.url }}
+    steps:
+      - name: Deploy with a masked token
+        id: deploy
+        shell: bash
+        run: |
+          token="disposable-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+          echo "::add-mask::$token"
+          echo "url=https://toolu-88.example/$token" >> "$GITHUB_OUTPUT"
+
+  steps:
+    if: ${{ contains(github.event.head_commit.message, '[live-88]') }}
+    name: steps-${{ matrix.lane }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: toolu
+            runner: [self-hosted, toolu-88]
+          - lane: reference
+            runner: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bash script
+        shell: bash
+        run: echo "bash step"
+      - name: Sh script
+        shell: sh
+        run: echo "sh step"
+      - name: Local node with post
+        uses: ./.github/actions/completejob-88-node
+      - name: Local composite
+        uses: ./.github/actions/completejob-88-composite
+      - name: Local Dockerfile
+        uses: ./.github/actions/completejob-88-docker
+      - name: Registry image
+        uses: docker://alpine:3.20
+        with:
+          args: echo completejob-88 registry image
+      - name: Failing step with an error annotation
+        continue-on-error: true
+        shell: bash
+        run: |
+          echo "::error title=completejob-88::step failed on purpose"
+          exit 3

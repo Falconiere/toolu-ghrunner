@@ -149,6 +149,8 @@ fn assert_success(events: &[RunnerEvent], step_ids: &[String]) {
       | RunnerEvent::LogGroup { .. }
       | RunnerEvent::StepSummary { .. }
       | RunnerEvent::Annotation { .. }
+      | RunnerEvent::StepMetadata { .. }
+      | RunnerEvent::InfrastructureError { .. }
       | RunnerEvent::JobCompleted { .. } => None,
     })
     .collect();

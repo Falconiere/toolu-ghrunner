@@ -150,6 +150,29 @@ pub enum RunnerEvent {
     conclusion: Conclusion,
     /// The job's `outputs.<name>` values, keyed by output name.
     outputs: HashMap<String, String>,
+    /// The evaluated, secret-free `environment.url`, when one was set.
+    environment_url: Option<String>,
+  },
+  /// The action identity of a reported step (upstream `StepTelemetry`),
+  /// emitted once its handler kind is known.
+  StepMetadata {
+    /// The reported step's id within the job.
+    step_id: String,
+    /// Handler kind: `run`, `node24`, `composite`, `Dockerfile`, `DockerHub`, `runner`.
+    kind: String,
+    /// Action name: `owner/repo[/path]`, local path, image, shell or runner step.
+    action: Option<String>,
+    /// Git ref of a remote repository action.
+    git_ref: Option<String>,
+  },
+  /// A categorized runner-infrastructure failure attributed to a step.
+  InfrastructureError {
+    /// The reported step the failure belongs to.
+    step_id: String,
+    /// Upstream infrastructure failure category (e.g. `resolve_action`).
+    category: String,
+    /// The unmasked failure message; consumers mask it before any sink.
+    message: String,
   },
 }
 

@@ -19,6 +19,9 @@ fn complete_job_outputs_are_value_objects_without_secret_flags() {
     )]),
     step_results: Vec::new(),
     annotations: Vec::new(),
+    environment_url: None,
+    billing_owner_id: None,
+    infrastructure_failure_category: None,
   };
   let json = serde_json::to_value(request).unwrap();
   assert_eq!(

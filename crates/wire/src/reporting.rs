@@ -13,5 +13,5 @@ mod types;
 
 pub use types::{
   Annotation, AnnotationLevel as ReportAnnotationLevel, Conclusion as ReportConclusion, Status,
-  StepResult,
+  StepResult, StepState,
 };

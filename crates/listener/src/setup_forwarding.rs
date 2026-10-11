@@ -64,7 +64,9 @@ pub(super) async fn before_event(
     | RunnerEvent::StepSkipped { .. }
     | RunnerEvent::StepSummary { .. }
     | RunnerEvent::LogGroup { .. }
-    | RunnerEvent::Annotation { .. } => {},
+    | RunnerEvent::Annotation { .. }
+    | RunnerEvent::StepMetadata { .. }
+    | RunnerEvent::InfrastructureError { .. } => {},
   }
 }
 

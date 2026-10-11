@@ -100,6 +100,8 @@ fn job_message(broker_uri: &str, results_endpoint: &str, job_id: &str) -> AgentJ
     environment_variables: Vec::new(),
     defaults: Vec::new(),
     file_table: Vec::new(),
+    actions_environment: None,
+    billing_owner_id: None,
   }
 }
 

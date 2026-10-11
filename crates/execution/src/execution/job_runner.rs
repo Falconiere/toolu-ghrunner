@@ -569,6 +569,7 @@ async fn emit_job_completed(
       job_id,
       conclusion,
       outputs,
+      environment_url: None,
     })
     .await;
 }
