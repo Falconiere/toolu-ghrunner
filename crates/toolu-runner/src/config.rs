@@ -34,18 +34,20 @@ pub(crate) fn path() -> Option<String> {
 /// (the attempt count is fixed). An empty value counts as unset; zero or a
 /// non-integer is diagnosed and the default kept.
 pub(crate) fn session_conflict_policy() -> SessionConflictPolicy {
-  let mut policy = SessionConflictPolicy::default();
-  match read(SESSION_CONFLICT_INTERVAL_KEY) {
-    Some(raw) if !raw.is_empty() => match parse_interval_ms(&raw) {
-      Some(interval) => policy.interval = interval,
-      None => report(
-        SESSION_CONFLICT_INTERVAL_KEY,
-        "is not a positive integer of milliseconds; using the default 30 s",
-      ),
-    },
-    _ => {},
+  let Some(raw) = read(SESSION_CONFLICT_INTERVAL_KEY).filter(|raw| !raw.is_empty()) else {
+    return SessionConflictPolicy::default();
+  };
+  if let Some(interval) = parse_interval_ms(&raw) {
+    return SessionConflictPolicy {
+      interval,
+      ..SessionConflictPolicy::default()
+    };
   }
-  policy
+  report(
+    SESSION_CONFLICT_INTERVAL_KEY,
+    "is not a positive integer of milliseconds; using the default 30 s",
+  );
+  SessionConflictPolicy::default()
 }
 
 /// Parse a positive whole number of milliseconds.
