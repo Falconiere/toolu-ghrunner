@@ -46,8 +46,10 @@ pub enum StepState {
 
 /// Result for a single step, sent in completejob.
 ///
-/// Mirrors upstream `StepResult.cs`: explicit `snake_case` member names
-/// (Newtonsoft's camel-casing leaves them unchanged) and string enums.
+/// Mirrors upstream `StepResult.cs`, whose `[DataMember(Name = "…")]` keys
+/// are `snake_case` (Newtonsoft's camel-casing leaves explicit names
+/// unchanged): serde's default field names produce the same keys, with
+/// `rename` only for `ref`/`type`, and the enums serialize as strings.
 #[derive(Debug, Clone, Serialize)]
 pub struct StepResult {
   /// Backend UUID of the step this result is for (never the context name).
