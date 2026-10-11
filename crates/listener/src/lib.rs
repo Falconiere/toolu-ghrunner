@@ -34,6 +34,11 @@ mod outage_override;
 mod post_results;
 /// Bounded retries for transient Run Service failures.
 pub(crate) mod retry;
+/// Bounded retry for broker session-create conflicts (HTTP 409).
+pub mod session_conflict;
+#[cfg(test)]
+#[path = "tests/session_conflict.rs"]
+mod session_conflict_test;
 mod setup_step;
 #[cfg(test)]
 #[path = "tests/startup_overlap.rs"]

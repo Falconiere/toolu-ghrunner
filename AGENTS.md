@@ -192,19 +192,27 @@ to that list requires proving the value is not a real credential.
   cap, cancel-aware) and retries the still-valid config. Fatal (exit
   non-zero) on a missing or auth-rejected re-mint bearer, naming `login`
   / `--token` (register) / `TOOLU_RUNNER_TOKEN`. Cancel (SIGINT/SIGTERM)
-  or a `.pending_remove` seen between jobs → clean exit 0. `--once` opts
-  back into single-job semantics (exit with the listener's status). The
-  per-repo `.lock` is held for the whole loop.
+  or a `.pending_remove` seen between jobs → clean exit 0. A listener
+  `SessionConflict` (session-create 409 that outlasted the listener's
+  bounded 30 s × 8 retry) → exit `5` (`shared::SESSION_CONFLICT_EXIT_CODE`,
+  upstream's `ReturnCode.SessionConflict`), with or without `--once` — the
+  loop never wraps it in backoff or a re-mint. `--once` opts back into
+  single-job semantics (exit with the listener's status). The per-repo
+  `.lock` is held for the whole loop.
 - **No self-daemonization for `run`.** `run` blocks in the foreground
   and loops; it never double-forks. Boot/crash persistence is delegated
   to the OS: `toolu-runner install-service` generates and activates a
   launchd LaunchAgent (macOS, label `io.toolu.runner.<owner>.<repo>`,
   `launchctl bootstrap gui/<uid>` fallback `load -w`) or a systemd user
   unit (Linux, `toolu-runner-<owner>-<repo>.service`, `Restart=always`,
+  `RestartPreventExitStatus=5` so a spent session conflict stays down,
   `systemctl --user enable --now`) wrapping `run --config <path>` — the
   supervisor owns process lifetime, the loop owns registration lifetime.
   No daemon code. (The static single-slot `scripts/` units installed by
-  `install.sh --service` still exist for legacy hosts.)
+  `install.sh --service` still exist for legacy hosts; the systemd one also
+  carries `RestartPreventExitStatus=5`. launchd `KeepAlive` cannot condition
+  a restart on an exit code, so a LaunchAgent relaunches into a fresh
+  bounded conflict window.)
 - **`boot`: zero-config one-shot container mode.** No flags — env-driven
   (`TOOLU_JITCONFIG` required, `TOOLU_DEADLINE` optional watchdog
   backstop, epoch-ms) for the toolu.sh provider image's ENTRYPOINT.
@@ -214,7 +222,8 @@ to that list requires proving the value is not a real credential.
   process exit code that `main` applies directly (bypassing the other
   subcommands' uniform Ok-is-0/Err-is-2 mapping): `0`
   Success/Skipped/no-job, `1` Failure/Cancelled or a listener error, `2`
-  env/config error before polling, `124` the deadline watchdog fired
+  env/config error before polling, `5` a session conflict outlasted the
+  bounded retry, `124` the deadline watchdog fired
   (checked before any network call for an already-past deadline, or
   mid-job via a `CancellationToken` graceful-cancel-then-hard-exit).
 - **No `build_tool_*`** — build-tool modules were cut in the port.
@@ -370,7 +379,7 @@ to that list requires proving the value is not a real credential.
   `<data_dir>/_diag/service.{out,err}.log`, plus `WorkingDirectory` and an
   `EnvironmentVariables` `PATH` built by `launchd_env_path`) / `systemd_unit`
   (Linux user unit — `Restart=always`, `RestartSec=5`,
-  `WantedBy=default.target`, double-quoted `ExecStart` so paths with spaces
+  `RestartPreventExitStatus=5`, `WantedBy=default.target`, double-quoted `ExecStart` so paths with spaces
   survive; ignores `env_path`/`work_dir`). `launchd_env_path` folds the
   installing shell's `PATH` with `/opt/homebrew/{bin,sbin}`, `/usr/local/bin`
   and the system four, first-occurrence-wins — launchd otherwise gives an agent
@@ -414,7 +423,7 @@ to that list requires proving the value is not a real credential.
   OAuth **device flow** — `request_device_code` / `poll_for_token`
   / pure `parse_poll_response`; host-relative so GHES works;
   backs `toolu-runner login`), `session` (create / delete
-  session), `messages` (poll + acknowledge), `run_service`
+  session; a 409 → `RunnerError::SessionConflict`), `messages` (poll + acknowledge), `run_service`
   (acquire / renew / complete), `results_service` (Twirp RPCs:
   `update_workflow_steps`, `create_job_logs_metadata`,
   `create_step_logs_metadata`, signed blob URLs), `log_upload`
@@ -544,7 +553,14 @@ to that list requires proving the value is not a real credential.
 
 - `handler::GitHubListener` is the entry point: parse JIT →
   authenticate (RSA → JWT → OAuth2) → create session →
-  `poll_and_execute`. `job_lifecycle::poll_and_execute` owns the
+  `poll_and_execute`. Session creation goes through
+  `session_conflict::retry_session_conflict`: a `SessionConflict` (409,
+  another live session for this registration — github.com keeps answering
+  409 for ~3 min after a session ends) re-authenticates and retries every
+  30 s for up to 8 attempts (`SessionConflictPolicy`, upstream's 4 min;
+  `GitHubListener::with_session_conflict_policy`), then returns the
+  conflict; cancel during the wait → `Ok(None)`; any other error ends the
+  retry with its own classification. `job_lifecycle::poll_and_execute` owns the
   long-poll loop with exponential backoff (1s → 60s cap), acquire_job,
   run_acquired_job, acknowledge_message, complete_job. The broker ack is
   fired EARLY — right after `acquire_job` succeeds, not at job end (the
@@ -599,7 +615,8 @@ to that list requires proving the value is not a real credential.
   the `observability::journal` writer (replacing the old no-op drain).
   `loop_decision::next_action` (→ `LoopAction`) is the pure
   per-iteration decision for the bin's always-online `run` loop —
-  precedence cancel > `--once` > `.pending_remove` > outcome (`Ok(())`
+  precedence cancel > `--once` > `.pending_remove` > outcome
+  (`Err(SessionConflict)` → `Exit(5)`, also under `--once`; `Ok(())`
   and `Err(Auth)` → `Reregister` since the JIT is spent/dead, any other
   `Err` → `BackoffRetry`) — unit-testable without a broker, mirroring
   `message_route`.
@@ -674,7 +691,11 @@ to that list requires proving the value is not a real credential.
   `register_cmd::remint_and_persist` on job-complete / listener-`Auth`;
   decorrelated-jitter backoff (`BACKOFF_START` 1s → `BACKOFF_MAX` 60s,
   cancel-aware `sleep_or_cancel`) on a transient failure; exit on cancel
-  / `--once` / `.pending_remove`. A missing or auth-rejected re-mint
+  / `--once` / `.pending_remove`; a session conflict exits 5 through the
+  typed `CodedExit` error that `main` downcasts (every other `Err` stays
+  exit 2). `config::session_conflict_policy` reads
+  `TOOLU_RUNNER_SESSION_CONFLICT_INTERVAL_MS` (test/ops override of the
+  30 s wait; attempts stay 8) for both `run` and `boot`. A missing or auth-rejected re-mint
   bearer is fatal (`REMINT_TOKEN_HELP` names `login` / `--token` /
   `TOOLU_RUNNER_TOKEN`).
 - `boot_cmd.rs` — `cmd_boot`: the zero-config one-shot container mode

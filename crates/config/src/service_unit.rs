@@ -189,7 +189,9 @@ fn push_environment(s: &mut String, env_path: &str) {
 
 /// Render a systemd user unit for `spec`. `ExecStart` double-quotes the exe
 /// and config paths (so spaces survive) and `Restart=always` + `RestartSec=5`
-/// give crash persistence; `WantedBy=default.target` enables it at login.
+/// give crash persistence, except `RestartPreventExitStatus=5` (a spent
+/// session conflict, [`shared::SESSION_CONFLICT_EXIT_CODE`]) stays down;
+/// `WantedBy=default.target` enables it at login.
 pub fn systemd_unit(spec: &ServiceSpec<'_>) -> String {
   let exe = systemd_quote(spec.exe);
   let config = systemd_quote(spec.config_path);
@@ -210,6 +212,11 @@ pub fn systemd_unit(spec: &ServiceSpec<'_>) -> String {
   s.push('\n');
   s.push_str("Restart=always\n");
   s.push_str("RestartSec=5\n");
+  // A session conflict that outlasted its bounded retry is final (upstream's
+  // service stops on it too); restarting would make the retry unbounded.
+  s.push_str("RestartPreventExitStatus=");
+  s.push_str(&shared::SESSION_CONFLICT_EXIT_CODE.to_string());
+  s.push('\n');
   s.push('\n');
   s.push_str("[Install]\n");
   s.push_str("WantedBy=default.target\n");

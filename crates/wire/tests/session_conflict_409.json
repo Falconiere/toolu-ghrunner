@@ -1,0 +1,23 @@
+{
+  "provenance": {
+    "captured": "2026-10-11T19:39:04Z",
+    "host": "github.com",
+    "request": "POST {server_url_v2}/session (second session for the same JIT registration while the first was live)",
+    "registrations": "throwaway JIT runners 158 and 159 on Falconiere/toolu-ghrunner, label toolu-91-probe-only, deleted after capture",
+    "method": "production wire::net::authenticate + protocol::build_session_request, then a raw reqwest POST recording status/headers/body verbatim",
+    "sanitization": "none needed: the response carries no credential; body is empty",
+    "follow_up": "after deleting the first session the broker kept answering 409 for ~181 s, then created the session"
+  },
+  "response": {
+    "body": "",
+    "headers": {
+      "content-length": "0",
+      "date": "Sun, 11 Oct 2026 19:39:04 GMT",
+      "server": "github.com",
+      "x-github-backend": "Kubernetes",
+      "x-github-edge-region": "eastus",
+      "x-github-request-id": "9C60:1211A:188F2AB:198DBA8:6ACBE5D7"
+    },
+    "status": 409
+  }
+}

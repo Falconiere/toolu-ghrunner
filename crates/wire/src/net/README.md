@@ -26,7 +26,7 @@ Higher-level domain wrappers and reporting-only types live in
 | `register.rs` | `register_jit` / `unregister_runner` | POSTs `generate-jitconfig` to mint a JIT registration, and DELETEs a runner registration. |
 | `results_service.rs` | `update_workflow_steps` / signed-blob-URL + metadata calls | Twirp JSON-over-HTTP POSTs to the GitHub Actions Results Service. |
 | `run_service.rs` | `acquire_job` / `renew_job` / `complete_job` | HTTP transport for the Actions Run Service job lifecycle; request/response shapes live in `crate::reporting::run_service`. |
-| `session.rs` | `create_session` / `delete_session` | HTTP transport for creating and deleting the broker session. |
+| `session.rs` | `create_session` / `delete_session` | HTTP transport for creating and deleting the broker session; a 409 is `RunnerError::SessionConflict`. |
 | `step_summary.rs` | `upload_step_summary` | Safe bounded summary signed-URL, blob and metadata requests. |
 | `v1.rs` | `fetch_connection_data` / `fetch_timeline` / `post_timeline_record` | HTTP fetches for GHES V1 service discovery and timeline reporting; pure URL resolvers live in `protocol::v1`. |
 

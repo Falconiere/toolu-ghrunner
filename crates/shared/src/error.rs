@@ -1,3 +1,8 @@
+/// Process exit code for a session conflict that outlasted the bounded retry.
+/// Matches upstream's `ReturnCode.SessionConflict`, which the official
+/// runner's service wrapper treats as "stop, do not restart".
+pub const SESSION_CONFLICT_EXIT_CODE: i32 = 5;
+
 /// Errors produced by the runner execution engine.
 #[derive(Debug, thiserror::Error)]
 pub enum RunnerError {
@@ -58,6 +63,12 @@ pub enum RunnerError {
   /// A transient network failure occurred; the run loop backs off and retries.
   #[error("network error: {0}")]
   Network(String),
+  /// The broker refused a new session (HTTP 409) because another session is
+  /// live for this registration. The listener retries it on a bounded
+  /// schedule; once that is spent the process exits
+  /// [`SESSION_CONFLICT_EXIT_CODE`].
+  #[error("another runner session is active for this registration: {0}")]
+  SessionConflict(String),
   /// The runner's on-disk configuration was invalid or unreadable.
   #[error("config error: {0}")]
   Config(String),

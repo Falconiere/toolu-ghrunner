@@ -18,6 +18,8 @@ enum Outcome {
   Proto,
   /// Fatal auth failure — the JIT config is dead and must be re-minted.
   Auth,
+  /// Session conflict that outlasted the listener's bounded retry.
+  Conflict,
 }
 
 /// Resolve a row's outcome marker to the listener result it stands for.
@@ -27,6 +29,9 @@ fn resolve(outcome: &Outcome) -> Result<(), RunnerError> {
     Outcome::Net => Err(RunnerError::Network("timeout".into())),
     Outcome::Proto => Err(RunnerError::Protocol("unexpected shape".into())),
     Outcome::Auth => Err(RunnerError::Auth("401 unauthorized".into())),
+    Outcome::Conflict => Err(RunnerError::SessionConflict(
+      "create session returned 409 Conflict".into(),
+    )),
   }
 }
 
@@ -38,7 +43,7 @@ type Row = (&'static str, Outcome, bool, bool, bool, LoopAction);
 /// including the `cancelled` > `once` > `pending_remove` precedence rows.
 fn exiting_cases() -> Vec<Row> {
   use LoopAction::Exit;
-  use Outcome::{Done, Net, Proto};
+  use Outcome::{Conflict, Done, Net, Proto};
   vec![
     // Rule 1: cancelled wins over once + pending_remove + an error outcome.
     (
@@ -64,6 +69,41 @@ fn exiting_cases() -> Vec<Row> {
     ),
     // Rule 3: pending_remove exits cleanly (not cancelled, not once).
     ("pending_remove exits 0", Done, false, false, true, Exit(0)),
+    // A spent session-conflict retry exits 5, with or without --once, and
+    // never falls through to the generic backoff (#91).
+    (
+      "once conflict exits 5",
+      Conflict,
+      true,
+      false,
+      false,
+      Exit(5),
+    ),
+    (
+      "loop conflict exits 5",
+      Conflict,
+      false,
+      false,
+      false,
+      Exit(5),
+    ),
+    // Cancel and pending_remove still win: a deliberate stop is a clean exit.
+    (
+      "cancel beats conflict",
+      Conflict,
+      false,
+      true,
+      false,
+      Exit(0),
+    ),
+    (
+      "pending_remove beats conflict",
+      Conflict,
+      false,
+      false,
+      true,
+      Exit(0),
+    ),
   ]
 }
 

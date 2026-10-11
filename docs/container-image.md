@@ -74,6 +74,7 @@ in-progress in the GitHub UI until GitHub times it out.
 | `0` | Job completed with Success or Skipped, or the runner shut down (signal or session end) before any job was acquired. |
 | `1` | Job completed with Failure or Cancelled, or the listener failed (auth, network, protocol). |
 | `2` | Environment error before polling: `TOOLU_JITCONFIG` missing or unparseable. |
+| `5` | Session conflict: the broker kept refusing a session (HTTP 409, another runner session is active for this registration) for all 8 attempts, 30 s apart. |
 | `124` | The `TOOLU_DEADLINE` watchdog fired (including a deadline already in the past at boot). |
 
 Providers don't inspect exit codes (their lifecycle is webhook- and

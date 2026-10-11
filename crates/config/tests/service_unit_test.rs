@@ -220,3 +220,17 @@ fn launchd_env_path_drops_empty_segments() {
   );
   assert!(built.starts_with("/opt/mine:/usr/bin:"));
 }
+
+/// The static unit `install.sh --service` installs wraps the same `run` loop,
+/// so a session conflict that outlasted its bounded retry (exit 5, #91) must
+/// not be restarted there either.
+#[test]
+fn legacy_systemd_unit_does_not_restart_a_session_conflict() {
+  let unit = include_str!("../../../scripts/toolu-runner.service");
+  assert!(
+    unit
+      .lines()
+      .any(|line| line == "RestartPreventExitStatus=5"),
+    "scripts/toolu-runner.service must carry RestartPreventExitStatus=5"
+  );
+}

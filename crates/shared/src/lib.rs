@@ -20,7 +20,7 @@ mod secret_masker;
 pub mod startup;
 
 pub use config::{CacheConfig, L2Config, RunnerConfig, ServicesMode};
-pub use error::{ActionFetchError, ActionFetchKind, RunnerError};
+pub use error::{ActionFetchError, ActionFetchKind, RunnerError, SESSION_CONFLICT_EXIT_CODE};
 pub use events::{
   AnnotationLevel, Conclusion, ListenerEvent, LogStream, RunnerEvent, SETUP_STEP_ID,
 };
