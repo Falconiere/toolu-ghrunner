@@ -5,6 +5,7 @@ Description=toolu-runner (io.toolu.runner.octocat.hello)
 ExecStart="/usr/local/bin/toolu-runner" run --config "/home/ci/.toolu-runner/runners/octocat/hello/config.toml"
 Restart=always
 RestartSec=5
+RestartPreventExitStatus=5
 
 [Install]
 WantedBy=default.target

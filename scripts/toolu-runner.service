@@ -12,6 +12,8 @@ WorkingDirectory=/var/lib/toolu-runner
 ExecStart=/usr/local/bin/toolu-runner run --config /etc/toolu-runner/config.toml
 Restart=always
 RestartSec=10
+# Exit 5 = a session conflict that outlasted the bounded retry; do not restart.
+RestartPreventExitStatus=5
 EnvironmentFile=-/etc/toolu-runner/toolu-runner.env
 
 # Hardening
