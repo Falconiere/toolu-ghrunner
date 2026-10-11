@@ -405,6 +405,11 @@ async fn captured_runtime_masked_url_is_suppressed_with_a_warning() -> TestResul
       .iter()
       .any(|line| line.starts_with("Evaluated environment url"))
   );
+  // The suppressed URL never reaches the row's log in any form.
+  assert!(
+    !logs.iter().any(|line| line.contains("toolu-88.example")),
+    "{logs:?}"
+  );
   assert_eq!(job.complete_conclusion(), Some(Conclusion::Success));
   Ok(())
 }

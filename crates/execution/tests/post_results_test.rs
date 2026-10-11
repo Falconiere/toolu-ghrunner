@@ -485,6 +485,11 @@ fn without_complete_job(events: Vec<RunnerEvent>) -> Vec<RunnerEvent> {
       }
     })
     .collect();
+  assert_eq!(
+    complete.len(),
+    1,
+    "exactly one \"Complete job\" row ends the job"
+  );
   events
     .into_iter()
     .filter(|event| {

@@ -335,6 +335,8 @@ async fn mask_hint_url_is_suppressed() -> TestResult {
 
 #[tokio::test]
 async fn completejob_retry_resends_an_identical_body() -> TestResult {
+  /// A completejob body is a few KiB; anything near this bound is a bug.
+  const MAX_BODY: usize = 1 << 20;
   // Run Service stand-in: the first completejob gets a 503, the rest 200.
   let bodies = Arc::new(Mutex::new(Vec::<Vec<u8>>::new()));
   let attempts = Arc::new(AtomicUsize::new(0));
@@ -343,7 +345,7 @@ async fn completejob_retry_resends_an_identical_body() -> TestResult {
     let (record, count) = (Arc::clone(&record), Arc::clone(&count));
     async move {
       let completes = request.uri().path().ends_with("completejob");
-      let body = axum::body::to_bytes(request.into_body(), usize::MAX)
+      let body = axum::body::to_bytes(request.into_body(), MAX_BODY)
         .await
         .map(|bytes| bytes.to_vec())
         .unwrap_or_default();
