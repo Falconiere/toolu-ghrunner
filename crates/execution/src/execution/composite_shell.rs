@@ -50,6 +50,7 @@ pub async fn run_shell_script(
         timeout: params.timeout,
         cancel: params.cancel,
         container: None,
+        report_metadata: false,
       },
       events,
       stdout_tx,

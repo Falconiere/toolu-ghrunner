@@ -112,6 +112,9 @@ async fn posted_completion() -> TestResult<(serde_json::Value, HashMap<String, u
     outputs: HashMap::new(),
     step_results: collector.collected_results().await,
     annotations: Vec::new(),
+    environment_url: None,
+    billing_owner_id: None,
+    infrastructure_failure_category: None,
   };
   let server = RecordingServer::start(|_| HashMap::new()).await;
   complete_job(
@@ -145,7 +148,7 @@ fn annotation_for<'a>(
     .ok_or("stepResults missing")?;
   let result = steps
     .iter()
-    .find(|step| step.get("externalId").and_then(serde_json::Value::as_str) == Some(step_id))
+    .find(|step| step.get("external_id").and_then(serde_json::Value::as_str) == Some(step_id))
     .ok_or("expected step result missing")?;
   Ok(
     result

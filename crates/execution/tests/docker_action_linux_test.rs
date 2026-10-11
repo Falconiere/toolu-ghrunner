@@ -166,7 +166,9 @@ fn job_conclusion(events: &[RunnerEvent]) -> Option<Conclusion> {
     | RunnerEvent::Log { .. }
     | RunnerEvent::StepSummary { .. }
     | RunnerEvent::LogGroup { .. }
-    | RunnerEvent::Annotation { .. } => None,
+    | RunnerEvent::Annotation { .. }
+    | RunnerEvent::StepMetadata { .. }
+    | RunnerEvent::InfrastructureError { .. } => None,
   })
 }
 
@@ -320,7 +322,9 @@ printf verified > docker-verify
       | RunnerEvent::Log { .. }
       | RunnerEvent::StepSummary { .. }
       | RunnerEvent::LogGroup { .. }
-      | RunnerEvent::Annotation { .. } => None,
+      | RunnerEvent::Annotation { .. }
+      | RunnerEvent::StepMetadata { .. }
+      | RunnerEvent::InfrastructureError { .. } => None,
     })
     .collect();
   assert_eq!(

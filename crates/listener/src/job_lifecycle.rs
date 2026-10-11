@@ -118,6 +118,12 @@ struct JobOutcome {
   /// present — overrides the run-service token used for reporting.
   job_token: Option<String>,
   annotations: Vec<wire::reporting::Annotation>,
+  /// Evaluated `environment.url` for `completejob`.
+  environment_url: Option<String>,
+  /// The job message's `billingOwnerId`, echoed on `completejob`.
+  billing_owner_id: Option<String>,
+  /// Category of the first runner-infrastructure failure.
+  infrastructure_failure_category: Option<String>,
   /// The live-log wrapper task's `JoinHandle`, threaded up so
   /// `poll_and_execute` can stash it on `ctx` before any further fallible
   /// call — see the design note at its assignment site.
@@ -149,6 +155,14 @@ fn parse_job_message(
       step_results: Vec::new(),
       job_token: None,
       annotations: Vec::new(),
+      environment_url: None,
+      // The parse failed, so echo the raw body's billing owner if present.
+      billing_owner_id: acquired
+        .body
+        .get("billingOwnerId")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned),
+      infrastructure_failure_category: None,
       live_log_handle: None,
       job_log_upload: None,
     })
@@ -368,6 +382,8 @@ async fn run_acquired_job(
     outputs,
     steps,
     annotations,
+    environment_url,
+    infrastructure_failure_category,
     live_log_handle,
     job_log_upload,
   } = execute_with_renewal(ctx, &route, &job_msg, job_cancel).await;
@@ -379,6 +395,9 @@ async fn run_acquired_job(
     step_results: steps,
     job_token,
     annotations,
+    environment_url,
+    billing_owner_id: job_msg.billing_owner_id,
+    infrastructure_failure_category,
     live_log_handle,
     job_log_upload,
   }
@@ -628,3 +647,7 @@ fn extract_system_token(job_msg: &AgentJobRequestMessage) -> Option<String> {
 #[cfg(test)]
 #[path = "tests/runner_update_policy.rs"]
 mod runner_update_policy;
+
+#[cfg(test)]
+#[path = "tests/completejob.rs"]
+mod completejob_tests;

@@ -276,10 +276,14 @@ acquire_job → run_acquired_job → execute_with_renewal
 - `feature_detection::detect` — picks V1 vs V2 from host.
 - `live_log::LiveLogStreamer` — WebSocket streamer for real-time
   log lines to the GitHub Actions UI.
-- `types::{Status, Conclusion, StepResult, Annotation}` — the
-  Twirp value types. `Conclusion` is a `#[repr(u8)]` enum with
-  the GitHub protocol integers (Success = 2, Failure = 3,
-  Cancelled = 4, Skipped = 7).
+- `types::{Status, Conclusion, StepResult, StepState, Annotation}` —
+  `Status`/`Conclusion` are the Results Service Twirp value types
+  (`#[repr(u8)]`: Success = 2, Failure = 3, Cancelled = 4, Skipped = 7).
+  The Run Service `StepResult` in `completejob` follows upstream
+  `StepResult.cs`: `snake_case` keys, string `status` (`completed`) and
+  `conclusion` (`succeeded`/`failed`/`canceled`/`skipped`), and
+  `action_name`/`ref`/`type`. `CompleteJobRequest` also carries
+  `environmentUrl`, `billingOwnerId` and `infrastructureFailureCategory`.
 
 ### `execution/` — job engine
 

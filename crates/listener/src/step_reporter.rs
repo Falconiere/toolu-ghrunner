@@ -5,9 +5,8 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
-use super::helpers::map_conclusion;
 use shared::{AnnotationLevel, RunnerEvent};
-use wire::reporting::{Annotation, ReportAnnotationLevel, Status, StepResult};
+use wire::reporting::{Annotation, ReportAnnotationLevel, StepResult, StepState};
 
 /// Per-step metadata captured from `StepStarted`.
 struct CollectedMeta {
@@ -16,10 +15,19 @@ struct CollectedMeta {
   started_at: String,
 }
 
+/// A step's upstream telemetry: `type`, `action_name`, `ref`.
+type ActionIdentity = (String, Option<String>, Option<String>);
+
 /// Inner state behind the Arc<Mutex>.
 struct CollectorState {
   meta: HashMap<String, CollectedMeta>,
   pending_annotations: HashMap<String, Vec<Annotation>>,
+  /// Action identity per step id, applied when the step's result is built.
+  identities: HashMap<String, ActionIdentity>,
+  /// Infrastructure categories reported per step, latched on failure.
+  infrastructure: HashMap<String, String>,
+  /// First category of a step that ended failed (upstream: first wins).
+  category: Option<String>,
   results: Vec<StepResult>,
 }
 
@@ -36,6 +44,9 @@ impl StepCollector {
       state: Arc::new(Mutex::new(CollectorState {
         meta: HashMap::new(),
         pending_annotations: HashMap::new(),
+        identities: HashMap::new(),
+        infrastructure: HashMap::new(),
+        category: None,
         results: Vec::new(),
       })),
     }
@@ -68,6 +79,31 @@ impl StepCollector {
       RunnerEvent::Annotation { step_id, .. } => {
         self.record_annotation(step_id, event).await;
       },
+      RunnerEvent::StepMetadata {
+        step_id,
+        kind,
+        action,
+        git_ref,
+      } => {
+        let identity = (kind.clone(), action.clone(), git_ref.clone());
+        self
+          .state
+          .lock()
+          .await
+          .identities
+          .insert(step_id.clone(), identity);
+      },
+      RunnerEvent::InfrastructureError {
+        step_id, category, ..
+      } => {
+        self
+          .state
+          .lock()
+          .await
+          .infrastructure
+          .insert(step_id.clone(), category.clone());
+        self.record_annotation(step_id, event).await;
+      },
       RunnerEvent::StepSummary { .. }
       | RunnerEvent::JobStarted { .. }
       | RunnerEvent::StepSkipped { .. }
@@ -78,7 +114,6 @@ impl StepCollector {
   }
 
   async fn record_completion(&self, step_id: &str, conclusion: shared::Conclusion) {
-    let c = map_conclusion(conclusion);
     let mut state = self.state.lock().await;
     let meta = state.meta.remove(step_id);
     let (number, name, started_at) = match meta {
@@ -89,13 +124,25 @@ impl StepCollector {
       .pending_annotations
       .remove(step_id)
       .unwrap_or_default();
+    let infrastructure = state.infrastructure.remove(step_id);
+    // A continue-on-error step that turns green reports its annotation but
+    // no job category: a successful job never claims an infrastructure fault.
+    if conclusion == shared::Conclusion::Failure && state.category.is_none() {
+      state.category = infrastructure;
+    }
+    let (kind, action_name, git_ref) = match state.identities.remove(step_id) {
+      Some((kind, action, git_ref)) => (Some(kind), action, git_ref),
+      None => (None, None, None),
+    };
     state.results.push(StepResult {
       external_id: step_id.to_owned(),
       number,
       name,
-      status: Status::Completed,
-      conclusion: c,
-      outcome: c,
+      action_name,
+      git_ref,
+      kind,
+      status: StepState::Completed,
+      conclusion: conclusion.into(),
       started_at,
       completed_at: Some(chrono::Utc::now().to_rfc3339()),
       completed_log_url: None,
@@ -143,6 +190,11 @@ impl StepCollector {
     }
   }
 
+  /// Category of the first infrastructure failure on a step that ended failed.
+  pub(super) async fn infrastructure_category(&self) -> Option<String> {
+    self.state.lock().await.category.clone()
+  }
+
   /// Return completed step results; omit annotations without a completed step.
   pub(super) async fn collected_results(&self) -> Vec<StepResult> {
     let state = self.state.lock().await;
@@ -157,6 +209,23 @@ impl StepCollector {
 }
 
 fn to_report_annotation(event: &RunnerEvent, number: Option<u32>) -> Option<Annotation> {
+  let step_number = number.map_or(0, i64::from);
+  if let RunnerEvent::InfrastructureError { message, .. } = event {
+    // Upstream `InfrastructureError`: an error issue flagged as the runner's.
+    return Some(Annotation {
+      level: ReportAnnotationLevel::Failure,
+      message: message.clone(),
+      title: None,
+      raw_details: None,
+      path: None,
+      is_infrastructure_issue: true,
+      start_line: 0,
+      end_line: 0,
+      start_column: 0,
+      end_column: 0,
+      step_number,
+    });
+  }
   let RunnerEvent::Annotation {
     level,
     message,
@@ -187,6 +256,6 @@ fn to_report_annotation(event: &RunnerEvent, number: Option<u32>) -> Option<Anno
     end_line: end_line.map_or(0, i64::from),
     start_column: col.map_or(0, i64::from),
     end_column: end_column.map_or(0, i64::from),
-    step_number: number.map_or(0, i64::from),
+    step_number,
   })
 }

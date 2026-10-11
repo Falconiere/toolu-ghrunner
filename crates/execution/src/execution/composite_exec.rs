@@ -449,6 +449,7 @@ async fn run_container_shell(
     timeout: shell_params.timeout,
     cancel: shell_params.cancel,
     container: Some(container),
+    report_metadata: false,
   };
   let handler = ScriptHandler::new();
   Ok(
@@ -533,6 +534,7 @@ async fn report_composite_step_error(
   // sink otherwise, and the error's detail outlives the live stream here.
   tracing::warn!(parent_step_id, error = %err, "composite inner step hard error");
   emit_log(events, parent_step_id, &format!("##[error]{err}")).await;
+  super::steps_runner::step_errors::report_infrastructure_error(events, parent_step_id, err).await;
   Conclusion::Failure
 }
 

@@ -83,6 +83,8 @@ async fn job_container_non_linux_fails_before_workspace_or_step() -> TestResult 
       | RunnerEvent::StepSkipped { .. }
       | RunnerEvent::LogGroup { .. }
       | RunnerEvent::Annotation { .. }
+      | RunnerEvent::StepMetadata { .. }
+      | RunnerEvent::InfrastructureError { .. }
       | RunnerEvent::StepSummary { .. } => {},
     }
   }

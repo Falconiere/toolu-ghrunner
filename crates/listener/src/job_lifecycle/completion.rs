@@ -1,9 +1,7 @@
 //! Build and send the Run Service completion request.
 
-use shared::{Conclusion, RunnerError};
-use wire::reporting::run_service::{
-  CompleteJobOutput, CompleteJobRequest, JobConclusion, complete_job,
-};
+use shared::RunnerError;
+use wire::reporting::run_service::{CompleteJobOutput, CompleteJobRequest, complete_job};
 
 use super::JobOutcome;
 use crate::SessionCtx;
@@ -20,7 +18,7 @@ pub(super) async fn report_completion(
     plan_id,
     job_id: outcome.job_id,
     request_id: outcome.request_id,
-    conclusion: map_job_conclusion(outcome.conclusion),
+    conclusion: outcome.conclusion.into(),
     outputs: outcome
       .outputs
       .into_iter()
@@ -28,6 +26,9 @@ pub(super) async fn report_completion(
       .collect(),
     step_results: outcome.step_results,
     annotations: outcome.annotations,
+    environment_url: outcome.environment_url,
+    billing_owner_id: outcome.billing_owner_id,
+    infrastructure_failure_category: outcome.infrastructure_failure_category,
   };
   // Borrow the payload across retries instead of cloning its step results.
   crate::retry::retry_transient(
@@ -37,13 +38,4 @@ pub(super) async fn report_completion(
     "complete_job",
   )
   .await
-}
-
-fn map_job_conclusion(conclusion: Conclusion) -> JobConclusion {
-  match conclusion {
-    Conclusion::Success => JobConclusion::Succeeded,
-    Conclusion::Failure => JobConclusion::Failed,
-    Conclusion::Cancelled => JobConclusion::Canceled,
-    Conclusion::Skipped => JobConclusion::Skipped,
-  }
 }

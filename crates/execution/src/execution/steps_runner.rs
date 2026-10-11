@@ -22,7 +22,7 @@ use super::step_timeout::{StepBounds, step_timeout_message, with_timeout_message
 use expressions::evaluator::EvalContext;
 
 #[path = "step_errors.rs"]
-mod step_errors;
+pub(crate) mod step_errors;
 use step_errors::report_step_error;
 mod script_support;
 use script_support::{
@@ -146,6 +146,8 @@ async fn run_main_and_posts(
     ctx.record_job_cancelled();
   }
 
+  // "Complete job" follows every numbered post row, skipped ones included.
+  ctx.next_step_number = Some(post_number(job.first_post_number, job_state.posts.len()));
   // Post failures affect the job like main failures; cancellation takes precedence.
   let post_result = drain_post_steps(&mut job_state.posts, ctx, events, job).await;
   if cancel.is_cancelled() {
@@ -453,6 +455,7 @@ async fn run_script_step(
   let container = ctx.job_container().cloned();
   let params = ScriptParams {
     container: container.as_deref(),
+    report_metadata: true,
     script: &interpolated,
     shell: shell.as_deref(),
     env: &env,

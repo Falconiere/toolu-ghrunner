@@ -34,6 +34,9 @@ pub struct ScriptParams<'a> {
   pub cancel: &'a CancellationToken,
   /// Job container that executes this step when present.
   pub container: Option<&'a JobContainer>,
+  /// Report the resolved shell as this step's metadata (top-level `run:`
+  /// steps only; composite children and hooks are not reported steps).
+  pub report_metadata: bool,
 }
 
 /// Executes `run:` step scripts as shell processes.
@@ -73,6 +76,7 @@ impl ScriptHandler {
       false,
     )
     .await?;
+    report_shell(params, &shell, events).await;
     let script_file = shell.write_script(params.script, None)?;
     let script_path = script_file.path().to_string_lossy().to_string();
 
@@ -116,6 +120,7 @@ async fn execute_in_container(
   let shell =
     super::shell_command::ShellCommand::resolve(params.shell, params.env, params.working_dir, true)
       .await?;
+  report_shell(params, &shell, events).await;
   let script_file = shell.write_script(params.script, Some(container.temp_dir()))?;
   let script_path = container
     .translator()
@@ -299,4 +304,23 @@ pub(crate) fn forward_lines<R: tokio::io::AsyncRead + Unpin + Send + 'static>(
       }
     }
   }))
+}
+
+/// Upstream `ScriptHandler`: a `run:` step's telemetry is `run` plus the
+/// resolved shell command (`bash`, `sh`, `pwsh`, `python`, ...).
+async fn report_shell(
+  params: &ScriptParams<'_>,
+  shell: &super::shell_command::ShellCommand,
+  events: &mpsc::Sender<RunnerEvent>,
+) {
+  if params.report_metadata {
+    crate::execution::step_metadata::emit_step_metadata(
+      events,
+      params.step_id,
+      "run".to_owned(),
+      Some(shell.name().to_owned()),
+      None,
+    )
+    .await;
+  }
 }

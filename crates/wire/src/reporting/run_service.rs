@@ -66,11 +66,20 @@ pub struct CompleteJobRequest {
   pub step_results: Vec<super::types::StepResult>,
   /// Job-level annotations (errors/warnings/notices) to report back.
   pub annotations: Vec<Annotation>,
+  /// Evaluated `environment.url`, omitted when absent, failed or secret-bearing.
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub environment_url: Option<String>,
+  /// The job message's `billingOwnerId`, echoed back when present.
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub billing_owner_id: Option<String>,
+  /// Category of the first runner-infrastructure failure, when any.
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub infrastructure_failure_category: Option<String>,
 }
 
 /// Run Service job result, serialized as the upstream `TaskResult` name.
 /// The Results Service step conclusion uses a different numeric enum.
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum JobConclusion {
   /// The job succeeded.
@@ -81,6 +90,17 @@ pub enum JobConclusion {
   Canceled,
   /// The job was skipped.
   Skipped,
+}
+
+impl From<shared::Conclusion> for JobConclusion {
+  fn from(conclusion: shared::Conclusion) -> Self {
+    match conclusion {
+      shared::Conclusion::Success => Self::Succeeded,
+      shared::Conclusion::Failure => Self::Failed,
+      shared::Conclusion::Cancelled => Self::Canceled,
+      shared::Conclusion::Skipped => Self::Skipped,
+    }
+  }
 }
 
 /// One job-level output in the Run Service completion payload.

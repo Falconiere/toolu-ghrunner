@@ -290,7 +290,9 @@ async fn missing_registry_images_fail_action_resolution_before_platform_or_daemo
         | RunnerEvent::StepSkipped { .. }
         | RunnerEvent::StepSummary { .. }
         | RunnerEvent::LogGroup { .. }
-        | RunnerEvent::Annotation { .. } => {},
+        | RunnerEvent::Annotation { .. }
+        | RunnerEvent::StepMetadata { .. }
+        | RunnerEvent::InfrastructureError { .. } => {},
       }
     }
     assert_eq!(conclusion, Some(Conclusion::Failure), "{logs:#?}");
@@ -335,7 +337,9 @@ async fn docker_registry_action_rejects_non_linux_without_running_host_code() ->
       | RunnerEvent::StepSkipped { .. }
       | RunnerEvent::StepSummary { .. }
       | RunnerEvent::LogGroup { .. }
-      | RunnerEvent::Annotation { .. } => {},
+      | RunnerEvent::Annotation { .. }
+      | RunnerEvent::StepMetadata { .. }
+      | RunnerEvent::InfrastructureError { .. } => {},
     }
   }
 

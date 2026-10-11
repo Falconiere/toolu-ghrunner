@@ -33,6 +33,9 @@ fn complete_request() -> CompleteJobRequest {
     outputs: std::collections::HashMap::new(),
     step_results: Vec::new(),
     annotations: Vec::new(),
+    environment_url: None,
+    billing_owner_id: None,
+    infrastructure_failure_category: None,
   }
 }
 

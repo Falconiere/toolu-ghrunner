@@ -107,6 +107,7 @@ impl Runner {
               job_id,
               conclusion: Conclusion::Failure,
               outputs: HashMap::new(),
+              environment_url: None,
             })
             .await
             .is_err()

@@ -37,6 +37,8 @@ fn runner_event_job_started() {
     | RunnerEvent::Log { .. }
     | RunnerEvent::LogGroup { .. }
     | RunnerEvent::Annotation { .. }
+    | RunnerEvent::StepMetadata { .. }
+    | RunnerEvent::InfrastructureError { .. }
     | RunnerEvent::JobCompleted { .. } => {
       // Only JobStarted is constructed above; other arms are unreachable.
     },

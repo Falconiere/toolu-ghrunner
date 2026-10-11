@@ -28,6 +28,7 @@ pub mod loop_decision;
 pub mod message_route;
 /// Mid-job connection outage detection.
 pub mod outage;
+mod outage_override;
 #[cfg(test)]
 #[path = "tests/post_results.rs"]
 mod post_results;

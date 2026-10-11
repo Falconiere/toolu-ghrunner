@@ -113,7 +113,9 @@ fn completed(
       | RunnerEvent::Log { .. }
       | RunnerEvent::LogGroup { .. }
       | RunnerEvent::StepSummary { .. }
-      | RunnerEvent::Annotation { .. } => None,
+      | RunnerEvent::Annotation { .. }
+      | RunnerEvent::StepMetadata { .. }
+      | RunnerEvent::InfrastructureError { .. } => None,
     })
     .ok_or_else(|| "JobCompleted missing".into())
 }

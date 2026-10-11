@@ -69,6 +69,8 @@ pub struct ExecutionContext {
   file_table: Vec<serde_json::Value>,
   /// Display names of top-level steps, keyed by step id.
   step_displays: HashMap<String, super::step_display::StepDisplay>,
+  /// Number for the "Complete job" row: one past the last main/post row.
+  pub(crate) next_step_number: Option<u32>,
 }
 
 impl ExecutionContext {
@@ -122,6 +124,7 @@ impl ExecutionContext {
       services: None,
       file_table: Vec::new(),
       step_displays: HashMap::new(),
+      next_step_number: None,
     }
   }
 

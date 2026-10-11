@@ -81,10 +81,17 @@ fn runner_events() -> Vec<RunnerEvent> {
       step_id: "step-2".to_owned(),
       reason: "condition evaluated to false".to_owned(),
     },
+    RunnerEvent::StepMetadata {
+      step_id: "step-1".to_owned(),
+      kind: "node24".to_owned(),
+      action: Some("actions/checkout".to_owned()),
+      git_ref: Some("v4".to_owned()),
+    },
     RunnerEvent::JobCompleted {
       job_id: JOB_ID.to_owned(),
       conclusion: Conclusion::Failure,
       outputs,
+      environment_url: Some("https://toolu-88.example/deploy".to_owned()),
     },
   ]
 }
@@ -115,7 +122,7 @@ fn all_listener_events() -> Vec<ListenerEvent> {
 #[test]
 fn every_variant_round_trips() -> TestResult {
   let events = all_listener_events();
-  assert_eq!(events.len(), 12, "one ListenerEvent per journal variant");
+  assert_eq!(events.len(), 13, "one ListenerEvent per journal variant");
   for (i, ev) in events.iter().enumerate() {
     let line = JournalLine {
       v: JOURNAL_VERSION,
@@ -180,6 +187,61 @@ fn conversion_maps_enums_to_lowercase_strings() {
     matches!(&ev, JournalEvent::Annotation { level, .. } if level == "error"),
     "Annotation conversion produced {ev:?}"
   );
+}
+
+#[test]
+fn step_metadata_line_uses_the_ref_key_and_omits_nothing() -> TestResult {
+  let line = JournalLine {
+    v: JOURNAL_VERSION,
+    seq: 0,
+    ts: "2026-10-10T00:00:00.000Z".to_owned(),
+    event: JournalEvent::from(&RunnerEvent::StepMetadata {
+      step_id: "s".to_owned(),
+      kind: "run".to_owned(),
+      action: Some("bash".to_owned()),
+      git_ref: None,
+    }),
+  };
+  assert_eq!(
+    serde_json::to_value(&line)?,
+    serde_json::json!({
+      "v": 1, "seq": 0, "ts": "2026-10-10T00:00:00.000Z",
+      "type": "step_metadata", "step_id": "s", "kind": "run",
+      "action": "bash", "ref": null
+    })
+  );
+  Ok(())
+}
+
+#[test]
+fn infrastructure_error_is_journaled_as_an_error_annotation() {
+  let ev = JournalEvent::from(&RunnerEvent::InfrastructureError {
+    step_id: "s".to_owned(),
+    category: "resolve_action".to_owned(),
+    message: "action download-info status 500 Internal Server Error".to_owned(),
+  });
+  assert_eq!(
+    ev,
+    JournalEvent::Annotation {
+      step_id: "s".to_owned(),
+      level: "error".to_owned(),
+      message: "action download-info status 500 Internal Server Error".to_owned(),
+      file: None,
+      line: None,
+    }
+  );
+}
+
+#[test]
+fn job_completed_line_does_not_journal_the_environment_url() -> TestResult {
+  let ev = JournalEvent::from(&RunnerEvent::JobCompleted {
+    job_id: JOB_ID.to_owned(),
+    conclusion: Conclusion::Success,
+    outputs: HashMap::new(),
+    environment_url: Some("https://toolu-88.example/deploy".to_owned()),
+  });
+  assert!(!serde_json::to_string(&ev)?.contains("toolu-88.example"));
+  Ok(())
 }
 
 #[test]

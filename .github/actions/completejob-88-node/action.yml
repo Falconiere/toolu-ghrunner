@@ -1,0 +1,6 @@
+name: completejob-88-node
+description: Node main and post stages for the issue-88 step metadata capture
+runs:
+  using: node20
+  main: main.js
+  post: post.js

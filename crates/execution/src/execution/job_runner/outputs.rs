@@ -1,63 +1,78 @@
-//! Finalize job outputs after the main and post step loops.
+//! Finalize job outputs inside the "Complete job" step, after the main and
+//! post step loops (upstream `JobExtension.FinalizeJob`).
 
 use std::collections::HashMap;
 
-use shared::{AnnotationLevel, Conclusion, RunnerError, RunnerEvent};
-use tokio::sync::mpsc;
+use shared::{AnnotationLevel, Conclusion, RunnerError};
 
+use super::complete_step::CompleteStep;
 use crate::execution::context::ExecutionContext;
-use crate::execution::job_spec::{JobSpec, evaluate_acquired_outputs, evaluate_job_outputs};
+use crate::execution::job_spec::{
+  JobSpec, NULL_TOKEN, evaluate_acquired_outputs, evaluate_job_outputs,
+};
+
+/// Resolved job outputs and whether their evaluation failed.
+pub(super) struct FinalOutputs {
+  /// Job conclusion after an output evaluation failure (cancellation wins).
+  pub(super) conclusion: Conclusion,
+  /// Nonempty, secret-free outputs.
+  pub(super) outputs: HashMap<String, String>,
+  /// An output failed to evaluate, which fails the "Complete job" step.
+  pub(super) failed: bool,
+}
 
 pub(super) async fn evaluate_final_outputs(
   spec: &JobSpec,
   ctx: &ExecutionContext,
-  events: &mpsc::Sender<RunnerEvent>,
-  job_id: &str,
+  step: &CompleteStep<'_>,
   conclusion: Conclusion,
-) -> Result<(Conclusion, HashMap<String, String>), RunnerError> {
-  let Some(token) = &spec.acquired_outputs else {
-    return Ok((conclusion, evaluate_job_outputs(spec, ctx)?));
+) -> Result<FinalOutputs, RunnerError> {
+  let Some(token) = spec
+    .acquired_outputs
+    .as_ref()
+    .filter(|t| t.token_type != NULL_TOKEN)
+  else {
+    return Ok(FinalOutputs {
+      conclusion,
+      outputs: evaluate_job_outputs(spec, ctx)?,
+      failed: false,
+    });
   };
+  step.log("Evaluate and set job outputs").await;
   let evaluated = evaluate_acquired_outputs(token, ctx);
   for name in &evaluated.skipped_secret_names {
-    emit_secret_warning(name, ctx, events, job_id).await;
+    let safe_name = step.mask(name);
+    step
+      .issue(
+        AnnotationLevel::Warning,
+        &format!("Skip output '{safe_name}' since it may contain secret."),
+      )
+      .await;
   }
-  let conclusion = if evaluated.error.is_some() && conclusion != Conclusion::Cancelled {
+  let mut names: Vec<&String> = evaluated.outputs.keys().collect();
+  names.sort();
+  for name in names {
+    let safe_name = step.mask(name);
+    step.log(&format!("Set output '{safe_name}'")).await;
+  }
+  let failed = evaluated.error.is_some();
+  if let Some(error) = &evaluated.error {
     tracing::error!("job output evaluation failed");
+    step
+      .issue(AnnotationLevel::Error, "Fail to evaluate job outputs")
+      .await;
+    step
+      .issue(AnnotationLevel::Error, &step.mask(&error.to_string()))
+      .await;
+  }
+  let conclusion = if failed && conclusion != Conclusion::Cancelled {
     Conclusion::Failure
   } else {
     conclusion
   };
-  Ok((conclusion, evaluated.outputs))
-}
-
-async fn emit_secret_warning(
-  name: &str,
-  ctx: &ExecutionContext,
-  events: &mpsc::Sender<RunnerEvent>,
-  job_id: &str,
-) {
-  let safe_name = match ctx.masker().lock() {
-    Ok(guard) => guard.mask(name).into_owned(),
-    Err(poisoned) => poisoned.into_inner().mask(name).into_owned(),
-  };
-  let message = format!("Skip output '{safe_name}' since it may contain a secret");
-  tracing::warn!("{message}");
-  if events
-    .send(RunnerEvent::Annotation {
-      step_id: job_id.to_owned(),
-      level: AnnotationLevel::Warning,
-      message,
-      file: None,
-      line: None,
-      col: None,
-      end_line: None,
-      end_column: None,
-      title: None,
-    })
-    .await
-    .is_err()
-  {
-    tracing::warn!("job output annotation receiver dropped before delivery");
-  }
+  Ok(FinalOutputs {
+    conclusion,
+    outputs: evaluated.outputs,
+    failed,
+  })
 }

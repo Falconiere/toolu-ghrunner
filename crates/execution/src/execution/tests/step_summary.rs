@@ -194,6 +194,8 @@ fn summaries(events: &[RunnerEvent]) -> Vec<(&str, &str)> {
       | RunnerEvent::Log { .. }
       | RunnerEvent::LogGroup { .. }
       | RunnerEvent::Annotation { .. }
+      | RunnerEvent::StepMetadata { .. }
+      | RunnerEvent::InfrastructureError { .. }
       | RunnerEvent::JobCompleted { .. } => None,
     })
     .collect()

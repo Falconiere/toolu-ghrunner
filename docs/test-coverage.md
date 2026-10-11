@@ -1123,7 +1123,7 @@ Known differences from the reference:
 - `fromJSON` parse errors inside display-name warnings carry serde_json's message instead of Newtonsoft's.
 - Composite `action.yml` attribute errors omit the reference's `<action.yml> (Line, Col)` prefix.
 
-Step numbering and the exit-code trailer also differ (pre step reported as step 0, a duplicated post row, no "Complete job" row). Those belong to step reporting (#88), not this issue.
+Step numbering and the exit-code trailer also differ (the pre step is reported as step 0, and post rows are numbered sequentially rather than with upstream record orders). #88 added the trailing "Complete job" row; pre-stage ordering stays with the pre/post work.
 
 Platform applicability: the GitHub.com Linux lane passed. The toolu lane ran the
 stack-head debug build on Linux x86_64; the reference lane was `ubuntu-24.04`
@@ -1133,3 +1133,84 @@ The gate's tests run on macOS CI. GHES is **unverified** because no server is
 configured; it uses the same job-message tokens. Docker pre stages share the
 naming path; the Docker-specific timeout lines were verified with the ignored
 real-Docker tests in `docker::job_container_failures`.
+
+# CompleteJob payload parity (#88)
+
+`completejob` now matches the official runner's `CompleteJobRequest` /
+`StepResult` contract at actions/runner
+`cab9d1c3901e45c7705889c4f88284fdd93f4ae5`. It carries the evaluated
+`environmentUrl` ("View deployment"), the echoed `billingOwnerId`,
+`infrastructureFailureCategory` for runner-side action fetch failures, and
+`StepResult`s with upstream `snake_case` keys, string `status`/`conclusion`,
+`action_name`/`ref`/`type` and per-step annotations. A trailing **Complete
+job** row evaluates job outputs and then the URL, as upstream's
+`JobExtension.FinalizeJob` does.
+
+Captures: the toolu-lane acquisitions of
+[`completejob-88.yml`](../.github/workflows/completejob-88.yml) run
+[38098611227](https://github.com/Falconiere/toolu-ghrunner/actions/runs/38098611227),
+sanitized with UUIDv5 placeholders (`crates/execution/tests/completejob_88_*_message.json`;
+hashes in `crates/listener/tests/completejob_88_evidence.json`). Check them with
+`python3 scripts/test/completejob_evidence_check.py --local`. Boundary cases are
+labelled capture-derived: they rewrite only the URL token or one script. Action
+resolver and archive failures use local fault-injection servers whose injected
+statuses are the faults under test.
+
+| AC / scenario | Exact observation | Tests |
+| --- | --- | --- |
+| AC-1 / 88-S1 | `steps.deploy.outputs.url` gives `environmentUrl` `https://toolu-88.example/toolu/38098611227` and logs `Evaluated environment url: …` in "Complete job". Absent or null → no key. Literal, `""`, missing output, `not a url`, `1`, `true` and `null` are sent as upstream strings. The final `$GITHUB_ENV` value is used. A mapping, a sequence, a bad `fromJSON` or `secrets.*` fails "Complete job" and the job. | `environment_url_test` (execution); `completejob_env_capture_sends_url_billing_and_step_identity` (listener) |
+| AC-2 / 88-S2 | A runtime `::add-mask::` value, a message mask hint, or a literal URL containing a secret is dropped with the warning annotation `Skip setting environment url as environment '<name>' may contain secret.` (absent name → `''`). The token never appears in the POST, and every journal/log line masks it. | `captured_runtime_masked_url_is_suppressed_with_a_warning`, `mask_hint_and_literal_secret_urls_are_suppressed`, `secret_environment_url_never_reaches_completejob_or_the_masker_sinks`, `mask_hint_url_is_suppressed` |
+| AC-3 / 88-S3 | Every posted `StepResult` uses only upstream keys. `external_id` is the wire UUID. `run`+`bash`/`sh`, `node20` + local path (main and post), `composite` + path, `Dockerfile` + path, `DockerHub` + `alpine:3.20`, and `runner` + `setup_job`/`complete_job`. A remote `owner/repo[/path]` + ref is covered by unit tests. A failing `::error::` step under continue-on-error keeps its annotation. Composite children are never rows. Pre and post rows carry their action's label; a post skipped by `post-if` carries none (upstream labels only a row whose handler ran). | `step_metadata_test` (Docker rows `--ignored`, also in CI's Docker step), `step_metadata` unit tests, `step_metadata_reaches_every_posted_step_result`, `pre_main_and_post_rows_carry_action_metadata_and_a_skipped_post_none`, `completejob_wire_test` |
+| AC-4 / 88-S4 | `billingOwnerId` is echoed (`U_kgDOAH-IyQ`) and omitted when absent. Launch 500/429 → `resolve_action`. Archive 500/404/401×2/mid-body cut → `error_download_action`. Corrupt gzip → `invalid_action_download`. Each carries an `isInfrastructureIssue` FAILURE annotation on the failing (or enclosing composite) step. Launch 422, archive 403, 401-then-success, a failing script and the outage watchdog set no category. A continue-on-error fetch failure keeps its annotation but sets no category. The first failed step's category wins; a cancelled step never latches one. The infrastructure message is masked before the POST and the journal. A body that fails to parse still echoes `billingOwnerId`. | `action_infrastructure_test`, `infrastructure_category_is_sent_only_for_a_failed_runner_side_fetch`, `first_failed_step_category_wins_and_only_failures_latch`, `infrastructure_error_message_is_masked_in_completejob_and_the_journal`, `unparseable_job_still_echoes_the_billing_owner`, `completejob_without_billing_owner_omits_it`, `action_fetch_categories_follow_the_upstream_exception_split` |
+| AC-5 / 88-S5 | A 503 then 200 `completejob` re-sends a byte-identical body through `retry_transient`. A job cancelled mid-step still runs "Complete job" and posts `canceled` with the URL. | `completejob_retry_resends_an_identical_body`, `completejob_cancelled_job_keeps_the_url`, `cancelled_job_still_reports_the_url_from_completed_steps` |
+| AC-6 / live | See the live table below. | `python3 scripts/test/completejob_evidence_check.py` |
+| AC-7 | Repository gate and this documentation. | `./tools/check.sh all`; CI's "CompleteJob evidence (#88)" step runs `completejob_evidence_check.py --local` and `--docs` |
+| AC-8 | The journal carries one `step_metadata` line per reported row (including "Complete job") and an `error` annotation line for an infrastructure failure. The canonical fixture is regenerated from a real engine run. | `journal_writer_test`, `journal_reader_test`, `journal_types_test` |
+
+Live comparison (AC-6): [run 38104866197](https://github.com/Falconiere/toolu-ghrunner/actions/runs/38104866197),
+toolu built from `5d727e4` on Linux x86_64 (`toolu-88-verify`) against the
+GitHub-hosted `ubuntu-24.04` official runner on the same workflow SHA. API
+results are recorded in `crates/listener/tests/completejob_88_evidence.json`;
+`python3 scripts/test/completejob_evidence_check.py` checks them and compares
+the toolu lane's rows and annotations with the reference lane's, allowing only
+the reference-only differences listed below. `--strict` also fails while macOS
+and GHES are unverified.
+
+| Check | toolu | reference |
+| --- | --- | --- |
+| `url` job deployment `environment_url` | `https://toolu-88.example/toolu/38104866197` | `https://toolu-88.example/reference/38104866197` |
+| `secret` job deployment `environment_url` | absent | absent |
+| `secret` job check-run annotation | `Skip setting environment url as environment 'completejob-88-secret-toolu' may contain secret.` | same text for `…-reference` |
+| Last row of every job | "Complete job" | "Complete job" |
+| Job logs load (lines: url / steps / secret) | 22 / 111 / 20 | 42 / 199 / 39 |
+| `steps` job annotations | `step failed on purpose`, `composite child notice` | same, plus Node 20 deprecation and exit-code lines |
+
+GitHub accepted the upstream-shaped `StepResult`s (snake_case keys, string
+enums) on every toolu job. The capture run 38098611227, which already used
+the new shape, completed the same way. macOS and GHES are **unverified**: no
+macOS runner host or GHES server is available here (recorded in the evidence
+file). GitHub does not expose `action_name`/`ref`/`type`, so those fields are
+verified at the outgoing POST only.
+
+Known differences from the reference:
+
+- toolu attributes action fetch failures to the failing step. Upstream fetches
+  during "Set up job", so its annotation sits there.
+- A literal environment URL containing a registered secret is dropped. Upstream
+  would send it.
+- toolu's evaluator words an unknown context `unknown named value: secrets`
+  where upstream says `Unrecognized named-value: 'secrets'`.
+- `type` for a Node action is the runtime toolu runs (`node20` for a `node20`
+  manifest). Upstream may report `node24` when GitHub forces Node 24.
+- "Complete job" log content differs: toolu's row ends with a
+  `Job conclusion: <conclusion>` line so it always has a log. A failed
+  job-started hook, or an internal runner error that aborts the step loop,
+  still ends the job without a "Complete job" row.
+- The reference lane has a `Pull alpine:3.20` row (upstream pre-pulls registry
+  images) and the Node 20 deprecation and `Process completed with exit code`
+  annotations; toolu emits neither.
+- `infrastructureFailureCategory` `debugger_tunnel_failure` is never produced:
+  toolu has no step debugger.
+- GHES: toolu completes GHES jobs through the same Run Service call. The V1
+  `JobEvent` completion is not implemented.
+

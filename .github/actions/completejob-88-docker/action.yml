@@ -1,0 +1,5 @@
+name: completejob-88-docker
+description: Dockerfile action for the issue-88 step metadata capture
+runs:
+  using: docker
+  image: Dockerfile

@@ -1,12 +1,9 @@
 //! Job-container validation and ownership around the full main/post lifecycle.
 
-use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use shared::{
-  AgentJobRequestMessage, Conclusion, RunnerConfig, RunnerError, RunnerEvent, ServicesMode,
-};
+use shared::{AgentJobRequestMessage, RunnerConfig, RunnerError, RunnerEvent, ServicesMode};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -74,9 +71,9 @@ pub(super) async fn start_container(
         return Ok(false);
       },
       Err(error) => {
-        return finish_container(ctx, Err(error), events)
+        return finish_container::<()>(ctx, Err(error), events)
           .await
-          .map(|_| false);
+          .map(|()| false);
       },
     }
   }
@@ -84,11 +81,11 @@ pub(super) async fn start_container(
 }
 
 /// Remove owned resources before reporting completion, preserving primary errors.
-pub(super) async fn finish_container(
+pub(super) async fn finish_container<T>(
   ctx: &ExecutionContext,
-  body: Result<(Conclusion, HashMap<String, String>), RunnerError>,
+  body: Result<T, RunnerError>,
   events: &mpsc::Sender<RunnerEvent>,
-) -> Result<(Conclusion, HashMap<String, String>), RunnerError> {
+) -> Result<T, RunnerError> {
   let services_cleanup = match ctx.services() {
     Some(services) => services.cleanup(events).await,
     None => Ok(()),

@@ -209,7 +209,9 @@ exit 1
         | shared::RunnerEvent::Log { .. }
         | shared::RunnerEvent::StepSummary { .. }
         | shared::RunnerEvent::LogGroup { .. }
-        | shared::RunnerEvent::Annotation { .. } => {},
+        | shared::RunnerEvent::Annotation { .. }
+        | shared::RunnerEvent::StepMetadata { .. }
+        | shared::RunnerEvent::InfrastructureError { .. } => {},
       }
     }
   })
