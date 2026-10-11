@@ -1398,6 +1398,18 @@ Red evidence: before the implementation all four replays failed. The host
 | AC-7 | A pre-#90 `config.toml` loads as `stable` / never-prune with its `gc_after_hours` kept. `fresh` + `stable_gc_after_hours = 72` round-trips through `save_config`. `mode = "per-job"` fails `load_config` naming the file and the value. `run` / `boot` map `[workspace]` into `RunnerConfig.workspace`. | `cargo test -p config --test workspace_section_test`; `--test remint_test`; `cargo test -p shared --test config_test` | as AC-1 |
 | AC-8 | Gate and docs. | `./tools/check.sh all` | Linux local, CI |
 
+Live / reference lane: [`workspace-90.yml`](../.github/workflows/workspace-90.yml)
+prints `GITHUB_WORKSPACE`, `github.workspace`, `RUNNER_WORKSPACE`,
+`runner.workspace`, whether `.git` existed before `actions/checkout@v4`, and
+`PipelineFolder.json`. It runs on GitHub-hosted `ubuntu-24.04` / `macos-15`
+(the official runner) and in two sequential `[self-hosted, toolu-90]` jobs,
+where the second must find the first job's `.git`. It runs on dispatch
+(`run_toolu`) or on a push to the #90 branch whose head commit says
+`[live-90]`. **Status: unverified** until a recorded run is linked here. GHES
+is **unverified** (no server); the layout does not depend on the server.
+macOS real-filesystem behavior is covered by the CI `macos-14`
+`cargo test --workspace` run only.
+
 Entry paths (90-S3): `run` and `boot` share `run_job`, so both take the
 lease. The run `.lock` is not what protects a workspace: an org-level and a
 repo-level registration can run the same repository at once on the shared
