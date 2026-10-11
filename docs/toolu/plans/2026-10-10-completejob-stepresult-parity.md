@@ -368,3 +368,15 @@ unsatisfiable strict live check, capture fallback, ignored Docker tests, docs
 content check, delivery push order; round 2 → wider regression checks on
 S7-S9, explicit AC-8 infrastructure-line test, loud AC-6 status, stale step
 numbers. All applied; no blockers remained.
+
+## Deviations
+
+- S4: no separate `observability` unit test file; the new journal mapping is
+  asserted in `toolu-runner/tests/journal_types_test.rs` (round trip,
+  `ref` key, infrastructure → `error` annotation, URL not journaled), which
+  already owns the per-variant contract.
+- S7: "Complete job" always ends with `Job conclusion: <c>` so the row has a
+  log (`finalize_split` requires every completed row to carry a log URL); a
+  failed job-started hook keeps ending the job in "Set up job" without a
+  "Complete job" row (spec Non-Goal 7). Existing tests that count workflow
+  rows now skip the "Complete job" row by name.

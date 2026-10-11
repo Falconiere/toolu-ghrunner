@@ -397,17 +397,27 @@ fn assert_blobs_clean(blobs: &[Vec<u8>]) -> TestResult {
     !blobs.is_empty(),
     "no blob PUT was captured; the sink assertions below would be vacuous"
   );
+  let mut masked = 0;
   for blob in blobs {
     let text = gunzip(blob)?;
     assert!(
       !text.contains(SECRET),
       "secret leaked into an uploaded log blob: {text}"
     );
-    assert!(
-      text.contains("***"),
-      "uploaded blob missing the expected mask marker: {text}"
-    );
+    if text.contains("***") {
+      masked += 1;
+    } else {
+      // Only the runner's own "Complete job" row (#88) prints no secret.
+      assert!(
+        text
+          .lines()
+          .all(|line| line.starts_with("Job conclusion: ")),
+        "uploaded blob missing the expected mask marker: {text}"
+      );
+    }
   }
+  // The combined job log and the leaking step's own log, both masked.
+  assert_eq!(masked, 2, "expected two masked blobs");
   Ok(())
 }
 

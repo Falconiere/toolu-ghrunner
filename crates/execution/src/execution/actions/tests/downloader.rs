@@ -387,8 +387,12 @@ async fn download_and_extract_action_leaves_no_dest_or_staging_on_extraction_fai
 
   let result = download_and_extract_action(&client, &url, None, &dest).await;
   assert!(
-    matches!(result, Err(RunnerError::ActionDownload(_))),
-    "a corrupt tarball must fail extraction: {result:?}"
+    matches!(
+      &result,
+      Err(RunnerError::ActionFetch(error))
+        if error.infrastructure_category() == Some("invalid_action_download")
+    ),
+    "a corrupt tarball must fail extraction as invalid_action_download: {result:?}"
   );
   assert!(
     !dest.exists(),

@@ -1177,6 +1177,10 @@ Known differences from the reference:
   where upstream says `Unrecognized named-value: 'secrets'`.
 - `type` for a Node action is the runtime toolu runs (`node20` for a `node20`
   manifest). Upstream may report `node24` when GitHub forces Node 24.
+- "Complete job" ends with a toolu `Job conclusion: <conclusion>` line so the
+  row always has a log; upstream's row carries its own cleanup lines (for
+  example `Cleaning up orphan processes`). A failed
+  job-started hook still ends the job in "Set up job" with no "Complete job" row.
 - `infrastructureFailureCategory` `debugger_tunnel_failure` is never produced:
   toolu has no step debugger.
 - GHES: toolu completes GHES jobs through the same Run Service call. The V1

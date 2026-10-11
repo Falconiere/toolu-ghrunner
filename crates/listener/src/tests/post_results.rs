@@ -69,29 +69,8 @@ async fn post_results_reach_distinct_completion_records() -> Result<(), Box<dyn 
   let collector = StepCollector::new();
   let cancellation = CancellationToken::new();
   let mut receiver = runner.execute_job(msg.clone(), cancellation.clone());
-  let completion = tokio::time::timeout(Duration::from_secs(30), async {
-    let mut conclusion = None;
-    let mut step_completions = Vec::new();
-    while let Some(event) = receiver.recv().await {
-      collector.record(&event).await;
-      if let RunnerEvent::StepCompleted {
-        step_id,
-        conclusion: result,
-        ..
-      } = &event
-      {
-        step_completions.push((step_id.clone(), *result));
-      }
-      if let RunnerEvent::JobCompleted {
-        conclusion: result, ..
-      } = event
-      {
-        conclusion = Some(result);
-      }
-    }
-    (conclusion, step_completions)
-  })
-  .await;
+  let completion =
+    tokio::time::timeout(Duration::from_secs(30), collect(&mut receiver, &collector)).await;
   let (conclusion, step_completions) = match completion {
     Ok(conclusion) => conclusion,
     Err(error) => {
@@ -135,7 +114,8 @@ async fn post_results_reach_distinct_completion_records() -> Result<(), Box<dyn 
     json.get("conclusion").and_then(serde_json::Value::as_str),
     Some("failed")
   );
-  assert_eq!(steps.len(), 2);
+  // Main, post, then the trailing "Complete job" row (#88).
+  assert_eq!(steps.len(), 3);
   let main = steps.first().ok_or("main step missing")?;
   let post = steps.get(1).ok_or("post step missing")?;
   assert_eq!(
@@ -163,4 +143,41 @@ async fn post_results_reach_distinct_completion_records() -> Result<(), Box<dyn 
     Some("Post Workflow input passed to action")
   );
   Ok(())
+}
+
+/// Record every event; return the job conclusion and the main/post
+/// completions (the trailing "Complete job" row of #88 excluded).
+async fn collect(
+  receiver: &mut tokio::sync::mpsc::Receiver<RunnerEvent>,
+  collector: &StepCollector,
+) -> (Option<Conclusion>, Vec<(String, Conclusion)>) {
+  let mut conclusion = None;
+  let mut step_completions = Vec::new();
+  let mut complete_job = None;
+  while let Some(event) = receiver.recv().await {
+    collector.record(&event).await;
+    if let RunnerEvent::StepStarted {
+      step_id, step_name, ..
+    } = &event
+      && step_name == "Complete job"
+    {
+      complete_job = Some(step_id.clone());
+    }
+    if let RunnerEvent::StepCompleted {
+      step_id,
+      conclusion: result,
+      ..
+    } = &event
+      && complete_job.as_ref() != Some(step_id)
+    {
+      step_completions.push((step_id.clone(), *result));
+    }
+    if let RunnerEvent::JobCompleted {
+      conclusion: result, ..
+    } = event
+    {
+      conclusion = Some(result);
+    }
+  }
+  (conclusion, step_completions)
 }
