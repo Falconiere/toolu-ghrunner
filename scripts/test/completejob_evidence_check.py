@@ -5,8 +5,8 @@ Modes:
   --sanitize RAW_DIR  turn raw acquired bodies into committed fixtures
   --local             verify the committed captures (sanitized, hashed, shaped)
   --record RUN_ID     record a completejob-88.yml run's GitHub API results
-  (default)           every required lane passed or recorded unverified
-  --strict            every required lane passed (non-gating)
+  (default)           toolu and reference passed; macOS/GHES may be recorded unverified
+  --strict            also fail while macOS/GHES are recorded unverified (non-gating)
   --docs              documentation mentions every #88 acceptance row
 """
 import argparse
@@ -169,24 +169,53 @@ def record(run_id):
     print(f'recorded run {run_id}')
 
 
+# Documented reference-only differences (docs/test-coverage.md, #88): upstream
+# pre-pulls registry images in their own row and emits these annotations.
+REFERENCE_ONLY_ROW_PREFIXES = ('Pull ',)
+REFERENCE_ONLY_ANNOTATION_PREFIXES = (
+    'Node.js 20 is deprecated', 'Process completed with exit code')
+
+
+def secret_warning(lane):
+    return (f"Skip setting environment url as environment 'completejob-88-secret-{lane}'"
+            ' may contain secret.')
+
+
+def compared_to_reference(jobs, reference):
+    """toolu rows and annotations must match the reference lane's, modulo the allowlists."""
+    problems = []
+    for name in ('url', 'secret', 'steps'):
+        rows = [s['name'] for s in sorted(jobs.get(name, {}).get('steps', []), key=lambda s: s['number'])]
+        expected = [s['name'] for s in sorted(reference.get(name, {}).get('steps', []), key=lambda s: s['number'])
+                    if not s['name'].startswith(REFERENCE_ONLY_ROW_PREFIXES)]
+        if rows != expected:
+            problems.append(f'{name}: rows {rows} != reference {expected}')
+        ours = sorted(a['message'].replace('-toolu', '-reference') for a in jobs.get(name, {}).get('annotations', []))
+        theirs = sorted(a['message'] for a in reference.get(name, {}).get('annotations', [])
+                        if not a['message'].startswith(REFERENCE_ONLY_ANNOTATION_PREFIXES))
+        if ours != theirs:
+            problems.append(f'{name}: annotations {ours} != reference {theirs}')
+    return problems
+
+
 def lane_status(evidence, lane):
-    """passed / failed with reasons / unverified, judged against the reference lane."""
-    unverified = evidence.get('unverified', {})
-    if lane in unverified:
-        return 'unverified', [unverified[lane]]
+    """passed / failed with reasons; toolu is also judged against the reference lane."""
     runs = evidence.get('runs')
     if not runs:
-        return 'failed', ['no recorded run and no recorded unverified reason']
+        return 'failed', ['no recorded run']
     jobs = runs['lanes'][lane]['jobs']
     run_id = runs['id']
     problems = []
     expected_url = f'https://toolu-88.example/{lane}/{run_id}'
     if expected_url not in jobs.get('url', {}).get('environment_urls', []):
         problems.append(f'url job environment_url != {expected_url}')
-    if any(jobs.get('secret', {}).get('environment_urls', [])):
+    secret_urls = jobs.get('secret', {}).get('environment_urls', [])
+    if not secret_urls:
+        problems.append('secret job has no successful deployment status')
+    elif any(secret_urls):
         problems.append('secret job published an environment_url')
-    if not any('may contain secret' in a['message'] for a in jobs.get('secret', {}).get('annotations', [])):
-        problems.append('secret job lacks the skip-url warning annotation')
+    if secret_warning(lane) not in [a['message'] for a in jobs.get('secret', {}).get('annotations', [])]:
+        problems.append('secret job lacks the exact skip-url warning annotation')
     for name in ('url', 'secret', 'steps'):
         steps = jobs.get(name, {}).get('steps', [])
         last = max(steps, key=lambda s: s['number'], default=None)
@@ -198,6 +227,8 @@ def lane_status(evidence, lane):
     for name in ('url', 'secret', 'steps'):
         if jobs.get(name, {}).get('conclusion') != 'success':
             problems.append(f'{name}: conclusion {jobs.get(name, {}).get("conclusion")}')
+    if lane == 'toolu':
+        problems.extend(compared_to_reference(jobs, runs['lanes']['reference']['jobs']))
     return ('passed' if not problems else 'failed'), problems
 
 
@@ -207,13 +238,14 @@ def check_lanes(strict):
     for lane in LANES:
         status, notes = lane_status(evidence, lane)
         print(f'{lane}: {status.upper()} {"; ".join(notes)}')
-        if status == 'failed' or (strict and status != 'passed'):
+        if status != 'passed':
             ok = False
+    # Only hosts this environment cannot reach may be recorded unverified;
+    # the required toolu/reference lanes are always judged on a recorded run.
     for lane, reason in evidence.get('unverified', {}).items():
-        if lane not in LANES:
-            print(f'{lane}: UNVERIFIED {reason}')
-            if lane not in ALLOWED_UNVERIFIED:
-                ok = False
+        print(f'{lane}: UNVERIFIED {reason}')
+        if strict or lane not in ALLOWED_UNVERIFIED:
+            ok = False
     passed = all(lane_status(evidence, lane)[0] == 'passed' for lane in LANES)
     print('AC-6: PASSED' if passed else 'AC-6: UNVERIFIED')
     return ok

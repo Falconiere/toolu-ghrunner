@@ -73,6 +73,17 @@ impl CompleteStep<'_> {
       .await;
   }
 
+  /// Close the row with `conclusion`.
+  async fn complete(&self, conclusion: Conclusion) {
+    self
+      .send(RunnerEvent::StepCompleted {
+        step_id: self.id.clone(),
+        conclusion,
+        outputs: HashMap::new(),
+      })
+      .await;
+  }
+
   /// Mask a name before it is embedded in a message.
   pub(super) fn mask(&self, text: &str) -> String {
     match self.masker.masker().lock() {
@@ -87,7 +98,8 @@ impl CompleteStep<'_> {
 ///
 /// # Errors
 ///
-/// Propagates a local (non-acquired) job output expression error.
+/// Propagates a local (non-acquired) job output expression error after
+/// closing the row as failed.
 pub(super) async fn run_complete_step(
   spec: &JobSpec,
   msg: &AgentJobRequestMessage,
@@ -118,7 +130,17 @@ pub(super) async fn run_complete_step(
       git_ref: None,
     })
     .await;
-  let outputs = evaluate_final_outputs(spec, ctx, &step, conclusion).await?;
+  let outputs = match evaluate_final_outputs(spec, ctx, &step, conclusion).await {
+    Ok(outputs) => outputs,
+    Err(error) => {
+      // A local job's output expression error still closes this row.
+      step
+        .issue(AnnotationLevel::Error, &step.mask(&error.to_string()))
+        .await;
+      step.complete(Conclusion::Failure).await;
+      return Err(error);
+    },
+  };
   let (environment_url, url_failed) = report_environment_url(&step, msg, ctx).await;
   let failed = outputs.failed || url_failed;
   let conclusion = if url_failed && outputs.conclusion != Conclusion::Cancelled {
@@ -126,6 +148,8 @@ pub(super) async fn run_complete_step(
   } else {
     outputs.conclusion
   };
+  // The line states what the job reports, so a shutdown is applied here too.
+  let conclusion = super::entry::after_shutdown(ctx, conclusion);
   // Upstream's row always carries log lines; reporting the final verdict
   // guarantees this row is never an empty (log-less) result.
   step
@@ -135,14 +159,10 @@ pub(super) async fn run_complete_step(
     ))
     .await;
   step
-    .send(RunnerEvent::StepCompleted {
-      step_id: step.id.clone(),
-      conclusion: if failed {
-        Conclusion::Failure
-      } else {
-        Conclusion::Success
-      },
-      outputs: HashMap::new(),
+    .complete(if failed {
+      Conclusion::Failure
+    } else {
+      Conclusion::Success
     })
     .await;
   Ok(JobResult {

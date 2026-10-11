@@ -383,3 +383,16 @@ numbers. All applied; no blockers remained.
 - S8: the Docker rows need the daemon-shared `TOOLU_CONTAINER_TEST_ROOT`
   (same as CI's Docker step); the check now sets it.
 
+- Pre-push review fixes:
+  - A post skipped by `post-if` carries no metadata, since upstream labels a row only when its handler runs. This is covered by `gh_compat_prepost`, which is red without the fix.
+  - A local job's output error now closes the "Complete job" row as failed.
+  - The `Job conclusion:` line applies the runner-shutdown override.
+  - Output names and evaluation errors are masked.
+  - The token discriminants are shared from `job_spec`.
+  - New listener tests cover first-failure-wins, the masked infrastructure message and the billing echo on a parse failure.
+  - The evidence checker now:
+    - compares the toolu lane against the reference lane, with documented allowlists;
+    - requires the exact warning and a deployment status for the secret job;
+    - never lets an `unverified` entry stand in for a required lane.
+  - CI runs `--local`/`--docs`.
+  - An internal runner error that aborts the step loop still ends the job without "Complete job", which is now a documented known difference.
