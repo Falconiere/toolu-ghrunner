@@ -1164,12 +1164,19 @@ and `macos-15` (official runner); its "Complete job" log must show `Terminate
 orphan process` for each `ORPHAN89|tagged` pid and none for the
 `ORPHAN89|opted-out` pid.
 
+Observed in [run 38101935911](https://github.com/Falconiere/toolu-ghrunner/actions/runs/38101935911)
+(head `200ba23`, official GitHub-hosted runner). On both `ubuntu-24.04` and
+`macos-15` the step saw a `github_<uuid>` id. "Complete job" logged `Cleaning
+up orphan processes`, then one `Terminate orphan process: pid (N) (name)` for
+each of the four tagged pids (`sleep` ×3 plus `python3`/`Python`), and none for
+the opted-out pid. Those are the same lines and the same kill/spare split that
+toolu's replay tests assert.
+
 Limits stated, not claimed: only processes started with the variable and
 readable by the runner's user are found (Linux `/proc/<pid>/environ`, macOS
 `KERN_PROCARGS2`, both exec-time snapshots), so `sudo`, `env -i` and other
 users' processes escape, as upstream. macOS real-process behavior is verified
 only by the CI `macos-14` test run; a macOS toolu live lane is **unverified**.
-The official-runner reference lane's "Complete job" log is **unverified**
-until its first push-triggered run is observed and linked here. The toolu self-hosted workflow lane (`run_toolu`) is **unverified** (no
+The toolu self-hosted workflow lane (`run_toolu`) is **unverified** (no
 registered runner). GHES is **unverified** (no server); the process rule does
 not depend on the server.
