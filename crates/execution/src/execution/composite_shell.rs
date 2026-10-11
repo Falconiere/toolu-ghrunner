@@ -22,6 +22,9 @@ pub struct ShellScriptParams<'a> {
   pub log_step_id: &'a str,
   /// Per-job cgroup directory to move the spawned step into (`None` = no isolation).
   pub cgroup_path: Option<&'a Path>,
+  /// `RUNNER_TRACKING_ID` for a host child (`None` = untagged; issue #89).
+  /// Ignored when the child runs in a job container, which is never tagged.
+  pub tracking_id: Option<&'a str>,
   /// Time left in the enclosing top-level step.
   pub timeout: Option<Duration>,
   /// Job cancellation token shared by the enclosing step.
@@ -47,6 +50,7 @@ pub async fn run_shell_script(
         working_dir: params.working_dir,
         step_id: params.log_step_id,
         cgroup_path: params.cgroup_path,
+        tracking_id: params.tracking_id,
         timeout: params.timeout,
         cancel: params.cancel,
         container: None,

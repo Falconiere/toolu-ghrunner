@@ -53,6 +53,7 @@ pub mod job_teardown;
 mod node_stage;
 /// OIDC token service for runner execution.
 pub mod oidc;
+pub(crate) mod orphan_cleanup;
 mod post_drain;
 /// Bearer-token validation shared across the local OIDC/artifact/cache services.
 pub mod service_auth;

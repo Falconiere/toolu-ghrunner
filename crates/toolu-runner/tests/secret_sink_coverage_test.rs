@@ -201,7 +201,11 @@ fn masked_log_buffers(
     if let RunnerEvent::Log { step_id, line, .. } = event {
       let redacted = mask_line(masker, line);
       all_job_lines.push(redacted.clone());
-      per_step.entry(step_id.clone()).or_default().push(redacted);
+      // Job-level lines (`step_id: ""`, e.g. the orphan-cleanup header) have
+      // no per-step uploader in the forwarder; they reach the job log only.
+      if !step_id.is_empty() {
+        per_step.entry(step_id.clone()).or_default().push(redacted);
+      }
     }
   }
   (all_job_lines, per_step)

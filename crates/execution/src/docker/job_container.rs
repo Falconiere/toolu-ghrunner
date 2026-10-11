@@ -156,7 +156,7 @@ impl JobContainer {
   fn create_body(&self, spec: &ContainerSpec) -> Result<ContainerCreateBody, RunnerError> {
     let mut env = spec.env.clone();
     env.insert("HOME".to_owned(), "/github/home".to_owned());
-    crate::execution::step_process_env::apply(&mut env, Some(&self.base_ci));
+    crate::execution::step_process_env::apply(&mut env, Some(&self.base_ci), None);
     let mut body = ContainerCreateBody {
       image: Some(spec.image.clone()),
       entrypoint: Some(vec!["tail".to_owned()]),

@@ -508,6 +508,11 @@ to that list requires proving the value is not a real credential.
   / `job_hooks` (job `outputs:`, `defaults.run`, job hook env),
   `context_build` (full `${{ }}` context), `service_endpoints`
   (forwarder / offline / accelerated service-URL injection).
+  `orphan_cleanup.rs` (#89) gives each job a `RUNNER_TRACKING_ID`
+  (`github_<uuid>`, host spawns only, via `step_process_env::apply`;
+  `process.clean=false` disables it) and, in `finish_execution` before
+  `JobCompleted`, `SIGKILL`s every other process still carrying it (sysinfo:
+  Linux `/proc`, macOS `KERN_PROCARGS2`; 15 s deadline; never fails the job).
   `workspace_gc.rs` prunes `workspace_root/<job_id>` older than
   `gc_after_hours` (never the running job's). `shadow/`
   (`fingerprint`, `record`) does off-by-default per-`run:`-step
