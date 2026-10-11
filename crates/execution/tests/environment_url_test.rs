@@ -76,6 +76,15 @@ fn set_script(message: &mut AgentJobRequestMessage, index: usize, script: &str) 
 }
 
 async fn run(message: AgentJobRequestMessage, cancel_on: Option<&str>) -> TestResult<Job> {
+  run_signalled(message, cancel_on, None).await
+}
+
+/// [`run`], also shutting the runner down when `shutdown_on` starts.
+async fn run_signalled(
+  message: AgentJobRequestMessage,
+  cancel_on: Option<&str>,
+  shutdown_on: Option<&str>,
+) -> TestResult<Job> {
   let dir = tempfile::tempdir()?;
   let config = RunnerConfig {
     data_dir: dir.path().join("data"),
@@ -83,10 +92,11 @@ async fn run(message: AgentJobRequestMessage, cancel_on: Option<&str>) -> TestRe
     workspace_gc_hours: 0,
     ..RunnerConfig::default()
   };
-  let cancel = CancellationToken::new();
+  let (cancel, shutdown) = (CancellationToken::new(), CancellationToken::new());
   let runner = Runner::new(config, Arc::new(Mutex::new(SecretMasker::new())));
-  let mut stream = runner.execute_job(message, cancel.clone());
+  let mut stream = runner.execute_job_with_shutdown(message, cancel.clone(), shutdown.clone());
   let cancel_on = cancel_on.map(str::to_owned);
+  let shutdown_on = shutdown_on.map(str::to_owned);
   let events = tokio::time::timeout(Duration::from_secs(90), async move {
     let mut events = Vec::new();
     while let Some(event) = stream.recv().await {
@@ -94,6 +104,11 @@ async fn run(message: AgentJobRequestMessage, cancel_on: Option<&str>) -> TestRe
         && cancel_on.as_deref() == Some(step_id.as_str())
       {
         cancel.cancel();
+      }
+      if let RunnerEvent::StepStarted { step_id, .. } = &event
+        && shutdown_on.as_deref() == Some(step_id.as_str())
+      {
+        shutdown.cancel();
       }
       events.push(event);
     }
@@ -448,5 +463,26 @@ async fn cancelled_job_still_reports_the_url_from_completed_steps() -> TestResul
   assert_eq!(job.conclusion, Conclusion::Cancelled);
   assert_eq!(job.environment_url.as_deref(), Some(CAPTURED_URL));
   assert_eq!(job.complete_conclusion(), Some(Conclusion::Success));
+  Ok(())
+}
+
+#[tokio::test]
+async fn runner_shutdown_is_the_conclusion_complete_job_logs() -> TestResult {
+  let mut message = env_message()?;
+  set_script(&mut message, 1, "sleep 60")?;
+  let after_deploy = message
+    .steps
+    .get(1)
+    .ok_or("captured step missing")?
+    .id
+    .clone();
+  let job = run_signalled(message, None, Some(&after_deploy)).await?;
+  // A shutdown fails the job, so the row must not claim another verdict.
+  assert_eq!(job.conclusion, Conclusion::Failure);
+  assert!(
+    job.complete_logs().contains(&"Job conclusion: failure"),
+    "{:?}",
+    job.complete_logs()
+  );
   Ok(())
 }

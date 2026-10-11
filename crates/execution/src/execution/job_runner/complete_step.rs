@@ -207,7 +207,9 @@ async fn report_environment_url(
       step
         .issue(AnnotationLevel::Error, "Failed to evaluate environment url")
         .await;
-      step.issue(AnnotationLevel::Error, &message).await;
+      step
+        .issue(AnnotationLevel::Error, &step.mask(&message))
+        .await;
       (None, true)
     },
   }
