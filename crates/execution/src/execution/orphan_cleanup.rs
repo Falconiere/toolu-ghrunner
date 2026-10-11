@@ -290,36 +290,31 @@ fn refresh_kind() -> ProcessRefreshKind {
 }
 
 async fn warn_on_report(events: &mpsc::Sender<RunnerEvent>, report: &CleanupReport) {
+  for warning in report_warnings(report) {
+    tracing::warn!(?report, "{warning}");
+    job_log(events, format!("##[warning]{warning}")).await;
+  }
+}
+
+/// One WARN line per abnormal sweep outcome: degraded scan, deadline, survivors.
+fn report_warnings(report: &CleanupReport) -> Vec<String> {
+  let mut warnings = Vec::new();
   if report.degraded {
-    tracing::warn!("orphan cleanup could not enumerate processes");
-    job_log(
-      events,
-      "##[warning]Orphan process cleanup could not enumerate processes on this host.".to_owned(),
-    )
-    .await;
+    warnings.push("Orphan process cleanup could not enumerate processes on this host.".to_owned());
   }
   if report.timed_out {
-    tracing::warn!(?report, "orphan cleanup hit its deadline");
-    job_log(
-      events,
-      format!(
-        "##[warning]Orphan process cleanup stopped after {}s.",
-        ORPHAN_CLEANUP_TIMEOUT.as_secs()
-      ),
-    )
-    .await;
+    warnings.push(format!(
+      "Orphan process cleanup stopped after {}s.",
+      ORPHAN_CLEANUP_TIMEOUT.as_secs()
+    ));
   }
   if !report.survivors.is_empty() {
-    tracing::warn!(survivors = ?report.survivors, "orphan processes survived cleanup");
-    job_log(
-      events,
-      format!(
-        "##[warning]Orphan processes still running after cleanup: {:?}",
-        report.survivors
-      ),
-    )
-    .await;
+    warnings.push(format!(
+      "Orphan processes still running after cleanup: {:?}",
+      report.survivors
+    ));
   }
+  warnings
 }
 
 fn job_event(line: String) -> RunnerEvent {

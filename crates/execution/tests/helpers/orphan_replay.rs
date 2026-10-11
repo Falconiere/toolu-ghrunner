@@ -269,7 +269,7 @@ pub fn is_dead(pid: u32) -> TestResult<bool> {
   Ok(ps_state(pid)?.is_none_or(|state| state.starts_with('Z')))
 }
 
-/// Poll briefly: a SIGKILLed orphan is reaped by init asynchronously.
+/// Poll briefly: a killed orphan is reaped by init asynchronously.
 pub async fn assert_dead(pid: u32, label: &str) -> TestResult {
   for _ in 0..50 {
     if is_dead(pid)? {

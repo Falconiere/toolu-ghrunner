@@ -1133,3 +1133,42 @@ The gate's tests run on macOS CI. GHES is **unverified** because no server is
 configured; it uses the same job-message tokens. Docker pre stages share the
 naming path; the Docker-specific timeout lines were verified with the ignored
 real-Docker tests in `docker::job_container_failures`.
+
+## Issue #89 — orphan process cleanup
+
+`RUNNER_TRACKING_ID` follows upstream `JobExtension.cs:586-600` / `880-925` at
+`cab9d1c3901e45c7705889c4f88284fdd93f4ae5`; see the
+[design](specs/2026-10-10-orphan-process-cleanup-design.md). The replays use the
+sanitized #68 GitHub.com acquisition (`crates/execution/tests/incoming_contexts_matrix_0.json`,
+`__run` / `__self` steps) through the production `Runner` → `run_job` →
+`finish_execution` path, with real Bash, Node (`orphan_89_*` fixture action),
+python3 `os.setsid` and `ps -o stat=`. No mocks. Red evidence: the same test
+file at the pre-implementation commit failed 11 of 13 (missing id `unset`,
+missing cleanup header); the two negative cases passed trivially.
+
+| AC / scenario | Exact observation | Tests (`cargo test -p execution …`) | Platforms |
+| --- | --- | --- | --- |
+| AC-1 / issue AC 1 | Hook, `run:` step, Node main and Node post print one identical `github_<uuid v4>`; a second job prints a different one. A re-exec with `RUNNER_TRACKING_ID=github_outer89` still prints the job id, and `github_outer89` when `process.clean=false`. | `--test orphan_cleanup_test`: `tracking_id_reaches_hook_shell_and_node_stages`, `tracking_id_replaces_inherited_outer_value` | Linux x86_64 local (root); CI `ubuntu-latest` and `macos-14` via `cargo test --workspace` |
+| AC-2 / 89-S1 | A stdout-holding child, a `bash -c` grandchild, `nohup` and `setsid` sleepers are gone or zombies after success, `exit 1` and cancellation; each swept one has `Terminate orphan process: pid (N)`; the job ends well inside 60 s (the stdout holder costs the 2 s drain). A job with no orphans logs only the header. On cancel the step-group `killpg` already reaps the non-detached kinds, so only the `setsid` one reaches the sweep. | `orphans_are_killed_after_successful_job`, `…_failed_job`, `…_cancelled_job`, `job_without_orphans_logs_header_and_no_termination` | as AC-1 |
+| AC-3 / 89-S2 | Two concurrent jobs: A's sweep leaves B's detached process and an unrelated id-less `sleep` alive (non-zombie `ps` state); B's own sweep then kills B's. | `concurrent_job_and_unrelated_process_survive_cleanup` | as AC-1 |
+| AC-4 / 89-S3 | Step `env: RUNNER_TRACKING_ID: ''` prints empty and its process survives; an upper-cased re-export is still killed; `process.clean=false` logs no header, kills nothing and passes the inherited value (or `unset`). Parser: `False`, ` FALSE ` disable; `0`, `no`, garbage enable. | `empty_step_tracking_id_opts_out`, `upper_cased_tracking_id_still_matches`, `process_clean_false_disables_tracking_and_cleanup`; `--lib orphan_cleanup` | as AC-1 |
+| AC-5 / 89-S2 lookup failure | A tagged process that `exec env -i sleep` between scan and kill keeps its pid but loses the id: not signalled, still running. An unreaped zombie carrying the id is skipped without error. An expired deadline reports `timed_out` and kills nothing. A live tagged `sleep` dies by signal 9. | `--lib orphan_cleanup`: `exec_without_id_between_scan_and_kill_is_not_signalled`, `unreaped_zombie_carrying_id_is_skipped`, `expired_deadline_kills_nothing_and_reports_timeout`, `sweep_kills_a_live_tagged_process` | as AC-1 |
+| AC-6 / 89-S4 | A job-started hook that detaches and exits 1 (job `Failure`) and a Node post that spawns `detached: true` and exits 1 (job `Failure`) both have their process killed. Cancel + shutdown fired on the cleanup header still kill every orphan and close the stream. | `failed_job_started_hook_orphan_is_killed`, `failing_node_post_orphan_is_killed`, `cancellation_during_cleanup_still_kills` | as AC-1 |
+| AC-7 / Non-Goal 1 | Captured #73 job-container message with real Docker 29.1.3: the container step prints `TRACK89\|container\|unset`, the host sweep logs its header and terminates nothing. | `TOOLU_CONTAINER_TEST_ROOT=<dir> cargo test -p execution --test orphan_cleanup_container_test -- --ignored` | Linux + Docker, run manually (ignored by default, so **unverified in the gate**); macOS not applicable |
+| AC-8 / gate + docs | `./tools/check.sh all` exits 0; README "What runs", `docs/architecture.md`, `AGENTS.md` and module READMEs describe the behavior and limits. | gate | Linux local, CI |
+
+Reference parity: [`orphan-cleanup-89.yml`](../.github/workflows/orphan-cleanup-89.yml)
+runs the same orphan kinds plus an opted-out process on GitHub-hosted
+`ubuntu-24.04` and `macos-15` (official runner); its "Complete job" log must
+show `Terminate orphan process` for each `ORPHAN89|tagged` pid and none for the
+`ORPHAN89|opted-out` pid. Reference run: pending first push (recorded below
+once observed).
+
+Limits stated, not claimed: only processes started with the variable and
+readable by the runner's user are found (Linux `/proc/<pid>/environ`, macOS
+`KERN_PROCARGS2`, both exec-time snapshots), so `sudo`, `env -i` and other
+users' processes escape, as upstream. macOS real-process behavior is verified
+only by the CI `macos-14` test run; a macOS toolu live lane is **unverified**.
+The toolu self-hosted workflow lane (`run_toolu`) is **unverified** (no
+registered runner). GHES is **unverified** (no server); the process rule does
+not depend on the server.

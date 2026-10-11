@@ -168,7 +168,7 @@ The design is the spawn-time host flag, per the approved spec:
       "crates/execution/src/execution/job_runner/entry.rs"
     ],
     "input": "Sanitized #73 job_container_message.json replayed against the local Docker 29 daemon; the container step prints TRACK89|container|unset and the job completes Success with the cleanup header logged.",
-    "check": "cargo test -p execution --test orphan_cleanup_container_test -- --ignored"
+    "check": "mkdir -p target/orphan89-ctr && TOOLU_CONTAINER_TEST_ROOT=$PWD/target/orphan89-ctr cargo test -p execution --test orphan_cleanup_container_test -- --ignored"
   },
   {
     "id": "reference_workflow",
@@ -278,6 +278,12 @@ During babysit, the reference workflow run triggered by the push is read with
 `gh run view --log`. Its official-runner `Terminate orphan process` lines are
 linked in `docs/test-coverage.md` in a follow-up commit; if the lines are
 absent, the lane is recorded as unverified.
+
+## Deviations
+
+- `container_lane` check: the Docker replay requires `TOOLU_CONTAINER_TEST_ROOT`
+  (a Docker-visible temp root, same contract as `job_container_ci_test.rs`), so
+  the check now creates `target/orphan89-ctr` and exports it.
 
 ## Review record
 
