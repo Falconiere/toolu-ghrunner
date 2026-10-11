@@ -20,10 +20,15 @@ fn capture() -> Value {
   serde_json::from_str(CAPTURE).expect("fixture is JSON")
 }
 
+/// The fixture value at JSON `pointer` (`Null` when absent, failing the
+/// caller's assertion or `expect`).
+fn at<'a>(fixture: &'a Value, pointer: &str) -> &'a Value {
+  fixture.pointer(pointer).unwrap_or(&Value::Null)
+}
+
 /// Raw HTTP response bytes: `status` plus the captured headers and body.
 fn response_bytes(status: u16) -> Vec<u8> {
   let fixture = capture();
-  let response = &fixture["response"];
   let reason = match status {
     401 => "Unauthorized",
     403 => "Forbidden",
@@ -31,11 +36,14 @@ fn response_bytes(status: u16) -> Vec<u8> {
     _ => "Internal Server Error",
   };
   let mut out = format!("HTTP/1.1 {status} {reason}\r\n");
-  for (name, value) in response["headers"].as_object().expect("headers object") {
-    out.push_str(&format!("{name}: {}\r\n", value.as_str().expect("header str")));
+  for (name, value) in at(&fixture, "/response/headers").as_object().expect("headers object") {
+    out.push_str(name);
+    out.push_str(": ");
+    out.push_str(value.as_str().expect("header str"));
+    out.push_str("\r\n");
   }
   out.push_str("connection: close\r\n\r\n");
-  out.push_str(response["body"].as_str().expect("body str"));
+  out.push_str(at(&fixture, "/response/body").as_str().expect("body str"));
   out.into_bytes()
 }
 
@@ -77,19 +85,19 @@ async fn create_against(status: u16) -> Result<protocol::CreateSessionResponse, 
 #[test]
 fn fixture_is_the_verbatim_live_capture() {
   let fixture = capture();
-  let response = &fixture["response"];
-  assert_eq!(response["status"], 409);
-  assert_eq!(response["body"], "");
-  assert_eq!(response["headers"]["content-length"], "0");
-  assert_eq!(response["headers"]["server"], "github.com");
-  let provenance = &fixture["provenance"];
+  assert_eq!(at(&fixture, "/response/status"), 409);
+  assert_eq!(at(&fixture, "/response/body"), "");
+  assert_eq!(at(&fixture, "/response/headers/content-length"), "0");
+  assert_eq!(at(&fixture, "/response/headers/server"), "github.com");
   for key in ["captured", "host", "request", "registrations", "method"] {
     assert!(
-      provenance[key].as_str().is_some_and(|v| !v.is_empty()),
+      at(&fixture, &format!("/provenance/{key}"))
+        .as_str()
+        .is_some_and(|v| !v.is_empty()),
       "provenance.{key} must be recorded"
     );
   }
-  assert_eq!(provenance["host"], "github.com");
+  assert_eq!(at(&fixture, "/provenance/host"), "github.com");
 }
 
 #[tokio::test]

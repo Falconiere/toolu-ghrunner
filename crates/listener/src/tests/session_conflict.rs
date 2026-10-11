@@ -22,16 +22,16 @@ const CAPTURE: &str = include_str!("../../../wire/tests/session_conflict_409.jso
 /// The captured 409 reply: its status, every recorded header, its empty body.
 fn captured_conflict() -> TestResult<ResponseTemplate> {
   let fixture: Value = serde_json::from_str(CAPTURE)?;
-  let response = &fixture["response"];
-  let status = u16::try_from(response["status"].as_u64().ok_or("status")?)?;
+  let field = |pointer: &str| fixture.pointer(pointer).ok_or(format!("fixture lacks {pointer}"));
+  let status = u16::try_from(field("/response/status")?.as_u64().ok_or("status")?)?;
   let mut template = ResponseTemplate::new(status);
-  for (name, value) in response["headers"].as_object().ok_or("headers")? {
+  for (name, value) in field("/response/headers")?.as_object().ok_or("headers")? {
     // wiremock computes content-length itself from the (empty) body.
     if name != "content-length" {
       template = template.insert_header(name.as_str(), value.as_str().ok_or("header")?);
     }
   }
-  Ok(template.set_body_string(response["body"].as_str().ok_or("body")?))
+  Ok(template.set_body_string(field("/response/body")?.as_str().ok_or("body")?))
 }
 
 fn session_created() -> ResponseTemplate {

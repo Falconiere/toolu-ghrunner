@@ -58,30 +58,45 @@ where
   loop {
     match op().await {
       Ok(value) => return Ok(Some(value)),
-      Err(RunnerError::SessionConflict(msg)) => {
-        if attempt >= max_attempts {
-          tracing::error!(
-            attempts = attempt,
-            "session conflict persisted for every attempt; another runner session is active for \
-             this registration — giving up"
-          );
-          return Err(RunnerError::SessionConflict(msg));
-        }
-        tracing::warn!(
-          "session conflict on attempt {attempt}/{max_attempts}: another runner session is \
-           active for this registration; retrying in {}s",
-          policy.interval.as_secs_f64()
-        );
-        tokio::select! {
-          () = cancel.cancelled() => {
-            tracing::info!("cancelled while waiting to retry a session conflict");
-            return Ok(None);
-          },
-          () = tokio::time::sleep(policy.interval) => {},
+      Err(RunnerError::SessionConflict(msg)) if attempt >= max_attempts => {
+        log_spent(attempt);
+        return Err(RunnerError::SessionConflict(msg));
+      },
+      Err(RunnerError::SessionConflict(_)) => {
+        log_retry(attempt, max_attempts, policy.interval);
+        if cancelled_while_waiting(cancel, policy.interval).await {
+          return Ok(None);
         }
         attempt += 1;
       },
       Err(other) => return Err(other),
     }
   }
+}
+
+/// Sleep `interval`, waking early on `cancel`; `true` when cancel won.
+async fn cancelled_while_waiting(cancel: &CancellationToken, interval: Duration) -> bool {
+  tokio::select! {
+    () = cancel.cancelled() => {
+      tracing::info!("cancelled while waiting to retry a session conflict");
+      true
+    },
+    () = tokio::time::sleep(interval) => false,
+  }
+}
+
+fn log_retry(attempt: u32, max_attempts: u32, interval: Duration) {
+  tracing::warn!(
+    "session conflict on attempt {attempt}/{max_attempts}: another runner session is active for \
+     this registration; retrying in {}s",
+    interval.as_secs_f64()
+  );
+}
+
+fn log_spent(attempts: u32) {
+  tracing::error!(
+    attempts,
+    "session conflict persisted for every attempt; another runner session is active for this \
+     registration — giving up"
+  );
 }

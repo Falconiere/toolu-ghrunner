@@ -154,9 +154,7 @@ impl GitHubListener {
     let Some(mut ctx) = self.build_session_ctx(cancel, tx).await? else {
       // Cancelled before any session existed: nothing to clean up, and the
       // `tx` dropped with the attempt, so the journal channel is closed.
-      if let Err(e) = journal.await {
-        tracing::warn!(error = %e, "journal writer task did not join cleanly");
-      }
+      join_journal(journal).await;
       return Ok(None);
     };
 
@@ -170,9 +168,7 @@ impl GitHubListener {
     // for the writer to flush the final events (e.g. `job_completed`) before
     // returning — otherwise a fast `--once` exit could truncate the tail.
     drop(ctx);
-    if let Err(e) = journal.await {
-      tracing::warn!(error = %e, "journal writer task did not join cleanly");
-    }
+    join_journal(journal).await;
     result
   }
 
@@ -286,6 +282,13 @@ impl GitHubListener {
       job_log_upload: None,
       watchdog: WatchdogConfig::default(),
     }))
+  }
+}
+
+/// Wait for the journal writer to flush and exit once its channel closed.
+async fn join_journal(journal: tokio::task::JoinHandle<()>) {
+  if let Err(e) = journal.await {
+    tracing::warn!(error = %e, "journal writer task did not join cleanly");
   }
 }
 

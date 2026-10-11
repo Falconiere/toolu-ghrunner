@@ -17,7 +17,8 @@ use config::config::{
 use config::{lockfile, registry};
 use listener::GitHubListener;
 use listener::loop_decision::{LoopAction, next_action};
-use shared::{RunnerError, SecretMasker};
+use listener::session_conflict::SessionConflictPolicy;
+use shared::{RunnerError, SESSION_CONFLICT_EXIT_CODE, SecretMasker};
 use tokio_util::sync::CancellationToken;
 
 use crate::cli::{RunArgs, credentials_path_for};
@@ -74,6 +75,7 @@ pub(crate) async fn cmd_run(args: RunArgs) -> Result<(), Box<dyn std::error::Err
     client,
     cancel,
     once: args.once,
+    conflict_policy: crate::config::session_conflict_policy(),
   }
   .drive()
   .await
@@ -128,6 +130,8 @@ struct RunLoop {
   client: reqwest::Client,
   cancel: CancellationToken,
   once: bool,
+  /// Session-conflict retry schedule handed to every listener lifecycle.
+  conflict_policy: SessionConflictPolicy,
 }
 
 impl RunLoop {
@@ -182,7 +186,8 @@ impl RunLoop {
       Arc::clone(&self.masker),
       self.client.clone(),
     )
-    .map_err(|e| format!("listener init: {e}"))?;
+    .map_err(|e| format!("listener init: {e}"))?
+    .with_session_conflict_policy(self.conflict_policy);
     Ok(
       listener
         .run(self.cancel.clone())
@@ -256,15 +261,42 @@ enum Remint {
 }
 
 /// Turn a [`LoopAction::Exit`] code into the process result. Code 0 is a
-/// clean exit; a non-zero code arises only from `--once` over a failed job,
-/// so surface the listener error for `main` to map to a non-zero exit.
+/// clean exit; a spent session-conflict retry carries its distinct code to
+/// `main` as a [`CodedExit`]; any other non-zero code (`--once` over a failed
+/// job) surfaces the listener error for `main`'s generic non-zero exit.
 fn finish(code: i32, outcome: Result<(), RunnerError>) -> Result<(), Box<dyn std::error::Error>> {
   if code == 0 {
     return Ok(());
   }
+  if code == SESSION_CONFLICT_EXIT_CODE {
+    let message = match outcome {
+      Err(e) => format!("listener: {e}"),
+      Ok(()) => "listener: session conflict".to_owned(),
+    };
+    return Err(Box::new(CodedExit { code, message }));
+  }
   outcome.map_err(|e| format!("listener: {e}"))?;
   Ok(())
 }
+
+/// A fatal `run` error that must exit with a specific process code instead
+/// of `main`'s generic 2 (today only the session conflict's
+/// [`SESSION_CONFLICT_EXIT_CODE`]).
+#[derive(Debug)]
+pub(crate) struct CodedExit {
+  /// The process exit code `main` applies.
+  pub(crate) code: i32,
+  /// What `main` prints to stderr.
+  message: String,
+}
+
+impl std::fmt::Display for CodedExit {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    f.write_str(&self.message)
+  }
+}
+
+impl std::error::Error for CodedExit {}
 
 /// Map a freshly loaded registration into the engine's runtime config.
 ///

@@ -48,7 +48,9 @@ async fn main() {
     Ok(()) => 0,
     Err(err) => {
       eprintln!("toolu-runner: {err}");
-      2
+      err
+        .downcast_ref::<run_cmd::CodedExit>()
+        .map_or(2, |coded| coded.code)
     },
   };
   std::process::exit(exit_code);

@@ -65,3 +65,18 @@ fn invalid_unicode_cli_config_values_are_diagnosed() {
     );
   }
 }
+
+#[test]
+fn session_conflict_interval_accepts_only_positive_milliseconds() {
+  assert_eq!(
+    super::parse_interval_ms("50"),
+    Some(std::time::Duration::from_millis(50))
+  );
+  assert_eq!(
+    super::parse_interval_ms("30000"),
+    Some(std::time::Duration::from_secs(30))
+  );
+  for bad in ["0", "-5", "1.5", "30s", " 50", ""] {
+    assert_eq!(super::parse_interval_ms(bad), None, "{bad:?} must be rejected");
+  }
+}

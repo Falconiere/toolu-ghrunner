@@ -14,7 +14,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use listener::GitHubListener;
-use shared::{CacheConfig, Conclusion, RunnerConfig, RunnerError, SecretMasker, ServicesMode};
+use shared::{
+  CacheConfig, Conclusion, RunnerConfig, RunnerError, SESSION_CONFLICT_EXIT_CODE, SecretMasker,
+  ServicesMode,
+};
 use tokio_util::sync::CancellationToken;
 
 /// Grace period after the deadline fires before the watchdog force-exits:
@@ -25,7 +28,8 @@ const WATCHDOG_GRACE: Duration = Duration::from_secs(30);
 /// `boot`: read `TOOLU_JITCONFIG` / `TOOLU_DEADLINE`, run one JIT lifecycle,
 /// return the process exit code: `0` Success/Skipped/no-job, `1`
 /// Failure/Cancelled or a listener error, `2` env/config error before
-/// polling, `124` the deadline watchdog fired (takes precedence).
+/// polling, `5` a session conflict outlasted the bounded retry, `124` the
+/// deadline watchdog fired (takes precedence).
 pub(crate) async fn cmd_boot() -> i32 {
   let masker = Arc::new(Mutex::new(SecretMasker::new()));
   if let Err(e) = crate::init_tracing_for(&masker) {
@@ -131,7 +135,7 @@ async fn run_listener_once(
     masker,
     client,
   ) {
-    Ok(l) => l,
+    Ok(l) => l.with_session_conflict_policy(crate::config::session_conflict_policy()),
     Err(e) => {
       eprintln!("toolu-runner: boot: {e}");
       return 2;
@@ -157,6 +161,10 @@ fn exit_code_for(result: Result<Option<Conclusion>, RunnerError>) -> i32 {
   match result {
     Ok(None | Some(Conclusion::Success | Conclusion::Skipped)) => 0,
     Ok(Some(Conclusion::Failure | Conclusion::Cancelled)) => 1,
+    Err(e @ RunnerError::SessionConflict(_)) => {
+      eprintln!("toolu-runner: boot: {e}");
+      SESSION_CONFLICT_EXIT_CODE
+    },
     Err(e) => {
       eprintln!("toolu-runner: boot: {e}");
       1

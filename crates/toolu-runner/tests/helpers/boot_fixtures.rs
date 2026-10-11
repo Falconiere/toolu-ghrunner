@@ -70,9 +70,8 @@ pub fn real_jit_config_b64(server_url_v2: &str) -> Result<String, String> {
   Ok(BASE64.encode(outer.to_string().as_bytes()))
 }
 
-/// Mount the `OAuth2` token exchange + broker session creation — the two
-/// requests every successful `GitHubListener::run` issues before polling.
-pub async fn mount_auth_and_session(server: &MockServer) {
+/// Mount the `OAuth2` token exchange alone (every session attempt re-runs it).
+pub async fn mount_auth(server: &MockServer) {
   Mock::given(method("POST"))
     .and(path("/_apis/distributedtracing/oauth2/token"))
     .respond_with(ResponseTemplate::new(200).set_body_json(json!({
@@ -82,6 +81,12 @@ pub async fn mount_auth_and_session(server: &MockServer) {
     })))
     .mount(server)
     .await;
+}
+
+/// Mount the `OAuth2` token exchange + broker session creation — the two
+/// requests every successful `GitHubListener::run` issues before polling.
+pub async fn mount_auth_and_session(server: &MockServer) {
+  mount_auth(server).await;
 
   Mock::given(method("POST"))
     .and(path("/session"))
