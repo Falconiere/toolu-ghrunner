@@ -396,3 +396,4 @@ numbers. All applied; no blockers remained.
     - never lets an `unverified` entry stand in for a required lane.
   - CI runs `--local`/`--docs`.
   - An internal runner error that aborts the step loop still ends the job without "Complete job", which is now a documented known difference.
+- Re-review fixes: the environment-URL error text is masked too. New unit tests in `execution/tests/complete_step.rs` cover row closure on a local output error and the masking of names and errors; the masking tests are red without the fix. `runner_shutdown_is_the_conclusion_complete_job_logs` pins that the row's `Job conclusion:` line agrees with a shutdown-failed job. A shutdown already fails the steps, so that test does not discriminate the `after_shutdown` guard, which stays as a consistency guard.

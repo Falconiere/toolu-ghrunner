@@ -695,3 +695,7 @@ async fn start_accelerated_service(
   let server = CacheServer::start(app, &bind).await?;
   Ok((server, urls, bearer, maintenance))
 }
+
+#[cfg(test)]
+#[path = "tests/complete_step.rs"]
+mod complete_step_tests;
