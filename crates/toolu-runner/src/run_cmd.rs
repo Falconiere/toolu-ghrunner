@@ -261,22 +261,24 @@ enum Remint {
 }
 
 /// Turn a [`LoopAction::Exit`] code into the process result. Code 0 is a
-/// clean exit; a spent session-conflict retry carries its distinct code to
-/// `main` as a [`CodedExit`]; any other non-zero code (`--once` over a failed
-/// job) surfaces the listener error for `main`'s generic non-zero exit.
+/// clean exit; the session-conflict code paired with an actual
+/// `SessionConflict` reaches `main` as a [`CodedExit`]; any other non-zero
+/// code (`--once` over a failed job) surfaces the listener error for `main`'s
+/// generic non-zero exit.
 fn finish(code: i32, outcome: Result<(), RunnerError>) -> Result<(), Box<dyn std::error::Error>> {
   if code == 0 {
     return Ok(());
   }
-  if code == SESSION_CONFLICT_EXIT_CODE {
-    let message = match outcome {
-      Err(e) => format!("listener: {e}"),
-      Ok(()) => "listener: session conflict".to_owned(),
-    };
-    return Err(Box::new(CodedExit { code, message }));
+  match outcome {
+    Err(e @ RunnerError::SessionConflict(_)) if code == SESSION_CONFLICT_EXIT_CODE => {
+      Err(Box::new(CodedExit {
+        code,
+        message: format!("listener: {e}"),
+      }))
+    },
+    Err(e) => Err(format!("listener: {e}").into()),
+    Ok(()) => Ok(()),
   }
-  outcome.map_err(|e| format!("listener: {e}"))?;
-  Ok(())
 }
 
 /// A fatal `run` error that must exit with a specific process code instead
