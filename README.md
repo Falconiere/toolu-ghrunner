@@ -642,6 +642,7 @@ new host.
 | `no GitHub OAuth App configured` | The built-in device-flow App isn't wired yet — set `TOOLU_RUNNER_CLIENT_ID` (or `login --client-id`), or skip the device flow with `--token` / `TOOLU_RUNNER_TOKEN`. |
 | `run` exits after one job (warned it would) | No stored `login` token, so re-mint has no bearer. Run `toolu-runner login` (or set `TOOLU_RUNNER_TOKEN`) to stay online; or pass `--once` if a single job is intended. |
 | `the ephemeral registration was kept — if the runner was removed on GitHub …` (exit 1) | The runner was deleted on GitHub before it got a job (the token exchange answered `invalid_client`). Run `toolu-runner remove`, then `register` again. |
+| `… (the job was acquired; its registration was removed)` (exit 1) | An ephemeral job was acquired but executing or reporting it failed; the registration was still cleaned up. Check the job on GitHub and `_diag/runner.log`. |
 | `ephemeral runner … finished its job, but unregistering it on GitHub failed` (exit 2) | The job ran; fix the token or connectivity, then `toolu-runner remove` to finish the cleanup. |
 | `… is an ephemeral registration … a service unit restarts run forever` | `install-service` does not supervise one-job registrations; register without `--ephemeral`, or start `run` from a one-shot supervisor. |
 | `another run is in flight` | Another `run` holds this repo's `.lock`; its PID is in the error. Wait it out, or stop the holder with `kill -INT <pid>`. |

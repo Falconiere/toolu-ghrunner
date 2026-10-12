@@ -232,7 +232,12 @@ impl RunLoop {
       pending: &self.pending_path,
       lock: &self.lock_path,
     };
-    crate::ephemeral::finish_job(cfg, &state, &self.client).await?;
+    if let Err(cleanup) = crate::ephemeral::finish_job(cfg, &state, &self.client).await {
+      return Err(match &outcome {
+        Ok(_) => cleanup,
+        Err(e) => format!("{cleanup}\n(the job itself ended with: listener: {e})").into(),
+      });
+    }
     match outcome {
       Ok(_) => Ok(()),
       Err(e) => Err(Box::new(CodedExit {

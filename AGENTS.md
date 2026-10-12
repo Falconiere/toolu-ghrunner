@@ -201,7 +201,8 @@ to that list requires proving the value is not a real credential.
   `.lock` is held for the whole loop. **Ephemeral exception (#92):** a
   registration persisted with `ephemeral = true` (`register --ephemeral`)
   never re-mints — `listener::loop_decision::next_ephemeral_action` decides
-  (a job ran → `Unregister`; cancel / `--once` / `.pending_remove` → exit,
+  (a job ran, or was acquired before the lifecycle errored —
+  `GitHubListener::job_acquired` — → `Unregister`, the latter then exits 1; cancel / `--once` / `.pending_remove` → exit,
   state kept; `SessionConflict` → 5; `Auth` → 1, state kept; else backoff on
   the same unused JIT) and `ephemeral.rs` unregisters + deletes the local
   registration after its one job.
@@ -635,9 +636,12 @@ to that list requires proving the value is not a real credential.
   (`Err(SessionConflict)` → `Exit(5)`, also under `--once`; `Ok(())`
   and `Err(Auth)` → `Reregister` since the JIT is spent/dead, any other
   `Err` → `BackoffRetry`) — unit-testable without a broker, mirroring
-  `message_route`. `next_ephemeral_action` (→ `EphemeralAction`) is the
-  same decision for an `--ephemeral` registration (no re-mint; see the
-  always-online rule's ephemeral exception).
+  `message_route`. `next_ephemeral_action(outcome, job_acquired,
+  LoopSignals)` (→ `EphemeralAction`) is the same decision for an
+  `--ephemeral` registration (no re-mint; see the always-online rule's
+  ephemeral exception). `GitHubListener::job_acquired()` reports whether the
+  last `run()` acquired a job (set from `SessionCtx.job_acquired` right after
+  `acquire_job`), even when it then returned an `Err`.
 
 ### `toolu-runner/` — CLI bin (deps: shared, protocol, config, wire, observability, listener)
 
