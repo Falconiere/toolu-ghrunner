@@ -433,14 +433,19 @@ async fn malformed_env_from_a_container_main_fails_the_step() -> TestResult {
   let events = collect_job(config, job, CancellationToken::new()).await?;
   let errors: Vec<&str> = events
     .iter()
-    .filter_map(|event| match event {
-      RunnerEvent::Annotation {
+    .filter_map(|event| {
+      if let RunnerEvent::Annotation {
         step_id,
         level: AnnotationLevel::Error,
         message,
         ..
-      } if step_id == "docker_96" => Some(message.as_str()),
-      _ => None,
+      } = event
+        && step_id == "docker_96"
+      {
+        Some(message.as_str())
+      } else {
+        None
+      }
     })
     .collect();
   assert_eq!(
@@ -451,13 +456,18 @@ async fn malformed_env_from_a_container_main_fails_the_step() -> TestResult {
     ],
     "{events:#?}"
   );
-  let step = events.iter().find_map(|event| match event {
-    RunnerEvent::StepCompleted {
+  let step = events.iter().find_map(|event| {
+    if let RunnerEvent::StepCompleted {
       step_id,
       conclusion,
       ..
-    } if step_id == "docker_96" => Some(*conclusion),
-    _ => None,
+    } = event
+      && step_id == "docker_96"
+    {
+      Some(*conclusion)
+    } else {
+      None
+    }
   });
   assert_eq!(step, Some(Conclusion::Failure), "{events:#?}");
   assert_eq!(job_conclusion(&events), Some(Conclusion::Failure));

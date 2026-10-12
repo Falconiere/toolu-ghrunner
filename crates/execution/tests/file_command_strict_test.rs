@@ -194,21 +194,29 @@ impl Replay {
   }
 
   fn job_conclusion(&self) -> Option<Conclusion> {
-    self.events.iter().find_map(|event| match event {
-      RunnerEvent::JobCompleted { conclusion, .. } => Some(*conclusion),
-      _ => None,
+    self.events.iter().find_map(|event| {
+      if let RunnerEvent::JobCompleted { conclusion, .. } = event {
+        Some(*conclusion)
+      } else {
+        None
+      }
     })
   }
 
   fn step_conclusion(&self, name: &str) -> Option<Conclusion> {
     let id = self.id(name);
-    self.events.iter().find_map(|event| match event {
-      RunnerEvent::StepCompleted {
+    self.events.iter().find_map(|event| {
+      if let RunnerEvent::StepCompleted {
         step_id,
         conclusion,
         ..
-      } if *step_id == id => Some(*conclusion),
-      _ => None,
+      } = event
+        && *step_id == id
+      {
+        Some(*conclusion)
+      } else {
+        None
+      }
     })
   }
 
@@ -218,14 +226,19 @@ impl Replay {
     self
       .events
       .iter()
-      .filter_map(|event| match event {
-        RunnerEvent::Annotation {
+      .filter_map(|event| {
+        if let RunnerEvent::Annotation {
           step_id,
           level: AnnotationLevel::Error,
           message,
           ..
-        } if *step_id == id => Some(message.clone()),
-        _ => None,
+        } = event
+          && *step_id == id
+        {
+          Some(message.clone())
+        } else {
+          None
+        }
       })
       .collect()
   }
@@ -234,9 +247,12 @@ impl Replay {
     self
       .events
       .iter()
-      .filter_map(|event| match event {
-        RunnerEvent::Log { line, .. } => Some(line.as_str()),
-        _ => None,
+      .filter_map(|event| {
+        if let RunnerEvent::Log { line, .. } = event {
+          Some(line.as_str())
+        } else {
+          None
+        }
       })
       .collect()
   }
@@ -253,7 +269,11 @@ impl Replay {
 }
 
 fn hex(value: &str) -> String {
-  value.bytes().map(|byte| format!("{byte:02x}")).collect()
+  value
+    .bytes()
+    .flat_map(|byte| [byte >> 4, byte & 0x0f])
+    .filter_map(|nibble| char::from_digit(u32::from(nibble), 16))
+    .collect()
 }
 
 #[tokio::test]
@@ -470,10 +490,9 @@ async fn a_secret_in_a_malformed_line_is_masked_everywhere() -> TestResult {
   let leaked: Vec<_> = run
     .events
     .iter()
-    .filter(|event| match event {
-      RunnerEvent::Annotation { .. } => true,
-      RunnerEvent::Log { line, .. } => line.starts_with("##[error]"),
-      _ => false,
+    .filter(|event| {
+      matches!(event, RunnerEvent::Annotation { .. })
+        || matches!(event, RunnerEvent::Log { line, .. } if line.starts_with("##[error]"))
     })
     .filter(|event| format!("{event:?}").contains(SECRET))
     .collect();
