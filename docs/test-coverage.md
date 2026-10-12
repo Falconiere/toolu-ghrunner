@@ -1,5 +1,13 @@
 # Test Coverage Map
 
+> **Epic-wide acceptance status lives in
+> [compatibility-matrix.md](compatibility-matrix.md)** (generated from
+> `compatibility-matrix.json`, validated in CI). It records one row per child
+> AC/scenario with all seven lanes, and [compatibility-evidence.md](compatibility-evidence.md)
+> explains lanes, capture/sanitization and the official-runner reference lane.
+> The table directly below is the original v1 design-spec map; a `live` entry
+> there means a test exists, not that it ran.
+
 Maps each of the 23 acceptance criteria from the design spec to the
 test(s) that cover it, with a "lane" indicating whether the test runs in
 the default `cargo test --workspace` lane or only with the `live`
@@ -18,9 +26,9 @@ Lane legend:
 | 1a  | Local status output (no network)                 | `crates/toolu-runner/tests/cli_test.rs::help_lists_all_subcommands` (clap surface), `crates/toolu-runner/tests/failure_modes_test.rs::legacy_env_warning_emitted_to_stderr_when_var_set` (exercises the `status` subcommand end-to-end through the binary).                                                                                                            | default      |
 | 1b  | Runner online within 30s of `register`           | `crates/toolu-runner/tests/live_e2e.rs::register_creates_config_and_credentials`, `crates/toolu-runner/tests/live_e2e.rs::register_replace_overwrites_existing` (gated; verifies config + credentials on disk after a real `register` call against the GH API).                                                                                       | live         |
 | 2   | No-op job (`run: echo hello`) completes          | `crates/toolu-runner/tests/live_e2e.rs::noop_job_completes` (gated; dispatches the noop workflow, runs the runner, asserts `conclusion: success` on the GH run).                                                                                                                                                                                                  | live         |
-| 3   | Multi-step job (run, uses, docker://)            | `crates/toolu-runner/tests/live_e2e.rs::multi_step_job` (gated; runs checkout + setup-node + docker://alpine).                                                                                                                                                                                                                                                    | live         |
+| 3   | Multi-step job (run, uses, docker://)            | `crates/toolu-runner/tests/live_e2e.rs::multi_step_job` (gated; pushes `tests/fixtures/multistep-workflow.yml`: checkout + setup-node + a pinned `docker://alpine` container action whose Alpine-only output and marker a later step asserts). Real container execution is evidenced by `crates/execution/tests/compat_probe_replay_test.rs` (CI Docker step) and the #103 reference run; the live test itself is unverified while no live token is configured. | live         |
 | 4   | Action resolution (`actions/checkout@v4`)        | `crates/toolu-runner/tests/live_e2e.rs::action_resolution` (gated), `crates/toolu-runner/tests/actions_resolver_test.rs` (planned; see `crates/execution/src/execution/actions/resolver.rs::parse_action_ref` and `resolve_action_refs` for the parser-level coverage).                                                                                                  | live         |
-| 5   | Expression evaluation (`${{ }}` full syntax)     | `crates/toolu-runner/tests/expression_eval_test.rs` — 28 tests covering literals, context/property/index access, function calls (`contains`, `startsWith`, `endsWith`, `format`, `join`, `toJson`, `fromJson`, `success`, `failure`, `always`, `cancelled`), binary ops, unary `!`, wildcards, and parse errors.                                                       | default      |
+| 5   | Expression evaluation (`${{ }}` full syntax)     | `crates/toolu-runner/tests/live_e2e.rs::expression_evaluation` (gated; `tests/fixtures/expression-workflow.yml` asserts the exact typed inputs, and a second dispatch with `who: ''` must conclude `failure`), `crates/toolu-runner/tests/expression_eval_test.rs` — 28 tests covering literals, context/property/index access, function calls (`contains`, `startsWith`, `endsWith`, `format`, `join`, `toJson`, `fromJson`, `success`, `failure`, `always`, `cancelled`), binary ops, unary `!`, wildcards, and parse errors.                                                       | default      |
 | 6   | Secret masking in logs                           | `crates/toolu-runner/tests/secret_masker_real_test.rs` — 10 tests driving the real `SecretMasker` against recorded log fixtures (`tests/fixtures/secret-masking-input.txt` → `secret-masking-expected.txt`), JSON-escaped variants, multi-line secrets, longest-first replacement, and the full `RedactingWriter` pipeline.                                                | default      |
 | 7   | OIDC token issuance                              | `crates/toolu-runner/tests/oidc_token_test.rs` — 6 tests spinning up the real `OidcServer` axum endpoint on `127.0.0.1:0`, posting to `/_apis/pipeline/oidc/requestToken`, decoding the returned JWT, verifying the default and overridden audiences, the 10-min expiry, and bearer-token auth.                                                                       | default      |
 | 8   | Artifact upload + download                       | `crates/execution/src/execution/artifacts/` (types only; v1 artifact service lives in `execution::execution::artifacts`). Live flow gated on artifact end-to-end tests landing in step 10.                                                                                                                                                                       | out-of-scope |
@@ -53,7 +61,7 @@ Lane legend:
 
 - `noop-workflow.yml` — `run: echo hello` workflow. Pushed by `crates/toolu-runner/tests/live_e2e.rs::noop_job_completes` to the test repo before dispatch.
 
-(The multi-step workflow — `checkout@v4` + `setup-node@v4` + a docker-pull step — is embedded inline in `crates/toolu-runner/tests/live_e2e.rs::multi_step_job`, not a fixture file.)
+Every workflow `live_e2e.rs` pushes is a committed fixture (`noop-`, `multistep-`, `expression-`, `journal-`, `action-resolution-`, `cancel-workflow.yml`); `scripts/test/live_lane_test.sh` (CI) keeps inline YAML out and pins the Docker/input assertions. Live tests fail with `UNVERIFIED: …` when `TOOLU_RUNNER_LIVE_TOKEN` / `TOOLU_RUNNER_LIVE_REPO` are absent; they never skip as a pass.
 
 ## Summary
 
@@ -1648,3 +1656,24 @@ from exported roots and the error paths only); toolu on a live acquired job
 variables; not exercised). Not applicable: Linux ARM32 deprecation/kill
 switches (toolu ships no armv7 build — such a host gets the unsupported-CPU
 error) and container hooks.
+
+## Compatibility matrix and reference lane (#103)
+
+The epic-wide record is [compatibility-matrix.md](compatibility-matrix.md); the
+method is [compatibility-evidence.md](compatibility-evidence.md). This section
+lists the #103 test surfaces.
+
+| Surface | Test / command | Lane |
+| --- | --- | --- |
+| Matrix integrity (ids, lanes, evidence, Markdown view) | `python3 scripts/test/compat_matrix_check.py --check`; `scripts/test/test_compat_matrix_check.py` mutates the real matrix for every rejection rule | CI "Compatibility evidence (#103)" |
+| Paired toolu / official v2.337.0 run | [run 38301583727](https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727) → `docs/compat-reference-103.json`; `reference_compare.py --verify` + `test_reference_compare.py` | recorded live; re-verified in CI |
+| S1 — dropped message sections fail the production replay | `crates/execution/tests/replay_mutation_test.rs` (captured `compat_103_contexts_message.json` + #70 capture) | default gate (ubuntu + macOS) |
+| S2 — real container action and exact input | `crates/execution/tests/compat_probe_replay_test.rs` (captured `compat_103_docker_message.json`, real Docker; echo-instead-of-container and empty `who` fail) | CI Docker step |
+| Capture hook | `crates/listener/src/tests/capture.rs` (exact body, 0600/0700, contained name, unwritable dir) | default gate |
+| Sanitizer | `scripts/test/test_sanitize_capture.py` (real envelope with injected probe secrets) | CI |
+| Honest live lane | `scripts/test/live_lane_test.sh`; `live.yml` fails `UNVERIFIED` without its secret | CI (static) |
+
+The paired run recorded two differences, kept unverified in the matrix:
+forwarder-mode cache never enables cache service v2 (save silently fails,
+restore 400), and the official runner reports a `Pull <image>` setup step toolu
+does not. Details: [compatibility-evidence.md#recorded-differences](compatibility-evidence.md#recorded-differences).
