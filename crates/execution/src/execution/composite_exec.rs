@@ -353,7 +353,8 @@ async fn finish_run_step(
     &mut run.state.step_outputs,
     &mut run.state.extra_env,
     &mut run.state.path_additions,
-  );
+  )
+  .await;
   apply_run_file_commands(run, step_id);
   report_file_command_issues(
     &issues.failures,

@@ -92,14 +92,7 @@ async fn apply_file_commands(
   file_cmds: &FileCommandManager,
   ctx: &mut ExecutionContext,
 ) -> (HashMap<String, String>, bool) {
-  let results = match file_cmds.process().await {
-    Ok(results) => results,
-    Err(error) => {
-      let message = format!("Unable to process file commands: {error}");
-      emit_error_issue(scope.report_id, &message, ctx, scope.events).await;
-      return (HashMap::new(), true);
-    },
-  };
+  let results = file_cmds.process().await;
   for (key, value) in results.env_vars {
     ctx.set_env(&key, &value);
   }

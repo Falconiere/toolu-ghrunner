@@ -24,7 +24,9 @@ runs:
         printf "$BODY" >> "$file"
     - id: after
       shell: bash
-      run: printf 'CMP96|after|%s\n' "${NODE_OPTIONS-<unset>}"
+      run: |
+        if [ "${NODE_OPTIONS-}" = '--require /tmp/fc96.js' ]; then v=applied; else v=not-applied; fi
+        printf 'CMP96|after|%s\n' "$v"
     - id: cleanup
       if: always()
       shell: bash

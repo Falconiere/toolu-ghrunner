@@ -14,7 +14,7 @@ use super::actions::prefetch::ActionFetcher;
 use super::composite_expr::{CompositeField, composite_eval_context, interpolate_composite_expr};
 use super::context::{ExecutionContext, runner_temp_dir};
 use super::file_commands::{
-  FileCommandFailure, parse_kv_command, parse_path_file, read_command_file, strip_blocked_env,
+  FileCommandFailure, parse_kv_command, parse_path_file, read_command_files, strip_blocked_env,
 };
 use super::handlers::node::input_env_key;
 
@@ -199,16 +199,19 @@ pub(super) struct FileCommandIssues {
 
 /// Read back a step's file commands into outputs / env / path accumulators,
 /// in upstream order (path, env, output). Pairs read before a malformed entry
-/// are still applied; the failure is returned for the caller to report.
-pub(super) fn process_file_commands(
+/// are still applied; the failure is returned for the caller to report. The
+/// three reads run on Tokio's blocking pool.
+pub(super) async fn process_file_commands(
   files: &FileCommandPaths,
   step_id: &str,
   step_outputs: &mut HashMap<String, HashMap<String, String>>,
   extra_env: &mut HashMap<String, String>,
   path_additions: &mut Vec<String>,
 ) -> FileCommandIssues {
+  let [path_read, env_read, output_read] =
+    read_command_files([files.path.clone(), files.env.clone(), files.output.clone()]).await;
   let mut failures = Vec::new();
-  match read_command_file(&files.path) {
+  match path_read {
     Ok(content) => path_additions.extend(parse_path_file(&content)),
     Err(message) => failures.push(FileCommandFailure {
       command: "path",
@@ -218,10 +221,10 @@ pub(super) fn process_file_commands(
   // Mirror the top-level file-command read-back: strip the blocked
   // `NODE_OPTIONS` before folding, so a composite `run:` step can't set a
   // node preload for later composite node children.
-  let mut parsed = parse_kv_command("env", read_command_file(&files.env), &mut failures);
+  let mut parsed = parse_kv_command("env", env_read, &mut failures);
   let blocked_env = strip_blocked_env(&mut parsed);
   extra_env.extend(parsed);
-  let outputs = parse_kv_command("output", read_command_file(&files.output), &mut failures);
+  let outputs = parse_kv_command("output", output_read, &mut failures);
   if !outputs.is_empty() {
     step_outputs
       .entry(step_id.to_owned())

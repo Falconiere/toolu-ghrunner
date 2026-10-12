@@ -126,8 +126,8 @@ async fn seed_node(data: &Path) -> TestResult {
   assert!(output.status.success(), "Node is required for this test");
   let host = String::from_utf8(output.stdout)?;
   let target = node_binary_path(&node_cache_dir(data, node_version_for(20)));
-  std::fs::create_dir_all(target.parent().ok_or("node cache parent missing")?)?;
-  std::os::unix::fs::symlink(host.trim(), target)?;
+  tokio::fs::create_dir_all(target.parent().ok_or("node cache parent missing")?).await?;
+  tokio::fs::symlink(host.trim(), target).await?;
   Ok(())
 }
 
@@ -463,13 +463,10 @@ async fn pairs_before_the_error_apply_and_continue_on_error_keeps_the_job_green(
 #[tokio::test]
 async fn node_options_is_blocked_with_an_issue_but_the_step_succeeds() -> TestResult {
   let writer = "printf 'NODE_OPTIONS=--require /tmp/fc96.js\\nnode_options=--require /tmp/fc96.js\\nKEEP=1\\n' >> \"$GITHUB_ENV\"";
-  let reader = "printf 'FC96|%s|%s\\n' \"${NODE_OPTIONS-<unset>}\" \"$KEEP\"";
+  // Hermetic: a host NODE_OPTIONS may reach the step, but never the blocked value.
+  let reader = "if [ \"${NODE_OPTIONS-}\" = '--require /tmp/fc96.js' ]; then v=applied; else v=not-applied; fi; printf 'FC96|%s|%s\\n' \"$v\" \"$KEEP\"";
   let run = replay(scripts(writer, reader)?, &[]).await?;
-  let host = std::env::var("NODE_OPTIONS").unwrap_or_else(|_| "<unset>".to_owned());
-  assert_eq!(
-    run.marked("FC96|"),
-    [format!("FC96|{host}|1"), "FC96|cleanup".to_owned()]
-  );
+  assert_eq!(run.marked("FC96|"), ["FC96|not-applied|1", "FC96|cleanup"]);
   // Upstream raises one issue per blocked pair, whatever its case.
   assert_eq!(run.errors("__run"), [BLOCKED, BLOCKED]);
   assert_eq!(run.step_conclusion("__run"), Some(Conclusion::Success));
@@ -554,10 +551,9 @@ async fn composite_run_step_node_options_is_blocked_without_failing() -> TestRes
     ],
   )?;
   let run = replay(job, &["composite-96-output"]).await?;
-  let host = std::env::var("NODE_OPTIONS").unwrap_or_else(|_| "<unset>".to_owned());
   assert_eq!(
     run.marked("CMP96|"),
-    [format!("CMP96|after|{host}"), "CMP96|cleanup".to_owned()]
+    ["CMP96|after|not-applied", "CMP96|cleanup"]
   );
   assert_eq!(run.errors("__self"), [BLOCKED]);
   assert_eq!(run.job_conclusion(), Some(Conclusion::Success));

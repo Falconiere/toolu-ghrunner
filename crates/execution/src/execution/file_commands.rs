@@ -155,22 +155,14 @@ impl FileCommandManager {
   /// pool. Each command is processed on its own, as upstream does: a
   /// malformed or unreadable file lands in `failures` without discarding the
   /// other commands or the pairs read before the error.
-  ///
-  /// # Errors
-  ///
-  /// Returns `RunnerError::FileCommand` if the blocking task cannot be joined.
-  pub async fn process(&self) -> Result<FileCommandResults, RunnerError> {
-    let paths = [
+  pub async fn process(&self) -> FileCommandResults {
+    let [path_read, env_read, state_read, output_read] = read_command_files([
       self.path_path.clone(),
       self.env_path.clone(),
       self.state_path.clone(),
       self.output_path.clone(),
-    ];
-    let [path_read, env_read, state_read, output_read] =
-      run_blocking_file_io("file-command file read", move || {
-        Ok(paths.map(|path| read_command_file(&path)))
-      })
-      .await?;
+    ])
+    .await;
 
     let mut failures = Vec::new();
     let path_additions = match path_read {
@@ -188,14 +180,14 @@ impl FileCommandManager {
     let state = parse_kv_command("state", state_read, &mut failures);
     let outputs = parse_kv_command("output", output_read, &mut failures);
 
-    Ok(FileCommandResults {
+    FileCommandResults {
       env_vars,
       outputs,
       path_additions,
       state,
       failures,
       blocked_env,
-    })
+    }
   }
 
   /// Reset all file command files for the next step. The five synchronous
@@ -263,6 +255,21 @@ pub(crate) fn read_command_file(path: &Path) -> Result<String, String> {
       "Unable to read file command file '{}': {error}",
       path.display()
     )),
+  }
+}
+
+/// Read several command files with [`read_command_file`] in one task on
+/// Tokio's blocking pool, keeping the synchronous reads off the async
+/// executor. If that task cannot be joined, every file reports the join error.
+pub(crate) async fn read_command_files<const N: usize>(
+  paths: [PathBuf; N],
+) -> [Result<String, String>; N] {
+  match tokio::task::spawn_blocking(move || paths.map(|path| read_command_file(&path))).await {
+    Ok(reads) => reads,
+    Err(error) => {
+      let message = format!("file-command file read task failed: {error}");
+      std::array::from_fn(|_| Err(message.clone()))
+    },
   }
 }
 
@@ -351,23 +358,30 @@ impl<'a> Lines<'a> {
 /// Parse the entry starting at `line`; whichever of `=` and `<<` comes first
 /// decides between the plain and the heredoc form.
 fn parse_entry(line: &str, lines: &mut Lines<'_>) -> Result<(String, String), String> {
-  match (line.find('='), line.find("<<")) {
-    (Some(equals), Some(heredoc)) if heredoc < equals => parse_heredoc(line, lines),
-    (Some(_), _) => {
-      let (key, value) = line.split_once('=').unwrap_or_default();
-      if key.is_empty() {
-        return Err(format!("Invalid format '{line}'. Name must not be empty"));
-      }
-      Ok((key.to_owned(), value.to_owned()))
-    },
-    (None, Some(_)) => parse_heredoc(line, lines),
-    (None, None) => Err(format!("Invalid format '{line}'")),
+  let plain = line.split_once('=');
+  // Each split's name is the text before its separator, so the shorter name
+  // marks the separator that comes first.
+  if let Some((key, delimiter)) = line.split_once("<<")
+    && plain.is_none_or(|(name, _)| key.len() < name.len())
+  {
+    return parse_heredoc(line, key, delimiter, lines);
   }
+  let Some((key, value)) = plain else {
+    return Err(format!("Invalid format '{line}'"));
+  };
+  if key.is_empty() {
+    return Err(format!("Invalid format '{line}'. Name must not be empty"));
+  }
+  Ok((key.to_owned(), value.to_owned()))
 }
 
 /// Read a heredoc value up to the line that equals the delimiter exactly.
-fn parse_heredoc(line: &str, lines: &mut Lines<'_>) -> Result<(String, String), String> {
-  let (key, delimiter) = line.split_once("<<").unwrap_or_default();
+fn parse_heredoc(
+  line: &str,
+  key: &str,
+  delimiter: &str,
+  lines: &mut Lines<'_>,
+) -> Result<(String, String), String> {
   if key.is_empty() || delimiter.is_empty() {
     return Err(format!(
       "Invalid format '{line}'. Name must not be empty and delimiter must not be empty"
