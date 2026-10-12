@@ -264,10 +264,22 @@ impl JobContainer {
       .join(":")
   }
 
+  /// Translate the job's `RUNNER_WORKSPACE` / `runner.workspace` host path.
+  pub fn translate_runner_workspace(&self, value: &str) -> String {
+    self
+      .translator()
+      .runner_workspace_to_container(Path::new(value))
+      .to_string_lossy()
+      .into_owned()
+  }
+
   /// Translate runner-owned path variables while preserving opaque workflow data.
   pub fn translate_env(&self, key: &str, value: &str) -> String {
     if key == "PATH" {
       return self.translate_value(value);
+    }
+    if key == "RUNNER_WORKSPACE" {
+      return self.translate_runner_workspace(value);
     }
     if matches!(
       key,

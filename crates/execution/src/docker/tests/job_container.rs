@@ -227,3 +227,89 @@ async fn job_container_real_host_hook_maps_github_path_back_to_host()
   cleanup?;
   Ok(())
 }
+
+#[tokio::test]
+#[ignore = "requires a real local Linux Docker daemon and ubuntu:24.04"]
+async fn job_container_real_runner_workspace_is_the_mount_parent()
+-> Result<(), Box<dyn std::error::Error>> {
+  let base = std::env::var_os("TOOLU_CONTAINER_TEST_ROOT")
+    .map_or_else(std::env::temp_dir, std::path::PathBuf::from);
+  let root = tempfile::Builder::new()
+    .prefix("toolu job container runner workspace ")
+    .tempdir_in(base)?;
+  let config = RunnerConfig {
+    data_dir: root.path().join("runner data"),
+    workspace_root: root.path().join("work root"),
+    ..RunnerConfig::default()
+  };
+  // The stable layout: `runner.workspace` is the workspace's parent.
+  let pipeline = config.workspace_root.join("hello-world");
+  let workspace = pipeline.join("hello-world");
+  tokio::fs::create_dir_all(&workspace).await?;
+  let masker = Arc::new(Mutex::new(SecretMasker::new()));
+  let cancel = CancellationToken::new();
+  let spec = ContainerSpec {
+    image: IMAGE.to_owned(),
+    credentials: None,
+    env: HashMap::new(),
+    ports: Vec::new(),
+    volumes: Vec::new(),
+    options: Vec::new(),
+  };
+  let container = Arc::new(
+    JobContainer::start(&spec, &config, &workspace, Arc::clone(&masker), &cancel)
+      .await?
+      .ok_or_else(|| std::io::Error::other("container setup unexpectedly cancelled"))?,
+  );
+  let result = AssertUnwindSafe(async {
+    let mut ctx = ExecutionContext::with_masker(masker);
+    ctx.set_job_workspace(&workspace, &pipeline);
+    ctx.set_runner_context("runner-workspace-probe", &config.data_dir)?;
+    ctx.set_job_container(Arc::clone(&container));
+    assert_eq!(ctx.interpolate_string("${{ runner.workspace }}")?, "/github");
+    assert_eq!(ctx.interpolate_string("${{ env.RUNNER_WORKSPACE }}")?, "/github");
+
+    // The step env carries host paths; `execute` translates them.
+    let env: HashMap<String, String> = ["RUNNER_WORKSPACE", "GITHUB_WORKSPACE"]
+      .into_iter()
+      .filter_map(|key| ctx.env_var(key).map(|value| (key.to_owned(), value)))
+      .collect();
+    assert_eq!(env.len(), 2, "{env:?}");
+    let args = vec![
+      "-ec".to_owned(),
+      "test \"$RUNNER_WORKSPACE\" = /github; test \"$GITHUB_WORKSPACE\" = \"$RUNNER_WORKSPACE/workspace\"; test -d \"$RUNNER_WORKSPACE/workspace\"; printf seen > \"$GITHUB_WORKSPACE/marker\"".to_owned(),
+    ];
+    let (events, mut events_rx) = tokio::sync::mpsc::channel(32);
+    let (stdout, mut stdout_rx) = tokio::sync::mpsc::channel(32);
+    let conclusion = container
+      .execute(
+        &crate::docker::container_exec::ContainerExec {
+          program: Path::new("sh"),
+          args: &args,
+          env: &env,
+          working_dir: &workspace,
+          step_id: "runner-workspace",
+          timeout: Some(std::time::Duration::from_secs(30)),
+          cancel: &cancel,
+        },
+        &events,
+        stdout,
+      )
+      .await?;
+    drop(events);
+    let mut diagnostics = Vec::new();
+    while let Some(event) = events_rx.recv().await { diagnostics.push(format!("{event:?}")); }
+    while let Some(line) = stdout_rx.recv().await { diagnostics.push(line); }
+    assert_eq!(conclusion, shared::Conclusion::Success, "{diagnostics:?}");
+    assert_eq!(tokio::fs::read_to_string(workspace.join("marker")).await?, "seen");
+    Ok::<(), Box<dyn std::error::Error>>(())
+  })
+  .catch_unwind()
+  .await;
+  let cleanup = container.cleanup().await;
+  result.map_err(|_panic| {
+    std::io::Error::other("runner-workspace assertion failed; owned resources cleaned")
+  })??;
+  cleanup?;
+  Ok(())
+}

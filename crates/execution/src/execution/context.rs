@@ -187,6 +187,9 @@ impl ExecutionContext {
         *value = container.translate_value(value);
       }
     }
+    if let Some(ExprValue::String(value)) = self.runner_context.get_mut("workspace") {
+      *value = container.translate_runner_workspace(value);
+    }
     self.container = Some(container);
   }
 
