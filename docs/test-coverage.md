@@ -1300,3 +1300,70 @@ transport serves it, but no GHES server is available, so this is
 macOS a supervised runner relaunches into a fresh bounded window; this is a
 documented limitation. The tests are platform-neutral (Linux run here); macOS
 is **unverified**.
+
+
+## Registration CLI parity (#92)
+
+`register --no-default-labels` / `--ephemeral`, parity with upstream
+`config.sh` (pinned `cab9d1c`: `CommandSettings.cs`, `Validators.cs`,
+`ConfigurationManager.cs`, `Runner.cs`, `MessageListener.cs`). Spec:
+`docs/specs/2026-10-11-registration-cli-parity-design.md`.
+
+**Live lane (github.com, 2026-10-12, Linux X64).** Recorded in
+`crates/toolu-runner/tests/fixtures/ephemeral_92_live.json`, re-checked
+against the GitHub API by `bash scripts/test/ephemeral_92_live_check.sh`
+(needs an authenticated `gh`; exits 2 = unverified without it). Ephemeral
+toolu runners took real dispatched jobs:
+[failure](https://github.com/Falconiere/toolu-ghrunner/actions/runs/38187780731)
+(`post-results-live.yml`, runner 169),
+[success](https://github.com/Falconiere/toolu-ghrunner/actions/runs/38187819741)
+(`noop-live.yml`, runner 170, **no token** at run time so no DELETE was sent)
+and [cancelled from GitHub](https://github.com/Falconiere/toolu-ghrunner/actions/runs/38187869097)
+(`cancel-live.yml`, runner 171). Each `run` exited 0 after its one job, the
+local `config.toml` / `credentials.json` were gone, and `GET
+/actions/runners/{id}` returned 404 — for runner 170 without any DELETE from
+toolu, which verifies that GitHub removes a used JIT runner itself. Live
+`generate-jitconfig` probes (runners 163/164/166/167) showed GitHub stores
+exactly the labels sent (no hidden `self-hosted`), rejects `[]` with 422,
+de-duplicates case-insensitively, and stores the `Linux` label as `linux`.
+
+**Deleted registration.** The live lane found that a runner deleted on GitHub
+makes the OAuth token exchange answer **400** `{"error":"invalid_client"}`
+(capture `crates/wire/tests/oauth_invalid_client_400.json`). toolu classified
+it as `Protocol` and retried forever (150 s observed, any `run` mode); it is
+now `RunnerError::Auth`, as upstream treats `invalid_client`.
+
+| Criterion / scenario | Real input and production path | Expected result | Runnable check |
+| --- | --- | --- | --- |
+| AC-1, 92-S1 explicit / duplicate / empty | Real `register` binary against a local `generate-jitconfig` endpoint (committed real envelope); request bodies recorded | `--labels gpu` → `[self-hosted, <RUNNER_OS>, <RUNNER_ARCH>, gpu]`; `--no-default-labels --labels gpu,GPU,,tpu` → `[gpu, tpu]`; `--labels ''` → the three defaults; same list in `config.toml` | `cargo test -p toolu-runner --test register_labels_test` |
+| AC-2, 92-S1 validation | Same binary | `--no-default-labels` alone or with `,,` and a 257-char label → exit 2, upstream message / "256", zero requests, no files | same suite |
+| AC-3, 92-S1 no hidden defaults | Live capture `crates/config/tests/fixtures/jit_labels_probe.json` | resolved set == GitHub's stored set (case-insensitive); empty list mirrors GitHub's 422 | `cargo test -p config --test labels_test` |
+| AC-4 | `register --ephemeral`; pre-#92 `config.toml` text | `ephemeral = true` persisted; missing key loads `false` | `register_labels_test`, `labels_test` |
+| AC-5, 92-S2 | Real `run` binary, real RSA JIT envelope, captured `fixtures/job_message.json` running `true` / `exit 3` / `sleep 30` + SIGTERM, local broker + runners API | 1 acquire, 0 `generate-jitconfig`, 1 DELETE, state removed (`_diag/` kept), exit 0; reported `succeeded` / `failed` / `failed` | `cargo test -p toolu-runner --test ephemeral_run_test` |
+| AC-6, 92-S3 no job / restart | Same harness, idle broker then a job | SIGTERM before a job → exit 0, state kept, 0 DELETE; restarted `run` takes the job and cleans up | `restart_before_the_first_job_keeps_then_uses_the_registration` |
+| AC-7, 92-S3 unregister outcomes | Same harness, DELETE 500 / 404 + empty list / no token | 500 → exit 2, state kept, names `toolu-runner remove`; 404 confirmed by lookup → removed; no token → removed, "not verified" | `failed_unregister_keeps_the_registration`, `already_removed_runner_counts_as_unregistered`, `no_token_removes_local_state_and_says_unverified` |
+| AC-8 | Pure decision table | every precedence row | `cargo test -p listener --test loop_decision_test` |
+| AC-9, 92-S4 | Persisted ephemeral config through the binary | `install-service --print` / `--no-activate` → exit 2, no unit; `--remove` works; `status` prints `mode:` | `cargo test -p toolu-runner --test install_service_test --test config_resolve_test` |
+| AC-10, 92-S2 live | github.com runs above | run conclusions failure / success / cancelled; toolu exit 0; runners 404; label sets match | `bash scripts/test/ephemeral_92_live_check.sh` |
+| AC-12, 92-S3 already removed | Live 400 `invalid_client` capture replayed to `exchange_token` and through the `run` binary; live re-run against deleted runner 168 | `RunnerError::Auth`; `run` exits 1 at once, state kept, 0 DELETE / mint, hint names `toolu-runner remove` | `cargo test -p wire --test oauth_invalid_client`; `dead_registration_before_a_job_exits_1_and_keeps_state` |
+| AC-11 | Whole workspace | green | `./tools/check.sh all` |
+
+**Mode contract (92-S4).** Every toolu registration is a GitHub JIT runner,
+which GitHub removes after one job (verified above). `run` re-mints a new JIT
+runner per job; `run --once` exits after one job and leaves the spent local
+state; `run` on an `--ephemeral` registration exits after one job and removes
+the local state, verifying the GitHub side when a token exists; `boot` runs
+one job with nothing persisted. Red evidence: before the change the new
+suites failed to compile (missing `config::labels`, `ephemeral`,
+`next_ephemeral_action`), and the `invalid_client` replay returned
+`Protocol`.
+
+**Differences and unverified.** A SIGTERM mid-job is reported `failed`
+(toolu's existing operator-shutdown result, unchanged by #92); a GitHub-side
+cancel is reported `cancelled` (live). Upstream exits after an ephemeral job
+without calling GitHub; toolu additionally verifies the removal when it has a
+token. No official-runner run was repeated for this issue; parity is with the
+pinned upstream source plus the live GitHub behavior above. GHES: the same
+`generate-jitconfig` / unregister / token-exchange paths serve it, but no
+GHES server is available — **unverified**. macOS: the code is
+platform-neutral and the tests ran on Linux only — **unverified**.

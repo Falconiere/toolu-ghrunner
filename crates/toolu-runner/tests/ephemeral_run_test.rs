@@ -14,7 +14,8 @@
 //! - AC-7: DELETE 500 keeps state and exits 2 naming `toolu-runner remove`;
 //!   404 + an empty runner list counts as removed; no token → removed,
 //!   "not verified".
-//! - AC-12: a dead JIT (token exchange 401) exits 1 and keeps state.
+//! - AC-12: a runner deleted on GitHub (the live 400 `invalid_client`
+//!   token-exchange capture) exits 1 and keeps state.
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
@@ -42,6 +43,27 @@ const TOKEN: &str = "ephemeral-92-token";
 const EXIT_BUDGET: Duration = Duration::from_secs(90);
 /// A file in the registration's `_diag/` that cleanup must leave alone.
 const DIAG_MARKER: &str = "history.log";
+
+/// GitHub's live reply to the token exchange of a deleted JIT registration.
+const INVALID_CLIENT: &str = include_str!("../../wire/tests/oauth_invalid_client_400.json");
+
+/// The captured `invalid_client` reply: its status, content type and body.
+fn invalid_client_capture() -> TestResult<ResponseTemplate> {
+  let capture: Value = serde_json::from_str(INVALID_CLIENT)?;
+  let status = capture
+    .pointer("/response/status")
+    .and_then(Value::as_u64)
+    .ok_or("status")?;
+  let body = capture
+    .pointer("/response/body")
+    .and_then(Value::as_str)
+    .ok_or("body")?;
+  Ok(
+    ResponseTemplate::new(u16::try_from(status)?)
+      .insert_header("content-type", "application/json; charset=utf-8")
+      .set_body_string(body),
+  )
+}
 
 fn delete_path() -> String {
   format!("{RUNNERS_PATH}/{RUNNER_ID}")
@@ -375,15 +397,16 @@ async fn no_token_removes_local_state_and_says_unverified() -> TestResult<()> {
 }
 
 /// AC-12: the runner was removed on GitHub before any job — the token
-/// exchange answers 401. `run` exits 1, keeps state, never DELETEs or
-/// re-mints, and names `toolu-runner remove`.
+/// exchange answers with the live capture (400, OAuth `invalid_client`).
+/// `run` exits 1, keeps state, never DELETEs or re-mints, and names
+/// `toolu-runner remove` instead of retrying the dead registration forever.
 #[tokio::test]
 async fn dead_registration_before_a_job_exits_1_and_keeps_state() -> TestResult<()> {
   let home = tempfile::tempdir()?;
   let server = MockServer::start().await;
   Mock::given(method("POST"))
     .and(path("/_apis/distributedtracing/oauth2/token"))
-    .respond_with(ResponseTemplate::new(401).set_body_json(json!({"error": "invalid_client"})))
+    .respond_with(invalid_client_capture()?)
     .mount(&server)
     .await;
   mount_runners_api(&server, 204).await;

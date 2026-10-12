@@ -95,6 +95,25 @@ running across reboots and crashes, `toolu-runner install-service` writes
 a launchd (macOS) / systemd (Linux) user unit that supervises it — see
 [Running as a service](#running-as-a-service).
 
+For autoscalers and throwaway hosts, `register --ephemeral` records a
+one-job registration: `run` takes exactly one job (any conclusion), never
+re-mints, then unregisters the runner on GitHub and deletes the local
+`config.toml` / `credentials.json` (`_diag/` is kept). With a token
+(`TOOLU_RUNNER_TOKEN` or a stored `login`) the removal is verified with the
+same call `remove` uses; without one, toolu relies on GitHub removing a used
+JIT runner itself and says the removal was not verified. Shutting down before
+a job keeps the registration for the next `run`. If the unregister call fails,
+the registration is kept and `run` exits 2 — retry with `toolu-runner remove`.
+`install-service` refuses an ephemeral registration (its unit restarts
+forever).
+
+| Mode | Jobs per process | After the job |
+|---|---|---|
+| `run` | unlimited | re-mint a fresh JIT config, keep polling |
+| `run --once` | 1 | exit; the spent registration stays on disk |
+| `run` on a `register --ephemeral` registration | 1 | unregister + delete the local registration |
+| `boot` (container image) | 1 | exit; nothing was persisted |
+
 Each registration gets its own directory —
 `~/.toolu-runner/runners/<owner>/<repo>/` (config, credentials, lock,
 logs) — so one machine holds runners for many repos, and jobs for
@@ -133,6 +152,9 @@ CLI.
 
 | Flag | Command | What it does |
 |---|---|---|
+| `--labels <LABELS>` | `register` | Comma-separated custom labels, **added** to the defaults `self-hosted`, `Linux`/`macOS`, `X64`/`ARM64` (GitHub's `RUNNER_OS`/`RUNNER_ARCH` spelling, as the official runner). Empty entries are ignored, case-duplicates kept once, 256 characters max. |
+| `--no-default-labels` | `register` | Register only the `--labels` values (which are then required). |
+| `--ephemeral` | `register` | One-job registration: `run` takes one job, then unregisters and deletes it (see above). |
 | `--work <DIR>` | `register` | Job workspace directory (default `~/.toolu-runner/_work`). |
 | `--runner-group <ID>` | `register` | Numeric runner group ID for org registrations. Group *names* aren't supported by the JIT API — a non-numeric value warns and falls back to the Default group. |
 | `--replace` | `register` | Overwrite an existing registration with the same name. |
@@ -485,8 +507,9 @@ runner_url   = "https://github.com/owner/repo"
 runner_name  = "my-runner"
 runner_id    = 12345
 auth_token   = "ghs_..."
-labels       = ["self-hosted", "linux", "x64"]
+labels       = ["self-hosted", "Linux", "X64"]
 runner_group = "Default"
+ephemeral    = false                         # `register --ephemeral`
 
 [runtime]
 jit_config       = "<base64 blob from GH>"   # written by `register`
@@ -618,6 +641,9 @@ new host.
 | `... is not a git repository` / `has no 'origin' remote` at `register` | Zero-arg inference needs a cwd git repo with an `origin` remote — pass `--url` instead. |
 | `no GitHub OAuth App configured` | The built-in device-flow App isn't wired yet — set `TOOLU_RUNNER_CLIENT_ID` (or `login --client-id`), or skip the device flow with `--token` / `TOOLU_RUNNER_TOKEN`. |
 | `run` exits after one job (warned it would) | No stored `login` token, so re-mint has no bearer. Run `toolu-runner login` (or set `TOOLU_RUNNER_TOKEN`) to stay online; or pass `--once` if a single job is intended. |
+| `the ephemeral registration was kept — if the runner was removed on GitHub …` (exit 1) | The runner was deleted on GitHub before it got a job (the token exchange answered `invalid_client`). Run `toolu-runner remove`, then `register` again. |
+| `ephemeral runner … finished its job, but unregistering it on GitHub failed` (exit 2) | The job ran; fix the token or connectivity, then `toolu-runner remove` to finish the cleanup. |
+| `… is an ephemeral registration … a service unit restarts run forever` | `install-service` does not supervise one-job registrations; register without `--ephemeral`, or start `run` from a one-shot supervisor. |
 | `another run is in flight` | Another `run` holds this repo's `.lock`; its PID is in the error. Wait it out, or stop the holder with `kill -INT <pid>`. |
 | `generate-jitconfig` fails with a network error | A firewall is blocking `api.github.com` (github.com) or the GHES host. |
 | `warning: ignoring yamless env var ...` | A stale `YAMLESS_*` var is in your shell rc. Remove it. |

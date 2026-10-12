@@ -1,0 +1,25 @@
+{
+  "provenance": {
+    "captured": "2026-10-12T00:18:40Z",
+    "host": "github.com",
+    "request": "POST {authorization_url} (OAuth client-credentials JWT exchange) for a JIT registration whose runner was deleted on GitHub",
+    "registrations": "ephemeral toolu JIT runner 168 on Falconiere/toolu-ghrunner (label toolu-92-gone), deleted with DELETE /repos/{owner}/{repo}/actions/runners/168 before any job",
+    "method": "protocol::JitConfig::parse + parse_rsa_private_key + build_jwt, then a raw reqwest form POST with exchange_token's parameters recording status/headers/body verbatim",
+    "sanitization": "none needed: the reply carries no credential (the registration id names a deleted runner)",
+    "observed_before_fix": "toolu-runner run retried this reply for 150 s (backoff 1 s -> 60 s) because 400 was classified as Protocol",
+    "upstream": "actions/runner cab9d1c MessageListener.cs: OAuth error invalid_client means the runner registration was deleted; the runner stops"
+  },
+  "response": {
+    "body": "{\"error\":\"invalid_client\",\"error_description\":\"Registration 6852b6fb-f4b4-4667-8d0f-5051036d520c was not found.\"}",
+    "headers": {
+      "cache-control": "no-store,no-cache",
+      "content-length": "113",
+      "content-type": "application/json; charset=utf-8",
+      "date": "Mon, 12 Oct 2026 00:18:40 GMT",
+      "pragma": "no-cache",
+      "server": "Kestrel",
+      "strict-transport-security": "max-age=2592000"
+    },
+    "status": 400
+  }
+}

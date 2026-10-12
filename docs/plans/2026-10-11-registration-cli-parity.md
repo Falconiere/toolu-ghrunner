@@ -115,10 +115,24 @@ lifecycle → install-service/status → live lane → docs → gate.
     "check": "cargo test -p toolu-runner --test install_service_test --test config_resolve_test --test cli_test"
   },
   {
+    "id": "oauth_invalid_client",
+    "title": "Token exchange: 4xx OAuth invalid_client (deleted registration) is RunnerError::Auth, replayed from the live capture",
+    "ac_refs": ["AC-12"],
+    "depends_on": ["ephemeral_run"],
+    "paths": [
+      "crates/wire/src/net/auth.rs",
+      "crates/wire/tests/oauth_invalid_client.rs",
+      "crates/wire/tests/oauth_invalid_client_400.json",
+      "crates/toolu-runner/tests/ephemeral_run_test.rs"
+    ],
+    "input": "Live github.com capture of the token-exchange reply for deleted JIT runner 168: 400 {\"error\":\"invalid_client\",...}; controlled variations invalid_grant / non-JSON 400 / 500.",
+    "check": "cargo test -p wire --test oauth_invalid_client && cargo test -p toolu-runner --test ephemeral_run_test"
+  },
+  {
     "id": "live_lane",
     "title": "Live github.com lane: real ephemeral toolu registration runs one dispatched job and the runner is gone afterwards; --no-default-labels registration shows exact labels; evidence recorded and re-checkable",
     "ac_refs": ["AC-10"],
-    "depends_on": ["ephemeral_run"],
+    "depends_on": ["ephemeral_run", "oauth_invalid_client"],
     "paths": [
       "scripts/test/ephemeral_92_live_check.sh",
       "crates/toolu-runner/tests/fixtures/ephemeral_92_live.json"
@@ -144,7 +158,7 @@ lifecycle → install-service/status → live lane → docs → gate.
     "id": "gate",
     "title": "Full repository gate",
     "ac_refs": ["AC-11"],
-    "depends_on": ["config_labels", "ephemeral_decision", "register_flags", "ephemeral_run", "service_status", "live_lane", "docs"],
+    "depends_on": ["config_labels", "ephemeral_decision", "register_flags", "ephemeral_run", "service_status", "oauth_invalid_client", "live_lane", "docs"],
     "paths": ["crates", "scripts", "docs", "README.md", "AGENTS.md", "Cargo.lock"],
     "input": "Whole workspace.",
     "check": "./tools/check.sh all"
@@ -193,6 +207,11 @@ lifecycle → install-service/status → live lane → docs → gate.
 - `ephemeral_run`: a SIGTERM-stopped job is reported as `failed` (toolu's
   existing operator-shutdown result), not `canceled`; the test pins the
   observed value and #92 leaves that behavior unchanged.
+
+- `oauth_invalid_client` (new step): the live lane showed a runner deleted
+  on GitHub makes the token exchange answer 400 `invalid_client`, which toolu
+  retried forever as `Protocol`; the spec was amended and AC-12 now replays
+  the live capture.
 
 ## Plan review (2026-10-11)
 
