@@ -303,8 +303,8 @@ to that list requires proving the value is not a real credential.
 - `config.rs` — `RunnerConfig` (data_dir, workspace_root, cgroup_path,
   services_mode, service_bind, cache, workspace_gc_hours, workspace,
   shadow_enabled, node_dir — `TOOLU_RUNNER_NODE_DIR`, network) + `NetworkConfig`
-  (`[network]` proxy / `no_proxy` / `ca_bundle`, pure data, redacting
-  `Debug`) + `ServicesMode` (forwarder / offline / accelerated),
+  (`[network]` proxy / `no_proxy` / `ca_bundle`, pure data; `Debug` shows
+  the proxy only as `<set>`) + `ServicesMode` (forwarder / offline / accelerated),
   `WorkspaceConfig` (`mode`: `WorkspaceMode` stable / fresh,
   `stable_gc_hours`), `CacheConfig`, `L2Config`.
 - `error.rs` — `RunnerError` enum (Protocol, Auth, Network, Config,
@@ -363,14 +363,21 @@ to that list requires proving the value is not a real credential.
   fallback). A proxy with an `@` in its path, query or fragment, or an `@` but no
   parsed credentials (an unencoded `/ ? #` in the password), is rejected.
   `describe` validates the same way and returns the redacted one-line
-  diagnostic (env mode: `HTTPS_PROXY` → `HTTP_PROXY` → `ALL_PROXY`);
-  `proxy_configured` is the config-mode test.
+  diagnostic (env mode: the proxy each scheme really uses, per
+  `ProxyEnv::effective`); `proxy_configured` is the config-mode test.
+- `proxy_env.rs` — the ONE proxy-env reading and URL handling (the bin's
+  `check` uses it too): `ProxyEnv` (`from_env`, `effective`, `secrets`) mirrors
+  hyper-util's `Matcher::from_system` (first *set* name per pair wins even when
+  empty, unparseable scheme var → `ALL_PROXY`, `REQUEST_METHOD` disables all);
+  `parse_url` (scheme-less → `http://`, only a leading RFC 3986 scheme counts),
+  `redact_url` (never echoes a value that does not parse cleanly) and
+  `url_secrets` (fails safe: such a value is masked whole).
 - `step_env.rs` — `step_env` → `StepNetworkEnv { host, container }`: proxy
-  vars in both casings (config values, or the runner's first-set env values),
-  `NODE_EXTRA_CA_CERTS` for host steps only.
-- `secrets.rs` — `proxy_secrets`: password raw + decoded and
-  `base64(user:password)` for the masker.
-- `config.rs` — the crate's env reads. `tests/helpers/tls_fixtures.rs`
+  vars in both casings (config values, or what `ProxyEnv::effective` says the
+  runner uses), `NODE_EXTRA_CA_CERTS` for host steps only.
+- `secrets.rs` — `proxy_secrets`: `url_secrets` of the effective proxy
+  value(s) minus a `user:password` pair's bare user name (not secret).
+- `config.rs` — the crate's env reads (the proxy pairs and `REQUEST_METHOD`). `tests/helpers/tls_fixtures.rs`
   (rcgen PKI, rustls target) and `tests/helpers/proxy_fixtures.rs`
   (recording CONNECT proxy) are `#[path]`-included by the `wire`, `cache`,
   `execution` and `toolu-runner` tests; each test includes only what it uses.
@@ -387,7 +394,8 @@ to that list requires proving the value is not a real credential.
   any other host → `pipelines.<host>`), `resolve_data_dir`,
   `resolve_work_dir`.
 - `network.rs` — `[network]` section (#94): `NetworkSection` (`proxy`,
-  `no_proxy`, `ca_bundle`; omitted on save when empty, preserved by re-mint)
+  `no_proxy`, `ca_bundle`; `deny_unknown_fields`; omitted on save when empty,
+  preserved by re-mint and by `register --replace`)
   and `resolve()` → `shared::NetworkConfig` (trims `no_proxy`, `~`-expands
   `ca_bundle`); `RunnerRegistrationConfig::network_config()`.
 - `labels.rs` — pure `register` label resolution (#92): `default_labels`
@@ -891,10 +899,9 @@ to that list requires proving the value is not a real credential.
   no redirects; ANY response passes except 407; failures classified from the
   error *source* chain — the top-level message embeds the URL),
   `check_tools.rs` (git / docker / node subprocesses, `kill_on_drop` +
-  timeout; always optional), `check_env.rs` (proxy vars exactly as
-  hyper-util's `Matcher::from_system` reads them, CGI guard, rustls-native-
-  certs trust anchors; `redact_url` / `url_secrets` for proxy and
-  `DOCKER_HOST` userinfo), `check_report.rs` (render through a
+  timeout; always optional), `check_env.rs` (renders `network::ProxyEnv` — the
+  proxy reading `run` itself uses — and rustls-native-certs trust anchors;
+  `network::redact_url` / `url_secrets` for proxy and `DOCKER_HOST` userinfo), `check_report.rs` (render through a
   `SecretMasker` seeded with those credentials; exit code). Env reads for all
   of it live in `config.rs`. Pinned by `tests/check_cmd_test.rs` /
   `tests/check_tools_test.rs` against real loopback peers

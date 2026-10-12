@@ -822,14 +822,21 @@ while the runner waits takes effect after the job it is waiting for (or on
 restart); an edit that breaks it stops the runner (exit `2`) instead of
 silently dropping the proxy or CA. `run` logs one line at startup and
 whenever the effective settings change, `boot` once:
-`network: proxy http://user:***@proxy.corp:3128 (config), no_proxy 2 entries,
-ca_bundle /home/u/certs/corp-root.pem (1 certificates)`.
+`network: proxy http://***@proxy.corp:3128 (config), no_proxy 2 entries,
+ca_bundle /home/u/certs/corp-root.pem (1 certificates)`. In environment mode
+the line names the proxy each scheme really uses, for example
+`proxy https http://***@proxy.corp:3128 (env HTTPS_PROXY), http direct`.
+An unknown key in `[network]` (a typo such as `ca_bundel`) is a config
+error, and `register --replace` keeps the registration's `[network]` (and
+mints through it).
 
 **What steps see.** Host steps (`run:`, job hooks, composite steps, Node
 actions' pre/main/post) get `HTTPS_PROXY` / `https_proxy` / `HTTP_PROXY` /
 `http_proxy` and `NO_PROXY` / `no_proxy` (config mode: the proxy and the
-bypass list including the loopback entries; environment mode: the runner's
-own first-set value of each, re-exported in both casings), plus
+bypass list including the loopback entries; environment mode: exactly what
+the runner itself uses — a set-but-empty variable disables its pair, an
+unparseable one falls back to `ALL_PROXY`, `REQUEST_METHOD` disables all of
+them — re-exported in both casings), plus
 `NODE_EXTRA_CA_CERTS=<ca_bundle>` when a bundle is set. Workflow, job,
 `GITHUB_ENV` and step `env:` values win over these. Job containers (and the
 `run:` steps executed in them), service containers and Docker actions get the
@@ -839,8 +846,10 @@ proxy variables unless their own `env` sets them — never
 **Secrets.** The proxy password (as written and percent-decoded) and its
 `base64(user:password)` Basic credential — or a lone `token@` user name,
 as written and decoded — are registered with the secret masker (in
-environment mode, those of `HTTPS_PROXY`, `HTTP_PROXY` and `ALL_PROXY`), so a step that prints `$HTTPS_PROXY` shows `user:***@…` and no log,
-journal or diagnostic carries them. The masker ignores values shorter than
+environment mode, those of `HTTPS_PROXY`, `HTTP_PROXY` and `ALL_PROXY`), so a step that prints `$HTTPS_PROXY` shows `http://***@…` and no log,
+journal or diagnostic carries them. A value that does not parse cleanly
+(for example an unencoded `/` in an environment proxy's password) is masked
+whole. The masker ignores values shorter than
 4 characters, so use a real password; runner-authored messages always print
 the proxy redacted.
 

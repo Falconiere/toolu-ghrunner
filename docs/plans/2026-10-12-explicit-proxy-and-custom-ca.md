@@ -49,7 +49,7 @@ accelerated, L2) → step/container export → live-log WebSocket → inventory 
 [
   {
     "id": "network_crate",
-    "title": "New crates/network crate (shared + reqwest rustls-native-roots + base64 + percent-encoding + tracing): client_builder (config-mode Proxy::all + NoProxy incl. LOOPBACK_BYPASS, ca_bundle absolute/readable/PEM rules), step_env (env reads in network/src/config.rs), proxy_secrets, describe; shared gains NetworkConfig (RunnerConfig.network, redacting Debug) + network_redact::redact_proxy_url; guardrails config + workspace manifest; fixtures helper (rcgen CA/leaves, auth CONNECT proxy resolving to loopback, rustls HTTPS target, TLS WS target); integration tests",
+    "title": "New crates/network crate (shared + reqwest rustls-native-roots + base64 + percent-encoding + tracing): client_builder (config-mode Proxy::all + NoProxy incl. LOOPBACK_BYPASS, ca_bundle absolute/readable/PEM rules), step_env (env reads in network/src/config.rs), proxy_secrets, describe; shared gains NetworkConfig (RunnerConfig.network, Debug shows <set>); network::proxy_env is the one proxy-env/redaction/masking implementation; guardrails config + workspace manifest; fixtures helper (rcgen CA/leaves, auth CONNECT proxy resolving to loopback, rustls HTTPS target, TLS WS target); integration tests",
     "ac_refs": [
       "AC-2",
       "AC-3",
@@ -63,12 +63,13 @@ accelerated, L2) → step/container export → live-log WebSocket → inventory 
       "crates/shared/Cargo.toml",
       "crates/shared/src/lib.rs",
       "crates/shared/src/config.rs",
-      "crates/shared/src/network_redact.rs",
-      "crates/shared/tests/network_redact_test.rs",
+      "crates/network/src/proxy_env.rs",
+      "crates/network/tests/proxy_env_test.rs",
+      "crates/shared/tests/network_config_debug_test.rs",
       "guardrails.workspace.json"
     ],
     "input": "rcgen CA and leaves (target.test, bypass.test, expired, other.test); auth CONNECT proxy requiring u:p%40ss; temp-env HTTPS_PROXY/NO_PROXY incl. a closed port; bundle files: relative, missing, directory, empty, key-only, valid+malformed.",
-    "check": "cargo test -p network && cargo test -p shared --test network_redact_test && ! cargo tree -p protocol | grep -q reqwest"
+    "check": "cargo test -p network && cargo test -p shared --test network_config_debug_test && ! cargo tree -p protocol | grep -q reqwest"
   },
   {
     "id": "config_network",
@@ -103,11 +104,12 @@ accelerated, L2) → step/container export → live-log WebSocket → inventory 
       "crates/toolu-runner/Cargo.toml",
       "crates/toolu-runner/src",
       "crates/toolu-runner/tests/network_cli_test.rs",
+      "crates/toolu-runner/tests/register_replace_network_test.rs",
       "crates/network/tests/helpers/tls_fixtures.rs",
       "crates/network/tests/helpers/proxy_fixtures.rs"
     ],
     "input": "Temp registration config.toml with [network] proxy=http://u:secretpw@127.0.0.1:<proxy> + ca_bundle; env HTTPS_PROXY=http://127.0.0.1:<closed>; a bad ca_bundle path; the real toolu-runner binary (check and run).",
-    "check": "cargo test -p toolu-runner --test network_cli_test && cargo test -p toolu-runner --test check_cmd_test && cargo test -p toolu-runner --bin toolu-runner"
+    "check": "cargo test -p toolu-runner --test network_cli_test --test register_replace_network_test && cargo test -p toolu-runner --test check_cmd_test && cargo test -p toolu-runner --bin toolu-runner"
   },
   {
     "id": "execution_clients",
@@ -256,7 +258,7 @@ accelerated, L2) → step/container export → live-log WebSocket → inventory 
 - Create: `crates/network/` (`Cargo.toml`, `guardrails.config.json`,
   `README.md`, `src/{lib,config,client,step_env,secrets}.rs`,
   `tests/{client_proxy_test,client_tls_test,secrets_test,step_env_test}.rs`,
-  `tests/helpers/{tls,proxy}_fixtures.rs`), `crates/shared/src/network_redact.rs`,
+  `tests/helpers/{tls,proxy}_fixtures.rs`, `src/proxy_env.rs`),
   `crates/config/src/network.rs`, `crates/config/tests/network_section_test.rs`,
   `crates/toolu-runner/tests/network_cli_test.rs`,
   `crates/toolu-runner/tests/network_client_inventory_test.rs`,
@@ -314,6 +316,13 @@ Recorded during execution and the delivery review (2026-10-12):
   env-mode `describe` / `proxy_secrets` include `ALL_PROXY`; `run` logs the
   network line only when it changes; blank `ca_bundle` is unset; the live-log
   client is built by `wire::reporting::live_log`.
+- Merge-gate review (B1–B6): `shared::network_redact` was replaced by ONE
+  implementation, `network::proxy_env` (moved from the bin's `check_env`):
+  env mode matches reqwest (set-but-empty, `REQUEST_METHOD`, `ALL_PROXY`
+  fallback) in `describe`, `step_env` and `proxy_secrets`; masking fails safe;
+  redaction only takes a leading scheme. `register --replace` keeps
+  `[network]`; `NetworkSection` denies unknown fields; `ArchiveClient`
+  enforces no-redirect and `ActionFetcher` takes the network.
 
 ## Plan review record
 

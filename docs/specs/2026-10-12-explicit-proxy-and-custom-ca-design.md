@@ -68,9 +68,11 @@ anchor validation), `base64`, `percent-encoding`) sits below `wire`, `cache`, `e
   accessor module).
 - `network::proxy_secrets(&NetworkConfig) -> Vec<String>`.
 
-`shared` keeps only pure data and string helpers: `NetworkConfig` (part of
-`RunnerConfig`, so `execution` sees it) with a redacting `Debug`, and
-`shared::network_redact::redact_proxy_url`. Layering after the change:
+`shared` keeps only pure data: `NetworkConfig` (part of `RunnerConfig`, so
+`execution` sees it), whose `Debug` shows the proxy only as `<set>`. Proxy
+env reading, URL redaction and credential extraction have ONE implementation,
+`network::proxy_env` (moved from the bin's `check_env`, which now renders
+it). Layering after the change:
 `network` — `shared`; `wire` — `shared`, `protocol`, `network`; `cache` —
 `shared`, `network`; `execution` — `shared`, `expressions`, `cache`, `network`;
 `listener` adds `network`; bin adds `network`.
@@ -106,7 +108,7 @@ exits 2 on an unusable `[network]` before probing.
 | `remove` unregister (`main.rs`) | bare | registration `[network]` |
 | `check` probes (`check_probe::build_client`) | bare | registration `[network]` when one resolves (`--config` or inferred); `--url` / no registration → env mode |
 | job client (`execution` — action API, node runtime, post-drain) | bare in `job_runner.rs` | `RunnerConfig.network`, moved with the other job clients to a new `job_runner/job_http.rs` (`job_runner.rs` is at 491/500 code lines) |
-| action archive client (`actions::downloader::request_archive`, private no-redirect client; `fetch_tarball_reader`'s client param is unused) | bare, per download | `ActionFetcher` owns one no-redirect archive client built from the job's network; `download_and_extract_action(archive_client, …)` uses it |
+| action archive client (`actions::downloader::request_archive`, private no-redirect client; `fetch_tarball_reader`'s client param is unused) | bare, per download | `ActionFetcher::new` / `for_job` take the job's network and own one `ArchiveClient` — a newtype whose only constructor builds the no-redirect client; `download_and_extract_action(&ArchiveClient, …)` uses it |
 | OIDC upstream client (`oidc::server`, process-global `OnceLock`; `OidcServer` has no production caller) | bare, global | held in `OidcState`, built from `OidcConfig.network` (default env mode) |
 | accelerated cache upstream (`job_runner.rs:693` `Client::new()`) | bare | `client_builder(network)` (no timeout, as today), in `job_runner/job_http.rs` |
 | S3 cold tier (`cache::tier::l2::L2Tier::from_config`) | opendal's own client | `from_config(cfg, client)`; `S3::http_client(HttpClient::with(client))` |
@@ -165,17 +167,20 @@ run in the job container (`docker exec`) inherits them from the container's
 create env; exec-time env (`container_exec`) adds nothing, so a workflow env
 value still overrides per exec.
 
-**Secrets.** `proxy_secrets` returns the proxy password raw and
-percent-decoded, and the `Proxy-Authorization` credential
-`base64(user:password)`; the bin registers them with the masker that is also
+**Secrets.** `proxy_secrets` returns `network::url_secrets` of the effective
+proxy value(s) — the password raw and percent-decoded, `user:password`, and
+the `Proxy-Authorization` credential `base64(user:password)`, or the whole
+value when it does not parse cleanly (fail safe: steps receive it verbatim) —
+minus a `user:password` pair's bare user name; the bin registers them with the masker that is also
 the tracing redactor, and `job_runner` registers them with the job masker, so
 a step echoing `$HTTPS_PROXY` is masked and no log line carries them. The
 masker ignores values shorter than 4 characters (`MIN_SECRET_LEN`), so such a
 password is not maskable on its own — documented; its `base64(user:pass)`
 form is always ≥ 4 characters and is still masked. The username is not secret (upstream
-parity). `NetworkConfig`'s `Debug` prints the proxy redacted
-(`http://user:***@host:port`); every runner-authored message about the proxy
-uses the redacted form.
+parity). `NetworkConfig`'s `Debug` shows only `<set>`; every runner-authored
+message about the proxy uses `network::redact_url`
+(`http://***@host:port`), which never echoes a value it cannot parse
+cleanly.
 
 **Diagnostics.** `run` logs one INFO line at startup and whenever the
 described settings change between iterations (and registers new proxy
@@ -198,11 +203,13 @@ ca_bundle = "~/certs/corp-root.pem"               # extra trusted CA(s), PEM; ab
 ```
 
 ```rust
-// shared::config (pure data, part of RunnerConfig; Debug redacts the proxy)
+// shared::config (pure data, part of RunnerConfig; Debug shows the proxy as <set>)
 pub struct NetworkConfig { pub proxy: Option<String>, pub no_proxy: Vec<String>, pub ca_bundle: Option<PathBuf> }
 pub struct RunnerConfig { /* … */ pub network: NetworkConfig }
-// shared::network_redact
-pub fn redact_proxy_url(raw: &str) -> String;
+// network::proxy_env (the one proxy-env / URL implementation)
+pub struct ProxyEnv { pub https: Option<ProxyVar>, pub http: Option<ProxyVar>, pub all: Option<ProxyVar>, pub no: Option<ProxyVar>, pub cgi: bool }
+pub fn redact_url(raw: &str) -> String;
+pub fn url_secrets(raw: &str) -> Vec<String>;
 
 // network (new crate)
 pub const LOOPBACK_BYPASS: [&str; 3] = ["localhost", "127.0.0.1", "::1"];
