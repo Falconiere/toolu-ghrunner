@@ -3,9 +3,10 @@
 //! image filesystems.
 //!
 //! The production `Runner::execute_job` path replays the captured github.com
-//! message `job_outputs_message.json` (live flags: `requirenode24 = "true"`)
-//! with its step replaced by a real local `node20` action and a pinned
-//! `alpine` or `ubuntu` job container. Runtimes are downloaded for real
+//! job-container acquisition `toolu-runner/tests/fixtures/job_container_message.json`
+//! (live flags: `requirenode24 = "true"`; its captured `jobContainer` token
+//! with only the image literal swapped for a pinned `alpine` or `ubuntu`
+//! digest) with its steps replaced by the committed `node20` probe. Runtimes are downloaded for real
 //! (`actions/alpine_nodejs` / nodejs.org) into a fresh data dir.
 #![cfg(target_os = "linux")]
 
@@ -19,13 +20,12 @@ use execution::Runner;
 use execution::node::platform::{Libc, detect_libc};
 use shared::{
   ActionStep, AgentJobRequestMessage, Conclusion, RunnerConfig, RunnerEvent, SecretMasker,
-  TemplateToken,
 };
 use tokio_util::sync::CancellationToken;
 
 type TestResult<T = ()> = Result<T, Box<dyn Error + Send + Sync>>;
 
-const CAPTURE: &str = include_str!("job_outputs_message.json");
+const CAPTURE: &str = include_str!("../../toolu-runner/tests/fixtures/job_container_message.json");
 const ALPINE: &str =
   "alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8";
 const UBUNTU: &str =
@@ -66,22 +66,21 @@ async fn run_in_container(image: &str) -> TestResult<(Option<Conclusion>, Observ
     },
     ..RunnerConfig::default()
   };
-  let mut job: AgentJobRequestMessage = serde_json::from_str(CAPTURE)?;
-  job.job_container = Some(serde_json::from_value::<TemplateToken>(
-    serde_json::json!({
-      "type": 2,
-      "map": [{ "key": { "type": 0, "lit": "image" }, "value": { "type": 0, "lit": image } }]
-    }),
-  )?);
+  let mut captured: serde_json::Value = serde_json::from_str(CAPTURE)?;
+  let image_literal = captured
+    .pointer_mut("/jobContainer/map/0/Value/lit")
+    .ok_or("captured jobContainer image literal missing")?;
+  *image_literal = serde_json::Value::from(image);
+  let mut job: AgentJobRequestMessage = serde_json::from_value(captured)?;
   let mut step = ActionStep::with_ref_type("node_probe", "repository");
   step.reference.path = Some("./node action".to_owned());
   step.reference.repository_type = Some("self".to_owned());
   job.steps = vec![step];
   let workspace = config.workspace_root.join(&job.job_id);
   let action = workspace.join("node action");
-  std::fs::create_dir_all(&action)?;
-  std::fs::write(action.join("action.yml"), ACTION_YML)?;
-  std::fs::write(action.join("index.js"), ACTION_JS)?;
+  tokio::fs::create_dir_all(&action).await?;
+  tokio::fs::write(action.join("action.yml"), ACTION_YML).await?;
+  tokio::fs::write(action.join("index.js"), ACTION_JS).await?;
   let runner = Runner::new(config, Arc::new(Mutex::new(SecretMasker::new())));
   let mut events = runner.execute_job(job, CancellationToken::new());
   let (conclusion, logs) = tokio::time::timeout(Duration::from_secs(600), async {

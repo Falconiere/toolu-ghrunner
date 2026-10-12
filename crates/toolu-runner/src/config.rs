@@ -90,7 +90,16 @@ pub(crate) fn node_extra_ca_certs() -> Option<String> {
 pub(crate) fn node_dir() -> Option<PathBuf> {
   let raw = read("TOOLU_RUNNER_NODE_DIR").filter(|raw| !raw.is_empty())?;
   let path = shared::paths::expand_tilde(Path::new(&raw));
-  Some(std::path::absolute(&path).unwrap_or(path))
+  match std::path::absolute(&path) {
+    Ok(absolute) => Some(absolute),
+    Err(error) => {
+      report(
+        "TOOLU_RUNNER_NODE_DIR",
+        &format!("could not be made absolute ({error}); using it as given"),
+      );
+      Some(path)
+    },
+  }
 }
 
 /// `DOCKER_HOST`: the Docker daemon endpoint the runner and the docker CLI use.

@@ -84,7 +84,14 @@ pub(super) async fn run_node_stage(
   mut s: NodeStage<'_>,
 ) -> Result<(Conclusion, HashMap<String, String>), RunnerError> {
   let script = resolve_stage_script(&s)?;
-  let (env, file_cmds) = s.bounds.resolve_within_bounds(node_stage_env(&s)).await?;
+  let (env, file_cmds) = s
+    .bounds
+    .resolve_within_bounds(node_stage_env(&s))
+    .await
+    .map_err(|error| {
+      tracing::warn!(step = s.log_step_id, %error, "node stage environment could not be built");
+      error
+    })?;
   let major = select_stage_node(&mut s, &env).await;
   let target = match s.ctx.job_container().cloned() {
     Some(container) => {

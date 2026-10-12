@@ -28,10 +28,16 @@ impl JobContainer {
     &self,
     cancel: &CancellationToken,
   ) -> Result<NodeTarget, RunnerError> {
+    // `get_or_try_init` keeps the cell empty on `Err`, so a failed probe is
+    // retried by the next stage rather than cached.
     let stdout = self
       .os_release
       .get_or_try_init(|| self.probe_os_release(cancel))
-      .await?;
+      .await
+      .map_err(|error| {
+        tracing::warn!(container = self.id(), %error, "job container OS probe failed");
+        error
+      })?;
     container_target(stdout.as_deref(), host_arch()?)
   }
 

@@ -69,26 +69,30 @@ pub async fn validate_runtime(binary: &Path, major: u8) -> Result<(), String> {
 ///
 /// See [`validate_runtime`].
 pub async fn validate_runtime_once(binary: &Path, major: u8) -> Result<(), String> {
-  static PROVEN: OnceLock<Mutex<HashSet<(PathBuf, u8, SystemTime)>>> = OnceLock::new();
   let modified = std::fs::metadata(binary)
     .and_then(|meta| meta.modified())
     .map_err(|e| format!("Node.js runtime {} is unreadable: {e}", binary.display()))?;
   let key = (binary.to_path_buf(), major, modified);
-  let proven = PROVEN.get_or_init(Mutex::default);
-  let seen = |set: &HashSet<_>| set.contains(&key);
-  let known = match proven.lock() {
-    Ok(set) => seen(&set),
-    Err(poisoned) => seen(&poisoned.into_inner()),
-  };
-  if known {
+  if with_proven(|set| set.contains(&key)) {
     return Ok(());
   }
   validate_runtime(binary, major).await?;
-  match proven.lock() {
-    Ok(mut set) => set.insert(key),
-    Err(poisoned) => poisoned.into_inner().insert(key),
-  };
+  with_proven(|set| set.insert(key));
   Ok(())
+}
+
+/// Runtimes already proven in this process: (path, major, mtime).
+type Proven = HashSet<(PathBuf, u8, SystemTime)>;
+
+/// Run `f` on the proven set under its lock. Synchronous on purpose: the
+/// `std` guard never lives across an `.await`.
+fn with_proven<T>(f: impl FnOnce(&mut Proven) -> T) -> T {
+  static PROVEN: OnceLock<Mutex<Proven>> = OnceLock::new();
+  let lock = PROVEN.get_or_init(Mutex::default);
+  match lock.lock() {
+    Ok(mut set) => f(&mut set),
+    Err(poisoned) => f(&mut poisoned.into_inner()),
+  }
 }
 
 #[cfg(test)]

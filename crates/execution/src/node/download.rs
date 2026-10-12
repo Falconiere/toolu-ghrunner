@@ -25,7 +25,7 @@ use super::runtime::node_binary_path;
 /// `tokio_util::io::SyncIoBridge`) instead of holding the whole tarball in
 /// memory. This is CPU-bound, synchronous work — every production call
 /// site MUST run it inside `tokio::task::spawn_blocking`.
-pub(crate) fn extract_tarball(reader: impl Read, dest: &Path, strip: usize) -> std::io::Result<()> {
+fn extract_tarball(reader: impl Read, dest: &Path, strip: usize) -> std::io::Result<()> {
   use flate2::read::GzDecoder;
   use std::path::Component;
   let decoder = GzDecoder::new(reader);
@@ -79,7 +79,7 @@ pub(crate) fn extract_tarball(reader: impl Read, dest: &Path, strip: usize) -> s
 ///
 /// Returns `RunnerError::NodeRuntime` on a request failure or a non-success
 /// HTTP status.
-pub(crate) async fn fetch_node_tarball_reader(
+async fn fetch_node_tarball_reader(
   client: &reqwest::Client,
   url: &str,
 ) -> Result<impl Read + use<>, RunnerError> {
@@ -125,7 +125,7 @@ static STAGING_SEQ: AtomicU64 = AtomicU64::new(0);
 /// `node_binary_path(dest)` other jobs/processes check to skip a re-download —
 /// never observes a partially-extracted tree, even under concurrent
 /// cross-repo runner processes sharing the same node cache dir.
-pub(crate) fn staging_dir_for(dest: &Path) -> PathBuf {
+fn staging_dir_for(dest: &Path) -> PathBuf {
   let seq = STAGING_SEQ.fetch_add(1, Ordering::Relaxed);
   let pid = std::process::id();
   let mut staging = dest.as_os_str().to_owned();
@@ -137,7 +137,7 @@ pub(crate) fn staging_dir_for(dest: &Path) -> PathBuf {
 /// failure is WARN-logged, never propagated: the caller already has (or is
 /// producing) the real error/result to return, and a leftover `.tmp-*` dir
 /// is a disk-hygiene issue, not a correctness one.
-pub(crate) fn cleanup_staging(staging: &Path) {
+fn cleanup_staging(staging: &Path) {
   if let Err(e) = std::fs::remove_dir_all(staging)
     && e.kind() != std::io::ErrorKind::NotFound
   {
@@ -181,7 +181,7 @@ pub(crate) fn cleanup_staging(staging: &Path) {
 /// Returns `RunnerError::NodeRuntime` when the rename fails for a reason
 /// other than a lost race — either with `dest` absent (a genuine filesystem
 /// error) or with the single retry over a stale `dest` failing too.
-pub(crate) fn promote_staging(staging: &Path, dest: &Path) -> Result<(), RunnerError> {
+fn promote_staging(staging: &Path, dest: &Path) -> Result<(), RunnerError> {
   let rename_err = match std::fs::rename(staging, dest) {
     Ok(()) => return Ok(()),
     Err(err) => err,
