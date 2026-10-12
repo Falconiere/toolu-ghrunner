@@ -226,12 +226,14 @@ fn load_bundle(path: &Path) -> Result<Vec<CertificateDer<'static>>, RunnerError>
   let mut store = RootCertStore::empty();
   for (index, cert) in certs.iter().enumerate() {
     // A borrowed view: `certs` is returned, so no copy is needed here.
-    store.add(CertificateDer::from(cert.as_ref())).map_err(|e| {
-      fail(format!(
-        "certificate #{} is not a usable CA certificate: {e}",
-        index + 1
-      ))
-    })?;
+    store
+      .add(CertificateDer::from(cert.as_ref()))
+      .map_err(|e| {
+        fail(format!(
+          "certificate #{} is not a usable CA certificate: {e}",
+          index + 1
+        ))
+      })?;
   }
   Ok(certs)
 }
