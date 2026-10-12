@@ -7,18 +7,11 @@ name: node-runtime-95
 # node_container_test.rs). github.com currently sends
 # `actions.runner.requirenode24 = true`, so every lane must observe Node 24;
 # the "Complete job" annotation lists the action as forced to Node 24.
-# See docs/test-coverage.md "Node runtime (#95)". The push trigger (this
-# branch only) records the reference run; it is removed before merge, leaving
-# the lane dispatch-only like its siblings.
+# See docs/test-coverage.md "Node runtime (#95)". Dispatch-only; the recorded
+# run (38217199303) came from a since-removed branch push trigger.
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - feat/95-node-runtime-musl-alpine-builds
-    paths:
-      - .github/workflows/node-runtime-95.yml
-      - .github/actions/node-runtime-95/**
 
 permissions:
   contents: read

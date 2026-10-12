@@ -1625,8 +1625,22 @@ and silently fell back to node20.
 
 Reference lane (official runner): `.github/workflows/node-runtime-95.yml`
 runs the same probe on GitHub-hosted `ubuntu-24.04`, `macos-15` and an
-`alpine` job container. The run is recorded here once the branch's first push triggers it; until then
-this lane is **unverified**.
+`alpine` job container —
+[run 38217199303](https://github.com/Falconiere/toolu-ghrunner/actions/runs/38217199303),
+head `f3f92ff`, runner 2.337.0, all three jobs `success`:
+
+- `ubuntu-24.04`: `{"version":"v24.19.0","execPath":".../externals/node24/bin/node","glibc":"2.39"}`;
+- `macos-15`: `{"version":"v24.19.0","execPath":".../externals/node24/bin/node","glibc":null}`;
+- `alpine` container: `{"version":"v24.19.0","execPath":"/__e/node24_alpine/bin/node","glibc":null}`
+  — the official runner picks the musl build for Alpine, as toolu does;
+- every job's "Complete job" annotation is exactly toolu's text, sorted the
+  same way: `Node.js 20 is deprecated. The following actions target Node.js 20
+  but are being forced to run on Node.js 24: ./.github/actions/node-runtime-95,
+  actions/checkout@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/`.
+
+The hosted 2.337.0 images ship Node 24.19.0, while toolu pins 24.21.0 from
+`externals.sh` at the pinned commit `cab9d1c`. The patch level differs; the
+selected major and the musl/glibc choice match.
 
 Unverified: a live musl (Alpine) **host** and Linux arm64 hosts (classified
 from exported roots and the error paths only); toolu on a live acquired job
