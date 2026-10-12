@@ -30,6 +30,8 @@ pub struct JobContainer {
   image_path: String,
   /// Effective container CI value inherited by execs without a step override.
   pub(crate) base_ci: String,
+  /// Upstream's `/etc/*release` probe stdout, once per job (`None` = non-zero exit).
+  pub(crate) os_release: tokio::sync::OnceCell<Option<String>>,
 }
 
 impl JobContainer {
@@ -77,6 +79,7 @@ impl JobContainer {
       mounts,
       image_path: String::new(),
       base_ci,
+      os_release: tokio::sync::OnceCell::new(),
     };
     if let Err(error) = container.initialize(spec, cancel).await {
       if let Err(cleanup) = container.cleanup().await {

@@ -40,6 +40,7 @@ pub(super) async fn run(
   let (msg, mut ctx) = build_job_context_async(msg, config, masker, &claimed).await?;
   ctx.cancellation = Some(JobCancellation::new(cancel.clone(), shutdown));
   ctx.set_process_tracking(ProcessTracking::for_job(&msg.variables));
+  ctx.node_migration = crate::node::migration::NodeMigrationState::for_job(&msg.variables);
   apply_job_environment(&msg.environment_variables, &mut ctx)?;
   let container_spec = evaluate_container(&msg, config, &ctx)?;
   let service_specs = evaluate_services(msg.job_service_containers.as_ref(), &ctx)?;

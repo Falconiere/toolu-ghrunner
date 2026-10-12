@@ -140,13 +140,15 @@ fn seed_installed_node(data_dir: &Path) -> TestResult<()> {
     return Err("installed node did not report its executable path".into());
   }
   let node = String::from_utf8(output.stdout)?;
-  let binary = node_binary_path(&node_cache_dir(data_dir, node_version_for(20)));
-  let parent = binary.parent().ok_or("node cache binary has no parent")?;
-  std::fs::create_dir_all(parent)?;
-  #[cfg(unix)]
-  std::os::unix::fs::symlink(node.trim(), &binary)?;
-  #[cfg(not(unix))]
-  std::fs::copy(node.trim(), &binary)?;
+  for major in [20, 24] {
+    let binary = node_binary_path(&node_cache_dir(data_dir, node_version_for(major)));
+    let parent = binary.parent().ok_or("node cache binary has no parent")?;
+    std::fs::create_dir_all(parent)?;
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(node.trim(), &binary)?;
+    #[cfg(not(unix))]
+    std::fs::copy(node.trim(), &binary)?;
+  }
   Ok(())
 }
 

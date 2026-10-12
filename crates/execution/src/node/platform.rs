@@ -100,6 +100,16 @@ pub fn host_target() -> Result<NodeTarget, RunnerError> {
   target_for(std::env::consts::OS, std::env::consts::ARCH, libc)
 }
 
+/// The runner host's CPU, which a job container shares.
+///
+/// # Errors
+///
+/// Returns `RunnerError::NodeRuntime` for an OS/CPU pair no Node.js build
+/// exists for.
+pub fn host_arch() -> Result<NodeArch, RunnerError> {
+  target_for(std::env::consts::OS, std::env::consts::ARCH, Libc::Glibc).map(|target| target.arch)
+}
+
 /// Classify an `std::env::consts` OS/arch pair with a detected libc.
 ///
 /// # Errors

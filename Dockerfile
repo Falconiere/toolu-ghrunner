@@ -34,14 +34,14 @@ RUN cargo build --release --locked --bin toolu-runner
 # ephemeral — a lazy cache never warms, so without the seed every
 # node-action job pays a cold fetch and requires nodejs.org egress.
 # Versions must match `node_version_for` in crates/execution/src/node/runtime.rs
-# (node20 -> 20.18.3, node24 -> 24.0.2; unknown majors fall back to 20.18.3).
+# (node20 -> 20.20.2, node24 -> 24.21.0; unknown majors fall back to 20.20.2).
 # Runs on $BUILDPLATFORM (download-only stage — never emulate it) and picks
 # the tarball by $TARGETARCH: amd64 -> x64, arm64 -> arm64.
 FROM --platform=$BUILDPLATFORM debian:bookworm-slim AS node-seed
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates curl \
   && rm -rf /var/lib/apt/lists/*
-ARG NODE_VERSIONS="20.18.3 24.0.2"
+ARG NODE_VERSIONS="20.20.2 24.21.0"
 ARG TARGETARCH
 RUN set -eu; \
   case "${TARGETARCH}" in \
@@ -88,7 +88,7 @@ ENV TOOLU_RUNNER_HOME=/var/lib/toolu-runner
 # "command not found". Expose the newest seeded LTS system-wide. `test -x`
 # fails the build loudly if NODE_ON_PATH ever names a version the seed stage
 # did not lay down (the PR image build catches it before publish).
-ARG NODE_ON_PATH=24.0.2
+ARG NODE_ON_PATH=24.21.0
 RUN set -eu; \
   for tool in node npm npx corepack; do \
     src="/var/lib/toolu-runner/node/${NODE_ON_PATH}/bin/${tool}"; \

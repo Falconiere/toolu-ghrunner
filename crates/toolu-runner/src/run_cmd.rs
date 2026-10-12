@@ -392,6 +392,7 @@ fn build_runner_config(
     workspace_gc_hours: cfg.workspace_gc_hours(),
     workspace: cfg.workspace_config(),
     shadow_enabled: cfg.shadow_enabled(),
+    node_dir: crate::config::node_dir(),
   })
 }
 

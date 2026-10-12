@@ -1,5 +1,6 @@
 //! Environment-derived configuration for the CLI bin.
 
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use listener::session_conflict::SessionConflictPolicy;
@@ -80,6 +81,16 @@ pub(crate) fn ssl_cert_dir() -> Option<String> {
 /// environment) add to their trust store.
 pub(crate) fn node_extra_ca_certs() -> Option<String> {
   read("NODE_EXTRA_CA_CERTS")
+}
+
+/// `TOOLU_RUNNER_NODE_DIR`: offline Node.js runtimes in upstream's
+/// `externals/` layout (`node24/bin/node`, `node24_alpine/bin/node`). Empty
+/// counts as unset; `~` is expanded and a relative path made absolute, since
+/// job containers bind-mount it.
+pub(crate) fn node_dir() -> Option<PathBuf> {
+  let raw = read("TOOLU_RUNNER_NODE_DIR").filter(|raw| !raw.is_empty())?;
+  let path = shared::paths::expand_tilde(Path::new(&raw));
+  Some(std::path::absolute(&path).unwrap_or(path))
 }
 
 /// `DOCKER_HOST`: the Docker daemon endpoint the runner and the docker CLI use.

@@ -25,8 +25,8 @@ instance and launched by name.
 | --- | --- |
 | `/entrypoint` | The launcher (`scripts/macos-entrypoint.sh`, 0755). The value the caller passes as `ApplicationRequest.command`. |
 | `/toolu-runner` | The **darwin/arm64** runner binary, 0755. |
-| `/node/<version>/` | Pre-seeded Node runtimes (20.18.3, 24.0.2 — darwin-arm64). |
-| `/node/default` | The seeded version the launcher puts on `$PATH` (24.0.2). |
+| `/node/<version>/` | Pre-seeded Node runtimes (20.20.2, 24.21.0 — darwin-arm64). |
+| `/node/default` | The seeded version the launcher puts on `$PATH` (24.21.0). |
 
 Everything else a job touches — `bash`, `git`, `curl`, `xcodebuild`,
 simulators, `sudo`, Homebrew — comes from Namespace's base image, not

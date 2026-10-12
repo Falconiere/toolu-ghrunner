@@ -1,5 +1,6 @@
 //! The "Complete job" step (upstream `JobExtension.FinalizeJob`): job outputs,
-//! then the deployment environment URL, reported as the job's last row.
+//! the deployment environment URL, then the Node.js 20 migration warnings,
+//! reported as the job's last row.
 
 use std::collections::HashMap;
 
@@ -142,6 +143,12 @@ pub(super) async fn run_complete_step(
     },
   };
   let (environment_url, url_failed) = report_environment_url(&step, msg, ctx).await;
+  // Upstream `JobExtension.FinalizeJob`: node20 → node24 migration warnings.
+  for warning in ctx.node_migration.completion_warnings() {
+    step
+      .issue(AnnotationLevel::Warning, &step.mask(&warning))
+      .await;
+  }
   let failed = outputs.failed || url_failed;
   let conclusion = if url_failed && outputs.conclusion != Conclusion::Cancelled {
     Conclusion::Failure

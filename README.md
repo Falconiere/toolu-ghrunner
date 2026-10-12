@@ -172,7 +172,8 @@ toolu-runner check --timeout 30                    # per-probe bound in seconds 
   `407 Proxy Authentication Required`. Failures are classified (`timeout`,
   `dns`, `tls`, `connect`, `proxy`) with a hint.
 - **Network (optional):** `node-dist` (`nodejs.org`, where the runner
-  downloads Node for JavaScript actions).
+  downloads Node for JavaScript actions; musl builds come from github.com
+  release downloads).
 - **Tools (optional — only ever warn):** `git --version`, `docker version`
   (client, daemon, and the endpoint the runner uses: `DOCKER_HOST`, else
   `unix:///var/run/docker.sock`), `node --version` plus the runtimes cached
@@ -259,7 +260,7 @@ left orphaned.
 
 | | |
 |---|---|
-| **Steps** | `run:` shell, `uses:` Node.js actions (runtime auto-downloaded + cached), composite actions, plugins, Linux Docker actions (`runs.using: docker` and `uses: docker://`) |
+| **Steps** | `run:` shell, `uses:` Node.js actions (runtime auto-downloaded + cached, musl/Alpine aware, node24 migration, offline preseed), composite actions, plugins, Linux Docker actions (`runs.using: docker` and `uses: docker://`) |
 | **Workflows** | matrices, `needs:` job graphs and job outputs, reusable workflows, `if:` conditions, `timeout-minutes`, `working-directory`, `defaults.run` |
 | **Expressions** | `${{ }}` with signed/radix numbers, reference equality, lazy `case()` and `format()`, insertion-ordered pretty `toJSON`, G15 number rendering, and `.*` / `[*]` filters; unknown named values fail visibly |
 | **Services** | artifacts, cache, and OIDC — forwarded to real GitHub by default, hosted locally in `offline` mode, or a local content-addressed cache accelerator in `accelerated` mode |
@@ -372,8 +373,10 @@ Jobs declaring a container on macOS or Windows fail before any step runs.
 Use a local Linux Docker daemon over a Unix socket (`DOCKER_HOST`, or the active
 Docker CLI context) and `forwarder` services mode. The image must provide `tail`
 and the requested shell; the default container shell is `sh`. Node actions use
-runner-downloaded Linux binaries, so the image needs their compatible runtime
-libraries. A runtime failure fails the step without falling back to the host.
+runner-provided Linux binaries chosen per container, like the official runner:
+an Alpine image (its `/etc/*release` `ID` contains `alpine`) gets the musl build,
+any other image the glibc build — see [Node.js runtimes](#nodejs-runtimes). A
+runtime failure fails the step without falling back to the host.
 
 Both image shorthand and the object form support evaluated `image`, registry
 `credentials`, `env`, `ports`, `volumes`, and `options`. Options accept CPU/memory/
@@ -387,6 +390,45 @@ the base PATH, with `GITHUB_PATH` entries prepended.
 Service-container and Docker-action integration, live GitHub.com comparison,
 and GHES acceptance are **unverified**; see the
 [#73 coverage map](docs/test-coverage.md#job-containers-73).
+
+### Node.js runtimes
+
+`runs.using: node12 | node16 | node20 | node24` (case-insensitive) is accepted;
+`node12`/`node16` run as node20 and any other `node*` fails with the official
+runner's message. Pinned releases match actions/runner v2.337.0: node20 →
+`20.20.2`, node24 → `24.21.0`.
+
+**node20 → node24 migration.** A node20 action's runtime follows the official
+runner exactly. GitHub sends the phase as job variables
+(`actions.runner.usenode24bydefault`, `actions.runner.requirenode24`,
+`actions.runner.warnonnode20`); github.com currently sends `requirenode24`, so
+node20 actions run on Node 24. Before that phase,
+`FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true` opts in and, once node24 is the
+default, `ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true` opts out — set either in
+the workflow/job/step `env` or the runner's own environment (the workflow value
+wins). Both set true in the same place is a configuration error: the step warns
+and the phase default applies. The "Complete job" step lists actions that were
+forced to Node 24 or are still on Node 20, as the official runner does.
+
+**Which build.** The host gets the nodejs.org build for its OS/CPU (Linux or
+macOS, x64 or arm64). A musl host (no glibc loader, an `ld-musl` loader present)
+and an Alpine job container get the musl build from
+[`actions/alpine_nodejs`](https://github.com/actions/alpine_nodejs), which —
+like the official runner — exists for x64 only; Alpine on arm64 fails the step
+before the action starts. A downloaded runtime that the host is meant to run
+must pass `node --version` before it is committed to the cache
+(`data_dir/node/<version>`, `<version>-alpine` for musl).
+
+**Offline / pre-seeded.** Set `TOOLU_RUNNER_NODE_DIR` (for `run`, `boot`, or the
+service unit's environment) to a directory in the official runner's `externals/`
+layout — `node20/bin/node`, `node24/bin/node`, `node20_alpine/bin/node`,
+`node24_alpine/bin/node`; an official runner's `externals/` folder works as-is.
+It is authoritative: toolu never downloads, a missing runtime fails the step
+naming the expected path, and a host runtime must start and report the right
+major. Job containers see it read-only at `/github/externals`, so keep real
+files there rather than symlinks that point outside it.
+
+Coverage and unverified lanes: [#95 coverage map](docs/test-coverage.md#node-runtime-95).
 
 ### Workflow service containers
 

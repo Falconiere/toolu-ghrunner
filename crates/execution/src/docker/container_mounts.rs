@@ -22,7 +22,7 @@ impl ContainerMounts {
     let home = tempfile::Builder::new()
       .prefix("container-home-")
       .tempdir_in(&temp)?;
-    let mappings = [
+    let mut mappings = vec![
       (workspace.to_path_buf(), "/github/workspace", false),
       (temp.clone(), "/github/runner_temp", false),
       (config.data_dir.join("tmp"), "/github/file_commands", false),
@@ -32,6 +32,11 @@ impl ContainerMounts {
       (config.data_dir.join("events"), "/github/events", true),
       (home.path().to_path_buf(), "/github/home", false),
     ];
+    // An operator's preseeded runtimes (`TOOLU_RUNNER_NODE_DIR`), read-only,
+    // so a preseed binary path translates like the `/github/node` cache.
+    if let Some(node_dir) = &config.node_dir {
+      mappings.push((node_dir.clone(), "/github/externals", true));
+    }
     let mut translator = PathTranslator::new(workspace.to_path_buf(), temp.clone());
     let mut volumes = Vec::new();
     for (host, target, readonly) in mappings {

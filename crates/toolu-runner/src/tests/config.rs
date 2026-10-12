@@ -139,3 +139,32 @@ fn session_conflict_policy_reads_and_diagnoses_the_override() {
     );
   }
 }
+
+#[test]
+fn node_dir_is_unset_when_empty_and_absolute_when_relative() {
+  temp_env::with_var("TOOLU_RUNNER_NODE_DIR", Some(""), || {
+    assert_eq!(super::node_dir(), None);
+  });
+  temp_env::with_var("TOOLU_RUNNER_NODE_DIR", None::<&str>, || {
+    assert_eq!(super::node_dir(), None);
+  });
+  temp_env::with_var("TOOLU_RUNNER_NODE_DIR", Some("externals"), || {
+    let dir = super::node_dir();
+    assert!(
+      dir
+        .as_ref()
+        .is_some_and(|dir| dir.is_absolute() && dir.ends_with("externals")),
+      "{dir:?}"
+    );
+  });
+  temp_env::with_var(
+    "TOOLU_RUNNER_NODE_DIR",
+    Some("/opt/actions-runner/externals"),
+    || {
+      assert_eq!(
+        super::node_dir(),
+        Some(std::path::PathBuf::from("/opt/actions-runner/externals"))
+      );
+    },
+  );
+}

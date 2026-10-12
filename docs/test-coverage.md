@@ -1596,3 +1596,40 @@ Not applicable or unverified:
 - Two branches are untested: a `GITHUB_PATH` read I/O failure, and a
   blocking-task join error. The reader's I/O-failure branch is
   unit-tested with a directory.
+
+## Node runtime (#95)
+
+Upstream contracts: actions/runner `cab9d1c3901e45c7705889c4f88284fdd93f4ae5`
+(v2.337.0) — `HandlerFactory.cs:60-145`, `NodeUtil.cs`, `NodeUtilL0.cs`,
+`StepHost.cs::DetermineNodeRuntimeVersion`, `JobExtension.cs` finalize
+annotations, `ActionManifestManager.cs:464-507`, `externals.sh` pins
+(20.20.2 / 24.21.0, `actions/alpine_nodejs` musl x64). Spec:
+`docs/specs/2026-10-12-node-runtime-musl-node24-design.md`.
+
+Red evidence: on the pre-#95 engine the production replay ran the captured
+message's node20 action on the node20 runtime and emitted no migration
+warning, although the message carries GitHub's live
+`actions.runner.requirenode24 = "true"`. `using: node22` parsed as major 22
+and silently fell back to node20.
+
+| AC / scenario | Exact observation | Tests | Platforms |
+| --- | --- | --- | --- |
+| AC-1 / 95-S2 | All 27 `[InlineData]` rows of upstream's `NodeUtilL0.cs`, committed verbatim with line provenance (`crates/execution/tests/node_migration_upstream_l0.json`), select the same version and warning presence. Declared node12/16 → node20 rules, node24 untouched; exact warning (`Both … in the {workflow,system} environment … node20/node24.`) and phase-2 info text; .NET `bool.TryParse` flags (`" TRUE "` true, `"1"`/`"yes"` false), `ConvertToBoolean` switches (`1`/`true`/`$true`), an empty workflow value overriding a true system value, and no warning for cross-source conflicts. Flags parse from the captured github.com message. | `cargo test -p execution --lib node::migration` | Linux x86_64 local; CI `ubuntu-latest` + `macos-14` |
+| AC-2 / 95-S2, S4 host | Production `Runner::execute_job` replay of the captured `job_outputs_message.json` with the committed probe `.github/actions/node-runtime-95` (`using: node20`): `process.execPath` is the `node/24.21.0` runtime and the "Complete job" row carries exactly `Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: ./node action. …`. With `requirenode24` set to `"false"` (wire structure kept) and step env `ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true`, it runs on `node/20.20.2` and the only warning is upstream's deprecation text with the message's dates. | `cargo test -p execution --test node_migration_test` | as AC-1 |
+| AC-3 / 95-S1 | This host classifies as `linux-x64 (glibc)` from its real loader, the `ci-macos` host as `darwin-arm64`. Loader rule over roots: Alpine layout → musl; glibc loader + Debian's `ld-musl` → glibc; dangling absolute loader symlink (Ubuntu shape) → glibc. Errors: `Node.js actions are not supported on linux arm` (armv7, FreeBSD, Windows), `JavaScript Actions on musl (Alpine) hosts are only supported on x64 Linux runners. Detected Linux Arm64`. Docker lane: `docker export`ed pinned `alpine` → musl, `debian` → glibc, `debian` + `apt-get install musl` → glibc. | `cargo test -p execution --lib node::platform`; `cargo test -p execution --test node_container_test exported -- --ignored` | as AC-1; export lane Linux local (Docker 29.1.3) |
+| AC-4 / 95-S4 container | The probe runs in real job containers through the production path under the captured flags: pinned `alpine` → `v24.x`, no glibc, `/github/node/24.21.0-alpine/bin/node` (real `actions/alpine_nodejs` download); pinned `ubuntu` → `v24.x`, glibc, `/github/node/24.21.0/bin/node`. Upstream's probe output (`ID=alpine`, `ID=ubuntu\nID_LIKE=debian`) is pinned; an Alpine container on arm64 fails with upstream's `JavaScript Actions in Alpine containers are only supported on x64 Linux runners. Detected Linux Arm64`. | `cargo test -p execution --test node_container_test -- --ignored --test-threads=1` (CI Docker step); `node::platform` | Linux x86_64 local + CI Docker step |
+| AC-5 / 95-S3 preseed | `TOOLU_RUNNER_NODE_DIR` with the real host `node` as `node{M}/bin/node` resolves with the download base pointed at a dead port (no network) and leaves the cache untouched; a missing `node24_alpine` fails with `… not found in TOOLU_RUNNER_NODE_DIR: expected <path>`; the host node filed under another major and a real non-Node binary fail the start check. The bin reads the variable for `run` and `boot` (empty = unset, relative made absolute). | `cargo test -p execution --lib node::runtime`; `cargo test -p toolu-runner --bin toolu-runner config::tests::node_dir` | as AC-1 |
+| AC-6 / 95-S3 downloads | Over a real local HTTP server: a tarball holding the real host `node` commits only after `node --version` passes; one holding real `/bin/echo` is rejected before commit (no cache dir, no staging leftovers); 404, non-gzip and truncated real bodies leave nothing; the alpine `./bin/node` layout extracts with no strip; an entry escaping the runtime dir is rejected; concurrent promotes leave one tree. Network lane: real nodejs.org 24.21.0 installs validated; the real `actions/alpine_nodejs` binary cannot start on this glibc host so a host-targeted install is refused, while the container-targeted install commits it. | `cargo test -p execution --lib node::`; `cargo test -p execution --test node_download_test -- --ignored` | as AC-1; network lane Linux x86_64 local |
+| AC-7 | `using: node22`/`node18`/`Node26`/`node` → `'using: X' is not supported, use 'docker', 'node12', 'node16', 'node20' or 'node24' instead.`; `Node20`, `NODE16` accepted. | `cargo test -p execution --lib actions::manifest` | as AC-1 |
+| AC-8 | Gate and docs. | `./tools/check.sh all` | Linux local, CI |
+
+Reference lane (official runner): `.github/workflows/node-runtime-95.yml`
+runs the same probe on GitHub-hosted `ubuntu-24.04`, `macos-15` and an
+`alpine` job container. Run: _recorded after the first push_.
+
+Unverified: a live musl (Alpine) **host** and Linux arm64 hosts (classified
+from exported roots and the error paths only); toolu on a live acquired job
+(the replays use captured messages); GHES (flags arrive as the same job
+variables; not exercised). Not applicable: Linux ARM32 deprecation/kill
+switches (toolu ships no armv7 build — such a host gets the unsupported-CPU
+error) and container hooks.

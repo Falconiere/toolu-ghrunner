@@ -62,12 +62,15 @@ async fn post_results_reach_distinct_completion_records() -> Result<(), Box<dyn 
   })
   .await??;
   assert!(node.status.success());
-  let binary = node_binary_path(&node_cache_dir(&config.data_dir, node_version_for(20)));
-  std::fs::create_dir_all(binary.parent().ok_or("node cache parent missing")?)?;
-  #[cfg(unix)]
-  std::os::unix::fs::symlink(String::from_utf8(node.stdout)?.trim(), &binary)?;
-  #[cfg(not(unix))]
-  std::fs::copy(String::from_utf8(node.stdout)?.trim(), &binary)?;
+  let host_node = String::from_utf8(node.stdout)?;
+  for major in [20, 24] {
+    let binary = node_binary_path(&node_cache_dir(&config.data_dir, node_version_for(major)));
+    std::fs::create_dir_all(binary.parent().ok_or("node cache parent missing")?)?;
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(host_node.trim(), &binary)?;
+    #[cfg(not(unix))]
+    std::fs::copy(host_node.trim(), &binary)?;
+  }
 
   let runner = Runner::new(config, Arc::new(Mutex::new(SecretMasker::new())));
   let collector = StepCollector::new();

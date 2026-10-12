@@ -98,13 +98,13 @@ exception is the existing `2`: an image with no `toolu-runner` on
   shell out to it), `ca-certificates` (the workspace is rustls-only —
   no OpenSSL in the image), plus `curl jq unzip tar gzip zstd xz-utils
   sudo` for the long tail of workflow `run:` scripts.
-- Node **20.18.3** and **24.0.2** pre-seeded at
+- Node **20.20.2** and **24.21.0** pre-seeded at
   `/var/lib/toolu-runner/node/<version>/` — the versions
   `crates/execution/src/node/runtime.rs` resolves for `node20` /
   `node24` actions. Ephemeral containers never warm a lazy cache, so
   seeding removes the per-job nodejs.org fetch (and the egress
   requirement) entirely.
-- The newest seeded LTS (**24.0.2**) is also on **PATH** as `node` /
+- The newest seeded LTS (**24.21.0**) is also on **PATH** as `node` /
   `npm` / `npx` / `corepack` (symlinked into `/usr/local/bin`), matching
   GitHub-hosted images: `run:` steps that invoke `node` directly — the
   standard composite-action shape — resolve it. The per-version seed
