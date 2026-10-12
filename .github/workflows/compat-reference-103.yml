@@ -11,6 +11,10 @@ name: compat-reference-103
 
 on:
   workflow_dispatch:
+  # TEMPORARY recording trigger; removed before merge (see header).
+  push:
+    branches:
+      - feat/103-add-an-evidence-backed-compatibility
 
 permissions:
   contents: read
