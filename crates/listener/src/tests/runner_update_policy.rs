@@ -33,6 +33,7 @@ fn context() -> SessionCtx {
     live_log: None,
     job_log_upload: None,
     watchdog: WatchdogConfig::default(),
+    job_acquired: false,
   }
 }
 

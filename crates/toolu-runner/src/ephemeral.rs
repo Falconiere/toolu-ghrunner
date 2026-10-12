@@ -50,7 +50,15 @@ pub(crate) async fn finish_job(
   client: &reqwest::Client,
 ) -> Result<(), Box<dyn std::error::Error>> {
   let github = unregister(cfg, client).await?;
-  crate::delete_registration_state(state.config, state.creds, state.pending, state.lock, false)?;
+  crate::delete_registration_state(state.config, state.creds, state.pending, state.lock, false)
+    .map_err(|e| {
+      format!(
+        "ephemeral runner '{}' finished its job and GitHub was handled, but deleting {} failed: \
+         {e}",
+        cfg.runner_name,
+        state.config.display()
+      )
+    })?;
   let summary = match github {
     GithubSide::Unregistered => "unregistered on GitHub".to_owned(),
     GithubSide::Unverified(why) => format!(

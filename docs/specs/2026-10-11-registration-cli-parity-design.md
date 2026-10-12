@@ -57,8 +57,10 @@ upstream's `--ephemeral` implies:
 - `run` on an ephemeral registration never re-mints. A pure
   `listener::loop_decision::next_ephemeral_action` decides each iteration
   (first match wins):
-  1. a job ran (`Ok(Some(conclusion))`, any conclusion, even after a cancel)
-     → `Unregister`;
+  1. a job ran (`Ok(Some(conclusion))`, any conclusion, even after a cancel),
+     or was acquired before the lifecycle errored (`job_acquired`, e.g. the
+     completion report failed) → `Unregister`; after the cleanup such an
+     error still exits 1;
   2. cancelled → `Exit(0)`, registration kept;
   3. `--once` → `Exit(0)` on `Ok(None)`, `Exit(5)` on a session conflict,
      `Exit(1)` on any other error (same as today's `--once`);
@@ -133,9 +135,13 @@ pub ephemeral: bool,                               // after runner_group, before
 //   → RunnerError::Auth("…the runner registration no longer exists on GitHub (OAuth invalid_client)")
 
 // crates/listener/src/loop_decision.rs
+pub struct LoopSignals { pub once: bool, pub cancelled: bool, pub pending_remove: bool }
 pub enum EphemeralAction { Unregister, Exit(i32), BackoffRetry }
 pub fn next_ephemeral_action(outcome: &Result<Option<Conclusion>, RunnerError>,
-  once: bool, cancelled: bool, pending_remove: bool) -> EphemeralAction;
+  job_acquired: bool, signals: LoopSignals) -> EphemeralAction;
+
+// crates/listener/src/handler.rs — GitHubListener::job_acquired(&self) -> bool
+//   (true once acquire_job succeeded in the last run(), even if it then errored)
 ```
 
 CLI (`register`): `--labels <LABELS>` (now additive), `--no-default-labels`,
@@ -288,6 +294,11 @@ spelling and the `install-service` refusal follow from the parity goal and
 the "no contradictory lifecycle modes" requirement); no blocking question.
 
 **Status:** Approved
+
+Amendment 2 (review, 2026-10-12): a job acquired before the lifecycle
+errored (execution or completion failure) consumed the JIT; it is now
+unregistered and removed too (`job_acquired`), then `run` exits 1 — instead
+of backing off on the spent registration until `invalid_client`.
 
 Amendment (execution, 2026-10-12): the live lane showed AC-12's premise
 (401) was wrong — GitHub sends 400 `invalid_client`. The `invalid_client`

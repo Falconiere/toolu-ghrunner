@@ -47,6 +47,7 @@ pub(super) async fn poll_and_execute(
     billing_owner_id: body.billing_owner_id.clone(),
   };
   let acquired = acquire_job(&ctx.client, &body.run_service_url, &ctx.token, &acquire_req).await?;
+  ctx.job_acquired = true;
   let rs_token = acquired
     .run_service_token
     .clone()

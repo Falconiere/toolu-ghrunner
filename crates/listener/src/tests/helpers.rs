@@ -144,6 +144,7 @@ fn test_ctx(broker_url: String, live_log: Option<tokio::task::JoinHandle<()>>) -
     live_log,
     job_log_upload: None,
     watchdog: crate::helpers::WatchdogConfig::default(),
+    job_acquired: false,
   }
 }
 

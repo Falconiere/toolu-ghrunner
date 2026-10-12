@@ -53,7 +53,10 @@ pub async fn exchange_token(
     // A 4xx `invalid_client` means the registration is gone. An unreadable
     // body only loses that refinement; the status still classifies below.
     let body = if status.is_client_error() {
-      response.text().await.unwrap_or_default()
+      response.text().await.unwrap_or_else(|e| {
+        tracing::debug!(error = %e, "token exchange error body unreadable");
+        String::new()
+      })
     } else {
       String::new()
     };

@@ -86,6 +86,9 @@ lifecycle → install-service/status → live lane → docs → gate.
     "depends_on": ["ephemeral_decision", "register_flags"],
     "paths": [
       "crates/listener/src/loop_decision.rs",
+      "crates/listener/src/handler.rs",
+      "crates/listener/src/job_lifecycle.rs",
+      "crates/listener/src/tests",
       "crates/wire/src/net/register.rs",
       "crates/toolu-runner/src/main.rs",
       "crates/toolu-runner/src/run_cmd.rs",
@@ -97,7 +100,7 @@ lifecycle → install-service/status → live lane → docs → gate.
       "crates/toolu-runner/tests/run_loop_warn_test.rs"
     ],
     "input": "Real JIT envelope with a fresh 2048-bit RSA keypair; the captured job message fixtures/job_message.json cut to one real shell step (`true`, `exit 3`, `sleep 30` + SIGTERM); a persisted ephemeral registration whose runner_url and broker point at a local HTTP endpoint; DELETE answering 204 / 500 / 404 + empty runner list; OAuth token exchange answering 401; no token.",
-    "check": "cargo test -p toolu-runner --test ephemeral_run_test --test session_conflict_e2e_test --test run_loop_warn_test"
+    "check": "cargo test -p toolu-runner --test ephemeral_run_test --test session_conflict_e2e_test --test run_loop_warn_test && cargo test -p listener --lib"
   },
   {
     "id": "service_status",
@@ -212,6 +215,13 @@ lifecycle → install-service/status → live lane → docs → gate.
   on GitHub makes the token exchange answer 400 `invalid_client`, which toolu
   retried forever as `Protocol`; the spec was amended and AC-12 now replays
   the live capture.
+
+- Review round (2026-10-12): a job acquired before the lifecycle errored
+  is now unregistered too (`GitHubListener::job_acquired`, new
+  `SessionCtx.job_acquired`, `LoopSignals` to keep clippy's bool-param limit);
+  `ephemeral_run` paths/check gained the listener files and `cargo test -p
+  listener --lib`, and its suite gained the loop-edge cases (org URL, retry,
+  `--once`, `.pending_remove`, conflict, completion failure).
 
 ## Plan review (2026-10-11)
 

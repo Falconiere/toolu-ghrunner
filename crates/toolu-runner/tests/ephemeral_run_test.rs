@@ -14,6 +14,10 @@
 //! - AC-7: DELETE 500 keeps state and exits 2 naming `toolu-runner remove`;
 //!   404 + an empty runner list counts as removed; no token → removed,
 //!   "not verified".
+//! - Loop edges: org URL (unverified removal), a transient failure retried
+//!   on the same registration, `--once`, `.pending_remove`, a session
+//!   conflict (exit 5), and a completion failure after the acquire (cleaned,
+//!   exit 1).
 //! - AC-12: a runner deleted on GitHub (the live 400 `invalid_client`
 //!   token-exchange capture) exits 1 and keeps state.
 
@@ -71,13 +75,18 @@ fn delete_path() -> String {
 
 /// Persist an ephemeral registration pointing at `server`.
 fn write_registration(home: &Path, server: &MockServer) -> TestResult<PathBuf> {
+  write_registration_at(home, server, "octo/demo")
+}
+
+/// Persist an ephemeral registration for `<server>/<url_path>`.
+fn write_registration_at(home: &Path, server: &MockServer, url_path: &str) -> TestResult<PathBuf> {
   let jit = boot_fixtures::real_jit_config_b64(&server.uri())?;
   let reg_dir = home.join("runners").join("octo").join("demo");
   std::fs::create_dir_all(reg_dir.join("_diag"))?;
   std::fs::write(reg_dir.join("_diag").join(DIAG_MARKER), "kept")?;
   let config_path = reg_dir.join("config.toml");
   let cfg = RunnerRegistrationConfig {
-    runner_url: format!("{}/octo/demo", server.uri()),
+    runner_url: format!("{}/{url_path}", server.uri()),
     runner_name: RUNNER_NAME.to_owned(),
     runner_id: RUNNER_ID,
     auth_token: "test-client-id".to_owned(),
@@ -153,6 +162,17 @@ async fn idle_server() -> TestResult<MockServer> {
 
 /// Spawn `run --config <path>` (no `--once`), with or without a token.
 fn spawn_run(home: &Path, config_path: &Path, token: Option<&str>) -> TestResult<Child> {
+  spawn_run_with(home, config_path, token, &[])
+}
+
+/// [`spawn_run`] with extra `run` arguments (e.g. `--once`). The session
+/// conflict wait is shrunk to 50 ms so an 8-attempt conflict ends fast.
+fn spawn_run_with(
+  home: &Path,
+  config_path: &Path,
+  token: Option<&str>,
+  extra: &[&str],
+) -> TestResult<Child> {
   let mut cmd = Command::new(env!("CARGO_BIN_EXE_toolu-runner"));
   cmd
     .env("HOME", home)
@@ -162,8 +182,10 @@ fn spawn_run(home: &Path, config_path: &Path, token: Option<&str>) -> TestResult
     .stdin(Stdio::null())
     .stdout(Stdio::piped())
     .stderr(Stdio::piped())
+    .env("TOOLU_RUNNER_SESSION_CONFLICT_INTERVAL_MS", "50")
     .args(["run", "--config"])
-    .arg(config_path);
+    .arg(config_path)
+    .args(extra);
   if let Some(token) = token {
     cmd.env("TOOLU_RUNNER_TOKEN", token);
   }
@@ -419,5 +441,159 @@ async fn dead_registration_before_a_job_exits_1_and_keeps_state() -> TestResult<
   let mint = format!("{RUNNERS_PATH}/generate-jitconfig");
   assert_eq!(count(&server, "POST", &mint).await?, 0);
   assert_state(&config_path, true, &out);
+  Ok(())
+}
+
+/// GitHub's live 409 reply to a second session for one registration.
+const CONFLICT_CAPTURE: &str = include_str!("../../wire/tests/session_conflict_409.json");
+
+/// A broker whose `POST /session` answers `template` (token exchange mounted).
+async fn session_failing_server(template: ResponseTemplate) -> TestResult<MockServer> {
+  let server = MockServer::start().await;
+  boot_fixtures::mount_auth(&server).await;
+  Mock::given(method("POST"))
+    .and(path("/session"))
+    .respond_with(template)
+    .mount(&server)
+    .await;
+  mount_runners_api(&server, 204).await;
+  Ok(server)
+}
+
+/// Assert an exit that kept the registration and never unregistered or
+/// re-minted.
+async fn assert_kept(
+  out: &Output,
+  server: &MockServer,
+  config_path: &Path,
+  code: i32,
+) -> TestResult<()> {
+  assert_eq!(
+    out.status.code(),
+    Some(code),
+    "stderr: {}",
+    text(&out.stderr)
+  );
+  assert_eq!(count(server, "DELETE", &delete_path()).await?, 0);
+  let mint = format!("{RUNNERS_PATH}/generate-jitconfig");
+  assert_eq!(count(server, "POST", &mint).await?, 0);
+  assert_state(config_path, true, out);
+  Ok(())
+}
+
+/// An org-level registration: the repo-scoped runners API cannot address it,
+/// so the local state goes and the output says GitHub-side removal was not
+/// verified (no DELETE is sent).
+#[tokio::test]
+async fn org_registration_removes_local_state_and_says_unverified() -> TestResult<()> {
+  let home = tempfile::tempdir()?;
+  let server = job_server("true", 204).await?;
+  let config_path = write_registration_at(home.path(), &server, "octo")?;
+  let out = wait_exit(spawn_run(home.path(), &config_path, Some(TOKEN))?).await?;
+  assert_eq!(out.status.code(), Some(0), "stderr: {}", text(&out.stderr));
+  assert_eq!(count(&server, "POST", "/acquirejob").await?, 1);
+  assert_eq!(count(&server, "DELETE", &delete_path()).await?, 0);
+  let stdout = text(&out.stdout);
+  assert!(
+    stdout.contains("not verified here (no runners API endpoint"),
+    "{stdout}"
+  );
+  assert_state(&config_path, false, &out);
+  Ok(())
+}
+
+/// A transient failure before any job backs off and retries the same,
+/// unused registration (no re-mint); the retry then takes the job.
+#[tokio::test]
+async fn transient_failure_before_a_job_retries_the_same_registration() -> TestResult<()> {
+  let home = tempfile::tempdir()?;
+  let server = job_server("true", 204).await?;
+  Mock::given(method("POST"))
+    .and(path("/session"))
+    .respond_with(ResponseTemplate::new(500))
+    .up_to_n_times(1)
+    .with_priority(1)
+    .mount(&server)
+    .await;
+  let config_path = write_registration(home.path(), &server)?;
+  let out = wait_exit(spawn_run(home.path(), &config_path, Some(TOKEN))?).await?;
+  assert_eq!(
+    count(&server, "POST", "/session").await?,
+    2,
+    "one failure, one retry"
+  );
+  assert_ran_once_and_cleaned(&out, &server, &config_path, "succeeded").await
+}
+
+/// `--once` keeps its single-lifecycle meaning: a transient failure exits 1
+/// at once (no backoff), keeping the unused registration.
+#[tokio::test]
+async fn once_with_a_transient_failure_exits_1_and_keeps_state() -> TestResult<()> {
+  let home = tempfile::tempdir()?;
+  let server = session_failing_server(ResponseTemplate::new(500)).await?;
+  let config_path = write_registration(home.path(), &server)?;
+  let child = spawn_run_with(home.path(), &config_path, Some(TOKEN), &["--once"])?;
+  let out = wait_exit(child).await?;
+  assert_eq!(
+    count(&server, "POST", "/session").await?,
+    1,
+    "no retry under --once"
+  );
+  assert_kept(&out, &server, &config_path, 1).await
+}
+
+/// A `remove` that ran while this `run` held the lock (`.pending_remove`)
+/// ends the loop after the failed lifecycle instead of retrying; nothing was
+/// used, so the registration is kept for that `remove`.
+#[tokio::test]
+async fn pending_remove_exits_0_and_keeps_state() -> TestResult<()> {
+  let home = tempfile::tempdir()?;
+  let server = session_failing_server(ResponseTemplate::new(500)).await?;
+  let config_path = write_registration(home.path(), &server)?;
+  let dir = config_path.parent().ok_or("registration dir")?;
+  std::fs::write(dir.join(".pending_remove"), "{}")?;
+  let out = wait_exit(spawn_run(home.path(), &config_path, Some(TOKEN))?).await?;
+  assert_eq!(count(&server, "POST", "/session").await?, 1);
+  assert_kept(&out, &server, &config_path, 0).await
+}
+
+/// A session conflict that outlasts the bounded retry exits 5 (as `run`
+/// and `boot` do), keeping the registration.
+#[tokio::test]
+async fn session_conflict_exits_5_and_keeps_state() -> TestResult<()> {
+  let capture: Value = serde_json::from_str(CONFLICT_CAPTURE)?;
+  let status = capture
+    .pointer("/response/status")
+    .and_then(Value::as_u64)
+    .ok_or("status")?;
+  let home = tempfile::tempdir()?;
+  let server = session_failing_server(ResponseTemplate::new(u16::try_from(status)?)).await?;
+  let config_path = write_registration(home.path(), &server)?;
+  let out = wait_exit(spawn_run(home.path(), &config_path, Some(TOKEN))?).await?;
+  assert_eq!(count(&server, "POST", "/session").await?, 8);
+  assert_kept(&out, &server, &config_path, 5).await
+}
+
+/// The job was acquired and ran, but reporting its completion failed: the
+/// job still consumed the registration, so it is unregistered and removed,
+/// and `run` exits 1 naming the error.
+#[tokio::test]
+async fn acquired_job_with_failed_completion_still_cleans_up() -> TestResult<()> {
+  let home = tempfile::tempdir()?;
+  let server = job_server("true", 204).await?;
+  Mock::given(method("POST"))
+    .and(path("/completejob"))
+    .respond_with(ResponseTemplate::new(400))
+    .with_priority(1)
+    .mount(&server)
+    .await;
+  let config_path = write_registration(home.path(), &server)?;
+  let out = wait_exit(spawn_run(home.path(), &config_path, Some(TOKEN))?).await?;
+  let stderr = text(&out.stderr);
+  assert_eq!(out.status.code(), Some(1), "stderr: {stderr}");
+  assert!(stderr.contains("the job was acquired"), "{stderr}");
+  assert_eq!(count(&server, "POST", "/acquirejob").await?, 1);
+  assert_eq!(count(&server, "DELETE", &delete_path()).await?, 1);
+  assert_state(&config_path, false, &out);
   Ok(())
 }

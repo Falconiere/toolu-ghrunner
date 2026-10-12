@@ -233,6 +233,7 @@ fn make_ctx(
     live_log: None,
     job_log_upload: None,
     watchdog,
+    job_acquired: false,
   })
 }
 

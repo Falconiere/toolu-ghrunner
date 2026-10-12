@@ -62,6 +62,17 @@ pub fn next_action(
   }
 }
 
+/// Facts the run loop observed after a lifecycle, besides its outcome.
+#[derive(Debug, Clone, Copy)]
+pub struct LoopSignals {
+  /// `run --once` was passed.
+  pub once: bool,
+  /// SIGINT/SIGTERM fired (graceful shutdown).
+  pub cancelled: bool,
+  /// A `remove` wrote `.pending_remove` while this run held the lock.
+  pub pending_remove: bool,
+}
+
 /// What `run` does after a listener lifecycle on an **ephemeral**
 /// registration (`register --ephemeral`): it never re-mints.
 #[derive(Debug, PartialEq, Eq)]
@@ -78,35 +89,35 @@ pub enum EphemeralAction {
 
 /// Decide an ephemeral registration's next action (#92). First match wins:
 ///
-/// 1. a job ran (`Ok(Some(_))`, any conclusion, even after a cancel) →
-///    `Unregister`;
-/// 2. `cancelled` → `Exit(0)` (shut down before a job; registration kept);
-/// 3. `once` → `Exit(0)` on `Ok(None)`, `Exit(SESSION_CONFLICT_EXIT_CODE)` on a
+/// 1. a job ran (`Ok(Some(_))`, any conclusion, even after a cancel) or was
+///    acquired before the lifecycle errored (`job_acquired`: execution or
+///    completion failed, but the job consumed the JIT) → `Unregister`;
+/// 2. `signals.cancelled` → `Exit(0)` (shut down before a job; registration kept);
+/// 3. `signals.once` → `Exit(0)` on `Ok(None)`, `Exit(SESSION_CONFLICT_EXIT_CODE)` on a
 ///    session conflict, `Exit(1)` on any other `Err`;
-/// 4. `pending_remove` → `Exit(0)`;
+/// 4. `signals.pending_remove` → `Exit(0)`;
 /// 5. `Err(SessionConflict(_))` → `Exit(SESSION_CONFLICT_EXIT_CODE)`;
 /// 6. `Err(Auth(_))` → `Exit(1)` (the JIT is dead and is never re-minted);
 /// 7. `Ok(None)` or any other `Err` → `BackoffRetry`.
 pub fn next_ephemeral_action(
   outcome: &Result<Option<Conclusion>, RunnerError>,
-  once: bool,
-  cancelled: bool,
-  pending_remove: bool,
+  job_acquired: bool,
+  signals: LoopSignals,
 ) -> EphemeralAction {
-  if matches!(outcome, Ok(Some(_))) {
+  if job_acquired || matches!(outcome, Ok(Some(_))) {
     return EphemeralAction::Unregister;
   }
-  if cancelled {
+  if signals.cancelled {
     return EphemeralAction::Exit(0);
   }
-  if once {
+  if signals.once {
     return match outcome {
       Ok(_) => EphemeralAction::Exit(0),
       Err(RunnerError::SessionConflict(_)) => EphemeralAction::Exit(SESSION_CONFLICT_EXIT_CODE),
       Err(_) => EphemeralAction::Exit(1),
     };
   }
-  if pending_remove {
+  if signals.pending_remove {
     return EphemeralAction::Exit(0);
   }
   match outcome {

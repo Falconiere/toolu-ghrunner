@@ -18,7 +18,9 @@ use config::config::{
 };
 use config::{lockfile, registry};
 use listener::GitHubListener;
-use listener::loop_decision::{EphemeralAction, LoopAction, next_action, next_ephemeral_action};
+use listener::loop_decision::{
+  EphemeralAction, LoopAction, LoopSignals, next_action, next_ephemeral_action,
+};
 use listener::session_conflict::SessionConflictPolicy;
 use shared::{Conclusion, RunnerError, SESSION_CONFLICT_EXIT_CODE, SecretMasker};
 use tokio_util::sync::CancellationToken;
@@ -153,12 +155,17 @@ impl RunLoop {
       let cfg = load_run_config(&self.config_path)?;
       // Fatal setup errors (corrupt config, unparseable JIT) deliberately
       // exit here without backoff — only listener outcomes are retried.
-      let raw = self.run_once(&cfg).await?;
+      let (raw, job_acquired) = self.run_once(&cfg).await?;
       let cancelled = self.cancel.is_cancelled();
       let pending_remove = self.pending_path.exists();
       if cfg.ephemeral {
-        match next_ephemeral_action(&raw, self.once, cancelled, pending_remove) {
-          EphemeralAction::Unregister => return self.finish_ephemeral(&cfg).await,
+        let signals = LoopSignals {
+          once: self.once,
+          cancelled,
+          pending_remove,
+        };
+        match next_ephemeral_action(&raw, job_acquired, signals) {
+          EphemeralAction::Unregister => return self.finish_ephemeral(&cfg, raw).await,
           EphemeralAction::Exit(code) => return finish_ephemeral_exit(code, raw),
           EphemeralAction::BackoffRetry if self.backoff_step(&mut backoff).await => return Ok(()),
           EphemeralAction::BackoffRetry => continue,
@@ -190,11 +197,12 @@ impl RunLoop {
   /// Build a listener from `cfg` and run one JIT lifecycle. The outer
   /// `Result` is fatal setup (bad config / unparseable JIT blob / listener
   /// init); the inner is the listener's own outcome — `Ok(Some(_))` means a
-  /// job ran, which an ephemeral registration needs to know.
+  /// job ran — paired with whether a job was acquired at all (true even when
+  /// the lifecycle then errored), which an ephemeral registration needs.
   async fn run_once(
     &self,
     cfg: &RunnerRegistrationConfig,
-  ) -> Result<Result<Option<Conclusion>, RunnerError>, Box<dyn std::error::Error>> {
+  ) -> Result<(Result<Option<Conclusion>, RunnerError>, bool), Box<dyn std::error::Error>> {
     let runner_cfg = build_runner_config(cfg)?;
     let jit = require_jit_config(cfg)?;
     let listener = GitHubListener::new(
@@ -205,14 +213,18 @@ impl RunLoop {
     )
     .map_err(|e| format!("listener init: {e}"))?
     .with_session_conflict_policy(self.conflict_policy);
-    Ok(listener.run(self.cancel.clone()).await)
+    let outcome = listener.run(self.cancel.clone()).await;
+    Ok((outcome, listener.job_acquired()))
   }
 
   /// An ephemeral registration's job ran: unregister it and delete the local
-  /// state ([`crate::ephemeral::finish_job`]).
+  /// state ([`crate::ephemeral::finish_job`]). When the lifecycle itself
+  /// errored after the acquire (execution or completion failed), the cleanup
+  /// still runs and `run` then exits 1 naming that error.
   async fn finish_ephemeral(
     &self,
     cfg: &RunnerRegistrationConfig,
+    outcome: Result<Option<Conclusion>, RunnerError>,
   ) -> Result<(), Box<dyn std::error::Error>> {
     let state = crate::ephemeral::LocalState {
       config: &self.config_path,
@@ -220,7 +232,14 @@ impl RunLoop {
       pending: &self.pending_path,
       lock: &self.lock_path,
     };
-    crate::ephemeral::finish_job(cfg, &state, &self.client).await
+    crate::ephemeral::finish_job(cfg, &state, &self.client).await?;
+    match outcome {
+      Ok(_) => Ok(()),
+      Err(e) => Err(Box::new(CodedExit {
+        code: 1,
+        message: format!("listener: {e} (the job was acquired; its registration was removed)"),
+      })),
+    }
   }
 
   /// Re-mint a fresh JIT config for the next iteration. Re-resolves the
