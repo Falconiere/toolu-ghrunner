@@ -9,7 +9,7 @@ no OTel.
   is now a **bin-only** crate (the CLI entrypoint: `main.rs` +
   `cli.rs` + `register_cmd.rs` + `run_cmd.rs` + `boot_cmd.rs` +
   `service_cmd.rs` + `login_cmd.rs` + `status_cmd.rs` +
-  `create_app_cmd.rs`).
+  `create_app_cmd.rs` + `ephemeral.rs`).
   The execution **engine** lives in
   `execution`; the GitHub **JIT lifecycle** lives in `listener`.
 - Workspace members (dependency order): `protocol`, `shared`,
@@ -198,7 +198,14 @@ to that list requires proving the value is not a real credential.
   upstream's `ReturnCode.SessionConflict`), with or without `--once` — the
   loop never wraps it in backoff or a re-mint. `--once` opts back into
   single-job semantics (exit with the listener's status). The per-repo
-  `.lock` is held for the whole loop.
+  `.lock` is held for the whole loop. **Ephemeral exception (#92):** a
+  registration persisted with `ephemeral = true` (`register --ephemeral`)
+  never re-mints — `listener::loop_decision::next_ephemeral_action` decides
+  (a job ran, or was acquired before the lifecycle errored —
+  `GitHubListener::job_acquired` — → `Unregister`, the latter then exits 1; cancel / `--once` / `.pending_remove` → exit,
+  state kept; `SessionConflict` → 5; `Auth` → 1, state kept; else backoff on
+  the same unused JIT) and `ephemeral.rs` unregisters + deletes the local
+  registration after its one job.
 - **No self-daemonization for `run`.** `run` blocks in the foreground
   and loops; it never double-forks. Boot/crash persistence is delegated
   to the OS: `toolu-runner install-service` generates and activates a
@@ -327,6 +334,13 @@ to that list requires proving the value is not a real credential.
   `jit_endpoint_for_host` (github.com → `pipelinesgh.azureedge.net`,
   any other host → `pipelines.<host>`), `resolve_data_dir`,
   `resolve_work_dir`.
+- `labels.rs` — pure `register` label resolution (#92): `default_labels`
+  (`self-hosted` + `shared::platform` `RUNNER_OS`/`RUNNER_ARCH` spelling) and
+  `resolve_labels` (defaults unless `--no-default-labels`, then `--labels`;
+  empty entries dropped, case-insensitive dedupe keeping the first spelling,
+  256-char limit, upstream's error for `--no-default-labels` without labels).
+  Pinned against the live `generate-jitconfig` capture
+  `tests/fixtures/jit_labels_probe.json`.
 - `lockfile.rs` — single-job `fs2` file lock. `acquire(path,
   config_path)` returns a `LockGuard`; `Drop` releases the OS
   advisory lock. Stale-lock recovery uses `is_pid_alive` (sysinfo)
@@ -419,7 +433,10 @@ to that list requires proving the value is not a real credential.
 
 - `net/` — async network layer. **One-way dependency on `protocol`**
   (request types from `protocol`, response types in `protocol` or
-  `reporting`). `auth` (token exchange), `device_auth` (GitHub
+  `reporting`). `auth` (token exchange; a 4xx OAuth `invalid_client` — GitHub's reply once
+  the runner registration was deleted, live capture
+  `tests/oauth_invalid_client_400.json` — is `RunnerError::Auth`, never a
+  retried `Protocol`), `device_auth` (GitHub
   OAuth **device flow** — `request_device_code` / `poll_for_token`
   / pure `parse_poll_response`; host-relative so GHES works;
   backs `toolu-runner login`), `session` (create / delete
@@ -619,7 +636,12 @@ to that list requires proving the value is not a real credential.
   (`Err(SessionConflict)` → `Exit(5)`, also under `--once`; `Ok(())`
   and `Err(Auth)` → `Reregister` since the JIT is spent/dead, any other
   `Err` → `BackoffRetry`) — unit-testable without a broker, mirroring
-  `message_route`.
+  `message_route`. `next_ephemeral_action(outcome, job_acquired,
+  LoopSignals)` (→ `EphemeralAction`) is the same decision for an
+  `--ephemeral` registration (no re-mint; see the always-online rule's
+  ephemeral exception). `GitHubListener::job_acquired()` reports whether the
+  last `run()` acquired a job (set from `SessionCtx.job_acquired` right after
+  `acquire_job`), even when it then returned an `Err`.
 
 ### `toolu-runner/` — CLI bin (deps: shared, protocol, config, wire, observability, listener)
 
@@ -681,6 +703,18 @@ to that list requires proving the value is not a real credential.
   into the prior config via `config::remint::merge_reminted_config`
   (preserving `[services]`/`[cache]`/`[workspace]`/`[shadow]` verbatim),
   and rewrites `config.toml` / `credentials.json` all-or-nothing.
+- Labels/ephemeral (#92): `register` resolves labels through
+  `config::labels` (`--labels` additive to the defaults,
+  `--no-default-labels`) and persists `--ephemeral` as the config's
+  `ephemeral` key.
+- `ephemeral.rs` — `finish_job`: after an ephemeral registration's one job,
+  unregister it with the crate root's `remove_bearer` +
+  `wire::net::unregister_runner` (404 confirmed by lookup), then
+  `delete_registration_state` (`_diag/` kept). No bearer or an org URL →
+  local state removed and the output says GitHub-side removal was not
+  verified (GitHub removes a used JIT runner itself — verified live). A
+  retryable unregister error keeps the local state and fails naming
+  `toolu-runner remove` (exit 2).
 - `run_cmd.rs` — the always-online `run` loop (`cmd_run`, extracted from
   `main.rs`). Startup: init tracing, resolve + load config, acquire the
   per-repo `.lock` (held for the whole loop), bridge SIGINT/SIGTERM to
@@ -726,7 +760,8 @@ to that list requires proving the value is not a real credential.
   systemd `systemctl --user daemon-reload` + `enable --now` /
   `disable --now`. Files land at `~/Library/LaunchAgents/<label>.plist`
   / `~/.config/systemd/user/<unit>` (honoring `$HOME`). Non-macOS/Linux
-  errors naming launchd/systemd. No network, no tracing init.
+  errors naming launchd/systemd. No network, no tracing init. Refuses an
+  `ephemeral = true` registration (render/install; `--remove` still works).
 - `login_cmd.rs` — `LoginArgs` / `LogoutArgs` (positional host; **no
   `--config`** — the token store is pinned to
   `config::registry::runner_home()`, shared by all repos) + `cmd_login`
@@ -736,7 +771,8 @@ to that list requires proving the value is not a real credential.
   OAuth App is registered — using it errors before any network call);
   until then every device flow needs `--client-id` (login) or
   `TOOLU_RUNNER_CLIENT_ID` env, and GHES always does.
-- `status_cmd.rs` — `cmd_status`: prints the persisted registration,
+- `status_cmd.rs` — `cmd_status`: prints the persisted registration (incl.
+  `mode:` ephemeral / persistent),
   credential presence, the token-store backend (file default / keyring
   opt-in), and any stored device-flow login token for the registered host
   **plus per-host login state** (the not-logged-in line carries the

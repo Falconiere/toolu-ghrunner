@@ -40,6 +40,11 @@ pub struct RunnerRegistrationConfig {
   pub labels: Vec<String>,
   /// Runner group (defaults to `"Default"`).
   pub runner_group: String,
+  /// `register --ephemeral`: `run` takes one job, then unregisters the runner
+  /// and deletes this registration instead of re-minting. Absent in configs
+  /// written before #92, which load as `false`.
+  #[serde(default)]
+  pub ephemeral: bool,
   /// Runtime section: paths + JIT config + protocol version.
   pub runtime: RuntimeConfig,
   /// `[services]` section: artifact/cache/OIDC serving mode.

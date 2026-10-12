@@ -23,8 +23,7 @@ use config::{registry, repo_infer};
 use shared::RunnerError;
 
 use crate::cli::{
-  RegisterArgs, credentials_path_for, default_labels, runner_name_or_hostname,
-  work_folder_or_default,
+  RegisterArgs, credentials_path_for, runner_name_or_hostname, work_folder_or_default,
 };
 use crate::login_cmd;
 
@@ -42,7 +41,12 @@ pub(crate) async fn cmd_register(args: RegisterArgs) -> Result<(), Box<dyn std::
   };
   let creds_path = credentials_path_for(&config_path);
   let runner_name = runner_name_or_hostname(args.name);
-  let labels = resolve_labels(args.labels);
+  let labels = config::labels::resolve_labels(
+    &args.labels,
+    args.no_default_labels,
+    &config::labels::default_labels(),
+  )
+  .map_err(|e| format!("{e}"))?;
 
   ensure_not_registered(&config_path, args.replace)?;
 
@@ -64,6 +68,7 @@ pub(crate) async fn cmd_register(args: RegisterArgs) -> Result<(), Box<dyn std::
       config_path: &config_path,
       creds_path: &creds_path,
       replace: args.replace,
+      ephemeral: args.ephemeral,
     },
     &client,
   )
@@ -78,17 +83,12 @@ pub(crate) async fn cmd_register(args: RegisterArgs) -> Result<(), Box<dyn std::
     &creds_path,
     &labels,
   );
-  Ok(())
-}
-
-/// The runner's advertised labels: `--labels` verbatim, or the default set
-/// when none were passed.
-fn resolve_labels(labels: Vec<String>) -> Vec<String> {
-  if labels.is_empty() {
-    default_labels()
-  } else {
-    labels
+  if args.ephemeral {
+    println!(
+      "ephemeral: `run` takes one job, then unregisters the runner and deletes this registration"
+    );
   }
+  Ok(())
 }
 
 /// Resolve the registration `(url, host)`: an explicit `--url` is
@@ -252,6 +252,8 @@ pub(crate) struct RegisterPersist<'a> {
   pub(crate) creds_path: &'a Path,
   /// Whether to replace an existing same-named runner at mint time.
   pub(crate) replace: bool,
+  /// `register --ephemeral`, persisted as the config's `ephemeral` key.
+  pub(crate) ephemeral: bool,
 }
 
 /// Per-request timeout for every `generate-jitconfig` HTTP call (up to three
@@ -378,6 +380,7 @@ pub(crate) async fn remint_and_persist(
     config_path,
     creds_path,
     replace: true,
+    ephemeral: prior.ephemeral,
   };
   let registration = mint_jit(&p, client).await?;
 
@@ -468,6 +471,7 @@ fn build_registration_config(
     auth_token: client_id.to_owned(),
     labels: p.labels.to_vec(),
     runner_group: p.runner_group.to_owned(),
+    ephemeral: p.ephemeral,
     runtime,
     services: ServicesSection::default(),
     cache: CacheSection::default(),

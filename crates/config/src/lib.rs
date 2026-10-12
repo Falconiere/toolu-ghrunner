@@ -9,6 +9,8 @@ pub mod app_store;
 pub mod auth_store;
 /// Runner registration + runtime config load/save (TOML) and credentials (JSON).
 pub mod config;
+/// Runner label resolution for `register` (upstream defaults + `--labels`).
+pub mod labels;
 /// Single-job `fs2` advisory lockfile with stale-lock recovery.
 pub mod lockfile;
 /// Per-repo runner registration registry (home layout + config resolution).

@@ -102,6 +102,7 @@ async fn replay(
     live_log: None,
     job_log_upload: None,
     watchdog: crate::helpers::WatchdogConfig::default(),
+    job_acquired: false,
   };
   let (setup, lines, _, handle) = connect_and_report_setup(&ctx, &msg, "", &msg.plan.plan_id).await;
   assert!(handle.is_none());

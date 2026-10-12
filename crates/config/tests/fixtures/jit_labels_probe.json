@@ -1,0 +1,43 @@
+{
+  "provenance": {
+    "captured": "2026-10-11",
+    "host": "github.com",
+    "repository": "Falconiere/toolu-ghrunner",
+    "endpoint": "POST /repos/{owner}/{repo}/actions/runners/generate-jitconfig",
+    "issue": "Falconiere/toolu-ghrunner#92",
+    "sanitization": "Only the request label arrays, the HTTP status, GitHub's error message and the `runner.labels` it echoed are kept; `encoded_jit_config` (credentials) was discarded. Runners 163, 164 and 172 were deleted right after their capture."
+  },
+  "cases": [
+    {
+      "request_labels": ["toolu-92-probe-only"],
+      "status": 201,
+      "runner_id": 163,
+      "stored_labels": [
+        { "id": 0, "name": "toolu-92-probe-only", "type": "read-only" }
+      ]
+    },
+    {
+      "request_labels": ["toolu-92-dup", "TOOLU-92-DUP", "self-hosted"],
+      "status": 201,
+      "runner_id": 164,
+      "stored_labels": [
+        { "id": 0, "name": "self-hosted", "type": "read-only" },
+        { "id": 0, "name": "toolu-92-dup", "type": "read-only" }
+      ]
+    },
+    {
+      "request_labels": ["é-92-probe", "É-92-PROBE"],
+      "status": 201,
+      "runner_id": 172,
+      "captured": "2026-10-12 (PR #167 review: GitHub folds non-ASCII case)",
+      "stored_labels": [
+        { "id": 0, "name": "é-92-probe", "type": "read-only" }
+      ]
+    },
+    {
+      "request_labels": [],
+      "status": 422,
+      "message": "Invalid request.\n\nInvalid property /labels: 1 item required; only 0 were supplied."
+    }
+  ]
+}

@@ -19,7 +19,7 @@ Higher-level domain wrappers and reporting-only types live in
 | File | Primary item | Purpose |
 | --- | --- | --- |
 | `app_manifest.rs` | `CallbackServer` / `convert_manifest_code` | Loopback HTTP server for the GitHub App manifest flow's redirect callback, plus the `app-manifests/{code}/conversions` POST. |
-| `auth.rs` | `authenticate` / `exchange_token` | POSTs the signed JWT to swap it for an OAuth2 access token (the JWT itself is built in `protocol::auth`). |
+| `auth.rs` | `authenticate` / `exchange_token` | POSTs the signed JWT to swap it for an OAuth2 access token (the JWT itself is built in `protocol::auth`). A 4xx OAuth `invalid_client` reply (the registration was deleted on GitHub) is `RunnerError::Auth`. |
 | `device_auth.rs` | `request_device_code` / `poll_for_token` | GitHub OAuth device-authorization flow: request a device/user code, then poll until an access token or terminal failure. |
 | `log_upload.rs` | `upload_block_blob` / `upload_log` | Raw Azure Blob Storage PUT requests (BlockBlob and AppendBlob); the mode decision lives in `crate::reporting::log_upload`. |
 | `messages.rs` | `poll_message` / `acknowledge_message` | HTTP transport for the broker long-poll loop; response decryption lives in `protocol::messages`. |

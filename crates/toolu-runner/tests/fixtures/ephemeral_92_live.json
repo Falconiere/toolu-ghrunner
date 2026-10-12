@@ -1,0 +1,73 @@
+{
+  "provenance": {
+    "captured": "2026-10-12",
+    "host": "github.com",
+    "repository": "Falconiere/toolu-ghrunner",
+    "binary": "target/debug/toolu-runner built from branch feat/92-registration-cli-parity-ephemeral-and (implementation commit 5a7db8d plus the invalid_client classification)",
+    "platform": "Linux X64",
+    "recheck": "bash scripts/test/ephemeral_92_live_check.sh (needs an authenticated gh)"
+  },
+  "label_registrations": [
+    {
+      "runner_id": 166,
+      "argv": "register --no-default-labels --labels toolu-92-only,TOOLU-92-ONLY,,extra-92",
+      "persisted_labels": ["toolu-92-only", "extra-92"],
+      "github_labels": ["toolu-92-only", "extra-92"],
+      "removed_with": "toolu-runner remove"
+    },
+    {
+      "runner_id": 167,
+      "argv": "register --labels gpu-92",
+      "persisted_labels": ["self-hosted", "Linux", "X64", "gpu-92"],
+      "github_labels": ["self-hosted", "linux", "X64", "gpu-92"],
+      "note": "GitHub stored the OS label as 'linux'; labels match case-insensitively",
+      "removed_with": "toolu-runner remove"
+    }
+  ],
+  "ephemeral_jobs": [
+    {
+      "scenario": "92-S2 failing job",
+      "runner_id": 169,
+      "labels": ["self-hosted", "linux", "X64", "toolu-92-eph-fail"],
+      "workflow": "post-results-live.yml (runner_label=toolu-92-eph-fail, scenario=failure)",
+      "run_id": 38187780731,
+      "run_conclusion": "failure",
+      "token_at_run": true,
+      "toolu_exit": 0,
+      "toolu_stdout": "ephemeral runner 'toolu-92-failure' finished its job: unregistered on GitHub; local registration removed (_diag kept).",
+      "runner_after": 404
+    },
+    {
+      "scenario": "92-S2 successful job, no token at run time (no DELETE sent)",
+      "runner_id": 170,
+      "labels": ["self-hosted", "linux", "X64", "toolu-runner-v1"],
+      "workflow": "noop-live.yml",
+      "run_id": 38187819741,
+      "run_conclusion": "success",
+      "token_at_run": false,
+      "toolu_exit": 0,
+      "toolu_stdout": "ephemeral runner 'toolu-92-success' finished its job: GitHub removes a used JIT runner itself — not verified here (no GitHub token); check the repository's runner list; local registration removed (_diag kept).",
+      "runner_after": 404
+    },
+    {
+      "scenario": "92-S2 job cancelled from GitHub (gh run cancel) mid-step",
+      "runner_id": 171,
+      "labels": ["self-hosted", "linux", "X64", "toolu-runner-v1"],
+      "workflow": "cancel-live.yml",
+      "run_id": 38187869097,
+      "run_conclusion": "cancelled",
+      "token_at_run": true,
+      "toolu_exit": 0,
+      "toolu_stdout": "ephemeral runner 'toolu-92-cancel' finished its job: unregistered on GitHub; local registration removed (_diag kept).",
+      "runner_after": 404
+    }
+  ],
+  "deleted_before_job": {
+    "scenario": "92-S3 runner deleted on GitHub before any job",
+    "runner_id": 168,
+    "token_exchange": "400 {\"error\":\"invalid_client\"} (crates/wire/tests/oauth_invalid_client_400.json)",
+    "before_fix": "run retried for 150 s until SIGTERM (400 classified as Protocol)",
+    "after_fix": "run exited 1 at once; config.toml and credentials.json kept; stderr: 'the ephemeral registration was kept — if the runner was removed on GitHub, run `toolu-runner remove` to clean it up'",
+    "then": "toolu-runner remove: 'unregistered on GitHub' (404 confirmed by lookup), local state removed"
+  }
+}

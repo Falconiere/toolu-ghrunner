@@ -119,6 +119,7 @@ fn harness() -> TestResult<Harness> {
     live_log: None,
     job_log_upload: None,
     watchdog: crate::helpers::WatchdogConfig::default(),
+    job_acquired: false,
   };
   Ok(Harness {
     ctx,

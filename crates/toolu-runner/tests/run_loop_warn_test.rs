@@ -41,6 +41,7 @@ fn write_fixture(
     auth_token: "client-id".to_owned(),
     labels: vec!["self-hosted".to_owned()],
     runner_group: "Default".to_owned(),
+    ephemeral: false,
     runtime: RuntimeConfig {
       // `!`/spaces are outside the standard base64 alphabet, so
       // `JitConfig::parse` fails and `run` exits fast with no network.

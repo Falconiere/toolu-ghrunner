@@ -183,6 +183,7 @@ fn make_ctx(server_uri: String, config: RunnerConfig) -> SessionCtx {
     live_log: None,
     job_log_upload: None,
     watchdog: WatchdogConfig::default(),
+    job_acquired: false,
   }
 }
 

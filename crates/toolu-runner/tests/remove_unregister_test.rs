@@ -36,6 +36,7 @@ fn seed_registration(dir: &Path, server_uri: &str) -> TestResult<PathBuf> {
     auth_token: "fixture-client-id".to_owned(),
     labels: vec!["self-hosted".to_owned()],
     runner_group: "Default".to_owned(),
+    ephemeral: false,
     runtime: RuntimeConfig {
       jit_config: "fixture-jit-blob".to_owned(),
       work_dir: "_work".to_owned(),

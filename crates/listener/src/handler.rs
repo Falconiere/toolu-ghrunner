@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tokio::sync::mpsc;
@@ -65,6 +66,9 @@ pub(crate) struct SessionCtx {
   /// Test-injectable outage-watchdog timing knobs (prod defaults set here
   /// at construction; tests override for millisecond-cadence trip tests).
   pub(crate) watchdog: WatchdogConfig,
+  /// Set once `acquire_job` succeeds: from then on the job owns this JIT
+  /// registration even if a later step (execution, completion) errors.
+  pub(crate) job_acquired: bool,
 }
 
 /// `GitHubListener` wraps a `Runner` and handles the full GitHub protocol lifecycle:
@@ -77,6 +81,9 @@ pub struct GitHubListener {
   config: RunnerConfig,
   masker: Arc<Mutex<SecretMasker>>,
   conflict_policy: SessionConflictPolicy,
+  /// Whether the last [`GitHubListener::run`] acquired a job (see
+  /// [`GitHubListener::job_acquired`]).
+  job_acquired: AtomicBool,
 }
 
 impl GitHubListener {
@@ -103,6 +110,7 @@ impl GitHubListener {
       config,
       masker,
       conflict_policy: SessionConflictPolicy::default(),
+      job_acquired: AtomicBool::new(false),
     })
   }
 
@@ -122,6 +130,13 @@ impl GitHubListener {
   /// Borrow the runner config.
   pub fn config(&self) -> &RunnerConfig {
     &self.config
+  }
+
+  /// Whether the last [`GitHubListener::run`] acquired a job — true even when
+  /// it then returned an `Err` (execution or completion failed after the
+  /// acquire), so an ephemeral registration knows its JIT was consumed.
+  pub fn job_acquired(&self) -> bool {
+    self.job_acquired.load(Ordering::SeqCst)
   }
 
   /// Run the listener lifecycle until cancellation or a fatal error.
@@ -159,6 +174,7 @@ impl GitHubListener {
     };
 
     let result = job_lifecycle::poll_and_execute(&mut ctx).await;
+    self.job_acquired.store(ctx.job_acquired, Ordering::SeqCst);
     if let Err(ref e) = result {
       log_job_error(e);
     }
@@ -281,6 +297,7 @@ impl GitHubListener {
       live_log: None,
       job_log_upload: None,
       watchdog: WatchdogConfig::default(),
+      job_acquired: false,
     }))
   }
 }

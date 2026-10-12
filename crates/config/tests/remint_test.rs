@@ -27,6 +27,7 @@ fn non_default_config() -> RunnerRegistrationConfig {
       "x64".to_owned(),
     ],
     runner_group: "Production".to_owned(),
+    ephemeral: false,
     runtime: RuntimeConfig {
       jit_config: "eyJvcmlnaW5hbCI6IHRydWV9".to_owned(),
       work_dir: "~/.toolu-runner/runners/octocat/hello-world/_work".to_owned(),

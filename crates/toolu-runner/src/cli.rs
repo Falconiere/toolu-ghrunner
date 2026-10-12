@@ -73,9 +73,16 @@ Examples:
   # explicit github.com repository, bearer from the stored `login` token
   toolu-runner register --url https://github.com/owner/repo
 
-  # GHES organization, explicit token, custom name + labels
+  # GHES organization, explicit token, custom name + extra labels
+  # (registered as self-hosted,<OS>,<arch>,gpu)
   toolu-runner register --url https://ghes.example.com/my-org \\
-    --token <PAT> --name build-01 --labels self-hosted,linux,arm64";
+    --token <PAT> --name build-01 --labels gpu
+
+  # only the listed labels, no self-hosted/<OS>/<arch> defaults
+  toolu-runner register --no-default-labels --labels build-farm,gpu
+
+  # one job, then the runner unregisters and deletes this registration
+  toolu-runner register --ephemeral --labels autoscaled";
 
 #[derive(Debug, Parser)]
 #[command(
@@ -114,8 +121,9 @@ pub(crate) enum Command {
   /// root `<home>/.lock` for old layouts), creates a broker session, and polls
   /// until a job arrives. After each job it re-mints a fresh JIT config
   /// with the stored `login` token and keeps listening, so one `run` stays
-  /// online across many jobs. `--once` runs a single job and exits. SIGINT
-  /// / SIGTERM cancel gracefully.
+  /// online across many jobs. `--once` runs a single job and exits. An
+  /// `--ephemeral` registration runs one job, then unregisters and deletes
+  /// itself. SIGINT / SIGTERM cancel gracefully.
   Run(RunArgs),
   /// Remove the runner registration.
   ///
@@ -224,9 +232,28 @@ pub(crate) struct RegisterArgs {
   /// Runner name (default: the machine hostname).
   #[arg(long, value_name = "NAME")]
   pub(crate) name: Option<String>,
-  /// Comma-separated runner labels (default: self-hosted,<os>,<arch>).
+  /// Comma-separated custom labels, added to the defaults.
+  ///
+  /// The defaults are `self-hosted`, the OS (`Linux` / `macOS`) and the
+  /// architecture (`X64` / `ARM64`) — GitHub's `RUNNER_OS` / `RUNNER_ARCH`
+  /// spelling. Empty entries are ignored, labels differing only in case are
+  /// kept once, and a label may be at most 256 characters (UTF-16 units, as
+  /// upstream counts them). Required with
+  /// --no-default-labels.
   #[arg(long, value_name = "LABELS", value_delimiter = ',')]
   pub(crate) labels: Vec<String>,
+  /// Register only the --labels values, without the self-hosted / OS /
+  /// architecture defaults.
+  #[arg(long)]
+  pub(crate) no_default_labels: bool,
+  /// Make this an ephemeral registration: `run` takes exactly one job, then
+  /// unregisters the runner on GitHub and deletes the local registration.
+  ///
+  /// Recorded in config.toml (`ephemeral = true`). `run` never re-mints for
+  /// it; shutting down before a job keeps the registration for the next
+  /// `run`. Not for `install-service`, whose unit restarts forever.
+  #[arg(long)]
+  pub(crate) ephemeral: bool,
   /// Numeric runner group ID for org registrations (default: the Default
   /// group).
   ///
@@ -360,15 +387,6 @@ pub(crate) fn runner_name_or_hostname(name: Option<String>) -> String {
       .and_then(|h| h.into_string().ok())
       .unwrap_or_else(|| "toolu-runner".to_owned())
   })
-}
-
-/// Default `--labels`: `self-hosted,<os>,<arch>`.
-pub(crate) fn default_labels() -> Vec<String> {
-  vec![
-    "self-hosted".to_owned(),
-    std::env::consts::OS.to_owned(),
-    std::env::consts::ARCH.to_owned(),
-  ]
 }
 
 /// Derive the credentials path from the config path. The credentials

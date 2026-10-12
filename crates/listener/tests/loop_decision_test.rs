@@ -4,8 +4,10 @@
 //! exercises one branch of the normative decision order, including the
 //! precedence between `cancelled`, `once`, and `pending_remove`.
 
-use listener::loop_decision::{LoopAction, next_action};
-use shared::RunnerError;
+use listener::loop_decision::{
+  EphemeralAction, LoopAction, LoopSignals, next_action, next_ephemeral_action,
+};
+use shared::{Conclusion, RunnerError};
 
 /// A listener outcome marker, kept compact in the table and resolved to a real
 /// `RunnerError` at assertion time.
@@ -158,5 +160,191 @@ fn next_action_covers_every_branch() {
   for (name, outcome, once, cancelled, pending_remove, expected) in rows {
     let got = next_action(&resolve(&outcome), once, cancelled, pending_remove);
     assert_eq!(got, expected, "case: {name}");
+  }
+}
+
+/// One ephemeral decision-table row:
+/// `(name, outcome, job_acquired, once, cancelled, pending_remove, expected)`.
+type EphemeralRow = (
+  &'static str,
+  Result<Option<Conclusion>, RunnerError>,
+  bool,
+  bool,
+  bool,
+  bool,
+  EphemeralAction,
+);
+
+/// Ephemeral rows where a job ran or was acquired: always `Unregister`, even
+/// with an error, a cancel, `--once` or `pending_remove` (#92 rule 1).
+fn ephemeral_job_cases() -> Vec<EphemeralRow> {
+  use EphemeralAction::Unregister;
+  let net = |m: &str| RunnerError::Network(m.into());
+  vec![
+    (
+      "success job",
+      Ok(Some(Conclusion::Success)),
+      true,
+      false,
+      false,
+      false,
+      Unregister,
+    ),
+    (
+      "failed job",
+      Ok(Some(Conclusion::Failure)),
+      true,
+      false,
+      false,
+      false,
+      Unregister,
+    ),
+    (
+      "cancelled job",
+      Ok(Some(Conclusion::Cancelled)),
+      true,
+      false,
+      true,
+      false,
+      Unregister,
+    ),
+    (
+      "job + once + pending",
+      Ok(Some(Conclusion::Success)),
+      true,
+      true,
+      false,
+      true,
+      Unregister,
+    ),
+    (
+      "acquired, no conclusion",
+      Ok(None),
+      true,
+      false,
+      false,
+      false,
+      Unregister,
+    ),
+    (
+      "acquired, completion failed",
+      Err(net("503")),
+      true,
+      false,
+      false,
+      false,
+      Unregister,
+    ),
+    (
+      "acquired, failed, cancel",
+      Err(net("reset")),
+      true,
+      true,
+      true,
+      false,
+      Unregister,
+    ),
+  ]
+}
+
+/// Ephemeral rows without a job: cancel > `--once` > `pending_remove` >
+/// conflict > auth > retry on the same unused registration.
+fn ephemeral_no_job_cases() -> Vec<EphemeralRow> {
+  use EphemeralAction::{BackoffRetry, Exit};
+  let conflict = || Err(RunnerError::SessionConflict("409".into()));
+  let net = || Err(RunnerError::Network("timeout".into()));
+  let auth = || Err(RunnerError::Auth("invalid_client".into()));
+  vec![
+    (
+      "cancel before a job",
+      Ok(None),
+      false,
+      false,
+      true,
+      false,
+      Exit(0),
+    ),
+    (
+      "cancel beats conflict",
+      conflict(),
+      false,
+      true,
+      true,
+      true,
+      Exit(0),
+    ),
+    ("once, no job", Ok(None), false, true, false, false, Exit(0)),
+    (
+      "once + conflict",
+      conflict(),
+      false,
+      true,
+      false,
+      false,
+      Exit(5),
+    ),
+    ("once + network", net(), false, true, false, false, Exit(1)),
+    (
+      "once beats pending",
+      auth(),
+      false,
+      true,
+      false,
+      true,
+      Exit(1),
+    ),
+    (
+      "pending, no job",
+      Ok(None),
+      false,
+      false,
+      false,
+      true,
+      Exit(0),
+    ),
+    (
+      "pending beats conflict",
+      conflict(),
+      false,
+      false,
+      false,
+      true,
+      Exit(0),
+    ),
+    ("conflict", conflict(), false, false, false, false, Exit(5)),
+    ("dead JIT", auth(), false, false, false, false, Exit(1)),
+    (
+      "no job, not cancelled",
+      Ok(None),
+      false,
+      false,
+      false,
+      false,
+      BackoffRetry,
+    ),
+    ("network", net(), false, false, false, false, BackoffRetry),
+  ]
+}
+
+/// AC-8: every row of the spec's ephemeral decision table.
+#[test]
+fn ephemeral_decision_table() {
+  for (name, outcome, acquired, once, cancelled, pending, expected) in ephemeral_job_cases()
+    .into_iter()
+    .chain(ephemeral_no_job_cases())
+  {
+    assert_eq!(
+      next_ephemeral_action(
+        &outcome,
+        acquired,
+        LoopSignals {
+          once,
+          cancelled,
+          pending_remove: pending,
+        }
+      ),
+      expected,
+      "row: {name}"
+    );
   }
 }

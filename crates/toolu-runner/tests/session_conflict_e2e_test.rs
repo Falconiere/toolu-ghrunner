@@ -128,6 +128,7 @@ fn write_registration(home: &Path, jit_config: &str) -> TestResult<PathBuf> {
     auth_token: "test-client-id".to_owned(),
     labels: vec!["self-hosted".to_owned()],
     runner_group: "Default".to_owned(),
+    ephemeral: false,
     runtime: RuntimeConfig {
       jit_config: jit_config.to_owned(),
       work_dir: reg_dir.join("_work").to_string_lossy().into_owned(),
