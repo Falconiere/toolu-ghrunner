@@ -24,17 +24,14 @@ type TestResult = Result<(), Box<dyn std::error::Error>>;
 const GHES_JIT: &str = include_str!("fixtures/jit_config_ghes.json");
 const ISRG_ROOT: &str = "tests/fixtures/check/isrg-root-x1.pem";
 
-fn listing(dir: &Path) -> Vec<String> {
-  let mut names: Vec<String> = std::fs::read_dir(dir)
-    .map(|entries| {
-      entries
-        .filter_map(Result::ok)
-        .map(|e| e.file_name().to_string_lossy().into_owned())
-        .collect()
-    })
-    .unwrap_or_default();
+/// Sorted entry names; an unreadable directory is an error, never "empty".
+fn listing(dir: &Path) -> std::io::Result<Vec<String>> {
+  let mut names = Vec::new();
+  for entry in std::fs::read_dir(dir)? {
+    names.push(entry?.file_name().to_string_lossy().into_owned());
+  }
   names.sort();
-  names
+  Ok(names)
 }
 
 #[test]
@@ -85,11 +82,8 @@ fn healthy_ghes_target_passes_and_stays_read_only() -> TestResult {
       "GET /api/v3 HTTP/1.1",
     ]
   );
-  assert!(
-    listing(home.path()).is_empty(),
-    "check wrote into the home: {:?}",
-    listing(home.path())
-  );
+  let entries = listing(home.path())?;
+  assert!(entries.is_empty(), "check wrote into the home: {entries:?}");
   Ok(())
 }
 
@@ -198,7 +192,7 @@ fn configured_registration_endpoints_are_probed_while_run_holds_the_lock() -> Te
   let reg_dir = config_path.parent().ok_or("no parent")?;
   let lock = std::fs::File::create(reg_dir.join(".lock"))?;
   lock.try_lock_exclusive()?;
-  let before = listing(reg_dir);
+  let before = listing(reg_dir)?;
 
   let (code, stdout, stderr, _) = run(check_cmd(home.path())?.args(["--timeout", "5"]))?;
 
@@ -226,7 +220,7 @@ fn configured_registration_endpoints_are_probed_while_run_holds_the_lock() -> Te
     ]
   );
   assert_eq!(
-    listing(reg_dir),
+    listing(reg_dir)?,
     before,
     "check changed the registration dir"
   );
@@ -551,11 +545,13 @@ fn usage_and_config_errors_exit_2() -> TestResult {
   let config_path = write_registration(home.path(), "https://github.com/o/r", "s3cr3t-garbage!!")?;
   let (code, stdout, stderr, _) = run(check_cmd(home.path())?.arg("--config").arg(&config_path))?;
   assert_eq!(code, Some(2), "stdout:\n{stdout}\nstderr:\n{stderr}");
-  assert!(
-    stderr.contains("not a valid JIT config envelope"),
-    "{stderr}"
+  // The whole output, exactly: nothing derived from the value (substring,
+  // base64, escaped form) can appear when nothing else is printed.
+  assert_eq!(
+    stderr,
+    "toolu-runner: the registration's jit_config is not a valid JIT config envelope\n"
   );
-  assert!(!stderr.contains("s3cr3t-garbage") && !stdout.contains("s3cr3t-garbage"));
+  assert!(stdout.is_empty(), "{stdout}");
   Ok(())
 }
 
@@ -617,11 +613,8 @@ fn defaults_target_the_github_com_hosts() -> TestResult {
       "CONNECT vstoken.actions.githubusercontent.com:443 HTTP/1.1",
     ]
   );
-  assert!(
-    listing(home.path()).is_empty(),
-    "{:?}",
-    listing(home.path())
-  );
+  let entries = listing(home.path())?;
+  assert!(entries.is_empty(), "{entries:?}");
   Ok(())
 }
 
