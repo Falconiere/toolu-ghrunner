@@ -158,7 +158,9 @@ to that list requires proving the value is not a real credential.
   `_PipelineMapping/_jobs/<job_id>.lock`, taken when directories are created)
   and held until `run_job` returns; a busy lease falls back to a fresh
   `<work>/<job_id>`. Directories are created only after container/services/env
-  evaluation (`PreparedWorkspace::create_dirs`), so setup errors leave none. `mode = "fresh"` keeps the pre-#90 per-job
+  evaluation (`PreparedWorkspace::create_dirs`), so setup errors leave none. In a
+  job container `RUNNER_WORKSPACE` / `runner.workspace` is `/github`, the parent
+  of the `/github/workspace` mount (`PathTranslator::runner_workspace_to_container`). `mode = "fresh"` keeps the pre-#90 per-job
   layout. Test harnesses that pre-populate `<work>/<job_id>` pin
   `WorkspaceMode::Fresh`.
 - **Cancellation token wiring.** `toolu-runner run` builds a

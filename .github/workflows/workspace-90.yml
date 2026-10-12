@@ -6,8 +6,8 @@ name: workspace-90
 # tracking file. On the official runner (GitHub-hosted reference) that shows
 # the upstream layout. On a toolu self-hosted runner the second sequential job
 # must reuse the first job's .git (checkout fetches instead of cloning) — see
-# docs/test-coverage.md "Issue #90". Runs on dispatch (toolu lane with
-# run_toolu) or on a push to the #90 branch whose head commit says [live-90].
+# docs/test-coverage.md "Issue #90". Dispatch-only, like the sibling lanes;
+# the toolu lane runs when run_toolu is set.
 
 on:
   workflow_dispatch:
@@ -16,16 +16,12 @@ on:
         description: Run the toolu self-hosted lane when a matching runner is registered
         type: boolean
         default: false
-  push:
-    branches:
-      - feat/90-stable-per-repository-workspace-for
 
 permissions:
   contents: read
 
 jobs:
   reference:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[live-90]')
     name: reference-${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -45,7 +41,7 @@ jobs:
           cat "$RUNNER_WORKSPACE/../_PipelineMapping/${{ github.repository }}/PipelineFolder.json"
 
   toolu-first:
-    if: (github.event_name == 'workflow_dispatch' && inputs.run_toolu) || contains(github.event.head_commit.message, '[live-90]')
+    if: inputs.run_toolu
     runs-on: [self-hosted, toolu-90]
     steps:
       - name: Workspace before checkout

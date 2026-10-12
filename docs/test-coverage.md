@@ -1375,8 +1375,7 @@ platform-neutral and the tests ran on Linux only — **unverified**.
 
 Layout and `workspace.clean` follow upstream `PipelineDirectoryManager` /
 `TrackingConfig` / `JobExtension` at actions/runner
-`cab9d1c3901e45c7705889c4f88284fdd93f4ae5`; see the
-[design](specs/2026-10-11-stable-per-repository-workspace-design.md). The
+`cab9d1c3901e45c7705889c4f88284fdd93f4ae5`. The
 replays drive the sanitized #68 GitHub.com acquisition
 (`crates/execution/tests/incoming_contexts_matrix_0.json`, `__run` step;
 only `github.repository` / `repository_owner`, the job id, `workspace.clean`
@@ -1393,9 +1392,10 @@ Red evidence: before the implementation all four replays failed. The host
 | AC-2 / 90-S1 fresh | With `mode = "fresh"`, a third job gets `<work>/<job_id>` for both values (the pre-#90 layout), has no `.git`, and the stable `.git` inode and `HEAD` are unchanged. | same test | as AC-1 |
 | AC-3 / 90-S2 | `alice/app`, `bob/app`, `alice/lib` → `<work>/app/app`, `<work>/app_2/app`, `<work>/lib/lib`. None sees another's `.git`, and `rev-parse HEAD` / `id` name each origin. `bob/app` re-runs in `app_2` and moves to commit 2, while `app/app` keeps alice's commit 1. Unit level: a legacy dir with the repo's name, a repo named `_PipelineMapping`, and a claimed name each get a `_<n>` suffix. | `same_repository_name_under_two_owners_and_other_repos_never_collide`; `cargo test -p execution --lib workspace_layout` | as AC-1 |
 | AC-4 / 90-S3 | Job A (registration `repo-level`) holds `alice/app`. Concurrent job B (registration `org-level`, same work root) runs in `<work>/<job_id>` and sees only `marker-b`; A sees only `marker-a`. After A ends, job C gets the stable workspace again and sees `marker-a`. Unit level: a busy lease falls back to fresh with an owner-tagged job lease; an absent/unsafe `github.repository` (`../escape`, `a/b/c`) and an odd job id (`id/with:odd` → `id_with_odd`) stay inside the work root. | `concurrent_job_for_a_leased_repository_runs_in_a_fresh_workspace`; `workspace_layout` unit tests | as AC-1 |
-| AC-5 / 90-S4 clean | On a populated stable workspace: absent / `true` keep `.git` and the `<work>/app/sibling` dir. `all` removes both. `resources` removes `.git` and keeps the sibling. `outputs` / `OUTPUTS` keep `.git` and remove the sibling. The path stays `<work>/app/app`. A corrupt or escaping (`..`) `PipelineFolder.json` is recreated inside the work root. | `workspace_clean_options_follow_upstream`; `corrupt_or_escaping_tracking_file_is_recreated_inside_the_work_root` | as AC-1 |
-| AC-6 / 90-S4 GC | Shared root, registration A sweeping. Removed: A's `alice/app` unused for 100 h (its `PipelineFolder.json` too), A's stale unleased fresh dir (and its `_jobs` lease), and a pre-#90 lease-less dir. Kept: A's 1 h-old `alice/lib`, B's stale `bob/tool` and fresh dir, A's live leased `alice/held` and live fresh dir, the running job's dir, a claimed stable dir with a 48 h-old mtime, and `_PipelineMapping`. `stable_gc_after_hours = 0` (default) prunes nothing stable. A pruned repo gets `app/app` back. | `cargo test -p toolu-runner --test workspace_gc_test`; `--test job_teardown_order_test` | as AC-1 |
+| AC-5 / 90-S4 clean | On a populated stable workspace: absent / `true` keep `.git` and the `<work>/app/sibling` dir. `all` removes both. `resources` removes `.git` and keeps the sibling. `outputs` / `OUTPUTS` keep `.git` and remove the sibling. The path stays `<work>/app/app`. A repository's first job (no pipeline dir yet) succeeds with every option, `outputs` included (red before the fix: `WorkspaceInit` / `NotFound`). A corrupt or escaping (`..`) `PipelineFolder.json` is recreated inside the work root. | `workspace_clean_options_follow_upstream`; `every_clean_option_tolerates_a_missing_pipeline_dir`; `corrupt_or_escaping_tracking_file_is_recreated_inside_the_work_root` | as AC-1 |
+| AC-6 / 90-S4 GC | Shared root, registration A sweeping. Removed: A's `alice/app` unused for 100 h (its `PipelineFolder.json` too), A's stale unleased fresh dir (and its `_jobs` lease), and a pre-#90 lease-less dir. Kept: A's 1 h-old `alice/lib`, B's stale `bob/tool` and fresh dir, A's live leased `alice/held` and live fresh dir, the running job's dir, a claimed stable dir with a 48 h-old mtime, and `_PipelineMapping`. `stable_gc_after_hours = 0` (default) prunes nothing stable. A pruned repo gets `app/app` back. An unreadable `PipelineFolder.json` claims every name its repo could have: a running job's leased `app` (tracking file overwritten with garbage, 48 h-old mtime) and a lease-less `app_2` stay, while `app_x` and a legacy dir go (red before the fix: `removed` = 4, the leased workspace deleted). | `cargo test -p toolu-runner --test workspace_gc_test`; `--test job_teardown_order_test` | as AC-1 |
 | AC-7 | A pre-#90 `config.toml` loads as `stable` / never-prune with its `gc_after_hours` kept. `fresh` + `stable_gc_after_hours = 72` round-trips through `save_config`. `mode = "per-job"` fails `load_config` naming the file and the value. `run` / `boot` map `[workspace]` into `RunnerConfig.workspace`. | `cargo test -p config --test workspace_section_test`; `--test remint_test`; `cargo test -p shared --test config_test` | as AC-1 |
+| Job container | With a job container only the workspace is mounted (`/github/workspace`), so `RUNNER_WORKSPACE` and `${{ runner.workspace }}` become its container-side parent `/github`. A fresh workspace (both values the job dir) maps to `/github/workspace`. In a real `ubuntu` container a step sees `RUNNER_WORKSPACE` = `/github` and `GITHUB_WORKSPACE` = `/github/workspace`. Red before the fix: the host path `<work>/hello-world`. | `cargo test -p execution --test runner_workspace_translation_test`; `cargo test -p execution --lib docker::job_container -- --ignored` (real Docker) | Linux x86_64 local (Docker 29.1.3); translator test on CI |
 | AC-8 | Gate and docs. | `./tools/check.sh all` | Linux local, CI |
 
 Live / reference lane: [`workspace-90.yml`](../.github/workflows/workspace-90.yml)
@@ -1403,9 +1403,9 @@ prints `GITHUB_WORKSPACE`, `github.workspace`, `RUNNER_WORKSPACE`,
 `runner.workspace`, whether `.git` existed before `actions/checkout@v4`, and
 `PipelineFolder.json`. It runs on GitHub-hosted `ubuntu-24.04` / `macos-15`
 (the official runner) and in two sequential `[self-hosted, toolu-90]` jobs,
-where the second must find the first job's `.git`. It runs on dispatch
-(`run_toolu`) or on a push to the #90 branch whose head commit says
-`[live-90]`.
+where the second must find the first job's `.git`. It is dispatch-only;
+the toolu jobs run when `run_toolu` is set. (The run below was started by a
+since-removed `[live-90]` push trigger on the #90 branch.)
 
 Observed in [run 38177256043](https://github.com/Falconiere/toolu-ghrunner/actions/runs/38177256043)
 (head `ceda4f2`). toolu was built from this branch on Linux x86_64 and
