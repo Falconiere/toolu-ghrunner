@@ -47,31 +47,33 @@ fn system_node() -> Option<PathBuf> {
   Some(PathBuf::from(path))
 }
 
-/// Seed the real node binary into the runner's node cache for `node20` so
+/// Seed the real node binary into the runner's node cache for both node pins (node20 and node24) so
 /// `ensure_node_runtime` resolves it from disk instead of downloading. Uses a
 /// symlink (preserving the install's sibling files), falling back to a copy.
 fn seed_node(data_dir: &Path, node: &Path) -> TestResult<()> {
-  let version = node_version_for(20);
-  let cache_dir = node_cache_dir(data_dir, version);
-  let binary = node_binary_path(&cache_dir);
-  if let Some(parent) = binary.parent() {
-    std::fs::create_dir_all(parent)?;
-  }
-  #[cfg(unix)]
-  {
-    use std::os::unix::fs::PermissionsExt;
-    if std::os::unix::fs::symlink(node, &binary).is_err() {
+  for major in [20, 24] {
+    let version = node_version_for(major);
+    let cache_dir = node_cache_dir(data_dir, version);
+    let binary = node_binary_path(&cache_dir);
+    if let Some(parent) = binary.parent() {
+      std::fs::create_dir_all(parent)?;
+    }
+    #[cfg(unix)]
+    {
+      use std::os::unix::fs::PermissionsExt;
+      if std::os::unix::fs::symlink(node, &binary).is_err() {
+        std::fs::copy(node, &binary)?;
+      }
+      if let Ok(meta) = std::fs::metadata(&binary) {
+        let mut perms = meta.permissions();
+        perms.set_mode(0o755);
+        let _ = std::fs::set_permissions(&binary, perms);
+      }
+    }
+    #[cfg(not(unix))]
+    {
       std::fs::copy(node, &binary)?;
     }
-    if let Ok(meta) = std::fs::metadata(&binary) {
-      let mut perms = meta.permissions();
-      perms.set_mode(0o755);
-      let _ = std::fs::set_permissions(&binary, perms);
-    }
-  }
-  #[cfg(not(unix))]
-  {
-    std::fs::copy(node, &binary)?;
   }
   Ok(())
 }

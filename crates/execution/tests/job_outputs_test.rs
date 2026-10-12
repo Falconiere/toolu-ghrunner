@@ -90,12 +90,14 @@ async fn seed_node(data: &Path) -> TestResult {
     .await?;
   assert!(output.status.success(), "Node is required for this test");
   let host_binary = String::from_utf8(output.stdout)?;
-  let target = node_binary_path(&node_cache_dir(data, node_version_for(20)));
-  std::fs::create_dir_all(target.parent().ok_or("node cache parent missing")?)?;
-  #[cfg(unix)]
-  std::os::unix::fs::symlink(host_binary.trim(), target)?;
-  #[cfg(not(unix))]
-  std::fs::copy(host_binary.trim(), target)?;
+  for major in [20, 24] {
+    let target = node_binary_path(&node_cache_dir(data, node_version_for(major)));
+    std::fs::create_dir_all(target.parent().ok_or("node cache parent missing")?)?;
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(host_binary.trim(), target)?;
+    #[cfg(not(unix))]
+    std::fs::copy(host_binary.trim(), target)?;
+  }
   Ok(())
 }
 

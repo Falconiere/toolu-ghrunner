@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use shared::{ActionStep, Conclusion, RunnerConfig, RunnerError, RunnerEvent};
+use shared::{ActionStep, AnnotationLevel, Conclusion, RunnerConfig, RunnerError, RunnerEvent};
 use tokio::sync::mpsc;
 
 use super::action_support::{build_node_env, emit_log};
@@ -21,6 +21,8 @@ use super::handlers::node_exec::{NodeExecParams, execute_node_action};
 use super::process_dispatch::{dispatcher, merge_command_result, stream_process};
 use super::step_env::{FileCommandScope, apply_file_commands_and_merge_outputs};
 use super::step_timeout::StepBounds;
+use crate::node::migration::{SystemNodeEnv, action_name, select_node_version};
+use crate::node::platform::host_target;
 use crate::node::runtime::ensure_node_runtime;
 
 /// Inputs for running one Node.js action stage.
@@ -79,14 +81,30 @@ fn resolve_stage_script(s: &NodeStage<'_>) -> Result<std::path::PathBuf, RunnerE
 /// Returns `RunnerError` if the node runtime is unavailable, the script is
 /// missing, or the process cannot be spawned/awaited.
 pub(super) async fn run_node_stage(
-  s: NodeStage<'_>,
+  mut s: NodeStage<'_>,
 ) -> Result<(Conclusion, HashMap<String, String>), RunnerError> {
   let script = resolve_stage_script(&s)?;
+  let (env, file_cmds) = s
+    .bounds
+    .resolve_within_bounds(node_stage_env(&s))
+    .await
+    .map_err(|error| {
+      tracing::warn!(step = s.log_step_id, %error, "node stage environment could not be built");
+      error
+    })?;
+  let major = select_stage_node(&mut s, &env).await;
+  let target = match s.ctx.job_container().cloned() {
+    Some(container) => {
+      s.bounds
+        .resolve_within_bounds(container.node_target(&s.bounds.cancel))
+        .await?
+    },
+    None => host_target()?,
+  };
   let node_binary = s
     .bounds
-    .resolve_within_bounds(ensure_node_runtime(s.client, &s.config.data_dir, s.major))
+    .resolve_within_bounds(ensure_node_runtime(s.client, s.config, major, target))
     .await?;
-  let (env, file_cmds) = s.bounds.resolve_within_bounds(node_stage_env(&s)).await?;
 
   // Own the cgroup path so `node_params` doesn't borrow `s.ctx` — the
   // concurrent dispatcher needs `&mut s.ctx` while the child runs.
@@ -107,6 +125,48 @@ pub(super) async fn run_node_stage(
   };
 
   run_stage_process(s, &node_params, &file_cmds).await
+}
+
+/// Upstream `HandlerFactory`: pick the stage's Node major from the declared
+/// one, the job's migration flags and the stage environment; emit the
+/// configuration warning / phase-2 notice and record the action for the
+/// end-of-job warnings.
+async fn select_stage_node(s: &mut NodeStage<'_>, env: &HashMap<String, String>) -> u8 {
+  let selection = select_node_version(
+    s.major,
+    &s.ctx.node_migration.flags,
+    env,
+    &SystemNodeEnv::from_process(),
+  );
+  if let Some(warning) = &selection.warning {
+    emit_warning(s.events, s.log_step_id, warning).await;
+  }
+  if let Some(info) = &selection.info {
+    emit_log(s.events, s.log_step_id, info).await;
+  }
+  if let (Some(tracking), Some(name)) = (selection.tracking, action_name(&s.step.reference)) {
+    s.ctx.node_migration.record(tracking, name);
+  }
+  selection.major
+}
+
+/// A `##[warning]` line plus a warning annotation on `step_id`.
+async fn emit_warning(events: &mpsc::Sender<RunnerEvent>, step_id: &str, message: &str) {
+  emit_log(events, step_id, &format!("##[warning]{message}")).await;
+  let annotation = RunnerEvent::Annotation {
+    step_id: step_id.to_owned(),
+    level: AnnotationLevel::Warning,
+    message: message.to_owned(),
+    file: None,
+    line: None,
+    col: None,
+    end_line: None,
+    end_column: None,
+    title: None,
+  };
+  if events.send(annotation).await.is_err() {
+    tracing::warn!("event receiver closed while reporting a node version warning");
+  }
 }
 
 /// Stream a node stage's workflow commands and merge its file outputs.

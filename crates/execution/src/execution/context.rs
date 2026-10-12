@@ -75,6 +75,8 @@ pub struct ExecutionContext {
   step_displays: HashMap<String, super::step_display::StepDisplay>,
   /// Number for the "Complete job" row: one past the last main/post row.
   pub(crate) next_step_number: Option<u32>,
+  /// node20 → node24 migration flags and the actions each end-of-job warning lists.
+  pub(crate) node_migration: crate::node::migration::NodeMigrationState,
 }
 
 impl ExecutionContext {
@@ -130,6 +132,7 @@ impl ExecutionContext {
       file_table: Vec::new(),
       step_displays: HashMap::new(),
       next_step_number: None,
+      node_migration: crate::node::migration::NodeMigrationState::default(),
     }
   }
 

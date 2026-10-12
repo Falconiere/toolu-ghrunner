@@ -36,18 +36,20 @@ impl ContainerMounts {
     let mut volumes = Vec::new();
     for (host, target, readonly) in mappings {
       std::fs::create_dir_all(&host)?;
-      let host = std::path::absolute(host)?;
-      if host.to_string_lossy().contains(':') {
-        return Err(RunnerError::Docker(
-          "job mount source paths cannot contain ':'".to_owned(),
-        ));
-      }
-      translator.add_mapping(host.clone(), PathBuf::from(target));
-      volumes.push(format!(
-        "{}:{target}:{}",
-        host.display(),
-        if readonly { "ro" } else { "rw" }
-      ));
+      mount(&mut translator, &mut volumes, &host, target, readonly)?;
+    }
+    // An operator's preseeded runtimes (`TOOLU_RUNNER_NODE_DIR`), read-only,
+    // so a preseed binary path translates like the `/github/node` cache. Never
+    // created: a missing directory stays missing and the runtime lookup names
+    // the path it expected.
+    if let Some(node_dir) = config.node_dir.as_ref().filter(|dir| dir.is_dir()) {
+      mount(
+        &mut translator,
+        &mut volumes,
+        node_dir,
+        "/github/externals",
+        true,
+      )?;
     }
     Ok(Self {
       translator,
@@ -56,6 +58,34 @@ impl ContainerMounts {
       _home: home,
     })
   }
+}
+
+/// Bind `host` at `target` and record the path mapping.
+fn mount(
+  translator: &mut PathTranslator,
+  volumes: &mut Vec<String>,
+  host: &Path,
+  target: &str,
+  readonly: bool,
+) -> Result<(), RunnerError> {
+  let host = std::path::absolute(host).map_err(|e| {
+    RunnerError::Docker(format!(
+      "cannot resolve job mount source {}: {e}",
+      host.display()
+    ))
+  })?;
+  if host.to_string_lossy().contains(':') {
+    return Err(RunnerError::Docker(
+      "job mount source paths cannot contain ':'".to_owned(),
+    ));
+  }
+  translator.add_mapping(host.clone(), PathBuf::from(target));
+  volumes.push(format!(
+    "{}:{target}:{}",
+    host.display(),
+    if readonly { "ro" } else { "rw" }
+  ));
+  Ok(())
 }
 
 /// Reject user mounts that obscure runner-owned paths or use ambiguous syntax.
@@ -83,3 +113,7 @@ pub(crate) fn validate_volume(volume: &str) -> Result<(), RunnerError> {
   }
   Ok(())
 }
+
+#[cfg(test)]
+#[path = "tests/container_mounts.rs"]
+mod tests;

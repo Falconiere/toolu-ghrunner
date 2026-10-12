@@ -130,14 +130,14 @@ fi
 # PATH is scrubbed to the system dirs for these cases: this host has a `node`
 # of its own, and inheriting it would make "the seed reached $PATH" pass for
 # the wrong reason and "no bogus node is exported" fail for one.
-root="$(image_tree seeded 24.0.2)"
+root="$(image_tree seeded 24.21.0)"
 home="$TMPROOT/home-seeded"
 out="$(PATH=/usr/bin:/bin TOOLU_RUNNER_HOME="$home" TOOLU_JITCONFIG=x "$root/entrypoint" 2>&1)"
-check "seeded node lands on PATH" "node=$root/node/24.0.2/bin/node" "$(grep '^node=' <<<"$out")"
-if [[ -L "$home/node/24.0.2" && -x "$home/node/24.0.2/bin/node" ]]; then
+check "seeded node lands on PATH" "node=$root/node/24.21.0/bin/node" "$(grep '^node=' <<<"$out")"
+if [[ -L "$home/node/24.21.0" && -x "$home/node/24.21.0/bin/node" ]]; then
   echo "ok: the seed is linked at <data_dir>/node/<version>"
 else
-  echo "FAIL: expected a symlink at $home/node/24.0.2 resolving to the seeded runtime" >&2
+  echo "FAIL: expected a symlink at $home/node/24.21.0 resolving to the seeded runtime" >&2
   fail=1
 fi
 
@@ -151,10 +151,10 @@ check "a second run over the same data dir still boots" "argv=boot" "$(grep '^ar
 # link reads as absent to `-e` but exists to `ln`, so a guarded link would die
 # with "File exists" under `set -e` — before dispatching anything, which looks
 # like a runner that did nothing at all.
-ln -sfn "$TMPROOT/gone/node/24.0.2" "$home/node/24.0.2"
+ln -sfn "$TMPROOT/gone/node/24.21.0" "$home/node/24.21.0"
 out="$(PATH=/usr/bin:/bin TOOLU_RUNNER_HOME="$home" TOOLU_JITCONFIG=x "$root/entrypoint" 2>&1)"
 check "a stale seed link from a previous image is repaired" "argv=boot" "$(grep '^argv=' <<<"$out")"
-check "…and repointed at this image's seed" "$root/node/24.0.2" "$(readlink "$home/node/24.0.2")"
+check "…and repointed at this image's seed" "$root/node/24.21.0" "$(readlink "$home/node/24.21.0")"
 
 # A REAL directory at that path is an engine-downloaded runtime
 # (`ensure_node_runtime` extracts into <data_dir>/node/<version>), and it must
@@ -162,16 +162,16 @@ check "…and repointed at this image's seed" "$root/node/24.0.2" "$(readlink "$
 # INSIDE it, which would leave the path without a `bin/node` and break exactly
 # the lookup the seed exists to serve.
 home="$TMPROOT/home-realnode"
-mkdir -p "$home/node/24.0.2/bin"
-printf '#!/usr/bin/env bash\necho downloaded-node\n' >"$home/node/24.0.2/bin/node"
-chmod +x "$home/node/24.0.2/bin/node"
+mkdir -p "$home/node/24.21.0/bin"
+printf '#!/usr/bin/env bash\necho downloaded-node\n' >"$home/node/24.21.0/bin/node"
+chmod +x "$home/node/24.21.0/bin/node"
 out="$(PATH=/usr/bin:/bin TOOLU_RUNNER_HOME="$home" TOOLU_JITCONFIG=x "$root/entrypoint" 2>&1)"
 check "an engine-downloaded runtime still boots" "argv=boot" "$(grep '^argv=' <<<"$out")"
-if [[ -d "$home/node/24.0.2" && ! -L "$home/node/24.0.2" && -x "$home/node/24.0.2/bin/node" && ! -e "$home/node/24.0.2/24.0.2" ]]; then
+if [[ -d "$home/node/24.21.0" && ! -L "$home/node/24.21.0" && -x "$home/node/24.21.0/bin/node" && ! -e "$home/node/24.21.0/24.21.0" ]]; then
   echo "ok: the downloaded runtime is left intact, with no link nested inside it"
 else
-  echo "FAIL: $home/node/24.0.2 must stay a real directory with bin/node and no nested link" >&2
-  ls -la "$home/node/24.0.2" >&2
+  echo "FAIL: $home/node/24.21.0 must stay a real directory with bin/node and no nested link" >&2
+  ls -la "$home/node/24.21.0" >&2
   fail=1
 fi
 
@@ -179,26 +179,26 @@ fi
 # bash's `read` returns non-zero on an unterminated final line even though it
 # assigned the value, so a `read … || default_node=""` would throw away a
 # perfectly good version and silently ship a job with no node on PATH.
-root="$(image_tree nonewline 24.0.2)"
-printf '24.0.2' >"$root/node/default" # deliberately no \n
+root="$(image_tree nonewline 24.21.0)"
+printf '24.21.0' >"$root/node/default" # deliberately no \n
 home="$TMPROOT/home-nonewline"
 out="$(PATH=/usr/bin:/bin TOOLU_RUNNER_HOME="$home" TOOLU_JITCONFIG=x "$root/entrypoint" 2>&1)"
 check "an unterminated default marker still puts node on PATH" \
-  "node=$root/node/24.0.2/bin/node" "$(grep '^node=' <<<"$out")"
+  "node=$root/node/24.21.0/bin/node" "$(grep '^node=' <<<"$out")"
 
 # --- a corrupted marker cannot inject a directory into PATH ----------------
 # The value is interpolated into PATH, so a marker carrying a colon splits
 # into TWO search-path entries. The fixture is a single path component with a
-# real runtime under it (`24.0.2:evil`, a legal directory name): the `-x` test
+# real runtime under it (`24.21.0:evil`, a legal directory name): the `-x` test
 # on the concatenated path therefore SUCCEEDS, and without the shape check the
-# launcher exports `…/node/24.0.2` and a second, attacker-named entry. A
+# launcher exports `…/node/24.21.0` and a second, attacker-named entry. A
 # fixture containing a slash would prove nothing — the pre-fix code rejects
 # that one anyway, because the concatenated path simply does not exist.
-root="$(image_tree badmarker 24.0.2)"
-mkdir -p "$root/node/24.0.2:evil/bin"
-printf '#!/usr/bin/env bash\necho evil-node\n' >"$root/node/24.0.2:evil/bin/node"
-chmod +x "$root/node/24.0.2:evil/bin/node"
-printf '24.0.2:evil\n' >"$root/node/default"
+root="$(image_tree badmarker 24.21.0)"
+mkdir -p "$root/node/24.21.0:evil/bin"
+printf '#!/usr/bin/env bash\necho evil-node\n' >"$root/node/24.21.0:evil/bin/node"
+chmod +x "$root/node/24.21.0:evil/bin/node"
+printf '24.21.0:evil\n' >"$root/node/default"
 home="$TMPROOT/home-badmarker"
 out="$(PATH=/usr/bin:/bin TOOLU_RUNNER_HOME="$home" TOOLU_JITCONFIG=x "$root/entrypoint" 2>&1)"
 check "a marker that is not a bare version is refused" "node=none" "$(grep '^node=' <<<"$out")"
@@ -218,7 +218,7 @@ fi
 # find — so a read-only home or a full disk must not take the job down before
 # it dispatches. Exercised with a real unwritable directory, which means it
 # needs an unprivileged uid: root ignores the permission bits entirely.
-root="$(image_tree unwritable 24.0.2)"
+root="$(image_tree unwritable 24.21.0)"
 home="$TMPROOT/home-unwritable"
 mkdir -p "$home/node"
 # `mktemp -d` is 0700, so an unprivileged uid cannot even traverse into the
@@ -275,7 +275,7 @@ chmod 700 "$TMPROOT"
 # A directory in place of the marker file is the reproducible stand-in for an
 # I/O failure: `head` fails, and its reason must reach the warning rather than
 # /dev/null, or an operator sees only "no node on PATH" with no cause.
-root="$(image_tree unreadablemarker 24.0.2)"
+root="$(image_tree unreadablemarker 24.21.0)"
 rm -f "$root/node/default"
 mkdir -p "$root/node/default"
 home="$TMPROOT/home-unreadablemarker"
@@ -301,7 +301,7 @@ else
 fi
 
 # --- a seed whose `default` names a missing runtime warns, does not die ----
-root="$(image_tree brokenseed 24.0.2)"
+root="$(image_tree brokenseed 24.21.0)"
 printf '99.0.0\n' >"$root/node/default"
 home="$TMPROOT/home-brokenseed"
 out="$(PATH=/usr/bin:/bin TOOLU_RUNNER_HOME="$home" TOOLU_JITCONFIG=x "$root/entrypoint" 2>&1)"

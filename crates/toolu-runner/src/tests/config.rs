@@ -139,3 +139,74 @@ fn session_conflict_policy_reads_and_diagnoses_the_override() {
     );
   }
 }
+
+#[test]
+fn node_dir_is_unset_when_empty_and_absolute_when_relative() {
+  temp_env::with_var("TOOLU_RUNNER_NODE_DIR", Some(""), || {
+    assert_eq!(super::node_dir(), None);
+  });
+  temp_env::with_var("TOOLU_RUNNER_NODE_DIR", None::<&str>, || {
+    assert_eq!(super::node_dir(), None);
+  });
+  temp_env::with_var("TOOLU_RUNNER_NODE_DIR", Some("externals"), || {
+    let dir = super::node_dir();
+    assert!(
+      dir
+        .as_ref()
+        .is_some_and(|dir| dir.is_absolute() && dir.ends_with("externals")),
+      "{dir:?}"
+    );
+  });
+  temp_env::with_var(
+    "TOOLU_RUNNER_NODE_DIR",
+    Some("/opt/actions-runner/externals"),
+    || {
+      assert_eq!(
+        super::node_dir(),
+        Some(std::path::PathBuf::from("/opt/actions-runner/externals"))
+      );
+    },
+  );
+}
+
+#[cfg(target_os = "linux")]
+const NODE_DIR_CHILD_TEST: &str = "config::tests::node_dir_unresolvable_cwd_child_probe";
+/// Directory the child enters and deletes before resolving `TOOLU_RUNNER_NODE_DIR`.
+const DOOMED_CWD_KEY: &str = "TOOLU_TEST_DOOMED_CWD";
+
+#[test]
+#[ignore = "child-process probe; exercised by node_dir_keeps_a_relative_path_when_the_cwd_is_gone"]
+fn node_dir_unresolvable_cwd_child_probe() {
+  let Ok(doomed) = std::env::var(DOOMED_CWD_KEY) else {
+    return;
+  };
+  std::env::set_current_dir(&doomed).expect("enter the doomed cwd");
+  std::fs::remove_dir(&doomed).expect("delete the cwd under the process");
+  assert_eq!(
+    super::node_dir(),
+    Some(std::path::PathBuf::from("externals")),
+    "an unresolvable cwd keeps the path as given"
+  );
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn node_dir_keeps_a_relative_path_when_the_cwd_is_gone() {
+  // Linux `getcwd` fails with ENOENT once the cwd is unlinked, so
+  // `std::path::absolute` really errors in the child.
+  let doomed = tempfile::tempdir().expect("temp dir");
+  let cwd = doomed.path().join("cwd");
+  std::fs::create_dir(&cwd).expect("create the doomed cwd");
+  let output = Command::new(std::env::current_exe().expect("resolve current test binary"))
+    .args(["--ignored", "--exact", NODE_DIR_CHILD_TEST, "--nocapture"])
+    .env(DOOMED_CWD_KEY, &cwd)
+    .env("TOOLU_RUNNER_NODE_DIR", "externals")
+    .output()
+    .expect("run node_dir child probe");
+  let stderr = String::from_utf8_lossy(&output.stderr);
+  assert!(output.status.success(), "child probe failed: {stderr}");
+  assert!(
+    stderr.contains("toolu-runner: TOOLU_RUNNER_NODE_DIR could not be made absolute ("),
+    "the fallback must be reported by name; stderr: {stderr}"
+  );
+}

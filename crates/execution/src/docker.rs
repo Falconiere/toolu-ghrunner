@@ -16,6 +16,7 @@ mod container_health_options;
 mod container_mounts;
 /// Validated Docker create options.
 pub mod container_options;
+mod container_os;
 mod container_ports;
 /// Evaluated job container declarations.
 pub mod container_spec;

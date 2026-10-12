@@ -1,0 +1,55 @@
+name: node-runtime-95
+
+# Issue #95 parity lane: which Node.js runtime the official runner gives a
+# node20 action under GitHub's live migration flags, on the host and inside an
+# Alpine job container. The probe (.github/actions/node-runtime-95) is the same
+# action toolu's replay tests run (crates/execution/tests/node_migration_test.rs,
+# node_container_test.rs). github.com currently sends
+# `actions.runner.requirenode24 = true`, so every lane must observe Node 24;
+# the "Complete job" annotation lists the action as forced to Node 24.
+# See docs/test-coverage.md "Node runtime (#95)". Dispatch-only; the recorded
+# run (38217199303) came from a since-removed branch push trigger.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host:
+    name: reference-${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - id: probe
+        uses: ./.github/actions/node-runtime-95
+      - name: Assert upstream parity
+        run: |
+          cat node-runtime-95.json
+          jq -e '.version | startswith("v24.")' node-runtime-95.json
+  alpine:
+    name: reference-alpine-container
+    runs-on: ubuntu-24.04
+    container: alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
+    steps:
+      - name: Install jq
+        run: apk add --no-cache jq >/dev/null
+      # actions/checkout is itself a JavaScript action: it already runs on
+      # the Alpine runtime here.
+      - uses: actions/checkout@v4
+      - id: probe
+        uses: ./.github/actions/node-runtime-95
+      - name: Assert upstream parity
+        run: |
+          cat node-runtime-95.json
+          jq -e '.version | startswith("v24.")' node-runtime-95.json
+          jq -e '.glibc == null' node-runtime-95.json
+          jq -e '.execPath | contains("node24_alpine")' node-runtime-95.json

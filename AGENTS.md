@@ -293,7 +293,7 @@ to that list requires proving the value is not a real credential.
 
 - `config.rs` — `RunnerConfig` (data_dir, workspace_root, cgroup_path,
   services_mode, service_bind, cache, workspace_gc_hours, workspace,
-  shadow_enabled) + `ServicesMode` (forwarder / offline / accelerated),
+  shadow_enabled, node_dir — `TOOLU_RUNNER_NODE_DIR`) + `ServicesMode` (forwarder / offline / accelerated),
   `WorkspaceConfig` (`mode`: `WorkspaceMode` stable / fresh,
   `stable_gc_hours`), `CacheConfig`, `L2Config`.
 - `error.rs` — `RunnerError` enum (Protocol, Auth, Network, Config,
@@ -580,8 +580,22 @@ to that list requires proving the value is not a real credential.
   actions are Linux-only; local actions skip pre, and remote pre failures
   retain eligible posts for cleanup. Stages borrow the job-container network or,
   for host jobs with services, the service network through main and post.
-- `node/` — Node.js runtime detection + caching. `runtime` (version
-  detection, download, cache at `data_dir/node/{version}`).
+- `node/` — Node.js runtime selection + acquisition (#95). `migration`
+  ports upstream's node20 → node24 decision (`HandlerFactory`/`NodeUtil`:
+  job variables `actions.runner.{usenode24bydefault,requirenode24,warnonnode20}`,
+  `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24` / `ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION`
+  from the stage env or runner process; state on `ExecutionContext.node_migration`,
+  end-of-job warnings in `job_runner/complete_step.rs`). `platform` classifies
+  the host (dynamic loader ⇒ glibc/musl; unsupported OS/CPU errors) and job
+  containers (upstream's `/etc/*release` probe, cached per job by
+  `docker/container_os.rs`; Alpine is x64-only). `runtime::ensure_node_runtime`
+  is the single entry (`node_stage::run_node_stage`): authoritative
+  `TOOLU_RUNNER_NODE_DIR` preseed (`RunnerConfig.node_dir`, upstream
+  `externals/` layout, mounted ro at `/github/externals`) → cache
+  `data_dir/node/{version}[-alpine]` → download (nodejs.org /
+  `actions/alpine_nodejs`, pins 20.20.2 / 24.21.0) via `download` (staging,
+  `validate`'s `node --version` start check for host-runnable targets, atomic
+  rename).
 - `plugin/` — `RunnerPlugin` trait + `PluginRegistry`. New
   addition not in upstream `actions/runner`.
 

@@ -326,15 +326,18 @@ async fn step_summary_real_node_and_composite_keep_distinct_documents() -> Resul
     node.status.success(),
     "Node must be available for acceptance"
   );
-  let binary = node_binary_path(&node_cache_dir(
-    &root.path().join("data"),
-    node_version_for(20),
-  ));
-  std::fs::create_dir_all(binary.parent().ok_or("node cache parent")?)?;
-  #[cfg(unix)]
-  std::os::unix::fs::symlink(String::from_utf8(node.stdout)?.trim(), binary)?;
-  #[cfg(not(unix))]
-  std::fs::copy(String::from_utf8(node.stdout)?.trim(), binary)?;
+  let host_node = String::from_utf8(node.stdout)?;
+  for major in [20, 24] {
+    let binary = node_binary_path(&node_cache_dir(
+      &root.path().join("data"),
+      node_version_for(major),
+    ));
+    std::fs::create_dir_all(binary.parent().ok_or("node cache parent")?)?;
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(host_node.trim(), binary)?;
+    #[cfg(not(unix))]
+    std::fs::copy(host_node.trim(), binary)?;
+  }
   let events = replay(root.path(), job).await?;
   let docs = summaries(&events);
   assert_eq!(

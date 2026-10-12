@@ -125,9 +125,11 @@ async fn seed_node(data: &Path) -> TestResult {
     .await?;
   assert!(output.status.success(), "Node is required for this test");
   let host = String::from_utf8(output.stdout)?;
-  let target = node_binary_path(&node_cache_dir(data, node_version_for(20)));
-  tokio::fs::create_dir_all(target.parent().ok_or("node cache parent missing")?).await?;
-  tokio::fs::symlink(host.trim(), target).await?;
+  for major in [20, 24] {
+    let target = node_binary_path(&node_cache_dir(data, node_version_for(major)));
+    tokio::fs::create_dir_all(target.parent().ok_or("node cache parent missing")?).await?;
+    tokio::fs::symlink(host.trim(), target).await?;
+  }
   Ok(())
 }
 

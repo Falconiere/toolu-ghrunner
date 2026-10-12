@@ -36,7 +36,7 @@
 # Pre-seed the Node runtimes the engine's `ensure_node_runtime` would
 # otherwise fetch from nodejs.org on first use. Instances are ephemeral, so a
 # lazy cache never warms. Versions must match `node_version_for` in
-# crates/execution/src/node/runtime.rs (node20 -> 20.18.3, node24 -> 24.0.2);
+# crates/execution/src/node/runtime.rs (node20 -> 20.20.2, node24 -> 24.21.0);
 # the tarball flavour is darwin-arm64 because that is the only shape a
 # Namespace macOS instance runs (`MachineArch: "arm64"`). Downloading is
 # platform-independent work, so this stage pins $BUILDPLATFORM and is never
@@ -51,12 +51,12 @@ FROM --platform=$BUILDPLATFORM debian:bookworm-slim AS node-seed
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates curl \
   && rm -rf /var/lib/apt/lists/*
-ARG NODE_VERSIONS="20.18.3 24.0.2"
+ARG NODE_VERSIONS="20.20.2 24.21.0"
 # The version the entrypoint puts on a step's $PATH (hosted-runner parity for
 # `run: node …`). Written to /seed/node/default so the launcher never has to
 # sort versions at boot; `test -x` below fails the build loudly if it names a
 # version the loop did not lay down.
-ARG NODE_ON_PATH=24.0.2
+ARG NODE_ON_PATH=24.21.0
 RUN set -eu; \
   for v in ${NODE_VERSIONS}; do \
     tarball="node-v${v}-darwin-arm64.tar.gz"; \

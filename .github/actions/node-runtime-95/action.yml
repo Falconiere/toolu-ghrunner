@@ -1,0 +1,9 @@
+name: node-runtime-95
+description: >-
+  Issue #95 probe: a node20 action that records the runtime it ran on
+  (version, executable path, glibc presence) to node-runtime-95.json in the
+  working directory and prints it. Shared by the official-runner reference
+  lane (.github/workflows/node-runtime-95.yml) and toolu's replay tests.
+runs:
+  using: node20
+  main: index.js

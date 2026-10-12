@@ -265,6 +265,7 @@ fn build_boot_runner_config() -> RunnerConfig {
       stable_gc_hours: 0,
     },
     shadow_enabled: false,
+    node_dir: crate::config::node_dir(),
   }
 }
 

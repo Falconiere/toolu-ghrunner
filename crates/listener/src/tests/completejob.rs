@@ -421,12 +421,18 @@ async fn seed_node(data: &std::path::Path) -> TestResult {
     .output()
     .await?;
   assert!(output.status.success(), "Node is required for this test");
-  let target = execution::node::runtime::node_binary_path(
-    &execution::node::runtime::node_cache_dir(data, execution::node::runtime::node_version_for(20)),
-  );
-  std::fs::create_dir_all(target.parent().ok_or("node cache parent")?)?;
-  #[cfg(unix)]
-  std::os::unix::fs::symlink(String::from_utf8(output.stdout)?.trim(), target)?;
+  let host_node = String::from_utf8(output.stdout)?;
+  // Captured messages select node24 for node20 actions (`requirenode24`).
+  for major in [20, 24] {
+    let target =
+      execution::node::runtime::node_binary_path(&execution::node::runtime::node_cache_dir(
+        data,
+        execution::node::runtime::node_version_for(major),
+      ));
+    std::fs::create_dir_all(target.parent().ok_or("node cache parent")?)?;
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(host_node.trim(), target)?;
+  }
   Ok(())
 }
 

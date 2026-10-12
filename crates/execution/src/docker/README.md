@@ -27,6 +27,7 @@ into this module. Job-level cgroup wiring lives in
 | `container_ports.rs` | `apply_ports` | Validates and maps published port declarations. |
 | `container_mounts.rs` | `ContainerMounts` | Mounts individual workspace/runtime directories and a private job home. |
 | `container_exec.rs` | `ContainerExec` | Runs attached container processes with timeout/cancel and streamed output. |
+| `container_os.rs` | `JobContainer::node_target` | Upstream's once-per-job `/etc/*release` probe deciding the Node.js runtime (glibc or Alpine musl) a job container can start. |
 | `job_container.rs` | `JobContainer` | Owns the per-job container/network through post steps and explicit cleanup. |
 | `services.rs` | `ServiceContainers` | Owns service startup, context metadata, diagnostic logs and cleanup on shared or host-owned networks. |
 | `service_spec.rs` | `ServiceSpec` | Evaluates ordered acquired service declarations and validates platform support. |

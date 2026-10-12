@@ -26,6 +26,8 @@ Environment:
   TOOLU_RUNNER_HOME            runner state root (default ~/.toolu-runner)
   TOOLU_RUNNER_KEYRING         opt in to the OS keyring token store (default: 0600 file)
   TOOLU_RUNNER_NO_KEYRING      force the file token store; overrides TOOLU_RUNNER_KEYRING
+  TOOLU_RUNNER_NODE_DIR        offline Node.js runtimes (official runner externals/ layout);
+                               never downloads when set
   TOOLU_RUNNER_LOG / RUST_LOG  tracing filter; levels above `info` also require
                                TOOLU_RUNNER_ALLOW_VERBOSE=1 (secret-leak guard)";
 
