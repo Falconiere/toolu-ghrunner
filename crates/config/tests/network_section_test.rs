@@ -58,8 +58,10 @@ ca_bundle = "~/certs/corp-root.pem"
   assert!(!debug.contains("pass@"), "Debug must redact: {debug}");
 }
 
+/// A blank `ca_bundle` resolves to unset. (A blank `proxy` passes through
+/// `resolve` unchanged; `network::configured_proxy` treats it as env mode.)
 #[test]
-fn blank_ca_bundle_is_unset_like_a_blank_proxy() {
+fn blank_ca_bundle_is_unset() {
   for blank in ["", "   ", "\t"] {
     let cfg = load(&format!("\n[network]\nca_bundle = \"{blank}\"\n")).expect("load config");
     assert_eq!(cfg.network_config().ca_bundle, None, "{blank:?}");
