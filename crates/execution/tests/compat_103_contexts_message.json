@@ -706,7 +706,7 @@
         "url": "https://run-actions-1-azure-eastus.actions.githubusercontent.com/231/",
         "authorization": {
           "parameters": {
-            "AccessToken": "3b2e2114-73d1-571f-b172-9e32da97df53"
+            "AccessToken": "redacted"
           },
           "scheme": "OAuth"
         },

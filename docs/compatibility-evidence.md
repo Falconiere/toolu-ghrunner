@@ -84,6 +84,10 @@ How the sanitizer treats the message:
 - **Placeholders.** Each distinct secret becomes a version-5 UUID derived from
   the namespace and the JSON path where it was first seen, never from the
   value, so no hash of a secret is committed.
+- **Endpoint authorization.** Endpoint `authorization.parameters` values (and
+  every other occurrence of them) become the literal `redacted`, the #99
+  convention. A UUID under an `AccessToken` key reads as a live API key to
+  gitleaks.
 - **Consistency.** Every occurrence of a secret, including inside scripts, is
   replaced by the same placeholder, so equality relations survive.
 - **What it keeps.** Keys, key order, value types, template-token shapes, step

@@ -714,8 +714,8 @@
   ],
   "leftover_containers": [],
   "captures": {
-    "crates/execution/tests/compat_103_contexts_message.json": "3ed7670cae5bbfcf3f42b8f373989940f707d4565fa86849081792456e736111",
-    "crates/execution/tests/compat_103_docker_message.json": "cc4deff981fa9c2a94435c7557f651a6249c6c1660de48995ee8f0e95f15cfa5"
+    "crates/execution/tests/compat_103_contexts_message.json": "47113f3a756cbf1d70276e26596ceb5067951055ff5f993697704bee35355380",
+    "crates/execution/tests/compat_103_docker_message.json": "f29dc49a93cb686ceb7569a83637802e0a22c24e53afdfbca5c8741946e326f5"
   },
   "acknowledged": [
     {

@@ -9,7 +9,10 @@ Secret values are collected from every place the job message carries one:
 secret `variables`, `mask` hints, endpoint `authorization.parameters`, and any
 JWT- or GitHub-token-shaped string. Each distinct value becomes a version-5 UUID
 derived from the namespace and the JSON path where it was first seen (never
-from the value itself, so the fixture holds no hash of a secret). Every
+from the value itself, so the fixture holds no hash of a secret) — except a
+value that is an endpoint `authorization.parameters` entry, which becomes the
+literal `redacted` (the #99 fixture convention; a placeholder under an
+`AccessToken` key reads as a live API key to secret scanners). Every
 occurrence of that value, including inside longer strings such as scripts, is
 replaced by the same placeholder, so equality relations (a mask hint equal to a
 variable) survive. Keys, key order, value types, step UUIDs, `contextName`s
@@ -96,15 +99,27 @@ def replace_all(node, mapping):
     return node
 
 
+def endpoint_secrets(message):
+    endpoints = (message.get("resources") or {}).get("endpoints") or []
+    return {value for endpoint in endpoints
+            for value in (((endpoint or {}).get("authorization") or {}).get("parameters") or {}).values()
+            if isinstance(value, str) and value}
+
+
 def sanitize(message, namespace):
     """Return (sanitized_message, number_of_distinct_secrets)."""
     secrets = collect_secrets(message)
-    mapping = {value: placeholder(namespace, path) for value, path in secrets.items()}
+    redacted = endpoint_secrets(message)
+    mapping = {value: REDACTED if value in redacted else placeholder(namespace, path)
+               for value, path in secrets.items()}
     clean = replace_all(message, mapping)
     problems = scan(clean, originals=secrets)
     if problems:
         raise ValueError("sanitization incomplete: " + "; ".join(problems))
     return clean, len(mapping)
+
+
+REDACTED = "redacted"
 
 
 def is_placeholder(value):
@@ -120,17 +135,19 @@ def scan(message, originals=()):
     problems = []
     for name, variable in (message.get("variables") or {}).items():
         if isinstance(variable, dict) and variable.get("isSecret") and variable.get("value"):
-            if not is_placeholder(variable["value"]):
+            if not (is_placeholder(variable["value"]) or variable["value"] == REDACTED):
                 problems.append(f"secret variable {name} is not a placeholder")
     for index, hint in enumerate(message.get("mask") or []):
-        if isinstance(hint, dict) and hint.get("value") and not is_placeholder(hint["value"]):
+        if (isinstance(hint, dict) and hint.get("value")
+                and not (is_placeholder(hint["value"]) or hint["value"] == REDACTED)):
             problems.append(f"mask[{index}] is not a placeholder")
     endpoints = (message.get("resources") or {}).get("endpoints") or []
     for index, endpoint in enumerate(endpoints):
         params = ((endpoint or {}).get("authorization") or {}).get("parameters") or {}
         for key, value in params.items():
-            if value and not is_placeholder(value):
-                problems.append(f"endpoint[{index}] {key} is not a placeholder")
+            # Older fixtures (#70) carry placeholders here; this tool writes `redacted`.
+            if value and not (value == REDACTED or is_placeholder(value)):
+                problems.append(f"endpoint[{index}] {key} is not redacted")
     for path, text in walk(message):
         if credential_words(text):
             problems.append(f"credential-shaped value at {path}")

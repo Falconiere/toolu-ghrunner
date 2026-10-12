@@ -17,7 +17,8 @@ CAPTURE = ROOT / "crates/execution/tests/job_outputs_message.json"
 
 # Disposable probe values shaped like the real credentials a raw capture holds.
 PROBE_TOKEN = "ghs_" + "0123456789abcdefABCDEF0123456789ab"
-PROBE_JWT = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJwcm9iZSJ9.c2lnbmF0dXJlLXByb2Jl"
+# Assembled at runtime so secret scanners reading this source see no JWT literal.
+PROBE_JWT = ".".join(["eyJhbGciOiJSUzI1NiJ9", "eyJzdWIiOiJwcm9iZSJ9", "c2lnbmF0dXJlLXByb2Jl"])
 PROBE_PLAIN = "plain-secret-probe-103"
 
 
@@ -85,6 +86,8 @@ class SanitizeCaptureTest(unittest.TestCase):
                          [s.get("contextName") for s in raw["steps"]])
         self.assertEqual(clean["resources"]["endpoints"][0]["url"],
                          raw["resources"]["endpoints"][0]["url"])
+        self.assertEqual(clean["resources"]["endpoints"][0]["authorization"]["parameters"],
+                         {"AccessToken": "redacted"})
 
     def test_placeholders_do_not_depend_on_the_secret_value(self):
         first, _ = sanitize_capture.sanitize(raw_capture(), "unit")
@@ -99,6 +102,7 @@ class SanitizeCaptureTest(unittest.TestCase):
         problems = sanitize_capture.scan(raw_capture())
         self.assertTrue(any("github_token" in p for p in problems), problems)
         self.assertTrue(any("credential-shaped" in p for p in problems), problems)
+        self.assertTrue(any("AccessToken is not redacted" in p for p in problems), problems)
 
     def test_cli_writes_a_clean_fixture_and_scan_accepts_it(self):
         with tempfile.TemporaryDirectory() as tmp:
