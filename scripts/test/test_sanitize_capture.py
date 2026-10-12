@@ -116,6 +116,14 @@ class SanitizeCaptureTest(unittest.TestCase):
             self.assertEqual(sanitize_capture.main(["--scan", str(out_path)]), 0)
             self.assertEqual(sanitize_capture.main(["--scan", str(raw_path)]), 1)
 
+    def test_invalid_json_exits_with_a_named_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = Path(tmp, "bad.json")
+            bad.write_text("{not json")
+            with self.assertRaises(SystemExit) as raised:
+                sanitize_capture.main(["--scan", str(bad)])
+            self.assertIn("cannot read JSON", str(raised.exception.code))
+
     def test_committed_captures_are_clean(self):
         fixtures = [CAPTURE, *sorted(CAPTURE.parent.glob("compat_103_*_message.json"))]
         self.assertGreaterEqual(len(fixtures), 3)

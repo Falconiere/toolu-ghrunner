@@ -88,6 +88,14 @@ class VerifyRecordedReportTest(unittest.TestCase):
         self.assertTrue(any("leftover container" in p for p in problems), problems)
         self.assertIn(f"{path} changed since the run; re-record", problems)
 
+    def test_a_failing_tool_exits_with_its_name(self):
+        with self.assertRaises(SystemExit) as missing:
+            reference_compare.run_tool(["no-such-tool-103", "x"])
+        self.assertIn("no-such-tool-103 is not on PATH", str(missing.exception.code))
+        with self.assertRaises(SystemExit) as failed:
+            reference_compare.run_tool(["python3", "-c", "import sys; sys.exit('boom')"])
+        self.assertIn("boom", str(failed.exception.code))
+
     def test_job_names_normalize_only_the_lane_token(self):
         self.assertEqual(reference_compare.split_job_name("probe-toolu / contexts (alpha, 7, true)"),
                          ("probe", "toolu", "contexts"))

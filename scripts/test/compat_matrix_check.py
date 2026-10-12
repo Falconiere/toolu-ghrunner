@@ -23,7 +23,10 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-reference_compare = importlib.import_module("reference_compare")
+try:
+    reference_compare = importlib.import_module("reference_compare")
+except ModuleNotFoundError as error:
+    sys.exit(f"compat_matrix_check: sibling module missing ({error}); run from a full checkout")
 
 ROOT = Path(__file__).resolve().parents[2]
 MATRIX = ROOT / "docs/compatibility-matrix.json"

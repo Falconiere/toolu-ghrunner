@@ -15,12 +15,13 @@ cd "$(dirname "$0")/../.." || exit 1 # repo root
 
 fail=0
 check() { # check <desc> <command...>
-  local desc="$1"
+  local desc="$1" out
   shift
-  if "$@" >/dev/null 2>&1; then
+  if out=$("$@" 2>&1); then
     echo "ok: $desc"
   else
     echo "FAIL: $desc" >&2
+    [[ -n "$out" ]] && printf '%s\n' "$out" >&2
     fail=1
   fi
 }

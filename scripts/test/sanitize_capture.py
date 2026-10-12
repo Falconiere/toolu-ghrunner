@@ -173,6 +173,14 @@ def scan(message, originals=()):
     return problems
 
 
+def read_json(path):
+    """Parsed JSON of `path`; unreadable or invalid input ends the script plainly."""
+    try:
+        return json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as error:
+        sys.exit(f"{path}: cannot read JSON: {error}")
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("raw", nargs="?", type=Path)
@@ -181,7 +189,7 @@ def main(argv=None):
     parser.add_argument("--scan", type=Path, metavar="PATH")
     args = parser.parse_args(argv)
     if args.scan:
-        problems = scan(json.loads(args.scan.read_text()))
+        problems = scan(read_json(args.scan))
         for problem in problems:
             print(f"{args.scan}: {problem}", file=sys.stderr)
         if problems:
@@ -190,7 +198,7 @@ def main(argv=None):
         return 0
     if not args.raw or not args.out:
         parser.error("RAW and OUT are required unless --scan is given")
-    message = json.loads(args.raw.read_text())
+    message = read_json(args.raw)
     try:
         clean, count = sanitize(message, args.namespace)
     except ValueError as error:

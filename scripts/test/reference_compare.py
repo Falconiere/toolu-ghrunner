@@ -49,8 +49,18 @@ NEGATIVE_FAILURES = {
 }
 
 
+def run_tool(args):
+    """stdout of `args`; a missing tool or a failed call ends the script with its stderr."""
+    try:
+        return subprocess.run(args, check=True, capture_output=True, text=True).stdout
+    except FileNotFoundError:
+        sys.exit(f"reference_compare: {args[0]} is not on PATH")
+    except subprocess.CalledProcessError as error:
+        sys.exit(f"reference_compare: {' '.join(args[:3])} failed: {error.stderr.strip()}")
+
+
 def gh_json(*args):
-    return json.loads(subprocess.check_output(["gh", *args], text=True))
+    return json.loads(run_tool(["gh", *args]))
 
 
 def split_job_name(name):
@@ -119,8 +129,7 @@ def expectation_failures(rows):
 
 
 def download(run_id, name, dest):
-    subprocess.run(["gh", "run", "download", str(run_id), "--repo", REPO, "-n", name,
-                    "-D", str(dest)], check=True, capture_output=True)
+    run_tool(["gh", "run", "download", str(run_id), "--repo", REPO, "-n", name, "-D", str(dest)])
 
 
 def observations(run_id, tmp):
@@ -140,7 +149,7 @@ def observations(run_id, tmp):
 
 
 def leftover_containers():
-    out = subprocess.check_output(["docker", "ps", "-a", "--format", "{{.ID}} {{.Image}}"], text=True)
+    out = run_tool(["docker", "ps", "-a", "--format", "{{.ID}} {{.Image}}"])
     digest = PROBE_IMAGE.split("@", 1)[1]
     return [line for line in out.splitlines() if digest in line or " alpine" in line]
 
@@ -148,9 +157,8 @@ def leftover_containers():
 def build_report(run_id, provenance, captures, acknowledged):
     run = gh_json("api", f"repos/{REPO}/actions/runs/{run_id}")
     # `--jq '.jobs[]' -c` prints one compact job object per line across pages.
-    lines = subprocess.check_output(
-        ["gh", "api", "--paginate", f"repos/{REPO}/actions/runs/{run_id}/jobs?per_page=100",
-         "--jq", ".jobs[] | tojson"], text=True).splitlines()
+    lines = run_tool(["gh", "api", "--paginate", f"repos/{REPO}/actions/runs/{run_id}/jobs?per_page=100",
+                      "--jq", ".jobs[] | tojson"]).splitlines()
     jobs = [json.loads(line) for line in lines if line.strip()]
     rows, unpaired = compare_jobs(jobs)
     with tempfile.TemporaryDirectory() as tmp:
