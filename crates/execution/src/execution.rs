@@ -79,8 +79,14 @@ pub mod step_timeout;
 pub mod steps_runner;
 /// Workflow YAML parsing, matrix build, orchestration and reusable-workflow resolution.
 pub mod workflow;
-/// Age-based garbage collection of per-job workspace directories.
+/// Ownership- and lease-aware garbage collection of job workspaces.
 pub mod workspace_gc;
+/// Stable per-repository / fresh per-job workspace allocation (issue #90).
+pub mod workspace_layout;
+/// Exclusive `fs2` leases that keep a workspace to one job at a time.
+pub mod workspace_lease;
+/// `_PipelineMapping/<owner>/<repo>/PipelineFolder.json` tracking files.
+pub mod workspace_tracking;
 
 #[cfg(test)]
 #[path = "execution/tests/job_environment.rs"]

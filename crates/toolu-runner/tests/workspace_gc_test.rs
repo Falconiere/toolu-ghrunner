@@ -1,19 +1,27 @@
-//! Real-data workspace GC tests: age-based pruning of per-job workspace
-//! directories under a real tempdir. No mocks — directories are backdated on
-//! disk with `filetime::set_file_mtime` and the sweep runs against real
-//! `std::fs` entries.
+//! Real-data workspace GC tests (issue #90 AC-6 / 90-S4).
+//!
+//! Workspaces are created by the production `prepare_workspace` from the
+//! recorded job message (`tests/fixtures/job_message.json`, only
+//! `github.repository` and the job id rewritten) on a real shared work root.
+//! Ages are real on-disk state: directory mtimes via `filetime`, stable
+//! `lastRunOnUnix` via the real tracking file. Leases are live `fs2` locks
+//! held by an unreleased `PreparedWorkspace`, as a running job holds them.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-use execution::execution::workspace_gc::gc_workspaces;
+use execution::execution::workspace_gc::{GcPolicy, gc_workspaces};
+use execution::execution::workspace_layout::{PreparedWorkspace, prepare_workspace};
+use execution::execution::workspace_tracking::{TrackingConfig, now_unix};
 use filetime::FileTime;
+use shared::{AgentJobRequestMessage, RunnerConfig, WorkspaceConfig, WorkspaceMode};
 
 /// Boxed error alias for test helpers that use `?`.
 type TestResult<T> = Result<T, Box<dyn std::error::Error>>;
 
 const HOUR: u64 = 3600;
+const FIXTURE: &str = include_str!("fixtures/job_message.json");
 
 /// Create `root/<name>/marker.txt` — a real directory holding a real file.
 fn make_job_dir(root: &Path, name: &str) -> TestResult<()> {
@@ -32,13 +40,78 @@ fn age_by(path: &Path, secs: u64) -> TestResult<()> {
   Ok(())
 }
 
+fn policy(data_dir: &Path, job_hours: u64, stable_hours: u64) -> GcPolicy {
+  let age = |hours: u64| (hours > 0).then(|| Duration::from_secs(hours * HOUR));
+  GcPolicy {
+    data_dir: data_dir.to_path_buf(),
+    job_max_age: age(job_hours),
+    stable_max_age: age(stable_hours),
+  }
+}
+
+/// A registration on the shared work root `root/work`.
+fn registration(root: &Path, name: &str, mode: WorkspaceMode) -> RunnerConfig {
+  RunnerConfig {
+    data_dir: root.join("registrations").join(name),
+    workspace_root: root.join("work"),
+    workspace: WorkspaceConfig {
+      mode,
+      stable_gc_hours: 0,
+    },
+    ..RunnerConfig::default()
+  }
+}
+
+/// The recorded job message for `repository` with job id `job_id`.
+fn message(repository: &str, job_id: &str) -> TestResult<AgentJobRequestMessage> {
+  let mut msg: AgentJobRequestMessage = serde_json::from_str(FIXTURE)?;
+  job_id.clone_into(&mut msg.job_id);
+  msg.workspace = None;
+  let github = msg
+    .context_data
+    .get_mut("github")
+    .and_then(|github| github.d.as_mut())
+    .ok_or("fixture github context")?;
+  let entry = github
+    .iter_mut()
+    .find(|entry| entry.key.s.as_deref() == Some("repository"))
+    .ok_or("fixture github.repository")?;
+  entry.value.s = Some(repository.to_owned());
+  Ok(msg)
+}
+
+/// Claim and create a workspace as `run_job` does, proving it is on disk
+/// before GC runs (a silently missing directory would make GC vacuous).
+fn prepare(config: &RunnerConfig, repository: &str, job_id: &str) -> TestResult<PreparedWorkspace> {
+  let mut prepared = prepare_workspace(config, &message(repository, job_id)?)?;
+  prepared.create_dirs()?;
+  assert!(
+    prepared.workspace.is_dir(),
+    "{}",
+    prepared.workspace.display()
+  );
+  Ok(prepared)
+}
+
+/// Rewrite a stable workspace's last use to `hours` ago.
+fn last_used(work: &Path, repository: &str, hours: u64) -> TestResult<PathBuf> {
+  let file = work
+    .join("_PipelineMapping")
+    .join(repository)
+    .join("PipelineFolder.json");
+  let mut tracking = TrackingConfig::load(&file)?.ok_or("tracking file")?;
+  tracking.last_run_on_unix = now_unix() - hours * HOUR;
+  tracking.save(&file)?;
+  Ok(file)
+}
+
 #[test]
 fn prunes_old_dirs_keeps_fresh_and_running() -> TestResult<()> {
   let tmp = tempfile::tempdir()?;
   let root = tmp.path();
 
-  // Two stale dirs to reap, one stale dir that is the running job (must live),
-  // and two fresh dirs.
+  // Pre-#90 directories (no lease file): two stale dirs to reap, one stale
+  // dir that is the running job (must live), and two fresh dirs.
   for name in [
     "job-old-a",
     "job-old-b",
@@ -52,7 +125,7 @@ fn prunes_old_dirs_keeps_fresh_and_running() -> TestResult<()> {
     age_by(&root.join(old), 48 * HOUR)?;
   }
 
-  let removed = gc_workspaces(root, Duration::from_secs(24 * HOUR), "job-keep")?;
+  let removed = gc_workspaces(root, &policy(root, 24, 0), "job-keep")?;
 
   assert_eq!(
     removed, 2,
@@ -74,7 +147,7 @@ fn missing_root_is_ok_zero() -> TestResult<()> {
   let tmp = tempfile::tempdir()?;
   let missing = tmp.path().join("does-not-exist");
 
-  let removed = gc_workspaces(&missing, Duration::from_secs(24 * HOUR), "job-keep")?;
+  let removed = gc_workspaces(&missing, &policy(tmp.path(), 24, 24), "job-keep")?;
 
   assert_eq!(removed, 0, "a missing workspace root prunes nothing");
   Ok(())
@@ -91,7 +164,7 @@ fn plain_file_in_root_is_left_untouched() -> TestResult<()> {
   make_job_dir(root, "job-old")?;
   age_by(&root.join("job-old"), 48 * HOUR)?;
 
-  let removed = gc_workspaces(root, Duration::from_secs(24 * HOUR), "job-keep")?;
+  let removed = gc_workspaces(root, &policy(root, 24, 0), "job-keep")?;
 
   assert_eq!(removed, 1, "only the stale directory is removed");
   assert!(
@@ -102,5 +175,161 @@ fn plain_file_in_root_is_left_untouched() -> TestResult<()> {
     !root.join("job-old").exists(),
     "the stale directory is removed"
   );
+  Ok(())
+}
+
+#[test]
+fn stable_gc_prunes_only_owned_stale_unleased_workspaces() -> TestResult<()> {
+  let tmp = tempfile::tempdir()?;
+  let a = registration(tmp.path(), "a", WorkspaceMode::Stable);
+  let b = registration(tmp.path(), "b", WorkspaceMode::Stable);
+  let work = a.workspace_root.clone();
+
+  drop(prepare(&a, "alice/app", "j1")?);
+  drop(prepare(&a, "alice/lib", "j2")?);
+  drop(prepare(&b, "bob/tool", "j3")?);
+  drop(prepare(&a, "alice/current", "j4")?);
+  let held = prepare(&a, "alice/held", "j5")?;
+  let stale_app = last_used(&work, "alice/app", 100)?;
+  last_used(&work, "alice/lib", 1)?;
+  last_used(&work, "bob/tool", 100)?;
+  last_used(&work, "alice/current", 100)?;
+  last_used(&work, "alice/held", 100)?;
+  // Stable directories are not mtime candidates, however old.
+  for dir in ["app", "lib", "tool", "current", "held"] {
+    age_by(&work.join(dir), 500 * HOUR)?;
+  }
+
+  // The default (stable_gc_hours = 0) never prunes a stable workspace.
+  assert_eq!(
+    gc_workspaces(&work, &policy(&a.data_dir, 24, 0), "current")?,
+    0
+  );
+
+  let removed = gc_workspaces(&work, &policy(&a.data_dir, 24, 48), "current")?;
+
+  assert_eq!(
+    removed, 1,
+    "only alice/app is owned, stale, unleased, not kept"
+  );
+  assert!(!work.join("app").exists(), "owned stale workspace pruned");
+  assert!(!stale_app.exists(), "its tracking file goes with it");
+  assert!(
+    work.join("lib/lib").exists(),
+    "recently used workspace kept"
+  );
+  assert!(
+    work.join("tool/tool").exists(),
+    "another registration's workspace kept"
+  );
+  assert!(
+    work.join("current/current").exists(),
+    "the running job's workspace kept"
+  );
+  assert!(
+    work.join("held/held").exists(),
+    "a leased (active) workspace kept"
+  );
+  assert!(
+    work.join("_PipelineMapping").is_dir(),
+    "mapping root never deleted"
+  );
+  drop(held);
+
+  // A pruned repository gets its stable name back on the next job.
+  let again = prepare(&a, "alice/app", "j6")?;
+  assert_eq!(again.workspace, work.join("app/app"));
+  Ok(())
+}
+
+#[test]
+fn fresh_gc_respects_owner_and_live_job_leases() -> TestResult<()> {
+  let tmp = tempfile::tempdir()?;
+  let a = registration(tmp.path(), "a", WorkspaceMode::Fresh);
+  let b = registration(tmp.path(), "b", WorkspaceMode::Fresh);
+  let work = a.workspace_root.clone();
+
+  drop(prepare(&a, "alice/app", "job-a-old")?);
+  drop(prepare(&b, "bob/app", "job-b-old")?);
+  let live = prepare(&a, "alice/app", "job-a-live")?;
+  drop(prepare(&a, "alice/app", "job-a-new")?);
+  make_job_dir(&work, "legacy-job")?;
+  // A stable workspace on the same root is claimed, never an mtime candidate.
+  let stable = registration(tmp.path(), "a", WorkspaceMode::Stable);
+  drop(prepare(&stable, "alice/kept", "job-s")?);
+  for dir in ["job-a-old", "job-b-old", "job-a-live", "legacy-job", "kept"] {
+    age_by(&work.join(dir), 48 * HOUR)?;
+  }
+  let jobs = work.join("_PipelineMapping/_jobs");
+  age_by(&work.join("_PipelineMapping"), 48 * HOUR)?;
+
+  let removed = gc_workspaces(&work, &policy(&a.data_dir, 24, 0), "job-a-new")?;
+
+  assert_eq!(removed, 2, "job-a-old and the pre-#90 legacy dir");
+  assert!(!work.join("job-a-old").exists(), "own stale job dir pruned");
+  assert!(!jobs.join("job-a-old.lock").exists(), "with its lease file");
+  assert!(
+    !work.join("legacy-job").exists(),
+    "lease-less legacy dir keeps the mtime rule"
+  );
+  assert!(
+    work.join("job-b-old").exists(),
+    "another registration's job dir kept"
+  );
+  assert!(jobs.join("job-b-old.lock").exists());
+  assert!(
+    work.join("job-a-live").exists(),
+    "a live job's leased dir kept"
+  );
+  assert!(
+    work.join("job-a-new").exists(),
+    "the running job's dir kept"
+  );
+  assert!(work.join("kept/kept").exists(), "claimed stable dir kept");
+  assert!(work.join("_PipelineMapping").is_dir(), "mapping root kept");
+  drop(live);
+  Ok(())
+}
+
+#[test]
+fn unreadable_tracking_file_still_protects_its_leased_workspace() -> TestResult<()> {
+  let tmp = tempfile::tempdir()?;
+  let a = registration(tmp.path(), "a", WorkspaceMode::Stable);
+  let work = a.workspace_root.clone();
+
+  // A running job holds alice/app's lease; its tracking file is then
+  // corrupted, so GC cannot learn the pipeline directory it names.
+  let running = prepare(&a, "alice/app", "j1")?;
+  fs::write(
+    work.join("_PipelineMapping/alice/app/PipelineFolder.json"),
+    b"{ not json",
+  )?;
+  // Lease-less siblings: a name the allocator could give alice/app, and two
+  // that it never would.
+  for dir in ["app_2", "app_x", "legacy-job"] {
+    make_job_dir(&work, dir)?;
+  }
+  for dir in ["app", "app_2", "app_x", "legacy-job"] {
+    age_by(&work.join(dir), 48 * HOUR)?;
+  }
+
+  let removed = gc_workspaces(&work, &policy(&a.data_dir, 24, 48), "other-job")?;
+
+  assert_eq!(removed, 2, "only app_x and legacy-job are unclaimed");
+  assert!(
+    running.workspace.is_dir(),
+    "the leased workspace survives an unreadable tracking file"
+  );
+  assert!(work.join("app/app").is_dir());
+  assert!(
+    work.join("app_2/marker.txt").exists(),
+    "<repo>_<n> claimed too"
+  );
+  assert!(!work.join("app_x").exists(), "not an allocator name");
+  assert!(
+    !work.join("legacy-job").exists(),
+    "GC still prunes the rest"
+  );
+  drop(running);
   Ok(())
 }

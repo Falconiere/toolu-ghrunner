@@ -35,6 +35,20 @@ impl PathTranslator {
     host_path.to_owned()
   }
 
+  /// Translate `RUNNER_WORKSPACE` / `runner.workspace`: the host parent of a
+  /// workspace mounted at `/github/workspace` is that mount's container-side
+  /// parent, `/github`; any other path translates as [`Self::to_container`].
+  pub fn runner_workspace_to_container(&self, host_path: &Path) -> PathBuf {
+    let container_workspace = Path::new("/github/workspace");
+    let is_workspace_parent = self.mappings.iter().any(|(host, container)| {
+      container == container_workspace && host.parent() == Some(host_path)
+    });
+    if is_workspace_parent {
+      return PathBuf::from("/github");
+    }
+    self.to_container(host_path)
+  }
+
   /// Translate a container path to its host equivalent.
   pub fn to_host(&self, container_path: &Path) -> PathBuf {
     for (host, container) in &self.mappings {

@@ -70,6 +70,10 @@ async fn replay(
       data_dir: root.join("data"),
       workspace_root: root.join("work"),
       workspace_gc_hours: 0,
+      workspace: shared::WorkspaceConfig {
+        mode: shared::WorkspaceMode::Fresh,
+        stable_gc_hours: 0,
+      },
       ..RunnerConfig::default()
     },
     Arc::new(Mutex::new(SecretMasker::new())),
@@ -393,6 +397,10 @@ async fn step_summary_completed_documents_survive_cancellation() -> Result<(), B
       data_dir: root.path().join("data"),
       workspace_root: root.path().join("work"),
       workspace_gc_hours: 0,
+      workspace: shared::WorkspaceConfig {
+        mode: shared::WorkspaceMode::Fresh,
+        stable_gc_hours: 0,
+      },
       ..RunnerConfig::default()
     },
     Arc::new(Mutex::new(SecretMasker::new())),

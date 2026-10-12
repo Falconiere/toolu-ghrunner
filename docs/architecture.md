@@ -487,10 +487,29 @@ seeds every step:
   the proxy forwards it upstream; local auth is a constant-time compare
   against that same token.
 
-Two adjacent, off-by-default subsystems ride the same config surface:
-`execution/workspace_gc.rs` prunes `workspace_root/<job_id>` older than
-`[workspace] gc_after_hours` (never the running job's), and
-`execution/shadow/` fingerprints each `run:` step's workspace before
+Workspaces (#90) follow upstream `PipelineDirectoryManager`:
+`execution/workspace_layout.rs` maps `owner/repo` to
+`workspace_root/<repo>/<repo>` (`github.workspace`; `runner.workspace` is
+`workspace_root/<repo>`) through
+`_PipelineMapping/<owner>/<repo>/PipelineFolder.json`
+(`workspace_tracking.rs`), reusing it across jobs and applying
+`workspace.clean` (`all` / `resources` / `outputs`). A same-name repository
+under another owner gets the first free `<repo>_<n>`. `[workspace] mode =
+"fresh"`, an absent or unsafe `github.repository`, or a busy lease gives a new
+`workspace_root/<job_id>`. Allocation is two-phase. `prepare_workspace`
+claims the paths before the context is built: a stable job takes its `fs2`
+lease (`workspace_lease.rs`) on `_PipelineMapping/<owner>/<repo>/.lock` and
+updates the tracking file. `PreparedWorkspace::create_dirs` applies
+`workspace.clean` and creates directories only after the container, services
+and environment evaluated, so a setup error leaves no workspace. A fresh job
+takes its `_PipelineMapping/_jobs/<job_id>.lock` there. Every lease is held
+until `run_job` returns, so registrations sharing a work root never share a
+workspace. `execution/workspace_gc.rs` prunes a stable workspace unused for
+`stable_gc_after_hours` (default `0` = never, as upstream) and a fresh one
+older than `gc_after_hours`, only when its record names this registration's
+`data_dir` and its lease is free; pre-#90 lease-less `<job_id>` dirs keep the
+mtime-only rule. One adjacent, off-by-default subsystem rides the same config
+surface: `execution/shadow/` fingerprints each `run:` step's workspace before
 and after to record `would_hit` / `false_hit` to
 `_diag/shadow/<job_id>.jsonl` — observation only, it never serves a
 cached result.
@@ -593,12 +612,13 @@ included) > an error listing every candidate.
 
 Two documented caveats for concurrent cross-repo runs:
 
-- **`workspace_gc` residual risk.** Job workspaces share the default
-  `<home>/_work` root. GC prunes job dirs older than
-  `[workspace] gc_after_hours` and never the running job's own — but a
-  run in one repo can prune *another* repo's still-live job dir if that
-  job outlives the GC window. Rare (a job running longer than the 24 h
-  default); accepted for now.
+- **Shared work root.** Job workspaces share the default `<home>/_work`
+  root. Leases keep two jobs out of one workspace, and GC removes only
+  workspaces whose record names its own registration and whose lease is
+  free, so it never prunes another repo's live or owned workspace. The
+  residual case is pre-#90 lease-less `<job_id>` dirs: they keep the old
+  mtime rule, so any registration may prune them. Workspaces of a removed
+  registration are never pruned by the others.
 - **`service_bind` collision.** `offline` / `accelerated` service modes
   bind a local port; concurrent cross-repo runs sharing one
   `service_bind` give the second run EADDRINUSE — use a distinct
@@ -925,9 +945,12 @@ window in milliseconds.
 ```
 ~/.toolu-runner/                    # runner home ($TOOLU_RUNNER_HOME overrides)
 ├── token-<host>.json               # login token (0600, default store; keyring opt-in) — SHARED by all repos
-├── _work/                          # per-job workspaces (GitHub-style, shared default)
-│   └── <repo>/
-│       └── <job-id>/
+├── _work/                          # job workspaces (upstream layout, shared default)
+│   ├── <repo>/<repo>/              # stable workspace (GITHUB_WORKSPACE), reused per repository
+│   ├── <job-id>/                   # fresh workspace ([workspace] mode = "fresh", or a busy lease)
+│   └── _PipelineMapping/
+│       ├── <owner>/<repo>/         # PipelineFolder.json + .lock (repository lease)
+│       └── _jobs/<job-id>.lock     # fresh-job lease ({"dataDir": …})
 ├── config.toml                     # legacy single-slot registration (read-only
 │                                   # fallback; org registrations still land here)
 ├── .runner_version                 # installed toolu-runner version

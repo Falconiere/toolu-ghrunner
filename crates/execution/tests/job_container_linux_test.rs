@@ -109,6 +109,10 @@ async fn job_container_real_production_shell_node_composite_and_posts() -> TestR
     data_dir: root.path().join("runner data"),
     workspace_root: root.path().join("work root"),
     workspace_gc_hours: 0,
+    workspace: shared::WorkspaceConfig {
+      mode: shared::WorkspaceMode::Fresh,
+      stable_gc_hours: 0,
+    },
     ..RunnerConfig::default()
   };
   let mut job: AgentJobRequestMessage = serde_json::from_str(include_str!(

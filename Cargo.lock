@@ -810,6 +810,7 @@ dependencies = [
  "criterion",
  "expressions",
  "flate2",
+ "fs2",
  "futures-util",
  "hostname",
  "jsonwebtoken",

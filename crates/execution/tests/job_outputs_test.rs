@@ -56,6 +56,10 @@ async fn replay(message: AgentJobRequestMessage) -> TestResult<Vec<RunnerEvent>>
   let config = RunnerConfig {
     data_dir: dir.path().join("data"),
     workspace_root: dir.path().join("work"),
+    workspace: shared::WorkspaceConfig {
+      mode: shared::WorkspaceMode::Fresh,
+      stable_gc_hours: 0,
+    },
     ..RunnerConfig::default()
   };
   run_with_config(message, config, CancellationToken::new()).await
@@ -268,6 +272,10 @@ async fn job_output_hash_waits_for_real_node_post_step() -> TestResult {
   let config = RunnerConfig {
     data_dir: dir.path().join("data"),
     workspace_root: dir.path().join("work"),
+    workspace: shared::WorkspaceConfig {
+      mode: shared::WorkspaceMode::Fresh,
+      stable_gc_hours: 0,
+    },
     ..RunnerConfig::default()
   };
   let workspace = config.workspace_root.join(&message.job_id);
@@ -324,6 +332,10 @@ async fn post_action_env_is_available_to_final_job_output() -> TestResult {
   let config = RunnerConfig {
     data_dir: dir.path().join("data"),
     workspace_root: dir.path().join("work"),
+    workspace: shared::WorkspaceConfig {
+      mode: shared::WorkspaceMode::Fresh,
+      stable_gc_hours: 0,
+    },
     ..RunnerConfig::default()
   };
   let root = config
@@ -365,6 +377,10 @@ async fn cancelled_job_evaluates_output_written_before_cleanup() -> TestResult {
   let config = RunnerConfig {
     data_dir: dir.path().join("data"),
     workspace_root: dir.path().join("work"),
+    workspace: shared::WorkspaceConfig {
+      mode: shared::WorkspaceMode::Fresh,
+      stable_gc_hours: 0,
+    },
     ..RunnerConfig::default()
   };
   let marker = config

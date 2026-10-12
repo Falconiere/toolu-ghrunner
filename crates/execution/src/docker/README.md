@@ -18,7 +18,7 @@ into this module. Job-level cgroup wiring lives in
 | `action_image.rs` | `ActionContainer::prepare_image` | Pulls registry images and builds action Dockerfiles with inspected immutable-cache tags. |
 | `action_mounts.rs` | `ActionMounts`, `action_path_to_host` | Mounts standard `/github` paths and translates action-emitted paths back to host coordinates. |
 | `client.rs` | `DockerClient`, `resolve_docker_host` | Thin async wrapper over bollard: resolve the daemon endpoint from `DOCKER_HOST` (default `unix:///var/run/docker.sock`) and connect, pull/inspect images, create/start/wait/remove/kill containers. |
-| `path_translator.rs` | `PathTranslator` | Maps host paths (workspace, temp) to their `/github/workspace` and `/github/runner_temp` container equivalents and back. |
+| `path_translator.rs` | `PathTranslator` | Maps host paths (workspace, temp) to their `/github/workspace` and `/github/runner_temp` container equivalents and back; the workspace's parent (`RUNNER_WORKSPACE`) maps to `/github`. |
 | `container_command.rs` | `ContainerCommand` | Connects the local Docker socket and masks daemon diagnostics. |
 | `container_spec.rs` | `ContainerSpec` | Evaluates and validates job-container declarations. |
 | `container_options.rs` | `parse_container_options` | Parses the supported quoted options without a shell. |

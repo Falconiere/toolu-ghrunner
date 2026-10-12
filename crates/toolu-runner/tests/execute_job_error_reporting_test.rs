@@ -57,6 +57,10 @@ async fn failing_job_reports_error_log_and_real_job_id() -> TestResult {
     data_dir,
     workspace_root,
     cgroup_path: None,
+    workspace: shared::WorkspaceConfig {
+      mode: shared::WorkspaceMode::Fresh,
+      stable_gc_hours: 0,
+    },
     ..RunnerConfig::default()
   };
 
@@ -157,6 +161,10 @@ async fn mid_step_failure_reports_log_before_step_completed_before_job_completed
     data_dir,
     workspace_root: workspace_root.clone(),
     cgroup_path: None,
+    workspace: shared::WorkspaceConfig {
+      mode: shared::WorkspaceMode::Fresh,
+      stable_gc_hours: 0,
+    },
     ..RunnerConfig::default()
   };
 

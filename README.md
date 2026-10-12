@@ -419,11 +419,27 @@ endpoint = ""
 region   = ""
 
 [workspace]
-gc_after_hours = 24      # prune _work/<job-id> older than this
+mode = "stable"            # "stable": reuse _work/<repo>/<repo> per repository (upstream layout); "fresh": new _work/<job-id> per job
+gc_after_hours = 24        # prune fresh _work/<job-id> dirs older than this (0 = never)
+stable_gc_after_hours = 0  # prune a stable workspace unused for this long (0 = never, as upstream)
 
 [shadow]
 enabled = false          # off by default; records would-hit/false-hit, never serves
 ```
+
+**Workspaces.** By default every job for `owner/repo` runs in
+`_work/<repo>/<repo>` (`GITHUB_WORKSPACE`; `RUNNER_WORKSPACE` is
+`_work/<repo>`), the official runner's layout, so `actions/checkout` finds
+the previous `.git` and fetches incrementally. The mapping lives in
+`_work/_PipelineMapping/<owner>/<repo>/PipelineFolder.json`; a repository
+with the same name under another owner gets `<repo>_2`. Each job holds an
+exclusive lease on its workspace, so a second job for the same repository
+(another registration sharing the work root) runs in a fresh `_work/<job-id>`
+instead of sharing it. The job message's `workspace.clean` (`all` /
+`resources` / `outputs`) is applied as upstream does. `mode = "fresh"` opts
+out: every job gets a new `_work/<job-id>`, as before. GC only removes
+workspaces this registration used, never one a live job holds (pre-#90
+`_work/<job-id>` dirs keep the old age-only rule).
 
 `fsync_chunks` (default `false`) skips the per-chunk `fsync` before a
 chunk's atomic rename, trading it for save-path throughput. This does
@@ -535,7 +551,8 @@ hand-edit `jit_config` or `auth_token` — re-run `register --replace`.
 ```
 ~/.toolu-runner/                # runner home — override with $TOOLU_RUNNER_HOME
 ├── token-<host>.json           # `login` token (0600, default store; keyring opt-in) — shared by all repos
-├── _work/                      # per-job workspaces: <repo>/<job-id>/ (shared default)
+├── _work/                      # job workspaces (shared default): <repo>/<repo>/ stable, <job-id>/ fresh
+│   └── _PipelineMapping/       # <owner>/<repo>/PipelineFolder.json + workspace leases
 ├── config.toml                 # legacy single-slot registration; org registrations land here
 ├── .runner_version
 └── runners/<owner>/<repo>/     # one directory per repo registration

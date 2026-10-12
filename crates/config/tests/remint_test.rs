@@ -51,7 +51,11 @@ fn non_default_config() -> RunnerRegistrationConfig {
       },
       fsync_chunks: true,
     },
-    workspace: WorkspaceSection { gc_after_hours: 72 },
+    workspace: WorkspaceSection {
+      mode: shared::WorkspaceMode::Fresh,
+      gc_after_hours: 72,
+      stable_gc_after_hours: 96,
+    },
     shadow: ShadowSection { enabled: true },
   }
 }

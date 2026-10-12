@@ -55,6 +55,10 @@ async fn replay(
     data_dir: root.path().join("data"),
     workspace_root: root.path().join("work"),
     workspace_gc_hours: 0,
+    workspace: shared::WorkspaceConfig {
+      mode: shared::WorkspaceMode::Fresh,
+      stable_gc_hours: 0,
+    },
     ..RunnerConfig::default()
   };
   let runner = Runner::new(config, Arc::new(Mutex::new(SecretMasker::new())));
@@ -422,6 +426,10 @@ async fn cancel_observed(mut job: AgentJobRequestMessage, during_health: bool) -
     data_dir: root.path().join("data"),
     workspace_root: root.path().join("work"),
     workspace_gc_hours: 0,
+    workspace: shared::WorkspaceConfig {
+      mode: shared::WorkspaceMode::Fresh,
+      stable_gc_hours: 0,
+    },
     ..RunnerConfig::default()
   };
   if during_health {

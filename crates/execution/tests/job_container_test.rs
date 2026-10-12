@@ -22,6 +22,10 @@ async fn job_container_absent_preserves_host_execution() -> TestResult {
   let config = RunnerConfig {
     data_dir: root.path().join("data"),
     workspace_root: root.path().join("work"),
+    workspace: shared::WorkspaceConfig {
+      mode: shared::WorkspaceMode::Fresh,
+      stable_gc_hours: 0,
+    },
     ..RunnerConfig::default()
   };
   let mut job = message()?;
@@ -53,6 +57,10 @@ async fn job_container_non_linux_fails_before_workspace_or_step() -> TestResult 
   let config = RunnerConfig {
     data_dir: root.path().join("data"),
     workspace_root: root.path().join("work"),
+    workspace: shared::WorkspaceConfig {
+      mode: shared::WorkspaceMode::Fresh,
+      stable_gc_hours: 0,
+    },
     ..RunnerConfig::default()
   };
   let mut job = message()?;
@@ -104,6 +112,10 @@ async fn job_container_setup_cancellation_reports_cancelled() -> TestResult {
   let config = RunnerConfig {
     data_dir: root.path().join("data"),
     workspace_root: root.path().join("work"),
+    workspace: shared::WorkspaceConfig {
+      mode: shared::WorkspaceMode::Fresh,
+      stable_gc_hours: 0,
+    },
     ..RunnerConfig::default()
   };
   let mut job = message()?;

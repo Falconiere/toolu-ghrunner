@@ -48,6 +48,10 @@ async fn replay(scripts: &[&str], nested: bool) -> TestResult<Vec<RunnerEvent>> 
     data_dir: temp.path().join("data"),
     workspace_root: temp.path().join("work"),
     workspace_gc_hours: 0,
+    workspace: shared::WorkspaceConfig {
+      mode: shared::WorkspaceMode::Fresh,
+      stable_gc_hours: 0,
+    },
     ..RunnerConfig::default()
   };
   let workspace = config.workspace_root.join(&message.job_id);

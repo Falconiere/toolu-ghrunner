@@ -99,6 +99,10 @@ fn harness() -> TestResult<Harness> {
     data_dir: dir.path().join("data"),
     workspace_root: dir.path().join("work"),
     workspace_gc_hours: 0,
+    workspace: shared::WorkspaceConfig {
+      mode: shared::WorkspaceMode::Fresh,
+      stable_gc_hours: 0,
+    },
     ..shared::RunnerConfig::default()
   };
   let (tx, journal) = mpsc::channel(4096);

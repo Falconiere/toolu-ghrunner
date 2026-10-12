@@ -66,7 +66,10 @@ not part of it. Workflow YAML parsing/matrix/orchestration lives in the
 | `step_timeout.rs` | `wait_bounded` | Bounded child-process wait shared by the script and node handlers: races `timeout-minutes` against the job `CancellationToken`. |
 | `steps_runner.rs` | `run_steps` | The per-job step loop: condition evaluation, dispatch to action/script execution, continue-on-error, and post-step draining. |
 | `workflow.rs` | (mod decl) | Declares the `workflow` sub-module; see its own README. |
-| `workspace_gc.rs` | `gc_workspaces` | Prunes `workspace_root/<job_id>` directories older than a configured age, always sparing the currently-running job. |
+| `workspace_gc.rs` | `gc_workspaces`, `GcPolicy` | Prunes this registration's unleased workspaces: stable ones unused for `stable_gc_hours` (default never) and fresh `<job_id>` ones older than `gc_after_hours`; pre-#90 lease-less dirs use mtime only; never the running job's. |
+| `workspace_layout.rs` | `prepare_workspace`, `PreparedWorkspace`, `Repository` | Allocates the job workspace (#90): stable `<work>/<repo>/<repo>` with upstream `workspace.clean`, or fresh `<work>/<job_id>`; holds the lease until dropped. |
+| `workspace_lease.rs` | `WorkspaceLease` | `fs2` exclusive lease on a `_PipelineMapping/` lock file; released on drop. |
+| `workspace_tracking.rs` | `TrackingConfig`, `tracking_files` | `_PipelineMapping/<owner>/<repo>/PipelineFolder.json` (upstream keys + `lastRunOnUnix`, `dataDir`), atomic writes. |
 
 ## Sub-modules
 

@@ -9,8 +9,8 @@ use tokio_util::sync::CancellationToken;
 
 use super::{
   ContainerStart, ContainerStartParams, JobOutcome, JobResult, LocalServices,
-  build_job_context_async, finish_job, prepare_job_workspace, prepared, start_job_container,
-  start_job_services, stop_local_services,
+  build_job_context_async, claim_job_workspace, finish_job, prepare_job_workspace, prepared,
+  start_job_container, start_job_services, stop_local_services,
 };
 use crate::docker::service_spec::evaluate_services;
 use crate::execution::container_job::{evaluate_container, finish_container};
@@ -33,14 +33,18 @@ pub(super) async fn run(
   shutdown: CancellationToken,
 ) -> Result<JobTeardown, RunnerError> {
   let cancel = cancel.child_token();
-  let workspace = config.workspace_root.join(&msg.job_id);
-  let (msg, mut ctx) = build_job_context_async(msg, config, masker, workspace.clone()).await?;
+  // Claimed before the context (which needs its paths); held until this
+  // function returns, so no other job may enter the workspace before every
+  // step, post step, container and orphan sweep has finished.
+  let claimed = claim_job_workspace(config, &msg).await?;
+  let (msg, mut ctx) = build_job_context_async(msg, config, masker, &claimed).await?;
   ctx.cancellation = Some(JobCancellation::new(cancel.clone(), shutdown));
   ctx.set_process_tracking(ProcessTracking::for_job(&msg.variables));
   apply_job_environment(&msg.environment_variables, &mut ctx)?;
   let container_spec = evaluate_container(&msg, config, &ctx)?;
   let service_specs = evaluate_services(msg.job_service_containers.as_ref(), &ctx)?;
-  let (workspace, workspace_gc) = prepare_job_workspace(config, &msg.job_id, workspace).await?;
+  let (prepared, workspace_gc) = prepare_job_workspace(config, claimed).await?;
+  let workspace = prepared.workspace.clone();
   let (http, local) = start_job_services(config, &msg, &mut ctx).await?;
   let (local, workspace_gc) = match Box::pin(start_job_container(ContainerStartParams {
     spec: container_spec.as_ref(),

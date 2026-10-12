@@ -19,7 +19,9 @@ mod secret_masker;
 /// Tracing initialization and secret redaction.
 pub mod startup;
 
-pub use config::{CacheConfig, L2Config, RunnerConfig, ServicesMode};
+pub use config::{
+  CacheConfig, L2Config, RunnerConfig, ServicesMode, WorkspaceConfig, WorkspaceMode,
+};
 pub use error::{ActionFetchError, ActionFetchKind, RunnerError, SESSION_CONFLICT_EXIT_CODE};
 pub use events::{
   AnnotationLevel, Conclusion, ListenerEvent, LogStream, RunnerEvent, SETUP_STEP_ID,

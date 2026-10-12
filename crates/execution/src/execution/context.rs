@@ -159,6 +159,20 @@ impl ExecutionContext {
     self.workspace = path;
   }
 
+  /// Set the job's workspace (`github.workspace` / `GITHUB_WORKSPACE`, the
+  /// `hashFiles()` root) and its parent (`runner.workspace` /
+  /// `RUNNER_WORKSPACE`), as upstream `JobExtension` does after preparing the
+  /// pipeline directory. Overrides any message-supplied value.
+  pub fn set_job_workspace(&mut self, workspace: &std::path::Path, pipeline: &std::path::Path) {
+    let workspace_text = workspace.to_string_lossy().into_owned();
+    let pipeline_text = pipeline.to_string_lossy().into_owned();
+    self.set_github_context("workspace", &workspace_text);
+    self.set_env("GITHUB_WORKSPACE", &workspace_text);
+    self.set_runner_value("workspace", &pipeline_text);
+    self.set_env("RUNNER_WORKSPACE", &pipeline_text);
+    self.workspace = Some(workspace.to_path_buf());
+  }
+
   /// Attach the execution host while retaining host paths for filesystem access.
   pub fn set_job_container(&mut self, container: Arc<JobContainer>) {
     if let Some(workspace) = &self.workspace {
@@ -172,6 +186,9 @@ impl ExecutionContext {
       if let Some(ExprValue::String(value)) = self.runner_context.get_mut(key) {
         *value = container.translate_value(value);
       }
+    }
+    if let Some(ExprValue::String(value)) = self.runner_context.get_mut("workspace") {
+      *value = container.translate_runner_workspace(value);
     }
     self.container = Some(container);
   }

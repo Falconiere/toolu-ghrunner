@@ -50,6 +50,8 @@ shlex = "1"
 # Process enumeration + environ reads for job-end orphan cleanup (issue #89);
 # the same version `config` pins (Linux `/proc`, macOS `KERN_PROCARGS2`).
 sysinfo = "0.37"
+# Workspace leases (issue #90); the same version `config` pins for its lockfile.
+fs2 = "0.4"
 
 # Docker
 bollard = { workspace = true }

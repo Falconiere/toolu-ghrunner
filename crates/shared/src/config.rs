@@ -21,6 +21,37 @@ pub enum ServicesMode {
   Accelerated,
 }
 
+/// How a job's workspace directory is allocated (`[workspace] mode`).
+///
+/// - [`Stable`](WorkspaceMode::Stable) (default) maps each repository to
+///   `<work>/<repo>/<repo>` and reuses it across jobs, like the official
+///   runner's `_work/<repo>/<repo>`, so `actions/checkout` fetches
+///   incrementally.
+/// - [`Fresh`](WorkspaceMode::Fresh) creates a new `<work>/<job_id>` for
+///   every job (the pre-#90 layout).
+///
+/// The default is [`Stable`](WorkspaceMode::Stable), so a config without
+/// `[workspace] mode` (and [`WorkspaceConfig::default`]) reuses workspaces.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WorkspaceMode {
+  /// Reuse one workspace per repository (default; upstream behavior).
+  #[default]
+  Stable,
+  /// A new workspace for every job.
+  Fresh,
+}
+
+/// Workspace layout and stable-workspace GC settings (`[workspace]`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct WorkspaceConfig {
+  /// Stable per-repository or fresh per-job workspaces.
+  pub mode: WorkspaceMode,
+  /// Hours since a stable workspace's last job after which GC may prune it.
+  /// `0` (default) never prunes stable workspaces, as upstream.
+  pub stable_gc_hours: u64,
+}
+
 /// Optional S3 cold tier that mirrors immutable chunks + manifests (never the
 /// index). Absent means L1-only.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -89,7 +120,8 @@ impl Default for CacheConfig {
 pub struct RunnerConfig {
   /// Root directory for caches (actions, node, tools).
   pub data_dir: PathBuf,
-  /// Parent directory for per-job workspace subdirectories.
+  /// Work root holding job workspaces (`<repo>/<repo>` stable or
+  /// `<job_id>` fresh) and `_PipelineMapping/`.
   pub workspace_root: PathBuf,
   /// Per-job cgroup-v2 directory used to enforce CPU/memory limits.
   ///
@@ -108,10 +140,12 @@ pub struct RunnerConfig {
   pub service_bind: String,
   /// Content-addressed cache settings (accelerated mode).
   pub cache: CacheConfig,
-  /// Age in hours after which a finished job's workspace is pruned. `0`
-  /// disables GC (never prune); a value at or above the 100-year cap also
+  /// Age in hours after which a finished fresh per-job workspace is pruned.
+  /// `0` disables GC (never prune); a value at or above the 100-year cap also
   /// means never prune.
   pub workspace_gc_hours: u64,
+  /// Workspace layout mode and stable-workspace GC age.
+  pub workspace: WorkspaceConfig,
   /// Whether shadow-mode step observation records (never serves).
   pub shadow_enabled: bool,
 }
@@ -160,6 +194,7 @@ impl Default for RunnerConfig {
       service_bind: Self::DEFAULT_SERVICE_BIND.to_owned(),
       cache: CacheConfig::default(),
       workspace_gc_hours: Self::DEFAULT_WORKSPACE_GC_HOURS,
+      workspace: WorkspaceConfig::default(),
       shadow_enabled: false,
     }
   }

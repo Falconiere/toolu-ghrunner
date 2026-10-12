@@ -92,6 +92,10 @@ async fn multiline_mask_real_job_reaches_every_local_sink() -> TestResult {
   let config = RunnerConfig {
     workspace_root: temp.path().join("work"),
     data_dir: temp.path().join("data"),
+    workspace: shared::WorkspaceConfig {
+      mode: shared::WorkspaceMode::Fresh,
+      stable_gc_hours: 0,
+    },
     ..RunnerConfig::default()
   };
   let msg = fixture(&config)?;

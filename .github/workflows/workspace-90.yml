@@ -1,0 +1,73 @@
+name: workspace-90
+
+# Issue #90 parity lane: stable per-repository workspaces. Each job prints
+# GITHUB_WORKSPACE / github.workspace / RUNNER_WORKSPACE / runner.workspace,
+# whether a .git existed before actions/checkout, and the PipelineFolder.json
+# tracking file. On the official runner (GitHub-hosted reference) that shows
+# the upstream layout. On a toolu self-hosted runner the second sequential job
+# must reuse the first job's .git (checkout fetches instead of cloning) — see
+# docs/test-coverage.md "Issue #90". Dispatch-only, like the sibling lanes;
+# the toolu lane runs when run_toolu is set.
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_toolu:
+        description: Run the toolu self-hosted lane when a matching runner is registered
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  reference:
+    name: reference-${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Workspace before checkout
+        shell: bash
+        run: |
+          printf 'WS90|%s|%s|%s|%s\n' "$GITHUB_WORKSPACE" '${{ github.workspace }}' "$RUNNER_WORKSPACE" '${{ runner.workspace }}'
+          if [ -d "$GITHUB_WORKSPACE/.git" ]; then echo 'WS90|git-before|yes'; else echo 'WS90|git-before|no'; fi
+      - uses: actions/checkout@v4
+      - name: Tracking file
+        shell: bash
+        run: |
+          cat "$RUNNER_WORKSPACE/../_PipelineMapping/${{ github.repository }}/PipelineFolder.json"
+
+  toolu-first:
+    if: inputs.run_toolu
+    runs-on: [self-hosted, toolu-90]
+    steps:
+      - name: Workspace before checkout
+        shell: bash
+        run: |
+          printf 'WS90|%s|%s|%s|%s\n' "$GITHUB_WORKSPACE" '${{ github.workspace }}' "$RUNNER_WORKSPACE" '${{ runner.workspace }}'
+          if [ -d "$GITHUB_WORKSPACE/.git" ]; then echo "WS90|git-before|yes|$(ls -di "$GITHUB_WORKSPACE/.git" | awk '{print $1}')"; else echo 'WS90|git-before|no'; fi
+      - uses: actions/checkout@v4
+      - name: Tracking file and checkout
+        shell: bash
+        run: |
+          echo "WS90|git-after|$(ls -di .git | awk '{print $1}')|$(git rev-parse HEAD)"
+          cat "$RUNNER_WORKSPACE/../_PipelineMapping/${{ github.repository }}/PipelineFolder.json"
+
+  toolu-second:
+    needs: toolu-first
+    runs-on: [self-hosted, toolu-90]
+    steps:
+      - name: Workspace before checkout
+        shell: bash
+        run: |
+          printf 'WS90|%s|%s|%s|%s\n' "$GITHUB_WORKSPACE" '${{ github.workspace }}' "$RUNNER_WORKSPACE" '${{ runner.workspace }}'
+          if [ -d "$GITHUB_WORKSPACE/.git" ]; then echo "WS90|git-before|yes|$(ls -di "$GITHUB_WORKSPACE/.git" | awk '{print $1}')"; else echo 'WS90|git-before|no'; fi
+      - uses: actions/checkout@v4
+      - name: Tracking file and checkout
+        shell: bash
+        run: |
+          echo "WS90|git-after|$(ls -di .git | awk '{print $1}')|$(git rev-parse HEAD)"
+          cat "$RUNNER_WORKSPACE/../_PipelineMapping/${{ github.repository }}/PipelineFolder.json"
