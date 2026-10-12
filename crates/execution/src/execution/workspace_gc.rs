@@ -5,7 +5,9 @@
 //! repository lease is free. Fresh `<job_id>` directories go when older than
 //! `job_max_age` with a free job lease naming this `data_dir`; one without a
 //! lease file predates #90 and keeps the mtime-only rule. `_`-prefixed,
-//! claimed and `keep` children are never fresh candidates. Unsure → keep.
+//! claimed and `keep` children are never fresh candidates; an unreadable
+//! tracking file claims every name its repository could have been given.
+//! Unsure → keep.
 
 use std::fs::{self, DirEntry};
 use std::path::{Path, PathBuf};
@@ -73,9 +75,15 @@ pub fn gc_workspaces(
   // One scan of the tracking files serves both passes: the stable pass prunes
   // from it, and whatever it keeps is the claimed set the fresh pass skips.
   let mut claimed = Vec::new();
+  let mut unreadable = Vec::new();
   let mut removed = 0usize;
   for file in tracking_files(workspace_root) {
     let Some(tracking) = load_tracking(&file) else {
+      // Its pipeline directory is unknown (and may be leased by a running
+      // job): protect every `<repo>` / `<repo>_<n>` name it could have.
+      if let Some(repo) = file.parent().and_then(Path::file_name) {
+        unreadable.push(repo.to_string_lossy().to_ascii_lowercase());
+      }
       continue;
     };
     let pruned = policy.stable_max_age.is_some_and(|max_age| {
@@ -102,7 +110,14 @@ pub fn gc_workspaces(
     match entry {
       Ok(entry) => {
         let name = entry.file_name().to_string_lossy().into_owned();
-        if name == keep || name.starts_with('_') || claimed.contains(&name.to_ascii_lowercase()) {
+        let lower = name.to_ascii_lowercase();
+        if name == keep
+          || name.starts_with('_')
+          || claimed.contains(&lower)
+          || unreadable
+            .iter()
+            .any(|repo| is_pipeline_name_for(&lower, repo))
+        {
           continue;
         }
         if prune_job_dir(workspace_root, &entry, &policy.data_dir, now, max_age) {
@@ -181,6 +196,17 @@ fn prune_job_dir(
   // Released only after the deletion (see `prune_stable`).
   drop(lease);
   removed
+}
+
+/// Whether `name` is one `new_tracking` could allocate for `repo`: `<repo>`
+/// or `<repo>_<n>`. Both are lowercase.
+fn is_pipeline_name_for(name: &str, repo: &str) -> bool {
+  name.strip_prefix(repo).is_some_and(|rest| {
+    rest.is_empty()
+      || rest
+        .strip_prefix('_')
+        .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+  })
 }
 
 fn load_tracking(file: &Path) -> Option<TrackingConfig> {

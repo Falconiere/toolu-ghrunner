@@ -290,3 +290,46 @@ fn fresh_gc_respects_owner_and_live_job_leases() -> TestResult<()> {
   drop(live);
   Ok(())
 }
+
+#[test]
+fn unreadable_tracking_file_still_protects_its_leased_workspace() -> TestResult<()> {
+  let tmp = tempfile::tempdir()?;
+  let a = registration(tmp.path(), "a", WorkspaceMode::Stable);
+  let work = a.workspace_root.clone();
+
+  // A running job holds alice/app's lease; its tracking file is then
+  // corrupted, so GC cannot learn the pipeline directory it names.
+  let running = prepare(&a, "alice/app", "j1")?;
+  fs::write(
+    work.join("_PipelineMapping/alice/app/PipelineFolder.json"),
+    b"{ not json",
+  )?;
+  // Lease-less siblings: a name the allocator could give alice/app, and two
+  // that it never would.
+  for dir in ["app_2", "app_x", "legacy-job"] {
+    make_job_dir(&work, dir)?;
+  }
+  for dir in ["app", "app_2", "app_x", "legacy-job"] {
+    age_by(&work.join(dir), 48 * HOUR)?;
+  }
+
+  let removed = gc_workspaces(&work, &policy(&a.data_dir, 24, 48), "other-job")?;
+
+  assert_eq!(removed, 2, "only app_x and legacy-job are unclaimed");
+  assert!(
+    running.workspace.is_dir(),
+    "the leased workspace survives an unreadable tracking file"
+  );
+  assert!(work.join("app/app").is_dir());
+  assert!(
+    work.join("app_2/marker.txt").exists(),
+    "<repo>_<n> claimed too"
+  );
+  assert!(!work.join("app_x").exists(), "not an allocator name");
+  assert!(
+    !work.join("legacy-job").exists(),
+    "GC still prunes the rest"
+  );
+  drop(running);
+  Ok(())
+}
