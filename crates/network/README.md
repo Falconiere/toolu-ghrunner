@@ -14,4 +14,5 @@ redacted diagnostic line (`describe`). Depends on `shared` only, so
 | `src/step_env.rs` | `StepNetworkEnv`, `step_env` |
 | `src/secrets.rs` | `proxy_secrets` |
 | `src/config.rs` | the crate's environment reads (`HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY`) |
-| `tests/helpers/network_fixtures.rs` | real rcgen PKI, rustls HTTPS target and recording CONNECT proxy, `#[path]`-included by other crates' tests |
+| `tests/helpers/tls_fixtures.rs` | real rcgen PKI and rustls HTTPS target, `#[path]`-included by other crates' tests |
+| `tests/helpers/proxy_fixtures.rs` | recording CONNECT proxy (optional Basic auth), included beside `tls_fixtures` |

@@ -1686,7 +1686,7 @@ upstream reference `RunnerWebProxy.cs`, `HostContext.cs`, `ContainerInfo.cs`
 (pinned `cab9d1c`).
 
 Every peer is real and generated at test time
-(`crates/network/tests/helpers/network_fixtures.rs`, `#[path]`-included by
+(`crates/network/tests/helpers/tls_fixtures.rs` and `proxy_fixtures.rs`, `#[path]`-included by
 the other crates): an rcgen CA with valid / expired / wrong-host leaves, a
 tokio-rustls HTTPS target recording request lines, and a tokio `CONNECT`
 proxy that requires Basic auth, records each request line with its

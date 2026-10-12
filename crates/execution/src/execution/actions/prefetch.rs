@@ -130,14 +130,11 @@ impl ActionFetcher {
       RunnerError::ActionDownload("action fetcher has no cancellation token".to_owned())
     })?;
     let info = context.resolve_info(client, action, masker, cancel).await?;
-    self
-      .ensure_resolved(client, action, &info, data_dir, cancel)
-      .await
+    self.ensure_resolved(action, &info, data_dir, cancel).await
   }
 
   async fn ensure_resolved(
     &self,
-    client: &reqwest::Client,
     action: &ActionRef,
     info: &ActionDownloadInfo,
     data_dir: &Path,

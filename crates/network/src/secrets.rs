@@ -18,7 +18,10 @@ use crate::config::{HTTP_PROXY, HTTPS_PROXY, first_set};
 pub fn proxy_secrets(cfg: &NetworkConfig) -> Vec<String> {
   let sources: Vec<String> = match configured_proxy(cfg) {
     Some(raw) => vec![raw.to_owned()],
-    None => [HTTPS_PROXY, HTTP_PROXY].into_iter().filter_map(first_set).collect(),
+    None => [HTTPS_PROXY, HTTP_PROXY]
+      .into_iter()
+      .filter_map(first_set)
+      .collect(),
   };
   let mut secrets: Vec<String> = Vec::new();
   let mut add = |value: String| {

@@ -211,7 +211,6 @@ async fn download_and_extract_action_streams_from_http() {
   let tar = build_tarball(&[("actions-checkout-v4-abc123/README.md", b"hello from http")]);
   let addr = spawn_tarball_server(tar).await;
   let url = format!("http://{addr}/tarball.tar.gz");
-  let client = reqwest::Client::new();
   let dest = tmp_dest("http-stream");
 
   download_and_extract_action(&shared::NetworkConfig::default(), &url, None, &dest)
@@ -312,12 +311,12 @@ async fn concurrent_downloads_to_the_same_dest_yield_one_complete_extraction() {
   let gate = Arc::new(tokio::sync::Barrier::new(2));
   let addr = spawn_gated_tarball_server(tar, Arc::clone(&gate)).await;
   let url = format!("http://{addr}/tarball.tar.gz");
-  let client = reqwest::Client::new();
   let dest = tmp_dest("concurrent-same-dest");
 
+  let network = shared::NetworkConfig::default();
   let (a, b) = tokio::join!(
-    download_and_extract_action(&client, &url, None, &dest),
-    download_and_extract_action(&client, &url, None, &dest),
+    download_and_extract_action(&network, &url, None, &dest),
+    download_and_extract_action(&network, &url, None, &dest),
   );
   a.expect("first concurrent extraction must succeed");
   b.expect("second concurrent extraction must succeed");
@@ -346,7 +345,6 @@ async fn download_over_a_stale_unwatermarked_dest_replaces_it() {
   let tar = build_tarball(&[("acme-repo-v1-abc123/README.md", b"fresh-content")]);
   let addr = spawn_tarball_server(tar).await;
   let url = format!("http://{addr}/tarball.tar.gz");
-  let client = reqwest::Client::new();
   let dest = tmp_dest("stale-dest");
 
   std::fs::create_dir_all(&dest).expect("mkdir stale dest");
@@ -382,10 +380,10 @@ async fn download_over_a_stale_unwatermarked_dest_replaces_it() {
 async fn download_and_extract_action_leaves_no_dest_or_staging_on_extraction_failure() {
   let addr = spawn_tarball_server(b"not a valid gzip tarball".to_vec()).await;
   let url = format!("http://{addr}/tarball.tar.gz");
-  let client = reqwest::Client::new();
   let dest = tmp_dest("corrupt-extraction");
 
-  let result = download_and_extract_action(&shared::NetworkConfig::default(), &url, None, &dest).await;
+  let result =
+    download_and_extract_action(&shared::NetworkConfig::default(), &url, None, &dest).await;
   assert!(
     matches!(
       &result,

@@ -5,15 +5,11 @@
 //! and a daemon-shared `TOOLU_CONTAINER_TEST_ROOT`.
 #![cfg(target_os = "linux")]
 
-#[path = "../../network/tests/helpers/network_fixtures.rs"]
-mod network_fixtures;
-
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use execution::Runner;
-use network_fixtures::{FixtureResult, Pki};
 use shared::{
   ActionStep, AgentJobRequestMessage, Conclusion, DictEntry, NetworkConfig, RunnerConfig,
   RunnerEvent, SecretMasker, TemplateToken,
@@ -23,9 +19,21 @@ use tokio_util::sync::CancellationToken;
 const CAPTURE: &str = include_str!("../../toolu-runner/tests/fixtures/job_container_message.json");
 const ALPINE: &str =
   "alpine@sha256:ce64758a109eb420d874a118f87920e625e12d3634e03b4a5573fd9f6e5d3507";
-const NGINX: &str =
-  "nginx@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10";
+const NGINX: &str = "nginx@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10";
 const PROXY: &str = "http://proxy.corp.test:3128";
+
+type FixtureResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
+
+/// A freshly generated self-signed CA written to `<dir>/ca.pem` — a real,
+/// loadable `ca_bundle` (the containers must still not see its host path).
+fn write_ca_bundle(dir: &std::path::Path) -> FixtureResult<PathBuf> {
+  let mut params = rcgen::CertificateParams::new(Vec::<String>::new())?;
+  params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+  let cert = params.self_signed(&rcgen::KeyPair::generate()?)?;
+  let path = dir.join("ca.pem");
+  std::fs::write(&path, cert.pem())?;
+  Ok(path)
+}
 
 fn literal(value: &str) -> TemplateToken {
   TemplateToken {
@@ -134,7 +142,6 @@ fn has(lines: &[String], wanted: &str) -> bool {
 #[ignore = "requires Linux, real Docker, and a daemon-shared test root"]
 async fn containers_receive_the_proxy_export_unless_they_set_it() -> FixtureResult<()> {
   let root = linux_root()?;
-  let pki = Pki::new()?;
   let config = RunnerConfig {
     data_dir: root.path().join("data"),
     workspace_root: root.path().join("work"),
@@ -146,7 +153,7 @@ async fn containers_receive_the_proxy_export_unless_they_set_it() -> FixtureResu
     network: NetworkConfig {
       proxy: Some(PROXY.to_owned()),
       no_proxy: vec!["internal.corp".to_owned()],
-      ca_bundle: Some(pki.write_bundle(root.path())?),
+      ca_bundle: Some(write_ca_bundle(root.path())?),
     },
     ..RunnerConfig::default()
   };
@@ -181,11 +188,16 @@ async fn containers_receive_the_proxy_export_unless_they_set_it() -> FixtureResu
     );
   }
   assert!(has(&lines, &format!("HTTPS_PROXY={PROXY}")), "{lines:?}");
-  assert!(has(&lines, "HTTPS_PROXY=http://step-own.test:2"), "{lines:?}");
+  assert!(
+    has(&lines, "HTTPS_PROXY=http://step-own.test:2"),
+    "{lines:?}"
+  );
   assert!(has(&lines, &format!("https_proxy={PROXY}")), "{lines:?}");
   assert!(has(&lines, &format!("no_proxy={bypass}")), "{lines:?}");
   assert!(
-    !lines.iter().any(|line| line.starts_with("NODE_EXTRA_CA_CERTS=")),
+    !lines
+      .iter()
+      .any(|line| line.starts_with("NODE_EXTRA_CA_CERTS=")),
     "{lines:?}"
   );
   Ok(())

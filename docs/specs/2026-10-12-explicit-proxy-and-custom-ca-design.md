@@ -313,7 +313,7 @@ tokio CONNECT proxy that requires Basic auth, records each request line and
 `Proxy-Authorization`, and resolves every requested host to `127.0.0.1`
 (portable — no `127.0.0.2`, which macOS lacks), a tokio-rustls HTTPS target and
 a TLS WebSocket target. They live once in
-`crates/network/tests/helpers/network_fixtures.rs`, `#[path]`-included by the
+`crates/network/tests/helpers/{tls,proxy}_fixtures.rs`, `#[path]`-included by the
 other crates' integration tests (the bin crate already uses a crate-root
 `tests/helpers/` directory, which the guardrails allow); each including crate
 gains `rcgen` (`ring` backend, already in the lock), `tokio-rustls` and, for

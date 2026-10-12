@@ -62,10 +62,7 @@ pub(super) fn add_container_network_env(
     .chain(services.iter_mut().map(|service| &mut service.container));
   for spec in specs {
     for (key, value) in &exported {
-      spec
-        .env
-        .entry(key.clone())
-        .or_insert_with(|| value.clone());
+      spec.env.entry(key.clone()).or_insert_with(|| value.clone());
     }
   }
 }

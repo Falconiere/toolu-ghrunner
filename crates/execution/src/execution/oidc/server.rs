@@ -247,7 +247,6 @@ fn hex_digit(byte: u8) -> char {
   }
 }
 
-
 /// Proxy an OIDC token request to GitHub's upstream OIDC provider.
 async fn proxy_to_github(
   client: &reqwest::Client,

@@ -2,16 +2,19 @@
 //! job's `[network]` proxy and trusts its `ca_bundle` — and fails closed
 //! without the bundle.
 
-#[path = "../../network/tests/helpers/network_fixtures.rs"]
-mod network_fixtures;
+#[path = "../../network/tests/helpers/proxy_fixtures.rs"]
+mod proxy_fixtures;
+#[path = "../../network/tests/helpers/tls_fixtures.rs"]
+mod tls_fixtures;
 
 use std::io::Write as _;
 
 use execution::execution::actions::downloader::download_and_extract_action;
 use flate2::Compression;
 use flate2::write::GzEncoder;
-use network_fixtures::{FixtureResult, Leaf, Pki, RecordingProxy, TlsTarget};
+use proxy_fixtures::RecordingProxy;
 use shared::NetworkConfig;
+use tls_fixtures::{FixtureResult, Leaf, Pki, TlsTarget};
 
 /// A real `owner-repo-sha/README.md` tar.gz, the shape GitHub's tarball
 /// endpoint serves.
@@ -42,7 +45,10 @@ async fn archive_download_uses_the_proxy_and_the_bundle() -> FixtureResult<()> {
   )
   .await?;
   let proxy = RecordingProxy::start(Some(("runner", "pw-94-test"))).await?;
-  let url = format!("https://target.test:{}/acme/probe/tarball/abc123", target.port());
+  let url = format!(
+    "https://target.test:{}/acme/probe/tarball/abc123",
+    target.port()
+  );
 
   let untrusted = NetworkConfig {
     proxy: Some(proxy.url(Some("runner:pw-94-test"))),

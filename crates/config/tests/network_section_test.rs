@@ -26,11 +26,11 @@ protocol_version = "v2"
 mode = "forwarder"
 "#;
 
-fn load(extra: &str) -> RunnerRegistrationConfig {
-  let dir = TempDir::new().expect("temp dir");
+fn load(extra: &str) -> Result<RunnerRegistrationConfig, Box<dyn std::error::Error>> {
+  let dir = TempDir::new()?;
   let path = dir.path().join("config.toml");
-  std::fs::write(&path, format!("{BASE}{extra}")).expect("write config");
-  load_config(&path).expect("load config")
+  std::fs::write(&path, format!("{BASE}{extra}"))?;
+  Ok(load_config(&path)?)
 }
 
 #[test]
@@ -42,19 +42,26 @@ proxy     = "http://user:pass@proxy.corp:3128"
 no_proxy  = ["internal.corp", "  ", " .svc.local ", ""]
 ca_bundle = "~/certs/corp-root.pem"
 "#,
-  );
+  )
+  .expect("load config");
   let network = cfg.network_config();
-  assert_eq!(network.proxy.as_deref(), Some("http://user:pass@proxy.corp:3128"));
+  assert_eq!(
+    network.proxy.as_deref(),
+    Some("http://user:pass@proxy.corp:3128")
+  );
   assert_eq!(network.no_proxy, vec!["internal.corp", ".svc.local"]);
   let expected = shared::paths::expand_tilde(&PathBuf::from("~/certs/corp-root.pem"));
   assert!(expected.is_absolute(), "{}", expected.display());
   assert_eq!(network.ca_bundle, Some(expected));
-  assert!(!format!("{:?}", cfg.network).contains("pass@"), "Debug must redact");
+  assert!(
+    !format!("{:?}", cfg.network).contains("pass@"),
+    "Debug must redact"
+  );
 }
 
 #[test]
 fn absent_section_is_env_mode_and_is_not_written_back() {
-  let cfg = load("");
+  let cfg = load("").expect("load config");
   assert_eq!(cfg.network_config(), NetworkConfig::default());
   let dir = TempDir::new().expect("temp dir");
   let path = dir.path().join("config.toml");
@@ -70,12 +77,16 @@ fn configured_section_round_trips() {
 [network]
 ca_bundle = "/etc/corp/ca.pem"
 "#,
-  );
+  )
+  .expect("load config");
   let dir = TempDir::new().expect("temp dir");
   let path = dir.path().join("config.toml");
   save_config(&path, &cfg).expect("save");
   let text = std::fs::read_to_string(&path).expect("read back");
-  assert!(text.contains("[network]") && text.contains("ca_bundle = \"/etc/corp/ca.pem\""), "{text}");
+  assert!(
+    text.contains("[network]") && text.contains("ca_bundle = \"/etc/corp/ca.pem\""),
+    "{text}"
+  );
   assert!(!text.contains("proxy"), "unset keys stay unset: {text}");
   assert_eq!(load_config(&path).expect("reload"), cfg);
 }

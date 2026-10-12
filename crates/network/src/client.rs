@@ -35,9 +35,8 @@ pub fn client_builder(cfg: &NetworkConfig) -> Result<ClientBuilder, RunnerError>
   }
   if let Some(path) = &cfg.ca_bundle {
     for der in load_bundle(path)? {
-      let cert = Certificate::from_der(der.as_ref()).map_err(|e| {
-        RunnerError::Config(format!("[network] ca_bundle {}: {e}", path.display()))
-      })?;
+      let cert = Certificate::from_der(der.as_ref())
+        .map_err(|e| RunnerError::Config(format!("[network] ca_bundle {}: {e}", path.display())))?;
       builder = builder.add_root_certificate(cert);
     }
   }
@@ -53,7 +52,7 @@ pub fn client_builder(cfg: &NetworkConfig) -> Result<ClientBuilder, RunnerError>
 ///
 /// The same `ca_bundle` errors as [`client_builder`].
 pub fn describe(cfg: &NetworkConfig) -> Result<String, RunnerError> {
-  let mut line = match configured_proxy(cfg) {
+  let proxy = match configured_proxy(cfg) {
     Some(raw) => format!(
       "proxy {} (config), no_proxy {} entries",
       redact_proxy_url(raw),
@@ -66,11 +65,15 @@ pub fn describe(cfg: &NetworkConfig) -> Result<String, RunnerError> {
       None => "proxy none".to_owned(),
     },
   };
-  if let Some(path) = &cfg.ca_bundle {
-    let count = load_bundle(path)?.len();
-    line.push_str(&format!(", ca_bundle {} ({count} certificates)", path.display()));
-  }
-  Ok(line)
+  let bundle = match &cfg.ca_bundle {
+    Some(path) => format!(
+      ", ca_bundle {} ({} certificates)",
+      path.display(),
+      load_bundle(path)?.len()
+    ),
+    None => String::new(),
+  };
+  Ok(format!("{proxy}{bundle}"))
 }
 
 /// The configured proxy, trimmed; blank means env mode.
@@ -125,9 +128,15 @@ pub(crate) fn parse_proxy(raw: &str) -> Result<ParsedProxy, RunnerError> {
     )));
   }
   if url.host_str().is_none_or(str::is_empty) {
-    return Err(RunnerError::Config(format!("[network] proxy {shown}: has no host")));
+    return Err(RunnerError::Config(format!(
+      "[network] proxy {shown}: has no host"
+    )));
   }
-  let decode = |value: &str| percent_encoding::percent_decode_str(value).decode_utf8_lossy().into_owned();
+  let decode = |value: &str| {
+    percent_encoding::percent_decode_str(value)
+      .decode_utf8_lossy()
+      .into_owned()
+  };
   let user = Some(url.username()).filter(|u| !u.is_empty()).map(decode);
   let raw_password = url.password().map(str::to_owned);
   let password = raw_password.as_deref().map(decode);
@@ -179,7 +188,10 @@ fn load_bundle(path: &Path) -> Result<Vec<CertificateDer<'static>>, RunnerError>
   let mut store = RootCertStore::empty();
   for (index, cert) in certs.iter().enumerate() {
     store.add(cert.clone()).map_err(|e| {
-      fail(format!("certificate #{} is not a usable CA certificate: {e}", index + 1))
+      fail(format!(
+        "certificate #{} is not a usable CA certificate: {e}",
+        index + 1
+      ))
     })?;
   }
   Ok(certs)

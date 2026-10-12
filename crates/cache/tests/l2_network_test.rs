@@ -3,18 +3,25 @@
 //! not S3: the test asserts the real `CONNECT` and the signed `PUT` that
 //! arrive, not an S3 success.
 
-#[path = "../../network/tests/helpers/network_fixtures.rs"]
-mod network_fixtures;
+#[path = "../../network/tests/helpers/proxy_fixtures.rs"]
+mod proxy_fixtures;
+#[path = "../../network/tests/helpers/tls_fixtures.rs"]
+mod tls_fixtures;
 
 use cache::tier::{BlobKind, L2Tier};
-use network_fixtures::{FixtureResult, Leaf, Pki, RecordingProxy, TlsTarget};
+use proxy_fixtures::RecordingProxy;
 use shared::{L2Config, NetworkConfig};
+use tls_fixtures::{FixtureResult, Leaf, Pki, TlsTarget};
 
 #[tokio::test]
 async fn l2_put_goes_through_the_configured_proxy_and_ca() -> FixtureResult<()> {
   let pki = Pki::new()?;
   let dir = tempfile::tempdir()?;
-  let s3 = TlsTarget::ok(pki.server_config(&["s3.test"], Leaf::Valid)?).await?;
+  let s3 = TlsTarget::serve(
+    pki.server_config(&["s3.test"], Leaf::Valid)?,
+    b"ok".to_vec(),
+  )
+  .await?;
   let proxy = RecordingProxy::start(None).await?;
   let network = NetworkConfig {
     proxy: Some(proxy.url(None)),

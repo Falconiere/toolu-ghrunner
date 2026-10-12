@@ -42,17 +42,18 @@ fn raw_constructions(line: &str) -> bool {
 }
 
 #[test]
-fn no_production_source_builds_a_reqwest_client_directly() -> Result<(), Box<dyn std::error::Error>> {
+fn no_production_source_builds_a_reqwest_client_directly() -> Result<(), Box<dyn std::error::Error>>
+{
   let crates_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
   let mut offenders = Vec::new();
   let mut scanned = 0_usize;
   for entry in std::fs::read_dir(&crates_dir)? {
-    let crate_dir = entry?.path();
-    let name = crate_dir
+    let member = entry?.path();
+    let name = member
       .file_name()
       .map(|n| n.to_string_lossy().into_owned())
       .unwrap_or_default();
-    let src = crate_dir.join("src");
+    let src = member.join("src");
     if EXEMPT_CRATES.contains(&name.as_str()) || !src.is_dir() {
       continue;
     }

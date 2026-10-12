@@ -16,7 +16,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::network::NetworkSection;
 use shared::{
-  CacheConfig, L2Config, RunnerError, ServicesMode, WorkspaceConfig, WorkspaceMode, paths, NetworkConfig};
+  CacheConfig, L2Config, NetworkConfig, RunnerError, ServicesMode, WorkspaceConfig, WorkspaceMode,
+  paths,
+};
 
 #[cfg(unix)]
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};

@@ -231,7 +231,12 @@ async fn archive_redirect_loop_and_missing_location_fail_closed() {
       "toolu-action-redirect-error-{}",
       uuid::Uuid::new_v4()
     ));
-    let error = download_and_extract_action(&shared::NetworkConfig::default(), &format!("http://{address}/{path}"), None, &destination)
+    let error = download_and_extract_action(
+      &shared::NetworkConfig::default(),
+      &format!("http://{address}/{path}"),
+      None,
+      &destination,
+    )
     .await
     .expect_err("invalid redirect must fail");
     assert!(error.to_string().contains(expected), "{error}");
@@ -399,7 +404,12 @@ async fn archive_redirect_keeps_basic_auth_on_origin_and_drops_it_cross_origin()
   let token = "synthetic-archive-token";
   let destination =
     std::env::temp_dir().join(format!("toolu-action-redirect-{}", uuid::Uuid::new_v4()));
-  let result = download_and_extract_action(&shared::NetworkConfig::default(), &format!("http://{source_address}/tarball"), Some(token), &destination)
+  let result = download_and_extract_action(
+    &shared::NetworkConfig::default(),
+    &format!("http://{source_address}/tarball"),
+    Some(token),
+    &destination,
+  )
   .await;
   let error = result.expect_err("terminal 403 must fail");
   assert!(error.to_string().contains("403"));

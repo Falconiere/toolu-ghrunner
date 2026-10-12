@@ -33,7 +33,10 @@ fn at_sign_in_password_and_path_are_handled() {
 #[test]
 fn values_without_credentials_or_scheme() {
   assert_eq!(redact_proxy_url("http://proxy:3128"), "http://proxy:3128");
-  assert_eq!(redact_proxy_url("user:pw@proxy:3128"), "user:***@proxy:3128");
+  assert_eq!(
+    redact_proxy_url("user:pw@proxy:3128"),
+    "user:***@proxy:3128"
+  );
   assert_eq!(redact_proxy_url(""), "");
 }
 

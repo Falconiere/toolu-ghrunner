@@ -192,14 +192,9 @@ impl RunLoop {
   ) -> Result<(Result<Option<Conclusion>, RunnerError>, bool), Box<dyn std::error::Error>> {
     let runner_cfg = build_runner_config(cfg)?;
     let jit = require_jit_config(cfg)?;
-    let listener = GitHubListener::new(
-      &jit,
-      runner_cfg,
-      Arc::clone(&self.masker),
-      client.clone(),
-    )
-    .map_err(|e| format!("listener init: {e}"))?
-    .with_session_conflict_policy(self.conflict_policy);
+    let listener = GitHubListener::new(&jit, runner_cfg, Arc::clone(&self.masker), client.clone())
+      .map_err(|e| format!("listener init: {e}"))?
+      .with_session_conflict_policy(self.conflict_policy);
     let outcome = listener.run(self.cancel.clone()).await;
     Ok((outcome, listener.job_acquired()))
   }

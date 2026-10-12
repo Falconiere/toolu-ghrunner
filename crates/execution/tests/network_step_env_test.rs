@@ -3,8 +3,8 @@
 //! steps, a job hook, a local Node action's main and post stages, and Node's
 //! TLS trust — under workflow env, with the proxy password masked.
 
-#[path = "../../network/tests/helpers/network_fixtures.rs"]
-mod network_fixtures;
+#[path = "../../network/tests/helpers/tls_fixtures.rs"]
+mod tls_fixtures;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -12,11 +12,11 @@ use std::time::Duration;
 
 use execution::Runner;
 use execution::node::runtime::{node_binary_path, node_cache_dir, node_version_for};
-use network_fixtures::{FixtureResult, Leaf, Pki, TlsTarget};
 use shared::{
   AgentJobRequestMessage, Conclusion, DictEntry, NetworkConfig, RunnerConfig, RunnerEvent,
   SecretMasker, TemplateToken, VariableValue,
 };
+use tls_fixtures::{FixtureResult, Leaf, Pki, TlsTarget};
 use tokio_util::sync::CancellationToken;
 
 /// The sanitized #68 GitHub.com acquisition (a `run:` step and a local action).
@@ -153,7 +153,9 @@ impl Harness {
     for stage in ["main", "post"] {
       std::fs::write(
         dir.join(format!("{stage}.js")),
-        format!("console.log('NET94|{stage}|HTTPS_PROXY|' + (process.env.HTTPS_PROXY ?? 'unset'));\n"),
+        format!(
+          "console.log('NET94|{stage}|HTTPS_PROXY|' + (process.env.HTTPS_PROXY ?? 'unset'));\n"
+        ),
       )?;
     }
     Ok(())
@@ -247,12 +249,23 @@ async fn host_steps_and_hooks_get_the_config_export_over_the_runner_env() -> Fix
   let bundle = bundle.display().to_string();
   for tag in ["run", "hook"] {
     for name in ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"] {
-      assert_eq!(reported(&lines, tag, name), Some(PROXY), "{tag} {name}: {lines:?}");
+      assert_eq!(
+        reported(&lines, tag, name),
+        Some(PROXY),
+        "{tag} {name}: {lines:?}"
+      );
     }
     assert_eq!(reported(&lines, tag, "NO_PROXY"), Some(bypass), "{tag}");
     assert_eq!(reported(&lines, tag, "no_proxy"), Some(bypass), "{tag}");
-    assert_eq!(reported(&lines, tag, "NODE_EXTRA_CA_CERTS"), Some(bundle.as_str()));
-    assert_eq!(reported(&lines, tag, "TOOLU_RUNNER_PROBE"), Some("unset"), "{tag}");
+    assert_eq!(
+      reported(&lines, tag, "NODE_EXTRA_CA_CERTS"),
+      Some(bundle.as_str())
+    );
+    assert_eq!(
+      reported(&lines, tag, "TOOLU_RUNNER_PROBE"),
+      Some("unset"),
+      "{tag}"
+    );
   }
   Ok(())
 }
@@ -269,7 +282,10 @@ async fn a_step_env_value_beats_the_export() -> FixtureResult<()> {
     Some(mapping(&[("HTTPS_PROXY", "http://workflow.test:1")]));
   let (conclusion, lines) = h.run(job, &[]).await?;
   assert_eq!(conclusion, Some(Conclusion::Success), "{lines:?}");
-  assert_eq!(reported(&lines, "run", "HTTPS_PROXY"), Some("http://workflow.test:1"));
+  assert_eq!(
+    reported(&lines, "run", "HTTPS_PROXY"),
+    Some("http://workflow.test:1")
+  );
   assert_eq!(reported(&lines, "run", "https_proxy"), Some(PROXY));
   Ok(())
 }
@@ -278,13 +294,25 @@ async fn a_step_env_value_beats_the_export() -> FixtureResult<()> {
 async fn env_mode_reexports_the_runner_proxy_in_both_casings() -> FixtureResult<()> {
   let h = Harness::new(NetworkConfig::default()).await?;
   let (conclusion, lines) = h
-    .run(job(&probe("run"), false)?, &[("HTTPS_PROXY", "http://ambient.test:9")])
+    .run(
+      job(&probe("run"), false)?,
+      &[("HTTPS_PROXY", "http://ambient.test:9")],
+    )
     .await?;
   assert_eq!(conclusion, Some(Conclusion::Success), "{lines:?}");
-  assert_eq!(reported(&lines, "run", "HTTPS_PROXY"), Some("http://ambient.test:9"));
-  assert_eq!(reported(&lines, "run", "https_proxy"), Some("http://ambient.test:9"));
+  assert_eq!(
+    reported(&lines, "run", "HTTPS_PROXY"),
+    Some("http://ambient.test:9")
+  );
+  assert_eq!(
+    reported(&lines, "run", "https_proxy"),
+    Some("http://ambient.test:9")
+  );
   assert_eq!(reported(&lines, "run", "HTTP_PROXY"), Some("unset"));
-  assert_eq!(reported(&lines, "run", "NODE_EXTRA_CA_CERTS"), Some("unset"));
+  assert_eq!(
+    reported(&lines, "run", "NODE_EXTRA_CA_CERTS"),
+    Some("unset")
+  );
   Ok(())
 }
 
@@ -299,8 +327,16 @@ async fn node_action_main_and_post_see_the_export() -> FixtureResult<()> {
   h.install_node_action(&job)?;
   let (conclusion, lines) = h.run(job, &[]).await?;
   assert_eq!(conclusion, Some(Conclusion::Success), "{lines:?}");
-  assert_eq!(reported(&lines, "main", "HTTPS_PROXY"), Some(PROXY), "{lines:?}");
-  assert_eq!(reported(&lines, "post", "HTTPS_PROXY"), Some(PROXY), "{lines:?}");
+  assert_eq!(
+    reported(&lines, "main", "HTTPS_PROXY"),
+    Some(PROXY),
+    "{lines:?}"
+  );
+  assert_eq!(
+    reported(&lines, "post", "HTTPS_PROXY"),
+    Some(PROXY),
+    "{lines:?}"
+  );
   Ok(())
 }
 
@@ -315,22 +351,36 @@ fn node_fetch(port: u16) -> String {
 async fn node_trusts_the_ca_bundle_only_when_configured() -> FixtureResult<()> {
   let pki = Pki::new()?;
   let dir = tempfile::tempdir()?;
-  let target = TlsTarget::ok(pki.server_config(&["127.0.0.1"], Leaf::Valid)?).await?;
+  let target = TlsTarget::serve(
+    pki.server_config(&["127.0.0.1"], Leaf::Valid)?,
+    b"ok".to_vec(),
+  )
+  .await?;
   let trusted = Harness::new(NetworkConfig {
     ca_bundle: Some(pki.write_bundle(dir.path())?),
     ..NetworkConfig::default()
   })
   .await?;
-  let (_, lines) = trusted.run(job(&node_fetch(target.port()), false)?, &[]).await?;
+  let (_, lines) = trusted
+    .run(job(&node_fetch(target.port()), false)?, &[])
+    .await?;
   assert_eq!(reported(&lines, "node", "status"), Some("200"), "{lines:?}");
+  assert_eq!(target.requests().len(), 1, "{:?}", target.requests());
 
   let untrusted = Harness::new(NetworkConfig::default()).await?;
-  let (_, lines) = untrusted.run(job(&node_fetch(target.port()), false)?, &[]).await?;
+  let (_, lines) = untrusted
+    .run(job(&node_fetch(target.port()), false)?, &[])
+    .await?;
   let status = reported(&lines, "node", "status").unwrap_or_default();
   assert_ne!(status, "200", "{lines:?}");
   assert!(
     status.contains("CERT") || status.contains("SIGNATURE") || status.contains("ISSUER"),
     "expected a certificate error, got {status}: {lines:?}"
+  );
+  assert_eq!(
+    target.requests().len(),
+    1,
+    "untrusted node must not reach the server"
   );
   Ok(())
 }
@@ -343,14 +393,20 @@ async fn an_echoed_proxy_password_is_masked() -> FixtureResult<()> {
   })
   .await?;
   let (conclusion, lines) = h
-    .run(job("echo \"NET94|echo|HTTPS_PROXY|$HTTPS_PROXY\"", false)?, &[])
+    .run(
+      job("echo \"NET94|echo|HTTPS_PROXY|$HTTPS_PROXY\"", false)?,
+      &[],
+    )
     .await?;
   assert_eq!(conclusion, Some(Conclusion::Success), "{lines:?}");
   let raw = reported(&lines, "echo", "HTTPS_PROXY").ok_or("echo line missing")?;
-  assert!(raw.contains("s3cr3tpw"), "the event stream is unmasked by design");
-  let masker = h.masker.lock().map_err(|_| "masker poisoned")?;
-  let masked = masker.mask(raw);
-  assert!(!masked.contains("s3cr3tpw"), "{masked}");
-  assert_eq!(masked, "http://u:***@proxy.corp.test:3128");
+  assert!(
+    raw.contains("s3cr3tpw"),
+    "the event stream is unmasked by design"
+  );
+  let masker = h.masker.lock().map_err(|e| e.to_string())?;
+  let shown = masker.mask(raw);
+  assert!(!shown.contains("s3cr3tpw"), "{shown}");
+  assert_eq!(shown, "http://u:***@proxy.corp.test:3128");
   Ok(())
 }

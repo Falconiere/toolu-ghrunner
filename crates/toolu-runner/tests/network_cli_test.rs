@@ -3,8 +3,10 @@
 //! and is ignored), reports the redacted settings, and `check` / `run` refuse
 //! an unusable `ca_bundle` with exit 2 before any network call.
 
-#[path = "../../network/tests/helpers/network_fixtures.rs"]
-mod network_fixtures;
+#[path = "../../network/tests/helpers/proxy_fixtures.rs"]
+mod proxy_fixtures;
+#[path = "../../network/tests/helpers/tls_fixtures.rs"]
+mod tls_fixtures;
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -14,7 +16,14 @@ use config::config::{
   ShadowSection, WorkspaceSection, save_config, save_credentials,
 };
 use config::network::NetworkSection;
-use network_fixtures::{FixtureResult, Leaf, Pki, RecordingProxy, TlsTarget, closed_port};
+use proxy_fixtures::RecordingProxy;
+use tls_fixtures::{FixtureResult, Leaf, Pki, TlsTarget};
+
+/// A loopback port nothing listens on.
+async fn closed_port() -> FixtureResult<u16> {
+  let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+  Ok(listener.local_addr()?.port())
+}
 
 const GHES_JIT: &str = include_str!("fixtures/jit_config_ghes.json");
 const ROUTING_VARS: [&str; 12] = [
@@ -34,7 +43,11 @@ const ROUTING_VARS: [&str; 12] = [
 
 /// Persist a registration for `runner_url` with `network` under
 /// `<home>/runners/o/r/`, the way `register` does.
-fn write_registration(home: &Path, runner_url: &str, network: NetworkSection) -> FixtureResult<PathBuf> {
+fn write_registration(
+  home: &Path,
+  runner_url: &str,
+  network: NetworkSection,
+) -> FixtureResult<PathBuf> {
   let fixture: serde_json::Value = serde_json::from_str(GHES_JIT)?;
   let jit = fixture
     .get("encoded")
@@ -106,7 +119,11 @@ async fn output(mut cmd: Command) -> FixtureResult<(Option<i32>, String, String)
 async fn check_probes_through_the_configured_proxy_and_reports_it_redacted() -> FixtureResult<()> {
   let home = tempfile::tempdir()?;
   let pki = Pki::new()?;
-  let ghes = TlsTarget::ok(pki.server_config(&["ghes.test", "codeload.ghes.test"], Leaf::Valid)?).await?;
+  let ghes = TlsTarget::serve(
+    pki.server_config(&["ghes.test", "codeload.ghes.test"], Leaf::Valid)?,
+    b"ok".to_vec(),
+  )
+  .await?;
   let proxy = RecordingProxy::start(Some(("runner", "pw94secret"))).await?;
   let bundle = pki.write_bundle(home.path())?;
   let config = write_registration(
@@ -119,12 +136,26 @@ async fn check_probes_through_the_configured_proxy_and_reports_it_redacted() -> 
     },
   )?;
   let mut cmd = runner(home.path(), closed_port().await?);
-  cmd.args(["check", "--config"]).arg(&config).args(["--timeout", "5"]);
+  cmd
+    .args(["check", "--config"])
+    .arg(&config)
+    .args(["--timeout", "5"]);
   let (_code, stdout, stderr) = output(cmd).await?;
 
   assert!(
-    stdout.contains(&format!("PASS  api        https://ghes.test:{}/api/v3", ghes.port())),
+    stdout.contains(&format!(
+      "PASS  api        https://ghes.test:{}/api/v3",
+      ghes.port()
+    )),
     "stdout:\n{stdout}\nstderr:\n{stderr}"
+  );
+  assert!(
+    ghes
+      .requests()
+      .iter()
+      .any(|line| line == "GET /api/v3 HTTP/1.1"),
+    "the api probe must reach GHES through the tunnel: {:?}",
+    ghes.requests()
   );
   let hits = proxy.hits();
   assert!(
@@ -135,8 +166,8 @@ async fn check_probes_through_the_configured_proxy_and_reports_it_redacted() -> 
   );
   assert!(
     stdout.contains(&format!(
-      "[network]    proxy http://runner:***@127.0.0.1:{} (config), no_proxy 1 entries, ca_bundle {} (1 certificates)",
-      proxy.port(),
+      "[network]    proxy {} (config), no_proxy 1 entries, ca_bundle {} (1 certificates)",
+      proxy.url(Some("runner:***")),
       bundle.display()
     )),
     "{stdout}"

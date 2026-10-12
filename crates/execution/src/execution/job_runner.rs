@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use shared::{
   AgentJobRequestMessage, Conclusion, RunnerConfig, RunnerError, RunnerEvent, ServicesMode,
@@ -247,7 +246,6 @@ fn build_shadow_observer(
     Arc::clone(ctx.masker()),
   )
 }
-
 
 /// Build the per-job context with its workspace set.
 ///

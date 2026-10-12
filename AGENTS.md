@@ -362,9 +362,10 @@ to that list requires proving the value is not a real credential.
   `NODE_EXTRA_CA_CERTS` for host steps only.
 - `secrets.rs` — `proxy_secrets`: password raw + decoded and
   `base64(user:password)` for the masker.
-- `config.rs` — the crate's env reads. `tests/helpers/network_fixtures.rs`
-  (rcgen PKI, rustls target, recording CONNECT proxy) is `#[path]`-included
-  by the `execution`, `cache`, `wire` and `toolu-runner` tests.
+- `config.rs` — the crate's env reads. `tests/helpers/tls_fixtures.rs`
+  (rcgen PKI, rustls target) and `tests/helpers/proxy_fixtures.rs`
+  (recording CONNECT proxy) are `#[path]`-included by the `wire`, `cache`,
+  `execution` and `toolu-runner` tests; each test includes only what it uses.
 
 ### `config/` — registration config, lock, token store (deps: shared)
 

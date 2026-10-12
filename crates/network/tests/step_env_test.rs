@@ -37,15 +37,24 @@ fn config_mode_exports_both_casings_loopback_and_node_ca() {
     no_proxy: vec!["internal.corp".to_owned(), ".svc".to_owned()],
     ca_bundle: Some(PathBuf::from("/etc/corp/ca.pem")),
   };
-  let exported = with_env(&[("HTTPS_PROXY", "http://ambient:1")], || network::step_env(&cfg));
+  let exported = with_env(&[("HTTPS_PROXY", "http://ambient:1")], || {
+    network::step_env(&cfg)
+  });
   let host = map(exported.host);
   for key in ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"] {
-    assert_eq!(host.get(key).map(String::as_str), Some("http://u:pw12@proxy.corp:3128"), "{key}");
+    assert_eq!(
+      host.get(key).map(String::as_str),
+      Some("http://u:pw12@proxy.corp:3128"),
+      "{key}"
+    );
   }
   let bypass = "internal.corp,.svc,localhost,127.0.0.1,::1";
   assert_eq!(host.get("NO_PROXY").map(String::as_str), Some(bypass));
   assert_eq!(host.get("no_proxy").map(String::as_str), Some(bypass));
-  assert_eq!(host.get("NODE_EXTRA_CA_CERTS").map(String::as_str), Some("/etc/corp/ca.pem"));
+  assert_eq!(
+    host.get("NODE_EXTRA_CA_CERTS").map(String::as_str),
+    Some("/etc/corp/ca.pem")
+  );
   let container = map(exported.container);
   assert_eq!(container.len(), 6, "{container:?}");
   assert!(!container.contains_key("NODE_EXTRA_CA_CERTS"));
@@ -63,8 +72,14 @@ fn env_mode_reexports_the_first_set_value_in_both_casings() {
     || network::step_env(&NetworkConfig::default()),
   );
   let host = map(exported.host);
-  assert_eq!(host.get("HTTPS_PROXY").map(String::as_str), Some("http://upper:1"));
-  assert_eq!(host.get("https_proxy").map(String::as_str), Some("http://upper:1"));
+  assert_eq!(
+    host.get("HTTPS_PROXY").map(String::as_str),
+    Some("http://upper:1")
+  );
+  assert_eq!(
+    host.get("https_proxy").map(String::as_str),
+    Some("http://upper:1")
+  );
   assert_eq!(host.get("NO_PROXY").map(String::as_str), Some("corp"));
   assert_eq!(host.get("no_proxy").map(String::as_str), Some("corp"));
   assert!(!host.contains_key("HTTP_PROXY") && !host.contains_key("http_proxy"));

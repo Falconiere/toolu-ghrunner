@@ -33,7 +33,7 @@ dedicated no-redirect archive client owned by `ActionFetcher` (built from the
 job's `NetworkConfig`). Test fixtures (rcgen CA/leaves, a tokio CONNECT proxy
 that requires Basic auth and resolves every host to loopback, a rustls HTTPS
 target, a TLS WebSocket target) live once in
-`crates/network/tests/helpers/network_fixtures.rs` and are `#[path]`-included by
+`crates/network/tests/helpers/{tls,proxy}_fixtures.rs` and are `#[path]`-included by
 the other crates' integration tests.
 
 ## Workstream summary
@@ -103,7 +103,8 @@ accelerated, L2) → step/container export → live-log WebSocket → inventory 
       "crates/toolu-runner/Cargo.toml",
       "crates/toolu-runner/src",
       "crates/toolu-runner/tests/network_cli_test.rs",
-      "crates/network/tests/helpers/network_fixtures.rs"
+      "crates/network/tests/helpers/tls_fixtures.rs",
+      "crates/network/tests/helpers/proxy_fixtures.rs"
     ],
     "input": "Temp registration config.toml with [network] proxy=http://u:secretpw@127.0.0.1:<proxy> + ca_bundle; env HTTPS_PROXY=http://127.0.0.1:<closed>; a bad ca_bundle path; the real toolu-runner binary (check and run).",
     "check": "cargo test -p toolu-runner --test network_cli_test && cargo test -p toolu-runner --test check_cmd_test && cargo test -p toolu-runner --bin toolu-runner"
@@ -131,7 +132,8 @@ accelerated, L2) → step/container export → live-log WebSocket → inventory 
       "crates/toolu-runner/tests/cache_l2_test.rs",
       "crates/execution/tests/network_job_clients_test.rs",
       "crates/execution/tests/action_downloads_test.rs",
-      "crates/network/tests/helpers/network_fixtures.rs"
+      "crates/network/tests/helpers/tls_fixtures.rs",
+      "crates/network/tests/helpers/proxy_fixtures.rs"
     ],
     "input": "A real gzip tarball served as https://target.test:<port>/a.tar.gz by the rustls target behind the auth proxy with the rcgen CA (and without the CA \u2192 TLS failure); an L2Tier put to https://s3.test:<port> with static AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY via temp-env (assert the proxy CONNECT, not an S3 success).",
     "check": "cargo test -p execution --test network_job_clients_test && cargo test -p execution --lib actions && cargo test -p execution --test action_downloads_test && cargo test -p cache --test l2_network_test && cargo test -p toolu-runner --test oidc_token_test && cargo test -p toolu-runner --test cache_l2_test"
@@ -154,7 +156,8 @@ accelerated, L2) → step/container export → live-log WebSocket → inventory 
       "crates/execution/tests/network_container_env_test.rs",
       ".github/workflows/ci.yml",
       "scripts/test/ci_workflow_test.sh",
-      "crates/network/tests/helpers/network_fixtures.rs"
+      "crates/network/tests/helpers/tls_fixtures.rs",
+      "crates/network/tests/helpers/proxy_fixtures.rs"
     ],
     "input": "The captured job message fixture replayed through Runner::execute_job with host run:/composite/hook steps printing env, a workflow env override and an echo of a password-bearing $HTTPS_PROXY whose events also pass through the real observability journal writer (dev-dep); a temp local node20 action (main+post) with the node20 runtime cache pre-seeded from the host node (seed_node pattern, no internet); host node https.get against the rustls target with/without ca_bundle; real Docker job container + run: inside it + alpine service + Docker action printing env.",
     "check": "cargo test -p execution --test network_step_env_test && cargo test -p execution --lib docker && cargo test -p execution --test network_container_env_test -- --ignored --test-threads=1 && bash scripts/test/ci_workflow_test.sh"
@@ -174,7 +177,8 @@ accelerated, L2) → step/container export → live-log WebSocket → inventory 
       "crates/wire/tests",
       "crates/listener/Cargo.toml",
       "crates/listener/src",
-      "crates/network/tests/helpers/network_fixtures.rs"
+      "crates/network/tests/helpers/tls_fixtures.rs",
+      "crates/network/tests/helpers/proxy_fixtures.rs"
     ],
     "input": "tokio-tungstenite server accepting over tokio-rustls (rcgen leaf for target.test) reached through the auth CONNECT proxy; a server that answers 200; no ca_bundle.",
     "check": "cargo test -p wire && cargo test -p listener"
@@ -252,7 +256,7 @@ accelerated, L2) → step/container export → live-log WebSocket → inventory 
 - Create: `crates/network/` (`Cargo.toml`, `guardrails.config.json`,
   `README.md`, `src/{lib,config,client,step_env,secrets}.rs`,
   `tests/{client_proxy_test,client_tls_test,secrets_test,step_env_test}.rs`,
-  `tests/helpers/network_fixtures.rs`), `crates/shared/src/network_redact.rs`,
+  `tests/helpers/{tls,proxy}_fixtures.rs`), `crates/shared/src/network_redact.rs`,
   `crates/config/src/network.rs`, `crates/config/tests/network_section_test.rs`,
   `crates/toolu-runner/tests/network_cli_test.rs`,
   `crates/toolu-runner/tests/network_client_inventory_test.rs`,

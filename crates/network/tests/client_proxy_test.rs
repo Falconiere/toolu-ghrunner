@@ -1,13 +1,22 @@
 //! #94 AC-2 / AC-3: `network::client_builder` proxy routing against a real
 //! recording `CONNECT` proxy and a real rustls HTTPS target.
 
-#[path = "helpers/network_fixtures.rs"]
-mod network_fixtures;
+#[path = "helpers/proxy_fixtures.rs"]
+mod proxy_fixtures;
+#[path = "helpers/tls_fixtures.rs"]
+mod tls_fixtures;
 
 use std::net::SocketAddr;
 
-use network_fixtures::{FixtureResult, Leaf, Pki, RecordingProxy, TlsTarget, closed_port};
+use proxy_fixtures::RecordingProxy;
 use shared::{NetworkConfig, RunnerError};
+use tls_fixtures::{FixtureResult, Leaf, Pki, TlsTarget};
+
+/// A loopback port nothing listens on.
+async fn closed_port() -> FixtureResult<u16> {
+  let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+  Ok(listener.local_addr()?.port())
+}
 
 /// Every proxy variable reqwest's system matcher reads, unset — the host
 /// running the tests may export some.
@@ -74,7 +83,11 @@ fn basic(user: &str, pass: &str) -> String {
 #[tokio::test]
 async fn config_proxy_tunnels_with_decoded_basic_auth() -> FixtureResult<()> {
   let e = env()?;
-  let target = TlsTarget::ok(e.pki.server_config(&["target.test"], Leaf::Valid)?).await?;
+  let target = TlsTarget::serve(
+    e.pki.server_config(&["target.test"], Leaf::Valid)?,
+    b"ok".to_vec(),
+  )
+  .await?;
   let proxy = RecordingProxy::start(Some(("u", "p@ss"))).await?;
   let cfg = NetworkConfig {
     proxy: Some(proxy.url(Some("u:p%40ss"))),
@@ -84,13 +97,16 @@ async fn config_proxy_tunnels_with_decoded_basic_auth() -> FixtureResult<()> {
   let client = client_with_env(&cfg, &[], None)?;
   let body = get(&client, &format!("https://target.test:{}/x", target.port())).await?;
   assert_eq!(body, "ok");
+  let line = format!("CONNECT target.test:{} HTTP/1.1", target.port());
+  let auth = basic("u", "p@ss");
   let hits = proxy.hits();
-  assert_eq!(hits.len(), 1, "{hits:?}");
   assert_eq!(
-    hits[0].line,
-    format!("CONNECT target.test:{} HTTP/1.1", target.port())
+    hits
+      .iter()
+      .map(|hit| (hit.line.as_str(), hit.auth.as_deref()))
+      .collect::<Vec<_>>(),
+    vec![(line.as_str(), Some(auth.as_str()))]
   );
-  assert_eq!(hits[0].auth.as_deref(), Some(basic("u", "p@ss").as_str()));
   assert_eq!(target.requests(), vec!["GET /x HTTP/1.1".to_owned()]);
   Ok(())
 }
@@ -98,7 +114,11 @@ async fn config_proxy_tunnels_with_decoded_basic_auth() -> FixtureResult<()> {
 #[tokio::test]
 async fn no_proxy_destination_goes_direct() -> FixtureResult<()> {
   let e = env()?;
-  let target = TlsTarget::ok(e.pki.server_config(&["bypass.test"], Leaf::Valid)?).await?;
+  let target = TlsTarget::serve(
+    e.pki.server_config(&["bypass.test"], Leaf::Valid)?,
+    b"ok".to_vec(),
+  )
+  .await?;
   let proxy = RecordingProxy::start(None).await?;
   let cfg = NetworkConfig {
     proxy: Some(proxy.url(None)),
@@ -115,7 +135,11 @@ async fn no_proxy_destination_goes_direct() -> FixtureResult<()> {
 #[tokio::test]
 async fn config_proxy_replaces_env_proxy_and_env_no_proxy() -> FixtureResult<()> {
   let e = env()?;
-  let target = TlsTarget::ok(e.pki.server_config(&["target.test"], Leaf::Valid)?).await?;
+  let target = TlsTarget::serve(
+    e.pki.server_config(&["target.test"], Leaf::Valid)?,
+    b"ok".to_vec(),
+  )
+  .await?;
   let configured = RecordingProxy::start(None).await?;
   let ambient = RecordingProxy::start(None).await?;
   let cfg = NetworkConfig {
@@ -138,7 +162,11 @@ async fn config_proxy_replaces_env_proxy_and_env_no_proxy() -> FixtureResult<()>
 #[tokio::test]
 async fn config_no_proxy_is_direct_even_with_a_dead_env_proxy() -> FixtureResult<()> {
   let e = env()?;
-  let target = TlsTarget::ok(e.pki.server_config(&["bypass.test"], Leaf::Valid)?).await?;
+  let target = TlsTarget::serve(
+    e.pki.server_config(&["bypass.test"], Leaf::Valid)?,
+    b"ok".to_vec(),
+  )
+  .await?;
   let configured = RecordingProxy::start(None).await?;
   let dead = format!("http://127.0.0.1:{}", closed_port().await?);
   let cfg = NetworkConfig {
@@ -159,7 +187,11 @@ async fn config_no_proxy_is_direct_even_with_a_dead_env_proxy() -> FixtureResult
 #[tokio::test]
 async fn env_mode_keeps_the_env_proxy() -> FixtureResult<()> {
   let e = env()?;
-  let target = TlsTarget::ok(e.pki.server_config(&["target.test"], Leaf::Valid)?).await?;
+  let target = TlsTarget::serve(
+    e.pki.server_config(&["target.test"], Leaf::Valid)?,
+    b"ok".to_vec(),
+  )
+  .await?;
   let ambient = RecordingProxy::start(None).await?;
   let cfg = NetworkConfig {
     proxy: None,
@@ -176,7 +208,11 @@ async fn env_mode_keeps_the_env_proxy() -> FixtureResult<()> {
 #[tokio::test]
 async fn loopback_bypasses_a_configured_proxy() -> FixtureResult<()> {
   let e = env()?;
-  let target = TlsTarget::ok(e.pki.server_config(&["127.0.0.1"], Leaf::Valid)?).await?;
+  let target = TlsTarget::serve(
+    e.pki.server_config(&["127.0.0.1"], Leaf::Valid)?,
+    b"ok".to_vec(),
+  )
+  .await?;
   let dead = format!("http://127.0.0.1:{}", closed_port().await?);
   let cfg = NetworkConfig {
     proxy: Some(dead),
@@ -201,14 +237,13 @@ fn invalid_proxy_values_fail_closed_with_the_credential_redacted() {
       proxy: Some(raw.to_owned()),
       ..NetworkConfig::default()
     };
-    match network::client_builder(&cfg) {
-      Err(RunnerError::Config(msg)) => {
-        assert!(msg.contains("[network] proxy"), "{msg}");
-        assert!(!msg.contains("secretpw"), "{msg}");
-      },
-      Err(other) => panic!("{raw}: expected Config error, got {other:?}"),
-      Ok(_) => panic!("{raw}: expected an error"),
-    }
+    let msg = match network::client_builder(&cfg) {
+      Err(RunnerError::Config(msg)) => msg,
+      Err(other) => format!("{raw}: expected a Config error, got {other:?}"),
+      Ok(_) => format!("{raw}: expected an error, got a client"),
+    };
+    assert!(msg.starts_with("[network] proxy"), "{msg}");
+    assert!(!msg.contains("secretpw"), "{msg}");
   }
 }
 

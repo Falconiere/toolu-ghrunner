@@ -34,7 +34,10 @@ fn config_proxy_password_raw_decoded_and_basic_credential() {
   assert!(secrets.contains(&"p%40ssw0rd".to_owned()), "{secrets:?}");
   assert!(secrets.contains(&"p@ssw0rd".to_owned()), "{secrets:?}");
   assert!(secrets.contains(&b64("alice:p@ssw0rd")), "{secrets:?}");
-  assert!(!secrets.iter().any(|s| s == "alice"), "username is not secret");
+  assert!(
+    !secrets.iter().any(|s| s == "alice"),
+    "username is not secret"
+  );
 }
 
 #[test]
@@ -75,8 +78,14 @@ fn describe_redacts_and_names_the_mode() -> Result<(), shared::RunnerError> {
     ca_bundle: None,
   };
   let line = temp_env::with_vars(cleared(), || network::describe(&cfg))?;
-  assert!(!line.contains("p%40ssw0rd") && !line.contains("p@ssw0rd"), "{line}");
-  assert!(line.contains("proxy http://alice:***@proxy.corp:3128 (config)"), "{line}");
+  assert!(
+    !line.contains("p%40ssw0rd") && !line.contains("p@ssw0rd"),
+    "{line}"
+  );
+  assert!(
+    line.contains("proxy http://alice:***@proxy.corp:3128 (config)"),
+    "{line}"
+  );
   assert!(line.contains("no_proxy 2 entries"), "{line}");
   let none = temp_env::with_vars(cleared(), || network::describe(&NetworkConfig::default()))?;
   assert!(none.contains("proxy none"), "{none}");
