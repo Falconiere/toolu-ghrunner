@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use shared::{
   AgentJobRequestMessage, Conclusion, RunnerConfig, RunnerError, RunnerEvent, ServicesMode,
@@ -34,6 +33,7 @@ use shared::SecretMasker;
 
 mod complete_step;
 mod entry;
+mod job_http;
 mod outputs;
 mod prepared;
 
@@ -178,7 +178,8 @@ async fn start_job_services(
   msg: &AgentJobRequestMessage,
   ctx: &mut ExecutionContext,
 ) -> Result<(reqwest::Client, LocalServices), RunnerError> {
-  let http = build_job_client()?;
+  let http = job_http::build_job_client(config)?;
+  job_http::export_network(ctx, config);
   let local = start_local_services(config, msg, ctx).await?;
   if let Err(error) = setup_job_env(ctx, msg, config, &local).await {
     stop_local_services(local).await;
@@ -244,21 +245,6 @@ fn build_shadow_observer(
     job_id,
     Arc::clone(ctx.masker()),
   )
-}
-
-/// Build the one job-scope HTTP client `run_job` threads to every action
-/// download, node-runtime fetch, and post-drain in this job. A generous
-/// timeout: action tarballs and node runtimes can be large.
-///
-/// # Errors
-///
-/// Returns `RunnerError` if the TLS backend fails to initialize (the only
-/// realistic `reqwest::ClientBuilder::build` failure).
-fn build_job_client() -> Result<reqwest::Client, RunnerError> {
-  reqwest::Client::builder()
-    .timeout(Duration::from_secs(120))
-    .build()
-    .map_err(|e| RunnerError::Network(format!("build job HTTP client: {e}")))
 }
 
 /// Build the per-job context with its workspace set.
@@ -690,7 +676,7 @@ async fn start_accelerated_service(
     bearer: bearer.clone(),
     staging_root: maintenance.staging_root.clone(),
     upstream_results_url,
-    client: reqwest::Client::new(),
+    client: job_http::accelerated_upstream_client(config)?,
   });
 
   let bind = format!("{}:0", config.service_bind);

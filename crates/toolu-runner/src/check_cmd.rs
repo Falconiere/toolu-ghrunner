@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use ::config::config::load_config;
 use clap::Args;
-use shared::SecretMasker;
+use shared::{NetworkConfig, SecretMasker};
 use tokio::task::JoinSet;
 use url::Url;
 
@@ -68,6 +68,8 @@ struct Target {
   jit: Option<JitEndpoints>,
   data_dir: Option<PathBuf>,
   origin: String,
+  /// The registration's `[network]` (env mode without a registration).
+  network: NetworkConfig,
 }
 
 /// Load a registration's runner URL, JIT endpoints and data dir.
@@ -80,6 +82,7 @@ fn target_from_registration(path: &Path) -> Result<Target, String> {
       &cfg.runtime.data_dir,
     ))),
     origin: format!("registration: {}", path.display()),
+    network: cfg.network_config(),
   })
 }
 
@@ -91,6 +94,7 @@ fn resolve_target(args: &CheckArgs) -> Result<Target, String> {
       jit: None,
       data_dir: None,
       origin: "--url".to_owned(),
+      network: NetworkConfig::default(),
     });
   }
   if let Some(path) = &args.config {
@@ -103,14 +107,19 @@ fn resolve_target(args: &CheckArgs) -> Result<Target, String> {
       jit: None,
       data_dir: None,
       origin: format!("defaults: {why}"),
+      network: NetworkConfig::default(),
     }),
   }
 }
 
 /// Probe every endpoint concurrently; skipped ones carry no outcome. A probe
 /// task that dies is recorded as a failure naming its endpoint.
-async fn probe_endpoints(endpoints: Vec<Endpoint>, timeout: Duration) -> Vec<EndpointResult> {
-  let client = build_client(timeout);
+async fn probe_endpoints(
+  endpoints: Vec<Endpoint>,
+  timeout: Duration,
+  network: &NetworkConfig,
+) -> Vec<EndpointResult> {
+  let client = build_client(timeout, network);
   let mut set = JoinSet::new();
   let mut task_index = HashMap::new();
   for (index, endpoint) in endpoints.iter().enumerate() {
@@ -160,12 +169,17 @@ async fn probe_endpoints(endpoints: Vec<Endpoint>, timeout: Duration) -> Vec<End
 }
 
 /// A masker seeded with every credential the printed settings could echo.
-fn masker_for(proxy: &ProxyReport) -> SecretMasker {
+fn masker_for(proxy: &ProxyReport, network: &NetworkConfig) -> SecretMasker {
   let mut masker = SecretMasker::new();
   let docker = config::docker_host()
     .map(|host| url_secrets(&host))
     .unwrap_or_default();
-  for secret in proxy.secrets().into_iter().chain(docker) {
+  for secret in proxy
+    .secrets()
+    .into_iter()
+    .chain(docker)
+    .chain(network::proxy_secrets(network))
+  {
     masker.add_secret(&secret);
   }
   masker
@@ -182,11 +196,20 @@ pub(crate) async fn cmd_check(args: CheckArgs) -> i32 {
   };
   let timeout = Duration::from_secs(args.timeout);
   let proxy = ProxyReport::from_env();
-  let masker = masker_for(&proxy);
+  let masker = masker_for(&proxy, &target.network);
+  // An unusable `[network]` (bad proxy URL, bad `ca_bundle`) is a config
+  // error before probing, exactly as `run` treats it.
+  let network_line = match network::describe(&target.network) {
+    Ok(line) => line,
+    Err(error) => {
+      eprintln!("toolu-runner: {}", masker.mask(&error.to_string()));
+      return EXIT_USAGE;
+    },
+  };
   let endpoints = endpoints_for(&target.base, target.jit.as_ref());
   let trust = tokio::task::spawn_blocking(TrustReport::from_env);
   let (endpoints, git, docker, node) = tokio::join!(
-    probe_endpoints(endpoints, timeout),
+    probe_endpoints(endpoints, timeout, &target.network),
     probe_git(timeout),
     probe_docker(timeout),
     probe_node(timeout, target.data_dir.as_deref()),
@@ -210,6 +233,8 @@ pub(crate) async fn cmd_check(args: CheckArgs) -> i32 {
     endpoints,
     tools: vec![git, docker, node],
     proxy,
+    network: (target.network != NetworkConfig::default()).then_some(network_line),
+    proxy_configured: network::proxy_configured(&target.network),
     trust,
   };
   print!("{}", render(&report, &masker));

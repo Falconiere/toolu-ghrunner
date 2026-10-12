@@ -17,7 +17,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use super::download_info::{ActionDownloadContext, ActionDownloadInfo};
-use super::downloader::{action_cache_dir, download_and_extract_action};
+use super::downloader::{ArchiveClient, action_cache_dir, download_and_extract_action};
 use super::resolver::{ActionRef, resolve_action_refs};
 use crate::execution::action_exec::build_uses_ref;
 
@@ -28,7 +28,6 @@ const ARCHIVE_ATTEMPTS: usize = 2;
 
 /// Per-job fetcher shared by prefetch and step execution, keyed by resolved
 /// action revision and API host.
-#[derive(Default)]
 pub struct ActionFetcher {
   events: Option<mpsc::Sender<shared::RunnerEvent>>,
   reported: Mutex<HashSet<String>>,
@@ -36,26 +35,46 @@ pub struct ActionFetcher {
   context: Option<Result<ActionDownloadContext, String>>,
   masker: Option<Arc<Mutex<SecretMasker>>>,
   cancel: Option<CancellationToken>,
+  /// The job's one no-redirect archive client, from its `[network]` (#94).
+  archive: ArchiveClient,
 }
 
 impl ActionFetcher {
-  /// Create an empty fetcher for direct archive tests and local-only jobs.
-  #[must_use]
-  pub fn new() -> Self {
-    Self::default()
+  /// Create an empty fetcher for direct archive tests and local-only jobs,
+  /// downloading through `network` (pass `NetworkConfig::default()` for env
+  /// mode — there is no implicit fallback).
+  ///
+  /// # Errors
+  ///
+  /// The `[network]` or client-build error from [`ArchiveClient::new`].
+  pub fn new(network: &shared::NetworkConfig) -> Result<Self, RunnerError> {
+    Ok(Self {
+      events: None,
+      reported: Mutex::new(HashSet::new()),
+      inflight: Mutex::new(HashMap::new()),
+      context: None,
+      masker: None,
+      cancel: None,
+      archive: ArchiveClient::new(network)?,
+    })
   }
 
-  /// Build the production fetcher from the acquired job and its shared masker.
+  /// Build the production fetcher from the acquired job, its shared masker
+  /// and its `[network]` (the archive client is built here, once per job).
   ///
   /// Context validation is deferred until a remote action needs it, so
   /// shell-only jobs do not require GitHub action-service fields.
-  #[must_use]
+  ///
+  /// # Errors
+  ///
+  /// The `[network]` or client-build error from [`ArchiveClient::new`].
   pub fn for_job(
     msg: &AgentJobRequestMessage,
     masker: Arc<Mutex<SecretMasker>>,
     cancel: CancellationToken,
-  ) -> Self {
-    Self {
+    network: &shared::NetworkConfig,
+  ) -> Result<Self, RunnerError> {
+    Ok(Self {
       events: None,
       reported: Mutex::new(HashSet::new()),
       inflight: Mutex::new(HashMap::new()),
@@ -64,7 +83,8 @@ impl ActionFetcher {
       ),
       masker: Some(masker),
       cancel: Some(cancel),
-    }
+      archive: ArchiveClient::new(network)?,
+    })
   }
 
   /// Send successful resolved-action diagnostics to the job's setup log.
@@ -120,25 +140,23 @@ impl ActionFetcher {
       RunnerError::ActionDownload("action fetcher has no cancellation token".to_owned())
     })?;
     let info = context.resolve_info(client, action, masker, cancel).await?;
-    self
-      .ensure_resolved(client, action, &info, data_dir, cancel)
-      .await
+    self.ensure_resolved(action, &info, data_dir, cancel).await
   }
 
   async fn ensure_resolved(
     &self,
-    client: &reqwest::Client,
     action: &ActionRef,
     info: &ActionDownloadInfo,
     data_dir: &Path,
     cancel: &CancellationToken,
   ) -> Result<PathBuf, RunnerError> {
     let dest = action_cache_dir(data_dir, &info.cache_key);
+    let archive = &self.archive;
     let cell = self.cell_for(&info.cache_key);
     let result = tokio::select! {
       () = cancel.cancelled() => Err(RunnerError::ActionDownload("action download cancelled".to_owned())),
       fetched = cell.get_or_try_init(|| async {
-        download_and_extract_action(client, &info.tarball_url, info.token.as_deref(), &dest)
+        download_and_extract_action(archive, &info.tarball_url, info.token.as_deref(), &dest)
           .await?;
         Ok::<PathBuf, RunnerError>(dest)
       }) => fetched,
@@ -198,16 +216,16 @@ impl ActionFetcher {
   /// fails.
   pub async fn ensure(
     &self,
-    client: &reqwest::Client,
     cache_key: &str,
     tarball_url: &str,
     cache_dir: &Path,
   ) -> Result<PathBuf, RunnerError> {
+    let archive = &self.archive;
     let cell = self.cell_for(cache_key);
     let dest = cache_dir.to_path_buf();
     let result = cell
       .get_or_try_init(move || async move {
-        download_and_extract_action(client, tarball_url, None, &dest).await?;
+        download_and_extract_action(archive, tarball_url, None, &dest).await?;
         Ok::<PathBuf, RunnerError>(dest)
       })
       .await;

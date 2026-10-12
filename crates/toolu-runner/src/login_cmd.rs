@@ -97,7 +97,8 @@ pub(crate) async fn run_device_flow(
     return Err(msg.into());
   }
 
-  let client = reqwest::Client::builder()
+  // No registration exists yet: env-mode networking (#94).
+  let client = network::client_builder(&shared::NetworkConfig::default())?
     .timeout(Duration::from_secs(30))
     .build()
     .map_err(|e| RunnerError::Network(format!("HTTP client: {e}")))?;

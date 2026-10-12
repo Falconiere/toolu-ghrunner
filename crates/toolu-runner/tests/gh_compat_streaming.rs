@@ -89,7 +89,7 @@ async fn run_steps_timed(
 
   let spec = JobSpec::default();
   let http = reqwest::Client::new();
-  let fetcher = ActionFetcher::new();
+  let fetcher = ActionFetcher::new(&shared::NetworkConfig::default())?;
   run_steps(
     &steps,
     &mut ctx,
@@ -290,7 +290,7 @@ async fn run_steps_polling_mask(
   let (tx, mut rx) = mpsc::channel::<RunnerEvent>(1024);
   let spec = JobSpec::default();
   let http = reqwest::Client::new();
-  let fetcher = ActionFetcher::new();
+  let fetcher = ActionFetcher::new(&shared::NetworkConfig::default())?;
   let job_run = JobRun {
     workspace: &workspace,
     config: &config,

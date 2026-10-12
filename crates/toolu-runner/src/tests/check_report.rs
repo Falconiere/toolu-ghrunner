@@ -51,6 +51,8 @@ fn report(endpoints: Vec<EndpointResult>) -> Report {
       no: None,
       cgi: false,
     },
+    network: None,
+    proxy_configured: false,
     trust: TrustReport {
       cert_file: None,
       cert_dir: None,
@@ -166,6 +168,26 @@ fn a_required_probe_without_an_outcome_fails_instead_of_passing() {
   let text = render(&report, &SecretMasker::new());
   assert!(
     text.contains("  FAIL  api        https://api.example.com/  error: the probe did not complete"),
+    "{text}"
+  );
+}
+
+#[test]
+fn proxy_override_note_follows_the_typed_flag_not_the_text() {
+  let mut config_mode = report(vec![endpoint("api", true, Some(reachable(200)))]);
+  config_mode.network = Some("proxy http://p:1 (env)".to_owned());
+  config_mode.proxy_configured = true;
+  let text = render(&config_mode, &SecretMasker::new());
+  assert!(
+    text.contains("[network] proxy is set: the proxy variables below are ignored"),
+    "{text}"
+  );
+  let mut env_mode = report(vec![endpoint("api", true, Some(reachable(200)))]);
+  env_mode.network = Some("proxy http://p:1 (config), no_proxy 0 entries".to_owned());
+  env_mode.proxy_configured = false;
+  let text = render(&env_mode, &SecretMasker::new());
+  assert!(
+    !text.contains("the proxy variables below are ignored"),
     "{text}"
   );
 }

@@ -13,6 +13,8 @@ pub mod config;
 pub mod labels;
 /// Single-job `fs2` advisory lockfile with stale-lock recovery.
 pub mod lockfile;
+/// `[network]` section: explicit proxy, bypass list and extra CA (#94).
+pub mod network;
 /// Per-repo runner registration registry (home layout + config resolution).
 pub mod registry;
 /// Re-mint merge that preserves user-editable config sections verbatim.

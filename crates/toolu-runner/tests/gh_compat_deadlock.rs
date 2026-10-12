@@ -75,7 +75,7 @@ async fn run_steps_bounded(
 
   let spec = JobSpec::default();
   let http = reqwest::Client::new();
-  let fetcher = ActionFetcher::new();
+  let fetcher = ActionFetcher::new(&shared::NetworkConfig::default())?;
   let job_run = JobRun {
     workspace: &workspace,
     config: &config,

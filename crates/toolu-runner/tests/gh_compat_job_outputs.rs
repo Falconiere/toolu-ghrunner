@@ -138,7 +138,7 @@ async fn run_steps_collect(
   });
 
   let http = reqwest::Client::new();
-  let fetcher = ActionFetcher::new();
+  let fetcher = ActionFetcher::new(&shared::NetworkConfig::default())?;
   run_steps(
     &steps,
     &mut ctx,

@@ -8,6 +8,7 @@
     "crates/execution",
     "crates/expressions",
     "crates/listener",
+    "crates/network",
     "crates/observability",
     "crates/protocol",
     "crates/shared",

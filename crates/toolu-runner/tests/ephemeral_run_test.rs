@@ -103,6 +103,7 @@ fn write_registration_at(home: &Path, server: &MockServer, url_path: &str) -> Te
     cache: CacheSection::default(),
     workspace: WorkspaceSection::default(),
     shadow: ShadowSection::default(),
+    network: config::network::NetworkSection::default(),
   };
   save_config(&config_path, &cfg)?;
   save_credentials(

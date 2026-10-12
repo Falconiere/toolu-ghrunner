@@ -34,6 +34,7 @@ mod config;
 mod create_app_cmd;
 mod ephemeral;
 mod login_cmd;
+mod network_setup;
 mod register_cmd;
 mod run_cmd;
 mod service_cmd;
@@ -333,7 +334,9 @@ async fn unregister_on_github(
     "unregistering runner '{}' (id {}) from {} …",
     cfg.runner_name, cfg.runner_id, cfg.runner_url
   );
-  let client = reqwest::Client::builder()
+  // The registration's `[network]` (#94): the unregister must use the same
+  // proxy / CA as `run`.
+  let client = network::client_builder(&cfg.network_config())?
     .build()
     .map_err(|e| format!("building the HTTP client for the unregister failed: {e}"))?;
   let outcome = wire::net::unregister_runner(

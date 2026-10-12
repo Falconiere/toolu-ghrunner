@@ -160,7 +160,7 @@ async fn drive(
 
   let spec = execution::execution::job_spec::JobSpec::default();
   let http = reqwest::Client::new();
-  let fetcher = ActionFetcher::new();
+  let fetcher = ActionFetcher::new(&shared::NetworkConfig::default())?;
   let conclusion = run_steps(
     steps,
     &mut ctx,

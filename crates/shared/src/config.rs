@@ -115,6 +115,41 @@ impl Default for CacheConfig {
   }
 }
 
+/// Explicit proxy and extra-CA settings (`[network]`, issue #94).
+///
+/// [`Default`] (every field empty) is *env mode*: runner HTTP clients keep
+/// reqwest's system proxy (`HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` /
+/// `NO_PROXY`). A non-empty [`proxy`](Self::proxy) is *config mode* and
+/// replaces those variables. [`ca_bundle`](Self::ca_bundle) adds trust anchors
+/// in either mode. The `network` crate turns this into HTTP clients and step
+/// env; this type is pure data so `protocol` (which depends on `shared`)
+/// stays free of `reqwest`.
+#[derive(Clone, PartialEq, Eq, Default)]
+pub struct NetworkConfig {
+  /// `http://` or `https://` proxy for http and https destinations. May carry
+  /// `user:password@` credentials — never print it; [`Debug`] shows only `<set>`.
+  pub proxy: Option<String>,
+  /// Bypass entries in `NO_PROXY` syntax, used only with [`proxy`](Self::proxy).
+  pub no_proxy: Vec<String>,
+  /// Absolute path to a PEM bundle of extra trusted CA certificates.
+  pub ca_bundle: Option<PathBuf>,
+}
+
+impl std::fmt::Debug for NetworkConfig {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    f.debug_struct("NetworkConfig")
+      .field(
+        "proxy",
+        // Never the value: it may carry credentials, and parsing proxy URLs
+        // belongs to the `network` crate (its `redact_url`).
+        &self.proxy.as_ref().map(|_| "<set>"),
+      )
+      .field("no_proxy", &self.no_proxy)
+      .field("ca_bundle", &self.ca_bundle)
+      .finish()
+  }
+}
+
 /// Runner environment configuration — no job-specific data.
 #[derive(Debug, Clone)]
 pub struct RunnerConfig {
@@ -153,6 +188,8 @@ pub struct RunnerConfig {
   /// `TOOLU_RUNNER_NODE_DIR`. When set it is authoritative: a missing
   /// runtime fails the step instead of downloading.
   pub node_dir: Option<PathBuf>,
+  /// Explicit proxy / extra-CA settings; default is env mode.
+  pub network: NetworkConfig,
 }
 
 /// Return `true` iff `TOOLU_RUNNER_ALLOW_VERBOSE` is exactly `"1"`.
@@ -202,6 +239,7 @@ impl Default for RunnerConfig {
       workspace: WorkspaceConfig::default(),
       shadow_enabled: false,
       node_dir: None,
+      network: NetworkConfig::default(),
     }
   }
 }

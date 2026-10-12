@@ -68,7 +68,8 @@ async fn l2_mirrors_on_ingest_and_restores_a_cold_l1() -> TestResult<()> {
 
   let dir = tempfile::tempdir()?;
   let root = dir.path().join("cas");
-  let l2 = L2Tier::from_config(&cfg)?;
+  let client = network::client_builder(&shared::NetworkConfig::default())?.build()?;
+  let l2 = L2Tier::from_config(&cfg, client)?;
   let store = CasStore::new(root.clone(), 16384, 1 << 30).with_l2(Some(l2.clone()));
 
   // Real payload: this crate's own Cargo.lock.

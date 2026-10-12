@@ -1,7 +1,7 @@
 //! Acquired-job action resolution and real HTTP archive download checks.
 
 use execution::execution::actions::download_info::ActionDownloadContext;
-use execution::execution::actions::downloader::download_and_extract_action;
+use execution::execution::actions::downloader::{ArchiveClient, download_and_extract_action};
 use execution::execution::actions::prefetch::ActionFetcher;
 use execution::execution::actions::resolver::parse_action_ref;
 use shared::{AgentJobRequestMessage, SecretMasker};
@@ -172,7 +172,9 @@ async fn remote_action_requires_a_valid_acquired_host_only_when_fetched() {
     &msg,
     Arc::new(Mutex::new(SecretMasker::new())),
     CancellationToken::new(),
-  );
+    &shared::NetworkConfig::default(),
+  )
+  .expect("env-mode archive client");
   let action = parse_action_ref("actions/checkout@v4").expect("remote action");
   let error = fetcher
     .ensure_action(&reqwest::Client::new(), &action, &std::env::temp_dir())
@@ -191,7 +193,13 @@ async fn cancelled_remote_action_does_not_request_download_info() {
     .expect("captured acquired job parses");
   let cancel = CancellationToken::new();
   cancel.cancel();
-  let fetcher = ActionFetcher::for_job(&msg, Arc::new(Mutex::new(SecretMasker::new())), cancel);
+  let fetcher = ActionFetcher::for_job(
+    &msg,
+    Arc::new(Mutex::new(SecretMasker::new())),
+    cancel,
+    &shared::NetworkConfig::default(),
+  )
+  .expect("env-mode archive client");
   let action = parse_action_ref("actions/checkout@v4").expect("remote action");
   let error = fetcher
     .ensure_action(&reqwest::Client::new(), &action, &std::env::temp_dir())
@@ -232,7 +240,7 @@ async fn archive_redirect_loop_and_missing_location_fail_closed() {
       uuid::Uuid::new_v4()
     ));
     let error = download_and_extract_action(
-      &reqwest::Client::new(),
+      &ArchiveClient::new(&shared::NetworkConfig::default()).expect("archive client"),
       &format!("http://{address}/{path}"),
       None,
       &destination,
@@ -405,7 +413,7 @@ async fn archive_redirect_keeps_basic_auth_on_origin_and_drops_it_cross_origin()
   let destination =
     std::env::temp_dir().join(format!("toolu-action-redirect-{}", uuid::Uuid::new_v4()));
   let result = download_and_extract_action(
-    &reqwest::Client::new(),
+    &ArchiveClient::new(&shared::NetworkConfig::default()).expect("archive client"),
     &format!("http://{source_address}/tarball"),
     Some(token),
     &destination,

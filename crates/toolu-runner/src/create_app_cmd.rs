@@ -101,7 +101,8 @@ fn prompt_browser(local_url: &str, no_browser: bool) {
 /// Build the HTTP client for the manifest conversion (30s timeout), matching
 /// the `register` / `login` client builders.
 fn build_client() -> Result<reqwest::Client, RunnerError> {
-  reqwest::Client::builder()
+  // No registration exists yet: env-mode networking (#94).
+  network::client_builder(&shared::NetworkConfig::default())?
     .timeout(Duration::from_secs(30))
     .build()
     .map_err(|e| RunnerError::Network(format!("failed to build the create-app HTTP client: {e}")))

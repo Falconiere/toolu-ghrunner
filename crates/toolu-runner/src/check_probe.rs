@@ -77,16 +77,20 @@ pub(crate) enum ProbeOutcome {
   },
 }
 
-/// The client the probes share: production's builder defaults (system
-/// proxy, native roots) plus the per-probe bound and no redirects, so a
-/// status is the target's own.
+/// The client the probes share: production's builder for the registration's
+/// `[network]` (system proxy and native roots in env mode) plus the per-probe
+/// bound and no redirects, so a status is the target's own.
 ///
 /// # Errors
 ///
 /// The builder's error (e.g. a native trust store with only invalid
 /// certificates).
-pub(crate) fn build_client(timeout: Duration) -> Result<reqwest::Client, String> {
-  reqwest::Client::builder()
+pub(crate) fn build_client(
+  timeout: Duration,
+  network: &shared::NetworkConfig,
+) -> Result<reqwest::Client, String> {
+  network::client_builder(network)
+    .map_err(|e| e.to_string())?
     // api.github.com answers 403 to a request without a User-Agent.
     .user_agent(concat!("toolu-runner/", env!("CARGO_PKG_VERSION"), " (check)"))
     .timeout(timeout)

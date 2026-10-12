@@ -95,7 +95,7 @@ async fn execute_with(
     events
   });
   let http = reqwest::Client::new();
-  let fetcher = ActionFetcher::new();
+  let fetcher = ActionFetcher::new(&shared::NetworkConfig::default())?;
   let spec = JobSpec::default();
   let conclusion = run_steps(
     &steps,

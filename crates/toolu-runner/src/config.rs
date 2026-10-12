@@ -30,41 +30,6 @@ pub(crate) fn path() -> Option<String> {
   read("PATH")
 }
 
-/// The first *set* variable of a proxy pair (a set-but-empty upper-case name
-/// still wins), mirroring hyper-util's `Matcher::from_system`, which every
-/// reqwest client in the runner uses for its system proxy.
-fn first_set(upper: &'static str, lower: &'static str) -> Option<(&'static str, String)> {
-  read(upper)
-    .map(|value| (upper, value))
-    .or_else(|| read(lower).map(|value| (lower, value)))
-}
-
-/// `HTTPS_PROXY` / `https_proxy`: the proxy for `https://` destinations.
-pub(crate) fn https_proxy() -> Option<(&'static str, String)> {
-  first_set("HTTPS_PROXY", "https_proxy")
-}
-
-/// `HTTP_PROXY` / `http_proxy`: the proxy for `http://` destinations.
-pub(crate) fn http_proxy() -> Option<(&'static str, String)> {
-  first_set("HTTP_PROXY", "http_proxy")
-}
-
-/// `ALL_PROXY` / `all_proxy`: the fallback proxy for both schemes.
-pub(crate) fn all_proxy() -> Option<(&'static str, String)> {
-  first_set("ALL_PROXY", "all_proxy")
-}
-
-/// `NO_PROXY` / `no_proxy`: the proxy bypass list.
-pub(crate) fn no_proxy() -> Option<(&'static str, String)> {
-  first_set("NO_PROXY", "no_proxy")
-}
-
-/// Whether `REQUEST_METHOD` is set: hyper-util then treats the process as a
-/// CGI script and ignores every proxy variable (the httpoxy guard).
-pub(crate) fn cgi_request() -> bool {
-  std::env::var_os("REQUEST_METHOD").is_some()
-}
-
 /// `SSL_CERT_FILE`: a PEM bundle rustls-native-certs loads instead of the
 /// platform trust store.
 pub(crate) fn ssl_cert_file() -> Option<String> {

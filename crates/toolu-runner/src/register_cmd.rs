@@ -49,12 +49,13 @@ pub(crate) async fn cmd_register(args: RegisterArgs) -> Result<(), Box<dyn std::
   .map_err(|e| format!("{e}"))?;
 
   ensure_not_registered(&config_path, args.replace)?;
+  let network = replaced_network(&config_path, args.replace);
 
   let token = resolve_register_bearer(&host, args.token.clone(), &home).await?;
   // Propagate the `RunnerError` itself rather than flattening it to a
   // `String`: the variant is what tells a caller (and the diagnostics) that
   // this was a transport failure.
-  let client = build_register_client()?;
+  let client = build_register_client(&network.resolve())?;
 
   let runner_id = register_and_persist(
     RegisterPersist {
@@ -69,6 +70,7 @@ pub(crate) async fn cmd_register(args: RegisterArgs) -> Result<(), Box<dyn std::
       creds_path: &creds_path,
       replace: args.replace,
       ephemeral: args.ephemeral,
+      network,
     },
     &client,
   )
@@ -254,6 +256,30 @@ pub(crate) struct RegisterPersist<'a> {
   pub(crate) replace: bool,
   /// `register --ephemeral`, persisted as the config's `ephemeral` key.
   pub(crate) ephemeral: bool,
+  /// `[network]` for the mint and the persisted config: the replaced
+  /// registration's, else empty (env mode).
+  pub(crate) network: config::network::NetworkSection,
+}
+
+/// The `[network]` a `register --replace` keeps: the existing registration's
+/// section, so the mint goes through its proxy / CA and the rewritten
+/// `config.toml` does not drop it. A fresh registration (or one whose config
+/// no longer parses, with a WARN) starts in env mode.
+fn replaced_network(config_path: &Path, replace: bool) -> config::network::NetworkSection {
+  if !replace || !config_path.exists() {
+    return config::network::NetworkSection::default();
+  }
+  match config::config::load_config(config_path) {
+    Ok(prior) => prior.network,
+    Err(e) => {
+      tracing::warn!(
+        path = %config_path.display(),
+        error = %e,
+        "the registration being replaced could not be read; its [network] section is not kept"
+      );
+      config::network::NetworkSection::default()
+    },
+  }
 }
 
 /// Per-request timeout for every `generate-jitconfig` HTTP call (up to three
@@ -263,15 +289,17 @@ pub(crate) struct RegisterPersist<'a> {
 /// client carries.
 const MINT_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Build a bare HTTP client for a one-shot `register` invocation (not shared
-/// across a loop — `run_cmd::RunLoop` builds and reuses its own for re-mints).
+/// Build the HTTP client for a one-shot `register` invocation (not shared
+/// across a loop — `run_cmd::RunLoop` builds and reuses its own for re-mints)
+/// from `network`: env mode for a first registration, the replaced
+/// registration's `[network]` for `--replace` (#94).
 ///
 /// # Errors
 ///
-/// Returns `RunnerError` if the TLS backend fails to initialize (the only
-/// realistic `reqwest::ClientBuilder::build` failure).
-fn build_register_client() -> Result<reqwest::Client, RunnerError> {
-  reqwest::Client::builder()
+/// `RunnerError::Config` for an unusable `[network]` (fail closed), or the
+/// TLS backend's build error.
+fn build_register_client(network: &shared::NetworkConfig) -> Result<reqwest::Client, RunnerError> {
+  network::client_builder(network)?
     .build()
     .map_err(|e| RunnerError::Network(format!("HTTP client: {e}")))
 }
@@ -381,6 +409,7 @@ pub(crate) async fn remint_and_persist(
     creds_path,
     replace: true,
     ephemeral: prior.ephemeral,
+    network: prior.network.clone(),
   };
   let registration = mint_jit(&p, client).await?;
 
@@ -477,6 +506,7 @@ fn build_registration_config(
     cache: CacheSection::default(),
     workspace: WorkspaceSection::default(),
     shadow: ShadowSection::default(),
+    network: p.network.clone(),
   }
 }
 

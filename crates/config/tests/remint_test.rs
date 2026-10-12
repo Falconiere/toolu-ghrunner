@@ -57,6 +57,11 @@ fn non_default_config() -> RunnerRegistrationConfig {
       stable_gc_after_hours: 96,
     },
     shadow: ShadowSection { enabled: true },
+    network: config::network::NetworkSection {
+      proxy: Some("http://u:pw12@proxy.corp:3128".to_owned()),
+      no_proxy: vec!["internal.corp".to_owned()],
+      ca_bundle: Some("/etc/corp/ca.pem".to_owned()),
+    },
   }
 }
 

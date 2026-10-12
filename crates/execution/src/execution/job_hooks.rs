@@ -162,7 +162,9 @@ fn job_hook_env(ctx: &ExecutionContext) -> HashMap<String, String> {
   let mut env = ctx.build_host_step_env();
   // Strip the runner's private `TOOLU_RUNNER_*` namespace (incl. the admin
   // re-mint bearer) from the inherited process env before it reaches the hook.
-  for (k, v) in super::context::safe_process_env_vars() {
+  // Hooks always run on the host, so they keep the network export (#94)
+  // even in container jobs.
+  for (k, v) in ctx.inherited_process_env() {
     env.entry(k).or_insert(v);
   }
   env

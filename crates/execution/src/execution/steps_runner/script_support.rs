@@ -85,7 +85,7 @@ pub(super) async fn build_step_env_and_file_commands(
   // private `TOOLU_RUNNER_*` namespace so the admin re-mint bearer never
   // reaches the step child.
   if ctx.job_container().is_none() {
-    for (k, v) in super::super::context::safe_process_env_vars() {
+    for (k, v) in ctx.inherited_process_env() {
       env.entry(k).or_insert(v);
     }
   }

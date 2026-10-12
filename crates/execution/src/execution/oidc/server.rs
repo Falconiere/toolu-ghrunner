@@ -21,6 +21,9 @@ struct OidcState {
   config: OidcConfig,
   bearer_token: String,
   job_context: OidcJobContext,
+  /// Upstream client from `config.network`, reused across token requests
+  /// (connection pool + TLS session reuse).
+  client: reqwest::Client,
 }
 
 /// Local OIDC token server.
@@ -38,16 +41,24 @@ impl OidcServer {
   ///
   /// # Errors
   ///
-  /// Returns `RunnerError::Io` if the TCP listener fails to bind.
+  /// Returns `RunnerError::Io` if the TCP listener fails to bind, or
+  /// `RunnerError::Config` for an unusable `config.network`.
   pub async fn start(
     config: OidcConfig,
     bearer_token: String,
     job_context: OidcJobContext,
   ) -> Result<Self, RunnerError> {
+    // A request timeout so a hung upstream can't block the OIDC handler (and
+    // the requesting action) forever.
+    let client = network::client_builder(&config.network)?
+      .timeout(std::time::Duration::from_secs(60))
+      .build()
+      .map_err(|e| RunnerError::Oidc(format!("build HTTP client: {e}")))?;
     let state = Arc::new(OidcState {
       config,
       bearer_token,
       job_context,
+      client,
     });
 
     let app = axum::Router::new()
@@ -133,7 +144,7 @@ async fn handle_oidc_request(
 
   match &state.config.mode {
     OidcMode::GitHub { upstream_url } => {
-      match proxy_to_github(upstream_url, &headers, audience).await {
+      match proxy_to_github(&state.client, upstream_url, &headers, audience).await {
         Ok(response) => response.into_response(),
         Err(e) => (
           StatusCode::BAD_GATEWAY,
@@ -236,31 +247,13 @@ fn hex_digit(byte: u8) -> char {
   }
 }
 
-/// The timeout-bounded HTTP client used to proxy OIDC requests, built once
-/// and reused (connection pool + TLS session reuse across token requests).
-///
-/// A request timeout so a hung upstream can't block the OIDC handler (and the
-/// requesting action) forever. Propagates the builder error.
-fn oidc_proxy_client() -> Result<&'static reqwest::Client, RunnerError> {
-  static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
-  if let Some(client) = CLIENT.get() {
-    return Ok(client);
-  }
-  let built = reqwest::Client::builder()
-    .timeout(std::time::Duration::from_secs(60))
-    .build()
-    .map_err(|e| RunnerError::Oidc(format!("build HTTP client: {e}")))?;
-  // A concurrent first call may have won the race; the extra client is dropped.
-  Ok(CLIENT.get_or_init(|| built))
-}
-
 /// Proxy an OIDC token request to GitHub's upstream OIDC provider.
 async fn proxy_to_github(
+  client: &reqwest::Client,
   upstream_url: &str,
   headers: &HeaderMap,
   audience: Option<&str>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), RunnerError> {
-  let client = oidc_proxy_client()?;
   let url = oidc_request_url(upstream_url, audience);
 
   let mut req = client.post(&url);

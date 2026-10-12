@@ -32,6 +32,8 @@ use crate::register_cmd;
 const BACKOFF_START: Duration = Duration::from_secs(1);
 /// Backoff ceiling: doubling never exceeds this.
 const BACKOFF_MAX: Duration = Duration::from_secs(60);
+/// Request timeout of each lifecycle's listener / re-mint client.
+const LOOP_CLIENT_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Guidance for the two fatal re-mint token paths (no stored bearer, or a
 /// bearer GitHub rejected): names every way to supply a fresh token.
@@ -65,13 +67,6 @@ pub(crate) async fn cmd_run(args: RunArgs) -> Result<(), Box<dyn std::error::Err
   // An ephemeral registration never re-mints, so it needs no login token.
   warn_if_no_login(&store, &host, args.once || cfg.ephemeral);
 
-  // One loop-scope HTTP client, reused across every re-mint iteration for
-  // both the listener and `generate-jitconfig` instead of a fresh connection
-  // (and TLS handshake) per job. 60 s: matches the listener's prior
-  // per-client timeout; `mint_jit`'s 30 s-per-request timeout is applied
-  // explicitly inside `wire::net::register_jit` and overrides this default.
-  let client = build_loop_client()?;
-
   RunLoop {
     config_path: config_path.clone(),
     creds_path: credentials_path_for(&config_path),
@@ -80,7 +75,6 @@ pub(crate) async fn cmd_run(args: RunArgs) -> Result<(), Box<dyn std::error::Err
     masker,
     store,
     host,
-    client,
     cancel,
     once: args.once,
     conflict_policy: crate::config::session_conflict_policy(),
@@ -88,20 +82,6 @@ pub(crate) async fn cmd_run(args: RunArgs) -> Result<(), Box<dyn std::error::Err
   .drive()
   .await
   // `_lock_guard` drops here, releasing the lock.
-}
-
-/// Build the one loop-scope HTTP client `RunLoop` threads to the listener and
-/// to every JIT re-mint.
-///
-/// # Errors
-///
-/// Errors if the TLS backend fails to initialize (the only realistic
-/// `reqwest::ClientBuilder::build` failure).
-fn build_loop_client() -> Result<reqwest::Client, Box<dyn std::error::Error>> {
-  reqwest::Client::builder()
-    .timeout(Duration::from_secs(60))
-    .build()
-    .map_err(|e| format!("HTTP client: {e}").into())
 }
 
 /// WARN once, before polling, when the runner will drop offline after the
@@ -135,9 +115,6 @@ struct RunLoop {
   masker: Arc<Mutex<SecretMasker>>,
   store: AuthStore,
   host: String,
-  /// The loop-scope HTTP client (60 s timeout), reused for the listener and
-  /// every JIT re-mint instead of a fresh connection pool per iteration.
-  client: reqwest::Client,
   cancel: CancellationToken,
   once: bool,
   /// Session-conflict retry schedule handed to every listener lifecycle.
@@ -151,11 +128,24 @@ impl RunLoop {
   /// or re-mint and is capped at [`BACKOFF_MAX`].
   async fn drive(self) -> Result<(), Box<dyn std::error::Error>> {
     let mut backoff = BACKOFF_START;
+    // Last network settings registered / logged: the client is rebuilt each
+    // pass (backoff retries included), the log line and secrets only on change.
+    let mut network_memo = crate::network_setup::NetworkMemo::default();
     loop {
       let cfg = load_run_config(&self.config_path)?;
+      // Rebuilt from the reloaded `[network]` every pass (edits apply next
+      // pass); an unusable value is fatal like a corrupt config. Shared by
+      // the listener, the re-mint and an ephemeral unregister. 60 s: the
+      // listener's per-client timeout; `register_jit` sets its own 30 s.
+      let client = crate::network_setup::lifecycle_client(
+        &cfg.network_config(),
+        &self.masker,
+        LOOP_CLIENT_TIMEOUT,
+        &mut network_memo,
+      )?;
       // Fatal setup errors (corrupt config, unparseable JIT) deliberately
       // exit here without backoff — only listener outcomes are retried.
-      let (raw, job_acquired) = self.run_once(&cfg).await?;
+      let (raw, job_acquired) = self.run_once(&cfg, &client).await?;
       let cancelled = self.cancel.is_cancelled();
       let pending_remove = self.pending_path.exists();
       if cfg.ephemeral {
@@ -165,7 +155,7 @@ impl RunLoop {
           pending_remove,
         };
         match next_ephemeral_action(&raw, job_acquired, signals) {
-          EphemeralAction::Unregister => return self.finish_ephemeral(&cfg, raw).await,
+          EphemeralAction::Unregister => return self.finish_ephemeral(&cfg, &client, raw).await,
           EphemeralAction::Exit(code) => return finish_ephemeral_exit(code, raw),
           EphemeralAction::BackoffRetry if self.backoff_step(&mut backoff).await => return Ok(()),
           EphemeralAction::BackoffRetry => continue,
@@ -182,7 +172,7 @@ impl RunLoop {
           if outcome.is_ok() {
             backoff = BACKOFF_START;
           }
-          match self.reregister(&cfg).await? {
+          match self.reregister(&cfg, &client).await? {
             Remint::Reset => backoff = BACKOFF_START,
             Remint::Retry if self.backoff_step(&mut backoff).await => return Ok(()),
             Remint::Retry => {},
@@ -202,17 +192,13 @@ impl RunLoop {
   async fn run_once(
     &self,
     cfg: &RunnerRegistrationConfig,
+    client: &reqwest::Client,
   ) -> Result<(Result<Option<Conclusion>, RunnerError>, bool), Box<dyn std::error::Error>> {
     let runner_cfg = build_runner_config(cfg)?;
     let jit = require_jit_config(cfg)?;
-    let listener = GitHubListener::new(
-      &jit,
-      runner_cfg,
-      Arc::clone(&self.masker),
-      self.client.clone(),
-    )
-    .map_err(|e| format!("listener init: {e}"))?
-    .with_session_conflict_policy(self.conflict_policy);
+    let listener = GitHubListener::new(&jit, runner_cfg, Arc::clone(&self.masker), client.clone())
+      .map_err(|e| format!("listener init: {e}"))?
+      .with_session_conflict_policy(self.conflict_policy);
     let outcome = listener.run(self.cancel.clone()).await;
     Ok((outcome, listener.job_acquired()))
   }
@@ -224,6 +210,7 @@ impl RunLoop {
   async fn finish_ephemeral(
     &self,
     cfg: &RunnerRegistrationConfig,
+    client: &reqwest::Client,
     outcome: Result<Option<Conclusion>, RunnerError>,
   ) -> Result<(), Box<dyn std::error::Error>> {
     let state = crate::ephemeral::LocalState {
@@ -232,7 +219,7 @@ impl RunLoop {
       pending: &self.pending_path,
       lock: &self.lock_path,
     };
-    if let Err(cleanup) = crate::ephemeral::finish_job(cfg, &state, &self.client).await {
+    if let Err(cleanup) = crate::ephemeral::finish_job(cfg, &state, client).await {
       return Err(match &outcome {
         Ok(_) => cleanup,
         Err(e) => format!("{cleanup}\n(the job itself ended with: listener: {e})").into(),
@@ -254,6 +241,7 @@ impl RunLoop {
   async fn reregister(
     &self,
     cfg: &RunnerRegistrationConfig,
+    client: &reqwest::Client,
   ) -> Result<Remint, Box<dyn std::error::Error>> {
     let Some(bearer) = auth_store::resolve_bearer(&self.store, &self.host, None)? else {
       return Err(format!("no GitHub token for {} — {REMINT_TOKEN_HELP}", self.host).into());
@@ -263,7 +251,7 @@ impl RunLoop {
       &bearer,
       &self.config_path,
       &self.creds_path,
-      &self.client,
+      client,
     )
     .await
     {
@@ -393,6 +381,7 @@ fn build_runner_config(
     workspace: cfg.workspace_config(),
     shadow_enabled: cfg.shadow_enabled(),
     node_dir: crate::config::node_dir(),
+    network: cfg.network_config(),
   })
 }
 

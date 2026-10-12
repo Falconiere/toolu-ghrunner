@@ -17,7 +17,6 @@ use tar::{Builder, Header};
 
 async fn prefetch_refs(
   fetcher: &ActionFetcher,
-  client: &reqwest::Client,
   data_dir: &Path,
   api_base: &str,
   uses_refs: &[String],
@@ -34,10 +33,7 @@ async fn prefetch_refs(
       let cache_key = action.action_ref.cache_key();
       let cache_dir = action_cache_dir(data_dir, &cache_key);
       let tarball_url = action.action_ref.tarball_url(api_base);
-      if let Err(error) = fetcher
-        .ensure(client, &cache_key, &tarball_url, &cache_dir)
-        .await
-      {
+      if let Err(error) = fetcher.ensure(&cache_key, &tarball_url, &cache_dir).await {
         tracing::warn!(action = cache_key.as_str(), error = %error, "action prefetch failed");
       }
     })
@@ -229,12 +225,13 @@ async fn ensure_dedupes_concurrent_prefetch_calls_for_the_same_ref() {
   let (release_tx, release_rx) = tokio::sync::watch::channel(false);
   let addr =
     spawn_held_counting_tarball_server(tar, Arc::clone(&count), arrival_tx, release_rx).await;
-  let client = reqwest::Client::new();
-  let fetcher = Arc::new(ActionFetcher::new());
+  let fetcher = Arc::new(
+    ActionFetcher::new(&shared::NetworkConfig::default()).expect("env-mode archive client"),
+  );
   let dest = tmp_dest("dedupe");
   let url = format!("http://{addr}/tarball.tar.gz");
 
-  let first = spawn_ensure(&fetcher, &client, &url, &dest, None);
+  let first = spawn_ensure(&fetcher, &url, &dest, None);
   // The first fetch has reached the server and is parked there: the
   // single-flight attempt is now unambiguously in flight.
   arrival_rx
@@ -243,7 +240,7 @@ async fn ensure_dedupes_concurrent_prefetch_calls_for_the_same_ref() {
     .expect("the first fetch must reach the server");
 
   let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
-  let second = spawn_ensure(&fetcher, &client, &url, &dest, Some(entered_tx));
+  let second = spawn_ensure(&fetcher, &url, &dest, Some(entered_tx));
   entered_rx
     .await
     .expect("the second caller must enter ensure");
@@ -278,20 +275,18 @@ async fn ensure_dedupes_concurrent_prefetch_calls_for_the_same_ref() {
 /// straight into `ensure`'s first await, i.e. the single-flight cell.
 fn spawn_ensure(
   fetcher: &Arc<ActionFetcher>,
-  client: &reqwest::Client,
   url: &str,
   dest: &Path,
   entered: Option<tokio::sync::oneshot::Sender<()>>,
 ) -> tokio::task::JoinHandle<Result<PathBuf, RunnerError>> {
   let fetcher = Arc::clone(fetcher);
-  let client = client.clone();
   let url = url.to_owned();
   let dest = dest.to_path_buf();
   tokio::spawn(async move {
     if let Some(entered) = entered {
       let _ = entered.send(());
     }
-    fetcher.ensure(&client, "acme/repo/v1", &url, &dest).await
+    fetcher.ensure("acme/repo/v1", &url, &dest).await
   })
 }
 
@@ -303,8 +298,8 @@ async fn ensure_prefetches_distinct_refs_concurrently() {
   let tar = build_tarball(&[("acme-repo-v1-abc/README.md", b"distinct-ref")]);
   let gate = Arc::new(tokio::sync::Barrier::new(2));
   let addr = spawn_gated_tarball_server(tar, Arc::clone(&gate)).await;
-  let client = reqwest::Client::new();
-  let fetcher = ActionFetcher::new();
+  let fetcher =
+    ActionFetcher::new(&shared::NetworkConfig::default()).expect("env-mode archive client");
   let dest_a = tmp_dest("distinct-a");
   let dest_b = tmp_dest("distinct-b");
   let url_a = format!("http://{addr}/repos/acme/repo-a/tarball/v1");
@@ -315,8 +310,8 @@ async fn ensure_prefetches_distinct_refs_concurrently() {
   // timeout instead of a bare join.
   let (a, b) = tokio::time::timeout(Duration::from_secs(5), async {
     tokio::join!(
-      fetcher.ensure(&client, "acme/repo-a/v1", &url_a, &dest_a),
-      fetcher.ensure(&client, "acme/repo-b/v1", &url_b, &dest_b),
+      fetcher.ensure("acme/repo-a/v1", &url_a, &dest_a),
+      fetcher.ensure("acme/repo-b/v1", &url_b, &dest_b),
     )
   })
   .await
@@ -332,15 +327,15 @@ async fn ensure_prefetches_distinct_refs_concurrently() {
 async fn ensure_retries_a_prefetch_after_the_first_fetch_fails() {
   let tar = build_tarball(&[("acme-repo-v1-abc/README.md", b"retry-me")]);
   let addr = spawn_failing_then_ok_server(tar).await;
-  let client = reqwest::Client::new();
-  let fetcher = ActionFetcher::new();
+  let fetcher =
+    ActionFetcher::new(&shared::NetworkConfig::default()).expect("env-mode archive client");
   let dest = tmp_dest("retry");
   let url = format!("http://{addr}/tarball.tar.gz");
 
-  let first = fetcher.ensure(&client, "acme/repo/v1", &url, &dest).await;
+  let first = fetcher.ensure("acme/repo/v1", &url, &dest).await;
   assert!(first.is_err(), "the first fetch (server 500) must fail");
 
-  let second = fetcher.ensure(&client, "acme/repo/v1", &url, &dest).await;
+  let second = fetcher.ensure("acme/repo/v1", &url, &dest).await;
   second.expect("the second ensure call must retry fresh and succeed");
   assert!(
     is_action_cached(&dest),
@@ -355,13 +350,13 @@ async fn prefetch_refs_dedupes_duplicate_uses_strings_via_resolve_action_refs() 
   let tar = build_tarball(&[("acme-repo-v1-abc/README.md", b"batch-dedupe")]);
   let count = Arc::new(AtomicUsize::new(0));
   let addr = spawn_counting_tarball_server(tar, Arc::clone(&count)).await;
-  let client = reqwest::Client::new();
-  let fetcher = ActionFetcher::new();
+  let fetcher =
+    ActionFetcher::new(&shared::NetworkConfig::default()).expect("env-mode archive client");
   let data_dir = tmp_dest("refs-dedupe-datadir");
   let api_base = format!("http://{addr}");
   let uses_refs = vec!["acme/repo@v1".to_owned(), "acme/repo@v1".to_owned()];
 
-  prefetch_refs(&fetcher, &client, &data_dir, &api_base, &uses_refs).await;
+  prefetch_refs(&fetcher, &data_dir, &api_base, &uses_refs).await;
 
   let cache_dir = action_cache_dir(&data_dir, "acme/repo/v1");
   assert!(
@@ -381,13 +376,13 @@ async fn prefetch_refs_dedupes_duplicate_uses_strings_via_resolve_action_refs() 
 #[tokio::test]
 async fn prefetch_refs_swallows_a_failed_fetch_without_failing_the_job() {
   let addr = spawn_always_failing_server().await;
-  let client = reqwest::Client::new();
-  let fetcher = ActionFetcher::new();
+  let fetcher =
+    ActionFetcher::new(&shared::NetworkConfig::default()).expect("env-mode archive client");
   let data_dir = tmp_dest("refs-fail-datadir");
   let api_base = format!("http://{addr}");
   let uses_refs = vec!["acme/broken@v1".to_owned()];
 
-  prefetch_refs(&fetcher, &client, &data_dir, &api_base, &uses_refs).await;
+  prefetch_refs(&fetcher, &data_dir, &api_base, &uses_refs).await;
 
   let cache_dir = action_cache_dir(&data_dir, "acme/broken/v1");
   assert!(
@@ -425,9 +420,11 @@ fn top_level_uses_refs_selects_action_steps_for_prefetch() {
 #[tokio::test]
 async fn spawn_prefetch_joinhandle_completes_with_no_uses_steps() {
   let steps = vec![ActionStep::script("s1", "echo hi", "")];
-  let fetcher = Arc::new(ActionFetcher::new());
-  let client = reqwest::Client::new();
+  let fetcher = Arc::new(
+    ActionFetcher::new(&shared::NetworkConfig::default()).expect("env-mode archive client"),
+  );
   let data_dir = tmp_dest("spawn-empty-datadir");
+  let client = reqwest::Client::new();
 
   let handle = spawn_prefetch(&steps, fetcher, client, data_dir);
 

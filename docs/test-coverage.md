@@ -1677,3 +1677,50 @@ The paired run recorded two differences, kept unverified in the matrix:
 forwarder-mode cache never enables cache service v2 (save silently fails,
 restore 400), and the official runner reports a `Pull <image>` setup step toolu
 does not. Details: [compatibility-evidence.md#recorded-differences](compatibility-evidence.md#recorded-differences).
+## Proxy and custom CA (#94)
+
+Optional `[network]` (`proxy`, `no_proxy`, `ca_bundle`) applied to every
+runner HTTP client through `network::client_builder`, and exported to steps.
+Spec: `docs/specs/2026-10-12-explicit-proxy-and-custom-ca-design.md`;
+upstream reference `RunnerWebProxy.cs`, `HostContext.cs`, `ContainerInfo.cs`
+(pinned `cab9d1c`).
+
+Every peer is real and generated at test time
+(`crates/network/tests/helpers/tls_fixtures.rs` and `proxy_fixtures.rs`, `#[path]`-included by
+the other crates): an rcgen CA with valid / expired / wrong-host leaves, a
+tokio-rustls HTTPS target recording request lines, and a tokio `CONNECT`
+proxy that requires Basic auth, records each request line with its
+`Proxy-Authorization`, and tunnels whatever host was asked for to
+`127.0.0.1` (portable; no `127.0.0.2`). No committed keys, no mocked
+transport: requests travel real reqwest / hyper / rustls stacks, real bash,
+real Node and real Docker.
+
+| Criterion / scenario | Real input and production path | Expected result | Runnable check |
+| --- | --- | --- | --- |
+| AC-1 config schema | `config.toml` text from the README example with and without `[network]` | trimmed `no_proxy`, `~`-expanded `ca_bundle`, redacting `Debug`; absent → env mode and no table written back | `cargo test -p config --test network_section_test`; `[network]` preserved by re-mint: `cargo test -p config --test remint_test` |
+| AC-2, 94-S2 authenticated proxy + bypass | `client_builder` → auth `CONNECT` proxy → HTTPS target (`target.test`); `no_proxy` destination pinned to loopback with `ClientBuilder::resolve` | proxy sees `CONNECT target.test:<port>` + `Basic base64(u:p@ss)` (percent-decoded); a plain `http://` destination goes in absolute form with the same header (and gets 407 without credentials); `http://:pw@` still sends Basic auth; unencoded `#` / `/` / `?` in a password is a redacted config error; bypass target reached directly, proxy log empty | `cargo test -p network --test client_proxy_test` |
+| AC-3, 94-S1 precedence | env `HTTPS_PROXY`/`NO_PROXY` naming a second recording proxy or a closed port (`temp-env`) | config proxy carries the request, env proxy and env `NO_PROXY` ignored; config `no_proxy` direct even with a dead env proxy; env mode keeps the env proxy; config mode reaches `127.0.0.1` directly | same file |
+| AC-4, 94-S3 trust | generated CA as `ca_bundle`; expired leaf; leaf for `other.test`; bundle relative / missing / directory / empty / text / key-only / valid+malformed / non-certificate DER; two-CA bundle | 200 with the bundle (one request recorded); without it `UnknownIssuer`, and with it `Expired` / `NotValidForName` for the two bad leaves, none reaching the server; `RunnerError::Config` naming the path for every bad bundle; two certificates counted | `cargo test -p network --test client_tls_test` |
+| AC-5, 94-S1/S4 host export | captured #68 acquisition replayed through `Runner::execute_job`: a bash `run:` step, an `ACTIONS_RUNNER_HOOK_JOB_STARTED` hook and a local composite action's `run:` step printing the variables; a step `env:` override; env-mode run | proxy in four variables (the composite step sees the same values as the plain step), `NO_PROXY`/`no_proxy` = list + loopback, `NODE_EXTRA_CA_CERTS` = bundle, `TOOLU_RUNNER_*` stripped, the runner's own `HTTPS_PROXY` overridden; step env wins; env mode re-exported in both casings | `cargo test -p execution --test network_step_env_test`; unit level `cargo test -p network --test step_env_test` |
+| AC-6, 94-S3/S4 Node | local `node20` action (main + post), run on Node 24 as the captured message's `requirenode24` demands (#95), with both runtime cache slots seeded from the host `node`; the same action under a workflow `env: HTTPS_PROXY`; `node -e https.get` against the generated-CA server | both stages see `HTTPS_PROXY`; the workflow value wins over the export; 200 with `ca_bundle`, a certificate error code without (and no request reaches the server) | same file (`node_action_main_and_post_see_the_export`, `node_action_sees_the_workflow_env_over_the_export`, `node_trusts_the_ca_bundle_only_when_configured`) |
+| AC-7, 94-S4 containers | real Docker: job container (its own `HTTP_PROXY` added), a `run:` step exec'd into it, an nginx service whose health check asserts its env, two alpine Docker actions running `env` (one with a step `env:` override) | proxy variables in both casings; container / service / step values kept; no `NODE_EXTRA_CA_CERTS` anywhere | `cargo test -p execution --test network_container_env_test -- --ignored --test-threads=1` (CI Docker lane); without Docker, `cargo test -p execution --lib job_http` (`container_env_keeps_explicit_values_and_never_gets_the_host_ca_path`) and `--lib action_container` (`step_env_proxy_wins_over_the_export`, `exports_proxy_vars_in_both_casings_without_the_host_ca_path`) |
+| AC-8, 94-S2/S3 live log | tokio-tungstenite `wss://` server over tokio-rustls behind the auth proxy; a plain HTTPS server answering 200 | handshake via `CONNECT`, `Authorization: Bearer …` and the log frame received; untrusted CA → `None`; non-101 answer, a wrong or a missing `Sec-WebSocket-Accept` → `None`; `live_log_client` refuses a missing bundle; `ws`/`wss` URL mapping table | `cargo test -p wire --test live_log_proxy_test`; `cargo test -p wire --lib live_log` |
+| AC-9, 94-S2 secrets | step `echo "$HTTPS_PROXY"` with `http://u:s3cr3tpw@…` through the engine; `proxy_secrets` / `describe` units | the job masker (shared with the tracing redactor and the journal writer) renders `http://***@…`; password raw + decoded, `user:password` and `base64(user:pass)` registered, the bare username not; a scheme-less env value (`alice:s3cretpw@proxy.corp:3128`) masked; a value with an unencoded `/ ? #` in the password masked whole; `Debug` shows `<set>`; redaction never echoes a mis-parsed value (`user:pa://ss@…`, `…?y=http://z`) | `an_echoed_proxy_password_is_masked`; the production journal writer fed the same job's events: `cargo test -p toolu-runner --test network_journal_mask_test` (no password, no `base64(u:s3cr3tpw)`, `***@` present); `cargo test -p network --test proxy_env_test --test secrets_test`; `cargo test -p shared --test network_config_debug_test` |
+| 94-S1 env mode = reqwest | real reqwest clients built under `HTTPS_PROXY=` + `https_proxy=<proxy>`, under `REQUEST_METHOD` + `HTTPS_PROXY`, and under an unparseable `HTTPS_PROXY` + `ALL_PROXY` | the first two go direct (recording proxy sees nothing) and `describe` / the step export agree (`proxy none`, no dead proxy exported); the third tunnels via `ALL_PROXY` and the export names it | `cargo test -p network --test proxy_env_test` |
+| `[network]` hardening | `register --replace` of a registration with a missing `ca_bundle` / with a proxy (real binary, local `generate-jitconfig`); `ca_bundel` typo; `ActionFetcher` built from an unusable `[network]` | replace fails closed (exit 2, no mint sent, config untouched) / keeps `[network]` in the rewritten config; unknown key rejected by name; both fetcher constructors fail closed (`ArchiveClient` is the only, no-redirect, archive client) | `cargo test -p toolu-runner --test register_replace_network_test`; `cargo test -p config --test network_section_test`; `cargo test -p execution --test network_job_clients_test` |
+| AC-10, 94-S1/S3 CLI | real `toolu-runner check --config` with `[network]` → auth proxy → GHES-shaped HTTPS target, env `HTTPS_PROXY` at a dead port; missing `ca_bundle` for `check` and `run --once` | `PASS api` through the proxy (`CONNECT ghes.test:<port>`), `[network]` line redacted with the certificate count, env-vars-ignored note, password absent, exit 1 only because the fixture JIT's `pipelines` / `token` hosts are unreachable; exit 2 naming the path (missing bundle) or `[network] proxy` (`ftp://x`), nothing probed | `cargo test -p toolu-runner --test network_cli_test`; repeat-pass log/secret memo: `cargo test -p toolu-runner --bin toolu-runner network_setup` |
+| AC-11 one builder | every `crates/*/src` file; a real tar.gz action archive through the auth proxy; an `L2Tier` put to `https://s3.test` | no raw `reqwest` construction outside `crates/network/src`; archive extracted via `CONNECT`, refused without the bundle (sanitized `ArchiveTransport` error, origin never reached, cause `UnknownIssuer`); the job client and the accelerated upstream client each send `CONNECT` + Basic auth and get the body; S3 `PUT` arrives via `CONNECT s3.test:<port>` | `cargo test -p toolu-runner --test network_client_inventory_test`; `cargo test -p execution --test network_job_clients_test`; `cargo test -p execution --lib job_http`; `cargo test -p cache --test l2_network_test` |
+| AC-12 docs | README "Proxy and custom CA", this section, AGENTS.md | present | review |
+| AC-13 | whole workspace; `cargo tree -p protocol` | green; no `reqwest` in `protocol` | `./tools/check.sh all`; CI "Protocol crate is sync + I/O-free" |
+
+**Applicability and unverified lanes.** Linux X64 for everything above;
+the macOS CI job runs the hermetic suites (no Docker there, so AC-7 is
+Linux-only). **Unverified:** a real corporate proxy and TLS-intercepting CA,
+live github.com and GHES through a proxy (GHES uses the same clients and no
+GHES-specific transport, but no GHES server is available), the S3 tier
+against real S3 through a proxy (the tier is not wired into production yet),
+and a side-by-side comparison with the official runner. Upstream parity
+differences, by design: config mode replaces env `NO_PROXY` instead of
+merging it; upstream reads lower-case variables first, reqwest (and so env
+mode here) upper case first; `NODE_EXTRA_CA_CERTS` is new (upstream exports
+no CA).

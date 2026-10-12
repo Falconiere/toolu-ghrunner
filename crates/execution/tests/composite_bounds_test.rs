@@ -35,7 +35,7 @@ async fn parent_deadline_kills_real_composite_child_without_late_work() -> Resul
   let drain = tokio::spawn(async move { while receiver.recv().await.is_some() {} });
   let cancel = CancellationToken::new();
   let http = reqwest::Client::new();
-  let fetcher = ActionFetcher::new();
+  let fetcher = ActionFetcher::new(&shared::NetworkConfig::default())?;
   let params = CompositeParams {
     manifest: &manifest,
     step_inputs: &inputs,
