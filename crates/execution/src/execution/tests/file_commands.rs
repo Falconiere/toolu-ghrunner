@@ -34,7 +34,8 @@ fn pairs(entries: &[(&str, &str)]) -> HashMap<String, String> {
 
 #[test]
 fn valid_plain_lines_match_upstream() -> TestResult {
-  let file = parsed("EMPTY=\\nEQ=b=c\\nMIXED=x<<y\\nU=h\\xc3\\xa9llo \\xe2\\x9c\\x93\\nDUP=1\\nDUP=2\\n")?;
+  let file =
+    parsed("EMPTY=\\nEQ=b=c\\nMIXED=x<<y\\nU=h\\xc3\\xa9llo \\xe2\\x9c\\x93\\nDUP=1\\nDUP=2\\n")?;
   assert_eq!(file.error, None);
   assert_eq!(
     file.pairs,
@@ -126,6 +127,9 @@ fn reader_strips_bom_decodes_lossily_and_treats_missing_as_empty() -> TestResult
   );
   assert_eq!(read_command_file(&dir.path().join("deleted"))?, "");
   let unreadable = read_command_file(dir.path());
-  assert!(unreadable.is_err(), "a directory is an I/O failure: {unreadable:?}");
+  assert!(
+    unreadable.is_err(),
+    "a directory is an I/O failure: {unreadable:?}"
+  );
   Ok(())
 }

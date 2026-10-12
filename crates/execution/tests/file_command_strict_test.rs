@@ -159,7 +159,12 @@ async fn replay(job: AgentJobRequestMessage, actions: &[&str]) -> TestResult<Rep
   let ids = job
     .steps
     .iter()
-    .map(|step| (step.context_name.clone().unwrap_or_default(), step.id.clone()))
+    .map(|step| {
+      (
+        step.context_name.clone().unwrap_or_default(),
+        step.id.clone(),
+      )
+    })
     .collect();
   let runner = Runner::new(config, Arc::new(Mutex::new(SecretMasker::new())));
   let mut events = runner.execute_job(job, CancellationToken::new());
@@ -288,7 +293,12 @@ async fn valid_bodies_reach_env_and_outputs_exactly() -> TestResult {
   });
   name_writer(&mut job)?;
   let run = replay(job, &[]).await?;
-  assert_eq!(run.job_conclusion(), Some(Conclusion::Success), "{:?}", run.events);
+  assert_eq!(
+    run.job_conclusion(),
+    Some(Conclusion::Success),
+    "{:?}",
+    run.events
+  );
   let expected: Vec<String> = [
     ("EMPTY", ""),
     ("EQ", "b=c"),
@@ -306,7 +316,10 @@ async fn valid_bodies_reach_env_and_outputs_exactly() -> TestResult {
   .iter()
   .map(|(name, value)| format!("FC96|{name}|{}", hex(value)))
   .collect();
-  assert_eq!(run.marked("FC96|"), [expected, vec!["FC96|cleanup".to_owned()]].concat());
+  assert_eq!(
+    run.marked("FC96|"),
+    [expected, vec!["FC96|cleanup".to_owned()]].concat()
+  );
   assert!(run.errors("writer").is_empty());
   Ok(())
 }
@@ -314,7 +327,10 @@ async fn valid_bodies_reach_env_and_outputs_exactly() -> TestResult {
 #[tokio::test]
 async fn malformed_env_fails_the_step_with_upstream_issues_and_runs_cleanup() -> TestResult {
   let cases = [
-    ("N<<EOF\\nv\\n", "Invalid value. Matching delimiter not found 'EOF'"),
+    (
+      "N<<EOF\\nv\\n",
+      "Invalid value. Matching delimiter not found 'EOF'",
+    ),
     ("N<<EOF\\nv", "Invalid value. EOF marker missing new line."),
     ("just-text\\n", "Invalid format 'just-text'"),
     ("\\r\\n", "Invalid format '\r'"),
@@ -327,7 +343,11 @@ async fn malformed_env_fails_the_step_with_upstream_issues_and_runs_cleanup() ->
   for (body, message) in cases {
     let writer = format!("printf '{body}' >> \"$GITHUB_ENV\"");
     let run = replay(scripts(&writer, "printf 'FC96|reader\\n'")?, &[]).await?;
-    assert_eq!(run.step_conclusion("__run"), Some(Conclusion::Failure), "{body}");
+    assert_eq!(
+      run.step_conclusion("__run"),
+      Some(Conclusion::Failure),
+      "{body}"
+    );
     let issues = vec![
       "Unable to process file command 'env' successfully.".to_owned(),
       message.to_owned(),
@@ -356,7 +376,11 @@ async fn malformed_output_and_state_fail_a_script_step() -> TestResult {
   ] {
     let writer = format!("printf '{body}' >> \"${file}\"");
     let run = replay(scripts(&writer, "true")?, &[]).await?;
-    assert_eq!(run.step_conclusion("__run"), Some(Conclusion::Failure), "{file}");
+    assert_eq!(
+      run.step_conclusion("__run"),
+      Some(Conclusion::Failure),
+      "{file}"
+    );
     assert_eq!(
       run.errors("__run"),
       [
@@ -419,7 +443,10 @@ async fn node_options_is_blocked_with_an_issue_but_the_step_succeeds() -> TestRe
 #[tokio::test]
 async fn a_secret_in_a_malformed_line_is_masked_everywhere() -> TestResult {
   const SECRET: &str = "fc96-s3cr3t-value";
-  let mut job = scripts(&format!("printf 'bad {SECRET}\\n' >> \"$GITHUB_ENV\""), "true")?;
+  let mut job = scripts(
+    &format!("printf 'bad {SECRET}\\n' >> \"$GITHUB_ENV\""),
+    "true",
+  )?;
   job.variables.insert(
     "FC96_SECRET".to_owned(),
     VariableValue {
@@ -478,7 +505,10 @@ async fn composite_run_step_malformed_output_fails_the_parent_step() -> TestResu
 async fn composite_run_step_node_options_is_blocked_without_failing() -> TestResult {
   let job = local_action(
     "composite-96-output",
-    &[("target", "ENV"), ("body", "NODE_OPTIONS=--require /tmp/fc96.js\\n")],
+    &[
+      ("target", "ENV"),
+      ("body", "NODE_OPTIONS=--require /tmp/fc96.js\\n"),
+    ],
   )?;
   let run = replay(job, &["composite-96-output"]).await?;
   let host = std::env::var("NODE_OPTIONS").unwrap_or_else(|_| "<unset>".to_owned());

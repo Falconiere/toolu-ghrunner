@@ -19,7 +19,10 @@ fn strip_blocked_env_drops_node_options_case_insensitively() {
   .map(|(k, v)| (k.to_owned(), v.to_owned()))
   .collect();
 
-  assert!(strip_blocked_env(&mut env), "a blocked key must be reported");
+  assert!(
+    strip_blocked_env(&mut env),
+    "a blocked key must be reported"
+  );
 
   assert!(
     !env.contains_key("NODE_OPTIONS"),

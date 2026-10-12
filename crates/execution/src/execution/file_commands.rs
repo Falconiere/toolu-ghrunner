@@ -333,7 +333,10 @@ struct Lines<'a> {
 impl<'a> Lines<'a> {
   /// The next line and whether an LF ended it; `None` at the end of the text.
   fn next_line(&mut self) -> Option<(&'a str, bool)> {
-    let rest = self.text.get(self.index..).filter(|rest| !rest.is_empty())?;
+    let rest = self
+      .text
+      .get(self.index..)
+      .filter(|rest| !rest.is_empty())?;
     if let Some(lf) = rest.find('\n') {
       self.index += lf + 1;
       Some((rest.get(..lf)?, true))
