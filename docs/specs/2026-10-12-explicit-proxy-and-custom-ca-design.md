@@ -1,6 +1,6 @@
 # Explicit proxy and custom CA configuration — Design
 
-**Date:** 2026-10-12   **Status:** Approved (rev 3)   **Author:** Claude (epic #67 worker)   **Topic:** issue #94 — an optional `[network]` config applied to every runner HTTP client and exported to steps
+**Date:** 2026-10-12   **Status:** Approved   **Author:** Claude (epic #67 worker)   **Topic:** issue #94 — an optional `[network]` config applied to every runner HTTP client and exported to steps
 
 ## Problem
 
