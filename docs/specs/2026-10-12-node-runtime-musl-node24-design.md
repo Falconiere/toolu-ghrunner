@@ -287,8 +287,8 @@ Env: `TOOLU_RUNNER_NODE_DIR` (bin `config.rs`); `FORCE_JAVASCRIPT_ACTIONS_TO_NOD
 - **AC-6:** Served over a real local HTTP server, a tarball holding the real
   host Node binary installs and validates; a tarball whose `bin/node` is a
   real non-Node system binary (`/bin/echo`), or — in the network lane — the
-  real `actions/alpine_nodejs` binary on this glibc host (cannot start), is
-  never committed to the cache dir; a corrupt/truncated body leaves no cache
+  real `actions/alpine_nodejs` binary on a glibc host without a musl loader
+  (cannot start), is never committed to the cache dir; a corrupt/truncated body leaves no cache
   dir; concurrent installs still commit exactly one tree; the musl tarball
   layout (`./bin/node`) extracts to `bin/node`.
 - **AC-7:** `using: node22` fails with upstream's message; `using: Node20`
@@ -305,7 +305,7 @@ Env: `TOOLU_RUNNER_NODE_DIR` (bin `config.rs`); `FORCE_JAVASCRIPT_ACTIONS_TO_NOD
 | AC-4 | Pinned `alpine` and `ubuntu` images, real downloads, captured flags message | action output proves runtime/libc; job Success | `cargo test -p execution --test node_container_test -- --ignored` (CI Docker step) |
 | AC-5 | Real host `node` placed in a temp preseed dir; client pointed at an unroutable base | path returned / missing-path error / validation error | `cargo test -p execution node::runtime` |
 | AC-6 | Local HTTP server serving tarballs built from the real host `node` (nodejs.org `node-v…/` layout and alpine `./` layout), from real `/bin/echo`, and a truncated real tarball body | committed + validated / no cache dir on failure; one tree under concurrency | `cargo test -p execution node::` |
-| AC-6 (real) | Real nodejs.org + alpine_nodejs downloads | glibc validates on host; alpine `bin/node` cannot start on glibc ⇒ not committed when host-targeted; committed for the container target | ignored network lane |
+| AC-6 (real) | Real nodejs.org + alpine_nodejs downloads | glibc validates on host; alpine `bin/node` host-targeted commits only if it starts (refused on a glibc host without `ld-musl`, e.g. CI ubuntu; starts on a host with Debian's `musl` package); committed for the container target | ignored network lane |
 | AC-7 | action.yml with `using: node22` / `Node20` | upstream error / node20 | `cargo test -p execution actions::manifest` |
 | AC-8 | whole workspace | exit 0 | `./tools/check.sh all` |
 
