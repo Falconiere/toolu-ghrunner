@@ -185,17 +185,20 @@ fn parse_outputs(raw_outputs: Option<HashMap<String, RawOutput>>) -> HashMap<Str
     .collect()
 }
 
+/// Upstream `ActionManifestManager`: `node12`/`node16`/`node20`/`node24`
+/// case-insensitively (12/16 run as node20); any other `node*` is rejected
+/// with upstream's message.
 fn parse_runs_using(using: &str) -> Result<RunsUsing, RunnerError> {
-  if let Some(digits) = using.strip_prefix("node") {
-    let major: u8 = digits
-      .parse()
-      .map_err(|e| RunnerError::ActionManifest(format!("invalid node version '{using}': {e}")))?;
-    // Deprecated versions (node12, node16) redirect to node20.
-    if major < 20 {
-      tracing::warn!(using, "deprecated node version, redirecting to node20");
-      return Ok(RunsUsing::Node { major: 20 });
-    }
-    return Ok(RunsUsing::Node { major });
+  match using.to_ascii_lowercase().as_str() {
+    "node12" | "node16" | "node20" => return Ok(RunsUsing::Node { major: 20 }),
+    "node24" => return Ok(RunsUsing::Node { major: 24 }),
+    lower if lower.starts_with("node") => {
+      return Err(RunnerError::ActionManifest(format!(
+        "'using: {using}' is not supported, use 'docker', 'node12', 'node16', 'node20' or \
+         'node24' instead."
+      )));
+    },
+    _ => {},
   }
   match using {
     "composite" => Ok(RunsUsing::Composite),
@@ -328,3 +331,7 @@ fn whole_expression(text: &str) -> Option<&str> {
   let (expression, rest) = (inner.get(..end)?, inner.get(end + 2..)?);
   rest.is_empty().then(|| expression.trim())
 }
+
+#[cfg(test)]
+#[path = "tests/manifest_using.rs"]
+mod tests;
