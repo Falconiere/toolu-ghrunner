@@ -16,7 +16,9 @@
 /// Secure by default: everything between the scheme and the LAST `@` of the
 /// whole remainder is userinfo, so an unencoded `/`, `?` or `#` inside a
 /// password (`http://u:a#b@proxy` → `http://u:***@proxy`) cannot leak. The
-/// cost is over-redaction when a path or query itself contains an `@`.
+/// cost is over-redaction when a path or query itself contains an `@`: the
+/// text before that `@` (host, port and path included) is hidden too, e.g.
+/// `http://u:p@ss@proxy:8080/path?q=@x` → `http://u:***@x`.
 pub fn redact_proxy_url(raw: &str) -> String {
   let (scheme, rest) = raw
     .split_once("://")
