@@ -39,7 +39,12 @@ impl NetworkMemo {
   }
 }
 
-/// The listener / re-mint client for one lifecycle, built from `network`.
+/// The client for one listener lifecycle pass, built from `network`: the
+/// listener, the JIT re-mint and an ephemeral registration's unregister all
+/// use it (`run`), as does `boot`'s single lifecycle.
+///
+/// `masker` is the process-wide masker, shared across passes; `memo` is the
+/// caller's per-loop state and is updated in place.
 ///
 /// Registers [`network::proxy_secrets`] with `masker` first (it is also the
 /// tracing redactor, so no later line carries them), then logs
