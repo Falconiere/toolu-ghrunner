@@ -255,6 +255,34 @@ fn hanging_endpoint_is_bounded_by_the_timeout() -> TestResult {
   Ok(())
 }
 
+/// A peer that accepts, lets the request arrive, then closes without reading
+/// it — the kernel answers unread data with a TCP RST.
+fn resetting_peer() -> std::io::Result<u16> {
+  let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+  let port = listener.local_addr()?.port();
+  std::thread::spawn(move || {
+    for stream in listener.incoming().flatten() {
+      std::thread::sleep(Duration::from_millis(300));
+      drop(stream);
+    }
+  });
+  Ok(port)
+}
+
+#[test]
+fn a_connection_reset_is_classified_as_connect_not_tls() -> TestResult {
+  let home = tempfile::tempdir()?;
+  let base = format!("http://127.0.0.1:{}", resetting_peer()?);
+  let (code, stdout, _, _) = run(check_cmd(home.path())?.args(["--url", &base, "--timeout", "5"]))?;
+  assert_eq!(code, Some(1), "{stdout}");
+  assert!(
+    stdout.contains(&format!("  FAIL  api        {base}/api/v3  connect:")),
+    "{stdout}"
+  );
+  assert!(!stdout.contains("tls:"), "{stdout}");
+  Ok(())
+}
+
 #[test]
 fn dns_refused_and_tls_failures_are_classified() -> TestResult {
   let home = tempfile::tempdir()?;

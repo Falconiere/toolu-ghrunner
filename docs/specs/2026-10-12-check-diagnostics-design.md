@@ -121,8 +121,8 @@ folders besides `tests/`):
 
 | File | Role |
 | --- | --- |
-| `check_cmd.rs` | `cmd_check(CheckArgs) -> i32`: target resolution, concurrent run, exit code |
-| `check_endpoints.rs` | pure `Target`, `Endpoint { name, url: Option<String>, required, skip_reason }`, `endpoints_for(target)` |
+| `check_cmd.rs` | `CheckArgs`, `Target` resolution, `cmd_check(CheckArgs) -> i32`: concurrent run, exit code |
+| `check_endpoints.rs` | pure `Endpoint { name, required, probe: Probe::{Get(url), Skip(reason)} }`, `JitEndpoints`, `endpoints_for(base, jit)` |
 | `check_probe.rs` | `probe_http(client, &Endpoint) -> ProbeOutcome`, `classify(&reqwest::Error) -> FailureKind` |
 | `check_tools.rs` | `probe_git/probe_docker/probe_node(timeout) -> ToolReport` |
 | `check_env.rs` | pure `redact_proxy(&str) -> String`, `ProxyReport`, `TrustReport` |
@@ -240,12 +240,13 @@ before probing (bad `--url`, explicit `--config` that cannot load, invalid
 - **AC-13:** Given an empty `TOOLU_RUNNER_HOME`, a cwd outside any git repo
   and no flags, the header reads `defaults:` with the reason and the probes
   target the github.com hosts: with `HTTPS_PROXY` pointing at a local
-  recording proxy that closes every connection, the proxy records `CONNECT`
+  recording proxy that refuses every tunnel (`502`), the proxy records `CONNECT`
   for `api.github.com:443`, `codeload.github.com:443`,
   `pipelines.actions.githubusercontent.com:443`,
   `broker.actions.githubusercontent.com:443`,
   `vstoken.actions.githubusercontent.com:443` and
-  `results-receiver.actions.githubusercontent.com:443`, the required probes
+  `results-receiver.actions.githubusercontent.com:443` (plus the optional
+  `nodejs.org:443`), the required probes
   FAIL (proxy refused the tunnel), and `check` exits 1 — hermetic, no traffic
   leaves the host.
 - **AC-12:** Given a local target whose token path answers `401`, the `token`
@@ -262,17 +263,17 @@ before probing (bad `--url`, explicit `--config` that cannot load, invalid
 
 | AC | Real input | Expected observable | Check |
 | --- | --- | --- | --- |
-| AC-1 | axum server on 127.0.0.1 recording method+path | lines + exit 0 + recorded paths | `cargo test -p toolu-runner --test check_cmd_test healthy_ghes_target` |
+| AC-1 | raw-TCP recording peer on 127.0.0.1 (`tests/helpers/check_servers.rs`) | lines + exit 0 + recorded paths | `cargo test -p toolu-runner --test check_cmd_test healthy_ghes_target` |
 | AC-2 | JIT envelope built from `tests/fixtures/jit_config_ghes.json` shape with URLs rewritten to the local server, written to a temp registration | recorded paths == configured paths | `… check_cmd_test configured_registration_endpoints` |
 | AC-3 | raw `TcpListener` that accepts and holds sockets | `timeout`, elapsed < 10 s, exit 1 | `… check_cmd_test hanging_endpoint_is_bounded` |
-| AC-4 | `.invalid` TLD (RFC 6761), bound-then-dropped port, `https://` to the plaintext axum server | `dns` / `connect` / `tls`, exit 1 | `… check_cmd_test dns_refused_and_tls_fail` |
+| AC-4 | `.invalid` TLD (RFC 6761), bound-then-dropped port, `https://` to the plaintext peer, a peer that resets | `dns` / `connect` / `tls`; reset → `connect`, exit 1 | `… check_cmd_test dns_refused_and_tls_failures_are_classified`, `… a_connection_reset_is_classified_as_connect_not_tls` |
 | AC-5 | recording proxy server (absolute-form + header capture); a 407-answering proxy | proxy hits / direct hits, redaction, no secret in output; `proxy` FAIL exit 1 | `… check_cmd_test authenticated_proxy_redacted`, `… no_proxy_bypasses`, `… proxy_407_fails` |
 | AC-6 | `tests/fixtures/check/isrg-root-x1.pem` (public Let's Encrypt root) | path + `1 loaded`; missing → `0 loaded` + error | `… check_cmd_test ssl_cert_file_reported` |
 | AC-7 | the host's real git/docker/node; empty-dir PATH; a `git` script that sleeps | exact versions from running the same binaries in the test; `not found on PATH`, exit 0; `timed out`, bounded | `… check_cmd_test tool_versions_match_real_binaries`, `… missing_tools_are_optional`, `… hung_tool_is_bounded` |
 | AC-7b | `DOCKER_HOST` with userinfo, closed port | redacted endpoint; secret absent | `… check_cmd_test docker_host_credentials_redacted` |
 | AC-13 | empty home + non-repo cwd + recording CONNECT proxy | `defaults:` header; recorded CONNECT authorities == the six github.com hosts; exit 1 | `… check_cmd_test defaults_target_github_com_hosts` |
 | AC-8 | empty temp home; temp registration dir | dir listing unchanged; only GET recorded | asserted in `healthy_ghes_target` / `configured_registration_endpoints` |
-| AC-9 | bad args; registration with a garbage `jit_config` | exit 2 / clap usage; garbage value absent from output | `… check_cmd_test usage_errors_exit_2` |
+| AC-9 | bad args; registration with a garbage `jit_config` | exit 2 / clap usage; garbage value absent from output | `… check_cmd_test usage_and_config_errors_exit_2` |
 | AC-12 | axum route answering 401 on the token path | `PASS … HTTP 401`, exit 0 | `… check_cmd_test unauthenticated_401_is_reachable` |
 | AC-10 | real github.com; ISRG-only `SSL_CERT_FILE` | PASS lines with statuses; narrowed bundle still PASSes and the report names the bundled roots | `cargo test -p toolu-runner --features live --test check_cmd_test -- --ignored live_github_com` (run manually, output recorded in the PR; network-dependent so outside the hermetic gate) |
 | AC-11 | repo | green | `./tools/check.sh all` |

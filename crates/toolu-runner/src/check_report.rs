@@ -40,14 +40,13 @@ pub(crate) struct Report {
 }
 
 impl Report {
-  /// How many required endpoints failed.
+  /// How many required endpoints failed. A probe that should have run but
+  /// produced no outcome (its task died) counts as failed, never as passed.
   pub(crate) fn required_failures(&self) -> usize {
     self
       .endpoints
       .iter()
-      .filter(|result| {
-        result.endpoint.required && matches!(result.outcome, Some(ProbeOutcome::Failed { .. }))
-      })
+      .filter(|result| result.endpoint.required && failed(result))
       .count()
   }
 
@@ -58,6 +57,14 @@ impl Report {
     } else {
       EXIT_REQUIRED_FAILED
     }
+  }
+}
+
+/// A `Get` probe that failed or never completed.
+fn failed(result: &EndpointResult) -> bool {
+  match (&result.endpoint.probe, &result.outcome) {
+    (Probe::Get(_), Some(ProbeOutcome::Failed { .. }) | None) => true,
+    (Probe::Get(_), Some(ProbeOutcome::Reachable { .. })) | (Probe::Skip(_), _) => false,
   }
 }
 
@@ -80,7 +87,14 @@ fn endpoint_line(result: &EndpointResult) -> String {
         kind.hint()
       )
     },
-    (Probe::Get(url), None) => format!("  WARN  {name:<10} {url}  not probed"),
+    (Probe::Get(url), None) => {
+      let tag = if result.endpoint.required {
+        "FAIL"
+      } else {
+        "WARN"
+      };
+      format!("  {tag}  {name:<10} {url}  error: the probe did not complete (see stderr)")
+    },
   }
 }
 

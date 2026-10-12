@@ -147,7 +147,25 @@ fn every_line_passes_through_the_masker() {
   let text = render(&report, &masker);
   assert!(!text.contains("s3cr3t-pw"), "{text}");
   assert!(
+    text.contains("proxy: tunnel to proxy alice:*** failed"),
+    "{text}"
+  );
+  assert!(
     text.contains("result: 1 required check failed (exit 1)"),
+    "{text}"
+  );
+}
+
+#[test]
+fn a_required_probe_without_an_outcome_fails_instead_of_passing() {
+  let mut never_ran = endpoint("api", true, Some(reachable(200)));
+  never_ran.outcome = None;
+  let report = report(vec![never_ran]);
+  assert_eq!(report.required_failures(), 1);
+  assert_eq!(report.exit_code(), 1);
+  let text = render(&report, &SecretMasker::new());
+  assert!(
+    text.contains("  FAIL  api        https://api.example.com/  error: the probe did not complete"),
     "{text}"
   );
 }

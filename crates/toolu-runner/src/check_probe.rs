@@ -19,7 +19,8 @@ pub(crate) enum FailureKind {
   Dns,
   /// The TLS handshake or certificate verification failed.
   Tls,
-  /// TCP connect refused / reset / unreachable.
+  /// TCP connect refused / unreachable, or the connection reset or closed
+  /// before a response.
   Connect,
   /// Anything else reqwest reported.
   Other,
@@ -142,9 +143,16 @@ pub(crate) fn classify(error: &reqwest::Error) -> FailureKind {
     "name or service not known",
   ]) {
     FailureKind::Dns
-  } else if has(&["certificate", "tls", "handshake", "corrupt message", "peer"]) {
+  } else if has(&["certificate", "tls", "handshake", "corrupt message"]) {
     FailureKind::Tls
-  } else if error.is_connect() {
+  } else if error.is_connect()
+    || has(&[
+      "connection reset",
+      "connection refused",
+      "connection closed",
+      "broken pipe",
+    ])
+  {
     FailureKind::Connect
   } else {
     FailureKind::Other
