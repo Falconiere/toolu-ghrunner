@@ -48,6 +48,9 @@ pub(super) async fn poll_and_execute(
   };
   let acquired = acquire_job(&ctx.client, &body.run_service_url, &ctx.token, &acquire_req).await?;
   ctx.job_acquired = true;
+  // Evidence-lane capture (#103): compiled only with `--features capture`.
+  #[cfg(feature = "capture")]
+  crate::capture::write_acquired(&ctx.config.data_dir, &acquired.plan_id, &acquired.body);
   let rs_token = acquired
     .run_service_token
     .clone()

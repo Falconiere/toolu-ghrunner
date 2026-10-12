@@ -1,0 +1,54 @@
+name: compat-reference-103
+
+# Issue #103 reference lane: the SAME reusable probe (compat-reference-103-probe.yml)
+# runs on a toolu runner and on an unmodified official actions/runner v2.337.0,
+# both self-hosted on one Linux host and one Docker daemon, selected by the
+# dedicated labels toolu-103-toolu / toolu-103-official. `probe` must succeed;
+# `negative` passes an empty `who` and must fail at the same steps on both
+# lanes. scripts/test/reference_compare.py <run_id> compares the lanes; see
+# docs/compatibility-evidence.md. Dispatch-only; the recorded run came from a
+# since-removed branch push trigger (workflow_dispatch needs the file on main).
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: probe-${{ matrix.lane }}
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [toolu, official]
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/compat-reference-103-probe.yml
+    with:
+      runner_label: toolu-103-${{ matrix.lane }}
+      lane: ${{ matrix.lane }}
+      variant: probe
+      who: world
+      count: 3
+      enabled: false
+      expect_oidc: true
+
+  negative:
+    name: negative-${{ matrix.lane }}
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [toolu, official]
+    permissions:
+      contents: read
+    uses: ./.github/workflows/compat-reference-103-probe.yml
+    with:
+      runner_label: toolu-103-${{ matrix.lane }}
+      lane: ${{ matrix.lane }}
+      variant: negative
+      who: ''
+      count: 3
+      enabled: false
+      expect_oidc: false

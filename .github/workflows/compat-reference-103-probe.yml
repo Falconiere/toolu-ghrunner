@@ -1,0 +1,190 @@
+name: compat-reference-103-probe
+
+# Reusable probe for the #103 reference lane (called by compat-reference-103.yml).
+# Every job runs on the caller-selected self-hosted label. Job `contexts` is
+# shell-only on purpose: its acquired message (captured on the toolu lane) is
+# the committed replay fixture for typed inputs, matrix, workflow/job/step env,
+# defaults.run and job outputs. `docker` executes a real container action whose
+# outputs only exist inside Alpine. `services` exercises the real cache,
+# artifact and OIDC backends; `consumer` checks job outputs, cache restore and
+# artifact bytes across jobs, then uploads toJSON(needs) for lane comparison.
+
+on:
+  workflow_call:
+    inputs:
+      runner_label:
+        type: string
+        required: true
+      lane:
+        type: string
+        required: true
+      variant:
+        type: string
+        required: true
+      who:
+        type: string
+        required: true
+      count:
+        type: number
+        required: true
+      enabled:
+        type: boolean
+        required: true
+      expect_oidc:
+        type: boolean
+        required: true
+
+env:
+  WORKFLOW_LEVEL: workflow-103
+  SHARED: from-workflow
+
+jobs:
+  contexts:
+    runs-on: [self-hosted, "${{ inputs.runner_label }}"]
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        include:
+          - tag: alpha
+            number: 7
+            flag: true
+    env:
+      JOB_LEVEL: job-103
+      SHARED: from-job
+    defaults:
+      run:
+        shell: bash
+        working-directory: probe-dir
+    outputs:
+      marker: ${{ steps.emit.outputs.marker }}
+      who: ${{ steps.emit.outputs.who }}
+    steps:
+      - name: Prepare working directory
+        working-directory: .
+        run: mkdir -p probe-dir
+      - name: Assert typed inputs
+        env:
+          INPUTS: ${{ toJSON(inputs) }}
+        run: |
+          test '${{ inputs.who }}' = world
+          test '${{ inputs.count == 3 && !inputs.enabled }}' = true
+          printf '%s' "$INPUTS" | jq -e '.who == "world" and .count == 3 and .enabled == false'
+      - name: Assert matrix, env and defaults
+        env:
+          STEP_LEVEL: step-103
+        run: |
+          test "$(basename "$PWD")" = probe-dir
+          test "$WORKFLOW_LEVEL" = workflow-103
+          test "$JOB_LEVEL" = job-103
+          test "$SHARED" = from-job
+          test "$STEP_LEVEL" = step-103
+          test '${{ matrix.tag }}' = alpha
+          test '${{ matrix.number }}' = 7
+          test '${{ matrix.flag }}' = true
+      - name: Emit outputs
+        id: emit
+        run: |
+          printf 'marker=contexts-103\n' >> "$GITHUB_OUTPUT"
+          printf 'who=%s\n' '${{ inputs.who }}' >> "$GITHUB_OUTPUT"
+
+  docker:
+    runs-on: [self-hosted, "${{ inputs.runner_label }}"]
+    timeout-minutes: 10
+    outputs:
+      release: ${{ steps.container.outputs.release }}
+    steps:
+      - name: Write container probe
+        run: |
+          cat > docker-probe.sh <<'PROBE'
+          set -eu
+          release=$(cat /etc/alpine-release)
+          printf '%s\n' "$release" > docker-103.txt
+          printf 'release=%s\n' "$release" >> "$GITHUB_OUTPUT"
+          printf 'who=%s\n' "$WHO" >> "$GITHUB_OUTPUT"
+          PROBE
+      - name: Container action
+        id: container
+        uses: docker://alpine@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
+        env:
+          WHO: ${{ inputs.who }}
+        with:
+          entrypoint: /bin/sh
+          args: docker-probe.sh
+      - name: Verify container effects
+        run: |
+          test '${{ steps.container.outputs.release }}' = 3.20.10
+          test '${{ steps.container.outputs.who }}' = world
+          test "$(cat docker-103.txt)" = 3.20.10
+
+  services:
+    runs-on: [self-hosted, "${{ inputs.runner_label }}"]
+    timeout-minutes: 10
+    outputs:
+      claims: ${{ steps.oidc.outputs.claims }}
+    steps:
+      - name: Write payloads
+        run: |
+          printf 'cache-103-%s\n' '${{ github.run_id }}' > cache-103.txt
+          printf 'artifact-103-%s\n' '${{ github.run_id }}' > artifact-103.txt
+      - name: Save cache
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: cache-103.txt
+          key: compat-103-${{ inputs.lane }}-${{ inputs.variant }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Upload artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: compat-103-${{ inputs.lane }}-${{ inputs.variant }}-payload
+          path: artifact-103.txt
+          if-no-files-found: error
+      - name: OIDC allowed
+        id: oidc
+        if: inputs.expect_oidc
+        run: |
+          test -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
+          response=$(curl -fsS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=compat-103")
+          payload=$(printf '%s' "$response" | jq -r .value | cut -d. -f2 | tr '_-' '/+')
+          while [ $(( ${#payload} % 4 )) -ne 0 ]; do payload="$payload="; done
+          claims=$(printf '%s' "$payload" | base64 -d)
+          printf '%s' "$claims" | jq -e '.aud == "compat-103" and .repository == "Falconiere/toolu-ghrunner" and (.job_workflow_ref | contains("compat-reference-103-probe.yml"))'
+          printf 'claims=%s\n' "$(printf '%s' "$claims" | jq -c 'keys')" >> "$GITHUB_OUTPUT"
+      - name: OIDC denied without id-token permission
+        if: ${{ !inputs.expect_oidc }}
+        run: test -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
+
+  consumer:
+    needs: [contexts, docker, services]
+    if: always()
+    runs-on: [self-hosted, "${{ inputs.runner_label }}"]
+    timeout-minutes: 10
+    steps:
+      - name: Restore cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: cache-103.txt
+          key: compat-103-${{ inputs.lane }}-${{ inputs.variant }}-${{ github.run_id }}-${{ github.run_attempt }}
+          fail-on-cache-miss: true
+      - name: Download artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: compat-103-${{ inputs.lane }}-${{ inputs.variant }}-payload
+      - name: Verify cross-job values
+        run: |
+          test "$(cat cache-103.txt)" = 'cache-103-${{ github.run_id }}'
+          test "$(cat artifact-103.txt)" = 'artifact-103-${{ github.run_id }}'
+          test '${{ needs.contexts.outputs.marker }}' = contexts-103
+          test '${{ needs.contexts.outputs.who }}' = world
+          test '${{ needs.docker.outputs.release }}' = 3.20.10
+      - name: Record observations
+        if: always()
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: printf '%s\n' "$NEEDS" > results-103.json
+      - name: Upload observations
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: compat-103-${{ inputs.lane }}-${{ inputs.variant }}-results
+          path: results-103.json
+          if-no-files-found: error

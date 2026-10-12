@@ -6,6 +6,7 @@
 
 | File | Purpose |
 | --- | --- |
+| `capture.rs` | Real acquire body through `capture::write_acquired`: exact JSON, 0600/0700 modes, contained file name, unwritable data dir. |
 | `completejob.rs` | Captured issue-88 jobs through `run_acquired_job` → `report_completion`: environment URL, secret suppression, billing owner, upstream `StepResult` keys and identity, infrastructure category latch, retry and cancellation. |
 | `annotation_reporting.rs` | Captured-job shell/composite annotations through a recorded Run Service POST. |
 | `early_ack.rs` | Broker acknowledgment ordering. |

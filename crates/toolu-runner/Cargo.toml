@@ -111,6 +111,9 @@ e2e-live-ghes = ["e2e"]
 # to actually execute the live tests.
 live = []
 live-ghes = ["live"]
+# Forwards `listener/capture` (acquired-body capture for the #103 evidence
+# lane). Off by default and never part of a release build.
+capture = ["listener/capture"]
 
 [lints]
 workspace = true
