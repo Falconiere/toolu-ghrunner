@@ -152,7 +152,7 @@ CLI.
 
 | Flag | Command | What it does |
 |---|---|---|
-| `--labels <LABELS>` | `register` | Comma-separated custom labels, **added** to the defaults `self-hosted`, `Linux`/`macOS`, `X64`/`ARM64` (GitHub's `RUNNER_OS`/`RUNNER_ARCH` spelling, as the official runner). Empty entries are ignored, case-duplicates kept once, 256 characters max. |
+| `--labels <LABELS>` | `register` | Comma-separated custom labels, **added** to the defaults `self-hosted`, `Linux`/`macOS`, `X64`/`ARM64` (GitHub's `RUNNER_OS`/`RUNNER_ARCH` spelling, as the official runner). Empty entries are ignored, case-duplicates kept once, at most 256 characters (UTF-16 units, as upstream counts them). |
 | `--no-default-labels` | `register` | Register only the `--labels` values (which are then required). |
 | `--ephemeral` | `register` | One-job registration: `run` takes one job, then unregisters and deletes it (see above). |
 | `--work <DIR>` | `register` | Job workspace directory (default `~/.toolu-runner/_work`). |

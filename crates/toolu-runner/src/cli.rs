@@ -237,7 +237,8 @@ pub(crate) struct RegisterArgs {
   /// The defaults are `self-hosted`, the OS (`Linux` / `macOS`) and the
   /// architecture (`X64` / `ARM64`) — GitHub's `RUNNER_OS` / `RUNNER_ARCH`
   /// spelling. Empty entries are ignored, labels differing only in case are
-  /// kept once, and a label may be at most 256 characters. Required with
+  /// kept once, and a label may be at most 256 characters (UTF-16 units, as
+  /// upstream counts them). Required with
   /// --no-default-labels.
   #[arg(long, value_name = "LABELS", value_delimiter = ',')]
   pub(crate) labels: Vec<String>,

@@ -218,6 +218,15 @@ fn ephemeral_job_cases() -> Vec<EphemeralRow> {
       Unregister,
     ),
     (
+      "acquired, no conclusion",
+      Ok(None),
+      true,
+      false,
+      false,
+      false,
+      Unregister,
+    ),
+    (
       "acquired, completion failed",
       Err(net("503")),
       true,

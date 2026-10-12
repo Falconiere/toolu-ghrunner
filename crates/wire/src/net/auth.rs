@@ -54,7 +54,7 @@ pub async fn exchange_token(
     // body only loses that refinement; the status still classifies below.
     let body = if status.is_client_error() {
       response.text().await.unwrap_or_else(|e| {
-        tracing::debug!(error = %e, "token exchange error body unreadable");
+        tracing::warn!(error = %e, "token exchange error body unreadable");
         String::new()
       })
     } else {

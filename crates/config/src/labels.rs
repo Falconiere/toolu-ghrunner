@@ -10,7 +10,9 @@
 
 use shared::RunnerError;
 
-/// Longest label upstream accepts (`Validators.LabelsValidator`).
+/// Longest label upstream accepts (`Validators.LabelsValidator`), in .NET
+/// `string.Length` units — UTF-16 code units, so an astral-plane character
+/// (e.g. an emoji) counts twice.
 pub const MAX_LABEL_LEN: usize = 256;
 
 /// Upstream's error for `--no-default-labels` without any label.
@@ -41,7 +43,10 @@ pub fn resolve_labels(
   defaults: &[String],
 ) -> Result<Vec<String>, RunnerError> {
   let user: Vec<&String> = user.iter().filter(|l| !l.is_empty()).collect();
-  if let Some(long) = user.iter().find(|l| l.chars().count() > MAX_LABEL_LEN) {
+  if let Some(long) = user
+    .iter()
+    .find(|l| l.encode_utf16().count() > MAX_LABEL_LEN)
+  {
     let head: String = long.chars().take(32).collect();
     return Err(RunnerError::Config(format!(
       "label '{head}…' is longer than {MAX_LABEL_LEN} characters"

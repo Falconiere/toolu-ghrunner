@@ -143,8 +143,9 @@ fn defaults_use_runner_os_and_arch_and_labels_are_additive() {
   );
 }
 
-/// A label longer than 256 characters is rejected (upstream
-/// `Validators.LabelsValidator`); exactly 256 is accepted.
+/// A label longer than 256 UTF-16 code units is rejected (upstream
+/// `Validators.LabelsValidator`, .NET `string.Length`); exactly 256 is
+/// accepted.
 #[test]
 fn label_length_limit_is_256() {
   let ok = "a".repeat(MAX_LABEL_LEN);
@@ -152,6 +153,15 @@ fn label_length_limit_is_256() {
     resolve_labels(std::slice::from_ref(&ok), true, &default_labels()).expect("256 accepted"),
     vec![ok]
   );
+  // Upstream counts .NET `string.Length` (UTF-16 code units): 128 emoji are
+  // 256 units (accepted) although they are 512 UTF-8 bytes; 129 are 258.
+  let emoji = "\u{1F680}".repeat(MAX_LABEL_LEN / 2);
+  assert_eq!(
+    resolve_labels(std::slice::from_ref(&emoji), true, &default_labels()).expect("128 emoji"),
+    vec![emoji.clone()]
+  );
+  let emoji_long = format!("{emoji}\u{1F680}");
+  assert!(resolve_labels(&[emoji_long], true, &default_labels()).is_err());
   let long = "b".repeat(MAX_LABEL_LEN + 1);
   let result = resolve_labels(&[long], false, &default_labels());
   assert!(
