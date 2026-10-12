@@ -18,7 +18,7 @@ Every matrix row records all seven lanes:
 | --- | --- | --- |
 | `hermetic` | `cargo test --workspace` on the ubuntu CI leg, plus the Python evidence-tool tests in the "Compatibility evidence (#103)" CI step | `gate`: at least one mapped, non-`#[ignore]` test |
 | `macos` | The same Rust suite on the `ci-macos` job | `gate`: at least one mapped, non-ignored Rust test whose file is not `#![cfg(target_os = "linux")]` |
-| `docker` | A real Linux Docker daemon | `ci-docker` (a mapped test run by `ci.yml`'s Docker step), a recorded explicit run (`doc:`), or a live run (`run:`) |
+| `docker` | A real Linux Docker daemon | `ci-docker` (a mapped test run by `ci.yml`'s Docker step), a recorded explicit run (`doc:` or a `pr:` whose body records it), or a live run (`run:`) |
 | `github-com` | A real job acquired from GitHub.com and executed by toolu | `run:<actions run URL>` or `pr:<PR URL>` whose body records the observation |
 | `reference` | The same workflow/action revisions compared against the official runner | `run:` (paired run) or `report:docs/compat-reference-103.json` |
 | `ghes` | GitHub Enterprise Server | none recorded; no GHES instance has been available |
@@ -146,7 +146,7 @@ job names. It compares:
 
 - job conclusions and the ordered step (name, conclusion) list;
 - each lane's uploaded `toJSON(needs)` observations;
-- exact payload artifact bytes;
+- exact payload artifact bytes, read back through the GitHub API (this checks the upload; the in-job `download-artifact` step is compared only through the step lists);
 - each variant's expected outcome;
 - leftover probe containers on the daemon.
 
@@ -197,6 +197,10 @@ fails `--verify`, so a fix forces the record to be updated.
      `Failed to save: … Our services aren't available right now` yet succeeds,
      so no cache entry exists. The dependent `Restore cache` fails with
      `Cache service responded with 400`.
+   - **Knock-on effect.** On toolu, the consumer job's `Download artifact`
+     step was skipped after the restore failed, so `download-artifact` v8 is
+     observed only on the official lane (row `103/R-artifacts` stays
+     unverified).
    - **Test gap.** `gh_compat_forwarder.rs::forward_env_cache_v2_only_when_true`
      pins the wrong variable name.
 2. **`docker-pull-step-reporting`** (rows `103/S3`, `75/75-S1`). For a

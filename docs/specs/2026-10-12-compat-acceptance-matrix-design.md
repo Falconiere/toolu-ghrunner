@@ -312,3 +312,25 @@ semantics, exclusions), `docs/compat-reference-103.json`, and `AGENTS.md`
 - Jev requirement coverage (#103 ACs r1–r7): 0.95 / 0.96 / 0.95 / 0.88 / 0.82 / 0.83 / 0.67 → r7 fixed by AC-9.
 
 **Status:** Approved
+
+## Implementation deviations (recorded at execution)
+
+- **Two capture fixtures.** The live run produced two captures, committed as
+  `compat_103_contexts_message.json` (S1: shell-only typed inputs, matrix,
+  env, defaults, outputs) and `compat_103_docker_message.json` (S2). This
+  replaces the single `compat_103_probe_message.json`. No earlier capture
+  carried workflow/job `env`, so the S1 mutations use the new contexts
+  capture, plus the #70 capture as a second outputs witness.
+- **Sanitizer.** It follows the #70/#99 convention: location-derived UUIDv5
+  placeholders for every secret. Service URLs are kept, because they are not
+  credentials and the replays read them.
+- **Recorded differences.** The paired run found two differences, recorded
+  per Non-Goal 4 (Jev record_only 0.8 / 1.0). They are listed under
+  `acknowledged` in `docs/compat-reference-103.json` and keep their rows
+  unverified:
+  - forwarder-mode cache never enables cache service v2;
+  - the official runner reports a `Pull <image>` setup step that toolu does
+    not.
+- **Python tests as gate evidence.** The matrix may map unittest methods
+  that CI's "Compatibility evidence (#103)" step runs. They count as `gate`
+  evidence on the hermetic lane only.
