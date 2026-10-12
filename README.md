@@ -813,7 +813,7 @@ ca_bundle = "~/certs/corp-root.pem"               # extra trusted CA(s), PEM
 
 | Setting | Effect |
 |---|---|
-| `proxy` set | Replaces the proxy variables **and** env `NO_PROXY` for the runner's clients. `localhost`, `127.0.0.1` and `::1` are always bypassed (as the official runner does), on top of `no_proxy`. Credentials are sent as Basic auth; percent-encode `@ : / ? #` in the user name or password (an unencoded one is rejected). |
+| `proxy` set | Replaces the proxy variables **and** env `NO_PROXY` for the runner's clients. `localhost`, `127.0.0.1` and `::1` are always bypassed (as the official runner does), on top of `no_proxy`. Credentials are sent as Basic auth. Percent-encode reserved characters in the user name and password: an unencoded `/`, `?` or `#` (anything that leaves an `@` outside the parsed credentials) is rejected; an unencoded `@` or `:` in the password is tolerated. |
 | `no_proxy` | Used only with `proxy`. |
 | `ca_bundle` | Works with or without `proxy`. **Adds** trust anchors; never removes the OS or Mozilla roots. Must be absolute after `~` expansion, a readable file, and contain at least one well-formed PEM certificate — anything else is an error naming the path, and `run` / `check` exit `2` before polling. |
 

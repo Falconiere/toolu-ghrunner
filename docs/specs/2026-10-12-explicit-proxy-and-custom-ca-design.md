@@ -92,8 +92,8 @@ readable regular file; parsed with rustls-pki-types'
 bundle, non-certificate PEM items (keys) are ignored, zero certificates fails,
 and every certificate must be accepted by rustls' `RootCertStore::add` as a
 trust anchor. `proxy` must parse as an absolute `http://` or `https://` URL
-with a host, and an `@` outside the parsed credentials (an unencoded reserved
-character in the user name or password) is rejected; anything else is a
+with a host, and an `@` in the path, query or fragment, or an `@` with no
+parsed credentials (an unencoded `/ ? #` in the password), is rejected; anything else is a
 `RunnerError::Config` showing the URL redacted. `proxy = ""` and
 `ca_bundle = ""` are unset. `describe` runs the same validation, so `check`
 exits 2 on an unusable `[network]` before probing.

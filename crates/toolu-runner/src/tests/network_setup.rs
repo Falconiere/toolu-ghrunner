@@ -1,7 +1,7 @@
 //! `lifecycle_client`: masker registration, fail-closed config and the
 //! once-per-change memo.
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use shared::{NetworkConfig, RunnerError, SecretMasker};
@@ -27,23 +27,68 @@ fn memo_reports_only_changes() {
   assert!(memo.line_changed("proxy http://p:1 (env)"));
 }
 
+/// An in-memory `tracing` sink: every formatted event's bytes.
+#[derive(Clone, Default)]
+struct Captured(Arc<Mutex<Vec<u8>>>);
+
+impl std::io::Write for Captured {
+  fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+    if let Ok(mut sink) = self.0.lock() {
+      sink.extend_from_slice(buf);
+    }
+    Ok(buf.len())
+  }
+
+  fn flush(&mut self) -> std::io::Result<()> {
+    Ok(())
+  }
+}
+
+impl Captured {
+  /// The `network: …` lines logged so far.
+  fn network_lines(&self) -> Vec<String> {
+    let text = self
+      .0
+      .lock()
+      .map(|sink| String::from_utf8_lossy(&sink).into_owned())
+      .unwrap_or_default();
+    text
+      .lines()
+      .filter_map(|line| {
+        line
+          .split_once("network: ")
+          .map(|(_, rest)| rest.to_owned())
+      })
+      .collect()
+  }
+}
+
 #[test]
 fn credentials_are_masked_and_repeat_passes_are_memoised() -> Result<(), RunnerError> {
+  let captured = Captured::default();
+  let sink = captured.clone();
+  let subscriber = tracing_subscriber::fmt()
+    .with_ansi(false)
+    .with_writer(move || sink.clone())
+    .finish();
   let masker = Mutex::new(SecretMasker::new());
   let mut memo = NetworkMemo::default();
-  let network = cfg("http://u:sekritpw@127.0.0.1:3128");
-  lifecycle_client(&network, &masker, Duration::from_secs(5), &mut memo)?;
-  let described = network::describe(&network)?;
-  assert!(
-    !memo.line_changed(&described),
-    "first pass recorded the line"
+  let first = cfg("http://u:sekritpw@127.0.0.1:3128");
+  let changed = cfg("http://u:sekritpw@127.0.0.1:3129");
+  tracing::subscriber::with_default(subscriber, || {
+    // Same settings twice (a backoff retry), then an edit.
+    lifecycle_client(&first, &masker, Duration::from_secs(5), &mut memo)?;
+    lifecycle_client(&first, &masker, Duration::from_secs(5), &mut memo)?;
+    lifecycle_client(&changed, &masker, Duration::from_secs(5), &mut memo)?;
+    Ok::<(), RunnerError>(())
+  })?;
+  assert_eq!(
+    captured.network_lines(),
+    vec![
+      "proxy http://u:***@127.0.0.1:3128 (config), no_proxy 0 entries".to_owned(),
+      "proxy http://u:***@127.0.0.1:3129 (config), no_proxy 0 entries".to_owned(),
+    ]
   );
-  assert!(
-    !memo.secrets_changed(&network::proxy_secrets(&network)),
-    "first pass recorded the secrets"
-  );
-  // A second pass with the same settings still builds a client.
-  lifecycle_client(&network, &masker, Duration::from_secs(5), &mut memo)?;
   let line_out = masker
     .lock()
     .map(|guard| guard.mask("password sekritpw here").into_owned())

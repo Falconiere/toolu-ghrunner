@@ -360,6 +360,16 @@ fn reserved_characters_in_a_password_are_rejected_without_leaking_it() {
       "http://u:123?pwd9z@proxy",
       format!("[network] proxy http://u:***@proxy: {HINT}"),
     ),
+    // Parse with truncated credentials: an `@` before the reserved
+    // character leaves a user name, the rest lands in the path / fragment.
+    (
+      "http://u:p@pwd9z/x@proxy:3128",
+      format!("[network] proxy http://u:***@proxy:3128: {HINT}"),
+    ),
+    (
+      "http://u:p@pwd9z#x@proxy",
+      format!("[network] proxy http://u:***@proxy: {HINT}"),
+    ),
   ] {
     let msg = proxy_error(raw);
     assert_eq!(msg, expected, "{raw}");

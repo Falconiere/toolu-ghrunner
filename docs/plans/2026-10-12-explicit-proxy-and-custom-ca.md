@@ -309,8 +309,8 @@ Recorded during execution and the delivery review (2026-10-12):
 - The CA bundle is parsed with `CertificateDer::pem_slice_iter` and each
   certificate checked with `RootCertStore::add` (a stricter fail-closed check
   than `Certificate::from_pem_bundle`).
-- Delivery review additions: proxy URLs with an unencoded `@` outside their
-  credentials are rejected; `describe` validates the proxy so `check` exits 2;
+- Delivery review additions: proxy URLs with an `@` outside their parsed
+  credentials (an unencoded `/ ? #` in the password) are rejected; `describe` validates the proxy so `check` exits 2;
   env-mode `describe` / `proxy_secrets` include `ALL_PROXY`; `run` logs the
   network line only when it changes; blank `ca_bundle` is unset; the live-log
   client is built by `wire::reporting::live_log`.

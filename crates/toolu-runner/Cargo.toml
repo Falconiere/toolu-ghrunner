@@ -73,6 +73,8 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-uti
 # `unsafe`-free (workspace `unsafe_code = "deny"`).
 temp-env = "0.3"
 filetime = "0.2"
+# Captures `network_setup`'s INFO line to pin its once-per-change memo (#94).
+tracing-subscriber = { version = "0.3", features = ["fmt"] }
 
 # Async / futures test helpers
 futures-util = "0.3"

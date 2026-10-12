@@ -147,9 +147,17 @@ pub(crate) fn parse_proxy(raw: &str) -> Result<ParsedProxy, RunnerError> {
       "[network] proxy {shown}: has no host"
     )));
   }
-  if raw.contains('@') && url.username().is_empty() && url.password().is_none() {
-    // `http://u:123#x@proxy` parses as host `u` with a fragment: the `@`
-    // belongs to credentials whose password held a reserved character.
+  let has_userinfo = !url.username().is_empty() || url.password().is_some();
+  let at_outside_userinfo = url.path().contains('@')
+    || url.query().is_some_and(|query| query.contains('@'))
+    || url
+      .fragment()
+      .is_some_and(|fragment| fragment.contains('@'));
+  if at_outside_userinfo || (raw.contains('@') && !has_userinfo) {
+    // An unencoded `/ ? #` in a password ends the authority early:
+    // `http://u:123#x@proxy` parses as host `u`, `http://u:p@ss/x@proxy` as
+    // password `p` on host `ss` — either way the real credentials and host
+    // are lost, and the raw value would be exported to steps unmasked.
     return Err(RunnerError::Config(format!(
       "[network] proxy {shown}: percent-encode reserved characters (@ : / ? #) in the user name and password"
     )));

@@ -34,7 +34,7 @@ no OTel.
   - `wire` — `shared`, `protocol`, `network`.
   - `execution` — `shared`, `expressions`, `cache`, `network`.
   - `listener` — `execution`, `wire`, `observability`, `shared`,
-    `protocol`, `network`.
+    `protocol` (the live-log client comes from `wire`).
   - `toolu-runner` (bin) — `shared`, `protocol`, `network`, `config`,
     `wire`, `observability`, `listener` at runtime (and, as dev-deps,
     `execution` / `expressions` / `cache` for the integration tests).
@@ -262,7 +262,7 @@ to that list requires proving the value is not a real credential.
 
 ## Key Modules
 
-### `protocol/` — sync, no I/O, no network (no deps)
+### `protocol/` — sync, no I/O, no network (deps: shared)
 
 - `auth.rs` — `parse_rsa_private_key` (PKCS#1 DER from
   `.NET RSACryptoServiceProvider` params, computes CRT components),
@@ -359,7 +359,8 @@ to that list requires proving the value is not a real credential.
   `NoProxy(no_proxy + LOOPBACK_BYPASS)`, which disables env proxy vars.
   `ca_bundle` adds anchors (absolute, regular file, every PEM item a valid
   trust anchor, ≥1 — else `RunnerError::Config` naming the path; never a
-  fallback). A proxy with an `@` outside its parsed credentials is rejected.
+  fallback). A proxy with an `@` in its path, query or fragment, or an `@` but no
+  parsed credentials (an unencoded `/ ? #` in the password), is rejected.
   `describe` validates the same way and returns the redacted one-line
   diagnostic (env mode: `HTTPS_PROXY` → `HTTP_PROXY` → `ALL_PROXY`);
   `proxy_configured` is the config-mode test.
@@ -465,7 +466,7 @@ to that list requires proving the value is not a real credential.
  into `${{ }}` template text — `references` for the
  `CheckHasRequiredContext` gate, and `first_line`).
 
-### `cache/` — content-addressed CI cache (deps: shared)
+### `cache/` — content-addressed CI cache (deps: shared, network)
 
 - Content-addressed CI cache backing `ServicesMode::Accelerated`:
   `cas/` (content-addressed store — `manifest`, `chunker`, `store`,
@@ -484,7 +485,7 @@ to that list requires proving the value is not a real credential.
   and falls through to an L2 restore or a clean miss, instead of
   leaving the entry permanently poisoned.
 
-### `wire/` — async HTTP transport + reporting domain types (deps: shared, protocol)
+### `wire/` — async HTTP transport + reporting domain types (deps: shared, protocol, network)
 
 - `net/` — async network layer. **One-way dependency on `protocol`**
   (request types from `protocol`, response types in `protocol` or
@@ -542,7 +543,7 @@ to that list requires proving the value is not a real credential.
   toolu-runner --test journal_writer_test capture_canonical`, and
   read back by `journal_reader_test.rs` / `journal_writer_test.rs`.
 
-### `execution/` — job execution engine (deps: shared, expressions, cache)
+### `execution/` — job execution engine (deps: shared, expressions, cache, network)
 
 - `lib.rs` — `Runner` struct (config, `execute_job` returns an
   `mpsc::Receiver<RunnerEvent>`). **The event stream is unmasked** —
@@ -731,7 +732,7 @@ to that list requires proving the value is not a real credential.
   never enable it. Raw captures hold secrets: sanitize with
   `scripts/test/sanitize_capture.py` before committing anything.
 
-### `toolu-runner/` — CLI bin (deps: shared, protocol, config, wire, observability, listener)
+### `toolu-runner/` — CLI bin (deps: shared, protocol, network, config, wire, observability, listener)
 
 - `cli.rs` — the clap surface: `Cli` (top-level parser with
   Examples/Environment `after_help` — `TOOLU_RUNNER_TOKEN` /
