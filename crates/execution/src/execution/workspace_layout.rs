@@ -225,22 +225,32 @@ fn new_tracking(work: &Path, repository: &Repository) -> Result<TrackingConfig, 
 /// Upstream `workspace.clean`, case-insensitive: `all` recreates the pipeline
 /// and workspace directories, `resources` recreates the workspace (the one
 /// tracked repository), `outputs` deletes the pipeline directory's other
-/// subdirectories. Anything else only ensures both exist.
+/// subdirectories. Anything else only ensures both exist. A missing pipeline
+/// directory (a repository's first job) has nothing to clean.
 fn apply_clean(clean: Option<&str>, pipeline: &Path, workspace: &Path) -> Result<(), RunnerError> {
   match clean.map(str::to_ascii_lowercase).as_deref() {
     Some("all") => remove_dir(pipeline)?,
     Some("resources") => remove_dir(workspace)?,
-    Some("outputs") => {
-      for entry in std::fs::read_dir(pipeline).map_err(|source| init_error(pipeline, source))? {
-        let path = entry.map_err(|source| init_error(pipeline, source))?.path();
-        if path != workspace && path.is_dir() {
-          remove_dir(&path)?;
-        }
-      }
-    },
+    Some("outputs") => remove_outputs(pipeline, workspace)?,
     _ => {},
   }
   std::fs::create_dir_all(workspace).map_err(|source| init_error(workspace, source))
+}
+
+/// Delete every subdirectory of `pipeline` except `workspace`.
+fn remove_outputs(pipeline: &Path, workspace: &Path) -> Result<(), RunnerError> {
+  let entries = match std::fs::read_dir(pipeline) {
+    Ok(entries) => entries,
+    Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+    Err(source) => return Err(init_error(pipeline, source)),
+  };
+  for entry in entries {
+    let path = entry.map_err(|source| init_error(pipeline, source))?.path();
+    if path != workspace && path.is_dir() {
+      remove_dir(&path)?;
+    }
+  }
+  Ok(())
 }
 
 /// A new `<work>/<job_id>`; its job lease is taken by `create_dirs`.

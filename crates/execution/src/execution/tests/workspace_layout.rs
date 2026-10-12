@@ -8,6 +8,7 @@ use std::path::Path;
 
 use shared::{
   AgentJobRequestMessage, PipelineContextData, RunnerConfig, WorkspaceConfig, WorkspaceMode,
+  WorkspaceOptions,
 };
 
 use super::{Repository, WorkspaceKind, prepare_workspace};
@@ -234,6 +235,29 @@ fn claim_creates_no_workspace_until_create_dirs() -> TestResult {
     );
     claimed.create_dirs()?;
     assert!(claimed.workspace.is_dir(), "{mode:?}");
+  }
+  Ok(())
+}
+
+#[test]
+fn every_clean_option_tolerates_a_missing_pipeline_dir() -> TestResult {
+  // The first job for a repository (or the first after GC or a manual
+  // delete) finds no pipeline directory: there is nothing to clean.
+  for clean in ["outputs", "OUTPUTS", "resources", "all"] {
+    let root = tempfile::tempdir()?;
+    let config = config(root.path(), WorkspaceMode::Stable);
+    let mut msg = message(Some("octocat/hello-world"), "job-1")?;
+    msg.workspace = Some(WorkspaceOptions {
+      clean: Some(clean.to_owned()),
+    });
+    let mut claimed = prepare_workspace(&config, &msg)?;
+    assert!(
+      !claimed.pipeline.exists(),
+      "{clean}: {:?}",
+      claimed.pipeline
+    );
+    claimed.create_dirs()?;
+    assert!(claimed.workspace.is_dir(), "{clean}");
   }
   Ok(())
 }
