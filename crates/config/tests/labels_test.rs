@@ -71,7 +71,7 @@ fn probe_cases() -> TestResult<Vec<(Vec<String>, Vec<String>)>> {
 #[test]
 fn resolved_labels_match_what_github_stored() {
   let cases = probe_cases().expect("probe cases parse");
-  assert_eq!(cases.len(), 2, "both 201 probe cases are present");
+  assert_eq!(cases.len(), 3, "every 201 probe case is present");
   for (request, stored) in cases {
     let resolved = resolve_labels(&request, true, &default_labels()).expect("labels resolve");
     assert_eq!(folded(&resolved), folded(&stored), "request {request:?}");
@@ -84,6 +84,14 @@ fn resolved_labels_match_what_github_stored() {
   )
   .expect("labels resolve");
   assert_eq!(dup, strings(&["toolu-92-dup", "self-hosted"]));
+  // GitHub folds non-ASCII case as well (runner 172 kept one label).
+  let unicode = resolve_labels(
+    &strings(&["é-92-probe", "É-92-PROBE"]),
+    true,
+    &default_labels(),
+  )
+  .expect("labels resolve");
+  assert_eq!(unicode, strings(&["é-92-probe"]));
 }
 
 /// AC-3: GitHub rejects an empty label list (recorded 422), so

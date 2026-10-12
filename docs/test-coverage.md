@@ -1325,7 +1325,9 @@ local `config.toml` / `credentials.json` were gone, and `GET
 toolu, which verifies that GitHub removes a used JIT runner itself. Live
 `generate-jitconfig` probes (runners 163/164/166/167) showed GitHub stores
 exactly the labels sent (no hidden `self-hosted`), rejects `[]` with 422,
-de-duplicates case-insensitively, and stores the `Linux` label as `linux`.
+de-duplicates case-insensitively — non-ASCII too (runner 172:
+`é-92-probe` / `É-92-PROBE` stored once) — and stores the `Linux` label as
+`linux`.
 
 **Deleted registration.** The live lane found that a runner deleted on GitHub
 makes the OAuth token exchange answer **400** `{"error":"invalid_client"}`

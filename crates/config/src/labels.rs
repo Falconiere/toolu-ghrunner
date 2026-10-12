@@ -60,12 +60,19 @@ pub fn resolve_labels(
   let base: &[String] = if no_default_labels { &[] } else { defaults };
   let mut resolved: Vec<String> = Vec::with_capacity(base.len() + user.len());
   for label in base.iter().chain(user) {
-    if !resolved
-      .iter()
-      .any(|seen| seen.to_lowercase() == label.to_lowercase())
-    {
+    if !resolved.iter().any(|seen| same_label(seen, label)) {
       resolved.push(label.clone());
     }
   }
   Ok(resolved)
+}
+
+/// Unicode case-insensitive label equality, without allocating. GitHub
+/// folds non-ASCII case too (live probe: `é-92-probe` / `É-92-PROBE` stored
+/// once), as upstream's `StringComparer.OrdinalIgnoreCase` does — an
+/// ASCII-only comparison would keep a duplicate GitHub collapses.
+fn same_label(a: &str, b: &str) -> bool {
+  a.chars()
+    .flat_map(char::to_lowercase)
+    .eq(b.chars().flat_map(char::to_lowercase))
 }
