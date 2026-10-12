@@ -164,7 +164,7 @@ async fn containers_receive_the_proxy_export_unless_they_set_it() -> FixtureResu
   job.steps = vec![
     ActionStep::script(
       "in_container",
-      "for v in HTTPS_PROXY https_proxy HTTP_PROXY http_proxy NO_PROXY NODE_EXTRA_CA_CERTS; do printf 'NET94|container|%s|%s\\n' \"$v\" \"${!v-unset}\"; done",
+      r#"for v in HTTPS_PROXY https_proxy HTTP_PROXY http_proxy NO_PROXY NODE_EXTRA_CA_CERTS; do eval "x=\${$v-unset}"; printf 'NET94|container|%s|%s\n' "$v" "$x"; done"#,
       "success()",
     ),
     docker_env_step("docker_plain"),

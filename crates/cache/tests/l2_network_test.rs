@@ -29,22 +29,23 @@ async fn l2_put_goes_through_the_configured_proxy_and_ca() -> FixtureResult<()> 
     ca_bundle: Some(pki.write_bundle(dir.path())?),
   };
   let client = network::client_builder(&network)?.build()?;
-  let tier = L2Tier::from_config(
-    &L2Config {
-      bucket: "toolu-cache".to_owned(),
-      endpoint: format!("https://s3.test:{}", s3.port()),
-      region: "us-east-1".to_owned(),
-    },
-    client,
-  )?;
-  // Static credentials: reqsign signs locally and never probes IMDS.
-  let _outcome = temp_env::async_with_vars(
+  let l2 = L2Config {
+    bucket: "toolu-cache".to_owned(),
+    endpoint: format!("https://s3.test:{}", s3.port()),
+    region: "us-east-1".to_owned(),
+  };
+  // Static credentials: reqsign signs locally and never probes IMDS. opendal
+  // reads them when the operator is built, so build inside the env scope.
+  let outcome = temp_env::async_with_vars(
     [
       ("AWS_ACCESS_KEY_ID", Some("toolu-test-access-key")),
       ("AWS_SECRET_ACCESS_KEY", Some("toolu-test-secret-key")),
       ("AWS_EC2_METADATA_DISABLED", Some("true")),
     ],
-    tier.put_blob(BlobKind::Chunk, "ab12", b"payload"),
+    async {
+      let tier = L2Tier::from_config(&l2, client)?;
+      tier.put_blob(BlobKind::Chunk, "ab12", b"payload").await
+    },
   )
   .await;
   let hits = proxy.hits();
@@ -52,7 +53,7 @@ async fn l2_put_goes_through_the_configured_proxy_and_ca() -> FixtureResult<()> 
     hits
       .iter()
       .any(|hit| hit.line == format!("CONNECT s3.test:{} HTTP/1.1", s3.port())),
-    "{hits:?}"
+    "{hits:?} (put_blob: {outcome:?})"
   );
   assert!(
     s3.requests()
