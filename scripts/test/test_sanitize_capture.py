@@ -108,8 +108,22 @@ class SanitizeCaptureTest(unittest.TestCase):
             self.assertEqual(sanitize_capture.main(["--scan", str(out_path)]), 0)
             self.assertEqual(sanitize_capture.main(["--scan", str(raw_path)]), 1)
 
-    def test_committed_capture_is_already_clean(self):
-        self.assertEqual(sanitize_capture.scan(json.loads(CAPTURE.read_text())), [])
+    def test_committed_captures_are_clean(self):
+        fixtures = [CAPTURE, *sorted(CAPTURE.parent.glob("compat_103_*_message.json"))]
+        self.assertGreaterEqual(len(fixtures), 3)
+        for fixture in fixtures:
+            self.assertEqual(sanitize_capture.scan(json.loads(fixture.read_text())), [], fixture)
+
+    def test_distinct_secrets_in_one_string_get_distinct_placeholders(self):
+        raw = raw_capture()
+        other = "ghs_" + "Y" * 36
+        script = script_entry(raw["steps"][0])
+        script["lit"] = f"echo {PROBE_TOKEN} {other}.\n" + script["lit"]
+        clean, _ = sanitize_capture.sanitize(raw, "unit")
+        first_line = script_entry(clean["steps"][0])["lit"].splitlines()[0]
+        _, first, second = first_line.split()
+        self.assertNotEqual(first, second.rstrip("."), first_line)
+        self.assertNotIn(other, json.dumps(clean))
 
 
 if __name__ == "__main__":

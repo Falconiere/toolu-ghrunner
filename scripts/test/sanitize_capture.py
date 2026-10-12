@@ -30,6 +30,8 @@ WORD_CHARS = "_-."
 def credential_words(text):
     """Credential-shaped words in `text`: GitHub tokens and three-part JWTs."""
     words = "".join(c if c.isalnum() or c in WORD_CHARS else " " for c in text).split()
+    # A sentence-final "." would otherwise give a JWT a fourth dot.
+    words = [w.rstrip(".") for w in words]
     return [w for w in words
             if (w.startswith(TOKEN_PREFIXES) and len(w) >= 24)
             or (w.startswith("eyJ") and w.count(".") == 2)]
@@ -49,11 +51,15 @@ def walk(node, path="$"):
 
 def collect_secrets(message):
     """Ordered {secret_value: first_json_path} for every secret the body carries."""
-    found = {}
+    found, per_path = {}, {}
 
     def add(value, path):
+        # Two distinct secrets first seen in the same string must not share a
+        # placeholder, so the key carries an occurrence index for that path.
         if isinstance(value, str) and value and value not in found:
-            found[value] = path
+            index = per_path.get(path, 0)
+            per_path[path] = index + 1
+            found[value] = path if index == 0 else f"{path}#{index}"
 
     for name, variable in (message.get("variables") or {}).items():
         if isinstance(variable, dict) and variable.get("isSecret"):

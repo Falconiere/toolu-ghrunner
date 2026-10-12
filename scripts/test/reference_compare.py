@@ -71,6 +71,16 @@ def job_view(job):
     }
 
 
+def lane_diff(toolu, official):
+    """Every difference between two lanes' views of one job."""
+    diff = []
+    if toolu["conclusion"] != official["conclusion"]:
+        diff.append(f"conclusion {toolu['conclusion']} != {official['conclusion']}")
+    if toolu["steps"] != official["steps"]:
+        diff.append(f"steps {toolu['steps']} != {official['steps']}")
+    return diff
+
+
 def compare_jobs(jobs):
     """Pair jobs across lanes; returns (rows, unpaired)."""
     by_key = {}
@@ -85,11 +95,7 @@ def compare_jobs(jobs):
             unpaired.append(f"{variant}/{name}: only {sorted(lanes)}")
             continue
         toolu, official = lanes["toolu"], lanes["official"]
-        diff = []
-        if toolu["conclusion"] != official["conclusion"]:
-            diff.append(f"conclusion {toolu['conclusion']} != {official['conclusion']}")
-        if toolu["steps"] != official["steps"]:
-            diff.append(f"steps {toolu['steps']} != {official['steps']}")
+        diff = lane_diff(toolu, official)
         rows.append({"variant": variant, "job": name, "equal": not diff, "diff": diff,
                      "toolu": toolu, "official": official})
     return rows, unpaired
@@ -163,8 +169,8 @@ def build_report(run_id, provenance, captures, acknowledged):
         "expectation_failures": [list(f) for f in expectation_failures(rows)],
         "leftover_containers": leftover_containers(),
         "captures": {path: sha256(ROOT / path) for path in captures},
-        "acknowledged": acknowledged,
     }
+    report["acknowledged"] = pin_observations(report, acknowledged)
     return report
 
 
@@ -173,13 +179,18 @@ def sha256(path):
 
 
 def keyed_problems(report):
-    """(variant, job, message); variant/job are None for run-wide problems."""
-    problems = [(r["variant"], r["job"], f"differs: {r['diff']}") for r in report["jobs"]
-                if not r["equal"]]
-    problems += [(v, j, msg) for v, j, msg in report["expectation_failures"]]
+    """(variant, job, message); recomputed from the stored lane views, never from
+    the stored `equal` / `expectation_failures` flags, so editing a flag cannot
+    hide a difference."""
+    problems = []
+    for row in report["jobs"]:
+        diff = lane_diff(row["toolu"], row["official"])
+        if diff:
+            problems.append((row["variant"], row["job"], f"differs: {diff}"))
+    problems += [(v, j, msg) for v, j, msg in expectation_failures(report["jobs"])]
     problems += [(None, None, f"unpaired job {u}") for u in report["unpaired"]]
     problems += [(v, None, "observations differ") for v, r in report["results"].items()
-                 if not r["equal"]]
+                 if r.get("toolu") != r.get("official")]
     problems += [(None, None, e) for e in report["payload_errors"]]
     problems += [(None, None, f"leftover container {c}") for c in report["leftover_containers"]]
     expected_jobs = {(v, j) for v in ("probe", "negative")
@@ -189,8 +200,24 @@ def keyed_problems(report):
     return problems
 
 
-def covers(ack, variant, job):
-    return job is not None and ack["job"] == job and variant in ack["variants"]
+def observed(report, variant, job):
+    """The recorded step lists of one job on both lanes, or None."""
+    row = next((r for r in report["jobs"] if r["variant"] == variant and r["job"] == job), None)
+    return None if row is None else {lane: row[lane]["steps"] for lane in LANES}
+
+
+def covers(ack, report, variant, job):
+    """An acknowledgement covers a job only while both lanes still show exactly the
+    step lists it pinned, so a new divergence in the same job is not excused."""
+    return (job is not None and ack["job"] == job and variant in ack["variants"]
+            and ack.get("observed", {}).get(variant) == observed(report, variant, job))
+
+
+def pin_observations(report, acknowledged):
+    """Record, per acknowledged job, the exact step lists the acknowledgement excuses."""
+    for ack in acknowledged:
+        ack["observed"] = {v: observed(report, v, ack["job"]) for v in ack["variants"]}
+    return acknowledged
 
 
 def verify(report):
@@ -199,7 +226,7 @@ def verify(report):
     acks = report.get("acknowledged", [])
     used = set()
     for variant, job, message in keyed_problems(report):
-        match = next((i for i, a in enumerate(acks) if covers(a, variant, job)), None)
+        match = next((i for i, a in enumerate(acks) if covers(a, report, variant, job)), None)
         label = f"{variant or '*'}/{job or '*'}: {message}"
         if match is None:
             problems.append(label)

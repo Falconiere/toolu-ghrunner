@@ -730,7 +730,133 @@
       "matrix_rows": [
         "103/S4",
         "103/R-cache"
-      ]
+      ],
+      "observed": {
+        "probe": {
+          "toolu": [
+            [
+              "Set up job",
+              "success"
+            ],
+            [
+              "Restore cache",
+              "failure"
+            ],
+            [
+              "Download artifact",
+              "skipped"
+            ],
+            [
+              "Verify cross-job values",
+              "skipped"
+            ],
+            [
+              "Record observations",
+              "success"
+            ],
+            [
+              "Upload observations",
+              "success"
+            ],
+            [
+              "Complete job",
+              "success"
+            ]
+          ],
+          "official": [
+            [
+              "Set up job",
+              "success"
+            ],
+            [
+              "Restore cache",
+              "success"
+            ],
+            [
+              "Download artifact",
+              "success"
+            ],
+            [
+              "Verify cross-job values",
+              "success"
+            ],
+            [
+              "Record observations",
+              "success"
+            ],
+            [
+              "Upload observations",
+              "success"
+            ],
+            [
+              "Complete job",
+              "success"
+            ]
+          ]
+        },
+        "negative": {
+          "toolu": [
+            [
+              "Set up job",
+              "success"
+            ],
+            [
+              "Restore cache",
+              "failure"
+            ],
+            [
+              "Download artifact",
+              "skipped"
+            ],
+            [
+              "Verify cross-job values",
+              "skipped"
+            ],
+            [
+              "Record observations",
+              "success"
+            ],
+            [
+              "Upload observations",
+              "success"
+            ],
+            [
+              "Complete job",
+              "success"
+            ]
+          ],
+          "official": [
+            [
+              "Set up job",
+              "success"
+            ],
+            [
+              "Restore cache",
+              "success"
+            ],
+            [
+              "Download artifact",
+              "success"
+            ],
+            [
+              "Verify cross-job values",
+              "failure"
+            ],
+            [
+              "Record observations",
+              "success"
+            ],
+            [
+              "Upload observations",
+              "success"
+            ],
+            [
+              "Complete job",
+              "success"
+            ]
+          ]
+        }
+      }
     },
     {
       "finding": "docker-pull-step-reporting",
@@ -744,7 +870,109 @@
       "matrix_rows": [
         "103/S3",
         "75/75-S1"
-      ]
+      ],
+      "observed": {
+        "probe": {
+          "toolu": [
+            [
+              "Set up job",
+              "success"
+            ],
+            [
+              "Write container probe",
+              "success"
+            ],
+            [
+              "Container action",
+              "success"
+            ],
+            [
+              "Verify container effects",
+              "success"
+            ],
+            [
+              "Complete job",
+              "success"
+            ]
+          ],
+          "official": [
+            [
+              "Set up job",
+              "success"
+            ],
+            [
+              "Pull alpine@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc",
+              "success"
+            ],
+            [
+              "Write container probe",
+              "success"
+            ],
+            [
+              "Container action",
+              "success"
+            ],
+            [
+              "Verify container effects",
+              "success"
+            ],
+            [
+              "Complete job",
+              "success"
+            ]
+          ]
+        },
+        "negative": {
+          "toolu": [
+            [
+              "Set up job",
+              "success"
+            ],
+            [
+              "Write container probe",
+              "success"
+            ],
+            [
+              "Container action",
+              "success"
+            ],
+            [
+              "Verify container effects",
+              "failure"
+            ],
+            [
+              "Complete job",
+              "success"
+            ]
+          ],
+          "official": [
+            [
+              "Set up job",
+              "success"
+            ],
+            [
+              "Pull alpine@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc",
+              "success"
+            ],
+            [
+              "Write container probe",
+              "success"
+            ],
+            [
+              "Container action",
+              "success"
+            ],
+            [
+              "Verify container effects",
+              "failure"
+            ],
+            [
+              "Complete job",
+              "success"
+            ]
+          ]
+        }
+      }
     }
   ]
 }

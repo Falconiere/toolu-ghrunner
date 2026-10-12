@@ -16,7 +16,8 @@ use std::path::{Path, PathBuf};
 ///
 /// Never fails the job: any I/O or encoding error is WARN-logged and `None`
 /// is returned, so a full disk or unwritable directory only loses the
-/// capture.
+/// capture. The write is synchronous (one small file per acquired job) and
+/// only ever runs in a `capture` build, so it is not moved off the async path.
 pub fn write_acquired(data_dir: &Path, plan_id: &str, body: &serde_json::Value) -> Option<PathBuf> {
   match try_write(data_dir, plan_id, body) {
     Ok(path) => {

@@ -102,7 +102,10 @@ def check_tests(row, errors):
         if attrs is None:
             errors.append(f"{row['id']}: {path}::{name} is not a #[test] / #[tokio::test] fn")
             continue
-        found.append(("rs", any(a.startswith("#[ignore") for a in attrs),
+        # A feature-gated file or fn never compiles in `cargo test --workspace`,
+        # so for the gate it is as good as ignored.
+        gated = "#![cfg(feature" in source or any(a.startswith("#[cfg(feature") for a in attrs)
+        found.append(("rs", gated or any(a.startswith("#[ignore") for a in attrs),
                       '#![cfg(target_os = "linux")]' in source, Path(path).stem))
     return found
 
@@ -117,7 +120,7 @@ def check_evidence(row, lane, evidence, tests, context, errors):
         elif not tests:
             errors.append(f"{where}: 'gate' evidence needs at least one mapped test")
         elif not runnable:
-            errors.append(f"{where}: an #[ignore] test never runs in the gate")
+            errors.append(f"{where}: an #[ignore] or feature-gated test never runs in the gate")
         elif lane == "macos" and not [t for t in runnable if t[0] == "rs" and not t[2]]:
             errors.append(f"{where}: the macOS gate needs a non-ignored Rust test that is not "
                           "Linux-only (Python checks run on the ubuntu leg only)")
@@ -136,7 +139,9 @@ def check_evidence(row, lane, evidence, tests, context, errors):
             errors.append(f"{where}: {evidence!r} does not resolve to a document heading")
     elif evidence.startswith("report:"):
         report = context["reports"].get(evidence[7:])
-        if report is None:
+        if lane != "reference":
+            errors.append(f"{where}: 'report:' evidence only backs the reference lane")
+        elif report is None:
             errors.append(f"{where}: report {evidence[7:]} is missing")
         elif row["id"] in report["unverified_rows"]:
             errors.append(f"{where}: the report acknowledges a difference for this row")
@@ -201,11 +206,12 @@ def check_coverage(matrix, errors):
     return seen
 
 
-def load_reports(matrix):
+def load_reports(matrix, errors):
     reports = {}
     for path in matrix.get("reports", []):
         file = ROOT / path
         if not file.is_file():
+            errors.append(f"listed report {path} does not exist")
             continue
         data = json.loads(file.read_text())
         rows = {r for ack in data.get("acknowledged", []) for r in ack.get("matrix_rows", [])}
@@ -271,7 +277,7 @@ def render(matrix):
 def validate(matrix, markdown, evidence_doc):
     """Every violation in `matrix`, its Markdown view and the evidence doc."""
     errors = []
-    context = {"ci": CI.read_text(), "reports": load_reports(matrix)}
+    context = {"ci": CI.read_text(), "reports": load_reports(matrix, errors)}
     for path, report in context["reports"].items():
         problems, _ = reference_compare.verify(report["data"])
         errors += [f"report {path}: {p}" for p in problems]
@@ -352,7 +358,7 @@ def main(argv=None):
         return 0
     if args.check_rows:
         errors = []
-        context = {"ci": CI.read_text(), "reports": load_reports(matrix)}
+        context = {"ci": CI.read_text(), "reports": load_reports(matrix, errors)}
         for row in json.loads(args.check_rows.read_text()):
             check_row(row, matrix.get("issues", {}), context, errors)
     elif args.remote:

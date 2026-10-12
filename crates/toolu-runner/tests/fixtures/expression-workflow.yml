@@ -1,6 +1,7 @@
 # Pushed by live_e2e.rs::expression_evaluation. Dispatched twice: with the
-# defaults (must succeed) and with `who: ''` (must fail at the first assertion),
-# so an empty or dropped input can never keep this scenario green (#103 S2).
+# defaults (the run must succeed) and with `who: ''` (the run must conclude
+# failure; the step's first assertion is what rejects it), so an empty or
+# dropped input can never keep this scenario green (#103 S2).
 name: expression
 on:
   workflow_dispatch:

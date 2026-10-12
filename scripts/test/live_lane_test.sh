@@ -2,9 +2,10 @@
 # live_lane_test.sh — static checks that the live lane cannot report a pass it
 # did not earn (#103 AC-7 / S7).
 #
-# - live.yml maps its secret at JOB level (a step-level env is invisible to the
-#   step's own `if:`, which made the lane skip daily and conclude success) and
-#   fails with an UNVERIFIED error when the secret is absent.
+# - live.yml / live-ghes.yml gate on a JOB-level boolean (a step-level env is
+#   invisible to the step's own `if:`, which made the lanes skip and still
+#   conclude success), keep the secrets scoped to the test step, and fail with
+#   an UNVERIFIED error when the secrets are absent.
 # - No live test skips by returning early: the shared harness gate panics.
 # - live_e2e.rs carries no inline workflow YAML; every pushed workflow is a
 #   committed fixture, and the Docker / input fixtures assert real effects.
@@ -25,19 +26,21 @@ check() { # check <desc> <command...>
 }
 absent() { ! grep -Eq -- "$1" "$2"; }
 
-WF=.github/workflows/live.yml
 TESTS=crates/toolu-runner/tests
 FIX=$TESTS/fixtures
 
-check "live.yml maps the secret at job level" \
-  grep -Eq '^    env:$' "$WF"
-check "live.yml job env carries the secret" \
-  grep -Eq '^      TOOLU_RUNNER_LIVE_TOKEN: \$\{\{ secrets\.TOOLU_RUNNER_LIVE_TOKEN \}\}$' "$WF"
-check "live.yml fails UNVERIFIED without the secret" \
-  grep -Eq 'UNVERIFIED: TOOLU_RUNNER_LIVE_TOKEN is not set' "$WF"
-check "live.yml has no success path for a missing secret" absent 'skipping live tests' "$WF"
-check "live tests run unconditionally once credentials exist" \
-  grep -Eq '^        run: cargo test -p toolu-runner --features live -- --ignored' "$WF"
+for wf in .github/workflows/live.yml .github/workflows/live-ghes.yml; do
+  name=$(basename "$wf")
+  check "$name keeps only a boolean at job level" \
+    grep -Eq '^      HAVE_(LIVE_TOKEN|GHES_SECRETS): \$\{\{ secrets\.' "$wf"
+  check "$name never exposes a secret at job level" \
+    absent '^      TOOLU_RUNNER_LIVE[A-Z_]*: \$\{\{ secrets\.' "$wf"
+  check "$name fails UNVERIFIED without its secrets" \
+    grep -Eq '::error::UNVERIFIED: TOOLU_RUNNER_LIVE' "$wf"
+  check "$name has no success path for missing secrets" absent 'skipping .*live tests' "$wf"
+  check "$name runs the live tests unconditionally once credentials exist" \
+    grep -Eq '^        run: cargo test -p toolu-runner --features live(-ghes)? -- --ignored' "$wf"
+done
 
 for f in "$TESTS"/live_e2e.rs "$TESTS"/live_login_e2e.rs "$TESTS"/cache_live_e2e.rs; do
   check "$(basename "$f") has no skip macro" absent 'macro_rules! require_live_env' "$f"

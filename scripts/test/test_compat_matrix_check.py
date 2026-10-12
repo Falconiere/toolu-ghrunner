@@ -70,7 +70,23 @@ class RejectionTest(unittest.TestCase):
         m = copy.deepcopy(MATRIX)
         gate_row(m)["tests"] = [["crates/execution/tests/compat_probe_replay_test.rs",
                                  "captured_docker_job_executes_the_container_and_cleans_up"]]
-        self.assert_rejected(m, "an #[ignore] test never runs in the gate")
+        self.assert_rejected(m, "an #[ignore] or feature-gated test never runs in the gate")
+
+    def test_feature_gated_test_cannot_back_the_gate(self):
+        m = copy.deepcopy(MATRIX)
+        gate_row(m)["tests"] = [["crates/toolu-runner/tests/live_e2e.rs", "noop_job_completes"]]
+        self.assert_rejected(m, "feature-gated test never runs in the gate")
+
+    def test_report_evidence_only_backs_the_reference_lane(self):
+        m = copy.deepcopy(MATRIX)
+        gate_row(m)["lanes"]["github-com"] = {"status": "passed",
+                                              "evidence": "report:docs/compat-reference-103.json"}
+        self.assert_rejected(m, "'report:' evidence only backs the reference lane")
+
+    def test_missing_listed_report(self):
+        m = copy.deepcopy(MATRIX)
+        m["reports"] = ["docs/no-such-report.json"]
+        self.assert_rejected(m, "listed report docs/no-such-report.json does not exist")
 
     def test_passed_without_evidence(self):
         m = copy.deepcopy(MATRIX)

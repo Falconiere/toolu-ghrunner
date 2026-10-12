@@ -409,10 +409,11 @@ async fn expression_evaluation() {
 
   // The fixture asserts the exact typed inputs, so the defaults must pass and
   // an empty `who` must fail the job: a dropped or empty input cannot stay green.
-  for (inputs, expected) in [
+  let dispatches = [
     (serde_json::json!({}), "success"),
     (serde_json::json!({"who": ""}), "failure"),
-  ] {
+  ];
+  for (index, (inputs, expected)) in dispatches.iter().enumerate() {
     let child = harness.run_once().expect("spawn run --once");
     let run_id = harness
       .trigger_workflow_with_inputs(workflow, inputs.clone())
@@ -424,11 +425,14 @@ async fn expression_evaluation() {
       .expect("wait for run");
     let _ = wait_child(child).await;
     assert_eq!(
-      conclusion, expected,
+      conclusion, *expected,
       "expression run with inputs {inputs} should conclude {expected}; got {conclusion}"
     );
-    // `run --once` consumed the single-use JIT registration.
-    harness.register().await.expect("re-register");
+    // `run --once` consumed the single-use JIT registration; mint another only
+    // when a further dispatch needs it.
+    if index + 1 < dispatches.len() {
+      harness.register().await.expect("re-register");
+    }
   }
 }
 

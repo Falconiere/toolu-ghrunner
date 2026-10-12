@@ -54,11 +54,28 @@ class VerifyRecordedReportTest(unittest.TestCase):
 
     def test_newly_unequal_job_fails(self):
         report = copy.deepcopy(REPORT)
-        contexts = job(report, "probe", "contexts")
-        contexts["equal"] = False
-        contexts["diff"] = ["conclusion failure != success"]
+        job(report, "probe", "contexts")["toolu"]["conclusion"] = "failure"
         problems, _ = reference_compare.verify(report)
         self.assertTrue(any(p.startswith("probe/contexts") for p in problems), problems)
+
+    def test_editing_stored_flags_cannot_hide_a_difference(self):
+        report = copy.deepcopy(REPORT)
+        report["acknowledged"] = []
+        for row in report["jobs"]:
+            row["equal"], row["diff"] = True, []
+        report["expectation_failures"] = []
+        for result in report["results"].values():
+            result["equal"] = True
+        problems, _ = reference_compare.verify(report)
+        self.assertTrue(any(p.startswith("probe/consumer") for p in problems), problems)
+        self.assertTrue(any(p.startswith("probe/docker") for p in problems), problems)
+
+    def test_new_divergence_in_an_acknowledged_job_is_not_excused(self):
+        report = copy.deepcopy(REPORT)
+        steps = job(report, "probe", "consumer")["toolu"]["steps"]
+        steps[-1] = [steps[-1][0], "failure"]
+        problems, _ = reference_compare.verify(report)
+        self.assertTrue(any(p.startswith("probe/consumer") for p in problems), problems)
 
     def test_missing_job_leftover_container_and_changed_capture_fail(self):
         report = copy.deepcopy(REPORT)

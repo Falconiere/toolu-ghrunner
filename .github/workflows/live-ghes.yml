@@ -5,7 +5,17 @@ on:
 jobs:
   live-ghes:
     runs-on: ubuntu-latest
+    # Only a boolean is job-level so the guard step's `if:` can see it (a
+    # step-level env is invisible to its own `if:`); the secrets stay scoped to
+    # the test step. A GHES lane that did not run is UNVERIFIED, not green (#103).
+    env:
+      HAVE_GHES_SECRETS: ${{ secrets.TOOLU_RUNNER_LIVE_GHES_TOKEN != '' && secrets.TOOLU_RUNNER_LIVE_GHES_URL != '' }}
     steps:
+      - name: Require GHES credentials
+        if: ${{ env.HAVE_GHES_SECRETS != 'true' }}
+        run: |
+          echo "::error::UNVERIFIED: TOOLU_RUNNER_LIVE_GHES_TOKEN or TOOLU_RUNNER_LIVE_GHES_URL is not set, so the GHES lane did not run; this is not coverage"
+          exit 1
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.94.1
         with:
@@ -13,12 +23,8 @@ jobs:
       - name: Build with --features live-ghes
         run: cargo build -p toolu-runner --features live-ghes --tests
       - name: Live tests (GHES)
-        if: ${{ env.TOOLU_RUNNER_LIVE_GHES_TOKEN != '' && env.TOOLU_RUNNER_LIVE_GHES_URL != '' }}
         env:
           TOOLU_RUNNER_LIVE_GHES_TOKEN: ${{ secrets.TOOLU_RUNNER_LIVE_GHES_TOKEN }}
           TOOLU_RUNNER_LIVE_GHES_URL: ${{ secrets.TOOLU_RUNNER_LIVE_GHES_URL }}
           TOOLU_RUNNER_LIVE_GHES_REPO: ${{ vars.TOOLU_RUNNER_LIVE_GHES_REPO || 'owner/test-repo' }}
         run: cargo test -p toolu-runner --features live-ghes -- --ignored --test-threads=1
-      - name: Live tests skipped (no secrets)
-        if: ${{ env.TOOLU_RUNNER_LIVE_GHES_TOKEN == '' || env.TOOLU_RUNNER_LIVE_GHES_URL == '' }}
-        run: echo "::warning::TOOLU_RUNNER_LIVE_GHES_TOKEN or TOOLU_RUNNER_LIVE_GHES_URL is not set; skipping GHES live tests"

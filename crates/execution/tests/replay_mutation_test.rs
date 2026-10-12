@@ -10,6 +10,17 @@
 //! emptied (the named assertion step must fail, or the observable must change).
 //! A helper that hand-builds contexts cannot satisfy this: the section is
 //! dropped from the wire message itself.
+//!
+//! To prove a mutation fails for the right reason, every captured `test …`
+//! assertion line is rewritten to `test … || (echo ASSERT_FAILED_<n>; exit 1)`.
+//! The rewrite keeps the semantics (the step still stops at the first false
+//! assertion) and names the exact line that tripped. Each mutation must trip
+//! only the line that reads the dropped section. Parentheses rather than
+//! braces keep the rewrite valid inside the captured `format()` expressions.
+//!
+//! Host requirements: `bash` and `jq` (the captured `Assert typed inputs` step
+//! pipes `toJSON(inputs)` through `jq`). Both are present on the ubuntu and
+//! macOS CI images; a missing `jq` fails fast with a named message.
 
 use std::collections::HashMap;
 use std::error::Error;
@@ -26,11 +37,80 @@ const CONTEXTS: &str = include_str!("compat_103_contexts_message.json");
 const JOB_OUTPUTS_70: &str = include_str!("job_outputs_message.json");
 
 /// What a replay produced: the job conclusion, the `contextName`s of the steps
-/// that failed, and the evaluated job outputs.
+/// that failed, the evaluated job outputs and every step log line.
 struct Replayed {
   conclusion: Conclusion,
   failed: Vec<String>,
   outputs: HashMap<String, String>,
+  logs: Vec<String>,
+}
+
+fn require_jq() {
+  let found = std::process::Command::new("jq")
+    .arg("--version")
+    .output()
+    .is_ok_and(|out| out.status.success());
+  assert!(
+    found,
+    "jq must be on PATH: the captured probe step pipes toJSON(inputs) through jq"
+  );
+}
+
+/// Rewrite every captured `test …` script line so a false assertion also prints
+/// `ASSERT_FAILED_<n>`; returns the original lines indexed by `n`.
+fn instrument(message: &mut serde_json::Value) -> Result<Vec<String>, Box<dyn Error>> {
+  let mut lines = Vec::new();
+  let steps = message
+    .get_mut("steps")
+    .and_then(serde_json::Value::as_array_mut)
+    .ok_or("captured steps missing")?;
+  for step in steps {
+    let Some(entries) = step
+      .pointer_mut("/inputs/map")
+      .and_then(serde_json::Value::as_array_mut)
+    else {
+      continue;
+    };
+    for entry in entries {
+      if entry
+        .pointer("/Key/lit")
+        .and_then(serde_json::Value::as_str)
+        != Some("script")
+      {
+        continue;
+      }
+      let value = object(entry.get_mut("Value").ok_or("script value missing")?)?;
+      for field in ["lit", "expr"] {
+        let Some(text) = value.get(field).and_then(serde_json::Value::as_str) else {
+          continue;
+        };
+        let rewritten = text
+          .split('\n')
+          .map(|line| {
+            if line.starts_with("test ") || line.starts_with("format('test ") {
+              lines.push(line.to_owned());
+              format!("{line} || (echo ASSERT_FAILED_{}; exit 1)", lines.len() - 1)
+            } else {
+              line.to_owned()
+            }
+          })
+          .collect::<Vec<_>>()
+          .join("\n");
+        value.insert(field.to_owned(), serde_json::Value::String(rewritten));
+      }
+    }
+  }
+  Ok(lines)
+}
+
+/// The indices of the instrumented lines that tripped during a replay.
+fn tripped(replayed: &Replayed) -> Vec<usize> {
+  replayed
+    .logs
+    .iter()
+    .filter_map(|line| line.trim().strip_prefix("ASSERT_FAILED_"))
+    .filter_map(|n| n.parse().ok())
+    .collect()
 }
 
 fn raw(source: &str) -> Result<serde_json::Value, Box<dyn Error>> {
@@ -77,9 +157,11 @@ fn replay(raw: serde_json::Value) -> Result<Replayed, Box<dyn Error>> {
     let mut events = runner.execute_job(message, cancel.clone());
     let collected = tokio::time::timeout(Duration::from_secs(60), async {
       let mut failed = Vec::new();
+      let mut logs = Vec::new();
       let mut completed = None;
       while let Some(event) = events.recv().await {
         match event {
+          RunnerEvent::Log { line, .. } => logs.push(line),
           RunnerEvent::StepCompleted {
             step_id,
             conclusion: Conclusion::Failure,
@@ -95,33 +177,38 @@ fn replay(raw: serde_json::Value) -> Result<Replayed, Box<dyn Error>> {
           | RunnerEvent::StepStarted { .. }
           | RunnerEvent::StepCompleted { .. }
           | RunnerEvent::StepSkipped { .. }
-          | RunnerEvent::Log { .. }
           | RunnerEvent::LogGroup { .. }
           | RunnerEvent::Annotation { .. }
           | RunnerEvent::StepMetadata { .. }
           | RunnerEvent::InfrastructureError { .. } => {},
         }
       }
-      (failed, completed)
+      (failed, logs, completed)
     })
     .await;
     cancel.cancel();
-    let (failed, completed) = collected?;
+    let (failed, logs, completed) = collected?;
     let (conclusion, outputs) = completed.ok_or("job never completed")?;
     Ok(Replayed {
       conclusion,
       failed,
       outputs,
+      logs,
     })
   })
 }
 
-/// Replay with `mutate` applied and assert the named step is the one failure.
+/// Replay the instrumented capture with `mutate` applied and assert that the
+/// named step is the only failure and that the one assertion line that tripped
+/// is the one reading the dropped section (it contains `marker`).
 fn assert_mutation_fails_at(
   mutate: impl FnOnce(&mut serde_json::Value) -> TestResult,
   step: &str,
+  marker: &str,
 ) -> TestResult {
+  require_jq();
   let mut message = raw(CONTEXTS)?;
+  let lines = instrument(&mut message)?;
   mutate(&mut message)?;
   let replayed = replay(message)?;
   assert_eq!(
@@ -130,6 +217,19 @@ fn assert_mutation_fails_at(
     "mutation must fail the job"
   );
   assert_eq!(replayed.failed, vec![step.to_owned()], "failing step");
+  let tripped: Vec<&str> = tripped(&replayed)
+    .into_iter()
+    .filter_map(|n| lines.get(n).map(String::as_str))
+    .collect();
+  assert_eq!(
+    tripped.len(),
+    1,
+    "exactly one assertion must trip: {tripped:?}"
+  );
+  assert!(
+    tripped.iter().all(|line| line.contains(marker)),
+    "the tripped assertion must read the dropped section ({marker}): {tripped:?}"
+  );
   Ok(())
 }
 
@@ -147,6 +247,23 @@ fn context_root(message: &mut serde_json::Value, root: &str) -> TestResult {
 
 #[test]
 fn captured_contexts_job_replays_green_with_exact_outputs() -> TestResult {
+  require_jq();
+  // The instrumentation is semantics-preserving: the instrumented capture is
+  // green too, and no assertion trips.
+  let mut instrumented = raw(CONTEXTS)?;
+  assert_eq!(
+    instrument(&mut instrumented)?.len(),
+    10,
+    "captured assertion lines"
+  );
+  let replayed = replay(instrumented)?;
+  assert_eq!(
+    replayed.conclusion,
+    Conclusion::Success,
+    "failed: {:?}",
+    replayed.failed
+  );
+  assert!(tripped(&replayed).is_empty());
   let replayed = replay(raw(CONTEXTS)?)?;
   assert_eq!(
     replayed.conclusion,
@@ -168,7 +285,7 @@ fn captured_contexts_job_replays_green_with_exact_outputs() -> TestResult {
 
 #[test]
 fn dropped_inputs_fail_the_typed_input_assertion() -> TestResult {
-  assert_mutation_fails_at(|m| context_root(m, "inputs"), "__run_2")
+  assert_mutation_fails_at(|m| context_root(m, "inputs"), "__run_2", "= world")
 }
 
 #[test]
@@ -187,12 +304,13 @@ fn empty_who_input_fails_the_typed_input_assertion() -> TestResult {
       Ok(())
     },
     "__run_2",
+    "= world",
   )
 }
 
 #[test]
 fn dropped_matrix_fails_the_context_assertion() -> TestResult {
-  assert_mutation_fails_at(|m| context_root(m, "matrix"), "__run_3")
+  assert_mutation_fails_at(|m| context_root(m, "matrix"), "__run_3", "= alpha")
 }
 
 #[test]
@@ -203,6 +321,7 @@ fn dropped_workflow_and_job_env_fail_the_context_assertion() -> TestResult {
       Ok(())
     },
     "__run_3",
+    "$WORKFLOW_LEVEL",
   )
 }
 
@@ -214,6 +333,7 @@ fn dropped_run_defaults_fail_the_context_assertion() -> TestResult {
       Ok(())
     },
     "__run_3",
+    "basename",
   )
 }
 

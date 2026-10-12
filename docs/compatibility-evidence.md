@@ -180,8 +180,11 @@ These remain `unverified` in the matrix.
 The paired run found two real differences. Per #103's spec, a difference is
 recorded rather than fixed in the evidence PR. It stays in the report under
 `acknowledged`, and it keeps the named matrix rows' `reference` lane
-unverified. An acknowledgement that no longer matches an observed difference
-fails `--verify`, so a fix forces the record to be updated.
+unverified. Each acknowledgement pins the exact step lists it excuses on both lanes, so
+a new divergence in the same job is not covered. `--verify` recomputes every
+difference from those recorded step lists rather than trusting stored
+`equal` flags. An acknowledgement that no longer matches an observed
+difference fails `--verify`, so a fix forces the record to be updated.
 
 1. **`forwarder-cache-service-v2`** (rows `103/S4`, `103/R-cache`).
    - **Cause.** toolu never exports `ACTIONS_CACHE_SERVICE_V2` or

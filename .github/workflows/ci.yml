@@ -21,6 +21,11 @@ jobs:
       # silenced in the source is invisible to the clippy step above — without
       # this, a PR could add #![allow(clippy::unwrap_used)] and go green here
       # while failing ./tools/check.sh all locally.
+      # The evidence-lane capture call site (#103) compiles only with the
+      # non-default `capture` feature, so lint that build too: otherwise a
+      # rename it depends on would stay green here and break the next capture.
+      - name: Clippy (capture feature)
+        run: cargo clippy -p toolu-runner --features capture --all-targets -- -D warnings
       - name: No lint suppressions
         run: ./tools/check.sh no-allow
       # scripts/guardrails/run.sh fails CLOSED (exit 3) when ast-grep is absent,
