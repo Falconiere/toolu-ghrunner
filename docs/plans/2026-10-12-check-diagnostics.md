@@ -175,3 +175,29 @@ Round 1 — Needs changes:
 - Verification: 🟡 should-fix: delivery sequence absent. Added.
 
 Round 2 — Approved: every spec AC maps to a step (jq/comm diff empty); Jev missing-failure 0.27. The residual Jev pick (`gate`, confidence 0.37) is a false positive — AC-11 is defined as `./tools/check.sh all`, which is that step's check.
+
+## Deviations
+
+- CGI guard: hyper-util's `REQUEST_METHOD` check disables **all** proxy
+  variables, not only `HTTP_PROXY` (read in hyper-util 0.1.21
+  `Builder::build`). Spec AC-5 / architecture wording corrected.
+- Default broker probe is `https://broker.actions.githubusercontent.com/health`
+  (live: `/` answers 404, `/health` 200), matching the other health paths.
+- `redact_url` keeps the path only for host-less socket URLs
+  (`unix:///var/run/docker.sock`) so the Docker endpoint stays meaningful.
+- A registration resolved implicitly (not via `--config`) that fails to load
+  also exits 2 — a broken registration is a configuration error, not "no
+  registration".
+- The defaults header carries `RunnerError`'s `config error:` prefix in the
+  reason; the AC-13 assertion matches the real text.
+- **Trust is native ∪ bundled.** The live AC-10 run with an ISRG-only
+  `SSL_CERT_FILE` still verified github.com: `cargo tree -e features -i reqwest`
+  shows `opendal`'s default `rustls-tls` unifying on
+  `rustls-tls-webpki-roots`, and reqwest 0.12.28 adds
+  `webpki_roots::TLS_SERVER_ROOTS` alongside the native anchors. `check` now
+  reports the bundled set, the zero-anchor case no longer claims every TLS
+  probe fails, the bin's manifest names the feature explicitly, and AC-10's
+  narrowed run asserts PASS + the bundled line. (Input for #94: the env vars
+  cannot narrow trust today.)
+- The probe client sends `User-Agent: toolu-runner/<ver> (check)`; without
+  one `api.github.com` answered 403 (live).

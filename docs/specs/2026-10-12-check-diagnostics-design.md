@@ -48,7 +48,7 @@ other hosts derive from `runner_url`. Host derivation mirrors upstream
 | `api` | yes | `https://api.github.com/` | `<scheme>://H/api/v3` |
 | `codeload` | yes | `https://codeload.github.com/_ping` | `<scheme>://codeload.H/_ping`; **skip** when `H` is an IP literal (no subdomain can exist; archives then come from `H`, covered by `api`) |
 | `pipelines` | yes | registration `ServerUrl`, else `https://pipelines.actions.githubusercontent.com/_apis/health` | registration `ServerUrl`, else `<scheme>://H/_services/pipelines/_apis/health` |
-| `broker` | yes | registration `ServerUrlV2`, else `https://broker.actions.githubusercontent.com/` | registration `ServerUrlV2` when non-empty and different from `ServerUrl`, else **skip** (GHES V1 has no broker) |
+| `broker` | yes | registration `ServerUrlV2`, else `https://broker.actions.githubusercontent.com/health` | registration `ServerUrlV2` when non-empty and different from `ServerUrl`, else **skip** (GHES V1 has no broker) |
 | `token` | yes | registration `AuthorizationUrl`, else `https://vstoken.actions.githubusercontent.com/_apis/health` | registration `AuthorizationUrl`, else `<scheme>://H/_services/vstoken/_apis/health` |
 | `results` | yes | `https://results-receiver.actions.githubusercontent.com/health` | **skip** (no Results service on GHES, as upstream) |
 | `node-dist` | no | `https://nodejs.org/dist/` (where the runner downloads Node runtimes) | same |
@@ -84,12 +84,15 @@ A missing binary prints `not found on PATH` and the capability it limits.
   `ALL_PROXY`/`all_proxy`, `NO_PROXY`/`no_proxy`, first-set wins in that
   upper→lower order (hyper-util `Matcher::from_system`, which reqwest 0.12.28
   uses regardless of its `system-proxy` feature). `REQUEST_METHOD` set (CGI)
-  is reported because `HTTP_PROXY` is then ignored.
+  is reported because hyper-util then ignores **every** proxy variable.
 - TLS trust: `SSL_CERT_FILE`, `SSL_CERT_DIR` (when either is set
   rustls-native-certs 0.8 loads **only** those, replacing the platform store),
   the count of trust anchors and load errors from
   `rustls_native_certs::load_native_certs()` (the same call reqwest makes),
   and `NODE_EXTRA_CA_CERTS` (seen by Node steps, which inherit the runner env).
+  reqwest is built with `rustls-tls-webpki-roots` as well (unified on by
+  `opendal`, declared explicitly in the bin), so the compiled-in Mozilla
+  roots are always trusted on top; the report says so.
 - Redaction: a proxy URL prints as `scheme://***@host:port` when it carries
   userinfo, with path/query dropped; an unparseable value prints
   `<set, unparseable — value hidden>`. Every printed line also passes through
@@ -174,9 +177,9 @@ before probing (bad `--url`, explicit `--config` that cannot load, invalid
 - **`--url` invalid / non-http(s) scheme:** exit 2.
 - **Tool missing / hangs / non-zero exit:** WARN with the reason; never
   changes the exit code; hung subprocess killed at the timeout.
-- **`SSL_CERT_FILE` points at a missing or empty file:** WARN with
-  rustls-native-certs' error and "0 anchors — TLS to every host will fail";
-  the HTTP probes then show the real TLS failures.
+- **`SSL_CERT_FILE` points at a missing or empty file:** rustls-native-certs'
+  error and "0 loaded — only the bundled roots remain; a private CA will
+  fail"; public hosts still verify against the bundled Mozilla set.
 - **Concurrent with a running `run`:** safe — no lock, no writes.
 
 ## Acceptance criteria
@@ -206,7 +209,8 @@ before probing (bad `--url`, explicit `--config` that cannot load, invalid
   requests directly and the proxy receives none. Given a proxy that answers
   `407 Proxy Authentication Required`, the probes report `FAIL` with the
   `proxy` class and `check` exits 1. With `REQUEST_METHOD` set, the proxy
-  section states that `HTTP_PROXY` is ignored (CGI guard).
+  section states that every proxy variable is ignored (CGI guard) and the
+  target is reached directly.
 - **AC-6:** Given `SSL_CERT_FILE` set to a committed real PEM CA certificate,
   the report shows that path, notes it replaces the platform store and shows
   `1 loaded`; given a missing path it shows the load error and `0 loaded`.
@@ -249,8 +253,9 @@ before probing (bad `--url`, explicit `--config` that cannot load, invalid
 - **AC-10:** Live: `check` against real github.com from a networked host
   passes `api`, `codeload`, `pipelines`, `broker`, `token`, `results` with the
   real HTTP statuses; re-run with `SSL_CERT_FILE` set to the single committed
-  ISRG root, the github.com probes FAIL with the `tls` class (the CA setting
-  is effective and fails closed).
+  ISRG root, the report shows `1 loaded` plus the always-trusted bundled
+  Mozilla set, and the github.com probes still PASS — the live run proved the
+  compiled-in webpki roots cannot be removed (see Deviations in the plan).
 - **AC-11:** `./tools/check.sh all` is green.
 
 ## Acceptance evidence
@@ -269,7 +274,7 @@ before probing (bad `--url`, explicit `--config` that cannot load, invalid
 | AC-8 | empty temp home; temp registration dir | dir listing unchanged; only GET recorded | asserted in `healthy_ghes_target` / `configured_registration_endpoints` |
 | AC-9 | bad args; registration with a garbage `jit_config` | exit 2 / clap usage; garbage value absent from output | `… check_cmd_test usage_errors_exit_2` |
 | AC-12 | axum route answering 401 on the token path | `PASS … HTTP 401`, exit 0 | `… check_cmd_test unauthenticated_401_is_reachable` |
-| AC-10 | real github.com; ISRG-only `SSL_CERT_FILE` | PASS lines with statuses; `tls` FAILs with the narrowed trust | `cargo test -p toolu-runner --features live --test check_cmd_test -- --ignored live_github_com` (run manually, output recorded in the PR; network-dependent so outside the hermetic gate) |
+| AC-10 | real github.com; ISRG-only `SSL_CERT_FILE` | PASS lines with statuses; narrowed bundle still PASSes and the report names the bundled roots | `cargo test -p toolu-runner --features live --test check_cmd_test -- --ignored live_github_com` (run manually, output recorded in the PR; network-dependent so outside the hermetic gate) |
 | AC-11 | repo | green | `./tools/check.sh all` |
 
 Pure unit coverage (bin crate, `src/tests/`): endpoint derivation for

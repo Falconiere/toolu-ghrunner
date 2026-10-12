@@ -63,7 +63,7 @@ toolu-ghrunner/                            workspace root
     │   └── log_uploader/                  per-step + combined job-log upload
     └── toolu-runner/                      bin only (the CLI)
         ├── src/main.rs                    dispatch + the inline remove handler
-        ├── src/cli.rs                     clap surface: register / run / boot / remove / status / install-service / login / logout / create-app
+        ├── src/cli.rs                     clap surface: register / run / boot / remove / status / install-service / login / logout / create-app / check
         ├── src/register_cmd.rs            register + remint_and_persist (per-repo persist, config rollback)
         ├── src/run_cmd.rs                 the always-online run loop (re-mint after each job)
         ├── src/boot_cmd.rs                zero-config one-shot container mode (env-driven, no persisted state)
@@ -71,6 +71,7 @@ toolu-ghrunner/                            workspace root
         ├── src/login_cmd.rs               login / logout (device flow)
         ├── src/status_cmd.rs              status (no network)
         ├── src/create_app_cmd.rs          create-app (GitHub App Manifest onboarding)
+        ├── src/check_*.rs                 check: read-only preflight (endpoints, tools, proxy/CA; exit 0/1/2)
         └── tests/                         integration tests across the whole graph
 ```
 

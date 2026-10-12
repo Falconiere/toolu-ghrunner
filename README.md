@@ -145,8 +145,54 @@ non-interactive runs fail, listing those three options).
 
 `login` / `logout` manage the stored token per host — they take a
 hostname, not `--config`. `status` prints local state — including login
-— without touching the network. `remove` unregisters. That's the whole
-CLI.
+— without touching the network. `remove` unregisters. `check` is the
+preflight (below). That's the whole CLI.
+
+### Preflight: `toolu-runner check`
+
+`check` answers "can this host run jobs?" — the equivalent of the official
+runner's `run.sh --check`. It is read-only: no lock, no registration, no
+session, no credentials sent.
+
+```sh
+toolu-runner check                                 # the resolved registration, else github.com
+toolu-runner check --url https://ghes.example.com  # a GHES instance, before registering
+toolu-runner check --timeout 30                    # per-probe bound in seconds (1–300, default 10)
+```
+
+- **Network (required):** `api`, `codeload`, `pipelines`, `broker`, `token`
+  and `results` — a registration's own JIT endpoints (`ServerUrl`,
+  `ServerUrlV2`, the OAuth `AuthorizationUrl`) when one resolves, else the
+  official runner's defaults for github.com / GHE.com
+  (`api.github.com`, `codeload.github.com/_ping`,
+  `*.actions.githubusercontent.com` health paths) or GHES (`/api/v3`,
+  `/_services/{pipelines,vstoken}/_apis/health`; no broker or Results
+  service on GHES). Any HTTP answer counts as reachable — a broker or token
+  URL legitimately answers 401/404 without credentials — except
+  `407 Proxy Authentication Required`. Failures are classified (`timeout`,
+  `dns`, `tls`, `connect`, `proxy`) with a hint.
+- **Network (optional):** `node-dist` (`nodejs.org`, where the runner
+  downloads Node for JavaScript actions).
+- **Tools (optional — only ever warn):** `git --version`, `docker version`
+  (client, daemon, and the endpoint the runner uses: `DOCKER_HOST`, else
+  `unix:///var/run/docker.sock`), `node --version` plus the runtimes cached
+  under the registration's `data_dir/node/`.
+- **Proxy / TLS trust:** the variables the runner's HTTP clients honour —
+  `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, `NO_PROXY` (upper case before
+  lower; `REQUEST_METHOD` set disables them all), `SSL_CERT_FILE` /
+  `SSL_CERT_DIR` (when set they **replace** the platform trust store) with
+  the loaded anchor count, and `NODE_EXTRA_CA_CERTS`. The runner's HTTP
+  clients also always trust the compiled-in Mozilla root set
+  (webpki-roots), so these variables can **add** a private or intercepting
+  CA but cannot narrow trust. Proxy and
+  `DOCKER_HOST` credentials print as `***`. Dedicated proxy/CA configuration
+  is tracked in #94; today these environment variables are the interface.
+
+| Exit | Meaning |
+|---|---|
+| `0` | Every applicable required endpoint answered (optional warnings allowed). |
+| `1` | At least one required endpoint failed. |
+| `2` | Usage or configuration error before probing (bad `--url`/`--timeout`, an unloadable `--config` or JIT config). |
 
 ### CLI flags reference
 
@@ -161,9 +207,11 @@ CLI.
 | `--once` | `run` | Run a single job, then exit. The default is to stay online — after each job `run` re-mints a fresh JIT config with the stored `login` token and keeps listening. |
 | `--print` / `--no-activate` / `--remove` | `install-service` | Print the unit without writing it / write it but don't activate / deactivate and delete it (idempotent). |
 | `--force` | `remove` | Cancel an in-flight run before unregistering. |
+| `--url <URL>` | `check` | Probe this GitHub host's endpoints instead of the resolved registration's. |
+| `--timeout <SECS>` | `check` | Per-probe bound, 1–300 seconds (default 10). |
 | `--client-id <ID>` | `login` | OAuth App client id for the device flow (fallback: `TOOLU_RUNNER_CLIENT_ID`). Needed until the built-in github.com App ships; always needed for GHES. |
 
-`register`, `run`, `remove`, `status`, and `install-service`
+`register`, `run`, `remove`, `status`, `install-service`, and `check`
 also take `--config <FILE>`; when omitted, the config resolves to the cwd-inferred
 `runners/<owner>/<repo>/config.toml` under the runner home, else the
 sole existing registration. Every command documents itself in full:
@@ -663,7 +711,8 @@ new host.
 | `ephemeral runner … finished its job, but unregistering it on GitHub failed` (exit 2) | The job ran; fix the token or connectivity, then `toolu-runner remove` to finish the cleanup. |
 | `… is an ephemeral registration … a service unit restarts run forever` | `install-service` does not supervise one-job registrations; register without `--ephemeral`, or start `run` from a one-shot supervisor. |
 | `another run is in flight` | Another `run` holds this repo's `.lock`; its PID is in the error. Wait it out, or stop the holder with `kill -INT <pid>`. |
-| `generate-jitconfig` fails with a network error | A firewall is blocking `api.github.com` (github.com) or the GHES host. |
+| `generate-jitconfig` fails with a network error | A firewall is blocking `api.github.com` (github.com) or the GHES host. Run `toolu-runner check` to see which hosts fail and why. |
+| `run` hangs or fails before any job | Run `toolu-runner check`: it names the unreachable GitHub service, the failure class (`dns`/`tls`/`proxy`/…), and the proxy / CA settings in effect. |
 | `warning: ignoring yamless env var ...` | A stale `YAMLESS_*` var is in your shell rc. Remove it. |
 
 ## Development

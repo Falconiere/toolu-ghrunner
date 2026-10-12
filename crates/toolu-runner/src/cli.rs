@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use clap::{Args, Parser, Subcommand, ValueHint};
 
-use crate::login_cmd;
+use crate::{check_cmd, login_cmd};
 
 /// Extended help footer for the top-level `--help`.
 const TOP_AFTER_HELP: &str = "\
@@ -18,6 +18,7 @@ Examples:
   toolu-runner login                # one-time GitHub OAuth device-flow login
   toolu-runner register             # repo inferred from the cwd git remote
   toolu-runner run                  # poll for the job, execute it, exit
+  toolu-runner check                # preflight: GitHub reachability, tools, proxy/CA
 
 Environment:
   TOOLU_RUNNER_TOKEN           GitHub bearer for `register` (flag > env > stored login token)
@@ -180,6 +181,16 @@ pub(crate) enum Command {
   /// and exits with a code reflecting the job outcome. See `--help` for
   /// the full env contract and exit-code mapping.
   Boot(BootArgs),
+  /// Preflight: can this host reach GitHub and run jobs? (read-only)
+  ///
+  /// Probes the API, codeload, pipelines, broker, token and results hosts
+  /// the runner needs (the resolved registration's own endpoints when one
+  /// exists, else `--url`, else github.com), each bounded by `--timeout`,
+  /// and reports git / Docker / Node availability plus the effective proxy
+  /// and TLS-trust settings with credentials redacted. Never takes the job
+  /// lock, registers, or opens a session. Exit 0 = all required probes
+  /// passed, 1 = a required probe failed, 2 = usage/config error.
+  Check(check_cmd::CheckArgs),
 }
 
 /// Arguments for the `create-app` subcommand.

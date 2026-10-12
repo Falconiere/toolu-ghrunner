@@ -1440,3 +1440,77 @@ mount, and `runner.workspace` stays a host path there (upstream mounts `_work`
 at `/__w`). Upstream `UpdateRepositoryDirectory` (`internal-set-repo-path`)
 is not implemented. Workspaces of a removed registration are never pruned by
 other registrations.
+
+## `check` diagnostics subcommand (#93)
+
+`toolu-runner check`, the read-only preflight equivalent to upstream
+`run.sh --check` (pinned `cab9d1c`: `src/Runner.Listener/Checks/ActionsCheck.cs`,
+`InternetCheck.cs`, `GitCheck.cs`, `NodeJsCheck.cs`). Spec:
+`docs/specs/2026-10-12-check-diagnostics-design.md`.
+
+Every hermetic test runs the compiled binary against real loopback sockets
+(`tests/helpers/check_servers.rs`: a raw-TCP peer acting as an HTTP target,
+a forward proxy, a CONNECT proxy, a 407 proxy, or a peer that never
+answers) and asserts on the request heads those sockets actually received.
+The registration case uses the committed GHES JIT fixture with its service
+URLs rewritten to the local peer. Tool lines are compared with the output
+of the same real `git` / `docker` / `node` binaries.
+
+| Criterion / scenario | Real input and production path | Expected result | Runnable check |
+| --- | --- | --- | --- |
+| AC-1, 93-S1 healthy GHES | `--url http://127.0.0.1:<port>` against a recording peer | `PASS` api / pipelines / token (`/api/v3`, `/_services/{pipelines,vstoken}/_apis/health`), `SKIP` codeload (IP literal), broker (V1), results (GHES); exactly those three GETs; exit 0 | `cargo test -p toolu-runner --test check_cmd_test healthy_ghes_target_passes_and_stays_read_only` |
+| AC-2, 93-S2 effective hosts | Registration whose JIT `ServerUrl` / `ServerUrlV2` / `AuthorizationUrl` point at distinct local paths, resolved like `run` | the peer receives GETs for exactly the configured paths; header names the registration | `configured_registration_endpoints_are_probed_while_run_holds_the_lock` |
+| AC-3, 93-S2 hanging endpoint | Peer that accepts and never answers, `--timeout 1` | `FAIL … timeout`, finishes < 10 s, exit 1 | `hanging_endpoint_is_bounded_by_the_timeout` |
+| AC-4, 93-S2 DNS / connect / TLS | `toolu-check.invalid`, a closed port, `https://` to a plaintext peer | `dns:` / `connect:` / `tls:` FAILs with hints, exit 1 | `dns_refused_and_tls_failures_are_classified` |
+| AC-5, 93-S3 authenticated proxy | `HTTP_PROXY=http://user:<secret>@…` to a recording proxy; `NO_PROXY`; a 407 proxy; `REQUEST_METHOD` | proxy receives absolute-form GETs with the Basic `Proxy-Authorization`, target none; `***@` redaction, secret absent from stdout/stderr; `NO_PROXY` and the CGI guard go direct; 407 → `proxy:` FAIL exit 1 | `authenticated_proxy_is_used_and_redacted`, `no_proxy_bypasses_the_proxy`, `proxy_407_fails_the_check`, `cgi_guard_disables_the_proxy_and_is_reported` |
+| AC-6, 93-S3 custom CA | `SSL_CERT_FILE` = committed public ISRG Root X1 (`tests/fixtures/check/isrg-root-x1.pem`); a missing path; `NODE_EXTRA_CA_CERTS` | path + "replaces the platform store", `1 loaded`; missing → `0 loaded, 1 errors` + load error; the Node variable echoed | `ssl_cert_file_and_node_extra_ca_certs_are_reported` |
+| AC-7, 93-S1 tools | The host's real git / docker / node; empty `PATH`; a `git` that `exec sleep 30`s; `DOCKER_HOST` at an absent socket and with userinfo | exact real versions; `not found on PATH` with exit 0; `timed out after 2 s` within the bound; `daemon unreachable` + endpoint; `tcp://***@…`, secret absent | `cargo test -p toolu-runner --test check_tools_test` |
+| AC-8, 93-S3 read-only | Empty `TOOLU_RUNNER_HOME`; registration dir with its `.lock` held (fs2 exclusive, as a live `run`) | home stays empty; dir listing unchanged; only `GET`s seen | asserted in AC-1 / AC-2 / AC-13 tests |
+| AC-9 | `--url ftp://…`, `--timeout 0`, missing `--config`, `--url` + `--config`, a garbage `jit_config` | exit 2, nothing probed, the garbage never echoed | `usage_and_config_errors_exit_2` |
+| AC-10, live | Real github.com / `*.actions.githubusercontent.com` (table below) | six required PASS; ISRG-only `SSL_CERT_FILE` still PASSes and reports the bundled roots | `cargo test -p toolu-runner --features live --test check_cmd_test -- --ignored live_github_com` |
+| AC-12, 93-S2 auth | Token path answering 401 | `PASS … HTTP 401`, exit 0 (credentials are never sent or checked) | `unauthenticated_401_is_reachable` |
+| AC-13 defaults | Empty home, non-repo cwd, `HTTPS_PROXY` = a CONNECT-recording proxy answering 502 | header `defaults: …no runner registration found…`; CONNECTs to exactly the six github.com service hosts + `nodejs.org`; exit 1; no traffic leaves the host | `defaults_target_the_github_com_hosts` |
+| AC-11 | Whole workspace | green | `./tools/check.sh all` |
+
+Pure units (bin crate, `src/tests/check_{env,endpoints,report}.rs`): URL
+redaction and credential extraction (schemeless, percent-encoded,
+unparseable), hyper-util's proxy precedence and ALL_PROXY fallback, the host
+table for github.com / GHE.com / GHES / IP literals / registrations, and the
+exit-code aggregation — `cargo test -p toolu-runner --bin toolu-runner check_`.
+
+**Live lane (github.com, 2026-10-12, Linux X64, this worktree's debug
+binary).** `toolu-runner check --url https://github.com` → exit 0:
+
+| Probe | URL | Status |
+| --- | --- | --- |
+| api | `https://api.github.com/` | 200 |
+| codeload | `https://codeload.github.com/_ping` | 200 |
+| pipelines | `https://pipelines.actions.githubusercontent.com/_apis/health` | 200 |
+| broker | `https://broker.actions.githubusercontent.com/health` | 200 |
+| token | `https://vstoken.actions.githubusercontent.com/_apis/health` | 200 |
+| results | `https://results-receiver.actions.githubusercontent.com/health` | 200 |
+| node-dist (optional) | `https://nodejs.org/dist/` | 200 |
+
+git 2.53.0, docker 29.1.3 (CLI and daemon), node v24.21.0 all `OK`; 122
+platform trust anchors. Before the User-Agent fix `api` answered 403.
+
+**Finding: trust cannot be narrowed.** Re-running with `SSL_CERT_FILE` set
+to the ISRG-only bundle still verified github.com (Sectigo-issued). `cargo
+tree -e features -i reqwest` shows `opendal`'s default `rustls-tls`
+unifying `rustls-tls-webpki-roots` into every reqwest client, and reqwest
+adds `webpki_roots::TLS_SERVER_ROOTS` next to the native anchors. `check`
+reports this ("bundled … always trusted too"), the bin now names the
+feature explicitly, and the environment variables can add a private CA but
+not remove trust — recorded as input for #94.
+
+**Differences and unverified.** No credentials are sent (upstream sends the
+`--pat`), so a reachable endpoint passes on any status but 407; upstream's
+POST to pipelines, `git ls-remote` and Node HTTPS round trips are not
+replicated (spec Non-Goal 4). GHES: derivation verified against local peers
+only — no GHES server is available, **unverified** live; the `codeload.<host>`
+probe follows upstream and can falsely fail on a GHES without subdomain
+isolation. macOS: CI runs the hermetic suites on `macos-14` (no docker CLI
+there, so `unreachable_docker_daemon_warns_with_the_endpoint` prints
+`UNVERIFIED` and returns); the live lane ran on Linux only — macOS live is
+**unverified**. No official-runner comparison run was made; parity is with
+the pinned upstream source.

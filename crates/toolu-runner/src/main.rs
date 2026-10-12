@@ -5,7 +5,8 @@
 //! listener until SIGINT/SIGTERM), `boot` (env-driven, zero-config
 //! one-shot mode for the container image — no persisted state), `remove`
 //! (delete state or write `.pending_remove` mid-job), `status` (print
-//! config, no network).
+//! config, no network), `check` (read-only connectivity / tools / proxy
+//! preflight).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -22,6 +23,12 @@ use shared::startup;
 use shared::{MaskerRedactor, SecretMasker};
 
 mod boot_cmd;
+mod check_cmd;
+mod check_endpoints;
+mod check_env;
+mod check_probe;
+mod check_report;
+mod check_tools;
 mod cli;
 mod config;
 mod create_app_cmd;
@@ -45,6 +52,13 @@ async fn main() {
   if matches!(cli.command, Command::Boot(_)) {
     std::process::exit(boot_cmd::cmd_boot().await);
   }
+  // `check` likewise owns its exit codes (0 / 1 required failure / 2 usage).
+  let cli = match cli {
+    Cli {
+      command: Command::Check(args),
+    } => std::process::exit(check_cmd::cmd_check(args).await),
+    other => other,
+  };
   let exit_code = match Box::pin(run(cli)).await {
     Ok(()) => 0,
     Err(err) => {
@@ -71,7 +85,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
       create_app_cmd::cmd_create_app(&args, &home).await
     },
     // Intercepted in `main` before `run` is called (see above).
-    Command::Boot(_) => Ok(()),
+    Command::Boot(_) | Command::Check(_) => Ok(()),
   }
 }
 
