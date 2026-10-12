@@ -5,6 +5,7 @@ import copy
 import importlib
 import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -82,6 +83,17 @@ class RejectionTest(unittest.TestCase):
         gate_row(m)["lanes"]["github-com"] = {"status": "passed",
                                               "evidence": "report:docs/compat-reference-103.json"}
         self.assert_rejected(m, "'report:' evidence only backs the reference lane")
+
+    def test_invalid_listed_report(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".json", dir=check.ROOT / "docs",
+                                         delete=False) as bad:
+            bad.write("{not json")
+        try:
+            m = copy.deepcopy(MATRIX)
+            m["reports"] = [str(Path(bad.name).relative_to(check.ROOT))]
+            self.assert_rejected(m, "is not valid JSON")
+        finally:
+            Path(bad.name).unlink()
 
     def test_missing_listed_report(self):
         m = copy.deepcopy(MATRIX)

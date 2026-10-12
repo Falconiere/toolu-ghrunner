@@ -9,7 +9,9 @@
 //! must pass) and then the same capture with exactly ONE section removed or
 //! emptied (the named assertion step must fail, or the observable must change).
 //! A helper that hand-builds contexts cannot satisfy this: the section is
-//! dropped from the wire message itself.
+//! dropped from the wire message itself. `job_outputs_message.json` (the #70
+//! capture, a single `GITHUB_OUTPUT` step) is a second, independent witness for
+//! the dropped-`jobOutputs` case.
 //!
 //! To prove a mutation fails for the right reason, every captured `test …`
 //! assertion line is rewritten to `test … || (echo ASSERT_FAILED_<n>; exit 1)`.

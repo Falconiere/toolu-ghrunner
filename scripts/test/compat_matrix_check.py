@@ -216,7 +216,11 @@ def load_reports(matrix, errors):
         if not file.is_file():
             errors.append(f"listed report {path} does not exist")
             continue
-        data = json.loads(file.read_text())
+        try:
+            data = json.loads(file.read_text())
+        except json.JSONDecodeError as error:
+            errors.append(f"listed report {path} is not valid JSON: {error}")
+            continue
         rows = {r for ack in data.get("acknowledged", []) for r in ack.get("matrix_rows", [])}
         reports[path] = {"data": data, "unverified_rows": rows}
     return reports
@@ -354,7 +358,10 @@ def main(argv=None):
     if args.extract_ids:
         print(json.dumps({str(n): extract_ids(n) for n in args.extract_ids}, indent=2))
         return 0
-    matrix = json.loads(MATRIX.read_text())
+    try:
+        matrix = json.loads(MATRIX.read_text())
+    except (OSError, json.JSONDecodeError) as error:
+        sys.exit(f"{MATRIX}: cannot read JSON: {error}")
     if args.write:
         MARKDOWN.write_text(render(matrix))
         print(f"wrote {MARKDOWN.relative_to(ROOT)}")
