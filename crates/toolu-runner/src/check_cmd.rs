@@ -5,6 +5,7 @@
 //! aggregate code. Never takes the job lock, writes a file, opens a session
 //! or registers anything.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -106,16 +107,18 @@ fn resolve_target(args: &CheckArgs) -> Result<Target, String> {
   }
 }
 
-/// Probe every endpoint concurrently; skipped ones carry no outcome.
+/// Probe every endpoint concurrently; skipped ones carry no outcome. A probe
+/// task that dies is recorded as a failure naming its endpoint.
 async fn probe_endpoints(endpoints: Vec<Endpoint>, timeout: Duration) -> Vec<EndpointResult> {
   let client = build_client(timeout);
   let mut set = JoinSet::new();
+  let mut task_index = HashMap::new();
   for (index, endpoint) in endpoints.iter().enumerate() {
     let Probe::Get(url) = endpoint.probe.clone() else {
       continue;
     };
     let client = client.clone();
-    set.spawn(async move {
+    let handle = set.spawn(async move {
       let outcome = match client {
         Ok(client) => probe_http(&client, &url).await,
         Err(detail) => ProbeOutcome::Failed {
@@ -125,16 +128,28 @@ async fn probe_endpoints(endpoints: Vec<Endpoint>, timeout: Duration) -> Vec<End
       };
       (index, outcome)
     });
+    task_index.insert(handle.id(), index);
   }
   let mut outcomes = vec![None; endpoints.len()];
-  while let Some(joined) = set.join_next().await {
-    match joined {
-      Ok((index, outcome)) => {
-        if let Some(slot) = outcomes.get_mut(index) {
-          *slot = Some(outcome);
-        }
+  while let Some(joined) = set.join_next_with_id().await {
+    let (index, outcome) = match joined {
+      Ok((_, settled)) => settled,
+      Err(error) => {
+        let Some(&index) = task_index.get(&error.id()) else {
+          eprintln!("toolu-runner: an unknown check probe task failed: {error}");
+          continue;
+        };
+        let name = endpoints.get(index).map_or("?", |endpoint| endpoint.name);
+        eprintln!("toolu-runner: check probe `{name}` failed: {error}");
+        let outcome = ProbeOutcome::Failed {
+          kind: FailureKind::Other,
+          detail: format!("probe task failed: {error}"),
+        };
+        (index, outcome)
       },
-      Err(error) => eprintln!("toolu-runner: check probe task failed: {error}"),
+    };
+    if let Some(slot) = outcomes.get_mut(index) {
+      *slot = Some(outcome);
     }
   }
   endpoints
@@ -176,12 +191,15 @@ pub(crate) async fn cmd_check(args: CheckArgs) -> i32 {
     probe_docker(timeout),
     probe_node(timeout, target.data_dir.as_deref()),
   );
-  let trust = trust.await.unwrap_or_else(|error| TrustReport {
-    cert_file: config::ssl_cert_file(),
-    cert_dir: config::ssl_cert_dir(),
-    node_extra_ca_certs: config::node_extra_ca_certs(),
-    anchors: 0,
-    errors: vec![format!("trust store load panicked: {error}")],
+  let trust = trust.await.unwrap_or_else(|error| {
+    eprintln!("toolu-runner: trust store load failed: {error}");
+    TrustReport {
+      cert_file: config::ssl_cert_file(),
+      cert_dir: config::ssl_cert_dir(),
+      node_extra_ca_certs: config::node_extra_ca_certs(),
+      anchors: 0,
+      errors: vec![format!("trust store load failed: {error}")],
+    }
   });
   let report = Report {
     target: format!(

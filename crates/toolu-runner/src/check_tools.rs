@@ -136,11 +136,12 @@ pub(crate) async fn probe_node(timeout: Duration, data_dir: Option<&Path>) -> To
   )
   .await;
   if let Some(dir) = data_dir {
-    report.summary = format!(
-      "{}  cached runtimes: {}",
-      report.summary,
-      cached_runtimes(dir)
-    );
+    // `read_dir` blocks; keep it off the async workers.
+    let dir = dir.to_path_buf();
+    let cached = tokio::task::spawn_blocking(move || cached_runtimes(&dir))
+      .await
+      .unwrap_or_else(|error| format!("unknown ({error})"));
+    report.summary = format!("{}  cached runtimes: {cached}", report.summary);
   }
   report
 }
@@ -183,6 +184,13 @@ pub(crate) async fn probe_docker(timeout: Duration) -> ToolReport {
   };
   let missing = "container jobs, service containers and Docker actions are unavailable";
   let mut report = match run("docker", &["version", "--format", format], timeout).await {
+    Ok(ran) if ran.success && !ran.stdout.contains('|') => warn(
+      "docker",
+      format!(
+        "unexpected `docker version` output: {}",
+        first_line(&ran.stdout)
+      ),
+    ),
     Ok(ran) => {
       let (client, server) = ran
         .stdout

@@ -172,3 +172,33 @@ fn docker_host_credentials_are_redacted() -> TestResult {
   );
   Ok(())
 }
+
+#[cfg(unix)]
+#[test]
+fn docker_output_without_the_version_separator_warns() -> TestResult {
+  use std::os::unix::fs::PermissionsExt;
+  let home = tempfile::tempdir()?;
+  let shim = tempfile::tempdir()?;
+  let docker = shim.path().join("docker");
+  // An old or wrapped CLI that ignores `--format` and prints prose.
+  std::fs::write(
+    &docker,
+    "#!/bin/sh\necho 'Docker version 1.13.1, build 092cba3'\n",
+  )?;
+  std::fs::set_permissions(&docker, std::fs::Permissions::from_mode(0o755))?;
+  let target = healthy()?;
+  let base = format!("http://127.0.0.1:{}", target.port());
+  let (code, stdout, _, _) = run(
+    check_cmd(home.path())?
+      .env("PATH", format!("{}:/usr/bin:/bin", shim.path().display()))
+      .args(["--url", &base, "--timeout", "5"]),
+  )?;
+  assert_eq!(code, Some(0), "{stdout}");
+  assert!(
+    stdout.contains(
+      "  WARN  docker     unexpected `docker version` output: Docker version 1.13.1, build 092cba3"
+    ),
+    "{stdout}"
+  );
+  Ok(())
+}

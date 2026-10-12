@@ -48,12 +48,12 @@ impl Recorder {
   }
 
   /// Every request head received so far (request line + headers).
+  /// A poisoned lock still yields what was recorded, never an empty list.
   pub fn heads(&self) -> Vec<String> {
-    self
-      .heads
-      .lock()
-      .map(|heads| heads.clone())
-      .unwrap_or_default()
+    match self.heads.lock() {
+      Ok(heads) => heads.clone(),
+      Err(poisoned) => poisoned.into_inner().clone(),
+    }
   }
 
   /// Just the request lines (`GET /path HTTP/1.1`).
@@ -75,7 +75,7 @@ fn serve(mut stream: TcpStream, sink: &Mutex<Vec<String>>, respond: Respond) {
   while !buf.windows(4).any(|w| w == b"\r\n\r\n") && buf.len() < 65_536 {
     match stream.read(&mut chunk) {
       Ok(0) | Err(_) => break,
-      Ok(n) => buf.extend_from_slice(chunk.get(..n).unwrap_or_default()),
+      Ok(n) => buf.extend(chunk.iter().take(n)),
     }
   }
   let head = String::from_utf8_lossy(&buf).into_owned();
