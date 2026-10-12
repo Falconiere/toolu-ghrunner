@@ -1,8 +1,10 @@
 //! Tests for `container_mounts`: the operator's `TOOLU_RUNNER_NODE_DIR` is
 //! bind-mounted read-only at `/github/externals` and translates a preseeded
-//! runtime path; a missing directory is neither created nor mounted.
+//! runtime path; a missing directory is neither created nor mounted; a mount
+//! source that cannot be made absolute fails naming the path.
 
-use super::ContainerMounts;
+use super::{ContainerMounts, mount};
+use crate::docker::path_translator::PathTranslator;
 use shared::RunnerConfig;
 use std::path::{Path, PathBuf};
 
@@ -61,5 +63,22 @@ fn a_missing_preseed_dir_is_not_created_or_mounted() -> TestResult {
     "{:?}",
     mounts.volumes
   );
+  Ok(())
+}
+
+#[test]
+fn an_unresolvable_mount_source_names_the_path_in_the_error() -> TestResult {
+  let mut translator = PathTranslator::new(PathBuf::from("/w"), PathBuf::from("/t"));
+  let mut volumes = Vec::new();
+  let error = mount(&mut translator, &mut volumes, Path::new(""), "/x", true)
+    .err()
+    .ok_or("an empty path cannot be made absolute")?;
+  assert!(
+    error
+      .to_string()
+      .contains("cannot resolve job mount source"),
+    "{error}"
+  );
+  assert!(volumes.is_empty(), "{volumes:?}");
   Ok(())
 }

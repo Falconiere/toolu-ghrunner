@@ -68,7 +68,12 @@ fn mount(
   target: &str,
   readonly: bool,
 ) -> Result<(), RunnerError> {
-  let host = std::path::absolute(host)?;
+  let host = std::path::absolute(host).map_err(|e| {
+    RunnerError::Docker(format!(
+      "cannot resolve job mount source {}: {e}",
+      host.display()
+    ))
+  })?;
   if host.to_string_lossy().contains(':') {
     return Err(RunnerError::Docker(
       "job mount source paths cannot contain ':'".to_owned(),

@@ -31,18 +31,22 @@ const GLIBC_X64: NodeTarget = NodeTarget {
 };
 
 /// The host's real `node` on `PATH` and its major (a host without one fails).
-fn host_node() -> Result<(PathBuf, u8), Box<dyn std::error::Error>> {
-  let path = std::env::var_os("PATH").ok_or("PATH unset")?;
+async fn host_node() -> Result<(PathBuf, u8), Box<dyn std::error::Error>> {
+  let path = std::env::var_os("PATH").ok_or("PATH environment variable is not set")?;
   let node = std::env::split_paths(&path)
     .map(|dir| dir.join("node"))
     .find(|candidate| candidate.is_file())
     .ok_or("no `node` on PATH; the runtime tests need a real Node.js")?;
   // The installed binary, not a version-manager shim or symlink, so its
   // companion libraries can be found next to it.
-  let node = std::fs::canonicalize(node)?;
-  let output = std::process::Command::new(&node)
+  let node = tokio::fs::canonicalize(&node)
+    .await
+    .map_err(|e| format!("canonicalize {}: {e}", node.display()))?;
+  let output = tokio::process::Command::new(&node)
     .arg("--version")
-    .output()?;
+    .output()
+    .await
+    .map_err(|e| format!("run {} --version: {e}", node.display()))?;
   let version = String::from_utf8(output.stdout)?;
   let major = version
     .trim()
@@ -65,15 +69,15 @@ fn config_for(data_dir: &Path, node_dir: Option<PathBuf>) -> RunnerConfig {
 /// A Node.js runtime tree to install: `bin/node` plus the shared libraries a
 /// dynamically linked build loads relative to it (Homebrew's
 /// `lib/libnode.*.dylib`; nodejs.org builds have none).
-fn node_tree(binary: &Path) -> Result<Vec<(String, PathBuf)>, std::io::Error> {
+async fn node_tree(binary: &Path) -> Result<Vec<(String, PathBuf)>, std::io::Error> {
   let mut files = vec![("bin/node".to_owned(), binary.to_path_buf())];
   let lib = binary
     .parent()
     .and_then(Path::parent)
     .map(|prefix| prefix.join("lib"));
   if let Some(lib) = lib.filter(|lib| lib.is_dir()) {
-    for entry in std::fs::read_dir(lib)? {
-      let entry = entry?;
+    let mut entries = tokio::fs::read_dir(lib).await?;
+    while let Some(entry) = entries.next_entry().await? {
       let name = entry.file_name().to_string_lossy().into_owned();
       if name.starts_with("libnode") {
         files.push((format!("lib/{name}"), entry.path()));
@@ -89,31 +93,38 @@ fn single(binary: &Path) -> Vec<(String, PathBuf)> {
 }
 
 /// A preseed dir holding `files` under `<dir>/<name>/`.
-fn preseed(dir: &Path, name: &str, files: &[(String, PathBuf)]) -> TestResult {
+async fn preseed(dir: &Path, name: &str, files: &[(String, PathBuf)]) -> TestResult {
   for (relative, source) in files {
     let target = dir.join(name).join(relative);
-    std::fs::create_dir_all(target.parent().ok_or("preseed parent")?)?;
-    std::fs::copy(source, target)?;
+    let parent = target
+      .parent()
+      .ok_or_else(|| format!("preseed target {} has no parent", target.display()))?;
+    tokio::fs::create_dir_all(parent)
+      .await
+      .map_err(|e| format!("create {}: {e}", parent.display()))?;
+    tokio::fs::copy(source, &target)
+      .await
+      .map_err(|e| format!("copy {} to {}: {e}", source.display(), target.display()))?;
   }
   Ok(())
 }
 
 /// A real executable that answers `--version` like a Node.js 99 would, so a
 /// rejection is deterministic on every host.
-fn impostor(dir: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
+async fn impostor(dir: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
   let path = dir.join("impostor-node");
-  std::fs::write(&path, "#!/bin/sh\necho v99.0.0\n")?;
+  tokio::fs::write(&path, "#!/bin/sh\necho v99.0.0\n").await?;
   #[cfg(unix)]
   {
     use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))?;
+    tokio::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).await?;
   }
   Ok(path)
 }
 
 /// A gzip tarball (stored blocks, so the real ~100 MB binary packs fast)
 /// holding `files` under `<prefix>`.
-fn tarball_with(
+async fn tarball_with(
   prefix: &str,
   files: &[(String, PathBuf)],
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
@@ -121,7 +132,9 @@ fn tarball_with(
   {
     let mut builder = Builder::new(&mut raw);
     for (relative, source) in files {
-      let body = std::fs::read(source)?;
+      let body = tokio::fs::read(source)
+        .await
+        .map_err(|e| format!("read {}: {e}", source.display()))?;
       let mut header = Header::new_gnu();
       header.set_size(u64::try_from(body.len())?);
       header.set_mode(0o755);
@@ -220,10 +233,15 @@ fn download_urls_follow_each_source_layout() {
 
 #[tokio::test]
 async fn preseed_hit_returns_the_real_node_without_network() -> TestResult {
-  let (node, major) = host_node()?;
+  let (node, major) = host_node().await?;
   let dir = tempfile::tempdir()?;
   let data = tempfile::tempdir()?;
-  preseed(dir.path(), &format!("node{major}"), &node_tree(&node)?)?;
+  preseed(
+    dir.path(),
+    &format!("node{major}"),
+    &node_tree(&node).await?,
+  )
+  .await?;
   let config = config_for(data.path(), Some(dir.path().to_path_buf()));
   let client = reqwest::Client::new();
   let binary =
@@ -262,16 +280,22 @@ async fn preseed_miss_names_the_expected_path_and_never_downloads() -> TestResul
 #[tokio::test]
 #[cfg(unix)]
 async fn preseed_with_the_wrong_major_or_another_version_fails_validation() -> TestResult {
-  let (node, major) = host_node()?;
+  let (node, major) = host_node().await?;
   let other = major.wrapping_add(1);
   let dir = tempfile::tempdir()?;
   let data = tempfile::tempdir()?;
-  preseed(dir.path(), &format!("node{other}"), &node_tree(&node)?)?;
+  preseed(
+    dir.path(),
+    &format!("node{other}"),
+    &node_tree(&node).await?,
+  )
+  .await?;
   preseed(
     dir.path(),
     &format!("node{major}"),
-    &single(&impostor(data.path())?),
-  )?;
+    &single(&impostor(data.path()).await?),
+  )
+  .await?;
   let config = config_for(data.path(), Some(dir.path().to_path_buf()));
   let client = reqwest::Client::new();
   let mislabeled =
@@ -308,9 +332,13 @@ async fn preseed_with_the_wrong_major_or_another_version_fails_validation() -> T
 
 #[tokio::test]
 async fn download_commits_a_real_node_only_after_it_starts() -> TestResult {
-  let (node, major) = host_node()?;
+  let (node, major) = host_node().await?;
   let version = node_version_for(major);
-  let tar = tarball_with(&format!("node-v{version}-linux-x64/"), &node_tree(&node)?)?;
+  let tar = tarball_with(
+    &format!("node-v{version}-linux-x64/"),
+    &node_tree(&node).await?,
+  )
+  .await?;
   let addr = serve(axum::http::StatusCode::OK, tar).await?;
   let (nodejs, alpine) = bases(addr);
   let data = tempfile::tempdir()?;
@@ -329,7 +357,7 @@ async fn download_commits_a_real_node_only_after_it_starts() -> TestResult {
     .arg("--version")
     .output()?;
   assert!(String::from_utf8(output.stdout)?.starts_with(&format!("v{major}.")));
-  assert_eq!(staging_leftovers(data.path())?, Vec::<String>::new());
+  assert_eq!(staging_leftovers(data.path()).await?, Vec::<String>::new());
   Ok(())
 }
 
@@ -339,8 +367,9 @@ async fn a_downloaded_runtime_reporting_another_version_is_never_committed() -> 
   let scratch = tempfile::tempdir()?;
   let tar = tarball_with(
     "node-v20.20.2-linux-x64/",
-    &single(&impostor(scratch.path())?),
-  )?;
+    &single(&impostor(scratch.path()).await?),
+  )
+  .await?;
   let addr = serve(axum::http::StatusCode::OK, tar).await?;
   let (nodejs, alpine) = bases(addr);
   let data = tempfile::tempdir()?;
@@ -367,7 +396,7 @@ async fn a_downloaded_runtime_reporting_another_version_is_never_committed() -> 
     "{message}"
   );
   assert!(!node_cache_dir(data.path(), "20.20.2").exists());
-  assert_eq!(staging_leftovers(data.path())?, Vec::<String>::new());
+  assert_eq!(staging_leftovers(data.path()).await?, Vec::<String>::new());
   Ok(())
 }
 
@@ -376,7 +405,7 @@ async fn container_target_alpine_layout_installs_without_a_host_start_check() ->
   // Container-only targets are not executed on the host, so any binary in
   // the alpine `./` layout commits; the container lane proves it runs.
   let scratch = tempfile::tempdir()?;
-  let tar = tarball_with("./", &single(&impostor(scratch.path())?))?;
+  let tar = tarball_with("./", &single(&impostor(scratch.path()).await?)).await?;
   let addr = serve(axum::http::StatusCode::OK, tar).await?;
   let (nodejs, alpine) = bases(addr);
   let data = tempfile::tempdir()?;
@@ -398,8 +427,8 @@ async fn container_target_alpine_layout_installs_without_a_host_start_check() ->
 
 #[tokio::test]
 async fn http_error_corrupt_and_truncated_bodies_leave_no_cache_dir() -> TestResult {
-  let (node, _) = host_node()?;
-  let real = tarball_with("node-v20.20.2-linux-x64/", &node_tree(&node)?)?;
+  let (node, _) = host_node().await?;
+  let real = tarball_with("node-v20.20.2-linux-x64/", &node_tree(&node).await?).await?;
   let truncated = real
     .get(..real.len() / 2)
     .ok_or("tarball too small")?
@@ -443,7 +472,7 @@ async fn http_error_corrupt_and_truncated_bodies_leave_no_cache_dir() -> TestRes
     assert!(message.contains(expected), "{status}: {message}");
     assert!(!node_cache_dir(data.path(), "20.20.2").exists(), "{status}");
     assert_eq!(
-      staging_leftovers(data.path())?,
+      staging_leftovers(data.path()).await?,
       Vec::<String>::new(),
       "{status}"
     );
@@ -452,16 +481,18 @@ async fn http_error_corrupt_and_truncated_bodies_leave_no_cache_dir() -> TestRes
 }
 
 /// Names under `<data>/node` that look like staging dirs.
-fn staging_leftovers(data: &Path) -> Result<Vec<String>, std::io::Error> {
+async fn staging_leftovers(data: &Path) -> Result<Vec<String>, std::io::Error> {
   let node = data.join("node");
-  if !node.exists() {
+  if !tokio::fs::try_exists(&node).await? {
     return Ok(Vec::new());
   }
-  Ok(
-    std::fs::read_dir(node)?
-      .filter_map(Result::ok)
-      .map(|entry| entry.file_name().to_string_lossy().into_owned())
-      .filter(|name| name.contains(".tmp-"))
-      .collect(),
-  )
+  let mut leftovers = Vec::new();
+  let mut entries = tokio::fs::read_dir(&node).await?;
+  while let Some(entry) = entries.next_entry().await? {
+    let name = entry.file_name().to_string_lossy().into_owned();
+    if name.contains(".tmp-") {
+      leftovers.push(name);
+    }
+  }
+  Ok(leftovers)
 }

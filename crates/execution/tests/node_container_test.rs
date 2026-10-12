@@ -96,8 +96,13 @@ async fn run_in_container(image: &str) -> TestResult<(Option<Conclusion>, Observ
     (conclusion, logs)
   })
   .await?;
-  let observed = std::fs::read_to_string(workspace.join("node-runtime-95.json"))
-    .map_err(|e| format!("action wrote no node-runtime-95.json ({e}); logs: {logs:#?}"))?;
+  let report = workspace.join("node-runtime-95.json");
+  let observed = tokio::fs::read_to_string(&report).await.map_err(|e| {
+    format!(
+      "action wrote no {} ({e}); logs: {logs:#?}",
+      report.display()
+    )
+  })?;
   Ok((conclusion, serde_json::from_str(&observed)?, logs))
 }
 

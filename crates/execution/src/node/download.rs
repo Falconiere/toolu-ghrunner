@@ -230,7 +230,7 @@ fn promote_staging(staging: &Path, dest: &Path) -> Result<(), RunnerError> {
 }
 
 /// Where one runtime install comes from and how it is proven.
-pub(crate) struct Install<'a> {
+pub(super) struct Install<'a> {
   /// Tarball URL.
   pub url: &'a str,
   /// Leading components to strip (see [`extract_tarball`]).
@@ -248,7 +248,7 @@ pub(crate) struct Install<'a> {
 ///
 /// Returns `RunnerError::NodeRuntime` on HTTP, extraction, validation or
 /// commit failures; the staging dir is removed and the cache dir untouched.
-pub(crate) async fn install_runtime(
+pub(super) async fn install_runtime(
   client: &reqwest::Client,
   install: &Install<'_>,
 ) -> Result<(), RunnerError> {
