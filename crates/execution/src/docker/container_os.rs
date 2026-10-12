@@ -16,6 +16,8 @@ use crate::node::platform::{NodeTarget, OS_RELEASE_PROBE, container_target, host
 
 /// Bound for the probe; a hung container must not stall the step forever.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(30);
+/// Lines buffered per probe channel before the exec waits for the reader.
+const PROBE_LINE_BUFFER: usize = 1024;
 
 impl JobContainer {
   /// The Node.js target for actions executed in this container.
@@ -60,9 +62,11 @@ impl JobContainer {
       timeout: None,
       cancel,
     };
-    let (stdout_tx, mut stdout_rx) = mpsc::channel::<String>(64);
+    // Both receivers are polled concurrently with the exec by `join!` below,
+    // so the bounds only apply backpressure; the probe prints a few `ID=` lines.
+    let (stdout_tx, mut stdout_rx) = mpsc::channel::<String>(PROBE_LINE_BUFFER);
     // Probe stderr is not step output: drain and drop it.
-    let (events_tx, mut events_rx) = mpsc::channel(64);
+    let (events_tx, mut events_rx) = mpsc::channel(PROBE_LINE_BUFFER);
     let run = async {
       let conclusion =
         tokio::time::timeout(PROBE_TIMEOUT, self.execute(&exec, &events_tx, stdout_tx)).await;
