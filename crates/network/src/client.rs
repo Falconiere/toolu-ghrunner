@@ -26,7 +26,7 @@ pub const LOOPBACK_BYPASS: [&str; 3] = ["localhost", "127.0.0.1", "::1"];
 /// # Errors
 ///
 /// `RunnerError::Config` for an unusable proxy URL (shown redacted) or a
-/// `ca_bundle` that is relative, unreadable, not a file, or holds no valid
+/// `ca_bundle` that is relative, inaccessible, unreadable, not a file, or holds no valid
 /// PEM certificate — never a silent fallback to default trust.
 pub fn client_builder(cfg: &NetworkConfig) -> Result<ClientBuilder, RunnerError> {
   let mut builder = reqwest::Client::builder();
@@ -212,7 +212,7 @@ fn load_bundle(path: &Path) -> Result<Vec<CertificateDer<'static>>, RunnerError>
   if !path.is_absolute() {
     return Err(fail("must be an absolute path".to_owned()));
   }
-  let meta = std::fs::metadata(path).map_err(|e| fail(format!("cannot read: {e}")))?;
+  let meta = std::fs::metadata(path).map_err(|e| fail(format!("cannot access: {e}")))?;
   if !meta.is_file() {
     return Err(fail("is not a regular file".to_owned()));
   }
@@ -225,7 +225,8 @@ fn load_bundle(path: &Path) -> Result<Vec<CertificateDer<'static>>, RunnerError>
   }
   let mut store = RootCertStore::empty();
   for (index, cert) in certs.iter().enumerate() {
-    store.add(cert.clone()).map_err(|e| {
+    // A borrowed view: `certs` is returned, so no copy is needed here.
+    store.add(CertificateDer::from(cert.as_ref())).map_err(|e| {
       fail(format!(
         "certificate #{} is not a usable CA certificate: {e}",
         index + 1

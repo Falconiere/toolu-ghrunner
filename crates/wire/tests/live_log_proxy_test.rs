@@ -245,7 +245,7 @@ fn live_log_client_fails_closed_on_a_missing_ca_bundle() {
   };
   assert!(
     msg.starts_with(&format!(
-      "[network] ca_bundle {}: cannot read",
+      "[network] ca_bundle {}: cannot access",
       missing.display()
     )),
     "{msg}"

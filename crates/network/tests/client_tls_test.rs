@@ -134,7 +134,7 @@ fn bad_bundles_fail_closed_naming_the_path() -> FixtureResult<()> {
   expect_config_error(&bundle_cfg(Some(relative.clone())), &relative, "absolute");
 
   let missing = d.join("missing.pem");
-  expect_config_error(&bundle_cfg(Some(missing.clone())), &missing, "cannot read");
+  expect_config_error(&bundle_cfg(Some(missing.clone())), &missing, "cannot access");
 
   expect_config_error(&bundle_cfg(Some(d.to_path_buf())), d, "not a regular file");
 
