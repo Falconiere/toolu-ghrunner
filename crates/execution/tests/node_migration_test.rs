@@ -54,7 +54,11 @@ fn seed(data: &Path, real: u8, other: u8) -> TestResult {
   let node = host_node()?;
   for (major, copy) in [(real, true), (other, false)] {
     let target = node_binary_path(&node_cache_dir(data, node_version_for(major)));
-    std::fs::create_dir_all(target.parent().ok_or("cache parent")?)?;
+    std::fs::create_dir_all(
+      target
+        .parent()
+        .ok_or_else(|| format!("cache parent for node {major}"))?,
+    )?;
     if copy {
       std::fs::copy(&node, &target)?;
       copy_companions(&node, &target)?;
@@ -84,7 +88,8 @@ fn copy_companions(node: &Path, target: &Path) -> TestResult {
     .and_then(Path::parent)
     .ok_or("cache dir parent")?
     .join("lib");
-  for entry in std::fs::read_dir(lib)? {
+  let entries = std::fs::read_dir(&lib).map_err(|e| format!("reading {}: {e}", lib.display()))?;
+  for entry in entries {
     let entry = entry?;
     if entry.file_name().to_string_lossy().starts_with("libnode") {
       std::fs::create_dir_all(&target_lib)?;

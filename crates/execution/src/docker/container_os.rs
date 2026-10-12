@@ -30,8 +30,10 @@ impl JobContainer {
     &self,
     cancel: &CancellationToken,
   ) -> Result<NodeTarget, RunnerError> {
-    // `get_or_try_init` keeps the cell empty on `Err`, so a failed probe is
-    // retried by the next stage rather than cached.
+    // A failed probe is not cached: tokio's `OnceCell::get_or_try_init` docs
+    // (tokio 1.53, `sync/once_cell.rs`) say "If the provided operation returns
+    // an error, is cancelled or panics, the initialization attempt is
+    // cancelled", so the cell stays empty and the next stage probes again.
     let stdout = self
       .os_release
       .get_or_try_init(|| self.probe_os_release(cancel))
