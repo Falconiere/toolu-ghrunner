@@ -1542,13 +1542,42 @@ a missing heredoc terminator swallowed the remainder.
 | AC-4 / 96-S4 | Input `OK=1`, `bad`, `LATER=2` with `continue-on-error: true`. The next step sees `OK=1`, `LATER` unset, and the same step's `GITHUB_OUTPUT` `kept=yes`. `steps.__run.outcome` = `failure`, `conclusion` = `success`, and the job succeeds. | `pairs_before_the_error_apply_and_continue_on_error_keeps_the_job_green` | as AC-1 |
 | AC-5 / 96-S4 | `NODE_OPTIONS` and `node_options` written to `GITHUB_ENV` are not applied, while `KEEP=1` is. Each blocked name raises one error annotation (two here), `Can't store NODE_OPTIONS output parameter using '$GITHUB_ENV' command.`, as upstream does per pair, and the step and job stay `Success`. The same holds in a composite `run:` step. Other reserved names are unchanged (upstream blocks only `NODE_OPTIONS`). | `node_options_is_blocked_with_an_issue_but_the_step_succeeds`, `composite_run_step_node_options_is_blocked_without_failing` | as AC-1 |
 | AC-6 | A secret job variable inside the bad line is reported as `Invalid format 'bad ***'`. No log line or annotation contains the raw value. | `a_secret_in_a_malformed_line_is_masked_everywhere` | as AC-1 |
-| AC-7 | Reference lane, below. | `.github/workflows/file-commands-96.yml` | GitHub-hosted `ubuntu-24.04`, `macos-15` |
+| AC-7 | The reference lane below matches on every outcome, value and message. | `.github/workflows/file-commands-96.yml` | GitHub-hosted `ubuntu-24.04`, `macos-15` |
 | AC-8 | Gate and docs. | `./tools/check.sh all` | Linux local, CI |
 
-Deliberate deviation: `=v` (empty name). Upstream's guard tests the whole
-line rather than the name, so the official runner accepts an empty name.
-Issue #96 requires the failure, so toolu fails the step with upstream's own
-message.
+Reference lane (official runner): [run 38206372062](https://github.com/Falconiere/toolu-ghrunner/actions/runs/38206372062),
+head `8be7b45`, on GitHub-hosted `ubuntu-24.04` and `macos-15`.
+
+- **Outcomes and values:** the "Assert upstream parity" step passed on
+  both images, so every outcome and hex value equals toolu's:
+  - `valid` succeeded;
+  - `missing_terminator`, `eof_without_newline`, `invalid_line`, `lone_cr`,
+    `empty_delimiter`, `bad_output` and `bad_state` each concluded with
+    outcome `failure`;
+  - `partial` ended `failure`/`success`, with `OK=1`, `LATER` unset and
+    `kept=yes`;
+  - `node_options` succeeded, with `NODE_OPTIONS` unset and `KEEP=1`;
+  - `CR` = `310d` and `HCR` = `760d` (CR kept), `MIXED` = `x<<y`, and
+    `LIKE` / `H` / `MULTI` match.
+- **Messages:** the check-run annotations carry the same messages:
+  - `Unable to process file command 'env'|'output'|'state' successfully.`;
+  - `Invalid value. Matching delimiter not found 'EOF'`;
+  - `Invalid value. EOF marker missing new line.`;
+  - `Invalid format 'just-text'`;
+  - `Invalid format 'N<<'. Name must not be empty and delimiter must not be
+    empty`;
+  - `Invalid format 'bad'`;
+  - `Can't store NODE_OPTIONS output parameter using '$GITHUB_ENV' command.`
+  
+  The lone-CR line shows as `Invalid format ''`, because the annotation view
+  drops the CR.
+
+Empty name (`=v`): the official runner **also fails** the step on both
+images, but its parser accepts the line (its guard tests the whole line, not
+the name). The failure comes later, from .NET's `Value cannot be null.
+(Parameter 'name')`. toolu fails at parse time with upstream's own
+`Invalid format '=v'. Name must not be empty`. The outcome matches; only the
+message text differs.
 
 Not applicable or unverified:
 

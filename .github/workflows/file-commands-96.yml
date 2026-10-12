@@ -7,16 +7,14 @@ name: file-commands-96
 # final "Assert upstream parity" step fails the job unless each outcome and
 # each value (hex-encoded, so a kept CR is visible) equals what toolu
 # implements. The error text lands in the check-run annotations. The empty-name
-# job records the official runner's behavior for `=v`, which toolu fails on
-# purpose (issue AC). See docs/test-coverage.md "Strict file commands (#96)".
-# The branch `push` trigger is temporary: it records the reference run before
-# merge (dispatch needs the file on main) and is removed before merge.
+# job records how the official runner handles `=v`: the step fails too, but
+# with a .NET argument error rather than the parser message toolu reports.
+# See docs/test-coverage.md "Strict file commands (#96)". Dispatch-only, like
+# the sibling lanes. The recorded run came from a since-removed branch push
+# trigger.
 
 on:
   workflow_dispatch:
-  push:
-    branches: [feat/96-strict-github-env-github-output]
-    paths: [.github/workflows/file-commands-96.yml]
 
 permissions:
   contents: read

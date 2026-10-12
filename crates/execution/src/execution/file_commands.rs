@@ -299,8 +299,9 @@ pub struct KvFile {
 /// upstream `EnvFileKeyValuePairs` on Linux and macOS: lines split on LF only
 /// (a CR stays part of names, values and delimiters), only zero-length lines
 /// are skipped, and parsing stops at the first malformed entry. An empty
-/// plain name fails too: upstream has that message but checks the line
-/// instead of the name, and issue #96 requires the failure.
+/// plain name fails here with upstream's own parser message. Upstream's
+/// parser checks the line rather than the name, so the official runner fails
+/// that step later, with .NET's `Value cannot be null. (Parameter 'name')`.
 pub fn parse_kv_file(content: &str) -> KvFile {
   let mut file = KvFile::default();
   let mut lines = Lines {

@@ -333,8 +333,9 @@ Linux/macOS runner:
     newline;
   - a line with neither `=` nor `<<`, including a lone CR or blank spaces;
   - an empty heredoc name or delimiter;
-  - an empty `=VALUE` name. The official runner silently accepts an empty
-    name; toolu fails it deliberately.
+  - an empty `=VALUE` name. The official runner fails this too, but with a
+    .NET argument error; toolu reports `Invalid format '=VALUE'. Name must
+    not be empty`.
 - The failing step reports two masked errors, `Unable to process file command
   'env' successfully.` and the reason, such as `Invalid format 'text'`.
 - Entries before the bad line still apply. The other file commands are
