@@ -53,7 +53,11 @@ fn this_macos_arm64_host_targets_darwin_arm64() -> TestResult {
 
 #[test]
 fn unsupported_os_or_cpu_fails_clearly() {
-  for (os, arch) in [("linux", "arm"), ("freebsd", "x86_64"), ("windows", "x86_64")] {
+  for (os, arch) in [
+    ("linux", "arm"),
+    ("freebsd", "x86_64"),
+    ("windows", "x86_64"),
+  ] {
     let error = target_for(os, arch, Libc::Glibc).map(|_| ());
     assert_eq!(
       error.map_err(|e| e.to_string()),
@@ -77,7 +81,10 @@ fn musl_host_is_x64_only() -> TestResult {
     ),
   );
   // macOS has no musl build; its libc is irrelevant.
-  assert_eq!(target_for("macos", "aarch64", Libc::Musl)?.libc, Libc::Glibc);
+  assert_eq!(
+    target_for("macos", "aarch64", Libc::Musl)?.libc,
+    Libc::Glibc
+  );
   Ok(())
 }
 

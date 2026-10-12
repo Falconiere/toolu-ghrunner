@@ -8,6 +8,7 @@
 //! applicable: toolu ships no armv7 build.
 
 use std::collections::{HashMap, HashSet};
+use std::hash::BuildHasher;
 
 use shared::{ActionStepDefinitionReference, VariableValue};
 
@@ -58,7 +59,7 @@ impl NodeMigrationFlags {
   /// Read the flags the way upstream's `Variables` does: case-insensitive
   /// names, `bool.TryParse` values (anything unparseable is unset ⇒ `false`),
   /// and the hardcoded dates when a date variable is absent or empty.
-  pub fn from_variables(variables: &HashMap<String, VariableValue>) -> Self {
+  pub fn from_variables<S: BuildHasher>(variables: &HashMap<String, VariableValue, S>) -> Self {
     let date = |name: &str, fallback: &str| {
       variable(variables, name)
         .filter(|value| !value.is_empty())
@@ -120,10 +121,10 @@ pub struct NodeSelection {
 ///
 /// node12/node16 run as node20 (upstream's redirect) and then follow the
 /// node20 rules; node24 stays node24; any other major is returned unchanged.
-pub fn select_node_version(
+pub fn select_node_version<S: BuildHasher>(
   declared: u8,
   flags: &NodeMigrationFlags,
-  workflow_env: &HashMap<String, String>,
+  workflow_env: &HashMap<String, String, S>,
   system: &SystemNodeEnv,
 ) -> NodeSelection {
   let declared = if declared < 20 { 20 } else { declared };
@@ -163,8 +164,8 @@ pub fn select_node_version(
 
 /// Upstream `NodeUtil.DetermineActionsNodeVersion`: the node20 action's major
 /// and the warning for both switches set true in the same source.
-pub fn determine_actions_node_version(
-  workflow_env: &HashMap<String, String>,
+pub fn determine_actions_node_version<S: BuildHasher>(
+  workflow_env: &HashMap<String, String, S>,
   use_node24_by_default: bool,
   require_node24: bool,
   system: &SystemNodeEnv,
@@ -240,7 +241,7 @@ pub struct NodeMigrationState {
 
 impl NodeMigrationState {
   /// Start a job's state from its message variables.
-  pub fn for_job(variables: &HashMap<String, VariableValue>) -> Self {
+  pub fn for_job<S: BuildHasher>(variables: &HashMap<String, VariableValue, S>) -> Self {
     Self {
       flags: NodeMigrationFlags::from_variables(variables),
       ..Self::default()
@@ -308,9 +309,9 @@ struct SwitchDetails {
 
 /// Upstream `GetEnvironmentVariableDetails`: a workflow value (even empty)
 /// decides truth; the system value counts as a source only when non-empty.
-fn switch_details(
+fn switch_details<S: BuildHasher>(
   name: &str,
-  workflow_env: &HashMap<String, String>,
+  workflow_env: &HashMap<String, String, S>,
   system_value: Option<&str>,
 ) -> SwitchDetails {
   let workflow = workflow_env.get(name).map(String::as_str);
@@ -340,7 +341,10 @@ fn try_parse_bool(value: Option<&str>) -> bool {
 }
 
 /// Case-insensitive variable lookup, preferring an exact-case key.
-fn variable<'a>(variables: &'a HashMap<String, VariableValue>, name: &str) -> Option<&'a str> {
+fn variable<'a, S: BuildHasher>(
+  variables: &'a HashMap<String, VariableValue, S>,
+  name: &str,
+) -> Option<&'a str> {
   variables
     .get(name)
     .or_else(|| {

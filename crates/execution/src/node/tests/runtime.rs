@@ -1,366 +1,384 @@
-//! Tests for `runtime`: version resolution helpers, `extract_tarball` (real
-//! tar.gz fixture, contents + permissions verified), the atomic-staging
-//! promotion (`promote_staging`) under real concurrency and under extraction
-//! failure, and — via the injected-`base_url` `ensure_node_runtime_from` —
-//! true end-to-end runs of the production entry point's full sequencing
-//! (`fetch_node_tarball_reader` → `spawn_blocking(extract_tarball)` →
-//! `cleanup_staging`/`promote_staging`, including its error mapping) against
-//! a real local HTTP server, on both the success path and its two distinct
-//! failure branches (non-success HTTP status, and a corrupt tarball body).
-//!
-//! Zero coverage existed for this module before this file — `cargo nextest
-//! run -p execution runtime` previously matched nothing and passed
-//! vacuously.
+//! Tests for `runtime`: pins and layout helpers, the authoritative preseed
+//! directory (hit with the real host `node` and no network, miss, wrong
+//! major, non-Node binary), and true end-to-end downloads through
+//! `ensure_node_runtime_from` against a real local HTTP server serving
+//! tarballs built from the real host `node`: committed only after it starts,
+//! rejected without a cache dir when the binary cannot (real `/bin/echo`),
+//! the alpine `./` layout for a container target, and 404 / corrupt /
+//! truncated bodies leaving nothing behind.
 
 use super::*;
 use flate2::Compression;
 use flate2::write::GzEncoder;
-use std::env;
 use std::io::Write;
 use std::net::SocketAddr;
-use std::sync::{Arc, Barrier};
 use tar::{Builder, Header};
 
-#[test]
-fn node_version_for_known_majors() {
-  assert_eq!(node_version_for(20), "20.18.3");
-  assert_eq!(node_version_for(24), "24.0.2");
+type TestResult = Result<(), Box<dyn std::error::Error>>;
+
+/// Nothing listens on the discard port: any request to it fails fast, so a
+/// preseed hit that returns `Ok` provably never touched the network.
+const UNROUTABLE: DownloadBases<'static> = DownloadBases {
+  nodejs: "http://127.0.0.1:9",
+  alpine: "http://127.0.0.1:9",
+};
+
+const GLIBC_X64: NodeTarget = NodeTarget {
+  os: NodeOs::Linux,
+  arch: NodeArch::X64,
+  libc: Libc::Glibc,
+};
+
+/// The host's real `node` on `PATH` and its major (a host without one fails).
+fn host_node() -> Result<(PathBuf, u8), Box<dyn std::error::Error>> {
+  let path = std::env::var_os("PATH").ok_or("PATH unset")?;
+  let node = std::env::split_paths(&path)
+    .map(|dir| dir.join("node"))
+    .find(|candidate| candidate.is_file())
+    .ok_or("no `node` on PATH; the runtime tests need a real Node.js")?;
+  let output = std::process::Command::new(&node)
+    .arg("--version")
+    .output()?;
+  let version = String::from_utf8(output.stdout)?;
+  let major = version
+    .trim()
+    .trim_start_matches('v')
+    .split('.')
+    .next()
+    .ok_or("empty node version")?
+    .parse()?;
+  Ok((node, major))
 }
 
-#[test]
-fn node_version_for_unknown_major_falls_back_to_lts() {
-  assert_eq!(node_version_for(99), "20.18.3");
+fn config_for(data_dir: &Path, node_dir: Option<PathBuf>) -> RunnerConfig {
+  RunnerConfig {
+    data_dir: data_dir.to_path_buf(),
+    node_dir,
+    ..RunnerConfig::default()
+  }
 }
 
-#[test]
-fn node_cache_dir_and_binary_path_join_correctly() {
-  let data_dir = Path::new("/data");
-  let cache_dir = node_cache_dir(data_dir, "20.18.3");
-  assert_eq!(cache_dir, Path::new("/data/node/20.18.3"));
-  assert_eq!(
-    node_binary_path(&cache_dir),
-    Path::new("/data/node/20.18.3/bin/node")
-  );
+/// A preseed dir holding `binary` as `<dir>/<name>/bin/node`.
+fn preseed(dir: &Path, name: &str, binary: &Path) -> TestResult {
+  let bin = dir.join(name).join("bin");
+  std::fs::create_dir_all(&bin)?;
+  std::fs::copy(binary, bin.join("node"))?;
+  Ok(())
 }
 
-#[test]
-fn node_download_url_is_well_formed() {
-  let url = node_download_url("https://nodejs.org/dist", "20.18.3", "linux", "x64");
-  assert_eq!(
-    url,
-    "https://nodejs.org/dist/v20.18.3/node-v20.18.3-linux-x64.tar.gz"
-  );
-}
-
-fn tmp_dest(label: &str) -> PathBuf {
-  let mut p = env::temp_dir();
-  p.push(format!(
-    "toolu-node-runtime-test-{label}-{}",
-    uuid::Uuid::new_v4()
-  ));
-  p
-}
-
-/// Build a tar.gz in memory containing the given entries (path, body,
-/// unix mode). Mirrors `actions::downloader`'s test fixture builder.
-fn build_tarball(entries: &[(&str, &[u8], u32)]) -> Vec<u8> {
+/// A gzip tarball (stored blocks, so the real ~100 MB binary packs fast)
+/// holding `binary` as `<prefix>bin/node`.
+fn tarball_with(prefix: &str, binary: &Path) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
   let mut raw = Vec::new();
   {
     let mut builder = Builder::new(&mut raw);
-    for (path, body, mode) in entries {
-      let mut header = Header::new_gnu();
-      header.set_size(body.len() as u64);
-      header.set_mode(*mode);
-      header.set_cksum();
-      builder
-        .append_data(&mut header, path, *body)
-        .expect("append entry");
-    }
-    builder.finish().expect("finish tar");
+    let body = std::fs::read(binary)?;
+    let mut header = Header::new_gnu();
+    header.set_size(u64::try_from(body.len())?);
+    header.set_mode(0o755);
+    header.set_cksum();
+    builder.append_data(&mut header, format!("{prefix}bin/node"), &body[..])?;
+    builder.finish()?;
   }
-  let mut gz = Vec::new();
-  {
-    let mut enc = GzEncoder::new(&mut gz, Compression::default());
-    enc.write_all(&raw).expect("gzip write");
-    enc.finish().expect("gzip finish");
-  }
-  gz
+  let mut gz = GzEncoder::new(Vec::new(), Compression::none());
+  gz.write_all(&raw)?;
+  Ok(gz.finish()?)
 }
 
-#[test]
-fn extract_tarball_strips_prefix_and_preserves_permissions() {
-  let dest = tmp_dest("extract");
-  let tar = build_tarball(&[
-    (
-      "node-v20.18.3-linux-x64/bin/node",
-      b"#!fake-node-binary",
-      0o755,
-    ),
-    ("node-v20.18.3-linux-x64/README.md", b"node runtime", 0o644),
-  ]);
-
-  extract_tarball(&tar[..], &dest).expect("tarball must extract");
-
-  let node_bin = dest.join("bin").join("node");
-  let content = std::fs::read(&node_bin).expect("binary present");
-  assert_eq!(content, b"#!fake-node-binary");
-
-  let readme = std::fs::read(dest.join("README.md")).expect("readme present");
-  assert_eq!(readme, b"node runtime");
-
-  #[cfg(unix)]
-  {
-    use std::os::unix::fs::PermissionsExt;
-    let mode = std::fs::metadata(&node_bin)
-      .expect("metadata")
-      .permissions()
-      .mode();
-    assert_eq!(
-      mode & 0o777,
-      0o755,
-      "executable bit must survive extraction"
-    );
-  }
-}
-
-/// Serve `status`+`body` as the response to every request on a random
-/// localhost port, returning the bound address. The caller resolves the
-/// exact tarball path against the returned base URL via
-/// [`node_download_url`] — the fallback route matches any path, so the
-/// helper works whether the caller is asserting a success or a failure
-/// response. The server task is aborted when the caller's Tokio runtime
-/// shuts down at test end.
-async fn spawn_node_dist_server(status: axum::http::StatusCode, body: Vec<u8>) -> SocketAddr {
-  let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-    .await
-    .expect("bind local node dist server");
-  let addr = listener.local_addr().expect("local_addr");
+/// Serve `status` + `body` for every path on a random local port.
+async fn serve(
+  status: axum::http::StatusCode,
+  body: Vec<u8>,
+) -> Result<SocketAddr, std::io::Error> {
+  let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+  let addr = listener.local_addr()?;
   let app = axum::Router::new().fallback(move || {
     let body = body.clone();
     async move { (status, body) }
   });
-  tokio::spawn(async move {
-    let _ = axum::serve(listener, app).await;
-  });
-  addr
+  tokio::spawn(async move { axum::serve(listener, app).await });
+  Ok(addr)
 }
 
-/// End-to-end: a real tarball fixture served over local HTTP is downloaded
-/// and extracted through the ACTUAL production entry point
-/// (`ensure_node_runtime_from`, which `ensure_node_runtime` calls pinned to
-/// the real `nodejs.org` base) — driving its full sequencing
-/// (`fetch_node_tarball_reader` → `spawn_blocking(extract_tarball)` →
-/// `promote_staging`) rather than replaying the steps by hand. Asserts the
-/// binary lands at the resolved cache path, stays executable, and no
-/// `.tmp-` staging dir survives a successful run.
-#[tokio::test]
-async fn ensure_node_runtime_end_to_end_downloads_and_extracts() {
-  let tar = build_tarball(&[("node-v20.18.3-linux-x64/bin/node", b"#!fake-node", 0o755)]);
-  let addr = spawn_node_dist_server(axum::http::StatusCode::OK, tar).await;
-  let base_url = format!("http://{addr}");
-
-  let data_dir = tmp_dest("e2e-success-data-dir");
-  std::fs::create_dir_all(&data_dir).expect("mkdir data_dir");
-  let client = reqwest::Client::new();
-
-  let binary = ensure_node_runtime_from(&base_url, &client, &data_dir, 20)
-    .await
-    .expect("ensure_node_runtime_from must succeed end-to-end");
-
-  let version = node_version_for(20);
-  let cache_dir = node_cache_dir(&data_dir, version);
-  assert_eq!(binary, node_binary_path(&cache_dir));
-
-  let content = std::fs::read(&binary).expect("binary present at expected path");
-  assert_eq!(content, b"#!fake-node");
-
-  #[cfg(unix)]
-  {
-    use std::os::unix::fs::PermissionsExt;
-    let mode = std::fs::metadata(&binary)
-      .expect("metadata")
-      .permissions()
-      .mode();
-    assert_eq!(mode & 0o111, 0o111, "binary must remain executable");
-  }
-
-  assert_eq!(
-    leftover_staging_dirs(&cache_dir),
-    Vec::<PathBuf>::new(),
-    "no staging dir must remain after a successful end-to-end run"
-  );
+fn bases(addr: SocketAddr) -> (String, String) {
+  (
+    format!("http://{addr}/dist"),
+    format!("http://{addr}/alpine"),
+  )
 }
 
-/// End-to-end failure branch 1: a non-success HTTP status (404) from the
-/// download host must propagate as an error out of the entry point, and
-/// must leave neither a cache dir nor a staging dir behind.
-#[tokio::test]
-async fn ensure_node_runtime_end_to_end_404_propagates_error_with_no_leftovers() {
-  let addr = spawn_node_dist_server(axum::http::StatusCode::NOT_FOUND, Vec::new()).await;
-  let base_url = format!("http://{addr}");
-
-  let data_dir = tmp_dest("e2e-404-data-dir");
-  std::fs::create_dir_all(&data_dir).expect("mkdir data_dir");
-  let client = reqwest::Client::new();
-
-  let result = ensure_node_runtime_from(&base_url, &client, &data_dir, 20).await;
-  assert!(
-    result.is_err(),
-    "a 404 tarball response must propagate as an error"
-  );
-
-  let version = node_version_for(20);
-  let cache_dir = node_cache_dir(&data_dir, version);
-  assert!(
-    !cache_dir.exists(),
-    "cache dir must not exist after a 404 fetch failure"
-  );
-  assert_eq!(
-    leftover_staging_dirs(&cache_dir),
-    Vec::<PathBuf>::new(),
-    "no staging dir must remain after a 404 fetch failure"
-  );
-}
-
-/// List any sibling staging dirs left behind for `dest` (i.e. anything
-/// matching `<dest file name>.tmp-*` in `dest`'s parent directory). Mirrors
-/// `actions::downloader`'s test helper of the same name.
-fn leftover_staging_dirs(dest: &Path) -> Vec<PathBuf> {
-  let Some(parent) = dest.parent() else {
-    return Vec::new();
-  };
-  let Some(dest_name) = dest.file_name() else {
-    return Vec::new();
-  };
-  let prefix = format!("{}.tmp-", dest_name.to_string_lossy());
-  let Ok(entries) = std::fs::read_dir(parent) else {
-    return Vec::new();
-  };
-  entries
-    .filter_map(Result::ok)
-    .map(|entry| entry.path())
-    .filter(|path| {
-      path
-        .file_name()
-        .is_some_and(|name| name.to_string_lossy().starts_with(&prefix))
-    })
-    .collect()
-}
-
-/// Two extractions racing `promote_staging` for the SAME `dest` (a
-/// `std::sync::Barrier` forces genuine overlap on their blocking threads,
-/// not a lucky interleave) must both return `Ok`, and `dest` must end up
-/// holding exactly ONE complete extraction's content — never an
-/// interleaving of both — with no `.tmp-` staging dirs left behind. This is
-/// the core regression test for the atomic-staging fix applied to the node
-/// runtime cache: two runner processes (different repos, always-online
-/// loop) installing the same Node.js version share this cache dir.
-#[tokio::test]
-async fn concurrent_promotions_to_the_same_dest_yield_one_complete_tree() {
-  let dest = tmp_dest("node-concurrent-dest");
-  let staging_a = staging_dir_for(&dest);
-  let staging_b = staging_dir_for(&dest);
-  let tar_a = build_tarball(&[("node-v20.18.3-linux-x64/bin/node", b"#!fake-node-a", 0o755)]);
-  let tar_b = build_tarball(&[("node-v20.18.3-linux-x64/bin/node", b"#!fake-node-b", 0o755)]);
-  extract_tarball(&tar_a[..], &staging_a).expect("extract into staging a");
-  extract_tarball(&tar_b[..], &staging_b).expect("extract into staging b");
-
-  let gate = Arc::new(Barrier::new(2));
-
-  let gate_a = Arc::clone(&gate);
-  let dest_a = dest.clone();
-  let handle_a = tokio::task::spawn_blocking(move || {
-    gate_a.wait();
-    promote_staging(&staging_a, &dest_a)
-  });
-
-  let gate_b = Arc::clone(&gate);
-  let dest_b = dest.clone();
-  let handle_b = tokio::task::spawn_blocking(move || {
-    gate_b.wait();
-    promote_staging(&staging_b, &dest_b)
-  });
-
-  let (result_a, result_b) = tokio::join!(handle_a, handle_b);
-  result_a
-    .expect("promote task a must join")
-    .expect("promote a must succeed");
-  result_b
-    .expect("promote task b must join")
-    .expect("promote b must succeed");
-
-  let content =
-    std::fs::read(node_binary_path(&dest)).expect("binary present exactly once at dest");
-  assert!(
-    content == b"#!fake-node-a" || content == b"#!fake-node-b",
-    "dest must hold exactly one complete extraction's content, got: {content:?}"
-  );
-  assert_eq!(
-    leftover_staging_dirs(&dest),
-    Vec::<PathBuf>::new(),
-    "no staging dirs must remain after both promotions settle"
-  );
-}
-
-/// A stale `dest` left by a pre-staging-fix (or interrupted) extraction —
-/// present on disk but missing the binary — must be replaced rather than
-/// causing `promote_staging` to error out.
 #[test]
-fn promote_staging_replaces_a_stale_dest_missing_the_binary() {
-  let dest = tmp_dest("node-stale-dest");
-  std::fs::create_dir_all(&dest).expect("mkdir stale dest");
-  std::fs::write(dest.join("leftover.txt"), b"partial").expect("write stale leftover file");
-  assert!(!node_binary_path(&dest).exists(), "precondition: no binary");
+fn pins_match_upstream_externals() {
+  assert_eq!(node_version_for(20), "20.20.2");
+  assert_eq!(node_version_for(24), "24.21.0");
+  assert_eq!(node_version_for(99), "20.20.2", "unknown majors fall back");
+}
 
-  let staging = staging_dir_for(&dest);
-  let tar = build_tarball(&[("node-v20.18.3-linux-x64/bin/node", b"#!fresh-node", 0o755)]);
-  extract_tarball(&tar[..], &staging).expect("extract into staging");
-
-  promote_staging(&staging, &dest).expect("promote over a stale dest must succeed");
-
-  let content = std::fs::read(node_binary_path(&dest)).expect("fresh binary present");
-  assert_eq!(content, b"#!fresh-node");
-  assert!(
-    !dest.join("leftover.txt").exists(),
-    "the stale leftover file must not survive the replace"
+#[test]
+fn layout_helpers_join_correctly() {
+  let data = Path::new("/data");
+  assert_eq!(
+    node_cache_dir(data, "20.20.2"),
+    Path::new("/data/node/20.20.2")
+  );
+  let musl = NodeTarget {
+    libc: Libc::Musl,
+    ..GLIBC_X64
+  };
+  assert_eq!(
+    node_runtime_dir(data, "24.21.0", musl),
+    Path::new("/data/node/24.21.0-alpine")
   );
   assert_eq!(
-    leftover_staging_dirs(&dest),
-    Vec::<PathBuf>::new(),
-    "no staging dir must remain after a successful promote"
+    preseed_binary_path(Path::new("/opt/externals"), 24, musl),
+    Path::new("/opt/externals/node24_alpine/bin/node")
   );
 }
 
-/// End-to-end failure branch 2: a corrupt (non-gzip) tarball body — a
-/// successful fetch (200 OK) but a failing extraction — must propagate as
-/// an error out of the entry point, driving the SAME
-/// fetch→stage→extract→cleanup sequence `ensure_node_runtime` runs
-/// internally, and must leave neither a cache dir nor a staging dir behind.
+#[test]
+fn download_urls_follow_each_source_layout() {
+  let (url, strip) = node_download_url(&PRODUCTION_BASES, "24.21.0", GLIBC_X64);
+  assert_eq!(
+    (url.as_str(), strip),
+    (
+      "https://nodejs.org/dist/v24.21.0/node-v24.21.0-linux-x64.tar.gz",
+      1
+    )
+  );
+  let darwin = NodeTarget {
+    os: NodeOs::Darwin,
+    arch: NodeArch::Arm64,
+    libc: Libc::Glibc,
+  };
+  assert_eq!(
+    node_download_url(&PRODUCTION_BASES, "20.20.2", darwin).0,
+    "https://nodejs.org/dist/v20.20.2/node-v20.20.2-darwin-arm64.tar.gz"
+  );
+  let musl = NodeTarget {
+    libc: Libc::Musl,
+    ..GLIBC_X64
+  };
+  let (url, strip) = node_download_url(&PRODUCTION_BASES, "20.20.2", musl);
+  assert_eq!(
+    (url.as_str(), strip),
+    (
+      "https://github.com/actions/alpine_nodejs/releases/download/v20.20.2/node-v20.20.2-alpine-x64.tar.gz",
+      0
+    )
+  );
+}
+
 #[tokio::test]
-async fn ensure_node_runtime_end_to_end_corrupt_tarball_propagates_error_with_no_leftovers() {
-  let addr = spawn_node_dist_server(
-    axum::http::StatusCode::OK,
-    b"not a valid gzip tarball".to_vec(),
+async fn preseed_hit_returns_the_real_node_without_network() -> TestResult {
+  let (node, major) = host_node()?;
+  let dir = tempfile::tempdir()?;
+  let data = tempfile::tempdir()?;
+  preseed(dir.path(), &format!("node{major}"), &node)?;
+  let config = config_for(data.path(), Some(dir.path().to_path_buf()));
+  let client = reqwest::Client::new();
+  let binary =
+    ensure_node_runtime_from(&UNROUTABLE, &client, &config, major, GLIBC_X64, true).await?;
+  assert_eq!(binary, dir.path().join(format!("node{major}/bin/node")));
+  assert!(
+    !data.path().join("node").exists(),
+    "the cache is never used"
+  );
+  Ok(())
+}
+
+#[tokio::test]
+async fn preseed_miss_names_the_expected_path_and_never_downloads() -> TestResult {
+  let dir = tempfile::tempdir()?;
+  let data = tempfile::tempdir()?;
+  let config = config_for(data.path(), Some(dir.path().to_path_buf()));
+  let musl = NodeTarget {
+    libc: Libc::Musl,
+    ..GLIBC_X64
+  };
+  let client = reqwest::Client::new();
+  let result = ensure_node_runtime_from(&UNROUTABLE, &client, &config, 24, musl, false).await;
+  let expected = dir.path().join("node24_alpine/bin/node");
+  assert_eq!(
+    result.map_err(|e| e.to_string()),
+    Err(format!(
+      "node runtime error: Node.js runtime node24_alpine for linux-x64 (musl) not found in \
+       TOOLU_RUNNER_NODE_DIR: expected {}",
+      expected.display()
+    ))
+  );
+  Ok(())
+}
+
+#[tokio::test]
+async fn preseed_with_the_wrong_major_or_a_non_node_binary_fails_validation() -> TestResult {
+  let (node, major) = host_node()?;
+  let other = major.wrapping_add(1);
+  let dir = tempfile::tempdir()?;
+  let data = tempfile::tempdir()?;
+  preseed(dir.path(), &format!("node{other}"), &node)?;
+  preseed(dir.path(), &format!("node{major}"), Path::new("/bin/echo"))?;
+  let config = config_for(data.path(), Some(dir.path().to_path_buf()));
+  let client = reqwest::Client::new();
+  let mislabeled =
+    ensure_node_runtime_from(&UNROUTABLE, &client, &config, other, GLIBC_X64, true).await;
+  let message = mislabeled
+    .map_err(|e| e.to_string())
+    .err()
+    .ok_or("must fail")?;
+  assert!(
+    message.contains(&format!("expected v{other}.x")),
+    "{message}"
+  );
+  let echo = ensure_node_runtime_from(&UNROUTABLE, &client, &config, major, GLIBC_X64, true).await;
+  let message = echo.map_err(|e| e.to_string()).err().ok_or("must fail")?;
+  // A multicall coreutils `echo` refuses to run as `node`; a plain one
+  // prints its banner. Either way the runtime is rejected.
+  assert!(
+    message.contains("reported version") || message.contains("failed to start"),
+    "{message}"
+  );
+  Ok(())
+}
+
+#[tokio::test]
+async fn download_commits_a_real_node_only_after_it_starts() -> TestResult {
+  let (node, major) = host_node()?;
+  let version = node_version_for(major);
+  let tar = tarball_with(&format!("node-v{version}-linux-x64/"), &node)?;
+  let addr = serve(axum::http::StatusCode::OK, tar).await?;
+  let (nodejs, alpine) = bases(addr);
+  let data = tempfile::tempdir()?;
+  let config = config_for(data.path(), None);
+  let client = reqwest::Client::new();
+  let bases = DownloadBases {
+    nodejs: &nodejs,
+    alpine: &alpine,
+  };
+  let binary = ensure_node_runtime_from(&bases, &client, &config, major, GLIBC_X64, true).await?;
+  assert_eq!(
+    binary,
+    node_binary_path(&node_cache_dir(data.path(), version))
+  );
+  let output = std::process::Command::new(&binary)
+    .arg("--version")
+    .output()?;
+  assert!(String::from_utf8(output.stdout)?.starts_with(&format!("v{major}.")));
+  assert_eq!(staging_leftovers(data.path())?, Vec::<String>::new());
+  Ok(())
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn a_downloaded_binary_that_cannot_run_as_node_is_never_committed() -> TestResult {
+  let tar = tarball_with("node-v20.20.2-linux-x64/", Path::new("/bin/echo"))?;
+  let addr = serve(axum::http::StatusCode::OK, tar).await?;
+  let (nodejs, alpine) = bases(addr);
+  let data = tempfile::tempdir()?;
+  let config = config_for(data.path(), None);
+  let bases = DownloadBases {
+    nodejs: &nodejs,
+    alpine: &alpine,
+  };
+  let result = ensure_node_runtime_from(
+    &bases,
+    &reqwest::Client::new(),
+    &config,
+    20,
+    GLIBC_X64,
+    true,
   )
   .await;
-  let base_url = format!("http://{addr}");
-
-  let data_dir = tmp_dest("e2e-corrupt-data-dir");
-  std::fs::create_dir_all(&data_dir).expect("mkdir data_dir");
-  let client = reqwest::Client::new();
-
-  let result = ensure_node_runtime_from(&base_url, &client, &data_dir, 20).await;
-  assert!(result.is_err(), "a corrupt tarball must fail to extract");
-
-  let version = node_version_for(20);
-  let cache_dir = node_cache_dir(&data_dir, version);
+  let message = result.map_err(|e| e.to_string()).err().ok_or("must fail")?;
   assert!(
-    !cache_dir.exists(),
-    "cache dir must not exist after a failed extraction"
+    message.contains("was not installed")
+      && (message.contains("reported version") || message.contains("failed to start")),
+    "{message}"
   );
-  assert_eq!(
-    leftover_staging_dirs(&cache_dir),
-    Vec::<PathBuf>::new(),
-    "no staging dir must remain after cleanup"
-  );
+  assert!(!node_cache_dir(data.path(), "20.20.2").exists());
+  assert_eq!(staging_leftovers(data.path())?, Vec::<String>::new());
+  Ok(())
+}
+
+#[tokio::test]
+async fn container_target_alpine_layout_installs_without_a_host_start_check() -> TestResult {
+  // Container-only targets are not executed on the host, so any binary in
+  // the alpine `./` layout commits; the container lane proves it runs.
+  let tar = tarball_with("./", Path::new("/bin/echo"))?;
+  let addr = serve(axum::http::StatusCode::OK, tar).await?;
+  let (nodejs, alpine) = bases(addr);
+  let data = tempfile::tempdir()?;
+  let config = config_for(data.path(), None);
+  let musl = NodeTarget {
+    libc: Libc::Musl,
+    ..GLIBC_X64
+  };
+  let bases = DownloadBases {
+    nodejs: &nodejs,
+    alpine: &alpine,
+  };
+  let binary =
+    ensure_node_runtime_from(&bases, &reqwest::Client::new(), &config, 24, musl, false).await?;
+  assert_eq!(binary, data.path().join("node/24.21.0-alpine/bin/node"));
+  assert!(binary.is_file());
+  Ok(())
+}
+
+#[tokio::test]
+async fn http_error_corrupt_and_truncated_bodies_leave_no_cache_dir() -> TestResult {
+  let (node, _) = host_node()?;
+  let real = tarball_with("node-v20.20.2-linux-x64/", &node)?;
+  let truncated = real
+    .get(..real.len() / 2)
+    .ok_or("tarball too small")?
+    .to_vec();
+  let cases = [
+    (axum::http::StatusCode::NOT_FOUND, Vec::new()),
+    (
+      axum::http::StatusCode::OK,
+      b"not a valid gzip tarball".to_vec(),
+    ),
+    (axum::http::StatusCode::OK, truncated),
+  ];
+  for (status, body) in cases {
+    let addr = serve(status, body).await?;
+    let (nodejs, alpine) = bases(addr);
+    let data = tempfile::tempdir()?;
+    let config = config_for(data.path(), None);
+    let bases = DownloadBases {
+      nodejs: &nodejs,
+      alpine: &alpine,
+    };
+    let result = ensure_node_runtime_from(
+      &bases,
+      &reqwest::Client::new(),
+      &config,
+      20,
+      GLIBC_X64,
+      true,
+    )
+    .await;
+    assert!(result.is_err(), "{status} must fail");
+    assert!(!node_cache_dir(data.path(), "20.20.2").exists(), "{status}");
+    assert_eq!(
+      staging_leftovers(data.path())?,
+      Vec::<String>::new(),
+      "{status}"
+    );
+  }
+  Ok(())
+}
+
+/// Names under `<data>/node` that look like staging dirs.
+fn staging_leftovers(data: &Path) -> Result<Vec<String>, std::io::Error> {
+  let node = data.join("node");
+  if !node.exists() {
+    return Ok(Vec::new());
+  }
+  Ok(
+    std::fs::read_dir(node)?
+      .filter_map(Result::ok)
+      .map(|entry| entry.file_name().to_string_lossy().into_owned())
+      .filter(|name| name.contains(".tmp-"))
+      .collect(),
+  )
 }

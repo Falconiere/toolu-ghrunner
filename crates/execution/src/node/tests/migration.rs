@@ -118,7 +118,10 @@ fn flags_follow_dotnet_bool_try_parse_and_ignore_key_case() {
     ("actions_runner_node24_default_date", ""),
     ("ACTIONS_RUNNER_NODE20_REMOVAL_DATE", "October 1st, 2026"),
   ]));
-  assert!(flags.use_node24_by_default, "TryParse trims and ignores case");
+  assert!(
+    flags.use_node24_by_default,
+    "TryParse trims and ignores case"
+  );
   assert!(!flags.require_node24, "TryParse rejects \"1\"");
   assert!(!flags.warn_on_node20, "TryParse rejects \"yes\"");
   assert_eq!(flags.node24_default_date, "June 16th, 2026");
@@ -251,7 +254,12 @@ fn declared_versions_redirect_and_track_like_upstream() {
     let quiet = select_node_version(declared, &NodeMigrationFlags::default(), &no_env, &none);
     assert_eq!((quiet.major, quiet.tracking), (20, None));
   }
-  let node24 = select_node_version(24, &warn, &env(&[(ALLOW_UNSECURE_NODE_VARIABLE, "true")]), &none);
+  let node24 = select_node_version(
+    24,
+    &warn,
+    &env(&[(ALLOW_UNSECURE_NODE_VARIABLE, "true")]),
+    &none,
+  );
   assert_eq!(
     node24,
     NodeSelection {
@@ -272,11 +280,13 @@ fn action_names_match_upstream_for_captured_references() -> TestResult {
     .map(|step| action_name(&step.reference))
     .collect();
   assert!(names.contains(&Some("actions/checkout@v4".to_owned())));
-  assert!(names.contains(&Some(
-    "Falconiere/toolu-ghrunner/.github/actions/step-attrs-99-node@\
+  assert!(
+    names.contains(&Some(
+      "Falconiere/toolu-ghrunner/.github/actions/step-attrs-99-node@\
      7ac4fa2e45c8c4725a9ad44db4eb6b9682064260"
-      .to_owned()
-  )));
+        .to_owned()
+    ))
+  );
   assert!(names.contains(&Some(
     "./.github/actions/step-attrs-99-composite".to_owned()
   )));
@@ -292,7 +302,13 @@ fn completion_warnings_dedupe_sort_and_quote_dates() {
     "actions_runner_node20_removal_date",
     "October 1st, 2026",
   )]));
-  for action in ["zeta/act@v1", "Alpha/act@v1", "beta_x/act@v1", "betax/act@v1", "zeta/act@v1"] {
+  for action in [
+    "zeta/act@v1",
+    "Alpha/act@v1",
+    "beta_x/act@v1",
+    "betax/act@v1",
+    "zeta/act@v1",
+  ] {
     state.record(Tracking::UpgradedToNode24, action.to_owned());
   }
   state.record(Tracking::DeprecatedNode20, "./local".to_owned());
@@ -320,5 +336,9 @@ fn completion_warnings_dedupe_sort_and_quote_dates() {
        https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/"
     )
   );
-  assert!(NodeMigrationState::default().completion_warnings().is_empty());
+  assert!(
+    NodeMigrationState::default()
+      .completion_warnings()
+      .is_empty()
+  );
 }

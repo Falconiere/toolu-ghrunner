@@ -180,7 +180,10 @@ pub const OS_RELEASE_PROBE: &str = "cat /etc/*release | grep ^ID";
 ///
 /// Returns upstream's `NotSupportedException` text for an Alpine container on
 /// a non-x64 runner.
-pub fn container_target(probe_stdout: Option<&str>, arch: NodeArch) -> Result<NodeTarget, RunnerError> {
+pub fn container_target(
+  probe_stdout: Option<&str>,
+  arch: NodeArch,
+) -> Result<NodeTarget, RunnerError> {
   let alpine = probe_stdout.is_some_and(|stdout| {
     stdout
       .lines()

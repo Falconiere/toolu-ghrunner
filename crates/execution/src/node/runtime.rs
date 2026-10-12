@@ -1,29 +1,44 @@
-//! Node.js runtime detection and caching.
+//! Node.js runtime resolution: pinned versions, cache layout, the offline
+//! preseed directory, and [`ensure_node_runtime`] — the single entry point
+//! every Node action stage uses.
+//!
+//! Order: a configured preseed dir (`TOOLU_RUNNER_NODE_DIR`) is authoritative
+//! and never downloads; otherwise the per-target cache dir; otherwise a
+//! download (nodejs.org for glibc/darwin, `actions/alpine_nodejs` for musl)
+//! committed atomically after a startup check when the target is this host.
 
-use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 
-use futures_util::StreamExt;
-use shared::RunnerError;
+use shared::{RunnerConfig, RunnerError};
 
-/// Resolve a Node.js major version to a concrete release version string.
+use super::download::{Install, install_runtime};
+use super::platform::{Libc, NodeArch, NodeOs, NodeTarget, host_target};
+use super::validate::validate_runtime;
+
+/// Resolve a Node.js major version to the release upstream's runner pins
+/// (actions/runner `externals.sh` @ v2.337.0).
 ///
-/// Unknown majors fall back to node 20 LTS with a warning.
+/// Unknown majors fall back to node 20 with a warning.
 pub fn node_version_for(major: u8) -> &'static str {
   match major {
-    20 => "20.18.3",
-    24 => "24.0.2",
+    20 => "20.20.2",
+    24 => "24.21.0",
     other => {
       tracing::warn!(major = other, "unknown node major, defaulting to node20");
-      "20.18.3"
+      "20.20.2"
     },
   }
 }
 
-/// Cache directory: `{data_dir}/node/{version}`.
+/// Cache directory of the host-OS nodejs.org build: `{data_dir}/node/{version}`.
 pub fn node_cache_dir(data_dir: &Path, version: &str) -> PathBuf {
   data_dir.join("node").join(version)
+}
+
+/// Cache directory for `target`: `{data_dir}/node/{version}` (glibc/darwin)
+/// or `{data_dir}/node/{version}-alpine` (musl).
+pub fn node_runtime_dir(data_dir: &Path, version: &str, target: NodeTarget) -> PathBuf {
+  data_dir.join("node").join(target.cache_name(version))
 }
 
 /// Path to node binary within cache directory.
@@ -31,312 +46,140 @@ pub fn node_binary_path(cache_dir: &Path) -> PathBuf {
   cache_dir.join("bin").join("node")
 }
 
-/// Download URL for a Node.js release tarball, resolved against `base_url`
-/// (production always resolves against [`NODE_DOWNLOAD_BASE`] via
-/// [`ensure_node_runtime`]; tests can point this at a local HTTP server).
-pub fn node_download_url(base_url: &str, version: &str, os: &str, arch: &str) -> String {
-  format!("{base_url}/v{version}/node-v{version}-{os}-{arch}.tar.gz")
+/// The preseeded binary for `major` on `target`, in upstream's `externals/`
+/// layout: `<node_dir>/node24/bin/node`, `<node_dir>/node24_alpine/bin/node`.
+pub fn preseed_binary_path(node_dir: &Path, major: u8, target: NodeTarget) -> PathBuf {
+  node_binary_path(&node_dir.join(target.externals_name(major)))
 }
 
-/// Detect current platform for Node.js downloads.
-///
-/// Returns `("linux"|"darwin", "x64"|"arm64")`.
-pub fn detect_platform() -> (&'static str, &'static str) {
-  let os = match std::env::consts::OS {
-    "macos" => "darwin",
-    _ => "linux",
-  };
-
-  let arch = match std::env::consts::ARCH {
-    "aarch64" => "arm64",
-    _ => "x64",
-  };
-
-  (os, arch)
+/// Download hosts a runtime tarball URL is resolved against.
+#[derive(Debug, Clone, Copy)]
+pub struct DownloadBases<'a> {
+  /// nodejs.org `dist` root (glibc Linux and darwin builds).
+  pub nodejs: &'a str,
+  /// `actions/alpine_nodejs` release-download root (musl x64 builds).
+  pub alpine: &'a str,
 }
 
-/// Extract a tar.gz tarball into a directory, stripping the leading
-/// top-level component (e.g. `node-v20.18.3-linux-x64/`).
-///
-/// Local copy so the `node` module compiles in step 4b before the real
-/// `execution::actions::downloader` lands in step 4c. The two share the
-/// same stripping semantics.
-///
-/// Takes a plain [`Read`] rather than a buffered byte slice so the caller
-/// can stream the tarball body straight off the network (via
-/// `tokio_util::io::SyncIoBridge`) instead of holding the whole tarball in
-/// memory. This is CPU-bound, synchronous work — every production call
-/// site MUST run it inside `tokio::task::spawn_blocking`.
-fn extract_tarball(reader: impl Read, dest: &Path) -> std::io::Result<()> {
-  use flate2::read::GzDecoder;
-  let decoder = GzDecoder::new(reader);
-  let mut archive = tar::Archive::new(decoder);
-  std::fs::create_dir_all(dest)?;
-  for entry in archive.entries()? {
-    let mut entry = entry?;
-    let path = entry.path()?;
-    let stripped = path.components().skip(1).collect::<std::path::PathBuf>();
-    if stripped.as_os_str().is_empty() {
-      continue;
-    }
-    let out = dest.join(stripped);
-    if entry.header().entry_type().is_dir() {
-      std::fs::create_dir_all(&out)?;
-    } else {
-      if let Some(parent) = out.parent() {
-        std::fs::create_dir_all(parent)?;
-      }
-      let mut f = std::fs::File::create(&out)?;
-      std::io::copy(&mut entry, &mut f)?;
-      #[cfg(unix)]
-      if let Ok(mode) = entry.header().mode() {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&out, std::fs::Permissions::from_mode(mode))?;
-      }
-    }
-  }
-  Ok(())
-}
+/// The real hosts every production install uses.
+pub const PRODUCTION_BASES: DownloadBases<'static> = DownloadBases {
+  nodejs: "https://nodejs.org/dist",
+  alpine: "https://github.com/actions/alpine_nodejs/releases/download",
+};
 
-/// Fetch `url` and return a synchronous [`Read`] streaming its body,
-/// suitable for [`extract_tarball`] inside `spawn_blocking`.
-///
-/// # Errors
-///
-/// Returns `RunnerError::NodeRuntime` on a request failure or a non-success
-/// HTTP status.
-async fn fetch_node_tarball_reader(
-  client: &reqwest::Client,
-  url: &str,
-) -> Result<impl Read + use<>, RunnerError> {
-  let response = client
-    .get(url)
-    .send()
-    .await
-    .map_err(|e| RunnerError::NodeRuntime(format!("fetch {url}: {e}")))?;
-
-  let status = response.status();
-  if !status.is_success() {
-    // A failed body read is reported, not swallowed: "status 500: <nothing>"
-    // and "status 500: <could not be read>" are different diagnoses.
-    let body = match response.text().await {
-      Ok(body) => body,
-      Err(e) => format!("(body read failed: {e})"),
-    };
-    return Err(RunnerError::NodeRuntime(format!(
-      "node tarball {url} status {status}: {body}"
-    )));
-  }
-
-  // The stream's `std::io::Error` surfaces from inside `extract_tarball`,
-  // where nothing knows which URL the bytes came from — so name it here.
-  let stream_url = url.to_owned();
-  let stream = response.bytes_stream().map(move |chunk| {
-    chunk.map_err(|e| std::io::Error::other(format!("tarball stream from {stream_url}: {e}")))
-  });
-  let stream_reader = tokio_util::io::StreamReader::new(stream);
-  // Constructed here (an async context) so it captures the current Tokio
-  // runtime handle, then moved into `spawn_blocking` — its documented use.
-  Ok(tokio_util::io::SyncIoBridge::new(stream_reader))
-}
-
-/// Monotonic counter disambiguating staging dirs created by this process.
-/// Mirrors `execution::actions::downloader`'s scheme (PID + counter, no
-/// UUID dependency) — this module is a deliberate local copy (see the
-/// module doc on [`extract_tarball`]), so the staging helpers are too.
-static STAGING_SEQ: AtomicU64 = AtomicU64::new(0);
-
-/// Build a unique sibling staging directory for `dest`:
-/// `<dest>.tmp-<pid>-<seq>`. Extraction lands here first; [`promote_staging`]
-/// renames it onto `dest` as the last step, so `dest` — the presence of
-/// `node_binary_path(dest)` other jobs/processes check to skip a re-download —
-/// never observes a partially-extracted tree, even under concurrent
-/// cross-repo runner processes sharing the same node cache dir.
-fn staging_dir_for(dest: &Path) -> PathBuf {
-  let seq = STAGING_SEQ.fetch_add(1, Ordering::Relaxed);
-  let pid = std::process::id();
-  let mut staging = dest.as_os_str().to_owned();
-  staging.push(format!(".tmp-{pid}-{seq}"));
-  PathBuf::from(staging)
-}
-
-/// Best-effort removal of a staging (or stale destination) directory. A
-/// failure is WARN-logged, never propagated: the caller already has (or is
-/// producing) the real error/result to return, and a leftover `.tmp-*` dir
-/// is a disk-hygiene issue, not a correctness one.
-fn cleanup_staging(staging: &Path) {
-  if let Err(e) = std::fs::remove_dir_all(staging)
-    && e.kind() != std::io::ErrorKind::NotFound
-  {
-    tracing::warn!(
-      staging = %staging.display(),
-      error = %e,
-      "node runtime staging dir cleanup failed"
+/// Tarball URL for `version` on `target`, and how many leading path
+/// components its entries carry before `bin/node`.
+pub fn node_download_url(
+  bases: &DownloadBases<'_>,
+  version: &str,
+  target: NodeTarget,
+) -> (String, usize) {
+  if target.libc == Libc::Musl {
+    let base = bases.alpine;
+    return (
+      format!("{base}/v{version}/node-v{version}-alpine-x64.tar.gz"),
+      0,
     );
   }
-}
-
-/// Promote a fully-extracted `staging` dir onto `dest` with a single rename
-/// — the commit point of a Node.js runtime install.
-///
-/// This install's completeness signal is the binary at
-/// `node_binary_path(dest)`, which `extract_tarball` writes INSIDE the
-/// staging dir (as `bin/node`), so the rename publishes the tree and its
-/// completeness signal together — the mirror of `actions::downloader`'s
-/// watermark-inside-staging ordering, without needing a separate marker
-/// file. `dest` is therefore never observably a complete-but-unsignaled
-/// tree, and this function deliberately does NOT clear `dest` up front: such
-/// a pre-rename cleanup is exactly what could delete a rival's just-committed
-/// tree.
-///
-/// A failed rename means `dest` was already occupied (or the filesystem
-/// refused the operation); which it is decides what happens next:
-/// - `node_binary_path(dest)` exists: a concurrent install (e.g. two runner
-///   processes for different repos installing the same Node.js version)
-///   committed first. Ours was redundant, not wrong — discard the staging
-///   copy and defer to it.
-/// - `dest` exists without the binary: a stale partial (an interrupted
-///   pre-staging extraction, or one left by a bug). Nothing valid can be
-///   reading it, so clear it and retry the rename ONCE.
-/// - `dest` does not exist: a genuine filesystem error — propagate it.
-///
-/// Either way `dest` ends up holding exactly ONE complete tree — never an
-/// interleaving of both, because extraction itself never writes into `dest`.
-///
-/// # Errors
-///
-/// Returns `RunnerError::NodeRuntime` when the rename fails for a reason
-/// other than a lost race — either with `dest` absent (a genuine filesystem
-/// error) or with the single retry over a stale `dest` failing too.
-fn promote_staging(staging: &Path, dest: &Path) -> Result<(), RunnerError> {
-  let rename_err = match std::fs::rename(staging, dest) {
-    Ok(()) => return Ok(()),
-    Err(err) => err,
+  let os = match target.os {
+    NodeOs::Linux => "linux",
+    NodeOs::Darwin => "darwin",
   };
-
-  if node_binary_path(dest).exists() {
-    cleanup_staging(staging);
-    return Ok(());
-  }
-
-  if dest.exists() {
-    // Re-check completeness at the last possible moment: a rival's rename can
-    // land between the check above and this removal, and deleting its
-    // just-committed runtime would strand later steps. Now-complete => lost
-    // race, defer to the winner.
-    if node_binary_path(dest).exists() {
-      cleanup_staging(staging);
-      return Ok(());
-    }
-    if let Err(remove_err) = std::fs::remove_dir_all(dest) {
-      tracing::warn!(
-        dest = %dest.display(),
-        error = %remove_err,
-        "stale node cache dir removal failed; retrying the promote rename anyway"
-      );
-    }
-    match std::fs::rename(staging, dest) {
-      Ok(()) => return Ok(()),
-      Err(retry_err) => {
-        cleanup_staging(staging);
-        return Err(RunnerError::NodeRuntime(format!(
-          "rename {} -> {}: {rename_err}; retry after clearing a stale dest: {retry_err}",
-          staging.display(),
-          dest.display()
-        )));
-      },
-    }
-  }
-
-  cleanup_staging(staging);
-  Err(RunnerError::NodeRuntime(format!(
-    "rename {} -> {}: {rename_err}",
-    staging.display(),
-    dest.display()
-  )))
+  let arch = match target.arch {
+    NodeArch::X64 => "x64",
+    NodeArch::Arm64 => "arm64",
+  };
+  let base = bases.nodejs;
+  (
+    format!("{base}/v{version}/node-v{version}-{os}-{arch}.tar.gz"),
+    1,
+  )
 }
 
-/// The real Node.js download host every production install resolves
-/// tarball URLs against. [`ensure_node_runtime_from`] takes the base as a
-/// parameter (this constant is the only value the public
-/// [`ensure_node_runtime`] ever calls it with) so an end-to-end test can
-/// drive the SAME fetch → stage → extract → promote sequence against a
-/// local HTTP server instead of `nodejs.org`.
-const NODE_DOWNLOAD_BASE: &str = "https://nodejs.org/dist";
-
-/// Download and cache Node.js if not already present, returning the binary path.
-///
-/// Thin wrapper around [`ensure_node_runtime_from`] pinned to the real
-/// [`NODE_DOWNLOAD_BASE`].
+/// Return a Node.js `major` binary that runs on `target`, acquiring it if
+/// needed (see the module doc for the order).
 ///
 /// # Errors
 ///
-/// Returns `RunnerError::NodeRuntime` on HTTP or extraction failures.
+/// Returns `RunnerError::NodeRuntime` when a preseeded runtime is missing or
+/// fails its startup check, or a download/extraction/startup check fails.
 pub async fn ensure_node_runtime(
   client: &reqwest::Client,
-  data_dir: &Path,
+  config: &RunnerConfig,
   major: u8,
+  target: NodeTarget,
 ) -> Result<PathBuf, RunnerError> {
-  ensure_node_runtime_from(NODE_DOWNLOAD_BASE, client, data_dir, major).await
+  let host_runnable = host_target().is_ok_and(|host| host == target);
+  ensure_node_runtime_from(
+    &PRODUCTION_BASES,
+    client,
+    config,
+    major,
+    target,
+    host_runnable,
+  )
+  .await
 }
 
-/// Download and cache Node.js if not already present, returning the binary
-/// path. `base_url` is a parameter (rather than hardcoded) so this exact
-/// function — the full fetch → stage → extract → promote sequence
-/// [`ensure_node_runtime`] runs in production — can be driven end-to-end
-/// against a local HTTP server in tests; [`ensure_node_runtime`] always
-/// calls it with [`NODE_DOWNLOAD_BASE`].
-///
-/// Skips download when the binary already exists on disk. Otherwise fetches
-/// the tarball and extracts it with first-component stripping (the
-/// tarball's `node-v{version}-{os}-{arch}/` prefix is removed) into a
-/// unique sibling staging directory, then promotes it onto the cache dir
-/// with a single [`std::fs::rename`] (see [`promote_staging`]). This keeps
-/// the cache dir always either absent or a complete tree, so an extraction
-/// from one runner process can never interleave with another's for the same
-/// Node.js version.
+/// [`ensure_node_runtime`] with injectable download hosts (tests serve
+/// tarballs locally) and an explicit "runs on this host" decision, which
+/// gates the startup check.
 ///
 /// # Errors
 ///
-/// Returns `RunnerError::NodeRuntime` on HTTP or extraction failures.
-async fn ensure_node_runtime_from(
-  base_url: &str,
+/// See [`ensure_node_runtime`].
+pub async fn ensure_node_runtime_from(
+  bases: &DownloadBases<'_>,
   client: &reqwest::Client,
-  data_dir: &Path,
+  config: &RunnerConfig,
   major: u8,
+  target: NodeTarget,
+  host_runnable: bool,
 ) -> Result<PathBuf, RunnerError> {
+  if let Some(node_dir) = &config.node_dir {
+    return preseeded(node_dir, major, target, host_runnable).await;
+  }
   let version = node_version_for(major);
-  let cache_dir = node_cache_dir(data_dir, version);
+  let cache_dir = node_runtime_dir(&config.data_dir, version, target);
   let binary = node_binary_path(&cache_dir);
-
   if binary.exists() {
     return Ok(binary);
   }
+  let (url, strip) = node_download_url(bases, version, target);
+  tracing::info!(version, %target, url = %url, "downloading Node.js runtime");
+  install_runtime(
+    client,
+    &Install {
+      url: &url,
+      strip,
+      cache_dir: &cache_dir,
+      validate_major: host_runnable.then_some(major),
+    },
+  )
+  .await?;
+  Ok(binary)
+}
 
-  let (os, arch) = detect_platform();
-  let url = node_download_url(base_url, version, os, arch);
-
-  tracing::info!(version, url = %url, "downloading Node.js runtime");
-
-  let sync_reader = fetch_node_tarball_reader(client, &url).await?;
-
-  let staging = staging_dir_for(&cache_dir);
-  let staging_for_extract = staging.clone();
-  let extract_result =
-    tokio::task::spawn_blocking(move || extract_tarball(sync_reader, &staging_for_extract))
-      .await
-      .map_err(|e| RunnerError::NodeRuntime(format!("extraction task failed: {e}")))
-      .and_then(|inner| {
-        inner.map_err(|e| RunnerError::NodeRuntime(format!("extract node tarball: {e}")))
-      });
-
-  if let Err(err) = extract_result {
-    cleanup_staging(&staging);
-    return Err(err);
+/// The authoritative preseed lookup: never downloads.
+async fn preseeded(
+  node_dir: &Path,
+  major: u8,
+  target: NodeTarget,
+  host_runnable: bool,
+) -> Result<PathBuf, RunnerError> {
+  let binary = preseed_binary_path(node_dir, major, target);
+  if !binary.exists() {
+    return Err(RunnerError::NodeRuntime(format!(
+      "Node.js runtime {} for {target} not found in TOOLU_RUNNER_NODE_DIR: expected {}",
+      target.externals_name(major),
+      binary.display()
+    )));
   }
-
-  promote_staging(&staging, &cache_dir)?;
-
+  if host_runnable {
+    validate_runtime(&binary, major)
+      .await
+      .map_err(RunnerError::NodeRuntime)?;
+  }
   Ok(binary)
 }
 

@@ -84,7 +84,12 @@ pub(super) async fn run_node_stage(
   let script = resolve_stage_script(&s)?;
   let node_binary = s
     .bounds
-    .resolve_within_bounds(ensure_node_runtime(s.client, &s.config.data_dir, s.major))
+    .resolve_within_bounds(ensure_node_runtime(
+      s.client,
+      s.config,
+      s.major,
+      crate::node::platform::host_target()?,
+    ))
     .await?;
   let (env, file_cmds) = s.bounds.resolve_within_bounds(node_stage_env(&s)).await?;
 

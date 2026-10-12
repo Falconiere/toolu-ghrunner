@@ -148,6 +148,11 @@ pub struct RunnerConfig {
   pub workspace: WorkspaceConfig,
   /// Whether shadow-mode step observation records (never serves).
   pub shadow_enabled: bool,
+  /// Offline Node.js runtimes in upstream's `externals/` layout
+  /// (`node24/bin/node`, `node24_alpine/bin/node`), from
+  /// `TOOLU_RUNNER_NODE_DIR`. When set it is authoritative: a missing
+  /// runtime fails the step instead of downloading.
+  pub node_dir: Option<PathBuf>,
 }
 
 /// Return `true` iff `TOOLU_RUNNER_ALLOW_VERBOSE` is exactly `"1"`.
@@ -196,6 +201,7 @@ impl Default for RunnerConfig {
       workspace_gc_hours: Self::DEFAULT_WORKSPACE_GC_HOURS,
       workspace: WorkspaceConfig::default(),
       shadow_enabled: false,
+      node_dir: None,
     }
   }
 }
