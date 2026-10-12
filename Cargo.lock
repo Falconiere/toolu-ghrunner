@@ -3085,6 +3085,7 @@ dependencies = [
  "rand 0.8.6",
  "reqwest",
  "rsa",
+ "rustls-native-certs",
  "serde_json",
  "sha1",
  "shared",

@@ -27,14 +27,22 @@ listener = { path = "../listener" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "signal", "time"] }
 tokio-util = "0.7"
 
-# Web / HTTP (register `generate-jitconfig` + device-flow login clients)
-reqwest = { version = "0.12", default-features = false, features = ["http2", "json", "rustls-tls-native-roots"] }
+# Web / HTTP (register `generate-jitconfig` + device-flow login clients).
+# `rustls-tls-webpki-roots` is already unified on at runtime by `opendal`'s
+# default `rustls-tls` (normal-dep chain listener → execution → cache →
+# opendal; `cargo tree -p toolu-runner -e normal -i opendal`). Naming it here
+# keeps the trust `check` reports (platform/SSL_CERT_* roots PLUS the
+# compiled-in Mozilla set) true even if that chain changes.
+reqwest = { version = "0.12", default-features = false, features = ["http2", "json", "rustls-tls-native-roots", "rustls-tls-webpki-roots"] }
 
 # Observability (no OTel in v1)
 tracing = "0.1"
 
 # CLI
 clap = { version = "4", features = ["derive", "env"] }
+
+# TLS trust report for `check` (the same loader reqwest's native-roots feature calls)
+rustls-native-certs = "0.8"
 
 # Utilities
 url = ">=2, <2.5.8"

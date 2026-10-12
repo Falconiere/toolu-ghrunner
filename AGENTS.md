@@ -9,7 +9,7 @@ no OTel.
   is now a **bin-only** crate (the CLI entrypoint: `main.rs` +
   `cli.rs` + `register_cmd.rs` + `run_cmd.rs` + `boot_cmd.rs` +
   `service_cmd.rs` + `login_cmd.rs` + `status_cmd.rs` +
-  `create_app_cmd.rs` + `ephemeral.rs`).
+  `create_app_cmd.rs` + `ephemeral.rs` + the `check_*.rs` preflight).
   The execution **engine** lives in
   `execution`; the GitHub **JIT lifecycle** lives in `listener`.
 - Workspace members (dependency order): `protocol`, `shared`,
@@ -680,7 +680,8 @@ to that list requires proving the value is not a real credential.
   `register_cmd`, `run` → `run_cmd`, `boot` → `boot_cmd` (intercepted
   before the generic dispatch — see `boot_cmd.rs` below), `install-service`
   → `service_cmd`, `login`/`logout` → `login_cmd`, `status` →
-  `status_cmd`, `create-app` → `create_app_cmd`)
+  `status_cmd`, `create-app` → `create_app_cmd`, `check` → `check_cmd`
+  (intercepted like `boot` for its own exit codes))
   plus the inline `remove` handler.
   `--config` resolution for `run` / `remove` / `status` /
   `install-service`: flag > cwd-inferred
@@ -796,6 +797,30 @@ to that list requires proving the value is not a real credential.
   opt-in), and any stored device-flow login token for the registered host
   **plus per-host login state** (the not-logged-in line carries the
   keyring-migration hint). No network (split out of `main.rs`).
+- `check_cmd.rs` (#93) — `toolu-runner check`, the read-only preflight
+  (upstream `run.sh --check`): `CheckArgs` (`--url` conflicts with
+  `--config`, `--timeout` 1–300 s, default 10) + `cmd_check` → explicit exit
+  code that `main` applies directly like `boot`'s: `0` every applicable
+  required endpoint answered (optional WARNs allowed), `1` a required
+  endpoint failed, `2` usage/config error before probing. Target: `--url` >
+  `--config` > `crate::resolve_config(None)` > github.com defaults (the
+  header names which). Never takes the `.lock`, writes, opens a session or
+  sends a credential. Split by concern: `check_endpoints.rs` (pure host
+  table from upstream `ActionsCheck.cs`; registration `ServerUrl` /
+  `ServerUrlV2` / `AuthorizationUrl` override pipelines / broker / token;
+  GHES skips broker (V1) and results; IP-literal GHES skips codeload),
+  `check_probe.rs` (one GET per endpoint, production client defaults + bound,
+  no redirects; ANY response passes except 407; failures classified from the
+  error *source* chain — the top-level message embeds the URL),
+  `check_tools.rs` (git / docker / node subprocesses, `kill_on_drop` +
+  timeout; always optional), `check_env.rs` (proxy vars exactly as
+  hyper-util's `Matcher::from_system` reads them, CGI guard, rustls-native-
+  certs trust anchors; `redact_url` / `url_secrets` for proxy and
+  `DOCKER_HOST` userinfo), `check_report.rs` (render through a
+  `SecretMasker` seeded with those credentials; exit code). Env reads for all
+  of it live in `config.rs`. Pinned by `tests/check_cmd_test.rs` /
+  `tests/check_tools_test.rs` against real loopback peers
+  (`tests/helpers/check_servers.rs`).
 - `create_app_cmd.rs` — `cmd_create_app`: runs GitHub's **App Manifest
   flow** to create a user-owned GitHub App in one click (github.com
   only; a `--host` other than github.com errors as unsupported). Binds a
