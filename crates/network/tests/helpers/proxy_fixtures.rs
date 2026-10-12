@@ -6,14 +6,19 @@
 //! line with its `Proxy-Authorization` header, and tunnels to
 //! `127.0.0.1:<requested port>` whatever host was asked for — so
 //! `target.test` works on any OS without DNS (no `127.0.0.2`, which macOS
-//! lacks).
+//! lacks). A plain-`http://` destination arrives in absolute form
+//! (`GET http://host:port/path HTTP/1.1`); with valid auth it is answered
+//! `200` with the body `via-proxy` instead of being forwarded.
 
 use std::sync::{Arc, Mutex};
 
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
 
-use crate::tls_fixtures::{FixtureResult, read_head};
+use super::tls_fixtures::{FixtureResult, read_head};
+
+/// Body (`via-proxy`) the proxy answers an authenticated absolute-form request with.
+const VIA_PROXY_BODY: &str = "via-proxy";
 
 /// The value of header `name` (case-insensitive) in a request `head`.
 fn header(head: &str, name: &str) -> Option<String> {
@@ -81,6 +86,15 @@ impl RecordingProxy {
   }
 }
 
+/// Answer `407` demanding Basic credentials.
+async fn reject(client: &mut TcpStream) {
+  let _ = client
+    .write_all(
+      b"HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"t\"\r\nContent-Length: 0\r\n\r\n",
+    )
+    .await;
+}
+
 async fn tunnel(mut client: TcpStream, sink: Arc<Mutex<Vec<ProxyHit>>>, expected: Option<String>) {
   let Ok(head) = read_head(&mut client).await else {
     return;
@@ -94,18 +108,26 @@ async fn tunnel(mut client: TcpStream, sink: Arc<Mutex<Vec<ProxyHit>>>, expected
     });
   }
   let mut parts = line.split_whitespace();
-  let (Some("CONNECT"), Some(authority)) = (parts.next(), parts.next()) else {
-    let _ = client
-      .write_all(b"HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n")
-      .await;
+  let (method, target) = (parts.next(), parts.next());
+  let absolute_form = method == Some("GET") && target.is_some_and(|t| t.starts_with("http://"));
+  let (Some("CONNECT"), Some(authority)) = (method, target) else {
+    if !absolute_form {
+      let _ = client
+        .write_all(b"HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n")
+        .await;
+    } else if expected.is_some() && auth != expected {
+      reject(&mut client).await;
+    } else {
+      let reply = format!(
+        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{VIA_PROXY_BODY}",
+        VIA_PROXY_BODY.len()
+      );
+      let _ = client.write_all(reply.as_bytes()).await;
+    }
     return;
   };
   if expected.is_some() && auth != expected {
-    let _ = client
-      .write_all(
-        b"HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"t\"\r\nContent-Length: 0\r\n\r\n",
-      )
-      .await;
+    reject(&mut client).await;
     return;
   }
   let port = authority.rsplit_once(':').map_or("443", |(_, p)| p);

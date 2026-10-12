@@ -1,7 +1,7 @@
 //! Acquired-job action resolution and real HTTP archive download checks.
 
 use execution::execution::actions::download_info::ActionDownloadContext;
-use execution::execution::actions::downloader::download_and_extract_action;
+use execution::execution::actions::downloader::{archive_client, download_and_extract_action};
 use execution::execution::actions::prefetch::ActionFetcher;
 use execution::execution::actions::resolver::parse_action_ref;
 use shared::{AgentJobRequestMessage, SecretMasker};
@@ -232,7 +232,7 @@ async fn archive_redirect_loop_and_missing_location_fail_closed() {
       uuid::Uuid::new_v4()
     ));
     let error = download_and_extract_action(
-      &shared::NetworkConfig::default(),
+      &archive_client(&shared::NetworkConfig::default()).expect("archive client"),
       &format!("http://{address}/{path}"),
       None,
       &destination,
@@ -405,7 +405,7 @@ async fn archive_redirect_keeps_basic_auth_on_origin_and_drops_it_cross_origin()
   let destination =
     std::env::temp_dir().join(format!("toolu-action-redirect-{}", uuid::Uuid::new_v4()));
   let result = download_and_extract_action(
-    &shared::NetworkConfig::default(),
+    &archive_client(&shared::NetworkConfig::default()).expect("archive client"),
     &format!("http://{source_address}/tarball"),
     Some(token),
     &destination,

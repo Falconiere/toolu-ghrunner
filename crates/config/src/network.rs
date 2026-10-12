@@ -42,7 +42,8 @@ impl NetworkSection {
   }
 
   /// The runtime [`NetworkConfig`]: blank `no_proxy` entries dropped and the
-  /// rest trimmed, `ca_bundle` tilde-expanded. Validation (absolute path,
+  /// rest trimmed, `ca_bundle` tilde-expanded (a blank `ca_bundle` is unset,
+  /// like a blank `proxy` is env mode). Validation (absolute path,
   /// readable PEM, proxy URL shape) happens where clients are built, so a
   /// bad value fails closed at `run` / `check` start with a clear error.
   pub fn resolve(&self) -> NetworkConfig {
@@ -57,7 +58,9 @@ impl NetworkSection {
       ca_bundle: self
         .ca_bundle
         .as_deref()
-        .map(|raw| shared::paths::expand_tilde(&PathBuf::from(raw.trim()))),
+        .map(str::trim)
+        .filter(|raw| !raw.is_empty())
+        .map(|raw| shared::paths::expand_tilde(&PathBuf::from(raw))),
     }
   }
 }

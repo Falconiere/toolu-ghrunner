@@ -48,18 +48,26 @@ pub fn client_builder(cfg: &NetworkConfig) -> Result<ClientBuilder, RunnerError>
 /// `proxy none`, the configured `no_proxy` entry count, and the
 /// `ca_bundle` path with its certificate count.
 ///
+/// Validates as it describes: a configured proxy must parse, so a caller
+/// that only wants the diagnostic (`check`) still fails on an unusable value.
+/// Env mode falls back `HTTPS_PROXY` → `HTTP_PROXY` → `ALL_PROXY`.
+///
 /// # Errors
 ///
-/// The same `ca_bundle` errors as [`client_builder`].
+/// The same proxy and `ca_bundle` errors as [`client_builder`].
 pub fn describe(cfg: &NetworkConfig) -> Result<String, RunnerError> {
   let proxy = match configured_proxy(cfg) {
-    Some(raw) => format!(
-      "proxy {} (config), no_proxy {} entries",
-      redact_proxy_url(raw),
-      configured_bypass(cfg).count()
-    ),
+    Some(raw) => {
+      parse_proxy(raw)?;
+      format!(
+        "proxy {} (config), no_proxy {} entries",
+        redact_proxy_url(raw),
+        configured_bypass(cfg).count()
+      )
+    },
     None => match crate::config::first_set(crate::config::HTTPS_PROXY)
       .or_else(|| crate::config::first_set(crate::config::HTTP_PROXY))
+      .or_else(|| crate::config::first_set(crate::config::ALL_PROXY))
     {
       Some(env) => format!("proxy {} (env)", redact_proxy_url(&env)),
       None => "proxy none".to_owned(),
@@ -74,6 +82,11 @@ pub fn describe(cfg: &NetworkConfig) -> Result<String, RunnerError> {
     None => String::new(),
   };
   Ok(format!("{proxy}{bundle}"))
+}
+
+/// Whether `[network] proxy` is set to a non-blank value (config mode).
+pub fn proxy_configured(cfg: &NetworkConfig) -> bool {
+  configured_proxy(cfg).is_some()
 }
 
 /// The configured proxy, trimmed; blank means env mode.
@@ -111,6 +124,8 @@ pub(crate) struct ParsedProxy {
   pub(crate) url: Url,
   /// Percent-decoded username, when present.
   pub(crate) user: Option<String>,
+  /// The username exactly as written (percent-encoded), when present.
+  pub(crate) raw_user: Option<String>,
   /// The password exactly as written (percent-encoded), when present.
   pub(crate) raw_password: Option<String>,
   /// Percent-decoded password, when present.
@@ -132,12 +147,22 @@ pub(crate) fn parse_proxy(raw: &str) -> Result<ParsedProxy, RunnerError> {
       "[network] proxy {shown}: has no host"
     )));
   }
+  if raw.contains('@') && url.username().is_empty() && url.password().is_none() {
+    // `http://u:123#x@proxy` parses as host `u` with a fragment: the `@`
+    // belongs to credentials whose password held a reserved character.
+    return Err(RunnerError::Config(format!(
+      "[network] proxy {shown}: percent-encode reserved characters (@ : / ? #) in the user name and password"
+    )));
+  }
   let decode = |value: &str| {
     percent_encoding::percent_decode_str(value)
       .decode_utf8_lossy()
       .into_owned()
   };
-  let user = Some(url.username()).filter(|u| !u.is_empty()).map(decode);
+  let raw_user = Some(url.username())
+    .filter(|u| !u.is_empty())
+    .map(str::to_owned);
+  let user = raw_user.as_deref().map(decode);
   let raw_password = url.password().map(str::to_owned);
   let password = raw_password.as_deref().map(decode);
   // Infallible for http(s) URLs with a host; a failure would keep the
@@ -150,6 +175,7 @@ pub(crate) fn parse_proxy(raw: &str) -> Result<ParsedProxy, RunnerError> {
   Ok(ParsedProxy {
     url,
     user,
+    raw_user,
     raw_password,
     password,
   })
@@ -160,8 +186,12 @@ fn build_proxy(raw: &str, cfg: &NetworkConfig) -> Result<Proxy, RunnerError> {
   let shown = redact_proxy_url(raw);
   let mut proxy = Proxy::all(parsed.url.as_str())
     .map_err(|e| RunnerError::Config(format!("[network] proxy {shown}: {e}")))?;
-  if let Some(user) = &parsed.user {
-    proxy = proxy.basic_auth(user, parsed.password.as_deref().unwrap_or_default());
+  // The user may be empty (`http://:pw@proxy`) when a password is present.
+  if parsed.user.is_some() || parsed.password.is_some() {
+    proxy = proxy.basic_auth(
+      parsed.user.as_deref().unwrap_or_default(),
+      parsed.password.as_deref().unwrap_or_default(),
+    );
   }
   Ok(proxy.no_proxy(NoProxy::from_string(&bypass_list(cfg).join(","))))
 }

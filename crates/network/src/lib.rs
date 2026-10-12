@@ -22,6 +22,6 @@ mod config;
 mod secrets;
 mod step_env;
 
-pub use client::{LOOPBACK_BYPASS, client_builder, describe};
+pub use client::{LOOPBACK_BYPASS, client_builder, describe, proxy_configured};
 pub use secrets::proxy_secrets;
 pub use step_env::{StepNetworkEnv, step_env};

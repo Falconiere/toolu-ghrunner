@@ -787,10 +787,11 @@ new host.
 ## Proxy and custom CA
 
 Every runner HTTP client — the listener, JIT re-mint, `remove`, `check`,
-action downloads, Node runtime downloads, the live-log WebSocket, the
-accelerated cache's upstream, OIDC and the S3 cold tier — is built from one
-place (`crates/network`) and honours the same settings. Nothing ever turns
-TLS verification off.
+action downloads, Node runtime downloads, the live-log WebSocket and the
+accelerated cache's upstream — is built from one place (`crates/network`)
+and honours the same settings. The local OIDC server and the S3 cold tier
+build their clients the same way but are not wired into a production job
+path yet. Nothing ever turns TLS verification off.
 
 **Environment mode (no `[network] proxy`, the default).** The runner reads
 `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` / `NO_PROXY` exactly as reqwest
@@ -812,13 +813,15 @@ ca_bundle = "~/certs/corp-root.pem"               # extra trusted CA(s), PEM
 
 | Setting | Effect |
 |---|---|
-| `proxy` set | Replaces the proxy variables **and** env `NO_PROXY` for the runner's clients. `localhost`, `127.0.0.1` and `::1` are always bypassed (as the official runner does), on top of `no_proxy`. Credentials are sent as Basic auth. |
+| `proxy` set | Replaces the proxy variables **and** env `NO_PROXY` for the runner's clients. `localhost`, `127.0.0.1` and `::1` are always bypassed (as the official runner does), on top of `no_proxy`. Credentials are sent as Basic auth; percent-encode `@ : / ? #` in the user name or password (an unencoded one is rejected). |
 | `no_proxy` | Used only with `proxy`. |
 | `ca_bundle` | Works with or without `proxy`. **Adds** trust anchors; never removes the OS or Mozilla roots. Must be absolute after `~` expansion, a readable file, and contain at least one well-formed PEM certificate — anything else is an error naming the path, and `run` / `check` exit `2` before polling. |
 
-`run` re-reads `[network]` before every job, so an edit applies to the next
-job; an edit that breaks it stops the runner (exit `2`) instead of silently
-dropping the proxy or CA. Each `run` iteration and `boot` logs one line:
+`run` re-reads `[network]` at the start of each poll cycle, so an edit made
+while the runner waits takes effect after the job it is waiting for (or on
+restart); an edit that breaks it stops the runner (exit `2`) instead of
+silently dropping the proxy or CA. `run` logs one line at startup and
+whenever the effective settings change, `boot` once:
 `network: proxy http://user:***@proxy.corp:3128 (config), no_proxy 2 entries,
 ca_bundle /home/u/certs/corp-root.pem (1 certificates)`.
 
@@ -834,8 +837,9 @@ proxy variables unless their own `env` sets them — never
 `NODE_EXTRA_CA_CERTS`, whose host path does not exist in a container.
 
 **Secrets.** The proxy password (as written and percent-decoded) and its
-`base64(user:password)` Basic credential are registered with the secret
-masker, so a step that prints `$HTTPS_PROXY` shows `user:***@…` and no log,
+`base64(user:password)` Basic credential — or a lone `token@` user name,
+as written and decoded — are registered with the secret masker (in
+environment mode, those of `HTTPS_PROXY`, `HTTP_PROXY` and `ALL_PROXY`), so a step that prints `$HTTPS_PROXY` shows `user:***@…` and no log,
 journal or diagnostic carries them. The masker ignores values shorter than
 4 characters, so use a real password; runner-authored messages always print
 the proxy redacted.

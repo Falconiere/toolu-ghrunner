@@ -23,11 +23,30 @@ fn lone_userinfo_is_treated_as_a_token() {
 
 #[test]
 fn at_sign_in_password_and_path_are_handled() {
-  // An unencoded `@` in the password: the LAST `@` before the path ends userinfo.
+  // An unencoded `@` in the password: the LAST `@` ends userinfo.
+  assert_eq!(
+    redact_proxy_url("http://bob:p@ss@proxy:8080/path"),
+    "http://bob:***@proxy:8080/path"
+  );
+  // Secure by default: an `@` later in the path / query over-redacts rather
+  // than risk leaking a password that contained `/` or `?`.
   assert_eq!(
     redact_proxy_url("http://bob:p@ss@proxy:8080/path?q=@x"),
-    "http://bob:***@proxy:8080/path?q=@x"
+    "http://bob:***@x"
   );
+}
+
+#[test]
+fn reserved_characters_in_the_password_never_leak() {
+  for (raw, expected) in [
+    ("http://u:ab#cd@proxy:3128", "http://u:***@proxy:3128"),
+    ("http://u:a/b@proxy", "http://u:***@proxy"),
+    ("http://u:a?b@proxy:1", "http://u:***@proxy:1"),
+    ("http://u:a/b?c#d@proxy:1/p", "http://u:***@proxy:1/p"),
+    ("http://tok#en@proxy", "http://***@proxy"),
+  ] {
+    assert_eq!(redact_proxy_url(raw), expected, "{raw}");
+  }
 }
 
 #[test]

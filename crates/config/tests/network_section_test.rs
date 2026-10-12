@@ -53,10 +53,17 @@ ca_bundle = "~/certs/corp-root.pem"
   let expected = shared::paths::expand_tilde(&PathBuf::from("~/certs/corp-root.pem"));
   assert!(expected.is_absolute(), "{}", expected.display());
   assert_eq!(network.ca_bundle, Some(expected));
-  assert!(
-    !format!("{:?}", cfg.network).contains("pass@"),
-    "Debug must redact"
-  );
+  let debug = format!("{:?}", cfg.network);
+  assert!(debug.contains("user:***@proxy.corp:3128"), "{debug}");
+  assert!(!debug.contains("pass@"), "Debug must redact: {debug}");
+}
+
+#[test]
+fn blank_ca_bundle_is_unset_like_a_blank_proxy() {
+  for blank in ["", "   ", "\t"] {
+    let cfg = load(&format!("\n[network]\nca_bundle = \"{blank}\"\n")).expect("load config");
+    assert_eq!(cfg.network_config().ca_bundle, None, "{blank:?}");
+  }
 }
 
 #[test]

@@ -66,8 +66,8 @@ async fn bundle_makes_the_generated_ca_trusted() -> FixtureResult<()> {
   let untrusted = fetch(&bundle_cfg(None), target.port()).await?;
   let err = untrusted.err().unwrap_or_default();
   assert!(
-    err.contains("certificate"),
-    "no-bundle must fail TLS: {err}"
+    err.contains("invalid peer certificate: UnknownIssuer"),
+    "no-bundle must fail as an unknown issuer: {err}"
   );
   assert_eq!(
     target.requests().len(),
@@ -92,10 +92,20 @@ async fn expired_and_wrong_host_leaves_fail_even_with_the_bundle() -> FixtureRes
     b"ok".to_vec(),
   )
   .await?;
-  for (what, port) in [("expired", expired.port()), ("wrong host", wrong.port())] {
+  for (what, port, cause) in [
+    ("expired", expired.port(), "certificate expired"),
+    (
+      "wrong host",
+      wrong.port(),
+      "certificate not valid for name \"target.test\"",
+    ),
+  ] {
     let outcome = fetch(&cfg, port).await?;
     let err = outcome.err().unwrap_or_default();
-    assert!(err.contains("certificate"), "{what} must fail TLS: {err}");
+    assert!(
+      err.contains(&format!("invalid peer certificate: {cause}")),
+      "{what} must fail with `{cause}`: {err}"
+    );
   }
   assert!(expired.requests().is_empty() && wrong.requests().is_empty());
   Ok(())

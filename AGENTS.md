@@ -5,7 +5,8 @@ no OTel.
 
 ## Crate Type
 
-- Layered workspace of **11 crates under `crates/`**. `toolu-runner`
+- Layered workspace of **12 crates under `crates/`** (`members =
+  ["crates/*"]`). `toolu-runner`
   is now a **bin-only** crate (the CLI entrypoint: `main.rs` +
   `cli.rs` + `register_cmd.rs` + `run_cmd.rs` + `boot_cmd.rs` +
   `service_cmd.rs` + `login_cmd.rs` + `status_cmd.rs` +
@@ -15,9 +16,11 @@ no OTel.
   `execution`; the GitHub **JIT lifecycle** lives in `listener`.
 - Workspace members (dependency order): `protocol`, `shared`,
   `network`, `config`, `expressions`, `cache`, `wire`, `observability`,
-  `execution`, `listener`, `toolu-runner`.
+  `execution`, `listener`, `toolu-runner`, plus the standalone `daemon`
+  bin (`toolu-daemon`; no internal deps, `reqwest` only in its tests).
 - Dependency graph (acyclic):
-  - `protocol` — no internal deps (sync crypto + protocol/v1 types).
+  - `protocol` — `shared` only (sync crypto + protocol/v1 types; no
+    async or network deps).
   - `shared` — no internal deps (cross-cutting types, tracing init,
     `SecretMasker`, `sanitize_job_id`, `runner_os`/`runner_arch`).
   - `network` — `shared` only. The ONLY production `reqwest` client
@@ -102,7 +105,7 @@ decision rather than drift.
 
 | Deviation | Kit says | Here | Why |
 | --- | --- | --- | --- |
-| Cargo workspace | one crate, no workspace | 11 crates under `crates/` | The layering (`protocol`/`shared` → … → `listener`) is what keeps `protocol` provably I/O-free; the kit's workspace guardrail machinery supports it. |
+| Cargo workspace | one crate, no workspace | 12 crates under `crates/` | The layering (`protocol`/`shared` → … → `listener`) is what keeps `protocol` provably I/O-free; the kit's workspace guardrail machinery supports it. |
 | `rustfmt.toml` `tab_spaces` | `4` | `2` | Adopting 4 would reformat all 341 `.rs` files (4,212 hunks) and reset `git blame` for no behavioural gain. Every other rustfmt option matches the kit. |
 | Lint set | `unwrap_used`/`expect_used` = `warn` | `deny`, plus `panic`/`unreachable`/`todo`/`indexing_slicing`/cast lints denied | Stricter than the kit, not looser. A runner that panics mid-job kills a customer's build. |
 | `#[allow(…)]` / `#[expect(…)]` | not addressed | banned repo-wide (`tools/check.sh`) | Fix the lint, don't silence it. Note the check matches the outer form only — a crate-level `#![allow(…)]` (as in the two `benches/*.rs`) slips through. |
@@ -356,7 +359,10 @@ to that list requires proving the value is not a real credential.
   `NoProxy(no_proxy + LOOPBACK_BYPASS)`, which disables env proxy vars.
   `ca_bundle` adds anchors (absolute, regular file, every PEM item a valid
   trust anchor, ≥1 — else `RunnerError::Config` naming the path; never a
-  fallback). `describe` is the redacted one-line diagnostic.
+  fallback). A proxy with an `@` outside its parsed credentials is rejected.
+  `describe` validates the same way and returns the redacted one-line
+  diagnostic (env mode: `HTTPS_PROXY` → `HTTP_PROXY` → `ALL_PROXY`);
+  `proxy_configured` is the config-mode test.
 - `step_env.rs` — `step_env` → `StepNetworkEnv { host, container }`: proxy
   vars in both casings (config values, or the runner's first-set env values),
   `NODE_EXTRA_CA_CERTS` for host steps only.
@@ -507,8 +513,9 @@ to that list requires proving the value is not a real credential.
   types, signed-URL helpers), `feature_detection` (V1 vs V2
   detection), `live_log` (WebSocket streamer for real-time logs to
   the GH UI; the handshake is an HTTP/1.1 upgrade on a caller-supplied
-  `network` client — the listener builds it `http1_only` from
-  `RunnerConfig.network` — wrapped by `WebSocketStream::from_raw_socket`,
+  client — `live_log_client(&NetworkConfig)` builds it `http1_only` with a
+  30 s connect timeout, and the listener calls it with `RunnerConfig.network`
+  (a bad `[network]` WARNs and disables the live log) — wrapped by `WebSocketStream::from_raw_socket`,
   so it shares every other client's proxy and trust (#94)), `log_upload`, `results_types`, `types` (`Status`,
   `ReportConclusion`, `StepResult`, `Annotation`).
 
@@ -790,9 +797,10 @@ to that list requires proving the value is not a real credential.
   `--no-default-labels`) and persists `--ephemeral` as the config's
   `ephemeral` key.
 - `network_setup.rs` — `lifecycle_client`: per `run` iteration (from the
-  reloaded `[network]`) and for `boot` (env mode), registers
-  `network::proxy_secrets` with the masker, logs `network::describe`, builds
-  the listener / re-mint client. An unusable `[network]` exits 2 like a
+  reloaded `[network]`) and for `boot` (env mode), builds the listener /
+  re-mint client; a `NetworkMemo` (local to `RunLoop::drive`) makes it
+  register new `network::proxy_secrets` and log the `network::describe` line
+  only when they change from the previous pass. An unusable `[network]` exits 2 like a
   corrupt config. `remove` and `check` build theirs from the registration's
   `[network]`; `login`, `create-app` and the first `register` use env mode.
 - `ephemeral.rs` — `finish_job`: after an ephemeral registration's one job,

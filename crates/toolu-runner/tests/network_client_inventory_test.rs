@@ -7,9 +7,21 @@
 use std::path::{Path, PathBuf};
 
 /// Constructor spellings that bypass `network::client_builder`.
-const CONSTRUCTORS: [&str; 3] = ["Client::builder(", "Client::new(", "ClientBuilder::new("];
+const CONSTRUCTORS: [&str; 6] = [
+  "Client::builder(",
+  "Client::new(",
+  "Client::default(",
+  "ClientBuilder::new(",
+  "ClientBuilder::default(",
+  "reqwest::get(",
+];
 
 /// Crates whose `src/` is not runner production code or is the builder itself.
+/// `network` is the one sanctioned construction site. `daemon` (the per-job
+/// runner container) uses `reqwest` only in its test tree today — it makes no
+/// outbound production requests and `[network]` for it is a spec non-goal; if
+/// it ever gains a production client, drop it from this list and route that
+/// client through `network::client_builder`.
 const EXEMPT_CRATES: [&str; 2] = ["network", "daemon"];
 
 fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
@@ -84,6 +96,10 @@ fn the_scanner_recognises_what_it_bans() {
   assert!(raw_constructions("let c = reqwest::Client::builder()"));
   assert!(raw_constructions("client: reqwest::Client::new(),"));
   assert!(raw_constructions("Client::new()"));
+  assert!(raw_constructions("let c = reqwest::Client::default();"));
+  assert!(raw_constructions("ClientBuilder::default()"));
+  assert!(raw_constructions("let r = reqwest::get(url).await?;"));
   assert!(!raw_constructions("DockerClient::new(host)"));
+  assert!(!raw_constructions("DockerClient::default()"));
   assert!(!raw_constructions("network::client_builder(&cfg)?"));
 }

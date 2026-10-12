@@ -281,11 +281,11 @@ fn promote_staging(staging: &Path, dest: &Path) -> Result<(), RunnerError> {
 /// is set when the body stream fails (including the whole-request timeout),
 /// so the caller can tell an interrupted download from corrupt content.
 async fn fetch_tarball_reader(
-  network: &shared::NetworkConfig,
+  archive_client: &reqwest::Client,
   tarball_url: &str,
   token: Option<&str>,
 ) -> Result<(impl Read + use<>, Arc<AtomicBool>), RunnerError> {
-  let response = request_archive(network, tarball_url, token).await?;
+  let response = request_archive(archive_client, tarball_url, token).await?;
   let status = response.status();
   if !status.is_success() {
     return Err(archive_error(
@@ -315,17 +315,12 @@ fn archive_error(kind: ActionFetchKind, message: String) -> RunnerError {
 
 /// Follow bounded archive redirects, forwarding Basic auth only on the
 /// resolver-selected origin and rejecting insecure or credentialed targets.
-/// The no-redirect client honours the job's `[network]` proxy / CA (#94).
+/// `archive_client` must be the no-redirect client from [`archive_client`].
 async fn request_archive(
-  network: &shared::NetworkConfig,
+  archive_client: &reqwest::Client,
   tarball_url: &str,
   token: Option<&str>,
 ) -> Result<reqwest::Response, RunnerError> {
-  let archive_client = network::client_builder(network)?
-    .redirect(reqwest::redirect::Policy::none())
-    .timeout(std::time::Duration::from_secs(120))
-    .build()
-    .map_err(|_error| RunnerError::ActionDownload("archive HTTP client failed".to_owned()))?;
   let initial = reqwest::Url::parse(tarball_url)
     .map_err(|_error| RunnerError::ActionDownload("archive URL invalid".to_owned()))?;
   let mut current = initial.clone();
@@ -374,6 +369,22 @@ async fn request_archive(
   ))
 }
 
+/// Build the no-redirect archive client (120 s whole-request timeout) from the
+/// job's `[network]` proxy / CA (#94). Built once per job and shared by every
+/// archive download, so a CA bundle is read from disk once, not per download.
+///
+/// # Errors
+///
+/// Returns `RunnerError::Config` for an unusable `[network]` section and
+/// `RunnerError::ActionDownload` when the client cannot be built.
+pub fn archive_client(network: &shared::NetworkConfig) -> Result<reqwest::Client, RunnerError> {
+  network::client_builder(network)?
+    .redirect(reqwest::redirect::Policy::none())
+    .timeout(std::time::Duration::from_secs(120))
+    .build()
+    .map_err(|_error| RunnerError::ActionDownload("archive HTTP client failed".to_owned()))
+}
+
 fn validate_archive_hop(current: &reqwest::Url, initial: &reqwest::Url) -> Result<(), RunnerError> {
   let loopback = matches!(
     current.host_str(),
@@ -410,7 +421,7 @@ fn validate_archive_hop(current: &reqwest::Url, initial: &reqwest::Url) -> Resul
 ///
 /// Returns `RunnerError::ActionDownload` on HTTP or extraction failure.
 pub async fn download_and_extract_action(
-  network: &shared::NetworkConfig,
+  archive_client: &reqwest::Client,
   tarball_url: &str,
   token: Option<&str>,
   cache_dir: &Path,
@@ -424,7 +435,7 @@ pub async fn download_and_extract_action(
     return Ok(());
   }
 
-  let (sync_reader, interrupted) = fetch_tarball_reader(network, tarball_url, token).await?;
+  let (sync_reader, interrupted) = fetch_tarball_reader(archive_client, tarball_url, token).await?;
 
   let staging = staging_dir_for(cache_dir);
   let staging_for_extract = staging.clone();

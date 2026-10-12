@@ -127,6 +127,7 @@ async fn run_listener_once(
     &shared::NetworkConfig::default(),
     &masker,
     Duration::from_secs(60),
+    &mut crate::network_setup::NetworkMemo::default(),
   ) {
     Ok(c) => c,
     Err(e) => {

@@ -56,8 +56,8 @@ configure git/node separately, and never to skip TLS validation.
 **A new `network` crate owns client construction.** `protocol` depends on
 `shared` and must stay free of `reqwest` (CI greps `cargo tree -p protocol`),
 so the builder cannot live in `shared`. New crate `crates/network`
-(deps: `shared`, `reqwest` with `rustls-tls-native-roots`, `base64`,
-`percent-encoding`, `tracing`) sits below `wire`, `cache`, `execution`,
+(deps: `shared`, `reqwest` with `rustls-tls-native-roots`, `rustls` (trust
+anchor validation), `base64`, `percent-encoding`) sits below `wire`, `cache`, `execution`,
 `listener` and the bin, all of which gain it as a dependency:
 
 - `network::client_builder(&NetworkConfig) -> Result<reqwest::ClientBuilder, RunnerError>`
@@ -87,23 +87,28 @@ so the builder cannot live in `shared`. New crate `crates/network`
 `RunnerError::Config` naming the path): must be absolute after the config
 crate's `~` expansion (`shared::paths::expand_tilde`) — a relative path is
 rejected because a supervised service's cwd is not the operator's; must be a
-readable regular file; parsed with `reqwest::Certificate::from_pem_bundle`
-(rustls-pemfile): a malformed PEM item fails the whole bundle, non-certificate
-PEM items (keys) are ignored, and zero certificates fails. `proxy` must parse
-as an absolute `http://` or `https://` URL with a host; anything else is a
-`RunnerError::Config` showing the URL redacted. `proxy = ""` is unset.
+readable regular file; parsed with rustls-pki-types'
+`CertificateDer::pem_slice_iter`: a malformed PEM item fails the whole
+bundle, non-certificate PEM items (keys) are ignored, zero certificates fails,
+and every certificate must be accepted by rustls' `RootCertStore::add` as a
+trust anchor. `proxy` must parse as an absolute `http://` or `https://` URL
+with a host, and an `@` outside the parsed credentials (an unencoded reserved
+character in the user name or password) is rejected; anything else is a
+`RunnerError::Config` showing the URL redacted. `proxy = ""` and
+`ca_bundle = ""` are unset. `describe` runs the same validation, so `check`
+exits 2 on an unusable `[network]` before probing.
 
 **Every HTTP client** (inventory, with the change):
 
 | Site | Today | After |
 | --- | --- | --- |
-| `run` loop client (`run_cmd::build_loop_client`) — listener, re-mint, ephemeral unregister | built once at startup | built from the reloaded `[network]` **every iteration** (the loop's existing "edits take effect next pass" contract); a build error is fatal (exit 2) exactly like a corrupt config today — under systemd/launchd the supervisor restarts it and it fails again visibly, never silently dropping the CA |
+| `run` loop client (`network_setup::lifecycle_client`, replacing `run_cmd::build_loop_client`) — listener, re-mint, ephemeral unregister | built once at startup | built from the reloaded `[network]` **every iteration** (the loop's existing "edits take effect next pass" contract); a build error is fatal (exit 2) exactly like a corrupt config today — under systemd/launchd the supervisor restarts it and it fails again visibly, never silently dropping the CA |
 | `remove` unregister (`main.rs`) | bare | registration `[network]` |
 | `check` probes (`check_probe::build_client`) | bare | registration `[network]` when one resolves (`--config` or inferred); `--url` / no registration → env mode |
-| job client (`execution` — action API, node runtime, post-drain) | bare in `job_runner.rs` | `RunnerConfig.network`, moved with the other job clients to a new `job_runner/http.rs` (`job_runner.rs` is at 491/500 code lines) |
+| job client (`execution` — action API, node runtime, post-drain) | bare in `job_runner.rs` | `RunnerConfig.network`, moved with the other job clients to a new `job_runner/job_http.rs` (`job_runner.rs` is at 491/500 code lines) |
 | action archive client (`actions::downloader::request_archive`, private no-redirect client; `fetch_tarball_reader`'s client param is unused) | bare, per download | `ActionFetcher` owns one no-redirect archive client built from the job's network; `download_and_extract_action(archive_client, …)` uses it |
 | OIDC upstream client (`oidc::server`, process-global `OnceLock`; `OidcServer` has no production caller) | bare, global | held in `OidcState`, built from `OidcConfig.network` (default env mode) |
-| accelerated cache upstream (`job_runner.rs:693` `Client::new()`) | bare | `client_builder(network)` (no timeout, as today), in `job_runner/http.rs` |
+| accelerated cache upstream (`job_runner.rs:693` `Client::new()`) | bare | `client_builder(network)` (no timeout, as today), in `job_runner/job_http.rs` |
 | S3 cold tier (`cache::tier::l2::L2Tier::from_config`) | opendal's own client | `from_config(cfg, client)`; `S3::http_client(HttpClient::with(client))` |
 | live-log WebSocket (`wire::reporting::live_log`) | `connect_async`, no proxy, native roots | HTTP/1.1 `Upgrade: websocket` GET on a caller-supplied client (`listener` builds it from `runner_cfg.network` with `http1_only()`), `wss→https`/`ws→http`, 101 + `Sec-WebSocket-Accept` verified, upgraded stream wrapped with `WebSocketStream::from_raw_socket(…, Role::Client, None)`; `WsStream` becomes `WebSocketStream<reqwest::Upgraded>`; the 30 s `try_connect` bound is kept; `tokio-tungstenite`'s TLS feature is dropped. Failure stays non-fatal (WARN, job runs without live log) |
 | `boot`, `login`, `create-app`, first `register` | bare | `client_builder(&NetworkConfig::default())` (env mode, unchanged behaviour, one builder) |
@@ -151,9 +156,9 @@ the process env, so `NODE_EXTRA_CA_CERTS` can never leak into a container
 through it.
 
 Containers: the proxy variables (never `NODE_EXTRA_CA_CERTS`) are added with
-`entry().or_insert` to the job container create env
-(`job_container::create_body`, before `step_process_env::apply`), service
-create env (`service_create::create_body`) and Docker-action env
+`entry().or_insert` to the job container's and every service's
+`ContainerSpec.env` (`job_http::add_container_network_env`, called from
+`job_runner/entry.rs` before any `create_body`) and to the Docker-action env
 (`action_container::build_env`, which has `params.config`), so
 `container.env`/`services.*.env`/step `env:` win (upstream `TryAdd`). A step
 run in the job container (`docker exec`) inherits them from the container's
@@ -172,10 +177,14 @@ parity). `NetworkConfig`'s `Debug` prints the proxy redacted
 (`http://user:***@host:port`); every runner-authored message about the proxy
 uses the redacted form.
 
-**Diagnostics.** Each `run` iteration and `boot` logs one INFO line:
-`network: proxy <redacted> (config|env|none), no_proxy <n> entries, ca_bundle
-<path> (<n> certificates)` (upstream's "running behind proxy" line). `check`
-prints the same facts in its Proxy/TLS section.
+**Diagnostics.** `run` logs one INFO line at startup and whenever the
+described settings change between iterations (and registers new proxy
+secrets only then); `boot` logs it once: `network: proxy <redacted> (config),
+no_proxy <n> entries` / `proxy <redacted> (env)` / `proxy none`, then
+`, ca_bundle <path> (<n> certificates)` when set (upstream's "running behind
+proxy" line). Env mode reads `HTTPS_PROXY`, then `HTTP_PROXY`, then
+`ALL_PROXY`. `check` prints the same line as a separate `[network]` line,
+only when `[network]` is non-default.
 
 ## Interfaces / Schema
 
@@ -352,7 +361,7 @@ comparison are **unverified** and recorded as such in `docs/test-coverage.md`.
 - `docs/test-coverage.md`: new "Proxy and custom CA (#94)" section.
 - `AGENTS.md`: crate list/graph gains `network`; module notes for
   `network`, `shared::NetworkConfig`, config `[network]`, live-log transport,
-  `L2Tier` client, `job_runner/http.rs`.
+  `L2Tier` client, `job_runner/job_http.rs`.
 - `crates/network/README.md` / src READMEs where the guardrail requires them;
   `guardrails.workspace.json` lists the crate.
 
@@ -370,7 +379,7 @@ config.
 - Round 1 (independent reviewer): Needs changes — 3 blockers (reqwest in
   `shared` would enter `protocol`'s tree; Node delta env missed the overlay;
   `job_runner.rs` at 491/500 code lines) + 8 should-fix/consider. All applied
-  in rev 2 (new `network` crate, `node_stage_env` fold, `job_runner/http.rs`,
+  in rev 2 (new `network` crate, `node_stage_env` fold, `job_runner/job_http.rs`,
   bundle rules, secrets, test placement, Docker lane, `run` exit-2 AC).
 - Round 2: Needs changes — 1 blocker (node20 runtime download through the
   fixture proxy) + 2 should-fix (hook fold text, L2 credentials/IMDS) + 4

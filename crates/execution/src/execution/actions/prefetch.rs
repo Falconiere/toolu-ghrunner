@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use futures_util::StreamExt;
 use futures_util::stream;
@@ -17,7 +17,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use super::download_info::{ActionDownloadContext, ActionDownloadInfo};
-use super::downloader::{action_cache_dir, download_and_extract_action};
+use super::downloader::{action_cache_dir, archive_client, download_and_extract_action};
 use super::resolver::{ActionRef, resolve_action_refs};
 use crate::execution::action_exec::build_uses_ref;
 
@@ -36,8 +36,10 @@ pub struct ActionFetcher {
   context: Option<Result<ActionDownloadContext, String>>,
   masker: Option<Arc<Mutex<SecretMasker>>>,
   cancel: Option<CancellationToken>,
-  /// The job's `[network]` settings for archive downloads (env mode default).
-  network: shared::NetworkConfig,
+  /// The job's one no-redirect archive client (#94). Set by
+  /// [`Self::with_network`]; a bare [`Self::new`] fetcher builds the env-mode
+  /// default on first use.
+  archive: OnceLock<reqwest::Client>,
 }
 
 impl ActionFetcher {
@@ -66,15 +68,29 @@ impl ActionFetcher {
       ),
       masker: Some(masker),
       cancel: Some(cancel),
-      network: shared::NetworkConfig::default(),
+      archive: OnceLock::new(),
     }
   }
 
-  /// Download archives through the job's `[network]` proxy / CA (#94).
-  #[must_use]
-  pub fn with_network(mut self, network: shared::NetworkConfig) -> Self {
-    self.network = network;
-    self
+  /// Build the fetcher's single archive client from the job's `[network]`
+  /// proxy / CA (#94); every download of the job reuses it.
+  ///
+  /// # Errors
+  ///
+  /// Returns the `[network]` or client-build error from
+  /// [`archive_client`](super::downloader::archive_client).
+  pub fn with_network(mut self, network: &shared::NetworkConfig) -> Result<Self, RunnerError> {
+    self.archive = OnceLock::from(archive_client(network)?);
+    Ok(self)
+  }
+
+  /// The job's archive client, built once (env mode) when none was configured.
+  fn archive_client(&self) -> Result<reqwest::Client, RunnerError> {
+    if let Some(client) = self.archive.get() {
+      return Ok(client.clone());
+    }
+    let built = archive_client(&shared::NetworkConfig::default())?;
+    Ok(self.archive.get_or_init(|| built).clone())
   }
 
   /// Send successful resolved-action diagnostics to the job's setup log.
@@ -141,11 +157,12 @@ impl ActionFetcher {
     cancel: &CancellationToken,
   ) -> Result<PathBuf, RunnerError> {
     let dest = action_cache_dir(data_dir, &info.cache_key);
+    let archive = self.archive_client()?;
     let cell = self.cell_for(&info.cache_key);
     let result = tokio::select! {
       () = cancel.cancelled() => Err(RunnerError::ActionDownload("action download cancelled".to_owned())),
       fetched = cell.get_or_try_init(|| async {
-        download_and_extract_action(&self.network, &info.tarball_url, info.token.as_deref(), &dest)
+        download_and_extract_action(&archive, &info.tarball_url, info.token.as_deref(), &dest)
           .await?;
         Ok::<PathBuf, RunnerError>(dest)
       }) => fetched,
@@ -209,11 +226,12 @@ impl ActionFetcher {
     tarball_url: &str,
     cache_dir: &Path,
   ) -> Result<PathBuf, RunnerError> {
+    let archive = self.archive_client()?;
     let cell = self.cell_for(cache_key);
     let dest = cache_dir.to_path_buf();
     let result = cell
       .get_or_try_init(move || async move {
-        download_and_extract_action(&self.network, tarball_url, None, &dest).await?;
+        download_and_extract_action(&archive, tarball_url, None, &dest).await?;
         Ok::<PathBuf, RunnerError>(dest)
       })
       .await;

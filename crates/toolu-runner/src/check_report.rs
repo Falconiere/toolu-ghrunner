@@ -37,6 +37,9 @@ pub(crate) struct Report {
   pub(crate) proxy: ProxyReport,
   /// The registration's `[network]` settings (`network::describe`), when set.
   pub(crate) network: Option<String>,
+  /// Whether `[network] proxy` is set (config mode), so the proxy variables
+  /// are ignored (`network::proxy_configured`).
+  pub(crate) proxy_configured: bool,
   /// TLS trust.
   pub(crate) trust: TrustReport,
 }
@@ -114,12 +117,12 @@ fn section(out: &mut Vec<String>, title: &str, lines: impl IntoIterator<Item = S
 }
 
 /// The `[network]` line, plus a note when its proxy overrides the variables.
-fn network_lines(network: Option<&str>) -> Vec<String> {
+fn network_lines(network: Option<&str>, proxy_configured: bool) -> Vec<String> {
   let Some(line) = network else {
     return Vec::new();
   };
   let mut lines = vec![format!("{:<12} {line}", "[network]")];
-  if line.contains("(config)") {
+  if proxy_configured {
     lines.push("[network] proxy is set: the proxy variables below are ignored".to_owned());
   }
   lines
@@ -150,7 +153,7 @@ pub(crate) fn render(report: &Report, masker: &SecretMasker) -> String {
   section(
     &mut out,
     "proxy",
-    network_lines(report.network.as_deref())
+    network_lines(report.network.as_deref(), report.proxy_configured)
       .into_iter()
       .chain(report.proxy.lines())
       .map(|line| format!("  {line}")),

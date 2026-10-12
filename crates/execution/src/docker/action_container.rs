@@ -486,3 +486,7 @@ impl<'a> OutputSinks<'a> {
     }
   }
 }
+
+#[cfg(test)]
+#[path = "tests/action_container_env.rs"]
+mod env_tests;

@@ -15,6 +15,7 @@ use std::time::Duration;
 
 use futures_util::SinkExt;
 use serde::Serialize;
+use shared::RunnerError;
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::handshake::client::generate_key;
 use tokio_tungstenite::tungstenite::handshake::derive_accept_key;
@@ -84,6 +85,27 @@ impl SendState {
       self.active = false;
     }
   }
+}
+
+/// Connect timeout of the live-log client (and of the handshake's TCP/TLS
+/// setup behind a proxy).
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// The HTTP client [`LiveLogStreamer::connect`] needs: `network`'s proxy,
+/// bypass list and trust anchors (#94), HTTP/1.1 only (a WebSocket upgrade
+/// cannot ride an h2 connection) and a 30 s connect timeout.
+///
+/// # Errors
+///
+/// `RunnerError::Config` for an unusable `[network]` proxy or `ca_bundle`
+/// (fail closed, never default trust); `RunnerError::Network` if the client
+/// cannot be built.
+pub fn live_log_client(network: &shared::NetworkConfig) -> Result<reqwest::Client, RunnerError> {
+  network::client_builder(network)?
+    .http1_only()
+    .connect_timeout(CONNECT_TIMEOUT)
+    .build()
+    .map_err(|e| RunnerError::Network(format!("live log HTTP client: {e}")))
 }
 
 /// Actor that buffers log lines and flushes to WebSocket every 500ms.
@@ -339,3 +361,7 @@ fn serialize_wrapper(step_id: &str, lines: Vec<String>, start_line: u64) -> Opti
 fn should_disable(total: u32, failed: u32) -> bool {
   total >= MIN_ATTEMPTS_BEFORE_THRESHOLD && failed > total / 2
 }
+
+#[cfg(test)]
+#[path = "tests/live_log.rs"]
+mod tests;

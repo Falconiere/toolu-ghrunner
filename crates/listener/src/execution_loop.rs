@@ -164,15 +164,8 @@ async fn connect_live_log(
   };
   let token = super::helpers::system_vss_access_token(job_msg);
   let ws_token = token.as_deref().unwrap_or(fallback_token);
-  // HTTP/1.1 only: the WebSocket upgrade cannot ride an h2 connection. Same
-  // `[network]` proxy / CA as every other client (#94).
-  let client = match network::client_builder(network).and_then(|builder| {
-    builder
-      .http1_only()
-      .connect_timeout(std::time::Duration::from_secs(30))
-      .build()
-      .map_err(|e| shared::RunnerError::Network(format!("live log HTTP client: {e}")))
-  }) {
+  // HTTP/1.1 only, same `[network]` proxy / CA as every other client (#94).
+  let client = match wire::reporting::live_log::live_log_client(network) {
     Ok(client) => client,
     Err(e) => {
       tracing::warn!(error = %e, "live log disabled: cannot build its HTTP client");

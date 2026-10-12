@@ -4,7 +4,7 @@ use base64::Engine as _;
 use shared::NetworkConfig;
 
 use crate::client::{configured_proxy, parse_proxy};
-use crate::config::{HTTP_PROXY, HTTPS_PROXY, first_set};
+use crate::config::{ALL_PROXY, HTTP_PROXY, HTTPS_PROXY, first_set};
 
 /// Credential strings from the effective proxy URL(s): each password as
 /// written and percent-decoded, and the `Proxy-Authorization` credential
@@ -13,12 +13,12 @@ use crate::config::{HTTP_PROXY, HTTPS_PROXY, first_set};
 /// pair is not secret (upstream parity).
 ///
 /// Config mode reads `[network] proxy`; env mode reads the runner's
-/// `HTTPS_PROXY` and `HTTP_PROXY` values. Unparseable values contribute
+/// `HTTPS_PROXY`, `HTTP_PROXY` and `ALL_PROXY` values. Unparseable values contribute
 /// nothing (a configured one already fails client construction).
 pub fn proxy_secrets(cfg: &NetworkConfig) -> Vec<String> {
   let sources: Vec<String> = match configured_proxy(cfg) {
     Some(raw) => vec![raw.to_owned()],
-    None => [HTTPS_PROXY, HTTP_PROXY]
+    None => [HTTPS_PROXY, HTTP_PROXY, ALL_PROXY]
       .into_iter()
       .filter_map(first_set)
       .collect(),
@@ -43,6 +43,9 @@ pub fn proxy_secrets(cfg: &NetworkConfig) -> Vec<String> {
       (Some(token), _, _) => {
         add(base64::engine::general_purpose::STANDARD.encode(format!("{token}:")));
         add(token);
+        if let Some(raw_token) = parsed.raw_user {
+          add(raw_token);
+        }
       },
       (None, _, _) => {},
     }

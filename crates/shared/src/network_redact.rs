@@ -12,13 +12,16 @@
 /// a value without credentials is returned unchanged. Works without a scheme
 /// (`user:pass@host` → `user:***@host`), because a rejected config value is
 /// echoed through here too.
+///
+/// Secure by default: everything between the scheme and the LAST `@` of the
+/// whole remainder is userinfo, so an unencoded `/`, `?` or `#` inside a
+/// password (`http://u:a#b@proxy` → `http://u:***@proxy`) cannot leak. The
+/// cost is over-redaction when a path or query itself contains an `@`.
 pub fn redact_proxy_url(raw: &str) -> String {
   let (scheme, rest) = raw
     .split_once("://")
     .map_or(("", raw), |(scheme, rest)| (scheme, rest));
-  let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
-  let (authority, tail) = rest.split_at(authority_end);
-  let Some((userinfo, host)) = authority.rsplit_once('@') else {
+  let Some((userinfo, host)) = rest.rsplit_once('@') else {
     return raw.to_owned();
   };
   let redacted = match userinfo.split_once(':') {
@@ -30,5 +33,5 @@ pub fn redact_proxy_url(raw: &str) -> String {
   } else {
     format!("{scheme}://")
   };
-  format!("{prefix}{redacted}@{host}{tail}")
+  format!("{prefix}{redacted}@{host}")
 }

@@ -91,3 +91,89 @@ fn describe_redacts_and_names_the_mode() -> Result<(), shared::RunnerError> {
   assert!(none.contains("proxy none"), "{none}");
   Ok(())
 }
+
+#[test]
+fn lone_userinfo_token_registers_raw_decoded_and_basic_credential() {
+  let cfg = NetworkConfig {
+    proxy: Some("http://tok%2Fen@proxy:3128".to_owned()),
+    ..NetworkConfig::default()
+  };
+  let secrets = temp_env::with_vars(cleared(), || network::proxy_secrets(&cfg));
+  assert!(secrets.contains(&"tok%2Fen".to_owned()), "{secrets:?}");
+  assert!(secrets.contains(&"tok/en".to_owned()), "{secrets:?}");
+  assert!(secrets.contains(&b64("tok/en:")), "{secrets:?}");
+}
+
+#[test]
+fn env_mode_reads_all_proxy_too() {
+  let mut vars = cleared();
+  vars.retain(|(k, _)| *k != "ALL_PROXY");
+  vars.push(("ALL_PROXY", Some("http://carol:allsecret@proxy:3128")));
+  let secrets = temp_env::with_vars(vars, || network::proxy_secrets(&NetworkConfig::default()));
+  assert!(secrets.contains(&"allsecret".to_owned()), "{secrets:?}");
+  assert!(secrets.contains(&b64("carol:allsecret")), "{secrets:?}");
+}
+
+fn describe_with(set: &[(&'static str, &'static str)]) -> Result<String, shared::RunnerError> {
+  let mut vars = cleared();
+  vars.retain(|(k, _)| !set.iter().any(|(name, _)| name == k));
+  vars.extend(set.iter().map(|(k, v)| (*k, Some(*v))));
+  temp_env::with_vars(vars, || network::describe(&NetworkConfig::default()))
+}
+
+#[test]
+fn describe_env_mode_redacts_the_env_proxy() -> Result<(), shared::RunnerError> {
+  assert_eq!(
+    describe_with(&[("HTTPS_PROXY", "http://u:pw@p:1")])?,
+    "proxy http://u:***@p:1 (env)"
+  );
+  Ok(())
+}
+
+#[test]
+fn describe_env_mode_falls_back_https_then_http_then_all() -> Result<(), shared::RunnerError> {
+  let https = ("HTTPS_PROXY", "http://h:s@https-proxy:1");
+  let http = ("HTTP_PROXY", "http://h:s@http-proxy:2");
+  let all = ("ALL_PROXY", "http://h:s@all-proxy:3");
+  assert_eq!(
+    describe_with(&[https, http, all])?,
+    "proxy http://h:***@https-proxy:1 (env)"
+  );
+  assert_eq!(
+    describe_with(&[http, all])?,
+    "proxy http://h:***@http-proxy:2 (env)"
+  );
+  assert_eq!(
+    describe_with(&[all])?,
+    "proxy http://h:***@all-proxy:3 (env)"
+  );
+  assert_eq!(describe_with(&[])?, "proxy none");
+  Ok(())
+}
+
+#[test]
+fn describe_rejects_an_unusable_configured_proxy() {
+  let cfg = NetworkConfig {
+    proxy: Some("ftp://u:secretpw@x".to_owned()),
+    ..NetworkConfig::default()
+  };
+  let msg = match temp_env::with_vars(cleared(), || network::describe(&cfg)) {
+    Err(shared::RunnerError::Config(msg)) => msg,
+    other => format!("expected a Config error, got {other:?}"),
+  };
+  assert_eq!(
+    msg,
+    "[network] proxy ftp://u:***@x: scheme must be http or https"
+  );
+}
+
+#[test]
+fn proxy_configured_ignores_blank_values() {
+  let set = |value: Option<&str>| NetworkConfig {
+    proxy: value.map(str::to_owned),
+    ..NetworkConfig::default()
+  };
+  assert!(network::proxy_configured(&set(Some("http://p:1"))));
+  assert!(!network::proxy_configured(&set(Some("   "))));
+  assert!(!network::proxy_configured(&set(None)));
+}

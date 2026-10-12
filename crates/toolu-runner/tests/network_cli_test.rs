@@ -140,7 +140,18 @@ async fn check_probes_through_the_configured_proxy_and_reports_it_redacted() -> 
     .args(["check", "--config"])
     .arg(&config)
     .args(["--timeout", "5"]);
-  let (_code, stdout, stderr) = output(cmd).await?;
+  let (code, stdout, stderr) = output(cmd).await?;
+  // Deterministic exit 1: `api` / `codeload` pass through the tunnel, but the
+  // fixture JIT's `pipelines` and `token` endpoints sit on `ghes.example.com:443`,
+  // which the recording proxy cannot reach (it tunnels to the fixture's
+  // loopback port only), so exactly those two required probes fail.
+  assert_eq!(code, Some(1), "stdout:\n{stdout}\nstderr:\n{stderr}");
+  assert!(
+    stdout.contains("result: 2 required checks failed (exit 1)")
+      && stdout.contains("FAIL  pipelines")
+      && stdout.contains("FAIL  token"),
+    "{stdout}"
+  );
 
   assert!(
     stdout.contains(&format!(
@@ -208,5 +219,30 @@ async fn check_and_run_refuse_an_unusable_ca_bundle_with_exit_2() -> FixtureResu
   assert_eq!(code, Some(2), "{stderr}");
   assert!(stderr.contains(&missing.display().to_string()), "{stderr}");
   assert!(stderr.contains("[network] ca_bundle"), "{stderr}");
+  Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn check_refuses_an_unusable_proxy_url_with_exit_2() -> FixtureResult<()> {
+  let home = tempfile::tempdir()?;
+  let config = write_registration(
+    home.path(),
+    "https://ghes.test/my-org",
+    NetworkSection {
+      proxy: Some("ftp://u:pw94secret@x".to_owned()),
+      no_proxy: Vec::new(),
+      ca_bundle: None,
+    },
+  )?;
+  let mut check = runner(home.path(), closed_port().await?);
+  check.args(["check", "--config"]).arg(&config);
+  let (code, stdout, stderr) = output(check).await?;
+  assert_eq!(code, Some(2), "stdout:\n{stdout}\nstderr:\n{stderr}");
+  assert!(
+    stderr.contains("[network] proxy ftp://u:***@x: scheme must be http or https"),
+    "{stderr}"
+  );
+  assert!(!stderr.contains("pw94secret"), "{stderr}");
+  assert!(stdout.is_empty(), "nothing is probed: {stdout}");
   Ok(())
 }

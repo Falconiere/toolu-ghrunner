@@ -66,3 +66,7 @@ pub(super) fn add_container_network_env(
     }
   }
 }
+
+#[cfg(test)]
+#[path = "tests/job_http.rs"]
+mod tests;

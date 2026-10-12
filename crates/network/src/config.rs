@@ -4,6 +4,8 @@
 pub(crate) const HTTPS_PROXY: [&str; 2] = ["HTTPS_PROXY", "https_proxy"];
 /// `HTTP_PROXY` then `http_proxy`.
 pub(crate) const HTTP_PROXY: [&str; 2] = ["HTTP_PROXY", "http_proxy"];
+/// `ALL_PROXY` then `all_proxy`.
+pub(crate) const ALL_PROXY: [&str; 2] = ["ALL_PROXY", "all_proxy"];
 /// `NO_PROXY` then `no_proxy`.
 pub(crate) const NO_PROXY: [&str; 2] = ["NO_PROXY", "no_proxy"];
 

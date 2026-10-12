@@ -50,7 +50,7 @@ pub(super) async fn execute(
         .map_or_else(CancellationToken::new, |signal| signal.force.clone()),
     )
     .with_events(events.clone())
-    .with_network(config.network.clone()),
+    .with_network(&config.network)?,
   );
   // A failed prefetch never fails the job; step-time resolution can retry.
   let prefetch_handle = spawn_prefetch(

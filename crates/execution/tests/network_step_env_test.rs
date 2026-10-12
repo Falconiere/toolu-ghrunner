@@ -161,6 +161,29 @@ impl Harness {
     Ok(())
   }
 
+  /// Install the local composite action whose single `run:` step prints the
+  /// full [`probe`] under the `comp` tag.
+  fn install_composite_action(&self, job: &AgentJobRequestMessage) -> FixtureResult<()> {
+    let dir = self
+      .config
+      .workspace_root
+      .join(&job.job_id)
+      .join(".github/actions/net-94");
+    std::fs::create_dir_all(&dir)?;
+    let body = probe("comp")
+      .lines()
+      .map(|line| format!("        {line}"))
+      .collect::<Vec<_>>()
+      .join("\n");
+    std::fs::write(
+      dir.join("action.yml"),
+      format!(
+        "name: net-94\ndescription: prints the proxy export\nruns:\n  using: composite\n  steps:\n    - shell: bash\n      run: |\n{body}\n"
+      ),
+    )?;
+    Ok(())
+  }
+
   /// Run `job` with exactly `env` set among [`AMBIENT`]; returns its log lines.
   async fn run(
     &self,
@@ -408,5 +431,69 @@ async fn an_echoed_proxy_password_is_masked() -> FixtureResult<()> {
   let shown = masker.mask(raw);
   assert!(!shown.contains("s3cr3tpw"), "{shown}");
   assert_eq!(shown, "http://u:***@proxy.corp.test:3128");
+  Ok(())
+}
+
+#[tokio::test]
+async fn composite_action_sees_the_same_export_as_a_run_step() -> FixtureResult<()> {
+  let pki = Pki::new()?;
+  let dir = tempfile::tempdir()?;
+  let bundle = pki.write_bundle(dir.path())?;
+  let h = Harness::new(NetworkConfig {
+    proxy: Some(PROXY.to_owned()),
+    no_proxy: vec!["internal.corp".to_owned()],
+    ca_bundle: Some(bundle),
+  })
+  .await?;
+  let job = job(&probe("run"), true)?;
+  h.install_composite_action(&job)?;
+  let (conclusion, lines) = h.run(job, &[("NO_PROXY", "ambient-only")]).await?;
+  assert_eq!(conclusion, Some(Conclusion::Success), "{lines:?}");
+  for name in ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"] {
+    assert_eq!(
+      reported(&lines, "comp", name),
+      Some(PROXY),
+      "comp {name}: {lines:?}"
+    );
+  }
+  let bypass = "internal.corp,localhost,127.0.0.1,::1";
+  assert_eq!(reported(&lines, "comp", "NO_PROXY"), Some(bypass));
+  assert_eq!(reported(&lines, "comp", "no_proxy"), Some(bypass));
+  for name in PROBED {
+    let in_run = reported(&lines, "run", name);
+    assert!(in_run.is_some(), "run {name}: {lines:?}");
+    assert_eq!(
+      reported(&lines, "comp", name),
+      in_run,
+      "composite and run step disagree on {name}: {lines:?}"
+    );
+  }
+  Ok(())
+}
+
+#[tokio::test]
+async fn node_action_sees_the_workflow_env_over_the_export() -> FixtureResult<()> {
+  let h = Harness::new(NetworkConfig {
+    proxy: Some(PROXY.to_owned()),
+    ..NetworkConfig::default()
+  })
+  .await?;
+  let mut job = job("true", true)?;
+  job
+    .environment_variables
+    .push(serde_json::to_value(mapping(&[(
+      "HTTPS_PROXY",
+      "http://workflow.test:1",
+    )]))?);
+  h.install_node_action(&job)?;
+  let (conclusion, lines) = h.run(job, &[]).await?;
+  assert_eq!(conclusion, Some(Conclusion::Success), "{lines:?}");
+  for stage in ["main", "post"] {
+    assert_eq!(
+      reported(&lines, stage, "HTTPS_PROXY"),
+      Some("http://workflow.test:1"),
+      "{stage}: {lines:?}"
+    );
+  }
   Ok(())
 }

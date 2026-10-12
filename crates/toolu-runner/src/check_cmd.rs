@@ -234,6 +234,7 @@ pub(crate) async fn cmd_check(args: CheckArgs) -> i32 {
     tools: vec![git, docker, node],
     proxy,
     network: (target.network != NetworkConfig::default()).then_some(network_line),
+    proxy_configured: network::proxy_configured(&target.network),
     trust,
   };
   print!("{}", render(&report, &masker));

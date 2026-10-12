@@ -14,11 +14,11 @@ Host env: every host builder starts from `ExecutionContext::build_step_env` /
 `build_host_step_env` and folds `context::safe_process_env_vars` last with
 `or_insert` (`script_support.rs`, `composite_env.rs`, `job_hooks.rs`), Node
 inherits it in `node_exec::build_node_command` under a delta env from
-`node_stage_env`. Containers: `job_container::create_body`,
-`service_create::create_body`, `action_container::build_env` (has
-`params.config`). reqwest 0.12.28: `.proxy()` disables the system proxy;
+`node_stage_env`. Containers: `job_http::add_container_network_env` (job and service
+`ContainerSpec.env`, from `job_runner/entry.rs`) and
+`action_container::build_env` (has `params.config`). reqwest 0.12.28: `.proxy()` disables the system proxy;
 `Proxy::all` has no implicit `NO_PROXY`; `NoProxy::from_string` uses
-hyper-util's matcher; `Certificate::from_pem_bundle`; `Response::upgrade`;
+hyper-util's matcher; `CertificateDer::pem_slice_iter` + `RootCertStore::add`; `Response::upgrade`;
 `http1_only`. opendal 0.51 `S3::http_client(HttpClient::with(reqwest::Client))`.
 `ring`, `tokio-rustls 0.26`, `temp-env 0.3` are already in the lock; `rcgen`
 is new (dev-only). comemory 99bd07ca (trust union, matcher order),
@@ -111,7 +111,7 @@ accelerated, L2) → step/container export → live-log WebSocket → inventory 
   },
   {
     "id": "execution_clients",
-    "title": "execution/cache: move build_job_client + accelerated upstream client into job_runner/http.rs (network-built); ActionFetcher owns a no-redirect archive client from the job network, download_and_extract_action uses it; OidcState client from OidcConfig.network (no global OnceLock); L2Tier::from_config(cfg, client) via S3::http_client; real archive download via auth proxy + CA; L2 put observed by proxy",
+    "title": "execution/cache: move build_job_client + accelerated upstream client into job_runner/job_http.rs (network-built); ActionFetcher owns a no-redirect archive client from the job network, download_and_extract_action uses it; OidcState client from OidcConfig.network (no global OnceLock); L2Tier::from_config(cfg, client) via S3::http_client; real archive download via auth proxy + CA; L2 put observed by proxy",
     "ac_refs": [
       "AC-11",
       "AC-2",
@@ -260,7 +260,7 @@ accelerated, L2) → step/container export → live-log WebSocket → inventory 
   `crates/config/src/network.rs`, `crates/config/tests/network_section_test.rs`,
   `crates/toolu-runner/tests/network_cli_test.rs`,
   `crates/toolu-runner/tests/network_client_inventory_test.rs`,
-  `crates/execution/src/execution/job_runner/http.rs`,
+  `crates/execution/src/execution/job_runner/job_http.rs`,
   `crates/execution/tests/network_job_clients_test.rs`,
   `crates/execution/tests/network_step_env_test.rs`,
   `crates/execution/tests/network_container_env_test.rs`,
@@ -270,7 +270,7 @@ accelerated, L2) → step/container export → live-log WebSocket → inventory 
   `.github/workflows/ci.yml` Docker lane; `shared/src/config.rs`,
   `config/src/config.rs`, `execution/src/execution/{context,context_env,
   composite_env,job_hooks,node_stage}.rs`, `steps_runner/script_support.rs`,
-  `docker/{job_container,service_create,action_container}.rs`,
+  `docker/action_container.rs`, `job_runner/entry.rs`,
   `wire/src/reporting/live_log.rs`, `listener/src/execution_loop.rs`,
   `cache/src/tier/l2.rs`, Cargo manifests, README, AGENTS.md,
   `docs/test-coverage.md`.
@@ -294,6 +294,26 @@ Delivery: scoped commits per step (WIP subjects allowed, squash-merged);
 `feat/94-explicit-proxy-and-custom-ca` → PR to `main` (`Closes
 Falconiere/toolu-ghrunner#94`, `Part of Falconiere/toolu-ghrunner#67`) →
 `pr-babysit:babysit`.
+
+## Deviations
+
+Recorded during execution and the delivery review (2026-10-12):
+
+- Job and service containers get the proxy variables on their
+  `ContainerSpec.env` in `job_http::add_container_network_env` (one place,
+  before any `create_body`) instead of in `job_container::create_body` /
+  `service_create::create_body`.
+- The shared fixtures are split into `tests/helpers/tls_fixtures.rs` and
+  `tests/helpers/proxy_fixtures.rs`: `#[allow(dead_code)]` is banned, so each
+  test includes only what it uses.
+- The CA bundle is parsed with `CertificateDer::pem_slice_iter` and each
+  certificate checked with `RootCertStore::add` (a stricter fail-closed check
+  than `Certificate::from_pem_bundle`).
+- Delivery review additions: proxy URLs with an unencoded `@` outside their
+  credentials are rejected; `describe` validates the proxy so `check` exits 2;
+  env-mode `describe` / `proxy_secrets` include `ALL_PROXY`; `run` logs the
+  network line only when it changes; blank `ca_bundle` is unset; the live-log
+  client is built by `wire::reporting::live_log`.
 
 ## Plan review record
 

@@ -255,3 +255,114 @@ fn blank_proxy_is_env_mode() {
   };
   assert!(network::client_builder(&cfg).is_ok());
 }
+
+#[tokio::test]
+async fn plain_http_destination_is_sent_in_absolute_form_with_auth() -> FixtureResult<()> {
+  let proxy = RecordingProxy::start(Some(("u", "p@ss"))).await?;
+  let cfg = NetworkConfig {
+    proxy: Some(proxy.url(Some("u:p%40ss"))),
+    ..NetworkConfig::default()
+  };
+  let client = client_with_env(&cfg, &[], None)?;
+  let body = get(&client, "http://plain.test:8080/some/path?x=1").await?;
+  assert_eq!(body, "via-proxy");
+  let auth = basic("u", "p@ss");
+  assert_eq!(
+    proxy
+      .hits()
+      .iter()
+      .map(|hit| (hit.line.as_str(), hit.auth.as_deref()))
+      .collect::<Vec<_>>(),
+    vec![(
+      "GET http://plain.test:8080/some/path?x=1 HTTP/1.1",
+      Some(auth.as_str())
+    )]
+  );
+  Ok(())
+}
+
+#[tokio::test]
+async fn plain_http_destination_without_credentials_is_rejected_with_407() -> FixtureResult<()> {
+  let proxy = RecordingProxy::start(Some(("u", "pw"))).await?;
+  let cfg = NetworkConfig {
+    proxy: Some(proxy.url(None)),
+    ..NetworkConfig::default()
+  };
+  let client = client_with_env(&cfg, &[], None)?;
+  let response = client.get("http://plain.test:8080/").send().await?;
+  assert_eq!(response.status(), 407);
+  Ok(())
+}
+
+#[tokio::test]
+async fn empty_username_with_a_password_still_sends_basic_auth() -> FixtureResult<()> {
+  let proxy = RecordingProxy::start(Some(("", "pw"))).await?;
+  let cfg = NetworkConfig {
+    proxy: Some(proxy.url(Some(":pw"))),
+    ..NetworkConfig::default()
+  };
+  assert!(
+    cfg
+      .proxy
+      .as_deref()
+      .is_some_and(|p| p.starts_with("http://:pw@"))
+  );
+  let client = client_with_env(&cfg, &[], None)?;
+  let body = get(&client, "http://plain.test:8080/").await?;
+  assert_eq!(body, "via-proxy");
+  let auth = basic("", "pw");
+  let hits = proxy.hits();
+  assert_eq!(hits.len(), 1, "{hits:?}");
+  assert_eq!(
+    hits.first().and_then(|h| h.auth.as_deref()),
+    Some(auth.as_str())
+  );
+  Ok(())
+}
+
+/// The `[network] proxy` Config error for `raw`, or a description of why
+/// there was none.
+fn proxy_error(raw: &str) -> String {
+  let cfg = NetworkConfig {
+    proxy: Some(raw.to_owned()),
+    ..NetworkConfig::default()
+  };
+  match network::client_builder(&cfg) {
+    Err(RunnerError::Config(msg)) => msg,
+    Err(other) => format!("{raw}: expected a Config error, got {other:?}"),
+    Ok(_) => format!("{raw}: expected an error, got a client"),
+  }
+}
+
+#[test]
+fn reserved_characters_in_a_password_are_rejected_without_leaking_it() {
+  const HINT: &str = "percent-encode reserved characters (@ : / ? #) in the user name and password";
+  for (raw, expected) in [
+    // Parse as a bad port: the host would be the user name.
+    (
+      "http://u:pwd9z#cd@proxy:3128",
+      "[network] proxy http://u:***@proxy:3128: not a valid URL (invalid port number)".to_owned(),
+    ),
+    (
+      "http://u:pwd9z/b@proxy",
+      "[network] proxy http://u:***@proxy: not a valid URL (invalid port number)".to_owned(),
+    ),
+    // Parse "successfully" with the `@` in the fragment / path / query.
+    (
+      "http://u:123#pwd9z@proxy:3128",
+      format!("[network] proxy http://u:***@proxy:3128: {HINT}"),
+    ),
+    (
+      "http://u:123/pwd9z@proxy",
+      format!("[network] proxy http://u:***@proxy: {HINT}"),
+    ),
+    (
+      "http://u:123?pwd9z@proxy",
+      format!("[network] proxy http://u:***@proxy: {HINT}"),
+    ),
+  ] {
+    let msg = proxy_error(raw);
+    assert_eq!(msg, expected, "{raw}");
+    assert!(!msg.contains("pwd9z"), "{msg}");
+  }
+}

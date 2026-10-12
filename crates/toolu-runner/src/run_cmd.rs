@@ -128,6 +128,9 @@ impl RunLoop {
   /// or re-mint and is capped at [`BACKOFF_MAX`].
   async fn drive(self) -> Result<(), Box<dyn std::error::Error>> {
     let mut backoff = BACKOFF_START;
+    // Last network settings registered / logged: the client is rebuilt each
+    // pass (backoff retries included), the log line and secrets only on change.
+    let mut network_memo = crate::network_setup::NetworkMemo::default();
     loop {
       let cfg = load_run_config(&self.config_path)?;
       // Rebuilt from the reloaded `[network]` every pass (edits apply next
@@ -138,6 +141,7 @@ impl RunLoop {
         &cfg.network_config(),
         &self.masker,
         LOOP_CLIENT_TIMEOUT,
+        &mut network_memo,
       )?;
       // Fatal setup errors (corrupt config, unparseable JIT) deliberately
       // exit here without backoff — only listener outcomes are retried.
