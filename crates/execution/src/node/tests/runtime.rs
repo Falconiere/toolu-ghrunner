@@ -3,7 +3,8 @@
 //! major, non-Node binary), and true end-to-end downloads through
 //! `ensure_node_runtime_from` against a real local HTTP server serving
 //! tarballs built from the real host `node`: committed only after it starts,
-//! rejected without a cache dir when the binary cannot (real `/bin/echo`),
+//! rejected without a cache dir when it reports another version (a real
+//! executable script printing `v99.0.0`),
 //! the alpine `./` layout for a container target, and 404 / corrupt /
 //! truncated bodies leaving nothing behind.
 
@@ -64,6 +65,19 @@ fn preseed(dir: &Path, name: &str, binary: &Path) -> TestResult {
   std::fs::create_dir_all(&bin)?;
   std::fs::copy(binary, bin.join("node"))?;
   Ok(())
+}
+
+/// A real executable that answers `--version` like a Node.js 99 would, so a
+/// rejection is deterministic on every host.
+fn impostor(dir: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
+  let path = dir.join("impostor-node");
+  std::fs::write(&path, "#!/bin/sh\necho v99.0.0\n")?;
+  #[cfg(unix)]
+  {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))?;
+  }
+  Ok(path)
 }
 
 /// A gzip tarball (stored blocks, so the real ~100 MB binary packs fast)
@@ -210,13 +224,14 @@ async fn preseed_miss_names_the_expected_path_and_never_downloads() -> TestResul
 }
 
 #[tokio::test]
-async fn preseed_with_the_wrong_major_or_a_non_node_binary_fails_validation() -> TestResult {
+#[cfg(unix)]
+async fn preseed_with_the_wrong_major_or_another_version_fails_validation() -> TestResult {
   let (node, major) = host_node()?;
   let other = major.wrapping_add(1);
   let dir = tempfile::tempdir()?;
   let data = tempfile::tempdir()?;
   preseed(dir.path(), &format!("node{other}"), &node)?;
-  preseed(dir.path(), &format!("node{major}"), Path::new("/bin/echo"))?;
+  preseed(dir.path(), &format!("node{major}"), &impostor(data.path())?)?;
   let config = config_for(data.path(), Some(dir.path().to_path_buf()));
   let client = reqwest::Client::new();
   let mislabeled =
@@ -225,17 +240,28 @@ async fn preseed_with_the_wrong_major_or_a_non_node_binary_fails_validation() ->
     .map_err(|e| e.to_string())
     .err()
     .ok_or("must fail")?;
-  assert!(
-    message.contains(&format!("expected v{other}.x")),
-    "{message}"
+  assert_eq!(
+    message,
+    format!(
+      "node runtime error: Node.js runtime {} reported version {:?}, expected v{other}.x",
+      dir.path().join(format!("node{other}/bin/node")).display(),
+      String::from_utf8(
+        std::process::Command::new(&node)
+          .arg("--version")
+          .output()?
+          .stdout
+      )?
+      .trim()
+    )
   );
-  let echo = ensure_node_runtime_from(&UNROUTABLE, &client, &config, major, GLIBC_X64, true).await;
-  let message = echo.map_err(|e| e.to_string()).err().ok_or("must fail")?;
-  // A multicall coreutils `echo` refuses to run as `node`; a plain one
-  // prints its banner. Either way the runtime is rejected.
-  assert!(
-    message.contains("reported version") || message.contains("failed to start"),
-    "{message}"
+  let fake = ensure_node_runtime_from(&UNROUTABLE, &client, &config, major, GLIBC_X64, true).await;
+  let message = fake.map_err(|e| e.to_string()).err().ok_or("must fail")?;
+  assert_eq!(
+    message,
+    format!(
+      "node runtime error: Node.js runtime {} reported version \"v99.0.0\", expected v{major}.x",
+      dir.path().join(format!("node{major}/bin/node")).display()
+    )
   );
   Ok(())
 }
@@ -269,8 +295,9 @@ async fn download_commits_a_real_node_only_after_it_starts() -> TestResult {
 
 #[tokio::test]
 #[cfg(unix)]
-async fn a_downloaded_binary_that_cannot_run_as_node_is_never_committed() -> TestResult {
-  let tar = tarball_with("node-v20.20.2-linux-x64/", Path::new("/bin/echo"))?;
+async fn a_downloaded_runtime_reporting_another_version_is_never_committed() -> TestResult {
+  let scratch = tempfile::tempdir()?;
+  let tar = tarball_with("node-v20.20.2-linux-x64/", &impostor(scratch.path())?)?;
   let addr = serve(axum::http::StatusCode::OK, tar).await?;
   let (nodejs, alpine) = bases(addr);
   let data = tempfile::tempdir()?;
@@ -290,8 +317,10 @@ async fn a_downloaded_binary_that_cannot_run_as_node_is_never_committed() -> Tes
   .await;
   let message = result.map_err(|e| e.to_string()).err().ok_or("must fail")?;
   assert!(
-    message.contains("was not installed")
-      && (message.contains("reported version") || message.contains("failed to start")),
+    message.contains(&format!(
+      "{} from http://{addr}/dist/v20.20.2/node-v20.20.2-linux-x64.tar.gz was not installed",
+      node_cache_dir(data.path(), "20.20.2").display()
+    )) && message.ends_with("reported version \"v99.0.0\", expected v20.x"),
     "{message}"
   );
   assert!(!node_cache_dir(data.path(), "20.20.2").exists());
@@ -303,7 +332,8 @@ async fn a_downloaded_binary_that_cannot_run_as_node_is_never_committed() -> Tes
 async fn container_target_alpine_layout_installs_without_a_host_start_check() -> TestResult {
   // Container-only targets are not executed on the host, so any binary in
   // the alpine `./` layout commits; the container lane proves it runs.
-  let tar = tarball_with("./", Path::new("/bin/echo"))?;
+  let scratch = tempfile::tempdir()?;
+  let tar = tarball_with("./", &impostor(scratch.path())?)?;
   let addr = serve(axum::http::StatusCode::OK, tar).await?;
   let (nodejs, alpine) = bases(addr);
   let data = tempfile::tempdir()?;
@@ -332,14 +362,23 @@ async fn http_error_corrupt_and_truncated_bodies_leave_no_cache_dir() -> TestRes
     .ok_or("tarball too small")?
     .to_vec();
   let cases = [
-    (axum::http::StatusCode::NOT_FOUND, Vec::new()),
+    (
+      axum::http::StatusCode::NOT_FOUND,
+      Vec::new(),
+      "status 404 Not Found",
+    ),
     (
       axum::http::StatusCode::OK,
       b"not a valid gzip tarball".to_vec(),
+      "extract node tarball:",
     ),
-    (axum::http::StatusCode::OK, truncated),
+    (
+      axum::http::StatusCode::OK,
+      truncated,
+      "extract node tarball:",
+    ),
   ];
-  for (status, body) in cases {
+  for (status, body, expected) in cases {
     let addr = serve(status, body).await?;
     let (nodejs, alpine) = bases(addr);
     let data = tempfile::tempdir()?;
@@ -357,7 +396,8 @@ async fn http_error_corrupt_and_truncated_bodies_leave_no_cache_dir() -> TestRes
       true,
     )
     .await;
-    assert!(result.is_err(), "{status} must fail");
+    let message = result.map_err(|e| e.to_string()).err().ok_or("must fail")?;
+    assert!(message.contains(expected), "{status}: {message}");
     assert!(!node_cache_dir(data.path(), "20.20.2").exists(), "{status}");
     assert_eq!(
       staging_leftovers(data.path())?,

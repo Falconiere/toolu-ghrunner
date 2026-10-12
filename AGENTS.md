@@ -293,7 +293,7 @@ to that list requires proving the value is not a real credential.
 
 - `config.rs` — `RunnerConfig` (data_dir, workspace_root, cgroup_path,
   services_mode, service_bind, cache, workspace_gc_hours, workspace,
-  shadow_enabled) + `ServicesMode` (forwarder / offline / accelerated),
+  shadow_enabled, node_dir — `TOOLU_RUNNER_NODE_DIR`) + `ServicesMode` (forwarder / offline / accelerated),
   `WorkspaceConfig` (`mode`: `WorkspaceMode` stable / fresh,
   `stable_gc_hours`), `CacheConfig`, `L2Config`.
 - `error.rs` — `RunnerError` enum (Protocol, Auth, Network, Config,

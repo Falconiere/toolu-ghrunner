@@ -428,6 +428,19 @@ naming the expected path, and a host runtime must start and report the right
 major. Job containers see it read-only at `/github/externals`, so keep real
 files there rather than symlinks that point outside it.
 
+**Upgrading.** The pins moved from 20.18.3 / 24.0.2, so the cache directory
+names changed: the first Node action after the upgrade downloads
+`node/20.20.2` or `node/24.21.0` (github.com's current flags select 24 for
+node20 actions). Airgapped hosts that hand-seeded `data_dir/node/<version>`
+must reseed those two versions (or switch to `TOOLU_RUNNER_NODE_DIR`); the old
+`20.18.3` / `24.0.2` directories are no longer used and can be deleted.
+
+An Alpine host running `gcompat` exposes a glibc loader shim, so it is treated
+as glibc and the glibc build then fails its start check with a clear error. On
+such a host, preseed the musl builds under the glibc names (`node20/`,
+`node24/` in `TOOLU_RUNNER_NODE_DIR`): that is what a glibc host looks up, and
+they pass the start check because they run there.
+
 Coverage and unverified lanes: [#95 coverage map](docs/test-coverage.md#node-runtime-95).
 
 ### Workflow service containers

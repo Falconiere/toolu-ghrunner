@@ -175,9 +175,10 @@ New `execution::node::platform`:
 - **Startup validation.** When the target is host-runnable (target libc == host
   libc and OS/arch == host), run `<node> --version` (30 s bound, no shell,
   `kill_on_drop`) **inside staging before promote**: it must exit 0 and print
-  `v{major}.`. Failure removes staging and fails with `Node.js {v} ({flavor})
-  failed to start on this host: {cause}` — the cache never commits a runtime
-  that cannot start. Container-only targets (e.g. Alpine runtime on a glibc
+  `v{major}.`. Failure removes staging and fails with `{cache dir} from {url}
+  was not installed: Node.js runtime {binary} failed to start on this host:
+  {cause}` (or `… reported version "…", expected v{major}.x`) — the cache
+  never commits a runtime that cannot start. Container-only targets (e.g. Alpine runtime on a glibc
   host) are not executed on the host; the container run proves them.
 - **Pins** match upstream `externals.sh`: node20 ⇒ `20.20.2`, node24 ⇒
   `24.21.0` (`actions/alpine_nodejs` has no `20.18.3`). `Dockerfile` and

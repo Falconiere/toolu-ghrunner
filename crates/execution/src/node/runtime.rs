@@ -13,7 +13,7 @@ use shared::{RunnerConfig, RunnerError};
 
 use super::download::{Install, install_runtime};
 use super::platform::{Libc, NodeArch, NodeOs, NodeTarget, host_target};
-use super::validate::validate_runtime;
+use super::validate::validate_runtime_once;
 
 /// Resolve a Node.js major version to the release upstream's runner pins
 /// (actions/runner `externals.sh` @ v2.337.0).
@@ -176,7 +176,7 @@ async fn preseeded(
     )));
   }
   if host_runnable {
-    validate_runtime(&binary, major)
+    validate_runtime_once(&binary, major)
       .await
       .map_err(RunnerError::NodeRuntime)?;
   }

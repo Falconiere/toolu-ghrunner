@@ -2,9 +2,11 @@
 //! the requested major. Catches a wrong-libc build (e.g. a glibc Node on a
 //! musl host), a non-executable or non-Node file, and a mislabeled preseed.
 
-use std::path::Path;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::time::Duration;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, SystemTime};
 
 /// Upper bound for `node --version`, generous for a cold disk.
 const VERSION_TIMEOUT: Duration = Duration::from_secs(30);
@@ -22,8 +24,11 @@ pub async fn validate_runtime(binary: &Path, major: u8) -> Result<(), String> {
       binary.display()
     )
   };
+  // An unverified binary gets no runner environment (no tokens, no
+  // `NODE_OPTIONS` that could alter or break the version check).
   let child = tokio::process::Command::new(binary)
     .arg("--version")
+    .env_clear()
     .stdin(Stdio::null())
     .stdout(Stdio::piped())
     .stderr(Stdio::piped())
@@ -54,6 +59,36 @@ pub async fn validate_runtime(binary: &Path, major: u8) -> Result<(), String> {
     "Node.js runtime {} reported version {reported:?}, expected v{major}.x",
     binary.display()
   ))
+}
+
+/// [`validate_runtime`], skipped for a binary already proven in this process
+/// at the same path, major and modification time — a preseeded runtime is
+/// otherwise re-run on every pre/main/post stage.
+///
+/// # Errors
+///
+/// See [`validate_runtime`].
+pub async fn validate_runtime_once(binary: &Path, major: u8) -> Result<(), String> {
+  static PROVEN: OnceLock<Mutex<HashSet<(PathBuf, u8, SystemTime)>>> = OnceLock::new();
+  let modified = std::fs::metadata(binary)
+    .and_then(|meta| meta.modified())
+    .map_err(|e| format!("Node.js runtime {} is unreadable: {e}", binary.display()))?;
+  let key = (binary.to_path_buf(), major, modified);
+  let proven = PROVEN.get_or_init(Mutex::default);
+  let seen = |set: &HashSet<_>| set.contains(&key);
+  let known = match proven.lock() {
+    Ok(set) => seen(&set),
+    Err(poisoned) => seen(&poisoned.into_inner()),
+  };
+  if known {
+    return Ok(());
+  }
+  validate_runtime(binary, major).await?;
+  match proven.lock() {
+    Ok(mut set) => set.insert(key),
+    Err(poisoned) => poisoned.into_inner().insert(key),
+  };
+  Ok(())
 }
 
 #[cfg(test)]

@@ -35,7 +35,9 @@ impl JobContainer {
     container_target(stdout.as_deref(), host_arch()?)
   }
 
-  /// Run the probe, returning its stdout when it exited zero.
+  /// Run the probe, returning its stdout when it exited zero and `None` when it
+  /// exited non-zero (upstream's "best effort": glibc). A timeout or a
+  /// cancellation is an error, so `get_or_try_init` never caches it.
   async fn probe_os_release(
     &self,
     cancel: &CancellationToken,
@@ -48,14 +50,16 @@ impl JobContainer {
       env: &env,
       working_dir: Path::new("/"),
       step_id: "",
-      timeout: Some(PROBE_TIMEOUT),
+      // Bounded below, so a timeout is an error rather than a cached "glibc".
+      timeout: None,
       cancel,
     };
     let (stdout_tx, mut stdout_rx) = mpsc::channel::<String>(64);
     // Probe stderr is not step output: drain and drop it.
     let (events_tx, mut events_rx) = mpsc::channel(64);
     let run = async {
-      let conclusion = self.execute(&exec, &events_tx, stdout_tx).await;
+      let conclusion =
+        tokio::time::timeout(PROBE_TIMEOUT, self.execute(&exec, &events_tx, stdout_tx)).await;
       drop(events_tx);
       conclusion
     };
@@ -69,6 +73,18 @@ impl JobContainer {
     };
     let drain = async { while events_rx.recv().await.is_some() {} };
     let (conclusion, stdout, ()) = tokio::join!(run, collect, drain);
-    Ok((conclusion? == Conclusion::Success).then_some(stdout))
+    let conclusion = conclusion.map_err(|elapsed| {
+      RunnerError::Docker(format!(
+        "container OS probe did not finish within {PROBE_TIMEOUT:?} ({elapsed})"
+      ))
+    })??;
+    // Only a probe that really ran decides; cancellation is not cached as glibc.
+    match conclusion {
+      Conclusion::Success => Ok(Some(stdout)),
+      Conclusion::Failure | Conclusion::Skipped => Ok(None),
+      Conclusion::Cancelled => Err(RunnerError::Docker(
+        "container OS probe was cancelled".to_owned(),
+      )),
+    }
   }
 }

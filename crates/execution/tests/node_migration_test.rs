@@ -217,3 +217,88 @@ async fn phase_two_with_workflow_opt_out_stays_on_node20_and_warns_deprecation()
   );
   Ok(())
 }
+
+#[tokio::test]
+async fn conflicting_step_switches_warn_on_the_step_and_print_the_phase_two_notice() -> TestResult {
+  let mut message: AgentJobRequestMessage = serde_json::from_str(CAPTURE)?;
+  // Phase 2 (captured `usenode24bydefault = "true"`, `requirenode24` moved back).
+  message.variables.insert(
+    "actions.runner.requirenode24".to_owned(),
+    VariableValue {
+      value: "false".to_owned(),
+      is_secret: false,
+    },
+  );
+  let both: TemplateToken = serde_json::from_value(serde_json::json!({
+    "type": 2,
+    "map": [
+      {
+        "key": { "type": 0, "lit": "FORCE_JAVASCRIPT_ACTIONS_TO_NODE24" },
+        "value": { "type": 0, "lit": "true" }
+      },
+      {
+        "key": { "type": 0, "lit": "ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION" },
+        "value": { "type": 0, "lit": "true" }
+      }
+    ]
+  }))?;
+  let step = probe_step(Some(both));
+  let step_id = step.id.clone();
+  message.steps = vec![step];
+  let replay = replay(message, 24, 20).await?;
+  assert_eq!(
+    conclusion(&replay.events),
+    Some(Conclusion::Success),
+    "{:?}",
+    replay.events
+  );
+  assert!(ran_on(&replay, 24)?, "ran {}", replay.exec_path.display());
+  let conflict = "Both FORCE_JAVASCRIPT_ACTIONS_TO_NODE24 and ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION \
+                  environment variables are set to true in the workflow environment. This is \
+                  likely a configuration error. Using the default Node version: node24.";
+  let step_warnings: Vec<&str> = replay
+    .events
+    .iter()
+    .filter_map(|event| {
+      if let RunnerEvent::Annotation {
+        step_id: id,
+        level: AnnotationLevel::Warning,
+        message,
+        ..
+      } = event
+        && id == &step_id
+      {
+        Some(message.as_str())
+      } else {
+        None
+      }
+    })
+    .collect();
+  assert_eq!(step_warnings, vec![conflict]);
+  let step_logs: Vec<&str> = replay
+    .events
+    .iter()
+    .filter_map(|event| {
+      if let RunnerEvent::Log {
+        step_id: id, line, ..
+      } = event
+        && id == &step_id
+      {
+        Some(line.as_str())
+      } else {
+        None
+      }
+    })
+    .collect();
+  assert!(
+    step_logs.contains(&format!("##[warning]{conflict}").as_str()),
+    "{step_logs:#?}"
+  );
+  let notice = format!(
+    "Node 20 is being deprecated. This workflow is running with Node 24 by default. If you need \
+     to temporarily use Node 20, you can set the ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true \
+     environment variable. For more information see: {URL}"
+  );
+  assert!(step_logs.contains(&notice.as_str()), "{step_logs:#?}");
+  Ok(())
+}

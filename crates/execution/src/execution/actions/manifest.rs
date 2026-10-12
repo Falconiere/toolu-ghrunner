@@ -185,9 +185,10 @@ fn parse_outputs(raw_outputs: Option<HashMap<String, RawOutput>>) -> HashMap<Str
     .collect()
 }
 
-/// Upstream `ActionManifestManager`: `node12`/`node16`/`node20`/`node24`
-/// case-insensitively (12/16 run as node20); any other `node*` is rejected
-/// with upstream's message.
+/// `node*` values follow upstream `ActionManifestManager`: `node12`/`node16`/
+/// `node20`/`node24` case-insensitively (12/16 run as node20); any other
+/// `node*` is rejected with upstream's message. `composite` / `docker` and the
+/// generic unsupported message are unchanged toolu behavior.
 fn parse_runs_using(using: &str) -> Result<RunsUsing, RunnerError> {
   match using.to_ascii_lowercase().as_str() {
     "node12" | "node16" | "node20" => return Ok(RunsUsing::Node { major: 20 }),

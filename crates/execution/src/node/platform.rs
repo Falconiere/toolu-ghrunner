@@ -7,6 +7,7 @@
 
 use std::fmt;
 use std::path::Path;
+use std::sync::OnceLock;
 
 use shared::RunnerError;
 
@@ -85,19 +86,26 @@ impl fmt::Display for NodeTarget {
   }
 }
 
-/// The target of the runner host itself.
+/// The target of the runner host itself, classified once per process (the
+/// host does not change under a running runner; every stage asks).
 ///
 /// # Errors
 ///
 /// Returns `RunnerError::NodeRuntime` for an OS/CPU pair no Node.js build
 /// exists for, or for a musl host on a non-x64 CPU.
 pub fn host_target() -> Result<NodeTarget, RunnerError> {
-  let libc = if std::env::consts::OS == "linux" {
-    detect_libc(Path::new("/"))
-  } else {
-    Libc::Glibc
-  };
-  target_for(std::env::consts::OS, std::env::consts::ARCH, libc)
+  static HOST: OnceLock<Result<NodeTarget, String>> = OnceLock::new();
+  HOST
+    .get_or_init(|| {
+      let libc = if std::env::consts::OS == "linux" {
+        detect_libc(Path::new("/"))
+      } else {
+        Libc::Glibc
+      };
+      classify(std::env::consts::OS, std::env::consts::ARCH, libc)
+    })
+    .clone()
+    .map_err(RunnerError::NodeRuntime)
 }
 
 /// The runner host's CPU, which a job container shares.
@@ -117,15 +125,18 @@ pub fn host_arch() -> Result<NodeArch, RunnerError> {
 /// Returns `RunnerError::NodeRuntime` for an unsupported pair, or musl on a
 /// non-x64 CPU.
 pub fn target_for(os: &str, arch: &str, libc: Libc) -> Result<NodeTarget, RunnerError> {
+  classify(os, arch, libc).map_err(RunnerError::NodeRuntime)
+}
+
+/// [`target_for`]'s rule with a plain message (cacheable: `RunnerError` is not `Clone`).
+fn classify(os: &str, arch: &str, libc: Libc) -> Result<NodeTarget, String> {
   let (node_os, node_arch) = match (os, arch) {
     ("linux", "x86_64") => (NodeOs::Linux, NodeArch::X64),
     ("linux", "aarch64") => (NodeOs::Linux, NodeArch::Arm64),
     ("macos", "x86_64") => (NodeOs::Darwin, NodeArch::X64),
     ("macos", "aarch64") => (NodeOs::Darwin, NodeArch::Arm64),
     _ => {
-      return Err(RunnerError::NodeRuntime(format!(
-        "Node.js actions are not supported on {os} {arch}"
-      )));
+      return Err(format!("Node.js actions are not supported on {os} {arch}"));
     },
   };
   let libc = if node_os == NodeOs::Darwin {
@@ -134,11 +145,11 @@ pub fn target_for(os: &str, arch: &str, libc: Libc) -> Result<NodeTarget, Runner
     libc
   };
   if libc == Libc::Musl && node_arch != NodeArch::X64 {
-    return Err(RunnerError::NodeRuntime(format!(
+    return Err(format!(
       "JavaScript Actions on musl (Alpine) hosts are only supported on x64 Linux runners. \
        Detected Linux {}",
       dotnet_arch(node_arch)
-    )));
+    ));
   }
   Ok(NodeTarget {
     os: node_os,
