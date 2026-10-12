@@ -13,9 +13,10 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+
+use crate::network::NetworkSection;
 use shared::{
-  CacheConfig, L2Config, RunnerError, ServicesMode, WorkspaceConfig, WorkspaceMode, paths,
-};
+  CacheConfig, L2Config, RunnerError, ServicesMode, WorkspaceConfig, WorkspaceMode, paths, NetworkConfig};
 
 #[cfg(unix)]
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
@@ -61,6 +62,9 @@ pub struct RunnerRegistrationConfig {
   /// `[shadow]` section: step-observation mode.
   #[serde(default)]
   pub shadow: ShadowSection,
+  /// `[network]` section: explicit proxy / extra CA (#94); omitted when empty.
+  #[serde(default, skip_serializing_if = "NetworkSection::is_empty")]
+  pub network: NetworkSection,
 }
 
 impl RunnerRegistrationConfig {
@@ -95,6 +99,11 @@ impl RunnerRegistrationConfig {
   /// Whether shadow-mode step observation is enabled.
   pub fn shadow_enabled(&self) -> bool {
     self.shadow.enabled
+  }
+
+  /// Resolve the `[network]` section into the runtime [`NetworkConfig`].
+  pub fn network_config(&self) -> NetworkConfig {
+    self.network.resolve()
   }
 }
 

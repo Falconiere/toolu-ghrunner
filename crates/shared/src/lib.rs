@@ -10,6 +10,8 @@ mod config;
 mod error;
 mod events;
 mod job_message;
+/// Credential redaction for proxy URLs (`[network] proxy`, proxy env vars).
+pub mod network_redact;
 /// Home-directory and tilde path resolution.
 pub mod paths;
 /// Runner OS/arch reporting (GitHub `RUNNER_OS` / `RUNNER_ARCH`).
@@ -20,7 +22,7 @@ mod secret_masker;
 pub mod startup;
 
 pub use config::{
-  CacheConfig, L2Config, RunnerConfig, ServicesMode, WorkspaceConfig, WorkspaceMode,
+  CacheConfig, L2Config, NetworkConfig, RunnerConfig, ServicesMode, WorkspaceConfig, WorkspaceMode,
 };
 pub use error::{ActionFetchError, ActionFetchKind, RunnerError, SESSION_CONFLICT_EXIT_CODE};
 pub use events::{

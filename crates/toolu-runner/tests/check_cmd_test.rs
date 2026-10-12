@@ -166,6 +166,7 @@ fn write_registration(
       cache: CacheSection::default(),
       workspace: WorkspaceSection::default(),
       shadow: ShadowSection::default(),
+      network: config::network::NetworkSection::default(),
     },
   )?;
   save_credentials(

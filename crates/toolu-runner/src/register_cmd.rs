@@ -477,6 +477,7 @@ fn build_registration_config(
     cache: CacheSection::default(),
     workspace: WorkspaceSection::default(),
     shadow: ShadowSection::default(),
+    network: config::network::NetworkSection::default(),
   }
 }
 

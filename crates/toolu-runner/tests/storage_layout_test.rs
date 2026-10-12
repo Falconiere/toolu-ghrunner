@@ -55,6 +55,7 @@ fn sample_config() -> RunnerRegistrationConfig {
     cache: CacheSection::default(),
     workspace: WorkspaceSection::default(),
     shadow: ShadowSection::default(),
+    network: config::network::NetworkSection::default(),
   }
 }
 

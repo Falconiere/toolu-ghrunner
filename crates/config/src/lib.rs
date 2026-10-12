@@ -15,6 +15,8 @@ pub mod labels;
 pub mod lockfile;
 /// Per-repo runner registration registry (home layout + config resolution).
 pub mod registry;
+/// `[network]` section: explicit proxy, bypass list and extra CA (#94).
+pub mod network;
 /// Re-mint merge that preserves user-editable config sections verbatim.
 pub mod remint;
 /// Repo inference from the cwd git remote (pure URL parse + `git` shell-out).
