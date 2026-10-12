@@ -9,7 +9,6 @@ repository.workspace = true
 [dependencies]
 # Internal
 shared = { path = "../shared" }
-network = { path = "../network" }
 
 # Async runtime
 tokio = { version = "1", features = ["rt", "sync", "time", "net", "io-util", "fs"] }
@@ -43,6 +42,9 @@ rand = { version = "0.8", features = ["std_rng"] }
 tracing = "0.1"
 
 [dev-dependencies]
+# `L2Tier::from_config` takes a caller-built client; only the #94 test builds
+# one with `network::client_builder`.
+network = { path = "../network" }
 # #94 proxy / custom-CA tests: real rcgen PKI, rustls servers and a recording
 # CONNECT proxy (`network/tests/helpers/{tls,proxy}_fixtures.rs`).
 rcgen = { version = "0.14", default-features = false, features = ["ring", "pem"] }

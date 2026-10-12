@@ -27,7 +27,8 @@ no OTel.
     construction (`client_builder`); it exists so `protocol` (which depends
     on `shared`) stays free of `reqwest` (#94).
   - `config`, `expressions` — each depend on `shared` only.
-  - `cache` — `shared`, `network`.
+  - `cache` — `shared` (`network` only as a dev-dependency: `L2Tier`
+    takes a caller-built client).
   - `observability` — depends on `shared` only. It does NOT depend on
     `config`: its journal takes `data_dir` from the caller rather than
     resolving it (see `observability/` below).
@@ -466,7 +467,7 @@ to that list requires proving the value is not a real credential.
  into `${{ }}` template text — `references` for the
  `CheckHasRequiredContext` gate, and `first_line`).
 
-### `cache/` — content-addressed CI cache (deps: shared, network)
+### `cache/` — content-addressed CI cache (deps: shared)
 
 - Content-addressed CI cache backing `ServicesMode::Accelerated`:
   `cas/` (content-addressed store — `manifest`, `chunker`, `store`,
