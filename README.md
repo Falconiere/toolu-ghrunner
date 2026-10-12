@@ -185,15 +185,18 @@ toolu-runner check --timeout 30                    # per-probe bound in seconds 
   the loaded anchor count, and `NODE_EXTRA_CA_CERTS`. The runner's HTTP
   clients also always trust the compiled-in Mozilla root set
   (webpki-roots), so these variables can **add** a private or intercepting
-  CA but cannot narrow trust. Proxy and
-  `DOCKER_HOST` credentials print as `***`. Dedicated proxy/CA configuration
-  is tracked in #94; today these environment variables are the interface.
+  CA but cannot narrow trust. With a registration whose `config.toml` has a
+  `[network]` section, the probes use it and a `[network]` line shows the
+  effective proxy (redacted), `no_proxy` count and `ca_bundle` certificate
+  count — see [Proxy and custom CA](#proxy-and-custom-ca); an unusable
+  `ca_bundle` or proxy URL exits `2` before probing. Proxy and `DOCKER_HOST`
+  credentials print as `***`.
 
 | Exit | Meaning |
 |---|---|
 | `0` | Every applicable required endpoint answered (optional warnings allowed). |
 | `1` | At least one required endpoint failed. |
-| `2` | Usage or configuration error before probing (bad `--url`/`--timeout`, an unloadable `--config` or JIT config). |
+| `2` | Usage or configuration error before probing (bad `--url`/`--timeout`, an unloadable `--config` or JIT config, an unusable `[network]`). |
 
 ### CLI flags reference
 
@@ -663,6 +666,11 @@ protocol_version = "v2"                      # "v1" for GHES
 
 [services]
 mode = "forwarder"   # "forwarder" (default) | "offline" | "accelerated"
+
+[network]                                     # optional — see "Proxy and custom CA"
+proxy     = "http://user:pass@proxy.corp:3128"
+no_proxy  = ["internal.corp", ".svc.local", "10.0.0.0/8"]
+ca_bundle = "~/certs/corp-root.pem"
 ```
 
 The `accelerated` mode adds `[cache]`, `[cache.l2]`, `[workspace]`, and
@@ -776,6 +784,79 @@ new host.
 
 </details>
 
+## Proxy and custom CA
+
+Every runner HTTP client — the listener, JIT re-mint, `remove`, `check`,
+action downloads, Node runtime downloads, the live-log WebSocket, the
+accelerated cache's upstream, OIDC and the S3 cold tier — is built from one
+place (`crates/network`) and honours the same settings. Nothing ever turns
+TLS verification off.
+
+**Environment mode (no `[network] proxy`, the default).** The runner reads
+`HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` / `NO_PROXY` exactly as reqwest
+does: upper case before lower case, an unparseable scheme variable falls back
+to `ALL_PROXY`, `REQUEST_METHOD` set disables them all, and `NO_PROXY`
+entries match a domain and its subdomains, IPs and CIDRs, or `*`. TLS trusts
+the OS store (`SSL_CERT_FILE` / `SSL_CERT_DIR` replace it) plus the
+compiled-in Mozilla set. `boot`, `login`, `create-app` and the first
+`register` always use this mode (no registration config exists for them).
+
+**Config mode.** In the registration's `config.toml`:
+
+```toml
+[network]
+proxy     = "http://user:pass@proxy.corp:3128"   # http:// or https://; used for http and https destinations
+no_proxy  = ["internal.corp", ".svc.local"]      # NO_PROXY syntax per entry
+ca_bundle = "~/certs/corp-root.pem"               # extra trusted CA(s), PEM
+```
+
+| Setting | Effect |
+|---|---|
+| `proxy` set | Replaces the proxy variables **and** env `NO_PROXY` for the runner's clients. `localhost`, `127.0.0.1` and `::1` are always bypassed (as the official runner does), on top of `no_proxy`. Credentials are sent as Basic auth. |
+| `no_proxy` | Used only with `proxy`. |
+| `ca_bundle` | Works with or without `proxy`. **Adds** trust anchors; never removes the OS or Mozilla roots. Must be absolute after `~` expansion, a readable file, and contain at least one well-formed PEM certificate — anything else is an error naming the path, and `run` / `check` exit `2` before polling. |
+
+`run` re-reads `[network]` before every job, so an edit applies to the next
+job; an edit that breaks it stops the runner (exit `2`) instead of silently
+dropping the proxy or CA. Each `run` iteration and `boot` logs one line:
+`network: proxy http://user:***@proxy.corp:3128 (config), no_proxy 2 entries,
+ca_bundle /home/u/certs/corp-root.pem (1 certificates)`.
+
+**What steps see.** Host steps (`run:`, job hooks, composite steps, Node
+actions' pre/main/post) get `HTTPS_PROXY` / `https_proxy` / `HTTP_PROXY` /
+`http_proxy` and `NO_PROXY` / `no_proxy` (config mode: the proxy and the
+bypass list including the loopback entries; environment mode: the runner's
+own first-set value of each, re-exported in both casings), plus
+`NODE_EXTRA_CA_CERTS=<ca_bundle>` when a bundle is set. Workflow, job,
+`GITHUB_ENV` and step `env:` values win over these. Job containers (and the
+`run:` steps executed in them), service containers and Docker actions get the
+proxy variables unless their own `env` sets them — never
+`NODE_EXTRA_CA_CERTS`, whose host path does not exist in a container.
+
+**Secrets.** The proxy password (as written and percent-decoded) and its
+`base64(user:password)` Basic credential are registered with the secret
+masker, so a step that prints `$HTTPS_PROXY` shows `user:***@…` and no log,
+journal or diagnostic carries them. The masker ignores values shorter than
+4 characters, so use a real password; runner-authored messages always print
+the proxy redacted.
+
+**Limits — configure these yourself.**
+
+- **Docker daemon.** Image pulls and `docker build` for Dockerfile actions
+  run inside `dockerd`, which uses its own proxy settings (systemd drop-in
+  `HTTP_PROXY`/`HTTPS_PROXY`, or `proxies` in `~/.docker/config.json`) and
+  its own CA trust (`/etc/docker/certs.d/`). The runner's Docker socket
+  (`DOCKER_HOST`) never goes through the HTTP proxy.
+- **Language tools.** Only Node reads `NODE_EXTRA_CA_CERTS`. git
+  (`http.sslCAInfo` / `GIT_SSL_CAINFO`), curl and OpenSSL tools
+  (`SSL_CERT_FILE`), Python requests (`REQUESTS_CA_BUNDLE`), pip and Java
+  keystores need their own CA configuration; most tools also need the CA in
+  the OS trust store. Node itself only uses `HTTPS_PROXY` when the action
+  opts in (`@actions/http-client` does; plain `https.get` does not).
+- Not supported: SOCKS proxies, separate http/https proxy URLs in config
+  (use environment mode), PAC/WPAD, a `.proxy` file, or disabling TLS
+  verification.
+
 ## Troubleshooting
 
 | Symptom | Fix |
@@ -792,7 +873,7 @@ new host.
 | `… is an ephemeral registration … a service unit restarts run forever` | `install-service` does not supervise one-job registrations; register without `--ephemeral`, or start `run` from a one-shot supervisor. |
 | `another run is in flight` | Another `run` holds this repo's `.lock`; its PID is in the error. Wait it out, or stop the holder with `kill -INT <pid>`. |
 | `generate-jitconfig` fails with a network error | A firewall is blocking `api.github.com` (github.com) or the GHES host. Run `toolu-runner check` to see which hosts fail and why. |
-| `run` hangs or fails before any job | Run `toolu-runner check`: it names the unreachable GitHub service, the failure class (`dns`/`tls`/`proxy`/…), and the proxy / CA settings in effect. |
+| `run` hangs or fails before any job | Run `toolu-runner check`: it names the unreachable GitHub service, the failure class (`dns`/`tls`/`proxy`/…), and the proxy / CA settings in effect (including `[network]`). |
 | `warning: ignoring yamless env var ...` | A stale `YAMLESS_*` var is in your shell rc. Remove it. |
 
 ## Development

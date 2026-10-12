@@ -5,30 +5,35 @@ no OTel.
 
 ## Crate Type
 
-- Layered workspace of **10 crates under `crates/`**. `toolu-runner`
+- Layered workspace of **11 crates under `crates/`**. `toolu-runner`
   is now a **bin-only** crate (the CLI entrypoint: `main.rs` +
   `cli.rs` + `register_cmd.rs` + `run_cmd.rs` + `boot_cmd.rs` +
   `service_cmd.rs` + `login_cmd.rs` + `status_cmd.rs` +
-  `create_app_cmd.rs` + `ephemeral.rs` + the `check_*.rs` preflight).
+  `create_app_cmd.rs` + `ephemeral.rs` + `network_setup.rs` + the
+  `check_*.rs` preflight).
   The execution **engine** lives in
   `execution`; the GitHub **JIT lifecycle** lives in `listener`.
 - Workspace members (dependency order): `protocol`, `shared`,
-  `config`, `expressions`, `cache`, `wire`, `observability`,
+  `network`, `config`, `expressions`, `cache`, `wire`, `observability`,
   `execution`, `listener`, `toolu-runner`.
 - Dependency graph (acyclic):
   - `protocol` — no internal deps (sync crypto + protocol/v1 types).
   - `shared` — no internal deps (cross-cutting types, tracing init,
     `SecretMasker`, `sanitize_job_id`, `runner_os`/`runner_arch`).
-  - `config`, `expressions`, `cache` — each depend on `shared` only.
+  - `network` — `shared` only. The ONLY production `reqwest` client
+    construction (`client_builder`); it exists so `protocol` (which depends
+    on `shared`) stays free of `reqwest` (#94).
+  - `config`, `expressions` — each depend on `shared` only.
+  - `cache` — `shared`, `network`.
   - `observability` — depends on `shared` only. It does NOT depend on
     `config`: its journal takes `data_dir` from the caller rather than
     resolving it (see `observability/` below).
-  - `wire` — `shared`, `protocol`.
-  - `execution` — `shared`, `expressions`, `cache`.
+  - `wire` — `shared`, `protocol`, `network`.
+  - `execution` — `shared`, `expressions`, `cache`, `network`.
   - `listener` — `execution`, `wire`, `observability`, `shared`,
-    `protocol`.
-  - `toolu-runner` (bin) — `shared`, `protocol`, `config`, `wire`,
-    `observability`, `listener` at runtime (and, as dev-deps,
+    `protocol`, `network`.
+  - `toolu-runner` (bin) — `shared`, `protocol`, `network`, `config`,
+    `wire`, `observability`, `listener` at runtime (and, as dev-deps,
     `execution` / `expressions` / `cache` for the integration tests).
 
 ## House Conventions & The Gate
@@ -51,7 +56,7 @@ bite here.
   --locked`) and exits 3 without either, so a missing dependency can
   never look like a clean run.
 - **Workspace guardrail layout.** The root carries
-  `guardrails.workspace.json` (the manifest naming all 10 crates) and
+  `guardrails.workspace.json` (the manifest naming every crate) and
   must **NOT** carry a `guardrails.config.json`; each crate carries
   its own. `run.sh` re-execs once per crate with the working directory
   inside it, so every path in a crate config is **crate-relative**.
@@ -97,7 +102,7 @@ decision rather than drift.
 
 | Deviation | Kit says | Here | Why |
 | --- | --- | --- | --- |
-| Cargo workspace | one crate, no workspace | 10 crates under `crates/` | The layering (`protocol`/`shared` → … → `listener`) is what keeps `protocol` provably I/O-free; the kit's workspace guardrail machinery supports it. |
+| Cargo workspace | one crate, no workspace | 11 crates under `crates/` | The layering (`protocol`/`shared` → … → `listener`) is what keeps `protocol` provably I/O-free; the kit's workspace guardrail machinery supports it. |
 | `rustfmt.toml` `tab_spaces` | `4` | `2` | Adopting 4 would reformat all 341 `.rs` files (4,212 hunks) and reset `git blame` for no behavioural gain. Every other rustfmt option matches the kit. |
 | Lint set | `unwrap_used`/`expect_used` = `warn` | `deny`, plus `panic`/`unreachable`/`todo`/`indexing_slicing`/cast lints denied | Stricter than the kit, not looser. A runner that panics mid-job kills a customer's build. |
 | `#[allow(…)]` / `#[expect(…)]` | not addressed | banned repo-wide (`tools/check.sh`) | Fix the lint, don't silence it. Note the check matches the outer form only — a crate-level `#![allow(…)]` (as in the two `benches/*.rs`) slips through. |
@@ -293,7 +298,9 @@ to that list requires proving the value is not a real credential.
 
 - `config.rs` — `RunnerConfig` (data_dir, workspace_root, cgroup_path,
   services_mode, service_bind, cache, workspace_gc_hours, workspace,
-  shadow_enabled, node_dir — `TOOLU_RUNNER_NODE_DIR`) + `ServicesMode` (forwarder / offline / accelerated),
+  shadow_enabled, node_dir — `TOOLU_RUNNER_NODE_DIR`, network) + `NetworkConfig`
+  (`[network]` proxy / `no_proxy` / `ca_bundle`, pure data, redacting
+  `Debug`) + `ServicesMode` (forwarder / offline / accelerated),
   `WorkspaceConfig` (`mode`: `WorkspaceMode` stable / fresh,
   `stable_gc_hours`), `CacheConfig`, `L2Config`.
 - `error.rs` — `RunnerError` enum (Protocol, Auth, Network, Config,
@@ -339,6 +346,26 @@ to that list requires proving the value is not a real credential.
   `RedactingMakeWriter` / `RedactingWriter` (line-level secret
   redaction), `.env` loader.
 
+### `network/` — proxy / custom-CA HTTP clients (deps: shared) (#94)
+
+- `client.rs` — `client_builder(&NetworkConfig)`: the only production
+  `reqwest` construction (pinned by
+  `toolu-runner/tests/network_client_inventory_test.rs`). Env mode (no
+  `proxy`) keeps reqwest's system proxy; config mode installs
+  `Proxy::all(proxy)` with percent-decoded Basic auth and
+  `NoProxy(no_proxy + LOOPBACK_BYPASS)`, which disables env proxy vars.
+  `ca_bundle` adds anchors (absolute, regular file, every PEM item a valid
+  trust anchor, ≥1 — else `RunnerError::Config` naming the path; never a
+  fallback). `describe` is the redacted one-line diagnostic.
+- `step_env.rs` — `step_env` → `StepNetworkEnv { host, container }`: proxy
+  vars in both casings (config values, or the runner's first-set env values),
+  `NODE_EXTRA_CA_CERTS` for host steps only.
+- `secrets.rs` — `proxy_secrets`: password raw + decoded and
+  `base64(user:password)` for the masker.
+- `config.rs` — the crate's env reads. `tests/helpers/network_fixtures.rs`
+  (rcgen PKI, rustls target, recording CONNECT proxy) is `#[path]`-included
+  by the `execution`, `cache`, `wire` and `toolu-runner` tests.
+
 ### `config/` — registration config, lock, token store (deps: shared)
 
 - `config.rs` — `RunnerRegistrationConfig`, `RuntimeConfig`,
@@ -350,6 +377,10 @@ to that list requires proving the value is not a real credential.
   `jit_endpoint_for_host` (github.com → `pipelinesgh.azureedge.net`,
   any other host → `pipelines.<host>`), `resolve_data_dir`,
   `resolve_work_dir`.
+- `network.rs` — `[network]` section (#94): `NetworkSection` (`proxy`,
+  `no_proxy`, `ca_bundle`; omitted on save when empty, preserved by re-mint)
+  and `resolve()` → `shared::NetworkConfig` (trims `no_proxy`, `~`-expands
+  `ca_bundle`); `RunnerRegistrationConfig::network_config()`.
 - `labels.rs` — pure `register` label resolution (#92): `default_labels`
   (`self-hosted` + `shared::platform` `RUNNER_OS`/`RUNNER_ARCH` spelling) and
   `resolve_labels` (defaults unless `--no-default-labels`, then `--labels`;
@@ -433,7 +464,8 @@ to that list requires proving the value is not a real credential.
   `cas/` (content-addressed store — `manifest`, `chunker`, `store`,
   `chunk_io`, `index`, `gc`; FastCDC + BLAKE3), `twirp/` (v2
   `CacheService` RPCs), `blob/` (Azure-blob-compatible endpoint),
-  `v1/` (legacy REST on the CAS), `tier/l2.rs` (S3 cold tier),
+  `v1/` (legacy REST on the CAS), `tier/l2.rs` (S3 cold tier; `from_config`
+  takes the `reqwest::Client` it sends through — not wired in production yet),
   `server.rs`, `proxy.rs` (selective reverse proxy), `scope.rs` (read
   ladder + write scope), `trust.rs` (branch-scoped writes),
   `accelerated.rs`. `chunk_io::Durability` (`Fsync` / `Deferred`) gates
@@ -473,7 +505,10 @@ to that list requires proving the value is not a real credential.
   shapes, `map_conclusion`), `results_service` (Twirp request
   types, signed-URL helpers), `feature_detection` (V1 vs V2
   detection), `live_log` (WebSocket streamer for real-time logs to
-  the GH UI), `log_upload`, `results_types`, `types` (`Status`,
+  the GH UI; the handshake is an HTTP/1.1 upgrade on a caller-supplied
+  `network` client — the listener builds it `http1_only` from
+  `RunnerConfig.network` — wrapped by `WebSocketStream::from_raw_socket`,
+  so it shares every other client's proxy and trust (#94)), `log_upload`, `results_types`, `types` (`Status`,
   `ReportConclusion`, `StepResult`, `Annotation`).
 
 ### `observability/` — job journal (deps: shared)
@@ -548,7 +583,12 @@ to that list requires proving the value is not a real credential.
   `command_dispatch` (stdout `::workflow-command::` pipeline),
   `node_stage` / `post_drain` (pre/post step stages + `STATE_`),
   `composite_uses` (local `./` + composite nested `uses:`),
-  `step_timeout` (`timeout-minutes` / `working-directory`), `job_spec`
+  `step_timeout` (`timeout-minutes` / `working-directory`),
+  `job_runner/job_http.rs` (#94: the job client and accelerated upstream
+  client from `RunnerConfig.network`, the job masks for proxy credentials,
+  the host-step export handed to `ExecutionContext::set_network_env` —
+  folded via `inherited_process_env` / Node's delta env under workflow env —
+  and the job / service container proxy vars, `or_insert`), `job_spec`
   / `job_hooks` (job `outputs:`, `defaults.run`, job hook env),
   `context_build` (full `${{ }}` context), `service_endpoints`
   (forwarder / offline / accelerated service-URL injection).
@@ -748,6 +788,12 @@ to that list requires proving the value is not a real credential.
   `config::labels` (`--labels` additive to the defaults,
   `--no-default-labels`) and persists `--ephemeral` as the config's
   `ephemeral` key.
+- `network_setup.rs` — `lifecycle_client`: per `run` iteration (from the
+  reloaded `[network]`) and for `boot` (env mode), registers
+  `network::proxy_secrets` with the masker, logs `network::describe`, builds
+  the listener / re-mint client. An unusable `[network]` exits 2 like a
+  corrupt config. `remove` and `check` build theirs from the registration's
+  `[network]`; `login`, `create-app` and the first `register` use env mode.
 - `ephemeral.rs` — `finish_job`: after an ephemeral registration's one job,
   unregister it with the crate root's `remove_bearer` +
   `wire::net::unregister_runner` (404 confirmed by lookup), then

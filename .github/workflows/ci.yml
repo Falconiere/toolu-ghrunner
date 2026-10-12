@@ -49,6 +49,7 @@ jobs:
           cargo test -p execution --test step_metadata_test -- --ignored --test-threads=1
           cargo test -p execution --test node_container_test -- --ignored --test-threads=1
           cargo test -p execution --test compat_probe_replay_test -- --ignored --test-threads=1
+          cargo test -p execution --test network_container_env_test -- --ignored --test-threads=1
       - name: Protocol crate is sync + I/O-free (AC #22)
         run: |
           if cargo tree -p protocol | grep -qE 'reqwest|tokio|opendal|bollard|axum'; then

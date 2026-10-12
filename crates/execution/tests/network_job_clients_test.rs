@@ -1,0 +1,78 @@
+//! #94 AC-11 / AC-2 / AC-4: a real action archive download goes through the
+//! job's `[network]` proxy and trusts its `ca_bundle` — and fails closed
+//! without the bundle.
+
+#[path = "../../network/tests/helpers/network_fixtures.rs"]
+mod network_fixtures;
+
+use std::io::Write as _;
+
+use execution::execution::actions::downloader::download_and_extract_action;
+use flate2::Compression;
+use flate2::write::GzEncoder;
+use network_fixtures::{FixtureResult, Leaf, Pki, RecordingProxy, TlsTarget};
+use shared::NetworkConfig;
+
+/// A real `owner-repo-sha/README.md` tar.gz, the shape GitHub's tarball
+/// endpoint serves.
+fn tarball() -> FixtureResult<Vec<u8>> {
+  let body = b"served through the proxy";
+  let mut raw = Vec::new();
+  {
+    let mut builder = tar::Builder::new(&mut raw);
+    let mut header = tar::Header::new_gnu();
+    header.set_size(u64::try_from(body.len())?);
+    header.set_mode(0o644);
+    header.set_cksum();
+    builder.append_data(&mut header, "acme-probe-abc123/README.md", &body[..])?;
+    builder.finish()?;
+  }
+  let mut gz = GzEncoder::new(Vec::new(), Compression::default());
+  gz.write_all(&raw)?;
+  Ok(gz.finish()?)
+}
+
+#[tokio::test]
+async fn archive_download_uses_the_proxy_and_the_bundle() -> FixtureResult<()> {
+  let pki = Pki::new()?;
+  let dir = tempfile::tempdir()?;
+  let target = TlsTarget::serve(
+    pki.server_config(&["target.test"], Leaf::Valid)?,
+    tarball()?,
+  )
+  .await?;
+  let proxy = RecordingProxy::start(Some(("runner", "pw-94-test"))).await?;
+  let url = format!("https://target.test:{}/acme/probe/tarball/abc123", target.port());
+
+  let untrusted = NetworkConfig {
+    proxy: Some(proxy.url(Some("runner:pw-94-test"))),
+    no_proxy: Vec::new(),
+    ca_bundle: None,
+  };
+  let refused = download_and_extract_action(&untrusted, &url, None, &dir.path().join("a")).await;
+  assert!(refused.is_err(), "no bundle → TLS must fail closed");
+
+  let trusted = NetworkConfig {
+    ca_bundle: Some(pki.write_bundle(dir.path())?),
+    ..untrusted
+  };
+  let dest = dir.path().join("b");
+  download_and_extract_action(&trusted, &url, None, &dest).await?;
+  assert_eq!(
+    std::fs::read_to_string(dest.join("README.md"))?,
+    "served through the proxy"
+  );
+  let hits = proxy.hits();
+  assert_eq!(hits.len(), 2, "{hits:?}");
+  assert!(
+    hits
+      .iter()
+      .all(|hit| hit.line == format!("CONNECT target.test:{} HTTP/1.1", target.port())),
+    "{hits:?}"
+  );
+  assert_eq!(
+    target.requests(),
+    vec!["GET /acme/probe/tarball/abc123 HTTP/1.1".to_owned()]
+  );
+  Ok(())
+}
