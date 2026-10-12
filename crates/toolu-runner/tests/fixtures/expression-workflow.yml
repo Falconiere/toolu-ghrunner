@@ -1,0 +1,36 @@
+# Pushed by live_e2e.rs::expression_evaluation. Dispatched twice: with the
+# defaults (the run must succeed) and with `who: ''` (the run must conclude
+# failure; the step's first assertion is what rejects it), so an empty or
+# dropped input can never keep this scenario green (#103 S2).
+name: expression
+on:
+  workflow_dispatch:
+    inputs:
+      who:
+        description: Exact string input
+        type: string
+        default: world
+      count:
+        description: Exact numeric input
+        type: number
+        default: 3
+      enabled:
+        description: Exact boolean input
+        type: boolean
+        default: false
+jobs:
+  greet:
+    runs-on: [self-hosted, toolu-runner-v1]
+    steps:
+      - name: assert exact typed inputs and contexts
+        env:
+          WHO: ${{ inputs.who }}
+          INPUTS: ${{ toJSON(inputs) }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          test "$WHO" = world
+          test '${{ inputs.count == 3 && !inputs.enabled }}' = true
+          printf '%s' "$INPUTS" | jq -e '.who == "world" and .count == "3" and .enabled == false'
+          test "$REPO" = "$GITHUB_REPOSITORY"
+          test "$SHA" = "$GITHUB_SHA"

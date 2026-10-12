@@ -60,3 +60,9 @@ futures-util = "0.3"
 
 [lints]
 workspace = true
+
+[features]
+# Writes each acquired job body to `<data_dir>/_diag/captures/` (0600) for the
+# #103 capture/replay evidence lane. Never enabled by release builds; see
+# docs/compatibility-evidence.md before committing anything it writes.
+capture = []

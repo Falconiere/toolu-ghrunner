@@ -675,6 +675,13 @@ to that list requires proving the value is not a real credential.
   ephemeral exception). `GitHubListener::job_acquired()` reports whether the
   last `run()` acquired a job (set from `SessionCtx.job_acquired` right after
   `acquire_job`), even when it then returned an `Err`.
+  `capture::write_acquired` (#103) writes the decoded acquire body to
+  `<data_dir>/_diag/captures/` (0600 file, 0700 dir, WARN-never-fail). It is
+  always compiled (tested in the gate), but its only call site, right after
+  `acquire_job`, exists only under the non-default `capture` cargo feature
+  (`listener/capture`, forwarded by `toolu-runner/capture`); release builds
+  never enable it. Raw captures hold secrets: sanitize with
+  `scripts/test/sanitize_capture.py` before committing anything.
 
 ### `toolu-runner/` — CLI bin (deps: shared, protocol, config, wire, observability, listener)
 
@@ -859,6 +866,12 @@ to that list requires proving the value is not a real credential.
 - [docs/architecture.md](docs/architecture.md) — high-level design +
   sequence diagrams for register / run / cancel / reconnect.
 - [docs/known-bugs.md](docs/known-bugs.md) — listener bug tracker.
+- [docs/compatibility-matrix.md](docs/compatibility-matrix.md) — epic #67
+  acceptance matrix (generated from `compatibility-matrix.json`; CI runs
+  `scripts/test/compat_matrix_check.py --check`). Lanes, capture/sanitization,
+  the official-runner reference lane and recorded differences:
+  [docs/compatibility-evidence.md](docs/compatibility-evidence.md). Only a
+  `passed` lane with evidence is coverage.
 - [docs/toolu/specs/2026-06-18-toolu-runner-standalone-design.md](docs/toolu/specs/2026-06-18-toolu-runner-standalone-design.md)
   — design spec (gitignored as `docs/toolu/`).
 - [docs/toolu/plans/2026-06-18-toolu-runner-standalone.md](docs/toolu/plans/2026-06-18-toolu-runner-standalone.md)

@@ -26,20 +26,6 @@ mod harness;
 
 use harness::LiveHarness;
 
-/// Skip (returning `Ok`) with a loud SKIP line when the live env is absent.
-macro_rules! require_live_env {
-  () => {
-    if std::env::var("TOOLU_RUNNER_LIVE_TOKEN").is_err()
-      || std::env::var("TOOLU_RUNNER_LIVE_REPO").is_err()
-    {
-      eprintln!(
-        "SKIP cache_live_e2e: set TOOLU_RUNNER_LIVE_TOKEN and TOOLU_RUNNER_LIVE_REPO to run the accelerated-cache live tests"
-      );
-      return Ok(());
-    }
-  };
-}
-
 /// AC-1 — a single-run `actions/cache@v4` save then restore of the same key.
 /// The save uploads through the local Twirp `CreateCacheEntry` +
 /// `FinalizeCacheEntryUpload` + Azure-blob PUT; the restore resolves through
@@ -175,7 +161,7 @@ async fn run_accelerated_workflow(
   enable_accelerated(&harness)?;
   harness.push_workflow(workflow, yaml).await?;
 
-  let child = harness.run_once().await?;
+  let child = harness.run_once()?;
   let run_id = harness.trigger_workflow(workflow).await?;
   let conclusion = harness
     .wait_for_run(run_id, Duration::from_secs(600))
@@ -202,7 +188,7 @@ async fn run_accelerated_workflow(
 #[ignore = "live test — requires TOOLU_RUNNER_LIVE_TOKEN + accelerated runner"]
 async fn actions_cache_v4_round_trips_through_accelerated_mode()
 -> Result<(), Box<dyn std::error::Error>> {
-  require_live_env!();
+  harness::require_live_env();
   run_accelerated_workflow("cache-v4-accel-live.yml", CACHE_V4_YAML).await
 }
 
@@ -212,7 +198,7 @@ async fn actions_cache_v4_round_trips_through_accelerated_mode()
 #[tokio::test]
 #[ignore = "live test — requires TOOLU_RUNNER_LIVE_TOKEN + accelerated runner"]
 async fn actions_cache_v4_1_uses_local_v1_rest() -> Result<(), Box<dyn std::error::Error>> {
-  require_live_env!();
+  harness::require_live_env();
   run_accelerated_workflow("cache-v1-rest-accel-live.yml", CACHE_V1_REST_YAML).await
 }
 
@@ -222,7 +208,7 @@ async fn actions_cache_v4_1_uses_local_v1_rest() -> Result<(), Box<dyn std::erro
 #[tokio::test]
 #[ignore = "live test — requires TOOLU_RUNNER_LIVE_TOKEN + accelerated runner"]
 async fn upload_artifact_still_reaches_github() -> Result<(), Box<dyn std::error::Error>> {
-  require_live_env!();
+  harness::require_live_env();
   run_accelerated_workflow(
     "cache-artifact-split-accel-live.yml",
     CACHE_ARTIFACT_SPLIT_YAML,

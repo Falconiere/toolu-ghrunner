@@ -1,0 +1,978 @@
+{
+  "issue": 103,
+  "run": {
+    "id": 38301583727,
+    "url": "https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727",
+    "head_sha": "4c902e5a90978c4063fe694efaa90b3ca2274fe1",
+    "workflow": ".github/workflows/compat-reference-103.yml",
+    "conclusion": "failure"
+  },
+  "provenance": {
+    "host": "one Linux x86_64 host (Ubuntu, glibc 2.43), Docker Engine 29.1.3; both runner processes share that daemon, run as root in isolated homes, and carry the same default labels (self-hosted, Linux, X64) plus one dedicated label",
+    "official": {
+      "version": "2.337.0",
+      "commit": "cab9d1c3901e45c7705889c4f88284fdd93f4ae5",
+      "archive": "https://github.com/actions/runner/releases/download/v2.337.0/actions-runner-linux-x64-2.337.0.tar.gz",
+      "archive_sha256": "70920811a4f8ad4328818682bca5c6469c1c942fab52448868071d0063816613",
+      "registration": "config.sh --unattended --labels toolu-103-official --disableupdate (unmodified archive)",
+      "runner_name": "toolu-103-official-ref"
+    },
+    "toolu": {
+      "version": "0.10.0",
+      "source_commit": "a0afa0b (feat/103 WIP: base d480753 + the listener capture feature)",
+      "build": "cargo build -p toolu-runner --features capture (debug profile)",
+      "binary_sha256": "6acafaf634e11aecf2aef0c3badee8b1e74c474251d7f21968115be19513d0d6",
+      "registration": "toolu-runner register --labels toolu-103-toolu; run (always-online loop, forwarder services mode)",
+      "runner_name": "toolu-103-toolu-lane"
+    },
+    "pins": {
+      "alpine": "alpine@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc (3.20.10)",
+      "actions/cache": "55cc8345863c7cc4c66a329aec7e433d2d1c52a9 (v6.1.0)",
+      "actions/upload-artifact": "cf430e030ddbb5b0abf93d22962f4752f3646cd9 (v7.0.2)",
+      "actions/download-artifact": "9000827ccba6bdab643e8b6fd33ac0654aef8333 (v8.0.2)"
+    },
+    "raw_capture_sha256": {
+      "probe-toolu / contexts": "b2563d964ca71587b71d600641b5963a631b1e7f4c59c5543d12aae4b74c95c7",
+      "probe-toolu / docker": "c441f7811ea694d7a51bab2d206fee23700146a35012cd669ec2520f84db07dd"
+    },
+    "normalized": "only the lane token in job names; step names, conclusions and observation values are compared verbatim"
+  },
+  "jobs": [
+    {
+      "variant": "negative",
+      "job": "consumer",
+      "equal": false,
+      "diff": [
+        "steps [['Set up job', 'success'], ['Restore cache', 'failure'], ['Download artifact', 'skipped'], ['Verify cross-job values', 'skipped'], ['Record observations', 'success'], ['Upload observations', 'success'], ['Complete job', 'success']] != [['Set up job', 'success'], ['Restore cache', 'success'], ['Download artifact', 'success'], ['Verify cross-job values', 'failure'], ['Record observations', 'success'], ['Upload observations', 'success'], ['Complete job', 'success']]"
+      ],
+      "toolu": {
+        "conclusion": "failure",
+        "steps": [
+          [
+            "Set up job",
+            "success"
+          ],
+          [
+            "Restore cache",
+            "failure"
+          ],
+          [
+            "Download artifact",
+            "skipped"
+          ],
+          [
+            "Verify cross-job values",
+            "skipped"
+          ],
+          [
+            "Record observations",
+            "success"
+          ],
+          [
+            "Upload observations",
+            "success"
+          ],
+          [
+            "Complete job",
+            "success"
+          ]
+        ],
+        "runner_name": "toolu-103-toolu-lane",
+        "url": "https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727/job/114985748941"
+      },
+      "official": {
+        "conclusion": "failure",
+        "steps": [
+          [
+            "Set up job",
+            "success"
+          ],
+          [
+            "Restore cache",
+            "success"
+          ],
+          [
+            "Download artifact",
+            "success"
+          ],
+          [
+            "Verify cross-job values",
+            "failure"
+          ],
+          [
+            "Record observations",
+            "success"
+          ],
+          [
+            "Upload observations",
+            "success"
+          ],
+          [
+            "Complete job",
+            "success"
+          ]
+        ],
+        "runner_name": "toolu-103-official-ref",
+        "url": "https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727/job/114985615419"
+      }
+    },
+    {
+      "variant": "negative",
+      "job": "contexts",
+      "equal": true,
+      "diff": [],
+      "toolu": {
+        "conclusion": "failure",
+        "steps": [
+          [
+            "Set up job",
+            "success"
+          ],
+          [
+            "Prepare working directory",
+            "success"
+          ],
+          [
+            "Assert typed inputs",
+            "failure"
+          ],
+          [
+            "Assert matrix, env and defaults",
+            "skipped"
+          ],
+          [
+            "Emit outputs",
+            "skipped"
+          ],
+          [
+            "Complete job",
+            "success"
+          ]
+        ],
+        "runner_name": "toolu-103-toolu-lane",
+        "url": "https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727/job/114985517309"
+      },
+      "official": {
+        "conclusion": "failure",
+        "steps": [
+          [
+            "Set up job",
+            "success"
+          ],
+          [
+            "Prepare working directory",
+            "success"
+          ],
+          [
+            "Assert typed inputs",
+            "failure"
+          ],
+          [
+            "Assert matrix, env and defaults",
+            "skipped"
+          ],
+          [
+            "Emit outputs",
+            "skipped"
+          ],
+          [
+            "Complete job",
+            "success"
+          ]
+        ],
+        "runner_name": "toolu-103-official-ref",
+        "url": "https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727/job/114985517317"
+      }
+    },
+    {
+      "variant": "negative",
+      "job": "docker",
+      "equal": false,
+      "diff": [
+        "steps [['Set up job', 'success'], ['Write container probe', 'success'], ['Container action', 'success'], ['Verify container effects', 'failure'], ['Complete job', 'success']] != [['Set up job', 'success'], ['Pull alpine@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc', 'success'], ['Write container probe', 'success'], ['Container action', 'success'], ['Verify container effects', 'failure'], ['Complete job', 'success']]"
+      ],
+      "toolu": {
+        "conclusion": "failure",
+        "steps": [
+          [
+            "Set up job",
+            "success"
+          ],
+          [
+            "Write container probe",
+            "success"
+          ],
+          [
+            "Container action",
+            "success"
+          ],
+          [
+            "Verify container effects",
+            "failure"
+          ],
+          [
+            "Complete job",
+            "success"
+          ]
+        ],
+        "runner_name": "toolu-103-toolu-lane",
+        "url": "https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727/job/114985517429"
+      },
+      "official": {
+        "conclusion": "failure",
+        "steps": [
+          [
+            "Set up job",
+            "success"
+          ],
+          [
+            "Pull alpine@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc",
+            "success"
+          ],
+          [
+            "Write container probe",
+            "success"
+          ],
+          [
+            "Container action",
+            "success"
+          ],
+          [
+            "Verify container effects",
+            "failure"
+          ],
+          [
+            "Complete job",
+            "success"
+          ]
+        ],
+        "runner_name": "toolu-103-official-ref",
+        "url": "https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727/job/114985517341"
+      }
+    },
+    {
+      "variant": "negative",
+      "job": "services",
+      "equal": true,
+      "diff": [],
+      "toolu": {
+        "conclusion": "success",
+        "steps": [
+          [
+            "Set up job",
+            "success"
+          ],
+          [
+            "Write payloads",
+            "success"
+          ],
+          [
+            "Save cache",
+            "success"
+          ],
+          [
+            "Upload artifact",
+            "success"
+          ],
+          [
+            "OIDC allowed",
+            "skipped"
+          ],
+          [
+            "OIDC denied without id-token permission",
+            "success"
+          ],
+          [
+            "Complete job",
+            "success"
+          ]
+        ],
+        "runner_name": "toolu-103-toolu-lane",
+        "url": "https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727/job/114985517559"
+      },
+      "official": {
+        "conclusion": "success",
+        "steps": [
+          [
+            "Set up job",
+            "success"
+          ],
+          [
+            "Write payloads",
+            "success"
+          ],
+          [
+            "Save cache",
+            "success"
+          ],
+          [
+            "Upload artifact",
+            "success"
+          ],
+          [
+            "OIDC allowed",
+            "skipped"
+          ],
+          [
+            "OIDC denied without id-token permission",
+            "success"
+          ],
+          [
+            "Complete job",
+            "success"
+          ]
+        ],
+        "runner_name": "toolu-103-official-ref",
+        "url": "https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727/job/114985516998"
+      }
+    },
+    {
+      "variant": "probe",
+      "job": "consumer",
+      "equal": false,
+      "diff": [
+        "conclusion failure != success",
+        "steps [['Set up job', 'success'], ['Restore cache', 'failure'], ['Download artifact', 'skipped'], ['Verify cross-job values', 'skipped'], ['Record observations', 'success'], ['Upload observations', 'success'], ['Complete job', 'success']] != [['Set up job', 'success'], ['Restore cache', 'success'], ['Download artifact', 'success'], ['Verify cross-job values', 'success'], ['Record observations', 'success'], ['Upload observations', 'success'], ['Complete job', 'success']]"
+      ],
+      "toolu": {
+        "conclusion": "failure",
+        "steps": [
+          [
+            "Set up job",
+            "success"
+          ],
+          [
+            "Restore cache",
+            "failure"
+          ],
+          [
+            "Download artifact",
+            "skipped"
+          ],
+          [
+            "Verify cross-job values",
+            "skipped"
+          ],
+          [
+            "Record observations",
+            "success"
+          ],
+          [
+            "Upload observations",
+            "success"
+          ],
+          [
+            "Complete job",
+            "success"
+          ]
+        ],
+        "runner_name": "toolu-103-toolu-lane",
+        "url": "https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727/job/114985796914"
+      },
+      "official": {
+        "conclusion": "success",
+        "steps": [
+          [
+            "Set up job",
+            "success"
+          ],
+          [
+            "Restore cache",
+            "success"
+          ],
+          [
+            "Download artifact",
+            "success"
+          ],
+          [
+            "Verify cross-job values",
+            "success"
+          ],
+          [
+            "Record observations",
+            "success"
+          ],
+          [
+            "Upload observations",
+            "success"
+          ],
+          [
+            "Complete job",
+            "success"
+          ]
+        ],
+        "runner_name": "toolu-103-official-ref",
+        "url": "https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727/job/114985716793"
+      }
+    },
+    {
+      "variant": "probe",
+      "job": "contexts",
+      "equal": true,
+      "diff": [],
+      "toolu": {
+        "conclusion": "success",
+        "steps": [
+          [
+            "Set up job",
+            "success"
+          ],
+          [
+            "Prepare working directory",
+            "success"
+          ],
+          [
+            "Assert typed inputs",
+            "success"
+          ],
+          [
+            "Assert matrix, env and defaults",
+            "success"
+          ],
+          [
+            "Emit outputs",
+            "success"
+          ],
+          [
+            "Complete job",
+            "success"
+          ]
+        ],
+        "runner_name": "toolu-103-toolu-lane",
+        "url": "https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727/job/114985517255"
+      },
+      "official": {
+        "conclusion": "success",
+        "steps": [
+          [
+            "Set up job",
+            "success"
+          ],
+          [
+            "Prepare working directory",
+            "success"
+          ],
+          [
+            "Assert typed inputs",
+            "success"
+          ],
+          [
+            "Assert matrix, env and defaults",
+            "success"
+          ],
+          [
+            "Emit outputs",
+            "success"
+          ],
+          [
+            "Complete job",
+            "success"
+          ]
+        ],
+        "runner_name": "toolu-103-official-ref",
+        "url": "https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727/job/114985517517"
+      }
+    },
+    {
+      "variant": "probe",
+      "job": "docker",
+      "equal": false,
+      "diff": [
+        "steps [['Set up job', 'success'], ['Write container probe', 'success'], ['Container action', 'success'], ['Verify container effects', 'success'], ['Complete job', 'success']] != [['Set up job', 'success'], ['Pull alpine@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc', 'success'], ['Write container probe', 'success'], ['Container action', 'success'], ['Verify container effects', 'success'], ['Complete job', 'success']]"
+      ],
+      "toolu": {
+        "conclusion": "success",
+        "steps": [
+          [
+            "Set up job",
+            "success"
+          ],
+          [
+            "Write container probe",
+            "success"
+          ],
+          [
+            "Container action",
+            "success"
+          ],
+          [
+            "Verify container effects",
+            "success"
+          ],
+          [
+            "Complete job",
+            "success"
+          ]
+        ],
+        "runner_name": "toolu-103-toolu-lane",
+        "url": "https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727/job/114985517611"
+      },
+      "official": {
+        "conclusion": "success",
+        "steps": [
+          [
+            "Set up job",
+            "success"
+          ],
+          [
+            "Pull alpine@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc",
+            "success"
+          ],
+          [
+            "Write container probe",
+            "success"
+          ],
+          [
+            "Container action",
+            "success"
+          ],
+          [
+            "Verify container effects",
+            "success"
+          ],
+          [
+            "Complete job",
+            "success"
+          ]
+        ],
+        "runner_name": "toolu-103-official-ref",
+        "url": "https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727/job/114985517490"
+      }
+    },
+    {
+      "variant": "probe",
+      "job": "services",
+      "equal": true,
+      "diff": [],
+      "toolu": {
+        "conclusion": "success",
+        "steps": [
+          [
+            "Set up job",
+            "success"
+          ],
+          [
+            "Write payloads",
+            "success"
+          ],
+          [
+            "Save cache",
+            "success"
+          ],
+          [
+            "Upload artifact",
+            "success"
+          ],
+          [
+            "OIDC allowed",
+            "success"
+          ],
+          [
+            "OIDC denied without id-token permission",
+            "skipped"
+          ],
+          [
+            "Complete job",
+            "success"
+          ]
+        ],
+        "runner_name": "toolu-103-toolu-lane",
+        "url": "https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727/job/114985517552"
+      },
+      "official": {
+        "conclusion": "success",
+        "steps": [
+          [
+            "Set up job",
+            "success"
+          ],
+          [
+            "Write payloads",
+            "success"
+          ],
+          [
+            "Save cache",
+            "success"
+          ],
+          [
+            "Upload artifact",
+            "success"
+          ],
+          [
+            "OIDC allowed",
+            "success"
+          ],
+          [
+            "OIDC denied without id-token permission",
+            "skipped"
+          ],
+          [
+            "Complete job",
+            "success"
+          ]
+        ],
+        "runner_name": "toolu-103-official-ref",
+        "url": "https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727/job/114985517452"
+      }
+    }
+  ],
+  "unpaired": [],
+  "results": {
+    "probe": {
+      "equal": true,
+      "toolu": {
+        "contexts": {
+          "result": "success",
+          "outputs": {
+            "who": "world",
+            "marker": "contexts-103"
+          }
+        },
+        "docker": {
+          "result": "success",
+          "outputs": {
+            "release": "3.20.10"
+          }
+        },
+        "services": {
+          "result": "success",
+          "outputs": {
+            "claims": "[\"actor\",\"actor_id\",\"aud\",\"base_ref\",\"check_run_id\",\"event_name\",\"exp\",\"head_ref\",\"iat\",\"iss\",\"job_workflow_ref\",\"job_workflow_sha\",\"jti\",\"nbf\",\"ref\",\"ref_protected\",\"ref_type\",\"repository\",\"repository_id\",\"repository_owner\",\"repository_owner_id\",\"repository_visibility\",\"run_attempt\",\"run_id\",\"run_number\",\"runner_environment\",\"sha\",\"sub\",\"workflow\",\"workflow_ref\",\"workflow_sha\"]"
+          }
+        }
+      },
+      "official": {
+        "contexts": {
+          "result": "success",
+          "outputs": {
+            "who": "world",
+            "marker": "contexts-103"
+          }
+        },
+        "docker": {
+          "result": "success",
+          "outputs": {
+            "release": "3.20.10"
+          }
+        },
+        "services": {
+          "result": "success",
+          "outputs": {
+            "claims": "[\"actor\",\"actor_id\",\"aud\",\"base_ref\",\"check_run_id\",\"event_name\",\"exp\",\"head_ref\",\"iat\",\"iss\",\"job_workflow_ref\",\"job_workflow_sha\",\"jti\",\"nbf\",\"ref\",\"ref_protected\",\"ref_type\",\"repository\",\"repository_id\",\"repository_owner\",\"repository_owner_id\",\"repository_visibility\",\"run_attempt\",\"run_id\",\"run_number\",\"runner_environment\",\"sha\",\"sub\",\"workflow\",\"workflow_ref\",\"workflow_sha\"]"
+          }
+        }
+      }
+    },
+    "negative": {
+      "equal": true,
+      "toolu": {
+        "contexts": {
+          "result": "failure",
+          "outputs": {}
+        },
+        "docker": {
+          "result": "failure",
+          "outputs": {
+            "release": "3.20.10"
+          }
+        },
+        "services": {
+          "result": "success",
+          "outputs": {}
+        }
+      },
+      "official": {
+        "contexts": {
+          "result": "failure",
+          "outputs": {}
+        },
+        "docker": {
+          "result": "failure",
+          "outputs": {
+            "release": "3.20.10"
+          }
+        },
+        "services": {
+          "result": "success",
+          "outputs": {}
+        }
+      }
+    }
+  },
+  "payload_errors": [],
+  "expectation_failures": [
+    [
+      "negative",
+      "consumer",
+      "toolu failed steps ['Restore cache']"
+    ],
+    [
+      "probe",
+      "consumer",
+      "toolu concluded failure"
+    ]
+  ],
+  "leftover_containers": [],
+  "captures": {
+    "crates/execution/tests/compat_103_contexts_message.json": "8fd8559099b24e5778926e2b14ce663d086d752caa742614df3f490685652498",
+    "crates/execution/tests/compat_103_docker_message.json": "28ccc7aeca95a50838195ef20312fa0cf50e281c7847fd3b028e3e93b60df5b1"
+  },
+  "acknowledged": [
+    {
+      "finding": "forwarder-cache-service-v2",
+      "job": "consumer",
+      "variants": [
+        "probe",
+        "negative"
+      ],
+      "diagnosis": "toolu never exports ACTIONS_CACHE_SERVICE_V2 or ACTIONS_CACHE_MODE in forwarder mode: execution::service_endpoints reads a job variable named ACTIONS_CACHE_SERVICE_V2, but GitHub sends actions_uses_cache_service_v2 = true and actions_cache_mode = write (see the committed compat_103_*_message.json captures). actions/cache therefore uses the retired v1 host artifactcache.actions.githubusercontent.com: `Save cache` logs the warning 'Failed to save: <h2>Our services aren't available right now</h2>' yet the step succeeds (no entry is created; GitHub's cache API lists only the official lane's keys), and the dependent `Restore cache` fails with 'Cache service responded with 400'. The official lane saves and restores.",
+      "upstream": "actions/runner cab9d1c src/Runner.Worker/Handlers/NodeScriptActionHandler.cs (actions_uses_cache_service_v2 -> ACTIONS_CACHE_SERVICE_V2=True; actions_cache_mode -> ACTIONS_CACHE_MODE), ContainerActionHandler.cs (ACTIONS_CACHE_MODE), JobExtension.cs ('Cache mode: <mode>' in Set up job)",
+      "matrix_rows": [
+        "103/S4",
+        "103/R-cache"
+      ],
+      "observed": {
+        "probe": {
+          "toolu": [
+            [
+              "Set up job",
+              "success"
+            ],
+            [
+              "Restore cache",
+              "failure"
+            ],
+            [
+              "Download artifact",
+              "skipped"
+            ],
+            [
+              "Verify cross-job values",
+              "skipped"
+            ],
+            [
+              "Record observations",
+              "success"
+            ],
+            [
+              "Upload observations",
+              "success"
+            ],
+            [
+              "Complete job",
+              "success"
+            ]
+          ],
+          "official": [
+            [
+              "Set up job",
+              "success"
+            ],
+            [
+              "Restore cache",
+              "success"
+            ],
+            [
+              "Download artifact",
+              "success"
+            ],
+            [
+              "Verify cross-job values",
+              "success"
+            ],
+            [
+              "Record observations",
+              "success"
+            ],
+            [
+              "Upload observations",
+              "success"
+            ],
+            [
+              "Complete job",
+              "success"
+            ]
+          ]
+        },
+        "negative": {
+          "toolu": [
+            [
+              "Set up job",
+              "success"
+            ],
+            [
+              "Restore cache",
+              "failure"
+            ],
+            [
+              "Download artifact",
+              "skipped"
+            ],
+            [
+              "Verify cross-job values",
+              "skipped"
+            ],
+            [
+              "Record observations",
+              "success"
+            ],
+            [
+              "Upload observations",
+              "success"
+            ],
+            [
+              "Complete job",
+              "success"
+            ]
+          ],
+          "official": [
+            [
+              "Set up job",
+              "success"
+            ],
+            [
+              "Restore cache",
+              "success"
+            ],
+            [
+              "Download artifact",
+              "success"
+            ],
+            [
+              "Verify cross-job values",
+              "failure"
+            ],
+            [
+              "Record observations",
+              "success"
+            ],
+            [
+              "Upload observations",
+              "success"
+            ],
+            [
+              "Complete job",
+              "success"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "finding": "docker-pull-step-reporting",
+      "job": "docker",
+      "variants": [
+        "probe",
+        "negative"
+      ],
+      "diagnosis": "for a `docker://` step the official runner reports an extra job-setup step 'Pull alpine@sha256:d9e8\u2026' before the first workflow step; toolu pulls the image inside the action step and reports no such row. Every shared step has the same name and conclusion on both lanes, the container output and marker bytes are identical, and no probe container is left on the daemon.",
+      "upstream": "actions/runner cab9d1c src/Runner.Worker/JobExtension.cs (container action image pre-pull as a job-setup step)",
+      "matrix_rows": [
+        "103/S3",
+        "75/75-S1"
+      ],
+      "observed": {
+        "probe": {
+          "toolu": [
+            [
+              "Set up job",
+              "success"
+            ],
+            [
+              "Write container probe",
+              "success"
+            ],
+            [
+              "Container action",
+              "success"
+            ],
+            [
+              "Verify container effects",
+              "success"
+            ],
+            [
+              "Complete job",
+              "success"
+            ]
+          ],
+          "official": [
+            [
+              "Set up job",
+              "success"
+            ],
+            [
+              "Pull alpine@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc",
+              "success"
+            ],
+            [
+              "Write container probe",
+              "success"
+            ],
+            [
+              "Container action",
+              "success"
+            ],
+            [
+              "Verify container effects",
+              "success"
+            ],
+            [
+              "Complete job",
+              "success"
+            ]
+          ]
+        },
+        "negative": {
+          "toolu": [
+            [
+              "Set up job",
+              "success"
+            ],
+            [
+              "Write container probe",
+              "success"
+            ],
+            [
+              "Container action",
+              "success"
+            ],
+            [
+              "Verify container effects",
+              "failure"
+            ],
+            [
+              "Complete job",
+              "success"
+            ]
+          ],
+          "official": [
+            [
+              "Set up job",
+              "success"
+            ],
+            [
+              "Pull alpine@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc",
+              "success"
+            ],
+            [
+              "Write container probe",
+              "success"
+            ],
+            [
+              "Container action",
+              "success"
+            ],
+            [
+              "Verify container effects",
+              "failure"
+            ],
+            [
+              "Complete job",
+              "success"
+            ]
+          ]
+        }
+      }
+    }
+  ]
+}

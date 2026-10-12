@@ -41,11 +41,11 @@ impl LiveHarness {
   ) -> Result<(), Box<dyn std::error::Error>> {
     let url = format!(
       "{}/repos/{}/contents/.github/workflows/{}",
-      self.api_base(),
+      Self::api_base(),
       self.repo,
       name,
     );
-    let client = self.http()?;
+    let client = Self::http()?;
     let existing_sha = self.fetch_file_sha(&client, &url).await;
 
     let encoded = base64::engine::general_purpose::STANDARD.encode(content.as_bytes());
@@ -78,11 +78,11 @@ impl LiveHarness {
   pub async fn delete_workflow(&self, name: &str) -> Result<(), Box<dyn std::error::Error>> {
     let url = format!(
       "{}/repos/{}/contents/.github/workflows/{}",
-      self.api_base(),
+      Self::api_base(),
       self.repo,
       name,
     );
-    let client = self.http()?;
+    let client = Self::http()?;
     let resp = client
       .get(&url)
       .bearer_auth(&self.token)
@@ -130,7 +130,7 @@ impl LiveHarness {
   ) -> Result<u64, Box<dyn std::error::Error>> {
     let list_url = format!(
       "{}/repos/{}/actions/workflows/{}/runs?per_page=1",
-      self.api_base(),
+      Self::api_base(),
       self.repo,
       name,
     );
@@ -173,20 +173,32 @@ impl LiveHarness {
   /// returns 404 — so 404s are retried for up to a minute; any other
   /// non-2xx fails immediately.
   pub async fn trigger_workflow(&self, name: &str) -> Result<u64, Box<dyn std::error::Error>> {
+    self
+      .trigger_workflow_with_inputs(name, serde_json::json!({}))
+      .await
+  }
+
+  /// [`Self::trigger_workflow`] with explicit `workflow_dispatch` `inputs`
+  /// (string values, as the dispatch API takes them).
+  pub async fn trigger_workflow_with_inputs(
+    &self,
+    name: &str,
+    inputs: serde_json::Value,
+  ) -> Result<u64, Box<dyn std::error::Error>> {
     let dispatch_url = format!(
       "{}/repos/{}/actions/workflows/{}/dispatches",
-      self.api_base(),
+      Self::api_base(),
       self.repo,
       name,
     );
-    let client = self.http()?;
+    let client = Self::http()?;
     let mut attempts_left = 20u8;
     loop {
       let resp = client
         .post(&dispatch_url)
         .bearer_auth(&self.token)
         .header("Accept", "application/vnd.github+json")
-        .json(&serde_json::json!({"ref": self.branch}))
+        .json(&serde_json::json!({"ref": self.branch, "inputs": inputs}))
         .send()
         .await?;
       let status = resp.status();
@@ -212,11 +224,11 @@ impl LiveHarness {
   ) -> Result<String, Box<dyn std::error::Error>> {
     let url = format!(
       "{}/repos/{}/actions/runs/{}",
-      self.api_base(),
+      Self::api_base(),
       self.repo,
       run_id,
     );
-    let client = self.http()?;
+    let client = Self::http()?;
     let deadline = Instant::now() + timeout;
     loop {
       let run: serde_json::Value = client
@@ -253,11 +265,11 @@ impl LiveHarness {
   pub async fn cancel_run(&self, run_id: u64) -> Result<(), Box<dyn std::error::Error>> {
     let url = format!(
       "{}/repos/{}/actions/runs/{}/cancel",
-      self.api_base(),
+      Self::api_base(),
       self.repo,
       run_id,
     );
-    let client = self.http()?;
+    let client = Self::http()?;
     let resp = client
       .post(&url)
       .bearer_auth(&self.token)

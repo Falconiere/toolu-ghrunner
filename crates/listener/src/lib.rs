@@ -8,6 +8,11 @@ mod annotation_reporting;
 mod broker_control;
 mod broker_message;
 mod broker_refresh;
+/// Opt-in capture of acquired job bodies for the evidence lane.
+pub mod capture;
+#[cfg(test)]
+#[path = "tests/capture.rs"]
+mod capture_test;
 #[cfg(test)]
 #[path = "tests/early_ack.rs"]
 mod early_ack;
