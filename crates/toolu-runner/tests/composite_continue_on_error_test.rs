@@ -72,7 +72,8 @@ async fn drive(
 
   let spec = execution::execution::job_spec::JobSpec::default();
   let http = reqwest::Client::new();
-  let fetcher = execution::execution::actions::prefetch::ActionFetcher::new();
+  let fetcher =
+    execution::execution::actions::prefetch::ActionFetcher::new(&shared::NetworkConfig::default())?;
   let steps = vec![local_action_step("outer", action_path)];
   let conclusion = run_steps(
     &steps,

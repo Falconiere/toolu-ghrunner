@@ -77,7 +77,8 @@ async fn run_steps_collect(
 
   let spec = execution::execution::job_spec::JobSpec::default();
   let http = reqwest::Client::new();
-  let fetcher = execution::execution::actions::prefetch::ActionFetcher::new();
+  let fetcher =
+    execution::execution::actions::prefetch::ActionFetcher::new(&shared::NetworkConfig::default())?;
   run_steps(
     &steps,
     &mut ctx,

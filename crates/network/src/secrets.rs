@@ -20,16 +20,15 @@ use crate::proxy_env::{ProxyEnv, ProxyVar, public_username, url_secrets};
 /// `HTTPS_PROXY`, `HTTP_PROXY` and `ALL_PROXY` pairs exactly as reqwest does
 /// ([`ProxyEnv`]), even under the CGI guard, since steps inherit them.
 pub fn proxy_secrets(cfg: &NetworkConfig) -> Vec<String> {
-  let raws: Vec<String> = match configured_proxy(cfg) {
-    Some(raw) => vec![raw.to_owned()],
-    None => {
-      let env = ProxyEnv::from_env();
-      [env.https, env.http, env.all]
-        .into_iter()
-        .flatten()
-        .map(|var: ProxyVar| var.value)
-        .collect()
-    },
+  let raws: Vec<String> = if let Some(raw) = configured_proxy(cfg) {
+    vec![raw.to_owned()]
+  } else {
+    let env = ProxyEnv::from_env();
+    [env.https, env.http, env.all]
+      .into_iter()
+      .flatten()
+      .map(|var: ProxyVar| var.value)
+      .collect()
   };
   let mut seen = std::collections::HashSet::new();
   raws

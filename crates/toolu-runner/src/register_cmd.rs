@@ -264,7 +264,7 @@ pub(crate) struct RegisterPersist<'a> {
 /// The `[network]` a `register --replace` keeps: the existing registration's
 /// section, so the mint goes through its proxy / CA and the rewritten
 /// `config.toml` does not drop it. A fresh registration (or one whose config
-/// no longer parses — WARNed) starts in env mode.
+/// no longer parses, with a WARN) starts in env mode.
 fn replaced_network(config_path: &Path, replace: bool) -> config::network::NetworkSection {
   if !replace || !config_path.exists() {
     return config::network::NetworkSection::default();

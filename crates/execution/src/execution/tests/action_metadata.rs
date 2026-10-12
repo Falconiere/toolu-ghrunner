@@ -223,7 +223,7 @@ async fn action_metadata_remote_dispatch_repeated_refs_and_parent_restore() -> T
   // metadata only, not the separate durable-sink masking contract.
   let mut ctx = build_context(&msg, &config, Arc::new(Mutex::new(SecretMasker::new())));
   let client = reqwest::Client::new();
-  let fetcher = ActionFetcher::new();
+  let fetcher = ActionFetcher::new(&shared::NetworkConfig::default())?;
   let bounds = StepBounds::nested(None, None, CancellationToken::new());
   let (events, _receiver) = tokio::sync::mpsc::channel(256);
   let env = ActionEnv {

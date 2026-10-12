@@ -9,7 +9,8 @@ mod tls_fixtures;
 
 use std::io::Write as _;
 
-use execution::execution::actions::downloader::{archive_client, download_and_extract_action};
+use execution::execution::actions::downloader::{ArchiveClient, download_and_extract_action};
+use execution::execution::actions::prefetch::ActionFetcher;
 use flate2::Compression;
 use flate2::write::GzEncoder;
 use proxy_fixtures::RecordingProxy;
@@ -67,7 +68,7 @@ async fn archive_download_uses_the_proxy_and_the_bundle() -> FixtureResult<()> {
     ca_bundle: None,
   };
   let refused = download_and_extract_action(
-    &archive_client(&untrusted)?,
+    &ArchiveClient::new(&untrusted)?,
     &url,
     None,
     &dir.path().join("a"),
@@ -114,7 +115,7 @@ async fn archive_download_uses_the_proxy_and_the_bundle() -> FixtureResult<()> {
     ..untrusted
   };
   let dest = dir.path().join("b");
-  download_and_extract_action(&archive_client(&trusted)?, &url, None, &dest).await?;
+  download_and_extract_action(&ArchiveClient::new(&trusted)?, &url, None, &dest).await?;
   assert_eq!(
     std::fs::read_to_string(dest.join("README.md"))?,
     "served through the proxy"
@@ -126,5 +127,37 @@ async fn archive_download_uses_the_proxy_and_the_bundle() -> FixtureResult<()> {
     target.requests(),
     vec!["GET /acme/probe/tarball/abc123 HTTP/1.1".to_owned()]
   );
+  Ok(())
+}
+
+/// B6: the fetcher has no implicit env-mode fallback — it is built from the
+/// configured `[network]`, so an unusable one fails closed (naming the path)
+/// for the bare and the per-job constructor alike.
+#[test]
+fn fetcher_is_built_from_the_configured_network_and_fails_closed() -> FixtureResult<()> {
+  let missing = std::env::temp_dir().join("toolu-94-fetcher-no-such-ca.pem");
+  let network = NetworkConfig {
+    ca_bundle: Some(missing.clone()),
+    ..NetworkConfig::default()
+  };
+  let expected = format!("[network] ca_bundle {}: cannot access", missing.display());
+  let message = |result: Result<ActionFetcher, RunnerError>| match result {
+    Err(RunnerError::Config(msg)) => msg,
+    Err(other) => format!("expected a Config error, got {other:?}"),
+    Ok(_) => "expected an error, got a fetcher".to_owned(),
+  };
+  let bare = message(ActionFetcher::new(&network));
+  assert!(bare.starts_with(&expected), "{bare}");
+  let msg: shared::AgentJobRequestMessage = serde_json::from_str(include_str!(
+    "../../toolu-runner/tests/fixtures/job_container_message.json"
+  ))?;
+  let per_job = message(ActionFetcher::for_job(
+    &msg,
+    std::sync::Arc::new(std::sync::Mutex::new(shared::SecretMasker::new())),
+    tokio_util::sync::CancellationToken::new(),
+    &network,
+  ));
+  assert!(per_job.starts_with(&expected), "{per_job}");
+  assert!(ActionFetcher::new(&NetworkConfig::default()).is_ok());
   Ok(())
 }

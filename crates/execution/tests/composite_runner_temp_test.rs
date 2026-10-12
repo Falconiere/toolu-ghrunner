@@ -74,7 +74,7 @@ impl Fixture {
       events,
       cancel: CancellationToken::new(),
       http: reqwest::Client::new(),
-      fetcher: ActionFetcher::new(),
+      fetcher: ActionFetcher::new(&shared::NetworkConfig::default())?,
     })
   }
 

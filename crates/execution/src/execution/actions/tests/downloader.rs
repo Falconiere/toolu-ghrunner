@@ -14,8 +14,8 @@ use std::sync::Arc;
 use tar::{Builder, Header};
 
 /// The env-mode archive client the production fetcher builds by default.
-fn default_archive_client() -> reqwest::Client {
-  archive_client(&shared::NetworkConfig::default()).expect("env-mode archive client builds")
+fn default_archive_client() -> ArchiveClient {
+  ArchiveClient::new(&shared::NetworkConfig::default()).expect("env-mode archive client builds")
 }
 
 fn tmp_dest(label: &str) -> PathBuf {

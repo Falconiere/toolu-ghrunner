@@ -186,7 +186,8 @@ async fn drive_with_cancel(
 
   let spec = execution::execution::job_spec::JobSpec::default();
   let http = reqwest::Client::new();
-  let fetcher = execution::execution::actions::prefetch::ActionFetcher::new();
+  let fetcher =
+    execution::execution::actions::prefetch::ActionFetcher::new(&shared::NetworkConfig::default())?;
   let conclusion = run_steps(
     steps,
     &mut ctx,
@@ -527,7 +528,8 @@ async fn drive_raw(
 
   let spec = execution::execution::job_spec::JobSpec::default();
   let http = reqwest::Client::new();
-  let fetcher = execution::execution::actions::prefetch::ActionFetcher::new();
+  let fetcher =
+    execution::execution::actions::prefetch::ActionFetcher::new(&shared::NetworkConfig::default())?;
   let result = run_steps(
     steps,
     &mut ctx,

@@ -62,7 +62,9 @@ fn fetcher(
     msg,
     Arc::new(Mutex::new(SecretMasker::new())),
     CancellationToken::new(),
+    &shared::NetworkConfig::default(),
   )
+  .expect("env-mode archive client")
   .with_events(events)
 }
 
