@@ -2,7 +2,6 @@
 //!
 //! ## Module map
 //!
-//! - [`resolve`] — Pick which handler runs a step based on `runs.using`.
 //! - [`script`] — Built-in `run:` shell handler.
 //! - [`node`] / [`node_exec`] — Built-in Node.js action handler.
 //! - [`composite`] — Built-in composite action handler.
@@ -20,11 +19,7 @@ pub mod docker;
 pub mod node;
 /// Built-in Node.js action handler: runtime resolution and process execution.
 pub mod node_exec;
-/// Picks which handler runs a step based on `runs.using`.
-pub mod resolve;
 /// Built-in `run:` shell handler.
 pub mod script;
 /// Shared shell command contract and script preparation.
 mod shell_command;
-
-pub use resolve::{HandlerKind, resolve_handler};

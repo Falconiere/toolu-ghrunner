@@ -38,7 +38,7 @@ mod docker_stage;
 mod environment_url;
 /// Parses the `GITHUB_ENV` / `GITHUB_PATH` / `GITHUB_OUTPUT` / `GITHUB_STATE` file commands.
 pub mod file_commands;
-/// Handler dispatch by `runs.using` (plugin → script → node → docker → composite).
+/// Handler dispatch by `runs.using` (script, node, docker, composite).
 pub mod handlers;
 mod job_cancellation;
 mod job_context;
@@ -77,8 +77,6 @@ mod step_state;
 pub mod step_timeout;
 /// Runs the per-job step loop.
 pub mod steps_runner;
-/// Workflow YAML parsing, matrix build, orchestration and reusable-workflow resolution.
-pub mod workflow;
 /// Ownership- and lease-aware garbage collection of job workspaces.
 pub mod workspace_gc;
 /// Stable per-repository / fresh per-job workspace allocation (issue #90).

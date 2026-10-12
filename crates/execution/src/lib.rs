@@ -12,8 +12,6 @@ pub mod docker;
 pub mod execution;
 /// Node.js runtime detection, download, and caching.
 pub mod node;
-/// `RunnerPlugin` trait and registry.
-pub mod plugin;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

@@ -3,9 +3,9 @@
 **Date:** 2026-06-18 · **Status:** maintained (v0.7.x) · **Author:** toolu
 
 This document is the architectural reference for `toolu-runner`. It
-mirrors the layout of the source tree and explains how the nine
-library crates plus the `toolu-runner` binary (ten workspace members
-in total) fit together, how the listener lifecycle runs, and how the
+mirrors the layout of the source tree and explains how the ten
+library crates plus the `toolu-runner` and `toolu-daemon` binaries (twelve
+workspace members in total) fit together, how the listener lifecycle runs, and how the
 runner behaves under failure.
 
 For the design rationale, see
@@ -51,10 +51,9 @@ toolu-ghrunner/                            workspace root
     │   └── journal/                       per-job JSONL event journal (types, writer, reader)
     ├── execution/                         job execution engine (→ shared, expressions, cache)
     │   ├── lib.rs                         Runner struct, execute_job
-    │   ├── execution/                     job engine (job_runner, handlers, workflow, artifacts, oidc, …)
+    │   ├── execution/                     job engine (job_runner, handlers, artifacts, oidc, …)
     │   ├── docker/                        bollard wrapper
-    │   ├── node/                          Node.js runtime detection + cache
-    │   └── plugin/                        RunnerPlugin trait + registry
+    │   └── node/                          Node.js runtime detection + cache
     ├── listener/                          GitHub JIT lifecycle (→ execution, wire, observability, …)
     │   ├── handler.rs                     GitHubListener entry point
     │   ├── job_lifecycle.rs               long-poll loop
@@ -188,7 +187,7 @@ layered graph above. `toolu-runner` itself is **bin-only** (the CLI:
 `create_app_cmd.rs`). The module descriptions
 that follow are grouped by their **current** crate: `net/` +
 `reporting/` live in `wire`; `listener/` in `listener`; `execution/` +
-`docker/` + `node/` + `plugin/` + the `Runner` (`lib.rs`) in
+`docker/` + `node/` + the `Runner` (`lib.rs`) in
 `execution`; `journal/` in `observability`; `config.rs` +
 `lockfile.rs` + `auth_store.rs` in `config`.
 
@@ -293,10 +292,12 @@ entry point: it builds a `StepsRunner` (per-job step loop) and
 dispatches each step to a handler:
 
 ```
-StepStarted → resolve_handler(runs.using) → handler.run() → StepCompleted
+StepStarted → dispatch on run:/runs.using → handler → StepCompleted
 ```
 
-Handler priority: **plugin → script → node → docker → composite**.
+Dispatch: `run:` is a script; a `uses:` action goes by its manifest
+`runs.using` — **node → docker → composite**. There is no plugin layer or
+local workflow orchestrator; GitHub orchestrates jobs (#97).
 
 - `script` — `run: echo hello`-style shell scripts. Streams stdout /
   stderr line-by-line into `RunnerEvent::Log`.
@@ -313,8 +314,6 @@ Handler priority: **plugin → script → node → docker → composite**.
   each inner condition and supported field through the expression engine,
   then dispatches shell or nested `uses:` steps. A failed inner step updates
   local status and still permits later `failure()`/`always()` cleanup.
-- `plugin` — `RunnerPlugin` extension point. New addition not in
-  upstream `actions/runner`.
 
 **Job containers.** `container_job` evaluates the wire `jobContainer` token
 before workspace creation and rejects non-Linux hosts. `docker::JobContainer`
@@ -352,10 +351,6 @@ evaluator: lexer → parser (AST + precedence + primary) → evaluator
 `format`, `join`, `toJSON`, `fromJSON`, `hashFiles`, etc.) plus
 GH-specific helpers.
 
-The workflow parser (`workflow/parser/`) handles the workflow YAML
-shape. `reusable/` resolves `uses: org/repo/.github/workflows/x.yml`
-references and propagates outputs back to the caller.
-
 Artifacts (`artifacts/`) and cache (`cache/`) run as in-process
 axum micro-services: artifact upload / download via Azure
 append-blob, and cache as a content-addressed store (`cache/cas/`,
@@ -363,15 +358,13 @@ FastCDC chunks addressed by BLAKE3) that backs the
 [accelerated mode](#accelerated-mode-cache-acceleration) described
 below.
 
-### `docker/`, `node/`, `plugin/`
+### `docker/`, `node/`
 
 - `docker` — bollard wrapper. `client` builds the daemon connection,
   `services` runs service containers, `path_translator` maps host ↔
   container paths.
 - `node` — `runtime::detect_version` + `runtime::download`. Caches
   Node at `data_dir/_node/<version>`.
-- `plugin` — `RunnerPlugin` trait + `PluginRegistry`. Plugins can
-  add custom step types and override behavior.
 
 ### `journal/` — local observability
 

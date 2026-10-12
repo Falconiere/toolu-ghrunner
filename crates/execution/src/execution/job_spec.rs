@@ -11,7 +11,6 @@ use shared::{RunnerError, TemplateToken};
 
 use super::context::ExecutionContext;
 use super::step_env::env_token_to_string;
-use super::workflow::types::WorkflowDefaults;
 
 /// Job-level fallback shell + working-directory for `run:` steps.
 ///
@@ -40,20 +39,6 @@ pub struct JobSpec {
 }
 
 impl JobSpec {
-  /// Build a `JobSpec` from parsed workflow data for local workflow callers.
-  /// A present job `run` mapping replaces the whole workflow `run` mapping.
-  pub fn from_workflow(
-    outputs: HashMap<String, String>,
-    workflow_defaults: Option<&WorkflowDefaults>,
-    job_defaults: Option<&WorkflowDefaults>,
-  ) -> Self {
-    Self {
-      outputs,
-      acquired_outputs: None,
-      defaults: merge_run_defaults(workflow_defaults, job_defaults),
-    }
-  }
-
   /// Evaluate ordered run-default mappings from a captured job message.
   ///
   /// # Errors
@@ -240,24 +225,6 @@ fn parse_value(
   }
   let value = env_token_to_string(token, ctx, eval_ctx)?;
   Ok((!value.is_empty()).then_some(value))
-}
-
-/// Merge workflow + job `defaults.run` with whole-mapping job precedence.
-fn merge_run_defaults(
-  workflow: Option<&WorkflowDefaults>,
-  job: Option<&WorkflowDefaults>,
-) -> RunDefaultsResolved {
-  let run = job
-    .and_then(|defaults| defaults.run.as_ref())
-    .or_else(|| workflow.and_then(|defaults| defaults.run.as_ref()));
-  RunDefaultsResolved {
-    shell: run
-      .and_then(|r| r.shell.clone())
-      .filter(|value| !value.is_empty()),
-    working_directory: run
-      .and_then(|r| r.working_directory.clone())
-      .filter(|value| !value.is_empty()),
-  }
 }
 
 /// Evaluate the job's `outputs:` map against the final execution context.

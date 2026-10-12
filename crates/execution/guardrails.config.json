@@ -12,15 +12,10 @@
         "job_runner",
         "oidc",
         "shadow",
-        "steps_runner",
-        "workflow"
+        "steps_runner"
       ],
       "execution/artifacts": [
         "service"
-      ],
-      "execution/workflow": [
-        "parser",
-        "reusable"
       ],
       "*": [
         "tests"
@@ -39,11 +34,7 @@
       "execution/shadow",
       "execution/steps_runner",
       "execution/tests",
-      "execution/workflow",
-      "execution/workflow/parser",
-      "execution/workflow/reusable",
-      "node",
-      "plugin"
+      "node"
     ]
   },
   "fileSize": {

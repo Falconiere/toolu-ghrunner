@@ -102,7 +102,10 @@ fn row(events: &[RunnerEvent]) -> (Vec<&str>, Vec<(AnnotationLevel, &str)>, Opti
 async fn local_output_error_still_closes_the_row_as_failed() -> TestResult {
   let message: AgentJobRequestMessage = serde_json::from_str(ENV_CAPTURE)?;
   let outputs = HashMap::from([("bad".to_owned(), "${{ fromJSON('{') }}".to_owned())]);
-  let spec = JobSpec::from_workflow(outputs, None, None);
+  let spec = JobSpec {
+    outputs,
+    ..JobSpec::default()
+  };
   let (result, events) = complete(&spec, &message, &ExecutionContext::new_for_test()).await;
   assert!(result.is_err(), "the local output error propagates");
   let (_, annotations, conclusion) = row(&events);

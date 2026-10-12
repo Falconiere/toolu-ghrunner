@@ -101,7 +101,7 @@ single PR.
 - **Severity:** L | **Effort:** M
 - **Rationale:** 34 `pub fn/struct/enum/trait/const` items across `shared/protocol/toolu-runner` have no preceding `///` or `#[doc = …]`. Worst offenders: `crates/protocol/src/v1/types.rs` (7 GHES V1 wire types) and `crates/execution/src/execution/context.rs` (6 public methods on the central `ExecutionContext`).
 - **Fix:** Add `///` doc lines to each of the 34. For `crates/protocol/src/v1/types.rs` in particular, every struct is the V1 wire contract and deserves a one-line description.
-- **Refs:** `crates/protocol/src/v1/types.rs:29`, `crates/execution/src/execution/context.rs:146`, `crates/execution/src/plugin/registry.rs:14`, `crates/execution/src/execution/service_lifecycle.rs:60`
+- **Refs:** `crates/protocol/src/v1/types.rs:29`, `crates/execution/src/execution/context.rs:146`, `crates/execution/src/execution/service_lifecycle.rs:60`
 
 ### IMP-CQ-008 — `docker_cache.rs` is pub-but-unreferenced dead code
 - **Severity:** L | **Effort:** S
@@ -137,7 +137,7 @@ single PR.
 - **Fix:** Add a default-lane test that builds a synthetic tarball via the `tar` crate with a `prefix/` top-level directory + nested file (and executable mode bit on Unix), feeds it to `extract_tarball`, and asserts the file lands at `dest/file` with mode 0o755 preserved.
 - **Refs:** `crates/execution/src/execution/actions/downloader.rs:33`
 
-### IMP-TG-003 — Handler dispatch untested for plugin + node24 + unknown branches
+### ~~IMP-TG-003 — Handler dispatch untested for plugin + node24 + unknown branches~~ **Obsolete (#97)** — the code under test was deleted (dead since the engine port).
 - **Severity:** M | **Effort:** S
 - **Rationale:** `resolve_handler` is documented as `plugin → script → node → docker → composite`, but existing tests only cover empty-registry cases. The plugin override branch, `node12`/`node16`/`node24` classification, and the unknown branch's `HandlerKind::Unknown(_)` payload are not independently verified.
 - **Fix:** Add default-lane tests: register a fake plugin named `telepathy` and verify a `telepathy` `uses:` resolves to `HandlerKind::Plugin("telepathy")`; verify `node12` / `node16` / `node24` each map to `HandlerKind::Node`; verify the unknown branch returns the original `using` string.
@@ -149,13 +149,13 @@ single PR.
 - **Fix:** Add a default-lane test asserting `UploadMode::for_content(0)` returns `BlockBlob`, `for_content(4 * 1024 * 1024)` returns `BlockBlob` (boundary), and `for_content(4 * 1024 * 1024 + 1)` returns `AppendBlob`. Plus a header-shape assertion for each helper.
 - **Refs:** `crates/wire/src/reporting/log_upload.rs:19`
 
-### IMP-TG-005 — Topological sort + cycle detection untested
+### ~~IMP-TG-005 — Topological sort + cycle detection untested~~ **Obsolete (#97)** — the code under test was deleted (dead since the engine port).
 - **Severity:** S | **Effort:** S
 - **Rationale:** `topological_sort` prevents the orchestrator from deadlocking on `needs:` cycles. Public, propagates `RunnerError::Expression` on cycle. No test exercises the happy path (4-job linear chain), parallel branches, or the cycle case.
 - **Fix:** Add a default-lane test: (a) sort `a → b → c → d` into `[a,b,c,d]`, (b) handle a diamond `a → {b,c} → d` (any valid order), (c) reject a cycle `a → b → a` with an error mentioning `cycle`, (d) sort empty input.
 - **Refs:** `crates/execution/src/execution/workflow/job_graph.rs:12`
 
-### IMP-TG-006 — Matrix expansion (include/exclude) untested
+### ~~IMP-TG-006 — Matrix expansion (include/exclude) untested~~ **Obsolete (#97)** — the code under test was deleted (dead since the engine port).
 - **Severity:** M | **Effort:** M
 - **Rationale:** `expand_matrix` produces the Cartesian product of base keys, applies exclude, then merges include entries. No test drives any of: 3-axis matrix, exclude targeting one combo, include overriding a single field, or the empty-config single-empty-combo fallback.
 - **Fix:** Add a default-lane test against `MatrixConfig { base: { os: [linux, macos], arch: [x64, arm64] }, exclude: [...], include: [...] }`. Plus an empty `MatrixConfig::default()` case that returns `[{}]`.
@@ -402,7 +402,7 @@ from this list once the top-10s are burnt down.
 - **IMP-TG-011** — transport header-builders (`block_blob_headers`, `append_block_headers`, `create_append_blob_headers`) not covered by `wiremock`. Fix: add a `#[tokio::test]` asserting the request contains `x-ms-blob-type: BlockBlob` for compressed payloads. Refs: `crates/wire/src/net/log_upload.rs:12`
 - **IMP-TG-012** — `reporting::feature_detection` has no test. Fix: build an `AgentJobRequestMessage` with and without `run_service_url` and assert V2/V1 respectively. Refs: `crates/wire/src/reporting/feature_detection.rs:37`
 - **IMP-TG-013** — V1 service URL resolvers (`log_files_url`, `log_lines_url`, `job_finish_url`, `agent_delete_url`) not covered. Fix: extend `ghes_v1_test` with a test that feeds a `ConnectionData` containing all five V1 GUIDs. Refs: `crates/protocol/src/v1/discovery.rs:25`
-- **IMP-TG-014** — `PluginRegistry` behavior beyond construction untested. Fix: add unit tests for dedup (re-registering a name replaces) and `iter()` insertion order. Refs: `crates/execution/src/plugin/registry.rs:21`
+- **IMP-TG-014** **Obsolete (#97 — `PluginRegistry`/`resolve_handler` deleted).** — `PluginRegistry` behavior beyond construction untested. Fix: add unit tests for dedup (re-registering a name replaces) and `iter()` insertion order. Refs: `crates/execution/src/plugin/registry.rs:21`
 - **IMP-TG-015** — `LocalDiskBackend` (cache LRU) has no test. Fix: add a `#[tokio::test]` that reserves a cache id, uploads 1024 bytes, finalizes, downloads, and asserts roundtrip; plus a second entry that triggers eviction when total > 1024. Refs: `crates/cache/src/backend/local_disk.rs:33`
 - **IMP-TG-016** — `LocalBackend` (artifacts) has no test. Fix: add a default-lane test that uploads 3 chunks, calls `finalize`, then `download`, and asserts the concatenated content equals the concatenated input bytes in order. Refs: `crates/execution/src/execution/artifacts/backend.rs:57`
 - **IMP-TG-017** — cache key + trust classifier untested. Fix: add a default-lane test for `key_matches` covering exact match, trailing-colon prefix match, and non-match. Refs: `crates/cache/src/key.rs:35`
@@ -443,11 +443,11 @@ from this list once the top-10s are burnt down.
 - **IMP-DO-014** — `results_service` step-update failure logs OAuth token prefix to stderr. Cross-ref **IMP-SE-015**. Refs: `crates/listener/src/helpers.rs:131`
 - **IMP-DO-015** — `cmd_remove` "another run is in flight" message drops holder's PID/started_at. Fix: at `main.rs:417-422`, parse the lock body and append `Holder PID: <pid>, started_at: <started_at>` to the error. Refs: `crates/toolu-runner/src/main.rs:417`, `README.md:270`
 - **IMP-DO-016** — `cmd_run` acquires `.lock` before checking empty `jit_config`. Fix: move the `if jit_config_b64.is_empty()` check (main.rs:345) above the `lockfile::acquire` call (main.rs:330). Refs: `crates/toolu-runner/src/main.rs:330`, `crates/toolu-runner/src/main.rs:345`
-- **IMP-DO-017** — `PluginRegistry::new` has no `///` doc line. Fix: add `/// Construct an empty registry. Plugins can be added with [`Self::register`].` Refs: `crates/execution/src/plugin/registry.rs:14`
+- **IMP-DO-017** **Obsolete (#97 — `PluginRegistry`/`resolve_handler` deleted).** — `PluginRegistry::new` has no `///` doc line. Fix: add `/// Construct an empty registry. Plugins can be added with [`Self::register`].` Refs: `crates/execution/src/plugin/registry.rs:14`
 - ~~**IMP-DO-018**~~ **Done (2026-07-12)** — `register --once` and `--work` flags are absent from README. Shipped: "CLI flags reference" subsection under Quick start listing `--work`, `--runner-group`, `--replace` (register), `--once` (run), `--force` (remove). Refs: `README.md`, `crates/toolu-runner/src/cli.rs`
 - **IMP-DO-019** — `scripts/test/plist_test.sh` misses `--no-config` validation. Fix: grep the `--config` value out of the plist and assert the file exists (after install). Refs: `scripts/test/plist_test.sh:1`, `README.md:152`
 - **IMP-DO-020** — `install.sh` download-failed diagnostic doesn't mention `TOOLU_RUNNER_REPO`. Fix: append one line: `If you're installing from a fork, set TOOLU_RUNNER_REPO=<owner/repo> before running.` Refs: `install.sh:223`
-- **IMP-DO-021** — Step handler dispatch description in docs is inconsistent (CLAUDE vs `handlers.rs`). Fix: align `handlers.rs:13` with CLAUDE.md:49 (plugin is a real entry point via the `PluginRegistry`). Refs: `CLAUDE.md:49`, `crates/execution/src/execution/handlers.rs:11`
+- **IMP-DO-021** **Obsolete (#97 — `PluginRegistry`/`resolve_handler` deleted).** — Step handler dispatch description in docs is inconsistent (CLAUDE vs `handlers.rs`). Fix: align `handlers.rs:13` with CLAUDE.md:49 (plugin is a real entry point via the `PluginRegistry`). Refs: `CLAUDE.md:49`, `crates/execution/src/execution/handlers.rs:11`
 - **IMP-DO-022** — `docs/architecture.md:154` session delete semantics claim is vague. Fix: replace with: `Status non-2xx on delete returns RunnerError::Protocol; transport errors propagate. The caller in listener/helpers.rs:105 logs and continues (broker may have expired the session already).` Refs: `docs/architecture.md:154`, `crates/wire/src/net/session.rs:44`
 
 ---

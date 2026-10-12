@@ -181,8 +181,12 @@ to that list requires proving the value is not a real credential.
 - **JIT config protocol version:** `v2` for github.com, `v1` for
   GHES. Selected automatically by host at `register` time; the
   `feature_detection` module handles the wire-shape difference.
-- **Handler dispatch** (in priority order): plugin → script → node
-  → docker → composite.
+- **Handler dispatch.** There is no plugin layer and no local
+  workflow orchestrator (removed in #97; GitHub orchestrates jobs). The
+  step loop dispatches in `execution::action_exec` / `process_dispatch`:
+  a `run:` step is a script; a `uses:` action goes by its manifest
+  `runs.using` — node → docker → composite. An unknown value fails the
+  step with an "unsupported runner type" error.
 - **Service mode (forwarder / offline / accelerated).** Config
   `[services] mode` (`ServicesMode` in `shared/src/config.rs`) selects
   how artifacts / cache / OIDC reach their backends. In `forwarder`
@@ -582,10 +586,7 @@ to that list requires proving the value is not a real credential.
   runtime) streams the HTTP body (`bytes_stream` → `StreamReader` →
   `SyncIoBridge`) into a sync `extract_tarball(impl Read, …)` inside
   `spawn_blocking` — no whole-tarball buffering, no CPU-bound work on
-  async workers. `workflow/` parses workflow YAML (`parser` with `jobs` /
-  `triggers` / `raw_types`), `matrix` (build matrix), `orchestrator`
-  (job graph, plan), `reusable` (reusable workflow resolution),
-  `trigger`, `job_graph`, `types`. `artifacts/` (upload / download via
+  async workers. `artifacts/` (upload / download via
   Azure append-blob; `backend` + `service` with `handlers` /
   `lifecycle`). `oidc/` (OIDC token server + claims). `context` (env,
   secrets, masking), `composite_*` (composite action scaffolding),
@@ -654,8 +655,6 @@ to that list requires proving the value is not a real credential.
   `actions/alpine_nodejs`, pins 20.20.2 / 24.21.0) via `download` (staging,
   `validate`'s `node --version` start check for host-runnable targets, atomic
   rename).
-- `plugin/` — `RunnerPlugin` trait + `PluginRegistry`. New
-  addition not in upstream `actions/runner`.
 
 ### `listener/` — GitHub JIT lifecycle (deps: execution, wire, observability, shared, protocol)
 

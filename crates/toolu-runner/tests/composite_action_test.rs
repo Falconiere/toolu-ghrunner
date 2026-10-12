@@ -8,16 +8,12 @@
 //! - `evaluate_outputs` resolves `${{ steps.X.outputs.Y }}` references
 //!   against the child step's outputs.
 //! - `parse_action_manifest` rejects unsupported `runs.using` values.
-//! - handler dispatch (`resolve_handler`) classifies composite steps.
 
 use std::collections::HashMap;
 
 use execution::execution::actions::manifest::{self, RunsUsing};
 use execution::execution::depth_tracker::DepthTracker;
 use execution::execution::handlers::composite::prepare_composite;
-use execution::execution::handlers::resolve::{HandlerKind, resolve_handler};
-use execution::plugin::PluginRegistry;
-use shared::ActionStep;
 
 const COMPOSITE_ACTION_YML: &str = r#"
 name: 'My Composite'
@@ -282,48 +278,4 @@ fn evaluate_outputs_skips_unresolvable_references() {
 
   let outputs = execution.evaluate_outputs(&HashMap::new());
   assert!(!outputs.contains_key("greeting"), "got: {outputs:?}");
-}
-
-#[test]
-fn resolve_handler_routes_composite_using_to_composite() {
-  let step = ActionStep::with_ref_type("my-composite", "composite");
-  let plugins = PluginRegistry::new();
-  let handler = resolve_handler(&step, &plugins);
-  assert_eq!(handler, HandlerKind::Composite);
-}
-
-#[test]
-fn resolve_handler_runs_to_script_for_run_step() {
-  let step = ActionStep::script("echo-step", "echo hi", "");
-  let plugins = PluginRegistry::new();
-  let handler = resolve_handler(&step, &plugins);
-  assert_eq!(handler, HandlerKind::Script);
-}
-
-#[test]
-fn resolve_handler_routes_node_runs_to_node_handler() {
-  let step = ActionStep::with_ref_type("checkout", "node20");
-  let plugins = PluginRegistry::new();
-  let handler = resolve_handler(&step, &plugins);
-  assert_eq!(handler, HandlerKind::Node);
-}
-
-#[test]
-fn resolve_handler_routes_docker_to_docker_handler() {
-  let step = ActionStep::with_ref_type("alpine", "docker");
-  let plugins = PluginRegistry::new();
-  let handler = resolve_handler(&step, &plugins);
-  assert_eq!(handler, HandlerKind::Docker);
-}
-
-#[test]
-fn resolve_handler_routes_unknown_using_to_unknown_variant() {
-  let step = ActionStep::with_ref_type("weird", "telepathy");
-  let plugins = PluginRegistry::new();
-  let handler = resolve_handler(&step, &plugins);
-  let is_unknown = matches!(handler, HandlerKind::Unknown(_));
-  assert!(is_unknown, "expected Unknown, got {handler:?}");
-  if let HandlerKind::Unknown(name) = handler {
-    assert_eq!(name, "telepathy");
-  }
 }

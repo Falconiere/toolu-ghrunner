@@ -263,7 +263,7 @@ left orphaned.
 
 | | |
 |---|---|
-| **Steps** | `run:` shell, `uses:` Node.js actions (runtime auto-downloaded + cached, musl/Alpine aware, node24 migration, offline preseed), composite actions, plugins, Linux Docker actions (`runs.using: docker` and `uses: docker://`) |
+| **Steps** | `run:` shell, `uses:` Node.js actions (runtime auto-downloaded + cached, musl/Alpine aware, node24 migration, offline preseed), composite actions, Linux Docker actions (`runs.using: docker` and `uses: docker://`) |
 | **Workflows** | matrices, `needs:` job graphs and job outputs, reusable workflows, `if:` conditions, `timeout-minutes`, `working-directory`, `defaults.run` |
 | **Expressions** | `${{ }}` with signed/radix numbers, reference equality, lazy `case()` and `format()`, insertion-ordered pretty `toJSON`, G15 number rendering, and `.*` / `[*]` filters; unknown named values fail visibly |
 | **Services** | artifacts, cache, and OIDC — forwarded to real GitHub by default, hosted locally in `offline` mode, or a local content-addressed cache accelerator in `accelerated` mode |
@@ -635,7 +635,6 @@ clock, a socket, or tokio.
 | Secret masking | C# | `shared::SecretMasker` + tracing layer |
 | Docker | C# | `execution::docker::action_container` *(bollard; Linux actions with image build/pull, mounts and cleanup)* |
 | Node.js auto-download | C# | `execution::node::runtime` |
-| Plugin system | — | **`execution::plugin::RunnerPlugin`** |
 
 **Deliberately not ported:** OpenTelemetry, and any coupling to the
 `yamless` orchestrator this code was extracted from.
@@ -938,7 +937,7 @@ TOOLU_RUNNER_LIVE_TOKEN=<ghs_...> \
 
 ### Workspace
 
-Ten layered crates under `crates/`, acyclic dependency graph:
+Twelve crates under `crates/` (ten libraries plus the `toolu-runner` and `toolu-daemon` bins), acyclic dependency graph:
 
 - **`protocol`** — JIT config, RSA/JWT, sessions, message decryption.
   Sync, I/O-free, **network-free** (no `reqwest`, no `tokio` — enforced
@@ -955,7 +954,7 @@ Ten layered crates under `crates/`, acyclic dependency graph:
   domain types (`reporting/`). → `shared`, `protocol`.
 - **`observability`** — per-job JSONL journal (`_diag/jobs/`). →
   `shared`.
-- **`execution`** — the job execution engine + Docker/Node/plugin + the
+- **`execution`** — the job execution engine + Docker/Node + the
   `Runner`. → `shared`, `expressions`, `cache`.
 - **`listener`** — the GitHub JIT lifecycle. → `execution`, `wire`,
   `observability`, `shared`, `protocol`.
