@@ -169,6 +169,7 @@ fn node_dir_is_unset_when_empty_and_absolute_when_relative() {
   );
 }
 
+#[cfg(target_os = "linux")]
 const NODE_DIR_CHILD_TEST: &str = "config::tests::node_dir_unresolvable_cwd_child_probe";
 /// Directory the child enters and deletes before resolving `TOOLU_RUNNER_NODE_DIR`.
 const DOOMED_CWD_KEY: &str = "TOOLU_TEST_DOOMED_CWD";
