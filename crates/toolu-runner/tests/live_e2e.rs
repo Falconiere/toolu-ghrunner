@@ -320,9 +320,12 @@ async fn journal_records_live_job_masked() {
 /// Locate the run's `_diag/jobs` dir via the persisted config and return
 /// the single journal's raw body.
 fn read_single_live_journal(harness: &LiveHarness) -> Result<String, Box<dyn std::error::Error>> {
-  let cfg = load_reg_config(&harness.config_dir.path().join("config.toml"))?;
-  let data_dir = config::config::resolve_data_dir(&cfg.runtime.data_dir)?;
-  let journals: Vec<_> = std::fs::read_dir(data_dir.join("_diag").join("jobs"))?
+  let cfg = load_reg_config(&harness.config_dir.path().join("config.toml"))
+    .map_err(|e| format!("load config: {e}"))?;
+  let data_dir = config::config::resolve_data_dir(&cfg.runtime.data_dir)
+    .map_err(|e| format!("resolve data dir: {e}"))?;
+  let journals: Vec<_> = std::fs::read_dir(data_dir.join("_diag").join("jobs"))
+    .map_err(|e| format!("jobs dir exists after a live run: {e}"))?
     .filter_map(Result::ok)
     .map(|e| e.path())
     .collect();
@@ -332,7 +335,7 @@ fn read_single_live_journal(harness: &LiveHarness) -> Result<String, Box<dyn std
     "single-job run writes exactly one journal: {journals:?}"
   );
   let journal = journals.first().ok_or("journal path")?;
-  Ok(std::fs::read_to_string(journal)?)
+  Ok(std::fs::read_to_string(journal).map_err(|e| format!("read journal: {e}"))?)
 }
 
 /// AC-1 lifecycle assertions over a parsed live journal.

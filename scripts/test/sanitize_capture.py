@@ -12,7 +12,9 @@ derived from the namespace and the JSON path where it was first seen (never
 from the value itself, so the fixture holds no hash of a secret) — except a
 value that is an endpoint `authorization.parameters` entry, which becomes the
 literal `redacted` (the #99 fixture convention; a placeholder under an
-`AccessToken` key reads as a live API key to secret scanners). Every
+`AccessToken` key reads as a live API key to secret scanners), and any opaque
+path segment of 32+ alphanumerics in an endpoint URL (a service collection id),
+which also becomes `redacted`. Every
 occurrence of that value, including inside longer strings such as scripts, is
 replaced by the same placeholder, so equality relations (a mask hint equal to a
 variable) survive. Keys, key order, value types, step UUIDs, `contextName`s
@@ -22,6 +24,7 @@ if a credential-shaped string or an original secret value remains.
 
 import argparse
 import json
+import re
 import sys
 import uuid
 from pathlib import Path
@@ -99,17 +102,31 @@ def replace_all(node, mapping):
     return node
 
 
+OPAQUE_SEGMENT = re.compile(r"/([A-Za-z0-9]{32,})(?=/|$)")
+
+
 def endpoint_secrets(message):
+    """Values replaced by `redacted`: endpoint authorization parameters and the
+    opaque collection-id segments of endpoint URLs."""
     endpoints = (message.get("resources") or {}).get("endpoints") or []
-    return {value for endpoint in endpoints
-            for value in (((endpoint or {}).get("authorization") or {}).get("parameters") or {}).values()
-            if isinstance(value, str) and value}
+    found = set()
+    for endpoint in endpoints:
+        endpoint = endpoint or {}
+        params = (endpoint.get("authorization") or {}).get("parameters") or {}
+        found.update(v for v in params.values() if isinstance(v, str) and v)
+        urls = [endpoint.get("url"), *(endpoint.get("data") or {}).values()]
+        for url in urls:
+            if isinstance(url, str) and url.startswith("https://"):
+                found.update(OPAQUE_SEGMENT.findall(url))
+    return found
 
 
 def sanitize(message, namespace):
     """Return (sanitized_message, number_of_distinct_secrets)."""
-    secrets = collect_secrets(message)
     redacted = endpoint_secrets(message)
+    secrets = collect_secrets(message)
+    for value in sorted(redacted - set(secrets)):
+        secrets[value] = "$.resources.endpoints"
     mapping = {value: REDACTED if value in redacted else placeholder(namespace, path)
                for value, path in secrets.items()}
     clean = replace_all(message, mapping)

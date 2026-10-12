@@ -209,7 +209,9 @@ difference fails `--verify`, so a fix forces the record to be updated.
      observed only on the official lane (row `103/R-artifacts` stays
      unverified).
    - **Test gap.** `gh_compat_forwarder.rs::forward_env_cache_v2_only_when_true`
-     pins the wrong variable name.
+     sets `cache_service_v2` directly, so the variable-name lookup in
+     `service_endpoints` is never exercised. It also expects `true` where
+     upstream sets `True`, and it never checks `ACTIONS_CACHE_MODE`.
 2. **`docker-pull-step-reporting`** (rows `103/S3`, `75/75-S1`). For a
    `docker://` step the official runner reports an extra job-setup step,
    `Pull alpine@sha256:…`; toolu does not. All shared steps have identical

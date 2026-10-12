@@ -47,6 +47,11 @@ fn plan_id_cannot_escape_the_capture_directory() -> TestResult {
   let body: serde_json::Value = serde_json::from_str(ACQUIRED)?;
   let dir = tempfile::tempdir()?;
   let path = write_acquired(dir.path(), "../../escape", &body).ok_or("capture not written")?;
+  let name = path.file_name().and_then(|n| n.to_str()).ok_or("name")?;
+  assert!(
+    !name.contains('/'),
+    "sanitized name must not contain '/': {name}"
+  );
   assert_eq!(
     path.parent(),
     Some(dir.path().join("_diag").join("captures").as_path())

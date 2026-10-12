@@ -694,10 +694,10 @@
         "data": {
           "ServerId": "",
           "ServerName": "",
-          "CacheServerUrl": "https://artifactcache.actions.githubusercontent.com/twrs8lbit9ZyitUezKDbXAEbXCYgAu956eDKeMRtkIO6zAuW11/",
+          "CacheServerUrl": "https://artifactcache.actions.githubusercontent.com/redacted/",
           "FeedStreamUrl": "wss://results-receiver.actions.githubusercontent.com/_ws/ingest.sock",
           "ResultsServiceUrl": "https://results-receiver.actions.githubusercontent.com/",
-          "PipelinesServiceUrl": "https://pipelinesghubeus9.actions.githubusercontent.com/twrs8lbit9ZyitUezKDbXAEbXCYgAu956eDKeMRtkIO6zAuW11/",
+          "PipelinesServiceUrl": "https://pipelinesghubeus9.actions.githubusercontent.com/redacted/",
           "GenerateIdTokenUrl": "https://run-actions-1-azure-eastus.actions.githubusercontent.com/231//idtoken/c37350b5-1def-85f8-83d1-ee55131e05c8/5d6bb38f-bf1d-5a23-8247-a8c275c68fe3?api-version=2.0",
           "ConnectivityChecks": "[\"https://broker.actions.githubusercontent.com/health\",\"https://token.actions.githubusercontent.com/ready\",\"https://run.actions.githubusercontent.com/health\"]",
           "ConnectivityAndDNSChecks": ""

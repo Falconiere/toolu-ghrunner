@@ -88,6 +88,10 @@ class SanitizeCaptureTest(unittest.TestCase):
                          raw["resources"]["endpoints"][0]["url"])
         self.assertEqual(clean["resources"]["endpoints"][0]["authorization"]["parameters"],
                          {"AccessToken": "redacted"})
+        data = clean["resources"]["endpoints"][0].get("data") or {}
+        for url in data.values():
+            if isinstance(url, str) and url.startswith("https://"):
+                self.assertIsNone(sanitize_capture.OPAQUE_SEGMENT.search(url), url)
 
     def test_placeholders_do_not_depend_on_the_secret_value(self):
         first, _ = sanitize_capture.sanitize(raw_capture(), "unit")

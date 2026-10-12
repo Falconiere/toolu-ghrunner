@@ -41,6 +41,7 @@ fn try_write(data_dir: &Path, plan_id: &str, body: &serde_json::Value) -> std::i
   let mut file = open_private(&path)?;
   file.write_all(&bytes)?;
   file.sync_all()?;
+  sync_parent(&path)?;
   Ok(path)
 }
 
@@ -58,6 +59,21 @@ fn create_private_dir(dir: &Path) -> std::io::Result<()> {
 #[cfg(not(unix))]
 fn create_private_dir(dir: &Path) -> std::io::Result<()> {
   std::fs::create_dir_all(dir)
+}
+
+/// Sync the directory entry too, so a crash cannot drop the file name of a
+/// capture whose data was already synced.
+#[cfg(unix)]
+fn sync_parent(path: &Path) -> std::io::Result<()> {
+  match path.parent() {
+    Some(parent) => std::fs::File::open(parent)?.sync_all(),
+    None => Ok(()),
+  }
+}
+
+#[cfg(not(unix))]
+fn sync_parent(_path: &Path) -> std::io::Result<()> {
+  Ok(())
 }
 
 #[cfg(unix)]

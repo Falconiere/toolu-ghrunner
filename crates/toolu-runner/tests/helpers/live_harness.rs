@@ -165,8 +165,9 @@ impl LiveHarness {
     "https://api.github.com"
   }
 
-  /// Build a configured `reqwest::Client`. One client per harness so
-  /// the connection pool is reused across the API calls a test makes.
+  /// Build a configured `reqwest::Client`. A fresh client per API call (as
+  /// before this was an associated fn); live tests make few calls, so pool
+  /// reuse is not worth threading a shared client through the helpers.
   fn http() -> Result<reqwest::Client, Box<dyn std::error::Error>> {
     Ok(
       reqwest::Client::builder()
