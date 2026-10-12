@@ -42,8 +42,9 @@ pub(super) async fn run(
   ctx.set_process_tracking(ProcessTracking::for_job(&msg.variables));
   ctx.node_migration = crate::node::migration::NodeMigrationState::for_job(&msg.variables);
   apply_job_environment(&msg.environment_variables, &mut ctx)?;
-  let container_spec = evaluate_container(&msg, config, &ctx)?;
-  let service_specs = evaluate_services(msg.job_service_containers.as_ref(), &ctx)?;
+  let mut container_spec = evaluate_container(&msg, config, &ctx)?;
+  let mut service_specs = evaluate_services(msg.job_service_containers.as_ref(), &ctx)?;
+  super::job_http::add_container_network_env(config, container_spec.as_mut(), &mut service_specs);
   let (prepared, workspace_gc) = prepare_job_workspace(config, claimed).await?;
   let workspace = prepared.workspace.clone();
   let (http, local) = start_job_services(config, &msg, &mut ctx).await?;

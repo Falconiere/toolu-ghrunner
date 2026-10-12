@@ -18,6 +18,7 @@ path = "src/main.rs"
 # Internal
 shared = { path = "../shared" }
 protocol = { path = "../protocol" }
+network = { path = "../network" }
 config = { path = "../config" }
 wire = { path = "../wire" }
 observability = { path = "../observability" }

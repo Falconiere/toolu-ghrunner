@@ -23,6 +23,9 @@ pub enum OidcMode {
 pub struct OidcConfig {
   /// Whether tokens are proxied to GitHub or minted locally.
   pub mode: OidcMode,
+  /// Proxy / extra CA for the upstream GitHub request (#94); env mode by
+  /// default.
+  pub network: shared::NetworkConfig,
 }
 
 impl OidcConfig {
@@ -30,6 +33,7 @@ impl OidcConfig {
   pub fn github(upstream_url: String) -> Self {
     Self {
       mode: OidcMode::GitHub { upstream_url },
+      network: shared::NetworkConfig::default(),
     }
   }
 
@@ -40,7 +44,15 @@ impl OidcConfig {
         signing_key,
         issuer_url,
       },
+      network: shared::NetworkConfig::default(),
     }
+  }
+
+  /// Route the upstream request through the job's `[network]` settings.
+  #[must_use]
+  pub fn with_network(mut self, network: shared::NetworkConfig) -> Self {
+    self.network = network;
+    self
   }
 }
 

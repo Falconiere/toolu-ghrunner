@@ -35,6 +35,8 @@ pub(crate) struct Report {
   pub(crate) tools: Vec<ToolReport>,
   /// Proxy variables.
   pub(crate) proxy: ProxyReport,
+  /// The registration's `[network]` settings (`network::describe`), when set.
+  pub(crate) network: Option<String>,
   /// TLS trust.
   pub(crate) trust: TrustReport,
 }
@@ -111,6 +113,18 @@ fn section(out: &mut Vec<String>, title: &str, lines: impl IntoIterator<Item = S
   out.extend(lines);
 }
 
+/// The `[network]` line, plus a note when its proxy overrides the variables.
+fn network_lines(network: Option<&str>) -> Vec<String> {
+  let Some(line) = network else {
+    return Vec::new();
+  };
+  let mut lines = vec![format!("{:<12} {line}", "[network]")];
+  if line.contains("(config)") {
+    lines.push("[network] proxy is set: the proxy variables below are ignored".to_owned());
+  }
+  lines
+}
+
 /// The full report text; every line passes through `masker`.
 pub(crate) fn render(report: &Report, masker: &SecretMasker) -> String {
   let mut out = vec![format!("toolu-runner check — target {}", report.target)];
@@ -136,10 +150,9 @@ pub(crate) fn render(report: &Report, masker: &SecretMasker) -> String {
   section(
     &mut out,
     "proxy",
-    report
-      .proxy
-      .lines()
+    network_lines(report.network.as_deref())
       .into_iter()
+      .chain(report.proxy.lines())
       .map(|line| format!("  {line}")),
   );
   section(

@@ -240,6 +240,14 @@ async fn node_stage_env(
     s.workspace,
     s.config,
   )?;
+  // Host Node inherits the process env under this delta env (`node_exec`),
+  // so the network export (#94) goes into the delta below any workflow value
+  // and before the file-command paths, which stay authoritative.
+  if s.ctx.job_container().is_none() {
+    for (key, value) in s.ctx.network_env() {
+      env.entry(key.clone()).or_insert_with(|| value.clone());
+    }
+  }
   let tmp_dir = s.config.data_dir.join("tmp");
   create_file_command_dir(&tmp_dir).await?;
   let (file_cmds, file_cmd_env) = FileCommandManager::create(&tmp_dir).await?;

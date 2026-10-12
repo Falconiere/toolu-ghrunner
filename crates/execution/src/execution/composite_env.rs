@@ -85,7 +85,7 @@ pub(super) fn build_step_env(
   // paths that do not exist inside the container, so only host steps inherit
   // the runner process environment.
   if ctx.job_container().is_none() {
-    inherit_safe_process_env(&mut env);
+    inherit_safe_process_env(&mut env, ctx);
   }
   env.extend(extra_env.clone());
   add_composite_inputs(&mut env, params.step_inputs);
@@ -98,8 +98,8 @@ pub(super) fn build_step_env(
   Ok(env)
 }
 
-fn inherit_safe_process_env(env: &mut HashMap<String, String>) {
-  for (key, value) in super::context::safe_process_env_vars() {
+fn inherit_safe_process_env(env: &mut HashMap<String, String>, ctx: &ExecutionContext) {
+  for (key, value) in ctx.inherited_process_env() {
     env.entry(key).or_insert(value);
   }
 }

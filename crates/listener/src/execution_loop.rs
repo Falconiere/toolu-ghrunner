@@ -140,7 +140,7 @@ async fn connect_and_report_setup(
   // Box both legs to keep the enclosing future below clippy's size limit.
   let ((setup_id, mut setup_lines), (live_log_tx, live_log_handle)) = tokio::join!(
     Box::pin(report_setup_step(rs_token, plan_id, job_msg, &ctx.client)),
-    Box::pin(connect_live_log(job_msg, rs_token)),
+    Box::pin(connect_live_log(&ctx.config.network, job_msg, rs_token)),
   );
   setup_lines.push(format!(
     "Runner name: '{}'",
@@ -152,6 +152,7 @@ async fn connect_and_report_setup(
 /// Connect the live-log WebSocket, returning `(None, None)` on failure.
 /// The wrapper handle reaches session cleanup through [`JobExecution`].
 async fn connect_live_log(
+  network: &shared::NetworkConfig,
   job_msg: &AgentJobRequestMessage,
   fallback_token: &str,
 ) -> (
@@ -163,7 +164,22 @@ async fn connect_live_log(
   };
   let token = super::helpers::system_vss_access_token(job_msg);
   let ws_token = token.as_deref().unwrap_or(fallback_token);
-  let Some((tx, inner_handle)) = LiveLogStreamer::connect(&url, ws_token).await else {
+  // HTTP/1.1 only: the WebSocket upgrade cannot ride an h2 connection. Same
+  // `[network]` proxy / CA as every other client (#94).
+  let client = match network::client_builder(network).and_then(|builder| {
+    builder
+      .http1_only()
+      .connect_timeout(std::time::Duration::from_secs(30))
+      .build()
+      .map_err(|e| shared::RunnerError::Network(format!("live log HTTP client: {e}")))
+  }) {
+    Ok(client) => client,
+    Err(e) => {
+      tracing::warn!(error = %e, "live log disabled: cannot build its HTTP client");
+      return (None, None);
+    },
+  };
+  let Some((tx, inner_handle)) = LiveLogStreamer::connect(&client, &url, ws_token).await else {
     return (None, None);
   };
   let wrapper_handle = tokio::spawn(async move {

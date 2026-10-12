@@ -51,6 +51,7 @@ fn report(endpoints: Vec<EndpointResult>) -> Report {
       no: None,
       cgi: false,
     },
+    network: None,
     trust: TrustReport {
       cert_file: None,
       cert_dir: None,

@@ -121,7 +121,13 @@ async fn run_listener_once(
   cancel: CancellationToken,
   deadline_hit: &Arc<AtomicBool>,
 ) -> i32 {
-  let client = match build_boot_client() {
+  // `boot` has no config file: env-mode networking, with the proxy
+  // credentials masked and the settings logged like `run` does.
+  let client = match crate::network_setup::lifecycle_client(
+    &shared::NetworkConfig::default(),
+    &masker,
+    Duration::from_secs(60),
+  ) {
     Ok(c) => c,
     Err(e) => {
       eprintln!("toolu-runner: boot: {e}");
@@ -266,18 +272,9 @@ fn build_boot_runner_config() -> RunnerConfig {
     },
     shadow_enabled: false,
     node_dir: crate::config::node_dir(),
+    // Env mode: no config file to carry a `[network]` section.
+    network: shared::NetworkConfig::default(),
   }
-}
-
-/// One HTTP client for the single listener lifecycle. Mirrors
-/// `run_cmd::build_loop_client`'s 60 s timeout (there is no re-mint loop to
-/// share it across, but the listener's own request timeout expectations are
-/// the same).
-fn build_boot_client() -> Result<reqwest::Client, String> {
-  reqwest::Client::builder()
-    .timeout(Duration::from_secs(60))
-    .build()
-    .map_err(|e| format!("HTTP client: {e}"))
 }
 
 /// Spawn the deadline watchdog: sleep until `deadline_ms` (standing down

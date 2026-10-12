@@ -34,8 +34,7 @@ async fn prefetch_refs(
       let cache_key = action.action_ref.cache_key();
       let cache_dir = action_cache_dir(data_dir, &cache_key);
       let tarball_url = action.action_ref.tarball_url(api_base);
-      if let Err(error) = fetcher
-        .ensure(client, &cache_key, &tarball_url, &cache_dir)
+      if let Err(error) = fetcher.ensure(&cache_key, &tarball_url, &cache_dir)
         .await
       {
         tracing::warn!(action = cache_key.as_str(), error = %error, "action prefetch failed");
@@ -291,7 +290,7 @@ fn spawn_ensure(
     if let Some(entered) = entered {
       let _ = entered.send(());
     }
-    fetcher.ensure(&client, "acme/repo/v1", &url, &dest).await
+    fetcher.ensure("acme/repo/v1", &url, &dest).await
   })
 }
 
@@ -337,10 +336,10 @@ async fn ensure_retries_a_prefetch_after_the_first_fetch_fails() {
   let dest = tmp_dest("retry");
   let url = format!("http://{addr}/tarball.tar.gz");
 
-  let first = fetcher.ensure(&client, "acme/repo/v1", &url, &dest).await;
+  let first = fetcher.ensure("acme/repo/v1", &url, &dest).await;
   assert!(first.is_err(), "the first fetch (server 500) must fail");
 
-  let second = fetcher.ensure(&client, "acme/repo/v1", &url, &dest).await;
+  let second = fetcher.ensure("acme/repo/v1", &url, &dest).await;
   second.expect("the second ensure call must retry fresh and succeed");
   assert!(
     is_action_cached(&dest),

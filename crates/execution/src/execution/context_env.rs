@@ -13,6 +13,29 @@ impl ExecutionContext {
     )
   }
 
+  /// Set the host-step network export (proxy variables and
+  /// `NODE_EXTRA_CA_CERTS`) from `network::step_env(..).host` (#94).
+  pub(crate) fn set_network_env(&mut self, env: Vec<(String, String)>) {
+    self.network_env = env;
+  }
+
+  /// The env a HOST child inherits: the runner process env without its
+  /// private `TOOLU_RUNNER_*` namespace ([`super::safe_process_env_vars`]),
+  /// overlaid by the job's network export. Callers fold it with `or_insert`
+  /// after workflow env, so the export beats the runner's own env but never a
+  /// workflow, job, `GITHUB_ENV` or step value.
+  pub(crate) fn inherited_process_env(&self) -> Vec<(String, String)> {
+    let mut inherited: HashMap<String, String> = super::safe_process_env_vars().collect();
+    inherited.extend(self.network_env.iter().cloned());
+    inherited.into_iter().collect()
+  }
+
+  /// The network export alone, for Node stages whose delta env sits on top
+  /// of the inherited process env (`node_exec`).
+  pub(crate) fn network_env(&self) -> &[(String, String)] {
+    &self.network_env
+  }
+
   /// Merge global env + step env + PATH additions into a full env map.
   pub fn build_step_env(&self, step_env: &HashMap<String, String>) -> HashMap<String, String> {
     let mut base = self.visible_env();

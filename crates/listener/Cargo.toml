@@ -12,6 +12,7 @@ execution = { path = "../execution" }
 wire = { path = "../wire" }
 observability = { path = "../observability" }
 shared = { path = "../shared" }
+network = { path = "../network" }
 protocol = { path = "../protocol" }
 
 # Async runtime

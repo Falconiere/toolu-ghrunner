@@ -302,6 +302,11 @@ fn build_env(
   image_path: Option<&str>,
 ) -> Vec<String> {
   let mut env = params.env.clone();
+  // Proxy variables for the action container unless the step env sets them
+  // (upstream `TryAdd`); never `NODE_EXTRA_CA_CERTS`, a host path (#94).
+  for (key, value) in network::step_env(&params.config.network).container {
+    env.entry(key).or_insert(value);
+  }
   crate::execution::step_process_env::apply(&mut env, None, None);
   let base_path = env
     .remove("PATH")

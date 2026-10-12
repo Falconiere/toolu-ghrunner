@@ -77,6 +77,9 @@ pub struct ExecutionContext {
   pub(crate) next_step_number: Option<u32>,
   /// node20 → node24 migration flags and the actions each end-of-job warning lists.
   pub(crate) node_migration: crate::node::migration::NodeMigrationState,
+  /// Host-step network export (`network::step_env(..).host`, #94): layered
+  /// over the inherited process env, under every workflow-level value.
+  network_env: Vec<(String, String)>,
 }
 
 impl ExecutionContext {
@@ -133,6 +136,7 @@ impl ExecutionContext {
       step_displays: HashMap::new(),
       next_step_number: None,
       node_migration: crate::node::migration::NodeMigrationState::default(),
+      network_env: Vec::new(),
     }
   }
 

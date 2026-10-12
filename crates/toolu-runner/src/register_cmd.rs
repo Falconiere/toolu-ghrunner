@@ -271,7 +271,8 @@ const MINT_TIMEOUT: Duration = Duration::from_secs(30);
 /// Returns `RunnerError` if the TLS backend fails to initialize (the only
 /// realistic `reqwest::ClientBuilder::build` failure).
 fn build_register_client() -> Result<reqwest::Client, RunnerError> {
-  reqwest::Client::builder()
+  // The first `register` has no `[network]` yet: env mode (#94).
+  network::client_builder(&shared::NetworkConfig::default())?
     .build()
     .map_err(|e| RunnerError::Network(format!("HTTP client: {e}")))
 }

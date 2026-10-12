@@ -3,6 +3,12 @@
 //! Connects to the `FeedStreamUrl` WebSocket endpoint and sends log lines
 //! as JSON `TimelineRecordFeedLinesWrapper` messages. Falls back silently
 //! if connection fails (gzip blob upload is the durable path).
+//!
+//! The handshake is an HTTP/1.1 `Upgrade: websocket` request on a caller's
+//! `reqwest` client (built by `network::client_builder` with `http1_only`),
+//! so the live log uses exactly the proxy, bypass list and trust anchors of
+//! every other runner client (#94); the upgraded stream is then framed by
+//! tungstenite.
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -10,7 +16,9 @@ use std::time::Duration;
 use futures_util::SinkExt;
 use serde::Serialize;
 use tokio::sync::mpsc;
-use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::handshake::client::generate_key;
+use tokio_tungstenite::tungstenite::handshake::derive_accept_key;
+use tokio_tungstenite::tungstenite::protocol::Role;
 
 /// Re-export the WebSocket message type so integration tests can build a sink
 /// for [`run_loop`] without depending on `tokio-tungstenite` directly.
@@ -82,25 +90,27 @@ impl SendState {
 pub struct LiveLogStreamer;
 
 impl LiveLogStreamer {
-  /// Connect to `FeedStreamUrl` and return `(sender, join_handle)`.
-  /// Returns None if connection fails — caller proceeds without live logs.
+  /// Connect to `FeedStreamUrl` through `client` and return
+  /// `(sender, join_handle)`. Returns None if connection fails — caller
+  /// proceeds without live logs. `client` must speak HTTP/1.1
+  /// (`http1_only`): an h2 connection cannot carry the upgrade.
   pub async fn connect(
+    client: &reqwest::Client,
     feed_stream_url: &str,
     access_token: &str,
   ) -> Option<(mpsc::Sender<LiveLogLine>, tokio::task::JoinHandle<()>)> {
-    let ws = open_websocket(feed_stream_url, access_token).await?;
+    let ws = open_websocket(client, feed_stream_url, access_token).await?;
     let (tx, rx) = mpsc::channel(4096);
     let handle = tokio::spawn(run_loop(ws, rx));
     Some((tx, handle))
   }
 }
 
-type WsStream =
-  tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+type WsStream = tokio_tungstenite::WebSocketStream<reqwest::Upgraded>;
 
 enum WsConnectError {
   Timeout,
-  Failed(tokio_tungstenite::tungstenite::Error),
+  Failed(String),
 }
 
 /// Log a WebSocket connection error (kept separate to reduce complexity of callers).
@@ -117,26 +127,86 @@ fn log_ws_error(e: &WsConnectError) {
 
 /// Attempt to connect with a 30-second timeout, returning a typed error.
 async fn try_connect(
-  request: tokio_tungstenite::tungstenite::handshake::client::Request,
+  client: &reqwest::Client,
+  feed_stream_url: &str,
+  access_token: &str,
 ) -> Result<WsStream, WsConnectError> {
-  let timed = tokio::time::timeout(
+  tokio::time::timeout(
     Duration::from_secs(30),
-    tokio_tungstenite::connect_async(request),
+    handshake(client, feed_stream_url, access_token),
   )
   .await
-  .map_err(|_elapsed| WsConnectError::Timeout)?;
-  let (stream, _) = timed.map_err(WsConnectError::Failed)?;
-  Ok(stream)
+  .map_err(|_elapsed| WsConnectError::Timeout)?
 }
 
-/// Build authenticated request and open WebSocket, returning the stream.
-async fn open_websocket(feed_stream_url: &str, access_token: &str) -> Option<WsStream> {
-  let mut request = feed_stream_url.into_client_request().ok()?;
-  request.headers_mut().insert(
-    "Authorization",
-    format!("Bearer {access_token}").parse().ok()?,
-  );
-  match try_connect(request).await {
+/// The `http(s)://` URL a `ws(s)://` feed URL is requested at.
+fn upgrade_url(feed_stream_url: &str) -> Result<reqwest::Url, WsConnectError> {
+  let mut url = reqwest::Url::parse(feed_stream_url)
+    .map_err(|e| WsConnectError::Failed(format!("invalid feed URL: {e}")))?;
+  let scheme = match url.scheme() {
+    "wss" | "https" => "https",
+    "ws" | "http" => "http",
+    other => {
+      return Err(WsConnectError::Failed(format!(
+        "unsupported feed URL scheme {other}"
+      )));
+    },
+  };
+  url
+    .set_scheme(scheme)
+    .map_err(|()| WsConnectError::Failed("cannot rewrite the feed URL scheme".to_owned()))?;
+  Ok(url)
+}
+
+/// RFC 6455 client handshake over `client`: `101 Switching Protocols` with
+/// the matching `Sec-WebSocket-Accept`, then wrap the upgraded connection.
+async fn handshake(
+  client: &reqwest::Client,
+  feed_stream_url: &str,
+  access_token: &str,
+) -> Result<WsStream, WsConnectError> {
+  let key = generate_key();
+  let response = client
+    .get(upgrade_url(feed_stream_url)?)
+    .version(reqwest::Version::HTTP_11)
+    .header(reqwest::header::CONNECTION, "Upgrade")
+    .header(reqwest::header::UPGRADE, "websocket")
+    .header(reqwest::header::SEC_WEBSOCKET_VERSION, "13")
+    .header(reqwest::header::SEC_WEBSOCKET_KEY, &key)
+    .bearer_auth(access_token)
+    .send()
+    .await
+    .map_err(|e| WsConnectError::Failed(format!("upgrade request failed: {e}")))?;
+  let status = response.status();
+  if status != reqwest::StatusCode::SWITCHING_PROTOCOLS {
+    return Err(WsConnectError::Failed(format!(
+      "server answered {status} instead of 101 Switching Protocols"
+    )));
+  }
+  let expected = derive_accept_key(key.as_bytes());
+  let accepted = response
+    .headers()
+    .get(reqwest::header::SEC_WEBSOCKET_ACCEPT)
+    .and_then(|value| value.to_str().ok());
+  if accepted != Some(expected.as_str()) {
+    return Err(WsConnectError::Failed(
+      "Sec-WebSocket-Accept does not match the request key".to_owned(),
+    ));
+  }
+  let upgraded = response
+    .upgrade()
+    .await
+    .map_err(|e| WsConnectError::Failed(format!("upgrade failed: {e}")))?;
+  Ok(tokio_tungstenite::WebSocketStream::from_raw_socket(upgraded, Role::Client, None).await)
+}
+
+/// Open the WebSocket through `client`, returning the stream.
+async fn open_websocket(
+  client: &reqwest::Client,
+  feed_stream_url: &str,
+  access_token: &str,
+) -> Option<WsStream> {
+  match try_connect(client, feed_stream_url, access_token).await {
     Ok(stream) => {
       tracing::info!("live log WebSocket connected");
       Some(stream)

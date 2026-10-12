@@ -36,6 +36,8 @@ pub struct ActionFetcher {
   context: Option<Result<ActionDownloadContext, String>>,
   masker: Option<Arc<Mutex<SecretMasker>>>,
   cancel: Option<CancellationToken>,
+  /// The job's `[network]` settings for archive downloads (env mode default).
+  network: shared::NetworkConfig,
 }
 
 impl ActionFetcher {
@@ -64,7 +66,15 @@ impl ActionFetcher {
       ),
       masker: Some(masker),
       cancel: Some(cancel),
+      network: shared::NetworkConfig::default(),
     }
+  }
+
+  /// Download archives through the job's `[network]` proxy / CA (#94).
+  #[must_use]
+  pub fn with_network(mut self, network: shared::NetworkConfig) -> Self {
+    self.network = network;
+    self
   }
 
   /// Send successful resolved-action diagnostics to the job's setup log.
@@ -138,7 +148,7 @@ impl ActionFetcher {
     let result = tokio::select! {
       () = cancel.cancelled() => Err(RunnerError::ActionDownload("action download cancelled".to_owned())),
       fetched = cell.get_or_try_init(|| async {
-        download_and_extract_action(client, &info.tarball_url, info.token.as_deref(), &dest)
+        download_and_extract_action(&self.network, &info.tarball_url, info.token.as_deref(), &dest)
           .await?;
         Ok::<PathBuf, RunnerError>(dest)
       }) => fetched,
@@ -198,7 +208,6 @@ impl ActionFetcher {
   /// fails.
   pub async fn ensure(
     &self,
-    client: &reqwest::Client,
     cache_key: &str,
     tarball_url: &str,
     cache_dir: &Path,
@@ -207,7 +216,7 @@ impl ActionFetcher {
     let dest = cache_dir.to_path_buf();
     let result = cell
       .get_or_try_init(move || async move {
-        download_and_extract_action(client, tarball_url, None, &dest).await?;
+        download_and_extract_action(&self.network, tarball_url, None, &dest).await?;
         Ok::<PathBuf, RunnerError>(dest)
       })
       .await;

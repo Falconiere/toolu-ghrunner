@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 # Internal
 shared = { path = "../shared" }
+network = { path = "../network" }
 expressions = { path = "../expressions" }
 cache = { path = "../cache" }
 

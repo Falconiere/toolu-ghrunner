@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 # Internal
 shared = { path = "../shared" }
+network = { path = "../network" }
 
 # Async runtime
 tokio = { version = "1", features = ["rt", "sync", "time", "net", "io-util", "fs"] }

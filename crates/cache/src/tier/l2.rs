@@ -33,15 +33,18 @@ pub struct L2Tier {
 impl L2Tier {
   /// Build an S3-backed tier from `cfg`. Credentials come from the standard AWS
   /// environment (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`), which opendal
-  /// loads; bucket / endpoint / region come from `cfg`.
+  /// loads; bucket / endpoint / region come from `cfg`. Requests go through
+  /// `client` — build it with `network::client_builder` so the runner's
+  /// `[network]` proxy / CA apply to S3 too (#94).
   ///
   /// # Errors
   /// `RunnerError::Cache` if the opendal S3 operator cannot be constructed.
-  pub fn from_config(cfg: &L2Config) -> Result<Self, RunnerError> {
+  pub fn from_config(cfg: &L2Config, client: reqwest::Client) -> Result<Self, RunnerError> {
     let builder = services::S3::default()
       .bucket(&cfg.bucket)
       .endpoint(&cfg.endpoint)
-      .region(&cfg.region);
+      .region(&cfg.region)
+      .http_client(opendal::raw::HttpClient::with(client));
     let op = Operator::new(builder)
       .map_err(|e| RunnerError::Cache(format!("failed to build S3 operator: {e}")))?
       .finish();

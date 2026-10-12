@@ -214,7 +214,7 @@ async fn download_and_extract_action_streams_from_http() {
   let client = reqwest::Client::new();
   let dest = tmp_dest("http-stream");
 
-  download_and_extract_action(&client, &url, None, &dest)
+  download_and_extract_action(&shared::NetworkConfig::default(), &url, None, &dest)
     .await
     .expect("download+extract over http must succeed");
 
@@ -224,7 +224,7 @@ async fn download_and_extract_action_streams_from_http() {
 
   // Re-running against the same dest is a cache hit — no second fetch,
   // and the previously extracted content is untouched.
-  download_and_extract_action(&client, &url, None, &dest)
+  download_and_extract_action(&shared::NetworkConfig::default(), &url, None, &dest)
     .await
     .expect("cached re-run must succeed without a fetch");
   let read_again = std::fs::read(dest.join("README.md")).expect("file still present");
@@ -356,7 +356,7 @@ async fn download_over_a_stale_unwatermarked_dest_replaces_it() {
     "precondition: the stale dest is not watermarked"
   );
 
-  download_and_extract_action(&client, &url, None, &dest)
+  download_and_extract_action(&shared::NetworkConfig::default(), &url, None, &dest)
     .await
     .expect("a download over a stale dest must succeed");
 
@@ -385,7 +385,7 @@ async fn download_and_extract_action_leaves_no_dest_or_staging_on_extraction_fai
   let client = reqwest::Client::new();
   let dest = tmp_dest("corrupt-extraction");
 
-  let result = download_and_extract_action(&client, &url, None, &dest).await;
+  let result = download_and_extract_action(&shared::NetworkConfig::default(), &url, None, &dest).await;
   assert!(
     matches!(
       &result,
