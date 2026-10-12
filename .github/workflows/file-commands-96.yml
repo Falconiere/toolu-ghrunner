@@ -9,6 +9,8 @@ name: file-commands-96
 # implements. The error text lands in the check-run annotations. The empty-name
 # job records the official runner's behavior for `=v`, which toolu fails on
 # purpose (issue AC). See docs/test-coverage.md "Strict file commands (#96)".
+# The branch `push` trigger is temporary: it records the reference run before
+# merge (dispatch needs the file on main) and is removed before merge.
 
 on:
   workflow_dispatch:

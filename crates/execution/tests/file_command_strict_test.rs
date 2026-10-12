@@ -220,6 +220,22 @@ impl Replay {
     })
   }
 
+  /// Outputs the named step completed with.
+  fn outputs(&self, name: &str) -> Option<std::collections::HashMap<String, String>> {
+    let id = self.id(name);
+    self.events.iter().find_map(|event| {
+      if let RunnerEvent::StepCompleted {
+        step_id, outputs, ..
+      } = event
+        && *step_id == id
+      {
+        Some(outputs.clone())
+      } else {
+        None
+      }
+    })
+  }
+
   /// Error annotations reported on the named step's timeline record.
   fn errors(&self, name: &str) -> Vec<String> {
     let id = self.id(name);
@@ -446,7 +462,7 @@ async fn pairs_before_the_error_apply_and_continue_on_error_keeps_the_job_green(
 
 #[tokio::test]
 async fn node_options_is_blocked_with_an_issue_but_the_step_succeeds() -> TestResult {
-  let writer = "printf 'NODE_OPTIONS=--require /tmp/fc96.js\\nKEEP=1\\n' >> \"$GITHUB_ENV\"";
+  let writer = "printf 'NODE_OPTIONS=--require /tmp/fc96.js\\nnode_options=--require /tmp/fc96.js\\nKEEP=1\\n' >> \"$GITHUB_ENV\"";
   let reader = "printf 'FC96|%s|%s\\n' \"${NODE_OPTIONS-<unset>}\" \"$KEEP\"";
   let run = replay(scripts(writer, reader)?, &[]).await?;
   let host = std::env::var("NODE_OPTIONS").unwrap_or_else(|_| "<unset>".to_owned());
@@ -454,7 +470,8 @@ async fn node_options_is_blocked_with_an_issue_but_the_step_succeeds() -> TestRe
     run.marked("FC96|"),
     [format!("FC96|{host}|1"), "FC96|cleanup".to_owned()]
   );
-  assert_eq!(run.errors("__run"), [BLOCKED]);
+  // Upstream raises one issue per blocked pair, whatever its case.
+  assert_eq!(run.errors("__run"), [BLOCKED, BLOCKED]);
   assert_eq!(run.step_conclusion("__run"), Some(Conclusion::Success));
   assert_eq!(run.job_conclusion(), Some(Conclusion::Success));
   Ok(())
@@ -514,6 +531,13 @@ async fn composite_run_step_malformed_output_fails_the_parent_step() -> TestResu
       "Unable to process file command 'output' successfully.",
       "Invalid format 'bad'"
     ]
+  );
+  // `ok=1` precedes the malformed line, so it still reaches the action output.
+  assert_eq!(
+    run
+      .outputs("__self")
+      .and_then(|outputs| outputs.get("ok").cloned()),
+    Some("1".to_owned())
   );
   assert_eq!(run.marked("CMP96|"), ["CMP96|cleanup"]);
   assert_eq!(run.job_conclusion(), Some(Conclusion::Failure));

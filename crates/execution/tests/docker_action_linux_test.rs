@@ -427,7 +427,7 @@ async fn malformed_env_from_a_container_main_fails_the_step() -> TestResult {
   job.steps = vec![local_step(
     "docker_96",
     "./.github/actions/probe-96",
-    &[("marker", "D96"), ("malformed_env", "OK=1\\nN<<EOF\\nv\\n")],
+    &[("marker", "D96"), ("malformed_env", "N<<EOF\\nv\\n")],
   )];
 
   let events = collect_job(config, job, CancellationToken::new()).await?;

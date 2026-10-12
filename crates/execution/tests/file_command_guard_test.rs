@@ -19,9 +19,10 @@ fn strip_blocked_env_drops_node_options_case_insensitively() {
   .map(|(k, v)| (k.to_owned(), v.to_owned()))
   .collect();
 
-  assert!(
+  assert_eq!(
     strip_blocked_env(&mut env),
-    "a blocked key must be reported"
+    2,
+    "each blocked key is counted"
   );
 
   assert!(
@@ -46,7 +47,7 @@ fn composite_env_readback_strips_node_options() {
   // real `$GITHUB_ENV` file body: parse, then strip the blocked key.
   let github_env = "NODE_OPTIONS=--require /tmp/evil.js\nGREETING=hi\n";
   let mut parsed = parse_kv_file(github_env).pairs;
-  assert!(strip_blocked_env(&mut parsed));
+  assert_eq!(strip_blocked_env(&mut parsed), 1);
 
   assert!(
     !parsed.contains_key("NODE_OPTIONS"),
@@ -58,6 +59,6 @@ fn composite_env_readback_strips_node_options() {
 #[test]
 fn strip_blocked_env_reports_nothing_when_no_key_is_blocked() {
   let mut parsed = parse_kv_file("GREETING=hi\n").pairs;
-  assert!(!strip_blocked_env(&mut parsed));
+  assert_eq!(strip_blocked_env(&mut parsed), 0);
   assert_eq!(parsed.get("GREETING").map(String::as_str), Some("hi"));
 }

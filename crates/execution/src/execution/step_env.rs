@@ -142,17 +142,18 @@ pub(super) async fn apply_file_commands_and_merge_outputs(
   (outputs, failed)
 }
 
-/// Report file-command problems as upstream issues on `report_id`: the
-/// blocked `NODE_OPTIONS` error (which never fails the step), then each failed
-/// command's two errors. Returns whether a command failed the step.
+/// Report file-command problems as upstream issues on `report_id`: one
+/// blocked `NODE_OPTIONS` error per blocked name (these never fail the step),
+/// then each failed command's two errors. Returns whether a command failed the
+/// step.
 pub(super) async fn report_file_command_issues(
   failures: &[FileCommandFailure],
-  blocked_env: bool,
+  blocked_env: usize,
   report_id: &str,
   ctx: &ExecutionContext,
   events: &mpsc::Sender<RunnerEvent>,
 ) -> bool {
-  if blocked_env {
+  for _ in 0..blocked_env {
     emit_error_issue(report_id, BLOCKED_ENV_MESSAGE, ctx, events).await;
   }
   for failure in failures {

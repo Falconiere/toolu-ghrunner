@@ -193,8 +193,8 @@ pub(super) fn create_file_command_files(
 pub(super) struct FileCommandIssues {
   /// Commands that could not be processed; each fails the step.
   pub(super) failures: Vec<FileCommandFailure>,
-  /// Whether `$GITHUB_ENV` tried to set the blocked `NODE_OPTIONS`.
-  pub(super) blocked_env: bool,
+  /// How many `$GITHUB_ENV` names were the blocked `NODE_OPTIONS`.
+  pub(super) blocked_env: usize,
 }
 
 /// Read back a step's file commands into outputs / env / path accumulators,

@@ -61,8 +61,8 @@ pub struct FileCommandResults {
   /// Commands that could not be processed, in upstream order; each fails
   /// its step. Pairs read before the error are still in the maps above.
   pub failures: Vec<FileCommandFailure>,
-  /// Whether `GITHUB_ENV` tried to set the blocked `NODE_OPTIONS`.
-  pub blocked_env: bool,
+  /// How many `GITHUB_ENV` names were the blocked `NODE_OPTIONS` (any case).
+  pub blocked_env: usize,
 }
 
 /// One file command that could not be processed. Upstream reports it as two
@@ -224,7 +224,7 @@ impl FileCommandManager {
 }
 
 /// Strip env keys the runner refuses to propagate from a `$GITHUB_ENV`
-/// read-back and report whether one was present. Today that is
+/// read-back and return how many were present. Today that is
 /// `NODE_OPTIONS` (case-insensitive), upstream's `SetEnvFileCommand` block
 /// list: node children honor it (e.g. `--require`), so letting a `run:` step
 /// set it would inject a preload into every later node action. Applied to
@@ -232,10 +232,10 @@ impl FileCommandManager {
 /// read-back.
 pub fn strip_blocked_env<S: ::std::hash::BuildHasher>(
   env: &mut HashMap<String, String, S>,
-) -> bool {
+) -> usize {
   let before = env.len();
   env.retain(|k, _| !k.eq_ignore_ascii_case("NODE_OPTIONS"));
-  env.len() != before
+  before.saturating_sub(env.len())
 }
 
 /// Parse a `GITHUB_PATH` file — one path per line.

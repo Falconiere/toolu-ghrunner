@@ -7,6 +7,10 @@ inputs:
   body:
     description: printf format appended to the target file
     required: true
+outputs:
+  ok:
+    description: The pair written before a malformed entry
+    value: ${{ steps.write.outputs.ok }}
 runs:
   using: composite
   steps:
