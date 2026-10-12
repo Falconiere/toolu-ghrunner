@@ -1,6 +1,6 @@
 # Explicit proxy and custom CA configuration — Plan
 
-**Date:** 2026-10-12   **Status:** Draft   **Spec:** docs/specs/2026-10-12-explicit-proxy-and-custom-ca-design.md   **Topic:** issue #94 — `[network]` config for every HTTP client, exported to steps
+**Date:** 2026-10-12   **Status:** Approved   **Spec:** docs/specs/2026-10-12-explicit-proxy-and-custom-ca-design.md   **Topic:** issue #94 — `[network]` config for every HTTP client, exported to steps
 
 ## Evidence and approach
 
@@ -102,11 +102,11 @@ accelerated, L2) → step/container export → live-log WebSocket → inventory 
     "paths": [
       "crates/toolu-runner/Cargo.toml",
       "crates/toolu-runner/src",
-      "crates/toolu-runner/tests/check_network_test.rs",
+      "crates/toolu-runner/tests/network_cli_test.rs",
       "crates/network/tests/helpers/network_fixtures.rs"
     ],
     "input": "Temp registration config.toml with [network] proxy=http://u:secretpw@127.0.0.1:<proxy> + ca_bundle; env HTTPS_PROXY=http://127.0.0.1:<closed>; a bad ca_bundle path; the real toolu-runner binary (check and run).",
-    "check": "cargo test -p toolu-runner --test check_network_test && cargo test -p toolu-runner --test check_cmd_test && cargo test -p toolu-runner --bin toolu-runner"
+    "check": "cargo test -p toolu-runner --test network_cli_test && cargo test -p toolu-runner --test check_cmd_test && cargo test -p toolu-runner --bin toolu-runner"
   },
   {
     "id": "execution_clients",
@@ -133,7 +133,7 @@ accelerated, L2) → step/container export → live-log WebSocket → inventory 
       "crates/execution/tests/action_downloads_test.rs",
       "crates/network/tests/helpers/network_fixtures.rs"
     ],
-    "input": "A real gzip tarball served as https://target.test:<port>/a.tar.gz by the rustls target behind the auth proxy with the rcgen CA (and without the CA \u2192 TLS failure); an L2Tier put to https://s3.test:<port>.",
+    "input": "A real gzip tarball served as https://target.test:<port>/a.tar.gz by the rustls target behind the auth proxy with the rcgen CA (and without the CA \u2192 TLS failure); an L2Tier put to https://s3.test:<port> with static AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY via temp-env (assert the proxy CONNECT, not an S3 success).",
     "check": "cargo test -p execution --test network_job_clients_test && cargo test -p execution --lib actions && cargo test -p execution --test action_downloads_test && cargo test -p cache --test l2_network_test && cargo test -p toolu-runner --test oidc_token_test && cargo test -p toolu-runner --test cache_l2_test"
   },
   {
@@ -156,7 +156,7 @@ accelerated, L2) → step/container export → live-log WebSocket → inventory 
       "scripts/test/ci_workflow_test.sh",
       "crates/network/tests/helpers/network_fixtures.rs"
     ],
-    "input": "The captured job message fixture replayed through Runner::execute_job with host run:/composite/hook steps printing env, a workflow env override and an echo of a password-bearing $HTTPS_PROXY; a temp local node20 action (main+post); host node https.get against the rustls target with/without ca_bundle; real Docker job container + run: inside it + alpine service + Docker action printing env.",
+    "input": "The captured job message fixture replayed through Runner::execute_job with host run:/composite/hook steps printing env, a workflow env override and an echo of a password-bearing $HTTPS_PROXY whose events also pass through the real observability journal writer (dev-dep); a temp local node20 action (main+post) with the node20 runtime cache pre-seeded from the host node (seed_node pattern, no internet); host node https.get against the rustls target with/without ca_bundle; real Docker job container + run: inside it + alpine service + Docker action printing env.",
     "check": "cargo test -p execution --test network_step_env_test && cargo test -p execution --lib docker && cargo test -p execution --test network_container_env_test -- --ignored --test-threads=1 && bash scripts/test/ci_workflow_test.sh"
   },
   {
@@ -254,7 +254,7 @@ accelerated, L2) → step/container export → live-log WebSocket → inventory 
   `tests/{client_proxy_test,client_tls_test,secrets_test,step_env_test}.rs`,
   `tests/helpers/network_fixtures.rs`), `crates/shared/src/network_redact.rs`,
   `crates/config/src/network.rs`, `crates/config/tests/network_section_test.rs`,
-  `crates/toolu-runner/tests/check_network_test.rs`,
+  `crates/toolu-runner/tests/network_cli_test.rs`,
   `crates/toolu-runner/tests/network_client_inventory_test.rs`,
   `crates/execution/src/execution/job_runner/http.rs`,
   `crates/execution/tests/network_job_clients_test.rs`,
@@ -283,3 +283,22 @@ expired/wrong-host certs, password in the proxy URL. Docs are synchronized
 in the `docs` step; `./tools/check.sh all` (through `job.ts`) closes it.
 Docker/node-dependent tests fail loudly (not skip-as-pass) when the tool is
 absent, matching the repo's existing live lanes, or are recorded unverified.
+
+Delivery: scoped commits per step (WIP subjects allowed, squash-merged);
+`plan-ledger.js run <plan> --verify` on the final branch; `toolu-review:review`
+(version 2 state) → `verdict.js status` = ready → push
+`feat/94-explicit-proxy-and-custom-ca` → PR to `main` (`Closes
+Falconiere/toolu-ghrunner#94`, `Part of Falconiere/toolu-ghrunner#67`) →
+`pr-babysit:babysit`.
+
+## Plan review record
+
+- AC coverage: every spec AC-1..13 maps to ≥1 step; no dangling refs; every
+  `depends_on` precedes its dependant (scripted check).
+- Fixed in review: the `run` exit-2 test lives in `network_cli_test.rs` (was
+  misnamed `check_network_test`); AC-9 journal assertion uses the real
+  `observability` writer as an `execution` dev-dep; delivery sequence added.
+- Docker AC-7 runs locally with `--ignored` (Docker 29 present) and joins CI's
+  existing Docker lane; Node 24 present; no internet needed by any new test.
+- **Status: Approved.**
+
