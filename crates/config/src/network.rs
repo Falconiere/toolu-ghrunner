@@ -7,6 +7,8 @@ use shared::NetworkConfig;
 
 /// `[network]` in `config.toml`. Every key is optional and an absent section
 /// is env mode (today's behaviour); `save_config` omits the table when empty.
+/// Unknown keys are an error: a typo such as `ca_bundel` must stop startup,
+/// not silently fall back to default trust or a direct connection.
 ///
 /// ```toml
 /// [network]
@@ -15,9 +17,10 @@ use shared::NetworkConfig;
 /// ca_bundle = "~/certs/corp-root.pem"
 /// ```
 #[derive(Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct NetworkSection {
   /// `http://` / `https://` proxy for http and https destinations; may carry
-  /// `user:password@` (never printed — see the redacting `Debug`).
+  /// `user:password@` (never printed — `Debug` shows only `<set>`).
   #[serde(default, skip_serializing_if = "Option::is_none")]
   pub proxy: Option<String>,
   /// Bypass entries in `NO_PROXY` syntax (only used with `proxy`).

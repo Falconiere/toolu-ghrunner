@@ -102,3 +102,20 @@ ca_bundle = "/etc/corp/ca.pem"
   assert!(!text.contains("proxy"), "unset keys stay unset: {text}");
   assert_eq!(load_config(&path).expect("reload"), cfg);
 }
+
+/// A misspelled key fails `load_config` naming it, instead of being
+/// ignored (which would silently drop the CA or proxy).
+#[test]
+fn unknown_network_key_is_rejected() {
+  let err = match load(
+    r#"
+[network]
+ca_bundel = "/etc/corp/ca.pem"
+"#,
+  ) {
+    Ok(cfg) => format!("loaded: {:?}", cfg.network),
+    Err(e) => e.to_string(),
+  };
+  assert!(err.contains("ca_bundel"), "{err}");
+  assert!(err.contains("unknown field"), "{err}");
+}
