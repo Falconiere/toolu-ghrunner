@@ -37,6 +37,9 @@ fn host_node() -> Result<(PathBuf, u8), Box<dyn std::error::Error>> {
     .map(|dir| dir.join("node"))
     .find(|candidate| candidate.is_file())
     .ok_or("no `node` on PATH; the runtime tests need a real Node.js")?;
+  // The installed binary, not a version-manager shim or symlink, so its
+  // companion libraries can be found next to it.
+  let node = std::fs::canonicalize(node)?;
   let output = std::process::Command::new(&node)
     .arg("--version")
     .output()?;
@@ -59,11 +62,39 @@ fn config_for(data_dir: &Path, node_dir: Option<PathBuf>) -> RunnerConfig {
   }
 }
 
-/// A preseed dir holding `binary` as `<dir>/<name>/bin/node`.
-fn preseed(dir: &Path, name: &str, binary: &Path) -> TestResult {
-  let bin = dir.join(name).join("bin");
-  std::fs::create_dir_all(&bin)?;
-  std::fs::copy(binary, bin.join("node"))?;
+/// A Node.js runtime tree to install: `bin/node` plus the shared libraries a
+/// dynamically linked build loads relative to it (Homebrew's
+/// `lib/libnode.*.dylib`; nodejs.org builds have none).
+fn node_tree(binary: &Path) -> Result<Vec<(String, PathBuf)>, std::io::Error> {
+  let mut files = vec![("bin/node".to_owned(), binary.to_path_buf())];
+  let lib = binary
+    .parent()
+    .and_then(Path::parent)
+    .map(|prefix| prefix.join("lib"));
+  if let Some(lib) = lib.filter(|lib| lib.is_dir()) {
+    for entry in std::fs::read_dir(lib)? {
+      let entry = entry?;
+      let name = entry.file_name().to_string_lossy().into_owned();
+      if name.starts_with("libnode") {
+        files.push((format!("lib/{name}"), entry.path()));
+      }
+    }
+  }
+  Ok(files)
+}
+
+/// A lone executable as a runtime tree.
+fn single(binary: &Path) -> Vec<(String, PathBuf)> {
+  vec![("bin/node".to_owned(), binary.to_path_buf())]
+}
+
+/// A preseed dir holding `files` under `<dir>/<name>/`.
+fn preseed(dir: &Path, name: &str, files: &[(String, PathBuf)]) -> TestResult {
+  for (relative, source) in files {
+    let target = dir.join(name).join(relative);
+    std::fs::create_dir_all(target.parent().ok_or("preseed parent")?)?;
+    std::fs::copy(source, target)?;
+  }
   Ok(())
 }
 
@@ -81,17 +112,22 @@ fn impostor(dir: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
 }
 
 /// A gzip tarball (stored blocks, so the real ~100 MB binary packs fast)
-/// holding `binary` as `<prefix>bin/node`.
-fn tarball_with(prefix: &str, binary: &Path) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+/// holding `files` under `<prefix>`.
+fn tarball_with(
+  prefix: &str,
+  files: &[(String, PathBuf)],
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
   let mut raw = Vec::new();
   {
     let mut builder = Builder::new(&mut raw);
-    let body = std::fs::read(binary)?;
-    let mut header = Header::new_gnu();
-    header.set_size(u64::try_from(body.len())?);
-    header.set_mode(0o755);
-    header.set_cksum();
-    builder.append_data(&mut header, format!("{prefix}bin/node"), &body[..])?;
+    for (relative, source) in files {
+      let body = std::fs::read(source)?;
+      let mut header = Header::new_gnu();
+      header.set_size(u64::try_from(body.len())?);
+      header.set_mode(0o755);
+      header.set_cksum();
+      builder.append_data(&mut header, format!("{prefix}{relative}"), &body[..])?;
+    }
     builder.finish()?;
   }
   let mut gz = GzEncoder::new(Vec::new(), Compression::none());
@@ -187,7 +223,7 @@ async fn preseed_hit_returns_the_real_node_without_network() -> TestResult {
   let (node, major) = host_node()?;
   let dir = tempfile::tempdir()?;
   let data = tempfile::tempdir()?;
-  preseed(dir.path(), &format!("node{major}"), &node)?;
+  preseed(dir.path(), &format!("node{major}"), &node_tree(&node)?)?;
   let config = config_for(data.path(), Some(dir.path().to_path_buf()));
   let client = reqwest::Client::new();
   let binary =
@@ -230,8 +266,12 @@ async fn preseed_with_the_wrong_major_or_another_version_fails_validation() -> T
   let other = major.wrapping_add(1);
   let dir = tempfile::tempdir()?;
   let data = tempfile::tempdir()?;
-  preseed(dir.path(), &format!("node{other}"), &node)?;
-  preseed(dir.path(), &format!("node{major}"), &impostor(data.path())?)?;
+  preseed(dir.path(), &format!("node{other}"), &node_tree(&node)?)?;
+  preseed(
+    dir.path(),
+    &format!("node{major}"),
+    &single(&impostor(data.path())?),
+  )?;
   let config = config_for(data.path(), Some(dir.path().to_path_buf()));
   let client = reqwest::Client::new();
   let mislabeled =
@@ -270,7 +310,7 @@ async fn preseed_with_the_wrong_major_or_another_version_fails_validation() -> T
 async fn download_commits_a_real_node_only_after_it_starts() -> TestResult {
   let (node, major) = host_node()?;
   let version = node_version_for(major);
-  let tar = tarball_with(&format!("node-v{version}-linux-x64/"), &node)?;
+  let tar = tarball_with(&format!("node-v{version}-linux-x64/"), &node_tree(&node)?)?;
   let addr = serve(axum::http::StatusCode::OK, tar).await?;
   let (nodejs, alpine) = bases(addr);
   let data = tempfile::tempdir()?;
@@ -297,7 +337,10 @@ async fn download_commits_a_real_node_only_after_it_starts() -> TestResult {
 #[cfg(unix)]
 async fn a_downloaded_runtime_reporting_another_version_is_never_committed() -> TestResult {
   let scratch = tempfile::tempdir()?;
-  let tar = tarball_with("node-v20.20.2-linux-x64/", &impostor(scratch.path())?)?;
+  let tar = tarball_with(
+    "node-v20.20.2-linux-x64/",
+    &single(&impostor(scratch.path())?),
+  )?;
   let addr = serve(axum::http::StatusCode::OK, tar).await?;
   let (nodejs, alpine) = bases(addr);
   let data = tempfile::tempdir()?;
@@ -333,7 +376,7 @@ async fn container_target_alpine_layout_installs_without_a_host_start_check() ->
   // Container-only targets are not executed on the host, so any binary in
   // the alpine `./` layout commits; the container lane proves it runs.
   let scratch = tempfile::tempdir()?;
-  let tar = tarball_with("./", &impostor(scratch.path())?)?;
+  let tar = tarball_with("./", &single(&impostor(scratch.path())?))?;
   let addr = serve(axum::http::StatusCode::OK, tar).await?;
   let (nodejs, alpine) = bases(addr);
   let data = tempfile::tempdir()?;
@@ -356,7 +399,7 @@ async fn container_target_alpine_layout_installs_without_a_host_start_check() ->
 #[tokio::test]
 async fn http_error_corrupt_and_truncated_bodies_leave_no_cache_dir() -> TestResult {
   let (node, _) = host_node()?;
-  let real = tarball_with("node-v20.20.2-linux-x64/", &node)?;
+  let real = tarball_with("node-v20.20.2-linux-x64/", &node_tree(&node)?)?;
   let truncated = real
     .get(..real.len() / 2)
     .ok_or("tarball too small")?

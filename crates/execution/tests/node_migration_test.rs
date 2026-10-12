@@ -57,11 +57,38 @@ fn seed(data: &Path, real: u8, other: u8) -> TestResult {
     std::fs::create_dir_all(target.parent().ok_or("cache parent")?)?;
     if copy {
       std::fs::copy(&node, &target)?;
+      copy_companions(&node, &target)?;
     } else {
       #[cfg(unix)]
       std::os::unix::fs::symlink(&node, &target)?;
       #[cfg(not(unix))]
       std::fs::copy(&node, &target)?;
+    }
+  }
+  Ok(())
+}
+
+/// Copy the shared libraries a dynamically linked Node loads relative to its
+/// binary (Homebrew's `lib/libnode.*.dylib`; nodejs.org builds have none), so
+/// the copied runtime starts.
+fn copy_companions(node: &Path, target: &Path) -> TestResult {
+  let lib = node
+    .parent()
+    .and_then(Path::parent)
+    .map(|prefix| prefix.join("lib"));
+  let Some(lib) = lib.filter(|lib| lib.is_dir()) else {
+    return Ok(());
+  };
+  let target_lib = target
+    .parent()
+    .and_then(Path::parent)
+    .ok_or("cache dir parent")?
+    .join("lib");
+  for entry in std::fs::read_dir(lib)? {
+    let entry = entry?;
+    if entry.file_name().to_string_lossy().starts_with("libnode") {
+      std::fs::create_dir_all(&target_lib)?;
+      std::fs::copy(entry.path(), target_lib.join(entry.file_name()))?;
     }
   }
   Ok(())
