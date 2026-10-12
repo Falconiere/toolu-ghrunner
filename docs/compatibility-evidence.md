@@ -5,7 +5,12 @@ This document explains how toolu-runner's compatibility with the official
 evidence stops. The per-criterion record is
 [compatibility-matrix.md](compatibility-matrix.md). That view is generated from
 [compatibility-matrix.json](compatibility-matrix.json) and validated in CI by
-`scripts/test/compat_matrix_check.py`.
+`scripts/test/compat_matrix_check.py`. The matrix JSON, its generated
+Markdown view, the reference report and the captures are generated data files,
+not code, so the 500-code-line ceiling does not apply to them.
+`scripts/guardrails/` checks only the `crates/*` packages listed in
+`guardrails.workspace.json`, so `docs/` is outside its scope. The captures live
+under `crates/execution/tests/`, which the ceiling exempts.
 
 **A green repository gate is not drop-in compatibility.** Only lanes marked
 `passed` with evidence count. Everything else is an explicit gap.
@@ -90,6 +95,10 @@ How the sanitizer treats the message:
   gitleaks.
 - **Consistency.** Every occurrence of a secret, including inside scripts, is
   replaced by the same placeholder, so equality relations survive.
+- **Run identifiers.** `plan.planId` and `jobId` are not credentials, but they
+  tie a fixture to its live run (they are embedded in `GenerateIdTokenUrl`, for
+  example). They become UUIDv5 placeholders at every occurrence, so the URL and
+  the body fields stay consistent and the replay remains valid.
 - **What it keeps.** Keys, key order, value types, template-token shapes, step
   UUIDs, `contextName`s and service URLs are untouched.
 - **Refusal.** The output is re-scanned, and the tool exits non-zero if a

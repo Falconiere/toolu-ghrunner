@@ -79,7 +79,8 @@ class SanitizeCaptureTest(unittest.TestCase):
         raw = raw_capture()
         clean, _ = sanitize_capture.sanitize(copy.deepcopy(raw), "unit")
         self.assertEqual(shape(clean), shape(raw))
-        for key in ("jobId", "requestId", "jobName", "fileTable", "contextData", "plan"):
+        # jobId / plan.planId become placeholders (see the run-identifier test).
+        for key in ("requestId", "jobName", "fileTable", "contextData"):
             self.assertEqual(clean[key], raw[key], key)
         self.assertEqual([s["id"] for s in clean["steps"]], [s["id"] for s in raw["steps"]])
         self.assertEqual([s.get("contextName") for s in clean["steps"]],
@@ -92,6 +93,22 @@ class SanitizeCaptureTest(unittest.TestCase):
         for url in data.values():
             if isinstance(url, str) and url.startswith("https://"):
                 self.assertIsNone(sanitize_capture.OPAQUE_SEGMENT.search(url), url)
+
+    def test_run_identifiers_are_replaced_consistently_everywhere(self):
+        raw = raw_capture()
+        plan, job = raw["plan"]["planId"], raw["jobId"]
+        endpoint = raw["resources"]["endpoints"][0]
+        endpoint.setdefault("data", {})["GenerateIdTokenUrl"] = (
+            f"https://run.example/idtoken/{plan}/{job}?api-version=2.0")
+        clean, _ = sanitize_capture.sanitize(raw, "unit")
+        text = json.dumps(clean)
+        self.assertNotIn(plan, text)
+        self.assertNotIn(job, text)
+        new_plan, new_job = clean["plan"]["planId"], clean["jobId"]
+        self.assertTrue(sanitize_capture.is_placeholder(new_plan))
+        self.assertTrue(sanitize_capture.is_placeholder(new_job))
+        self.assertEqual(clean["resources"]["endpoints"][0]["data"]["GenerateIdTokenUrl"],
+                         f"https://run.example/idtoken/{new_plan}/{new_job}?api-version=2.0")
 
     def test_placeholders_do_not_depend_on_the_secret_value(self):
         first, _ = sanitize_capture.sanitize(raw_capture(), "unit")

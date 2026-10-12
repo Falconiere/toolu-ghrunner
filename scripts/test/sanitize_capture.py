@@ -14,7 +14,10 @@ value that is an endpoint `authorization.parameters` entry, which becomes the
 literal `redacted` (the #99 fixture convention; a placeholder under an
 `AccessToken` key reads as a live API key to secret scanners), and any opaque
 path segment of 32+ alphanumerics in an endpoint URL (a service collection id),
-which also becomes `redacted`. Every
+which also becomes `redacted`. The run identifiers `plan.planId` and `jobId` are
+not credentials, but they tie a fixture to the live run (they are embedded in
+`GenerateIdTokenUrl`, for example), so they too become UUIDv5 placeholders;
+every occurrence is replaced, keeping URL and body fields consistent. Every
 occurrence of that value, including inside longer strings such as scripts, is
 replaced by the same placeholder, so equality relations (a mask hint equal to a
 variable) survive. Keys, key order, value types, step UUIDs, `contextName`s
@@ -121,10 +124,19 @@ def endpoint_secrets(message):
     return found
 
 
+def run_identifiers(message):
+    """(json_path, value) for the live run's plan and job ids."""
+    found = [("$.plan.planId", (message.get("plan") or {}).get("planId")),
+             ("$.jobId", message.get("jobId"))]
+    return [(path, value) for path, value in found if isinstance(value, str) and value]
+
+
 def sanitize(message, namespace):
     """Return (sanitized_message, number_of_distinct_secrets)."""
     redacted = endpoint_secrets(message)
     secrets = collect_secrets(message)
+    for path, value in run_identifiers(message):
+        secrets.setdefault(value, path)
     for value in sorted(redacted - set(secrets)):
         secrets[value] = "$.resources.endpoints"
     mapping = {value: REDACTED if value in redacted else placeholder(namespace, path)
