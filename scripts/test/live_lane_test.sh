@@ -30,10 +30,12 @@ absent() { ! grep -Eq -- "$1" "$2"; }
 TESTS=crates/toolu-runner/tests
 FIX=$TESTS/fixtures
 
-for wf in .github/workflows/live.yml .github/workflows/live-ghes.yml; do
-  name=$(basename "$wf")
-  check "$name keeps only a boolean at job level" \
-    grep -Eq '^      HAVE_(LIVE_TOKEN|GHES_SECRETS): \$\{\{ secrets\.' "$wf"
+for pair in live.yml:HAVE_LIVE_TOKEN live-ghes.yml:HAVE_GHES_SECRETS; do
+  name=${pair%%:*} flag=${pair#*:}
+  wf=.github/workflows/$name
+  check "$name keeps only its $flag boolean at job level" \
+    grep -Eq "^      $flag: \\\$\\{\\{ secrets\\." "$wf"
+  check "$name's guard step reads $flag" grep -Eq "if: \\\$\\{\\{ env\.$flag != 'true' \\}\\}" "$wf"
   check "$name never exposes a secret at job level" \
     absent '^      TOOLU_RUNNER_LIVE[A-Z_]*: \$\{\{ secrets\.' "$wf"
   check "$name fails UNVERIFIED without its secrets" \

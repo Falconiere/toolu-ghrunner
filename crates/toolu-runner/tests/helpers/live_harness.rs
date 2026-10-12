@@ -229,8 +229,9 @@ impl LiveHarness {
 
   /// Spawn `toolu-runner run --once` and return the child handle. The
   /// child holds the single-job `.lock` and exits after the first job
-  /// completes (or fails). Caller is responsible for waiting on the
-  /// child and asserting its exit code.
+  /// completes (or fails). The returned `tokio::process::Child` must be
+  /// awaited by the caller (`child.wait().await`, or `wait_child` in
+  /// `live_e2e.rs`) before asserting its exit code.
   pub fn run_once(&self) -> Result<Child, Box<dyn std::error::Error>> {
     let config_path = self
       .config_path()
