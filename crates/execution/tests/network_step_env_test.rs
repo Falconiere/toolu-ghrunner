@@ -222,9 +222,13 @@ async fn seed_node(data: &Path) -> FixtureResult<()> {
     .await?;
   assert!(output.status.success(), "Node is required for this test");
   let host_binary = String::from_utf8(output.stdout)?;
-  let target = node_binary_path(&node_cache_dir(data, node_version_for(20)));
-  std::fs::create_dir_all(target.parent().ok_or("node cache parent missing")?)?;
-  std::os::unix::fs::symlink(host_binary.trim(), target)?;
+  // The captured message requires node24 (#95 migrates node20 actions), so
+  // both cache slots point at the host binary.
+  for major in [20, 24] {
+    let target = node_binary_path(&node_cache_dir(data, node_version_for(major)));
+    std::fs::create_dir_all(target.parent().ok_or("node cache parent missing")?)?;
+    std::os::unix::fs::symlink(host_binary.trim(), target)?;
+  }
   Ok(())
 }
 
