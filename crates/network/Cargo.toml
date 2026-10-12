@@ -19,6 +19,9 @@ rustls = { version = "0.23", default-features = false, features = ["std"] }
 base64 = "0.22"
 # Percent-decoding of proxy URL userinfo.
 percent-encoding = "2"
+# Proxy URL parsing for env mode, redaction and masking (the same pin as the
+# bin: `url` 2.5.8 needs a newer MSRV).
+url = ">=2, <2.5.8"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "time", "sync"] }

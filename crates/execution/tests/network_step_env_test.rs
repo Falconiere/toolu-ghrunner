@@ -434,7 +434,8 @@ async fn an_echoed_proxy_password_is_masked() -> FixtureResult<()> {
   let masker = h.masker.lock().map_err(|e| e.to_string())?;
   let shown = masker.mask(raw);
   assert!(!shown.contains("s3cr3tpw"), "{shown}");
-  assert_eq!(shown, "http://u:***@proxy.corp.test:3128");
+  // `u:<password>` is registered whole, so the user goes too.
+  assert_eq!(shown, "http://***@proxy.corp.test:3128");
   Ok(())
 }
 

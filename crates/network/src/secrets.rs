@@ -1,54 +1,45 @@
 //! [`proxy_secrets`]: proxy credentials the secret masker must learn.
 
-use base64::Engine as _;
 use shared::NetworkConfig;
 
-use crate::client::{configured_proxy, parse_proxy};
-use crate::config::{ALL_PROXY, HTTP_PROXY, HTTPS_PROXY, first_set};
+use crate::client::configured_proxy;
+use crate::proxy_env::{ProxyEnv, ProxyVar, public_username, url_secrets};
 
-/// Credential strings from the effective proxy URL(s): each password as
-/// written and percent-decoded, and the `Proxy-Authorization` credential
-/// `base64(user:password)`. A lone userinfo (`http://token@proxy`) is
-/// treated as a token and registered too. The username of a `user:password`
-/// pair is not secret (upstream parity).
+/// Credential strings from the effective proxy URL(s) — user and password as
+/// written and percent-decoded, `user:password`, and the
+/// `Proxy-Authorization` credential `base64(user:password)` — via
+/// [`url_secrets`], which fails safe: a value that does not parse cleanly
+/// (scheme-less forms parse; an unencoded `/ ? #` in a password does not) is
+/// registered whole, because steps receive it verbatim.
+///
+/// The user name of a `user:password` pair is not secret (upstream parity:
+/// masking a name such as `proxy` would blank that word in every log line);
+/// a lone `token@` user name is.
 ///
 /// Config mode reads `[network] proxy`; env mode reads the runner's
-/// `HTTPS_PROXY`, `HTTP_PROXY` and `ALL_PROXY` values. Unparseable values contribute
-/// nothing (a configured one already fails client construction).
+/// `HTTPS_PROXY`, `HTTP_PROXY` and `ALL_PROXY` pairs exactly as reqwest does
+/// ([`ProxyEnv`]), even under the CGI guard, since steps inherit them.
 pub fn proxy_secrets(cfg: &NetworkConfig) -> Vec<String> {
-  let sources: Vec<String> = match configured_proxy(cfg) {
+  let raws: Vec<String> = match configured_proxy(cfg) {
     Some(raw) => vec![raw.to_owned()],
-    None => [HTTPS_PROXY, HTTP_PROXY, ALL_PROXY]
-      .into_iter()
-      .filter_map(first_set)
-      .collect(),
+    None => {
+      let env = ProxyEnv::from_env();
+      [env.https, env.http, env.all]
+        .into_iter()
+        .flatten()
+        .map(|var: ProxyVar| var.value)
+        .collect()
+    },
   };
-  let mut secrets: Vec<String> = Vec::new();
-  let mut add = |value: String| {
-    if !value.is_empty() && !secrets.contains(&value) {
-      secrets.push(value);
-    }
-  };
-  for raw in sources {
-    let Ok(parsed) = parse_proxy(&raw) else {
-      continue;
-    };
-    match (parsed.user, parsed.raw_password, parsed.password) {
-      (user, Some(raw_password), Some(password)) => {
-        let user = user.unwrap_or_default();
-        add(base64::engine::general_purpose::STANDARD.encode(format!("{user}:{password}")));
-        add(raw_password);
-        add(password);
-      },
-      (Some(token), _, _) => {
-        add(base64::engine::general_purpose::STANDARD.encode(format!("{token}:")));
-        add(token);
-        if let Some(raw_token) = parsed.raw_user {
-          add(raw_token);
-        }
-      },
-      (None, _, _) => {},
-    }
-  }
-  secrets
+  let mut seen = std::collections::HashSet::new();
+  raws
+    .iter()
+    .flat_map(|raw| {
+      let public = public_username(raw);
+      url_secrets(raw)
+        .into_iter()
+        .filter(move |secret| !public.contains(secret))
+    })
+    .filter(|secret| seen.insert(secret.clone()))
+    .collect()
 }

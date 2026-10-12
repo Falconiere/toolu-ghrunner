@@ -143,7 +143,7 @@ async fn proxy_credentials_never_reach_the_journal() -> TestResult {
     "base64(user:password) leaked into the journal"
   );
   assert!(
-    journal.contains("proxy=http://u:***@proxy.corp.test:3128"),
+    journal.contains("proxy=http://***@proxy.corp.test:3128"),
     "masked proxy URL missing from the journal: {journal}"
   );
   Ok(())

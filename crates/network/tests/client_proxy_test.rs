@@ -337,38 +337,39 @@ fn proxy_error(raw: &str) -> String {
 #[test]
 fn reserved_characters_in_a_password_are_rejected_without_leaking_it() {
   const HINT: &str = "percent-encode reserved characters (@ : / ? #) in the user name and password";
+  const HIDDEN: &str = network::proxy_env::UNPARSEABLE;
   for (raw, expected) in [
     // Parse as a bad port: the host would be the user name.
     (
       "http://u:pwd9z#cd@proxy:3128",
-      "[network] proxy http://u:***@proxy:3128: not a valid URL (invalid port number)".to_owned(),
+      format!("[network] proxy {HIDDEN}: not a valid URL (invalid port number)"),
     ),
     (
       "http://u:pwd9z/b@proxy",
-      "[network] proxy http://u:***@proxy: not a valid URL (invalid port number)".to_owned(),
+      format!("[network] proxy {HIDDEN}: not a valid URL (invalid port number)"),
     ),
     // Parse "successfully" with the `@` in the fragment / path / query.
     (
       "http://u:123#pwd9z@proxy:3128",
-      format!("[network] proxy http://u:***@proxy:3128: {HINT}"),
+      format!("[network] proxy {HIDDEN}: {HINT}"),
     ),
     (
       "http://u:123/pwd9z@proxy",
-      format!("[network] proxy http://u:***@proxy: {HINT}"),
+      format!("[network] proxy {HIDDEN}: {HINT}"),
     ),
     (
       "http://u:123?pwd9z@proxy",
-      format!("[network] proxy http://u:***@proxy: {HINT}"),
+      format!("[network] proxy {HIDDEN}: {HINT}"),
     ),
     // Parse with truncated credentials: an `@` before the reserved
     // character leaves a user name, the rest lands in the path / fragment.
     (
       "http://u:p@pwd9z/x@proxy:3128",
-      format!("[network] proxy http://u:***@proxy:3128: {HINT}"),
+      format!("[network] proxy {HIDDEN}: {HINT}"),
     ),
     (
       "http://u:p@pwd9z#x@proxy",
-      format!("[network] proxy http://u:***@proxy: {HINT}"),
+      format!("[network] proxy {HIDDEN}: {HINT}"),
     ),
   ] {
     let msg = proxy_error(raw);

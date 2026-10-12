@@ -155,7 +155,7 @@ pub(crate) fn render(report: &Report, masker: &SecretMasker) -> String {
     "proxy",
     network_lines(report.network.as_deref(), report.proxy_configured)
       .into_iter()
-      .chain(report.proxy.lines())
+      .chain(crate::check_env::proxy_lines(&report.proxy))
       .map(|line| format!("  {line}")),
   );
   section(

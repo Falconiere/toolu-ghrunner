@@ -11,7 +11,6 @@ mod error;
 mod events;
 mod job_message;
 /// Credential redaction for proxy URLs (`[network] proxy`, proxy env vars).
-pub mod network_redact;
 /// Home-directory and tilde path resolution.
 pub mod paths;
 /// Runner OS/arch reporting (GitHub `RUNNER_OS` / `RUNNER_ARCH`).

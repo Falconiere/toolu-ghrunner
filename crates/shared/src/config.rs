@@ -127,7 +127,7 @@ impl Default for CacheConfig {
 #[derive(Clone, PartialEq, Eq, Default)]
 pub struct NetworkConfig {
   /// `http://` or `https://` proxy for http and https destinations. May carry
-  /// `user:password@` credentials — never print it; [`Debug`] redacts it.
+  /// `user:password@` credentials — never print it; [`Debug`] shows only `<set>`.
   pub proxy: Option<String>,
   /// Bypass entries in `NO_PROXY` syntax, used only with [`proxy`](Self::proxy).
   pub no_proxy: Vec<String>,
@@ -140,10 +140,9 @@ impl std::fmt::Debug for NetworkConfig {
     f.debug_struct("NetworkConfig")
       .field(
         "proxy",
-        &self
-          .proxy
-          .as_deref()
-          .map(crate::network_redact::redact_proxy_url),
+        // Never the value: it may carry credentials, and parsing proxy URLs
+        // belongs to the `network` crate (its `redact_url`).
+        &self.proxy.as_ref().map(|_| "<set>"),
       )
       .field("no_proxy", &self.no_proxy)
       .field("ca_bundle", &self.ca_bundle)

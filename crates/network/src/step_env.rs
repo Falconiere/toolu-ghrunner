@@ -3,7 +3,11 @@
 use shared::NetworkConfig;
 
 use crate::client::{bypass_list, configured_proxy};
-use crate::config::{HTTP_PROXY, HTTPS_PROXY, NO_PROXY, first_set};
+use crate::proxy_env::ProxyEnv;
+
+const HTTPS_PROXY: [&str; 2] = ["HTTPS_PROXY", "https_proxy"];
+const HTTP_PROXY: [&str; 2] = ["HTTP_PROXY", "http_proxy"];
+const NO_PROXY: [&str; 2] = ["NO_PROXY", "no_proxy"];
 
 /// Variables exported to a job's steps, lowest precedence (any workflow,
 /// job, `GITHUB_ENV` or step value wins).
@@ -21,9 +25,12 @@ pub struct StepNetworkEnv {
 ///
 /// Config mode exports the configured proxy as `HTTPS_PROXY` / `https_proxy`
 /// / `HTTP_PROXY` / `http_proxy` and the bypass list (with loopback) as
-/// `NO_PROXY` / `no_proxy`. Env mode re-exports the runner's own first-set
-/// value of each pair in both casings (upstream parity: curl and wget read
-/// lower case, Docker upper case). The proxy value keeps its credentials,
+/// `NO_PROXY` / `no_proxy`. Env mode exports what the runner itself uses
+/// ([`ProxyEnv::effective`]): per scheme the proxy reqwest goes through (a
+/// set-but-empty variable disables its pair, an unparseable one falls back to
+/// `ALL_PROXY`), plus the first-set `NO_PROXY` pair, each in both casings
+/// (upstream parity: curl and wget read lower case, Docker upper case); with
+/// `REQUEST_METHOD` set, nothing. The proxy value keeps its credentials,
 /// as upstream's does; callers register [`crate::proxy_secrets`] with the
 /// secret masker.
 pub fn step_env(cfg: &NetworkConfig) -> StepNetworkEnv {
@@ -38,9 +45,16 @@ pub fn step_env(cfg: &NetworkConfig) -> StepNetworkEnv {
     both(&mut proxies, HTTP_PROXY, proxy);
     both(&mut proxies, NO_PROXY, &bypass_list(cfg).join(","));
   } else {
-    for names in [HTTPS_PROXY, HTTP_PROXY, NO_PROXY] {
-      if let Some(value) = first_set(names) {
-        both(&mut proxies, names, &value);
+    let env = ProxyEnv::from_env();
+    if !env.cgi {
+      if let Some(var) = env.effective(true) {
+        both(&mut proxies, HTTPS_PROXY, &var.value);
+      }
+      if let Some(var) = env.effective(false) {
+        both(&mut proxies, HTTP_PROXY, &var.value);
+      }
+      if let Some(var) = &env.no {
+        both(&mut proxies, NO_PROXY, &var.value);
       }
     }
   }

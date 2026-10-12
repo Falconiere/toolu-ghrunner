@@ -6,8 +6,9 @@ use reqwest::{Certificate, ClientBuilder, NoProxy, Proxy, Url};
 use rustls::RootCertStore;
 use rustls::pki_types::CertificateDer;
 use rustls::pki_types::pem::PemObject as _;
-use shared::network_redact::redact_proxy_url;
 use shared::{NetworkConfig, RunnerError};
+
+use crate::proxy_env::{ProxyEnv, ProxyVar, redact_url};
 
 /// Destinations a configured proxy never carries (upstream `RunnerWebProxy`
 /// bypasses loopback). Also keeps offline/accelerated local service URLs
@@ -50,7 +51,8 @@ pub fn client_builder(cfg: &NetworkConfig) -> Result<ClientBuilder, RunnerError>
 ///
 /// Validates as it describes: a configured proxy must parse, so a caller
 /// that only wants the diagnostic (`check`) still fails on an unusable value.
-/// Env mode falls back `HTTPS_PROXY` → `HTTP_PROXY` → `ALL_PROXY`.
+/// Env mode reports what reqwest actually uses ([`ProxyEnv::effective`]):
+/// per scheme, `REQUEST_METHOD` and set-but-empty variables included.
 ///
 /// # Errors
 ///
@@ -61,17 +63,11 @@ pub fn describe(cfg: &NetworkConfig) -> Result<String, RunnerError> {
       parse_proxy(raw)?;
       format!(
         "proxy {} (config), no_proxy {} entries",
-        redact_proxy_url(raw),
+        redact_url(raw),
         configured_bypass(cfg).count()
       )
     },
-    None => match crate::config::first_set(crate::config::HTTPS_PROXY)
-      .or_else(|| crate::config::first_set(crate::config::HTTP_PROXY))
-      .or_else(|| crate::config::first_set(crate::config::ALL_PROXY))
-    {
-      Some(env) => format!("proxy {} (env)", redact_proxy_url(&env)),
-      None => "proxy none".to_owned(),
-    },
+    None => describe_env(&ProxyEnv::from_env()),
   };
   let bundle = match &cfg.ca_bundle {
     Some(path) => format!(
@@ -82,6 +78,23 @@ pub fn describe(cfg: &NetworkConfig) -> Result<String, RunnerError> {
     None => String::new(),
   };
   Ok(format!("{proxy}{bundle}"))
+}
+
+/// The env-mode half of [`describe`]: the proxy each scheme goes through.
+fn describe_env(env: &ProxyEnv) -> String {
+  if env.cgi {
+    return "proxy none (env: REQUEST_METHOD is set, proxy variables ignored)".to_owned();
+  }
+  let shown = |var: &ProxyVar| format!("{} (env {})", redact_url(&var.value), var.name);
+  match (env.effective(true), env.effective(false)) {
+    (None, None) => "proxy none".to_owned(),
+    (Some(https), Some(http)) if https == http => format!("proxy {}", shown(https)),
+    (https, http) => format!(
+      "proxy https {}, http {}",
+      https.map_or_else(|| "direct".to_owned(), shown),
+      http.map_or_else(|| "direct".to_owned(), shown)
+    ),
+  }
 }
 
 /// Whether `[network] proxy` is set to a non-blank value (config mode).
@@ -124,17 +137,13 @@ pub(crate) struct ParsedProxy {
   pub(crate) url: Url,
   /// Percent-decoded username, when present.
   pub(crate) user: Option<String>,
-  /// The username exactly as written (percent-encoded), when present.
-  pub(crate) raw_user: Option<String>,
-  /// The password exactly as written (percent-encoded), when present.
-  pub(crate) raw_password: Option<String>,
   /// Percent-decoded password, when present.
   pub(crate) password: Option<String>,
 }
 
 /// Parse `raw` as an `http://` / `https://` proxy URL with a host.
 pub(crate) fn parse_proxy(raw: &str) -> Result<ParsedProxy, RunnerError> {
-  let shown = redact_proxy_url(raw);
+  let shown = redact_url(raw);
   let mut url = Url::parse(raw)
     .map_err(|e| RunnerError::Config(format!("[network] proxy {shown}: not a valid URL ({e})")))?;
   if !matches!(url.scheme(), "http" | "https") {
@@ -167,12 +176,8 @@ pub(crate) fn parse_proxy(raw: &str) -> Result<ParsedProxy, RunnerError> {
       .decode_utf8_lossy()
       .into_owned()
   };
-  let raw_user = Some(url.username())
-    .filter(|u| !u.is_empty())
-    .map(str::to_owned);
-  let user = raw_user.as_deref().map(decode);
-  let raw_password = url.password().map(str::to_owned);
-  let password = raw_password.as_deref().map(decode);
+  let user = Some(url.username()).filter(|u| !u.is_empty()).map(decode);
+  let password = url.password().map(decode);
   // Infallible for http(s) URLs with a host; a failure would keep the
   // credentials in the URL, so treat it as unusable rather than ignore it.
   if url.set_username("").is_err() || url.set_password(None).is_err() {
@@ -183,15 +188,13 @@ pub(crate) fn parse_proxy(raw: &str) -> Result<ParsedProxy, RunnerError> {
   Ok(ParsedProxy {
     url,
     user,
-    raw_user,
-    raw_password,
     password,
   })
 }
 
 fn build_proxy(raw: &str, cfg: &NetworkConfig) -> Result<Proxy, RunnerError> {
   let parsed = parse_proxy(raw)?;
-  let shown = redact_proxy_url(raw);
+  let shown = redact_url(raw);
   let mut proxy = Proxy::all(parsed.url.as_str())
     .map_err(|e| RunnerError::Config(format!("[network] proxy {shown}: {e}")))?;
   // The user may be empty (`http://:pw@proxy`) when a password is present.

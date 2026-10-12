@@ -54,8 +54,11 @@ ca_bundle = "~/certs/corp-root.pem"
   assert!(expected.is_absolute(), "{}", expected.display());
   assert_eq!(network.ca_bundle, Some(expected));
   let debug = format!("{:?}", cfg.network);
-  assert!(debug.contains("user:***@proxy.corp:3128"), "{debug}");
-  assert!(!debug.contains("pass@"), "Debug must redact: {debug}");
+  assert!(debug.contains(r#"proxy: Some("<set>")"#), "{debug}");
+  assert!(
+    !debug.contains("pass"),
+    "Debug must not print the proxy: {debug}"
+  );
 }
 
 /// A blank `ca_bundle` resolves to unset. (A blank `proxy` passes through

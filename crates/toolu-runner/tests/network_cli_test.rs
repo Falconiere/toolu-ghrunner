@@ -178,7 +178,7 @@ async fn check_probes_through_the_configured_proxy_and_reports_it_redacted() -> 
   assert!(
     stdout.contains(&format!(
       "[network]    proxy {} (config), no_proxy 1 entries, ca_bundle {} (1 certificates)",
-      proxy.url(Some("runner:***")),
+      proxy.url(Some("***")),
       bundle.display()
     )),
     "{stdout}"
@@ -239,7 +239,7 @@ async fn check_refuses_an_unusable_proxy_url_with_exit_2() -> FixtureResult<()> 
   let (code, stdout, stderr) = output(check).await?;
   assert_eq!(code, Some(2), "stdout:\n{stdout}\nstderr:\n{stderr}");
   assert!(
-    stderr.contains("[network] proxy ftp://u:***@x: scheme must be http or https"),
+    stderr.contains("[network] proxy ftp://***@x: scheme must be http or https"),
     "{stderr}"
   );
   assert!(!stderr.contains("pw94secret"), "{stderr}");

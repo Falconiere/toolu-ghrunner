@@ -8,7 +8,7 @@
 //! Two modes, decided by [`shared::NetworkConfig::proxy`]:
 //! - **env mode** (unset): clients keep reqwest's system proxy
 //!   (`HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` / `NO_PROXY`, upper case
-//!   first, `REQUEST_METHOD` disables them);
+//!   first, `REQUEST_METHOD` disables them), mirrored by [`ProxyEnv`];
 //! - **config mode** (set): the configured proxy for http and https
 //!   destinations, bypassing `no_proxy` plus [`LOOPBACK_BYPASS`]; the proxy
 //!   environment variables are ignored.
@@ -19,9 +19,11 @@
 
 mod client;
 mod config;
+pub mod proxy_env;
 mod secrets;
 mod step_env;
 
 pub use client::{LOOPBACK_BYPASS, client_builder, describe, proxy_configured};
+pub use proxy_env::{ProxyEnv, ProxyVar, redact_url, url_secrets};
 pub use secrets::proxy_secrets;
 pub use step_env::{StepNetworkEnv, step_env};

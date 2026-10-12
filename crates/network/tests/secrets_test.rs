@@ -83,7 +83,7 @@ fn describe_redacts_and_names_the_mode() -> Result<(), shared::RunnerError> {
     "{line}"
   );
   assert!(
-    line.contains("proxy http://alice:***@proxy.corp:3128 (config)"),
+    line.contains("proxy http://***@proxy.corp:3128 (config)"),
     "{line}"
   );
   assert!(line.contains("no_proxy 2 entries"), "{line}");
@@ -125,27 +125,28 @@ fn describe_with(set: &[(&'static str, &'static str)]) -> Result<String, shared:
 fn describe_env_mode_redacts_the_env_proxy() -> Result<(), shared::RunnerError> {
   assert_eq!(
     describe_with(&[("HTTPS_PROXY", "http://u:pw@p:1")])?,
-    "proxy http://u:***@p:1 (env)"
+    "proxy https http://***@p:1 (env HTTPS_PROXY), http direct"
   );
   Ok(())
 }
 
 #[test]
-fn describe_env_mode_falls_back_https_then_http_then_all() -> Result<(), shared::RunnerError> {
+fn describe_env_mode_reports_each_scheme_with_all_proxy_fallback() -> Result<(), shared::RunnerError>
+{
   let https = ("HTTPS_PROXY", "http://h:s@https-proxy:1");
   let http = ("HTTP_PROXY", "http://h:s@http-proxy:2");
   let all = ("ALL_PROXY", "http://h:s@all-proxy:3");
   assert_eq!(
     describe_with(&[https, http, all])?,
-    "proxy http://h:***@https-proxy:1 (env)"
+    "proxy https http://***@https-proxy:1 (env HTTPS_PROXY), http http://***@http-proxy:2 (env HTTP_PROXY)"
   );
   assert_eq!(
     describe_with(&[http, all])?,
-    "proxy http://h:***@http-proxy:2 (env)"
+    "proxy https http://***@all-proxy:3 (env ALL_PROXY), http http://***@http-proxy:2 (env HTTP_PROXY)"
   );
   assert_eq!(
     describe_with(&[all])?,
-    "proxy http://h:***@all-proxy:3 (env)"
+    "proxy http://***@all-proxy:3 (env ALL_PROXY)"
   );
   assert_eq!(describe_with(&[])?, "proxy none");
   Ok(())
@@ -163,7 +164,7 @@ fn describe_rejects_an_unusable_configured_proxy() {
   };
   assert_eq!(
     msg,
-    "[network] proxy ftp://u:***@x: scheme must be http or https"
+    "[network] proxy ftp://***@x: scheme must be http or https"
   );
 }
 

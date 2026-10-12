@@ -85,8 +85,8 @@ fn credentials_are_masked_and_repeat_passes_are_memoised() -> Result<(), RunnerE
   assert_eq!(
     captured.network_lines(),
     vec![
-      "proxy http://u:***@127.0.0.1:3128 (config), no_proxy 0 entries".to_owned(),
-      "proxy http://u:***@127.0.0.1:3129 (config), no_proxy 0 entries".to_owned(),
+      "proxy http://***@127.0.0.1:3128 (config), no_proxy 0 entries".to_owned(),
+      "proxy http://***@127.0.0.1:3129 (config), no_proxy 0 entries".to_owned(),
     ]
   );
   let line_out = masker
@@ -113,6 +113,6 @@ fn an_unusable_proxy_fails_closed_naming_the_setting() {
   };
   assert_eq!(
     msg,
-    "[network] proxy ftp://u:***@x: scheme must be http or https"
+    "[network] proxy ftp://***@x: scheme must be http or https"
   );
 }
