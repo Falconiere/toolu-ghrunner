@@ -21,7 +21,9 @@
 //!
 //! Read at runtime by `new()`. The harness compiles fine without
 //! them; the `live` feature only gates compilation, not runtime.
-//! Individual tests check the env vars up front and early-return.
+//! Every live test calls [`require_live_env`] first, which FAILS the
+//! test when they are absent: a live test that returns early reports a
+//! pass, and a lane that did not run is unverified, never coverage (#103).
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -36,6 +38,21 @@ mod api;
 /// User agent string sent to the GitHub API. Stable so request logs are
 /// filterable in the test repo's audit trail.
 const USER_AGENT: &str = "toolu-runner-live-tests";
+
+/// Fail — never skip — a live test whose credentials are absent or empty.
+///
+/// Live tests are `#[ignore]`d, so they only run when someone explicitly asks
+/// for the live lane; reaching here without credentials means that lane is
+/// UNVERIFIED, and an early `return` would have reported it as passing.
+pub fn require_live_env() {
+  for var in ["TOOLU_RUNNER_LIVE_TOKEN", "TOOLU_RUNNER_LIVE_REPO"] {
+    let present = std::env::var(var).is_ok_and(|value| !value.trim().is_empty());
+    assert!(
+      present,
+      "UNVERIFIED: {var} is not set; a live test without credentials is not coverage"
+    );
+  }
+}
 
 /// Default branch assumed for workflow dispatch. Override via
 /// `TOOLU_RUNNER_LIVE_BRANCH` if the test repo uses a different default.
@@ -58,8 +75,7 @@ fn workspace_root() -> PathBuf {
 /// Resolved path to the `toolu-runner` binary after `cargo build`.
 fn binary_path() -> PathBuf {
   let target = std::env::var("CARGO_TARGET_DIR")
-    .map(PathBuf::from)
-    .unwrap_or_else(|_| workspace_root().join("target"));
+    .map_or_else(|_| workspace_root().join("target"), PathBuf::from);
   target.join("debug").join("toolu-runner")
 }
 
@@ -145,13 +161,13 @@ impl LiveHarness {
   }
 
   /// Base URL for the GitHub REST API.
-  fn api_base(&self) -> String {
-    "https://api.github.com".to_owned()
+  fn api_base() -> &'static str {
+    "https://api.github.com"
   }
 
   /// Build a configured `reqwest::Client`. One client per harness so
   /// the connection pool is reused across the API calls a test makes.
-  fn http(&self) -> Result<reqwest::Client, Box<dyn std::error::Error>> {
+  fn http() -> Result<reqwest::Client, Box<dyn std::error::Error>> {
     Ok(
       reqwest::Client::builder()
         .user_agent(USER_AGENT)
@@ -214,7 +230,7 @@ impl LiveHarness {
   /// child holds the single-job `.lock` and exits after the first job
   /// completes (or fails). Caller is responsible for waiting on the
   /// child and asserting its exit code.
-  pub async fn run_once(&self) -> Result<Child, Box<dyn std::error::Error>> {
+  pub fn run_once(&self) -> Result<Child, Box<dyn std::error::Error>> {
     let config_path = self
       .config_path()
       .to_str()

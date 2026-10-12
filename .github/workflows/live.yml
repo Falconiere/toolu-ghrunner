@@ -8,7 +8,20 @@ jobs:
   live:
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' }}
+    # Job-level so every step's `if:` can see them. (A step-level `env:` is
+    # invisible to that step's own `if:`, which is how this lane used to skip
+    # every day and still conclude success.)
+    env:
+      TOOLU_RUNNER_LIVE_TOKEN: ${{ secrets.TOOLU_RUNNER_LIVE_TOKEN }}
+      TOOLU_RUNNER_LIVE_REPO: ${{ vars.TOOLU_RUNNER_LIVE_REPO || 'Falconiere/toolu-runner-test' }}
     steps:
+      # A live lane that did not run is UNVERIFIED, not green (#103). Fail
+      # before the build so a missing secret costs seconds and reads plainly.
+      - name: Require live credentials
+        if: ${{ env.TOOLU_RUNNER_LIVE_TOKEN == '' }}
+        run: |
+          echo "::error::UNVERIFIED: TOOLU_RUNNER_LIVE_TOKEN is not set, so the live lane did not run; this is not coverage"
+          exit 1
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.94.1
         with:
@@ -16,11 +29,4 @@ jobs:
       - name: Build with --features live
         run: cargo build -p toolu-runner --features live --tests
       - name: Live tests (github.com)
-        if: ${{ env.TOOLU_RUNNER_LIVE_TOKEN != '' }}
-        env:
-          TOOLU_RUNNER_LIVE_TOKEN: ${{ secrets.TOOLU_RUNNER_LIVE_TOKEN }}
-          TOOLU_RUNNER_LIVE_REPO: ${{ vars.TOOLU_RUNNER_LIVE_REPO || 'Falconiere/toolu-runner-test' }}
         run: cargo test -p toolu-runner --features live -- --ignored --test-threads=1
-      - name: Live tests skipped (no token)
-        if: ${{ env.TOOLU_RUNNER_LIVE_TOKEN == '' }}
-        run: echo "::warning::TOOLU_RUNNER_LIVE_TOKEN is not set; skipping live tests"

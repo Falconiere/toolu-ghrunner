@@ -3,7 +3,7 @@
 //! a token (AC-1, manual).
 //!
 //! Mirrors `tests/live_e2e.rs`: gated behind `#![cfg(feature = "live")]`,
-//! reuses the shared `LiveHarness`, the `require_live_env!` gate, and the
+//! reuses the shared `LiveHarness`, the failing `harness::require_live_env` gate, and the
 //! `TOOLU_RUNNER_LIVE_TOKEN` / `TOOLU_RUNNER_LIVE_REPO` env contract.
 //!
 //! These compile under `cargo test --features live --no-run` with no live
@@ -26,20 +26,6 @@ use tokio::process::Command;
 mod harness;
 
 use harness::LiveHarness;
-
-/// Skip the test with a clear message if the live env vars are missing.
-macro_rules! require_live_env {
-  () => {
-    if std::env::var("TOOLU_RUNNER_LIVE_TOKEN").is_err()
-      || std::env::var("TOOLU_RUNNER_LIVE_REPO").is_err()
-    {
-      eprintln!(
-        "skipping live login test: set TOOLU_RUNNER_LIVE_TOKEN and TOOLU_RUNNER_LIVE_REPO to run"
-      );
-      return;
-    }
-  };
-}
 
 /// Seed the File-backed token store next to the harness's `config.toml`
 /// with `access_token` for github.com. `register` (invoked without
@@ -97,7 +83,7 @@ async fn register_without_token(harness: &LiveHarness) -> Output {
 #[tokio::test]
 #[ignore = "live test — requires TOOLU_RUNNER_LIVE_TOKEN + keyless File store"]
 async fn register_reuses_stored_token() {
-  require_live_env!();
+  harness::require_live_env();
   let harness = LiveHarness::new().await.expect("harness init");
   let _cleanup = harness.cleanup(&[]).await;
 
@@ -124,7 +110,7 @@ async fn register_reuses_stored_token() {
 #[tokio::test]
 #[ignore = "live test — requires TOOLU_RUNNER_LIVE_TOKEN + keyless File store"]
 async fn register_bad_stored_token_maps_to_login_hint() {
-  require_live_env!();
+  harness::require_live_env();
   let harness = LiveHarness::new().await.expect("harness init");
   let _cleanup = harness.cleanup(&[]).await;
 
@@ -160,7 +146,7 @@ async fn register_bad_stored_token_maps_to_login_hint() {
 #[tokio::test]
 #[ignore = "manual: interactive device-flow login, needs a real OAuth App client_id"]
 async fn device_flow_login_stores_token() {
-  require_live_env!();
+  harness::require_live_env();
   let harness = LiveHarness::new().await.expect("harness init");
 
   // Drive the real `login` command: prints a code, opens the browser,

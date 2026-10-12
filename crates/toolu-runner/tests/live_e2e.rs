@@ -34,66 +34,20 @@ use harness::LiveHarness;
 
 const NOOP_FIXTURE: &str = include_str!("fixtures/noop-workflow.yml");
 
-/// Workflow for the expression test: interpolates `inputs.*` and
-/// `github.*` contexts into step env and asserts they are non-empty.
-const EXPRESSION_YAML: &str = r#"
-name: expression
-on:
-  workflow_dispatch:
-    inputs:
-      who:
-        description: 'Who to greet'
-        required: true
-        default: 'world'
-jobs:
-  greet:
-    runs-on: [self-hosted, toolu-runner-v1]
-    steps:
-      - name: echo interpolated values
-        env:
-          WHO: ${{ inputs.who }}
-          REPO: ${{ github.repository }}
-          SHA: ${{ github.sha }}
-        run: |
-          echo "hello $WHO from $REPO @ $SHA"
-          test -n "$REPO"
-          test -n "$SHA"
-"#;
-
-/// Skip the test with a clear message if the live env vars are missing.
-macro_rules! require_live_env {
-  () => {
-    if std::env::var("TOOLU_RUNNER_LIVE_TOKEN").is_err()
-      || std::env::var("TOOLU_RUNNER_LIVE_REPO").is_err()
-    {
-      eprintln!(
-        "skipping live test: set TOOLU_RUNNER_LIVE_TOKEN and TOOLU_RUNNER_LIVE_REPO to run"
-      );
-      return;
-    }
-  };
-}
+/// Typed-input workflow for the expression test: asserts the exact
+/// dispatched values, so the empty-input dispatch must fail.
+const EXPRESSION_YAML: &str = include_str!("fixtures/expression-workflow.yml");
+/// Multi-step workflow with a real `docker://` container action.
+const MULTISTEP_YAML: &str = include_str!("fixtures/multistep-workflow.yml");
+/// Checkout-only workflow for action resolution.
+const ACTION_RESOLUTION_YAML: &str = include_str!("fixtures/action-resolution-workflow.yml");
+/// Long-sleep workflow cancelled from the GitHub side.
+const CANCEL_YAML: &str = include_str!("fixtures/cancel-workflow.yml");
 
 /// Workflow for the journal test (AC-1/AC-2): two named steps, a
 /// `::warning::` annotation, and a token-probe step that echoes
 /// `$ACTIONS_RUNTIME_TOKEN` — the journal must show it masked.
-const JOURNAL_YAML: &str = r#"
-name: journal-fixture
-on:
-  workflow_dispatch:
-jobs:
-  build:
-    runs-on: [self-hosted, toolu-runner-v1]
-    steps:
-      - name: greet
-        run: |
-          echo hello from step one
-          echo "::warning file=demo.txt,line=3::deprecated feature"
-      - name: token probe
-        run: echo "token-probe=[$ACTIONS_RUNTIME_TOKEN]"
-      - name: farewell
-        run: echo done from step two
-"#;
+const JOURNAL_YAML: &str = include_str!("fixtures/journal-workflow.yml");
 
 /// Wait for `child` to exit and return its `ExitStatus`. Used after
 /// `run_once` so the child doesn't outlive the test process. The
@@ -136,7 +90,7 @@ fn assert_config_shape(cfg: &RunnerRegistrationConfig, repo: &str) {
   );
 }
 
-/// AC #1b assertions: `credentials.json` stores the runner's client_id
+/// AC #1b assertions: `credentials.json` stores the runner's `client_id`
 /// (a UUID — the stable, non-secret identity lifted from the minted JIT
 /// config; the real OAuth token is exchanged at `run` time) and an
 /// RFC3339 `issued_at`.
@@ -155,7 +109,7 @@ fn assert_credentials_shape(creds: &CredentialsFile) {
 #[tokio::test]
 #[ignore = "live test — requires TOOLU_RUNNER_LIVE_TOKEN"]
 async fn register_creates_config_and_credentials() {
-  require_live_env!();
+  harness::require_live_env();
   let harness = LiveHarness::new().await.expect("harness init");
 
   // Register against the test repo. The harness always passes
@@ -192,7 +146,7 @@ async fn register_creates_config_and_credentials() {
 #[tokio::test]
 #[ignore = "live test — requires TOOLU_RUNNER_LIVE_TOKEN"]
 async fn register_replace_overwrites_existing() {
-  require_live_env!();
+  harness::require_live_env();
   let harness = LiveHarness::new().await.expect("harness init");
 
   // First registration.
@@ -235,7 +189,7 @@ async fn register_replace_overwrites_existing() {
 #[tokio::test]
 #[ignore = "live test — requires TOOLU_RUNNER_LIVE_TOKEN"]
 async fn noop_job_completes() {
-  require_live_env!();
+  harness::require_live_env();
   let harness = LiveHarness::new().await.expect("harness init");
   let workflow = "noop-live.yml";
   let _cleanup = harness.cleanup(&[workflow]).await;
@@ -248,7 +202,7 @@ async fn noop_job_completes() {
 
   // Spawn the runner before triggering so the listener picks up the
   // job as soon as GH sees the workflow_dispatch event.
-  let child = harness.run_once().await.expect("spawn run --once");
+  let child = harness.run_once().expect("spawn run --once");
   let run_id = harness
     .trigger_workflow(workflow)
     .await
@@ -278,33 +232,18 @@ async fn noop_job_completes() {
 #[tokio::test]
 #[ignore = "live test — requires TOOLU_RUNNER_LIVE_TOKEN"]
 async fn multi_step_job() {
-  require_live_env!();
+  harness::require_live_env();
   let harness = LiveHarness::new().await.expect("harness init");
   let workflow = "multistep-live.yml";
   let _cleanup = harness.cleanup(&[workflow]).await;
 
   harness.register().await.expect("register");
-  let yaml = r#"
-name: multistep
-on:
-  workflow_dispatch:
-jobs:
-  hello:
-    runs-on: [self-hosted, toolu-runner-v1]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - name: alpine via docker
-        run: echo "hello from a step that pulls docker://alpine:3.19"
-"#;
   harness
-    .push_workflow(workflow, yaml)
+    .push_workflow(workflow, MULTISTEP_YAML)
     .await
     .expect("push multistep workflow");
 
-  let child = harness.run_once().await.expect("spawn run --once");
+  let child = harness.run_once().expect("spawn run --once");
   let run_id = harness
     .trigger_workflow(workflow)
     .await
@@ -327,7 +266,7 @@ jobs:
 #[tokio::test]
 #[ignore = "live test — requires TOOLU_RUNNER_LIVE_TOKEN"]
 async fn journal_records_live_job_masked() {
-  require_live_env!();
+  harness::require_live_env();
   let harness = LiveHarness::new().await.expect("harness init");
   let workflow = "journal-live.yml";
   let _cleanup = harness.cleanup(&[workflow]).await;
@@ -338,7 +277,7 @@ async fn journal_records_live_job_masked() {
     .await
     .expect("push journal workflow");
 
-  let child = harness.run_once().await.expect("spawn run --once");
+  let child = harness.run_once().expect("spawn run --once");
   let run_id = harness
     .trigger_workflow(workflow)
     .await
@@ -351,7 +290,7 @@ async fn journal_records_live_job_masked() {
   assert_eq!(conclusion, "success", "journal fixture run should succeed");
 
   // AC-1: exactly one journal, every line v1, seq strict, full lifecycle.
-  let body = read_single_live_journal(&harness);
+  let body = read_single_live_journal(&harness).expect("read the single live journal");
   let lines: Vec<JournalLine> = body
     .lines()
     .map(|l| serde_json::from_str::<JournalLine>(l).expect("every journal line parses as v1"))
@@ -380,11 +319,10 @@ async fn journal_records_live_job_masked() {
 
 /// Locate the run's `_diag/jobs` dir via the persisted config and return
 /// the single journal's raw body.
-fn read_single_live_journal(harness: &LiveHarness) -> String {
-  let cfg = load_reg_config(&harness.config_dir.path().join("config.toml")).expect("load config");
-  let data_dir = config::config::resolve_data_dir(&cfg.runtime.data_dir).expect("resolve data dir");
-  let journals: Vec<_> = std::fs::read_dir(data_dir.join("_diag").join("jobs"))
-    .expect("jobs dir exists after a live run")
+fn read_single_live_journal(harness: &LiveHarness) -> Result<String, Box<dyn std::error::Error>> {
+  let cfg = load_reg_config(&harness.config_dir.path().join("config.toml"))?;
+  let data_dir = config::config::resolve_data_dir(&cfg.runtime.data_dir)?;
+  let journals: Vec<_> = std::fs::read_dir(data_dir.join("_diag").join("jobs"))?
     .filter_map(Result::ok)
     .map(|e| e.path())
     .collect();
@@ -393,7 +331,8 @@ fn read_single_live_journal(harness: &LiveHarness) -> String {
     1,
     "single-job run writes exactly one journal: {journals:?}"
   );
-  std::fs::read_to_string(journals.first().expect("journal path")).expect("read journal")
+  let journal = journals.first().ok_or("journal path")?;
+  Ok(std::fs::read_to_string(journal)?)
 }
 
 /// AC-1 lifecycle assertions over a parsed live journal.
@@ -425,33 +364,18 @@ fn assert_journal_lifecycle(lines: &[JournalLine]) {
 #[tokio::test]
 #[ignore = "live test — requires TOOLU_RUNNER_LIVE_TOKEN"]
 async fn action_resolution() {
-  require_live_env!();
+  harness::require_live_env();
   let harness = LiveHarness::new().await.expect("harness init");
   let workflow = "action-resolution-live.yml";
   let _cleanup = harness.cleanup(&[workflow]).await;
 
   harness.register().await.expect("register");
-  let yaml = r#"
-name: action-resolution
-on:
-  workflow_dispatch:
-jobs:
-  resolve:
-    runs-on: [self-hosted, toolu-runner-v1]
-    steps:
-      - name: checkout via actions/checkout
-        uses: actions/checkout@v4
-      - name: verify checkout succeeded
-        run: |
-          test -f README.md || test -f readme.md || test -d .git
-          echo "checkout step ran"
-"#;
   harness
-    .push_workflow(workflow, yaml)
+    .push_workflow(workflow, ACTION_RESOLUTION_YAML)
     .await
     .expect("push action-resolution workflow");
 
-  let child = harness.run_once().await.expect("spawn run --once");
+  let child = harness.run_once().expect("spawn run --once");
   let run_id = harness
     .trigger_workflow(workflow)
     .await
@@ -472,7 +396,7 @@ jobs:
 #[tokio::test]
 #[ignore = "live test — requires TOOLU_RUNNER_LIVE_TOKEN"]
 async fn expression_evaluation() {
-  require_live_env!();
+  harness::require_live_env();
   let harness = LiveHarness::new().await.expect("harness init");
   let workflow = "expression-live.yml";
   let _cleanup = harness.cleanup(&[workflow]).await;
@@ -483,52 +407,46 @@ async fn expression_evaluation() {
     .await
     .expect("push expression workflow");
 
-  let child = harness.run_once().await.expect("spawn run --once");
-  let run_id = harness
-    .trigger_workflow(workflow)
-    .await
-    .expect("trigger workflow");
-
-  let conclusion = harness
-    .wait_for_run(run_id, Duration::from_secs(300))
-    .await
-    .expect("wait for run");
-
-  let _ = wait_child(child).await;
-  assert_eq!(
-    conclusion, "success",
-    "expression run should conclude with success; got {conclusion}"
-  );
+  // The fixture asserts the exact typed inputs, so the defaults must pass and
+  // an empty `who` must fail the job: a dropped or empty input cannot stay green.
+  for (inputs, expected) in [
+    (serde_json::json!({}), "success"),
+    (serde_json::json!({"who": ""}), "failure"),
+  ] {
+    let child = harness.run_once().expect("spawn run --once");
+    let run_id = harness
+      .trigger_workflow_with_inputs(workflow, inputs.clone())
+      .await
+      .expect("trigger workflow");
+    let conclusion = harness
+      .wait_for_run(run_id, Duration::from_secs(300))
+      .await
+      .expect("wait for run");
+    let _ = wait_child(child).await;
+    assert_eq!(
+      conclusion, expected,
+      "expression run with inputs {inputs} should conclude {expected}; got {conclusion}"
+    );
+    // `run --once` consumed the single-use JIT registration.
+    harness.register().await.expect("re-register");
+  }
 }
 
 #[tokio::test]
 #[ignore = "live test — requires TOOLU_RUNNER_LIVE_TOKEN"]
 async fn cancel_by_github() {
-  require_live_env!();
+  harness::require_live_env();
   let harness = LiveHarness::new().await.expect("harness init");
   let workflow = "cancel-live.yml";
   let _cleanup = harness.cleanup(&[workflow]).await;
 
   harness.register().await.expect("register");
-  // 5-minute sleep so the runner is guaranteed to be in-flight when
-  // we cancel from the GH API side.
-  let yaml = r#"
-name: cancel
-on:
-  workflow_dispatch:
-jobs:
-  long:
-    runs-on: [self-hosted, toolu-runner-v1]
-    steps:
-      - name: long sleep
-        run: sleep 300
-"#;
   harness
-    .push_workflow(workflow, yaml)
+    .push_workflow(workflow, CANCEL_YAML)
     .await
     .expect("push cancel workflow");
 
-  let child = harness.run_once().await.expect("spawn run --once");
+  let child = harness.run_once().expect("spawn run --once");
   let run_id = harness
     .trigger_workflow(workflow)
     .await
@@ -554,14 +472,14 @@ jobs:
 #[tokio::test]
 #[ignore = "live test — requires TOOLU_RUNNER_LIVE_TOKEN"]
 async fn concurrent_single_job() {
-  require_live_env!();
+  harness::require_live_env();
   let harness = LiveHarness::new().await.expect("harness init");
   let _cleanup = harness.cleanup(&[]).await;
 
   harness.register().await.expect("register");
 
   // Start the first `run --once`; it polls until a job arrives.
-  let mut first = harness.run_once().await.expect("spawn first run --once");
+  let mut first = harness.run_once().expect("spawn first run --once");
 
   // Give the first process a moment to acquire the .lock.
   tokio::time::sleep(Duration::from_secs(2)).await;

@@ -1,0 +1,10 @@
+# Pushed by live_e2e.rs::cancel_by_github.
+name: cancel
+on:
+  workflow_dispatch:
+jobs:
+  long:
+    runs-on: [self-hosted, toolu-runner-v1]
+    steps:
+      - name: long sleep
+        run: sleep 300

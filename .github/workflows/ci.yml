@@ -43,6 +43,7 @@ jobs:
           cargo test -p execution --test docker_action_linux_test -- --ignored --test-threads=1
           cargo test -p execution --test step_metadata_test -- --ignored --test-threads=1
           cargo test -p execution --test node_container_test -- --ignored --test-threads=1
+          cargo test -p execution --test compat_probe_replay_test -- --ignored --test-threads=1
       - name: Protocol crate is sync + I/O-free (AC #22)
         run: |
           if cargo tree -p protocol | grep -qE 'reqwest|tokio|opendal|bollard|axum'; then
@@ -58,7 +59,7 @@ jobs:
         # fails here exactly as it does in a clean sandbox today — a gap for
         # a later step to close, not this one.
         run: |
-          for t in assert_version changelog_extract package_release release_workflow release_finalize_workflow generate_homebrew_formula release_homebrew_workflow release_image_workflow release_macos_image_workflow macos_entrypoint docker_entrypoint release_pr_workflow release_pr_script code_review_workflow ci_workflow check_script daemon_live_workflow daemon_systemd; do
+          for t in assert_version changelog_extract package_release release_workflow release_finalize_workflow generate_homebrew_formula release_homebrew_workflow release_image_workflow release_macos_image_workflow macos_entrypoint docker_entrypoint release_pr_workflow release_pr_script code_review_workflow ci_workflow check_script daemon_live_workflow daemon_systemd live_lane; do
             bash "scripts/test/${t}_test.sh"
           done
       # Committed #88 captures stay sanitized and hash-pinned, and the #88
@@ -68,6 +69,18 @@ jobs:
         run: |
           python3 scripts/test/completejob_evidence_check.py --local
           python3 scripts/test/completejob_evidence_check.py --docs
+      # #103: the epic-wide acceptance matrix stays consistent with the code
+      # (every mapped test is a real test fn, every status carries evidence or
+      # a reason, the Markdown view is current), the recorded reference-lane
+      # report re-verifies against its pinned captures, and the evidence
+      # tooling's own tests pass. Live lanes are recorded, never re-run here.
+      - name: Compatibility evidence (#103)
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          python3 scripts/test/compat_matrix_check.py --check
+          python3 scripts/test/reference_compare.py --verify docs/compat-reference-103.json
+          python3 -m unittest scripts/test/test_compat_matrix_check.py scripts/test/test_sanitize_capture.py scripts/test/test_reference_compare.py
 
   # The OS-dependent half of the gate on a real macOS host. Formatting, the
   # #[allow] ban and the guardrail structure checks are OS-independent and stay
