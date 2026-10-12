@@ -416,6 +416,54 @@ printf composite-verified > composite-registry-verified
   Ok(())
 }
 
+#[tokio::test]
+#[ignore = "requires Linux, real Docker, and a daemon-shared test root"]
+async fn malformed_env_from_a_container_main_fails_the_step() -> TestResult {
+  let root = linux_root()?;
+  let config = config_for(root.path());
+  let mut job = captured_job()?;
+  let workspace = config.workspace_root.join(&job.job_id);
+  seed_probe(&workspace, "probe-96", "action.yml").await?;
+  job.steps = vec![local_step(
+    "docker_96",
+    "./.github/actions/probe-96",
+    &[("marker", "D96"), ("malformed_env", "OK=1\\nN<<EOF\\nv\\n")],
+  )];
+
+  let events = collect_job(config, job, CancellationToken::new()).await?;
+  let errors: Vec<&str> = events
+    .iter()
+    .filter_map(|event| match event {
+      RunnerEvent::Annotation {
+        step_id,
+        level: AnnotationLevel::Error,
+        message,
+        ..
+      } if step_id == "docker_96" => Some(message.as_str()),
+      _ => None,
+    })
+    .collect();
+  assert_eq!(
+    errors,
+    [
+      "Unable to process file command 'env' successfully.",
+      "Invalid value. Matching delimiter not found 'EOF'"
+    ],
+    "{events:#?}"
+  );
+  let step = events.iter().find_map(|event| match event {
+    RunnerEvent::StepCompleted {
+      step_id,
+      conclusion,
+      ..
+    } if step_id == "docker_96" => Some(*conclusion),
+    _ => None,
+  });
+  assert_eq!(step, Some(Conclusion::Failure), "{events:#?}");
+  assert_eq!(job_conclusion(&events), Some(Conclusion::Failure));
+  Ok(())
+}
+
 #[path = "../src/execution/tests/docker_action_lifecycle.rs"]
 mod lifecycle;
 

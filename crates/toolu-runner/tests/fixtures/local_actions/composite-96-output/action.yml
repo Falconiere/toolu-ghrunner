@@ -1,0 +1,27 @@
+name: composite-96-output
+description: Real composite run step writing a file-command body (issue 96).
+inputs:
+  target:
+    description: ENV or OUTPUT
+    required: true
+  body:
+    description: printf format appended to the target file
+    required: true
+runs:
+  using: composite
+  steps:
+    - id: write
+      shell: bash
+      env:
+        TARGET: ${{ inputs.target }}
+        BODY: ${{ inputs.body }}
+      run: |
+        if [ "$TARGET" = ENV ]; then file=$GITHUB_ENV; else file=$GITHUB_OUTPUT; fi
+        printf "$BODY" >> "$file"
+    - id: after
+      shell: bash
+      run: printf 'CMP96|after|%s\n' "${NODE_OPTIONS-<unset>}"
+    - id: cleanup
+      if: always()
+      shell: bash
+      run: printf 'CMP96|cleanup\n'

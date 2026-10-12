@@ -9,7 +9,7 @@ use super::super::context::ExecutionContext;
 use super::super::file_commands::{FileCommandManager, create_file_command_dir};
 use super::super::handlers::script::{ScriptHandler, ScriptParams};
 use super::super::process_dispatch::{dispatcher, stream_process};
-use super::super::step_env::apply_file_commands_and_merge_outputs;
+use super::super::step_env::{FileCommandScope, apply_file_commands_and_merge_outputs};
 use super::JobCtx;
 
 /// Run the shell child and stream-dispatch its stdout concurrently.
@@ -49,22 +49,23 @@ pub(super) async fn run_and_dispatch_script(
 /// by the streaming dispatcher) with its `$GITHUB_OUTPUT` file-command outputs
 /// into one step-outputs map. Thin wrapper over the shared
 /// [`apply_file_commands_and_merge_outputs`], which also applies the step's
-/// `$GITHUB_ENV`/`$GITHUB_PATH` file commands to `ctx`.
+/// `$GITHUB_ENV`/`$GITHUB_PATH` file commands to `ctx` and reports whether a
+/// file command failed the step.
 pub(super) async fn merge_step_outputs(
   step: &ActionStep,
   stdout_outputs: HashMap<String, String>,
   file_cmds: &FileCommandManager,
   ctx: &mut ExecutionContext,
-) -> HashMap<String, String> {
-  apply_file_commands_and_merge_outputs(
-    &step.id,
-    step.expression_name(),
-    None,
-    stdout_outputs,
-    file_cmds,
-    ctx,
-  )
-  .await
+  events: &mpsc::Sender<RunnerEvent>,
+) -> (HashMap<String, String>, bool) {
+  let scope = FileCommandScope {
+    step_id: &step.id,
+    expression_name: step.expression_name(),
+    state_id: None,
+    report_id: &step.id,
+    events,
+  };
+  apply_file_commands_and_merge_outputs(&scope, stdout_outputs, file_cmds, ctx).await
 }
 
 /// Build process env from the caller's already-resolved step overlay and job

@@ -58,7 +58,37 @@ pub struct FileCommandResults {
   pub path_additions: Vec<String>,
   /// State saved via `GITHUB_STATE`, for the action's post step.
   pub state: HashMap<String, String>,
+  /// Commands that could not be processed, in upstream order; each fails
+  /// its step. Pairs read before the error are still in the maps above.
+  pub failures: Vec<FileCommandFailure>,
+  /// Whether `GITHUB_ENV` tried to set the blocked `NODE_OPTIONS`.
+  pub blocked_env: bool,
 }
+
+/// One file command that could not be processed. Upstream reports it as two
+/// errors and fails the step (`FileCommandManager.ProcessFiles`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileCommandFailure {
+  /// Upstream `ContextName`: `path`, `env`, `state` or `output`.
+  pub command: &'static str,
+  /// The parser or I/O message.
+  pub message: String,
+}
+
+impl FileCommandFailure {
+  /// Upstream's first error line for this command.
+  pub fn summary(&self) -> String {
+    format!(
+      "Unable to process file command '{}' successfully.",
+      self.command
+    )
+  }
+}
+
+/// Upstream's error for a `GITHUB_ENV` write of the blocked `NODE_OPTIONS`.
+/// It is reported without failing the step.
+pub const BLOCKED_ENV_MESSAGE: &str =
+  "Can't store NODE_OPTIONS output parameter using '$GITHUB_ENV' command.";
 
 impl FileCommandManager {
   /// Create temp files for all file commands.
@@ -120,40 +150,51 @@ impl FileCommandManager {
     Ok((mgr, env_map))
   }
 
-  /// Read environment, output, path, and state files after a step. The four synchronous
-  /// reads run as one task on Tokio's blocking pool.
+  /// Read and parse the path, environment, state and output files after a
+  /// step. The four synchronous reads run as one task on Tokio's blocking
+  /// pool. Each command is processed on its own, as upstream does: a
+  /// malformed or unreadable file lands in `failures` without discarding the
+  /// other commands or the pairs read before the error.
   ///
   /// # Errors
   ///
-  /// Returns `RunnerError::Io` if reading files fails, or
-  /// `RunnerError::FileCommand` if the blocking task cannot be joined.
+  /// Returns `RunnerError::FileCommand` if the blocking task cannot be joined.
   pub async fn process(&self) -> Result<FileCommandResults, RunnerError> {
     let paths = [
-      self.env_path.clone(),
-      self.output_path.clone(),
       self.path_path.clone(),
+      self.env_path.clone(),
       self.state_path.clone(),
+      self.output_path.clone(),
     ];
-    let (env_content, output_content, path_content, state_content) =
+    let [path_read, env_read, state_read, output_read] =
       run_blocking_file_io("file-command file read", move || {
-        let [env_path, output_path, path_path, state_path] = paths;
-        Ok((
-          std::fs::read_to_string(env_path)?,
-          std::fs::read_to_string(output_path)?,
-          std::fs::read_to_string(path_path)?,
-          std::fs::read_to_string(state_path)?,
-        ))
+        Ok(paths.map(|path| read_command_file(&path)))
       })
       .await?;
 
-    let mut env_vars = parse_env_file(&env_content);
-    strip_blocked_env(&mut env_vars);
+    let mut failures = Vec::new();
+    let path_additions = match path_read {
+      Ok(content) => parse_path_file(&content),
+      Err(message) => {
+        failures.push(FileCommandFailure {
+          command: "path",
+          message,
+        });
+        Vec::new()
+      },
+    };
+    let mut env_vars = parse_kv_command("env", env_read, &mut failures);
+    let blocked_env = strip_blocked_env(&mut env_vars);
+    let state = parse_kv_command("state", state_read, &mut failures);
+    let outputs = parse_kv_command("output", output_read, &mut failures);
 
     Ok(FileCommandResults {
       env_vars,
-      outputs: parse_output_file(&output_content),
-      path_additions: parse_path_file(&path_content),
-      state: parse_kv_file(&state_content),
+      outputs,
+      path_additions,
+      state,
+      failures,
+      blocked_env,
     })
   }
 
@@ -183,27 +224,18 @@ impl FileCommandManager {
 }
 
 /// Strip env keys the runner refuses to propagate from a `$GITHUB_ENV`
-/// read-back. Today that is `NODE_OPTIONS` (case-insensitive): node children
-/// honor it (e.g. `--require`), so letting a `run:` step set it via
-/// `$GITHUB_ENV` would inject a preload into every later node action — the one
-/// env guard the runner enforces. Applied to BOTH the top-level file-command
-/// read-back and the composite `$GITHUB_ENV` read-back.
-pub fn strip_blocked_env<S: ::std::hash::BuildHasher>(env: &mut HashMap<String, String, S>) {
+/// read-back and report whether one was present. Today that is
+/// `NODE_OPTIONS` (case-insensitive), upstream's `SetEnvFileCommand` block
+/// list: node children honor it (e.g. `--require`), so letting a `run:` step
+/// set it would inject a preload into every later node action. Applied to
+/// BOTH the top-level file-command read-back and the composite `$GITHUB_ENV`
+/// read-back.
+pub fn strip_blocked_env<S: ::std::hash::BuildHasher>(
+  env: &mut HashMap<String, String, S>,
+) -> bool {
+  let before = env.len();
   env.retain(|k, _| !k.eq_ignore_ascii_case("NODE_OPTIONS"));
-}
-
-/// Parse a `GITHUB_ENV` file. Supports `KEY=VALUE` and heredoc `KEY<<DELIM`.
-///
-/// Splits on first `=` only (values may contain `=`).
-/// Handles both `\r\n` and `\n` line endings.
-/// Skips blank lines.
-pub fn parse_env_file(content: &str) -> HashMap<String, String> {
-  parse_kv_file(content)
-}
-
-/// Parse a `GITHUB_OUTPUT` file (same format as env).
-pub fn parse_output_file(content: &str) -> HashMap<String, String> {
-  parse_kv_file(content)
+  env.len() != before
 }
 
 /// Parse a `GITHUB_PATH` file — one path per line.
@@ -216,59 +248,143 @@ pub fn parse_path_file(content: &str) -> Vec<String> {
     .collect()
 }
 
-fn parse_kv_file(content: &str) -> HashMap<String, String> {
-  let mut result = HashMap::new();
-  let lines: Vec<&str> = content.split('\n').collect();
-  let mut i = 0;
+/// Read one command file the way upstream's `File.ReadAllText` does: a
+/// missing file is empty, a UTF-8 BOM is dropped and invalid UTF-8 is
+/// replaced rather than rejected. Any other I/O error is the command's
+/// failure message.
+pub(crate) fn read_command_file(path: &Path) -> Result<String, String> {
+  match std::fs::read(path) {
+    Ok(bytes) => {
+      let body = bytes.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(&bytes);
+      Ok(String::from_utf8_lossy(body).into_owned())
+    },
+    Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+    Err(error) => Err(format!(
+      "Unable to read file command file '{}': {error}",
+      path.display()
+    )),
+  }
+}
 
-  while i < lines.len() {
-    let line = lines
-      .get(i)
-      .copied()
-      .unwrap_or_default()
-      .trim_end_matches('\r');
-    i += 1;
+/// Parse one read `KEY=VALUE` command file, recording its failure (an I/O or
+/// parser message) under `command` while keeping the pairs read before it.
+pub(crate) fn parse_kv_command(
+  command: &'static str,
+  read: Result<String, String>,
+  failures: &mut Vec<FileCommandFailure>,
+) -> HashMap<String, String> {
+  let (pairs, error) = match read {
+    Ok(content) => {
+      let file = parse_kv_file(&content);
+      (file.pairs, file.error)
+    },
+    Err(message) => (HashMap::new(), Some(message)),
+  };
+  if let Some(message) = error {
+    failures.push(FileCommandFailure { command, message });
+  }
+  pairs
+}
 
+/// A parsed `GITHUB_ENV` / `GITHUB_OUTPUT` / `GITHUB_STATE` file.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct KvFile {
+  /// Pairs read before the first error; a repeated name keeps its last value.
+  pub pairs: HashMap<String, String>,
+  /// Upstream's message for the first malformed entry, if any.
+  pub error: Option<String>,
+}
+
+/// Parse `NAME=VALUE` and heredoc `NAME<<DELIMITER` entries exactly like
+/// upstream `EnvFileKeyValuePairs` on Linux and macOS: lines split on LF only
+/// (a CR stays part of names, values and delimiters), only zero-length lines
+/// are skipped, and parsing stops at the first malformed entry. An empty
+/// plain name fails too: upstream has that message but checks the line
+/// instead of the name, and issue #96 requires the failure.
+pub fn parse_kv_file(content: &str) -> KvFile {
+  let mut file = KvFile::default();
+  let mut lines = Lines {
+    text: content,
+    index: 0,
+  };
+  while let Some((line, _)) = lines.next_line() {
     if line.is_empty() {
       continue;
     }
+    match parse_entry(line, &mut lines) {
+      Ok((key, value)) => {
+        file.pairs.insert(key, value);
+      },
+      Err(message) => {
+        file.error = Some(message);
+        break;
+      },
+    }
+  }
+  file
+}
 
-    // Check for heredoc: KEY<<DELIMITER
-    if let Some((key, delimiter)) = parse_heredoc_start(line) {
-      let mut value_lines: Vec<&str> = Vec::new();
-      while i < lines.len() {
-        let next = lines
-          .get(i)
-          .copied()
-          .unwrap_or_default()
-          .trim_end_matches('\r');
-        i += 1;
-        if next == delimiter {
-          break;
-        }
-        value_lines.push(next);
+/// Upstream's non-Windows `ReadLine`: lines end at LF only.
+struct Lines<'a> {
+  text: &'a str,
+  index: usize,
+}
+
+impl<'a> Lines<'a> {
+  /// The next line and whether an LF ended it; `None` at the end of the text.
+  fn next_line(&mut self) -> Option<(&'a str, bool)> {
+    let rest = self.text.get(self.index..).filter(|rest| !rest.is_empty())?;
+    if let Some(lf) = rest.find('\n') {
+      self.index += lf + 1;
+      Some((rest.get(..lf)?, true))
+    } else {
+      self.index = self.text.len();
+      Some((rest, false))
+    }
+  }
+}
+
+/// Parse the entry starting at `line`; whichever of `=` and `<<` comes first
+/// decides between the plain and the heredoc form.
+fn parse_entry(line: &str, lines: &mut Lines<'_>) -> Result<(String, String), String> {
+  match (line.find('='), line.find("<<")) {
+    (Some(equals), Some(heredoc)) if heredoc < equals => parse_heredoc(line, lines),
+    (Some(_), _) => {
+      let (key, value) = line.split_once('=').unwrap_or_default();
+      if key.is_empty() {
+        return Err(format!("Invalid format '{line}'. Name must not be empty"));
       }
-      result.insert(key.to_owned(), value_lines.join("\n"));
-      continue;
-    }
-
-    // Simple KEY=VALUE (split on first = only)
-    if let Some((key, value)) = line.split_once('=')
-      && !key.is_empty()
-    {
-      result.insert(key.to_owned(), value.to_owned());
-    }
+      Ok((key.to_owned(), value.to_owned()))
+    },
+    (None, Some(_)) => parse_heredoc(line, lines),
+    (None, None) => Err(format!("Invalid format '{line}'")),
   }
-
-  result
 }
 
-fn parse_heredoc_start(line: &str) -> Option<(&str, &str)> {
-  let pos = line.find("<<")?;
-  let key = line.get(..pos)?;
-  let delimiter = line.get(pos + 2..)?;
+/// Read a heredoc value up to the line that equals the delimiter exactly.
+fn parse_heredoc(line: &str, lines: &mut Lines<'_>) -> Result<(String, String), String> {
+  let (key, delimiter) = line.split_once("<<").unwrap_or_default();
   if key.is_empty() || delimiter.is_empty() {
-    return None;
+    return Err(format!(
+      "Invalid format '{line}'. Name must not be empty and delimiter must not be empty"
+    ));
   }
-  Some((key, delimiter))
+  let mut value = Vec::new();
+  loop {
+    match lines.next_line() {
+      None => {
+        return Err(format!(
+          "Invalid value. Matching delimiter not found '{delimiter}'"
+        ));
+      },
+      Some((next, _)) if next == delimiter => break,
+      Some((_, false)) => return Err("Invalid value. EOF marker missing new line.".to_owned()),
+      Some((next, true)) => value.push(next),
+    }
+  }
+  Ok((key.to_owned(), value.join("\n")))
 }
+
+#[cfg(test)]
+#[path = "tests/file_commands.rs"]
+mod tests;

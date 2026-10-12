@@ -1,0 +1,122 @@
+name: file-commands-96
+
+# Issue #96 parity lane: strict GITHUB_ENV / GITHUB_OUTPUT / GITHUB_STATE
+# parsing. The reference jobs run the same file bodies as
+# crates/execution/tests/file_command_strict_test.rs on the official runner
+# (GitHub-hosted images). Every writer step uses continue-on-error, so the
+# final "Assert upstream parity" step fails the job unless each outcome and
+# each value (hex-encoded, so a kept CR is visible) equals what toolu
+# implements. The error text lands in the check-run annotations. The empty-name
+# job records the official runner's behavior for `=v`, which toolu fails on
+# purpose (issue AC). See docs/test-coverage.md "Strict file commands (#96)".
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/96-strict-github-env-github-output]
+    paths: [.github/workflows/file-commands-96.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  reference:
+    name: reference-${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - id: valid
+        continue-on-error: true
+        run: |
+          printf 'EMPTY=\nEQ=b=c\nMIXED=x<<y\nU=h\303\251llo \342\234\223\nCR=1\r\nDUP=1\nDUP=2\n' >> "$GITHUB_ENV"
+          printf 'H<<EOF\na\n\nb\nEOF\nHE<<EOF\nEOF\nLIKE<<EOF\nEOF2\n EOF\nEOF\nHCR<<EOF\r\nv\r\nEOF\r\n' >> "$GITHUB_ENV"
+          printf 'out=b=c\nmulti<<EOF\nl1\nl2\nEOF\n' >> "$GITHUB_OUTPUT"
+      - id: missing_terminator
+        continue-on-error: true
+        run: printf 'N<<EOF\nv\n' >> "$GITHUB_ENV"
+      - id: eof_without_newline
+        continue-on-error: true
+        run: printf 'N<<EOF\nv' >> "$GITHUB_ENV"
+      - id: invalid_line
+        continue-on-error: true
+        run: printf 'just-text\n' >> "$GITHUB_ENV"
+      - id: lone_cr
+        continue-on-error: true
+        run: printf '\r\n' >> "$GITHUB_ENV"
+      - id: empty_delimiter
+        continue-on-error: true
+        run: printf 'N<<\n' >> "$GITHUB_ENV"
+      - id: partial
+        continue-on-error: true
+        run: |
+          printf 'OK=1\nbad\nLATER=2\n' >> "$GITHUB_ENV"
+          printf 'kept=yes\n' >> "$GITHUB_OUTPUT"
+      - id: bad_output
+        continue-on-error: true
+        run: printf 'o<<EOF\n' >> "$GITHUB_OUTPUT"
+      - id: bad_state
+        continue-on-error: true
+        run: printf 'bad\n' >> "$GITHUB_STATE"
+      - id: node_options
+        continue-on-error: true
+        run: printf 'NODE_OPTIONS=--require /tmp/fc96.js\nKEEP=1\n' >> "$GITHUB_ENV"
+      - name: Assert upstream parity
+        env:
+          MULTI: ${{ steps.valid.outputs.multi }}
+          OUT: ${{ steps.valid.outputs.out }}
+        run: |
+          fail=0
+          hex() { printf '%s' "$1" | od -An -tx1 | tr -d ' \n'; }
+          expect() {
+            if [ "$2" = "$3" ]; then echo "FC96|$1|$2"; else echo "::error::FC96 $1: expected <$3>, got <$2>"; fail=1; fi
+          }
+          expect valid '${{ steps.valid.outcome }}' success
+          expect missing_terminator '${{ steps.missing_terminator.outcome }}' failure
+          expect eof_without_newline '${{ steps.eof_without_newline.outcome }}' failure
+          expect invalid_line '${{ steps.invalid_line.outcome }}' failure
+          expect lone_cr '${{ steps.lone_cr.outcome }}' failure
+          expect empty_delimiter '${{ steps.empty_delimiter.outcome }}' failure
+          expect partial '${{ steps.partial.outcome }}/${{ steps.partial.conclusion }}' failure/success
+          expect partial.applied "${OK-unset}/${LATER-unset}/${{ steps.partial.outputs.kept }}" 1/unset/yes
+          expect bad_output '${{ steps.bad_output.outcome }}' failure
+          expect bad_state '${{ steps.bad_state.outcome }}' failure
+          expect node_options '${{ steps.node_options.outcome }}' success
+          expect node_options.env "${NODE_OPTIONS-<unset>}/$KEEP" '<unset>/1'
+          expect EMPTY "$(hex "$EMPTY")" ''
+          expect EQ "$(hex "$EQ")" "$(hex 'b=c')"
+          expect MIXED "$(hex "$MIXED")" "$(hex 'x<<y')"
+          expect U "$(hex "$U")" 68c3a96c6c6f20e29c93
+          expect CR "$(hex "$CR")" 310d
+          expect DUP "$DUP" 2
+          expect H "$(hex "$H")" 610a0a62
+          expect HE "$(hex "$HE")" ''
+          expect LIKE "$(hex "$LIKE")" "$(hex "$(printf 'EOF2\n EOF')")"
+          expect HCR "$(hex "$HCR")" 760d
+          expect MULTI "$(hex "$MULTI")" 6c310a6c32
+          expect OUT "$OUT" b=c
+          exit "$fail"
+
+  empty-name:
+    name: empty-name-${{ matrix.os }}
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - id: empty_name
+        continue-on-error: true
+        run: printf '=v\n' >> "$GITHUB_ENV"
+      - name: Record
+        if: always()
+        run: echo 'FC96|empty_name|${{ steps.empty_name.outcome }}'

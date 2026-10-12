@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use execution::execution::file_commands::{parse_env_file, strip_blocked_env};
+use execution::execution::file_commands::{parse_kv_file, strip_blocked_env};
 
 #[test]
 fn strip_blocked_env_drops_node_options_case_insensitively() {
@@ -19,7 +19,7 @@ fn strip_blocked_env_drops_node_options_case_insensitively() {
   .map(|(k, v)| (k.to_owned(), v.to_owned()))
   .collect();
 
-  strip_blocked_env(&mut env);
+  assert!(strip_blocked_env(&mut env), "a blocked key must be reported");
 
   assert!(
     !env.contains_key("NODE_OPTIONS"),
@@ -42,12 +42,19 @@ fn composite_env_readback_strips_node_options() {
   // Exercise the exact sequence composite `process_file_commands` now runs on a
   // real `$GITHUB_ENV` file body: parse, then strip the blocked key.
   let github_env = "NODE_OPTIONS=--require /tmp/evil.js\nGREETING=hi\n";
-  let mut parsed = parse_env_file(github_env);
-  strip_blocked_env(&mut parsed);
+  let mut parsed = parse_kv_file(github_env).pairs;
+  assert!(strip_blocked_env(&mut parsed));
 
   assert!(
     !parsed.contains_key("NODE_OPTIONS"),
     "a composite run: step must not inject NODE_OPTIONS for later node children"
   );
+  assert_eq!(parsed.get("GREETING").map(String::as_str), Some("hi"));
+}
+
+#[test]
+fn strip_blocked_env_reports_nothing_when_no_key_is_blocked() {
+  let mut parsed = parse_kv_file("GREETING=hi\n").pairs;
+  assert!(!strip_blocked_env(&mut parsed));
   assert_eq!(parsed.get("GREETING").map(String::as_str), Some("hi"));
 }

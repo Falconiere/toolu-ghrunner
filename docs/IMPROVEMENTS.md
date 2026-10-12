@@ -184,6 +184,7 @@ single PR.
 - **Rationale:** `parse_env_file`, `parse_output_file`, `parse_path_file`, and the `KEY<<DELIM` heredoc branch drive the runner's file-command contract. The 1 MiB summary truncation (`truncate_summary`) is also untested.
 - **Fix:** Add a default-lane test parsing real-shape env files: `KEY=value`, heredoc `MULTI<<EOF\nline1\nline2\nEOF`, mixed line endings, `NODE_OPTIONS=--inspect` (must be stripped from results), empty values; plus an oversize summary input to assert `truncate_summary` lands at the UTF-8 char boundary.
 - **Refs:** `crates/execution/src/execution/file_commands.rs:126`
+- **Status:** Addressed for `GITHUB_ENV` / `GITHUB_OUTPUT` / `GITHUB_STATE` by #96 (`parse_kv_file` unit tests in `crates/execution/src/execution/tests/file_commands.rs` and the `file_command_strict_test` replays). `GITHUB_PATH` and the summary limit (#83) are covered elsewhere.
 
 ---
 

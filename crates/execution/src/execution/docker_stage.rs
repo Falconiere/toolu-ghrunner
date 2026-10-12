@@ -12,7 +12,8 @@ use super::command_dispatch::stream_dispatch_stdout;
 use super::context::ExecutionContext;
 use super::file_commands::{FileCommandManager, create_file_command_dir};
 use super::handlers::node::input_env_key;
-use super::step_env::apply_file_commands_and_merge_outputs;
+use super::process_dispatch::merge_command_result;
+use super::step_env::{FileCommandScope, apply_file_commands_and_merge_outputs};
 use super::step_timeout::StepBounds;
 use crate::docker::action_container::{ActionContainer, ActionContainerParams};
 use crate::docker::action_mounts::action_path_to_host;
@@ -96,16 +97,16 @@ async fn execute_stage(
   let (result, stdout_outputs) = tokio::join!(process, dispatch);
   // Read commands even on a daemon error after the action wrote them.
   translate_path_file(s, commands).await?;
-  let outputs = apply_file_commands_and_merge_outputs(
-    &s.step.id,
-    name,
-    Some(&s.step.id),
-    stdout_outputs,
-    commands,
-    ctx,
-  )
-  .await;
-  Ok((result?, outputs))
+  let scope = FileCommandScope {
+    step_id: &s.step.id,
+    expression_name: name,
+    state_id: Some(&s.step.id),
+    report_id: s.log_step_id,
+    events: s.events,
+  };
+  let (outputs, failed) =
+    apply_file_commands_and_merge_outputs(&scope, stdout_outputs, commands, ctx).await;
+  Ok((merge_command_result(result?, failed), outputs))
 }
 
 type StageValues = (HashMap<String, String>, Option<Vec<String>>, Option<String>);

@@ -1514,3 +1514,48 @@ there, so `unreachable_docker_daemon_warns_with_the_endpoint` prints
 `UNVERIFIED` and returns); the live lane ran on Linux only — macOS live is
 **unverified**. No official-runner comparison run was made; parity is with
 the pinned upstream source.
+
+## Strict file commands (#96)
+
+Grammar follows upstream `EnvFileKeyValuePairs`
+(`src/Runner.Worker/FileCommandManager.cs`), as built for Linux/macOS, at
+actions/runner `cab9d1c3901e45c7705889c4f88284fdd93f4ae5`. Step results merge
+as in `ActionRunner.cs:282` / `StepsRunner.cs:348`: the file-command result
+merges into the step result before continue-on-error applies.
+
+The replays drive the sanitized #68 GitHub.com acquisition
+(`crates/execution/tests/incoming_contexts_matrix_0.json`) through
+`Runner::execute_job`. Only scripts, conditions, step inputs,
+`continueOnError` and one secret variable are rewritten. Real Bash `printf`,
+the host Node runtime and real composite/Node local actions write the files.
+No mocks.
+
+Red evidence: run against the pre-#96 engine, the replays fail. Every
+malformed body concluded `Success` with no annotations, CR was stripped, and
+a missing heredoc terminator swallowed the remainder.
+
+| AC / scenario | Exact observation | Tests | Platforms |
+| --- | --- | --- | --- |
+| AC-1 / 96-S1, S2 | A later step sees these exact bytes (hex-compared): `EMPTY` = `""`, `EQ` = `b=c`, `MIXED` (`x<<y` after `=`) = `x<<y`, `U` = `héllo ✓`, `CR` = `1\r`, `DUP` = `2`, heredoc `H` = `a\n\nb`, `HE` = `""`, `LIKE` = `EOF2\n EOF`, `HCR` (`N<<EOF\r` … `EOF\r`) = `v\r`. Outputs: `multi` = `l1\nl2`, `out` = `b=c`. Unit level: a heredoc closed at EOF without LF is accepted; BOM stripped; invalid UTF-8 → U+FFFD; a deleted file is empty. | `cargo test -p execution --test file_command_strict_test valid_bodies_reach_env_and_outputs_exactly`; `cargo test -p execution --lib file_commands` | Linux x86_64 local; CI `ubuntu-latest` + `macos-14` |
+| AC-2 / 96-S3, S4 cleanup | Six bodies each make the writing step conclude `Failure`. Each raises exactly two error annotations and `##[error]` lines: `Unable to process file command 'env' successfully.`, then the reason. The six reasons: `Invalid value. Matching delimiter not found 'EOF'`, `Invalid value. EOF marker missing new line.`, `Invalid format 'just-text'`, `Invalid format '\r'`, `Invalid format '=v'. Name must not be empty`, `Invalid format 'N<<'. Name must not be empty and delimiter must not be empty`. The next `success()` step is skipped, the `always()` step runs, and the job fails. | `malformed_env_fails_the_step_with_upstream_issues_and_runs_cleanup` | as AC-1 |
+| AC-3 / 96-S3 scope | One parser for all three files. A script step fails on a bad `GITHUB_OUTPUT` (`'output'`) and a bad `GITHUB_STATE` (`'state'`). A real Node action's main fails on a bad `GITHUB_STATE` (`'state'`), and its post still runs (`NODE96|post|<unset>`). A composite `run:` step's bad `GITHUB_OUTPUT` fails the composite step on the parent record, and the inner `always()` step runs. A real Docker action's main fails on a bad `GITHUB_ENV` (`'env'`). | `malformed_output_and_state_fail_a_script_step`, `node_action_malformed_state_fails_main_and_post_still_runs`, `composite_run_step_malformed_output_fails_the_parent_step`; Docker: `cargo test -p execution --test docker_action_linux_test malformed_env -- --ignored` with `TOOLU_CONTAINER_TEST_ROOT` | as AC-1; Docker on Linux local (Docker 29.1.3) only |
+| AC-4 / 96-S4 | Input `OK=1`, `bad`, `LATER=2` with `continue-on-error: true`. The next step sees `OK=1`, `LATER` unset, and the same step's `GITHUB_OUTPUT` `kept=yes`. `steps.__run.outcome` = `failure`, `conclusion` = `success`, and the job succeeds. | `pairs_before_the_error_apply_and_continue_on_error_keeps_the_job_green` | as AC-1 |
+| AC-5 / 96-S4 | `NODE_OPTIONS` written to `GITHUB_ENV` is not applied, while `KEEP=1` is. One error annotation, `Can't store NODE_OPTIONS output parameter using '$GITHUB_ENV' command.`, and the step and job stay `Success`. The same holds in a composite `run:` step. Other reserved names are unchanged (upstream blocks only `NODE_OPTIONS`). | `node_options_is_blocked_with_an_issue_but_the_step_succeeds`, `composite_run_step_node_options_is_blocked_without_failing` | as AC-1 |
+| AC-6 | A secret job variable inside the bad line is reported as `Invalid format 'bad ***'`. No log line or annotation contains the raw value. | `a_secret_in_a_malformed_line_is_masked_everywhere` | as AC-1 |
+| AC-7 | Reference lane, below. | `.github/workflows/file-commands-96.yml` | GitHub-hosted `ubuntu-24.04`, `macos-15` |
+| AC-8 | Gate and docs. | `./tools/check.sh all` | Linux local, CI |
+
+Deliberate deviation: `=v` (empty name). Upstream's guard tests the whole
+line rather than the name, so the official runner accepts an empty name.
+Issue #96 requires the failure, so toolu fails the step with upstream's own
+message.
+
+Not applicable or unverified:
+
+- Windows CRLF splitting (`#if OS_WINDOWS`) does not apply; toolu supports
+  only Linux and macOS.
+- GHES is **unverified**: the parser does not depend on the server.
+- A live toolu self-hosted job is **unverified**: no runner was registered
+  for this lane.
+- Composite `run:` steps still get no `GITHUB_STATE` file (pre-existing;
+  out of scope).

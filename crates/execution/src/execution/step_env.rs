@@ -2,10 +2,11 @@
 
 use std::collections::HashMap;
 
-use shared::{ActionStep, RunnerError, TemplateToken};
+use shared::{ActionStep, AnnotationLevel, LogStream, RunnerError, RunnerEvent, TemplateToken};
+use tokio::sync::mpsc;
 
 use super::context::ExecutionContext;
-use super::file_commands::FileCommandManager;
+use super::file_commands::{BLOCKED_ENV_MESSAGE, FileCommandFailure, FileCommandManager};
 use expressions::evaluator::EvalContext;
 use expressions::types::ExprValue;
 
@@ -66,20 +67,38 @@ pub(super) fn env_token_to_string(
   }
 }
 
+/// Where one finished stage's file commands apply and report.
+pub(super) struct FileCommandScope<'a> {
+  /// Runtime step id that keys saved state.
+  pub(super) step_id: &'a str,
+  /// Visible `steps.<name>` key for outputs, if the stage exposes them.
+  pub(super) expression_name: Option<&'a str>,
+  /// Set when the stage's `GITHUB_STATE` is kept for its post stage.
+  pub(super) state_id: Option<&'a str>,
+  /// Timeline record that receives file-command errors.
+  pub(super) report_id: &'a str,
+  /// The job's event stream.
+  pub(super) events: &'a mpsc::Sender<RunnerEvent>,
+}
+
 /// Process file commands after step execution; returns `GITHUB_OUTPUT`
-/// values. Does NOT record them on `ctx` — the caller
-/// ([`apply_file_commands_and_merge_outputs`]) is the single writer, so a
-/// `$GITHUB_OUTPUT` value can't be recorded once here and again by a caller's
-/// own loop.
+/// values and whether a command failed the step. Does NOT record outputs on
+/// `ctx` — the caller ([`apply_file_commands_and_merge_outputs`]) is the
+/// single writer, so a `$GITHUB_OUTPUT` value can't be recorded once here and
+/// again by a caller's own loop. Pairs read before a malformed entry are
+/// applied, as upstream's enumerator does before it throws.
 async fn apply_file_commands(
-  step_id: &str,
+  scope: &FileCommandScope<'_>,
   file_cmds: &FileCommandManager,
   ctx: &mut ExecutionContext,
-  state_id: Option<&str>,
-) -> HashMap<String, String> {
-  let Ok(results) = file_cmds.process().await else {
-    tracing::warn!("failed to process file commands; step outputs/env will be empty");
-    return HashMap::new();
+) -> (HashMap<String, String>, bool) {
+  let results = match file_cmds.process().await {
+    Ok(results) => results,
+    Err(error) => {
+      let message = format!("Unable to process file commands: {error}");
+      emit_error_issue(scope.report_id, &message, ctx, scope.events).await;
+      return (HashMap::new(), true);
+    },
   };
   for (key, value) in results.env_vars {
     ctx.set_env(&key, &value);
@@ -87,31 +106,94 @@ async fn apply_file_commands(
   for dir in results.path_additions {
     ctx.prepend_path(&dir);
   }
-  if state_id.is_some() {
+  if scope.state_id.is_some() {
     for (key, value) in results.state {
-      ctx.set_step_state(step_id, &key, &value);
+      ctx.set_step_state(scope.step_id, &key, &value);
     }
   }
-  results.outputs
+  let failed = report_file_command_issues(
+    &results.failures,
+    results.blocked_env,
+    scope.report_id,
+    ctx,
+    scope.events,
+  )
+  .await;
+  (results.outputs, failed)
 }
 
 /// Apply file commands and merge output values for a visible expression name.
 /// Saved state uses the runtime step ID within the current action scope.
 /// Stdout outputs take precedence over file outputs with the same key.
+/// Returns the merged outputs and whether a file command failed the step.
 pub(super) async fn apply_file_commands_and_merge_outputs(
-  step_id: &str,
-  expression_name: Option<&str>,
-  state_id: Option<&str>,
+  scope: &FileCommandScope<'_>,
   stdout_outputs: HashMap<String, String>,
   file_cmds: &FileCommandManager,
   ctx: &mut ExecutionContext,
-) -> HashMap<String, String> {
-  let mut outputs = apply_file_commands(step_id, file_cmds, ctx, state_id).await;
+) -> (HashMap<String, String>, bool) {
+  let (mut outputs, failed) = apply_file_commands(scope, file_cmds, ctx).await;
   outputs.extend(stdout_outputs);
-  if let Some(name) = expression_name {
+  if let Some(name) = scope.expression_name {
     for (key, value) in &outputs {
       ctx.set_step_output(name, key, value);
     }
   }
-  outputs
+  (outputs, failed)
+}
+
+/// Report file-command problems as upstream issues on `report_id`: the
+/// blocked `NODE_OPTIONS` error (which never fails the step), then each failed
+/// command's two errors. Returns whether a command failed the step.
+pub(super) async fn report_file_command_issues(
+  failures: &[FileCommandFailure],
+  blocked_env: bool,
+  report_id: &str,
+  ctx: &ExecutionContext,
+  events: &mpsc::Sender<RunnerEvent>,
+) -> bool {
+  if blocked_env {
+    emit_error_issue(report_id, BLOCKED_ENV_MESSAGE, ctx, events).await;
+  }
+  for failure in failures {
+    emit_error_issue(report_id, &failure.summary(), ctx, events).await;
+    emit_error_issue(report_id, &failure.message, ctx, events).await;
+  }
+  !failures.is_empty()
+}
+
+/// Emit one masked `##[error]` log line plus its error annotation, the shape
+/// upstream's `ExecutionContext.Error` produces.
+async fn emit_error_issue(
+  report_id: &str,
+  message: &str,
+  ctx: &ExecutionContext,
+  events: &mpsc::Sender<RunnerEvent>,
+) {
+  let message = match ctx.masker().lock() {
+    Ok(masker) => masker.mask(message).into_owned(),
+    Err(poisoned) => poisoned.into_inner().mask(message).into_owned(),
+  };
+  let log = RunnerEvent::Log {
+    step_id: report_id.to_owned(),
+    line: format!("##[error]{message}"),
+    stream: LogStream::Stdout,
+  };
+  let annotation = RunnerEvent::Annotation {
+    step_id: report_id.to_owned(),
+    level: AnnotationLevel::Error,
+    message,
+    file: None,
+    line: None,
+    col: None,
+    end_line: None,
+    end_column: None,
+    title: None,
+  };
+  for event in [log, annotation] {
+    if events.send(event).await.is_err() {
+      tracing::warn!("event receiver closed while reporting a file-command error");
+      return;
+    }
+  }
 }
