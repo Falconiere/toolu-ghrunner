@@ -13,6 +13,7 @@ use super::file_commands::FileCommandManager;
 use super::handlers::script::{ScriptHandler, ScriptParams};
 use super::job_spec::JobSpec;
 use super::post_drain::{drain_post_steps, post_number};
+use super::process_dispatch::merge_command_result;
 use super::shadow::ShadowObserver;
 use super::shadow::record::StepKey;
 use super::step_attrs::{resolve_continue_on_error, resolve_timeout};
@@ -476,10 +477,10 @@ async fn run_script_step(
   super::step_summary::collect(&file_cmds.summary_path, &step.id, &step.id, ctx, events).await;
   let (result, stdout_outputs) = execution?;
   shadow_post(job, &step.id, &interpolated, &env, &working_dir, pre)?;
-  let outputs = merge_step_outputs(step, stdout_outputs, &file_cmds, ctx).await;
-
+  // Upstream logs the process exit before processing file commands.
   emit_status(events, &step.id, result).await;
-  Ok((result, outputs))
+  let (outputs, failed) = merge_step_outputs(step, stdout_outputs, &file_cmds, ctx, events).await;
+  Ok((merge_command_result(result, failed), outputs))
 }
 
 /// Emit the C#-runner-style "Process completed with exit code N." trailer.

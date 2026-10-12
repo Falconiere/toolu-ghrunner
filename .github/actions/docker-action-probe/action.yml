@@ -25,6 +25,9 @@ inputs:
   fail_post:
     description: Exit nonzero after recording post state
     default: 'false'
+  malformed_env:
+    description: Optional printf format appended to GITHUB_ENV during main (issue 96)
+    default: ''
 runs:
   using: docker
   image: Dockerfile

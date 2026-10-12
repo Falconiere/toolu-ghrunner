@@ -15,7 +15,7 @@ async fn step_summary_deleted_file_preserves_other_file_commands() -> Result<(),
     .envs(env)
     .status()?;
   assert!(status.success());
-  let result = files.process().await?;
+  let result = files.process().await;
   assert_eq!(result.outputs.get("answer").map(String::as_str), Some("42"));
   Ok(())
 }

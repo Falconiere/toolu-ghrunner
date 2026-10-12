@@ -321,6 +321,31 @@ Malformed environment tokens fail setup before steps start. See
 [test coverage](docs/test-coverage.md#workflow-and-job-environment-issue-69) for
 measured replay coverage and pending live parity lanes.
 
+`GITHUB_ENV`, `GITHUB_OUTPUT` and `GITHUB_STATE` are parsed like the official
+Linux/macOS runner:
+
+- Entries are `NAME=VALUE` or a `NAME<<DELIMITER` heredoc, chosen by whichever
+  of `=` and `<<` comes first.
+- Lines end at LF only, so a CR written by a CRLF tool stays in the value.
+- A malformed file fails the step that wrote it, after its exit code is
+  logged. Malformed means:
+  - a heredoc without its closing delimiter, or whose last line has no
+    newline;
+  - a line with neither `=` nor `<<`, including a lone CR or blank spaces;
+  - an empty heredoc name or delimiter;
+  - an empty `=VALUE` name. The official runner fails this too, but with a
+    .NET argument error; toolu reports `Invalid format '=VALUE'. Name must
+    not be empty`.
+- The failing step reports two masked errors, `Unable to process file command
+  'env' successfully.` and the reason, such as `Invalid format 'text'`.
+- Entries before the bad line still apply. The other file commands are
+  processed independently. `continue-on-error`, `always()` and post steps
+  behave as for any other step failure.
+- Setting `NODE_OPTIONS` through `GITHUB_ENV` is ignored with an error
+  annotation but does not fail the step.
+
+See [the #96 test map](docs/test-coverage.md#strict-file-commands-96).
+
 Job `outputs:` arrive in the acquired job message and resolve after main and
 post steps finish. Empty values are omitted. Values matching a registered
 secret mask are omitted with a warning; safe values reach downstream jobs as

@@ -35,6 +35,11 @@ printf 'summary-%s\n' "$marker" >> "$GITHUB_STEP_SUMMARY"
 cp "$GITHUB_STEP_SUMMARY" "$GITHUB_WORKSPACE/docker-summary-$marker.txt"
 printf '::warning file=probe.sh,line=7,title=Docker probe::annotation-%s\n' "$marker"
 
+if [ -n "${INPUT_MALFORMED_ENV:-}" ]; then
+  # The input is the printf format under test, so it is the format argument.
+  printf "$INPUT_MALFORMED_ENV" >> "$GITHUB_ENV"
+fi
+
 if [ -n "${INPUT_PEER:-}" ]; then
   attempt=0
   while ! wget -qO "$GITHUB_WORKSPACE/docker-network.txt" \

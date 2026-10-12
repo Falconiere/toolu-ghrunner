@@ -16,11 +16,18 @@ pub(super) struct ProcessOutput {
 impl ProcessOutput {
   /// Command failures override success while preserving cancellation.
   pub(super) fn conclusion(&self, conclusion: Conclusion) -> Conclusion {
-    if self.failed && conclusion == Conclusion::Success {
-      Conclusion::Failure
-    } else {
-      conclusion
-    }
+    merge_command_result(conclusion, self.failed)
+  }
+}
+
+/// Merge a failed command result into a step result the way upstream
+/// `MergeTaskResults` does for these outcomes: Success becomes Failure, while
+/// Failure, Cancelled and Skipped are kept.
+pub(super) fn merge_command_result(conclusion: Conclusion, failed: bool) -> Conclusion {
+  if failed && conclusion == Conclusion::Success {
+    Conclusion::Failure
+  } else {
+    conclusion
   }
 }
 

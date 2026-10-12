@@ -27,7 +27,8 @@ use super::composite_shell::{ShellScriptParams, run_shell_script};
 use super::composite_uses::{NestedUsesParams, run_nested_uses_step};
 use super::context::ExecutionContext;
 use super::depth_tracker::DepthTracker;
-use super::process_dispatch::{dispatcher, stream_process};
+use super::process_dispatch::{dispatcher, merge_command_result, stream_process};
+use super::step_env::report_file_command_issues;
 use super::step_timeout::{NESTED_TIMEOUT_MESSAGE, with_timeout_message};
 
 /// Execute a composite action's steps sequentially.
@@ -315,9 +316,9 @@ async fn run_run_step(
   .await;
   let conclusion = conclusion?;
 
-  finish_run_step(run, &step_id, &file_paths).await;
+  let failed = finish_run_step(run, &step_id, &file_paths).await;
 
-  Ok(conclusion)
+  Ok(merge_command_result(conclusion, failed))
 }
 
 async fn start_run_step(
@@ -337,21 +338,32 @@ async fn start_run_step(
     .unwrap_or_else(|| format!("__composite_{idx}"))
 }
 
+/// Close the step's group and apply its file commands; returns whether a
+/// file command failed the step.
 async fn finish_run_step(
   run: &mut CompositeRun<'_>,
   step_id: &str,
   file_paths: &super::composite_env::FileCommandPaths,
-) {
+) -> bool {
   let params = run.params;
   emit_log(params.events, params.parent_step_id, "##[endgroup]").await;
-  process_file_commands(
+  let issues = process_file_commands(
     file_paths,
     step_id,
     &mut run.state.step_outputs,
     &mut run.state.extra_env,
     &mut run.state.path_additions,
-  );
+  )
+  .await;
   apply_run_file_commands(run, step_id);
+  report_file_command_issues(
+    &issues.failures,
+    issues.blocked_env,
+    params.parent_step_id,
+    run.ctx,
+    params.events,
+  )
+  .await
 }
 
 async fn execute_composite_script(

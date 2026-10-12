@@ -1,0 +1,6 @@
+name: node-96-state
+description: Real Node action whose main stage writes a malformed GITHUB_STATE (issue 96).
+runs:
+  using: node20
+  main: main.js
+  post: post.js

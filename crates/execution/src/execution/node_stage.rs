@@ -18,8 +18,8 @@ use super::context::ExecutionContext;
 use super::file_commands::{FileCommandManager, create_file_command_dir};
 use super::handlers::node::determine_script;
 use super::handlers::node_exec::{NodeExecParams, execute_node_action};
-use super::process_dispatch::{dispatcher, stream_process};
-use super::step_env::apply_file_commands_and_merge_outputs;
+use super::process_dispatch::{dispatcher, merge_command_result, stream_process};
+use super::step_env::{FileCommandScope, apply_file_commands_and_merge_outputs};
 use super::step_timeout::StepBounds;
 use crate::node::runtime::ensure_node_runtime;
 
@@ -137,16 +137,16 @@ async fn run_stage_process(
   let (output, stdout_outputs) = tokio::join!(exec, dispatch);
   collect_stage_summary(&s, file_cmds).await;
   let conclusion = stdout_outputs.conclusion(output?.conclusion);
-  let outputs = apply_file_commands_and_merge_outputs(
-    &s.step.id,
-    output_name,
-    Some(&s.step.id),
-    stdout_outputs.outputs,
-    file_cmds,
-    s.ctx,
-  )
-  .await;
-  Ok((conclusion, outputs))
+  let scope = FileCommandScope {
+    step_id: &s.step.id,
+    expression_name: output_name,
+    state_id: Some(&s.step.id),
+    report_id: s.log_step_id,
+    events: s.events,
+  };
+  let (outputs, failed) =
+    apply_file_commands_and_merge_outputs(&scope, stdout_outputs.outputs, file_cmds, s.ctx).await;
+  Ok((merge_command_result(conclusion, failed), outputs))
 }
 
 /// Collect each stage's summary before propagating process errors.
