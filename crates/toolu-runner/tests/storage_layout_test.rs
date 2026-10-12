@@ -41,6 +41,7 @@ fn sample_config() -> RunnerRegistrationConfig {
       "x64".to_owned(),
     ],
     runner_group: "Default".to_owned(),
+    ephemeral: false,
     runtime: RuntimeConfig {
       jit_config: "<base64-jit-blob>".to_owned(),
       work_dir: "~/.toolu-runner/_work".to_owned(),

@@ -50,6 +50,7 @@ fn write_registration(
     auth_token: "fixture-client-id".to_owned(),
     labels: vec!["self-hosted".to_owned()],
     runner_group: "Default".to_owned(),
+    ephemeral: false,
     runtime: RuntimeConfig {
       jit_config: "fixture-jit-blob".to_owned(),
       work_dir: "~/.toolu-runner/_work".to_owned(),
@@ -369,6 +370,7 @@ fn fsync_chunks_round_trips_through_load_config() {
     auth_token: "fixture-client-id".to_owned(),
     labels: vec!["self-hosted".to_owned()],
     runner_group: "Default".to_owned(),
+    ephemeral: false,
     runtime: RuntimeConfig {
       jit_config: "fixture-jit-blob".to_owned(),
       work_dir: "~/.toolu-runner/_work".to_owned(),
@@ -460,5 +462,36 @@ fn remove_deletes_registration_files_but_keeps_diag() {
   assert!(
     repo_dir.join("_diag/jobs/history.jsonl").is_file(),
     "_diag contents must survive remove (job journal history, OQ-3)"
+  );
+}
+
+/// AC-9 (#92): `status` reports whether the registration is ephemeral.
+#[test]
+fn status_reports_the_registration_mode() {
+  let home = tempfile::tempdir().expect("home tempdir");
+  let cwd = tempfile::tempdir().expect("cwd tempdir");
+  let config_path = seed_legacy(home.path(), "mode-runner").expect("seed registration");
+
+  let status = |home: &Path| {
+    let output = runner_cmd(home, cwd.path())
+      .arg("status")
+      .output()
+      .expect("spawn status");
+    assert!(output.status.success(), "status must succeed");
+    String::from_utf8_lossy(&output.stdout).into_owned()
+  };
+  let stdout = status(home.path());
+  assert!(
+    stdout.contains("mode:      persistent (re-mints after each job)"),
+    "{stdout}"
+  );
+
+  let mut cfg = load_config(&config_path).expect("load");
+  cfg.ephemeral = true;
+  save_config(&config_path, &cfg).expect("save");
+  let stdout = status(home.path());
+  assert!(
+    stdout.contains("mode:      ephemeral (one job, then unregister)"),
+    "{stdout}"
   );
 }

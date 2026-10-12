@@ -216,6 +216,15 @@ fn render_unit(
   id: &ServiceId,
 ) -> Result<String, RunnerError> {
   let cfg = load_reg_config(config_path)?;
+  if cfg.ephemeral {
+    return Err(RunnerError::Config(format!(
+      "{} is an ephemeral registration (one job, then it unregisters and deletes itself); a \
+       service unit restarts `run` forever and would relaunch into a removed registration — \
+       start `toolu-runner run` from a one-shot supervisor instead, or register without \
+       --ephemeral",
+      config_path.display()
+    )));
+  }
   let data_dir = resolve_data_dir(&cfg.runtime.data_dir)?;
   let diag_dir = data_dir.join("_diag");
   // launchd hands an agent a minimal PATH, and steps inherit the runner

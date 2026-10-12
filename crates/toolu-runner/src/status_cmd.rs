@@ -31,6 +31,12 @@ pub(crate) fn cmd_status(args: StatusArgs) -> Result<(), Box<dyn std::error::Err
   println!("runner_id: {}", cfg.runner_id);
   println!("labels:    {:?}", cfg.labels);
   println!("group:     {}", cfg.runner_group);
+  let mode = if cfg.ephemeral {
+    "ephemeral (one job, then unregister)"
+  } else {
+    "persistent (re-mints after each job)"
+  };
+  println!("mode:      {mode}");
   println!("protocol:  {}", cfg.runtime.protocol_version);
   println!("data_dir:  {}", cfg.runtime.data_dir);
   println!("work_dir:  {}", cfg.runtime.work_dir);

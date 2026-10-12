@@ -25,6 +25,7 @@ mod boot_cmd;
 mod cli;
 mod config;
 mod create_app_cmd;
+mod ephemeral;
 mod login_cmd;
 mod register_cmd;
 mod run_cmd;

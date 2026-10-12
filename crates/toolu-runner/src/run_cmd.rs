@@ -3,7 +3,9 @@
 //! A JIT config is single-use, so per iteration `run` reloads `config.toml`,
 //! runs one listener lifecycle, then dispatches [`next_action`]: re-mint on a
 //! completed job, cancel-aware jittered backoff on a transient failure, exit
-//! on cancel / `--once` / `.pending_remove`. Extracted from `main.rs`.
+//! on cancel / `--once` / `.pending_remove`. An `--ephemeral` registration
+//! never re-mints: after its one job it is unregistered and deleted
+//! ([`crate::ephemeral`]). Extracted from `main.rs`.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -16,9 +18,9 @@ use config::config::{
 };
 use config::{lockfile, registry};
 use listener::GitHubListener;
-use listener::loop_decision::{LoopAction, next_action};
+use listener::loop_decision::{EphemeralAction, LoopAction, next_action, next_ephemeral_action};
 use listener::session_conflict::SessionConflictPolicy;
-use shared::{RunnerError, SESSION_CONFLICT_EXIT_CODE, SecretMasker};
+use shared::{Conclusion, RunnerError, SESSION_CONFLICT_EXIT_CODE, SecretMasker};
 use tokio_util::sync::CancellationToken;
 
 use crate::cli::{RunArgs, credentials_path_for};
@@ -48,6 +50,8 @@ pub(crate) async fn cmd_run(args: RunArgs) -> Result<(), Box<dyn std::error::Err
   let cfg = load_run_config(&config_path)?;
   let data_dir = resolve_data_dir(&cfg.runtime.data_dir).map_err(|e| format!("{e}"))?;
   let lock_path = data_dir.join(".lock");
+  // Held until `cmd_run` returns — including across an ephemeral cleanup,
+  // which deletes the `.lock` path while still holding it (as `remove` does).
   let _lock_guard = lockfile::acquire(&lock_path, &config_path).map_err(|e| format!("{e}"))?;
   tracing::info!(path = %lock_path.display(), "acquired single-job lock");
 
@@ -56,7 +60,8 @@ pub(crate) async fn cmd_run(args: RunArgs) -> Result<(), Box<dyn std::error::Err
 
   let store = AuthStore::new(&registry::runner_home());
   let host = register_cmd::host_from_runner_url(&cfg.runner_url)?;
-  warn_if_no_login(&store, &host, args.once);
+  // An ephemeral registration never re-mints, so it needs no login token.
+  warn_if_no_login(&store, &host, args.once || cfg.ephemeral);
 
   // One loop-scope HTTP client, reused across every re-mint iteration for
   // both the listener and `generate-jitconfig` instead of a fresh connection
@@ -69,6 +74,7 @@ pub(crate) async fn cmd_run(args: RunArgs) -> Result<(), Box<dyn std::error::Err
     config_path: config_path.clone(),
     creds_path: credentials_path_for(&config_path),
     pending_path: data_dir.join(".pending_remove"),
+    lock_path,
     masker,
     store,
     host,
@@ -122,6 +128,8 @@ struct RunLoop {
   config_path: PathBuf,
   creds_path: PathBuf,
   pending_path: PathBuf,
+  /// The job `.lock` this process holds (deleted by an ephemeral cleanup).
+  lock_path: PathBuf,
   masker: Arc<Mutex<SecretMasker>>,
   store: AuthStore,
   host: String,
@@ -145,9 +153,20 @@ impl RunLoop {
       let cfg = load_run_config(&self.config_path)?;
       // Fatal setup errors (corrupt config, unparseable JIT) deliberately
       // exit here without backoff — only listener outcomes are retried.
-      let outcome = self.run_once(&cfg).await?;
+      let raw = self.run_once(&cfg).await?;
       let cancelled = self.cancel.is_cancelled();
       let pending_remove = self.pending_path.exists();
+      if cfg.ephemeral {
+        match next_ephemeral_action(&raw, self.once, cancelled, pending_remove) {
+          EphemeralAction::Unregister => return self.finish_ephemeral(&cfg).await,
+          EphemeralAction::Exit(code) => return finish_ephemeral_exit(code, raw),
+          EphemeralAction::BackoffRetry if self.backoff_step(&mut backoff).await => return Ok(()),
+          EphemeralAction::BackoffRetry => continue,
+        }
+      }
+      // The persistent loop only distinguishes Ok from Err; the completed
+      // job's `Conclusion` is not needed by `next_action`.
+      let outcome = raw.map(|_conclusion| ());
       match next_action(&outcome, self.once, cancelled, pending_remove) {
         LoopAction::Exit(code) => return finish(code, outcome),
         LoopAction::Reregister => {
@@ -170,14 +189,12 @@ impl RunLoop {
 
   /// Build a listener from `cfg` and run one JIT lifecycle. The outer
   /// `Result` is fatal setup (bad config / unparseable JIT blob / listener
-  /// init); the inner is the listener's own outcome for [`next_action`],
-  /// which only distinguishes Ok from Err — the completed job's
-  /// `Conclusion` (`listener.run`'s `Some`/`None`) isn't needed by the loop,
-  /// so it's dropped here rather than threaded through `next_action`.
+  /// init); the inner is the listener's own outcome — `Ok(Some(_))` means a
+  /// job ran, which an ephemeral registration needs to know.
   async fn run_once(
     &self,
     cfg: &RunnerRegistrationConfig,
-  ) -> Result<Result<(), RunnerError>, Box<dyn std::error::Error>> {
+  ) -> Result<Result<Option<Conclusion>, RunnerError>, Box<dyn std::error::Error>> {
     let runner_cfg = build_runner_config(cfg)?;
     let jit = require_jit_config(cfg)?;
     let listener = GitHubListener::new(
@@ -188,12 +205,22 @@ impl RunLoop {
     )
     .map_err(|e| format!("listener init: {e}"))?
     .with_session_conflict_policy(self.conflict_policy);
-    Ok(
-      listener
-        .run(self.cancel.clone())
-        .await
-        .map(|_conclusion| ()),
-    )
+    Ok(listener.run(self.cancel.clone()).await)
+  }
+
+  /// An ephemeral registration's job ran: unregister it and delete the local
+  /// state ([`crate::ephemeral::finish_job`]).
+  async fn finish_ephemeral(
+    &self,
+    cfg: &RunnerRegistrationConfig,
+  ) -> Result<(), Box<dyn std::error::Error>> {
+    let state = crate::ephemeral::LocalState {
+      config: &self.config_path,
+      creds: &self.creds_path,
+      pending: &self.pending_path,
+      lock: &self.lock_path,
+    };
+    crate::ephemeral::finish_job(cfg, &state, &self.client).await
   }
 
   /// Re-mint a fresh JIT config for the next iteration. Re-resolves the
@@ -279,6 +306,29 @@ fn finish(code: i32, outcome: Result<(), RunnerError>) -> Result<(), Box<dyn std
     Err(e) => Err(format!("listener: {e}").into()),
     Ok(()) => Ok(()),
   }
+}
+
+/// Turn an ephemeral [`EphemeralAction::Exit`] into the process result: the
+/// registration was not used, so it is kept. A non-zero code reaches `main`
+/// as a [`CodedExit`] (exactly 1 or 5), naming `toolu-runner remove` for a
+/// registration that may be dead.
+fn finish_ephemeral_exit(
+  code: i32,
+  outcome: Result<Option<Conclusion>, RunnerError>,
+) -> Result<(), Box<dyn std::error::Error>> {
+  if code == 0 {
+    return Ok(());
+  }
+  let reason = outcome
+    .err()
+    .map_or_else(|| "no job".to_owned(), |e| e.to_string());
+  Err(Box::new(CodedExit {
+    code,
+    message: format!(
+      "listener: {reason}\nthe ephemeral registration was kept — if the runner was removed on \
+       GitHub, run `toolu-runner remove` to clean it up"
+    ),
+  }))
 }
 
 /// A fatal `run` error that must exit with a specific process code instead

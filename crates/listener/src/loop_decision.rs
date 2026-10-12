@@ -5,7 +5,7 @@
 //! live broker, a token store, or the filesystem. Mirrors `message_route` in
 //! spirit: one pure function over already-observed facts.
 
-use shared::{RunnerError, SESSION_CONFLICT_EXIT_CODE};
+use shared::{Conclusion, RunnerError, SESSION_CONFLICT_EXIT_CODE};
 
 /// What the run loop does after a listener lifecycle returns.
 #[derive(Debug, PartialEq, Eq)]
@@ -59,5 +59,59 @@ pub fn next_action(
     // minting a fresh config; only rule 7's transient errors reuse the config.
     Ok(()) | Err(RunnerError::Auth(_)) => LoopAction::Reregister,
     Err(_) => LoopAction::BackoffRetry,
+  }
+}
+
+/// What `run` does after a listener lifecycle on an **ephemeral**
+/// registration (`register --ephemeral`): it never re-mints.
+#[derive(Debug, PartialEq, Eq)]
+pub enum EphemeralAction {
+  /// A job ran and consumed the registration: unregister it and delete the
+  /// local state, then exit.
+  Unregister,
+  /// Terminate with this process exit code, keeping the registration.
+  Exit(i32),
+  /// Sleep with cancel-aware jittered backoff, then retry the same, still
+  /// unused JIT config.
+  BackoffRetry,
+}
+
+/// Decide an ephemeral registration's next action (#92). First match wins:
+///
+/// 1. a job ran (`Ok(Some(_))`, any conclusion, even after a cancel) →
+///    `Unregister`;
+/// 2. `cancelled` → `Exit(0)` (shut down before a job; registration kept);
+/// 3. `once` → `Exit(0)` on `Ok(None)`, `Exit(SESSION_CONFLICT_EXIT_CODE)` on a
+///    session conflict, `Exit(1)` on any other `Err`;
+/// 4. `pending_remove` → `Exit(0)`;
+/// 5. `Err(SessionConflict(_))` → `Exit(SESSION_CONFLICT_EXIT_CODE)`;
+/// 6. `Err(Auth(_))` → `Exit(1)` (the JIT is dead and is never re-minted);
+/// 7. `Ok(None)` or any other `Err` → `BackoffRetry`.
+pub fn next_ephemeral_action(
+  outcome: &Result<Option<Conclusion>, RunnerError>,
+  once: bool,
+  cancelled: bool,
+  pending_remove: bool,
+) -> EphemeralAction {
+  if matches!(outcome, Ok(Some(_))) {
+    return EphemeralAction::Unregister;
+  }
+  if cancelled {
+    return EphemeralAction::Exit(0);
+  }
+  if once {
+    return match outcome {
+      Ok(_) => EphemeralAction::Exit(0),
+      Err(RunnerError::SessionConflict(_)) => EphemeralAction::Exit(SESSION_CONFLICT_EXIT_CODE),
+      Err(_) => EphemeralAction::Exit(1),
+    };
+  }
+  if pending_remove {
+    return EphemeralAction::Exit(0);
+  }
+  match outcome {
+    Err(RunnerError::SessionConflict(_)) => EphemeralAction::Exit(SESSION_CONFLICT_EXIT_CODE),
+    Err(RunnerError::Auth(_)) => EphemeralAction::Exit(1),
+    _ => EphemeralAction::BackoffRetry,
   }
 }

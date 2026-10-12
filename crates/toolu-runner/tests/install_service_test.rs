@@ -13,7 +13,7 @@ use std::process::Command;
 
 use config::config::{
   CacheSection, CredentialsFile, RunnerRegistrationConfig, RuntimeConfig, ServicesSection,
-  ShadowSection, WorkspaceSection, save_config, save_credentials,
+  ShadowSection, WorkspaceSection, load_config, save_config, save_credentials,
 };
 use config::service_unit::{self, ServiceSpec};
 
@@ -35,6 +35,7 @@ fn write_fixture(
     auth_token: "client-id".to_owned(),
     labels: vec!["self-hosted".to_owned()],
     runner_group: "Default".to_owned(),
+    ephemeral: false,
     runtime: RuntimeConfig {
       jit_config: "unused-by-install-service".to_owned(),
       work_dir: reg_dir.join("_work").to_string_lossy().into_owned(),
@@ -408,5 +409,46 @@ fn remove_deletes_the_unit_and_is_idempotent() {
   assert!(
     stdout.contains("nothing to do"),
     "second --remove must report nothing-to-do; got:\n{stdout}"
+  );
+}
+
+/// Turn the fixture registration into an `--ephemeral` one on disk.
+fn make_ephemeral(config_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+  let mut cfg = load_config(config_path)?;
+  cfg.ephemeral = true;
+  save_config(config_path, &cfg)?;
+  Ok(())
+}
+
+/// AC-9 (#92): a restart-forever unit contradicts a one-job registration, so
+/// `--print` and `--no-activate` both refuse it (exit 2, reason named, no unit
+/// written), while `--remove` still works.
+#[test]
+fn ephemeral_registration_is_refused_but_remove_still_works() {
+  let home = tempfile::tempdir().expect("tempdir");
+  let config_path = write_fixture(home.path(), "octo", "demo").expect("write fixture");
+  make_ephemeral(&config_path).expect("mark ephemeral");
+
+  for extra in [["--print"], ["--no-activate"]] {
+    let output = install_cmd(home.path(), &config_path, &extra)
+      .output()
+      .expect("run install-service");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(2), "{extra:?}; stderr: {stderr}");
+    assert!(stderr.contains("ephemeral registration"), "{stderr}");
+    assert!(output.stdout.is_empty(), "no unit may be printed");
+    assert!(
+      !expected_dest(home.path()).exists(),
+      "no unit may be written"
+    );
+  }
+
+  let output = install_cmd(home.path(), &config_path, &["--remove"])
+    .output()
+    .expect("run install-service --remove");
+  assert!(
+    output.status.success(),
+    "--remove must still work; stderr: {}",
+    String::from_utf8_lossy(&output.stderr)
   );
 }

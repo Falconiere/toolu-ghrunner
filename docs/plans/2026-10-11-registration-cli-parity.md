@@ -108,10 +108,11 @@ lifecycle → install-service/status → live lane → docs → gate.
       "crates/toolu-runner/src/service_cmd.rs",
       "crates/toolu-runner/src/status_cmd.rs",
       "crates/toolu-runner/tests/install_service_test.rs",
+      "crates/toolu-runner/tests/config_resolve_test.rs",
       "crates/toolu-runner/tests/cli_test.rs"
     ],
     "input": "A persisted config.toml with ephemeral = true and one without the key, driven through the real binary.",
-    "check": "cargo test -p toolu-runner --test install_service_test --test cli_test"
+    "check": "cargo test -p toolu-runner --test install_service_test --test config_resolve_test --test cli_test"
   },
   {
     "id": "live_lane",
@@ -183,6 +184,15 @@ lifecycle → install-service/status → live lane → docs → gate.
   = `overall: ready`, then push, PR to `main`, `pr-babysit:babysit`.
   Preflight prerequisites: `gh api user` OK, branch
   `feat/92-registration-cli-parity-ephemeral-and` (non-default).
+
+## Deviations
+
+- `service_status`: the `status` mode test lives in
+  `config_resolve_test.rs` (it already owns the `status` fixtures) instead of
+  `cli_test.rs`; the step's paths and check now include it.
+- `ephemeral_run`: a SIGTERM-stopped job is reported as `failed` (toolu's
+  existing operator-shutdown result), not `canceled`; the test pins the
+  observed value and #92 leaves that behavior unchanged.
 
 ## Plan review (2026-10-11)
 
