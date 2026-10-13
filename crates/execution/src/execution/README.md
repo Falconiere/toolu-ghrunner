@@ -6,11 +6,10 @@ workflow-command dispatch, file commands), job lifecycle (start, hooks,
 teardown), and the local OIDC/artifact/cache service plumbing a job's steps
 talk to.
 
-**What does NOT belong here:** the bollard Docker wrapper (`crate::docker`),
-Node.js runtime download/caching (`crate::node`), and the compiled-in plugin
-trait/registry (`crate::plugin`) — those are siblings this module calls into,
-not part of it. Workflow YAML parsing/matrix/orchestration lives in the
-`workflow/` sub-module, not spread across the step loop.
+**What does NOT belong here:** the bollard Docker wrapper (`crate::docker`)
+and Node.js runtime download/caching (`crate::node`) — those are siblings this
+module calls into, not part of it. There is no local workflow parser or
+orchestrator: GitHub expands workflows and sends the engine a single job.
 
 ## Contents
 
@@ -65,7 +64,6 @@ not part of it. Workflow YAML parsing/matrix/orchestration lives in the
 | `step_summary.rs` | `collect` | Bounded, masked summary snapshots; refuses non-regular summary files; non-fatal error annotations. |
 | `step_timeout.rs` | `wait_bounded` | Bounded child-process wait shared by the script and node handlers: races `timeout-minutes` against the job `CancellationToken`. |
 | `steps_runner.rs` | `run_steps` | The per-job step loop: condition evaluation, dispatch to action/script execution, continue-on-error, and post-step draining. |
-| `workflow.rs` | (mod decl) | Declares the `workflow` sub-module; see its own README. |
 | `workspace_gc.rs` | `gc_workspaces`, `GcPolicy` | Prunes this registration's unleased workspaces: stable ones unused for `stable_gc_hours` (default never) and fresh `<job_id>` ones older than `gc_after_hours`; pre-#90 lease-less dirs use mtime only; never the running job's. |
 | `workspace_layout.rs` | `prepare_workspace`, `PreparedWorkspace`, `Repository` | Allocates the job workspace (#90): stable `<work>/<repo>/<repo>` with upstream `workspace.clean`, or fresh `<work>/<job_id>`; holds the lease until dropped. |
 | `workspace_lease.rs` | `WorkspaceLease` | `fs2` exclusive lease on a `_PipelineMapping/` lock file; released on drop. |
@@ -75,11 +73,10 @@ not part of it. Workflow YAML parsing/matrix/orchestration lives in the
 
 - `actions/` — action resolution, download, and manifest parsing for `uses:` steps.
 - `artifacts/` — artifact upload/download service (Azure append-blob backend).
-- `handlers/` — the concrete `runs.using` handlers plus dispatch resolution.
+- `handlers/` — the concrete `runs.using` handlers (dispatch itself is in `steps_runner` + `action_exec`).
 - `oidc/` — OIDC token server and claims building.
 - `shadow/` — shadow-mode (approach C) workspace fingerprinting; records only.
 - `tests/` — flat sibling test files for execution module internals.
-- `workflow/` — workflow YAML parsing, matrix expansion, orchestration, and reusable-workflow resolution.
 
 When you add a file here, add its row above so the index stays current. No
 `mod.rs` barrel — declare submodules from the parent file (`src/foo.rs`

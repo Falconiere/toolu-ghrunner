@@ -1,5 +1,5 @@
 //! Job-level execution inputs that live above the per-step loop: the job's
-//! `outputs:` expression map and the resolved `defaults.run` (shell +
+//! acquired `outputs:` token and the resolved `defaults.run` (shell +
 //! working-directory) fallback.
 //!
 //! Ordered `defaults` mappings from the acquired message supply the live
@@ -28,11 +28,9 @@ pub struct RunDefaultsResolved {
 /// Constant-per-job inputs threaded into the step loop and consumed at job end.
 #[derive(Debug, Clone, Default)]
 pub struct JobSpec {
-  /// Job-level `outputs:` map: name → `${{ }}` expression string. Evaluated
-  /// against the final context after all steps + post-steps complete.
-  pub outputs: HashMap<String, String>,
-  /// Ordered, unevaluated `jobOutputs` token from the acquired job message.
-  /// This takes precedence over locally parsed workflow outputs when present.
+  /// Ordered, unevaluated `jobOutputs` token from the acquired job message,
+  /// evaluated against the final context after all steps + post-steps
+  /// complete. `None` (or a null token) means the job declares no outputs.
   pub acquired_outputs: Option<TemplateToken>,
   /// Final `defaults.run` mapping applied to run-steps that omit their own.
   pub defaults: RunDefaultsResolved,
@@ -225,25 +223,4 @@ fn parse_value(
   }
   let value = env_token_to_string(token, ctx, eval_ctx)?;
   Ok((!value.is_empty()).then_some(value))
-}
-
-/// Evaluate the job's `outputs:` map against the final execution context.
-///
-/// Each value is a `${{ }}` expression (typically `steps.<id>.outputs.<k>`).
-/// Interpolation runs after all main + post steps complete, so step outputs are
-/// fully recorded. The resolved map is placed into `JobCompleted.outputs`.
-///
-/// # Errors
-///
-/// Returns `RunnerError::Expression` if an output expression fails to evaluate.
-pub fn evaluate_job_outputs(
-  spec: &JobSpec,
-  ctx: &ExecutionContext,
-) -> Result<HashMap<String, String>, RunnerError> {
-  let mut resolved = HashMap::with_capacity(spec.outputs.len());
-  for (name, expr) in &spec.outputs {
-    let value = ctx.interpolate_string(expr)?;
-    resolved.insert(name.clone(), value);
-  }
-  Ok(resolved)
 }

@@ -1,8 +1,9 @@
 # handlers/
 
 **What belongs here:** the concrete `runs.using` step handlers (script,
-node, node_exec, docker, composite). Dispatch itself lives in the step
-loop (`execution::action_exec` / `process_dispatch`), keyed on `runs.using`.
+node, node_exec, docker, composite). Selection is not here: `steps_runner`
+splits `run:` from `uses:` and `action_exec` matches the resolved manifest's
+`runs.using`.
 
 **What does NOT belong here:** the actual end-to-end action download/run
 orchestration — that is `execution::action_exec` /

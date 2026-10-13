@@ -124,7 +124,7 @@ runtime dependencies beyond `serde`, `chrono`, and `tracing`.
   codebase. Variants map to categories: `Protocol`, `Auth`,
   `Network`, `Config`, `StepExecution`, `ScriptHandler`,
   `Expression`, `Docker`, `Oidc`, `Artifact`, `Cache`,
-  `ReusableWorkflow`, `Reporting`, `WorkspaceInit`, `LockHeld`,
+  `Reporting`, `WorkspaceInit`, `LockHeld`,
   `Cancelled`, plus `Io` and `Json` for ergonomic `From` conversions.
 - `RunnerEvent` — events emitted by `Runner::execute_job()`. Carries
   the conclusion on `JobCompleted`.
@@ -295,8 +295,10 @@ dispatches each step to a handler:
 StepStarted → dispatch on run:/runs.using → handler → StepCompleted
 ```
 
-Dispatch: `run:` is a script; a `uses:` action goes by its manifest
-`runs.using` — **node → docker → composite**. There is no plugin layer or
+Dispatch: `steps_runner` splits `run:` (script) from `uses:`; for a
+`uses:` action `action_exec` matches the resolved manifest's `runs.using` —
+**node → docker → composite**. An unsupported `runs.using` is rejected at
+manifest parse. There is no plugin layer or
 local workflow orchestrator; GitHub orchestrates jobs (#97).
 
 - `script` — `run: echo hello`-style shell scripts. Streams stdout /

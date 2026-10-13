@@ -51,9 +51,6 @@ pub enum RunnerError {
   /// The content-addressed cache service failed.
   #[error("cache service error: {0}")]
   Cache(String),
-  /// Reusable workflow resolution failed.
-  #[error("reusable workflow error: {0}")]
-  ReusableWorkflow(String),
   /// Reporting status/logs back to the Results Service failed.
   #[error("reporting error: {0}")]
   Reporting(String),

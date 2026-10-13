@@ -183,10 +183,11 @@ to that list requires proving the value is not a real credential.
   `feature_detection` module handles the wire-shape difference.
 - **Handler dispatch.** There is no plugin layer and no local
   workflow orchestrator (removed in #97; GitHub orchestrates jobs). The
-  step loop dispatches in `execution::action_exec` / `process_dispatch`:
-  a `run:` step is a script; a `uses:` action goes by its manifest
-  `runs.using` — node → docker → composite. An unknown value fails the
-  step with an "unsupported runner type" error.
+  step loop (`steps_runner`) splits `run:` (script) from `uses:`; for a
+  `uses:` action, `action_exec` matches the resolved manifest's
+  `runs.using` — node → docker → composite. An unsupported `runs.using`
+  is rejected at manifest parse (`actions/manifest.rs`, "unsupported
+  runs.using" / "'using: X' is not supported").
 - **Service mode (forwarder / offline / accelerated).** Config
   `[services] mode` (`ServicesMode` in `shared/src/config.rs`) selects
   how artifacts / cache / OIDC reach their backends. In `forwarder`
@@ -313,7 +314,7 @@ to that list requires proving the value is not a real credential.
   `stable_gc_hours`), `CacheConfig`, `L2Config`.
 - `error.rs` — `RunnerError` enum (Protocol, Auth, Network, Config,
   StepExecution, ScriptHandler, Expression, Docker, Oidc, Artifact,
-  Cache, ReusableWorkflow, Reporting, WorkspaceInit, LockHeld, etc.).
+  Cache, Reporting, WorkspaceInit, LockHeld, etc.).
 - `events.rs` — `RunnerEvent` (`JobStarted`, `StepStarted`, `Log`,
   `StepCompleted`, `JobCompleted`, `Annotation`, `LogGroup`,
   `StepSkipped`) + `ListenerEvent` (wraps `RunnerEvent` plus

@@ -1,6 +1,6 @@
 //! Job execution engine: context, steps runner, handlers, expressions
-//! glue, plus the Node.js runtime, bollard Docker wrapper, and the plugin
-//! registry. Exposes the reusable [`Runner`] that spawns job work and
+//! glue, plus the Node.js runtime, and bollard Docker wrapper.
+//! Exposes the reusable [`Runner`] that spawns job work and
 //! returns an event stream. Depends only on `shared`, `expressions`, and
 //! `cache` — never on the listener, `wire`, or `observability`.
 

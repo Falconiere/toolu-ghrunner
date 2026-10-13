@@ -17,7 +17,6 @@ cache = { path = "../cache" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "net", "io-util", "fs"] }
 tokio-util = { version = "0.7", features = ["io-util"] }
 futures-util = "0.3"
-async-trait = "0.1"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

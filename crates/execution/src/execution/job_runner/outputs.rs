@@ -8,7 +8,7 @@ use shared::{AnnotationLevel, Conclusion, RunnerError};
 use super::complete_step::CompleteStep;
 use crate::execution::context::ExecutionContext;
 use crate::execution::job_spec::{
-  JobSpec, NULL_TOKEN, evaluate_acquired_outputs, evaluate_job_outputs,
+  JobSpec, NULL_TOKEN, evaluate_acquired_outputs,
 };
 
 /// Resolved job outputs and whether their evaluation failed.
@@ -34,7 +34,7 @@ pub(super) async fn evaluate_final_outputs(
   else {
     return Ok(FinalOutputs {
       conclusion,
-      outputs: evaluate_job_outputs(spec, ctx)?,
+      outputs: HashMap::new(),
       failed: false,
     });
   };
