@@ -13,7 +13,7 @@ use std::time::Duration;
 use execution::Runner;
 use execution::execution::actions::prefetch::ActionFetcher;
 use execution::execution::context::ExecutionContext;
-use execution::execution::job_spec::{JobSpec, evaluate_job_outputs};
+use execution::execution::job_spec::JobSpec;
 use execution::execution::steps_runner::{JobRun, run_steps};
 use execution::node::runtime::{node_binary_path, node_cache_dir, node_version_for};
 use shared::{
@@ -214,16 +214,9 @@ async fn named_output_uses_context_name_while_reporting_uses_wire_uuid() -> Test
   assert!(events.iter().any(
     |event| matches!(event, RunnerEvent::StepCompleted { step_id, .. } if step_id == &producer_id)
   ));
-  let spec = JobSpec {
-    outputs: std::collections::HashMap::from([(
-      "artifact".to_owned(),
-      "${{ steps.build.outputs.value }}".to_owned(),
-    )]),
-    ..JobSpec::default()
-  };
   assert_eq!(
-    evaluate_job_outputs(&spec, &ctx)?.get("artifact"),
-    Some(&"hello".to_owned())
+    ctx.interpolate_string("${{ steps.build.outputs.value }}")?,
+    "hello"
   );
   Ok(())
 }

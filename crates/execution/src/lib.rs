@@ -1,6 +1,6 @@
 //! Job execution engine: context, steps runner, handlers, expressions
-//! glue, plus the Node.js runtime, bollard Docker wrapper, and the plugin
-//! registry. Exposes the reusable [`Runner`] that spawns job work and
+//! glue, plus the Node.js runtime, and bollard Docker wrapper.
+//! Exposes the reusable [`Runner`] that spawns job work and
 //! returns an event stream. Depends only on `shared`, `expressions`, and
 //! `cache` — never on the listener, `wire`, or `observability`.
 
@@ -12,8 +12,6 @@ pub mod docker;
 pub mod execution;
 /// Node.js runtime detection, download, and caching.
 pub mod node;
-/// `RunnerPlugin` trait and registry.
-pub mod plugin;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

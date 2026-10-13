@@ -1,7 +1,7 @@
-//! AC-8 (E1, S11) — job-level execution glue: job `outputs:` evaluation that
-//! feeds `JobCompleted.outputs` (→ `needs.<job>.outputs.*`), `defaults.run`
+//! AC-8 (E1, S11) — job-level execution glue: `defaults.run`
 //! shell/working-directory fallback for run-steps, and the self-hosted
-//! `ACTIONS_RUNNER_HOOK_JOB_STARTED` / `_COMPLETED` hooks.
+//! `ACTIONS_RUNNER_HOOK_JOB_STARTED` / `_COMPLETED` hooks. Job `outputs:` are
+//! covered on the production path by `crates/execution/tests/job_outputs_test.rs`.
 //!
 //! Real-data only: steps run through the live step loop
 //! (`execution::steps_runner::run_steps`) and hooks through the real hook
@@ -10,25 +10,21 @@
 //! same `AgentJobRequestMessage` shape the engine consumes.
 //!
 //! Asserts:
-//!   1. A job `outputs: { out1: ${{ steps.s1.outputs.k }} }` where `s1` writes
-//!      `k=v` to `$GITHUB_OUTPUT` resolves to `out1 == v`.
-//!   2. `defaults.run.working-directory: sub` applies to a run-step with no
+//!   1. `defaults.run.working-directory: sub` applies to a run-step with no
 //!      `working-directory:` (cwd ends in `/sub`); a step that sets its own
 //!      `working-directory` overrides the default.
-//!   3. `ACTIONS_RUNNER_HOOK_JOB_STARTED` runs before steps (marker written),
+//!   2. `ACTIONS_RUNNER_HOOK_JOB_STARTED` runs before steps (marker written),
 //!      and a failing started-hook is reported as `Failure`.
-//!   4. `ACTIONS_RUNNER_HOOK_JOB_COMPLETED` runs (marker written), best-effort.
+//!   3. `ACTIONS_RUNNER_HOOK_JOB_COMPLETED` runs (marker written), best-effort.
 
-use std::collections::HashMap;
 use std::error::Error;
 use std::sync::{Arc, Mutex};
 
 use execution::execution::actions::prefetch::ActionFetcher;
 use execution::execution::context::ExecutionContext;
 use execution::execution::job_hooks::{JobHookStage, run_job_hook};
-use execution::execution::job_spec::{JobSpec, evaluate_job_outputs};
+use execution::execution::job_spec::{JobSpec, RunDefaultsResolved};
 use execution::execution::steps_runner::{JobRun, run_steps};
-use execution::execution::workflow::types::{RunDefaults, WorkflowDefaults};
 use shared::SecretMasker;
 use shared::{
   ActionStep, ActionStepDefinitionReference, AgentJobRequestMessage, Conclusion, DictEntry,
@@ -159,64 +155,16 @@ async fn run_steps_collect(
   Ok(ctx)
 }
 
-/// Build a `JobSpec` from a real parsed-workflow outputs map + defaults.
-fn spec_with(
-  outputs: &[(&str, &str)],
-  wf_defaults: Option<&WorkflowDefaults>,
-  job_defaults: Option<&WorkflowDefaults>,
-) -> JobSpec {
-  let outputs: HashMap<String, String> = outputs
-    .iter()
-    .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
-    .collect();
-  JobSpec::from_workflow(outputs, wf_defaults, job_defaults)
-}
-
-/// Defaults carrying a `run.working-directory` value.
-fn defaults_wd(wd: &str) -> WorkflowDefaults {
-  WorkflowDefaults {
-    run: Some(RunDefaults {
+/// Build a `JobSpec` from a resolved `defaults.run.working-directory` (the
+/// shape `from_message_defaults` yields).
+fn spec_with(working_directory: Option<&str>) -> JobSpec {
+  JobSpec {
+    defaults: RunDefaultsResolved {
       shell: None,
-      working_directory: Some(wd.to_owned()),
-    }),
+      working_directory: working_directory.map(str::to_owned),
+    },
+    ..JobSpec::default()
   }
-}
-
-// ---- AC-8: job outputs feed JobCompleted.outputs ---------------------------
-
-#[tokio::test]
-async fn job_outputs_resolve_from_step_github_output() -> TestResult<()> {
-  // s1 writes `k=v` to $GITHUB_OUTPUT; the job output `out1` maps to it.
-  let steps = vec![script_step(
-    "s1",
-    "echo \"k=hello-output\" >> \"$GITHUB_OUTPUT\"",
-    Some("bash"),
-    None,
-  )];
-  let spec = spec_with(&[("out1", "${{ steps.s1.outputs.k }}")], None, None);
-  let ctx = run_steps_collect(steps, &spec, |_| Ok(())).await?;
-
-  // This is the exact map run_job places into JobCompleted.outputs.
-  let outputs = evaluate_job_outputs(&spec, &ctx)?;
-  assert_eq!(
-    outputs.get("out1").map(String::as_str),
-    Some("hello-output"),
-    "job output out1 must resolve to the step's $GITHUB_OUTPUT value"
-  );
-  Ok(())
-}
-
-#[tokio::test]
-async fn job_outputs_empty_spec_yields_empty_map() -> TestResult<()> {
-  let steps = vec![script_step("s1", "echo hi", Some("bash"), None)];
-  let spec = JobSpec::default();
-  let ctx = run_steps_collect(steps, &spec, |_| Ok(())).await?;
-  let outputs = evaluate_job_outputs(&spec, &ctx)?;
-  assert!(
-    outputs.is_empty(),
-    "no job outputs => empty JobCompleted.outputs"
-  );
-  Ok(())
 }
 
 // ---- AC-8: defaults.run working-directory ----------------------------------
@@ -230,8 +178,7 @@ async fn defaults_run_working_directory_applies_to_bare_step() -> TestResult<()>
     Some("bash"),
     None,
   )];
-  let job = defaults_wd("sub");
-  let spec = spec_with(&[], None, Some(&job));
+  let spec = spec_with(Some("sub"));
 
   let ctx = run_steps_collect(steps, &spec, |ws| std::fs::create_dir_all(ws.join("sub"))).await?;
 
@@ -252,8 +199,7 @@ async fn step_working_directory_overrides_default() -> TestResult<()> {
     Some("bash"),
     Some("own"),
   )];
-  let job = defaults_wd("sub");
-  let spec = spec_with(&[], None, Some(&job));
+  let spec = spec_with(Some("sub"));
 
   let ctx = run_steps_collect(steps, &spec, |ws| {
     std::fs::create_dir_all(ws.join("sub"))?;
@@ -265,33 +211,6 @@ async fn step_working_directory_overrides_default() -> TestResult<()> {
   assert!(
     pwd.ends_with("/own"),
     "step working-directory must override the default: pwd was {pwd}"
-  );
-  Ok(())
-}
-
-#[tokio::test]
-async fn job_defaults_override_workflow_defaults() -> TestResult<()> {
-  // Workflow default `wf`, job default `job` => job wins.
-  let steps = vec![script_step(
-    "s1",
-    "echo \"k=$(pwd)\" >> \"$GITHUB_OUTPUT\"",
-    Some("bash"),
-    None,
-  )];
-  let wf = defaults_wd("wf");
-  let job = defaults_wd("job");
-  let spec = spec_with(&[], Some(&wf), Some(&job));
-
-  let ctx = run_steps_collect(steps, &spec, |ws| {
-    std::fs::create_dir_all(ws.join("wf"))?;
-    std::fs::create_dir_all(ws.join("job"))
-  })
-  .await?;
-
-  let pwd = ctx.step_outputs("s1").get("k").cloned().unwrap_or_default();
-  assert!(
-    pwd.ends_with("/job"),
-    "job defaults.run must override workflow defaults.run: pwd was {pwd}"
   );
   Ok(())
 }

@@ -66,7 +66,6 @@ pub(super) async fn execute(
   let spec = JobSpec {
     acquired_outputs: msg.job_outputs.clone(),
     defaults: JobSpec::from_message_defaults(&msg.defaults, ctx)?,
-    ..JobSpec::default()
   };
   let body = JobBody {
     msg,

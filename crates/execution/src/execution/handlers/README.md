@@ -1,9 +1,9 @@
 # handlers/
 
 **What belongs here:** the concrete `runs.using` step handlers (script,
-node, node_exec, docker, composite) and the dispatch decision
-(`resolve::resolve_handler`) that picks among them — plugin first, then the
-four built-ins.
+node, node_exec, docker, composite). Selection is not here: `steps_runner`
+splits `run:` from `uses:` and `action_exec` matches the resolved manifest's
+`runs.using`.
 
 **What does NOT belong here:** the actual end-to-end action download/run
 orchestration — that is `execution::action_exec` /
@@ -20,7 +20,6 @@ holds the depth-tracked scope/output-evaluation scaffolding).
 | `docker.rs` | `parse_docker_uses` | Parses a `docker://image:tag` `uses:` string into `(image, tag)`, defaulting the tag to `latest`. |
 | `node.rs` | `build_action_env` | Node.js action env building: `determine_script` picks the pre/main/post entrypoint, `input_env_key` does the `INPUT_*` name transform, and this assembles `GITHUB_ACTION_PATH`/`INPUT_*`/`STATE_*`. |
 | `node_exec.rs` | `execute_node_action` | Spawns `node {script}` for one stage, streams stdout/stderr live, and waits bounded by timeout/cancellation via `step_timeout::wait_bounded`. |
-| `resolve.rs` | `resolve_handler` | Picks which handler runs a step: plugin registry first (by `runs.using` name), then the built-in script/node/docker/composite match. |
 | `shell_command.rs` | `ShellCommand` | Shared default/explicit shell resolution, argv templates, script extensions and PowerShell fixups. |
 | `script.rs` | `ScriptHandler` | Spawns a `run:` step's shell script, streams stdout/stderr live, and waits bounded by timeout/cancellation; also hosts the `stream_output`/`forward_lines`/`bounded_drain` helpers shared with `node_exec`. |
 

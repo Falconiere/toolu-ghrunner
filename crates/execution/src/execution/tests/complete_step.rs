@@ -2,7 +2,6 @@
 //! driven with the sanitized `completejob-88.yml` env capture (run
 //! 38098611227) and real job contexts.
 
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use shared::{
@@ -99,16 +98,20 @@ fn row(events: &[RunnerEvent]) -> (Vec<&str>, Vec<(AnnotationLevel, &str)>, Opti
 }
 
 #[tokio::test]
-async fn local_output_error_still_closes_the_row_as_failed() -> TestResult {
+async fn acquired_output_error_still_closes_the_row_as_failed() -> TestResult {
   let message: AgentJobRequestMessage = serde_json::from_str(ENV_CAPTURE)?;
-  let outputs = HashMap::from([("bad".to_owned(), "${{ fromJSON('{') }}".to_owned())]);
-  let spec = JobSpec::from_workflow(outputs, None, None);
+  let spec = JobSpec {
+    acquired_outputs: Some(outputs(vec![("bad", expression("fromJSON('{')"))])),
+    ..JobSpec::default()
+  };
   let (result, events) = complete(&spec, &message, &ExecutionContext::new_for_test()).await;
-  assert!(result.is_err(), "the local output error propagates");
+  assert_eq!(result.ok(), Some(Conclusion::Failure));
   let (_, annotations, conclusion) = row(&events);
   assert_eq!(conclusion, Some(Conclusion::Failure));
   assert!(
-    matches!(annotations.as_slice(), [(AnnotationLevel::Error, message)] if message.contains("JSON")),
+    annotations
+      .iter()
+      .any(|(level, message)| *level == AnnotationLevel::Error && message.contains("JSON")),
     "{annotations:?}"
   );
   Ok(())
