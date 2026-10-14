@@ -14,8 +14,8 @@ concurrency:
 jobs:
   ci:
     runs-on: ubuntu-latest
-    # Median run ~6 min, slowest on record 30; a hang must not hold a runner
-    # for GitHub's 360 min default.
+    # Median run ~6 min; a hang must not hold a runner for GitHub's 360 min
+    # default.
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
