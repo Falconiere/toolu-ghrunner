@@ -54,9 +54,9 @@ macOS arm64 was not re-measured here. The issue's measurements at `2ca6459`
 Every metric is inside the 10% threshold (worst: masker +8.3%,
 `interpolate_github_repository` +8.0%; cache within 3.2%), so `"s"` + fat LTO is
 adopted. Masking and interpolation run in microseconds per line/expression; the
-regression is far below what a job's I/O shows. Criterion intervals for the
-masker overlap (baseline 1.596–1.626 µs, adopted 1.680–1.805 µs, a small but
-real shift), which is why the masker is the metric to watch if the profile is
+regression is far below what a job's I/O shows. The masker's criterion
+intervals do not overlap (baseline 1.596–1.626 µs, adopted 1.680–1.805 µs), so
+its +8.3% is a real shift, which is why the masker is the metric to watch if the profile is
 revisited. No per-crate `opt-level = 3` override was needed. The fallback
 (`3` + fat, −5.6% only) stays the documented retreat if a later change pushes a
 metric past 10%.
