@@ -52,5 +52,10 @@ tempfile = "3"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "time", "sync"] }
 temp-env = { version = "0.3", features = ["async_closure"] }
 
+[[bench]]
+name = "cas_roundtrip"
+harness = false
+test = false
+
 [lints]
 workspace = true
