@@ -130,9 +130,11 @@ debug = 0
 inherits = "dev"
 debug = true
 
+# Size-optimized, fat LTO: measured against opt-level 3 + thin LTO, every hot
+# path stayed within the 10% threshold (docs/release-profile.md, #112).
 [profile.release]
-opt-level = 3
-lto = "thin"
+opt-level = "s"
+lto = "fat"
 codegen-units = 1
 strip = "symbols"
 panic = "abort"
