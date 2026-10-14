@@ -22,6 +22,22 @@
 # it would slow the cold pull for every deployment — toolu.sh's
 # DEFAULT_RUNNER_IMAGE follows this repo's moving tag — while only VPS hosts
 # that opt in per host (`vps_hosts.image_ref`) need a daemon at all.
+#
+# Where the binary comes from (#121) is a build arg, not a second Dockerfile:
+#
+#   RUNNER_BINARY=build     (default)  compile it in `builder` below — PR,
+#                                      dispatch and local builds
+#   RUNNER_BINARY=prebuilt             COPY dist/toolu-runner-linux-<arch>,
+#                                      the binary out of release.yml's tarball
+#
+# A tag publish uses `prebuilt`, so the image ships the release tarball's
+# binary byte for byte instead of compiling it a second time. BuildKit builds
+# only the stages the target reaches, so the prebuilt path never compiles.
+# release.yml builds its linux legs in the same rust:1.94.1-bookworm image as
+# `builder`, which is what keeps that binary loadable on the bookworm runtime.
+# `runtime` runs `toolu-runner --version` either way, so a binary linked
+# against a newer glibc fails the build here, before anything is pushed.
+ARG RUNNER_BINARY=build
 
 # The build runs under BuildKit cache mounts, so a rebuild after a source edit
 # recompiles only the crates that changed instead of every dependency (#114):
@@ -47,6 +63,18 @@ RUN --mount=type=cache,id=toolu-cargo-registry,target=/usr/local/cargo/registry,
     --mount=type=cache,id=toolu-target-${TARGETPLATFORM},target=/src/target,sharing=locked \
   cargo build --release --locked --bin toolu-runner \
   && install -D -m 0755 target/release/toolu-runner /out/toolu-runner
+
+# The two binary sources. Both leave the binary at /out/toolu-runner; `binary`
+# is whichever one RUNNER_BINARY names, and `runtime` reads only `binary`.
+FROM builder AS binary-build
+
+# The workflow extracts the tarball's binary to dist/ before the build; the
+# context allowlist (.dockerignore) admits exactly these two paths.
+FROM scratch AS binary-prebuilt
+ARG TARGETARCH
+COPY --chmod=0755 dist/toolu-runner-linux-${TARGETARCH} /out/toolu-runner
+
+FROM binary-${RUNNER_BINARY} AS binary
 
 # Pre-seed the Node runtimes the engine's `ensure_node_runtime` would
 # otherwise download from nodejs.org on first use. These containers are
@@ -94,7 +122,17 @@ RUN apt-get update \
     bash git ca-certificates curl sudo tar gzip zstd xz-utils unzip jq \
   && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /out/toolu-runner /usr/local/bin/toolu-runner
+COPY --from=binary /out/toolu-runner /usr/local/bin/toolu-runner
+# The binary must load on THIS libc: `--version` exits non-zero with
+# "GLIBC_x.y not found" for one linked against a newer glibc. When the
+# workflow passes the sha256 of the release tarball's binary, the copy must
+# match it byte for byte. Empty (PR / local builds) skips only the sha check.
+ARG RUNNER_SHA256=
+RUN set -eu; \
+  toolu-runner --version; \
+  if [ -n "${RUNNER_SHA256}" ]; then \
+    echo "${RUNNER_SHA256}  /usr/local/bin/toolu-runner" | sha256sum -c -; \
+  fi
 # Seed lands where boot mode resolves its data dir: TOOLU_RUNNER_HOME/node/<v>.
 COPY --from=node-seed /seed/node /var/lib/toolu-runner/node
 ENV TOOLU_RUNNER_HOME=/var/lib/toolu-runner

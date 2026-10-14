@@ -76,6 +76,95 @@ want_in "$IMAGE_JOB" "pushes on tags only"                   "push: \\\$\{\{ git
 # The image these tags name must not collide with the Linux one.
 want "the image basename is the macOS one" "IMAGE_BASENAME: toolu-ghrunner-macos"
 
+# --- the binary source (#121) -----------------------------------------------
+# A tag reaches this workflow only from release.yml, which already built the
+# darwin-arm64 tarball on macos-14: the prebuilt path skips the compile and
+# packs that tarball's binary. PR / dispatch still compile here, under an
+# artifact name of their own so one name never carries two shapes.
+want_in "$BUILD_JOB" "the compile runs only off the prebuilt path" \
+  'if: \$\{\{ !inputs\.prebuilt_binaries \}\}'
+want_in "$BUILD_JOB" "the compiled binary has its own artifact name" \
+  '^          name: toolu-runner-darwin-arm64-binary$'
+want_in "$IMAGE_JOB" "the pack still runs when the compile is skipped, never after a failed one" \
+  "if: \\$\{\{ !cancelled\(\) && needs\.build\.result != 'failure' \}\}"
+want_in "$IMAGE_JOB" "the prebuilt path packs the release tarball's binary" \
+  '^          name: toolu-runner-darwin-arm64$'
+want_in "$IMAGE_JOB" "the tarball binary is staged where Dockerfile.macos copies it" \
+  'tar -xzf "\$\{tarball\}" -O toolu-runner >dist/toolu-runner-darwin-arm64'
+# `scratch` has no shell for an in-build check, so the payload is exported
+# (a cache hit of the same build) and compared BEFORE the push.
+want_in "$IMAGE_JOB" "the payload is exported and compared to the staged binary" \
+  '--output type=local,dest=payload'
+if printf '%s\n' "$IMAGE_JOB" | awk '
+    /--output type=local,dest=payload/ { v = NR }
+    /name: Build \(and push on tag\)/  { b = NR }
+    END { exit !(v && b && v < b) }'; then
+  echo "ok: the payload is verified before the push step"
+else
+  echo "FAIL: the payload check must come before the push step" >&2
+  fail=1
+fi
+
+# structure_check FILE — one "FAIL: <desc>" per violated trigger/job property
+# (PyYAML: `on:` parses as the boolean True key).
+structure_check() {
+  python3 - "$1" <<'PY'
+import sys, yaml
+wf = yaml.safe_load(open(sys.argv[1]))
+on = wf.get("on", wf.get(True)) or {}
+jobs = wf.get("jobs", {})
+def fail(d): print(f"FAIL: {d}")
+if "push" in on:
+    fail("no push trigger: a tag reaches this workflow only through release.yml")
+inp = ((on.get("workflow_call") or {}).get("inputs") or {}).get("prebuilt_binaries") or {}
+if inp.get("type") != "boolean" or inp.get("default") is not False:
+    fail("workflow_call takes prebuilt_binaries (boolean, default false)")
+if "paths" not in (on.get("pull_request") or {}):
+    fail("PRs touching the macOS image inputs still build")
+if "workflow_dispatch" not in on:
+    fail("workflow_dispatch still builds on demand")
+if "verify" in jobs:
+    fail("no verify job: release.yml's gate is the only one per tag")
+if "needs" in jobs.get("build", {}):
+    fail("build needs nothing inside this workflow")
+PY
+}
+
+if python3 -c 'import yaml' >/dev/null 2>&1; then
+  out="$(structure_check "$WF")"
+  if [[ -n "$out" ]]; then
+    echo "$out" >&2
+    fail=1
+  else
+    echo "ok: reached by workflow_call(prebuilt_binaries) + PR + dispatch; no tag trigger, no verify"
+  fi
+  mut="$(mktemp)"
+  mutate_yaml() {
+    local desc="$1" script="$2"
+    sed -e "$script" "$WF" >"$mut"
+    if cmp -s "$WF" "$mut"; then
+      echo "FAIL: mutation for '$desc' no longer changes $WF — update it" >&2
+      fail=1
+    elif grep -Fxq "FAIL: $desc" <<<"$(structure_check "$mut")"; then
+      echo "ok: re-introducing it fails '$desc'"
+    else
+      echo "FAIL: '$desc' still passes when violated" >&2
+      fail=1
+    fi
+  }
+  mutate_yaml "no push trigger: a tag reaches this workflow only through release.yml" \
+    "s#^  workflow_dispatch:\$#  workflow_dispatch:\n  push:\n    tags: ['v*']#"
+  mutate_yaml "no verify job: release.yml's gate is the only one per tag" \
+    's#^jobs:$#jobs:\n  verify:\n    runs-on: ubuntu-24.04\n    steps:\n      - run: cargo test --workspace#'
+  mutate_yaml "build needs nothing inside this workflow" \
+    's#^    runs-on: macos-14$#    needs: verify\n&#'
+  mutate_yaml "workflow_call takes prebuilt_binaries (boolean, default false)" \
+    's#^        default: false$#        default: true#'
+  rm -f "$mut"
+else
+  echo "# PyYAML unavailable — skipped the trigger/job structure tier"
+fi
+
 # ---------------------------------------------------------------------------
 # Behavioural tier: run the real derivation.
 # ---------------------------------------------------------------------------

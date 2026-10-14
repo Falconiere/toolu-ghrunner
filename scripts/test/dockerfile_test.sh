@@ -18,6 +18,14 @@
 # Plus the stage-order rule the Dockerfile's header explains: `runner` is the
 # LAST stage, so a bare `docker build .` produces the lean image.
 #
+# And the binary-source switch (#121): `runtime` takes the binary from stage
+# `binary`, which is `binary-${RUNNER_BINARY}` — `binary-build` (the builder
+# above, the default) or `binary-prebuilt` (release.yml's tarball binary,
+# COPYed from dist/). `runtime` must never read the builder directly, or the
+# prebuilt path would compile anyway; and it must run the binary it got
+# (`--version`: a glibc newer than bookworm's fails HERE, before any push)
+# and check it against RUNNER_SHA256 when the workflow passes one.
+#
 # Every check is then re-run against a mutated copy with its property removed,
 # and must fail there — a check that cannot fail proves nothing.
 set -uo pipefail
@@ -76,8 +84,32 @@ run_checks() {
     echo "FAIL: builder declares ARG TARGETPLATFORM"
   grep -Fq 'target/release/toolu-runner /out/toolu-runner' <<<"$build_run" ||
     echo "FAIL: binary copied out of the mount in the build RUN"
-  grep -Fxq 'COPY --from=builder /out/toolu-runner /usr/local/bin/toolu-runner' <<<"$runtime" ||
+  grep -Fxq 'COPY --from=binary /out/toolu-runner /usr/local/bin/toolu-runner' <<<"$runtime" ||
     echo "FAIL: runtime copies /out/toolu-runner to /usr/local/bin/toolu-runner"
+  if grep -Eq -- '--from=builder' <<<"$runtime"; then
+    echo "FAIL: runtime never reads the builder directly"
+  fi
+  # The selector is a GLOBAL arg (before the first FROM) so FROM can expand it,
+  # and it defaults to compiling: PR and local builds have no dist/ binary.
+  logical "$f" | awk '/^FROM /{ exit } /^ARG RUNNER_BINARY=build$/{ found = 1 } END { exit !found }' ||
+    echo "FAIL: global ARG RUNNER_BINARY defaults to build"
+  logical "$f" | grep -Fxq 'FROM builder AS binary-build' ||
+    echo "FAIL: binary-build derives from builder"
+  prebuilt="$(stage "$f" binary-prebuilt)"
+  grep -Eq '^FROM scratch AS binary-prebuilt$' <<<"$prebuilt" ||
+    echo "FAIL: binary-prebuilt starts from scratch"
+  grep -Eq '^ARG TARGETARCH$' <<<"$prebuilt" ||
+    echo "FAIL: binary-prebuilt declares ARG TARGETARCH"
+  grep -Fxq 'COPY --chmod=0755 dist/toolu-runner-linux-${TARGETARCH} /out/toolu-runner' <<<"$prebuilt" ||
+    echo "FAIL: binary-prebuilt copies the per-arch release binary"
+  logical "$f" | grep -Fxq 'FROM binary-${RUNNER_BINARY} AS binary' ||
+    echo "FAIL: binary stage is selected by RUNNER_BINARY"
+  grep -Eq '^ARG RUNNER_SHA256=?$' <<<"$runtime" ||
+    echo "FAIL: runtime declares ARG RUNNER_SHA256"
+  grep -Eq '^RUN .*toolu-runner --version' <<<"$runtime" ||
+    echo "FAIL: runtime runs the copied binary"
+  grep -Eq '^RUN .*\$\{RUNNER_SHA256\} +/usr/local/bin/toolu-runner.*sha256sum -c' <<<"$runtime" ||
+    echo "FAIL: runtime checks the binary against RUNNER_SHA256"
   if logical "$f" | grep -Eq '^COPY --from=builder /src/target'; then
     echo "FAIL: nothing is copied from the target/ mount path"
   fi
@@ -91,7 +123,7 @@ if [[ -n "$out" ]]; then
   echo "$out" >&2
   fail=1
 else
-  echo "ok: $DF builder caches registry/git/target, copies the binary out, runner is last"
+  echo "ok: $DF builder caches registry/git/target, copies the binary out, binary source switch + guards, runner is last"
 fi
 
 # --- each check must be able to fail -----------------------------------------
@@ -126,10 +158,38 @@ mutate "/usr/local/cargo/git mount is sharing=locked" 's#cargo/git,sharing=locke
 mutate "/src/target mount is sharing=locked" 's#target=/src/target,sharing=locked#target=/src/target#'
 mutate "builder declares ARG TARGETPLATFORM" '/^ARG TARGETPLATFORM$/d'
 mutate "binary copied out of the mount in the build RUN" 's#target/release/toolu-runner /out/toolu-runner#target/release/toolu-runner /src/toolu-runner#'
-mutate "runtime copies /out/toolu-runner to /usr/local/bin/toolu-runner" 's#^COPY --from=builder /out/toolu-runner #COPY --from=builder /src/target/release/toolu-runner #'
-mutate "nothing is copied from the target/ mount path" 's#^COPY --from=builder /out/toolu-runner .*#&\nCOPY --from=builder /src/target/release/toolu-runner /tmp/x#'
+mutate "runtime copies /out/toolu-runner to /usr/local/bin/toolu-runner" 's#^COPY --from=binary /out/toolu-runner #COPY --from=binary /src/target/release/toolu-runner #'
+mutate "nothing is copied from the target/ mount path" 's#^COPY --from=binary /out/toolu-runner .*#&\nCOPY --from=builder /src/target/release/toolu-runner /tmp/x#'
+mutate "runtime never reads the builder directly" 's#^COPY --from=binary /out/toolu-runner #COPY --from=builder /out/toolu-runner #'
+mutate "global ARG RUNNER_BINARY defaults to build" 's#^ARG RUNNER_BINARY=build$#ARG RUNNER_BINARY=prebuilt#'
+mutate "binary-build derives from builder" 's#^FROM builder AS binary-build$#FROM scratch AS binary-build#'
+mutate "binary-prebuilt starts from scratch" 's#^FROM scratch AS binary-prebuilt$#FROM builder AS binary-prebuilt#'
+mutate "binary-prebuilt declares ARG TARGETARCH" '/^FROM scratch AS binary-prebuilt$/,/^FROM /{/^ARG TARGETARCH$/d;}'
+mutate "binary-prebuilt copies the per-arch release binary" 's#dist/toolu-runner-linux-${TARGETARCH}#dist/toolu-runner#'
+mutate "binary stage is selected by RUNNER_BINARY" 's#^FROM binary-${RUNNER_BINARY} AS binary$#FROM binary-build AS binary#'
+mutate "runtime declares ARG RUNNER_SHA256" '/^ARG RUNNER_SHA256/d'
+mutate "runtime runs the copied binary" 's#toolu-runner --version#true#'
+mutate "runtime checks the binary against RUNNER_SHA256" 's#sha256sum -c#cat#'
 mutate "runner is the last stage" '$a\
 FROM runtime AS extra'
+
+# --- .dockerignore admits the two prebuilt binaries, and nothing else of dist/ --
+# The allowlist is the Linux image's whole context; widening it to `!dist/`
+# would send every local tarball and scratch file into `builder`'s COPY . .
+for a in amd64 arm64; do
+  if grep -Fxq "!dist/toolu-runner-linux-${a}" .dockerignore; then
+    echo "ok: .dockerignore admits dist/toolu-runner-linux-${a}"
+  else
+    echo "FAIL: .dockerignore must admit dist/toolu-runner-linux-${a} for the prebuilt path" >&2
+    fail=1
+  fi
+done
+if grep -Eq '^!dist/?$|^!dist/\*' .dockerignore; then
+  echo "FAIL: .dockerignore admits all of dist/ — list the two binaries only" >&2
+  fail=1
+else
+  echo "ok: .dockerignore does not admit the rest of dist/"
+fi
 
 if [[ "$fail" -ne 0 ]]; then
   echo "dockerfile_test: FAILED" >&2

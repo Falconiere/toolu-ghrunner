@@ -1,6 +1,7 @@
 name: release-image
 
-# Tag-driven container publish: push vX.Y.Z -> gate -> build linux/amd64 +
+# Tag-driven container publish: push vX.Y.Z -> release.yml gates + builds the
+# release tarballs, then calls this workflow -> build linux/amd64 +
 # linux/arm64 legs on native runners -> push both by digest -> merge into
 # one multi-arch manifest at ghcr.io/<owner>/toolu-ghrunner -> print the
 # digest-pinned ref. toolu.sh pins NAMESPACE_RUNNER_IMAGE /
@@ -10,9 +11,8 @@ name: release-image
 # this workflow. The arm64 leg exists for local runs on Apple-Silicon
 # Macs; providers resolve amd64 from the same manifest digest.
 #
-# Each arch compiles on its native runner (the same ubuntu-24.04 /
-# ubuntu-24.04-arm pair release.yml builds on) — a QEMU-emulated Rust
-# release build would be painfully slow and flaky.
+# Each arch builds on its native runner (the same ubuntu-24.04 /
+# ubuntu-24.04-arm pair release.yml builds on) — no QEMU emulation.
 #
 # Two VARIANTS ship from the one Dockerfile, each as its own manifest:
 #
@@ -26,14 +26,27 @@ name: release-image
 # `vps_hosts.image_ref`. The two targets share every expensive layer, so a
 # leg's second build is mostly cache hits on the first.
 #
+# A tag reaches this workflow ONLY through release.yml (`workflow_call`,
+# `needs: build`), never through its own `push: tags` trigger (#121). That
+# gives one fmt/clippy/test gate per tag — release.yml's `verify` — and lets
+# the legs reuse release.yml's binaries: called jobs run inside the caller's
+# workflow run, so `build`'s tarball artifacts are downloadable here. With
+# `prebuilt_binaries: true` each leg extracts `toolu-runner` from its arch's
+# release tarball and builds the Dockerfile with RUNNER_BINARY=prebuilt, so
+# the published image carries the tarball's binary byte for byte (the image
+# build checks it against RUNNER_SHA256) instead of compiling it again.
+#
 # PRs touching the image inputs build without pushing (catches Dockerfile
-# rot); workflow_dispatch does the same on demand. The verify job repeats
-# release.yml's gate rather than depending on it: the two workflows run
-# independently on the same tag, and an image must never publish off a
-# commit whose gate would fail.
+# rot); workflow_dispatch does the same on demand. Neither has release
+# artifacts, so both compile inside Docker (RUNNER_BINARY=build), and neither
+# repeats the gate: nothing is published, and PRs already run ci.yml.
 on:
-  push:
-    tags: ['v*']
+  workflow_call:
+    inputs:
+      prebuilt_binaries:
+        description: Build from the toolu-runner-linux-<arch> release tarballs this run's caller uploaded, instead of compiling in Docker.
+        type: boolean
+        default: false
   pull_request:
     paths:
       - Dockerfile
@@ -57,21 +70,7 @@ env:
   IMAGE_BASENAME: toolu-ghrunner
 
 jobs:
-  verify:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@1.94.1
-        with:
-          components: rustfmt, clippy
-      - name: Format
-        run: cargo fmt --all -- --check
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: Test
-        run: cargo test --workspace
-
-  # One leg per arch PER VARIANT, compiled natively, pushed by digest only
+  # One leg per arch PER VARIANT, built natively, pushed by digest only
   # (tags are applied by `manifest` after both of a variant's legs exist).
   #
   # `target` is a real dimension crossed with `arch`; the `include` entries
@@ -79,7 +78,6 @@ jobs:
   # combinations. The suffix is carried here, not derived in `manifest`, so
   # exactly one place in this file decides which variant owns which tag.
   build:
-    needs: verify
     strategy:
       fail-fast: true
       matrix:
@@ -105,6 +103,34 @@ jobs:
       - name: Compute image name
         id: meta
         run: echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${IMAGE_BASENAME}" >> "$GITHUB_OUTPUT"
+      # The prebuilt path (release.yml's call): this arch's release tarball,
+      # uploaded by release.yml's `build` earlier in the same workflow run.
+      - name: Download this arch's release tarball
+        if: inputs.prebuilt_binaries
+        uses: actions/download-artifact@v8
+        with:
+          name: toolu-runner-linux-${{ matrix.arch }}
+          path: release-tarball
+      # Extracted to the one path the Dockerfile's `binary-prebuilt` stage
+      # copies (and .dockerignore admits). Its sha256 goes to the build as
+      # RUNNER_SHA256, and the image build fails unless its copy matches.
+      - name: Stage the release binary
+        if: inputs.prebuilt_binaries
+        id: binary
+        env:
+          ARCH: ${{ matrix.arch }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          tarball="release-tarball/toolu-runner-linux-${ARCH}.tar.gz"
+          mkdir -p dist
+          tar -xzf "${tarball}" -O toolu-runner >"dist/toolu-runner-linux-${ARCH}"
+          sha="$(sha256sum "dist/toolu-runner-linux-${ARCH}" | cut -d' ' -f1)"
+          echo "sha256=${sha}" >>"$GITHUB_OUTPUT"
+          {
+            echo "## Release binary (linux/${ARCH}, ${TARGET} image)"
+            echo "- tarball \`${tarball##*/}\` sha256 \`$(sha256sum "${tarball}" | cut -d' ' -f1)\`"
+            echo "- \`toolu-runner\` inside it sha256 \`${sha}\` — the image build checks its copy against this"
+          } >>"$GITHUB_STEP_SUMMARY"
       - uses: docker/setup-buildx-action@v3
       - name: Log in to GHCR
         if: github.ref_type == 'tag'
@@ -123,6 +149,13 @@ jobs:
           # variants differ by nothing else, so an omitted target would
           # publish the same image under both tag lines.
           target: ${{ matrix.target }}
+          # Where the binary comes from: the staged release binary on the
+          # prebuilt path, an in-Docker compile otherwise (PR / dispatch). An
+          # empty RUNNER_SHA256 (the compile path) skips only the sha check;
+          # the image build still runs the binary on the runtime's libc.
+          build-args: |
+            RUNNER_BINARY=${{ inputs.prebuilt_binaries && 'prebuilt' || 'build' }}
+            RUNNER_SHA256=${{ steps.binary.outputs.sha256 }}
           # On tag: push the leg untagged (digest-only); `manifest` stitches
           # and tags. On PR/dispatch: build-only.
           outputs: type=image,name=${{ steps.meta.outputs.image }},push-by-digest=true,name-canonical=true,push=${{ github.ref_type == 'tag' }}

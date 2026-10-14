@@ -65,7 +65,9 @@ Add `--service` to also install and start the service unit (launchd on
 macOS, systemd on Linux). Pass `--check` to print the plan and exit
 without downloading anything.
 
-Prebuilt for **macOS** (arm64, x86_64) and **Linux** (x86_64, arm64).
+Prebuilt for **macOS** (arm64, x86_64) and **Linux** (x86_64, arm64). The
+Linux binaries are built on Debian 12 and need glibc 2.36 or newer (Debian 12,
+Ubuntu 22.04 and later).
 
 ## Quick start
 

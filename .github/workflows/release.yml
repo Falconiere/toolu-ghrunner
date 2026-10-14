@@ -10,6 +10,14 @@ name: release
 # triggered by `on: release: [published]`: a release created by `gh release
 # create` under the default GITHUB_TOKEN emits no `release` event, so
 # event-triggered versions of them could never fire.
+#
+# The container images are chained here too (#121) — release-image.yml and
+# release-macos-image.yml have no tag trigger of their own. So a tag runs the
+# fmt/clippy/test gate exactly once (`verify` below), and the images pack the
+# binaries `build` produced instead of compiling them again: a called
+# workflow's jobs run inside THIS run, so they can download its artifacts.
+# They follow `build`, not `publish`: they read the tarball artifacts, never
+# the GitHub Release.
 on:
   push:
     tags: ['v*']
@@ -63,10 +71,20 @@ jobs:
           - runner: ubuntu-24.04
             os: linux
             arch: amd64
+            container: rust:1.94.1-bookworm
           - runner: ubuntu-24.04-arm
             os: linux
             arch: arm64
+            container: rust:1.94.1-bookworm
     runs-on: ${{ matrix.runner }}
+    # Linux legs build inside the Dockerfile's `builder` image, never on the
+    # ubuntu-24.04 host: a host build links glibc 2.39 symbols (Rust std's
+    # pidfd_spawnp / pidfd_getpid), and that binary will not load on the
+    # bookworm (glibc 2.36) runtime the release image ships it in. Same image,
+    # same glibc floor — which also keeps the tarballs installable on Debian 12
+    # / Ubuntu 22.04 hosts. Darwin legs carry no `container`, and an empty
+    # value runs the job on the host.
+    container: ${{ matrix.container }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.94.1
@@ -160,3 +178,27 @@ jobs:
     secrets:
       HOMEBREW_APP_ID: ${{ secrets.HOMEBREW_APP_ID }}
       HOMEBREW_APP_PRIVATE_KEY: ${{ secrets.HOMEBREW_APP_PRIVATE_KEY }}
+
+  # The GHCR images, built from `build`'s release tarballs (see the header).
+  # `packages: write` is granted HERE because a called workflow can only
+  # narrow the caller's token, never widen it; the callees push with
+  # github.token alone, so no secret crosses. Each keeps its own concurrency
+  # group (release-image-<tag> / release-macos-image-<tag>), distinct from
+  # this workflow's, so a call can never cancel or wait on its caller.
+  image:
+    needs: build
+    permissions:
+      contents: read
+      packages: write # push the per-arch legs + the multi-arch manifests
+    uses: ./.github/workflows/release-image.yml
+    with:
+      prebuilt_binaries: true
+
+  macos-image:
+    needs: build
+    permissions:
+      contents: read
+      packages: write # push the macOS carrier image
+    uses: ./.github/workflows/release-macos-image.yml
+    with:
+      prebuilt_binaries: true

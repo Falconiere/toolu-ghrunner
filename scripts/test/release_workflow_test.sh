@@ -95,6 +95,15 @@ want "one release per tag"             "^concurrency:"
 want "never cancels a release"         "cancel-in-progress: false"
 want "chains finalize off publish"     "uses: \./\.github/workflows/release-finalize\.yml"
 want "chains homebrew off publish"     "uses: \./\.github/workflows/release-homebrew\.yml"
+# --- the image workflows are chained too (#121): one gate per tag, and they
+# pack the binaries `build` already produced instead of compiling again ---
+want "chains the Linux image off build"  "uses: \./\.github/workflows/release-image\.yml"
+want "chains the macOS image off build"  "uses: \./\.github/workflows/release-macos-image\.yml"
+want "image workflows take the prebuilt binaries" "prebuilt_binaries: true"
+# Linux legs build inside the image the Dockerfile's builder uses, so the
+# tarball binary's glibc floor is the image runtime's (bookworm) and the
+# images can ship it as-is. A ubuntu-24.04 host build links GLIBC_2.39.
+want "build legs pick their container from the matrix" "container: \\\$\{\{ matrix\.container \}\}"
 # Least privilege: pass the two App secrets homebrew needs, never
 # `secrets: inherit` (which would forward RELEASE_PLZ_TOKEN,
 # OPENROUTER_API_KEY, … as well).
@@ -123,10 +132,10 @@ fi
 # --- optional: deep parse if PyYAML is available ---
 if python3 -c 'import yaml' >/dev/null 2>&1; then
   if python3 - "$WF" <<'PY'
-import sys, yaml
+import re, sys, yaml
 wf = yaml.safe_load(open(sys.argv[1]))
 jobs = wf.get("jobs", {})
-assert set(jobs) == {"verify", "build", "publish", "finalize", "homebrew"}, f"jobs: {list(jobs)}"
+assert set(jobs) == {"verify", "build", "publish", "finalize", "homebrew", "image", "macos-image"}, f"jobs: {list(jobs)}"
 assert jobs["build"]["needs"] == "verify", jobs["build"].get("needs")
 assert jobs["publish"]["needs"] == "build", jobs["publish"].get("needs")
 inc = jobs["build"]["strategy"]["matrix"]["include"]
@@ -151,7 +160,25 @@ assert set(hb_secrets) == {"HOMEBREW_APP_ID", "HOMEBREW_APP_PRIVATE_KEY"}, (
 )
 # finalize needs no secret at all: github.token is granted to callees automatically.
 assert "secrets" not in jobs["finalize"], "finalize needs no secrets"
-print("ok: PyYAML deep-check (job DAG + 4 os/arch + publish write perm + chained finalize/homebrew + scoped App secrets)")
+# The image workflows (#121): after `build` (its tarballs are their input),
+# not after `publish` — they never read the GitHub Release. packages: write is
+# granted here because a callee can only narrow the caller's token, never
+# widen it. github.token is all they use, so no secrets cross.
+for j, wf_file in (("image", "release-image.yml"), ("macos-image", "release-macos-image.yml")):
+    assert jobs[j]["needs"] == "build", f"{j} needs: {jobs[j].get('needs')}"
+    assert jobs[j]["uses"] == f"./.github/workflows/{wf_file}", jobs[j]["uses"]
+    assert jobs[j].get("with") == {"prebuilt_binaries": True}, f"{j} with: {jobs[j].get('with')}"
+    assert jobs[j]["permissions"] == {"contents": "read", "packages": "write"}, f"{j} perms"
+    assert "secrets" not in jobs[j], f"{j} needs no secrets"
+# Linux legs run in exactly the Dockerfile builder's image; darwin legs on the host.
+builder = re.search(r"^FROM (\S+) AS builder$", open("Dockerfile").read(), re.M).group(1)
+assert jobs["build"]["container"] == "${{ matrix.container }}", jobs["build"].get("container")
+for m in inc:
+    if m["os"] == "linux":
+        assert m.get("container") == builder, f"linux/{m['arch']} container {m.get('container')!r} != Dockerfile builder {builder!r}"
+    else:
+        assert "container" not in m, f"darwin/{m['arch']} must build on the host"
+print("ok: PyYAML deep-check (job DAG + 4 os/arch + publish write perm + chained finalize/homebrew + scoped App secrets + chained images + linux legs on the builder image)")
 PY
   then :; else
     echo "FAIL: PyYAML deep-check failed" >&2

@@ -12,3 +12,8 @@ crates/**/target/
 # under scripts/ is release tooling that would bust the image cache on every
 # edit without ever entering the build.
 !scripts/docker-entrypoint.sh
+# The prebuilt-binary path (RUNNER_BINARY=prebuilt): release workflows drop
+# the release tarball's binary here. Named per arch, never `!dist/`, so local
+# tarballs and scratch files stay out of the context.
+!dist/toolu-runner-linux-amd64
+!dist/toolu-runner-linux-arm64
