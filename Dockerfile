@@ -23,11 +23,27 @@
 # DEFAULT_RUNNER_IMAGE follows this repo's moving tag — while only VPS hosts
 # that opt in per host (`vps_hosts.image_ref`) need a daemon at all.
 
+# The build runs under BuildKit cache mounts, so a rebuild after a source edit
+# recompiles only the crates that changed instead of every dependency (#114):
+# - cargo's registry and git checkouts (CARGO_HOME is /usr/local/cargo here);
+#   platform-independent, shared freely (cargo takes its own lock).
+# - target/, keyed by TARGETPLATFORM because target/release holds one
+#   platform's artifacts; `sharing=locked` makes a concurrent build of the same
+#   platform wait instead of interleaving writes.
+# A mount is never part of the layer, so the binary is copied OUT of it to
+# /out in the same RUN — `runtime` copies it from there, never from target/.
+# A fresh builder (every CI runner) starts with empty mounts: a full build,
+# the same as before. scripts/test/dockerfile_test.sh pins all of the above.
 FROM rust:1.94.1-bookworm AS builder
+ARG TARGETPLATFORM
 WORKDIR /src
 COPY . .
 # --locked pins the committed Cargo.lock, same as release.yml.
-RUN cargo build --release --locked --bin toolu-runner
+RUN --mount=type=cache,id=toolu-cargo-registry,target=/usr/local/cargo/registry \
+    --mount=type=cache,id=toolu-cargo-git,target=/usr/local/cargo/git \
+    --mount=type=cache,id=toolu-target-${TARGETPLATFORM},target=/src/target,sharing=locked \
+  cargo build --release --locked --bin toolu-runner \
+  && install -D -m 0755 target/release/toolu-runner /out/toolu-runner
 
 # Pre-seed the Node runtimes the engine's `ensure_node_runtime` would
 # otherwise download from nodejs.org on first use. These containers are
@@ -75,7 +91,7 @@ RUN apt-get update \
     bash git ca-certificates curl sudo tar gzip zstd xz-utils unzip jq \
   && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /src/target/release/toolu-runner /usr/local/bin/toolu-runner
+COPY --from=builder /out/toolu-runner /usr/local/bin/toolu-runner
 # Seed lands where boot mode resolves its data dir: TOOLU_RUNNER_HOME/node/<v>.
 COPY --from=node-seed /seed/node /var/lib/toolu-runner/node
 ENV TOOLU_RUNNER_HOME=/var/lib/toolu-runner
