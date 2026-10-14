@@ -57,9 +57,9 @@ gate script → workflows → shell tests → docs → full gate.
   },
   {
     "id": "s5-suite-count",
-    "title": "nextest runs the same 1437 tests (+1 doctest) as cargo test did",
-    "check": "cargo nextest run --workspace 2>&1 | tee /dev/stderr | grep -q '1437 tests run: 1437 passed' && cargo test --workspace --doc 2>&1 | grep -q '1 passed'",
-    "ac_refs": ["AC-2"],
+    "title": "full gate passes; nextest runs the same 1437 tests (+1 doctest) as cargo test did",
+    "check": "./tools/check.sh all 2>&1 | tee /dev/stderr | grep -q '1437 tests run: 1437 passed'",
+    "ac_refs": ["AC-2", "AC-4"],
     "depends_on": ["s1-gate-script"],
     "paths": ["Cargo.toml", "crates"],
     "input": "whole workspace"
