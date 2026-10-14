@@ -1,13 +1,13 @@
 name: live
+# Dispatch-only (#120): the repo has no TOOLU_RUNNER_LIVE_TOKEN secret, so a
+# cron could only produce a daily red check nobody can clear. Re-add a
+# `schedule:` once the secret exists.
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 6 * * *'
 
 jobs:
   live:
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' }}
     # Only a boolean is job-level, so every step's `if:` can see it. (A
     # step-level `env:` is invisible to that step's own `if:`, which is how this
     # lane used to skip every day and still conclude success.) The token itself

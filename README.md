@@ -40,12 +40,13 @@ Relative paths resolve from the workspace; absolute paths are preserved. Missing
 or empty values use the workspace, independently of caller `defaults.run`.
 A missing directory fails that inner step and still permits eligible cleanup.
 
-The nightly [`live`](.github/workflows/live.yml) workflow above is not a
-mock. It dispatches a real job to a real `toolu-runner` on a real repo,
-every morning at 06:00 UTC.
+The manually dispatched [`live`](.github/workflows/live.yml) workflow above is
+not a mock. It dispatches a real job to a real `toolu-runner` on a real repo.
+It has no schedule (#120) and fails as `UNVERIFIED` when
+`TOOLU_RUNNER_LIVE_TOKEN` is not set.
 
 > [!WARNING]
-> **Pre-1.0.** The live path is green nightly, but rough edges remain:
+> **Pre-1.0.** The live path is only verified when `live` is dispatched with credentials, and rough edges remain:
 > Container actions require Linux and a local Docker daemon. Acceptance
 > evidence and remaining platform gaps are tracked in
 > [docs/test-coverage.md](docs/test-coverage.md). See [docs/known-bugs.md](docs/known-bugs.md) before
