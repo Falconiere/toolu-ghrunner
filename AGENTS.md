@@ -955,6 +955,9 @@ to that list requires proving the value is not a real credential.
 - [docs/architecture.md](docs/architecture.md) — high-level design +
   sequence diagrams for register / run / cancel / reconnect.
 - [docs/known-bugs.md](docs/known-bugs.md) — listener bug tracker.
+- [docs/release-profile.md](docs/release-profile.md) — why `[profile.release]` is
+  `opt-level = "s"` + fat LTO, the 10% hot-path threshold and the benchmark
+  evidence; `scripts/test/release_profile_test.sh` pins it.
 - [docs/compatibility-matrix.md](docs/compatibility-matrix.md) — epic #67
   acceptance matrix (generated from `compatibility-matrix.json`; CI runs
   `scripts/test/compat_matrix_check.py --check`). Lanes, capture/sanitization,

@@ -1,4 +1,10 @@
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::print_stdout, clippy::cast_precision_loss)]
+#![allow(
+  clippy::unwrap_used,
+  clippy::expect_used,
+  clippy::panic,
+  clippy::print_stdout,
+  clippy::cast_precision_loss
+)]
 //! Save + restore throughput of the accelerated cache's content-addressed
 //! store over a real directory of at least 500 MB (#112).
 //!
@@ -49,7 +55,9 @@ fn build_dir(dir: &Path, total: u64) -> u64 {
     if i % 4 == 3 {
       let block = vec![b'a' + u8::try_from(i % 26).unwrap(); 64 * 1024];
       for chunk in buf.chunks_mut(block.len()) {
-        chunk.copy_from_slice(&block[..chunk.len()]);
+        for (dst, src) in chunk.iter_mut().zip(&block) {
+          *dst = *src;
+        }
       }
     } else {
       fill_random(i + 1, &mut buf);
@@ -95,7 +103,10 @@ fn main() {
   let staged = tmp.path().join("staged.bin");
   let want = assemble(&src, &staged);
 
-  let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+  let rt = tokio::runtime::Builder::new_multi_thread()
+    .enable_all()
+    .build()
+    .unwrap();
   let store = CasStore::new(tmp.path().join("cas"), CHUNK_AVG, u64::MAX);
 
   let t = Instant::now();
