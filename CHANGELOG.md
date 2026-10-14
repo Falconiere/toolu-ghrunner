@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-14
+
+### Added
+- *(listener)* populate Set up job diagnostics (#147)
+- upload masked step summaries to Results Service (#144)
+- *(shared)* accept bare and typed template-token forms (#99, 1/9) (#149)
+- *(execution)* evaluate step timeout and continue-on-error tokens (#99, 2/9) (#150)
+- *(execution)* carry the job message fileTable on ExecutionContext (#99, 3/10) (#151)
+- *(execution)* evaluate deferred timeout-minutes and continue-on-error (#99, 4/10) (#152)
+- *(execution)* separate pre/main timeout budgets and pre continue-on-error (#99, 6/10) (#154)
+- *(execution)* report step timeouts with upstream's messages (#99, 7/N) (#155)
+- *(execution)* upstream timeout messages for pre stages and Docker paths (#99, 8/N) (#156)
+- *(expressions)* upstream step display-name helpers (#99, 9/N) (#157)
+- *(execution)* evaluate step display names in two phases (#99, 10/N) (#158)
+- *(execution)* name pre and post stages after step display names (#99, 11/N) (#159)
+- *(execution)* evaluate composite continue-on-error expressions (#99, 12/N) (#160)
+- *(execution)* clean up orphan processes after each job via RUNNER_TRACKING_ID (#89) (#163)
+- *(reporting)* CompleteJob/StepResult payload parity (#88) (#164)
+- *(listener)* handle session-create 409 conflicts explicitly (#91) (#165)
+- *(register)* --ephemeral and --no-default-labels (#92) (#167)
+- *(execution)* stable per-repository workspaces for incremental checkout (#90) (#166)
+- *(cli)* add a read-only check diagnostics subcommand (#93) (#168)
+- *(execution)* strict GITHUB_ENV/GITHUB_OUTPUT/GITHUB_STATE file-command parsing (#96) (#169)
+- *(execution)* musl/Alpine Node runtimes, node24 migration flags and offline preseed (#95) (#170)
+- *(evidence)* compatibility acceptance matrix and pinned official-runner reference lane (#103) (#172)
+- *(network)* explicit proxy and custom CA configuration (#94) (#171)
+
+### Changed
+- *(execution)* remove dead workflow/plugin/resolve_handler code and fix doc drift (#97) (#173)
+
+### Documentation
+- *(99)* record step attribute and display-name evidence (#99, 13/13) (#161)
+- document the macOS Developer Tools setting that removes XProtect build stalls (#174)
+
 ## [0.10.0] - 2026-09-27
 
 ### Added
