@@ -16,7 +16,8 @@ set -uo pipefail
 
 cd "$(dirname "$0")/../.." || exit 1 # repo root
 
-WF=".github/workflows/ci.yml"
+# CI_WORKFLOW_FILE lets a negative check point the test at a mutated copy.
+WF="${CI_WORKFLOW_FILE:-.github/workflows/ci.yml}"
 fail=0
 
 if [[ ! -f "$WF" ]]; then
@@ -105,6 +106,42 @@ want_ci "ubuntu re-verifies the #103 reference report" "reference_compare\.py --
 want_ci "ubuntu replays the #103 docker capture" "--test integration -- compat_probe_replay_test:: --ignored"
 want_ci "ubuntu runs the live-lane honesty test" "live_lane"
 want_ci "ubuntu lints the capture feature build" "cargo clippy -p toolu-runner --features capture --all-targets -- -D warnings"
+
+# --- #110: prebuilt, pinned ast-grep and a Rust build cache ---
+# Building ast-grep from source cost 76-117 s per run. The install must stay a
+# version + SHA-256 pinned download, placed before the Structure step that needs
+# it, and must never fall back to compiling it.
+want_ci "ubuntu pins the ast-grep version"   "AST_GREP_VERSION: \"[0-9]+\.[0-9]+\.[0-9]+\""
+want_ci "ubuntu pins the ast-grep SHA-256"   "AST_GREP_SHA256: [0-9a-f]{64}"
+want_ci "ubuntu verifies the ast-grep checksum" "sha256sum --check --strict"
+if printf '%s\n' "$CI_JOB" | grep -Eq -- "cargo install ast-grep"; then
+  echo "FAIL: the ci job compiles ast-grep from source — use the pinned prebuilt binary" >&2
+  fail=1
+else
+  echo "ok: ci does not cargo-install ast-grep"
+fi
+if printf '%s\n' "$CI_JOB" | awk '
+    /name: Install ast-grep/ { inst = NR }
+    /name: Structure/        { st = NR }
+    END { exit !(inst && st && inst < st) }'; then
+  echo "ok: ast-grep is installed before the Structure step"
+else
+  echo "FAIL: 'Install ast-grep' must precede 'Structure' in the ci job" >&2
+  fail=1
+fi
+# The cache step must come after the toolchain: rust-cache keys on rustc -vV.
+for leg in ci macos; do
+  if [[ "$leg" == ci ]]; then body="$CI_JOB"; else body="$MACOS_JOB"; fi
+  if printf '%s\n' "$body" | awk '
+      /dtolnay\/rust-toolchain@/ { tc = 1 }
+      /Swatinem\/rust-cache@v[0-9]+/ { if (tc) ok = 1 }
+      END { exit !ok }'; then
+    echo "ok: $leg restores a Rust cache after the toolchain"
+  else
+    echo "FAIL: $leg needs a Swatinem/rust-cache step after dtolnay/rust-toolchain" >&2
+    fail=1
+  fi
+done
 
 # The macOS leg must NOT be wired as a `continue-on-error` or `if: false`
 # no-op — a green-but-inert job is worse than none, because it reads as

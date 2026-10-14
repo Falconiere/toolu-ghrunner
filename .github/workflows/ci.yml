@@ -13,6 +13,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.94.1
         with:
           components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Clippy
@@ -32,8 +33,27 @@ jobs:
       # and Rust is the stack that needs it: oxlint cannot parse Rust, so the
       # pattern rules have no other enforcer. jq is preinstalled on the GitHub
       # runners; ast-grep is not.
+      #
+      # Installed as the official prebuilt release asset, pinned by version AND
+      # SHA-256 (taiki-e/install-action has no ast-grep manifest, and building
+      # from source cost 76-117 s per run). x86_64 linux only: ubuntu-latest is
+      # the only leg that runs the guardrails. To bump, change both values and
+      # run scripts/test/ast_grep_pin_check.sh.
       - name: Install ast-grep
-        run: cargo install ast-grep --locked
+        env:
+          AST_GREP_VERSION: "0.45.3"
+          AST_GREP_SHA256: f8ac830881339d1edee6b2652f54798c0f4da5a827f2db38a08ee31117783ce8
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/ast-grep"
+          mkdir -p "$dir"
+          curl --fail --silent --show-error --location --retry 3 \
+            -o "$dir/ast-grep.zip" \
+            "https://github.com/ast-grep/ast-grep/releases/download/${AST_GREP_VERSION}/app-x86_64-unknown-linux-gnu.zip"
+          echo "${AST_GREP_SHA256}  $dir/ast-grep.zip" | sha256sum --check --strict -
+          unzip -q "$dir/ast-grep.zip" -d "$dir"
+          echo "$dir" >> "$GITHUB_PATH"
+          "$dir/ast-grep" --version
       - name: Structure
         run: bash scripts/guardrails/run.sh
       - name: Test
@@ -90,8 +110,8 @@ jobs:
 
   # The OS-dependent half of the gate on a real macOS host. Formatting, the
   # #[allow] ban and the guardrail structure checks are OS-independent and stay
-  # on the ubuntu leg alone — a second `cargo install ast-grep` would cost
-  # minutes for no additional signal. arm64 only: Apple Silicon is what this
+  # on the ubuntu leg alone — a second ast-grep install would add time for no
+  # additional signal. arm64 only: Apple Silicon is what this
   # runner is deployed on, and the release workflow already cross-builds Intel.
   ci-macos:
     runs-on: macos-14
@@ -100,6 +120,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.94.1
         with:
           components: clippy
+      - uses: Swatinem/rust-cache@v2
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
