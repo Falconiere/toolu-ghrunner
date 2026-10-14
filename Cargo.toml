@@ -115,7 +115,7 @@ codegen-units = 256
 opt-level = 2
 [profile.dev.package.serde_json]
 opt-level = 2
-# 2048-bit RSA key generation in tests is ~70x slower unoptimized.
+# Test-time 2048-bit RSA key generation is very slow unoptimized (#117).
 [profile.dev.package.num-bigint-dig]
 opt-level = 3
 [profile.dev.package.rsa]
