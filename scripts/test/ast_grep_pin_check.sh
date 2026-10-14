@@ -33,7 +33,15 @@ if [[ "$reported" != "ast-grep ${version}" ]]; then
 fi
 echo "ok: checksum and version match the pin (${version})"
 
-# Only the pinned binary and the system tools; no other ast-grep can leak in.
-jq_dir=$(dirname "$(command -v jq)")
-PATH="$tmp:$jq_dir:/usr/bin:/bin" bash scripts/guardrails/run.sh
+# Only the pinned binary: jq is linked into the temp dir rather than putting
+# its directory on PATH, which could carry another ast-grep. The check below
+# fails if anything else still shadows the pinned binary.
+ln -s "$(command -v jq)" "$tmp/jq"
+guard_path="$tmp:/usr/bin:/bin"
+resolved=$(PATH="$guard_path" command -v ast-grep)
+if [[ "$resolved" != "$tmp/ast-grep" ]]; then
+  echo "FAIL: ast-grep resolves to '$resolved', not the pinned binary" >&2
+  exit 1
+fi
+PATH="$guard_path" bash scripts/guardrails/run.sh
 echo "ok: guardrails pass with the pinned ast-grep"
