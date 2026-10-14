@@ -898,8 +898,9 @@ cargo install ast-grep --locked
 ```
 
 ```sh
-cargo build --workspace
+cargo build --workspace --all-targets   # also builds the test units, so `cargo test` reuses the libraries
 cargo test  --workspace          # the full suite, no network required
+cargo build --profile debugging  # opt-in full debuginfo for a debugger (target/debugging/)
 
 ./tools/check.sh all             # the full local gate
 ```
