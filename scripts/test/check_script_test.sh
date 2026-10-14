@@ -51,6 +51,16 @@ else
   echo "ok: stdin is detached before the first cargo call (line $cargo_line)"
 fi
 
+# --- #118: the test step is nextest plus a separate doctest run ---
+for pat in 'cargo nextest run --workspace' 'cargo test --workspace --doc'; do
+  if grep -qF -- "$pat" "$SCRIPT"; then
+    echo "ok: $SCRIPT runs '$pat'"
+  else
+    echo "FAIL: $SCRIPT does not run '$pat'" >&2
+    fail=1
+  fi
+done
+
 # --- a real run survives a poisoned stdin ---
 #
 # `no-allow` is the one group that finishes in milliseconds, so this pipes the

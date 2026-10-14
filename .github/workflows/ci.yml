@@ -23,6 +23,10 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Clippy
@@ -66,7 +70,10 @@ jobs:
       - name: Structure
         run: bash scripts/guardrails/run.sh
       - name: Test
-        run: cargo test --workspace
+        run: cargo nextest run --workspace
+      # nextest does not run doctests.
+      - name: Doctests
+        run: cargo test --workspace --doc
       - name: Docker action runtime and production replay
         env:
           DOCKER_HOST: unix:///var/run/docker.sock
@@ -131,10 +138,17 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
-        run: cargo test --workspace
+        run: cargo nextest run --workspace
+      # nextest does not run doctests.
+      - name: Doctests
+        run: cargo test --workspace --doc
       # plutil is macOS-only, so this is the one host where the generated
       # LaunchAgent is validated as a real plist rather than as a string.
       - name: Validate the launchd plist

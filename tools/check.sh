@@ -8,7 +8,8 @@
 #   cargo fmt --check
 #   cargo clippy --all-targets -- -D warnings
 #   bash scripts/guardrails/run.sh
-#   cargo test
+#   cargo nextest run --workspace
+#   cargo test --workspace --doc   (nextest does not run doctests)
 #
 # The structure rules the compiler cannot see — the 500 code-line ceiling,
 # snake_case filenames, mod.rs barrels, the folder tree, colocated tests,
@@ -41,7 +42,18 @@ _check_rust() {
   (cd "$_project_root" && cargo clippy --workspace --all-targets -- -D warnings)
   _check_no_allow
   (cd "$_project_root" && bash scripts/guardrails/run.sh)
-  (cd "$_project_root" && cargo test --workspace)
+  _require_nextest
+  (cd "$_project_root" && cargo nextest run --workspace)
+  # nextest does not run doctests; keep them as their own step.
+  (cd "$_project_root" && cargo test --workspace --doc)
+}
+
+_require_nextest() {
+  # Fail with the install command instead of cargo's generic "no such command".
+  if ! cargo nextest --version >/dev/null 2>&1; then
+    printf 'toolu: cargo-nextest is required. Install it with: cargo install cargo-nextest --locked\n' >&2
+    return 1
+  fi
 }
 
 _check_no_allow() {
@@ -83,6 +95,9 @@ REQUIREMENTS
   jq and ast-grep must be on PATH — scripts/guardrails/run.sh exits 3 without
   either, so a missing dependency can never look like a clean run.
   Install ast-grep with: cargo install ast-grep --locked
+  cargo-nextest must be installed too (the test step runs
+  `cargo nextest run --workspace`, then `cargo test --workspace --doc`).
+  Install it with: cargo install cargo-nextest --locked
 EOF
 }
 
