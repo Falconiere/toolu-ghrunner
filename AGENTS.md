@@ -954,6 +954,9 @@ to that list requires proving the value is not a real credential.
   what applies here and the deviations on record.
 - [docs/architecture.md](docs/architecture.md) — high-level design +
   sequence diagrams for register / run / cancel / reconnect.
+- [docs/macos-developer-tools.md](docs/macos-developer-tools.md) — macOS
+  Developer Tools (XProtect) setting that removes local build/test stalls;
+  each developer's choice, never scripted.
 - [docs/known-bugs.md](docs/known-bugs.md) — listener bug tracker.
 - [docs/release-profile.md](docs/release-profile.md) — why `[profile.release]` is
   `opt-level = "s"` + fat LTO, the 10% hot-path threshold and the benchmark
