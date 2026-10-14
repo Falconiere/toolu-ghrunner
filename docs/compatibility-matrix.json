@@ -3177,7 +3177,7 @@
           "job_container_real_production_shell_node_composite_and_posts"
         ]
       ],
-      "command": "TOOLU_CONTAINER_TEST_ROOT=<daemon-shared dir> cargo test -p execution --lib --test integration -- docker::job_container job_container_linux_test:: --ignored --test-threads=1",
+      "command": "TOOLU_CONTAINER_TEST_ROOT=<daemon-shared dir> cargo test -p execution --lib docker::job_container -- --ignored --test-threads=1 && TOOLU_CONTAINER_TEST_ROOT=<daemon-shared dir> cargo test -p execution --test integration -- job_container_linux_test:: --ignored --test-threads=1",
       "lanes": {
         "hermetic": {
           "status": "unverified",
@@ -3508,7 +3508,7 @@
           "job_container_real_production_shell_node_composite_and_posts"
         ]
       ],
-      "command": "TOOLU_CONTAINER_TEST_ROOT=<daemon-shared dir> cargo test -p execution --lib --test integration -- docker::job_container job_container_composite_test:: job_container_linux_test:: --ignored --test-threads=1",
+      "command": "TOOLU_CONTAINER_TEST_ROOT=<daemon-shared dir> cargo test -p execution --lib docker::job_container -- --ignored --test-threads=1 && TOOLU_CONTAINER_TEST_ROOT=<daemon-shared dir> cargo test -p execution --test integration -- job_container_composite_test:: job_container_linux_test:: --ignored --test-threads=1",
       "lanes": {
         "hermetic": {
           "status": "unverified",
