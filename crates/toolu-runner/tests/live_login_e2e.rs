@@ -22,8 +22,7 @@ use std::process::{Output, Stdio};
 use config::auth_store::{AuthStore, StoredToken};
 use tokio::process::Command;
 
-#[path = "helpers/live_harness.rs"]
-mod harness;
+use crate::harness;
 
 use harness::LiveHarness;
 
@@ -135,8 +134,8 @@ async fn register_bad_stored_token_maps_to_login_hint() {
 /// browser approval, so it cannot run unattended. Run it by hand:
 ///
 /// ```text
-/// cargo test -p toolu-runner --features live --test live_login_e2e \
-///   device_flow_login_stores_token -- --ignored --nocapture
+/// cargo test -p toolu-runner --features live --test integration \
+///   -- live_login_e2e::device_flow_login_stores_token --ignored --nocapture
 /// ```
 ///
 /// then open the printed URL, enter the code, and approve. On return the

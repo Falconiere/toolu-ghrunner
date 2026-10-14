@@ -3,10 +3,7 @@
 //! and is ignored), reports the redacted settings, and `check` / `run` refuse
 //! an unusable `ca_bundle` with exit 2 before any network call.
 
-#[path = "../../network/tests/helpers/proxy_fixtures.rs"]
-mod proxy_fixtures;
-#[path = "../../network/tests/helpers/tls_fixtures.rs"]
-mod tls_fixtures;
+use crate::{proxy_fixtures, tls_fixtures};
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

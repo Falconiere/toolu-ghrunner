@@ -5,7 +5,7 @@
 //! workflow, and watch the run to completion. They are `#[ignore]`'d so the
 //! default `cargo test` skips them, and they self-skip (LOUD `eprintln!` +
 //! `Ok(())`) unless the whole environment gate is present — so
-//! `cargo test -p toolu-runner --test run_loop_live` is green with nothing set.
+//! `cargo test -p toolu-runner --test integration -- run_loop_live::` is green with nothing set.
 //!
 //! Environment gate (ALL required, else the test prints why and returns Ok):
 //! - `TOOLU_TEST_GH_LIVE=1` — opt in to the live path.

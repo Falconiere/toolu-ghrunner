@@ -7,8 +7,7 @@ use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 
-#[path = "helpers/check_servers.rs"]
-mod check_servers;
+use crate::check_servers;
 
 use check_servers::{OK, Recorder, check_cmd, closed_port, run};
 

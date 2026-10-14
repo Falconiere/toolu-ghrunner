@@ -27,8 +27,7 @@ use config::config::{
 };
 use observability::journal::{JournalEvent, JournalLine};
 
-#[path = "helpers/live_harness.rs"]
-mod harness;
+use crate::harness;
 
 use harness::LiveHarness;
 

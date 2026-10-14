@@ -14,8 +14,7 @@ use config::config::{
 };
 use fs2::FileExt;
 
-#[path = "helpers/check_servers.rs"]
-mod check_servers;
+use crate::check_servers;
 
 use check_servers::{OK, Recorder, check_cmd, closed_port, run};
 
@@ -620,7 +619,7 @@ fn defaults_target_the_github_com_hosts() -> TestResult {
 }
 
 /// AC-10 — real github.com from a networked host. Run manually:
-/// `cargo test -p toolu-runner --features live --test check_cmd_test -- --ignored live_github_com`.
+/// `cargo test -p toolu-runner --features live --test integration -- --ignored check_cmd_test::live_github_com`.
 #[cfg(feature = "live")]
 #[test]
 #[ignore = "live: needs outbound access to github.com"]
