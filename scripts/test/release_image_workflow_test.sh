@@ -66,8 +66,18 @@ want "the build arg selects the prebuilt stage only on the prebuilt path" \
   "^            RUNNER_BINARY=\\$\{\{ inputs\.prebuilt_binaries && 'prebuilt' \|\| 'build' \}\}$"
 want "the image build checks its copy against the tarball binary's sha256" \
   '^            RUNNER_SHA256=\$\{\{ steps\.binary\.outputs\.sha256 \}\}$'
-want "pushing stays gated on a tag ref" \
-  'push=\$\{\{ github\.ref_type == .tag. \}\}'
+want "pushing needs a tag ref AND release.yml's call" \
+  'push=\$\{\{ inputs\.prebuilt_binaries && github\.ref_type == .tag. \}\}'
+# Every publish condition, not just the push: a dispatch with a tag selected
+# has a tag ref but never ran release.yml's gate, so a bare `ref_type == 'tag'`
+# anywhere (login, digest export, manifest) would publish ungated.
+bare="$(grep -n "ref_type == 'tag'" "$WF" | grep -v "inputs\.prebuilt_binaries && github\.ref_type == 'tag'" || true)"
+if [[ -n "$bare" ]]; then
+  echo "FAIL: a publish condition checks the tag ref without release.yml's call: $bare" >&2
+  fail=1
+else
+  echo "ok: every publish condition also requires release.yml's call"
+fi
 
 # structure_check FILE — print one "FAIL: <desc>" per violated trigger/job
 # property. Needs PyYAML (`on:` parses as the boolean True key); the grep

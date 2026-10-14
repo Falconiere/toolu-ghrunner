@@ -184,8 +184,9 @@ for a in amd64 arm64; do
     fail=1
   fi
 done
-if grep -Eq '^!dist/?$|^!dist/\*' .dockerignore; then
-  echo "FAIL: .dockerignore admits all of dist/ — list the two binaries only" >&2
+extra="$(grep -E '^!dist' .dockerignore | grep -Fxv -e '!dist/toolu-runner-linux-amd64' -e '!dist/toolu-runner-linux-arm64' || true)"
+if [[ -n "$extra" ]]; then
+  echo "FAIL: .dockerignore admits more of dist/ than the two binaries: $extra" >&2
   fail=1
 else
   echo "ok: .dockerignore does not admit the rest of dist/"

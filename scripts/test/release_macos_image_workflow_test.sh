@@ -71,7 +71,16 @@ want_in "$IMAGE_JOB" "the pack uses Dockerfile.macos"        "file: Dockerfile.m
 want_in "$IMAGE_JOB" "the pack consumes the macOS artifact"  "name: toolu-runner-darwin-arm64"
 # Pushing on a non-tag would publish an untested payload under a tag someone
 # may pin; the gate is the expression, not the reviewer.
-want_in "$IMAGE_JOB" "pushes on tags only"                   "push: \\\$\{\{ github.ref_type == 'tag' \}\}"
+want_in "$IMAGE_JOB" "pushes on release.yml's tag call only" "push: \\\$\{\{ inputs\.prebuilt_binaries && github\.ref_type == 'tag' \}\}"
+# Login and the digest print too: a dispatch with a tag selected has a tag ref
+# but never ran release.yml's gate.
+bare="$(grep -n "ref_type == 'tag'" "$WF" | grep -v "inputs\.prebuilt_binaries && github\.ref_type == 'tag'" || true)"
+if [[ -n "$bare" ]]; then
+  echo "FAIL: a publish condition checks the tag ref without release.yml's call: $bare" >&2
+  fail=1
+else
+  echo "ok: every publish condition also requires release.yml's call"
+fi
 
 # The image these tags name must not collide with the Linux one.
 want "the image basename is the macOS one" "IMAGE_BASENAME: toolu-ghrunner-macos"

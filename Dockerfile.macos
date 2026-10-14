@@ -76,7 +76,7 @@ RUN set -eu; \
 FROM scratch
 # Both files must already be executable in the context: `scratch` has no shell
 # to chmod with, and the materialised tree keeps the mode it was packed with.
-# The workflow chmods the downloaded artifact; the script is committed 0755.
+# The workflow chmods the staged binary; the script is committed 0755.
 COPY dist/toolu-runner-darwin-arm64 /toolu-runner
 COPY scripts/macos-entrypoint.sh /entrypoint
 COPY --from=node-seed /seed/node /node

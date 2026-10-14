@@ -82,8 +82,9 @@ jobs:
     # pidfd_spawnp / pidfd_getpid), and that binary will not load on the
     # bookworm (glibc 2.36) runtime the release image ships it in. Same image,
     # same glibc floor — which also keeps the tarballs installable on Debian 12
-    # / Ubuntu 22.04 hosts. Darwin legs carry no `container`, and an empty
-    # value runs the job on the host.
+    # hosts (the bookworm-built v0.10.0 binary references nothing past
+    # GLIBC_2.34, so Ubuntu 22.04 runs it too). Darwin legs carry no
+    # `container`, and an empty value runs the job on the host.
     container: ${{ matrix.container }}
     steps:
       - uses: actions/checkout@v7

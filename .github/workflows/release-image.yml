@@ -39,7 +39,10 @@ name: release-image
 # PRs touching the image inputs build without pushing (catches Dockerfile
 # rot); workflow_dispatch does the same on demand. Neither has release
 # artifacts, so both compile inside Docker (RUNNER_BINARY=build), and neither
-# repeats the gate: nothing is published, and PRs already run ci.yml.
+# repeats the gate, because neither publishes. Every login / push / manifest
+# condition requires BOTH a tag ref AND release.yml's call
+# (`inputs.prebuilt_binaries`): a dispatch with a tag selected has a tag ref,
+# but only release.yml has run the gate, so it must build and stop.
 on:
   workflow_call:
     inputs:
@@ -133,7 +136,7 @@ jobs:
           } >>"$GITHUB_STEP_SUMMARY"
       - uses: docker/setup-buildx-action@v3
       - name: Log in to GHCR
-        if: github.ref_type == 'tag'
+        if: inputs.prebuilt_binaries && github.ref_type == 'tag'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -158,19 +161,19 @@ jobs:
             RUNNER_SHA256=${{ steps.binary.outputs.sha256 }}
           # On tag: push the leg untagged (digest-only); `manifest` stitches
           # and tags. On PR/dispatch: build-only.
-          outputs: type=image,name=${{ steps.meta.outputs.image }},push-by-digest=true,name-canonical=true,push=${{ github.ref_type == 'tag' }}
+          outputs: type=image,name=${{ steps.meta.outputs.image }},push-by-digest=true,name-canonical=true,push=${{ inputs.prebuilt_binaries && github.ref_type == 'tag' }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ github.ref_name }}
       - name: Export leg digest
-        if: github.ref_type == 'tag'
+        if: inputs.prebuilt_binaries && github.ref_type == 'tag'
         run: |
           mkdir -p /tmp/digests
           digest="${{ steps.build.outputs.digest }}"
           touch "/tmp/digests/${digest#sha256:}"
       - name: Upload leg digest
-        if: github.ref_type == 'tag'
+        if: inputs.prebuilt_binaries && github.ref_type == 'tag'
         uses: actions/upload-artifact@v7
         with:
           # Variant-scoped: `manifest` downloads one variant's legs by
@@ -184,7 +187,7 @@ jobs:
   # and print the manifest-list digest — the ref toolu.sh operators pin. One
   # job per variant: each publishes its own tag line off its own two legs.
   manifest:
-    if: github.ref_type == 'tag'
+    if: inputs.prebuilt_binaries && github.ref_type == 'tag'
     needs: build
     runs-on: ubuntu-24.04
     strategy:

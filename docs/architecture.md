@@ -1063,10 +1063,20 @@ verify (ubuntu)      scripts/assert-version.sh — tag must equal the
       ▼
 build (matrix ×4)    native runners, no cross: darwin/arm64 (macos-14),
       │              darwin/amd64 (macos-15-intel), linux/amd64
-      │              (ubuntu-24.04), linux/arm64 (ubuntu-24.04-arm).
-      │              cargo build --release --locked, then
-      │              scripts/package-release.sh assembles
+      │              (ubuntu-24.04), linux/arm64 (ubuntu-24.04-arm); the
+      │              linux legs run in a rust:1.94.1-bookworm container
+      │              (the image's glibc). cargo build --release --locked,
+      │              then scripts/package-release.sh assembles
       │              toolu-runner-<os>-<arch>.tar.gz (binary + scripts/).
+      ├──────────────────────────────┐
+      │                              ▼
+      │              image + macos-image   `uses:` release-image.yml /
+      │                                    release-macos-image.yml on
+      │                                    `needs: build` with
+      │                                    prebuilt_binaries: true — no
+      │                                    gate of their own; they pack the
+      │                                    tarballs' binaries into the GHCR
+      │                                    images (byte-identical, checked).
       ▼
 publish (ubuntu)     sha256sum → SHA256SUMS; scripts/changelog-extract.sh
       │              → release notes; gh release create (contents: write,
