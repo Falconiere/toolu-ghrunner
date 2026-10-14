@@ -1,7 +1,8 @@
 //! CLI smoke tests for `toolu-runner`.
 //!
-//! Builds the binary via `cargo run` and exercises the clap surface.
-//! These tests are integration-level — they shell out to `cargo run`
+//! Runs the binary Cargo built for this test target
+//! (`CARGO_BIN_EXE_toolu-runner`) and exercises the clap surface.
+//! These tests are integration-level — they shell out to the built binary
 //! because the runner's CLI shape is the contract being verified.
 //! Every invocation also runs `cli::debug_assert_cli()` (clap's own
 //! definition self-check, wired at startup in debug builds), so a
@@ -10,9 +11,7 @@
 use std::process::Command;
 
 fn toolu_runner() -> Command {
-  let mut cmd = Command::new(env!("CARGO"));
-  cmd.args(["run", "-p", "toolu-runner", "--quiet", "--"]);
-  cmd
+  Command::new(env!("CARGO_BIN_EXE_toolu-runner"))
 }
 
 #[test]
