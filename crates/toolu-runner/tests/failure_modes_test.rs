@@ -2,7 +2,7 @@
 //!
 //! Each test maps to one of the 12 v1-critical failure paths from the
 //! design spec. Tests are real-data: the lock and config tests touch a
-//! temp directory; the CLI tests shell out to `cargo run` and exercise
+//! temp directory; the CLI tests shell out to the built binary and exercise
 //! the clap surface end-to-end.
 //!
 //! Failure modes NOT covered here (per spec scope of step 8):
@@ -15,9 +15,8 @@
 //! - Outage > 5 min mid-job (live integration; tracked in
 //!   `docs/known-bugs.md`)
 //!
-//! Each test that shells out to the binary depends on the
-//! `toolu-runner` binary having been built with `cargo build` first
-//! (or `cargo run`, which builds on demand).
+//! Each test that shells out to the binary runs the one Cargo built for
+//! this test target (`CARGO_BIN_EXE_toolu-runner`).
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -26,9 +25,7 @@ use config::lockfile::{self, LockBody};
 use fs2::FileExt;
 
 fn toolu_runner() -> Command {
-  let mut cmd = Command::new(env!("CARGO"));
-  cmd.args(["run", "-p", "toolu-runner", "--quiet", "--"]);
-  cmd
+  Command::new(env!("CARGO_BIN_EXE_toolu-runner"))
 }
 
 fn temp_dir(label: &str) -> PathBuf {
