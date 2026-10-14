@@ -191,6 +191,15 @@ The default target is the lean image: the `runner` stage is deliberately
 **last** in the `Dockerfile`, so a bare `docker build .` can never
 produce the fat one by accident.
 
+Rebuilds are incremental. The builder compiles under BuildKit cache
+mounts (cargo's registry and git checkouts, plus `target/` per
+platform), so after a source edit only the changed crates recompile;
+the rest come from the cache mount. A fresh builder starts with empty
+mounts and does a full build, and so does every CI runner: the mounts
+live in the builder and are never exported with the image or a layer
+cache. To force a clean build, drop them with
+`docker builder prune --filter type=exec.cachemount`.
+
 Run one job against a freshly minted JIT config:
 
 ```sh
