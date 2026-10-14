@@ -12,8 +12,7 @@ use std::time::Duration;
 
 use shared::{Conclusion, RunnerEvent};
 
-#[path = "helpers/orphan_replay.rs"]
-mod orphan_replay;
+use crate::orphan_replay;
 
 use orphan_replay::{
   HEADER, ORPHANS, PROBE, Replay, TestResult, assert_alive, assert_dead, assert_orphans_cleaned,
@@ -75,7 +74,7 @@ async fn tracking_id_replaces_inherited_outer_value() -> TestResult {
   let output = tokio::process::Command::new(std::env::current_exe()?)
     .args([
       "--exact",
-      "inherited_outer_id_child",
+      "orphan_cleanup_test::inherited_outer_id_child",
       "--ignored",
       "--nocapture",
     ])

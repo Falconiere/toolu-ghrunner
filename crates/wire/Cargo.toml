@@ -5,6 +5,12 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+autotests = false # every tests/*.rs is a module of the [[test]] target below (#109)
+
+# One merged integration binary: tests/main.rs declares each tests/*.rs as a module.
+[[test]]
+name = "integration"
+path = "tests/main.rs"
 
 [dependencies]
 # Internal

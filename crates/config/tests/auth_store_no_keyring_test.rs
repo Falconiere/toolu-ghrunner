@@ -130,7 +130,11 @@ fn no_keyring_env_overrides_keyring_opt_in_end_to_end() {
   let exe = std::env::current_exe().expect("current exe");
 
   let mut cmd = std::process::Command::new(exe);
-  cmd.args(["helper_no_keyring_roundtrip", "--exact", "--nocapture"]);
+  cmd.args([
+    "auth_store_no_keyring_test::helper_no_keyring_roundtrip",
+    "--exact",
+    "--nocapture",
+  ]);
   cmd.env("NO_KEYRING_HELPER", "1");
   // Both set: the back-compat off-switch must beat the keyring opt-in.
   cmd.env("TOOLU_RUNNER_NO_KEYRING", "1");
@@ -201,7 +205,11 @@ fn default_backend_is_file_end_to_end() {
   let exe = std::env::current_exe().expect("current exe");
 
   let mut cmd = std::process::Command::new(exe);
-  cmd.args(["helper_default_file_roundtrip", "--exact", "--nocapture"]);
+  cmd.args([
+    "auth_store_no_keyring_test::helper_default_file_roundtrip",
+    "--exact",
+    "--nocapture",
+  ]);
   cmd.env("DEFAULT_STORE_HELPER", "1");
   // A clean default environment: neither the opt-in nor the off-switch.
   cmd.env_remove("TOOLU_RUNNER_KEYRING");

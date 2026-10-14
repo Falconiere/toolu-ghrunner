@@ -11,7 +11,7 @@
 //! subprocess, so `./tools/check.sh all` runs these four `detect_repo` cases
 //! in exactly the polluted environment that regressed them. Reproduce by hand
 //! with: `GIT_DIR=$(git rev-parse --absolute-git-dir) cargo test -p config
-//! --test repo_infer_test`.
+//! --test integration -- repo_infer_test::`.
 
 use std::path::Path;
 

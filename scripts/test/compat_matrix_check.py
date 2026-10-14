@@ -130,7 +130,9 @@ def check_evidence(row, lane, evidence, tests, context, errors):
     elif evidence == "ci-docker":
         docker_step = context["ci"].split("Docker action runtime", 1)[-1].split("- name:", 1)[0]
         if lane != "docker" or not [t for t in tests
-                                    if t[0] == "rs" and f"--test {t[3]} " in docker_step]:
+                                    # One merged `integration` target per crate (#109): the
+                                    # step selects a test file with a `<file>::` filter.
+                                    if t[0] == "rs" and f" {t[3]}:: " in docker_step]:
             errors.append(f"{where}: 'ci-docker' needs a mapped test run by ci.yml's Docker step")
     elif evidence.startswith(("run:", "pr:")):
         if not RUN_URL.match(evidence.split(":", 1)[1]):

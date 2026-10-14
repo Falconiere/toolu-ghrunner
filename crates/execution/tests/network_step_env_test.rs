@@ -3,8 +3,7 @@
 //! steps, a job hook, a local Node action's main and post stages, and Node's
 //! TLS trust — under workflow env, with the proxy password masked.
 
-#[path = "../../network/tests/helpers/tls_fixtures.rs"]
-mod tls_fixtures;
+use crate::tls_fixtures;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};

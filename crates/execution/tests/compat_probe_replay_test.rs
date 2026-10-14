@@ -11,7 +11,7 @@
 //!
 //! Opt-in (real Docker): run explicitly, as the `ci.yml` Docker step does —
 //! `TOOLU_CONTAINER_TEST_ROOT=<daemon-shared dir> cargo test -p execution
-//! --test compat_probe_replay_test -- --ignored --test-threads=1`.
+//! --test integration -- compat_probe_replay_test:: --ignored --test-threads=1`.
 #![cfg(target_os = "linux")]
 
 use std::collections::HashMap;

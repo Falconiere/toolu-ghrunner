@@ -2,10 +2,7 @@
 //! real `wss://` server behind a real authenticated CONNECT proxy, trusted
 //! only through the generated `ca_bundle`.
 
-#[path = "../../network/tests/helpers/proxy_fixtures.rs"]
-mod proxy_fixtures;
-#[path = "../../network/tests/helpers/tls_fixtures.rs"]
-mod tls_fixtures;
+use crate::{proxy_fixtures, tls_fixtures};
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;

@@ -78,6 +78,14 @@ class RejectionTest(unittest.TestCase):
         gate_row(m)["tests"] = [["crates/toolu-runner/tests/live_e2e.rs", "noop_job_completes"]]
         self.assert_rejected(m, "feature-gated test never runs in the gate")
 
+    def test_ci_docker_evidence_needs_a_test_file_the_docker_step_runs(self):
+        m = copy.deepcopy(MATRIX)
+        target = next(r for r in m["rows"]
+                      if r["lanes"].get("docker", {}).get("evidence") == "ci-docker")
+        target["tests"] = [["crates/execution/tests/shell_templates_container_test.rs",
+                            "container_default_shell_is_sh_and_pipeline_succeeds"]]
+        self.assert_rejected(m, "'ci-docker' needs a mapped test run by ci.yml's Docker step")
+
     def test_report_evidence_only_backs_the_reference_lane(self):
         m = copy.deepcopy(MATRIX)
         gate_row(m)["lanes"]["github-com"] = {"status": "passed",

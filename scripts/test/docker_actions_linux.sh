@@ -53,8 +53,8 @@ docker run --rm \
     fi
 
     if [[ "$TOOLU_DOCKER_ACTIONS_MODE" = replay || "$TOOLU_DOCKER_ACTIONS_MODE" = all ]]; then
-      cargo test -p execution --test docker_action_test -- --skip remote_repository_action
-      listed=$(cargo test -p execution --test docker_action_linux_test -- --list)
+      cargo test -p execution --test integration -- docker_action_test:: --skip remote_repository_action
+      listed=$(cargo test -p execution --test integration -- docker_action_linux_test:: --list)
       for required in \
         local_actions_preserve_argv_env_commands_state_and_lifo_posts \
         registry_and_manifest_arg_variants_execute_exact_argv \
@@ -67,18 +67,18 @@ docker run --rm \
           *) echo "required Linux Docker-action test is missing: $required" >&2; exit 2 ;;
         esac
       done
-      cargo test -p execution --test docker_action_linux_test -- \
+      cargo test -p execution --test integration -- docker_action_linux_test:: \
         --ignored --nocapture --test-threads=1 --skip remote_repository_action
     fi
 
     if [[ "$TOOLU_DOCKER_ACTIONS_MODE" = remote ]]; then
-      listed=$(cargo test -p execution --test docker_action_test -- --list)
+      listed=$(cargo test -p execution --test integration -- docker_action_test:: --list)
       case "$listed" in
         *remote_repository_action_runs_pre_main_post_and_reuses_image*) ;;
         *) echo "required remote Docker-action replay is missing" >&2; exit 2 ;;
       esac
-      cargo test -p execution --test docker_action_test \
-        remote_repository_action -- --ignored --nocapture --test-threads=1
+      cargo test -p execution --test integration -- \
+        docker_action_test::remote_repository_action --ignored --nocapture --test-threads=1
     fi
 
     if [[ "$TOOLU_DOCKER_ACTIONS_MODE" = gate ]]; then

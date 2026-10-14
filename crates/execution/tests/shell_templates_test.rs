@@ -79,13 +79,14 @@ async fn missing_path_does_not_search_the_working_directory() -> TestResult {
     let output = std::process::Command::new(std::env::current_exe()?)
       .args([
         "--exact",
-        "missing_path_does_not_search_the_working_directory",
+        "shell_templates_test::missing_path_does_not_search_the_working_directory",
       ])
       .env(CHILD, "1")
       .env_remove("PATH")
       .output()?;
+    // `1 passed`: a filter that matches nothing also exits 0.
     assert!(
-      output.status.success(),
+      output.status.success() && String::from_utf8_lossy(&output.stdout).contains("1 passed"),
       "child stdout:\n{}\nchild stderr:\n{}",
       String::from_utf8_lossy(&output.stdout),
       String::from_utf8_lossy(&output.stderr)

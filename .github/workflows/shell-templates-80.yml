@@ -65,8 +65,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/shell 80 scripts"
-          TMPDIR="$RUNNER_TEMP/shell 80 scripts" cargo test -p execution --test shell_templates_test -- --include-ignored
-          cargo test -p execution --test shell_templates_replay_test
+          TMPDIR="$RUNNER_TEMP/shell 80 scripts" cargo test -p execution --test integration -- shell_templates_test:: --include-ignored
+          cargo test -p execution --test integration -- shell_templates_replay_test::
 
   container:
     runs-on: ubuntu-24.04
@@ -75,4 +75,4 @@ jobs:
       - name: Real toolu job-container replay
         run: |
           mkdir -p "$RUNNER_TEMP/shell80"
-          TOOLU_CONTAINER_TEST_ROOT="$RUNNER_TEMP/shell80" cargo test -p execution --test shell_templates_container_test -- --ignored --nocapture
+          TOOLU_CONTAINER_TEST_ROOT="$RUNNER_TEMP/shell80" cargo test -p execution --test integration -- shell_templates_container_test:: --ignored --nocapture

@@ -2,10 +2,7 @@
 //! job's `[network]` proxy and trusts its `ca_bundle` — and fails closed
 //! without the bundle.
 
-#[path = "../../network/tests/helpers/proxy_fixtures.rs"]
-mod proxy_fixtures;
-#[path = "../../network/tests/helpers/tls_fixtures.rs"]
-mod tls_fixtures;
+use crate::{proxy_fixtures, tls_fixtures};
 
 use std::io::Write as _;
 

@@ -1,8 +1,7 @@
 //! #94 AC-4: `[network] ca_bundle` trust against real TLS handshakes, and the
 //! fail-closed bundle rules.
 
-#[path = "helpers/tls_fixtures.rs"]
-mod tls_fixtures;
+use crate::tls_fixtures;
 
 use std::error::Error as _;
 use std::net::SocketAddr;

@@ -88,8 +88,20 @@ bite here.
   install the global tracing subscriber. A new `tests/foo.rs` is NOT picked up
   until you add `mod foo;` to `main.rs`. Test names carry the file as a prefix:
   `cargo test -p toolu-runner --test integration -- foo::`. Shared helpers are
-  declared once in `main.rs` and reached with `use crate::<helper>;` (a
-  `#[path]` inside a module file would resolve against `tests/<file>/`).
+  declared once in `main.rs` and reached with `use crate::<helper>;`, so each
+  is compiled once. A test that re-runs its own binary as a child must pass
+  the module-qualified name (`<file>::<test>`) to `--exact`: a filter that
+  matches nothing still exits 0.
+- **The other crates' integration tests are one target each (#109).**
+  `config`, `daemon`, `execution`, `listener`, `network`, `protocol`, `shared`
+  and `wire` use the same `autotests = false` + `tests/main.rs` (`integration`)
+  layout; `cache` has a single test file and keeps Cargo's default. `execution`
+  adds `process_env` (`tests/process_env.rs`) for `network_step_env_test`,
+  which sets proxy env vars process-wide around whole job runs that spawn
+  steps. Run one file with `cargo test -p <crate> --test integration --
+  <file>::` (`<file>::name` for a single test; libtest filters are OR'd
+  substrings). The `network/tests/helpers/*` fixtures and
+  `execution/tests/helpers/orphan_replay.rs` are declared in each `main.rs`.
 - **Every `src/` submodule folder carries a `README.md`** listing what
   belongs there, what does not, and one row per file. `src.requireReadme`
   in each crate's config enforces it — when you add a module folder,
