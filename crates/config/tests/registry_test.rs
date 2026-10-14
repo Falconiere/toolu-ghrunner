@@ -74,7 +74,11 @@ fn runner_home_subprocess(
 ) -> Result<String, std::io::Error> {
   let exe = std::env::current_exe()?;
   let mut cmd = std::process::Command::new(exe);
-  cmd.args(["helper_print_runner_home", "--exact", "--nocapture"]);
+  cmd.args([
+    "registry_test::helper_print_runner_home",
+    "--exact",
+    "--nocapture",
+  ]);
   cmd.env("REGISTRY_TEST_PRINT_HOME", "1");
   prepare(&mut cmd);
   let out = cmd.output()?;

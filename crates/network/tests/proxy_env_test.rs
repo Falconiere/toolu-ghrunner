@@ -3,10 +3,7 @@
 //! #94 regressions — env mode matches what reqwest really does (B1), masking
 //! fails safe (B2), redaction never echoes a mis-parsed value (B3).
 
-#[path = "helpers/proxy_fixtures.rs"]
-mod proxy_fixtures;
-#[path = "helpers/tls_fixtures.rs"]
-mod tls_fixtures;
+use crate::{proxy_fixtures, tls_fixtures};
 
 use network::proxy_env::UNPARSEABLE;
 use network::{ProxyEnv, ProxyVar, redact_url, url_secrets};

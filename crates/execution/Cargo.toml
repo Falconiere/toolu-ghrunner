@@ -5,6 +5,18 @@ edition.workspace = true
 publish = false
 license.workspace = true
 repository.workspace = true
+autotests = false # every tests/*.rs is a module of one of the two [[test]] targets below (#109)
+
+# One merged integration binary: tests/main.rs declares each tests/*.rs as a module.
+[[test]]
+name = "integration"
+path = "tests/main.rs"
+
+# `network_step_env_test` sets proxy env vars process-wide around whole job
+# runs; see the header of tests/process_env.rs.
+[[test]]
+name = "process_env"
+path = "tests/process_env.rs"
 
 [dependencies]
 # Internal

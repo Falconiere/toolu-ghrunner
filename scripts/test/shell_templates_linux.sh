@@ -20,7 +20,7 @@ docker run --rm \
     set -euo pipefail
     test "$(uname -s)" = Linux
     test -S /var/run/docker.sock
-    listed=$(cargo test -p execution --test shell_templates_container_test -- --list)
+    listed=$(cargo test -p execution --test integration -- shell_templates_container_test:: --list)
     for required in \
       container_default_shell_is_sh_and_pipeline_succeeds \
       container_explicit_bash_pipeline_fails \
@@ -33,6 +33,6 @@ docker run --rm \
       esac
     done
     mkdir -p "$TOOLU_CONTAINER_TEST_ROOT"
-    cargo test -p execution --test shell_templates_test --test shell_templates_replay_test
-    cargo test -p execution --test shell_templates_container_test -- --ignored --nocapture
+    cargo test -p execution --test integration -- shell_templates_test:: shell_templates_replay_test::
+    cargo test -p execution --test integration -- shell_templates_container_test:: --ignored --nocapture
   '

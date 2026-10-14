@@ -102,7 +102,7 @@ want_ci "ubuntu runs the guardrails"       "bash scripts/guardrails/run\.sh"
 want_ci "ubuntu runs the check.sh test"    "check_script"
 want_ci "ubuntu checks the #103 compatibility matrix" "compat_matrix_check\.py --check"
 want_ci "ubuntu re-verifies the #103 reference report" "reference_compare\.py --verify docs/compat-reference-103\.json"
-want_ci "ubuntu replays the #103 docker capture" "--test compat_probe_replay_test -- --ignored"
+want_ci "ubuntu replays the #103 docker capture" "--test integration -- compat_probe_replay_test:: --ignored"
 want_ci "ubuntu runs the live-lane honesty test" "live_lane"
 want_ci "ubuntu lints the capture feature build" "cargo clippy -p toolu-runner --features capture --all-targets -- -D warnings"
 

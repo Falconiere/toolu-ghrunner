@@ -688,7 +688,7 @@
           "dropped_inputs_fail_the_typed_input_assertion"
         ]
       ],
-      "command": "cargo test -p execution --test incoming_contexts_test",
+      "command": "cargo test -p execution --test integration -- incoming_contexts_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -737,7 +737,7 @@
           "new_roots_keep_nested_types_and_cannot_shadow_runtime_roots"
         ]
       ],
-      "command": "cargo test -p execution --test incoming_contexts_test",
+      "command": "cargo test -p execution --test integration -- incoming_contexts_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -790,7 +790,7 @@
           "acquired_matrix_jobs_execute_assertions_and_restore_composite_scope"
         ]
       ],
-      "command": "cargo test -p execution --test incoming_contexts_test",
+      "command": "cargo test -p execution --test integration -- incoming_contexts_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -851,7 +851,7 @@
           "acquired_with_tokens_reach_node_and_expressions_are_not_reevaluated"
         ]
       ],
-      "command": "cargo test -p execution --test incoming_contexts_test --test incoming_contexts_node_test",
+      "command": "cargo test -p execution --test integration -- incoming_contexts_test:: incoming_contexts_node_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -967,7 +967,7 @@
           "acquired_with_tokens_reach_node_and_expressions_are_not_reevaluated"
         ]
       ],
-      "command": "cargo test -p execution --test incoming_contexts_test",
+      "command": "cargo test -p execution --test integration -- incoming_contexts_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -1020,7 +1020,7 @@
           "new_roots_keep_nested_types_and_cannot_shadow_runtime_roots"
         ]
       ],
-      "command": "cargo test -p execution --test incoming_contexts_test",
+      "command": "cargo test -p execution --test integration -- incoming_contexts_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -1073,7 +1073,7 @@
           "acquired_matrix_jobs_execute_assertions_and_restore_composite_scope"
         ]
       ],
-      "command": "cargo test -p execution --test incoming_contexts_test",
+      "command": "cargo test -p execution --test integration -- incoming_contexts_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -1130,7 +1130,7 @@
           "acquired_matrix_jobs_execute_assertions_and_restore_composite_scope"
         ]
       ],
-      "command": "cargo test -p execution --test incoming_contexts_test",
+      "command": "cargo test -p execution --test integration -- incoming_contexts_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -1361,7 +1361,7 @@
           "dropped_workflow_and_job_env_fail_the_context_assertion"
         ]
       ],
-      "command": "cargo test -p execution --lib job_environment && cargo test -p execution --test replay_mutation_test",
+      "command": "cargo test -p execution --lib job_environment && cargo test -p execution --test integration -- replay_mutation_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -1690,7 +1690,7 @@
           "dropped_job_outputs_lose_the_evaluated_outputs"
         ]
       ],
-      "command": "cargo test -p execution --test job_outputs_test && cargo test -p execution --test replay_mutation_test",
+      "command": "cargo test -p execution --test integration -- job_outputs_test:: && cargo test -p execution --test integration -- replay_mutation_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -1747,7 +1747,7 @@
           "captured_output_is_evaluated_after_real_github_output_step"
         ]
       ],
-      "command": "cargo test -p wire --test job_outputs_test && cargo test -p listener --lib job_outputs && cargo test -p execution --test job_outputs_test",
+      "command": "cargo test -p wire --test integration -- job_outputs_test:: && cargo test -p listener --lib job_outputs && cargo test -p execution --test integration -- job_outputs_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -1796,7 +1796,7 @@
           "message_secret_and_dynamic_add_mask_are_skipped_with_warnings"
         ]
       ],
-      "command": "cargo test -p execution --test job_outputs_test",
+      "command": "cargo test -p execution --test integration -- job_outputs_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -1854,7 +1854,7 @@
           "complete_job_outputs_are_value_objects_without_secret_flags"
         ]
       ],
-      "command": "cargo test -p execution --test job_outputs_test",
+      "command": "cargo test -p execution --test integration -- job_outputs_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -1963,7 +1963,7 @@
           "complete_job_outputs_are_value_objects_without_secret_flags"
         ]
       ],
-      "command": "cargo test -p execution --test job_outputs_test",
+      "command": "cargo test -p execution --test integration -- job_outputs_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -2025,7 +2025,7 @@
           "cancelled_job_evaluates_output_written_before_cleanup"
         ]
       ],
-      "command": "cargo test -p execution --test job_outputs_test",
+      "command": "cargo test -p execution --test integration -- job_outputs_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -2075,7 +2075,7 @@
           "message_secret_and_dynamic_add_mask_are_skipped_with_warnings"
         ]
       ],
-      "command": "cargo test -p execution --test job_outputs_test",
+      "command": "cargo test -p execution --test integration -- job_outputs_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -2133,7 +2133,7 @@
           "post_action_env_is_available_to_final_job_output"
         ]
       ],
-      "command": "cargo test -p execution --test job_outputs_test",
+      "command": "cargo test -p execution --test integration -- job_outputs_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -2194,7 +2194,7 @@
           "dropped_run_defaults_fail_the_context_assertion"
         ]
       ],
-      "command": "cargo test -p execution --test job_message_run_defaults_test && cargo test -p execution --test replay_mutation_test",
+      "command": "cargo test -p execution --test integration -- job_message_run_defaults_test:: && cargo test -p execution --test integration -- replay_mutation_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -2247,7 +2247,7 @@
           "empty_explicit_shell_uses_job_shell"
         ]
       ],
-      "command": "cargo test -p execution --test job_message_run_defaults_test",
+      "command": "cargo test -p execution --test integration -- job_message_run_defaults_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -2304,7 +2304,7 @@
           "paths_and_absence"
         ]
       ],
-      "command": "cargo test -p execution --test job_message_run_defaults_test",
+      "command": "cargo test -p execution --test integration -- job_message_run_defaults_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -2408,7 +2408,7 @@
           "step_values_override_defaults"
         ]
       ],
-      "command": "cargo test -p execution --test job_message_run_defaults_test",
+      "command": "cargo test -p execution --test integration -- job_message_run_defaults_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -2465,7 +2465,7 @@
           "job_default_directory_expression_is_evaluated"
         ]
       ],
-      "command": "cargo test -p execution --test job_message_run_defaults_test",
+      "command": "cargo test -p execution --test integration -- job_message_run_defaults_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -2514,7 +2514,7 @@
           "composite_scope"
         ]
       ],
-      "command": "cargo test -p execution --test job_message_run_defaults_test",
+      "command": "cargo test -p execution --test integration -- job_message_run_defaults_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -2573,7 +2573,7 @@
           "composite_shell_nested_empty_ci_and_forced_github_actions"
         ]
       ],
-      "command": "env -u CI cargo test -p execution --test step_process_ci_test && CI=false cargo test -p execution --test step_process_ci_test",
+      "command": "env -u CI cargo test -p execution --test integration -- step_process_ci_test:: && CI=false cargo test -p execution --test integration -- step_process_ci_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -2624,7 +2624,7 @@
           "host_script_defaults_and_preserves_ci_precedence"
         ]
       ],
-      "command": "env -u CI cargo test -p execution --test step_process_ci_test && CI=false cargo test -p execution --test step_process_ci_test",
+      "command": "env -u CI cargo test -p execution --test integration -- step_process_ci_test:: && CI=false cargo test -p execution --test integration -- step_process_ci_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -2680,7 +2680,7 @@
           "composite_shell_nested_empty_ci_and_forced_github_actions"
         ]
       ],
-      "command": "env -u CI cargo test -p execution --test step_process_ci_test && CI=false cargo test -p execution --test step_process_ci_test",
+      "command": "env -u CI cargo test -p execution --test integration -- step_process_ci_test:: && CI=false cargo test -p execution --test integration -- step_process_ci_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -2782,7 +2782,7 @@
           "host_script_defaults_and_preserves_ci_precedence"
         ]
       ],
-      "command": "env -u CI cargo test -p execution --test step_process_ci_test && CI=false cargo test -p execution --test step_process_ci_test",
+      "command": "env -u CI cargo test -p execution --test integration -- step_process_ci_test:: && CI=false cargo test -p execution --test integration -- step_process_ci_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -2833,7 +2833,7 @@
           "host_script_defaults_and_preserves_ci_precedence"
         ]
       ],
-      "command": "env -u CI cargo test -p execution --test step_process_ci_test && CI=false cargo test -p execution --test step_process_ci_test && bash scripts/test/step_process_ci_linux.sh",
+      "command": "env -u CI cargo test -p execution --test integration -- step_process_ci_test:: && CI=false cargo test -p execution --test integration -- step_process_ci_test:: && bash scripts/test/step_process_ci_linux.sh",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -2900,7 +2900,7 @@
           "malformed_action_ci_expression_fails_visibly"
         ]
       ],
-      "command": "env -u CI cargo test -p execution --test step_process_ci_test && CI=false cargo test -p execution --test step_process_ci_test && bash scripts/test/step_process_ci_linux.sh",
+      "command": "env -u CI cargo test -p execution --test integration -- step_process_ci_test:: && CI=false cargo test -p execution --test integration -- step_process_ci_test:: && bash scripts/test/step_process_ci_linux.sh",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -2948,7 +2948,7 @@
           "job_container_non_linux_fails_before_workspace_or_step"
         ]
       ],
-      "command": "cargo test -p execution --test job_container_test",
+      "command": "cargo test -p execution --test integration -- job_container_test::",
       "lanes": {
         "hermetic": {
           "status": "unverified",
@@ -3020,7 +3020,7 @@
           "captured_job_container_preserves_wire_shape"
         ]
       ],
-      "command": "cargo test -p execution --lib docker::container_spec docker::container_options docker::container_create_options; cargo test -p execution --test job_container_capture_replay",
+      "command": "cargo test -p execution --lib docker::container_spec docker::container_options docker::container_create_options; cargo test -p execution --test integration -- job_container_capture_replay::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -3125,7 +3125,7 @@
           "captured_job_container_replays_shell_node_composite_and_verify"
         ]
       ],
-      "command": "TOOLU_CONTAINER_TEST_ROOT=<daemon-shared dir> cargo test -p execution --test job_container_linux_test --test job_container_capture_replay -- --ignored --test-threads=1",
+      "command": "TOOLU_CONTAINER_TEST_ROOT=<daemon-shared dir> cargo test -p execution --test integration -- job_container_linux_test:: job_container_capture_replay:: --ignored --test-threads=1",
       "lanes": {
         "hermetic": {
           "status": "unverified",
@@ -3177,7 +3177,7 @@
           "job_container_real_production_shell_node_composite_and_posts"
         ]
       ],
-      "command": "TOOLU_CONTAINER_TEST_ROOT=<daemon-shared dir> cargo test -p execution --lib docker::job_container --test job_container_linux_test -- --ignored --test-threads=1",
+      "command": "TOOLU_CONTAINER_TEST_ROOT=<daemon-shared dir> cargo test -p execution --lib docker::job_container -- --ignored --test-threads=1 && TOOLU_CONTAINER_TEST_ROOT=<daemon-shared dir> cargo test -p execution --test integration -- job_container_linux_test:: --ignored --test-threads=1",
       "lanes": {
         "hermetic": {
           "status": "unverified",
@@ -3283,7 +3283,7 @@
           "job_container_non_linux_fails_before_workspace_or_step"
         ]
       ],
-      "command": "cargo test -p execution --test job_container_test",
+      "command": "cargo test -p execution --test integration -- job_container_test::",
       "lanes": {
         "hermetic": {
           "status": "unverified",
@@ -3339,7 +3339,7 @@
           "captured_job_container_replays_shell_node_composite_and_verify"
         ]
       ],
-      "command": "cargo test -p execution --test job_container_capture_replay; TOOLU_CONTAINER_TEST_ROOT=<dir> cargo test -p execution --test job_container_capture_replay -- --ignored",
+      "command": "cargo test -p execution --test integration -- job_container_capture_replay::; TOOLU_CONTAINER_TEST_ROOT=<dir> cargo test -p execution --test integration -- job_container_capture_replay:: --ignored",
       "lanes": {
         "hermetic": {
           "status": "unverified",
@@ -3452,7 +3452,7 @@
           "job_container_real_composite_uses_container_shell_and_paths"
         ]
       ],
-      "command": "TOOLU_CONTAINER_TEST_ROOT=<daemon-shared dir> cargo test -p execution --test job_container_linux_test --test job_container_capture_replay --test job_container_composite_test -- --ignored --test-threads=1",
+      "command": "TOOLU_CONTAINER_TEST_ROOT=<daemon-shared dir> cargo test -p execution --test integration -- job_container_linux_test:: job_container_capture_replay:: job_container_composite_test:: --ignored --test-threads=1",
       "lanes": {
         "hermetic": {
           "status": "unverified",
@@ -3508,7 +3508,7 @@
           "job_container_real_production_shell_node_composite_and_posts"
         ]
       ],
-      "command": "TOOLU_CONTAINER_TEST_ROOT=<daemon-shared dir> cargo test -p execution --lib docker::job_container --test job_container_composite_test --test job_container_linux_test -- --ignored --test-threads=1",
+      "command": "TOOLU_CONTAINER_TEST_ROOT=<daemon-shared dir> cargo test -p execution --lib docker::job_container -- --ignored --test-threads=1 && TOOLU_CONTAINER_TEST_ROOT=<daemon-shared dir> cargo test -p execution --test integration -- job_container_composite_test:: job_container_linux_test:: --ignored --test-threads=1",
       "lanes": {
         "hermetic": {
           "status": "unverified",
@@ -3627,7 +3627,7 @@
           "job_container_setup_cancellation_reports_cancelled"
         ]
       ],
-      "command": "TOOLU_CONTAINER_TEST_ROOT=<daemon-shared dir> cargo test -p execution --lib docker::job_container_failures -- --ignored --test-threads=1; cargo test -p execution --test job_container_test",
+      "command": "TOOLU_CONTAINER_TEST_ROOT=<daemon-shared dir> cargo test -p execution --lib docker::job_container_failures -- --ignored --test-threads=1; cargo test -p execution --test integration -- job_container_test::",
       "lanes": {
         "hermetic": {
           "status": "unverified",
@@ -3678,7 +3678,7 @@
           "job_container_absent_preserves_host_execution"
         ]
       ],
-      "command": "cargo test -p execution --test job_container_test",
+      "command": "cargo test -p execution --test integration -- job_container_test::",
       "lanes": {
         "hermetic": {
           "status": "unverified",
@@ -3726,7 +3726,7 @@
           "services_reject_unsupported_host_before_user_steps"
         ]
       ],
-      "command": "cargo test -p execution --test service_containers_test",
+      "command": "cargo test -p execution --test integration -- service_containers_test::",
       "lanes": {
         "hermetic": {
           "status": "unverified",
@@ -4313,7 +4313,7 @@
           "services_reject_unsupported_host_before_user_steps"
         ]
       ],
-      "command": "cargo test -p execution --test service_containers_test",
+      "command": "cargo test -p execution --test integration -- service_containers_test::",
       "lanes": {
         "hermetic": {
           "status": "unverified",
@@ -4419,7 +4419,7 @@
           "remote_repository_action_runs_pre_main_post_and_reuses_image"
         ]
       ],
-      "command": "TOOLU_CONTAINER_TEST_ROOT=<daemon-shared dir> cargo test -p execution --lib docker::action_container -- --ignored --test-threads=1; cargo test -p execution --test docker_action_test -- --ignored",
+      "command": "TOOLU_CONTAINER_TEST_ROOT=<daemon-shared dir> cargo test -p execution --lib docker::action_container -- --ignored --test-threads=1; cargo test -p execution --test integration -- docker_action_test:: --ignored",
       "lanes": {
         "hermetic": {
           "status": "unverified",
@@ -4471,7 +4471,7 @@
           "local_actions_preserve_argv_env_commands_state_and_lifo_posts"
         ]
       ],
-      "command": "TOOLU_CONTAINER_TEST_ROOT=<daemon-shared dir> cargo test -p execution --test docker_action_linux_test -- --ignored --test-threads=1",
+      "command": "TOOLU_CONTAINER_TEST_ROOT=<daemon-shared dir> cargo test -p execution --test integration -- docker_action_linux_test:: --ignored --test-threads=1",
       "lanes": {
         "hermetic": {
           "status": "unverified",
@@ -4527,7 +4527,7 @@
           "docker_action_joins_service_only_network_through_main_and_post"
         ]
       ],
-      "command": "TOOLU_CONTAINER_TEST_ROOT=<daemon-shared dir> cargo test -p execution --test docker_action_linux_test -- --ignored --test-threads=1",
+      "command": "TOOLU_CONTAINER_TEST_ROOT=<daemon-shared dir> cargo test -p execution --test integration -- docker_action_linux_test:: --ignored --test-threads=1",
       "lanes": {
         "hermetic": {
           "status": "unverified",
@@ -4583,7 +4583,7 @@
           "captured_docker_job_executes_the_container_and_cleans_up"
         ]
       ],
-      "command": "TOOLU_CONTAINER_TEST_ROOT=<daemon-shared dir> cargo test -p execution --test docker_action_linux_test -- --ignored --test-threads=1; cargo test -p execution --test compat_probe_replay_test -- --ignored --test-threads=1",
+      "command": "TOOLU_CONTAINER_TEST_ROOT=<daemon-shared dir> cargo test -p execution --test integration -- docker_action_linux_test:: --ignored --test-threads=1; cargo test -p execution --test integration -- compat_probe_replay_test:: --ignored --test-threads=1",
       "lanes": {
         "hermetic": {
           "status": "unverified",
@@ -4643,7 +4643,7 @@
           "local_actions_preserve_argv_env_commands_state_and_lifo_posts"
         ]
       ],
-      "command": "TOOLU_CONTAINER_TEST_ROOT=<daemon-shared dir> cargo test -p execution --test compat_probe_replay_test --test docker_action_linux_test -- --ignored --test-threads=1",
+      "command": "TOOLU_CONTAINER_TEST_ROOT=<daemon-shared dir> cargo test -p execution --test integration -- compat_probe_replay_test:: docker_action_linux_test:: --ignored --test-threads=1",
       "lanes": {
         "hermetic": {
           "status": "unverified",
@@ -4763,7 +4763,7 @@
           "local_actions_preserve_argv_env_commands_state_and_lifo_posts"
         ]
       ],
-      "command": "TOOLU_CONTAINER_TEST_ROOT=<daemon-shared dir> cargo test -p execution --test compat_probe_replay_test --test docker_action_linux_test -- --ignored --test-threads=1; cargo test -p execution --lib docker::action_container -- --ignored",
+      "command": "TOOLU_CONTAINER_TEST_ROOT=<daemon-shared dir> cargo test -p execution --test integration -- compat_probe_replay_test:: docker_action_linux_test:: --ignored --test-threads=1; cargo test -p execution --lib docker::action_container -- --ignored",
       "lanes": {
         "hermetic": {
           "status": "unverified",
@@ -4815,7 +4815,7 @@
           "local_actions_preserve_argv_env_commands_state_and_lifo_posts"
         ]
       ],
-      "command": "TOOLU_CONTAINER_TEST_ROOT=<daemon-shared dir> cargo test -p execution --test docker_action_linux_test -- --ignored --test-threads=1",
+      "command": "TOOLU_CONTAINER_TEST_ROOT=<daemon-shared dir> cargo test -p execution --test integration -- docker_action_linux_test:: --ignored --test-threads=1",
       "lanes": {
         "hermetic": {
           "status": "unverified",
@@ -4871,7 +4871,7 @@
           "action_run_preserves_image_path_mounts_streams_and_cleans_up"
         ]
       ],
-      "command": "TOOLU_CONTAINER_TEST_ROOT=<daemon-shared dir> cargo test -p execution --test docker_action_linux_test -- --ignored --test-threads=1",
+      "command": "TOOLU_CONTAINER_TEST_ROOT=<daemon-shared dir> cargo test -p execution --test integration -- docker_action_linux_test:: --ignored --test-threads=1",
       "lanes": {
         "hermetic": {
           "status": "unverified",
@@ -4935,7 +4935,7 @@
           "timeout_returns_failure_and_removes_owned_container"
         ]
       ],
-      "command": "TOOLU_CONTAINER_TEST_ROOT=<daemon-shared dir> cargo test -p execution --test docker_action_linux_test -- --ignored --test-threads=1; cargo test -p execution --lib docker::action_container -- --ignored --test-threads=1",
+      "command": "TOOLU_CONTAINER_TEST_ROOT=<daemon-shared dir> cargo test -p execution --test integration -- docker_action_linux_test:: --ignored --test-threads=1; cargo test -p execution --lib docker::action_container -- --ignored --test-threads=1",
       "lanes": {
         "hermetic": {
           "status": "unverified",
@@ -4982,7 +4982,7 @@
           "docker_registry_action_rejects_non_linux_without_running_host_code"
         ]
       ],
-      "command": "cargo test -p execution --test docker_action_test",
+      "command": "cargo test -p execution --test integration -- docker_action_test::",
       "lanes": {
         "hermetic": {
           "status": "unverified",
@@ -5038,7 +5038,7 @@
           "denied_launch_resolution_does_not_fall_back_to_an_archive_api"
         ]
       ],
-      "command": "cargo test -p execution --test action_downloads_test; cargo test -p execution --lib actions::",
+      "command": "cargo test -p execution --test integration -- action_downloads_test::; cargo test -p execution --lib actions::",
       "lanes": {
         "hermetic": {
           "status": "unverified",
@@ -5097,7 +5097,7 @@
           "setup_action_production_prefetch_emits_resolved_sha"
         ]
       ],
-      "command": "cargo test -p execution --test action_downloads_test; cargo test -p execution --lib actions::",
+      "command": "cargo test -p execution --test integration -- action_downloads_test::; cargo test -p execution --lib actions::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -5162,7 +5162,7 @@
           "substituted_scope_cannot_traverse_the_service_path"
         ]
       ],
-      "command": "cargo test -p execution --test action_downloads_test; cargo test -p execution --lib actions::",
+      "command": "cargo test -p execution --test integration -- action_downloads_test::; cargo test -p execution --lib actions::",
       "lanes": {
         "hermetic": {
           "status": "unverified",
@@ -5214,7 +5214,7 @@
           "setup_action_real_archive_cold_warm_dedup_and_subpath"
         ]
       ],
-      "command": "cargo test -p execution --test action_downloads_test; cargo test -p execution --lib actions::",
+      "command": "cargo test -p execution --test integration -- action_downloads_test::; cargo test -p execution --lib actions::",
       "lanes": {
         "hermetic": {
           "status": "unverified",
@@ -5273,7 +5273,7 @@
           "setup_action_real_archive_cold_warm_dedup_and_subpath"
         ]
       ],
-      "command": "cargo test -p execution --test action_downloads_test; cargo test -p execution --lib actions::",
+      "command": "cargo test -p execution --test integration -- action_downloads_test::; cargo test -p execution --lib actions::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -5399,7 +5399,7 @@
           "parses_local_action"
         ]
       ],
-      "command": "cargo test -p execution --test action_downloads_test; cargo test -p execution --lib actions::; cargo test -p toolu-runner --test integration -- actions_resolver_test::",
+      "command": "cargo test -p execution --test integration -- action_downloads_test::; cargo test -p execution --lib actions::; cargo test -p toolu-runner --test integration -- actions_resolver_test::",
       "lanes": {
         "hermetic": {
           "status": "unverified",
@@ -5455,7 +5455,7 @@
           "resource_path_rejects_encoded_and_plain_traversal"
         ]
       ],
-      "command": "cargo test -p execution --test action_downloads_test; cargo test -p execution --lib actions::",
+      "command": "cargo test -p execution --test integration -- action_downloads_test::; cargo test -p execution --lib actions::",
       "lanes": {
         "hermetic": {
           "status": "unverified",
@@ -5519,7 +5519,7 @@
           "archive_redirect_validation_rejects_downgrades_and_embedded_credentials"
         ]
       ],
-      "command": "cargo test -p execution --test action_downloads_test; cargo test -p execution --lib actions::",
+      "command": "cargo test -p execution --test integration -- action_downloads_test::; cargo test -p execution --lib actions::",
       "lanes": {
         "hermetic": {
           "status": "unverified",
@@ -5599,7 +5599,7 @@
           "setup_action_production_prefetch_emits_resolved_sha"
         ]
       ],
-      "command": "cargo test -p execution --test action_downloads_test; cargo test -p execution --lib actions::",
+      "command": "cargo test -p execution --test integration -- action_downloads_test::; cargo test -p execution --lib actions::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -5650,7 +5650,7 @@
           "future_type_is_skipped_with_the_original_cursor"
         ]
       ],
-      "command": "cargo test -p protocol --test message_types && cargo test -p wire --test broker_poll_parser && cargo test -p listener --lib broker_control",
+      "command": "cargo test -p protocol --test integration -- message_types:: && cargo test -p wire --test integration -- broker_poll_parser:: && cargo test -p listener --lib broker_control",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -5748,7 +5748,7 @@
           "malformed_id_still_fails_the_poll_parser"
         ]
       ],
-      "command": "cargo test -p wire --test broker_poll_parser",
+      "command": "cargo test -p wire --test integration -- broker_poll_parser::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -5808,7 +5808,7 @@
           "future_type_then_job_reaches_acquire_route"
         ]
       ],
-      "command": "cargo test -p protocol --test message_types && cargo test -p wire --test broker_poll_parser && cargo test -p listener --lib broker_control",
+      "command": "cargo test -p protocol --test integration -- message_types:: && cargo test -p wire --test integration -- broker_poll_parser:: && cargo test -p listener --lib broker_control",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -6127,7 +6127,7 @@
           "poll_url_keeps_required_params"
         ]
       ],
-      "command": "cargo test -p wire --test runner_version",
+      "command": "cargo test -p wire --test integration -- runner_version::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -6176,7 +6176,7 @@
           "one_build_emits_one_compatibility_identity_on_all_broker_requests"
         ]
       ],
-      "command": "cargo test -p wire --test runner_version",
+      "command": "cargo test -p wire --test integration -- runner_version::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -6323,7 +6323,7 @@
           "refresh_warns_and_continues_in_idle_and_busy_handlers_without_reading_body"
         ]
       ],
-      "command": "cargo test -p wire --test runner_version && cargo test -p listener --lib runner_update_policy",
+      "command": "cargo test -p wire --test integration -- runner_version:: && cargo test -p listener --lib runner_update_policy",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -6428,7 +6428,7 @@
           "subsequent_poll_threads_known_message_id"
         ]
       ],
-      "command": "cargo test -p wire --test runner_version",
+      "command": "cargo test -p wire --test integration -- runner_version::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -6476,7 +6476,7 @@
           "one_build_emits_one_compatibility_identity_on_all_broker_requests"
         ]
       ],
-      "command": "cargo test -p wire --test runner_version && python3 scripts/test/runner_version_evidence_check.py",
+      "command": "cargo test -p wire --test integration -- runner_version:: && python3 scripts/test/runner_version_evidence_check.py",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -6903,7 +6903,7 @@
           "bad_composite_root_is_visible_and_fails"
         ]
       ],
-      "command": "cargo test -p expressions; cargo test -p execution --test expression_parity_test",
+      "command": "cargo test -p expressions; cargo test -p execution --test integration -- expression_parity_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -7071,7 +7071,7 @@
           "bad_composite_root_is_visible_and_fails"
         ]
       ],
-      "command": "cargo test -p execution --test expression_parity_test",
+      "command": "cargo test -p execution --test integration -- expression_parity_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -7291,7 +7291,7 @@
           "bad_root_expression_is_visible_and_fails_the_captured_environment"
         ]
       ],
-      "command": "cargo test -p expressions; cargo test -p execution --test expression_parity_test",
+      "command": "cargo test -p expressions; cargo test -p execution --test integration -- expression_parity_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -7402,7 +7402,7 @@
           "bad_composite_root_is_visible_and_fails"
         ]
       ],
-      "command": "cargo test -p execution --test expression_parity_test",
+      "command": "cargo test -p execution --test integration -- expression_parity_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -7462,7 +7462,7 @@
           "captured_composite_custom_shell_ignores_job_default"
         ]
       ],
-      "command": "cargo test -p execution --test shell_templates_test --test shell_templates_replay_test",
+      "command": "cargo test -p execution --test integration -- shell_templates_test:: shell_templates_replay_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -7519,7 +7519,7 @@
           "captured_unknown_shell_reports_failure_without_executing_body"
         ]
       ],
-      "command": "cargo test -p execution --test shell_templates_test --test shell_templates_replay_test",
+      "command": "cargo test -p execution --test integration -- shell_templates_test:: shell_templates_replay_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -7585,7 +7585,7 @@
           "captured_job_default_template_and_explicit_override"
         ]
       ],
-      "command": "cargo test -p execution --test shell_templates_test --test shell_templates_replay_test",
+      "command": "cargo test -p execution --test integration -- shell_templates_test:: shell_templates_replay_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -7646,7 +7646,7 @@
           "explicit_missing_interpreters_do_not_fallback"
         ]
       ],
-      "command": "cargo test -p execution --test shell_templates_test -- --include-ignored",
+      "command": "cargo test -p execution --test integration -- shell_templates_test:: --include-ignored",
       "lanes": {
         "hermetic": {
           "status": "unverified",
@@ -7707,7 +7707,7 @@
           "captured_default_pipeline_and_explicit_bash_have_different_results"
         ]
       ],
-      "command": "cargo test -p execution --test shell_templates_replay_test",
+      "command": "cargo test -p execution --test integration -- shell_templates_replay_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -7814,7 +7814,7 @@
           "captured_job_default_template_and_explicit_override"
         ]
       ],
-      "command": "cargo test -p execution --test shell_templates_test --test shell_templates_replay_test",
+      "command": "cargo test -p execution --test integration -- shell_templates_test:: shell_templates_replay_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -7867,7 +7867,7 @@
           "captured_default_pipeline_and_explicit_bash_have_different_results"
         ]
       ],
-      "command": "cargo test -p execution --test shell_templates_test --test shell_templates_replay_test",
+      "command": "cargo test -p execution --test integration -- shell_templates_test:: shell_templates_replay_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -7937,7 +7937,7 @@
           "captured_unknown_shell_reports_failure_without_executing_body"
         ]
       ],
-      "command": "cargo test -p execution --test shell_templates_test --test shell_templates_replay_test",
+      "command": "cargo test -p execution --test integration -- shell_templates_test:: shell_templates_replay_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -7998,7 +7998,7 @@
           "explicit_missing_interpreters_do_not_fallback"
         ]
       ],
-      "command": "cargo test -p execution --test shell_templates_test -- --include-ignored",
+      "command": "cargo test -p execution --test integration -- shell_templates_test:: --include-ignored",
       "lanes": {
         "hermetic": {
           "status": "unverified",
@@ -8055,7 +8055,7 @@
           "captured_unknown_shell_reports_failure_without_executing_body"
         ]
       ],
-      "command": "cargo test -p execution --test shell_templates_replay_test",
+      "command": "cargo test -p execution --test integration -- shell_templates_replay_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -8454,7 +8454,7 @@
           "step_annotations_keep_the_run_service_annotation_shape"
         ]
       ],
-      "command": "cargo test -p execution --test command_annotation_test && cargo test -p listener annotation_reporting",
+      "command": "cargo test -p execution --test integration -- command_annotation_test:: && cargo test -p listener annotation_reporting",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -8506,7 +8506,7 @@
           "annotation_reporting_posts_upstream_shape_on_correct_steps"
         ]
       ],
-      "command": "cargo test -p execution --test command_annotation_test && cargo test -p listener annotation_reporting",
+      "command": "cargo test -p execution --test integration -- command_annotation_test:: && cargo test -p listener annotation_reporting",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -8610,7 +8610,7 @@
           "annotation_reporting_posts_upstream_shape_on_correct_steps"
         ]
       ],
-      "command": "cargo test -p execution --test command_annotation_test && cargo test -p listener annotation_reporting",
+      "command": "cargo test -p execution --test integration -- command_annotation_test:: && cargo test -p listener annotation_reporting",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -8719,7 +8719,7 @@
           "step_annotations_keep_the_run_service_annotation_shape"
         ]
       ],
-      "command": "cargo test -p execution --test command_annotation_test && cargo test -p listener annotation_reporting",
+      "command": "cargo test -p execution --test integration -- command_annotation_test:: && cargo test -p listener annotation_reporting",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -8772,7 +8772,7 @@
           "annotation_reporting_posts_upstream_shape_on_correct_steps"
         ]
       ],
-      "command": "cargo test -p execution --test command_annotation_test && cargo test -p listener annotation_reporting",
+      "command": "cargo test -p execution --test integration -- command_annotation_test:: && cargo test -p listener annotation_reporting",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -8824,7 +8824,7 @@
           "step_annotations_keep_the_run_service_annotation_shape"
         ]
       ],
-      "command": "cargo test -p execution --test command_annotation_test && cargo test -p listener annotation_reporting",
+      "command": "cargo test -p execution --test integration -- command_annotation_test:: && cargo test -p listener annotation_reporting",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -11187,7 +11187,7 @@
           "completejob_env_capture_sends_url_billing_and_step_identity"
         ]
       ],
-      "command": "cargo test -p execution --test environment_url_test --test action_infrastructure_test && cargo test -p wire --test completejob_wire_test && cargo test -p listener completejob",
+      "command": "cargo test -p execution --test integration -- environment_url_test:: action_infrastructure_test:: && cargo test -p wire --test integration -- completejob_wire_test:: && cargo test -p listener completejob",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -11261,7 +11261,7 @@
           "mask_hint_url_is_suppressed"
         ]
       ],
-      "command": "cargo test -p execution --test environment_url_test --test action_infrastructure_test && cargo test -p wire --test completejob_wire_test && cargo test -p listener completejob",
+      "command": "cargo test -p execution --test integration -- environment_url_test:: action_infrastructure_test:: && cargo test -p wire --test integration -- completejob_wire_test:: && cargo test -p listener completejob",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -11331,7 +11331,7 @@
           "step_metadata_reaches_every_posted_step_result"
         ]
       ],
-      "command": "cargo test -p execution --test environment_url_test --test action_infrastructure_test && cargo test -p wire --test completejob_wire_test && cargo test -p listener completejob",
+      "command": "cargo test -p execution --test integration -- environment_url_test:: action_infrastructure_test:: && cargo test -p wire --test integration -- completejob_wire_test:: && cargo test -p listener completejob",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -11408,7 +11408,7 @@
           "completejob_without_billing_owner_omits_it"
         ]
       ],
-      "command": "cargo test -p execution --test environment_url_test --test action_infrastructure_test && cargo test -p wire --test completejob_wire_test && cargo test -p listener completejob",
+      "command": "cargo test -p execution --test integration -- environment_url_test:: action_infrastructure_test:: && cargo test -p wire --test integration -- completejob_wire_test:: && cargo test -p listener completejob",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -11467,7 +11467,7 @@
           "step_metadata_reaches_every_posted_step_result"
         ]
       ],
-      "command": "cargo test -p execution --test environment_url_test --test action_infrastructure_test && cargo test -p wire --test completejob_wire_test && cargo test -p listener completejob",
+      "command": "cargo test -p execution --test integration -- environment_url_test:: action_infrastructure_test:: && cargo test -p wire --test integration -- completejob_wire_test:: && cargo test -p listener completejob",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -11587,7 +11587,7 @@
           "completejob_env_capture_sends_url_billing_and_step_identity"
         ]
       ],
-      "command": "cargo test -p execution --test environment_url_test --test action_infrastructure_test && cargo test -p wire --test completejob_wire_test && cargo test -p listener completejob",
+      "command": "cargo test -p execution --test integration -- environment_url_test:: action_infrastructure_test:: && cargo test -p wire --test integration -- completejob_wire_test:: && cargo test -p listener completejob",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -11653,7 +11653,7 @@
           "mask_hint_url_is_suppressed"
         ]
       ],
-      "command": "cargo test -p execution --test environment_url_test --test action_infrastructure_test && cargo test -p wire --test completejob_wire_test && cargo test -p listener completejob",
+      "command": "cargo test -p execution --test integration -- environment_url_test:: action_infrastructure_test:: && cargo test -p wire --test integration -- completejob_wire_test:: && cargo test -p listener completejob",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -11723,7 +11723,7 @@
           "step_metadata_reaches_every_posted_step_result"
         ]
       ],
-      "command": "cargo test -p execution --test environment_url_test --test action_infrastructure_test && cargo test -p wire --test completejob_wire_test && cargo test -p listener completejob",
+      "command": "cargo test -p execution --test integration -- environment_url_test:: action_infrastructure_test:: && cargo test -p wire --test integration -- completejob_wire_test:: && cargo test -p listener completejob",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -11800,7 +11800,7 @@
           "unparseable_job_still_echoes_the_billing_owner"
         ]
       ],
-      "command": "cargo test -p execution --test environment_url_test --test action_infrastructure_test && cargo test -p wire --test completejob_wire_test && cargo test -p listener completejob",
+      "command": "cargo test -p execution --test integration -- environment_url_test:: action_infrastructure_test:: && cargo test -p wire --test integration -- completejob_wire_test:: && cargo test -p listener completejob",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -11859,7 +11859,7 @@
           "cancelled_job_still_reports_the_url_from_completed_steps"
         ]
       ],
-      "command": "cargo test -p execution --test environment_url_test --test action_infrastructure_test && cargo test -p wire --test completejob_wire_test && cargo test -p listener completejob",
+      "command": "cargo test -p execution --test integration -- environment_url_test:: action_infrastructure_test:: && cargo test -p wire --test integration -- completejob_wire_test:: && cargo test -p listener completejob",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -11917,7 +11917,7 @@
           "process_clean_enabled_jobs_get_fresh_github_ids"
         ]
       ],
-      "command": "cargo test -p execution --test orphan_cleanup_test; cargo test -p execution --lib orphan_cleanup",
+      "command": "cargo test -p execution --test integration -- orphan_cleanup_test::; cargo test -p execution --lib orphan_cleanup",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -11985,7 +11985,7 @@
           "empty_step_tracking_id_opts_out"
         ]
       ],
-      "command": "cargo test -p execution --test orphan_cleanup_test; cargo test -p execution --lib orphan_cleanup",
+      "command": "cargo test -p execution --test integration -- orphan_cleanup_test::; cargo test -p execution --lib orphan_cleanup",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -12092,7 +12092,7 @@
           "failing_node_post_orphan_is_killed"
         ]
       ],
-      "command": "cargo test -p execution --test orphan_cleanup_test; cargo test -p execution --lib orphan_cleanup",
+      "command": "cargo test -p execution --test integration -- orphan_cleanup_test::; cargo test -p execution --lib orphan_cleanup",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -12211,7 +12211,7 @@
           "job_without_orphans_logs_header_and_no_termination"
         ]
       ],
-      "command": "cargo test -p execution --test orphan_cleanup_test; cargo test -p execution --lib orphan_cleanup",
+      "command": "cargo test -p execution --test integration -- orphan_cleanup_test::; cargo test -p execution --lib orphan_cleanup",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -12273,7 +12273,7 @@
           "sweep_kills_a_live_tagged_process"
         ]
       ],
-      "command": "cargo test -p execution --test orphan_cleanup_test; cargo test -p execution --lib orphan_cleanup",
+      "command": "cargo test -p execution --test integration -- orphan_cleanup_test::; cargo test -p execution --lib orphan_cleanup",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -12341,7 +12341,7 @@
           "carries_id_matches_exact_key_and_case_insensitive_value"
         ]
       ],
-      "command": "cargo test -p execution --test orphan_cleanup_test; cargo test -p execution --lib orphan_cleanup",
+      "command": "cargo test -p execution --test integration -- orphan_cleanup_test::; cargo test -p execution --lib orphan_cleanup",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -12407,7 +12407,7 @@
           "report_warnings_name_each_abnormal_outcome_once"
         ]
       ],
-      "command": "cargo test -p execution --test orphan_cleanup_test; cargo test -p execution --lib orphan_cleanup",
+      "command": "cargo test -p execution --test integration -- orphan_cleanup_test::; cargo test -p execution --lib orphan_cleanup",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -12459,7 +12459,7 @@
           "stable_layout_reuses_one_mapping_and_records_the_owner"
         ]
       ],
-      "command": "cargo test -p execution --test stable_workspace_test; cargo test -p execution --lib workspace_layout",
+      "command": "cargo test -p execution --test integration -- stable_workspace_test::; cargo test -p execution --lib workspace_layout",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -12515,7 +12515,7 @@
           "a_held_job_lease_is_not_taken_twice"
         ]
       ],
-      "command": "cargo test -p execution --test stable_workspace_test; cargo test -p execution --lib workspace_layout",
+      "command": "cargo test -p execution --test integration -- stable_workspace_test::; cargo test -p execution --lib workspace_layout",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -12584,7 +12584,7 @@
           "workspace_mode_uses_lowercase_names_and_rejects_unknown"
         ]
       ],
-      "command": "cargo test -p execution --test stable_workspace_test; cargo test -p execution --lib workspace_layout; cargo test -p config --test workspace_section_test; cargo test -p shared --test config_test",
+      "command": "cargo test -p execution --test integration -- stable_workspace_test::; cargo test -p execution --lib workspace_layout; cargo test -p config --test integration -- workspace_section_test::; cargo test -p shared --test integration -- config_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -12644,7 +12644,7 @@
           "workspace_clean_options_follow_upstream"
         ]
       ],
-      "command": "cargo test -p execution --test stable_workspace_test; cargo test -p execution --lib workspace_layout",
+      "command": "cargo test -p execution --test integration -- stable_workspace_test::; cargo test -p execution --lib workspace_layout",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -12747,7 +12747,7 @@
           "stable_workspace_reuses_git_across_jobs_and_fresh_mode_stays_isolated"
         ]
       ],
-      "command": "cargo test -p execution --test stable_workspace_test; cargo test -p execution --lib workspace_layout",
+      "command": "cargo test -p execution --test integration -- stable_workspace_test::; cargo test -p execution --lib workspace_layout",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -12807,7 +12807,7 @@
           "absent_or_unsafe_repository_uses_a_sanitized_fresh_job_dir"
         ]
       ],
-      "command": "cargo test -p execution --test stable_workspace_test; cargo test -p execution --lib workspace_layout",
+      "command": "cargo test -p execution --test integration -- stable_workspace_test::; cargo test -p execution --lib workspace_layout",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -12867,7 +12867,7 @@
           "claim_creates_no_workspace_until_create_dirs"
         ]
       ],
-      "command": "cargo test -p execution --test stable_workspace_test; cargo test -p execution --lib workspace_layout",
+      "command": "cargo test -p execution --test integration -- stable_workspace_test::; cargo test -p execution --lib workspace_layout",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -12939,7 +12939,7 @@
           "prunes_old_dirs_keeps_fresh_and_running"
         ]
       ],
-      "command": "cargo test -p execution --test stable_workspace_test; cargo test -p execution --lib workspace_layout; cargo test -p toolu-runner --test integration -- workspace_gc_test::",
+      "command": "cargo test -p execution --test integration -- stable_workspace_test::; cargo test -p execution --lib workspace_layout; cargo test -p toolu-runner --test integration -- workspace_gc_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -12994,7 +12994,7 @@
           "fixture_is_the_verbatim_live_capture"
         ]
       ],
-      "command": "cargo test -p wire --test session_conflict",
+      "command": "cargo test -p wire --test integration -- session_conflict::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -13061,7 +13061,7 @@
           "next_action_covers_every_branch"
         ]
       ],
-      "command": "cargo test -p wire --test session_conflict && cargo test -p listener --lib session_conflict && cargo test -p toolu-runner --test integration -- session_conflict_e2e_test:: && cargo test -p listener --test loop_decision_test",
+      "command": "cargo test -p wire --test integration -- session_conflict:: && cargo test -p listener --lib session_conflict && cargo test -p toolu-runner --test integration -- session_conflict_e2e_test:: && cargo test -p listener --test integration -- loop_decision_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -13116,7 +13116,7 @@
           "boot_recovers_when_the_conflict_clears_inside_the_window"
         ]
       ],
-      "command": "cargo test -p wire --test session_conflict && cargo test -p listener --lib session_conflict && cargo test -p toolu-runner --test integration -- session_conflict_e2e_test::",
+      "command": "cargo test -p wire --test integration -- session_conflict:: && cargo test -p listener --lib session_conflict && cargo test -p toolu-runner --test integration -- session_conflict_e2e_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -13222,7 +13222,7 @@
           "captured_409_is_a_session_conflict"
         ]
       ],
-      "command": "cargo test -p wire --test session_conflict && cargo test -p listener --lib session_conflict && cargo test -p toolu-runner --test integration -- session_conflict_e2e_test::",
+      "command": "cargo test -p wire --test integration -- session_conflict:: && cargo test -p listener --lib session_conflict && cargo test -p toolu-runner --test integration -- session_conflict_e2e_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -13285,7 +13285,7 @@
           "sigterm_during_the_conflict_wait_exits_zero_promptly"
         ]
       ],
-      "command": "cargo test -p wire --test session_conflict && cargo test -p listener --lib session_conflict && cargo test -p toolu-runner --test integration -- session_conflict_e2e_test::",
+      "command": "cargo test -p wire --test integration -- session_conflict:: && cargo test -p listener --lib session_conflict && cargo test -p toolu-runner --test integration -- session_conflict_e2e_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -13349,7 +13349,7 @@
           "legacy_systemd_unit_does_not_restart_a_session_conflict"
         ]
       ],
-      "command": "cargo test -p toolu-runner --test integration -- session_conflict_e2e_test:: && cargo test -p listener --test loop_decision_test && cargo test -p config --test service_unit_test",
+      "command": "cargo test -p toolu-runner --test integration -- session_conflict_e2e_test:: && cargo test -p listener --test integration -- loop_decision_test:: && cargo test -p config --test integration -- service_unit_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -13400,7 +13400,7 @@
           "resolved_labels_match_what_github_stored"
         ]
       ],
-      "command": "cargo test -p toolu-runner --test integration -- register_labels_test:: && cargo test -p config --test labels_test",
+      "command": "cargo test -p toolu-runner --test integration -- register_labels_test:: && cargo test -p config --test integration -- labels_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -13465,7 +13465,7 @@
           "cancelled_job_unregisters_and_removes_the_registration"
         ]
       ],
-      "command": "cargo test -p toolu-runner --test integration -- register_labels_test:: ephemeral_run_test:: && cargo test -p config --test labels_test",
+      "command": "cargo test -p toolu-runner --test integration -- register_labels_test:: ephemeral_run_test:: && cargo test -p config --test integration -- labels_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -13528,7 +13528,7 @@
           "captured_invalid_client_is_an_auth_error"
         ]
       ],
-      "command": "cargo test -p toolu-runner --test integration -- register_labels_test:: ephemeral_run_test:: && cargo test -p config --test labels_test && cargo test -p wire --test oauth_invalid_client",
+      "command": "cargo test -p toolu-runner --test integration -- register_labels_test:: ephemeral_run_test:: && cargo test -p config --test integration -- labels_test:: && cargo test -p wire --test integration -- oauth_invalid_client::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -13658,7 +13658,7 @@
           "label_length_limit_is_256"
         ]
       ],
-      "command": "cargo test -p toolu-runner --test integration -- register_labels_test:: && cargo test -p config --test labels_test",
+      "command": "cargo test -p toolu-runner --test integration -- register_labels_test:: && cargo test -p config --test integration -- labels_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -13719,7 +13719,7 @@
           "ephemeral_decision_table"
         ]
       ],
-      "command": "cargo test -p toolu-runner --test integration -- ephemeral_run_test:: && cargo test -p listener --test loop_decision_test",
+      "command": "cargo test -p toolu-runner --test integration -- ephemeral_run_test:: && cargo test -p listener --test integration -- loop_decision_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -13788,7 +13788,7 @@
           "captured_invalid_client_is_an_auth_error"
         ]
       ],
-      "command": "cargo test -p toolu-runner --test integration -- ephemeral_run_test:: && cargo test -p wire --test oauth_invalid_client",
+      "command": "cargo test -p toolu-runner --test integration -- ephemeral_run_test:: && cargo test -p wire --test integration -- oauth_invalid_client::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -14822,7 +14822,7 @@
           "conflicting_step_switches_warn_on_the_step_and_print_the_phase_two_notice"
         ]
       ],
-      "command": "cargo test -p execution --lib node::migration; cargo test -p execution --test node_migration_test",
+      "command": "cargo test -p execution --lib node::migration; cargo test -p execution --test integration -- node_migration_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -14956,7 +14956,7 @@
           "download_commits_a_real_node_only_after_it_starts"
         ]
       ],
-      "command": "cargo test -p execution --test node_migration_test; cargo test -p execution --lib node::runtime",
+      "command": "cargo test -p execution --test integration -- node_migration_test::; cargo test -p execution --lib node::runtime",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -15196,7 +15196,7 @@
           "conflicting_step_switches_warn_on_the_step_and_print_the_phase_two_notice"
         ]
       ],
-      "command": "cargo test -p execution --lib node::migration; cargo test -p execution --test node_migration_test",
+      "command": "cargo test -p execution --lib node::migration; cargo test -p execution --test integration -- node_migration_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -15370,7 +15370,7 @@
           "alpine_container_on_arm64_fails_with_upstream_text"
         ]
       ],
-      "command": "cargo test -p execution --test node_migration_test; cargo test -p execution --test node_container_test -- --ignored --test-threads=1",
+      "command": "cargo test -p execution --test integration -- node_migration_test::; cargo test -p execution --test integration -- node_container_test:: --ignored --test-threads=1",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -15425,7 +15425,7 @@
           "malformed_env_fails_the_step_with_upstream_issues_and_runs_cleanup"
         ]
       ],
-      "command": "cargo test -p execution --test file_command_strict_test; cargo test -p execution --lib file_commands",
+      "command": "cargo test -p execution --test integration -- file_command_strict_test::; cargo test -p execution --lib file_commands",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -15508,7 +15508,7 @@
           "node_action_malformed_state_fails_main_and_post_still_runs"
         ]
       ],
-      "command": "cargo test -p execution --test file_command_strict_test",
+      "command": "cargo test -p execution --test integration -- file_command_strict_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -15615,7 +15615,7 @@
           "crlf_keeps_carriage_returns_like_the_linux_runner"
         ]
       ],
-      "command": "cargo test -p execution --test file_command_strict_test; cargo test -p execution --lib file_commands",
+      "command": "cargo test -p execution --test integration -- file_command_strict_test::; cargo test -p execution --lib file_commands",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -15673,7 +15673,7 @@
           "reader_strips_bom_decodes_lossily_and_treats_missing_as_empty"
         ]
       ],
-      "command": "cargo test -p execution --test file_command_strict_test; cargo test -p execution --lib file_commands",
+      "command": "cargo test -p execution --test integration -- file_command_strict_test::; cargo test -p execution --lib file_commands",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -15743,7 +15743,7 @@
           "a_secret_in_a_malformed_line_is_masked_everywhere"
         ]
       ],
-      "command": "cargo test -p execution --test file_command_strict_test; cargo test -p execution --lib file_commands",
+      "command": "cargo test -p execution --test integration -- file_command_strict_test::; cargo test -p execution --lib file_commands",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -15806,7 +15806,7 @@
           "pairs_before_the_first_error_are_kept_and_parsing_stops"
         ]
       ],
-      "command": "cargo test -p execution --test file_command_strict_test; cargo test -p execution --lib file_commands",
+      "command": "cargo test -p execution --test integration -- file_command_strict_test::; cargo test -p execution --lib file_commands",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -16184,7 +16184,7 @@
           "skipped_step_reports_captured_wire_id_and_skipped_conclusion"
         ]
       ],
-      "command": "cargo test -p execution --test step_context_identity_test && cargo test -p listener --lib step_context_identity",
+      "command": "cargo test -p execution --test integration -- step_context_identity_test:: && cargo test -p listener --lib step_context_identity",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -16241,7 +16241,7 @@
           "skipped_step_reports_captured_wire_id_and_skipped_conclusion"
         ]
       ],
-      "command": "cargo test -p execution --test step_context_identity_test && cargo test -p listener --lib step_context_identity",
+      "command": "cargo test -p execution --test integration -- step_context_identity_test:: && cargo test -p listener --lib step_context_identity",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -16294,7 +16294,7 @@
           "skipped_post_reports_skipped_without_rewriting_main_result"
         ]
       ],
-      "command": "cargo test -p execution --test step_context_identity_test && cargo test -p listener --lib step_context_identity",
+      "command": "cargo test -p execution --test integration -- step_context_identity_test:: && cargo test -p listener --lib step_context_identity",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -16343,7 +16343,7 @@
           "repeated_nested_composites_do_not_leak_inner_step_outputs"
         ]
       ],
-      "command": "cargo test -p execution --test step_context_identity_test && cargo test -p listener --lib step_context_identity",
+      "command": "cargo test -p execution --test integration -- step_context_identity_test:: && cargo test -p listener --lib step_context_identity",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -16401,7 +16401,7 @@
           "captured_output_is_evaluated_after_real_github_output_step"
         ]
       ],
-      "command": "cargo test -p execution --test step_context_identity_test && cargo test -p listener --lib step_context_identity",
+      "command": "cargo test -p execution --test integration -- step_context_identity_test:: && cargo test -p listener --lib step_context_identity",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -16459,7 +16459,7 @@
           "skipped_step_reports_captured_wire_id_and_skipped_conclusion"
         ]
       ],
-      "command": "cargo test -p execution --test step_context_identity_test && cargo test -p listener --lib step_context_identity",
+      "command": "cargo test -p execution --test integration -- step_context_identity_test:: && cargo test -p listener --lib step_context_identity",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -16512,7 +16512,7 @@
           "skipped_step_reports_captured_wire_id_and_skipped_conclusion"
         ]
       ],
-      "command": "cargo test -p execution --test step_context_identity_test && cargo test -p listener --lib step_context_identity",
+      "command": "cargo test -p execution --test integration -- step_context_identity_test:: && cargo test -p listener --lib step_context_identity",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -16573,7 +16573,7 @@
           "repeated_nested_composites_do_not_leak_inner_step_outputs"
         ]
       ],
-      "command": "cargo test -p execution --test step_context_identity_test && cargo test -p listener --lib step_context_identity",
+      "command": "cargo test -p execution --test integration -- step_context_identity_test:: && cargo test -p listener --lib step_context_identity",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -16630,7 +16630,7 @@
           "named_output_uses_context_name_while_reporting_uses_wire_uuid"
         ]
       ],
-      "command": "cargo test -p execution --test job_outputs_test && cargo test -p execution --test step_context_identity_test",
+      "command": "cargo test -p execution --test integration -- job_outputs_test:: && cargo test -p execution --test integration -- step_context_identity_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -16691,7 +16691,7 @@
           "captured_literal_deferred_and_matrix_attributes"
         ]
       ],
-      "command": "cargo test -p execution --test step_attrs_replay_test && cargo test -p execution --lib -- step_attrs step_display step_timeout && cargo test -p shared --test template_token_test && cargo test -p toolu-runner --test integration -- gh_compat_step_attrs:: gh_compat_prepost::",
+      "command": "cargo test -p execution --test integration -- step_attrs_replay_test:: && cargo test -p execution --lib -- step_attrs step_display step_timeout && cargo test -p shared --test integration -- template_token_test:: && cargo test -p toolu-runner --test integration -- gh_compat_step_attrs:: gh_compat_prepost::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -16788,7 +16788,7 @@
           "composite_continue_on_error_expressions"
         ]
       ],
-      "command": "cargo test -p execution --test step_attrs_replay_test && cargo test -p execution --lib -- step_attrs step_display step_timeout && cargo test -p shared --test template_token_test && cargo test -p toolu-runner --test integration -- gh_compat_step_attrs:: gh_compat_prepost::",
+      "command": "cargo test -p execution --test integration -- step_attrs_replay_test:: && cargo test -p execution --lib -- step_attrs step_display step_timeout && cargo test -p shared --test integration -- template_token_test:: && cargo test -p toolu-runner --test integration -- gh_compat_step_attrs:: gh_compat_prepost::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -16857,7 +16857,7 @@
           "pre_timeout_reports_the_pre_step"
         ]
       ],
-      "command": "cargo test -p execution --test step_attrs_replay_test && cargo test -p execution --lib -- step_attrs step_display step_timeout && cargo test -p shared --test template_token_test && cargo test -p toolu-runner --test integration -- gh_compat_step_attrs:: gh_compat_prepost::",
+      "command": "cargo test -p execution --test integration -- step_attrs_replay_test:: && cargo test -p execution --lib -- step_attrs step_display step_timeout && cargo test -p shared --test integration -- template_token_test:: && cargo test -p toolu-runner --test integration -- gh_compat_step_attrs:: gh_compat_prepost::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -16920,7 +16920,7 @@
           "pre_and_main_get_separate_timeout_budgets"
         ]
       ],
-      "command": "cargo test -p execution --test step_attrs_replay_test && cargo test -p execution --lib -- step_attrs step_display step_timeout && cargo test -p shared --test template_token_test && cargo test -p toolu-runner --test integration -- gh_compat_step_attrs:: gh_compat_prepost::",
+      "command": "cargo test -p execution --test integration -- step_attrs_replay_test:: && cargo test -p execution --lib -- step_attrs step_display step_timeout && cargo test -p shared --test integration -- template_token_test:: && cargo test -p toolu-runner --test integration -- gh_compat_step_attrs:: gh_compat_prepost::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -16985,7 +16985,7 @@
           "deferred_continue_on_error_reads_prior_step_output"
         ]
       ],
-      "command": "cargo test -p execution --test step_attrs_replay_test && cargo test -p execution --lib -- step_attrs step_display step_timeout && cargo test -p shared --test template_token_test && cargo test -p toolu-runner --test integration -- gh_compat_step_attrs:: gh_compat_prepost::",
+      "command": "cargo test -p execution --test integration -- step_attrs_replay_test:: && cargo test -p execution --lib -- step_attrs step_display step_timeout && cargo test -p shared --test integration -- template_token_test:: && cargo test -p toolu-runner --test integration -- gh_compat_step_attrs:: gh_compat_prepost::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -17046,7 +17046,7 @@
           "captured_literal_deferred_and_matrix_attributes"
         ]
       ],
-      "command": "cargo test -p execution --test step_attrs_replay_test && cargo test -p execution --lib -- step_attrs step_display step_timeout && cargo test -p shared --test template_token_test && cargo test -p toolu-runner --test integration -- gh_compat_step_attrs:: gh_compat_prepost::",
+      "command": "cargo test -p execution --test integration -- step_attrs_replay_test:: && cargo test -p execution --lib -- step_attrs step_display step_timeout && cargo test -p shared --test integration -- template_token_test:: && cargo test -p toolu-runner --test integration -- gh_compat_step_attrs:: gh_compat_prepost::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -17111,7 +17111,7 @@
           "failing_pre_honors_continue_on_error"
         ]
       ],
-      "command": "cargo test -p execution --test step_attrs_replay_test && cargo test -p execution --lib -- step_attrs step_display step_timeout && cargo test -p shared --test template_token_test && cargo test -p toolu-runner --test integration -- gh_compat_step_attrs:: gh_compat_prepost::",
+      "command": "cargo test -p execution --test integration -- step_attrs_replay_test:: && cargo test -p execution --lib -- step_attrs step_display step_timeout && cargo test -p shared --test integration -- template_token_test:: && cargo test -p toolu-runner --test integration -- gh_compat_step_attrs:: gh_compat_prepost::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -17192,7 +17192,7 @@
           "parse_action_manifest_composite_step_continue_on_error_tokens"
         ]
       ],
-      "command": "cargo test -p execution --test step_attrs_replay_test && cargo test -p execution --lib -- step_attrs step_display step_timeout && cargo test -p shared --test template_token_test && cargo test -p toolu-runner --test integration -- gh_compat_step_attrs:: gh_compat_prepost::",
+      "command": "cargo test -p execution --test integration -- step_attrs_replay_test:: && cargo test -p execution --lib -- step_attrs step_display step_timeout && cargo test -p shared --test integration -- template_token_test:: && cargo test -p toolu-runner --test integration -- gh_compat_step_attrs:: gh_compat_prepost::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -17261,7 +17261,7 @@
           "pre_timeout_reports_the_pre_step"
         ]
       ],
-      "command": "cargo test -p execution --test step_attrs_replay_test && cargo test -p execution --lib -- step_attrs step_display step_timeout && cargo test -p shared --test template_token_test && cargo test -p toolu-runner --test integration -- gh_compat_step_attrs:: gh_compat_prepost::",
+      "command": "cargo test -p execution --test integration -- step_attrs_replay_test:: && cargo test -p execution --lib -- step_attrs step_display step_timeout && cargo test -p shared --test integration -- template_token_test:: && cargo test -p toolu-runner --test integration -- gh_compat_step_attrs:: gh_compat_prepost::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -17324,7 +17324,7 @@
           "pre_and_main_get_separate_timeout_budgets"
         ]
       ],
-      "command": "cargo test -p execution --test step_attrs_replay_test && cargo test -p execution --lib -- step_attrs step_display step_timeout && cargo test -p shared --test template_token_test && cargo test -p toolu-runner --test integration -- gh_compat_step_attrs:: gh_compat_prepost::",
+      "command": "cargo test -p execution --test integration -- step_attrs_replay_test:: && cargo test -p execution --lib -- step_attrs step_display step_timeout && cargo test -p shared --test integration -- template_token_test:: && cargo test -p toolu-runner --test integration -- gh_compat_step_attrs:: gh_compat_prepost::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -17380,7 +17380,7 @@
           "workspace_setup_failure_never_runs_user_steps_and_completes_once"
         ]
       ],
-      "command": "cargo test -p execution --test conditional_cleanup_test --test post_results_test && cargo test -p execution --lib cleanup_processes_share_one_deadline",
+      "command": "cargo test -p execution --test integration -- conditional_cleanup_test:: post_results_test:: && cargo test -p execution --lib cleanup_processes_share_one_deadline",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -17436,7 +17436,7 @@
           "observed_start_cancel_retests_current_condition_and_runs_cleanup"
         ]
       ],
-      "command": "cargo test -p execution --test conditional_cleanup_test --test post_results_test && cargo test -p execution --lib cleanup_processes_share_one_deadline",
+      "command": "cargo test -p execution --test integration -- conditional_cleanup_test:: post_results_test:: && cargo test -p execution --lib cleanup_processes_share_one_deadline",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -17492,7 +17492,7 @@
           "shutdown_interrupts_always_and_skips_later_user_steps"
         ]
       ],
-      "command": "cargo test -p execution --test conditional_cleanup_test --test post_results_test && cargo test -p execution --lib cleanup_processes_share_one_deadline",
+      "command": "cargo test -p execution --test integration -- conditional_cleanup_test:: post_results_test:: && cargo test -p execution --lib cleanup_processes_share_one_deadline",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -17552,7 +17552,7 @@
           "cleanup_processes_share_one_deadline"
         ]
       ],
-      "command": "cargo test -p execution --test conditional_cleanup_test --test post_results_test && cargo test -p execution --lib cleanup_processes_share_one_deadline",
+      "command": "cargo test -p execution --test integration -- conditional_cleanup_test:: post_results_test:: && cargo test -p execution --lib cleanup_processes_share_one_deadline",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -17616,7 +17616,7 @@
           "hard_main_error_still_completes_after_post_cleanup"
         ]
       ],
-      "command": "cargo test -p execution --test conditional_cleanup_test --test post_results_test && cargo test -p execution --lib cleanup_processes_share_one_deadline",
+      "command": "cargo test -p execution --test integration -- conditional_cleanup_test:: post_results_test:: && cargo test -p execution --lib cleanup_processes_share_one_deadline",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -17672,7 +17672,7 @@
           "workspace_setup_failure_never_runs_user_steps_and_completes_once"
         ]
       ],
-      "command": "cargo test -p execution --test conditional_cleanup_test --test post_results_test && cargo test -p execution --lib cleanup_processes_share_one_deadline",
+      "command": "cargo test -p execution --test integration -- conditional_cleanup_test:: post_results_test:: && cargo test -p execution --lib cleanup_processes_share_one_deadline",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -17724,7 +17724,7 @@
           "real_step_timeout_is_failure_then_conditional_cleanup_runs"
         ]
       ],
-      "command": "cargo test -p execution --test conditional_cleanup_test --test post_results_test && cargo test -p execution --lib cleanup_processes_share_one_deadline",
+      "command": "cargo test -p execution --test integration -- conditional_cleanup_test:: post_results_test:: && cargo test -p execution --lib cleanup_processes_share_one_deadline",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -17772,7 +17772,7 @@
           "observed_start_cancel_retests_current_condition_and_runs_cleanup"
         ]
       ],
-      "command": "cargo test -p execution --test conditional_cleanup_test --test post_results_test && cargo test -p execution --lib cleanup_processes_share_one_deadline",
+      "command": "cargo test -p execution --test integration -- conditional_cleanup_test:: post_results_test:: && cargo test -p execution --lib cleanup_processes_share_one_deadline",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -17828,7 +17828,7 @@
           "shutdown_interrupts_always_and_skips_later_user_steps"
         ]
       ],
-      "command": "cargo test -p execution --test conditional_cleanup_test --test post_results_test && cargo test -p execution --lib cleanup_processes_share_one_deadline",
+      "command": "cargo test -p execution --test integration -- conditional_cleanup_test:: post_results_test:: && cargo test -p execution --lib cleanup_processes_share_one_deadline",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -17884,7 +17884,7 @@
           "cancelled_posts_retest_always_and_complete_job"
         ]
       ],
-      "command": "cargo test -p execution --test conditional_cleanup_test --test post_results_test && cargo test -p execution --lib cleanup_processes_share_one_deadline",
+      "command": "cargo test -p execution --test integration -- conditional_cleanup_test:: post_results_test:: && cargo test -p execution --lib cleanup_processes_share_one_deadline",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -17940,7 +17940,7 @@
           "post_results_reach_distinct_completion_records"
         ]
       ],
-      "command": "cargo test -p execution --test post_results_test && cargo test -p listener --lib post_results_reach_distinct_completion_records",
+      "command": "cargo test -p execution --test integration -- post_results_test:: && cargo test -p listener --lib post_results_reach_distinct_completion_records",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -17992,7 +17992,7 @@
           "hard_post_error_keeps_draining_lifo"
         ]
       ],
-      "command": "cargo test -p execution --test post_results_test && cargo test -p listener --lib post_results_reach_distinct_completion_records",
+      "command": "cargo test -p execution --test integration -- post_results_test:: && cargo test -p listener --lib post_results_reach_distinct_completion_records",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -18056,7 +18056,7 @@
           "repeated_posts_keep_state_and_report_identity"
         ]
       ],
-      "command": "cargo test -p execution --test post_results_test && cargo test -p listener --lib post_results_reach_distinct_completion_records",
+      "command": "cargo test -p execution --test integration -- post_results_test:: && cargo test -p listener --lib post_results_reach_distinct_completion_records",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -18120,7 +18120,7 @@
           "file_commands_step_env_and_nested_posts_are_scoped"
         ]
       ],
-      "command": "cargo test -p execution --test post_results_test && cargo test -p listener --lib post_results_reach_distinct_completion_records",
+      "command": "cargo test -p execution --test integration -- post_results_test:: && cargo test -p listener --lib post_results_reach_distinct_completion_records",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -18176,7 +18176,7 @@
           "post_drains_with_grace_when_job_is_cancelled"
         ]
       ],
-      "command": "cargo test -p execution --test post_results_test && cargo test -p listener --lib post_results_reach_distinct_completion_records",
+      "command": "cargo test -p execution --test integration -- post_results_test:: && cargo test -p listener --lib post_results_reach_distinct_completion_records",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -18232,7 +18232,7 @@
           "post_results_reach_distinct_completion_records"
         ]
       ],
-      "command": "cargo test -p execution --test post_results_test && cargo test -p listener --lib post_results_reach_distinct_completion_records",
+      "command": "cargo test -p execution --test integration -- post_results_test:: && cargo test -p listener --lib post_results_reach_distinct_completion_records",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -18284,7 +18284,7 @@
           "hard_post_error_keeps_draining_lifo"
         ]
       ],
-      "command": "cargo test -p execution --test post_results_test && cargo test -p listener --lib post_results_reach_distinct_completion_records",
+      "command": "cargo test -p execution --test integration -- post_results_test:: && cargo test -p listener --lib post_results_reach_distinct_completion_records",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -18344,7 +18344,7 @@
           "cancelled_main_keeps_failure_post_and_final_cancelled"
         ]
       ],
-      "command": "cargo test -p execution --test post_results_test && cargo test -p listener --lib post_results_reach_distinct_completion_records",
+      "command": "cargo test -p execution --test integration -- post_results_test:: && cargo test -p listener --lib post_results_reach_distinct_completion_records",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -18400,7 +18400,7 @@
           "file_commands_step_env_and_nested_posts_are_scoped"
         ]
       ],
-      "command": "cargo test -p execution --test post_results_test && cargo test -p listener --lib post_results_reach_distinct_completion_records",
+      "command": "cargo test -p execution --test integration -- post_results_test:: && cargo test -p listener --lib post_results_reach_distinct_completion_records",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -18452,7 +18452,7 @@
           "cancelled_posts_retest_always_and_complete_job"
         ]
       ],
-      "command": "cargo test -p execution --test post_results_test && cargo test -p listener --lib post_results_reach_distinct_completion_records",
+      "command": "cargo test -p execution --test integration -- post_results_test:: && cargo test -p listener --lib post_results_reach_distinct_completion_records",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -18518,7 +18518,7 @@
           "malformed_directory_expression_fails_inner_step_and_runs_cleanup"
         ]
       ],
-      "command": "cargo test -p execution --test composite_semantics_test --test composite_bounds_test && cargo test -p execution --lib -- step_timeout composite_working_directory",
+      "command": "cargo test -p execution --test integration -- composite_semantics_test:: composite_bounds_test:: && cargo test -p execution --lib -- step_timeout composite_working_directory",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -18576,7 +18576,7 @@
           "hard_nested_error_keeps_parent_attribution_and_runs_failure_cleanup"
         ]
       ],
-      "command": "cargo test -p execution --test composite_semantics_test --test composite_bounds_test && cargo test -p execution --lib -- step_timeout composite_working_directory",
+      "command": "cargo test -p execution --test integration -- composite_semantics_test:: composite_bounds_test:: && cargo test -p execution --lib -- step_timeout composite_working_directory",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -18626,7 +18626,7 @@
           "nested_repeated_names_keep_distinct_inputs_and_outputs"
         ]
       ],
-      "command": "cargo test -p execution --test composite_semantics_test --test composite_bounds_test && cargo test -p execution --lib -- step_timeout composite_working_directory",
+      "command": "cargo test -p execution --test integration -- composite_semantics_test:: composite_bounds_test:: && cargo test -p execution --lib -- step_timeout composite_working_directory",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -18680,7 +18680,7 @@
           "nested_post_if_failure_sees_later_global_job_failure"
         ]
       ],
-      "command": "cargo test -p execution --test composite_semantics_test --test composite_bounds_test && cargo test -p execution --lib -- step_timeout composite_working_directory",
+      "command": "cargo test -p execution --test integration -- composite_semantics_test:: composite_bounds_test:: && cargo test -p execution --lib -- step_timeout composite_working_directory",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -18754,7 +18754,7 @@
           "blocked_resolution_obeys_cancellation"
         ]
       ],
-      "command": "cargo test -p execution --test composite_semantics_test --test composite_bounds_test && cargo test -p execution --lib -- step_timeout composite_working_directory",
+      "command": "cargo test -p execution --test integration -- composite_semantics_test:: composite_bounds_test:: && cargo test -p execution --lib -- step_timeout composite_working_directory",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -18812,7 +18812,7 @@
           "forbidden_context_fails_visibly_then_runs_cleanup"
         ]
       ],
-      "command": "cargo test -p execution --test composite_semantics_test --test composite_bounds_test && cargo test -p execution --lib -- step_timeout composite_working_directory",
+      "command": "cargo test -p execution --test integration -- composite_semantics_test:: composite_bounds_test:: && cargo test -p execution --lib -- step_timeout composite_working_directory",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -18866,7 +18866,7 @@
           "continue_on_error_keeps_raw_failure_and_runs_ordinary_and_always"
         ]
       ],
-      "command": "cargo test -p execution --test composite_semantics_test --test composite_bounds_test && cargo test -p execution --lib -- step_timeout composite_working_directory",
+      "command": "cargo test -p execution --test integration -- composite_semantics_test:: composite_bounds_test:: && cargo test -p execution --lib -- step_timeout composite_working_directory",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -18916,7 +18916,7 @@
           "nested_repeated_names_keep_distinct_inputs_and_outputs"
         ]
       ],
-      "command": "cargo test -p execution --test composite_semantics_test --test composite_bounds_test && cargo test -p execution --lib -- step_timeout composite_working_directory",
+      "command": "cargo test -p execution --test integration -- composite_semantics_test:: composite_bounds_test:: && cargo test -p execution --lib -- step_timeout composite_working_directory",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -18974,7 +18974,7 @@
           "malformed_run_expression_fails_step_then_runs_cleanup"
         ]
       ],
-      "command": "cargo test -p execution --test composite_semantics_test --test composite_bounds_test && cargo test -p execution --lib -- step_timeout composite_working_directory",
+      "command": "cargo test -p execution --test integration -- composite_semantics_test:: composite_bounds_test:: && cargo test -p execution --lib -- step_timeout composite_working_directory",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -19044,7 +19044,7 @@
           "blocked_resolution_obeys_cancellation"
         ]
       ],
-      "command": "cargo test -p execution --test composite_semantics_test --test composite_bounds_test && cargo test -p execution --lib -- step_timeout composite_working_directory",
+      "command": "cargo test -p execution --test integration -- composite_semantics_test:: composite_bounds_test:: && cargo test -p execution --lib -- step_timeout composite_working_directory",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -19214,7 +19214,7 @@
           "writes_one_private_file_equal_to_the_acquire_body"
         ]
       ],
-      "command": "cargo test -p execution --test replay_mutation_test; TOOLU_CONTAINER_TEST_ROOT=… cargo test -p execution --test compat_probe_replay_test -- --ignored",
+      "command": "cargo test -p execution --test integration -- replay_mutation_test::; TOOLU_CONTAINER_TEST_ROOT=… cargo test -p execution --test integration -- compat_probe_replay_test:: --ignored",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -19273,7 +19273,7 @@
           "empty_who_input_fails_the_typed_input_assertion"
         ]
       ],
-      "command": "bash scripts/test/live_lane_test.sh; cargo test -p execution --test compat_probe_replay_test -- --ignored",
+      "command": "bash scripts/test/live_lane_test.sh; cargo test -p execution --test integration -- compat_probe_replay_test:: --ignored",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -19525,7 +19525,7 @@
           "dropped_job_outputs_lose_the_evaluated_outputs"
         ]
       ],
-      "command": "cargo test -p execution --test replay_mutation_test",
+      "command": "cargo test -p execution --test integration -- replay_mutation_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -19588,7 +19588,7 @@
           "empty_who_input_fails_the_typed_input_assertion"
         ]
       ],
-      "command": "cargo test -p execution --test compat_probe_replay_test -- --ignored --test-threads=1",
+      "command": "cargo test -p execution --test integration -- compat_probe_replay_test:: --ignored --test-threads=1",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -20072,7 +20072,7 @@
           "malformed_env_fails_the_step_with_upstream_issues_and_runs_cleanup"
         ]
       ],
-      "command": "cargo test -p execution --test file_command_strict_test",
+      "command": "cargo test -p execution --test integration -- file_command_strict_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -20231,7 +20231,7 @@
           "boundary_is_strict_and_latches"
         ]
       ],
-      "command": "cargo test -p listener --lib watchdog_trip; cargo test -p listener --test outage_test",
+      "command": "cargo test -p listener --lib watchdog_trip; cargo test -p listener --test integration -- outage_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -20390,7 +20390,7 @@
           "captured_output_is_evaluated_after_real_github_output_step"
         ]
       ],
-      "command": "cargo test -p execution --test replay_mutation_test --test incoming_contexts_test --test job_outputs_test",
+      "command": "cargo test -p execution --test integration -- replay_mutation_test:: incoming_contexts_test:: job_outputs_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -20443,7 +20443,7 @@
           "file_commands_step_env_and_nested_posts_are_scoped"
         ]
       ],
-      "command": "cargo test -p execution --test composite_semantics_test",
+      "command": "cargo test -p execution --test integration -- composite_semantics_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -20496,7 +20496,7 @@
           "captured_docker_job_executes_the_container_and_cleans_up"
         ]
       ],
-      "command": "cargo test -p execution --test job_container_test --test service_containers_test",
+      "command": "cargo test -p execution --test integration -- job_container_test:: service_containers_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -20549,7 +20549,7 @@
           "orphans_are_killed_after_cancelled_job"
         ]
       ],
-      "command": "cargo test -p execution --test conditional_cleanup_test --test post_results_test --test orphan_cleanup_test",
+      "command": "cargo test -p execution --test integration -- conditional_cleanup_test:: post_results_test:: orphan_cleanup_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -20651,7 +20651,7 @@
           "successful_job_unregisters_and_removes_the_registration"
         ]
       ],
-      "command": "cargo test -p execution --test stable_workspace_test; cargo test -p toolu-runner --test integration -- ephemeral_run_test::",
+      "command": "cargo test -p execution --test integration -- stable_workspace_test::; cargo test -p toolu-runner --test integration -- ephemeral_run_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",

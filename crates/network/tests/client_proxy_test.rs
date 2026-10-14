@@ -1,10 +1,7 @@
 //! #94 AC-2 / AC-3: `network::client_builder` proxy routing against a real
 //! recording `CONNECT` proxy and a real rustls HTTPS target.
 
-#[path = "helpers/proxy_fixtures.rs"]
-mod proxy_fixtures;
-#[path = "helpers/tls_fixtures.rs"]
-mod tls_fixtures;
+use crate::{proxy_fixtures, tls_fixtures};
 
 use std::net::SocketAddr;
 

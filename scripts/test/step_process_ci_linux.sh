@@ -20,13 +20,13 @@ docker run --rm \
     set -euo pipefail
     test "$(uname -s)" = Linux
     test -S /var/run/docker.sock
-    listed=$(cargo test -p execution --test job_container_ci_test -- --list)
+    listed=$(cargo test -p execution --test integration -- job_container_ci_test:: --list)
     case "$listed" in
       *container_defaults_to_runner_ci_or_true*container_preserves_declaration_and_step_overrides_across_handlers*) ;;
       *) echo "required Linux container tests are missing" >&2; exit 2 ;;
     esac
     mkdir -p "$TOOLU_CONTAINER_TEST_ROOT"
-    env -u CI cargo test -p execution --test job_container_ci_test -- --ignored --nocapture
-    CI=false cargo test -p execution --test job_container_ci_test -- --ignored --nocapture
-    CI=runner cargo test -p execution --test job_container_ci_test -- --ignored --nocapture
+    env -u CI cargo test -p execution --test integration -- job_container_ci_test:: --ignored --nocapture
+    CI=false cargo test -p execution --test integration -- job_container_ci_test:: --ignored --nocapture
+    CI=runner cargo test -p execution --test integration -- job_container_ci_test:: --ignored --nocapture
   '

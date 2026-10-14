@@ -57,9 +57,9 @@ docker run --rm --network host \
     set -euo pipefail
     test "$(uname -s)" = Linux
     test -S /var/run/docker.sock
-    listed=$(cargo test -p execution --test service_containers_test -- --list)
+    listed=$(cargo test -p execution --test integration -- service_containers_test:: --list)
     case "$listed" in *services_host_dynamic_port_connects_and_cleans_up*) ;; *) exit 2 ;; esac
     cargo test -p execution --lib container_health_options -- --nocapture
-    cargo test -p execution --test service_containers_test -- --include-ignored --nocapture
+    cargo test -p execution --test integration -- service_containers_test:: --include-ignored --nocapture
     cargo test -p execution --lib never_healthy_service_respects_budget -- --ignored --nocapture
   '
