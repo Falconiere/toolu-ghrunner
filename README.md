@@ -931,6 +931,9 @@ in every `src/` submodule folder, no `std::env::var` outside a crate's
 0 — if `jq` or `ast-grep` is missing, so a broken setup can't look like
 a clean run.
 
+On macOS, builds and tests can stall on XProtect scans of fresh executables;
+see [docs/macos-developer-tools.md](docs/macos-developer-tools.md).
+
 `lefthook install` wires `cargo fmt` + the structure gate to
 `pre-commit` and the full gate to `pre-push`.
 
