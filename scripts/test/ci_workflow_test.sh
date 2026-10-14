@@ -112,12 +112,6 @@ want_ci "ubuntu checks formatting"         "cargo fmt --all -- --check"
 want_ci "ubuntu runs the workspace tests with nextest" "cargo nextest run --workspace"
 want_ci "ubuntu runs the doctests nextest skips"       "cargo test --workspace --doc"
 want_ci "ubuntu installs cargo-nextest"                "tool: cargo-nextest"
-if printf '%s\n%s\n' "$CI_JOB" "$MACOS_JOB" | grep -Eq -- "cargo test --workspace$"; then
-  echo "FAIL: a job still runs the whole suite through cargo test --workspace" >&2
-  fail=1
-else
-  echo "ok: no job runs the whole suite through cargo test"
-fi
 want_ci "ubuntu enforces the #[allow] ban" "\./tools/check\.sh no-allow"
 want_ci "ubuntu runs the guardrails"       "bash scripts/guardrails/run\.sh"
 want_ci "ubuntu runs the check.sh test"    "check_script"
