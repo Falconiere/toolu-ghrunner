@@ -70,6 +70,11 @@ want_ci() { want_in "$CI_JOB" "$1" "$2"; }
 # --- both legs run on pull requests (a leg that never fires proves nothing) ---
 want "workflow runs on pull_request"      "^  pull_request:"
 
+# --- #119: superseded PR runs are cancelled, main never is; jobs are bounded ---
+want "ci groups runs per ref"             '^  group: ci-\$\{\{ github\.ref \}\}$'
+want "cancel-in-progress only for pull_request" \
+  "^  cancel-in-progress: \\$\\{\\{ github\\.event_name == 'pull_request' \\}\\}$"
+
 # --- the macOS leg ---
 want "a macOS job exists"                 "^  ci-macos:"
 
@@ -95,6 +100,9 @@ want_macos "macOS runs the workspace tests"     "cargo test --workspace"
 # plutil only exists on macOS — validating the generated LaunchAgent as a real
 # plist is the single thing this leg can do that ubuntu cannot.
 want_macos "macOS validates the launchd plist"  "scripts/test/plist_test\.sh"
+
+want_ci "ci has a job timeout"          "^    timeout-minutes: [0-9]+$"
+want_macos "ci-macos has a job timeout" "^    timeout-minutes: [0-9]+$"
 
 # --- the ubuntu leg still mirrors ./tools/check.sh all ---
 want_ci "ubuntu checks formatting"         "cargo fmt --all -- --check"
