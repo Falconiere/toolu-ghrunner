@@ -12,9 +12,7 @@
 
 #![cfg(feature = "live")]
 
-mod job_container_live_command;
-
-use job_container_live_command::{Captured, capture};
+use crate::job_container_live_command::{Captured, capture};
 use std::collections::BTreeSet;
 use std::error::Error;
 use std::fs;

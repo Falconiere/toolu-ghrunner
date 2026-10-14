@@ -5399,7 +5399,7 @@
           "parses_local_action"
         ]
       ],
-      "command": "cargo test -p execution --test action_downloads_test; cargo test -p execution --lib actions::; cargo test -p toolu-runner --test actions_resolver_test",
+      "command": "cargo test -p execution --test action_downloads_test; cargo test -p execution --lib actions::; cargo test -p toolu-runner --test integration -- actions_resolver_test::",
       "lanes": {
         "hermetic": {
           "status": "unverified",
@@ -8558,7 +8558,7 @@
           "annotation_matches_ghes_reference"
         ]
       ],
-      "command": "TOOLU_ANNOTATION_82_LIVE=true cargo test -p toolu-runner --test annotation_live -- --ignored (needs GH_TOKEN and two online runners)",
+      "command": "TOOLU_ANNOTATION_82_LIVE=true cargo test -p toolu-runner --features live --test integration -- --ignored annotation_live:: (needs GH_TOKEN and two online runners)",
       "lanes": {
         "hermetic": {
           "status": "unverified",
@@ -12939,7 +12939,7 @@
           "prunes_old_dirs_keeps_fresh_and_running"
         ]
       ],
-      "command": "cargo test -p execution --test stable_workspace_test; cargo test -p execution --lib workspace_layout; cargo test -p toolu-runner --test workspace_gc_test",
+      "command": "cargo test -p execution --test stable_workspace_test; cargo test -p execution --lib workspace_layout; cargo test -p toolu-runner --test integration -- workspace_gc_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -13061,7 +13061,7 @@
           "next_action_covers_every_branch"
         ]
       ],
-      "command": "cargo test -p wire --test session_conflict && cargo test -p listener --lib session_conflict && cargo test -p toolu-runner --test session_conflict_e2e_test && cargo test -p listener --test loop_decision_test",
+      "command": "cargo test -p wire --test session_conflict && cargo test -p listener --lib session_conflict && cargo test -p toolu-runner --test integration -- session_conflict_e2e_test:: && cargo test -p listener --test loop_decision_test",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -13116,7 +13116,7 @@
           "boot_recovers_when_the_conflict_clears_inside_the_window"
         ]
       ],
-      "command": "cargo test -p wire --test session_conflict && cargo test -p listener --lib session_conflict && cargo test -p toolu-runner --test session_conflict_e2e_test",
+      "command": "cargo test -p wire --test session_conflict && cargo test -p listener --lib session_conflict && cargo test -p toolu-runner --test integration -- session_conflict_e2e_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -13222,7 +13222,7 @@
           "captured_409_is_a_session_conflict"
         ]
       ],
-      "command": "cargo test -p wire --test session_conflict && cargo test -p listener --lib session_conflict && cargo test -p toolu-runner --test session_conflict_e2e_test",
+      "command": "cargo test -p wire --test session_conflict && cargo test -p listener --lib session_conflict && cargo test -p toolu-runner --test integration -- session_conflict_e2e_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -13285,7 +13285,7 @@
           "sigterm_during_the_conflict_wait_exits_zero_promptly"
         ]
       ],
-      "command": "cargo test -p wire --test session_conflict && cargo test -p listener --lib session_conflict && cargo test -p toolu-runner --test session_conflict_e2e_test",
+      "command": "cargo test -p wire --test session_conflict && cargo test -p listener --lib session_conflict && cargo test -p toolu-runner --test integration -- session_conflict_e2e_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -13349,7 +13349,7 @@
           "legacy_systemd_unit_does_not_restart_a_session_conflict"
         ]
       ],
-      "command": "cargo test -p toolu-runner --test session_conflict_e2e_test && cargo test -p listener --test loop_decision_test && cargo test -p config --test service_unit_test",
+      "command": "cargo test -p toolu-runner --test integration -- session_conflict_e2e_test:: && cargo test -p listener --test loop_decision_test && cargo test -p config --test service_unit_test",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -13400,7 +13400,7 @@
           "resolved_labels_match_what_github_stored"
         ]
       ],
-      "command": "cargo test -p toolu-runner --test register_labels_test && cargo test -p config --test labels_test",
+      "command": "cargo test -p toolu-runner --test integration -- register_labels_test:: && cargo test -p config --test labels_test",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -13465,7 +13465,7 @@
           "cancelled_job_unregisters_and_removes_the_registration"
         ]
       ],
-      "command": "cargo test -p toolu-runner --test register_labels_test --test ephemeral_run_test && cargo test -p config --test labels_test",
+      "command": "cargo test -p toolu-runner --test integration -- register_labels_test:: ephemeral_run_test:: && cargo test -p config --test labels_test",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -13528,7 +13528,7 @@
           "captured_invalid_client_is_an_auth_error"
         ]
       ],
-      "command": "cargo test -p toolu-runner --test register_labels_test --test ephemeral_run_test && cargo test -p config --test labels_test && cargo test -p wire --test oauth_invalid_client",
+      "command": "cargo test -p toolu-runner --test integration -- register_labels_test:: ephemeral_run_test:: && cargo test -p config --test labels_test && cargo test -p wire --test oauth_invalid_client",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -13658,7 +13658,7 @@
           "label_length_limit_is_256"
         ]
       ],
-      "command": "cargo test -p toolu-runner --test register_labels_test && cargo test -p config --test labels_test",
+      "command": "cargo test -p toolu-runner --test integration -- register_labels_test:: && cargo test -p config --test labels_test",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -13719,7 +13719,7 @@
           "ephemeral_decision_table"
         ]
       ],
-      "command": "cargo test -p toolu-runner --test ephemeral_run_test && cargo test -p listener --test loop_decision_test",
+      "command": "cargo test -p toolu-runner --test integration -- ephemeral_run_test:: && cargo test -p listener --test loop_decision_test",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -13788,7 +13788,7 @@
           "captured_invalid_client_is_an_auth_error"
         ]
       ],
-      "command": "cargo test -p toolu-runner --test ephemeral_run_test && cargo test -p wire --test oauth_invalid_client",
+      "command": "cargo test -p toolu-runner --test integration -- ephemeral_run_test:: && cargo test -p wire --test oauth_invalid_client",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -13851,7 +13851,7 @@
           "pending_remove_exits_0_and_keeps_state"
         ]
       ],
-      "command": "cargo test -p toolu-runner --test install_service_test --test config_resolve_test --test ephemeral_run_test",
+      "command": "cargo test -p toolu-runner --test integration -- install_service_test:: config_resolve_test:: ephemeral_run_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -13907,7 +13907,7 @@
           "configured_registration_endpoints_are_probed_while_run_holds_the_lock"
         ]
       ],
-      "command": "cargo test -p toolu-runner --test check_cmd_test --test check_tools_test",
+      "command": "cargo test -p toolu-runner --test integration -- check_cmd_test:: check_tools_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -13975,7 +13975,7 @@
           "ssl_cert_file_and_node_extra_ca_certs_are_reported"
         ]
       ],
-      "command": "cargo test -p toolu-runner --test check_cmd_test --test check_tools_test",
+      "command": "cargo test -p toolu-runner --test integration -- check_cmd_test:: check_tools_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -14031,7 +14031,7 @@
           "tool_versions_match_the_real_binaries"
         ]
       ],
-      "command": "cargo test -p toolu-runner --test check_cmd_test --test check_tools_test",
+      "command": "cargo test -p toolu-runner --test integration -- check_cmd_test:: check_tools_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -14141,7 +14141,7 @@
           "defaults_target_the_github_com_hosts"
         ]
       ],
-      "command": "cargo test -p toolu-runner --test check_cmd_test --test check_tools_test",
+      "command": "cargo test -p toolu-runner --test integration -- check_cmd_test:: check_tools_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -14212,7 +14212,7 @@
           "configured_registration_endpoints_are_probed_while_run_holds_the_lock"
         ]
       ],
-      "command": "cargo test -p toolu-runner --test check_cmd_test --test check_tools_test",
+      "command": "cargo test -p toolu-runner --test integration -- check_cmd_test:: check_tools_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -14284,7 +14284,7 @@
           "defaults_target_the_github_com_hosts"
         ]
       ],
-      "command": "cargo test -p toolu-runner --test check_cmd_test --test check_tools_test",
+      "command": "cargo test -p toolu-runner --test integration -- check_cmd_test:: check_tools_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -16691,7 +16691,7 @@
           "captured_literal_deferred_and_matrix_attributes"
         ]
       ],
-      "command": "cargo test -p execution --test step_attrs_replay_test && cargo test -p execution --lib -- step_attrs step_display step_timeout && cargo test -p shared --test template_token_test && cargo test -p toolu-runner --test gh_compat_step_attrs --test gh_compat_prepost",
+      "command": "cargo test -p execution --test step_attrs_replay_test && cargo test -p execution --lib -- step_attrs step_display step_timeout && cargo test -p shared --test template_token_test && cargo test -p toolu-runner --test integration -- gh_compat_step_attrs:: gh_compat_prepost::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -16788,7 +16788,7 @@
           "composite_continue_on_error_expressions"
         ]
       ],
-      "command": "cargo test -p execution --test step_attrs_replay_test && cargo test -p execution --lib -- step_attrs step_display step_timeout && cargo test -p shared --test template_token_test && cargo test -p toolu-runner --test gh_compat_step_attrs --test gh_compat_prepost",
+      "command": "cargo test -p execution --test step_attrs_replay_test && cargo test -p execution --lib -- step_attrs step_display step_timeout && cargo test -p shared --test template_token_test && cargo test -p toolu-runner --test integration -- gh_compat_step_attrs:: gh_compat_prepost::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -16857,7 +16857,7 @@
           "pre_timeout_reports_the_pre_step"
         ]
       ],
-      "command": "cargo test -p execution --test step_attrs_replay_test && cargo test -p execution --lib -- step_attrs step_display step_timeout && cargo test -p shared --test template_token_test && cargo test -p toolu-runner --test gh_compat_step_attrs --test gh_compat_prepost",
+      "command": "cargo test -p execution --test step_attrs_replay_test && cargo test -p execution --lib -- step_attrs step_display step_timeout && cargo test -p shared --test template_token_test && cargo test -p toolu-runner --test integration -- gh_compat_step_attrs:: gh_compat_prepost::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -16920,7 +16920,7 @@
           "pre_and_main_get_separate_timeout_budgets"
         ]
       ],
-      "command": "cargo test -p execution --test step_attrs_replay_test && cargo test -p execution --lib -- step_attrs step_display step_timeout && cargo test -p shared --test template_token_test && cargo test -p toolu-runner --test gh_compat_step_attrs --test gh_compat_prepost",
+      "command": "cargo test -p execution --test step_attrs_replay_test && cargo test -p execution --lib -- step_attrs step_display step_timeout && cargo test -p shared --test template_token_test && cargo test -p toolu-runner --test integration -- gh_compat_step_attrs:: gh_compat_prepost::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -16985,7 +16985,7 @@
           "deferred_continue_on_error_reads_prior_step_output"
         ]
       ],
-      "command": "cargo test -p execution --test step_attrs_replay_test && cargo test -p execution --lib -- step_attrs step_display step_timeout && cargo test -p shared --test template_token_test && cargo test -p toolu-runner --test gh_compat_step_attrs --test gh_compat_prepost",
+      "command": "cargo test -p execution --test step_attrs_replay_test && cargo test -p execution --lib -- step_attrs step_display step_timeout && cargo test -p shared --test template_token_test && cargo test -p toolu-runner --test integration -- gh_compat_step_attrs:: gh_compat_prepost::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -17046,7 +17046,7 @@
           "captured_literal_deferred_and_matrix_attributes"
         ]
       ],
-      "command": "cargo test -p execution --test step_attrs_replay_test && cargo test -p execution --lib -- step_attrs step_display step_timeout && cargo test -p shared --test template_token_test && cargo test -p toolu-runner --test gh_compat_step_attrs --test gh_compat_prepost",
+      "command": "cargo test -p execution --test step_attrs_replay_test && cargo test -p execution --lib -- step_attrs step_display step_timeout && cargo test -p shared --test template_token_test && cargo test -p toolu-runner --test integration -- gh_compat_step_attrs:: gh_compat_prepost::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -17111,7 +17111,7 @@
           "failing_pre_honors_continue_on_error"
         ]
       ],
-      "command": "cargo test -p execution --test step_attrs_replay_test && cargo test -p execution --lib -- step_attrs step_display step_timeout && cargo test -p shared --test template_token_test && cargo test -p toolu-runner --test gh_compat_step_attrs --test gh_compat_prepost",
+      "command": "cargo test -p execution --test step_attrs_replay_test && cargo test -p execution --lib -- step_attrs step_display step_timeout && cargo test -p shared --test template_token_test && cargo test -p toolu-runner --test integration -- gh_compat_step_attrs:: gh_compat_prepost::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -17192,7 +17192,7 @@
           "parse_action_manifest_composite_step_continue_on_error_tokens"
         ]
       ],
-      "command": "cargo test -p execution --test step_attrs_replay_test && cargo test -p execution --lib -- step_attrs step_display step_timeout && cargo test -p shared --test template_token_test && cargo test -p toolu-runner --test gh_compat_step_attrs --test gh_compat_prepost",
+      "command": "cargo test -p execution --test step_attrs_replay_test && cargo test -p execution --lib -- step_attrs step_display step_timeout && cargo test -p shared --test template_token_test && cargo test -p toolu-runner --test integration -- gh_compat_step_attrs:: gh_compat_prepost::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -17261,7 +17261,7 @@
           "pre_timeout_reports_the_pre_step"
         ]
       ],
-      "command": "cargo test -p execution --test step_attrs_replay_test && cargo test -p execution --lib -- step_attrs step_display step_timeout && cargo test -p shared --test template_token_test && cargo test -p toolu-runner --test gh_compat_step_attrs --test gh_compat_prepost",
+      "command": "cargo test -p execution --test step_attrs_replay_test && cargo test -p execution --lib -- step_attrs step_display step_timeout && cargo test -p shared --test template_token_test && cargo test -p toolu-runner --test integration -- gh_compat_step_attrs:: gh_compat_prepost::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -17324,7 +17324,7 @@
           "pre_and_main_get_separate_timeout_budgets"
         ]
       ],
-      "command": "cargo test -p execution --test step_attrs_replay_test && cargo test -p execution --lib -- step_attrs step_display step_timeout && cargo test -p shared --test template_token_test && cargo test -p toolu-runner --test gh_compat_step_attrs --test gh_compat_prepost",
+      "command": "cargo test -p execution --test step_attrs_replay_test && cargo test -p execution --lib -- step_attrs step_display step_timeout && cargo test -p shared --test template_token_test && cargo test -p toolu-runner --test integration -- gh_compat_step_attrs:: gh_compat_prepost::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -19820,7 +19820,7 @@
           "multiline_mask_real_job_reaches_every_local_sink"
         ]
       ],
-      "command": "cargo test -p toolu-runner --test secret_sink_coverage_test; cargo test -p listener --lib completejob",
+      "command": "cargo test -p toolu-runner --test process_env -- secret_sink_coverage_test::; cargo test -p listener --lib completejob",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -19876,7 +19876,7 @@
           "test_open_issue_row_must_stay_pending"
         ]
       ],
-      "command": "bash scripts/test/live_lane_test.sh; env -u TOOLU_RUNNER_LIVE_TOKEN cargo test -p toolu-runner --features live --test live_e2e -- --ignored noop_job_completes  # fails UNVERIFIED",
+      "command": "bash scripts/test/live_lane_test.sh; env -u TOOLU_RUNNER_LIVE_TOKEN cargo test -p toolu-runner --test integration --features live -- --ignored live_e2e::noop_job_completes  # fails UNVERIFIED",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -19925,7 +19925,7 @@
           "forward_env_emits_all_vars_with_fixture_values"
         ]
       ],
-      "command": "cargo test -p toolu-runner --test cache_twirp_test --test gh_compat_forwarder",
+      "command": "cargo test -p toolu-runner --test integration -- cache_twirp_test:: gh_compat_forwarder::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -20023,7 +20023,7 @@
           "no_audience_produces_bare_url"
         ]
       ],
-      "command": "cargo test -p toolu-runner --test oidc_token_test",
+      "command": "cargo test -p toolu-runner --test integration -- oidc_token_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -20125,7 +20125,7 @@
           "multiline_mask_real_job_reaches_every_local_sink"
         ]
       ],
-      "command": "cargo test -p toolu-runner --test secret_sink_coverage_test",
+      "command": "cargo test -p toolu-runner --test process_env -- secret_sink_coverage_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -20333,7 +20333,7 @@
           "ac7_cancel_mid_backoff_returns_promptly"
         ]
       ],
-      "command": "cargo test -p toolu-runner --test gh_compat_cancel",
+      "command": "cargo test -p toolu-runner --test integration -- gh_compat_cancel::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -20602,7 +20602,7 @@
           "a_secret_in_a_malformed_line_is_masked_everywhere"
         ]
       ],
-      "command": "cargo test -p toolu-runner --test secret_sink_coverage_test",
+      "command": "cargo test -p toolu-runner --test process_env -- secret_sink_coverage_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -20651,7 +20651,7 @@
           "successful_job_unregisters_and_removes_the_registration"
         ]
       ],
-      "command": "cargo test -p execution --test stable_workspace_test; cargo test -p toolu-runner --test ephemeral_run_test",
+      "command": "cargo test -p execution --test stable_workspace_test; cargo test -p toolu-runner --test integration -- ephemeral_run_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",

@@ -11,8 +11,8 @@
 //!
 //! Every test is `#[ignore]`'d so the harness compiles under
 //! `cargo test --features live` without a real PAT. Run with
-//! `cargo test -p toolu-runner --features live --test cache_live_e2e --
-//! --ignored`, with `TOOLU_RUNNER_LIVE_TOKEN` and `TOOLU_RUNNER_LIVE_REPO`
+//! `cargo test -p toolu-runner --features live --test integration --
+//! cache_live_e2e:: --ignored`, with `TOOLU_RUNNER_LIVE_TOKEN` and `TOOLU_RUNNER_LIVE_REPO`
 //! set. When those are absent each test prints a SKIP line and returns Ok.
 
 #![cfg(feature = "live")]
@@ -21,8 +21,7 @@ use std::time::Duration;
 
 use config::config::{load_config, save_config};
 
-#[path = "helpers/live_harness.rs"]
-mod harness;
+use crate::harness;
 
 use harness::LiveHarness;
 

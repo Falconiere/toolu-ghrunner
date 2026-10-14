@@ -18,8 +18,7 @@
 use std::process::Command;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-#[path = "helpers/boot_fixtures.rs"]
-mod boot_fixtures;
+use crate::boot_fixtures;
 
 fn temp_home(label: &str) -> std::path::PathBuf {
   let dir = std::env::temp_dir().join(format!(

@@ -5,10 +5,22 @@ edition.workspace = true
 publish = false # never published to crates.io (mirrors release-plz.toml [workspace] publish = false)
 license.workspace = true
 repository.workspace = true
+autotests = false # every tests/*.rs is a module of one of the two [[test]] targets below (#108)
 
 [[bin]]
 name = "toolu-runner"
 path = "src/main.rs"
+
+# One merged integration binary: tests/main.rs declares each tests/*.rs as a module.
+[[test]]
+name = "integration"
+path = "tests/main.rs"
+
+# Process-global state (env + tracing subscriber) must not share a process with
+# the rest; see the header of tests/process_env.rs.
+[[test]]
+name = "process_env"
+path = "tests/process_env.rs"
 
 # Bin-only crate: main.rs + login_cmd.rs + status_cmd.rs. The engine lives in
 # `execution`, the JIT lifecycle in `listener`; both reach the bin transitively

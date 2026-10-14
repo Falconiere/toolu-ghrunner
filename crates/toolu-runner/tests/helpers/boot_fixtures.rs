@@ -9,9 +9,9 @@
 //! helpers are private to that file, and it is untouched in-flight work) —
 //! trimmed down to only what `boot`'s subprocess E2E test needs.
 //!
-//! Included via `#[path = "helpers/boot_fixtures.rs"] mod boot_fixtures;`,
-//! matching `live_e2e.rs`'s `helpers/live_harness.rs` pattern (Cargo does
-//! not compile `tests/helpers/**` as a test target of its own).
+//! Declared once in `tests/main.rs` (`mod boot_fixtures;`) and reached with
+//! `use crate::boot_fixtures;` (Cargo does not compile `tests/helpers/**` as a
+//! test target of its own).
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;

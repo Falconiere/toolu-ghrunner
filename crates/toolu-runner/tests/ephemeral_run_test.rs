@@ -33,8 +33,7 @@ use serde_json::{Value, json};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-#[path = "helpers/boot_fixtures.rs"]
-mod boot_fixtures;
+use crate::boot_fixtures;
 
 type TestResult<T> = Result<T, Box<dyn std::error::Error>>;
 

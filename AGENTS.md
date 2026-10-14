@@ -81,6 +81,15 @@ bite here.
   dir fails the folder-tree check). Crate-root integration tests stay
   in the top-level `tests/`, one file per surface. Real data, no
   mock-data tests.
+- **`toolu-runner` integration tests are two Cargo targets (#108).**
+  `autotests = false`; `tests/main.rs` (`integration`) declares every
+  `tests/*.rs` as a module, and `tests/process_env.rs` (`process_env`) holds
+  `auth_store_test` + `secret_sink_coverage_test`, which mutate process env /
+  install the global tracing subscriber. A new `tests/foo.rs` is NOT picked up
+  until you add `mod foo;` to `main.rs`. Test names carry the file as a prefix:
+  `cargo test -p toolu-runner --test integration -- foo::`. Shared helpers are
+  declared once in `main.rs` and reached with `use crate::<helper>;` (a
+  `#[path]` inside a module file would resolve against `tests/<file>/`).
 - **Every `src/` submodule folder carries a `README.md`** listing what
   belongs there, what does not, and one row per file. `src.requireReadme`
   in each crate's config enforces it — when you add a module folder,
@@ -554,7 +563,7 @@ to that list requires proving the value is not a real credential.
   of `Cargo.toml`.
   Test fixture: `tests/fixtures/journal/canonical.jsonl`, captured
   from a real engine run via `JOURNAL_CAPTURE=1 cargo test -p
-  toolu-runner --test journal_writer_test capture_canonical`, and
+  toolu-runner --test integration -- journal_writer_test::capture_canonical`, and
   read back by `journal_reader_test.rs` / `journal_writer_test.rs`.
 
 ### `execution/` — job execution engine (deps: shared, expressions, cache, network)

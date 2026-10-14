@@ -4,8 +4,8 @@
 //! end-to-end against a real test repo. Each test gets a fresh temp
 //! `~/.toolu-runner` stand-in and a built `toolu-runner` binary.
 //!
-//! Included via `#[path = "helpers/live_harness.rs"] mod harness;` by
-//! the live test entry `tests/live_e2e.rs` — Cargo does not compile
+//! Declared once in `tests/main.rs` (`mod harness;`, `live` feature) and reached
+//! with `use crate::harness;` — Cargo does not compile
 //! `tests/helpers/**` as a test target of its own. The GitHub REST helpers (workflow
 //! push/delete, dispatch, run polling, teardown) live in the child
 //! module [`api`] (`live_harness_api.rs`).

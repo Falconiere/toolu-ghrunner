@@ -352,7 +352,7 @@ async fn unwritable_jobs_dir_never_fails_the_job() -> TestResult {
 
 /// Env-gated capture: writes the canonical real-engine fixture used by the
 /// reader/state tests. Run once via
-/// `JOURNAL_CAPTURE=1 cargo test -p toolu-runner --test journal_writer_test capture_canonical`.
+/// `JOURNAL_CAPTURE=1 cargo test -p toolu-runner --test integration -- journal_writer_test::capture_canonical`.
 #[tokio::test]
 async fn capture_canonical_fixture() -> TestResult {
   if std::env::var("JOURNAL_CAPTURE").is_err() {
