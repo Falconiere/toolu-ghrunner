@@ -54,6 +54,97 @@ want "legs are stitched per variant, not per arch alone" \
   'pattern: digest-\$\{\{ matrix\.target \}\}-\*'
 
 # ---------------------------------------------------------------------------
+# Trigger + binary-source tier (#121): a tag reaches this workflow ONLY as a
+# reusable call from release.yml, after release.yml's single gate and build,
+# and that call ships the release tarball's binary instead of compiling it.
+# ---------------------------------------------------------------------------
+want "the tag path builds from the release tarball's binary" \
+  '^          name: toolu-runner-linux-\$\{\{ matrix\.arch \}\}$'
+want "the staged binary lands where the Dockerfile's prebuilt stage reads it" \
+  'dist/toolu-runner-linux-\$\{ARCH\}'
+want "the build arg selects the prebuilt stage only on the prebuilt path" \
+  "^            RUNNER_BINARY=\\$\{\{ inputs\.prebuilt_binaries && 'prebuilt' \|\| 'build' \}\}$"
+want "the image build checks its copy against the tarball binary's sha256" \
+  '^            RUNNER_SHA256=\$\{\{ steps\.binary\.outputs\.sha256 \}\}$'
+want "pushing needs a tag ref AND release.yml's call" \
+  'push=\$\{\{ inputs\.prebuilt_binaries == true && github\.ref_type == .tag. \}\}'
+# Every publish condition, not just the push: a dispatch with a tag selected
+# has a tag ref but never ran release.yml's gate, so a bare `ref_type == 'tag'`
+# anywhere (login, digest export, manifest) would publish ungated.
+# `== true` is part of the required form: `&&` yields its first falsy OPERAND,
+# so a bare null input (every PR) would render the push flag as an empty string.
+bare="$(grep -n "ref_type == 'tag'" "$WF" | grep -v "inputs\.prebuilt_binaries == true && github\.ref_type == 'tag'" || true)"
+if [[ -n "$bare" ]]; then
+  echo "FAIL: a publish condition checks the tag ref without release.yml's call: $bare" >&2
+  fail=1
+else
+  echo "ok: every publish condition also requires release.yml's call"
+fi
+
+# structure_check FILE — print one "FAIL: <desc>" per violated trigger/job
+# property. Needs PyYAML (`on:` parses as the boolean True key); the grep
+# tier above already covers the step wiring.
+structure_check() {
+  python3 - "$1" <<'PY'
+import sys, yaml
+wf = yaml.safe_load(open(sys.argv[1]))
+on = wf.get("on", wf.get(True)) or {}
+jobs = wf.get("jobs", {})
+def fail(d): print(f"FAIL: {d}")
+if "push" in on:
+    fail("no push trigger: a tag reaches this workflow only through release.yml")
+call = on.get("workflow_call") or {}
+inp = (call.get("inputs") or {}).get("prebuilt_binaries") or {}
+if inp.get("type") != "boolean" or inp.get("default") is not False:
+    fail("workflow_call takes prebuilt_binaries (boolean, default false)")
+if "paths" not in (on.get("pull_request") or {}):
+    fail("PRs touching the image inputs still build")
+if "workflow_dispatch" not in on:
+    fail("workflow_dispatch still builds on demand")
+if "verify" in jobs:
+    fail("no verify job: release.yml's gate is the only one per tag")
+if "needs" in jobs.get("build", {}):
+    fail("build needs nothing inside this workflow")
+PY
+}
+
+if python3 -c 'import yaml' >/dev/null 2>&1; then
+  out="$(structure_check "$WF")"
+  if [[ -n "$out" ]]; then
+    echo "$out" >&2
+    fail=1
+  else
+    echo "ok: reached by workflow_call(prebuilt_binaries) + PR + dispatch; no tag trigger, no verify"
+  fi
+  # Each property must be able to fail: re-introduce the old shape.
+  mut="$(mktemp)"
+  mutate_yaml() {
+    local desc="$1" script="$2"
+    sed -e "$script" "$WF" >"$mut"
+    if cmp -s "$WF" "$mut"; then
+      echo "FAIL: mutation for '$desc' no longer changes $WF — update it" >&2
+      fail=1
+    elif grep -Fxq "FAIL: $desc" <<<"$(structure_check "$mut")"; then
+      echo "ok: re-introducing it fails '$desc'"
+    else
+      echo "FAIL: '$desc' still passes when violated" >&2
+      fail=1
+    fi
+  }
+  mutate_yaml "no push trigger: a tag reaches this workflow only through release.yml" \
+    "s#^  workflow_dispatch:\$#  workflow_dispatch:\n  push:\n    tags: ['v*']#"
+  mutate_yaml "no verify job: release.yml's gate is the only one per tag" \
+    's#^jobs:$#jobs:\n  verify:\n    runs-on: ubuntu-24.04\n    steps:\n      - run: cargo test --workspace#'
+  mutate_yaml "build needs nothing inside this workflow" \
+    's#^    runs-on: \${{ matrix.runner }}$#    needs: verify\n&#'
+  mutate_yaml "workflow_call takes prebuilt_binaries (boolean, default false)" \
+    's#^        default: false$#        default: true#'
+  rm -f "$mut"
+else
+  echo "# PyYAML unavailable — skipped the trigger/job structure tier"
+fi
+
+# ---------------------------------------------------------------------------
 # Behavioural tier: run the real derivation.
 # ---------------------------------------------------------------------------
 

@@ -212,11 +212,13 @@ docker run --rm \
   toolu-ghrunner:dev
 ```
 
-Publishing is tag-driven: pushing `vX.Y.Z` runs
-[`release-image.yml`](../.github/workflows/release-image.yml), which
-gates on fmt/clippy/tests, then builds **each variant on each arch** on
-a native runner (`ubuntu-24.04` / `ubuntu-24.04-arm` — no QEMU Rust
-builds), pushes every leg by digest, and merges each variant's two legs
+Publishing is tag-driven. Pushing `vX.Y.Z` runs
+[`release.yml`](../.github/workflows/release.yml), the one workflow a tag
+triggers. It runs the fmt/clippy/test gate once, builds the release tarballs,
+and then calls [`release-image.yml`](../.github/workflows/release-image.yml).
+That workflow has no gate of its own. It builds **each variant on each arch**
+on a native runner (`ubuntu-24.04` / `ubuntu-24.04-arm`, no QEMU), pushes
+every leg by digest, and merges each variant's two legs
 into its own manifest at `ghcr.io/<owner>/toolu-ghrunner:<version>` and
 `…:<version>-docker` (plus `:latest` / `:vN` and their `-docker`
 counterparts for stable tags). Each manifest job prints its
@@ -233,6 +235,27 @@ mutable tag — this container runs customer build code holding a live
 GitHub credential. PRs touching `Dockerfile`, `.dockerignore`,
 `scripts/docker-entrypoint.sh` or the workflow build both variants
 without pushing; `workflow_dispatch` does the same on demand.
+
+The image does not compile its own binary on a tag. Each leg extracts
+`toolu-runner` from the release tarball for its arch and builds with
+`--build-arg RUNNER_BINARY=prebuilt`, which `COPY`s
+`dist/toolu-runner-linux-<arch>` into the image. The published image therefore
+carries the tarball's binary byte for byte. The build checks this with
+`RUNNER_SHA256` and prints both checksums in the job summary. PR, dispatch and
+local builds have no tarball, so they use the default `RUNNER_BINARY=build`
+and compile in the `builder` stage.
+
+Both paths run `toolu-runner --version` on the runtime's libc during the
+build, so a binary linked against a newer glibc than bookworm's 2.36 fails the
+build instead of the first job. That is also why `release.yml` builds its
+Linux legs inside the same `rust:1.94.1-bookworm` image as `builder`.
+
+To build the prebuilt variant locally:
+
+```sh
+mkdir -p dist && tar -xzf toolu-runner-linux-amd64.tar.gz -O toolu-runner > dist/toolu-runner-linux-amd64
+docker buildx build --platform linux/amd64 --build-arg RUNNER_BINARY=prebuilt -t toolu-ghrunner:dev .
+```
 
 ### Tag surface
 

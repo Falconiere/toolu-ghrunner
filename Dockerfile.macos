@@ -17,9 +17,10 @@
 #
 # - The binary is NOT compiled here. Rust cannot cross-compile to darwin from
 #   the Linux build host without an Apple SDK, so `release-macos-image.yml`
-#   builds it on a `macos-14` runner and drops it at
-#   dist/toolu-runner-darwin-arm64 before this file is built. There is no
-#   builder stage to keep honest.
+#   drops a `macos-14`-built binary at dist/toolu-runner-darwin-arm64 before
+#   this file is built. On a tag that binary is the one inside release.yml's
+#   darwin-arm64 release tarball; on a PR or dispatch, `build` compiles it.
+#   There is no builder stage to keep honest.
 # - The image's declared platform is meaningless to Namespace. It reads the
 #   filesystem and ignores the config — Namespace's own `macrun` example
 #   pushes a go-containerregistry `empty.Image` (linux/amd64 config) carrying
@@ -75,7 +76,7 @@ RUN set -eu; \
 FROM scratch
 # Both files must already be executable in the context: `scratch` has no shell
 # to chmod with, and the materialised tree keeps the mode it was packed with.
-# The workflow chmods the downloaded artifact; the script is committed 0755.
+# The workflow chmods the staged binary; the script is committed 0755.
 COPY dist/toolu-runner-darwin-arm64 /toolu-runner
 COPY scripts/macos-entrypoint.sh /entrypoint
 COPY --from=node-seed /seed/node /node

@@ -1,9 +1,9 @@
 name: release-macos-image
 
-# Tag-driven publish of the macOS runner payload: push vX.Y.Z -> gate ->
-# compile the darwin/arm64 binary on a real Mac -> pack it into a `scratch`
-# OCI carrier -> push to ghcr.io/<owner>/toolu-ghrunner-macos -> print the
-# digest-pinned ref.
+# Tag-driven publish of the macOS runner payload: push vX.Y.Z -> release.yml
+# gates + builds the darwin/arm64 release tarball on a real Mac, then calls
+# this workflow -> pack that tarball's binary into a `scratch` OCI carrier ->
+# push to ghcr.io/<owner>/toolu-ghrunner-macos -> print the digest-pinned ref.
 #
 # Two things make this workflow shaped differently from release-image.yml:
 #
@@ -12,21 +12,38 @@ name: release-macos-image
 #    digest IS the deliverable — no `imagetools create` stitching.
 # 2. The compile and the pack happen on different hosts. Rust cannot
 #    cross-compile to darwin without an Apple SDK, and GitHub's macOS runners
-#    have no Docker daemon, so `build` produces the binary on macos-14 and
-#    `image` packs it on ubuntu-24.04. The image carries no OS and runs no
-#    build step, so nothing about the pack needs a Mac.
+#    have no Docker daemon, so the binary comes from macos-14 and `image`
+#    packs it on ubuntu-24.04. The image carries no OS and runs no build
+#    step, so nothing about the pack needs a Mac.
 #
 # The image is a filesystem carrier, not a bootable macOS environment: Xcode,
 # git and the shell come from Namespace's base image (selected per instance).
 # Full contract, including how toolu.sh must shape CreateInstance:
 # docs/macos-image.md.
 #
-# The verify job repeats the gate rather than depending on release.yml, for
-# the same reason release-image.yml does: the workflows run independently on
-# the same tag, and an image must never publish off a commit whose gate fails.
+# A tag reaches this workflow ONLY through release.yml (`workflow_call`,
+# `needs: build`) — the same chaining, and for the same reasons, as
+# release-image.yml (#121): one gate per tag, and the darwin/arm64 binary is
+# the one release.yml's macos-14 leg already built and packaged. With
+# `prebuilt_binaries: true` the `build` job is skipped and `image` packs the
+# `toolu-runner` out of that release tarball, so the carrier holds the
+# tarball's binary byte for byte (checked before the push).
+#
+# PRs touching the image inputs and workflow_dispatch have no release
+# artifacts: they compile on macos-14 in `build` and pack without pushing.
+# Neither repeats the gate, because neither publishes. Login, push and the
+# digest print all require BOTH a tag ref AND release.yml's call
+# (`inputs.prebuilt_binaries == true` — compared, never bare: `&&` returns its
+# first falsy operand, so a bare null input renders `push:` empty, which
+# build-push-action rejects as a non-boolean), so a dispatch with a tag
+# selected still stops short of GHCR.
 on:
-  push:
-    tags: ['v*']
+  workflow_call:
+    inputs:
+      prebuilt_binaries:
+        description: Pack the toolu-runner-darwin-arm64 release tarball this run's caller uploaded, instead of compiling on macos-14.
+        type: boolean
+        default: false
   pull_request:
     paths:
       - Dockerfile.macos
@@ -50,24 +67,11 @@ env:
   IMAGE_BASENAME: toolu-ghrunner-macos
 
 jobs:
-  verify:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@1.94.1
-        with:
-          components: rustfmt, clippy
-      - name: Format
-        run: cargo fmt --all -- --check
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: Test
-        run: cargo test --workspace
-
   # The one host that can produce the payload. macos-14 is Apple Silicon, so
   # this is a native build — no cross-compilation, no Apple SDK plumbing.
+  # Skipped on the prebuilt path: release.yml's macos-14 leg already built it.
   build:
-    needs: verify
+    if: ${{ !inputs.prebuilt_binaries }}
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v7
@@ -86,12 +90,17 @@ jobs:
           file dist/toolu-runner-darwin-arm64
       - uses: actions/upload-artifact@v7
         with:
-          name: toolu-runner-darwin-arm64
+          # Not `toolu-runner-darwin-arm64`: that is release.yml's TARBALL
+          # artifact, and one name must never carry two shapes.
+          name: toolu-runner-darwin-arm64-binary
           path: dist/toolu-runner-darwin-arm64
           if-no-files-found: error
 
   image:
     needs: build
+    # `build` is skipped on the prebuilt path, which must not skip this job
+    # (the default `success()` would); a failed compile still stops it.
+    if: ${{ !cancelled() && needs.build.result != 'failure' }}
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -99,17 +108,38 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Download the darwin/arm64 binary
+        if: ${{ !inputs.prebuilt_binaries }}
+        uses: actions/download-artifact@v8
+        with:
+          name: toolu-runner-darwin-arm64-binary
+          path: dist
+      # The prebuilt path: release.yml's darwin/arm64 tarball, uploaded by its
+      # `build` earlier in the same workflow run.
+      - name: Download the darwin/arm64 release tarball
+        if: inputs.prebuilt_binaries
         uses: actions/download-artifact@v8
         with:
           name: toolu-runner-darwin-arm64
-          path: dist
+          path: release-tarball
+      - name: Stage the release binary
+        if: inputs.prebuilt_binaries
+        run: |
+          tarball="release-tarball/toolu-runner-darwin-arm64.tar.gz"
+          mkdir -p dist
+          tar -xzf "${tarball}" -O toolu-runner >dist/toolu-runner-darwin-arm64
+          {
+            echo "## Release binary (darwin/arm64)"
+            echo "- tarball \`${tarball##*/}\` sha256 \`$(sha256sum "${tarball}" | cut -d' ' -f1)\`"
+            echo "- \`toolu-runner\` inside it sha256 \`$(sha256sum dist/toolu-runner-darwin-arm64 | cut -d' ' -f1)\`"
+          } >>"$GITHUB_STEP_SUMMARY"
       - name: Assert both payload files are executable
         # Two different sources, one requirement: `scratch` has no shell to
         # chmod with, so whatever mode these carry here is the mode a job on
-        # the instance gets. The binary comes from the artifact (which does
-        # preserve the bit — the chmod is belt and braces); the entrypoint
-        # comes from THIS checkout, where a git core.fileMode misconfiguration
-        # is what would strip it. Both are asserted, because either one landing
+        # the instance gets. The binary comes from the compile artifact (which
+        # preserves the bit) or, on the prebuilt path, from `tar -O`, which
+        # writes it 0644 — there this chmod is what makes it executable. The
+        # entrypoint comes from THIS checkout, where a git core.fileMode
+        # misconfiguration is what would strip it. Both are asserted, because either one landing
         # 0644 fails only at job time on a rented Mac.
         run: |
           chmod +x dist/toolu-runner-darwin-arm64
@@ -153,8 +183,26 @@ jobs:
             echo "TAGS"
           } >>"$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@v3
+      - name: Verify the payload is the staged binary
+        # `scratch` has no shell, so the check cannot live in Dockerfile.macos
+        # the way the Linux image's does. Export the same build's filesystem
+        # instead — the push step below then reuses every layer from cache —
+        # and compare BEFORE anything is pushed.
+        run: |
+          docker buildx build --platform linux/arm64 -f Dockerfile.macos \
+            --output type=local,dest=payload .
+          want="$(sha256sum dist/toolu-runner-darwin-arm64 | cut -d' ' -f1)"
+          got="$(sha256sum payload/toolu-runner | cut -d' ' -f1)"
+          echo "staged  /toolu-runner sha256 ${want}"
+          echo "payload /toolu-runner sha256 ${got}"
+          if [[ "${got}" != "${want}" ]]; then
+            echo "::error::the carrier's /toolu-runner is not the staged binary"
+            exit 1
+          fi
+          test -x payload/toolu-runner
+          echo "- carrier \`/toolu-runner\` sha256 \`${got}\` (matches the staged binary)" >>"$GITHUB_STEP_SUMMARY"
       - name: Log in to GHCR
-        if: github.ref_type == 'tag'
+        if: inputs.prebuilt_binaries == true && github.ref_type == 'tag'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -172,14 +220,14 @@ jobs:
           # declared because the payload inside is arm64 and a manifest must
           # say something.
           platforms: linux/arm64
-          push: ${{ github.ref_type == 'tag' }}
+          push: ${{ inputs.prebuilt_binaries == true && github.ref_type == 'tag' }}
           tags: ${{ steps.tags.outputs.tags }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ github.ref_name }}
       - name: Print digest-pinned ref
-        if: github.ref_type == 'tag'
+        if: inputs.prebuilt_binaries == true && github.ref_type == 'tag'
         # The line a toolu.sh operator pins for macOS jobs. Same rule as the
         # Linux image: this payload runs customer build code holding a live
         # GitHub credential, so consumers pin the digest, never a moving tag.
