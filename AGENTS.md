@@ -51,7 +51,9 @@ bite here.
   step-for-step by `.github/workflows/ci.yml`:
   `./tools/check.sh all` = `cargo fmt --check` → `cargo clippy
   --workspace --all-targets -D warnings` → the `#[allow]` ban →
-  `bash scripts/guardrails/run.sh` → `cargo test --workspace`.
+  `bash scripts/guardrails/run.sh` → `cargo nextest run --workspace` →
+  `cargo test --workspace --doc` (nextest does not run doctests; needs
+  `cargo-nextest` installed — CI uses `taiki-e/install-action`).
   **No layer may be disabled to get it green** — not for an unrelated
   failure, not "just this once".
 - **`scripts/guardrails/` is copied VERBATIM from the kit** and is

@@ -898,8 +898,9 @@ cargo install ast-grep --locked
 ```
 
 ```sh
-cargo build --workspace --all-targets   # also builds the test units, so `cargo test` reuses the libraries
-cargo test  --workspace          # the full suite, no network required
+cargo build --workspace --all-targets   # also builds the test units, so the test run reuses the libraries
+cargo nextest run --workspace    # the full suite, no network required (cargo install cargo-nextest --locked)
+cargo test --workspace --doc     # doctests; nextest does not run them
 cargo build --profile debugging  # opt-in full debuginfo for a debugger (target/debugging/)
 
 ./tools/check.sh all             # the full local gate
@@ -912,7 +913,8 @@ cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
 the #[allow(..)] / #[expect(..)] ban
 bash scripts/guardrails/run.sh          # the structure gate
-cargo test --workspace
+cargo nextest run --workspace
+cargo test --workspace --doc            # nextest skips doctests
 ```
 
 `scripts/guardrails/` is copied verbatim from
@@ -971,7 +973,7 @@ sequence diagrams for register / run / cancel / reconnect.
 PRs welcome. Before you open one:
 
 1. `./tools/check.sh all` passes.
-2. `cargo test --workspace` passes.
+2. `cargo nextest run --workspace` passes.
 3. Listener or reporting change? Add a test under `crates/toolu-runner/tests/`.
 4. User-facing change? Update `README.md`, `docs/architecture.md`, and
    `CHANGELOG.md` in the same commit.

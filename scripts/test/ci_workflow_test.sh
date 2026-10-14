@@ -96,7 +96,9 @@ fi
 want_macos "the macOS job is arm64"             "^ +runs-on: macos-(1[4-9]|[2-9][0-9])$"
 want_macos "macOS runs clippy as an error gate" \
   "cargo clippy --workspace --all-targets -- -D warnings"
-want_macos "macOS runs the workspace tests"     "cargo test --workspace"
+want_macos "macOS runs the workspace tests with nextest" "cargo nextest run --workspace"
+want_macos "macOS runs the doctests nextest skips" "cargo test --workspace --doc"
+want_macos "macOS installs cargo-nextest"       "tool: cargo-nextest"
 # plutil only exists on macOS — validating the generated LaunchAgent as a real
 # plist is the single thing this leg can do that ubuntu cannot.
 want_macos "macOS validates the launchd plist"  "scripts/test/plist_test\.sh"
@@ -106,6 +108,16 @@ want_macos "ci-macos has a job timeout" "^    timeout-minutes: [0-9]+$"
 
 # --- the ubuntu leg still mirrors ./tools/check.sh all ---
 want_ci "ubuntu checks formatting"         "cargo fmt --all -- --check"
+# --- #118: nextest in the gate and CI; doctests stay a separate step ---
+want_ci "ubuntu runs the workspace tests with nextest" "cargo nextest run --workspace"
+want_ci "ubuntu runs the doctests nextest skips"       "cargo test --workspace --doc"
+want_ci "ubuntu installs cargo-nextest"                "tool: cargo-nextest"
+if printf '%s\n%s\n' "$CI_JOB" "$MACOS_JOB" | grep -Eq -- "cargo test --workspace$"; then
+  echo "FAIL: a job still runs the whole suite through cargo test --workspace" >&2
+  fail=1
+else
+  echo "ok: no job runs the whole suite through cargo test"
+fi
 want_ci "ubuntu enforces the #[allow] ban" "\./tools/check\.sh no-allow"
 want_ci "ubuntu runs the guardrails"       "bash scripts/guardrails/run\.sh"
 want_ci "ubuntu runs the check.sh test"    "check_script"
