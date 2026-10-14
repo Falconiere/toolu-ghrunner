@@ -67,11 +67,13 @@ want "the build arg selects the prebuilt stage only on the prebuilt path" \
 want "the image build checks its copy against the tarball binary's sha256" \
   '^            RUNNER_SHA256=\$\{\{ steps\.binary\.outputs\.sha256 \}\}$'
 want "pushing needs a tag ref AND release.yml's call" \
-  'push=\$\{\{ inputs\.prebuilt_binaries && github\.ref_type == .tag. \}\}'
+  'push=\$\{\{ inputs\.prebuilt_binaries == true && github\.ref_type == .tag. \}\}'
 # Every publish condition, not just the push: a dispatch with a tag selected
 # has a tag ref but never ran release.yml's gate, so a bare `ref_type == 'tag'`
 # anywhere (login, digest export, manifest) would publish ungated.
-bare="$(grep -n "ref_type == 'tag'" "$WF" | grep -v "inputs\.prebuilt_binaries && github\.ref_type == 'tag'" || true)"
+# `== true` is part of the required form: `&&` yields its first falsy OPERAND,
+# so a bare null input (every PR) would render the push flag as an empty string.
+bare="$(grep -n "ref_type == 'tag'" "$WF" | grep -v "inputs\.prebuilt_binaries == true && github\.ref_type == 'tag'" || true)"
 if [[ -n "$bare" ]]; then
   echo "FAIL: a publish condition checks the tag ref without release.yml's call: $bare" >&2
   fail=1

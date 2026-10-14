@@ -71,10 +71,12 @@ want_in "$IMAGE_JOB" "the pack uses Dockerfile.macos"        "file: Dockerfile.m
 want_in "$IMAGE_JOB" "the pack consumes the macOS artifact"  "name: toolu-runner-darwin-arm64"
 # Pushing on a non-tag would publish an untested payload under a tag someone
 # may pin; the gate is the expression, not the reviewer.
-want_in "$IMAGE_JOB" "pushes on release.yml's tag call only" "push: \\\$\{\{ inputs\.prebuilt_binaries && github\.ref_type == 'tag' \}\}"
+want_in "$IMAGE_JOB" "pushes on release.yml's tag call only" "push: \\\$\{\{ inputs\.prebuilt_binaries == true && github\.ref_type == 'tag' \}\}"
 # Login and the digest print too: a dispatch with a tag selected has a tag ref
 # but never ran release.yml's gate.
-bare="$(grep -n "ref_type == 'tag'" "$WF" | grep -v "inputs\.prebuilt_binaries && github\.ref_type == 'tag'" || true)"
+# `== true` is part of the required form: `&&` yields its first falsy OPERAND,
+# so a bare null input (every PR) would render the push flag as an empty string.
+bare="$(grep -n "ref_type == 'tag'" "$WF" | grep -v "inputs\.prebuilt_binaries == true && github\.ref_type == 'tag'" || true)"
 if [[ -n "$bare" ]]; then
   echo "FAIL: a publish condition checks the tag ref without release.yml's call: $bare" >&2
   fail=1

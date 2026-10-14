@@ -33,8 +33,10 @@ name: release-macos-image
 # artifacts: they compile on macos-14 in `build` and pack without pushing.
 # Neither repeats the gate, because neither publishes. Login, push and the
 # digest print all require BOTH a tag ref AND release.yml's call
-# (`inputs.prebuilt_binaries`), so a dispatch with a tag selected still stops
-# short of GHCR.
+# (`inputs.prebuilt_binaries == true` — compared, never bare: `&&` returns its
+# first falsy operand, so a bare null input renders `push:` empty, which
+# build-push-action rejects as a non-boolean), so a dispatch with a tag
+# selected still stops short of GHCR.
 on:
   workflow_call:
     inputs:
@@ -200,7 +202,7 @@ jobs:
           test -x payload/toolu-runner
           echo "- carrier \`/toolu-runner\` sha256 \`${got}\` (matches the staged binary)" >>"$GITHUB_STEP_SUMMARY"
       - name: Log in to GHCR
-        if: inputs.prebuilt_binaries && github.ref_type == 'tag'
+        if: inputs.prebuilt_binaries == true && github.ref_type == 'tag'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -218,14 +220,14 @@ jobs:
           # declared because the payload inside is arm64 and a manifest must
           # say something.
           platforms: linux/arm64
-          push: ${{ inputs.prebuilt_binaries && github.ref_type == 'tag' }}
+          push: ${{ inputs.prebuilt_binaries == true && github.ref_type == 'tag' }}
           tags: ${{ steps.tags.outputs.tags }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ github.ref_name }}
       - name: Print digest-pinned ref
-        if: inputs.prebuilt_binaries && github.ref_type == 'tag'
+        if: inputs.prebuilt_binaries == true && github.ref_type == 'tag'
         # The line a toolu.sh operator pins for macOS jobs. Same rule as the
         # Linux image: this payload runs customer build code holding a live
         # GitHub credential, so consumers pin the digest, never a moving tag.
