@@ -48,6 +48,7 @@ done
 # #120: no secret exists, so a cron would only produce a daily red (or, if the
 # guard regressed, a meaningless green) check. Dispatch-only until it does.
 check "live.yml has no schedule trigger" absent '^[[:space:]]*schedule:' .github/workflows/live.yml
+check "live.yml has no cron trigger" absent '^[[:space:]]*-?[[:space:]]*cron:' .github/workflows/live.yml
 check "live.yml stays dispatchable" grep -Eq '^  workflow_dispatch:' .github/workflows/live.yml
 
 for f in "$TESTS"/live_e2e.rs "$TESTS"/live_login_e2e.rs "$TESTS"/cache_live_e2e.rs; do
