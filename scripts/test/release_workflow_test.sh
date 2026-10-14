@@ -38,6 +38,32 @@ want "asserts tag == Cargo version"    "assert-version\.sh"
 want "runs cargo fmt check"            "cargo fmt --all -- --check"
 want "runs clippy -D warnings"         "cargo clippy --workspace --all-targets -- -D warnings"
 want "runs cargo test"                 "cargo test --workspace"
+# --- Rust build cache (#110): the gate job restores it after the toolchain; the
+# tag-only build matrix does not (low hit rate, a cold tag build is the norm).
+job_body() {
+  awk -v key="  $1:" '
+    $0 == key                                  { injob = 1; print; next }
+    injob && /^  [A-Za-z0-9_-]+:[[:space:]]*$/ { injob = 0 }
+    injob                                      { print }
+  ' "$WF"
+}
+VERIFY_JOB=$(job_body verify)
+BUILD_JOB=$(job_body build)
+if printf '%s\n' "$VERIFY_JOB" | awk '
+    /dtolnay\/rust-toolchain@/ { tc = 1 }
+    /Swatinem\/rust-cache@v[0-9]+/ { if (tc) ok = 1 }
+    END { exit !ok }'; then
+  echo "ok: verify restores a Rust cache after the toolchain"
+else
+  echo "FAIL: verify needs a Swatinem/rust-cache step after dtolnay/rust-toolchain" >&2
+  fail=1
+fi
+if printf '%s\n' "$BUILD_JOB" | grep -Eq -- "Swatinem/rust-cache"; then
+  echo "FAIL: the release build matrix must not use rust-cache (tag-only, low hit rate)" >&2
+  fail=1
+else
+  echo "ok: release build matrix is not cached"
+fi
 # --- build (4 native targets) ---
 want "macos-14 (darwin arm64)"         "runner: macos-14"
 want "macos-15-intel (darwin amd64)"   "runner: macos-15-intel"
