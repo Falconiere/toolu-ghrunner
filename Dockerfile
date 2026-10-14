@@ -25,22 +25,25 @@
 
 # The build runs under BuildKit cache mounts, so a rebuild after a source edit
 # recompiles only the crates that changed instead of every dependency (#114):
-# - cargo's registry and git checkouts (CARGO_HOME is /usr/local/cargo here);
-#   platform-independent, shared freely (cargo takes its own lock).
+# - cargo's registry and git checkouts (CARGO_HOME is /usr/local/cargo here).
 # - target/, keyed by TARGETPLATFORM because target/release holds one
-#   platform's artifacts; `sharing=locked` makes a concurrent build of the same
-#   platform wait instead of interleaving writes.
+#   platform's artifacts.
+# All three are `sharing=locked`: cargo's own package-cache lock lives at the
+# CARGO_HOME root, outside the mounts, so it cannot guard them — a concurrent
+# build on the same builder (e.g. a multi-platform build) waits for the mounts
+# instead of writing into them at the same time.
 # A mount is never part of the layer, so the binary is copied OUT of it to
 # /out in the same RUN — `runtime` copies it from there, never from target/.
 # A fresh builder (every CI runner) starts with empty mounts: a full build,
-# the same as before. scripts/test/dockerfile_test.sh pins all of the above.
+# the same as before. scripts/test/dockerfile_test.sh pins the mounts, the
+# copy-out and the stage order.
 FROM rust:1.94.1-bookworm AS builder
 ARG TARGETPLATFORM
 WORKDIR /src
 COPY . .
 # --locked pins the committed Cargo.lock, same as release.yml.
-RUN --mount=type=cache,id=toolu-cargo-registry,target=/usr/local/cargo/registry \
-    --mount=type=cache,id=toolu-cargo-git,target=/usr/local/cargo/git \
+RUN --mount=type=cache,id=toolu-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=toolu-cargo-git,target=/usr/local/cargo/git,sharing=locked \
     --mount=type=cache,id=toolu-target-${TARGETPLATFORM},target=/src/target,sharing=locked \
   cargo build --release --locked --bin toolu-runner \
   && install -D -m 0755 target/release/toolu-runner /out/toolu-runner

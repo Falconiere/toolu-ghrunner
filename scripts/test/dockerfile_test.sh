@@ -12,7 +12,8 @@
 #      builder` that reads `/src/target/...` would find nothing.
 #   2. The `target/` mount is keyed by TARGETPLATFORM: `target/release` holds
 #      one platform's artifacts, and two platforms built on one builder must
-#      not share it.
+#      not share it. Every mount is `sharing=locked`, because cargo's own
+#      package-cache lock lives outside them.
 #
 # Plus the stage-order rule the Dockerfile's header explains: `runner` is the
 # LAST stage, so a bare `docker build .` produces the lean image.
@@ -64,8 +65,13 @@ run_checks() {
     echo "FAIL: target/ cache mount"
   grep -Eq -- '--mount=type=cache,[^ ]*id=[^, ]*\$\{TARGETPLATFORM\}[^ ]*target=/src/target' <<<"$build_run" ||
     echo "FAIL: target/ mount keyed by TARGETPLATFORM"
-  grep -Eq -- '--mount=type=cache,[^ ]*target=/src/target,[^ ]*sharing=locked|--mount=type=cache,[^ ]*sharing=locked,[^ ]*target=/src/target' <<<"$build_run" ||
-    echo "FAIL: target/ mount is sharing=locked"
+  # cargo's package-cache lock sits at the CARGO_HOME root, outside these
+  # mounts, so only BuildKit's lock keeps two builds out of each other's way.
+  local dir
+  for dir in /usr/local/cargo/registry /usr/local/cargo/git /src/target; do
+    grep -Eq -- "--mount=type=cache,[^ ]*target=${dir}(,[^ ]*)?,sharing=locked( |,)|--mount=type=cache,[^ ]*sharing=locked,[^ ]*target=${dir}( |,)" <<<"$build_run" ||
+      echo "FAIL: ${dir} mount is sharing=locked"
+  done
   grep -Eq '^ARG TARGETPLATFORM$' <<<"$builder" ||
     echo "FAIL: builder declares ARG TARGETPLATFORM"
   grep -Fq 'target/release/toolu-runner /out/toolu-runner' <<<"$build_run" ||
@@ -111,11 +117,13 @@ mutate() {
   fi
 }
 
-mutate "cargo registry cache mount" 's#--mount=type=cache,id=toolu-cargo-registry,target=/usr/local/cargo/registry##'
-mutate "cargo git cache mount" 's#--mount=type=cache,id=toolu-cargo-git,target=/usr/local/cargo/git##'
+mutate "cargo registry cache mount" 's#--mount=type=cache,id=toolu-cargo-registry,target=/usr/local/cargo/registry,sharing=locked##'
+mutate "cargo git cache mount" 's#--mount=type=cache,id=toolu-cargo-git,target=/usr/local/cargo/git,sharing=locked##'
 mutate "target/ cache mount" 's#target=/src/target#target=/tmp/elsewhere#'
 mutate "target/ mount keyed by TARGETPLATFORM" 's#id=toolu-target-${TARGETPLATFORM}#id=toolu-target#'
-mutate "target/ mount is sharing=locked" 's#,sharing=locked##'
+mutate "/usr/local/cargo/registry mount is sharing=locked" 's#cargo/registry,sharing=locked#cargo/registry#'
+mutate "/usr/local/cargo/git mount is sharing=locked" 's#cargo/git,sharing=locked#cargo/git#'
+mutate "/src/target mount is sharing=locked" 's#target=/src/target,sharing=locked#target=/src/target#'
 mutate "builder declares ARG TARGETPLATFORM" '/^ARG TARGETPLATFORM$/d'
 mutate "binary copied out of the mount in the build RUN" 's#target/release/toolu-runner /out/toolu-runner#target/release/toolu-runner /src/toolu-runner#'
 mutate "runtime copies /out/toolu-runner to /usr/local/bin/toolu-runner" 's#^COPY --from=builder /out/toolu-runner #COPY --from=builder /src/target/release/toolu-runner #'
