@@ -159,7 +159,7 @@ to that list requires proving the value is not a real credential.
   the file sink unredacted.
 - **`protocol` crate is strictly sync, no I/O, no network.** Its
   dependency set is restricted to `serde`, `serde_json`,
-  `serde_yaml`, `base64`, `jsonwebtoken`, `num-bigint-dig`, `pkcs1`,
+  `base64`, `jsonwebtoken`, `num-bigint-dig`, `pkcs1`,
   `sha1`, `sha2`, `aes`, `cbc`, `rsa`, `uuid` (dev-dep `rand`). `rsa`
   was added for message-body decryption (RSA-OAEP AES-key unwrap).
   Enforced by `protocol/Cargo.toml` (no `reqwest`, `tokio`, `opendal`,
