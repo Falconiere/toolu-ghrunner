@@ -10,7 +10,10 @@
 //!
 //! The shared helpers under `tests/helpers/` (and the `network` crate's
 //! fixtures) are declared once here; test files reach them with
-//! `use crate::<helper>;`.
+//! `use crate::<helper>;`. The `#[path]` attributes below are required: a bare
+//! `mod x;` here would look for `tests/x.rs`, and `tests/` must stay flat, so
+//! the helpers stay in `tests/helpers/`. `proxy_fixtures` / `tls_fixtures` are
+//! included from `../../network/tests/helpers/`, shared with that crate's tests.
 
 #[path = "helpers/boot_fixtures.rs"]
 mod boot_fixtures;
