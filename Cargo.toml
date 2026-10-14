@@ -97,13 +97,18 @@ unused_must_use = "deny"
 rust_2018_idioms = { level = "warn", priority = -1 }
 
 # ── Shared profile ─────────────────────────────────────────────────
-# Dev profile: fast incremental compile, full debuginfo on our own crates
-# (line tables only), zero debuginfo on deps.
+# Dev profile: fast incremental compile, line-table debuginfo on our own
+# crates (enough for backtraces and `file:line`), zero debuginfo on deps.
+# `cargo test` uses the `test` profile, which inherits `dev` unchanged so
+# the workspace libraries are compiled once and shared with a build that
+# includes the test units (`cargo build --workspace --all-targets`); a plain
+# `cargo build` still differs from `cargo test` in dev-dependency features.
+# For a debugger with variables use `--profile debugging`.
 [profile.dev]
 opt-level = 0
 incremental = true
 split-debuginfo = "unpacked"
-debug = 1
+debug = "line-tables-only"
 codegen-units = 256
 
 [profile.dev.package.sha2]
@@ -114,11 +119,11 @@ opt-level = 2
 [profile.dev.package."*"]
 debug = 0
 
-[profile.test]
-opt-level = 0
-incremental = true
-debug = 0
-codegen-units = 256
+# Opt-in full debuginfo for stepping through code in a debugger:
+# `cargo build --profile debugging` (output in target/debugging/).
+[profile.debugging]
+inherits = "dev"
+debug = true
 
 [profile.release]
 opt-level = 3
