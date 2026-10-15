@@ -4,15 +4,45 @@
 //! extracts into a unique sibling staging dir, optionally proves the runtime
 //! starts there, and only then renames it onto the cache dir — so the cache
 //! dir is always either absent or a complete, validated tree.
+//!
+//! A transient transport failure (connection error, 408/429/5xx, or the body
+//! stream breaking mid-download) is retried up to [`DOWNLOAD_ATTEMPTS`]
+//! times; anything else — a 4xx, a corrupt tarball, a failed start check —
+//! fails on the first attempt.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::Duration;
 
 use futures_util::StreamExt;
+use reqwest::StatusCode;
 use shared::RunnerError;
 
 use super::runtime::node_binary_path;
+
+/// Download attempts per install, so one dropped connection on a tens-of-MB
+/// tarball does not fail the step.
+const DOWNLOAD_ATTEMPTS: u32 = 3;
+
+/// The pause before retry `n` is `n` times this.
+const RETRY_DELAY: Duration = Duration::from_secs(1);
+
+/// A failed download attempt, and whether a fresh request may succeed.
+struct AttemptError {
+  error: RunnerError,
+  transient: bool,
+}
+
+impl AttemptError {
+  fn permanent(error: RunnerError) -> Self {
+    Self {
+      error,
+      transient: false,
+    }
+  }
+}
 
 /// Extract a tar.gz tarball into `dest`, dropping `.` components and then
 /// the first `strip` components: nodejs.org tarballs nest everything under
@@ -73,21 +103,23 @@ fn extract_tarball(reader: impl Read, dest: &Path, strip: usize) -> std::io::Res
 }
 
 /// Fetch `url` and return a synchronous [`Read`] streaming its body,
-/// suitable for [`extract_tarball`] inside `spawn_blocking`.
+/// suitable for [`extract_tarball`] inside `spawn_blocking`, plus a flag set
+/// when that body stream fails — gzip/tar cannot tell a broken connection
+/// from a corrupt tarball once the error reaches them.
 ///
 /// # Errors
 ///
-/// Returns `RunnerError::NodeRuntime` on a request failure or a non-success
-/// HTTP status.
+/// Returns a `RunnerError::NodeRuntime` on a request failure or a
+/// non-success HTTP status, transient for a connection failure or a
+/// 408/429/5xx.
 async fn fetch_node_tarball_reader(
   client: &reqwest::Client,
   url: &str,
-) -> Result<impl Read + use<>, RunnerError> {
-  let response = client
-    .get(url)
-    .send()
-    .await
-    .map_err(|e| RunnerError::NodeRuntime(format!("fetch {url}: {e}")))?;
+) -> Result<(impl Read + use<>, Arc<AtomicBool>), AttemptError> {
+  let response = client.get(url).send().await.map_err(|e| AttemptError {
+    transient: !e.is_builder(),
+    error: RunnerError::NodeRuntime(format!("fetch {url}: {e}")),
+  })?;
 
   let status = response.status();
   if !status.is_success() {
@@ -97,21 +129,32 @@ async fn fetch_node_tarball_reader(
       Ok(body) => body,
       Err(e) => format!("(body read failed: {e})"),
     };
-    return Err(RunnerError::NodeRuntime(format!(
-      "node tarball {url} status {status}: {body}"
-    )));
+    return Err(AttemptError {
+      transient: status.is_server_error()
+        || status == StatusCode::TOO_MANY_REQUESTS
+        || status == StatusCode::REQUEST_TIMEOUT,
+      error: RunnerError::NodeRuntime(format!("node tarball {url} status {status}: {body}")),
+    });
   }
 
   // The stream's `std::io::Error` surfaces from inside `extract_tarball`,
   // where nothing knows which URL the bytes came from — so name it here.
   let stream_url = url.to_owned();
+  let stream_failed = Arc::new(AtomicBool::new(false));
+  let failed = Arc::clone(&stream_failed);
   let stream = response.bytes_stream().map(move |chunk| {
-    chunk.map_err(|e| std::io::Error::other(format!("tarball stream from {stream_url}: {e}")))
+    chunk.map_err(|e| {
+      failed.store(true, Ordering::Relaxed);
+      std::io::Error::other(format!("tarball stream from {stream_url}: {e}"))
+    })
   });
   let stream_reader = tokio_util::io::StreamReader::new(stream);
   // Constructed here (an async context) so it captures the current Tokio
   // runtime handle, then moved into `spawn_blocking` — its documented use.
-  Ok(tokio_util::io::SyncIoBridge::new(stream_reader))
+  Ok((
+    tokio_util::io::SyncIoBridge::new(stream_reader),
+    stream_failed,
+  ))
 }
 
 /// Monotonic counter disambiguating staging dirs created by this process.
@@ -241,8 +284,31 @@ pub(super) struct Install<'a> {
   pub validate_major: Option<u8>,
 }
 
+/// One download attempt: fetch `install.url` and extract it into `staging`.
+async fn download_into(
+  client: &reqwest::Client,
+  install: &Install<'_>,
+  staging: &Path,
+) -> Result<(), AttemptError> {
+  let (sync_reader, stream_failed) = fetch_node_tarball_reader(client, install.url).await?;
+  let staging_for_extract = staging.to_path_buf();
+  let strip = install.strip;
+  tokio::task::spawn_blocking(move || extract_tarball(sync_reader, &staging_for_extract, strip))
+    .await
+    .map_err(|e| {
+      AttemptError::permanent(RunnerError::NodeRuntime(format!(
+        "extraction task failed: {e}"
+      )))
+    })?
+    .map_err(|e| AttemptError {
+      error: RunnerError::NodeRuntime(format!("extract node tarball: {e}")),
+      transient: stream_failed.load(Ordering::Relaxed),
+    })
+}
+
 /// Download, extract and (optionally) start-check a runtime in staging,
-/// then commit it onto `install.cache_dir`.
+/// then commit it onto `install.cache_dir`. Transient transport failures
+/// are retried (see the module doc).
 ///
 /// # Errors
 ///
@@ -252,32 +318,34 @@ pub(super) async fn install_runtime(
   client: &reqwest::Client,
   install: &Install<'_>,
 ) -> Result<(), RunnerError> {
-  let sync_reader = fetch_node_tarball_reader(client, install.url).await?;
-  let staging = staging_dir_for(install.cache_dir);
-  let staging_for_extract = staging.clone();
-  let strip = install.strip;
-  let extracted =
-    tokio::task::spawn_blocking(move || extract_tarball(sync_reader, &staging_for_extract, strip))
-      .await
-      .map_err(|e| RunnerError::NodeRuntime(format!("extraction task failed: {e}")))
-      .and_then(|inner| {
-        inner.map_err(|e| RunnerError::NodeRuntime(format!("extract node tarball: {e}")))
-      });
-  let checked = match (extracted, install.validate_major) {
-    (Ok(()), Some(major)) => super::validate::validate_runtime(&node_binary_path(&staging), major)
-      .await
-      .map_err(|e| {
-        RunnerError::NodeRuntime(format!(
-          "{} from {} was not installed: {e}",
-          install.cache_dir.display(),
-          install.url
-        ))
-      }),
-    (result, _) => result,
-  };
-  if let Err(err) = checked {
+  let mut attempt = 1;
+  let staging = loop {
+    let staging = staging_dir_for(install.cache_dir);
+    let Err(failed) = download_into(client, install, &staging).await else {
+      break staging;
+    };
     cleanup_staging(&staging);
-    return Err(err);
+    if !failed.transient || attempt >= DOWNLOAD_ATTEMPTS {
+      return Err(failed.error);
+    }
+    tracing::warn!(
+      url = install.url,
+      attempt,
+      error = %failed.error,
+      "node runtime download failed; retrying"
+    );
+    tokio::time::sleep(RETRY_DELAY * attempt).await;
+    attempt += 1;
+  };
+  if let Some(major) = install.validate_major
+    && let Err(e) = super::validate::validate_runtime(&node_binary_path(&staging), major).await
+  {
+    cleanup_staging(&staging);
+    return Err(RunnerError::NodeRuntime(format!(
+      "{} from {} was not installed: {e}",
+      install.cache_dir.display(),
+      install.url
+    )));
   }
   promote_staging(&staging, install.cache_dir)
 }
