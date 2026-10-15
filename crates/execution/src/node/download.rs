@@ -5,10 +5,13 @@
 //! starts there, and only then renames it onto the cache dir — so the cache
 //! dir is always either absent or a complete, validated tree.
 //!
-//! A transient transport failure (connection error, 408/429/5xx, or the body
-//! stream breaking mid-download) is retried up to [`DOWNLOAD_ATTEMPTS`]
-//! times; anything else — a 4xx, a corrupt tarball, a failed start check —
-//! fails on the first attempt.
+//! A transient transport failure (a connect, request-send or timeout error,
+//! 408/429/5xx, or the body stream breaking mid-download) is retried up to
+//! [`DOWNLOAD_ATTEMPTS`] times; anything else — a request-build or redirect
+//! error, a 4xx, a corrupt tarball, a failed start check — fails on the
+//! first attempt. reqwest reports DNS and TLS handshake failures as connect
+//! errors, indistinguishable from a refused connection, so those are retried
+//! too.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -110,14 +113,14 @@ fn extract_tarball(reader: impl Read, dest: &Path, strip: usize) -> std::io::Res
 /// # Errors
 ///
 /// Returns a `RunnerError::NodeRuntime` on a request failure or a
-/// non-success HTTP status, transient for a connection failure or a
-/// 408/429/5xx.
+/// non-success HTTP status, transient for a connect, request-send or timeout
+/// error or a 408/429/5xx.
 async fn fetch_node_tarball_reader(
   client: &reqwest::Client,
   url: &str,
 ) -> Result<(impl Read + use<>, Arc<AtomicBool>), AttemptError> {
   let response = client.get(url).send().await.map_err(|e| AttemptError {
-    transient: !e.is_builder(),
+    transient: e.is_connect() || e.is_request() || e.is_timeout(),
     error: RunnerError::NodeRuntime(format!("fetch {url}: {e}")),
   })?;
 
@@ -144,6 +147,8 @@ async fn fetch_node_tarball_reader(
   let failed = Arc::clone(&stream_failed);
   let stream = response.bytes_stream().map(move |chunk| {
     chunk.map_err(|e| {
+      // Relaxed suffices: the flag is read only after the `spawn_blocking`
+      // join in `download_into`, which orders this store before that read.
       failed.store(true, Ordering::Relaxed);
       std::io::Error::other(format!("tarball stream from {stream_url}: {e}"))
     })
