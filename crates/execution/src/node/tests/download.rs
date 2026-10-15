@@ -1,12 +1,17 @@
 //! Tests for `download`: tarball extraction (nodejs.org nesting, the
 //! `actions/alpine_nodejs` `./` root, rejected escapes, permissions) and the
-//! atomic staging promotion under real concurrency and over a stale dest.
+//! atomic staging promotion under real concurrency and over a stale dest,
+//! and `install_runtime`'s retry against a real local server whose response
+//! body is cut mid-stream (the dropped-connection failure seen from
+//! nodejs.org).
 
 use super::*;
 use flate2::Compression;
 use flate2::write::GzEncoder;
 use std::env;
 use std::io::Write;
+use std::net::SocketAddr;
+use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Barrier};
 use tar::{Builder, Header};
 
@@ -233,4 +238,153 @@ fn promote_staging_replaces_a_stale_dest_missing_the_binary() {
     Vec::<PathBuf>::new(),
     "no staging dir must remain after a successful promote"
   );
+}
+
+/// Serve `status` + `tarball` on every path, counting requests in `hits`.
+/// The first `broken` responses send half the body and then fail the
+/// stream, which aborts the connection mid-body.
+async fn serve_flaky(
+  status: axum::http::StatusCode,
+  tarball: Vec<u8>,
+  broken: usize,
+  hits: Arc<AtomicUsize>,
+) -> SocketAddr {
+  let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+    .await
+    .expect("bind local server");
+  let addr = listener.local_addr().expect("local addr");
+  let app = axum::Router::new().fallback(move || {
+    let tarball = tarball.clone();
+    let hit = hits.fetch_add(1, Ordering::SeqCst);
+    async move {
+      if hit >= broken {
+        return (status, axum::body::Body::from(tarball));
+      }
+      let half = tarball
+        .get(..tarball.len() / 2)
+        .unwrap_or_default()
+        .to_vec();
+      let chunks: Vec<Result<axum::body::Bytes, std::io::Error>> = vec![
+        Ok(half.into()),
+        Err(std::io::Error::other("connection dropped")),
+      ];
+      (
+        status,
+        axum::body::Body::from_stream(futures_util::stream::iter(chunks)),
+      )
+    }
+  });
+  tokio::spawn(async move { axum::serve(listener, app).await });
+  addr
+}
+
+/// A tarball big enough that half of it is a partial body, not just headers.
+fn sizeable_tarball() -> Vec<u8> {
+  let filler = vec![b'x'; 256 * 1024];
+  build_tarball(&[
+    ("node-v24.21.0-linux-x64/bin/node", b"#!fake-node", 0o755),
+    ("node-v24.21.0-linux-x64/filler", &filler, 0o644),
+  ])
+}
+
+async fn install_from(addr: SocketAddr, cache_dir: &Path) -> Result<(), RunnerError> {
+  let url = format!("http://{addr}/dist/node.tar.gz");
+  install_runtime(
+    &reqwest::Client::new(),
+    &Install {
+      url: &url,
+      strip: 1,
+      cache_dir,
+      validate_major: None,
+    },
+  )
+  .await
+}
+
+#[tokio::test]
+async fn a_body_cut_mid_stream_is_retried_and_committed() {
+  let hits = Arc::new(AtomicUsize::new(0));
+  let addr = serve_flaky(
+    axum::http::StatusCode::OK,
+    sizeable_tarball(),
+    1,
+    Arc::clone(&hits),
+  )
+  .await;
+  let dest = tmp_dest("node-retry-ok");
+
+  install_from(addr, &dest)
+    .await
+    .expect("the second attempt must install");
+
+  assert_eq!(hits.load(Ordering::SeqCst), 2);
+  assert_eq!(
+    std::fs::read(node_binary_path(&dest)).expect("binary committed"),
+    b"#!fake-node"
+  );
+  assert_eq!(leftover_staging_dirs(&dest), Vec::<PathBuf>::new());
+}
+
+#[tokio::test]
+async fn a_persistently_cut_body_gives_up_after_the_attempt_cap() {
+  let hits = Arc::new(AtomicUsize::new(0));
+  let addr = serve_flaky(
+    axum::http::StatusCode::OK,
+    sizeable_tarball(),
+    usize::MAX,
+    Arc::clone(&hits),
+  )
+  .await;
+  let dest = tmp_dest("node-retry-exhausted");
+
+  let error = install_from(addr, &dest)
+    .await
+    .expect_err("every attempt is cut");
+
+  assert_eq!(hits.load(Ordering::SeqCst), DOWNLOAD_ATTEMPTS as usize);
+  assert!(
+    error
+      .to_string()
+      .contains(&format!("http://{addr}/dist/node.tar.gz")),
+    "{error}"
+  );
+  assert!(!dest.exists());
+  assert_eq!(leftover_staging_dirs(&dest), Vec::<PathBuf>::new());
+}
+
+#[tokio::test]
+async fn a_not_found_tarball_is_requested_once() {
+  let hits = Arc::new(AtomicUsize::new(0));
+  let addr = serve_flaky(
+    axum::http::StatusCode::NOT_FOUND,
+    Vec::new(),
+    0,
+    Arc::clone(&hits),
+  )
+  .await;
+  let dest = tmp_dest("node-retry-404");
+
+  let error = install_from(addr, &dest).await.expect_err("404 must fail");
+
+  assert_eq!(hits.load(Ordering::SeqCst), 1);
+  assert!(error.to_string().contains("status 404"), "{error}");
+  assert!(!dest.exists());
+}
+
+#[tokio::test]
+async fn a_server_error_is_retried() {
+  let hits = Arc::new(AtomicUsize::new(0));
+  let addr = serve_flaky(
+    axum::http::StatusCode::SERVICE_UNAVAILABLE,
+    Vec::new(),
+    0,
+    Arc::clone(&hits),
+  )
+  .await;
+  let dest = tmp_dest("node-retry-503");
+
+  let error = install_from(addr, &dest).await.expect_err("503 must fail");
+
+  assert_eq!(hits.load(Ordering::SeqCst), DOWNLOAD_ATTEMPTS as usize);
+  assert!(error.to_string().contains("status 503"), "{error}");
 }
