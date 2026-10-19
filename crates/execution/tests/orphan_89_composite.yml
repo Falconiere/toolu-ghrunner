@@ -1,0 +1,11 @@
+# Issue #89: a composite action whose shell step leaves a child without the
+# tracking id in its process group; only the group match can find it.
+name: orphan-89-composite
+description: Leave an id-less background sleeper behind
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        env -u RUNNER_TRACKING_ID sleep 311 >/dev/null 2>&1 &
+        echo $! > "$ORPHAN89_PIDS/composite-untagged"

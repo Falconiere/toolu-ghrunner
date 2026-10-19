@@ -32,8 +32,9 @@ pub struct ScriptParams<'a> {
   /// Ignored when the child runs in a job container, which is never tagged.
   pub tracking_id: Option<&'a str>,
   /// This job's process tracking. The spawned step leads its own process
-  /// group, which is registered here for the job-end orphan sweep (`None`
-  /// when `process.clean=false`).
+  /// group, which is registered here for the job-end orphan sweep and
+  /// released once the step leaves nothing in it (`None` when
+  /// `process.clean=false`; ignored when the child runs in a job container).
   pub tracking: Option<&'a crate::execution::orphan_cleanup::ProcessTracking>,
   /// `timeout-minutes` bound for the child wait (`None` = unbounded).
   pub timeout: Option<Duration>,
@@ -88,6 +89,8 @@ impl ScriptHandler {
     let script_path = script_file.path().to_string_lossy().to_string();
 
     let mut child = spawn_step_shell(params, &shell, &script_path).await?;
+    // The step root leads its own process group; its pid is the group id.
+    let group = child.id();
 
     let stdout_handle = forward_lines(child.stdout.take(), stdout_tx);
     let stderr_handle = stream_output(
@@ -104,6 +107,9 @@ impl ScriptHandler {
       RunnerError::ScriptHandler,
     )
     .await?;
+    if let (Some(tracking), Some(group)) = (params.tracking, group) {
+      tracking.release_if_empty(group);
+    }
     let conclusion = match outcome {
       WaitOutcome::Exited(status) => conclusion_for(status.success()),
       WaitOutcome::TimedOut => {

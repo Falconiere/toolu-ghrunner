@@ -315,6 +315,84 @@ async fn process_clean_false_disables_tracking_and_cleanup() -> TestResult {
 }
 
 // ---------------------------------------------------------------------------
+// Step process groups: members without the id are still the job's
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn id_less_member_of_a_run_step_group_is_killed() -> TestResult {
+  let replay = Replay::new().await?;
+  // `env -u` drops the id before `exec`, so no environment read can match
+  // it; only the run step's registered process group ties it to the job.
+  let body = format!(
+    r#"P='{}'
+{PROBE}
+env -u RUNNER_TRACKING_ID sleep 309 >/dev/null 2>&1 & echo $! > "$P/untagged"
+exit 0
+"#,
+    replay.pids_dir()
+  );
+  let finished = replay.run(script_job(&body)?, |_, _, _| {}).await?;
+  assert_eq!(finished.conclusion(), Some(Conclusion::Success));
+  let pid = replay.pid("untagged")?;
+  assert_dead(pid, "id-less run-step group member").await?;
+  assert!(finished.terminated(pid), "{:?}", finished.lines());
+  Ok(())
+}
+
+#[tokio::test]
+async fn id_less_member_of_a_node_post_group_is_killed() -> TestResult {
+  let replay = Replay::new().await?;
+  let pids = replay.pids_dir();
+  let job = script_and_node_job(
+    PROBE,
+    &[("ORPHAN89_PIDS", &pids), ("ORPHAN89_POST_UNTAGGED", "1")],
+  )?;
+  replay.install_node_action(&job)?;
+  let finished = replay.run(job, |_, _, _| {}).await?;
+  let pid = replay.pid("node-untagged")?;
+  assert_dead(pid, "id-less node-post group member").await?;
+  assert!(finished.terminated(pid), "{:?}", finished.lines());
+  Ok(())
+}
+
+#[tokio::test]
+async fn id_less_member_of_a_composite_step_group_is_killed() -> TestResult {
+  let replay = Replay::new().await?;
+  let pids = replay.pids_dir();
+  let job = script_and_node_job(PROBE, &[("ORPHAN89_PIDS", &pids)])?;
+  replay.install_composite_action(&job)?;
+  let finished = replay.run(job, |_, _, _| {}).await?;
+  let pid = replay.pid("composite-untagged")?;
+  assert_dead(pid, "id-less composite-step group member").await?;
+  assert!(finished.terminated(pid), "{:?}", finished.lines());
+  Ok(())
+}
+
+#[tokio::test]
+async fn id_less_member_of_a_job_hook_group_is_killed() -> TestResult {
+  let replay = Replay::new().await?;
+  let hook = replay.pids.join("hook.sh");
+  std::fs::write(
+    &hook,
+    format!(
+      "env -u RUNNER_TRACKING_ID sleep 312 >/dev/null 2>&1 &\necho $! > '{}/hook-untagged'\n",
+      replay.pids_dir()
+    ),
+  )?;
+  let mut job = script_job(PROBE)?;
+  variable(
+    &mut job,
+    "ACTIONS_RUNNER_HOOK_JOB_STARTED",
+    &hook.to_string_lossy(),
+  );
+  let finished = replay.run(job, |_, _, _| {}).await?;
+  let pid = replay.pid("hook-untagged")?;
+  assert_dead(pid, "id-less job-hook group member").await?;
+  assert!(finished.terminated(pid), "{:?}", finished.lines());
+  Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // AC-6: setup failure, failing post, cancellation during cleanup
 // ---------------------------------------------------------------------------
 

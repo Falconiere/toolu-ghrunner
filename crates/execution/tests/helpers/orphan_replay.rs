@@ -166,6 +166,21 @@ impl Replay {
     Ok(())
   }
 
+  /// Install `orphan_89_composite.yml` where the captured action step looks.
+  pub fn install_composite_action(&self, job: &AgentJobRequestMessage) -> TestResult {
+    let root = self
+      .config
+      .workspace_root
+      .join(&job.job_id)
+      .join(".github/actions/orphan-89");
+    std::fs::create_dir_all(&root)?;
+    std::fs::write(
+      root.join("action.yml"),
+      include_str!("../orphan_89_composite.yml"),
+    )?;
+    Ok(())
+  }
+
   pub fn pid(&self, name: &str) -> TestResult<u32> {
     Ok(
       std::fs::read_to_string(self.pids.join(name))?

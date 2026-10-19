@@ -26,8 +26,9 @@ pub struct ShellScriptParams<'a> {
   /// Ignored when the child runs in a job container, which is never tagged.
   pub tracking_id: Option<&'a str>,
   /// This job's process tracking. The spawned step leads its own process
-  /// group, which is registered here for the job-end orphan sweep (`None`
-  /// when `process.clean=false`).
+  /// group, which is registered here for the job-end orphan sweep and
+  /// released once the step leaves nothing in it (`None` when
+  /// `process.clean=false`; ignored when the child runs in a job container).
   pub tracking: Option<&'a crate::execution::orphan_cleanup::ProcessTracking>,
   /// Time left in the enclosing top-level step.
   pub timeout: Option<Duration>,

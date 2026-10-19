@@ -310,8 +310,8 @@ Both see only the environment a process was started with, and only for
 processes the runner's user may inspect. With SIP on, macOS shows no
 environment at all for Apple platform binaries (`sleep`, `sh`, `bash`,
 `/usr/bin/python3`, …); the process-group match covers those while they stay in
-the step's group, but one that detaches into its own session (`setsid`) is not
-found there. Processes started through `sudo` or as another user, and an
+the step's group, but one that detaches into its own session or group
+(`setsid`/`setpgid`) is not found there. Processes started through `sudo` or as another user, and an
 `env -i` process that left the step's group, are not found either. Processes inside Docker
 containers are never tagged; container teardown owns them. A runner crash, or
 the `boot` deadline watchdog's hard exit, skips the sweep.

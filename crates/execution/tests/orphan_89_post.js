@@ -15,5 +15,17 @@ if (dir) {
   });
   fs.writeFileSync(path.join(dir, 'node-post'), String(child.pid));
   child.unref();
+  if (process.env.ORPHAN89_POST_UNTAGGED === '1') {
+    // Stays in this post's process group but without the id: only the
+    // group match can find it.
+    const env = { ...process.env };
+    delete env.RUNNER_TRACKING_ID;
+    const untagged = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 310000)'], {
+      env,
+      stdio: 'ignore',
+    });
+    fs.writeFileSync(path.join(dir, 'node-untagged'), String(untagged.pid));
+    untagged.unref();
+  }
 }
 process.exitCode = process.env.ORPHAN89_POST_EXIT === '1' ? 1 : 0;

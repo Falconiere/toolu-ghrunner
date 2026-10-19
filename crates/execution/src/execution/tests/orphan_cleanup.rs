@@ -12,8 +12,9 @@ use shared::VariableValue;
 use sysinfo::{Pid, ProcessesToUpdate, System};
 
 use super::{
-  CleanupReport, KillOutcome, ProcessTracking, TRACKING_ENV, Tracked, carries_id, kill_verified,
-  process_clean_enabled, refresh_kind, report_warnings, scan_candidates, sweep_blocking,
+  CleanupReport, KillOutcome, ProcessTracking, TRACKING_ENV, Tracked, carries_id, in_tracked_group,
+  kill_verified, process_clean_enabled, refresh_kind, report_warnings, scan_candidates,
+  sweep_blocking,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -377,7 +378,13 @@ fn register_group_needs_the_jobs_own_id_in_the_spawn_env() -> TestResult {
   let mut tracked = Command::new("true");
   tracked.env(TRACKING_ENV, tracking.id().to_ascii_uppercase());
   tracking.register_group(&tracked, 104);
-  assert_eq!(tracking.snapshot().groups, [104]);
+  let ids: Vec<u32> = tracking
+    .snapshot()
+    .groups
+    .iter()
+    .map(|group| group.id)
+    .collect();
+  assert_eq!(ids, [104]);
   Ok(())
 }
 
@@ -420,7 +427,9 @@ while not os.path.exists(sys.argv[1]): time.sleep(0.05)\n\
 os.setpgid(0, 0)\n\
 open(sys.argv[2], 'w').close()\n\
 time.sleep(300)\n";
-  let script = "python3 -c \"$1\" \"$2\" \"$3\" >/dev/null 2>&1 & echo $!";
+  // `env -u`: without the id only the group can tie it to the job, on every OS.
+  let script =
+    "env -u RUNNER_TRACKING_ID python3 -c \"$1\" \"$2\" \"$3\" >/dev/null 2>&1 & echo $!";
   let (command, root, member) = group_root(
     tracking.id(),
     script,
@@ -444,6 +453,119 @@ time.sleep(300)\n";
   force_kill(member);
   assert_eq!(outcome, KillOutcome::Skipped);
   assert!(still_running, "a process that left the group was signalled");
+  Ok(())
+}
+
+/// A `/bin/sh` group leader that stays alive (it execs into `sleep`) with an
+/// id-less background member; returns the leader and the member's pid.
+fn live_group(id: &str) -> Result<(Child, u32), Box<dyn std::error::Error>> {
+  let mut leader = Command::new("/bin/sh")
+    .args([
+      "-c",
+      "env -u RUNNER_TRACKING_ID sleep 300 >/dev/null 2>&1 & echo $!; exec sleep 301",
+    ])
+    .env(TRACKING_ENV, id)
+    .process_group(0)
+    .stdin(Stdio::null())
+    .stdout(Stdio::piped())
+    .stderr(Stdio::null())
+    .spawn()?;
+  let mut line = String::new();
+  BufReader::new(leader.stdout.take().ok_or("stdout")?).read_line(&mut line)?;
+  Ok((leader, line.trim().parse()?))
+}
+
+#[test]
+fn a_group_whose_id_now_names_another_leader_is_spared() -> TestResult {
+  let tracking = ProcessTracking::for_job(&variables(&[])).ok_or("tracking enabled")?;
+  let (mut leader, member) = live_group(tracking.id())?;
+  let mut command = Command::new("true");
+  command.env(TRACKING_ENV, tracking.id());
+  tracking.register_group(&command, leader.id());
+  // The same group id, but recorded with a leader that started at another
+  // time: the id now belongs to an unrelated group.
+  let mut recycled = tracking.snapshot();
+  for group in &mut recycled.groups {
+    group.leader_start = Some(1);
+  }
+  let spared = sweep_blocking(&recycled, std::process::id(), far_deadline(), |_, _| {});
+  let member_alive = running(member)?;
+  let owned = sweep_blocking(
+    &tracking.snapshot(),
+    std::process::id(),
+    far_deadline(),
+    |_, _| {},
+  );
+  force_kill(member);
+  leader.kill()?;
+  leader.wait()?;
+  assert!(!spared.terminated.contains(&member), "{spared:?}");
+  assert!(member_alive, "a member of a recycled group id was killed");
+  assert!(owned.terminated.contains(&member), "{owned:?}");
+  Ok(())
+}
+
+#[test]
+fn group_matches_need_a_start_since_the_job_and_the_runners_uid() -> TestResult {
+  let tracking = ProcessTracking::for_job(&variables(&[])).ok_or("tracking enabled")?;
+  let (command, root, member) = group_root(
+    tracking.id(),
+    "env -u RUNNER_TRACKING_ID sleep 300 >/dev/null 2>&1 & echo $!",
+    &[],
+  )?;
+  tracking.register_group(&command, root);
+  let member: u32 = member.parse()?;
+  let tracked = tracking.snapshot();
+
+  let mut later = tracked.clone();
+  later.started += 3600;
+  let report = sweep_blocking(&later, std::process::id(), far_deadline(), |_, _| {});
+  let alive_after_later = running(member)?;
+
+  let mut system = System::new();
+  let pid = Pid::from_u32(member);
+  system.refresh_processes_specifics(
+    ProcessesToUpdate::Some(&[pid]),
+    true,
+    sysinfo::ProcessRefreshKind::nothing().with_user(sysinfo::UpdateKind::Always),
+  );
+  let process = system.process(pid).ok_or("member not visible")?;
+  let own = process.user_id().cloned().ok_or("member uid unreadable")?;
+  let other: sysinfo::Uid = if own.to_string() == "0" { "1" } else { "0" }.parse()?;
+  let matches_own = in_tracked_group(&system, process, &tracked, Some(&own));
+  let matches_other = in_tracked_group(&system, process, &tracked, Some(&other));
+  let matches_unknown = in_tracked_group(&system, process, &tracked, None);
+  force_kill(member);
+
+  assert!(report.terminated.is_empty(), "{report:?}");
+  assert!(
+    alive_after_later,
+    "a process older than the job was matched"
+  );
+  assert!(matches_own);
+  assert!(!matches_other, "another user's process was matched");
+  assert!(!matches_unknown, "an unknown runner uid matched");
+  Ok(())
+}
+
+#[test]
+fn release_forgets_only_groups_left_empty() -> TestResult {
+  let tracking = ProcessTracking::for_job(&variables(&[])).ok_or("tracking enabled")?;
+  let (empty_command, empty_root, _) = group_root(tracking.id(), "echo done", &[])?;
+  tracking.register_group(&empty_command, empty_root);
+  let (busy_command, busy_root, member) =
+    group_root(tracking.id(), "sleep 300 >/dev/null 2>&1 & echo $!", &[])?;
+  tracking.register_group(&busy_command, busy_root);
+  tracking.release_if_empty(empty_root);
+  tracking.release_if_empty(busy_root);
+  let ids: Vec<u32> = tracking
+    .snapshot()
+    .groups
+    .iter()
+    .map(|group| group.id)
+    .collect();
+  force_kill(member.parse()?);
+  assert_eq!(ids, [busy_root]);
   Ok(())
 }
 

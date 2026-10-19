@@ -648,8 +648,11 @@ to that list requires proving the value is not a real credential.
   step led: `script.rs` / `node_exec.rs` call
   `ProcessTracking::register_group(cmd.as_std(), pid)` after `spawn_in_cgroup`
   (registered only when the spawn env carries the job's id, keeping the `''`
-  opt-out); candidates re-verify by the same evidence (start time + env, or
-  `getpgid` still tracked) before `SIGKILL`. A `setsid`'d platform binary on
+  opt-out) and `release_if_empty` after the wait (`killpg(G, 0)` → `ESRCH`), so
+  a group id the kernel recycles cannot match later; a registered group whose id
+  now names a live leader with another start time is spared; candidates
+  re-verify by the same evidence (start time + env, or `getpgid` still an owned
+  group) before `SIGKILL`. A `setsid`'d platform binary on
   SIP macOS stays uncovered; the replay tests require an env-visible
   `python3` (`Replay::new` precondition).
   `workspace_layout.rs` (+ `workspace_tracking.rs`, `workspace_lease.rs`)
