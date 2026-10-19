@@ -642,19 +642,10 @@ to that list requires proving the value is not a real credential.
   `process.clean=false` disables it) and, in `finish_execution` before
   `JobCompleted`, `SIGKILL`s every other process still carrying it (sysinfo:
   Linux `/proc`, macOS `KERN_PROCARGS2`; 15 s deadline; never fails the job).
-  SIP macOS hides the environment of `cs_restricted` (Apple platform) binaries
-  even from their parent, so a second inheritance-based match also kills
-  same-uid processes started during the job whose process group is one a host
-  step led: `script.rs` / `node_exec.rs` call
-  `ProcessTracking::register_group(cmd.as_std(), pid)` after `spawn_in_cgroup`
-  (registered only when the spawn env carries the job's id, keeping the `''`
-  opt-out) and `release_if_empty` after the wait (`killpg(G, 0)` → `ESRCH`), so
-  a group id the kernel recycles cannot match later; a registered group whose id
-  now names a live leader with another start time is spared; candidates
-  re-verify by the same evidence (start time + env, or `getpgid` still an owned
-  group) before `SIGKILL`. A `setsid`'d platform binary on
-  SIP macOS stays uncovered; the replay tests require an env-visible
-  `python3` (`Replay::new` precondition).
+  SIP macOS hides Apple platform binaries' env, so the sweep also kills
+  same-uid processes started during the job in a step's registered process
+  group (`ProcessTracking::register_group` / `release_if_empty`; the module doc
+  has the reuse guards and the uncovered `setsid` case).
   `workspace_layout.rs` (+ `workspace_tracking.rs`, `workspace_lease.rs`)
   allocates and leases the job workspace (#90); `workspace_gc.rs` prunes
   stable workspaces unused for `stable_gc_hours` (default never) and fresh
