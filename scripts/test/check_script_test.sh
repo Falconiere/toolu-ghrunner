@@ -56,9 +56,16 @@ fi
 # Pushing from a linked worktree gives the pre-push hook an absolute GIT_DIR;
 # tests that run `git commit` in temporary repositories then hit this
 # checkout's index. The clear must precede the first cargo invocation.
-clear_line=$(grep -nF 'git rev-parse --local-env-vars' "$SCRIPT" | grep -v '^[0-9]*:[[:space:]]*#' | head -1 | cut -d: -f1)
-if [[ -z "$clear_line" ]]; then
-  echo "FAIL: $SCRIPT does not clear the hook's GIT_* repository variables" >&2
+# Pin the executing construct, not just the text: the `unset` of each listed
+# name and the loop fed by the command — a comment or an `echo` of the command
+# would match neither.
+unset_line=$(grep -nE '^[[:space:]]*unset "\$_git_var"[[:space:]]*$' "$SCRIPT" | head -1 | cut -d: -f1)
+clear_line=$(grep -nE '^[[:space:]]*done < <\(git rev-parse --local-env-vars\)[[:space:]]*$' "$SCRIPT" | head -1 | cut -d: -f1)
+if [[ -z "$unset_line" || -z "$clear_line" ]]; then
+  echo "FAIL: $SCRIPT does not unset each name 'git rev-parse --local-env-vars' lists in a loop" >&2
+  fail=1
+elif ((unset_line >= clear_line)); then
+  echo "FAIL: the unset (line $unset_line) is not inside the loop fed at line $clear_line" >&2
   fail=1
 elif [[ -n "$cargo_line" ]] && ((clear_line >= cargo_line)); then
   echo "FAIL: GIT_* variables are cleared at line $clear_line, after the first cargo call at line $cargo_line" >&2

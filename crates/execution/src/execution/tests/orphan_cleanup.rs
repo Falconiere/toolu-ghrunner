@@ -456,16 +456,15 @@ time.sleep(300)\n";
   Ok(())
 }
 
-/// A `/bin/sh` group leader that stays alive (it execs into `sleep`) with an
-/// id-less background member; returns the leader and the member's pid.
-fn live_group(id: &str) -> Result<(Child, u32), Box<dyn std::error::Error>> {
+/// A `/bin/sh` group leader that stays alive (it execs into `sleep`) with a
+/// background member, neither ever carrying a job id — only the group can
+/// tie them to a job; returns the leader and the member's pid. (A leader
+/// spawned with the id could be swept by its environment before its `exec`,
+/// and a killed, unreaped leader then reads as gone.)
+fn live_group() -> Result<(Child, u32), Box<dyn std::error::Error>> {
   let mut leader = Command::new("/bin/sh")
-    .args([
-      "-c",
-      "env -u RUNNER_TRACKING_ID sleep 300 >/dev/null 2>&1 & echo $!; \
-       exec env -u RUNNER_TRACKING_ID sleep 301",
-    ])
-    .env(TRACKING_ENV, id)
+    .args(["-c", "sleep 300 >/dev/null 2>&1 & echo $!; exec sleep 301"])
+    .env_remove(TRACKING_ENV)
     .process_group(0)
     .stdin(Stdio::null())
     .stdout(Stdio::piped())
@@ -479,7 +478,7 @@ fn live_group(id: &str) -> Result<(Child, u32), Box<dyn std::error::Error>> {
 #[test]
 fn a_group_whose_id_now_names_another_leader_is_spared() -> TestResult {
   let tracking = ProcessTracking::for_job(&variables(&[])).ok_or("tracking enabled")?;
-  let (mut leader, member) = live_group(tracking.id())?;
+  let (mut leader, member) = live_group()?;
   let mut command = Command::new("true");
   command.env(TRACKING_ENV, tracking.id());
   tracking.register_group(&command, leader.id());
