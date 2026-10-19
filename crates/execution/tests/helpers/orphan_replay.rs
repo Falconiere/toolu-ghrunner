@@ -404,8 +404,14 @@ fn python3_environment_is_visible() -> TestResult {
     }
     std::thread::sleep(Duration::from_millis(50));
   }
-  child.kill()?;
-  child.wait()?;
+  // Best-effort: the verdict is already known; a failed cleanup must not
+  // turn a visible environment into a failed precondition.
+  if let Err(error) = child.kill() {
+    eprintln!("python3 probe cleanup: kill failed: {error}");
+  }
+  if let Err(error) = child.wait() {
+    eprintln!("python3 probe cleanup: wait failed: {error}");
+  }
   if visible {
     return Ok(());
   }

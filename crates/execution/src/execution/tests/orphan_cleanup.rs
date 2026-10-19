@@ -181,8 +181,14 @@ fn environment_visible(program: &Path) -> Result<bool, Box<dyn std::error::Error
     }
     std::thread::sleep(Duration::from_millis(50));
   }
-  child.kill()?;
-  child.wait()?;
+  // Best-effort: the verdict is already known; a failed cleanup must not
+  // turn it into an error.
+  if let Err(error) = child.kill() {
+    eprintln!("probe cleanup: kill failed: {error}");
+  }
+  if let Err(error) = child.wait() {
+    eprintln!("probe cleanup: wait failed: {error}");
+  }
   Ok(visible)
 }
 
@@ -573,16 +579,31 @@ fn group_matches_need_a_start_since_the_job_and_the_runners_uid() -> TestResult 
   let mut later = tracked.clone();
   later.started += 3600;
   let report = sweep_blocking(&later, std::process::id(), far_deadline(), |_, _| {});
-  let alive_after_later = running(member)?;
+  if !report.terminated.is_empty() || !running(member)? {
+    force_kill(member);
+    return Err(format!("a process older than the job was matched: {report:?}").into());
+  }
 
+  // macOS sysinfo drops a process whose arguments it cannot read at that
+  // instant (a fresh `exec`), so poll rather than trust a single refresh.
   let mut system = System::new();
   let pid = Pid::from_u32(member);
-  system.refresh_processes_specifics(
-    ProcessesToUpdate::Some(&[pid]),
-    true,
-    sysinfo::ProcessRefreshKind::nothing().with_user(sysinfo::UpdateKind::Always),
-  );
-  let process = system.process(pid).ok_or("member not visible")?;
+  let kind = sysinfo::ProcessRefreshKind::nothing().with_user(sysinfo::UpdateKind::Always);
+  for _ in 0..100 {
+    system.refresh_processes_specifics(ProcessesToUpdate::Some(&[pid]), true, kind);
+    if system
+      .process(pid)
+      .and_then(sysinfo::Process::user_id)
+      .is_some()
+    {
+      break;
+    }
+    std::thread::sleep(Duration::from_millis(50));
+  }
+  let Some(process) = system.process(pid) else {
+    force_kill(member);
+    return Err(format!("member {member} never became visible to sysinfo").into());
+  };
   let own = process.user_id().cloned().ok_or("member uid unreadable")?;
   let other: sysinfo::Uid = if own.to_string() == "0" { "1" } else { "0" }.parse()?;
   let matches_own = in_tracked_group(&system, process, &tracked, Some(&own));
@@ -590,11 +611,6 @@ fn group_matches_need_a_start_since_the_job_and_the_runners_uid() -> TestResult 
   let matches_unknown = in_tracked_group(&system, process, &tracked, None);
   force_kill(member);
 
-  assert!(report.terminated.is_empty(), "{report:?}");
-  assert!(
-    alive_after_later,
-    "a process older than the job was matched"
-  );
   assert!(matches_own);
   assert!(!matches_other, "another user's process was matched");
   assert!(!matches_unknown, "an unknown runner uid matched");
