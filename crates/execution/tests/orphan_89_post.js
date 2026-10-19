@@ -6,7 +6,13 @@ const path = require('node:path');
 console.log(`TRACK89|node-post|${process.env.RUNNER_TRACKING_ID ?? 'unset'}`);
 const dir = process.env.ORPHAN89_PIDS;
 if (dir) {
-  const child = spawn('sleep', ['305'], { detached: true, stdio: 'ignore' });
+  // The detached child is this Node itself, not `sleep`: with SIP on, macOS
+  // hides the environment of a setsid'd Apple platform binary such as
+  // /bin/sleep, which no inheritance-based sweep can then find.
+  const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 305000)'], {
+    detached: true,
+    stdio: 'ignore',
+  });
   fs.writeFileSync(path.join(dir, 'node-post'), String(child.pid));
   child.unref();
 }

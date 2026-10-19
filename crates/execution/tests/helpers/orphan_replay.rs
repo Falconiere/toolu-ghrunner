@@ -137,6 +137,7 @@ impl Replay {
     };
     let pids = root.path().join("pids");
     std::fs::create_dir_all(&pids)?;
+    python3_environment_is_visible()?;
     seed_node(&config.data_dir).await?;
     Ok(Self {
       _root: root,
@@ -356,6 +357,48 @@ python3 -c 'import os,sys,time; os.setsid(); open(sys.argv[1],"w").write(str(os.
 while [ ! -s "$P/detached" ] || [ ! -s "$P/grandchild" ]; do sleep 0.05; done
 {tail}
 "#
+  )
+}
+
+/// Precondition for the `setsid` python sleepers: the kernel must show other
+/// processes the `python3` on `PATH`'s environment. With SIP on, macOS hides
+/// it for Apple platform binaries (`/usr/bin/python3`); a setsid'd platform
+/// binary is then outside the orphan sweep by design, so these scenarios need
+/// a non-Apple interpreter (Homebrew, venv, python.org, any Linux python3).
+fn python3_environment_is_visible() -> TestResult {
+  let marker = "ORPHAN89_PROBE=visible";
+  let mut child = std::process::Command::new("python3")
+    .args(["-c", "import time; time.sleep(10)"])
+    .env("ORPHAN89_PROBE", "visible")
+    .stdin(std::process::Stdio::null())
+    .spawn()?;
+  let pid = sysinfo::Pid::from_u32(child.id());
+  let mut system = sysinfo::System::new();
+  let kind = sysinfo::ProcessRefreshKind::nothing().with_environ(sysinfo::UpdateKind::Always);
+  let mut visible = false;
+  for _ in 0..40 {
+    system.refresh_processes_specifics(sysinfo::ProcessesToUpdate::Some(&[pid]), true, kind);
+    visible = system.process(pid).is_some_and(|process| {
+      process
+        .environ()
+        .iter()
+        .any(|entry| entry.as_encoded_bytes() == marker.as_bytes())
+    });
+    if visible {
+      break;
+    }
+    std::thread::sleep(Duration::from_millis(50));
+  }
+  child.kill()?;
+  child.wait()?;
+  if visible {
+    return Ok(());
+  }
+  Err(
+    "the python3 on PATH hides its environment from other processes (an Apple platform \
+     binary under SIP); put a Homebrew/venv/python.org python3 first on PATH for the orphan \
+     replay tests"
+      .into(),
   )
 }
 

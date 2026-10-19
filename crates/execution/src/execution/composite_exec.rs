@@ -379,6 +379,7 @@ async fn execute_composite_script(
   let deadline = run.active_deadline();
   let cgroup_path = run.ctx.cgroup_path().map(Path::to_path_buf);
   let tracking = run.ctx.process_tracking_env();
+  let group_tracking = run.ctx.process_tracking().cloned();
   let container = run.ctx.job_container().cloned();
   let shell_params = ShellScriptParams {
     shell,
@@ -388,6 +389,7 @@ async fn execute_composite_script(
     log_step_id: params.parent_step_id,
     cgroup_path: cgroup_path.as_deref(),
     tracking_id: tracking.as_deref(),
+    tracking: group_tracking.as_ref(),
     timeout: deadline.map(|at| at.saturating_duration_since(Instant::now())),
     cancel: &cancel,
   };
@@ -461,6 +463,7 @@ async fn run_container_shell(
     step_id: shell_params.log_step_id,
     cgroup_path: None,
     tracking_id: None,
+    tracking: None,
     timeout: shell_params.timeout,
     cancel: shell_params.cancel,
     container: Some(container),

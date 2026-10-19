@@ -31,6 +31,10 @@ pub struct ScriptParams<'a> {
   /// `RUNNER_TRACKING_ID` for a host child (`None` = untagged; issue #89).
   /// Ignored when the child runs in a job container, which is never tagged.
   pub tracking_id: Option<&'a str>,
+  /// This job's process tracking. The spawned step leads its own process
+  /// group, which is registered here for the job-end orphan sweep (`None`
+  /// when `process.clean=false`).
+  pub tracking: Option<&'a crate::execution::orphan_cleanup::ProcessTracking>,
   /// `timeout-minutes` bound for the child wait (`None` = unbounded).
   pub timeout: Option<Duration>,
   /// In-flight cancellation: a fired token kills the child mid-run.
@@ -249,7 +253,7 @@ async fn spawn_step_shell(
     .envs(&env)
     .stdout(Stdio::piped())
     .stderr(Stdio::piped());
-  spawn_in_cgroup(&mut cmd, params.cgroup_path)
+  let child = spawn_in_cgroup(&mut cmd, params.cgroup_path)
     .await
     .map_err(|e| {
       RunnerError::ScriptHandler(format!(
@@ -257,7 +261,11 @@ async fn spawn_step_shell(
         program.display(),
         params.working_dir.display()
       ))
-    })
+    })?;
+  if let (Some(tracking), Some(group)) = (params.tracking, child.id()) {
+    tracking.register_group(cmd.as_std(), group);
+  }
+  Ok(child)
 }
 
 /// Spawn a task that forwards every line read from `reader` as a `Log` event

@@ -6,17 +6,30 @@
 //! process whose environment still carries that id receives `SIGKILL`.
 //! Linux reads `/proc/<pid>/environ`; macOS reads `sysctl(KERN_PROCARGS2)`.
 //! Both expose the environment captured at `exec` and only for processes the
-//! runner's user may inspect, so `sudo`, `env -i` and other users' processes
-//! fall outside the sweep, exactly as upstream.
+//! runner's user may inspect, so `sudo` and other users' processes fall
+//! outside the sweep, exactly as upstream.
+//!
+//! With SIP on, macOS returns no environment at all for `cs_restricted`
+//! targets — Apple platform binaries such as `sleep`, `sh`, `bash`, `zsh` and
+//! `/usr/bin/python3` — even to their parent. A second, inheritance-based
+//! match covers them: every host step leads its own process group
+//! (`spawn_in_cgroup`), the step's group is registered with the job's
+//! tracking when its spawn environment carries the job's id
+//! ([`ProcessTracking::register_group`]), and a same-user process started
+//! during the job whose process group is one of those is swept too. A daemon
+//! that leaves the group (`setsid`/`setpgid`) is still found only by its
+//! environment, so a platform-binary daemon on SIP macOS is not covered.
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
+use std::process::Command;
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use shared::{LogStream, RunnerEvent, VariableValue};
 use sysinfo::{
-  Pid, ProcessRefreshKind, ProcessStatus, ProcessesToUpdate, Signal, System, UpdateKind,
+  Pid, Process, ProcessRefreshKind, ProcessStatus, ProcessesToUpdate, Signal, System, Uid,
+  UpdateKind,
 };
 use tokio::sync::mpsc;
 
@@ -42,10 +55,14 @@ const EXIT_POLL: Duration = Duration::from_millis(100);
 /// Job log header, upstream's wording.
 const HEADER: &str = "Cleaning up orphan processes";
 
-/// The tracking id of one job; `None` on the context when `process.clean=false`.
+/// The tracking of one job; `None` on the context when `process.clean=false`.
 #[derive(Debug, Clone)]
 pub struct ProcessTracking {
   id: String,
+  /// Unix seconds at job entry: a group match must have started since.
+  started: u64,
+  /// Process groups led by host steps whose spawn environment carried `id`.
+  groups: Arc<Mutex<Vec<u32>>>,
 }
 
 impl ProcessTracking {
@@ -53,6 +70,10 @@ impl ProcessTracking {
   pub(crate) fn for_job(variables: &HashMap<String, VariableValue>) -> Option<Self> {
     process_clean_enabled(variables).then(|| Self {
       id: format!("github_{}", uuid::Uuid::new_v4()),
+      started: SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |since| since.as_secs()),
+      groups: Arc::default(),
     })
   }
 
@@ -60,6 +81,52 @@ impl ProcessTracking {
   pub fn id(&self) -> &str {
     &self.id
   }
+
+  /// Record `group` — the pid of a step root spawned as its own process
+  /// group leader — when `command` set `RUNNER_TRACKING_ID` to this job's id
+  /// (ASCII case-insensitive). A step that opted out (`''`) or overrode the
+  /// id is never group-tracked, preserving upstream's opt-out.
+  pub fn register_group(&self, command: &Command, group: u32) {
+    let tracked = command.get_envs().any(|(key, value)| {
+      key == TRACKING_ENV
+        && value.is_some_and(|value| {
+          value
+            .as_encoded_bytes()
+            .eq_ignore_ascii_case(self.id.as_bytes())
+        })
+    });
+    if tracked {
+      self
+        .groups
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .push(group);
+    }
+  }
+
+  /// What one sweep matches against, frozen when the sweep starts.
+  pub(crate) fn snapshot(&self) -> Tracked {
+    Tracked {
+      id: self.id.clone(),
+      started: self.started,
+      groups: self
+        .groups
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone(),
+    }
+  }
+}
+
+/// A job's tracking as one sweep sees it.
+#[derive(Debug, Clone)]
+pub(crate) struct Tracked {
+  /// The job's `RUNNER_TRACKING_ID`.
+  pub(crate) id: String,
+  /// Unix seconds at job entry.
+  pub(crate) started: u64,
+  /// Registered step process groups.
+  pub(crate) groups: Vec<u32>,
 }
 
 /// Upstream `GetBoolean("process.clean") ?? true`: only a (trimmed,
@@ -104,12 +171,22 @@ pub struct CleanupReport {
   pub failed: bool,
 }
 
-/// One process found carrying the id during a scan.
+/// How a candidate is tied to the job; re-verified by the same evidence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Evidence {
+  /// Its environment carries the job's id.
+  Environment,
+  /// It sits in one of the job's step process groups.
+  Group,
+}
+
+/// One process found tied to the job during a scan.
 #[derive(Debug, Clone)]
 pub(crate) struct Candidate {
   pub(crate) pid: u32,
   start_time: u64,
   name: String,
+  evidence: Evidence,
 }
 
 /// Result of one full process scan.
@@ -136,7 +213,7 @@ pub(crate) async fn sweep(
   events: &mpsc::Sender<RunnerEvent>,
 ) -> CleanupReport {
   job_log(events, HEADER.to_owned()).await;
-  let id = tracking.id.clone();
+  let tracked = tracking.snapshot();
   let own_pid = std::process::id();
   let deadline = Instant::now() + ORPHAN_CLEANUP_TIMEOUT;
   // The blocking closure owns no event sender: a thread parked in the kernel
@@ -145,7 +222,7 @@ pub(crate) async fn sweep(
   let kills = Arc::new(Mutex::new(Vec::new()));
   let sink = Arc::clone(&kills);
   let task = tokio::task::spawn_blocking(move || {
-    sweep_blocking(&id, own_pid, deadline, |pid, name| {
+    sweep_blocking(&tracked, own_pid, deadline, |pid, name| {
       sink
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
@@ -182,7 +259,7 @@ pub(crate) async fn sweep(
 /// Scan, re-verify and kill until a pass finds no new candidate, then wait for
 /// the killed processes to exit — all bounded by `deadline`.
 pub(crate) fn sweep_blocking(
-  id: &str,
+  tracked: &Tracked,
   own_pid: u32,
   deadline: Instant,
   mut on_kill: impl FnMut(u32, &str),
@@ -196,7 +273,7 @@ pub(crate) fn sweep_blocking(
       report.timed_out = true;
       break;
     }
-    let scan = scan_candidates(&mut system, id, own_pid);
+    let scan = scan_candidates(&mut system, tracked, own_pid);
     report.degraded |= !scan.own_pid_seen;
     let fresh: Vec<Candidate> = scan
       .candidates
@@ -211,7 +288,7 @@ pub(crate) fn sweep_blocking(
         report.timed_out = true;
         break 'passes;
       }
-      match kill_verified(&mut system, id, &candidate) {
+      match kill_verified(&mut system, tracked, &candidate) {
         KillOutcome::Killed => {
           on_kill(candidate.pid, &candidate.name);
           killed.push(candidate);
@@ -225,9 +302,29 @@ pub(crate) fn sweep_blocking(
   report
 }
 
-/// Every process other than `own_pid` whose environment carries `id`.
-pub(crate) fn scan_candidates(system: &mut System, id: &str, own_pid: u32) -> Scan {
+/// The process group of `pid`; `None` once it is gone.
+fn process_group(pid: u32) -> Option<u32> {
+  let raw = i32::try_from(pid).ok()?;
+  let group = nix::unistd::getpgid(Some(nix::unistd::Pid::from_raw(raw))).ok()?;
+  u32::try_from(group.as_raw()).ok()
+}
+
+/// A same-user process started during the job inside one of its step groups.
+fn in_tracked_group(process: &Process, tracked: &Tracked, own_uid: Option<&Uid>) -> bool {
+  !tracked.groups.is_empty()
+    && process.start_time() >= tracked.started
+    && own_uid.is_some_and(|uid| process.user_id() == Some(uid))
+    && process_group(process.pid().as_u32()).is_some_and(|group| tracked.groups.contains(&group))
+}
+
+/// Every process other than `own_pid` tied to the job: its environment
+/// carries the id, or it sits in one of the job's step process groups.
+pub(crate) fn scan_candidates(system: &mut System, tracked: &Tracked, own_pid: u32) -> Scan {
   system.refresh_processes_specifics(ProcessesToUpdate::All, true, refresh_kind());
+  let runner_uid = system
+    .process(Pid::from_u32(own_pid))
+    .and_then(Process::user_id)
+    .cloned();
   let mut scan = Scan {
     candidates: Vec::new(),
     own_pid_seen: false,
@@ -236,29 +333,49 @@ pub(crate) fn scan_candidates(system: &mut System, id: &str, own_pid: u32) -> Sc
     let pid = pid.as_u32();
     if pid == own_pid {
       scan.own_pid_seen = true;
-    } else if process.thread_kind().is_none()
-      && process.status() != ProcessStatus::Zombie
-      && carries_id(process.environ(), id)
-    {
-      scan.candidates.push(Candidate {
-        pid,
-        start_time: process.start_time(),
-        name: process.name().to_string_lossy().into_owned(),
-      });
+      continue;
     }
+    if process.thread_kind().is_some() || process.status() == ProcessStatus::Zombie {
+      continue;
+    }
+    let evidence = if carries_id(process.environ(), &tracked.id) {
+      Evidence::Environment
+    } else if in_tracked_group(process, tracked, runner_uid.as_ref()) {
+      Evidence::Group
+    } else {
+      continue;
+    };
+    scan.candidates.push(Candidate {
+      pid,
+      start_time: process.start_time(),
+      name: process.name().to_string_lossy().into_owned(),
+      evidence,
+    });
   }
   scan
 }
 
 /// Refresh one candidate and `SIGKILL` it only if it is still the same
-/// process and still carries `id` — the guard against PID reuse and `exec`.
-pub(crate) fn kill_verified(system: &mut System, id: &str, candidate: &Candidate) -> KillOutcome {
+/// process and still tied to the job by the same evidence (the id in its
+/// environment, or membership of a step group) — the guard against PID
+/// reuse, `exec` and leaving the group.
+pub(crate) fn kill_verified(
+  system: &mut System,
+  tracked: &Tracked,
+  candidate: &Candidate,
+) -> KillOutcome {
   let pid = Pid::from_u32(candidate.pid);
   system.refresh_processes_specifics(ProcessesToUpdate::Some(&[pid]), true, refresh_kind());
   let Some(process) = system.process(pid) else {
     return KillOutcome::Skipped;
   };
-  if process.start_time() != candidate.start_time || !carries_id(process.environ(), id) {
+  let still_tied = match candidate.evidence {
+    Evidence::Environment => carries_id(process.environ(), &tracked.id),
+    Evidence::Group => {
+      process_group(candidate.pid).is_some_and(|group| tracked.groups.contains(&group))
+    },
+  };
+  if process.start_time() != candidate.start_time || !still_tied {
     return KillOutcome::Skipped;
   }
   match process.kill_with(Signal::Kill) {
@@ -316,11 +433,13 @@ fn has_exited(system: &mut System, pid: u32, start_time: Option<u64>) -> bool {
   })
 }
 
-/// Environment only; per-thread entries skipped so Linux reads each process once.
+/// Environment and owner; per-thread entries skipped so Linux reads each
+/// process once.
 fn refresh_kind() -> ProcessRefreshKind {
   ProcessRefreshKind::nothing()
     .without_tasks()
     .with_environ(UpdateKind::Always)
+    .with_user(UpdateKind::OnlyIfNotSet)
 }
 
 async fn warn_on_report(events: &mpsc::Sender<RunnerEvent>, report: &CleanupReport) {

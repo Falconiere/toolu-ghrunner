@@ -259,16 +259,25 @@ async fn concurrent_job_and_unrelated_process_survive_cleanup() -> TestResult {
 #[tokio::test]
 async fn empty_step_tracking_id_opts_out() -> TestResult {
   let replay = Replay::new().await?;
-  let mut job = script_job(&detached_script(&replay.pids_dir(), "detached", "exit 0"))?;
+  // Besides the setsid sleeper, a plain background `sleep` stays in the
+  // opted-out step's own process group: the group layer must spare it too.
+  let tail = r#"sleep 308 >/dev/null 2>&1 & echo $! > "$P/ingroup"
+exit 0"#;
+  let mut job = script_job(&detached_script(&replay.pids_dir(), "detached", tail))?;
   job.steps.first_mut().ok_or("step absent")?.environment =
     Some(mapping(&[("RUNNER_TRACKING_ID", "")]));
   let finished = replay.run(job, |_, _, _| {}).await?;
   let pid = replay.pid("detached")?;
+  let in_group = replay.pid("ingroup")?;
   let alive = ps_state(pid)?.is_some_and(|state| !state.starts_with('Z'));
+  let in_group_alive = ps_state(in_group)?.is_some_and(|state| !state.starts_with('Z'));
   kill(pid);
+  kill(in_group);
   assert_eq!(finished.markers(), [("run".to_owned(), String::new())]);
   assert!(alive, "opted-out process was killed");
+  assert!(in_group_alive, "opted-out step's group member was killed");
   assert!(!finished.terminated(pid));
+  assert!(!finished.terminated(in_group));
   Ok(())
 }
 
