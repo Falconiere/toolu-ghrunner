@@ -92,10 +92,11 @@ fn env_only(id: &str) -> Tracked {
 }
 
 /// `sleep` and a POSIX shell whose environment the kernel shows other
-/// processes. With SIP on, macOS hides the environment of Apple platform
-/// binaries (`cs_restricted`), so the env-path tests run ad-hoc re-signed
-/// copies of `/bin/sleep` and `/bin/bash` there (`/bin/sh` is a shim that
-/// re-execs a restricted shell). Linux reads `/proc` for every binary.
+/// processes. Linux reads `/proc` for every binary, and so does macOS with SIP
+/// off (hosted CI). With SIP on, macOS hides the environment of Apple platform
+/// binaries (`cs_restricted`), so there the env-path tests run ad-hoc
+/// re-signed copies of `/bin/sleep` and `/bin/bash` (`/bin/sh` is a shim that
+/// re-execs a restricted shell).
 struct VisibleTools {
   _dir: tempfile::TempDir,
   sleep: PathBuf,
@@ -109,6 +110,13 @@ fn visible_tools() -> Result<VisibleTools, Box<dyn std::error::Error>> {
       _dir: dir,
       sleep: PathBuf::from("sleep"),
       shell: PathBuf::from("/bin/sh"),
+    });
+  }
+  if environment_visible(Path::new("/bin/sleep"))? {
+    return Ok(VisibleTools {
+      _dir: dir,
+      sleep: PathBuf::from("/bin/sleep"),
+      shell: PathBuf::from("/bin/bash"),
     });
   }
   let resign = |source: &str, name: &str| -> Result<PathBuf, Box<dyn std::error::Error>> {
@@ -140,10 +148,42 @@ fn visible_tools() -> Result<VisibleTools, Box<dyn std::error::Error>> {
 
 /// Run `program` once to completion, failing loudly if it does not succeed.
 fn warm_up(program: &Path, args: &[&str]) -> Result<(), Box<dyn std::error::Error>> {
-  if Command::new(program).args(args).status()?.success() {
+  let status = Command::new(program).args(args).status()?;
+  if status.success() {
     return Ok(());
   }
-  Err(format!("warm-up run of {} failed", program.display()).into())
+  Err(format!("warm-up run of {} failed: {status}", program.display()).into())
+}
+
+/// Whether another process can read `program`'s environment: a real
+/// `program 30` started with a marker variable, polled through sysinfo.
+fn environment_visible(program: &Path) -> Result<bool, Box<dyn std::error::Error>> {
+  let mut child = Command::new(program)
+    .arg("30")
+    .env("ORPHAN89_VISIBLE", "1")
+    .stdin(Stdio::null())
+    .stdout(Stdio::null())
+    .stderr(Stdio::null())
+    .spawn()?;
+  let pid = Pid::from_u32(child.id());
+  let mut system = System::new();
+  let mut visible = false;
+  for _ in 0..40 {
+    system.refresh_processes_specifics(ProcessesToUpdate::Some(&[pid]), true, refresh_kind());
+    visible = system.process(pid).is_some_and(|process| {
+      process
+        .environ()
+        .iter()
+        .any(|entry| entry.as_encoded_bytes() == b"ORPHAN89_VISIBLE=1")
+    });
+    if visible {
+      break;
+    }
+    std::thread::sleep(Duration::from_millis(50));
+  }
+  child.kill()?;
+  child.wait()?;
+  Ok(visible)
 }
 
 /// `ps -o stat=` for `pid`: `None` once it is gone.
