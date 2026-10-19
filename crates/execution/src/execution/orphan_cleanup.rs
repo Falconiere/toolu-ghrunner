@@ -20,7 +20,11 @@
 //! is forgotten once its step leaves it empty
 //! ([`ProcessTracking::release_if_empty`]), and one whose id now names a live
 //! leader with another start time is treated as reused, so an unrelated group
-//! that inherits a recycled id is never matched. A daemon that leaves the
+//! that inherits a recycled id is not matched. One narrow case remains: a
+//! group still registered because its members outlived its step, whose
+//! members all died, whose id the kernel then reused for a new same-user
+//! group, and whose new leader already exited leaving members — those match.
+//! A daemon that leaves the
 //! group (`setsid`/`setpgid`) is still found only by its environment, so a
 //! platform-binary daemon on SIP macOS is not covered.
 
@@ -393,8 +397,7 @@ fn owned_group_of<'a>(system: &System, pid: u32, tracked: &'a Tracked) -> Option
   tracked
     .groups
     .iter()
-    .find(|group| group.id == id)
-    .filter(|group| group_owned(system, group))
+    .find(|group| group.id == id && group_owned(system, group))
 }
 
 /// A same-user process started during the job inside one of its step groups.

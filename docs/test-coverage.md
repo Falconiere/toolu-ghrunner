@@ -1194,8 +1194,9 @@ A `sudo` process, another user's process, or one that left the step's group
 (`setsid`/`setpgid`) while hiding or dropping the id still escapes. The replay
 tests need a `python3` whose environment the kernel shows (`Replay::new`
 precondition). They and the env-path unit tests (ad-hoc re-signed `sleep` /
-`bash` copies) were run on a SIP-enabled macOS 27.0.1 host, as well as CI. macOS real-process behavior is verified
-only by the CI `macos-14` test run; a macOS toolu live lane is **unverified**.
+`bash` copies) were run locally on a SIP-enabled macOS 27.0.1 host. macOS real-process behavior is verified by
+the CI `macos-14` test run and, for SIP-hidden environments, by that local
+macOS 27.0.1 run; a macOS toolu live lane is **unverified**.
 The toolu self-hosted workflow lane (`run_toolu`) is **unverified** (no
 registered runner). GHES is **unverified** (no server); the process rule does
 not depend on the server.

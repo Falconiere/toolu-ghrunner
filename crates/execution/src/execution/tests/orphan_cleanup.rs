@@ -462,7 +462,8 @@ fn live_group(id: &str) -> Result<(Child, u32), Box<dyn std::error::Error>> {
   let mut leader = Command::new("/bin/sh")
     .args([
       "-c",
-      "env -u RUNNER_TRACKING_ID sleep 300 >/dev/null 2>&1 & echo $!; exec sleep 301",
+      "env -u RUNNER_TRACKING_ID sleep 300 >/dev/null 2>&1 & echo $!; \
+       exec env -u RUNNER_TRACKING_ID sleep 301",
     ])
     .env(TRACKING_ENV, id)
     .process_group(0)
@@ -566,6 +567,68 @@ fn release_forgets_only_groups_left_empty() -> TestResult {
     .collect();
   force_kill(member.parse()?);
   assert_eq!(ids, [busy_root]);
+  Ok(())
+}
+
+/// Run `script` as a host `run:` step through the production `ScriptHandler`,
+/// tracked by `tracking`.
+async fn run_tracked_step(tracking: &ProcessTracking, script: &str) -> TestResult {
+  let dir = tempfile::tempdir()?;
+  let env = HashMap::from([("PATH".to_owned(), std::env::var("PATH")?)]);
+  let cancel = tokio_util::sync::CancellationToken::new();
+  let (events, _events_rx) = tokio::sync::mpsc::channel(256);
+  let (stdout, mut lines) = tokio::sync::mpsc::channel(256);
+  let output = crate::execution::handlers::script::ScriptHandler::new()
+    .execute(
+      &crate::execution::handlers::script::ScriptParams {
+        script,
+        shell: Some("bash"),
+        env: &env,
+        working_dir: dir.path(),
+        step_id: "orphan-group",
+        cgroup_path: None,
+        tracking_id: Some(tracking.id()),
+        tracking: Some(tracking),
+        timeout: Some(Duration::from_secs(15)),
+        cancel: &cancel,
+        container: None,
+        report_metadata: false,
+      },
+      &events,
+      stdout,
+    )
+    .await?;
+  while lines.recv().await.is_some() {}
+  assert_eq!(output.conclusion, shared::Conclusion::Success);
+  Ok(())
+}
+
+#[tokio::test]
+async fn the_script_handler_releases_a_step_group_only_once_it_is_empty() -> TestResult {
+  let tracking = ProcessTracking::for_job(&variables(&[])).ok_or("tracking enabled")?;
+  run_tracked_step(&tracking, "true").await?;
+  assert!(
+    tracking.snapshot().groups.is_empty(),
+    "a step that left nothing kept its group registered"
+  );
+
+  let dir = tempfile::tempdir()?;
+  let pid_file = dir.path().join("member");
+  run_tracked_step(
+    &tracking,
+    &format!(
+      "sleep 300 >/dev/null 2>&1 & echo $! > '{}'",
+      pid_file.display()
+    ),
+  )
+  .await?;
+  let groups = tracking.snapshot().groups;
+  force_kill(std::fs::read_to_string(&pid_file)?.trim().parse()?);
+  assert_eq!(
+    groups.len(),
+    1,
+    "a step with a live member lost its group: {groups:?}"
+  );
   Ok(())
 }
 
