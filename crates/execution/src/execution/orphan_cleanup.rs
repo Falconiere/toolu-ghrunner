@@ -408,7 +408,7 @@ pub(crate) fn in_tracked_group(
   own_uid: Option<&Uid>,
 ) -> bool {
   !tracked.groups.is_empty()
-    && process.start_time() + START_SLACK_SECS >= tracked.started
+    && process.start_time().saturating_add(START_SLACK_SECS) >= tracked.started
     && own_uid.is_some_and(|uid| process.user_id() == Some(uid))
     && owned_group_of(system, process.pid().as_u32(), tracked).is_some()
 }

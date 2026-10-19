@@ -213,30 +213,38 @@ fn force_kill(pid: u32) {
 }
 
 /// A `/bin/sh` step root leading its own process group (what
-/// `spawn_in_cgroup` does), carrying `id`; it runs `script` and its first
-/// stdout line is returned with the root's pid once the root has exited.
+/// `spawn_in_cgroup` does); it runs `script` and its first stdout line is
+/// returned with the root's pid once the root has exited, plus the spawn
+/// command `register_group` should see for a step tracked under `id`.
+///
+/// The root itself never carries `id`: a backgrounded member is a forked
+/// subshell holding the parent's environment until its `exec` completes, and
+/// where that environment is readable (Linux, SIP-off CI) a sweep landing in
+/// that window would match it by environment. Without the id in the tree,
+/// only the group ties the members to the job, on every OS.
 fn group_root(
   id: &str,
   script: &str,
   args: &[&str],
 ) -> Result<(Command, u32, String), Box<dyn std::error::Error>> {
-  let mut command = Command::new("/bin/sh");
-  command
+  let mut child = Command::new("/bin/sh")
     .arg("-c")
     .arg(script)
     .arg("sh")
     .args(args)
-    .env(TRACKING_ENV, id)
+    .env_remove(TRACKING_ENV)
     .process_group(0)
     .stdin(Stdio::null())
     .stdout(Stdio::piped())
-    .stderr(Stdio::null());
-  let mut child = command.spawn()?;
+    .stderr(Stdio::null())
+    .spawn()?;
   let root = child.id();
   let mut line = String::new();
   BufReader::new(child.stdout.take().ok_or("stdout")?).read_line(&mut line)?;
   child.wait()?;
-  Ok((command, root, line.trim().to_owned()))
+  let mut tracked_spawn = Command::new("/bin/sh");
+  tracked_spawn.env(TRACKING_ENV, id);
+  Ok((tracked_spawn, root, line.trim().to_owned()))
 }
 
 fn wait_for_path(path: &Path) -> Result<(), Box<dyn std::error::Error>> {

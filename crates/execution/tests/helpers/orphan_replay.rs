@@ -123,6 +123,13 @@ pub struct Replay {
 }
 
 impl Replay {
+  /// A fresh runner root (data + work dirs, seeded Node runtime).
+  ///
+  /// Requires a `python3` on `PATH` whose environment other processes can
+  /// read: the `setsid` sleepers are found only by their environment. On a
+  /// SIP-enabled Mac, `/usr/bin/python3` is an Apple platform binary whose
+  /// environment is hidden, so this fails up front, naming the fix: put a
+  /// Homebrew, venv or python.org `python3` first on `PATH`.
   pub async fn new() -> TestResult<Self> {
     let root = tempfile::tempdir()?;
     let config = RunnerConfig {
