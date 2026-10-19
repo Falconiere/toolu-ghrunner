@@ -126,11 +126,24 @@ fn visible_tools() -> Result<VisibleTools, Box<dyn std::error::Error>> {
   };
   let sleep = resign("/bin/sleep", "sleep")?;
   let shell = resign("/bin/bash", "bash")?;
+  // A freshly signed executable's first launch is held by the macOS malware
+  // scan for seconds; take that launch here, untimed, so it never lands inside
+  // a test's bounded wait.
+  warm_up(&sleep, &["0"])?;
+  warm_up(&shell, &["-c", "true"])?;
   Ok(VisibleTools {
     _dir: dir,
     sleep,
     shell,
   })
+}
+
+/// Run `program` once to completion, failing loudly if it does not succeed.
+fn warm_up(program: &Path, args: &[&str]) -> Result<(), Box<dyn std::error::Error>> {
+  if Command::new(program).args(args).status()?.success() {
+    return Ok(());
+  }
+  Err(format!("warm-up run of {} failed", program.display()).into())
 }
 
 /// `ps -o stat=` for `pid`: `None` once it is gone.
