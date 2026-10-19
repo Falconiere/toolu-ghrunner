@@ -27,6 +27,17 @@ set -euo pipefail
 # check below reads stdin, so nothing here needs it.
 exec </dev/null
 
+# Drop the repository variables a git hook exports (GIT_DIR, GIT_INDEX_FILE,
+# GIT_WORK_TREE, ...). Pushing from a linked worktree hands the pre-push hook an
+# ABSOLUTE GIT_DIR, so tests that create and commit to their own temporary
+# repositories would act on this checkout's index and hooks instead and fail.
+# `git rev-parse --local-env-vars` lists exactly the variables to clear.
+if command -v git >/dev/null 2>&1; then
+  while IFS= read -r _git_var; do
+    unset "$_git_var"
+  done < <(git rev-parse --local-env-vars)
+fi
+
 (( BASH_VERSINFO[0] >= 4 )) || { printf 'toolu: bash 4+ required (got %s).\n' "$BASH_VERSION" >&2; exit 1; }
 
 _self=${BASH_SOURCE[0]}

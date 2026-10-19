@@ -51,6 +51,22 @@ else
   echo "ok: stdin is detached before the first cargo call (line $cargo_line)"
 fi
 
+# --- a git hook's repository variables are cleared before any cargo call ---
+#
+# Pushing from a linked worktree gives the pre-push hook an absolute GIT_DIR;
+# tests that run `git commit` in temporary repositories then hit this
+# checkout's index. The clear must precede the first cargo invocation.
+clear_line=$(grep -nF 'git rev-parse --local-env-vars' "$SCRIPT" | grep -v '^[0-9]*:[[:space:]]*#' | head -1 | cut -d: -f1)
+if [[ -z "$clear_line" ]]; then
+  echo "FAIL: $SCRIPT does not clear the hook's GIT_* repository variables" >&2
+  fail=1
+elif [[ -n "$cargo_line" ]] && ((clear_line >= cargo_line)); then
+  echo "FAIL: GIT_* variables are cleared at line $clear_line, after the first cargo call at line $cargo_line" >&2
+  fail=1
+else
+  echo "ok: the hook's GIT_* repository variables are cleared before the first cargo call (line $clear_line)"
+fi
+
 # --- #118: the test step is nextest plus a separate doctest run ---
 for pat in 'cargo nextest run --workspace' 'cargo test --workspace --doc'; do
   if grep -qF -- "$pat" "$SCRIPT"; then
