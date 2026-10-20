@@ -144,7 +144,7 @@ impl Replay {
     };
     let pids = root.path().join("pids");
     std::fs::create_dir_all(&pids)?;
-    python3_environment_is_visible()?;
+    python3_environment_is_visible().await?;
     seed_node(&config.data_dir).await?;
     Ok(Self {
       _root: root,
@@ -387,7 +387,7 @@ while [ ! -s "$P/detached" ] || [ ! -s "$P/grandchild" ]; do sleep 0.05; done
 /// it for Apple platform binaries (`/usr/bin/python3`); a setsid'd platform
 /// binary is then outside the orphan sweep by design, so these scenarios need
 /// a non-Apple interpreter (Homebrew, venv, python.org, any Linux python3).
-fn python3_environment_is_visible() -> TestResult {
+async fn python3_environment_is_visible() -> TestResult {
   let marker = "ORPHAN89_PROBE=visible";
   let mut child = std::process::Command::new("python3")
     .args(["-c", "import time; time.sleep(10)"])
@@ -409,7 +409,7 @@ fn python3_environment_is_visible() -> TestResult {
     if visible {
       break;
     }
-    std::thread::sleep(Duration::from_millis(50));
+    tokio::time::sleep(Duration::from_millis(50)).await;
   }
   // Best-effort: the verdict is already known; a failed cleanup must not
   // turn a visible environment into a failed precondition.

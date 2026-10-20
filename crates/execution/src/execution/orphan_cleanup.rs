@@ -92,9 +92,7 @@ impl ProcessTracking {
   pub(crate) fn for_job(variables: &HashMap<String, VariableValue>) -> Option<Self> {
     process_clean_enabled(variables).then(|| Self {
       id: format!("github_{}", uuid::Uuid::new_v4()),
-      started: SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |since| since.as_secs()),
+      started: started_secs(SystemTime::now()),
       groups: Arc::default(),
     })
   }
@@ -156,6 +154,15 @@ impl ProcessTracking {
         .clone(),
     }
   }
+}
+
+/// `now` as Unix seconds, the lower bound a group match must start after. A
+/// clock before the epoch yields `u64::MAX`, so no process can match by group
+/// (the environment match still works): a broken clock fails closed.
+fn started_secs(now: SystemTime) -> u64 {
+  now
+    .duration_since(UNIX_EPOCH)
+    .map_or(u64::MAX, |since| since.as_secs())
 }
 
 /// A job's tracking as one sweep sees it.

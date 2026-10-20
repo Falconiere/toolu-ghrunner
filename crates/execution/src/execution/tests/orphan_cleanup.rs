@@ -14,7 +14,7 @@ use sysinfo::{Pid, ProcessesToUpdate, System};
 use super::{
   Attempts, CleanupReport, Evidence, KillOutcome, ProcessTracking, TRACKING_ENV, Tracked,
   carries_id, in_tracked_group, kill_verified, process_clean_enabled, refresh_kind,
-  report_warnings, scan_candidates, sweep_blocking,
+  report_warnings, scan_candidates, started_secs, sweep_blocking,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -277,6 +277,19 @@ fn process_clean_only_false_disables_tracking() {
   }
   assert!(process_clean_enabled(&variables(&[])));
   assert!(ProcessTracking::for_job(&variables(&[("process.clean", "false")])).is_none());
+}
+
+#[test]
+fn a_clock_before_the_epoch_disables_the_group_match() -> TestResult {
+  use std::time::{SystemTime, UNIX_EPOCH};
+  let before = UNIX_EPOCH
+    .checked_sub(Duration::from_secs(1))
+    .ok_or("pre-epoch time unrepresentable")?;
+  assert_eq!(started_secs(before), u64::MAX);
+  assert_eq!(started_secs(UNIX_EPOCH + Duration::from_secs(42)), 42);
+  let now = started_secs(SystemTime::now());
+  assert!(now > 0 && now < u64::MAX);
+  Ok(())
 }
 
 #[test]
