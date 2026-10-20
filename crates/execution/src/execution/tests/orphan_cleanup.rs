@@ -12,9 +12,9 @@ use shared::VariableValue;
 use sysinfo::{Pid, ProcessesToUpdate, System};
 
 use super::{
-  CleanupReport, KillOutcome, ProcessTracking, TRACKING_ENV, Tracked, carries_id, in_tracked_group,
-  kill_verified, process_clean_enabled, refresh_kind, report_warnings, scan_candidates,
-  sweep_blocking,
+  Attempts, CleanupReport, Evidence, KillOutcome, ProcessTracking, TRACKING_ENV, Tracked,
+  carries_id, in_tracked_group, kill_verified, process_clean_enabled, refresh_kind,
+  report_warnings, scan_candidates, sweep_blocking,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -521,6 +521,92 @@ time.sleep(300)\n";
   assert_eq!(outcome, KillOutcome::Skipped);
   assert!(still_running, "a process that left the group was signalled");
   Ok(())
+}
+
+/// The real step's window: a backgrounded member still carries the id when a
+/// pass scans it, then `exec`s an id-less image without leaving its group.
+/// The environment re-verification skips it; the next pass must retry it by
+/// its group instead of discarding the pid as already seen.
+#[test]
+fn member_execing_away_the_id_is_retried_by_its_group() -> TestResult {
+  let tools = visible_tools()?;
+  let tracking = ProcessTracking::for_job(&variables(&[])).ok_or("tracking enabled")?;
+  let dir = tempfile::tempdir()?;
+  let fifo = dir.path().join("go");
+  if !Command::new("mkfifo").arg(&fifo).status()?.success() {
+    return Err("mkfifo failed".into());
+  }
+  // The member blocks on the FIFO holding the id (a re-signed shell where
+  // macOS hides platform binaries' environments), then execs the sleep.
+  let member_script =
+    "read _ < \"$1\"; unset RUNNER_TRACKING_ID; export ORPHAN89_EXECED=1; exec \"$2\" 300";
+  let script =
+    "RUNNER_TRACKING_ID=\"$1\" \"$2\" -c \"$3\" sh \"$4\" \"$5\" >/dev/null 2>&1 & echo $!";
+  let (command, root, member) = group_root(
+    tracking.id(),
+    script,
+    &[
+      tracking.id(),
+      &tools.shell.to_string_lossy(),
+      member_script,
+      &fifo.to_string_lossy(),
+      &tools.sleep.to_string_lossy(),
+    ],
+  )?;
+  tracking.register_group(&command, root);
+  let member: u32 = member.parse()?;
+  let passes = retry_passes(&tracking, member, &fifo);
+  force_kill(member);
+  let (by_env, skipped, by_group, outcome, retried) = passes?;
+  assert_eq!(by_env, Evidence::Environment);
+  assert_eq!(skipped, KillOutcome::Skipped);
+  assert_eq!(by_group, Evidence::Group);
+  assert_eq!(outcome, KillOutcome::Killed);
+  assert!(retried.is_empty(), "a signalled pid was attempted again");
+  Ok(())
+}
+
+type Passes = (Evidence, KillOutcome, Evidence, KillOutcome, Vec<u32>);
+
+/// Two sweep passes over `member`, with its id-dropping `exec` in between.
+fn retry_passes(
+  tracking: &ProcessTracking,
+  member: u32,
+  fifo: &Path,
+) -> Result<Passes, Box<dyn std::error::Error>> {
+  wait_until(member, |process| {
+    carries_id(process.environ(), tracking.id())
+  })?;
+  let tracked = tracking.snapshot();
+  let mut system = System::new();
+  let mut attempts = Attempts::default();
+  let pass = |system: &mut System, attempts: &mut Attempts| {
+    let scan = scan_candidates(system, &tracked, std::process::id());
+    attempts
+      .fresh(scan.candidates)
+      .into_iter()
+      .find(|candidate| candidate.pid == member)
+  };
+  let first = pass(&mut system, &mut attempts).ok_or("member not scanned")?;
+  std::fs::write(fifo, "go\n")?;
+  wait_until(member, |process| {
+    process
+      .environ()
+      .iter()
+      .any(|entry| entry.as_encoded_bytes() == b"ORPHAN89_EXECED=1")
+      && !carries_id(process.environ(), tracking.id())
+  })?;
+  let skipped = kill_verified(&mut system, &tracked, &first);
+  let second = pass(&mut system, &mut attempts).ok_or("member not retried by its group")?;
+  let outcome = kill_verified(&mut system, &tracked, &second);
+  attempts.finish(member);
+  let (by_env, by_group) = (first.evidence, second.evidence);
+  let retried = attempts
+    .fresh(vec![first, second])
+    .iter()
+    .map(|candidate| candidate.pid)
+    .collect();
+  Ok((by_env, skipped, by_group, outcome, retried))
 }
 
 /// A `/bin/sh` group leader that stays alive (it execs into `sleep`) with a

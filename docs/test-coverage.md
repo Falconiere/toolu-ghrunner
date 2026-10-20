@@ -1188,7 +1188,8 @@ match also sweeps same-user processes started during the job inside a host
 step's registered process group (`orphan_cleanup::tests::group_*`,
 `a_group_whose_id_now_names_another_leader_is_spared`,
 `group_matches_need_a_start_since_the_job_and_the_runners_uid`,
-`release_forgets_only_groups_left_empty`, and the replay tests
+`release_forgets_only_groups_left_empty`,
+`member_execing_away_the_id_is_retried_by_its_group`, and the replay tests
 `id_less_member_of_a_{run_step,node_post,composite_step,job_hook}_group_is_killed`).
 A `sudo` process, another user's process, or one that left the step's group
 (`setsid`/`setpgid`) while hiding or dropping the id still escapes. The replay

@@ -338,7 +338,9 @@ leaves the group empty. The sweep re-scans and `SIGKILL`s every other process
 still carrying the id, or started during the job by the runner's user inside a
 registered group whose leader is gone or unchanged (macOS hides the
 environment of SIP-restricted platform binaries), rechecking the same evidence
-before each signal, under a 15 s shared deadline.
+before each signal, under a 15 s shared deadline. A pid skipped under one
+evidence is retried once under the other, so a member that `exec`s away the id
+between scan and signal is still swept by its group.
 
 **Job teardown order.** `run_job` returns a `JobTeardown`
 (`execution/job_teardown.rs`) rather than cleaning up inline: local

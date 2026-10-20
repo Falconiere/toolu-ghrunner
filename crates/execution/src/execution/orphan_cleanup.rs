@@ -212,7 +212,7 @@ pub struct CleanupReport {
 }
 
 /// How a candidate is tied to the job; re-verified by the same evidence.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Evidence {
   /// Its environment carries the job's id.
   Environment,
@@ -227,6 +227,35 @@ pub(crate) struct Candidate {
   start_time: u64,
   name: String,
   evidence: Evidence,
+}
+
+/// The candidates one sweep has acted on. A pid is attempted once per kind
+/// of evidence: a backgrounded member is a forked shell still holding the
+/// id until its `exec`, so a scan can match it by environment and the
+/// re-verification find the id gone — the next pass then retries it as a
+/// member of its step group. A pid signalled, or found unkillable, is done.
+#[derive(Debug, Default)]
+struct Attempts {
+  tried: HashSet<(u32, Evidence)>,
+  done: HashSet<u32>,
+}
+
+impl Attempts {
+  /// The candidates not yet attempted with their current evidence.
+  fn fresh(&mut self, candidates: Vec<Candidate>) -> Vec<Candidate> {
+    candidates
+      .into_iter()
+      .filter(|candidate| {
+        !self.done.contains(&candidate.pid)
+          && self.tried.insert((candidate.pid, candidate.evidence))
+      })
+      .collect()
+  }
+
+  /// Never attempt `pid` again, whatever ties it to the job.
+  fn finish(&mut self, pid: u32) {
+    self.done.insert(pid);
+  }
 }
 
 /// Result of one full process scan.
@@ -297,8 +326,9 @@ pub(crate) async fn sweep(
   report
 }
 
-/// Scan, re-verify and kill until a pass finds no new candidate, then wait for
-/// the killed processes to exit — all bounded by `deadline`.
+/// Scan, re-verify and kill until a pass finds no new candidate (see
+/// [`Attempts`]), then wait for the killed processes to exit — all bounded by
+/// `deadline`.
 pub(crate) fn sweep_blocking(
   tracked: &Tracked,
   own_pid: u32,
@@ -307,7 +337,7 @@ pub(crate) fn sweep_blocking(
 ) -> CleanupReport {
   let mut report = CleanupReport::default();
   let mut system = System::new();
-  let mut seen = HashSet::new();
+  let mut attempts = Attempts::default();
   let mut killed = Vec::new();
   'passes: loop {
     if Instant::now() >= deadline {
@@ -316,11 +346,7 @@ pub(crate) fn sweep_blocking(
     }
     let scan = scan_candidates(&mut system, tracked, own_pid);
     report.degraded |= !scan.own_pid_seen;
-    let fresh: Vec<Candidate> = scan
-      .candidates
-      .into_iter()
-      .filter(|candidate| seen.insert(candidate.pid))
-      .collect();
+    let fresh = attempts.fresh(scan.candidates);
     if fresh.is_empty() {
       break;
     }
@@ -331,11 +357,15 @@ pub(crate) fn sweep_blocking(
       }
       match kill_verified(&mut system, tracked, &candidate) {
         KillOutcome::Killed => {
+          attempts.finish(candidate.pid);
           on_kill(candidate.pid, &candidate.name);
           killed.push(candidate);
         },
         KillOutcome::Skipped => {},
-        KillOutcome::Failed => report.survivors.push(candidate.pid),
+        KillOutcome::Failed => {
+          attempts.finish(candidate.pid);
+          report.survivors.push(candidate.pid);
+        },
       }
     }
   }
