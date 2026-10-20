@@ -150,7 +150,8 @@ non-interactive runs fail, listing those three options).
 `login` / `logout` manage the stored token per host — they take a
 hostname, not `--config`. `status` prints local state — including login
 — without touching the network. `remove` unregisters. `check` is the
-preflight (below). That's the whole CLI.
+network preflight and `doctor` the whole-machine health check (both below).
+That's the whole CLI.
 
 ### Preflight: `toolu-runner check`
 
@@ -202,6 +203,51 @@ toolu-runner check --timeout 30                    # per-probe bound in seconds 
 | `1` | At least one required endpoint failed. |
 | `2` | Usage or configuration error before probing (bad `--url`/`--timeout`, an unloadable `--config` or JIT config, an unusable `[network]`). |
 
+### Health: `toolu-runner doctor`
+
+`doctor` answers "is this machine serving my repos, and how do I fix what
+isn't?". It checks every registration under the runner home (or one with
+`--config`) and prints the fix command under every `WARN` / `FAIL` row.
+
+```sh
+toolu-runner doctor                     # every registration under TOOLU_RUNNER_HOME
+toolu-runner doctor --config <PATH>     # one registration
+toolu-runner doctor --offline           # local checks only: no network request at all
+```
+
+- **install:** the version (and the GitHub runner version it is compatible
+  with) and whether a newer toolu-runner release exists. The fix is the
+  install one-liner. A failed release check is `SKIP`, never a problem.
+- **host:** the platform, a warning when running as root, and the free disk
+  at the runner home and every work dir: `FAIL` below 1 GiB, `WARN` below
+  5 GiB. On Linux with an installed unit, it also checks whether user
+  lingering is on, because systemd user units only start at boot when it is.
+- **github auth (per host):** the bearer `run` re-mints with after every
+  job. That is `TOOLU_RUNNER_TOKEN`, else the stored `login` token. It is
+  verified with one authenticated `GET <api>/user`, the only request that
+  carries a credential. No bearer, or one GitHub rejects, is a `FAIL` when a
+  persistent registration needs it. The token is masked in all output.
+- **registrations:** for each registration:
+  - `config.toml`, `credentials.json` (warns unless mode `0600`) and the JIT
+    config all load.
+  - Whether a `run` is serving it. This is read from the `.lock` body; the
+    lock itself is never taken. A stopped persistent registration is a
+    `FAIL`.
+  - Its supervisor unit is installed and active.
+  - Any pending `remove`.
+  - The last job's conclusion, from the job journal.
+- **network (per host):** the same endpoint, tool, proxy and TLS lines as
+  `check`, using the registration's own JIT endpoints.
+
+`doctor` is read-only. It never takes a lock, writes a file, opens a session
+or registers.
+
+| Exit | Meaning |
+|---|---|
+| `0` | No `FAIL` row (warnings allowed). |
+| `1` | At least one `FAIL` row. |
+| `2` | Usage error before checking (a `--config` path that does not exist). |
+
 ### CLI flags reference
 
 | Flag | Command | What it does |
@@ -216,13 +262,15 @@ toolu-runner check --timeout 30                    # per-probe bound in seconds 
 | `--print` / `--no-activate` / `--remove` | `install-service` | Print the unit without writing it / write it but don't activate / deactivate and delete it (idempotent). |
 | `--force` | `remove` | Cancel an in-flight run before unregistering. |
 | `--url <URL>` | `check` | Probe this GitHub host's endpoints instead of the resolved registration's. |
-| `--timeout <SECS>` | `check` | Per-probe bound, 1–300 seconds (default 10). |
+| `--timeout <SECS>` | `check`, `doctor` | Per-probe bound, 1–300 seconds (default 10). |
+| `--offline` | `doctor` | Make no network request; the update, token and network rows print `SKIP`. |
 | `--client-id <ID>` | `login` | OAuth App client id for the device flow (fallback: `TOOLU_RUNNER_CLIENT_ID`). Needed until the built-in github.com App ships; always needed for GHES. |
 
 `register`, `run`, `remove`, `status`, `install-service`, and `check`
 also take `--config <FILE>`; when omitted, the config resolves to the cwd-inferred
 `runners/<owner>/<repo>/config.toml` under the runner home, else the
-sole existing registration. Every command documents itself in full:
+sole existing registration. `doctor --config` narrows its report to that one
+registration; without it, `doctor` checks them all. Every command documents itself in full:
 `toolu-runner <command> --help`.
 
 ## How it works
@@ -882,12 +930,13 @@ the proxy redacted.
 
 | Symptom | Fix |
 |---|---|
+| Anything — start here | Run `toolu-runner doctor`. Every `WARN` / `FAIL` row is followed by the command that fixes it. |
 | `config not found at ...` / `no runner registration found under ...` | Run `register` before `run`. |
 | `several runner registrations found (...)` | More than one repo is registered and the cwd matches none — `cd` into the repo, or pass `--config`. |
 | `registration already exists at ...` | Pass `--replace` to `register`. |
 | `... is not a git repository` / `has no 'origin' remote` at `register` | Zero-arg inference needs a cwd git repo with an `origin` remote — pass `--url` instead. |
 | `no GitHub OAuth App configured` | The built-in device-flow App isn't wired yet — set `TOOLU_RUNNER_CLIENT_ID` (or `login --client-id`), or skip the device flow with `--token` / `TOOLU_RUNNER_TOKEN`. |
-| `run` exits after one job (warned it would) | No stored `login` token, so re-mint has no bearer. Run `toolu-runner login` (or set `TOOLU_RUNNER_TOKEN`) to stay online; or pass `--once` if a single job is intended. |
+| `run` exits after one job (warned it would) | No stored `login` token, so re-mint has no bearer. Run `toolu-runner login` (or set `TOOLU_RUNNER_TOKEN`) to stay online; or pass `--once` if a single job is intended. `doctor` flags this (and a token GitHub has revoked) as `FAIL  token`. |
 | `the ephemeral registration was kept — if the runner was removed on GitHub …` (exit 1) | The runner was deleted on GitHub before it got a job (the token exchange answered `invalid_client`). Run `toolu-runner remove`, then `register` again. |
 | `… (the job was acquired; its registration was removed)` (exit 1) | An ephemeral job was acquired but executing or reporting it failed; the registration was still cleaned up. Check the job on GitHub and `_diag/runner.log`. |
 | `ephemeral runner … finished its job, but unregistering it on GitHub failed` (exit 2) | The job ran; fix the token or connectivity, then `toolu-runner remove` to finish the cleanup. |

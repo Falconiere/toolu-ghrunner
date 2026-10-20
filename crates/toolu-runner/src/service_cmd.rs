@@ -20,8 +20,8 @@ use crate::cli::InstallServiceArgs;
 
 /// The OS supervisor a unit targets. Selected at runtime from the build's
 /// target OS; anything but macOS/Linux is rejected before any work.
-#[derive(Clone, Copy)]
-enum Supervisor {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Supervisor {
   /// macOS launchd user `LaunchAgent`.
   Launchd,
   /// Linux systemd user unit.
@@ -30,11 +30,11 @@ enum Supervisor {
 
 /// A registration's supervisor identity: the launchd `Label` (also the
 /// systemd `Description` suffix) and the systemd unit file basename.
-struct ServiceId {
+pub(crate) struct ServiceId {
   /// launchd `Label` + plist basename stem; systemd `Description` suffix.
-  label: String,
+  pub(crate) label: String,
   /// systemd unit file basename (`toolu-runner-<owner>-<repo>.service`).
-  unit: String,
+  pub(crate) unit: String,
 }
 
 /// `install-service`: derive the unit for the resolved registration, then
@@ -144,7 +144,7 @@ pub(crate) fn install_service_core(
 
 /// The supervisor for the build's target OS: launchd on macOS, systemd on
 /// Linux. Any other target errors — Windows service support is out of scope.
-fn current_supervisor() -> Result<Supervisor, RunnerError> {
+pub(crate) fn current_supervisor() -> Result<Supervisor, RunnerError> {
   if cfg!(target_os = "macos") {
     Ok(Supervisor::Launchd)
   } else if cfg!(target_os = "linux") {
@@ -161,7 +161,7 @@ fn current_supervisor() -> Result<Supervisor, RunnerError> {
 /// `io.toolu.runner.<owner>.<repo>` / `toolu-runner-<owner>-<repo>.service`;
 /// any other layout (the legacy `<home>/config.toml`) falls back to
 /// `io.toolu.runner` / `toolu-runner.service`.
-fn service_id(config_path: &Path) -> ServiceId {
+pub(crate) fn service_id(config_path: &Path) -> ServiceId {
   match owner_repo(config_path) {
     Some((owner, repo)) => ServiceId {
       label: format!("io.toolu.runner.{owner}.{repo}"),
@@ -177,7 +177,7 @@ fn service_id(config_path: &Path) -> ServiceId {
 /// Extract `(owner, repo)` from a `.../runners/<owner>/<repo>/config.toml`
 /// path, or `None` when the config is not under a `runners/` tree (legacy
 /// root registration).
-fn owner_repo(config_path: &Path) -> Option<(String, String)> {
+pub(crate) fn owner_repo(config_path: &Path) -> Option<(String, String)> {
   let repo_dir = config_path.parent()?;
   let owner_dir = repo_dir.parent()?;
   if owner_dir.parent()?.file_name()?.to_str()? != "runners" {
@@ -191,7 +191,7 @@ fn owner_repo(config_path: &Path) -> Option<(String, String)> {
 /// OS-conventional destination for the unit file, honoring `$HOME`.
 /// macOS: `~/Library/LaunchAgents/<label>.plist`; Linux:
 /// `~/.config/systemd/user/<unit>` (parent dirs created by [`write_unit`]).
-fn dest_path(supervisor: Supervisor, id: &ServiceId, home: &Path) -> PathBuf {
+pub(crate) fn dest_path(supervisor: Supervisor, id: &ServiceId, home: &Path) -> PathBuf {
   match supervisor {
     Supervisor::Launchd => home
       .join("Library/LaunchAgents")
@@ -201,7 +201,7 @@ fn dest_path(supervisor: Supervisor, id: &ServiceId, home: &Path) -> PathBuf {
 }
 
 /// The user's home from `$HOME`; unit files land under it.
-fn home_dir() -> Result<PathBuf, RunnerError> {
+pub(crate) fn home_dir() -> Result<PathBuf, RunnerError> {
   std::env::var_os("HOME").map(PathBuf::from).ok_or_else(|| {
     RunnerError::Config("HOME is not set — cannot locate the user service directory".to_owned())
   })
@@ -355,7 +355,7 @@ fn deactivate_systemd(unit: &str) -> Result<(), RunnerError> {
 
 /// The exact command `--no-activate` tells the user to run — it mirrors what
 /// the default mode would execute to load the just-written unit.
-fn activation_hint(supervisor: Supervisor, dest: &Path, id: &ServiceId) -> String {
+pub(crate) fn activation_hint(supervisor: Supervisor, dest: &Path, id: &ServiceId) -> String {
   match supervisor {
     Supervisor::Launchd => format!("launchctl bootstrap gui/$(id -u) {}", dest.display()),
     Supervisor::Systemd => format!(
@@ -368,7 +368,7 @@ fn activation_hint(supervisor: Supervisor, dest: &Path, id: &ServiceId) -> Strin
 /// The current user id via `id -u` (avoids an `unsafe` libc `getuid`),
 /// validated as all-digits — a broken `id` wrapper must fail loudly here,
 /// not as a cryptic `launchctl` domain error downstream.
-fn current_uid() -> Result<String, RunnerError> {
+pub(crate) fn current_uid() -> Result<String, RunnerError> {
   let uid = run_stdout("id", &["-u"])?;
   if uid.is_empty() || !uid.bytes().all(|b| b.is_ascii_digit()) {
     return Err(RunnerError::Config(format!(

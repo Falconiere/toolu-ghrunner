@@ -93,6 +93,20 @@ pub(crate) fn session_conflict_policy() -> SessionConflictPolicy {
   SessionConflictPolicy::default()
 }
 
+/// Where `doctor` reads the latest release when `TOOLU_RUNNER_RELEASES_URL`
+/// is unset: this repository's latest GitHub release.
+const DEFAULT_RELEASES_URL: &str =
+  "https://api.github.com/repos/Falconiere/toolu-ghrunner/releases/latest";
+
+/// `TOOLU_RUNNER_RELEASES_URL`: the GitHub-API-shaped release document
+/// `doctor` compares the build against (a mirror, a fork, or a test peer).
+/// An empty value counts as unset.
+pub(crate) fn releases_url() -> String {
+  read("TOOLU_RUNNER_RELEASES_URL")
+    .filter(|raw| !raw.is_empty())
+    .unwrap_or_else(|| DEFAULT_RELEASES_URL.to_owned())
+}
+
 /// Parse a positive whole number of milliseconds.
 pub(crate) fn parse_interval_ms(raw: &str) -> Option<Duration> {
   raw

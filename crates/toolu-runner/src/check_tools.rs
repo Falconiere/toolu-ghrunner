@@ -36,7 +36,7 @@ pub(crate) struct ToolReport {
 }
 
 /// Why running a tool did not produce output.
-enum RunError {
+pub(crate) enum RunError {
   /// Not on `PATH`.
   NotFound,
   /// Still running at the bound; killed.
@@ -46,14 +46,17 @@ enum RunError {
 }
 
 /// Captured output of a tool that exited (successfully or not).
-struct Ran {
-  success: bool,
-  stdout: String,
-  stderr: String,
+pub(crate) struct Ran {
+  /// Exit status 0.
+  pub(crate) success: bool,
+  /// Trimmed stdout.
+  pub(crate) stdout: String,
+  /// Trimmed stderr.
+  pub(crate) stderr: String,
 }
 
 /// Run `program args…` with stdin closed, killing it after `timeout`.
-async fn run(program: &str, args: &[&str], timeout: Duration) -> Result<Ran, RunError> {
+pub(crate) async fn run(program: &str, args: &[&str], timeout: Duration) -> Result<Ran, RunError> {
   let child = Command::new(program)
     .args(args)
     .stdin(Stdio::null())
@@ -79,7 +82,7 @@ fn warn(name: &'static str, summary: String) -> ToolReport {
   }
 }
 
-fn first_line(text: &str) -> &str {
+pub(crate) fn first_line(text: &str) -> &str {
   text.lines().next().unwrap_or_default()
 }
 
