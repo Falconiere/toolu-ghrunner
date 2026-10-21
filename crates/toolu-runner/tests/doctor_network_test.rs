@@ -123,11 +123,17 @@ fn unusable_network_settings_fail_the_network_section() -> TestResult {
     "r",
     &format!("http://127.0.0.1:{}", peer.port()),
     true,
-    |config| config.network.ca_bundle = Some(ca.display().to_string()),
+    |config| {
+      config.network.ca_bundle = Some(ca.display().to_string());
+      // A credentialed proxy beside the broken bundle: never echoed.
+      config.network.proxy = Some("http://proxyuser:pw-SECRET@127.0.0.1:9".to_owned());
+    },
   )?;
 
   let (code, stdout, stderr, _) = run(doctor_cmd(home.path())?.args(["--timeout", "5"]))?;
   assert_eq!(code, Some(1), "{}", report(&stdout, &stderr));
+  assert!(!stdout.contains("pw-SECRET"), "{stdout}");
+  assert!(!stderr.contains("pw-SECRET"), "{stderr}");
   let cause = format!(
     "config error: [network] ca_bundle {}: cannot access: No such file or directory (os error 2)",
     ca.display()

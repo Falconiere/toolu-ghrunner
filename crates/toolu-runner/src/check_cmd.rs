@@ -220,14 +220,19 @@ pub(crate) async fn cmd_check(args: CheckArgs) -> i32 {
 }
 
 /// Probe `target`'s endpoints and the local tools, then assemble the report.
-/// `Err` is an unusable `[network]` (unmasked — the caller masks it), which
-/// no probe was run for.
+/// `Err` is an unusable `[network]`, which no probe was run for; it comes
+/// back already masked with every credential the settings could echo, so no
+/// caller can print a proxy password by forgetting to mask it.
 pub(crate) async fn gather(
   target: &Target,
   timeout: Duration,
   proxy: ProxyReport,
 ) -> Result<Report, String> {
-  let network_line = network::describe(&target.network).map_err(|error| error.to_string())?;
+  let network_line = network::describe(&target.network).map_err(|error| {
+    masker_for(&proxy, &target.network)
+      .mask(&error.to_string())
+      .into_owned()
+  })?;
   let endpoints = endpoints_for(&target.base, target.jit.as_ref());
   let trust = tokio::task::spawn_blocking(TrustReport::from_env);
   let (endpoints, git, docker, node) = tokio::join!(
