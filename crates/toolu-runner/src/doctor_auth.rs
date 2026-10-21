@@ -186,7 +186,20 @@ async fn verify(target: &AuthHost, source: &str, token: &str, timeout: Duration)
         .get("x-oauth-scopes")
         .and_then(|value| value.to_str().ok())
         .map(str::to_owned);
-      let body = response.text().await.unwrap_or_default();
+      let body = match response.text().await {
+        Ok(body) => body,
+        // An unread body must not pass for an empty one (`login unknown`).
+        Err(error) => {
+          return Row::new(
+            Level::Warn,
+            "token",
+            format!(
+              "{source}: could not verify: unreadable response (HTTP {status}): {}",
+              error.without_url()
+            ),
+          );
+        },
+      };
       verdict_row(
         source,
         status,
@@ -255,3 +268,7 @@ pub(crate) async fn auth_section(
 #[cfg(test)]
 #[path = "tests/doctor_auth.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/doctor_auth_verify.rs"]
+mod verify_tests;

@@ -299,7 +299,17 @@ pub(crate) async fn cmd_doctor(args: DoctorArgs) -> i32 {
   let update = doctor_host::update_check(args.offline, timeout, &release_network).await;
   let mut disk_paths = vec![home];
   disk_paths.extend(checked.iter().filter_map(|block| block.work_dir.clone()));
-  let mut host = vec![doctor_host::platform_row(), doctor_host::user_row()];
+  // `id -u` is a blocking subprocess: keep it off the async workers.
+  let user = tokio::task::spawn_blocking(doctor_host::user_row)
+    .await
+    .unwrap_or_else(|error| {
+      Row::new(
+        Level::Warn,
+        "user",
+        format!("could not determine the uid: {error}"),
+      )
+    });
+  let mut host = vec![doctor_host::platform_row(), user];
   host.extend(doctor_host::disk_rows(&disk_paths));
   let any_unit = checked.iter().any(|block| block.unit_installed);
   host.extend(doctor_service::linger_row(any_unit, timeout).await);

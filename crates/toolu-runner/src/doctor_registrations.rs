@@ -80,21 +80,26 @@ pub(crate) fn holder_alive(body: &LockBody) -> bool {
   }
 }
 
-/// Read the lock body at `lock` without opening it for locking; an empty
-/// body is re-read once after [`BODY_SETTLE`].
-pub(crate) async fn run_state(lock: &Path) -> RunState {
-  let read = || match std::fs::read_to_string(lock) {
+/// The lock body's text; `Err` is the state a missing or unreadable file
+/// means.
+async fn read_body(lock: &Path) -> Result<String, RunState> {
+  match tokio::fs::read_to_string(lock).await {
     Ok(raw) => Ok(raw),
     Err(error) if error.kind() == std::io::ErrorKind::NotFound => Err(RunState::Stopped),
     Err(error) => Err(RunState::Unreadable(error.to_string())),
-  };
-  let mut raw = match read() {
+  }
+}
+
+/// Read the lock body at `lock` without opening it for locking; an empty
+/// body is re-read once after [`BODY_SETTLE`].
+pub(crate) async fn run_state(lock: &Path) -> RunState {
+  let mut raw = match read_body(lock).await {
     Ok(raw) => raw,
     Err(state) => return state,
   };
   if raw.trim().is_empty() {
     tokio::time::sleep(BODY_SETTLE).await;
-    raw = match read() {
+    raw = match read_body(lock).await {
       Ok(raw) => raw,
       Err(state) => return state,
     };
@@ -350,7 +355,19 @@ pub(crate) async fn check_registration(config_path: &Path, timeout: Duration) ->
     unit_installed = installed;
   }
   rows.extend(pending_row(&data_dir, config_path));
-  rows.push(last_job_row(&data_dir.join("_diag").join("jobs")));
+  // The journal scan reads files: keep it off the async workers.
+  let jobs = data_dir.join("_diag").join("jobs");
+  rows.push(
+    tokio::task::spawn_blocking(move || last_job_row(&jobs))
+      .await
+      .unwrap_or_else(|error| {
+        Row::new(
+          Level::Warn,
+          "last job",
+          format!("journal scan did not finish: {error}"),
+        )
+      }),
+  );
   Checked {
     heading: format!(
       "  {} ({mode}, runner {}):",
