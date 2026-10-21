@@ -90,8 +90,10 @@ async fn activity(
 ) -> Activity {
   match supervisor {
     Supervisor::Launchd => {
-      let uid = match current_uid() {
-        Ok(uid) => uid,
+      // `current_uid` runs `id -u`: keep the subprocess off the async workers.
+      let uid = match tokio::task::spawn_blocking(current_uid).await {
+        Ok(Ok(uid)) => uid,
+        Ok(Err(error)) => return Activity::Unknown("launchctl".to_owned(), error.to_string()),
         Err(error) => return Activity::Unknown("launchctl".to_owned(), error.to_string()),
       };
       let target = format!("gui/{uid}/{label}");

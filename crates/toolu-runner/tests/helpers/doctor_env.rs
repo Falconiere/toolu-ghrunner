@@ -172,7 +172,7 @@ pub fn snapshot(dir: &Path) -> Result<Vec<String>, Box<dyn std::error::Error>> {
       let meta = std::fs::symlink_metadata(&path)?;
       let nanos = meta.modified()?.duration_since(UNIX_EPOCH)?.as_nanos();
       let digest = if meta.is_file() {
-        blake3::hash(&std::fs::read(&path)?).to_hex().to_string()
+        blake3::hash(&std::fs::read(&path)?).to_string()
       } else {
         "-".to_owned()
       };

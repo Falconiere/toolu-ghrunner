@@ -135,7 +135,9 @@ fn resolve_runners_base(url: &str) -> Result<String, RunnerError> {
 
 /// The REST API base for a GitHub URL whose host is `host`: github.com
 /// routes through `https://api.github.com`; any other host keeps the URL's
-/// scheme and authority and adds `/api/v3` (GHES).
+/// scheme and authority and adds `/api/v3` (GHES). `url` is a parsed
+/// `http(s)` repository or server URL and `host` its `host_str()`; the result
+/// is only as valid as that input.
 #[must_use]
 pub fn api_base(url: &url::Url, host: &str) -> String {
   if host.eq_ignore_ascii_case("github.com") {
