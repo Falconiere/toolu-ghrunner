@@ -181,7 +181,12 @@ pub(crate) async fn linger_row(any_unit_installed: bool, timeout: Duration) -> O
   let user = match run("id", &["-un"], timeout).await {
     Ok(ran) if ran.success && !ran.stdout.is_empty() => ran.stdout,
     Ok(ran) => {
-      let reason = format!("`id -un` failed: {}", first_line(&ran.stderr));
+      let said = first_line(&ran.stderr);
+      let reason = if said.is_empty() {
+        "`id -un` gave no user name".to_owned()
+      } else {
+        format!("`id -un` failed: {said}")
+      };
       return Some(linger_row_for("this user", Err(reason)));
     },
     Err(error) => {

@@ -9,7 +9,7 @@
 //! or registers; the only credentialed request is the auth section's
 //! `GET <api>/user`, and `--offline` makes no request at all.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
 use clap::{Args, ValueHint};
@@ -81,8 +81,27 @@ struct Selection {
   unreadable: Option<String>,
 }
 
-/// `--config` (which must exist; made absolute so its `runners/<owner>/
-/// <repo>` identity is visible) > every registration under `home`.
+/// `path` with `.` and `..` folded lexically. No filesystem access, so a
+/// symlinked registration dir keeps its `runners/<owner>/<repo>` name.
+fn fold_dots(path: &Path) -> PathBuf {
+  let mut folded = PathBuf::new();
+  for part in path.components() {
+    match part {
+      Component::CurDir => {},
+      Component::ParentDir => {
+        folded.pop();
+      },
+      other @ (Component::Prefix(_) | Component::RootDir | Component::Normal(_)) => {
+        folded.push(other);
+      },
+    }
+  }
+  folded
+}
+
+/// `--config` (which must exist; made absolute and folded so its
+/// `runners/<owner>/<repo>` identity is visible) > every registration under
+/// `home`.
 fn select(home: &Path, config: Option<&Path>) -> Result<Selection, String> {
   if let Some(path) = config {
     if !path.exists() {
@@ -91,7 +110,7 @@ fn select(home: &Path, config: Option<&Path>) -> Result<Selection, String> {
     let path = std::path::absolute(path)
       .map_err(|error| format!("cannot resolve {}: {error}", path.display()))?;
     return Ok(Selection {
-      configs: vec![path],
+      configs: vec![fold_dots(&path)],
       unreadable: None,
     });
   }
@@ -132,44 +151,57 @@ fn registrations_section(selection: &Selection, checked: &[Checked]) -> Section 
   section
 }
 
-/// The registration's target; when its JIT config does not decode, the
-/// host's generic endpoints through its `[network]` instead, so the host is
-/// still probed (the `jit` row already reports the broken config).
+/// The registration's target, and whether it fell back: when its JIT config
+/// does not decode, the host's generic endpoints through its `[network]`, so
+/// the host is still probed (the `jit` row already reports the broken config).
 fn registration_target(
   path: &Path,
   config: &config::config::RunnerRegistrationConfig,
-) -> Result<Target, String> {
-  check_cmd::target_from_registration(path).or_else(|_| {
-    let origin = format!(
-      "registration: {} (JIT unreadable; generic endpoints)",
-      path.display()
-    );
-    let mut target = check_cmd::unregistered_target(&config.runner_url, origin)?;
+) -> (Result<Target, String>, bool) {
+  if let Ok(target) = check_cmd::target_from_registration(path) {
+    return (Ok(target), false);
+  }
+  let origin = format!(
+    "registration: {} (JIT unreadable; generic endpoints)",
+    path.display()
+  );
+  let target = check_cmd::unregistered_target(&config.runner_url, origin).map(|mut target| {
     target.network = config.network_config();
-    Ok(target)
-  })
+    target
+  });
+  (target, true)
 }
 
-/// One target per distinct registration host (its first registration
-/// supplies the JIT endpoints); github.com when nothing loaded.
+/// A registration host: its name and port.
+type HostKey = Option<(Option<String>, Option<u16>)>;
+
+/// One target per distinct registration host, from the first registration on
+/// it whose JIT config decodes (else the first one's generic endpoints);
+/// github.com when nothing loaded.
 fn network_targets(selection: &Selection, checked: &[Checked]) -> Vec<Result<Target, String>> {
-  let mut seen = Vec::new();
-  let mut targets = Vec::new();
+  let mut hosts: Vec<(HostKey, Result<Target, String>, bool)> = Vec::new();
   for (path, block) in selection.configs.iter().zip(checked) {
     let Some(config) = &block.config else {
       continue;
     };
-    let key = url::Url::parse(&config.runner_url).ok().map(|url| {
+    let key: HostKey = url::Url::parse(&config.runner_url).ok().map(|url| {
       (
         url.host_str().map(str::to_owned),
         url.port_or_known_default(),
       )
     });
-    if !seen.contains(&key) {
-      seen.push(key);
-      targets.push(registration_target(path, config));
+    if let Some((_, target, generic)) = hosts.iter_mut().find(|(known, ..)| *known == key) {
+      if *generic && let Ok(own) = check_cmd::target_from_registration(path) {
+        *target = Ok(own);
+        *generic = false;
+      }
+    } else {
+      let (target, generic) = registration_target(path, config);
+      hosts.push((key, target, generic));
     }
   }
+  let mut targets: Vec<Result<Target, String>> =
+    hosts.into_iter().map(|(_, target, _)| target).collect();
   if targets.is_empty() {
     targets.push(check_cmd::unregistered_target(
       "https://github.com",

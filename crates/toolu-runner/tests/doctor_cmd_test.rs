@@ -131,11 +131,8 @@ fn update_check() -> TestResult {
   let frame = row(
     "SKIP",
     "update",
-    &format!(
-      "could not check latest release: connect: error sending request for url \
-       (http://127.0.0.1:{closed}/releases/latest): client error (Connect): \
-       tcp connect error: Connection refused (os error "
-    ),
+    "could not check latest release: connect: error sending request: client error \
+     (Connect): tcp connect error: Connection refused (os error ",
   );
   assert!(
     skip.starts_with(&frame) && skip.ends_with(')'),

@@ -199,7 +199,7 @@ pub(crate) enum Command {
   ///
   /// Checks the install (version, newer release), the host (platform, uid,
   /// free disk) and every registration under the runner home, printing a
-  /// fix command under each warning or failure. Read-only: never takes the
+  /// fix command under each warning or failure that has one. Read-only: never takes the
   /// job lock, writes a file or registers. `--offline` makes no network
   /// request. Exit 0 = no failure, 1 = a failure, 2 = usage error.
   Doctor(doctor_cmd::DoctorArgs),

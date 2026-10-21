@@ -259,11 +259,12 @@ async fn latest_tag_failures_are_reasons_not_panics() -> TestResult {
   let refused = std::net::TcpStream::connect(addr)
     .err()
     .ok_or("a closed port accepted a connection")?;
-  let url = format!("http://{addr}/releases/latest");
+  let url = format!("http://{addr}/releases/latest?access_token=never-shown");
+  // The URL is left out: a mirror's query can carry a token.
   assert_eq!(
     latest_tag(&url, timeout, &network).await,
     Err(format!(
-      "connect: error sending request for url ({url}): client error (Connect): tcp connect error: {refused}"
+      "connect: error sending request: client error (Connect): tcp connect error: {refused}"
     ))
   );
   Ok(())

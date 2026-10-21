@@ -402,8 +402,8 @@ to that list requires proving the value is not a real credential.
 - `step_env.rs` — `step_env` → `StepNetworkEnv { host, container }`: proxy
   vars in both casings (config values, or what `ProxyEnv::effective` says the
   runner uses), `NODE_EXTRA_CA_CERTS` for host steps only.
-- `secrets.rs` — `proxy_secrets`: `url_secrets` of the effective proxy
-  value(s) minus a `user:password` pair's bare user name (not secret).
+- `secrets.rs` — `proxy_secrets`: `url_credentials` (`url_secrets` minus a
+  `user:password` pair's user name) of each effective proxy value.
 - `config.rs` — the crate's env reads (the proxy pairs and `REQUEST_METHOD`). `tests/helpers/tls_fixtures.rs`
   (rcgen PKI, rustls target) and `tests/helpers/proxy_fixtures.rs`
   (recording CONNECT proxy) are `#[path]`-included once per test crate root
@@ -933,7 +933,7 @@ to that list requires proving the value is not a real credential.
   every registration (`--config` narrows; `--offline` sends no request). Exit
   code applied by `main` like `check`'s: `0` no `FAIL` row, `1` a `FAIL` row,
   `2` a missing `--config` path. Never takes a `.lock` (run state = lock body +
-  `is_pid_alive`; holding it would make a starting `run` fail `LockHeld`),
+  `holder_alive`; holding it would make a starting `run` fail `LockHeld`),
   writes, creates dirs or opens a session; its one credentialed request is
   `GET <api>/user`. Sections live in `doctor_{report,host,auth,registrations,
   service}.rs`; the network section reuses `check_cmd::gather`. Pinned by

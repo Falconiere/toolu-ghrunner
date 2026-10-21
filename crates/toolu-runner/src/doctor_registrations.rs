@@ -66,7 +66,9 @@ fn label(config_path: &Path) -> String {
 
 /// The body's PID is alive and its process started no later than the body
 /// was written (a reboot can hand the PID to an unrelated, later process).
-/// An unparseable `started_at` falls back to liveness alone.
+/// An unparseable `started_at` falls back to liveness alone. Known limit: a
+/// wall clock stepped forward by more than [`START_SLACK_SECS`] after `run`
+/// wrote the body (a host without an RTC syncing late) reads as reused.
 pub(crate) fn holder_alive(body: &LockBody) -> bool {
   let Some(started) = pid_start_time(body.pid) else {
     return false;
@@ -105,6 +107,46 @@ pub(crate) async fn run_state(lock: &Path) -> RunState {
     Ok(_) => RunState::Stopped,
     Err(error) => RunState::Unreadable(error.to_string()),
   }
+}
+
+/// `message` with every serde-quoted string value (`string "…"`) cut out: a
+/// mistyped field can hold a secret the masker never learned, because the
+/// file that would name it did not load.
+pub(crate) fn without_quoted_strings(message: &str) -> String {
+  const MARK: &str = "string \"";
+  let mut out = String::with_capacity(message.len());
+  let mut rest = message;
+  while let Some((head, tail)) = rest
+    .find(MARK)
+    .and_then(|at| rest.split_at_checked(at + MARK.len()))
+  {
+    out.push_str(head);
+    out.push_str("…\"");
+    // Skip the Debug-escaped value through its closing quote; without one,
+    // drop the remainder rather than risk echoing it.
+    let mut escaped = false;
+    let mut end = tail.len();
+    for (index, c) in tail.char_indices() {
+      match c {
+        _ if escaped => escaped = false,
+        '\\' => escaped = true,
+        '"' => {
+          end = index + 1;
+          break;
+        },
+        _ => {},
+      }
+    }
+    rest = tail.get(end..).unwrap_or_default();
+  }
+  out.push_str(rest);
+  out
+}
+
+/// A parse error fit for a shared report: no source excerpt and no quoted
+/// string values.
+fn shareable(error: &str) -> String {
+  without_quoted_strings(&without_source_excerpt(error))
 }
 
 /// `error` without the source excerpt a TOML parse error quotes (the
@@ -174,7 +216,12 @@ fn creds_row(path: &Path) -> Row {
       .with_fix(REREGISTER);
   }
   if let Err(error) = load_credentials(path) {
-    return Row::new(Level::Fail, "creds", format!("unreadable: {error}")).with_fix(REREGISTER);
+    return Row::new(
+      Level::Fail,
+      "creds",
+      format!("unreadable: {}", shareable(&error.to_string())),
+    )
+    .with_fix(REREGISTER);
   }
   match std::fs::metadata(path) {
     Ok(meta) => creds_mode_row(path, mode_of(&meta)),
@@ -233,7 +280,7 @@ fn unloadable(config_path: &Path, error: &RunnerError) -> Checked {
         format!(
           "cannot load {}: {}",
           config_path.display(),
-          without_source_excerpt(&error.to_string())
+          shareable(&error.to_string())
         ),
       )
       .with_fix(REREGISTER),

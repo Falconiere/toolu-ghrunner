@@ -124,10 +124,7 @@ fn releases_url_credentials_are_masked() -> TestResult {
     skip.starts_with(&row(
       "SKIP",
       "update",
-      &format!(
-        "could not check latest release: connect: error sending request for url \
-         (http://127.0.0.1:{closed}/latest): "
-      )
+      "could not check latest release: connect: error sending request: "
     )),
     "{skip}"
   );

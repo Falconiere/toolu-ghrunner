@@ -144,5 +144,21 @@ fn relative_config_flag_is_made_absolute() -> TestResult {
     "{stdout}"
   );
   assert!(!stdout.contains("  config.toml:"), "{stdout}");
+
+  // From a subdirectory, `../config.toml` folds to the same identity: an
+  // unfolded `_diag/..` would hide `runners/o/r` from the service lookup.
+  let diag = reg_dir.join("_diag");
+  std::fs::create_dir_all(&diag)?;
+  let (code, from_diag, stderr, _) = run(doctor_cmd(home.path())?.current_dir(&diag).args([
+    "--offline",
+    "--config",
+    "../config.toml",
+  ]))?;
+  assert_eq!(code, Some(1), "{}", report(&from_diag, &stderr));
+  assert_eq!(
+    section(&from_diag, "registrations"),
+    section(&stdout, "registrations"),
+    "{from_diag}"
+  );
   Ok(())
 }

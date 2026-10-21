@@ -15,7 +15,7 @@ use config::config::{
 
 use super::{
   check_registration, creds_mode_row, creds_row, jit_row, label, pending_row,
-  without_source_excerpt,
+  without_quoted_strings, without_source_excerpt,
 };
 use crate::doctor_report::{Level, Row};
 
@@ -335,4 +335,57 @@ fn a_pending_removal_marker_warns_with_the_remove_command() -> TestResult {
 fn the_label_is_owner_repo_under_runners_else_the_path() {
   assert_eq!(label(Path::new(CONFIG)), "o/r");
   assert_eq!(label(Path::new("/h/config.toml")), "/h/config.toml");
+}
+
+#[tokio::test]
+async fn a_mistyped_secret_value_is_cut_from_the_config_row() -> TestResult {
+  let dir = tempfile::tempdir()?;
+  let (_, config_path) = persisted(dir.path(), &encoded_jit(GHES_JIT)?, false)?;
+  let text = std::fs::read_to_string(&config_path)?;
+  // `[network]` written as a bare string: serde quotes the value it rejects.
+  std::fs::write(
+    &config_path,
+    format!("network = \"http://user:{SECRET}@proxy.example:8080\"\n{text}"),
+  )?;
+  let raw = load_config(&config_path)
+    .err()
+    .ok_or("a string [network] loaded")?
+    .to_string();
+  assert!(raw.contains(SECRET), "raw error: {raw}");
+
+  let checked = check_registration(&config_path, Duration::from_secs(1)).await;
+  assert_eq!(
+    checked.rows,
+    [Row::new(
+      Level::Fail,
+      "config",
+      format!(
+        "cannot load {path}: config error: parse {path}: TOML parse error at line 1, \
+         column 11; invalid type: string \"…\", expected struct NetworkSection",
+        path = config_path.display()
+      ),
+    )
+    .with_fix("re-register: toolu-runner register --replace --url <repo url>")],
+    "raw error: {raw}"
+  );
+  Ok(())
+}
+
+#[test]
+fn quoted_string_values_are_cut_through_their_escapes() {
+  assert_eq!(
+    without_quoted_strings(r#"invalid type: string "a\"b:pw", expected x"#),
+    r#"invalid type: string "…", expected x"#
+  );
+  assert_eq!(
+    without_quoted_strings(r#"invalid value: string "one", or string "two""#),
+    r#"invalid value: string "…", or string "…""#
+  );
+  // No closing quote: the remainder is dropped, never echoed.
+  assert_eq!(
+    without_quoted_strings(r#"invalid type: string "pw-unterminated"#),
+    r#"invalid type: string "…""#
+  );
+  let untouched = "invalid string; expected `\"`, `'`";
+  assert_eq!(without_quoted_strings(untouched), untouched);
 }

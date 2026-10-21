@@ -76,6 +76,42 @@ fn unreadable_jit_still_probes_the_hosts() -> TestResult {
   Ok(())
 }
 
+/// Two registrations on one host, the first with a broken JIT: the host is
+/// probed through the sibling's own JIT endpoints, not the generic fallback.
+#[test]
+fn a_host_prefers_a_sibling_with_a_readable_jit() -> TestResult {
+  let home = tempfile::tempdir()?;
+  let peer = Recorder::spawn(|_| Some(OK))?;
+  let base = format!("http://127.0.0.1:{}", peer.port());
+  write_registration_with(home.path(), "o", "a", &base, true, |config| {
+    config.runtime.jit_config = "this-is-not-a-jit-config".to_owned();
+  })?;
+  write_registration(home.path(), "o", "b", &base, true)?;
+
+  let (code, stdout, stderr, _) = run(doctor_cmd(home.path())?.args(["--timeout", "5"]))?;
+  assert_eq!(code, Some(1), "{}", report(&stdout, &stderr));
+  assert_eq!(
+    stdout
+      .lines()
+      .filter(|line| line.starts_with("network ("))
+      .count(),
+    1,
+    "one network section per host:\n{stdout}"
+  );
+  let requested = peer.request_lines();
+  assert!(
+    requested
+      .iter()
+      .any(|line| line.contains("/pipelines/tenant/")),
+    "the readable sibling's JIT endpoints were not probed: {requested:?}"
+  );
+  assert!(
+    !requested.iter().any(|line| line.contains("/_services/")),
+    "the generic fallback was probed despite a readable sibling: {requested:?}"
+  );
+  Ok(())
+}
+
 #[test]
 fn unusable_network_settings_fail_the_network_section() -> TestResult {
   let home = tempfile::tempdir()?;

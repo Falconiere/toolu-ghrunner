@@ -115,7 +115,8 @@ async fn latest_tag(
     .header("Accept", "application/vnd.github+json")
     .send()
     .await
-    .map_err(|error| crate::check_probe::describe_error(&error))?;
+    // `without_url`: the mirror URL's query can carry a token.
+    .map_err(|error| crate::check_probe::describe_error(&error.without_url()))?;
   let status = response.status();
   if !status.is_success() {
     return Err(format!("HTTP {}", status.as_u16()));
@@ -123,7 +124,7 @@ async fn latest_tag(
   let body: serde_json::Value = response
     .json()
     .await
-    .map_err(|error| format!("unreadable response: {error}"))?;
+    .map_err(|error| format!("unreadable response: {}", error.without_url()))?;
   body
     .get("tag_name")
     .and_then(serde_json::Value::as_str)
