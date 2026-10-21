@@ -2,7 +2,7 @@
 
 use shared::SecretMasker;
 
-use super::{EndpointResult, Report, render};
+use super::{EndpointResult, Report, render, section_lines};
 use crate::check_endpoints::{Endpoint, Probe};
 use crate::check_env::{ProxyReport, TrustReport};
 use crate::check_probe::{FailureKind, ProbeOutcome};
@@ -189,5 +189,113 @@ fn proxy_override_note_follows_the_typed_flag_not_the_text() {
   assert!(
     !text.contains("the proxy variables below are ignored"),
     "{text}"
+  );
+}
+
+#[test]
+fn warnings_count_failed_optional_probes_and_warned_tools_only() {
+  let mut optional_never_ran = endpoint("telemetry", false, Some(reachable(200)));
+  optional_never_ran.outcome = None;
+  let mut mixed = report(vec![
+    // A required failure is a failure, not a warning.
+    endpoint(
+      "api",
+      true,
+      Some(failed(
+        FailureKind::Dns,
+        "dns error: failed to lookup address",
+      )),
+    ),
+    endpoint("token", true, Some(reachable(401))),
+    endpoint("results", true, None),
+    // Optional probes: failed (+1), never completed (+1), reachable, skipped.
+    endpoint(
+      "node-dist",
+      false,
+      Some(failed(FailureKind::Timeout, "operation timed out")),
+    ),
+    optional_never_ran,
+    endpoint("codeload", false, Some(reachable(200))),
+    endpoint("alpine", false, None),
+  ]);
+  mixed.tools = vec![
+    ToolReport {
+      name: "git",
+      status: ToolStatus::Warn,
+      summary: "not found on PATH (…)".to_owned(),
+    },
+    ToolReport {
+      name: "docker",
+      status: ToolStatus::Ok,
+      summary: "Docker version 27.0.0".to_owned(),
+    },
+    ToolReport {
+      name: "node",
+      status: ToolStatus::Warn,
+      summary: "`node --version` failed: boom".to_owned(),
+    },
+  ];
+  assert_eq!(mixed.warnings(), 4);
+  assert_eq!(mixed.required_failures(), 1);
+
+  let mut clean = report(vec![
+    endpoint("api", true, Some(reachable(200))),
+    endpoint("node-dist", false, Some(reachable(200))),
+  ]);
+  clean.tools = Vec::new();
+  assert_eq!(clean.warnings(), 0);
+  assert_eq!(clean.required_failures(), 0);
+}
+
+#[test]
+fn a_required_failure_alone_is_no_warning() {
+  let report = report(vec![endpoint(
+    "api",
+    true,
+    Some(failed(FailureKind::Connect, "connection refused")),
+  )]);
+  // Only the `git` tool line of the helper report warns.
+  assert_eq!(report.warnings(), 1);
+  assert_eq!(report.required_failures(), 1);
+}
+
+#[test]
+fn section_lines_omit_the_header_and_result_and_leave_secrets_for_the_caller() {
+  let report = report(vec![
+    endpoint("api", true, Some(reachable(200))),
+    endpoint("results", true, None),
+    endpoint(
+      "node-dist",
+      false,
+      Some(failed(
+        FailureKind::Proxy,
+        "tunnel to proxy alice:s3cr3t-pw failed",
+      )),
+    ),
+  ]);
+  let lines = section_lines(&report);
+  assert_eq!(
+    lines,
+    vec![
+      "network (required):",
+      "  PASS  api        https://api.example.com/  HTTP 200  12 ms",
+      "  SKIP  results    not applicable on GHES (no Results service)",
+      "network (optional):",
+      "  WARN  node-dist  https://node-dist.example.com/  proxy: tunnel to proxy alice:s3cr3t-pw failed\n        hint: the proxy refused the tunnel or wants credentials: check HTTPS_PROXY / HTTP_PROXY",
+      "tools (optional):",
+      "  WARN  git        not found on PATH (…)",
+      "proxy:",
+      "  HTTPS_PROXY  (unset)",
+      "  HTTP_PROXY   (unset)",
+      "  ALL_PROXY    (unset)",
+      "  NO_PROXY     (unset)",
+      "  routing      https:// direct; http:// direct",
+      "tls trust:",
+      "  SSL_CERT_FILE        (unset)",
+      "  SSL_CERT_DIR         (unset)",
+      "  NODE_EXTRA_CA_CERTS  (unset)",
+      "  anchors              140 loaded from the platform store, 0 errors",
+      "  bundled              Mozilla root set compiled in (webpki-roots), always trusted too",
+    ]
   );
 }

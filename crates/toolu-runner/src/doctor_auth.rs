@@ -27,20 +27,13 @@ pub(crate) struct AuthHost {
   network: NetworkConfig,
 }
 
-/// `(host, api base)` for a registration URL — the rule `register` uses:
-/// github.com → `api.github.com`; any other host keeps its scheme and
-/// authority and adds `/api/v3`.
+/// `(host, api base)` for a registration URL, by `register`'s own rule
+/// ([`wire::net::register::api_base`]).
 pub(crate) fn api_base(runner_url: &str) -> Option<(String, String)> {
   let url = url::Url::parse(runner_url).ok()?;
   let host = url.host_str()?.to_owned();
-  if host.eq_ignore_ascii_case("github.com") {
-    return Some((host, "https://api.github.com".to_owned()));
-  }
-  let authority = match url.port() {
-    Some(port) => format!("{host}:{port}"),
-    None => host.clone(),
-  };
-  Some((host, format!("{}://{authority}/api/v3", url.scheme())))
+  let base = wire::net::register::api_base(&url, &host);
+  Some((host, base))
 }
 
 /// The hosts to check: each distinct registration host in order, or
@@ -72,6 +65,9 @@ pub(crate) fn auth_hosts(configs: &[&RunnerRegistrationConfig]) -> Vec<AuthHost>
   hosts
 }
 
+/// The bearer source name for `TOOLU_RUNNER_TOKEN`.
+const ENV_SOURCE: &str = "TOOLU_RUNNER_TOKEN";
+
 /// `toolu-runner login`, naming the host when it is not github.com.
 fn login_fix(host: &str) -> String {
   if host == "github.com" {
@@ -81,13 +77,38 @@ fn login_fix(host: &str) -> String {
   }
 }
 
-/// The `token` row for a `GET /user` answer with `status` and `body`.
+/// The fix for a rejected bearer from `source`: `TOOLU_RUNNER_TOKEN`
+/// outranks the stored login, so `login` alone cannot replace it.
+fn rejected_fix(source: &str, host: &str) -> String {
+  if source == ENV_SOURCE {
+    format!(
+      "export a valid {ENV_SOURCE}, or unset it and run `{}`",
+      login_fix(host)
+    )
+  } else {
+    login_fix(host)
+  }
+}
+
+/// `FAIL` when a persistent registration needs the bearer, else `WARN`.
+fn needed(needs_bearer: bool) -> Level {
+  if needs_bearer {
+    Level::Fail
+  } else {
+    Level::Warn
+  }
+}
+
+/// The `token` row for a `GET /user` answer with `status` and `body`; a
+/// rejection fails only when `needs_bearer` (a persistent registration
+/// re-mints with it).
 pub(crate) fn verdict_row(
   source: &str,
   status: u16,
   body: &str,
   scopes: Option<&str>,
   host: &str,
+  needs_bearer: bool,
 ) -> Row {
   let json: Option<serde_json::Value> = serde_json::from_str(body).ok();
   let field = |key: &str| {
@@ -109,11 +130,11 @@ pub(crate) fn verdict_row(
     401 => {
       let reason = field("message").map_or_else(String::new, |message| format!(": {message}"));
       Row::new(
-        Level::Fail,
+        needed(needs_bearer),
         "token",
         format!("{source}: rejected by GitHub (HTTP 401{reason})"),
       )
-      .with_fix(login_fix(host))
+      .with_fix(rejected_fix(source, host))
     },
     other => Row::new(
       Level::Warn,
@@ -126,7 +147,7 @@ pub(crate) fn verdict_row(
 /// The bearer `run` would use for `host` and where it came from.
 fn bearer(host: &str) -> Result<Option<(String, String)>, String> {
   if let Some(token) = config::config::runner_token() {
-    return Ok(Some(("TOOLU_RUNNER_TOKEN".to_owned(), token)));
+    return Ok(Some((ENV_SOURCE.to_owned(), token)));
   }
   let store = AuthStore::new(&registry::runner_home());
   let source = match &store {
@@ -166,7 +187,14 @@ async fn verify(target: &AuthHost, source: &str, token: &str, timeout: Duration)
         .and_then(|value| value.to_str().ok())
         .map(str::to_owned);
       let body = response.text().await.unwrap_or_default();
-      verdict_row(source, status, &body, scopes.as_deref(), &target.host)
+      verdict_row(
+        source,
+        status,
+        &body,
+        scopes.as_deref(),
+        &target.host,
+        target.needs_bearer,
+      )
     },
     Err(error) => Row::new(
       Level::Warn,
@@ -189,10 +217,11 @@ pub(crate) async fn auth_section(
   let title = format!("github auth ({})", target.host);
   let row = match bearer(&target.host) {
     Err(error) => Row::new(
-      Level::Warn,
+      needed(target.needs_bearer),
       "token",
       format!("token store unreadable: {error}"),
-    ),
+    )
+    .with_fix(login_fix(&target.host)),
     Ok(Some((source, token))) => {
       if !token.is_empty() {
         masker.add_secret(&token);

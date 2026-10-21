@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use config::config::{RunnerRegistrationConfig, load_config, load_credentials};
-use config::lockfile::{LockBody, is_pid_alive};
+use config::lockfile::{LockBody, pid_start_time};
 use shared::RunnerError;
 use shared::paths::expand_tilde;
 
@@ -19,6 +19,12 @@ use crate::doctor_report::{Level, Row};
 
 /// The fix for anything only a fresh registration repairs.
 const REREGISTER: &str = "re-register: toolu-runner register --replace --url <repo url>";
+/// How long to wait before re-reading an empty lock body: `run` truncates
+/// the file and then writes the body, so a read can land in between.
+const BODY_SETTLE: Duration = Duration::from_millis(100);
+/// Clock slack when comparing a holder's start time with the body's
+/// `started_at` (whole-second start times, clock adjustments).
+const START_SLACK_SECS: u64 = 60;
 
 /// One registration's report block, plus what later sections need from it.
 pub(crate) struct Checked {
@@ -37,14 +43,14 @@ pub(crate) struct Checked {
 /// Whether a `run` holds the registration, from the `.lock` body alone.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum RunState {
-  /// The body's PID is alive.
+  /// The body's PID is alive and started before the body was written.
   Active {
     /// The holder's PID.
     pid: u32,
     /// When it took the lock.
     since: String,
   },
-  /// No body, or its PID is gone.
+  /// No body, or its PID is gone or now names a later process (reused).
   Stopped,
   /// A body that does not parse.
   Unreadable(String),
@@ -58,21 +64,67 @@ fn label(config_path: &Path) -> String {
   )
 }
 
-/// Read the lock body at `lock` without opening it for locking.
-pub(crate) fn run_state(lock: &Path) -> RunState {
-  let raw = match std::fs::read_to_string(lock) {
-    Ok(raw) => raw,
-    Err(error) if error.kind() == std::io::ErrorKind::NotFound => return RunState::Stopped,
-    Err(error) => return RunState::Unreadable(error.to_string()),
+/// The body's PID is alive and its process started no later than the body
+/// was written (a reboot can hand the PID to an unrelated, later process).
+/// An unparseable `started_at` falls back to liveness alone.
+pub(crate) fn holder_alive(body: &LockBody) -> bool {
+  let Some(started) = pid_start_time(body.pid) else {
+    return false;
   };
+  match chrono::DateTime::parse_from_rfc3339(&body.started_at) {
+    Ok(at) => u64::try_from(at.timestamp())
+      .is_ok_and(|written| started <= written.saturating_add(START_SLACK_SECS)),
+    Err(_) => true,
+  }
+}
+
+/// Read the lock body at `lock` without opening it for locking; an empty
+/// body is re-read once after [`BODY_SETTLE`].
+pub(crate) async fn run_state(lock: &Path) -> RunState {
+  let read = || match std::fs::read_to_string(lock) {
+    Ok(raw) => Ok(raw),
+    Err(error) if error.kind() == std::io::ErrorKind::NotFound => Err(RunState::Stopped),
+    Err(error) => Err(RunState::Unreadable(error.to_string())),
+  };
+  let mut raw = match read() {
+    Ok(raw) => raw,
+    Err(state) => return state,
+  };
+  if raw.trim().is_empty() {
+    tokio::time::sleep(BODY_SETTLE).await;
+    raw = match read() {
+      Ok(raw) => raw,
+      Err(state) => return state,
+    };
+  }
   match serde_json::from_str::<LockBody>(&raw) {
-    Ok(body) if is_pid_alive(body.pid) => RunState::Active {
+    Ok(body) if holder_alive(&body) => RunState::Active {
       pid: body.pid,
       since: body.started_at,
     },
     Ok(_) => RunState::Stopped,
     Err(error) => RunState::Unreadable(error.to_string()),
   }
+}
+
+/// `error` without the source excerpt a TOML parse error quotes (the
+/// `N | <line>` gutter lines): a hand-edited `config.toml` line can hold a
+/// secret, such as an unquoted proxy password, and this report is meant to
+/// be shared. The location and the message stay.
+pub(crate) fn without_source_excerpt(error: &str) -> String {
+  error
+    .lines()
+    .filter(|line| {
+      !line
+        .trim_start()
+        .trim_start_matches(|c: char| c.is_ascii_digit())
+        .trim_start()
+        .starts_with('|')
+    })
+    .map(str::trim)
+    .filter(|line| !line.is_empty())
+    .collect::<Vec<_>>()
+    .join("; ")
 }
 
 /// The `run` row: a stopped persistent registration fails (its jobs queue
@@ -178,7 +230,11 @@ fn unloadable(config_path: &Path, error: &RunnerError) -> Checked {
       Row::new(
         Level::Fail,
         "config",
-        format!("cannot load {}: {error}", config_path.display()),
+        format!(
+          "cannot load {}: {}",
+          config_path.display(),
+          without_source_excerpt(&error.to_string())
+        ),
       )
       .with_fix(REREGISTER),
     ],
@@ -234,7 +290,7 @@ pub(crate) async fn check_registration(config_path: &Path, timeout: Duration) ->
     creds_row(&crate::cli::credentials_path_for(config_path)),
     jit_row(&config),
     run_row(
-      &run_state(&data_dir.join(".lock")),
+      &run_state(&data_dir.join(".lock")).await,
       config.ephemeral,
       config_path,
     ),
@@ -264,3 +320,7 @@ pub(crate) async fn check_registration(config_path: &Path, timeout: Duration) ->
 #[cfg(test)]
 #[path = "tests/doctor_registrations.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/doctor_registrations_state.rs"]
+mod state_tests;

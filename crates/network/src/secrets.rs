@@ -1,4 +1,5 @@
-//! [`proxy_secrets`]: proxy credentials the secret masker must learn.
+//! [`proxy_secrets`]: proxy credentials the secret masker must learn, and
+//! [`url_credentials`], the same rule for any one credential-bearing URL.
 
 use shared::NetworkConfig;
 
@@ -33,12 +34,19 @@ pub fn proxy_secrets(cfg: &NetworkConfig) -> Vec<String> {
   let mut seen = std::collections::HashSet::new();
   raws
     .iter()
-    .flat_map(|raw| {
-      let public = public_username(raw);
-      url_secrets(raw)
-        .into_iter()
-        .filter(move |secret| !public.contains(secret))
-    })
+    .flat_map(|raw| url_credentials(raw))
     .filter(|secret| seen.insert(secret.clone()))
+    .collect()
+}
+
+/// The strings to mask for one URL that may carry credentials: its
+/// [`url_secrets`] minus the user name of a `user:password` pair, which is
+/// not secret (a lone `token@` user name is). Masking a name such as
+/// `toolu` would blank that word in every line of the output.
+pub fn url_credentials(raw: &str) -> Vec<String> {
+  let public = public_username(raw);
+  url_secrets(raw)
+    .into_iter()
+    .filter(|secret| !public.contains(secret))
     .collect()
 }

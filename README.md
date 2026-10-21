@@ -207,7 +207,8 @@ toolu-runner check --timeout 30                    # per-probe bound in seconds 
 
 `doctor` answers "is this machine serving my repos, and how do I fix what
 isn't?". It checks every registration under the runner home (or one with
-`--config`) and prints the fix command under every `WARN` / `FAIL` row.
+`--config`) and prints the fix command under each `WARN` / `FAIL` row that
+has one.
 
 ```sh
 toolu-runner doctor                     # every registration under TOOLU_RUNNER_HOME
@@ -225,11 +226,12 @@ toolu-runner doctor --offline           # local checks only: no network request 
 - **github auth (per host):** the bearer `run` re-mints with after every
   job. That is `TOOLU_RUNNER_TOKEN`, else the stored `login` token. It is
   verified with one authenticated `GET <api>/user`, the only request that
-  carries a credential. No bearer, or one GitHub rejects, is a `FAIL` when a
-  persistent registration needs it. The token is masked in all output.
+  carries a credential. No bearer, an unreadable token store, or a bearer
+  GitHub rejects is a `FAIL` when a persistent registration needs it, and a
+  `WARN` or `INFO` otherwise. The token is masked in all output.
 - **registrations:** for each registration:
-  - `config.toml`, `credentials.json` (warns unless mode `0600`) and the JIT
-    config all load.
+  - `config.toml`, `credentials.json` (warns when its group or others can
+    read it) and the JIT config all load.
   - Whether a `run` is serving it. This is read from the `.lock` body; the
     lock itself is never taken. A stopped persistent registration is a
     `FAIL`.
@@ -237,7 +239,8 @@ toolu-runner doctor --offline           # local checks only: no network request 
   - Any pending `remove`.
   - The last job's conclusion, from the job journal.
 - **network (per host):** the same endpoint, tool, proxy and TLS lines as
-  `check`, using the registration's own JIT endpoints.
+  `check`, using the registration's own JIT endpoints. If its JIT config
+  does not decode, the host's generic endpoints are probed instead.
 
 `doctor` is read-only. It never takes a lock, writes a file, opens a session
 or registers.
@@ -263,7 +266,7 @@ or registers.
 | `--force` | `remove` | Cancel an in-flight run before unregistering. |
 | `--url <URL>` | `check` | Probe this GitHub host's endpoints instead of the resolved registration's. |
 | `--timeout <SECS>` | `check`, `doctor` | Per-probe bound, 1–300 seconds (default 10). |
-| `--offline` | `doctor` | Make no network request; the update, token and network rows print `SKIP`. |
+| `--offline` | `doctor` | Make no network request; the update and network rows print `SKIP`, and a present token is reported unverified. |
 | `--client-id <ID>` | `login` | OAuth App client id for the device flow (fallback: `TOOLU_RUNNER_CLIENT_ID`). Needed until the built-in github.com App ships; always needed for GHES. |
 
 `register`, `run`, `remove`, `status`, `install-service`, and `check`
@@ -773,6 +776,7 @@ survives unregistration.
 | `TOOLU_RUNNER_CLIENT_ID` | — | OAuth App client id for the device flow (`--client-id` fallback). |
 | `TOOLU_RUNNER_KEYRING` | — | when set, opts the token store in to the OS keyring (default is a 0600 file — on macOS the keychain re-prompts whenever the binary's code signature changes, e.g. every rebuild). |
 | `TOOLU_RUNNER_NO_KEYRING` | — | when set, forces the 0600-file token store and skips the OS keyring probe entirely; overrides `TOOLU_RUNNER_KEYRING` (headless hosts, CI, locked keyrings). |
+| `TOOLU_RUNNER_RELEASES_URL` | the latest `Falconiere/toolu-ghrunner` release on `api.github.com` | release document `doctor`'s newer-release check reads (a mirror); credentials in it are masked. |
 | `TOOLU_RUNNER_LOG` | `info` | tracing filter. Checked before `RUST_LOG`. |
 | `RUST_LOG` | — | tracing filter (standard fallback). |
 | `DOCKER_HOST` | `unix:///var/run/docker.sock` | Docker daemon endpoint, read the same way the Docker CLI reads it — required for Colima, OrbStack, Podman and Rancher Desktop, which do not publish the default socket. `unix://`, `tcp://` and `http://` are supported; an `ssh://` or `https://` value is rejected with an error naming the endpoint rather than silently falling back. |
@@ -843,7 +847,7 @@ new host.
 ## Proxy and custom CA
 
 Every runner HTTP client — the listener, JIT re-mint, `remove`, `check`,
-action downloads, Node runtime downloads, the live-log WebSocket and the
+`doctor` (its first registration's settings for the release check), action downloads, Node runtime downloads, the live-log WebSocket and the
 accelerated cache's upstream — is built from one place (`crates/network`)
 and honours the same settings. The local OIDC server and the S3 cold tier
 build their clients the same way but are not wired into a production job
@@ -930,7 +934,7 @@ the proxy redacted.
 
 | Symptom | Fix |
 |---|---|
-| Anything — start here | Run `toolu-runner doctor`. Every `WARN` / `FAIL` row is followed by the command that fixes it. |
+| Anything — start here | Run `toolu-runner doctor`. A `WARN` / `FAIL` row with a known fix is followed by the command that applies it. |
 | `config not found at ...` / `no runner registration found under ...` | Run `register` before `run`. |
 | `several runner registrations found (...)` | More than one repo is registered and the cwd matches none — `cd` into the repo, or pass `--config`. |
 | `registration already exists at ...` | Pass `--replace` to `register`. |

@@ -25,5 +25,5 @@ mod step_env;
 
 pub use client::{LOOPBACK_BYPASS, client_builder, describe, proxy_configured};
 pub use proxy_env::{ProxyEnv, ProxyVar, redact_url, url_secrets};
-pub use secrets::proxy_secrets;
+pub use secrets::{proxy_secrets, url_credentials};
 pub use step_env::{StepNetworkEnv, step_env};

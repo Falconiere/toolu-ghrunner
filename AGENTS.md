@@ -937,7 +937,7 @@ to that list requires proving the value is not a real credential.
   writes, creates dirs or opens a session; its one credentialed request is
   `GET <api>/user`. Sections live in `doctor_{report,host,auth,registrations,
   service}.rs`; the network section reuses `check_cmd::gather`. Pinned by
-  `tests/doctor_cmd_test.rs`.
+  `tests/doctor_*_test.rs`.
 - `create_app_cmd.rs` — `cmd_create_app`: runs GitHub's **App Manifest
   flow** to create a user-owned GitHub App in one click (github.com
   only; a `--host` other than github.com errors as unsupported). Binds a

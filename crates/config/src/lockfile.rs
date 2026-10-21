@@ -197,6 +197,21 @@ fn read_body(path: &Path) -> Result<LockBody, RunnerError> {
   serde_json::from_str(&raw).map_err(|e| RunnerError::Config(format!("lock body parse: {e}")))
 }
 
+/// The start time (Unix seconds) of the live process `pid`; `None` for `0`
+/// and for a PID no process holds. A lock body's PID that now belongs to a
+/// process started after the body was written has been reused.
+#[must_use]
+pub fn pid_start_time(pid: u32) -> Option<u64> {
+  if pid == 0 {
+    return None;
+  }
+  let mut sys = System::new();
+  sys.refresh_processes(ProcessesToUpdate::Some(&[Pid::from_u32(pid)]), true);
+  sys
+    .process(Pid::from_u32(pid))
+    .map(sysinfo::Process::start_time)
+}
+
 /// Is `pid` still alive? Uses `sysinfo` to check a single PID without
 /// the full-process-table enumeration that the old `refresh_processes(All)`
 /// path did. Returns `false` for `0` and unknown PIDs.

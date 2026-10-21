@@ -129,16 +129,23 @@ fn resolve_runners_base(url: &str) -> Result<String, RunnerError> {
     .ok_or_else(|| RunnerError::Config(format!("URL '{url}' missing repo segment")))?;
   let repo = repo_raw.strip_suffix(".git").unwrap_or(repo_raw);
 
-  let api_base = if host.eq_ignore_ascii_case("github.com") {
-    "https://api.github.com".to_owned()
-  } else {
-    let authority = match parsed.port() {
-      Some(port) => format!("{host}:{port}"),
-      None => host.to_owned(),
-    };
-    format!("{}://{authority}/api/v3", parsed.scheme())
+  let base = api_base(&parsed, host);
+  Ok(format!("{base}/repos/{owner}/{repo}/actions/runners"))
+}
+
+/// The REST API base for a GitHub URL whose host is `host`: github.com
+/// routes through `https://api.github.com`; any other host keeps the URL's
+/// scheme and authority and adds `/api/v3` (GHES).
+#[must_use]
+pub fn api_base(url: &url::Url, host: &str) -> String {
+  if host.eq_ignore_ascii_case("github.com") {
+    return "https://api.github.com".to_owned();
+  }
+  let authority = match url.port() {
+    Some(port) => format!("{host}:{port}"),
+    None => host.to_owned(),
   };
-  Ok(format!("{api_base}/repos/{owner}/{repo}/actions/runners"))
+  format!("{}://{authority}/api/v3", url.scheme())
 }
 
 /// Parse GitHub's `generate-jitconfig` JSON response body.

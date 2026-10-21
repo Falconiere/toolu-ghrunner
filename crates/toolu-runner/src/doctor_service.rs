@@ -1,6 +1,8 @@
 //! `doctor` service rows: whether a persistent registration has the
 //! supervisor unit `install-service` writes, whether the supervisor has it
-//! running, and (systemd) whether user lingering lets units start at boot.
+//! loaded (launchd) or active (systemd), and (systemd) whether user lingering
+//! lets units start at boot. Whether `run` itself is up is the `run` row's
+//! answer, from the lock body.
 //!
 //! Queries are read-only subprocesses (`launchctl print`, `systemctl --user
 //! is-active`, `loginctl show-user`), each bounded by the probe timeout and
@@ -19,7 +21,8 @@ use crate::service_cmd::{
 /// What the supervisor says about an installed unit.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Activity {
-  /// Loaded and running.
+  /// Loaded by launchd (`launchctl print` answers) or active under
+  /// systemd (`is-active`).
   Running,
   /// Installed but not running; carries the activation command.
   Stopped(String),
@@ -147,24 +150,25 @@ pub(crate) async fn service_row(
   Some((installed_row(&dest, &activity), true))
 }
 
-/// The `linger` row for `user` given `loginctl`'s parsed answer.
-pub(crate) fn linger_row_for(user: &str, linger: Option<bool>) -> Row {
+/// The `linger` row for `user` given `loginctl`'s parsed answer, or why
+/// there was none.
+pub(crate) fn linger_row_for(user: &str, linger: Result<bool, String>) -> Row {
   match linger {
-    Some(true) => Row::new(
+    Ok(true) => Row::new(
       Level::Ok,
       "linger",
       format!("enabled for {user}: user units start at boot"),
     ),
-    Some(false) => Row::new(
+    Ok(false) => Row::new(
       Level::Warn,
       "linger",
       format!("disabled for {user}: user units start only at login"),
     )
     .with_fix(format!("loginctl enable-linger {user}")),
-    None => Row::new(
+    Err(reason) => Row::new(
       Level::Warn,
       "linger",
-      format!("could not query loginctl for {user}"),
+      format!("could not query loginctl for {user}: {reason}"),
     ),
   }
 }
@@ -176,7 +180,14 @@ pub(crate) async fn linger_row(any_unit_installed: bool, timeout: Duration) -> O
   }
   let user = match run("id", &["-un"], timeout).await {
     Ok(ran) if ran.success && !ran.stdout.is_empty() => ran.stdout,
-    Ok(_) | Err(_) => return Some(linger_row_for("this user", None)),
+    Ok(ran) => {
+      let reason = format!("`id -un` failed: {}", first_line(&ran.stderr));
+      return Some(linger_row_for("this user", Err(reason)));
+    },
+    Err(error) => {
+      let reason = format!("`id -un`: {}", run_error(error, timeout));
+      return Some(linger_row_for("this user", Err(reason)));
+    },
   };
   let linger = match run(
     "loginctl",
@@ -185,8 +196,15 @@ pub(crate) async fn linger_row(any_unit_installed: bool, timeout: Duration) -> O
   )
   .await
   {
-    Ok(ran) => parse_linger(&ran.stdout),
-    Err(_) => None,
+    Ok(ran) => parse_linger(&ran.stdout).ok_or_else(|| {
+      let said = first_line(&ran.stderr);
+      if said.is_empty() {
+        format!("unexpected output {:?}", ran.stdout.trim())
+      } else {
+        said.to_owned()
+      }
+    }),
+    Err(error) => Err(run_error(error, timeout)),
   };
   Some(linger_row_for(&user, linger))
 }

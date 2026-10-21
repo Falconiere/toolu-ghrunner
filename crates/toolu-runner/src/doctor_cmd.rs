@@ -36,7 +36,7 @@ systemd lingering), github auth (the bearer `run` re-mints with, verified by one
 authenticated GET <api>/user per host), registrations (config, credentials,
 JIT, whether `run` is serving it, supervisor unit, pending removal, last job)
 and network (the same probes as `check`, per host). Each WARN/FAIL row is
-followed by the command that fixes it.
+followed by the command that fixes it, where one exists.
 
 Read-only: never takes a registration's lock, writes a file, opens a session or
 registers. `check` is the narrower, credential-free network preflight.
@@ -81,14 +81,17 @@ struct Selection {
   unreadable: Option<String>,
 }
 
-/// `--config` (which must exist) > every registration under `home`.
+/// `--config` (which must exist; made absolute so its `runners/<owner>/
+/// <repo>` identity is visible) > every registration under `home`.
 fn select(home: &Path, config: Option<&Path>) -> Result<Selection, String> {
   if let Some(path) = config {
     if !path.exists() {
       return Err(format!("config not found at {}", path.display()));
     }
+    let path = std::path::absolute(path)
+      .map_err(|error| format!("cannot resolve {}: {error}", path.display()))?;
     return Ok(Selection {
-      configs: vec![path.to_path_buf()],
+      configs: vec![path],
       unreadable: None,
     });
   }
@@ -129,6 +132,24 @@ fn registrations_section(selection: &Selection, checked: &[Checked]) -> Section 
   section
 }
 
+/// The registration's target; when its JIT config does not decode, the
+/// host's generic endpoints through its `[network]` instead, so the host is
+/// still probed (the `jit` row already reports the broken config).
+fn registration_target(
+  path: &Path,
+  config: &config::config::RunnerRegistrationConfig,
+) -> Result<Target, String> {
+  check_cmd::target_from_registration(path).or_else(|_| {
+    let origin = format!(
+      "registration: {} (JIT unreadable; generic endpoints)",
+      path.display()
+    );
+    let mut target = check_cmd::unregistered_target(&config.runner_url, origin)?;
+    target.network = config.network_config();
+    Ok(target)
+  })
+}
+
 /// One target per distinct registration host (its first registration
 /// supplies the JIT endpoints); github.com when nothing loaded.
 fn network_targets(selection: &Selection, checked: &[Checked]) -> Vec<Result<Target, String>> {
@@ -146,7 +167,7 @@ fn network_targets(selection: &Selection, checked: &[Checked]) -> Vec<Result<Tar
     });
     if !seen.contains(&key) {
       seen.push(key);
-      targets.push(check_cmd::target_from_registration(path));
+      targets.push(registration_target(path, config));
     }
   }
   if targets.is_empty() {
@@ -190,9 +211,10 @@ async fn network_section(
   match check_cmd::gather(&target, timeout, proxy).await {
     Ok(report) => Section::verbatim(
       &title,
+      // A line can carry a second `hint:` line; indent every physical line.
       check_report::section_lines(&report)
-        .into_iter()
-        .map(|line| format!("  {line}"))
+        .iter()
+        .flat_map(|line| line.lines().map(|part| format!("  {part}")))
         .collect(),
       report.required_failures(),
       report.warnings(),
@@ -228,11 +250,21 @@ pub(crate) async fn cmd_doctor(args: DoctorArgs) -> i32 {
   };
   let timeout = Duration::from_secs(args.timeout);
   let mut masker = SecretMasker::new();
-  let update = doctor_host::update_check(args.offline, timeout).await;
+  for secret in network::url_credentials(&crate::config::releases_url()) {
+    masker.add_secret(&secret);
+  }
   let mut checked: Vec<Checked> = Vec::new();
   for config in &selection.configs {
     checked.push(check_registration(config, timeout).await);
   }
+  // The release check goes through the first loadable registration's
+  // `[network]`, like every other runner client (env mode without one).
+  let release_network = checked
+    .iter()
+    .find_map(|block| block.config.as_ref())
+    .map(config::config::RunnerRegistrationConfig::network_config)
+    .unwrap_or_default();
+  let update = doctor_host::update_check(args.offline, timeout, &release_network).await;
   let mut disk_paths = vec![home];
   disk_paths.extend(checked.iter().filter_map(|block| block.work_dir.clone()));
   let mut host = vec![doctor_host::platform_row(), doctor_host::user_row()];

@@ -1,11 +1,20 @@
 //! Tests for the `doctor` service rows: parsing the real one-line answers of
 //! `systemctl --user is-active` and `loginctl show-user --property=Linger`,
-//! and the row each unit state renders.
+//! the row each unit state renders, and the supervisor query against the
+//! real tool (or its absence) on this host.
 
 use std::path::Path;
+use std::time::Duration;
 
-use super::{Activity, installed_row, linger_row_for, parse_is_active, parse_linger};
-use crate::doctor_report::Level;
+use super::{
+  Activity, activity, installed_row, linger_row, linger_row_for, parse_is_active, parse_linger,
+  run_error, service_row,
+};
+use crate::check_tools::RunError;
+use crate::doctor_report::{Level, Row};
+use crate::service_cmd::{Supervisor, current_supervisor};
+
+const UNIT: &str = "/h/.config/systemd/user/toolu-runner-o-r.service";
 
 #[test]
 fn systemctl_is_active_states_map_to_running_or_not() {
@@ -17,6 +26,8 @@ fn systemctl_is_active_states_map_to_running_or_not() {
   }
   assert_eq!(parse_is_active(""), None);
   assert_eq!(parse_is_active("Failed to connect to bus\n"), None);
+  // Only the whole answer counts, not a word inside another message.
+  assert_eq!(parse_is_active("not active\n"), None);
 }
 
 #[test]
@@ -25,67 +36,151 @@ fn loginctl_linger_property_is_parsed() {
   assert_eq!(parse_linger("Linger=no\n"), Some(false));
   assert_eq!(parse_linger(""), None);
   assert_eq!(parse_linger("Linger=maybe\n"), None);
+  assert_eq!(parse_linger("Failed to get user: No such user\n"), None);
 }
 
 #[test]
 fn unit_states_render_ok_warn_with_activation_or_query_failure() {
-  let dest = Path::new("/h/.config/systemd/user/toolu-runner-o-r.service");
-  let active = installed_row(dest, &Activity::Running);
-  assert_eq!(active.level, Level::Ok);
+  let dest = Path::new(UNIT);
   assert_eq!(
-    active.detail,
-    "installed and active (/h/.config/systemd/user/toolu-runner-o-r.service)"
+    installed_row(dest, &Activity::Running),
+    Row::new(
+      Level::Ok,
+      "service",
+      "installed and active (/h/.config/systemd/user/toolu-runner-o-r.service)"
+    )
   );
 
-  let stopped = installed_row(
-    dest,
-    &Activity::Stopped("systemctl --user enable --now toolu-runner-o-r.service".to_owned()),
-  );
-  assert_eq!(stopped.level, Level::Warn);
-  assert!(
-    stopped.detail.starts_with("installed ("),
-    "{}",
-    stopped.detail
-  );
-  assert!(
-    stopped.detail.ends_with("), not active"),
-    "{}",
-    stopped.detail
-  );
   assert_eq!(
-    stopped.fix.as_deref(),
-    Some("systemctl --user enable --now toolu-runner-o-r.service")
-  );
-
-  let unknown = installed_row(
-    dest,
-    &Activity::Unknown(
-      "systemctl".to_owned(),
-      "Failed to connect to bus".to_owned(),
+    installed_row(
+      dest,
+      &Activity::Stopped("systemctl --user enable --now toolu-runner-o-r.service".to_owned()),
     ),
+    Row::new(
+      Level::Warn,
+      "service",
+      "installed (/h/.config/systemd/user/toolu-runner-o-r.service), not active"
+    )
+    .with_fix("systemctl --user enable --now toolu-runner-o-r.service")
   );
-  assert_eq!(unknown.level, Level::Warn);
-  assert!(
-    unknown
-      .detail
-      .ends_with("; could not query systemctl: Failed to connect to bus"),
-    "{}",
-    unknown.detail
+
+  assert_eq!(
+    installed_row(
+      dest,
+      &Activity::Unknown(
+        "systemctl".to_owned(),
+        "Failed to connect to bus".to_owned(),
+      ),
+    ),
+    Row::new(
+      Level::Warn,
+      "service",
+      "installed (/h/.config/systemd/user/toolu-runner-o-r.service); could not query systemctl: Failed to connect to bus"
+    )
   );
 }
 
 #[test]
 fn linger_off_warns_with_enable_linger_for_the_user() {
-  let on = linger_row_for("ci", Some(true));
-  assert_eq!(on.level, Level::Ok);
-  let off = linger_row_for("ci", Some(false));
-  assert_eq!(off.level, Level::Warn);
-  assert_eq!(off.fix.as_deref(), Some("loginctl enable-linger ci"));
-  let unknown = linger_row_for("ci", None);
-  assert_eq!(unknown.level, Level::Warn);
-  assert!(
-    unknown.detail.starts_with("could not query"),
-    "{}",
-    unknown.detail
+  assert_eq!(
+    linger_row_for("ci", Ok(true)),
+    Row::new(
+      Level::Ok,
+      "linger",
+      "enabled for ci: user units start at boot"
+    )
   );
+  assert_eq!(
+    linger_row_for("ci", Ok(false)),
+    Row::new(
+      Level::Warn,
+      "linger",
+      "disabled for ci: user units start only at login"
+    )
+    .with_fix("loginctl enable-linger ci")
+  );
+  assert_eq!(
+    linger_row_for("ci", Err("not found on PATH".to_owned())),
+    Row::new(
+      Level::Warn,
+      "linger",
+      "could not query loginctl for ci: not found on PATH"
+    )
+  );
+}
+
+#[test]
+fn a_query_that_cannot_run_is_explained_in_one_line() {
+  assert_eq!(
+    run_error(RunError::NotFound, Duration::from_secs(3)),
+    "not found on PATH"
+  );
+  assert_eq!(
+    run_error(RunError::TimedOut, Duration::from_secs(3)),
+    "timed out after 3 s"
+  );
+  assert_eq!(
+    run_error(
+      RunError::Spawn("Permission denied (os error 13)".to_owned()),
+      Duration::from_secs(3)
+    ),
+    "could not start: Permission denied (os error 13)"
+  );
+}
+
+#[tokio::test]
+async fn an_ephemeral_registration_has_no_service_row() {
+  assert!(
+    service_row(
+      Path::new("/h/runners/o/r/config.toml"),
+      true,
+      Duration::from_secs(1)
+    )
+    .await
+    .is_none()
+  );
+}
+
+#[tokio::test]
+async fn linger_is_only_asked_about_for_installed_units_on_systemd() {
+  assert_eq!(linger_row(false, Duration::from_secs(1)).await, None);
+  if !matches!(current_supervisor(), Ok(Supervisor::Systemd)) {
+    assert_eq!(linger_row(true, Duration::from_secs(1)).await, None);
+  }
+}
+
+#[tokio::test]
+async fn the_foreign_supervisors_tool_is_reported_as_not_found_on_path() {
+  let (foreign, tool) = if matches!(current_supervisor(), Ok(Supervisor::Launchd)) {
+    (Supervisor::Systemd, "systemctl")
+  } else {
+    (Supervisor::Launchd, "launchctl")
+  };
+  let got = activity(
+    foreign,
+    "io.toolu.runner.doctor-test.absent",
+    "toolu-runner-doctor-test-absent.service",
+    "hint".to_owned(),
+    Duration::from_secs(5),
+  )
+  .await;
+  assert_eq!(
+    got,
+    Activity::Unknown(tool.to_owned(), "not found on PATH".to_owned())
+  );
+}
+
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn launchd_reports_an_unloaded_label_as_stopped_with_the_activation_hint() {
+  let hint = "launchctl bootstrap gui/$(id -u) /h/Library/LaunchAgents/x.plist".to_owned();
+  let got = activity(
+    Supervisor::Launchd,
+    "io.toolu.runner.doctor-test.absent",
+    "unused.service",
+    hint.clone(),
+    Duration::from_secs(5),
+  )
+  .await;
+  assert_eq!(got, Activity::Stopped(hint));
 }

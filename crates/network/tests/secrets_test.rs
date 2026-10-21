@@ -178,3 +178,17 @@ fn proxy_configured_ignores_blank_values() {
   assert!(!network::proxy_configured(&set(Some("   "))));
   assert!(!network::proxy_configured(&set(None)));
 }
+
+#[test]
+fn url_credentials_keep_a_pairs_user_name_but_mask_a_lone_token() {
+  let pair = network::url_credentials("http://toolu:pw-SECRET@mirror.example/latest");
+  assert!(pair.contains(&"pw-SECRET".to_owned()), "{pair:?}");
+  assert!(pair.contains(&b64("toolu:pw-SECRET")), "{pair:?}");
+  assert!(
+    !pair.iter().any(|secret| secret == "toolu"),
+    "a pair's user name is not secret: {pair:?}"
+  );
+  let lone = network::url_credentials("https://lonetoken-1234@mirror.example/latest");
+  assert!(lone.contains(&"lonetoken-1234".to_owned()), "{lone:?}");
+  assert!(network::url_credentials("https://mirror.example/latest").is_empty());
+}

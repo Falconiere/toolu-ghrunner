@@ -83,12 +83,17 @@ pub(crate) fn update_row(current: &str, latest_tag: &str) -> Row {
   }
 }
 
-/// The `update` row: `SKIP` offline or when the check itself fails.
-pub(crate) async fn update_check(offline: bool, timeout: Duration) -> Row {
+/// The `update` row through `network`: `SKIP` offline or when the check
+/// itself fails.
+pub(crate) async fn update_check(
+  offline: bool,
+  timeout: Duration,
+  network: &shared::NetworkConfig,
+) -> Row {
   if offline {
     return Row::new(Level::Skip, "update", "offline");
   }
-  match latest_tag(&crate::config::releases_url(), timeout).await {
+  match latest_tag(&crate::config::releases_url(), timeout, network).await {
     Ok(tag) => update_row(env!("CARGO_PKG_VERSION"), &tag),
     Err(reason) => Row::new(
       Level::Skip,
@@ -99,8 +104,12 @@ pub(crate) async fn update_check(offline: bool, timeout: Duration) -> Row {
 }
 
 /// GET the release document and read its `tag_name`.
-async fn latest_tag(url: &str, timeout: Duration) -> Result<String, String> {
-  let client = crate::check_probe::build_client(timeout, &shared::NetworkConfig::default())?;
+async fn latest_tag(
+  url: &str,
+  timeout: Duration,
+  network: &shared::NetworkConfig,
+) -> Result<String, String> {
+  let client = crate::check_probe::build_client(timeout, network)?;
   let response = client
     .get(url)
     .header("Accept", "application/vnd.github+json")
@@ -196,38 +205,44 @@ pub(crate) fn disk_rows(paths: &[PathBuf]) -> Vec<Row> {
       continue;
     }
     seen.push(path);
-    rows.push(match fs2::available_space(nearest_existing(path)) {
-      Ok(free) => {
-        let level = disk_level(free);
-        let row = Row::new(
-          level,
-          "disk",
-          format!(
-            "{:.1} GiB free at {}",
-            free as f64 / GIB as f64,
-            path.display()
-          ),
-        );
-        if level == Level::Ok {
-          row
-        } else {
-          row.with_fix(format!(
-            "free space on the volume holding {}",
-            path.display()
-          ))
-        }
-      },
-      Err(error) => Row::new(
-        Level::Warn,
-        "disk",
-        format!(
-          "could not measure free space at {}: {error}",
-          path.display()
-        ),
-      ),
-    });
+    rows.push(disk_row(path, fs2::available_space(nearest_existing(path))));
   }
   rows
+}
+
+/// The `disk` row for `path` given its measured free bytes (or why they
+/// could not be measured).
+pub(crate) fn disk_row(path: &Path, free: std::io::Result<u64>) -> Row {
+  match free {
+    Ok(free) => {
+      let level = disk_level(free);
+      let row = Row::new(
+        level,
+        "disk",
+        format!(
+          "{:.1} GiB free at {}",
+          free as f64 / GIB as f64,
+          path.display()
+        ),
+      );
+      if level == Level::Ok {
+        row
+      } else {
+        row.with_fix(format!(
+          "free space on the volume holding {}",
+          path.display()
+        ))
+      }
+    },
+    Err(error) => Row::new(
+      Level::Warn,
+      "disk",
+      format!(
+        "could not measure free space at {}: {error}",
+        path.display()
+      ),
+    ),
+  }
 }
 
 #[cfg(test)]

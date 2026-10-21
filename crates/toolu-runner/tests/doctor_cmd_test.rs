@@ -1,54 +1,96 @@
 //! Shell-out tests for `toolu-runner doctor`: the compiled binary run against
 //! real registrations (the committed GHES JIT fixture), real processes, real
 //! files and loopback peers serving bodies captured from the live GitHub API.
+//!
+//! Rows are asserted whole: the level column, the padded name, the detail and
+//! the `fix:` line beneath. Only text the OS or a dependency owns (an errno,
+//! a measured millisecond count, free disk space) is matched by its stable
+//! frame instead.
+//!
+//! The shared fixtures and row helpers live in `helpers/doctor_env.rs`. The
+//! auth, release, flag, service and network/summary tests live in the sibling
+//! `doctor_*_test.rs` files; the ones here are the plan's per-step checks.
 
 use std::os::unix::fs::PermissionsExt as _;
-use std::path::Path;
 use std::time::Duration;
 
 use fs2::FileExt;
 
-use crate::check_servers::{OK, Recorder, run};
-use crate::doctor_env::{doctor_cmd, write_registration};
+use crate::check_servers::{Recorder, closed_port, run};
+use crate::doctor_env::{
+  ENV_REJECTED_FIX, REREGISTER, STORED_BEARER, TEST_BEARER, USER_401, VERSION, block, dead_pid,
+  doctor_cmd, fix, heading, healthy_reply, implied_summary, install_fix, jit_ok, last_line, report,
+  row, section, snapshot, store_login, user_authorization, user_peer, write_lock_body,
+  write_registration,
+};
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
-
-/// The captured real `GET …/releases/latest` body as an HTTP response.
-const RELEASES_LATEST: &str = concat!(
-  "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\nconnection: close\r\n\r\n",
-  include_str!("fixtures/doctor/releases_latest.json")
-);
-
-/// One loopback peer for every GitHub host a GHES-shaped registration names:
-/// the release check gets the captured body, every service endpoint a 200.
-fn github_reply(head: &str) -> &'static str {
-  if head.starts_with("GET /releases/latest ") {
-    RELEASES_LATEST
-  } else {
-    OK
-  }
-}
 
 #[test]
 fn empty_home() -> TestResult {
   let home = tempfile::tempdir()?;
   let (code, stdout, stderr, _) = run(doctor_cmd(home.path())?.arg("--offline"))?;
 
-  assert_eq!(code, Some(0), "stdout:\n{stdout}\nstderr:\n{stderr}");
-  assert!(stdout.contains("  INFO  registrations none"), "{stdout}");
-  assert!(stdout.contains("toolu-runner register"), "{stdout}");
+  assert_eq!(code, Some(0), "{}", report(&stdout, &stderr));
+  assert_eq!(
+    section(&stdout, "registrations"),
+    [
+      row("INFO", "registrations", "none"),
+      fix("toolu-runner register --url https://github.com/<owner>/<repo>"),
+    ],
+    "{stdout}"
+  );
+  assert_eq!(
+    section(&stdout, "install"),
+    [
+      row(
+        "OK",
+        "version",
+        &format!(
+          "toolu-runner {VERSION} (GitHub runner compatibility {})",
+          protocol::runner_version::COMPATIBILITY_VERSION
+        )
+      ),
+      row("SKIP", "update", "offline"),
+    ],
+    "{stdout}"
+  );
+  assert_eq!(
+    section(&stdout, "github auth (github.com)"),
+    [
+      row(
+        "INFO",
+        "token",
+        "none (only needed for persistent registrations)"
+      ),
+      fix("toolu-runner login"),
+    ],
+    "{stdout}"
+  );
+  assert_eq!(
+    section(&stdout, "network (github.com)"),
+    [row("SKIP", "endpoints", "offline")],
+    "{stdout}"
+  );
+  let disk = format!(" GiB free at {}", home.path().display());
   assert!(
-    stdout.contains(&format!("free at {}", home.path().display())),
+    section(&stdout, "host").iter().any(|line| {
+      line
+        .strip_prefix("  OK    disk       ")
+        .and_then(|rest| rest.strip_suffix(disk.as_str()))
+        .is_some_and(|gib| gib.parse::<f64>().is_ok())
+    }),
     "{stdout}"
   );
   assert!(!stdout.contains("FAIL"), "{stdout}");
+  assert_eq!(last_line(&stdout), implied_summary(&stdout, 0), "{stdout}");
   Ok(())
 }
 
 #[test]
 fn update_check() -> TestResult {
   let home = tempfile::tempdir()?;
-  let peer = Recorder::spawn(|head| Some(github_reply(head)))?;
+  let peer = Recorder::spawn(|head| Some(healthy_reply(head)))?;
   let base = format!("http://127.0.0.1:{}", peer.port());
   // Ephemeral: no bearer is needed, so the token section cannot fail.
   write_registration(home.path(), "o", "r", &base, true)?;
@@ -57,12 +99,14 @@ fn update_check() -> TestResult {
     "TOOLU_RUNNER_RELEASES_URL",
     format!("{base}/releases/latest"),
   ))?;
-  let update = stdout
-    .lines()
-    .find(|line| line.starts_with("  OK    update     "))
-    .ok_or_else(|| format!("no OK update row:\n{stdout}\nstderr:\n{stderr}"))?;
-  // Build versions only grow, so the captured v0.11.1 is never newer.
-  assert!(update.contains("v0.11.1"), "{update}");
+  // Build versions only grow: the captured v0.11.1 is the build or older.
+  let install = section(&stdout, "install");
+  assert!(
+    install.contains(&row("OK", "update", "up to date (latest v0.11.1)").as_str())
+      || install.contains(&row("OK", "update", "newer than the latest release (v0.11.1)").as_str()),
+    "{}",
+    report(&stdout, &stderr)
+  );
   assert!(
     peer
       .request_lines()
@@ -70,79 +114,35 @@ fn update_check() -> TestResult {
     "{:?}",
     peer.request_lines()
   );
-  assert_eq!(code, Some(0), "stdout:\n{stdout}\nstderr:\n{stderr}");
+  assert_eq!(code, Some(0), "{}", report(&stdout, &stderr));
 
   // The default (closed port) release URL: SKIP, and the exit is unaffected.
+  let closed = closed_port()?;
   let (unreachable_code, unreachable, _, _) =
-    run(doctor_cmd(home.path())?.args(["--timeout", "5"]))?;
+    run(doctor_cmd(home.path())?.args(["--timeout", "5"]).env(
+      "TOOLU_RUNNER_RELEASES_URL",
+      format!("http://127.0.0.1:{closed}/releases/latest"),
+    ))?;
+  let skip = section(&unreachable, "install")
+    .into_iter()
+    .find(|line| line.starts_with("  SKIP  update "))
+    .ok_or_else(|| format!("no SKIP update row:\n{unreachable}"))?;
+  // The errno spelling is the OS's: match the row up to it.
+  let frame = row(
+    "SKIP",
+    "update",
+    &format!(
+      "could not check latest release: connect: error sending request for url \
+       (http://127.0.0.1:{closed}/releases/latest): client error (Connect): \
+       tcp connect error: Connection refused (os error "
+    ),
+  );
   assert!(
-    unreachable.contains("  SKIP  update     could not check latest release"),
-    "{unreachable}"
+    skip.starts_with(&frame) && skip.ends_with(')'),
+    "{skip}\nexpected to start with:\n{frame}"
   );
   assert_eq!(unreachable_code, code, "{unreachable}");
   Ok(())
-}
-
-/// Every path under `dir`, relative and sorted, with file sizes — a change
-/// anywhere (a new `.lock`, `_diag`, a rewritten file) changes the listing.
-fn tree(dir: &Path) -> std::io::Result<Vec<String>> {
-  let mut out = Vec::new();
-  let mut stack = vec![dir.to_path_buf()];
-  while let Some(next) = stack.pop() {
-    for entry in std::fs::read_dir(&next)? {
-      let entry = entry?;
-      let meta = entry.metadata()?;
-      let rel = entry
-        .path()
-        .strip_prefix(dir)
-        .map(|rel| rel.display().to_string())
-        .unwrap_or_default();
-      out.push(format!("{rel} {}", meta.len()));
-      if meta.is_dir() {
-        stack.push(entry.path());
-      }
-    }
-  }
-  out.sort();
-  Ok(out)
-}
-
-/// A PID that belonged to a real process which has exited and been reaped.
-fn dead_pid() -> Result<u32, Box<dyn std::error::Error>> {
-  for _ in 0..5 {
-    let mut child = std::process::Command::new("true").spawn()?;
-    let pid = child.id();
-    child.wait()?;
-    if !config::lockfile::is_pid_alive(pid) {
-      return Ok(pid);
-    }
-  }
-  Err("every reaped PID was reused at once".into())
-}
-
-/// Write a `.lock` body the way `run` does, naming `pid`.
-fn write_lock_body(reg_dir: &Path, pid: u32, config: &Path) -> std::io::Result<()> {
-  let body = config::lockfile::LockBody {
-    pid,
-    started_at: "2026-10-19T10:00:00Z".to_owned(),
-    config_path: config.display().to_string(),
-  };
-  std::fs::write(
-    reg_dir.join(".lock"),
-    serde_json::to_string(&body).map_err(std::io::Error::other)?,
-  )
-}
-
-/// The rows printed under the registration heading for `owner/repo`.
-fn block<'a>(stdout: &'a str, owner_repo: &str) -> Vec<&'a str> {
-  stdout
-    .lines()
-    .skip_while(|line| {
-      !line.starts_with(&format!("  {owner_repo} (")) && *line != format!("  {owner_repo}:")
-    })
-    .skip(1)
-    .take_while(|line| line.starts_with("  ") && !line.ends_with("):") && !line.ends_with(':'))
-    .collect()
 }
 
 #[test]
@@ -155,49 +155,66 @@ fn registration_integrity() -> TestResult {
   let loose_creds = loose.with_file_name("credentials.json");
   std::fs::set_permissions(&loose_creds, std::fs::Permissions::from_mode(0o644))?;
   let missing = write_registration(home.path(), "o", "nocreds", base, true)?;
-  std::fs::remove_file(missing.with_file_name("credentials.json"))?;
+  let missing_creds = missing.with_file_name("credentials.json");
+  std::fs::remove_file(&missing_creds)?;
 
   let (code, stdout, stderr, _) = run(doctor_cmd(home.path())?.arg("--offline"))?;
-  assert_eq!(code, Some(1), "stdout:\n{stdout}\nstderr:\n{stderr}");
+  assert_eq!(code, Some(1), "{}", report(&stdout, &stderr));
 
+  // A config that does not parse is the only row of its block, and the
+  // parse error's source excerpt (which could quote a secret) is dropped.
   let bad_rows = block(&stdout, "o/bad");
-  assert!(
-    bad_rows
-      .iter()
-      .any(|row| row.starts_with("  FAIL  config ")),
+  assert_eq!(
+    bad_rows,
+    [
+      row(
+        "FAIL",
+        "config",
+        &format!(
+          "cannot load {0}: config error: parse {0}: TOML parse error at line 1, column 15; \
+           invalid array; expected `]`",
+          bad.display()
+        )
+      ),
+      fix(REREGISTER),
+    ],
+    "{stdout}"
+  );
+  assert!(!stdout.contains("runner_url = [unterminated"), "{stdout}");
+
+  // A loose-mode credentials file warns and every other row is still reported.
+  assert_eq!(
+    block(&stdout, "o/loose"),
+    [
+      row("OK", "config", &loose.display().to_string()),
+      row("WARN", "creds", "mode 0644: readable beyond the owner"),
+      fix(&format!("chmod 600 {}", loose_creds.display())),
+      jit_ok(&loose)?,
+      row("WARN", "run", "not running"),
+      fix(&format!("toolu-runner run --config {}", loose.display())),
+      row("INFO", "last job", "no jobs yet"),
+    ],
     "{stdout}"
   );
 
-  let loose_rows = block(&stdout, "o/loose");
-  assert!(
-    loose_rows
-      .iter()
-      .any(|row| row.starts_with("  WARN  creds ") && row.contains("0644")),
+  assert_eq!(
+    block(&stdout, "o/nocreds"),
+    [
+      row("OK", "config", &missing.display().to_string()),
+      row(
+        "FAIL",
+        "creds",
+        &format!("missing {}", missing_creds.display())
+      ),
+      fix(REREGISTER),
+      jit_ok(&missing)?,
+      row("WARN", "run", "not running"),
+      fix(&format!("toolu-runner run --config {}", missing.display())),
+      row("INFO", "last job", "no jobs yet"),
+    ],
     "{stdout}"
   );
-  assert!(
-    loose_rows.contains(&format!("        fix: chmod 600 {}", loose_creds.display()).as_str()),
-    "{stdout}"
-  );
-  // The loose registration's other rows are still reported.
-  assert!(
-    loose_rows.iter().any(|row| row.starts_with("  OK    jit ")),
-    "{stdout}"
-  );
-  assert!(
-    loose_rows
-      .iter()
-      .any(|row| row.starts_with("  OK    config ")),
-    "{stdout}"
-  );
-
-  let missing_rows = block(&stdout, "o/nocreds");
-  assert!(
-    missing_rows
-      .iter()
-      .any(|row| row.starts_with("  FAIL  creds ")),
-    "{stdout}"
-  );
+  assert_eq!(last_line(&stdout), implied_summary(&stdout, 1), "{stdout}");
   Ok(())
 }
 
@@ -210,21 +227,49 @@ fn run_state() -> TestResult {
   std::fs::write(reg_dir.join(".pending_remove"), "")?;
 
   let (code, stdout, stderr, _) = run(doctor_cmd(home.path())?.arg("--offline"))?;
-  assert_eq!(code, Some(1), "stdout:\n{stdout}\nstderr:\n{stderr}");
-  let rows = block(&stdout, "o/r");
-  assert!(rows.contains(&"  FAIL  run        not running"), "{stdout}");
-  assert!(
-    rows.contains(
-      &format!(
-        "        fix: toolu-runner install-service --config {}",
+  assert_eq!(code, Some(1), "{}", report(&stdout, &stderr));
+  assert_eq!(
+    block(&stdout, "o/r"),
+    [
+      row("OK", "config", &config.display().to_string()),
+      row("OK", "creds", "present (0600)"),
+      jit_ok(&config)?,
+      row("FAIL", "run", "not running"),
+      install_fix(&config),
+      row("WARN", "service", "not installed"),
+      install_fix(&config),
+      row(
+        "WARN",
+        "pending",
+        "removal pending: `run` exits at its next job boundary"
+      ),
+      fix(&format!(
+        "toolu-runner remove --config {}",
         config.display()
-      )
-      .as_str()
-    ),
+      )),
+      row("INFO", "last job", "no jobs yet"),
+    ],
     "{stdout}"
   );
   assert!(
-    rows.iter().any(|row| row.starts_with("  WARN  pending ")),
+    section(&stdout, "registrations").contains(&heading("o/r", "persistent").as_str()),
+    "{stdout}"
+  );
+
+  // A lock body that is not JSON is "not running" and says why.
+  std::fs::write(reg_dir.join(".lock"), "not json")?;
+  let (_, stdout, _, _) = run(doctor_cmd(home.path())?.arg("--offline"))?;
+  let unreadable = block(&stdout, "o/r")
+    .into_iter()
+    .find(|line| line.starts_with("  FAIL  run "))
+    .ok_or_else(|| format!("no FAIL run row:\n{stdout}"))?;
+  assert_eq!(
+    unreadable,
+    row(
+      "FAIL",
+      "run",
+      "lock body unreadable (expected ident at line 1 column 2); treated as not running"
+    ),
     "{stdout}"
   );
   Ok(())
@@ -244,12 +289,18 @@ fn last_job() -> TestResult {
 
   let (_, stdout, _, _) = run(doctor_cmd(home.path())?.arg("--offline"))?;
   assert!(
-    block(&stdout, "o/r")
-      .contains(&"  INFO  last job   success — build at 2026-10-11T02:01:30.612Z"),
+    block(&stdout, "o/r").contains(
+      &row(
+        "INFO",
+        "last job",
+        "success — build at 2026-10-11T02:01:30.612Z"
+      )
+      .as_str()
+    ),
     "{stdout}"
   );
   assert!(
-    block(&stdout, "o/fresh").contains(&"  INFO  last job   no jobs yet"),
+    block(&stdout, "o/fresh").contains(&row("INFO", "last job", "no jobs yet").as_str()),
     "{stdout}"
   );
   Ok(())
@@ -258,93 +309,68 @@ fn last_job() -> TestResult {
 #[test]
 fn read_only() -> TestResult {
   let home = tempfile::tempdir()?;
-  let config = write_registration(home.path(), "o", "r", "http://127.0.0.1:9", false)?;
+  let peer = Recorder::spawn(|head| Some(healthy_reply(head)))?;
+  let base = format!("http://127.0.0.1:{}", peer.port());
+  let config = write_registration(home.path(), "o", "r", &base, false)?;
   let reg_dir = config.parent().ok_or("no parent")?;
-  write_lock_body(reg_dir, std::process::id(), &config)?;
+  let since = write_lock_body(reg_dir, std::process::id(), &config)?;
+  store_login(home.path(), "127.0.0.1", STORED_BEARER)?;
+  std::fs::write(reg_dir.join(".pending_remove"), "")?;
   let lock = std::fs::OpenOptions::new()
     .read(true)
     .write(true)
     .open(reg_dir.join(".lock"))?;
   lock.try_lock_exclusive()?;
-  let before = tree(home.path())?;
+  let before = snapshot(home.path())?;
+  let active = row(
+    "OK",
+    "run",
+    &format!("active (pid {}, since {since})", std::process::id()),
+  );
 
+  // Offline, with another process holding the registration's lock.
   let (_, stdout, stderr, elapsed) = run(doctor_cmd(home.path())?.arg("--offline"))?;
   assert!(elapsed < Duration::from_secs(30), "{elapsed:?}");
   assert!(
-    block(&stdout, "o/r")
-      .iter()
-      .any(|row| row.starts_with(&format!(
-        "  OK    run        active (pid {}",
-        std::process::id()
-      ))),
-    "stdout:\n{stdout}\nstderr:\n{stderr}"
+    block(&stdout, "o/r").contains(&active.as_str()),
+    "{}",
+    report(&stdout, &stderr)
   );
-  assert_eq!(tree(home.path())?, before, "doctor changed the home");
+  assert_eq!(
+    snapshot(home.path())?,
+    before,
+    "an offline doctor changed the home"
+  );
+
+  // Online: the bearer, the release document and every endpoint are fetched,
+  // and the home is still byte-, mode- and mtime-identical.
+  let release = format!("http://127.0.0.1:{}/releases/latest", peer.port());
+  let (code, stdout, stderr, _) = run(
+    doctor_cmd(home.path())?
+      .args(["--timeout", "5"])
+      .env("TOOLU_RUNNER_RELEASES_URL", release),
+  )?;
+  let requested = peer.request_lines();
+  for path in ["/api/v3/user", "/releases/latest", "/api/v3"] {
+    assert!(
+      requested.contains(&format!("GET {path} HTTP/1.1")),
+      "doctor never asked {path}: {requested:?}"
+    );
+  }
+  assert!(
+    block(&stdout, "o/r").contains(&active.as_str()),
+    "{}",
+    report(&stdout, &stderr)
+  );
+  assert_eq!(code, Some(0), "{}", report(&stdout, &stderr));
+  assert_eq!(
+    snapshot(home.path())?,
+    before,
+    "an online doctor changed the home"
+  );
   FileExt::unlock(&lock)?;
   Ok(())
 }
-
-#[test]
-fn service_unit() -> TestResult {
-  let home = tempfile::tempdir()?;
-  let config = write_registration(home.path(), "o", "r", "http://127.0.0.1:9", false)?;
-  write_registration(home.path(), "o", "once", "http://127.0.0.1:9", true)?;
-
-  // Without a unit: an exact WARN with the install command.
-  let (_, stdout, _, _) = run(doctor_cmd(home.path())?.arg("--offline"))?;
-  let rows = block(&stdout, "o/r");
-  assert!(
-    rows.contains(&"  WARN  service    not installed"),
-    "{stdout}"
-  );
-  assert!(
-    rows.contains(
-      &format!(
-        "        fix: toolu-runner install-service --config {}",
-        config.display()
-      )
-      .as_str()
-    ),
-    "{stdout}"
-  );
-  // An ephemeral registration is never supervised: no service row.
-  assert!(
-    !block(&stdout, "o/once")
-      .iter()
-      .any(|row| row.contains(" service ")),
-    "{stdout}"
-  );
-
-  // The unit the real `install-service --no-activate` writes into this HOME.
-  let (code, out, err, _) = run(
-    std::process::Command::new(env!("CARGO_BIN_EXE_toolu-runner"))
-      .args(["install-service", "--no-activate", "--config"])
-      .arg(&config)
-      .current_dir(home.path())
-      .env("HOME", home.path())
-      .env("TOOLU_RUNNER_HOME", home.path()),
-  )?;
-  assert_eq!(code, Some(0), "stdout:\n{out}\nstderr:\n{err}");
-  let (_, stdout, _, _) = run(doctor_cmd(home.path())?.arg("--offline"))?;
-  let service = block(&stdout, "o/r")
-    .into_iter()
-    .find(|row| row.starts_with("  WARN  service    installed ("))
-    .ok_or_else(|| format!("no installed-unit row:\n{stdout}"))?;
-  assert!(
-    service.ends_with("), not active") || service.contains("; could not query "),
-    "{service}"
-  );
-  Ok(())
-}
-
-/// The bearer the auth tests hand the binary; synthetic, never a credential.
-const TEST_BEARER: &str = "doctor-test-bearer-0f3c9a";
-
-/// The captured real `GET /user` 401 body as an HTTP response.
-const USER_401: &str = concat!(
-  "HTTP/1.1 401 Unauthorized\r\ncontent-type: application/json\r\nconnection: close\r\n\r\n",
-  include_str!("fixtures/doctor/github_user_401.json")
-);
 
 #[test]
 fn missing_token() -> TestResult {
@@ -352,23 +378,17 @@ fn missing_token() -> TestResult {
   let config = write_registration(home.path(), "o", "r", "http://127.0.0.1:9", false)?;
 
   let (code, stdout, stderr, _) = run(doctor_cmd(home.path())?.arg("--offline"))?;
-  assert_eq!(code, Some(1), "stdout:\n{stdout}\nstderr:\n{stderr}");
-  let token = stdout
-    .lines()
-    .skip_while(|line| *line != "github auth (127.0.0.1):")
-    .skip(1)
-    .take(2)
-    .collect::<Vec<_>>();
-  assert!(
-    token
-      .first()
-      .is_some_and(|row| row.starts_with("  FAIL  token ")),
-    "{stdout}"
-  );
-  assert!(
-    token
-      .get(1)
-      .is_some_and(|fix| fix.starts_with("        fix: toolu-runner login")),
+  assert_eq!(code, Some(1), "{}", report(&stdout, &stderr));
+  assert_eq!(
+    section(&stdout, "github auth (127.0.0.1)"),
+    [
+      row(
+        "FAIL",
+        "token",
+        "none: a persistent registration cannot re-mint after its next job"
+      ),
+      fix("toolu-runner login 127.0.0.1"),
+    ],
     "{stdout}"
   );
 
@@ -376,20 +396,25 @@ fn missing_token() -> TestResult {
   std::fs::remove_dir_all(config.parent().ok_or("no parent")?)?;
   write_registration(home.path(), "o", "r", "http://127.0.0.1:9", true)?;
   let (_, stdout, _, _) = run(doctor_cmd(home.path())?.arg("--offline"))?;
-  assert!(!stdout.contains("FAIL  token"), "{stdout}");
+  assert_eq!(
+    section(&stdout, "github auth (127.0.0.1)"),
+    [
+      row(
+        "INFO",
+        "token",
+        "none (only needed for persistent registrations)"
+      ),
+      fix("toolu-runner login 127.0.0.1"),
+    ],
+    "{stdout}"
+  );
   Ok(())
 }
 
 #[test]
 fn rejected_token() -> TestResult {
   let home = tempfile::tempdir()?;
-  let api = Recorder::spawn(|head| {
-    Some(if head.starts_with("GET /api/v3/user ") {
-      USER_401
-    } else {
-      OK
-    })
-  })?;
+  let api = user_peer!(USER_401)?;
   let base = format!("http://127.0.0.1:{}", api.port());
   write_registration(home.path(), "o", "r", &base, false)?;
 
@@ -398,140 +423,24 @@ fn rejected_token() -> TestResult {
       .args(["--timeout", "5"])
       .env("TOOLU_RUNNER_TOKEN", TEST_BEARER),
   )?;
-  assert_eq!(code, Some(1), "stdout:\n{stdout}\nstderr:\n{stderr}");
-  assert!(
-    stdout.contains(
-      "  FAIL  token      TOOLU_RUNNER_TOKEN: rejected by GitHub (HTTP 401: Bad credentials)"
-    ),
+  assert_eq!(code, Some(1), "{}", report(&stdout, &stderr));
+  assert_eq!(
+    section(&stdout, "github auth (127.0.0.1)"),
+    [
+      row(
+        "FAIL",
+        "token",
+        "TOOLU_RUNNER_TOKEN: rejected by GitHub (HTTP 401: Bad credentials)"
+      ),
+      fix(ENV_REJECTED_FIX),
+    ],
     "{stdout}"
   );
-  let user_request = api
-    .heads()
-    .into_iter()
-    .find(|head| head.starts_with("GET /api/v3/user "))
-    .ok_or("doctor never asked GET /api/v3/user")?;
-  assert!(
-    user_request
-      .to_ascii_lowercase()
-      .contains(&format!("authorization: bearer {TEST_BEARER}")),
-    "{user_request}"
+  assert_eq!(
+    user_authorization(&api)?,
+    format!("authorization: bearer {TEST_BEARER}")
   );
   assert!(!stdout.contains(TEST_BEARER), "{stdout}");
   assert!(!stderr.contains(TEST_BEARER), "{stderr}");
-  Ok(())
-}
-
-/// The captured real (sanitized) `GET /user` 200 body as an HTTP response.
-const USER_200: &str = concat!(
-  "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\nconnection: close\r\n\r\n",
-  include_str!("fixtures/doctor/github_user_200.json")
-);
-
-/// The rows of the `network (<host>)` section.
-fn network_rows<'a>(stdout: &'a str, host: &str) -> Vec<&'a str> {
-  stdout
-    .lines()
-    .skip_while(|line| *line != format!("network ({host}):"))
-    .skip(1)
-    .take_while(|line| line.starts_with("  "))
-    .collect()
-}
-
-#[test]
-fn healthy() -> TestResult {
-  let home = tempfile::tempdir()?;
-  let api = Recorder::spawn(|head| {
-    Some(if head.starts_with("GET /api/v3/user ") {
-      USER_200
-    } else {
-      OK
-    })
-  })?;
-  let base = format!("http://127.0.0.1:{}", api.port());
-  let config = write_registration(home.path(), "o", "r", &base, false)?;
-  write_lock_body(
-    config.parent().ok_or("no parent")?,
-    std::process::id(),
-    &config,
-  )?;
-
-  let (code, stdout, stderr, _) = run(
-    doctor_cmd(home.path())?
-      .args(["--timeout", "5"])
-      .env("TOOLU_RUNNER_TOKEN", TEST_BEARER),
-  )?;
-  assert_eq!(code, Some(0), "stdout:\n{stdout}\nstderr:\n{stderr}");
-  assert!(
-    stdout.contains("  OK    token      TOOLU_RUNNER_TOKEN: valid (login Falconiere)"),
-    "{stdout}"
-  );
-  assert!(
-    stdout.contains(&format!(
-      "  OK    run        active (pid {}",
-      std::process::id()
-    )),
-    "{stdout}"
-  );
-  assert!(
-    stdout.contains("  WARN  service    not installed"),
-    "{stdout}"
-  );
-  let network = network_rows(&stdout, "127.0.0.1");
-  assert!(
-    network.iter().any(|row| row.contains("PASS  api ")),
-    "{stdout}"
-  );
-  assert!(stdout.contains("result: 0 failures"), "{stdout}");
-  assert!(!stdout.contains(TEST_BEARER), "{stdout}");
-  Ok(())
-}
-
-#[test]
-fn offline_makes_no_requests() -> TestResult {
-  let home = tempfile::tempdir()?;
-  let peer = Recorder::spawn(|head| Some(github_reply(head)))?;
-  let base = format!("http://127.0.0.1:{}", peer.port());
-  write_registration(home.path(), "o", "r", &base, false)?;
-
-  let (_, stdout, stderr, _) = run(
-    doctor_cmd(home.path())?
-      .arg("--offline")
-      .env("TOOLU_RUNNER_TOKEN", TEST_BEARER)
-      .env(
-        "TOOLU_RUNNER_RELEASES_URL",
-        format!("{base}/releases/latest"),
-      ),
-  )?;
-  assert!(peer.heads().is_empty(), "requests: {:?}", peer.heads());
-  assert!(
-    stdout.contains("  SKIP  update     offline"),
-    "{stdout}\n{stderr}"
-  );
-  assert!(
-    stdout.contains("  SKIP  token      TOOLU_RUNNER_TOKEN: present, not verified (offline)"),
-    "{stdout}"
-  );
-  assert!(
-    network_rows(&stdout, "127.0.0.1").contains(&"  SKIP  endpoints  offline"),
-    "{stdout}"
-  );
-  Ok(())
-}
-
-#[test]
-fn endpoint_failure() -> TestResult {
-  let home = tempfile::tempdir()?;
-  let closed = format!("http://127.0.0.1:{}", crate::check_servers::closed_port()?);
-  // Ephemeral, so no bearer is needed and only the network can fail.
-  write_registration(home.path(), "o", "r", &closed, true)?;
-
-  let (code, stdout, stderr, _) = run(doctor_cmd(home.path())?.args(["--timeout", "5"]))?;
-  assert_eq!(code, Some(1), "stdout:\n{stdout}\nstderr:\n{stderr}");
-  assert!(
-    network_rows(&stdout, "127.0.0.1")
-      .iter()
-      .any(|row| row.contains("FAIL  api ")),
-    "{stdout}"
-  );
   Ok(())
 }
