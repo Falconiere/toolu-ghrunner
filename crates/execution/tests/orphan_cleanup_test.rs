@@ -259,16 +259,25 @@ async fn concurrent_job_and_unrelated_process_survive_cleanup() -> TestResult {
 #[tokio::test]
 async fn empty_step_tracking_id_opts_out() -> TestResult {
   let replay = Replay::new().await?;
-  let mut job = script_job(&detached_script(&replay.pids_dir(), "detached", "exit 0"))?;
+  // Besides the setsid sleeper, a plain background `sleep` stays in the
+  // opted-out step's own process group: the group layer must spare it too.
+  let tail = r#"sleep 308 >/dev/null 2>&1 & echo $! > "$P/ingroup"
+exit 0"#;
+  let mut job = script_job(&detached_script(&replay.pids_dir(), "detached", tail))?;
   job.steps.first_mut().ok_or("step absent")?.environment =
     Some(mapping(&[("RUNNER_TRACKING_ID", "")]));
   let finished = replay.run(job, |_, _, _| {}).await?;
   let pid = replay.pid("detached")?;
+  let in_group = replay.pid("ingroup")?;
   let alive = ps_state(pid)?.is_some_and(|state| !state.starts_with('Z'));
+  let in_group_alive = ps_state(in_group)?.is_some_and(|state| !state.starts_with('Z'));
   kill(pid);
+  kill(in_group);
   assert_eq!(finished.markers(), [("run".to_owned(), String::new())]);
   assert!(alive, "opted-out process was killed");
+  assert!(in_group_alive, "opted-out step's group member was killed");
   assert!(!finished.terminated(pid));
+  assert!(!finished.terminated(in_group));
   Ok(())
 }
 
@@ -302,6 +311,84 @@ async fn process_clean_false_disables_tracking_and_cleanup() -> TestResult {
   assert_eq!(finished.markers(), [("run".to_owned(), inherited)]);
   assert!(alive, "process.clean=false must not kill");
   assert!(!finished.has_line(HEADER), "{:?}", finished.lines());
+  Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Step process groups: members without the id are still the job's
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn id_less_member_of_a_run_step_group_is_killed() -> TestResult {
+  let replay = Replay::new().await?;
+  // `env -u` drops the id before `exec`, so no environment read can match
+  // it; only the run step's registered process group ties it to the job.
+  let body = format!(
+    r#"P='{}'
+{PROBE}
+env -u RUNNER_TRACKING_ID sleep 309 >/dev/null 2>&1 & echo $! > "$P/untagged"
+exit 0
+"#,
+    replay.pids_dir()
+  );
+  let finished = replay.run(script_job(&body)?, |_, _, _| {}).await?;
+  assert_eq!(finished.conclusion(), Some(Conclusion::Success));
+  let pid = replay.pid("untagged")?;
+  assert_dead(pid, "id-less run-step group member").await?;
+  assert!(finished.terminated(pid), "{:?}", finished.lines());
+  Ok(())
+}
+
+#[tokio::test]
+async fn id_less_member_of_a_node_post_group_is_killed() -> TestResult {
+  let replay = Replay::new().await?;
+  let pids = replay.pids_dir();
+  let job = script_and_node_job(
+    PROBE,
+    &[("ORPHAN89_PIDS", &pids), ("ORPHAN89_POST_UNTAGGED", "1")],
+  )?;
+  replay.install_node_action(&job)?;
+  let finished = replay.run(job, |_, _, _| {}).await?;
+  let pid = replay.pid("node-untagged")?;
+  assert_dead(pid, "id-less node-post group member").await?;
+  assert!(finished.terminated(pid), "{:?}", finished.lines());
+  Ok(())
+}
+
+#[tokio::test]
+async fn id_less_member_of_a_composite_step_group_is_killed() -> TestResult {
+  let replay = Replay::new().await?;
+  let pids = replay.pids_dir();
+  let job = script_and_node_job(PROBE, &[("ORPHAN89_PIDS", &pids)])?;
+  replay.install_composite_action(&job)?;
+  let finished = replay.run(job, |_, _, _| {}).await?;
+  let pid = replay.pid("composite-untagged")?;
+  assert_dead(pid, "id-less composite-step group member").await?;
+  assert!(finished.terminated(pid), "{:?}", finished.lines());
+  Ok(())
+}
+
+#[tokio::test]
+async fn id_less_member_of_a_job_hook_group_is_killed() -> TestResult {
+  let replay = Replay::new().await?;
+  let hook = replay.pids.join("hook.sh");
+  std::fs::write(
+    &hook,
+    format!(
+      "env -u RUNNER_TRACKING_ID sleep 312 >/dev/null 2>&1 &\necho $! > '{}/hook-untagged'\n",
+      replay.pids_dir()
+    ),
+  )?;
+  let mut job = script_job(PROBE)?;
+  variable(
+    &mut job,
+    "ACTIONS_RUNNER_HOOK_JOB_STARTED",
+    &hook.to_string_lossy(),
+  );
+  let finished = replay.run(job, |_, _, _| {}).await?;
+  let pid = replay.pid("hook-untagged")?;
+  assert_dead(pid, "id-less job-hook group member").await?;
+  assert!(finished.terminated(pid), "{:?}", finished.lines());
   Ok(())
 }
 

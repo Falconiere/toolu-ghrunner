@@ -642,6 +642,10 @@ to that list requires proving the value is not a real credential.
   `process.clean=false` disables it) and, in `finish_execution` before
   `JobCompleted`, `SIGKILL`s every other process still carrying it (sysinfo:
   Linux `/proc`, macOS `KERN_PROCARGS2`; 15 s deadline; never fails the job).
+  SIP macOS hides Apple platform binaries' env, so the sweep also kills
+  same-uid processes started during the job in a step's registered process
+  group (`ProcessTracking::register_group` / `release_if_empty`; the module doc
+  has the reuse guards and the uncovered `setsid` case).
   `workspace_layout.rs` (+ `workspace_tracking.rs`, `workspace_lease.rs`)
   allocates and leases the job workspace (#90); `workspace_gc.rs` prunes
   stable workspaces unused for `stable_gc_hours` (default never) and fresh

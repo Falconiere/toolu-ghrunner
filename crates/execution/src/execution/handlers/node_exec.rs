@@ -32,6 +32,11 @@ pub struct NodeExecParams<'a> {
   /// `RUNNER_TRACKING_ID` for a host child (`None` = untagged; issue #89).
   /// Ignored when the child runs in a job container, which is never tagged.
   pub tracking_id: Option<&'a str>,
+  /// This job's process tracking. The spawned step leads its own process
+  /// group, which is registered here for the job-end orphan sweep and
+  /// released once the step leaves nothing in it (`None` when
+  /// `process.clean=false`; ignored when the child runs in a job container).
+  pub tracking: Option<&'a crate::execution::orphan_cleanup::ProcessTracking>,
   /// `timeout-minutes` bound for the child wait (`None` = unbounded).
   pub timeout: Option<Duration>,
   /// In-flight cancellation: a fired token kills the child mid-run.
@@ -69,6 +74,11 @@ pub async fn execute_node_action(
 
   let mut cmd = build_node_command(params);
   let mut child = spawn_in_cgroup(&mut cmd, params.cgroup_path).await?;
+  // The node child leads its own process group; its pid is the group id.
+  let group = child.id();
+  if let (Some(tracking), Some(group)) = (params.tracking, group) {
+    tracking.register_group(cmd.as_std(), group);
+  }
 
   let stdout_handle = forward_lines(child.stdout.take(), stdout_tx);
   let stderr_handle = stream_output(
@@ -85,6 +95,9 @@ pub async fn execute_node_action(
     RunnerError::NodeHandler,
   )
   .await?;
+  if let (Some(tracking), Some(group)) = (params.tracking, group) {
+    tracking.release_if_empty(group);
+  }
 
   // Bound the post-exit drain: a grandchild that inherited the pipe keeps it
   // open past the node child's exit, so abort the reader after the grace period

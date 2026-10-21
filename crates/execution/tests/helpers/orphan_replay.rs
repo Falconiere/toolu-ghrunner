@@ -123,6 +123,13 @@ pub struct Replay {
 }
 
 impl Replay {
+  /// A fresh runner root (data + work dirs, seeded Node runtime).
+  ///
+  /// Requires a `python3` on `PATH` whose environment other processes can
+  /// read: the `setsid` sleepers are found only by their environment. On a
+  /// SIP-enabled Mac, `/usr/bin/python3` is an Apple platform binary whose
+  /// environment is hidden, so this fails up front, naming the fix: put a
+  /// Homebrew, venv or python.org `python3` first on `PATH`.
   pub async fn new() -> TestResult<Self> {
     let root = tempfile::tempdir()?;
     let config = RunnerConfig {
@@ -137,6 +144,7 @@ impl Replay {
     };
     let pids = root.path().join("pids");
     std::fs::create_dir_all(&pids)?;
+    python3_environment_is_visible().await?;
     seed_node(&config.data_dir).await?;
     Ok(Self {
       _root: root,
@@ -162,6 +170,21 @@ impl Replay {
     )?;
     std::fs::write(root.join("main.js"), include_str!("../orphan_89_main.js"))?;
     std::fs::write(root.join("post.js"), include_str!("../orphan_89_post.js"))?;
+    Ok(())
+  }
+
+  /// Install `orphan_89_composite.yml` where the captured action step looks.
+  pub fn install_composite_action(&self, job: &AgentJobRequestMessage) -> TestResult {
+    let root = self
+      .config
+      .workspace_root
+      .join(&job.job_id)
+      .join(".github/actions/orphan-89");
+    std::fs::create_dir_all(&root)?;
+    std::fs::write(
+      root.join("action.yml"),
+      include_str!("../orphan_89_composite.yml"),
+    )?;
     Ok(())
   }
 
@@ -356,6 +379,54 @@ python3 -c 'import os,sys,time; os.setsid(); open(sys.argv[1],"w").write(str(os.
 while [ ! -s "$P/detached" ] || [ ! -s "$P/grandchild" ]; do sleep 0.05; done
 {tail}
 "#
+  )
+}
+
+/// Precondition for the `setsid` python sleepers: the kernel must show other
+/// processes the `python3` on `PATH`'s environment. With SIP on, macOS hides
+/// it for Apple platform binaries (`/usr/bin/python3`); a setsid'd platform
+/// binary is then outside the orphan sweep by design, so these scenarios need
+/// a non-Apple interpreter (Homebrew, venv, python.org, any Linux python3).
+async fn python3_environment_is_visible() -> TestResult {
+  let marker = "ORPHAN89_PROBE=visible";
+  let mut child = std::process::Command::new("python3")
+    .args(["-c", "import time; time.sleep(10)"])
+    .env("ORPHAN89_PROBE", "visible")
+    .stdin(std::process::Stdio::null())
+    .spawn()?;
+  let pid = sysinfo::Pid::from_u32(child.id());
+  let mut system = sysinfo::System::new();
+  let kind = sysinfo::ProcessRefreshKind::nothing().with_environ(sysinfo::UpdateKind::Always);
+  let mut visible = false;
+  for _ in 0..40 {
+    system.refresh_processes_specifics(sysinfo::ProcessesToUpdate::Some(&[pid]), true, kind);
+    visible = system.process(pid).is_some_and(|process| {
+      process
+        .environ()
+        .iter()
+        .any(|entry| entry.as_encoded_bytes() == marker.as_bytes())
+    });
+    if visible {
+      break;
+    }
+    tokio::time::sleep(Duration::from_millis(50)).await;
+  }
+  // Best-effort: the verdict is already known; a failed cleanup must not
+  // turn a visible environment into a failed precondition.
+  if let Err(error) = child.kill() {
+    eprintln!("python3 probe cleanup: kill failed: {error}");
+  }
+  if let Err(error) = child.wait() {
+    eprintln!("python3 probe cleanup: wait failed: {error}");
+  }
+  if visible {
+    return Ok(());
+  }
+  Err(
+    "the python3 on PATH hides its environment from other processes (an Apple platform \
+     binary under SIP); put a Homebrew/venv/python.org python3 first on PATH for the orphan \
+     replay tests"
+      .into(),
   )
 }
 

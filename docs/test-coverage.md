@@ -1180,11 +1180,25 @@ each of the four tagged pids (`sleep` ×3 plus `python3`/`Python`), and none for
 the opted-out pid. Those are the same lines and the same kill/spare split that
 toolu's replay tests assert.
 
-Limits stated, not claimed: only processes started with the variable and
-readable by the runner's user are found (Linux `/proc/<pid>/environ`, macOS
-`KERN_PROCARGS2`, both exec-time snapshots), so `sudo`, `env -i` and other
-users' processes escape, as upstream. macOS real-process behavior is verified
-only by the CI `macos-14` test run; a macOS toolu live lane is **unverified**.
+Limits stated, not claimed: the environment match finds only processes
+started with the variable and readable by the runner's user (Linux
+`/proc/<pid>/environ`, macOS `KERN_PROCARGS2`, both exec-time snapshots). With
+SIP on, macOS returns no environment for Apple platform binaries, so a second
+match also sweeps same-user processes started during the job inside a host
+step's registered process group (`orphan_cleanup::tests::group_*`,
+`a_group_whose_id_now_names_another_leader_is_spared`,
+`group_matches_need_a_start_since_the_job_and_the_runners_uid`,
+`release_forgets_only_groups_left_empty`,
+`member_execing_away_the_id_is_retried_by_its_group`, and the replay tests
+`id_less_member_of_a_{run_step,node_post,composite_step,job_hook}_group_is_killed`).
+A `sudo` process, another user's process, or one that left the step's group
+(`setsid`/`setpgid`) while hiding or dropping the id still escapes. The replay
+tests need a `python3` whose environment the kernel shows (`Replay::new`
+precondition). They and the env-path unit tests (which switch to ad-hoc
+re-signed `sleep` / `bash` copies only where SIP hides the environment) were
+run locally on a SIP-enabled macOS 27.0.1 host. macOS real-process behavior is verified by
+the CI `macos-14` test run and, for SIP-hidden environments, by that local
+macOS 27.0.1 run; a macOS toolu live lane is **unverified**.
 The toolu self-hosted workflow lane (`run_toolu`) is **unverified** (no
 registered runner). GHES is **unverified** (no server); the process rule does
 not depend on the server.

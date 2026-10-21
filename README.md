@@ -297,8 +297,9 @@ Every host step process — shells, Node action pre/main/post, composite shells
 and job hooks — starts with a per-job `RUNNER_TRACKING_ID=github_<uuid>`. Once
 the job's steps, posts and containers are done, the runner logs `Cleaning up
 orphan processes` and sends `SIGKILL` to every other process whose environment
-still carries that id, logging `Terminate orphan process: pid (N) (name)` for
-each. Background services started by one step therefore keep running for later
+still carries that id — or that was started during the job inside a tracked
+step's own process group (every host step leads one) — logging `Terminate
+orphan process: pid (N) (name)` for each. Background services started by one step therefore keep running for later
 steps, but `nohup`, `setsid` and other detached leftovers do not outlive the
 job. As with the official runner, a workflow value wins: `env:
 RUNNER_TRACKING_ID: ''` (or any other value) on a step opts that step's
@@ -306,8 +307,12 @@ processes out, and the job variable `process.clean=false` disables tagging and
 cleanup entirely. The sweep is bounded at 15 seconds and never changes the job
 result. Linux reads `/proc/<pid>/environ` and macOS uses `KERN_PROCARGS2`.
 Both see only the environment a process was started with, and only for
-processes the runner's user may inspect. Processes started through `sudo`,
-`env -i`, or as another user are therefore not found. Processes inside Docker
+processes the runner's user may inspect. With SIP on, macOS shows no
+environment at all for Apple platform binaries (`sleep`, `sh`, `bash`,
+`/usr/bin/python3`, …); the process-group match covers those while they stay in
+the step's group, but one that detaches into its own session or group
+(`setsid`/`setpgid`) is not found there. Processes started through `sudo` or as another user, and an
+`env -i` process that left the step's group, are not found either. Processes inside Docker
 containers are never tagged; container teardown owns them. A runner crash, or
 the `boot` deadline watchdog's hard exit, skips the sweep.
 

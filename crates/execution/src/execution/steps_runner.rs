@@ -454,6 +454,7 @@ async fn run_script_step(
   // dispatcher needs `&mut ctx` while the child runs.
   let cgroup = ctx.cgroup_path().map(Path::to_path_buf);
   let tracking = ctx.process_tracking_env();
+  let group_tracking = ctx.process_tracking().cloned();
   let container = ctx.job_container().cloned();
   let params = ScriptParams {
     container: container.as_deref(),
@@ -465,6 +466,7 @@ async fn run_script_step(
     step_id: &step.id,
     cgroup_path: cgroup.as_deref(),
     tracking_id: tracking.as_deref(),
+    tracking: group_tracking.as_ref(),
     timeout: bounds.remaining_timeout(),
     cancel: &bounds.cancel,
   };

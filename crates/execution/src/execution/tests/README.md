@@ -13,7 +13,7 @@
 | `step_display.rs` | Generates captured step display names at job start and main stage, including failure warnings and masking. |
 | `workspace_layout.rs` | Issue #90 stable/fresh allocation on a real work root: repository parsing, busy-lease fallback, corrupt/escaping tracking files, collision suffixes. |
 | `step_timeout.rs` | Checks stalled action resolution against a parent deadline and cancellation. |
-| `orphan_cleanup.rs` | Issue #89 sweep internals on real processes: kill of a tagged process, `exec` without the id between scan and kill (PID-reuse stand-in), unreaped zombie skip, expired deadline, `process.clean` parsing and id matching. |
+| `orphan_cleanup.rs` | Issue #89 sweep internals on real processes: kill of a tagged process, `exec` without the id between scan and kill (PID-reuse stand-in), unreaped zombie skip, expired deadline, `process.clean` parsing and id matching; the step process-group match (`register_group` opt-out, id-less member killed, member leaving its group skipped, recycled group id spared, start-time/uid guards, `release_if_empty`). The env-path cases probe a real `/bin/sleep` first and, only where SIP hides platform binaries' environment, run warmed-up ad-hoc re-signed `sleep`/`bash` copies instead. |
 | `complete_step.rs` | Issue 88 "Complete job": a local output error still closes the row; output names and evaluation errors are masked. |
 | `job_cancellation.rs` | Real cleanup processes share one cancellation deadline and are reaped on expiry. |
 | `composite_working_directory.rs` | Issue 81 captured-job replay through real Bash, per-step cwd, nested defaults and failure cleanup. |

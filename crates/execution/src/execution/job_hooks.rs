@@ -98,6 +98,7 @@ pub async fn run_job_hook(
   emit_log(events, stage.step_id(), "##[endgroup]").await;
 
   let tracking = ctx.process_tracking_env();
+  let group_tracking = ctx.process_tracking().cloned();
   let params = ScriptParams {
     container: None,
     report_metadata: false,
@@ -108,6 +109,7 @@ pub async fn run_job_hook(
     step_id: stage.step_id(),
     cgroup_path: ctx.cgroup_path(),
     tracking_id: tracking.as_deref(),
+    tracking: group_tracking.as_ref(),
     timeout: None,
     cancel,
   };

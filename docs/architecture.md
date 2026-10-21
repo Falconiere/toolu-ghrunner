@@ -331,9 +331,16 @@ Only forwarder service URLs are supported; local loopback cache URLs are rejecte
 **Orphan process sweep.** `job_runner::entry::finish_execution` runs
 `orphan_cleanup::sweep` after `finish_container` and before `JobCompleted`, on
 every body outcome. Host step children carry the job's `RUNNER_TRACKING_ID`
-(added in `step_process_env::apply`, overridable by workflow env). The sweep
-re-scans and `SIGKILL`s every other process still carrying it, rechecking the
-id before each signal, under a 15 s shared deadline.
+(added in `step_process_env::apply`, overridable by workflow env). Every host
+step also leads its own process group, registered with the job's
+`ProcessTracking` when its spawn env carries that id and released once the step
+leaves the group empty. The sweep re-scans and `SIGKILL`s every other process
+still carrying the id, or started during the job by the runner's user inside a
+registered group whose leader is gone or unchanged (macOS hides the
+environment of SIP-restricted platform binaries), rechecking the same evidence
+before each signal, under a 15 s shared deadline. A pid skipped under one
+evidence is retried once under the other, so a member that `exec`s away the id
+between scan and signal is still swept by its group.
 
 **Job teardown order.** `run_job` returns a `JobTeardown`
 (`execution/job_teardown.rs`) rather than cleaning up inline: local

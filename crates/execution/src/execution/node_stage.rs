@@ -110,6 +110,7 @@ pub(super) async fn run_node_stage(
   // concurrent dispatcher needs `&mut s.ctx` while the child runs.
   let cgroup = s.ctx.cgroup_path().map(Path::to_path_buf);
   let tracking = s.ctx.process_tracking_env();
+  let group_tracking = s.ctx.process_tracking().cloned();
   let container = s.ctx.job_container().cloned();
   let node_params = NodeExecParams {
     container: container.as_deref(),
@@ -120,6 +121,7 @@ pub(super) async fn run_node_stage(
     step_id: s.log_step_id,
     cgroup_path: cgroup.as_deref(),
     tracking_id: tracking.as_deref(),
+    tracking: group_tracking.as_ref(),
     timeout: s.bounds.remaining_timeout(),
     cancel: &s.bounds.cancel,
   };
