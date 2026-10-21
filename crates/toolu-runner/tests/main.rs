@@ -19,6 +19,8 @@
 mod boot_fixtures;
 #[path = "helpers/check_servers.rs"]
 mod check_servers;
+#[path = "helpers/doctor_env.rs"]
+mod doctor_env;
 #[cfg(feature = "live")]
 #[path = "helpers/live_harness.rs"]
 mod harness;
@@ -56,6 +58,12 @@ mod composite_continue_on_error_test;
 mod config_resolve_test;
 mod create_app_test;
 mod device_auth_test;
+mod doctor_auth_test;
+mod doctor_cmd_test;
+mod doctor_flags_test;
+mod doctor_network_test;
+mod doctor_release_test;
+mod doctor_service_test;
 mod ephemeral_run_test;
 mod execute_job_error_reporting_test;
 mod expression_eval_test;

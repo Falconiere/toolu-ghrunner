@@ -32,6 +32,12 @@ mod check_tools;
 mod cli;
 mod config;
 mod create_app_cmd;
+mod doctor_auth;
+mod doctor_cmd;
+mod doctor_host;
+mod doctor_registrations;
+mod doctor_report;
+mod doctor_service;
 mod ephemeral;
 mod login_cmd;
 mod network_setup;
@@ -53,11 +59,14 @@ async fn main() {
   if matches!(cli.command, Command::Boot(_)) {
     std::process::exit(boot_cmd::cmd_boot().await);
   }
-  // `check` likewise owns its exit codes (0 / 1 required failure / 2 usage).
+  // `check` and `doctor` likewise own their exit codes (0 / 1 / 2 usage).
   let cli = match cli {
     Cli {
       command: Command::Check(args),
     } => std::process::exit(check_cmd::cmd_check(args).await),
+    Cli {
+      command: Command::Doctor(args),
+    } => std::process::exit(doctor_cmd::cmd_doctor(args).await),
     other => other,
   };
   let exit_code = match Box::pin(run(cli)).await {
@@ -86,7 +95,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
       create_app_cmd::cmd_create_app(&args, &home).await
     },
     // Intercepted in `main` before `run` is called (see above).
-    Command::Boot(_) | Command::Check(_) => Ok(()),
+    Command::Boot(_) | Command::Check(_) | Command::Doctor(_) => Ok(()),
   }
 }
 

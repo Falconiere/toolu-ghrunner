@@ -163,6 +163,12 @@ pub(crate) fn classify(error: &reqwest::Error) -> FailureKind {
   }
 }
 
+/// `<kind>: <error chain>` — a transport failure in one line, for callers
+/// that report it inside a row rather than as a probe outcome.
+pub(crate) fn describe_error(error: &reqwest::Error) -> String {
+  format!("{}: {}", classify(error).label(), error_chain(error))
+}
+
 /// `error: source: source …`, de-duplicated, capped at 300 characters.
 fn error_chain(error: &reqwest::Error) -> String {
   let mut parts = vec![error.to_string()];

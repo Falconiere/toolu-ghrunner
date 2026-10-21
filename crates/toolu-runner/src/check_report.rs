@@ -55,6 +55,22 @@ impl Report {
       .count()
   }
 
+  /// Optional endpoints that failed plus tools that warned — what `doctor`
+  /// counts as warnings for these lines.
+  pub(crate) fn warnings(&self) -> usize {
+    let endpoints = self
+      .endpoints
+      .iter()
+      .filter(|result| !result.endpoint.required && failed(result))
+      .count();
+    let tools = self
+      .tools
+      .iter()
+      .filter(|tool| tool.status == ToolStatus::Warn)
+      .count();
+    endpoints + tools
+  }
+
   /// The process exit code for this report.
   pub(crate) fn exit_code(&self) -> i32 {
     if self.required_failures() == 0 {
@@ -131,6 +147,29 @@ fn network_lines(network: Option<&str>, proxy_configured: bool) -> Vec<String> {
 /// The full report text; every line passes through `masker`.
 pub(crate) fn render(report: &Report, masker: &SecretMasker) -> String {
   let mut out = vec![format!("toolu-runner check — target {}", report.target)];
+  out.extend(section_lines(report));
+  let failures = report.required_failures();
+  out.push(if failures == 0 {
+    "result: all required checks passed (exit 0)".to_owned()
+  } else {
+    format!(
+      "result: {failures} required check{} failed (exit {EXIT_REQUIRED_FAILED})",
+      if failures == 1 { "" } else { "s" }
+    )
+  });
+  let mut text = out
+    .iter()
+    .map(|line| masker.mask(line).into_owned())
+    .collect::<Vec<_>>()
+    .join("\n");
+  text.push('\n');
+  text
+}
+
+/// The network, tools, proxy and TLS sections, unmasked and without the
+/// header or result line, so `doctor` can embed them verbatim.
+pub(crate) fn section_lines(report: &Report) -> Vec<String> {
+  let mut out = Vec::new();
   let (required, optional): (Vec<_>, Vec<_>) = report
     .endpoints
     .iter()
@@ -167,22 +206,7 @@ pub(crate) fn render(report: &Report, masker: &SecretMasker) -> String {
       .into_iter()
       .map(|line| format!("  {line}")),
   );
-  let failures = report.required_failures();
-  out.push(if failures == 0 {
-    "result: all required checks passed (exit 0)".to_owned()
-  } else {
-    format!(
-      "result: {failures} required check{} failed (exit {EXIT_REQUIRED_FAILED})",
-      if failures == 1 { "" } else { "s" }
-    )
-  });
-  let mut text = out
-    .iter()
-    .map(|line| masker.mask(line).into_owned())
-    .collect::<Vec<_>>()
-    .join("\n");
-  text.push('\n');
-  text
+  out
 }
 
 #[cfg(test)]

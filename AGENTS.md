@@ -11,7 +11,7 @@ no OTel.
   `cli.rs` + `register_cmd.rs` + `run_cmd.rs` + `boot_cmd.rs` +
   `service_cmd.rs` + `login_cmd.rs` + `status_cmd.rs` +
   `create_app_cmd.rs` + `ephemeral.rs` + `network_setup.rs` + the
-  `check_*.rs` preflight).
+  `check_*.rs` preflight + the `doctor_*.rs` health check).
   The execution **engine** lives in
   `execution`; the GitHub **JIT lifecycle** lives in `listener`.
 - Workspace members (dependency order): `protocol`, `shared`,
@@ -261,12 +261,10 @@ to that list requires proving the value is not a real credential.
   registration after its one job.
 - **No self-daemonization for `run`.** `run` blocks in the foreground
   and loops; it never double-forks. Boot/crash persistence is delegated
-  to the OS: `toolu-runner install-service` generates and activates a
-  launchd LaunchAgent (macOS, label `io.toolu.runner.<owner>.<repo>`,
-  `launchctl bootstrap gui/<uid>` fallback `load -w`) or a systemd user
-  unit (Linux, `toolu-runner-<owner>-<repo>.service`, `Restart=always`,
-  `RestartPreventExitStatus=5` so a spent session conflict stays down,
-  `systemctl --user enable --now`) wrapping `run --config <path>` — the
+  to the OS: `toolu-runner install-service` (`service_cmd.rs` below)
+  generates and activates a launchd LaunchAgent (macOS) or a systemd user
+  unit (Linux, `Restart=always`, `RestartPreventExitStatus=5` so a spent
+  session conflict stays down) wrapping `run --config <path>` — the
   supervisor owns process lifetime, the loop owns registration lifetime.
   No daemon code. (The static single-slot `scripts/` units installed by
   `install.sh --service` still exist for legacy hosts; the systemd one also
@@ -404,8 +402,8 @@ to that list requires proving the value is not a real credential.
 - `step_env.rs` — `step_env` → `StepNetworkEnv { host, container }`: proxy
   vars in both casings (config values, or what `ProxyEnv::effective` says the
   runner uses), `NODE_EXTRA_CA_CERTS` for host steps only.
-- `secrets.rs` — `proxy_secrets`: `url_secrets` of the effective proxy
-  value(s) minus a `user:password` pair's bare user name (not secret).
+- `secrets.rs` — `proxy_secrets`: `url_credentials` (`url_secrets` minus a
+  `user:password` pair's user name) of each effective proxy value.
 - `config.rs` — the crate's env reads (the proxy pairs and `REQUEST_METHOD`). `tests/helpers/tls_fixtures.rs`
   (rcgen PKI, rustls target) and `tests/helpers/proxy_fixtures.rs`
   (recording CONNECT proxy) are `#[path]`-included once per test crate root
@@ -789,7 +787,8 @@ to that list requires proving the value is not a real credential.
   before the generic dispatch — see `boot_cmd.rs` below), `install-service`
   → `service_cmd`, `login`/`logout` → `login_cmd`, `status` →
   `status_cmd`, `create-app` → `create_app_cmd`, `check` → `check_cmd`
-  (intercepted like `boot` for its own exit codes))
+  and `doctor` → `doctor_cmd` (both intercepted like `boot` for their own
+  exit codes))
   plus the inline `remove` handler.
   `--config` resolution for `run` / `remove` / `status` /
   `install-service`: flag > cwd-inferred
@@ -854,19 +853,16 @@ to that list requires proving the value is not a real credential.
   `main.rs`). Startup: init tracing, resolve + load config, acquire the
   per-repo `.lock` (held for the whole loop), bridge SIGINT/SIGTERM to
   one `CancellationToken`, and WARN (unless `--once`) when no login token
-  is stored. `RunLoop::drive` reloads `config.toml` each iteration, runs
-  one `GitHubListener` lifecycle, and dispatches
-  `listener::loop_decision::next_action`: re-mint via
-  `register_cmd::remint_and_persist` on job-complete / listener-`Auth`;
-  decorrelated-jitter backoff (`BACKOFF_START` 1s → `BACKOFF_MAX` 60s,
-  cancel-aware `sleep_or_cancel`) on a transient failure; exit on cancel
-  / `--once` / `.pending_remove`; a session conflict exits 5 through the
-  typed `CodedExit` error that `main` downcasts (every other `Err` stays
-  exit 2). `config::session_conflict_policy` reads
+  is stored. `RunLoop::drive` reloads `config.toml` and runs one
+  `GitHubListener` lifecycle per iteration, then acts on
+  `listener::loop_decision::next_action` as the always-online rule above
+  describes (`BACKOFF_START` → `BACKOFF_MAX`, cancel-aware
+  `sleep_or_cancel`). A session conflict exits 5 through the typed
+  `CodedExit` error that `main` downcasts (every other `Err` stays exit
+  2). `config::session_conflict_policy` reads
   `TOOLU_RUNNER_SESSION_CONFLICT_INTERVAL_MS` (test/ops override of the
-  30 s wait; attempts stay 8) for both `run` and `boot`. A missing or auth-rejected re-mint
-  bearer is fatal (`REMINT_TOKEN_HELP` names `login` / `--token` /
-  `TOOLU_RUNNER_TOKEN`).
+  30 s wait; attempts stay 8) for both `run` and `boot`. A missing or
+  auth-rejected re-mint bearer is fatal (`REMINT_TOKEN_HELP`).
 - `boot_cmd.rs` — `cmd_boot`: the zero-config one-shot container mode
   (`toolu-runner boot`, no flags). Reads `TOOLU_JITCONFIG` /
   `TOOLU_DEADLINE` straight from the env, builds an in-memory
@@ -876,10 +872,8 @@ to that list requires proving the value is not a real credential.
   tracing redactor, spawns a deadline watchdog task when `TOOLU_DEADLINE`
   parses, and runs `GitHubListener::run` once — then aborts and joins the
   watchdog handle (so its grace-period sleep can't hard-exit a finished
-  process, and a panic in it is logged). Returns an explicit process exit code
-  (`main` applies it directly, bypassing every other subcommand's
-  uniform Ok-is-0/Err-is-2 mapping) — see the crate-rules bullet above
-  for the code table. `parse_deadline_ms` and the exit-code mapping
+  process, and a panic in it is logged). Returns the explicit exit code
+  the `boot` crate rule above tabulates. `parse_deadline_ms` and the exit-code mapping
   are pure; pinned by the shell-out tests in
   `tests/boot_cmd_test.rs` / `tests/boot_cmd_e2e_test.rs` (bin-only
   crate, no lib target for inline unit tests).
@@ -935,6 +929,15 @@ to that list requires proving the value is not a real credential.
   of it live in `config.rs`. Pinned by `tests/check_cmd_test.rs` /
   `tests/check_tools_test.rs` against real loopback peers
   (`tests/helpers/check_servers.rs`).
+- `doctor_cmd.rs` — `toolu-runner doctor`, the read-only health check over
+  every registration (`--config` narrows; `--offline` sends no request). Exit
+  code applied by `main` like `check`'s: `0` no `FAIL` row, `1` a `FAIL` row,
+  `2` a missing `--config` path. Never takes a `.lock` (run state = lock body +
+  `holder_alive`; holding it would make a starting `run` fail `LockHeld`),
+  writes, creates dirs or opens a session; its one credentialed request is
+  `GET <api>/user`. Sections live in `doctor_{report,host,auth,registrations,
+  service}.rs`; the network section reuses `check_cmd::gather`. Pinned by
+  `tests/doctor_*_test.rs`.
 - `create_app_cmd.rs` — `cmd_create_app`: runs GitHub's **App Manifest
   flow** to create a user-owned GitHub App in one click (github.com
   only; a `--host` other than github.com errors as unsupported). Binds a

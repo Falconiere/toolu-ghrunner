@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use clap::{Args, Parser, Subcommand, ValueHint};
 
-use crate::{check_cmd, login_cmd};
+use crate::{check_cmd, doctor_cmd, login_cmd};
 
 /// Extended help footer for the top-level `--help`.
 const TOP_AFTER_HELP: &str = "\
@@ -19,6 +19,7 @@ Examples:
   toolu-runner register             # repo inferred from the cwd git remote
   toolu-runner run                  # poll for the job, execute it, exit
   toolu-runner check                # preflight: GitHub reachability, tools, proxy/CA
+  toolu-runner doctor               # health: what is broken and the command that fixes it
 
 Environment:
   TOOLU_RUNNER_TOKEN           GitHub bearer for `register` (flag > env > stored login token)
@@ -191,8 +192,17 @@ pub(crate) enum Command {
   /// and reports git / Docker / Node availability plus the effective proxy
   /// and TLS-trust settings with credentials redacted. Never takes the job
   /// lock, registers, or opens a session. Exit 0 = all required probes
-  /// passed, 1 = a required probe failed, 2 = usage/config error.
+  /// passed, 1 = a required probe failed, 2 = usage/config error. See
+  /// `doctor` for the whole-machine health check.
   Check(check_cmd::CheckArgs),
+  /// Health: is this machine serving its registrations, and how to fix it.
+  ///
+  /// Checks the install (version, newer release), the host (platform, uid,
+  /// free disk) and every registration under the runner home, printing a
+  /// fix command under each warning or failure that has one. Read-only: never takes the
+  /// job lock, writes a file or registers. `--offline` makes no network
+  /// request. Exit 0 = no failure, 1 = a failure, 2 = usage error.
+  Doctor(doctor_cmd::DoctorArgs),
 }
 
 /// Arguments for the `create-app` subcommand.

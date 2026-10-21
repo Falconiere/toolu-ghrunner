@@ -63,17 +63,21 @@ pub(crate) struct CheckArgs {
 }
 
 /// The target hosts and where they came from.
-struct Target {
-  base: Url,
-  jit: Option<JitEndpoints>,
-  data_dir: Option<PathBuf>,
-  origin: String,
+pub(crate) struct Target {
+  /// The GitHub base URL whose service hosts are derived.
+  pub(crate) base: Url,
+  /// The registration's JIT service URLs, when one resolved.
+  pub(crate) jit: Option<JitEndpoints>,
+  /// The registration's data dir (its Node runtime cache is reported).
+  pub(crate) data_dir: Option<PathBuf>,
+  /// Where the target came from, printed in the report header.
+  pub(crate) origin: String,
   /// The registration's `[network]` (env mode without a registration).
-  network: NetworkConfig,
+  pub(crate) network: NetworkConfig,
 }
 
 /// Load a registration's runner URL, JIT endpoints and data dir.
-fn target_from_registration(path: &Path) -> Result<Target, String> {
+pub(crate) fn target_from_registration(path: &Path) -> Result<Target, String> {
   let cfg = load_config(path).map_err(|e| format!("cannot load {}: {e}", path.display()))?;
   Ok(Target {
     base: parse_target_url(&cfg.runner_url)?,
@@ -86,29 +90,28 @@ fn target_from_registration(path: &Path) -> Result<Target, String> {
   })
 }
 
+/// A target with no registration: `raw`'s hosts, env-mode networking.
+pub(crate) fn unregistered_target(raw: &str, origin: String) -> Result<Target, String> {
+  Ok(Target {
+    base: parse_target_url(raw)?,
+    jit: None,
+    data_dir: None,
+    origin,
+    network: NetworkConfig::default(),
+  })
+}
+
 /// `--url` > `--config` > the registration `run` would use > github.com.
 fn resolve_target(args: &CheckArgs) -> Result<Target, String> {
   if let Some(raw) = &args.url {
-    return Ok(Target {
-      base: parse_target_url(raw)?,
-      jit: None,
-      data_dir: None,
-      origin: "--url".to_owned(),
-      network: NetworkConfig::default(),
-    });
+    return unregistered_target(raw, "--url".to_owned());
   }
   if let Some(path) = &args.config {
     return target_from_registration(path);
   }
   match crate::resolve_config(None) {
     Ok(path) => target_from_registration(&path),
-    Err(why) => Ok(Target {
-      base: parse_target_url("https://github.com")?,
-      jit: None,
-      data_dir: None,
-      origin: format!("defaults: {why}"),
-      network: NetworkConfig::default(),
-    }),
+    Err(why) => unregistered_target("https://github.com", format!("defaults: {why}")),
   }
 }
 
@@ -168,18 +171,24 @@ async fn probe_endpoints(
     .collect()
 }
 
-/// A masker seeded with every credential the printed settings could echo.
-fn masker_for(proxy: &ProxyReport, network: &NetworkConfig) -> SecretMasker {
-  let mut masker = SecretMasker::new();
+/// Every credential the printed proxy, Docker and `[network]` settings
+/// could echo.
+pub(crate) fn credential_secrets(proxy: &ProxyReport, network: &NetworkConfig) -> Vec<String> {
   let docker = config::docker_host()
     .map(|host| url_secrets(&host))
     .unwrap_or_default();
-  for secret in proxy
+  proxy
     .secrets()
     .into_iter()
     .chain(docker)
     .chain(network::proxy_secrets(network))
-  {
+    .collect()
+}
+
+/// A masker seeded with every credential the printed settings could echo.
+fn masker_for(proxy: &ProxyReport, network: &NetworkConfig) -> SecretMasker {
+  let mut masker = SecretMasker::new();
+  for secret in credential_secrets(proxy, network) {
     masker.add_secret(&secret);
   }
   masker
@@ -194,18 +203,36 @@ pub(crate) async fn cmd_check(args: CheckArgs) -> i32 {
       return EXIT_USAGE;
     },
   };
-  let timeout = Duration::from_secs(args.timeout);
   let proxy = ProxyReport::from_env();
   let masker = masker_for(&proxy, &target.network);
   // An unusable `[network]` (bad proxy URL, bad `ca_bundle`) is a config
   // error before probing, exactly as `run` treats it.
-  let network_line = match network::describe(&target.network) {
-    Ok(line) => line,
-    Err(error) => {
-      eprintln!("toolu-runner: {}", masker.mask(&error.to_string()));
-      return EXIT_USAGE;
+  match gather(&target, Duration::from_secs(args.timeout), proxy).await {
+    Ok(report) => {
+      print!("{}", render(&report, &masker));
+      report.exit_code()
     },
-  };
+    Err(error) => {
+      eprintln!("toolu-runner: {}", masker.mask(&error));
+      EXIT_USAGE
+    },
+  }
+}
+
+/// Probe `target`'s endpoints and the local tools, then assemble the report.
+/// `Err` is an unusable `[network]`, which no probe was run for; it comes
+/// back already masked with every credential the settings could echo, so no
+/// caller can print a proxy password by forgetting to mask it.
+pub(crate) async fn gather(
+  target: &Target,
+  timeout: Duration,
+  proxy: ProxyReport,
+) -> Result<Report, String> {
+  let network_line = network::describe(&target.network).map_err(|error| {
+    masker_for(&proxy, &target.network)
+      .mask(&error.to_string())
+      .into_owned()
+  })?;
   let endpoints = endpoints_for(&target.base, target.jit.as_ref());
   let trust = tokio::task::spawn_blocking(TrustReport::from_env);
   let (endpoints, git, docker, node) = tokio::join!(
@@ -224,7 +251,7 @@ pub(crate) async fn cmd_check(args: CheckArgs) -> i32 {
       errors: vec![format!("trust store load failed: {error}")],
     }
   });
-  let report = Report {
+  Ok(Report {
     target: format!(
       "{} ({})",
       target.base.host_str().unwrap_or_default(),
@@ -236,7 +263,5 @@ pub(crate) async fn cmd_check(args: CheckArgs) -> i32 {
     network: (target.network != NetworkConfig::default()).then_some(network_line),
     proxy_configured: network::proxy_configured(&target.network),
     trust,
-  };
-  print!("{}", render(&report, &masker));
-  report.exit_code()
+  })
 }

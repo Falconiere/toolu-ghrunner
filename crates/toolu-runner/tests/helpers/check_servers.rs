@@ -13,6 +13,12 @@ use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as B64;
+
+/// The committed GHES JIT registration fixture.
+const GHES_JIT: &str = include_str!("../fixtures/jit_config_ghes.json");
+
 /// A `200 OK` with an empty body.
 pub const OK: &str = "HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n";
 
@@ -148,4 +154,55 @@ pub fn run(cmd: &mut Command) -> std::io::Result<(Option<i32>, String, String, D
     String::from_utf8_lossy(&output.stderr).into_owned(),
     started.elapsed(),
   ))
+}
+
+/// The GHES fixture's JIT envelope with its service URLs pointed at `base`.
+pub fn jit_pointing_at(base: &str) -> Result<String, Box<dyn std::error::Error>> {
+  let fixture: serde_json::Value = serde_json::from_str(GHES_JIT)?;
+  let encoded = fixture
+    .get("encoded")
+    .and_then(serde_json::Value::as_str)
+    .ok_or("fixture has no encoded field")?;
+  let mut outer: serde_json::Map<String, serde_json::Value> =
+    serde_json::from_slice(&B64.decode(encoded)?)?;
+  let mut rewrite =
+    |blob: &str, edit: &dyn Fn(&mut serde_json::Value)| -> Result<(), Box<dyn std::error::Error>> {
+      let raw = outer
+        .get(blob)
+        .and_then(serde_json::Value::as_str)
+        .ok_or("blob is not a string")?;
+      let mut value: serde_json::Value = serde_json::from_slice(&B64.decode(raw)?)?;
+      edit(&mut value);
+      outer.insert(
+        blob.to_owned(),
+        B64.encode(serde_json::to_vec(&value)?).into(),
+      );
+      Ok(())
+    };
+  // A missing key is a silent no-op here; the recorded request paths in the
+  // caller's assertions catch it.
+  rewrite(".runner", &|runner| {
+    if let Some(runner) = runner.as_object_mut() {
+      runner.insert(
+        "ServerUrl".to_owned(),
+        format!("{base}/pipelines/tenant/").into(),
+      );
+      runner.insert(
+        "ServerUrlV2".to_owned(),
+        format!("{base}/broker/tenant/").into(),
+      );
+    }
+  })?;
+  rewrite(".credentials", &|creds| {
+    if let Some(data) = creds
+      .get_mut("Data")
+      .and_then(serde_json::Value::as_object_mut)
+    {
+      data.insert(
+        "AuthorizationUrl".to_owned(),
+        format!("{base}/token/oauth").into(),
+      );
+    }
+  })?;
+  Ok(B64.encode(serde_json::to_vec(&outer)?))
 }
