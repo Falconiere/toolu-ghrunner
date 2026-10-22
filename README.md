@@ -55,16 +55,27 @@ It has no schedule (#120) and fails as `UNVERIFIED` when
 ## Install
 
 ```sh
-# macOS / Linux — installs to /usr/local/bin
+# macOS / Linux — installs to /usr/local/bin when it is writable,
+# otherwise to ~/.local/bin (no sudo needed; it prints a PATH hint)
 curl -fsSL https://get.toolu.sh/pkg/ghrunner/install | bash
+
+# ...force /usr/local/bin on a host where it needs root
+curl -fsSL https://get.toolu.sh/pkg/ghrunner/install | sudo bash
+
+# ...or pick the directory yourself
+curl -fsSL https://get.toolu.sh/pkg/ghrunner/install | bash -s -- --install-dir "$HOME/bin"
 
 # ...or Homebrew
 brew install falconiere/tap/toolu-runner
 ```
 
-Add `--service` to also install and start the service unit (launchd on
-macOS, systemd on Linux). Pass `--check` to print the plan and exit
-without downloading anything.
+Pass `--check` to print the plan (including which directory it would
+use) and exit without downloading anything. `--service` also installs
+and starts the static single-slot unit shipped in the tarball, but only
+when the binary lands at `/usr/local/bin/toolu-runner` — that path is
+hardcoded in those units, so anywhere else the unit is skipped with a
+warning; use `toolu-runner install-service` after registering instead
+(it writes a unit for the binary's real path).
 
 Prebuilt for **macOS** (arm64, x86_64) and **Linux** (x86_64, arm64). The
 Linux binaries are built on Debian 12 (glibc 2.36), so any Debian 12 / Ubuntu
@@ -838,6 +849,7 @@ survives unregistration.
 | `SSL_CERT_FILE` / `SSL_CERT_DIR` | — | replace the platform trust store for the runner's HTTP clients (the compiled-in Mozilla roots stay trusted). |
 | `PATH` | — | `install-service` bakes the installing shell's `PATH` into the launchd unit. |
 | `TOOLU_RUNNER_REPO` | `Falconiere/toolu-ghrunner` | `install.sh` only — release source. |
+| `TOOLU_RUNNER_INSTALL_DIR` | `/usr/local/bin` | `install.sh` only — preferred install dir when `--install-dir` is absent; still falls back to `~/.local/bin` when not writable. |
 | `TOOLU_DAEMON_*` | — | the separate `toolu-daemon` bin only (token file, vCPU/memory budget, image, bind, queue ceiling, runtime) — see the [VPS host runbook](docs/vps-host-runbook.md). |
 | `HOME` / `USERPROFILE` | — | resolves `~/.toolu-runner/`. |
 | `HOSTNAME` / `COMPUTERNAME` | `unknown` | names this host in the broker session's `owner_name` (`<host> (PID: n)`). The default runner name at `register` comes from the OS hostname, not these. |
