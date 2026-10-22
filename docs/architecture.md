@@ -121,7 +121,8 @@ protocol   network   config   expressions   cache   observability
 
 The arrows above are the edges BETWEEN library crates, with the
 `shared` fan-out drawn for the first layer only: `wire`, `execution`,
-`listener` and the bin depend on `shared` directly as well. The bin sits
+`listener` and the bin depend on `shared` directly as well, and
+`listener` also depends on `protocol` directly. The bin sits
 at the sink of every path and additionally depends on `shared`,
 `protocol`, `network`, `config`, `wire` and `observability` directly.
 `config` is drawn as a leaf because the bin is its only consumer —
@@ -1101,7 +1102,7 @@ Detection itself only covers `Network`-class renewal failures: a
 persistent *definitive* renewal error (a stale 401/404, say) never
 trips the watchdog, so that failure mode is unchanged by this fix. See
 [known-bugs.md](known-bugs.md) B-001, now Resolved. Live `tc` netem
-outage e2e remains deferred to the step-10 live smoke.
+outage e2e remains deferred to a credentialed `live` workflow run.
 
 For session-level reconnection: on `BrokerMigration` message, the
 poll loop switches `ctx.broker_url` to the new URL and continues (a
