@@ -97,7 +97,7 @@ invocation survives many jobs, idle gaps, and re-dispatches — no manual
 re-register. Pass `--once` to run a single job and exit. To keep it
 running across reboots and crashes, `toolu-runner install-service` writes
 a launchd (macOS) / systemd (Linux) user unit that supervises it — see
-[Running as a service](#running-as-a-service).
+*Running as a service* under [Configuration](#configuration).
 
 For autoscalers and throwaway hosts, `register --ephemeral` records a
 one-job registration: `run` takes exactly one job (any conclusion), never
@@ -148,10 +148,12 @@ stored `login` token > inline device flow (interactive terminals only —
 non-interactive runs fail, listing those three options).
 
 `login` / `logout` manage the stored token per host — they take a
-hostname, not `--config`. `status` prints local state — including login
-— without touching the network. `remove` unregisters. `check` is the
-network preflight and `doctor` the whole-machine health check (both below).
-That's the whole CLI.
+hostname (default `github.com`), not `--config`. `status` prints local
+state — including login — without touching the network. `remove`
+unregisters. `check` is the network preflight and `doctor` the
+whole-machine health check (both below).
+`boot` is the flag-less one-shot mode of the container image and `create-app`
+the one-click GitHub App onboarding (also below). That's the whole CLI.
 
 ### Preflight: `toolu-runner check`
 
@@ -251,10 +253,46 @@ or registers.
 | `1` | At least one `FAIL` row. |
 | `2` | Usage error before checking (a `--config` path that does not exist). |
 
+### Container one-shot: `toolu-runner boot`
+
+`boot` takes no flags. It is the `ENTRYPOINT` of the container image, driven
+entirely by the environment (a JIT config in argv would leak into provider
+dashboards): `TOOLU_JITCONFIG` (required) is GitHub's `encoded_jit_config`
+from `generate-jitconfig`, verbatim; `TOOLU_DEADLINE` (optional) is an
+epoch-milliseconds decimal string, a self-timeout backstop (missing or
+unparseable: no watchdog). It runs exactly one job and persists nothing — no
+`config.toml`, `credentials.json`, `.lock` or re-mint. See the
+[container image](docs/container-image.md).
+
+| Exit | Meaning |
+|---|---|
+| `0` | The job succeeded or was skipped, or the runner shut down (signal or session end) before acquiring one. |
+| `1` | The job failed or was cancelled, or the listener errored (auth, network, protocol). |
+| `2` | Environment or config error before polling (missing `TOOLU_JITCONFIG`, unparseable JIT envelope). |
+| `5` | A session conflict outlasted the bounded retry. |
+| `124` | The `TOOLU_DEADLINE` watchdog fired: already past at start (exits before any network call), or mid-job (graceful cancel, then a hard exit after a 30 s grace period). |
+
+### GitHub App: `toolu-runner create-app`
+
+`create-app` creates a user-owned GitHub App through GitHub's App Manifest
+flow, in one click. It binds a loopback callback on `127.0.0.1`, opens your
+browser to a prefilled manifest form (`--no-browser` prints the URL instead;
+the App gets `administration:write`, is not public and has no webhook),
+exchanges the returned code, and saves the App's credentials to
+`github-app.json` (0600) at the runner-home root, shared by every repo. It
+then prints a secret-free summary and the App's install URL. It does **not**
+install the App or mint installation tokens yet: `register` still takes
+`--token`, `TOOLU_RUNNER_TOKEN` or a stored `login`. github.com only — another
+`--host` is rejected before any browser or network call — and it refuses to
+overwrite a saved App unless you pass `--force`.
+
 ### CLI flags reference
 
 | Flag | Command | What it does |
 |---|---|---|
+| `--url <URL>` | `register` | Repository or organization URL. Optional: absent, the repo is inferred from the cwd git remote `origin` (github.com only); org runners and GHES need it. |
+| `--token <TOKEN>` | `register`, `remove` | GitHub token (a PAT or App installation token with `administration:write`). Resolution: flag > `TOOLU_RUNNER_TOKEN` > stored `login` token; used only for the registration / unregister call, never at job runtime. |
+| `--name <NAME>` | `register` | Runner name (default: the machine hostname). |
 | `--labels <LABELS>` | `register` | Comma-separated custom labels, **added** to the defaults `self-hosted`, `Linux`/`macOS`, `X64`/`ARM64` (GitHub's `RUNNER_OS`/`RUNNER_ARCH` spelling, as the official runner). Empty entries are ignored, case-duplicates kept once, at most 256 characters (UTF-16 units, as upstream counts them). |
 | `--no-default-labels` | `register` | Register only the `--labels` values (which are then required). |
 | `--ephemeral` | `register` | One-job registration: `run` takes one job, then unregisters and deletes it (see above). |
@@ -262,12 +300,17 @@ or registers.
 | `--runner-group <ID>` | `register` | Numeric runner group ID for org registrations. Group *names* aren't supported by the JIT API — a non-numeric value warns and falls back to the Default group. |
 | `--replace` | `register` | Overwrite an existing registration with the same name. |
 | `--once` | `run` | Run a single job, then exit. The default is to stay online — after each job `run` re-mints a fresh JIT config with the stored `login` token and keeps listening. |
-| `--print` / `--no-activate` / `--remove` | `install-service` | Print the unit without writing it / write it but don't activate / deactivate and delete it (idempotent). |
-| `--force` | `remove` | Cancel an in-flight run before unregistering. |
-| `--url <URL>` | `check` | Probe this GitHub host's endpoints instead of the resolved registration's. |
+| `--print` / `--no-activate` / `--remove` | `install-service` | Print the unit without writing it (conflicts with `--remove`) / write it but don't activate / deactivate and delete it (idempotent). |
+| `--force` | `remove` | Remove even while a `run` holds the job lock. Local state goes, but the lock file is kept and the GitHub unregister is skipped (that job is still reporting against the registration), so remove the runner on GitHub by hand afterwards. It does not cancel the job. Without it, a held lock only writes a `.pending_remove` marker and `remove` exits 2. |
+| `--skip-unregister` | `remove` | Delete local state without calling GitHub (revoked token, deleted repo, no network); the runner stays registered there. Without it, `remove` with no token, or with a failed unregister, aborts before deleting anything. |
+| `--url <URL>` | `check` | Probe this GitHub host's endpoints instead of the resolved registration's (conflicts with `--config`). |
 | `--timeout <SECS>` | `check`, `doctor` | Per-probe bound, 1–300 seconds (default 10). |
 | `--offline` | `doctor` | Make no network request; the update and network rows print `SKIP`, and a present token is reported unverified. |
 | `--client-id <ID>` | `login` | OAuth App client id for the device flow (fallback: `TOOLU_RUNNER_CLIENT_ID`). Needed until the built-in github.com App ships; always needed for GHES. |
+| `--name <NAME>` | `create-app` | GitHub App name (default `toolu-runner-<hostname>`). It must be unique across GitHub: a duplicate makes the browser flow time out. |
+| `--host <HOST>` | `create-app` | GitHub host to create the App on (default `github.com`, the only value accepted this release). |
+| `--no-browser` | `create-app` | Print the URL to open instead of launching a browser. |
+| `--force` | `create-app` | Overwrite an already saved App (`github-app.json` at the runner-home root). |
 
 `register`, `run`, `remove`, `status`, `install-service`, and `check`
 also take `--config <FILE>`; when omitted, the config resolves to the cwd-inferred
@@ -313,6 +356,12 @@ binds nothing.)
 `SIGINT`/`SIGTERM` are bridged to a `CancellationToken` that the poll
 loop, the renewal task, and the in-flight job all observe. Nothing is
 left orphaned.
+
+A session conflict (GitHub answers `409` while another live session holds the
+registration) is retried every 30 s, up to 8 attempts. If it outlasts that,
+`run` exits `5`, with or without `--once`, and the systemd unit from
+`install-service` does not restart on it. `TOOLU_RUNNER_SESSION_CONFLICT_INTERVAL_MS`
+overrides the 30 s wait for `run` and `boot`.
 
 ### What runs
 
@@ -689,8 +738,8 @@ clock, a socket, or tokio.
 | Run service (acquire/renew/complete) | C# | `wire::reporting::run_service` |
 | Results service (Twirp) | C# | `wire::reporting::results_service` |
 | Expression engine (`${{ }}`) | C# | `expressions` *(own crate)* |
-| Step handlers | C# | `execution::handlers` |
-| Artifacts / OIDC | C# | `execution::{artifacts,oidc}` |
+| Step handlers | C# | `execution::execution::handlers` |
+| Artifacts / OIDC | C# | `execution::execution::{artifacts,oidc}` |
 | Content-addressed cache | C# | `cache` *(own crate)* |
 | Secret masking | C# | `shared::SecretMasker` + tracing layer |
 | Docker | C# | `execution::docker::action_container` *(bollard; Linux actions with image build/pull, mounts and cleanup)* |
@@ -732,8 +781,9 @@ no_proxy  = ["internal.corp", ".svc.local", "10.0.0.0/8"]
 ca_bundle = "~/certs/corp-root.pem"
 ```
 
-The `accelerated` mode adds `[cache]`, `[cache.l2]`, `[workspace]`, and
-`[shadow]` sections — see [Cache acceleration](#cache-acceleration).
+`[cache]` and `[cache.l2]` configure `accelerated` mode; `[workspace]` and
+`[shadow]` apply in every services mode. All four are optional and default as
+shown — see [Cache acceleration](#cache-acceleration).
 
 Credentials live beside it in `credentials.json` (also 0600). Don't
 hand-edit `jit_config` or `auth_token` — re-run `register --replace`.
@@ -749,7 +799,6 @@ hand-edit `jit_config` or `auth_token` — re-run `register --replace`.
 ├── _work/                      # job workspaces (shared default): <repo>/<repo>/ stable, <job-id>/ fresh
 │   └── _PipelineMapping/       # <owner>/<repo>/PipelineFolder.json + workspace leases
 ├── config.toml                 # legacy single-slot registration; org registrations land here
-├── .runner_version
 └── runners/<owner>/<repo>/     # one directory per repo registration
     ├── config.toml             # registration + runtime config (0600)
     ├── credentials.json        # (0600)
@@ -772,21 +821,30 @@ survives unregistration.
 | Variable | Default | Description |
 |---|---|---|
 | `TOOLU_RUNNER_HOME` | `~/.toolu-runner` | runner state root: the token store, `runners/<owner>/<repo>/` registrations, default `_work/`. |
-| `TOOLU_RUNNER_TOKEN` | — | bearer for `register` (resolution: `--token` > env > stored `login` token). |
+| `TOOLU_RUNNER_TOKEN` | — | bearer for `register`, `remove` and `run`'s re-mint after every job (resolution: `--token` > env > stored `login` token); `doctor` verifies it. |
 | `TOOLU_RUNNER_CLIENT_ID` | — | OAuth App client id for the device flow (`--client-id` fallback). |
-| `TOOLU_RUNNER_KEYRING` | — | when set, opts the token store in to the OS keyring (default is a 0600 file — on macOS the keychain re-prompts whenever the binary's code signature changes, e.g. every rebuild). |
-| `TOOLU_RUNNER_NO_KEYRING` | — | when set, forces the 0600-file token store and skips the OS keyring probe entirely; overrides `TOOLU_RUNNER_KEYRING` (headless hosts, CI, locked keyrings). |
+| `TOOLU_RUNNER_KEYRING` | — | when set (non-empty, not `0`), opts the token store in to the OS keyring (default is a 0600 file — on macOS the keychain re-prompts whenever the binary's code signature changes, e.g. every rebuild). |
+| `TOOLU_RUNNER_NO_KEYRING` | — | when set (non-empty, not `0`), forces the 0600-file token store and skips the OS keyring probe entirely; overrides `TOOLU_RUNNER_KEYRING` (headless hosts, CI, locked keyrings). |
+| `TOOLU_RUNNER_NODE_DIR` | — | directory of pre-seeded Node.js runtimes in the official runner's `externals/` layout; authoritative, so the runner never downloads (`run`, `boot`, the service unit's environment). See [Node.js runtimes](#nodejs-runtimes). |
+| `TOOLU_RUNNER_SESSION_CONFLICT_INTERVAL_MS` | `30000` | wait between session-conflict retries, in milliseconds (a positive integer; the 8 attempts are fixed). Read by `run` and `boot`. |
+| `TOOLU_JITCONFIG` | — | `boot` only: GitHub's `encoded_jit_config`, verbatim. Required. |
+| `TOOLU_DEADLINE` | — | `boot` only: epoch milliseconds (decimal string) of the self-timeout backstop. Optional. |
 | `TOOLU_RUNNER_RELEASES_URL` | the latest `Falconiere/toolu-ghrunner` release on `api.github.com` | release document `doctor`'s newer-release check reads (a mirror); credentials in it are masked. |
-| `TOOLU_RUNNER_LOG` | `info` | tracing filter. Checked before `RUST_LOG`. |
-| `RUST_LOG` | — | tracing filter (standard fallback). |
+| `TOOLU_RUNNER_LOG` | `info` | tracing filter. Checked before `RUST_LOG`. Honoured only with `TOOLU_RUNNER_ALLOW_VERBOSE=1`; otherwise the runner always logs at `info`. |
+| `RUST_LOG` | — | tracing filter (standard fallback). Same `TOOLU_RUNNER_ALLOW_VERBOSE` gate. |
+| `TOOLU_RUNNER_ALLOW_VERBOSE` | — | `1` lets `TOOLU_RUNNER_LOG` / `RUST_LOG` take effect. Off by default so debug/trace output cannot leak secrets into the log file. |
 | `DOCKER_HOST` | `unix:///var/run/docker.sock` | Docker daemon endpoint, read the same way the Docker CLI reads it — required for Colima, OrbStack, Podman and Rancher Desktop, which do not publish the default socket. `unix://`, `tcp://` and `http://` are supported; an `ssh://` or `https://` value is rejected with an error naming the endpoint rather than silently falling back. |
+| `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` / `NO_PROXY` | — | proxy for the runner's HTTP clients when `config.toml` has no `[network] proxy` (also read in lower case; `REQUEST_METHOD` set disables them all). See [Proxy and custom CA](#proxy-and-custom-ca). |
+| `SSL_CERT_FILE` / `SSL_CERT_DIR` | — | replace the platform trust store for the runner's HTTP clients (the compiled-in Mozilla roots stay trusted). |
+| `PATH` | — | `install-service` bakes the installing shell's `PATH` into the launchd unit. |
 | `TOOLU_RUNNER_REPO` | `Falconiere/toolu-ghrunner` | `install.sh` only — release source. |
+| `TOOLU_DAEMON_*` | — | the separate `toolu-daemon` bin only (token file, vCPU/memory budget, image, bind, queue ceiling, runtime) — see the [VPS host runbook](docs/vps-host-runbook.md). |
 | `HOME` / `USERPROFILE` | — | resolves `~/.toolu-runner/`. |
-| `HOSTNAME` / `COMPUTERNAME` | `unknown` | identifies the runner host at `register`. |
-| `YAMLESS_*` | — | **Legacy.** Warned about, then ignored. No compatibility layer. |
+| `HOSTNAME` / `COMPUTERNAME` | `unknown` | names this host in the broker session's `owner_name` (`<host> (PID: n)`). The default runner name at `register` comes from the OS hostname, not these. |
 
 `TOOLU_RUNNER_CONFIG` / `_WORK` / `_LABELS` are specced but **not yet
-implemented** — use the CLI flags.
+implemented** — use the CLI flags. Job steps never inherit the runner's own
+`TOOLU_RUNNER_*` variables.
 
 </details>
 
@@ -827,9 +885,10 @@ value that will be used. The systemd unit is unchanged: the user manager
 already exports a usable `PATH`.
 
 **systemd (Linux)** — a user unit `toolu-runner-<owner>-<repo>.service` at
-`~/.config/systemd/user/`, with `Restart=always` + `RestartSec=5`. Activated
-with `systemctl --user daemon-reload && systemctl --user enable --now`; logs
-land in journald (`journalctl --user -u toolu-runner-<owner>-<repo>`). A
+`~/.config/systemd/user/`, with `Restart=always` + `RestartSec=5` (and
+`RestartPreventExitStatus=5`, so a session conflict that outlasted its retry
+stays down). Activated with `systemctl --user daemon-reload && systemctl
+--user enable --now`; logs land in journald (`journalctl --user -u toolu-runner-<owner>-<repo>`). A
 headless host needs `loginctl enable-linger <user>` so the unit runs without
 an active login session.
 
@@ -938,17 +997,16 @@ the proxy redacted.
 | `config not found at ...` / `no runner registration found under ...` | Run `register` before `run`. |
 | `several runner registrations found (...)` | More than one repo is registered and the cwd matches none — `cd` into the repo, or pass `--config`. |
 | `registration already exists at ...` | Pass `--replace` to `register`. |
-| `... is not a git repository` / `has no 'origin' remote` at `register` | Zero-arg inference needs a cwd git repo with an `origin` remote — pass `--url` instead. |
+| `... is not a git repository, so the repo cannot be inferred` / ``... has no `origin` remote`` at `register` | Zero-arg inference needs a cwd git repo with an `origin` remote — pass `--url` instead. |
 | `no GitHub OAuth App configured` | The built-in device-flow App isn't wired yet — set `TOOLU_RUNNER_CLIENT_ID` (or `login --client-id`), or skip the device flow with `--token` / `TOOLU_RUNNER_TOKEN`. |
 | `run` exits after one job (warned it would) | No stored `login` token, so re-mint has no bearer. Run `toolu-runner login` (or set `TOOLU_RUNNER_TOKEN`) to stay online; or pass `--once` if a single job is intended. `doctor` flags this (and a token GitHub has revoked) as `FAIL  token`. |
 | `the ephemeral registration was kept — if the runner was removed on GitHub …` (exit 1) | The runner was deleted on GitHub before it got a job (the token exchange answered `invalid_client`). Run `toolu-runner remove`, then `register` again. |
 | `… (the job was acquired; its registration was removed)` (exit 1) | An ephemeral job was acquired but executing or reporting it failed; the registration was still cleaned up. Check the job on GitHub and `_diag/runner.log`. |
 | `ephemeral runner … finished its job, but unregistering it on GitHub failed` (exit 2) | The job ran; fix the token or connectivity, then `toolu-runner remove` to finish the cleanup. |
 | `… is an ephemeral registration … a service unit restarts run forever` | `install-service` does not supervise one-job registrations; register without `--ephemeral`, or start `run` from a one-shot supervisor. |
-| `another run is in flight` | Another `run` holds this repo's `.lock`; its PID is in the error. Wait it out, or stop the holder with `kill -INT <pid>`. |
+| `runner is already running as PID <pid> ...` | Another `run` holds this repo's `.lock`; its PID is in the error. Wait it out, or stop the holder with `kill -INT <pid>`. |
 | `generate-jitconfig` fails with a network error | A firewall is blocking `api.github.com` (github.com) or the GHES host. Run `toolu-runner check` to see which hosts fail and why. |
 | `run` hangs or fails before any job | Run `toolu-runner check`: it names the unreachable GitHub service, the failure class (`dns`/`tls`/`proxy`/…), and the proxy / CA settings in effect (including `[network]`). |
-| `warning: ignoring yamless env var ...` | A stale `YAMLESS_*` var is in your shell rc. Remove it. |
 
 ## Development
 
@@ -1000,18 +1058,24 @@ The live suite talks to a real repo and is token-gated:
 
 ```sh
 TOOLU_RUNNER_LIVE_TOKEN=<ghs_...> \
-  cargo test --workspace --features e2e-live -- --ignored live
+  cargo test -p toolu-runner --features live -- --ignored --test-threads=1
 ```
+
+`TOOLU_RUNNER_LIVE_REPO` picks the target repo (the `live` workflow defaults to
+`Falconiere/toolu-runner-test`).
 
 ### Workspace
 
 Twelve crates under `crates/` (ten libraries plus the `toolu-runner` and `toolu-daemon` bins), acyclic dependency graph:
 
+- **`shared`** — config, errors, events, job-message types, tracing
+  init, `SecretMasker`, platform labels. Sync, no network. No internal deps.
 - **`protocol`** — JIT config, RSA/JWT, sessions, message decryption.
   Sync, I/O-free, **network-free** (no `reqwest`, no `tokio` — enforced
-  by its `Cargo.toml`). No internal deps.
-- **`shared`** — config, errors, events, job-message types, tracing
-  init, `SecretMasker`, platform labels. Sync, I/O-free. No internal deps.
+  by its `Cargo.toml`). → `shared`.
+- **`network`** — the one place that builds the production `reqwest`
+  clients (proxy and custom-CA support) and reads the proxy variables, so
+  `protocol` stays free of `reqwest`. → `shared`.
 - **`config`** — registration config (TOML/JSON), the per-repo
   `runners/<owner>/<repo>/` registry, cwd repo inference, the
   single-job file lock, and the login-token store. → `shared`.
@@ -1019,16 +1083,21 @@ Twelve crates under `crates/` (ten libraries plus the `toolu-runner` and `toolu-
 - **`cache`** — content-addressed CI cache (CAS + Twirp/blob/v1
   endpoints). → `shared`.
 - **`wire`** — async HTTP transport (`net/`) + Run/Results reporting
-  domain types (`reporting/`). → `shared`, `protocol`.
+  domain types (`reporting/`). → `shared`, `protocol`, `network`.
 - **`observability`** — per-job JSONL journal (`_diag/jobs/`). →
   `shared`.
 - **`execution`** — the job execution engine + Docker/Node + the
-  `Runner`. → `shared`, `expressions`, `cache`.
+  `Runner`. → `shared`, `expressions`, `cache`, `network`.
 - **`listener`** — the GitHub JIT lifecycle. → `execution`, `wire`,
   `observability`, `shared`, `protocol`.
-- **`toolu-runner`** — the CLI **bin** (`register` / `run` / `remove` /
-  `status` / `install-service` / `login` / `logout` /
-  `create-app`). → all of the above.
+- **`toolu-runner`** — the CLI **bin** (`register` / `run` / `boot` /
+  `remove` / `status` / `install-service` / `login` / `logout` /
+  `create-app` / `check` / `doctor`). → `shared`, `protocol`, `network`,
+  `config`, `wire`, `observability`, `listener`.
+- **`daemon`** — the `toolu-daemon` bin: the HTTP service on a toolu-operated
+  VPS host that turns `POST /v1/jobs` into one sysbox-isolated container
+  running `toolu-runner boot` (see the [VPS host runbook](docs/vps-host-runbook.md)).
+  No internal deps.
 
 [docs/architecture.md](docs/architecture.md) has the full design with
 sequence diagrams for register / run / cancel / reconnect.
@@ -1040,8 +1109,9 @@ PRs welcome. Before you open one:
 1. `./tools/check.sh all` passes.
 2. `cargo nextest run --workspace` passes.
 3. Listener or reporting change? Add a test under `crates/toolu-runner/tests/`.
-4. User-facing change? Update `README.md`, `docs/architecture.md`, and
-   `CHANGELOG.md` in the same commit.
+4. User-facing change? Update `README.md` and `docs/architecture.md` in the
+   same commit. `CHANGELOG.md` is generated from conventional-commit subjects
+   at release time (git-cliff), so don't edit it by hand.
 
 New files stay under 500 **code** lines (blanks and comments don't
 count; tests are exempt); function bodies under 150. Tests live in a

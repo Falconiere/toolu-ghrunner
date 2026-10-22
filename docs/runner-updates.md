@@ -12,8 +12,10 @@ feature of that runner or that GitHub guarantees queue eligibility.
 
 Toolu's product/release version remains independent: `toolu-runner --version`
 prints it, and listener startup logs both `product_version` and
-`compatibility_version`. Use both when reporting an incident. Updating toolu's
-Cargo version does not automatically raise the compatibility target.
+`compatibility_version`. `toolu-runner doctor` shows both on its `version`
+row, and a job's "Set up job" log lists them as `Toolu runner version` and
+`Runner compatibility version`. Use both when reporting an incident. Updating
+toolu's Cargo version does not automatically raise the compatibility target.
 
 ## Chosen update policy
 

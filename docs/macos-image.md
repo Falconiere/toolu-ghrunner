@@ -138,8 +138,10 @@ against a real materialised tree.
 ## Limitations
 
 - **No Docker on macOS.** `uses: docker://…`, job-level `container:`
-  and `services:` are unsupported — same floor as the Linux image, and
-  here it is the platform's, not a packaging choice.
+  and `services:` are unsupported: the engine runs them on Linux hosts
+  only and rejects them on macOS, and Namespace's base image carries no
+  `docker`. On the Linux image a daemon is a packaging choice (the
+  `-docker` variant); here the limit is the platform's.
 - **arm64 only.** Namespace macOS instances are Apple Silicon; there is
   no x86_64 leg and no Rosetta assumption in the image.
 - **Code signing is the job's problem.** The image ships no keychain,

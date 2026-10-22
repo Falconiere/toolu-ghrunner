@@ -21,7 +21,7 @@ Every matrix row records all seven lanes:
 
 | Lane | What it means | `passed` evidence |
 | --- | --- | --- |
-| `hermetic` | `cargo test --workspace` on the ubuntu CI leg, plus the Python evidence-tool tests in the "Compatibility evidence (#103)" CI step | `gate`: at least one mapped, non-`#[ignore]` test |
+| `hermetic` | `cargo nextest run --workspace` (plus the doctests) on the ubuntu CI leg, and the Python evidence-tool tests in the "Compatibility evidence (#103)" CI step | `gate`: at least one mapped, non-`#[ignore]` test |
 | `macos` | The same Rust suite on the `ci-macos` job | `gate`: at least one mapped, non-ignored Rust test whose file is not `#![cfg(target_os = "linux")]` |
 | `docker` | A real Linux Docker daemon | `ci-docker` (a mapped test run by `ci.yml`'s Docker step), a recorded explicit run (`doc:` or a `pr:` whose body records it), or a live run (`run:`) |
 | `github-com` | A real job acquired from GitHub.com and executed by toolu | `run:<actions run URL>` or `pr:<PR URL>` whose body records the observation |
@@ -35,8 +35,8 @@ Statuses:
 - `unverified` needs a reason. Missing credentials, tools, hosts or reference
   runners, skipped or ignored tests, and recorded differences all land here.
 - `not-applicable` needs a reason explaining why the lane cannot apply.
-- `pending` needs a reason. It is used only for open child issues (#94, #97)
-  and must link the issue.
+- `pending` needs a reason. It is used only for child issues whose evidence is
+  not recorded yet (#94, #97) and must link the issue.
 
 The checker enforces the mechanical parts:
 
@@ -140,7 +140,7 @@ Both variants ran on both lanes.
 
 | | Official lane | toolu lane |
 | --- | --- | --- |
-| Runner | unmodified actions/runner **2.337.0** (`cab9d1c3901e45c7705889c4f88284fdd93f4ae5`), `actions-runner-linux-x64-2.337.0.tar.gz` SHA-256 `70920811a4f8ad4328818682bca5c6469c1c942fab52448868071d0063816613` (matches the release notes), `--disableupdate` | toolu-runner 0.10.0 from commit `a0afa0b`, built with `cargo build -p toolu-runner --features capture` (debug), binary SHA-256 `6acafaf634e11aecf2aef0c3badee8b1e74c474251d7f21968115be19513d0d6`, always-online `run` loop, forwarder services mode |
+| Runner | unmodified actions/runner **2.337.0** (release commit `397b032cbf865e9c3ddfab89d533ec19325e1273`), `actions-runner-linux-x64-2.337.0.tar.gz` SHA-256 `70920811a4f8ad4328818682bca5c6469c1c942fab52448868071d0063816613` (matches the release notes), `--disableupdate` | toolu-runner 0.10.0 from commit `a0afa0b`, built with `cargo build -p toolu-runner --features capture` (debug), binary SHA-256 `6acafaf634e11aecf2aef0c3badee8b1e74c474251d7f21968115be19513d0d6`, always-online `run` loop, forwarder services mode |
 | Labels | `self-hosted, Linux, X64, toolu-103-official` | `self-hosted, Linux, X64, toolu-103-toolu` |
 | Host | one Linux x86_64 host, Docker Engine 29.1.3; both runners ran as root in isolated homes against the same daemon | same |
 
@@ -244,7 +244,8 @@ These are the epic's exclusions. They are not evidenced and not claimed:
 - Runner telemetry.
 - AuthMigration.
 
-The open children are tracked as `pending` until they merge:
+Two children have merged (#94 in PR #171, #97 in PR #173) but the matrix still
+tracks them as `pending` until their rows are filled in with evidence:
 
 - [#94](https://github.com/Falconiere/toolu-ghrunner/issues/94) — proxy/CA.
 - [#97](https://github.com/Falconiere/toolu-ghrunner/issues/97) — dead code and

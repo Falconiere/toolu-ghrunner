@@ -1,8 +1,8 @@
 //! Broker message types + AES-256-CBC decryption.
 //!
-//! The async `poll_message` / `acknowledge_message` live in `toolu-runner::net`
-//! because they talk HTTP. The crypto stays here so we can unit-test
-//! padding stripping and BOM handling without a broker.
+//! The async `poll_message` / `acknowledge_message` live in
+//! `wire::net::messages` because they talk HTTP. The crypto stays here so
+//! we can unit-test padding stripping and BOM handling without a broker.
 
 use serde::{Deserialize, Deserializer};
 use shared::RunnerError;

@@ -17,7 +17,8 @@ no OTel.
 - Workspace members (dependency order): `protocol`, `shared`,
   `network`, `config`, `expressions`, `cache`, `wire`, `observability`,
   `execution`, `listener`, `toolu-runner`, plus the standalone `daemon`
-  bin (`toolu-daemon`; no internal deps, `reqwest` only in its tests).
+  bin (`toolu-daemon`, see `crates/daemon/README.md`; no internal deps,
+  `reqwest` only in its tests).
 - Dependency graph (acyclic):
   - `protocol` — `shared` only (sync crypto + protocol/v1 types; no
     async or network deps).
@@ -29,9 +30,7 @@ no OTel.
   - `config`, `expressions` — each depend on `shared` only.
   - `cache` — `shared` (`network` only as a dev-dependency: `L2Tier`
     takes a caller-built client).
-  - `observability` — depends on `shared` only. It does NOT depend on
-    `config`: its journal takes `data_dir` from the caller rather than
-    resolving it (see `observability/` below).
+  - `observability` — `shared` only; NOT `config` (see below).
   - `wire` — `shared`, `protocol`, `network`.
   - `execution` — `shared`, `expressions`, `cache`, `network`.
   - `listener` — `execution`, `wire`, `observability`, `shared`,
@@ -116,9 +115,8 @@ bite here.
 - **Env reads go through the crate's `config` module.** A guardrail
   pattern rule (`no-direct-env-var`) bans `std::env::var` anywhere but
   `config.rs` / `config/**` / `tests/**`, so every variable a crate
-  reads is declared and validated in one place. `config`, `shared`,
-  `protocol`, `execution` and `toolu-runner` each have a `src/config.rs`
-  holding their accessors.
+  reads is declared and validated in one place. Every crate that reads
+  env has a `src/config.rs` holding its accessors.
 - **500 code-line ceiling per file** (blanks and comment-only lines
   excluded; anything under a `tests/` dir is exempt). Split the design
   before you fight the gate.
@@ -153,10 +151,10 @@ to that list requires proving the value is not a real credential.
 ## Crate-Specific Rules
 
 - **No OTel in v1.** Tracing is `tracing-subscriber` + `EnvFilter`
-  only. JSON-formatted to `data_dir/_diag/<service>.log` (daily
-  rotation), pretty-printed to stderr. Secret redaction is wired
-  through `shared::startup::SecretRedactor` so secrets never reach
-  the file sink unredacted.
+  only (`info` unless `TOOLU_RUNNER_ALLOW_VERBOSE=1`). JSON-formatted
+  to `~/.toolu-runner/_diag/<service>.log` (daily rotation; ignores
+  `TOOLU_RUNNER_HOME`), pretty-printed to stderr, redacted per
+  *Secret masking*.
 - **`protocol` crate is strictly sync, no I/O, no network.** Its
   dependency set is restricted to `serde`, `serde_json`,
   `base64`, `jsonwebtoken`, `num-bigint-dig`, `pkcs1`,
@@ -308,9 +306,10 @@ to that list requires proving the value is not a real credential.
   `TaskAgentSession`, `build_session_request` (builds the
   ephemeral `00000000-...` session).
 - `messages.rs` — `BrokerMessage`, `RunnerJobRequestBody`,
-  `BrokerMigrationBody`, `MessageType` (RunnerJobRequest /
-  BrokerMigration), `decrypt_message_body` (AES-256-CBC with
-  PKCS#7 strip), `strip_bom`.
+  `BrokerMigrationBody`, `JobCancelBody`, `MessageType` (job / migration /
+  cancellation / control types; `Unknown(String)` for future ones),
+  `decrypt_message_body` (AES-256-CBC with PKCS#7 strip), `strip_bom`.
+  `rsa_oaep.rs` + `body_decrypt.rs` unwrap an `encrypted` session key.
 - `types.rs` — `RunnerSettings` (`.runner` blob), `CredentialData` /
   `CredentialDataInner` (`.credentials` blob), `RsaKeyParams`
   (`.credentials_rsaparams` blob; base64 big-endian integers).
@@ -359,8 +358,7 @@ to that list requires proving the value is not a real credential.
   contract; do not converge it without evidence GitHub validates the field.
 - `secret_masker.rs` — `SecretMasker` (`add_secret` / batch `add_secrets` +
   per-line `mask`) and `MaskerRedactor` (implements
-  `startup::SecretRedactor`) so registered `secrets.*` values never reach
-  `_diag/runner.log` unredacted. `mask` returns `Cow<'_, str>` —
+  `startup::SecretRedactor`; see *Secret masking*). `mask` returns `Cow<'_, str>` —
   `Borrowed` when nothing matches (no per-line alloc on the common path),
   `Owned` only when a span was replaced — running one
   `aho_corasick::AhoCorasick` (`MatchKind::Standard`) overlapping pass,
@@ -572,9 +570,7 @@ to that list requires proving the value is not a real credential.
   replay/tail reader (`poll()` advances only past complete lines)
   plus `scan_jobs` head/tail-window summaries. The crate reads NO
   configuration: `writer::jobs_dir_for(data_dir)` joins `_diag/jobs`
-  onto the path its caller passes (`listener::handler`), so nothing
-  here calls `config::resolve_data_dir` and the `config` dep stays out
-  of `Cargo.toml`.
+  onto the caller's (`listener::handler`) `data_dir`, never resolving it.
   Test fixture: `tests/fixtures/journal/canonical.jsonl`, captured
   from a real engine run via `JOURNAL_CAPTURE=1 cargo test -p
   toolu-runner --test integration -- journal_writer_test::capture_canonical`, and
@@ -682,7 +678,7 @@ to that list requires proving the value is not a real credential.
   `data_dir/node/{version}[-alpine]` → download (nodejs.org /
   `actions/alpine_nodejs`, pins 20.20.2 / 24.21.0) via `download` (staging,
   `validate`'s `node --version` start check for host-runnable targets, atomic
-  rename).
+  rename; transient failures retried, 3 attempts).
 
 ### `listener/` — GitHub JIT lifecycle (deps: execution, wire, observability, shared, protocol)
 
@@ -703,7 +699,9 @@ to that list requires proving the value is not a real credential.
   un-acked job message; accepted trade: death mid-job loses broker
   redelivery, the job waits out GitHub's lock timeout). `message_route`
   is the pure "what does the runner do with this broker message type"
-  decision (unit-testable without a live broker).
+  decision (unit-testable without a live broker); `broker_message`
+  applies it (unknown types skipped), `broker_refresh` answers
+  `ForceTokenRefresh`.
   `execution_loop::execute_with_renewal` runs the job with a 60s
   renewal task, an event forwarder that streams logs to the
   Results Service, and a oneshot that captures the final conclusion.

@@ -67,7 +67,7 @@ jobs:
           if docker info --format '{{json .Runtimes}}' 2>/dev/null | grep -q '"sysbox-runc"'; then
             echo "sysbox-runc is registered as a Docker runtime"
           else
-            echo "::warning::sysbox-runc is not registered as a Docker runtime on this runner (docs/container-image.md has the install steps). Nothing this workflow currently runs needs it, but AC-9 has no coverage anywhere until it is installed."
+            echo "::warning::sysbox-runc is not registered as a Docker runtime on this runner (docs/vps-host-runbook.md has the install steps). Nothing this workflow currently runs needs it, but AC-9 has no coverage anywhere until it is installed."
           fi
 
       - name: Run the live Docker suite

@@ -383,8 +383,8 @@ fn assert_request_count(
 /// EXACT match for [`LOST_CONNECTION_MESSAGE`]. Field names are the real
 /// wire shape `wire::reporting::Annotation` serializes to
 /// (`#[serde(rename_all = "camelCase")]`, no per-field override on
-/// `annotation_type`/`message` — see `crates/wire/src/reporting/types.rs`):
-/// `annotationType` / `message`.
+/// `level`/`message` — see `crates/wire/src/reporting/types.rs`):
+/// `level` / `message`.
 fn find_lost_connection_annotation(
   body: &serde_json::Value,
 ) -> TestResult<Option<&serde_json::Value>> {

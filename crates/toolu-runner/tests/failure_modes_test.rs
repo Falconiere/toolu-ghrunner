@@ -12,8 +12,9 @@
 //! - Disk full mid-job (engine IO path is exercised by the standard
 //!   `run_steps` flow; the engine surfaces `RunnerError::Io` which
 //!   `run` already logs and treats as a step failure)
-//! - Outage > 5 min mid-job (live integration; tracked in
-//!   `docs/known-bugs.md`)
+//! - Outage > 5 min mid-job (the watchdog is covered offline by the
+//!   listener's `watchdog_trip` / `watchdog_retry` tests; the live `tc`
+//!   e2e is tracked in `docs/known-bugs.md` B-001)
 //!
 //! Each test that shells out to the binary runs the one Cargo built for
 //! this test target (`CARGO_BIN_EXE_toolu-runner`).
