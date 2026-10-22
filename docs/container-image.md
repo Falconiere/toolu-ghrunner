@@ -29,10 +29,13 @@ Everything below applies to both variants unless it says otherwise.
 | `TOOLU_DEADLINE` | Epoch **milliseconds**, decimal string (`/^\d+$/`) | Self-termination backstop for hung jobs. **Not** a promise of remaining time: Namespace may clamp the real instance deadline *earlier* server-side without updating this value. Missing or unparseable → warn and run without a watchdog. Already past at boot → exit 124 immediately. |
 | `TOOLU_DOCKERD_TIMEOUT` | Whole seconds, decimal string (`/^\d+$/`) | **Docker-capable variant only.** How long the entrypoint waits for the daemon's API before giving up on it and dispatching the job anyway. Default `60`; unparseable → warn and use the default. Never fails a job by itself. |
 
-No other variables are read from the provider. `TOOLU_RUNNER_HOME` is
-preset in the image to `/var/lib/toolu-runner` (the data dir holding
-the pre-seeded Node runtimes, `_diag/` logs, the `_work/` workspace,
-and — in the Docker-capable variant — `dockerd.log`).
+No other variables are required from the provider; if it sets the
+standard proxy variables (`HTTPS_PROXY` and friends) the runner honours
+them (see the README's "Proxy and custom CA" section).
+`TOOLU_RUNNER_HOME` is preset in the image to `/var/lib/toolu-runner`
+(the data dir holding the pre-seeded Node runtimes, `_diag/` logs, the
+`_work/` workspace, and — in the Docker-capable variant —
+`dockerd.log`).
 
 ### Behavior
 
@@ -128,11 +131,13 @@ exception is the existing `2`: an image with no `toolu-runner` on
   docker-in-docker at all, so this stays the floor across providers
   rather than an image choice.
 - **`uses: docker://…` container actions, job-level `container:` and
-  `services:` are unsupported in BOTH variants.** That is an engine
-  gap, not an image one — the handler is not wired, so a daemon does
-  not change it. A `docker://` step fails that step with an explicit
-  "docker actions not yet supported" log line; it does not take down
-  the runner.
+  `services:` need a Docker daemon, so they fail in the default
+  image.** The engine implements all three on Linux hosts and reaches
+  the daemon through `DOCKER_HOST` (default `/var/run/docker.sock`);
+  this image ships none, so the step (or the job's setup) fails with a
+  Docker error instead of taking down the runner. The Docker-capable
+  variant starts a daemon for them, though no test here runs them
+  inside that image.
 - github.com JIT configs only (matching toolu.sh's minting path);
   GHES registrations use the normal `register` / `run` flow instead.
 - No macOS/Windows jobs — the image is Linux; `runs-on` labels must

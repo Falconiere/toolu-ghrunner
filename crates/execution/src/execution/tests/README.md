@@ -6,6 +6,8 @@
 
 | File | Purpose |
 | --- | --- |
+| `action_metadata.rs` | Issue 68 captured-job replay with real shell/Node probes: action identity (wire names, nested stages, composite posts, remote dispatch, repeated refs) is exported and restored. |
+| `action_metadata_docker.rs` | Real Linux Docker metadata probes on the captured container-job skeleton, included by the opt-in `docker_action_linux_test` integration target. |
 | `job_environment.rs` | Issue 69 captured-envelope replay for environment layers, step precedence, file commands, and job isolation. |
 | `job_environment_actions.rs` | Issue 69 real Node stages and repeated nested composite environment probes. |
 | `step_attrs.rs` | Evaluates captured timeout / continue-on-error tokens and pins the reference runner's diagnostics. |

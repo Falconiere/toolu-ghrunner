@@ -96,8 +96,9 @@ fn cleanup_old_logs(diag: &Path, service: &str) {
 /// - a `tracing_subscriber::fmt` JSON layer writing to
 ///   `data_dir/_diag/<service>.log` (created if absent).
 ///
-/// `EnvFilter` is built from `RUST_LOG` first, then `TOOLU_RUNNER_LOG`,
-/// falling back to `info`.
+/// `EnvFilter` is built from `TOOLU_RUNNER_LOG` first, then `RUST_LOG`,
+/// falling back to `info`; both are ignored (filter fixed at `info`) unless
+/// `TOOLU_RUNNER_ALLOW_VERBOSE=1`.
 ///
 /// Uses `try_init` so duplicate calls (e.g. in tests) are silently ignored.
 ///

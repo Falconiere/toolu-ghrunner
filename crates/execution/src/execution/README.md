@@ -31,8 +31,11 @@ orchestrator: GitHub expands workflows and sends the engine a single job.
 | `composite_uses.rs` | `run_nested_uses_step` | Builds a synthetic `ActionStep` for a composite's nested `uses:` step and recurses through `action_exec::execute_action`, bounded by `DepthTracker`. |
 | `context.rs` | `ExecutionContext` | Mutable per-job execution state: env, per-step outputs/state/conclusions, runtime-owned contexts plus typed incoming server roots (`matrix`/`needs`/`inputs`/`strategy` and future keys), the shared `SecretMasker`, and expression evaluation. Its execution-only workspace root also anchors problem-matcher paths. |
 | `context/` | Scoped state helpers | Keeps expression-visible step scopes separate from private action state. |
+| `context_env.rs` | `build_step_env` / `build_host_step_env` | `ExecutionContext` env assembly: global + step env + `PATH` additions, the host child's inherited env (runner env minus `TOOLU_RUNNER_*`, overlaid by the #94 network export from `set_network_env`), and the Docker action `PATH`. |
+| `context_eval.rs` | `eval_context` | Builds the `EvalContext` snapshot (`github`, `env`, `steps`, `job`, scoped job status) that expressions evaluate against. |
 | `context_process.rs` | `process_tracking_env` | `ExecutionContext` accessors for the job's `RUNNER_TRACKING_ID` (issue #89); falls back to the runner's inherited value only when `process.clean=false`. |
 | `context_build.rs` | `build_strategy` | Pure helpers for `ExecutionContext`: `runner.debug` detection and the `strategy.*` object, split out to keep `context.rs`'s `impl` blocks small. |
+| `context_scopes.rs` | `push_step_env` / `pop_step_env` | Nested `uses:` step env overlays (visible only for that action's stages, snapshotted for deferred posts), the scoped `github.action_path` / `action_status`, and the nested Node post queue. |
 | `docker_action.rs` | `run_docker_action` | Linux Docker action image preparation, conditional pre stage and deferred post registration. |
 | `docker_stage.rs` | `run_docker_stage` | Container argv/env evaluation and normal workflow/file-command dispatch. |
 | `depth_tracker.rs` | `DepthTracker` | Tracks composite-action nesting depth and errors past `MAX_COMPOSITE_DEPTH` (10) to prevent infinite recursion. |
@@ -55,6 +58,7 @@ orchestrator: GitHub expands workflows and sends the engine a single job.
 | `shadow.rs` | (mod decl) | Declares the `shadow` sub-module; see its own README. |
 | `step_attrs.rs` | `evaluate_timeout` / `evaluate_continue_on_error` | Evaluates step `timeout-minutes` / `continue-on-error` tokens at execution time with upstream's number/boolean-only validation and positioned `The template is not valid.` diagnostics. |
 | `environment_url.rs` | `evaluate_environment_url` | Evaluates the job's `environment.url` at job end against upstream's no-secrets context; scalar results become strings, a value the masker changes is suppressed (#88). |
+| `step_errors.rs` | `report_step_error` / `report_infrastructure_error` | Reports a hard step error (nested failures attributed to the parent step) and emits `RunnerEvent::InfrastructureError` for a categorized `RunnerError::ActionFetch` on the step that hit it (#88). Declared from `steps_runner.rs` via `#[path]`. |
 | `step_metadata.rs` | `action_metadata` / `emit_step_metadata` | A reported row's upstream telemetry (`type` / `action_name` / `ref`): `run` + shell, `node{major}`, `composite`, `Dockerfile`, `DockerHub` + image (#88). |
 | `step_display.rs` | `name_at_job_start` / `name_at_main` | Upstream's two-phase step display names: job-start message contexts, then live contexts before the condition; prettified pending names, warnings on failure, masked results. |
 | `step_env.rs` | `resolve_step_env` | Renders scalar template tokens for step env/script/working-directory/action inputs and applies file-command results back onto the context. |

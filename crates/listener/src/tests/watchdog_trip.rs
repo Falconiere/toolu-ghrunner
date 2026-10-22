@@ -380,11 +380,9 @@ fn assert_request_count(
 }
 
 /// Find the annotation in a `/completejob` body whose `message` field is an
-/// EXACT match for [`LOST_CONNECTION_MESSAGE`]. Field names are the real
-/// wire shape `wire::reporting::Annotation` serializes to
-/// (`#[serde(rename_all = "camelCase")]`, no per-field override on
-/// `annotation_type`/`message` — see `crates/wire/src/reporting/types.rs`):
-/// `annotationType` / `message`.
+/// EXACT match for [`LOST_CONNECTION_MESSAGE`]. Keys follow the wire shape of
+/// `wire::reporting::Annotation` (`crates/wire/src/reporting/types.rs`):
+/// this reads `message`; the caller checks the numeric `level`.
 fn find_lost_connection_annotation(
   body: &serde_json::Value,
 ) -> TestResult<Option<&serde_json::Value>> {
@@ -406,11 +404,12 @@ fn body_conclusion(body: &serde_json::Value) -> TestResult<&str> {
     .ok_or_else(|| format!("completejob body missing string conclusion: {body}").into())
 }
 
-/// Assert the completejob body carries `conclusion: "failed"` (the real
-/// `wire::reporting::ReportConclusion::Failure` discriminant —
-/// `ReportConclusion` is `serde_repr`, not a string; see
-/// `crates/wire/src/reporting/types.rs`) and exactly the "lost connection"
-/// annotation the watchdog trip emits, with numeric failure level 3.
+/// Assert the completejob body carries `conclusion: "failed"` (the Run
+/// Service `TaskResult` name `run_service::JobConclusion::Failed` serializes
+/// to — a camelCase string, unlike the numeric Results Service step
+/// conclusion; see `crates/wire/src/reporting/run_service.rs`) and exactly
+/// the "lost connection" annotation the watchdog trip emits, with numeric
+/// failure level 3.
 fn assert_failure_with_lost_connection(body: &serde_json::Value) -> TestResult<()> {
   let conclusion = body_conclusion(body)?;
   let expected = "failed";

@@ -147,6 +147,7 @@ not a silent empty-env launch. Every variable it reads
 | `TOOLU_DAEMON_BIND` | no (default `127.0.0.1:8080`) | Listen address. | Leave it loopback — the Cloudflare Tunnel (section 6) is what makes it reachable, not a public bind. |
 | `TOOLU_DAEMON_QUEUE_MAX` | no (default `32`) | Hard queue-depth ceiling — the *only* source of a 429. | A 429 permanently fails a customer's job (no requeue path exists anywhere upstream), so this is a last-resort ceiling, not a normal operating limit. Raise it rather than relying on it to shed load. |
 | `TOOLU_DAEMON_RUNTIME` | no (default `sysbox-runc`) | Docker runtime job containers are created under. | Leave the default. Changing it away from `sysbox-runc` removes the isolation the Docker-capable image's whole design depends on — see [`docs/container-image.md`](container-image.md#the-docker-capable-variant). |
+| `RUST_LOG` | no (default `info`) | `tracing` filter directives for the daemon's own log. | `bollard` is held at `info` whatever this says (at `trace` it would log every container's env, which carries the job's JIT config), and a value that does not parse falls back to `info`. |
 
 A concrete sizing example: the largest Linux tag toolu currently offers
 is `toolu-ubuntu-16vcpu-32gb`. The gate only checks that *one* job fits

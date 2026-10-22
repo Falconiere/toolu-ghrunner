@@ -5,9 +5,12 @@ Tracking format: B-NNN — short title — severity — owner — status.
 ## Live smoke deferred (waiting on user)
 
 - The runner's full end-to-end live path (register → run → execute →
-  report) is blocked on step 10, which requires a real registration
-  token from a test repo. Until the user provides one, the entries
-  below are tracked.
+  report) is only verified when the manually dispatched `live` workflow
+  (`.github/workflows/live.yml`, dispatch-only since #120) runs with a
+  `TOOLU_RUNNER_LIVE_TOKEN` secret and a test repo
+  (`TOOLU_RUNNER_LIVE_REPO`). The repo has no such secret, so the lane
+  fails as `UNVERIFIED` rather than passing. Until the user provides
+  one, the entries below are tracked.
 
 ## B-001 — Outage > 5 min mid-job: cancellation watchdog missing
 
@@ -43,8 +46,8 @@ Tracking format: B-NNN — short title — severity — owner — status.
   (2) detection covers `Network`-class renewal failures only — a
   persistent *definitive* renewal error still leaves the job running with
   a dead reporting channel, exactly as before this fix. Live `tc` netem
-  outage e2e remains deferred to the step-10 live smoke (see Reproduce,
-  below).
+  outage e2e remains deferred to a credentialed `live` run (see
+  Reproduce, below).
 - **Trigger:** The runner's network drops for more than 5 minutes
   during a job. The in-flight step keeps running locally, but the
   reporting channel is offline. The spec requires the runner to
@@ -56,8 +59,12 @@ Tracking format: B-NNN — short title — severity — owner — status.
   failed reporting, it cancels the in-flight `CancellationToken`,
   waits for the step to terminate, and reports the job as `failure`
   to GH on reconnect.
-- **Reproduce:** `cargo test --features e2e-live` against a test repo
-  with `tc` simulating 6+ min of network outage mid-job.
+- **Reproduce:** Run a job through the live harness
+  (`cargo test -p toolu-runner --features live -- --ignored`, see
+  `.github/workflows/live.yml`) against a test repo with `tc` simulating
+  6+ min of network outage mid-job. No automated test does this; the
+  watchdog and the report retry are covered without a network by
+  `listener/src/tests/watchdog_trip.rs` and `watchdog_retry.rs`.
 
 ## B-002 — Live unregistration API call not implemented
 
@@ -114,12 +121,13 @@ Tracking format: B-NNN — short title — severity — owner — status.
 - **Severity:** Low
 - **Owner:** E0–E3 (gh-compatibility-core)
 - **Status:** Resolved
-- **Resolution:** Live JIT register implemented in `net/register.rs`
-  (POST `…/repos/{owner}/{repo}/actions/runners/generate-jitconfig` →
+- **Resolution:** Live JIT register implemented in
+  `wire/src/net/register.rs` (POST
+  `…/repos/{owner}/{repo}/actions/runners/generate-jitconfig` →
   persists the real `encoded_jit_config` + `runner_id`), replacing the
   placeholder stub. End-to-end live smoke (real-token register → run)
-  is still pending a registration token from a test repo (tracked by
-  S16).
+  is verified only when the `live` workflow is dispatched with a
+  `TOOLU_RUNNER_LIVE_TOKEN` (see the note at the top of this file).
 - **Trigger:** `toolu-runner register` is called.
 - **Observed:** Step 9 wrote the URL validation and JIT endpoint
   derivation (`jit_endpoint_for_host` returns
@@ -148,16 +156,17 @@ Tracking format: B-NNN — short title — severity — owner — status.
   / `data_dir/_tool`; `action_support::apply_runner_paths` (node stages
   at any nesting depth) and `composite_env::build_step_env` read them
   back instead of joining their own `tmp` / `tool_cache` paths, and
-  `composite_exec` threads a dedicated `runner_temp` (distinct from the
-  composite's file-command backing dir, which deliberately stays
-  `data_dir/tmp`) into both composite interpolation sites — so
+  composite `${{ runner.temp }}` interpolation reads the same
+  `runner_context` store `set_runner_context` fills (via the context
+  snapshot in `composite_expr.rs`; see B-005) while the composite's
+  file-command backing dir deliberately stays `data_dir/tmp` — so
   `${{ runner.temp }}` in a composite `run:` body or step `env:` now
   equals the step's own `$RUNNER_TEMP`. Ordering: `set_runner_context`
-  runs during job context build (`job_runner.rs:601`), before any step,
-  creating both dirs 0700; a failed creation WARNs and degrades to the
-  old missing-dir behavior (`@actions/tool-cache` self-heals with
-  `mkdirP`), never worse than before. The units live in private
-  modules, so coverage drives public surfaces:
+  runs during job context build (`job_context::build_context`), before
+  any step, creating both dirs 0700; a failed creation WARNs and
+  degrades to the old missing-dir behavior (`@actions/tool-cache`
+  self-heals with `mkdirP`), never worse than before. The units live in
+  private modules, so coverage drives public surfaces:
   `crates/execution/tests/composite_runner_temp_test.rs` (a real bash
   subprocess through `execute_composite_action`, pinning env ==
   script-body interpolation == `env:`-value interpolation ==
@@ -227,28 +236,28 @@ Tracking format: B-NNN — short title — severity — owner — status.
 - **Severity:** Medium
 - **Owner:** TBD (execution maintainer)
 - **Status:** Resolved
-- **Resolution:** `resolve_runner` no longer hand-implements a second,
-  independently-maintained copy of the `runner.*` values — it now takes
-  `ctx: &ExecutionContext` (replacing the bare `temp_dir: &Path` it used to
-  thread through) and answers every key via a new
-  `ExecutionContext::runner_value(key) -> Option<&str>` accessor
-  (`context.rs`, mirroring the existing `github_context` accessor), which
-  reads the SAME `runner_context` map `set_runner_context` populates
+- **Resolution:** The hand-rolled `resolve_runner` (a second,
+  independently-maintained copy of the `runner.*` values) is gone. The
+  first fix made it read `ExecutionContext::runner_value`; composite
+  interpolation has since moved onto the full expression engine
+  (`composite_expr::interpolate_composite_expr`), which evaluates against
+  a snapshot of `ExecutionContext::eval_context()`
+  (`composite_expr::composite_eval_context`). That snapshot carries the
+  SAME `runner_context` map `set_runner_context` populates
   (`os`/`arch`/`name`/`temp`/`tool_cache`, plus `debug` when step-debug is
-  on) and `eval_context()` hands to the real evaluator. Sourcing this way
-  means every field composite interpolation answers is structurally the
-  same value the real evaluator answers — there is no second place a future
-  field could be added to one and not the other. An absent key (a
-  genuinely unknown field, or `debug` when step-debug is off) still
-  resolves to `""`, unchanged upstream semantics. Threading: all three
-  interpolation call sites (`composite_exec::run_run_step`,
-  `composite_env::build_step_env`, `composite_uses::build_nested_step` /
-  `build_inputs_token`) already had an `ExecutionContext` reference in
-  scope, so no new struct was needed — the dedicated `runner_temp: &Path`
-  field B-004 had threaded through `CompositeRun` and
-  `NestedUsesParams` purely to reach these interpolation call sites became
-  redundant and was removed (the `env:`-var-setting uses of
+  on) and hands to the real evaluator, so every field composite
+  interpolation answers is structurally the same value the real evaluator
+  answers — there is no second place a future field could be added to one
+  and not the other. An absent key (a genuinely unknown field, or `debug`
+  when step-debug is off) still resolves to `""`, unchanged upstream
+  semantics. All interpolation call sites (`composite_exec`,
+  `composite_env::build_step_env`, `composite_uses`) build that snapshot
+  from the `ExecutionContext` they already hold, so the dedicated
+  `runner_temp: &Path` field B-004 had threaded through `CompositeRun` and
+  `NestedUsesParams` is gone (the `env:`-var-setting uses of
   `runner_temp_dir`/`runner_tool_cache_dir` from B-004 are untouched).
+  `ExecutionContext::runner_value` remains as a public accessor, but
+  nothing calls it any more.
   `crates/execution/tests/composite_runner_context_test.rs` pins
   `${{ runner.tool_cache }}` at both the `run:` body and step `env:` sites
   to `data_dir/_tool`, pins `os`/`arch`/`name` to the same source
