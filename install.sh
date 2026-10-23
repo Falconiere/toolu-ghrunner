@@ -91,8 +91,9 @@ setup options were given; otherwise the next command is printed.
 The download is verified against the release's SHA256SUMS (sha256sum, or
 shasum -a 256); a mismatch installs nothing. When the install dir is not on
 PATH, ~/.toolu-runner/env (and env.fish) put it there, sourced from ~/.profile,
-~/.bashrc (~/.bash_profile, ~/.bash_login when present), ~/.zshenv when zsh is
-installed, and the fish conf.d dir. These files never hold secrets.
+~/.bashrc (~/.bash_profile, ~/.bash_login when present), \${ZDOTDIR:-~}/.zshenv
+when zsh is installed or that file exists, and the fish conf.d dir. These files
+never hold secrets.
 
 ENVIRONMENT:
   TOOLU_RUNNER_REPO    Override the GitHub owner/repo. Default: $REPO.
@@ -156,6 +157,14 @@ join_args() {
 # --- arg parsing -----------------------------------------------------------
 
 while [[ $# -gt 0 ]]; do
+  # --version=v1, --install-dir=/x and --home=/x are the same as the
+  # two-word forms (an unrecognised --version=v1 would otherwise reach setup
+  # and silently install latest).
+  case "$1" in
+    --version=* | --install-dir=* | --home=*)
+      set -- "${1%%=*}" "${1#*=}" "${@:2}"
+      ;;
+  esac
   case "$1" in
     --version)
       [[ $# -ge 2 ]] || die "--version requires a value"
@@ -334,47 +343,69 @@ profile_candidates() {
   if [[ -n "${ZDOTDIR:-}" && "$ZDOTDIR" != "$HOME" ]]; then echo "$ZDOTDIR/.zshenv"; fi
 }
 
+# The exact text a block is written as. When the file did not end in a
+# newline, the installer adds one and says so in the begin marker, so that
+# --uninstall can take it away again and leave the file byte-identical.
+BLOCK="$PROFILE_BEGIN"$'\n'"$PROFILE_LINE"$'\n'"$PROFILE_END"$'\n'
+BLOCK_NL=$'\n'"$PROFILE_BEGIN (added the newline above)"$'\n'"$PROFILE_LINE"$'\n'"$PROFILE_END"$'\n'
+
+# read_file <file>: its exact bytes into FILE_TEXT (a command substitution
+# alone would drop trailing newlines).
+read_file() {
+  FILE_TEXT="$(cat "$1"; printf x)"
+  FILE_TEXT="${FILE_TEXT%x}"
+}
+
+# Lines starting with the begin marker (either form).
+begin_count() {
+  grep -c "^$PROFILE_BEGIN" "$1" 2>/dev/null || true
+}
+
+has_block() {
+  [[ "$(begin_count "$1")" -gt 0 ]]
+}
+
 # The file holds exactly one block, equal to ours.
 has_exact_block() {
-  B="$PROFILE_BEGIN" L="$PROFILE_LINE" E="$PROFILE_END" awk '
-    $0 == ENVIRON["B"] { n++; s = 1; next }
-    s == 1 { s = ($0 == ENVIRON["L"]) ? 2 : 0; next }
-    s == 2 { if ($0 == ENVIRON["E"]) ok++; s = 0; next }
-    END { exit !(n == 1 && ok == 1) }
-  ' "$1"
+  [[ "$(begin_count "$1")" -eq 1 ]] || return 1
+  read_file "$1"
+  [[ "$FILE_TEXT" == *"$BLOCK"* || "$FILE_TEXT" == *"$BLOCK_NL"* ]]
 }
 
 # Begin and end markers pair up (a hand-edited file may break that).
 blocks_balanced() {
   B="$PROFILE_BEGIN" E="$PROFILE_END" awk '
-    $0 == ENVIRON["B"] { if (open) bad = 1; open = 1; next }
+    index($0, ENVIRON["B"]) == 1 { if (open) bad = 1; open = 1; next }
     $0 == ENVIRON["E"] { if (!open) bad = 1; open = 0; next }
     END { exit (bad || open) }
   ' "$1"
 }
 
-has_block() {
-  grep -qxF "$PROFILE_BEGIN" "$1" 2>/dev/null
-}
-
-# The file without any of our blocks, on stdout.
+# strip_blocks <file>: the file without our blocks, into FILE_TEXT. Exact
+# blocks are cut byte for byte; any other block (an older line, say) goes
+# line by line.
 strip_blocks() {
-  B="$PROFILE_BEGIN" E="$PROFILE_END" awk '
-    $0 == ENVIRON["B"] { skip = 1; next }
-    skip && $0 == ENVIRON["E"] { skip = 0; next }
-    !skip { print }
-  ' "$1"
+  read_file "$1"
+  while [[ "$FILE_TEXT" == *"$BLOCK_NL"* ]]; do FILE_TEXT="${FILE_TEXT/"$BLOCK_NL"/}"; done
+  while [[ "$FILE_TEXT" == *"$BLOCK"* ]]; do FILE_TEXT="${FILE_TEXT/"$BLOCK"/}"; done
+  case "$FILE_TEXT" in
+    "$PROFILE_BEGIN"* | *$'\n'"$PROFILE_BEGIN"*)
+      printf '%s' "$FILE_TEXT" >"$WORK_DIR/profile.tmp"
+      B="$PROFILE_BEGIN" E="$PROFILE_END" awk '
+        index($0, ENVIRON["B"]) == 1 { skip = 1; next }
+        skip && $0 == ENVIRON["E"] { skip = 0; next }
+        !skip { print }
+      ' "$WORK_DIR/profile.tmp" >"$WORK_DIR/profile.stripped"
+      read_file "$WORK_DIR/profile.stripped"
+      ;;
+  esac
 }
 
-# Rewrite a file in place through cat, so a symlinked dotfile stays a symlink
-# and keeps its mode.
-replace_contents() {
-  cat "$2" >"$1"
-}
-
-# add_profile_block <file>: 0 when the file holds our block afterwards.
+# add_profile_block <file>: 0 when the file holds our block afterwards. Writes
+# through the existing file (printf >), so a symlinked dotfile stays a symlink
+# and keeps its mode. Never fatal: a failure is a warning.
 add_profile_block() {
-  local f="$1" tmp
+  local f="$1"
   if [[ -f "$f" ]] && has_exact_block "$f"; then
     return 0
   fi
@@ -382,25 +413,26 @@ add_profile_block() {
     PATH_WARNINGS+=("$(tilde "$f") has an unmatched toolu-runner marker; left unchanged")
     return 1
   fi
-  mkdir -p "$(dirname "$f")"
-  tmp="$WORK_DIR/profile.tmp"
-  : >"$tmp"
+  FILE_TEXT=""
   if [[ -f "$f" ]]; then
-    strip_blocks "$f" >"$tmp"
+    strip_blocks "$f"
   fi
-  # A file without a final newline gets one, so the block starts on its own line.
-  if [[ -s "$tmp" && -n "$(tail -c 1 "$tmp")" ]]; then
-    echo >>"$tmp"
+  if [[ -n "$FILE_TEXT" && "$FILE_TEXT" != *$'\n' ]]; then
+    FILE_TEXT="$FILE_TEXT$BLOCK_NL"
+  else
+    FILE_TEXT="$FILE_TEXT$BLOCK"
   fi
-  printf '%s\n%s\n%s\n' "$PROFILE_BEGIN" "$PROFILE_LINE" "$PROFILE_END" >>"$tmp"
-  replace_contents "$f" "$tmp"
+  if ! mkdir -p "$(dirname "$f")" 2>/dev/null || ! printf '%s' "$FILE_TEXT" 2>/dev/null >"$f"; then
+    PATH_WARNINGS+=("could not write $(tilde "$f")")
+    return 1
+  fi
 }
 
 # write_env_files <path guard 0|1>: ~/.toolu-runner/env and env.fish. They hold
 # the install dir and TOOLU_RUNNER_HOME, never a secret.
 write_env_files() {
   local with_path="$1"
-  mkdir -p "$ENV_DIR"
+  mkdir -p "$ENV_DIR" 2>/dev/null || return 1
   {
     echo "# toolu-runner shell environment, written by install.sh (undo: install.sh --uninstall)."
     echo "# No secrets belong here: tokens live in the runner's 0600 credential store."
@@ -411,8 +443,8 @@ write_env_files() {
     if [[ -n "$RUNNER_HOME" ]]; then
       printf 'export TOOLU_RUNNER_HOME="%s"\n' "$RUNNER_HOME"
     fi
-  } >"$ENV_DIR/env.tmp"
-  mv -f "$ENV_DIR/env.tmp" "$ENV_DIR/env"
+  } 2>/dev/null >"$ENV_DIR/env.tmp" || return 1
+  mv -f "$ENV_DIR/env.tmp" "$ENV_DIR/env" 2>/dev/null || return 1
   {
     echo "# toolu-runner shell environment, written by install.sh (undo: install.sh --uninstall)."
     echo "# No secrets belong here: tokens live in the runner's 0600 credential store."
@@ -423,9 +455,9 @@ write_env_files() {
     if [[ -n "$RUNNER_HOME" ]]; then
       printf 'set -gx TOOLU_RUNNER_HOME "%s"\n' "$RUNNER_HOME"
     fi
-  } >"$ENV_DIR/env.fish.tmp"
-  mv -f "$ENV_DIR/env.fish.tmp" "$ENV_DIR/env.fish"
-  chmod 0644 "$ENV_DIR/env" "$ENV_DIR/env.fish"
+  } 2>/dev/null >"$ENV_DIR/env.fish.tmp" || return 1
+  mv -f "$ENV_DIR/env.fish.tmp" "$ENV_DIR/env.fish" 2>/dev/null || return 1
+  chmod 0644 "$ENV_DIR/env" "$ENV_DIR/env.fish" 2>/dev/null || return 1
 }
 
 # --- --uninstall -----------------------------------------------------------------
@@ -441,8 +473,13 @@ uninstall() {
       kept+=("$(tilde "$f")")
       continue
     fi
-    strip_blocks "$f" >"$WORK_DIR/profile.tmp"
-    replace_contents "$f" "$WORK_DIR/profile.tmp"
+    strip_blocks "$f"
+    if [[ -z "$FILE_TEXT" && ! -L "$f" ]]; then
+      # Only the block was in it (the installer created it): remove the file.
+      rm -f "$f"
+    else
+      printf '%s' "$FILE_TEXT" >"$f"
+    fi
     removed+=("$(tilde "$f")")
   done < <(profile_candidates)
   for f in "$ENV_DIR/env" "$ENV_DIR/env.fish" "$FISH_CONF"; do
@@ -453,6 +490,7 @@ uninstall() {
   done
   # Only when empty: the dir is also the default runner home.
   rmdir "$ENV_DIR" 2>/dev/null || true
+  rmdir "$(dirname "$FISH_CONF")" 2>/dev/null || true
 
   if [[ ${#removed[@]} -eq 0 ]]; then
     echo "$BIN_NAME: nothing to remove"
@@ -568,6 +606,11 @@ elif dir_writable "$DEFAULT_INSTALL_DIR" || [[ -z "$FALLBACK_INSTALL_DIR" ]]; th
 else
   INSTALL_DIR="$FALLBACK_INSTALL_DIR"
   INSTALL_DIR_FALLBACK=1
+fi
+# A relative dir would be written into ~/.toolu-runner/env and break in every
+# other working directory.
+if [[ "$INSTALL_DIR" != /* ]]; then
+  INSTALL_DIR="$PWD/$INSTALL_DIR"
 fi
 BIN="$INSTALL_DIR/$BIN_NAME"
 
@@ -736,7 +779,7 @@ install -m 0755 "$BIN_PATH" "$NEW_BIN"
 INSTALLED_VERSION="$("$NEW_BIN" --version 2>/dev/null </dev/null \
   | awk -v n="$BIN_NAME" 'NR == 1 && $1 == n { print $2 }')" || INSTALLED_VERSION=""
 if [[ -z "$INSTALLED_VERSION" ]]; then
-  fail_install "The downloaded $BIN_NAME does not run on this machine ($OS/$ARCH)."
+  fail_install "The downloaded $BIN_NAME does not run here ($OS/$ARCH, or $INSTALL_DIR is mounted noexec)."
 fi
 mv -f "$NEW_BIN" "$BIN"
 
@@ -834,26 +877,43 @@ elif [[ "$ON_PATH" -eq 0 ]] && unsafe_for_shell_file "$INSTALL_DIR"; then
   PATH_GLYPH="▲"
   PATH_ROW="not changed (the install dir cannot be written to a shell file safely); add it yourself:"
   MANUAL_LINES+=("export PATH=\"$INSTALL_DIR:\$PATH\"")
+  if [[ -n "$RUNNER_HOME" ]]; then
+    MANUAL_LINES+=("export TOOLU_RUNNER_HOME=\"$RUNNER_HOME\"")
+  fi
 else
   WITH_PATH=1
   if [[ "$ON_PATH" -eq 1 ]]; then WITH_PATH=0; fi
-  write_env_files "$WITH_PATH"
   CONFIGURED=()
-  while IFS= read -r f; do
-    if add_profile_block "$f"; then CONFIGURED+=("$(tilde "$f")"); fi
-  done < <(profile_targets)
-  if command -v fish >/dev/null 2>&1 || [[ -d "$(dirname "$(dirname "$FISH_CONF")")" ]]; then
-    mkdir -p "$(dirname "$FISH_CONF")"
-    {
-      echo "# toolu-runner (written by install.sh; undo: install.sh --uninstall)"
-      echo 'if test -f "$HOME/.toolu-runner/env.fish"; source "$HOME/.toolu-runner/env.fish"; end'
-    } >"$FISH_CONF"
-    CONFIGURED+=("fish")
+  # The binary is installed already: failing to set up PATH is a warning with
+  # the manual line, never a failed install.
+  if write_env_files "$WITH_PATH"; then
+    ENV_WRITTEN=1
+    while IFS= read -r f; do
+      if add_profile_block "$f"; then CONFIGURED+=("$(tilde "$f")"); fi
+    done < <(profile_targets)
+    if command -v fish >/dev/null 2>&1 || [[ -d "$(dirname "$(dirname "$FISH_CONF")")" ]]; then
+      if mkdir -p "$(dirname "$FISH_CONF")" 2>/dev/null && {
+        echo "# toolu-runner (written by install.sh; undo: install.sh --uninstall)"
+        echo 'if test -f "$HOME/.toolu-runner/env.fish"; source "$HOME/.toolu-runner/env.fish"; end'
+      } 2>/dev/null >"$FISH_CONF"; then
+        CONFIGURED+=("fish")
+      else
+        PATH_WARNINGS+=("could not write $(tilde "$FISH_CONF")")
+      fi
+    fi
+  else
+    PATH_WARNINGS+=("could not write $(tilde "$ENV_DIR/env")")
   fi
-  ENV_WRITTEN=1
   if [[ ${#CONFIGURED[@]} -eq 0 ]]; then
+    ENV_WRITTEN=0
     PATH_GLYPH="▲"
-    PATH_ROW="no shell profile could be changed; run: . $(tilde "$ENV_DIR/env")"
+    PATH_ROW="not changed (no shell file could be written); add it yourself:"
+    if [[ "$WITH_PATH" -eq 1 ]]; then
+      MANUAL_LINES+=("export PATH=\"$INSTALL_DIR:\$PATH\"")
+    fi
+    if [[ -n "$RUNNER_HOME" ]]; then
+      MANUAL_LINES+=("export TOOLU_RUNNER_HOME=\"$RUNNER_HOME\"")
+    fi
   elif [[ "$WITH_PATH" -eq 1 ]]; then
     PATH_ROW="added to $(join_and "${CONFIGURED[@]}")"
   else

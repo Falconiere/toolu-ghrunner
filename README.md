@@ -87,12 +87,15 @@ What the installer does:
 - **Sets up PATH for new shells** when the install dir is not on it already:
   it writes `~/.toolu-runner/env` and `env.fish` and sources them from
   `~/.profile`, `~/.bashrc` (plus `~/.bash_profile` / `~/.bash_login` when
-  present), `~/.zshenv` when zsh is installed, and
-  `~/.config/fish/conf.d/toolu-runner.fish` — one marker block per file, so a
+  present), `${ZDOTDIR:-~}/.zshenv` when zsh is installed or that file
+  exists, and
+  `${XDG_CONFIG_HOME:-~/.config}/fish/conf.d/toolu-runner.fish` — one marker block per file, so a
   re-run changes nothing. `--home <dir>` also exports `TOOLU_RUNNER_HOME` there.
   These files never hold a secret. `--no-modify-path` writes none of them and
-  prints the line to add; `--uninstall` removes the blocks and files again
-  (the binary and runner state stay).
+  prints the line to add; `--uninstall` removes the blocks and files again,
+  leaving each profile byte-identical (the binary and runner state stay). A
+  file that cannot be written is a warning with the line to add, never a
+  failed install.
 - **Hands off to `toolu-runner setup`**: on a terminal it runs setup
   interactively (reading `/dev/tty`, since under `curl | bash` stdin is the
   script); every option the installer does not own is passed to setup in

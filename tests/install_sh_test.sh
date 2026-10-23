@@ -119,6 +119,16 @@ if want legacy; then
   echo "$out_ns" | grep -q 'setup:         skipped (--no-setup)' \
     || fail "--check --no-setup should report the skipped handoff: $out_ns"
 
+  # --opt=value forms are the installer's, not setup's.
+  out_eq="$("$SCRIPT" --check --version=v1.2.3 --install-dir=/opt/bin --home=/srv/toolu)"
+  echo "$out_eq" | grep -q 'version:       v1.2.3$' || fail "--version=v1.2.3 should pin the version: $out_eq"
+  echo "$out_eq" | grep -q 'install dir:   /opt/bin$' || fail "--install-dir=/opt/bin should be used: $out_eq"
+  echo "$out_eq" | grep -q 'setup args:    (none)' || fail "--opt=value forms must not reach setup: $out_eq"
+  if "$SCRIPT" --check --home=relative >/dev/null 2>&1; then fail "--home=relative should be rejected"; fi
+  # A relative --install-dir is resolved against the working directory.
+  out_rel="$(cd "$tmp" && "$SCRIPT" --check --install-dir rel/bin)"
+  echo "$out_rel" | grep -q "install dir:   $tmp/rel/bin\$" || fail "relative --install-dir should be made absolute: $out_rel"
+
   if "$SCRIPT" --check --version not-a-version >/dev/null 2>&1; then
     fail "--version not-a-version should be rejected"
   fi
@@ -290,6 +300,12 @@ b = bytearray(open(p, "rb").read())
 b[len(b) // 2] ^= 0x01
 open(p, "wb").write(b)
 EOF
+# broken: a binary that does not run (stands in for a wrong-arch download or a
+# noexec install dir).
+mkdir -p "$tmp/broken"
+printf '#!/bin/sh\nexit 1\n' >"$tmp/broken/toolu-runner"
+chmod 0755 "$tmp/broken/toolu-runner"
+make_release broken "$tmp/broken/toolu-runner"
 # nosum: SHA256SUMS lists another platform only.
 make_release nosum "$REAL_BIN"
 awk '{ print $1 "  toolu-runner-plan9-mips.tar.gz" }' "$SRV/nosum/latest/download/SHA256SUMS" \
@@ -341,7 +357,8 @@ if PATH="$SHASUM_PATH" command -v sha256sum >/dev/null 2>&1; then fail "shasum P
 #   notty: no controlling terminal (setsid), stdin /dev/null
 #   pipe:  no controlling terminal, the script piped on stdin (curl | bash)
 #   pty:   under script(1): a pseudo-terminal, the script piped on stdin
-# RUN_PATH / RUN_TERM / RUN_ENV (array) tune the environment.
+# RUN_PATH / RUN_TERM / RUN_ENV (array) tune the environment; RUN_CWD sets the
+# working directory (notty only).
 RUN_ENV=()
 run_install() {
   local mode="$1" home="$2" rel="$3"
@@ -358,7 +375,7 @@ run_install() {
   RC=0
   case "$mode" in
     notty)
-      OUT="$(setsid -w timeout 60 "${envv[@]}" bash "$SCRIPT" "$@" </dev/null 2>&1)" || RC=$?
+      OUT="$(cd "${RUN_CWD:-.}" && setsid -w timeout 60 "${envv[@]}" bash "$SCRIPT" "$@" </dev/null 2>&1)" || RC=$?
       ;;
     pipe)
       OUT="$(cat "$SCRIPT" | setsid -w timeout 60 "${envv[@]}" bash -s -- "$@" 2>&1)" || RC=$?
@@ -378,7 +395,7 @@ new_home() {
   mkdir -p "$h"
   echo "$h"
 }
-count_blocks() { grep -cxF '# >>> toolu-runner >>>' "$1" || true; }
+count_blocks() { grep -c '^# >>> toolu-runner >>>' "$1" || true; }
 strip_ansi() { sed $'s/\033\\[[0-9;]*m//g'; }
 
 # =========================================================================
@@ -444,6 +461,19 @@ if want S2; then
   [[ "$RC" -eq 1 ]] || fail "S2 missing checksum should exit 1 (rc=$RC): $OUT"
   echo "$OUT" | grep -q "SHA256SUMS has no entry for $ASSET" || fail "S2 should name the missing entry: $OUT"
   [[ ! -e "$h/.local/bin/toolu-runner" ]] || fail "S2 missing checksum must not install"
+
+  echo "S2: a binary that does not run never replaces the installed one"
+  h="$(new_home s2-broken)"
+  mkdir -p "$h/.local/bin"
+  cp "$REAL_BIN" "$h/.local/bin/toolu-runner"
+  run_install notty "$h" broken --install-dir "$h/.local/bin"
+  [[ "$RC" -eq 1 ]] || fail "S2 a non-running binary should exit 1 (rc=$RC): $OUT"
+  echo "$OUT" | grep -q "does not run here ($OS/$ARCH, or $h/.local/bin is mounted noexec). Nothing was installed." \
+    || fail "S2 should say the binary does not run: $OUT"
+  cmp -s "$REAL_BIN" "$h/.local/bin/toolu-runner" || fail "S2 the working binary must stay in place"
+  for leftover in "$h/.local/bin"/.toolu-runner.new.*; do
+    [[ ! -e "$leftover" ]] || fail "S2 left a staged binary behind: $leftover"
+  done
   echo "ok: S2"
 fi
 
@@ -468,9 +498,17 @@ if want S3; then
   echo "S3: env files + one marker block per profile, run twice"
   h="$(new_home s3)"
   seed_dotfiles "$h"
-  for _ in 1 2; do
+  mkdir -p "$tmp/s3-first"
+  for run in 1 2; do
     run_install notty "$h" real --install-dir "$h/.local/bin"
     [[ "$RC" -eq 0 ]] || fail "S3 install should exit 0 (rc=$RC): $OUT"
+    for f in .profile .bashrc .zshenv .toolu-runner/env .toolu-runner/env.fish .config/fish/conf.d/toolu-runner.fish; do
+      if [[ "$run" -eq 1 ]]; then
+        cp "$h/$f" "$tmp/s3-first/$(basename "$f")"
+      else
+        cmp -s "$tmp/s3-first/$(basename "$f")" "$h/$f" || fail "S3 a second run changed $f"
+      fi
+    done
   done
   for f in .profile .bashrc .zshenv; do
     [[ "$(count_blocks "$h/$f")" -eq 1 ]] || fail "S3 $f should hold exactly one marker block: $(cat "$h/$f")"
@@ -506,6 +544,20 @@ if want S3; then
   plain="$(echo "$OUT" | strip_ansi)"
   echo "$plain" | grep -q '✓ PATH         added to ~/.profile, ~/.bashrc, ~/.zshenv and fish' \
     || fail "S3 pty PATH row should list the files: $plain"
+
+  echo "S3: ZDOTDIR and XDG_CONFIG_HOME are honoured"
+  h="$(new_home s3-xdg)"
+  RUN_ENV=("ZDOTDIR=$h/zdot" "XDG_CONFIG_HOME=$h/xdg")
+  run_install notty "$h" real --install-dir "$h/.local/bin"
+  RUN_ENV=()
+  [[ "$RC" -eq 0 ]] || fail "S3 ZDOTDIR install should exit 0 (rc=$RC): $OUT"
+  [[ "$(count_blocks "$h/zdot/.zshenv")" -eq 1 ]] || fail "S3 \$ZDOTDIR/.zshenv should get the block"
+  [[ ! -e "$h/.zshenv" ]] || fail "S3 with ZDOTDIR set, ~/.zshenv must not be written"
+  [[ -f "$h/xdg/fish/conf.d/toolu-runner.fish" ]] || fail "S3 the fish file should go under XDG_CONFIG_HOME"
+  got="$(login_finds "$h" "ZDOTDIR=$h/zdot" zsh -lc 'command -v toolu-runner')" || true
+  [[ "$got" == "$h/.local/bin/toolu-runner" ]] || fail "S3 zsh with ZDOTDIR should find it, got '$got'"
+  got="$(login_finds "$h" "XDG_CONFIG_HOME=$h/xdg" fish -lc 'command -v toolu-runner')" || true
+  [[ "$got" == "$h/.local/bin/toolu-runner" ]] || fail "S3 fish with XDG_CONFIG_HOME should find it, got '$got'"
   echo "ok: S3"
 fi
 
@@ -513,20 +565,28 @@ if want S4; then
   echo "S4: --uninstall removes blocks and env files, profiles byte-identical"
   h="$(new_home s4)"
   seed_dotfiles "$h"
-  printf '# user bash_login\n' >"$h/.bash_login"
+  # No trailing newline: the block must still come off byte for byte.
+  printf '# user bash_login, no final newline' >"$h/.bash_login"
+  # An unmatched marker (a hand edit) is left alone by install and uninstall.
+  printf '# user bash_profile\n# >>> toolu-runner >>>\necho half a block\n' >"$h/.bash_profile"
   mkdir -p "$tmp/s4-snap"
-  for f in .profile .bashrc .zshenv .bash_login; do cp "$h/$f" "$tmp/s4-snap/$f"; done
+  for f in .profile .bashrc .zshenv .bash_login .bash_profile; do cp "$h/$f" "$tmp/s4-snap/$f"; done
   run_install notty "$h" real --install-dir "$h/.local/bin"
   run_install notty "$h" real --install-dir "$h/.local/bin" --home "$tmp/s4-runner-home"
   [[ "$RC" -eq 0 ]] || fail "S4 install should exit 0 (rc=$RC): $OUT"
+  echo "$OUT" | grep -qx 'install.sh: ~/.bash_profile has an unmatched toolu-runner marker; left unchanged' \
+    || fail "S4 install should warn about the unmatched marker: $OUT"
+  cmp -s "$tmp/s4-snap/.bash_profile" "$h/.bash_profile" || fail "S4 install must not touch a file with an unmatched marker"
   for f in .profile .bashrc .zshenv .bash_login; do
     [[ "$(count_blocks "$h/$f")" -eq 1 ]] || fail "S4 $f should hold one block before uninstall"
   done
   run_install notty "$h" real --uninstall
   [[ "$RC" -eq 0 ]] || fail "S4 --uninstall should exit 0 (rc=$RC): $OUT"
-  for f in .profile .bashrc .zshenv .bash_login; do
-    cmp -s "$tmp/s4-snap/$f" "$h/$f" || fail "S4 $f should be byte-identical after --uninstall: $(cat "$h/$f")"
+  for f in .profile .bashrc .zshenv .bash_login .bash_profile; do
+    cmp -s "$tmp/s4-snap/$f" "$h/$f" || fail "S4 $f should be byte-identical after --uninstall: $(od -c "$h/$f" | tail -3)"
   done
+  echo "$OUT" | grep -q "left unchanged (unmatched toolu-runner marker; edit by hand): ~/.bash_profile" \
+    || fail "S4 --uninstall should name the file it left alone: $OUT"
   for f in .toolu-runner/env .toolu-runner/env.fish .config/fish/conf.d/toolu-runner.fish; do
     [[ ! -e "$h/$f" ]] || fail "S4 --uninstall should remove $f"
   done
@@ -535,6 +595,16 @@ if want S4; then
   run_install notty "$h" real --uninstall
   [[ "$RC" -eq 0 ]] || fail "S4 a second --uninstall should exit 0 (rc=$RC): $OUT"
   echo "$OUT" | grep -q 'nothing to remove' || fail "S4 second --uninstall should say nothing to remove: $OUT"
+
+  echo "S4: files the installer created are removed again"
+  h="$(new_home s4-created)"
+  run_install notty "$h" real --install-dir "$h/.local/bin"
+  [[ -f "$h/.profile" && -f "$h/.bashrc" && -f "$h/.zshenv" ]] || fail "S4 install should create the profiles"
+  run_install notty "$h" real --uninstall
+  [[ "$RC" -eq 0 ]] || fail "S4 --uninstall should exit 0 (rc=$RC): $OUT"
+  for f in .profile .bashrc .zshenv .toolu-runner .config/fish/conf.d; do
+    [[ ! -e "$h/$f" ]] || fail "S4 --uninstall should remove the created $f"
+  done
   echo "ok: S4"
 fi
 
@@ -719,6 +789,34 @@ if want S10; then
   echo "$OUT" | grep -qF "export PATH=\"$h/.local/bin:\$PATH\"" || fail "S10 should print the export line: $OUT"
   echo "$OUT" | grep -q "^next: $h/.local/bin/toolu-runner register" \
     || fail "S10 next line should use the full path when it is not on PATH: $OUT"
+
+  echo "S10: an unwritable ~/.toolu-runner is a warning, not a failed install"
+  h="$(new_home s10-envfile)"
+  : >"$h/.toolu-runner"
+  run_install notty "$h" real --install-dir "$h/.local/bin"
+  [[ "$RC" -eq 0 ]] || fail "S10 an unwritable env dir should still exit 0 (rc=$RC): $OUT"
+  echo "$OUT" | grep -qx "toolu-runner: installed $WORKSPACE_VERSION (checksum ok)" || fail "S10 should report the install: $OUT"
+  echo "$OUT" | grep -q 'could not write ~/.toolu-runner/env' || fail "S10 should warn about the env file: $OUT"
+  echo "$OUT" | grep -qF "export PATH=\"$h/.local/bin:\$PATH\"" || fail "S10 should print the export line: $OUT"
+  echo "$OUT" | grep -q "^next: $h/.local/bin/toolu-runner register" || fail "S10 next line should use the full path: $OUT"
+  [[ ! -e "$h/.profile" ]] || fail "S10 must not source an env file it could not write"
+
+  echo "S10: an unwritable fish config dir only skips fish"
+  h="$(new_home s10-fishfile)"
+  mkdir -p "$h/.config"
+  : >"$h/.config/fish"
+  run_install notty "$h" real --install-dir "$h/.local/bin"
+  [[ "$RC" -eq 0 ]] || fail "S10 an unwritable fish dir should still exit 0 (rc=$RC): $OUT"
+  echo "$OUT" | grep -q 'could not write ~/.config/fish/conf.d/toolu-runner.fish' || fail "S10 should warn about fish: $OUT"
+  [[ "$(count_blocks "$h/.profile")" -eq 1 ]] || fail "S10 the other profiles should still be set up"
+
+  echo "S10: a relative --install-dir is written as an absolute path"
+  h="$(new_home s10-rel)"
+  RUN_CWD="$h" run_install notty "$h" real --install-dir rel-bin
+  [[ "$RC" -eq 0 ]] || fail "S10 relative install should exit 0 (rc=$RC): $OUT"
+  [[ -x "$h/rel-bin/toolu-runner" ]] || fail "S10 relative install dir should resolve against the cwd"
+  grep -qF "export PATH=\"$h/rel-bin:\$PATH\"" "$h/.toolu-runner/env" \
+    || fail "S10 env should hold the absolute dir: $(cat "$h/.toolu-runner/env")"
   echo "ok: S10"
 fi
 

@@ -1302,7 +1302,8 @@ finalize         homebrew        both `uses:` reusable workflows, chained on
 The asset names + tarball layout are the contract `install.sh`
 consumes (`toolu-runner-<os>-<arch>.tar.gz`, binary at root, service
 files under `scripts/`, plus the release's `SHA256SUMS`, which
-`install.sh` verifies the tarball against before installing anything). glibc-dynamic only. The workspace is
+`install.sh` verifies the tarball against before installing anything).
+glibc-dynamic only. The workspace is
 rustls-only — `reqwest` uses `rustls-tls-native-roots`, and
 `tokio-tungstenite` is framing-only (the live-log handshake runs over a
 `reqwest` upgrade, so it shares the `network` client's TLS and proxy
