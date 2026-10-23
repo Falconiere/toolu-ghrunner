@@ -234,8 +234,8 @@ no `[auth]` section and behaves exactly as before. `remove` still takes a
 personal token (or `--skip-unregister`) for an App registration. When the App
 was picked automatically (no `--app`), its errors say so: pass `--token` /
 `TOOLU_RUNNER_TOKEN`, or move `github-app.json` aside, to register with a
-personal token instead. `doctor` checks an App registration's App file (an
-`app` row).
+personal token instead. `doctor` checks a persistent App registration's App
+file (an `app` row).
 
 `login` / `logout` manage the stored token per host — they take a
 hostname (default `github.com`), not `--config`. `status` prints local
