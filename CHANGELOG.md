@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.2] - 2026-10-23
+
+### Fixed
+- *(install)* fall back to ~/.local/bin when /usr/local/bin is not writable (#197)
+
 ## [0.12.1] - 2026-10-22
 
 ### Documentation
