@@ -92,6 +92,11 @@ jobs:
             echo "ERROR: protocol crate must not depend on I/O crates"
             exit 1
           fi
+      # tests/install_sh_test.sh checks what real bash, zsh and fish login
+      # shells see after an install, and FAILS (never skips) when a shell is
+      # missing. bash is preinstalled; zsh and fish are not.
+      - name: Install zsh and fish for the install.sh tests
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends zsh fish
       - name: Run release-script tests
         # Explicit list, not a scripts/test/*.sh glob — plist_test.sh is
         # macOS-only (plutil) and would fail here. systemd_test.sh is NOT
