@@ -1,0 +1,19 @@
+{
+  "provenance": {
+    "captured": "2026-10-23T20:24:36Z",
+    "host": "api.github.com",
+    "meaning": "a deleted App: every App-JWT endpoint answers 404 Integration not found",
+    "method": "curl with an RS256 App JWT signed by a throwaway 2048-bit key generated for the probe (registered to no App); status, headers and body recorded verbatim",
+    "request": "POST /app/installations/1/access_tokens with a JWT whose iss names no App (the same 404 body came back for GET /repos/Falconiere/toolu-ghrunner/installation and GET /app/installations)",
+    "sanitization": "none needed: the reply carries no credential"
+  },
+  "response": {
+    "body": "{\"message\":\"Integration not found\",\"documentation_url\":\"https://docs.github.com/rest\",\"status\":\"404\"}",
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "date": "Fri, 23 Oct 2026 20:24:35 GMT",
+      "x-github-request-id": "AD28:233C66:116BAA7:38FE525:6ADBC279"
+    },
+    "status": 404
+  }
+}

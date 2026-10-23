@@ -1,0 +1,19 @@
+{
+  "provenance": {
+    "captured": "2026-10-23T20:24:36Z",
+    "host": "api.github.com",
+    "meaning": "a revoked / rotated App private key: GitHub cannot verify the JWT",
+    "method": "curl with an RS256 App JWT signed by a throwaway 2048-bit key generated for the probe (registered to no App); status, headers and body recorded verbatim",
+    "request": "POST /app/installations/1/access_tokens, JWT iss=15368 (an existing App) signed with a key that App does not hold",
+    "sanitization": "none needed: the reply carries no credential"
+  },
+  "response": {
+    "body": "{\"message\":\"A JSON web token could not be decoded\",\"documentation_url\":\"https://docs.github.com/rest\",\"status\":\"401\"}",
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "date": "Fri, 23 Oct 2026 20:24:36 GMT",
+      "x-github-request-id": "9F22:8F34E:1096FAC:364288E:6ADBC284"
+    },
+    "status": 401
+  }
+}
