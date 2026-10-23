@@ -12,7 +12,7 @@ use shared::RunnerError;
 use wire::net::RunnerScope;
 use wire::net::github_app::{create_installation_token, find_installation, list_installations};
 use wire::net::runner_groups::{list_runner_groups, pick_group};
-use wiremock::matchers::{method, path, query_param};
+use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use crate::github_app_fixtures::{
@@ -92,7 +92,7 @@ async fn an_org_scope_looks_up_the_org_installation() -> TestResult {
     TIMEOUT,
   )
   .await?;
-  assert!(found.is_some());
+  assert_eq!(found.map(|installation| installation.id), Some(1));
   Ok(())
 }
 
@@ -100,6 +100,7 @@ async fn an_org_scope_looks_up_the_org_installation() -> TestResult {
 async fn a_known_app_not_installed_on_the_target_is_none() -> TestResult {
   let server = MockServer::start().await;
   Mock::given(method("GET"))
+    .and(path("/api/v3/repos/octo/demo/installation"))
     .respond_with(not_installed())
     .mount(&server)
     .await;
@@ -163,6 +164,13 @@ async fn an_installation_token_is_minted_with_a_verifiable_app_jwt() -> TestResu
   let expires = rfc3339_in(3600);
   Mock::given(method("POST"))
     .and(path(TOKENS_PATH))
+    // GitHub's REST API 403s a request without a User-Agent.
+    .and(header("accept", "application/vnd.github+json"))
+    .and(header("x-github-api-version", "2022-11-28"))
+    .and(header(
+      "user-agent",
+      concat!("toolu-runner/", env!("CARGO_PKG_VERSION")),
+    ))
     .respond_with(token_reply(&expires)?)
     .expect(1)
     .mount(&server)

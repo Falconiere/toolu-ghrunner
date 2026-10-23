@@ -542,7 +542,25 @@ pub async fn register_jit(
     )));
   }
 
-  Err(mint_failure(status, &text))
+  Err(org_hint(mint_failure(status, &text), status, params.url))
+}
+
+/// A 404 for a one-segment URL may be a mistyped repository URL read as an
+/// organization (#201): say so, since the URL decides the endpoint.
+fn org_hint(failure: RunnerError, status: reqwest::StatusCode, url: &str) -> RunnerError {
+  if status != reqwest::StatusCode::NOT_FOUND {
+    return failure;
+  }
+  let Ok((_, RunnerScope::Org { org })) = resolve_target(url) else {
+    return failure;
+  };
+  if let RunnerError::Auth(msg) = failure {
+    return RunnerError::Auth(format!(
+      "{msg}\n'{org}' was read as an organization because the URL has one path segment; for a \
+       repository runner pass --url https://<host>/<owner>/<repo>"
+    ));
+  }
+  failure
 }
 
 /// Map a non-2xx `generate-jitconfig` status to the loop-critical error
@@ -556,7 +574,9 @@ pub async fn register_jit(
 fn mint_failure(status: reqwest::StatusCode, text: &str) -> RunnerError {
   if status == reqwest::StatusCode::UNAUTHORIZED {
     return RunnerError::Auth(
-      "stored GitHub token invalid or expired — run 'toolu-runner login'".into(),
+      "GitHub rejected the bearer as invalid or expired (401) — for a personal token, run \
+       'toolu-runner login'"
+        .into(),
     );
   }
   if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
@@ -567,7 +587,7 @@ fn mint_failure(status: reqwest::StatusCode, text: &str) -> RunnerError {
   }
   RunnerError::Auth(format!(
     "generate-jitconfig failed with status {status} (permanent — retrying cannot succeed; \
-     check the registration URL and runner parameters, or re-run 'toolu-runner login' if \
-     the token lacks access to this repository): {text}"
+     check the registration URL and runner parameters, or, for a personal token, re-run \
+     'toolu-runner login' if the token lacks access to this repository or organization): {text}"
   ))
 }

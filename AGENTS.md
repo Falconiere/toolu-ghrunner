@@ -159,8 +159,10 @@ App-JWT tests, never uploaded to any GitHub App (authenticates nothing).
   on the still-valid config; missing/auth-rejected re-mint bearer → fatal
   naming `login`/`--token`/`TOOLU_RUNNER_TOKEN`/`register --app`
   (`REMINT_TOKEN_HELP`), or for an App its fix (`app_remint_help`: install
-  URL, `register --app --replace`); an App registration's App file is loaded
-  and masked at start (missing → exit 2 before polling); cancel or `.pending_remove`
+  URL, `register --app --replace`) — `Config` from the App path (a key that no
+  longer signs) is fatal too; unless `--once`/ephemeral, an App registration's
+  App file is loaded, masked and test-signed at start (unusable → exit 2
+  before polling); cancel or `.pending_remove`
   between jobs → exit 0; `SessionConflict` (409 outlasting the listener's
   30s×8 retry) → exit `5` (`SESSION_CONFLICT_EXIT_CODE`), never backed
   off/re-minted, even under `--once`. **Ephemeral (#92)**: `ephemeral = true`
@@ -413,7 +415,8 @@ App-JWT tests, never uploaded to any GitHub App (authenticates nothing).
   locks — state via lock body + `holder_alive`; one credentialed
   `GET <api>/user`; `doctor_{report,host,auth,registrations,service}.rs`,
   network reuses `check_cmd::gather`; only a persistent *token* registration
-  needs a personal bearer, `[auth] kind = "app"` mints its own (#201);
+  needs a personal bearer, `[auth] kind = "app"` mints its own and gets an
+  `app` row that loads its App file (#201);
   `doctor_*_test`). `create_app_cmd` (github.com only; loopback callback,
   `--no-browser` prints URL; converts code, persists `<home>/github-app.json`;
   prints install URL, never installs — `register --app` then uses it;

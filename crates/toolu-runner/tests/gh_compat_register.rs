@@ -110,8 +110,34 @@ fn build_request_rejects_url_without_owner_or_org() {
   let err = build_request("https://github.com/", "r", &[], None, "_work")
     .expect_err("a URL with no path segment must error");
   assert!(
-    matches!(err, RunnerError::Config(_)),
-    "expected Config error, got {err:?}"
+    matches!(&err, RunnerError::Config(msg) if msg.contains("names no owner/repo or organization")),
+    "expected the no-owner Config error, got {err:?}"
+  );
+}
+
+/// A 404 on a one-segment URL says it was read as an organization (a
+/// mistyped repository URL would otherwise only be told to re-login).
+#[tokio::test]
+async fn register_jit_names_the_org_reading_on_a_404() {
+  let server = MockServer::start().await;
+  Mock::given(method("POST"))
+    .and(path(
+      "/api/v3/orgs/octo-org/actions/runners/generate-jitconfig",
+    ))
+    .respond_with(ResponseTemplate::new(404).set_body_string(r#"{"message":"Not Found"}"#))
+    .mount(&server)
+    .await;
+  let url = format!("{}/octo-org", server.uri());
+  let labels = ["self-hosted".to_owned()];
+  let err = register_jit(
+    &reqwest::Client::new(),
+    &params_for(&url, "tok", &labels, false),
+  )
+  .await
+  .expect_err("404");
+  assert!(
+    matches!(&err, RunnerError::Auth(msg) if msg.contains("'octo-org' was read as an organization")),
+    "{err:?}"
   );
 }
 

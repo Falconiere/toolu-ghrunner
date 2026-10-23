@@ -12,6 +12,10 @@ use shared::RunnerError;
 
 use super::github_app::{decode, github_request, send};
 
+/// Groups requested per list call (GitHub's maximum page size); a longer
+/// list is not paged through.
+pub const PAGE_SIZE: usize = 100;
+
 /// One organization runner group.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct RunnerGroup {
@@ -27,7 +31,7 @@ struct RunnerGroupsPage {
   runner_groups: Vec<RunnerGroup>,
 }
 
-/// The org's runner groups (the first 100).
+/// The org's runner groups (the first [`PAGE_SIZE`]).
 ///
 /// # Errors
 ///
@@ -42,7 +46,9 @@ pub async fn list_runner_groups(
   timeout: Duration,
 ) -> Result<Vec<RunnerGroup>, RunnerError> {
   let url = format!("{api_base}/orgs/{org}/actions/runner-groups");
-  let request = client.get(&url).query(&[("per_page", "100")]);
+  let request = client
+    .get(&url)
+    .query(&[("per_page", PAGE_SIZE.to_string())]);
   let what = "runner group list";
   let (status, body) = send(github_request(request, token, timeout), what).await?;
   let page: RunnerGroupsPage = decode(what, status, &body)?;

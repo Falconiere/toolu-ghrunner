@@ -61,7 +61,9 @@ pub(crate) async fn resolve(
       app_label: None,
     });
   };
-  let registration = crate::app_auth::register_installation(client, &app, url, masker).await?;
+  let registration = crate::app_auth::register_installation(client, &app, url, masker)
+    .await
+    .map_err(|e| with_implicit_note(e, args.app, &app_file, host))?;
   let app_file = std::path::absolute(&app_file).unwrap_or(app_file);
   Ok(RegisterAuth {
     bearer: registration.token,
@@ -90,7 +92,8 @@ fn pick_app(
   if !app_flag && (token_given || !path.exists()) {
     return Ok(None);
   }
-  let app = crate::app_auth::load_app(&path, masker)?;
+  let app = crate::app_auth::load_app(&path, masker)
+    .map_err(|e| with_implicit_note(e, app_flag, &path, host))?;
   if app.host.eq_ignore_ascii_case(host) {
     return Ok(Some((path, app)));
   }
@@ -102,6 +105,32 @@ fn pick_app(
     path.display(),
     app.host
   )))
+}
+
+/// Explain an App failure when the App was picked automatically (no
+/// `--app`): why it was used, and how to register without it.
+fn with_implicit_note(error: RunnerError, app_flag: bool, path: &Path, host: &str) -> RunnerError {
+  if app_flag {
+    return error;
+  }
+  let note = format!(
+    "\n(the GitHub App was used automatically because {} exists for {host}: pass --token or \
+     set TOOLU_RUNNER_TOKEN to register with a personal token, or move the file aside to use \
+     the stored `login` token)",
+    path.display()
+  );
+  // Keep the kind the run loop and `main` act on; anything else is a setup
+  // error of the App file.
+  if let RunnerError::Auth(msg) = error {
+    return RunnerError::Auth(format!("{msg}{note}"));
+  }
+  if let RunnerError::Network(msg) = error {
+    return RunnerError::Network(format!("{msg}{note}"));
+  }
+  if let RunnerError::Config(msg) = error {
+    return RunnerError::Config(format!("{msg}{note}"));
+  }
+  RunnerError::Config(format!("{error}{note}"))
 }
 
 /// The runner group to register under. For an organization URL a group
@@ -131,15 +160,26 @@ pub(crate) async fn resolve_runner_group(
   )
   .await
   .map_err(|e| {
+    if let RunnerError::Network(msg) = e {
+      return RunnerError::Network(format!(
+        "could not list the runner groups of {org} ({msg}) — retry, or pass the group's \
+         numeric ID with --runner-group"
+      ));
+    }
     RunnerError::Config(format!(
-      "could not list the runner groups of {org} ({e}) — pass the group's numeric ID with \
-           --runner-group"
+      "could not list the runner groups of {org} ({e}) — the bearer may not read the org's \
+       runner groups; pass the group's numeric ID with --runner-group"
     ))
   })?;
   let Some(id) = wire::net::runner_groups::pick_group(&groups, trimmed) else {
     let names: Vec<&str> = groups.iter().map(|g| g.name.as_str()).collect();
+    let partial = if groups.len() >= wire::net::runner_groups::PAGE_SIZE {
+      "; only the first page was searched — pass the group's numeric ID"
+    } else {
+      ""
+    };
     return Err(RunnerError::Config(format!(
-      "runner group '{trimmed}' not found in {org} (groups: {})",
+      "runner group '{trimmed}' not found in {org} (groups: {}){partial}",
       names.join(", ")
     )));
   };

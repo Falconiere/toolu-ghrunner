@@ -797,10 +797,13 @@ while `reuse_deadline` allows (≤ 50 min after minting, ≥ 5 min before
 `expires_at`; memory only), else a fresh `access_tokens` mint. `Auth` there
 (401 revoked key / bad JWT, 404 deleted App or removed installation, 403,
 422) is fatal with the App's fix (`register --app --replace`, the install
-URL); `Network` (429, 5xx, transport) backs off and retries the still-valid
-JIT config. `run` loads the App file at startup (exit 2 before polling when
-it is gone) and does not WARN about a missing login for an App
-registration; `doctor` does not require a personal token for one.
+URL), as is `Config` (the key in the App file no longer signs); `Network`
+(429, 5xx, transport) backs off and retries the still-valid JIT config.
+Unless `--once` or ephemeral, `run` loads the App file and signs a test JWT
+at startup (exit 2 before polling when either fails) and does not WARN
+about a missing login for an App registration; `doctor` does not require a
+personal token for one and reports its App file in an `app` row. `remove`
+and the ephemeral cleanup still unregister with a personal token.
 
 ## Multi-repo concurrency
 

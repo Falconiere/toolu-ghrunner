@@ -22,7 +22,7 @@ Examples:
   toolu-runner doctor               # health: what is broken and the command that fixes it
 
 Environment:
-  TOOLU_RUNNER_TOKEN           GitHub bearer for `register` (flag > env > stored login token)
+  TOOLU_RUNNER_TOKEN           GitHub bearer for `register` and re-mint (flag > env > saved App > login)
   TOOLU_RUNNER_CLIENT_ID       OAuth App client_id for `login` (fallback for --client-id)
   TOOLU_RUNNER_HOME            runner state root (default ~/.toolu-runner)
   TOOLU_RUNNER_KEYRING         opt in to the OS keyring token store (default: 0600 file)
@@ -74,8 +74,12 @@ Examples:
   # zero-arg: repo inferred from the cwd git remote `origin` (github.com)
   cd my-repo && toolu-runner register
 
-  # explicit github.com repository, bearer from the stored `login` token
+  # explicit github.com repository; bearer from the saved GitHub App
+  # (`create-app`) or else the stored `login` token
   toolu-runner register --url https://github.com/owner/repo
+
+  # organization runner through the GitHub App, group chosen by name
+  toolu-runner register --app --url https://github.com/acme --runner-group ci
 
   # GHES organization, explicit token, custom name + extra labels
   # (registered as self-hosted,<OS>,<arch>,gpu)
@@ -124,7 +128,9 @@ pub(crate) enum Command {
   /// exclusive job lock (`<home>/runners/<owner>/<repo>/.lock`; the legacy
   /// root `<home>/.lock` for old layouts), creates a broker session, and polls
   /// until a job arrives. After each job it re-mints a fresh JIT config
-  /// with the stored `login` token and keeps listening, so one `run` stays
+  /// with `TOOLU_RUNNER_TOKEN` or the stored `login` token — or, for a
+  /// `register --app` registration, a GitHub App installation token — and
+  /// keeps listening, so one `run` stays
   /// online across many jobs. `--once` runs a single job and exits. An
   /// `--ephemeral` registration runs one job, then unregisters and deletes
   /// itself. SIGINT / SIGTERM cancel gracefully.
@@ -332,7 +338,8 @@ pub(crate) struct RunArgs {
   /// Exit after the first job completes (single-job mode).
   ///
   /// The default is to stay online: after each job the runner re-mints a
-  /// fresh JIT config with the stored `login` token and keeps listening.
+  /// fresh JIT config (personal token, or the registration's GitHub App) and
+  /// keeps listening.
   /// Pass this to run exactly one job and exit with its status.
   #[arg(long)]
   pub(crate) once: bool,

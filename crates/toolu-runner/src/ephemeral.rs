@@ -80,7 +80,12 @@ async fn unregister(
   client: &reqwest::Client,
 ) -> Result<GithubSide, Box<dyn std::error::Error>> {
   let Some(token) = crate::remove_bearer(&cfg.runner_url, None)? else {
-    return Ok(GithubSide::Unverified("no GitHub token"));
+    // The unregister takes a personal token even for an App registration.
+    return Ok(GithubSide::Unverified(if cfg.auth.is_token() {
+      "no GitHub token"
+    } else {
+      "no personal GitHub token; an App registration's unregister still needs one"
+    }));
   };
   let outcome = wire::net::unregister_runner(
     client,

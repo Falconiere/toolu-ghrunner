@@ -143,7 +143,9 @@ needs your own App's client id — set `TOOLU_RUNNER_CLIENT_ID`, or run
 `toolu-runner login --client-id <id>` once.
 
 `run` stays online by default: after each job it re-mints a fresh JIT
-config with your stored `login` token and keeps listening, so one
+config with your stored `login` token (or `TOOLU_RUNNER_TOKEN`, or — for a
+`register --app` registration — a GitHub App installation token) and keeps
+listening, so one
 invocation survives many jobs, idle gaps, and re-dispatches — no manual
 re-register. Pass `--once` to run a single job and exit. To keep it
 running across reboots and crashes, `toolu-runner install-service` writes
@@ -216,7 +218,9 @@ re-mint after a job mints its own installation token (kept in memory and
 reused for up to 50 minutes, never written to disk): the runner needs no
 stored login and no `TOOLU_RUNNER_TOKEN`. The App needs Administration
 (read and write) on a repository, or Self-hosted runners (read and write)
-on an organization. For an organization URL, `--runner-group` takes a group
+on an organization. `create-app` currently requests only Administration, so
+for an organization runner add the Self-hosted runners organization
+permission in the App's settings (and accept it on the installation) first. For an organization URL, `--runner-group` takes a group
 name (resolved through the org's runner-group list and recorded by id) or a
 numeric id.
 
@@ -227,7 +231,11 @@ or 404) ends the loop with the fix; a 429 or 5xx backs off and retries. The
 private key, the minted tokens and the App JWTs are registered with the
 secret masker, so they never reach `_diag` logs. A token registration writes
 no `[auth]` section and behaves exactly as before. `remove` still takes a
-personal token (or `--skip-unregister`) for an App registration.
+personal token (or `--skip-unregister`) for an App registration. When the App
+was picked automatically (no `--app`), its errors say so: pass `--token` /
+`TOOLU_RUNNER_TOKEN`, or move `github-app.json` aside, to register with a
+personal token instead. `doctor` checks an App registration's App file (an
+`app` row).
 
 `login` / `logout` manage the stored token per host — they take a
 hostname (default `github.com`), not `--config`. `status` prints local
@@ -384,7 +392,7 @@ overwrite a saved App unless you pass `--force`.
 | `--work <DIR>` | `register` | Job workspace directory (default `~/.toolu-runner/_work`). |
 | `--runner-group <NAME\|ID>` | `register` | Runner group for org registrations: a name (resolved through the org's runner-group list, recorded by id) or a numeric id. Repository runners only have the Default group — a name there warns and uses it. |
 | `--replace` | `register` | Overwrite an existing registration with the same name. |
-| `--once` | `run` | Run a single job, then exit. The default is to stay online — after each job `run` re-mints a fresh JIT config with the stored `login` token and keeps listening. |
+| `--once` | `run` | Run a single job, then exit. The default is to stay online — after each job `run` re-mints a fresh JIT config (with `TOOLU_RUNNER_TOKEN` / the stored `login` token, or the registration's GitHub App) and keeps listening. |
 | `--print` / `--no-activate` / `--remove` | `install-service` | Print the unit without writing it (conflicts with `--remove`) / write it but don't activate / deactivate and delete it (idempotent). |
 | `--force` | `remove` | Remove even while a `run` holds the job lock. Local state goes, but the lock file is kept and the GitHub unregister is skipped (that job is still reporting against the registration), so remove the runner on GitHub by hand afterwards. It does not cancel the job. Without it, a held lock only writes a `.pending_remove` marker and `remove` exits 2. |
 | `--skip-unregister` | `remove` | Delete local state without calling GitHub (revoked token, deleted repo, no network); the runner stays registered there. Without it, `remove` with no token, or with a failed unregister, aborts before deleting anything. |

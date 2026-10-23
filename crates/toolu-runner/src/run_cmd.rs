@@ -68,13 +68,17 @@ pub(crate) async fn cmd_run(args: RunArgs) -> Result<(), Box<dyn std::error::Err
 
   let store = AuthStore::new(&registry::runner_home());
   let host = register_cmd::host_from_runner_url(&cfg.runner_url)?;
-  // An App registration needs its App file: fail before polling, with its
-  // secrets masked from here on.
-  if let AuthSection::App { app_file, .. } = &cfg.auth {
-    crate::app_auth::load_app(Path::new(app_file), &masker).map_err(|e| {
+  // An App registration that will re-mint needs a usable App: fail before
+  // polling (unreadable file, or a key that cannot sign), with its secrets
+  // masked from here on.
+  if let AuthSection::App { app_file, .. } = &cfg.auth
+    && !args.once
+    && !cfg.ephemeral
+  {
+    crate::app_auth::check_app(Path::new(app_file), &masker).map_err(|e| {
       format!(
         "{e} — the registration authenticates with this GitHub App; restore the file or \
-               run `toolu-runner register --app --replace`"
+         run `toolu-runner register --app --replace`"
       )
     })?;
   }
@@ -291,7 +295,9 @@ impl RunLoop {
           .await;
         match minted {
           Ok(bearer) => (bearer, help),
-          Err(RunnerError::Auth(msg)) => {
+          // `Config`: the key in the App file no longer signs — retrying
+          // the spent JIT config could never recover.
+          Err(RunnerError::Auth(msg) | RunnerError::Config(msg)) => {
             return Err(format!("re-mint rejected: {msg} — {help}").into());
           },
           Err(e) => {

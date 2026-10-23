@@ -471,3 +471,46 @@ fn rejected_token() -> TestResult {
   assert!(!stderr.contains(TEST_BEARER), "{stderr}");
   Ok(())
 }
+
+/// #201 F5: an App registration gets an `app` row: OK naming the App when its
+/// file loads, FAIL with the fix when it is gone.
+#[test]
+fn an_app_registration_reports_its_app_file() -> TestResult {
+  let home = tempfile::tempdir()?;
+  let app_file = crate::github_app_fixtures::write_app(home.path(), "127.0.0.1")?;
+  let app_file_text = app_file.to_string_lossy().into_owned();
+  let auth = config::registration_auth::AuthSection::App {
+    app_file: app_file_text.clone(),
+    installation_id: 1,
+  };
+  write_registration_with(home.path(), "o", "r", "http://127.0.0.1:9", false, |cfg| {
+    cfg.auth = auth;
+  })?;
+
+  let (_, stdout, _, _) = run(doctor_cmd(home.path())?.arg("--offline"))?;
+  let ok = row(
+    "OK",
+    "app",
+    "GitHub App 'toolu-runner-test-app' (App 424242, installation 1)",
+  );
+  assert!(block(&stdout, "o/r").contains(&ok.as_str()), "{stdout}");
+
+  std::fs::remove_file(&app_file)?;
+  let (code, stdout, stderr, _) = run(doctor_cmd(home.path())?.arg("--offline"))?;
+  let fail = row(
+    "FAIL",
+    "app",
+    &format!(
+      "config error: no GitHub App saved at {app_file_text} — run `toolu-runner create-app` first"
+    ),
+  );
+  let restore = fix(&format!(
+    "restore {app_file_text}, or re-register: toolu-runner register --app --replace --url \
+     http://127.0.0.1:9/o/r"
+  ));
+  let registration = block(&stdout, "o/r");
+  assert!(registration.contains(&fail.as_str()), "{stdout}");
+  assert!(registration.contains(&restore.as_str()), "{stdout}");
+  assert_eq!(code, Some(1), "{}", report(&stdout, &stderr));
+  Ok(())
+}

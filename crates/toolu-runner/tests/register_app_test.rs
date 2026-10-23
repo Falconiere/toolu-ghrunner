@@ -354,3 +354,232 @@ async fn status_names_the_app_of_an_app_registration() -> TestResult {
   );
   Ok(())
 }
+
+/// GitHub's documented basic 404 for a known App not installed on a repo.
+fn not_installed_reply() -> ResponseTemplate {
+  ResponseTemplate::new(404).set_body_json(json!({
+    "message": "Not Found",
+    "documentation_url": "https://docs.github.com/rest/apps/apps#get-a-repository-installation-for-the-authenticated-app",
+    "status": "404",
+  }))
+}
+
+/// AC-4 variants: an App installed nowhere says so; a failed installation
+/// listing is left out; an automatically picked App says why it was used.
+#[tokio::test]
+async fn not_installed_errors_describe_the_installations_and_the_automatic_pick() -> TestResult {
+  let cases = [
+    (
+      ResponseTemplate::new(200).set_body_json(json!([])),
+      "(it has no installation yet)",
+    ),
+    (
+      ResponseTemplate::new(500),
+      "is not installed on octo/demo —",
+    ),
+  ];
+  for (listing, expected) in cases {
+    let home = tempfile::tempdir()?;
+    write_app(home.path(), "127.0.0.1")?;
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+      .and(path(REPO_INSTALLATION))
+      .respond_with(not_installed_reply())
+      .mount(&server)
+      .await;
+    Mock::given(method("GET"))
+      .and(path("/api/v3/app/installations"))
+      .respond_with(listing)
+      .mount(&server)
+      .await;
+    // No --app: the saved App is picked automatically.
+    let out = register(home.path(), &server, "octo/demo", None, &[])?;
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = text(&out.stderr);
+    assert!(stderr.contains(expected), "missing {expected:?}: {stderr}");
+    assert!(
+      !stderr.contains("it is installed on:"),
+      "no account list here: {stderr}"
+    );
+    assert!(
+      stderr.contains("the GitHub App was used automatically because"),
+      "{stderr}"
+    );
+    assert!(!repo_config(home.path()).exists());
+  }
+  Ok(())
+}
+
+/// `--app` and `--token` cannot be combined (clap rejects it before any
+/// request).
+#[tokio::test]
+async fn app_and_token_conflict() -> TestResult {
+  let home = tempfile::tempdir()?;
+  let server = MockServer::start().await;
+  let out = register(
+    home.path(),
+    &server,
+    "octo/demo",
+    None,
+    &["--app", "--token", "pat"],
+  )?;
+  assert_eq!(out.status.code(), Some(2));
+  let stderr = text(&out.stderr);
+  assert!(
+    stderr.contains("cannot be used with")
+      && stderr.contains("'--app'")
+      && stderr.contains("'--token <TOKEN>'"),
+    "{stderr}"
+  );
+  Ok(())
+}
+
+/// Without `--app`, an App saved for another host is ignored: the stored
+/// login registers, and the config keeps the token shape.
+#[tokio::test]
+async fn an_app_for_another_host_falls_back_to_the_stored_login() -> TestResult {
+  let home = tempfile::tempdir()?;
+  write_app(home.path(), "github.com")?;
+  store_login(home.path(), "127.0.0.1", "stored-login-token")?;
+  let server = MockServer::start().await;
+  mount_jit(&server, "Bearer stored-login-token").await?;
+  let out = register(home.path(), &server, "octo/demo", None, &[])?;
+  assert!(out.status.success(), "stderr: {}", text(&out.stderr));
+  assert_eq!(hits(&server, REPO_JIT).await?, 1);
+  assert_eq!(
+    load_config(&repo_config(home.path()))?.auth,
+    AuthSection::Token
+  );
+  Ok(())
+}
+
+/// An unreadable saved App fails a plain `register`, saying it was picked
+/// automatically and how to register without it.
+#[tokio::test]
+async fn an_unreadable_saved_app_names_the_automatic_pick() -> TestResult {
+  let home = tempfile::tempdir()?;
+  let app_file = write_app(home.path(), "127.0.0.1")?;
+  std::fs::write(&app_file, "{ not json")?;
+  let server = MockServer::start().await;
+  let out = register(home.path(), &server, "octo/demo", None, &[])?;
+  assert_eq!(out.status.code(), Some(2));
+  let stderr = text(&out.stderr);
+  for expected in [
+    format!("parse {}", app_file.display()),
+    "the GitHub App was used automatically because".to_owned(),
+    "move the file aside to use the stored `login` token".to_owned(),
+  ] {
+    assert!(stderr.contains(&expected), "missing {expected:?}: {stderr}");
+  }
+  Ok(())
+}
+
+/// A JIT mint rejected for the App names the permissions it needs.
+#[tokio::test]
+async fn a_rejected_app_mint_names_the_permissions() -> TestResult {
+  let home = tempfile::tempdir()?;
+  write_app(home.path(), "127.0.0.1")?;
+  let server = MockServer::start().await;
+  Mock::given(method("GET"))
+    .and(path(REPO_INSTALLATION))
+    .respond_with(capture("installation_200.json")?)
+    .mount(&server)
+    .await;
+  Mock::given(method("POST"))
+    .and(path(TOKENS))
+    .respond_with(token_reply(&rfc3339_in(3600))?)
+    .mount(&server)
+    .await;
+  Mock::given(method("POST"))
+    .and(path(REPO_JIT))
+    .respond_with(ResponseTemplate::new(403).set_body_json(json!({
+      "message": "Resource not accessible by integration",
+      "status": "403",
+    })))
+    .mount(&server)
+    .await;
+  let out = register(home.path(), &server, "octo/demo", None, &["--app"])?;
+  assert_eq!(out.status.code(), Some(2));
+  let stderr = text(&out.stderr);
+  for expected in [
+    "Resource not accessible by integration",
+    "(registering as GitHub App 'toolu-runner-test-app' (installation 1): the App needs \
+     Administration write access on a repository",
+  ] {
+    assert!(stderr.contains(expected), "missing {expected:?}: {stderr}");
+  }
+  assert!(!repo_config(home.path()).exists());
+  Ok(())
+}
+
+/// F13: a runner-group list the bearer may not read, or a transient
+/// failure, each fails with its own fix and mints nothing.
+#[tokio::test]
+async fn runner_group_listing_failures_name_their_fix() -> TestResult {
+  let cases = [
+    (
+      ResponseTemplate::new(403)
+        .set_body_json(json!({"message": "Resource not accessible by integration"})),
+      "the bearer may not read the org's runner groups",
+    ),
+    (
+      ResponseTemplate::new(503),
+      "— retry, or pass the group's numeric ID",
+    ),
+  ];
+  for (reply, expected) in cases {
+    let home = tempfile::tempdir()?;
+    write_app(home.path(), "127.0.0.1")?;
+    let server = app_server().await?;
+    Mock::given(method("GET"))
+      .and(path("/api/v3/orgs/octo-org/actions/runner-groups"))
+      .respond_with(reply)
+      .mount(&server)
+      .await;
+    let out = register(
+      home.path(),
+      &server,
+      "octo-org",
+      None,
+      &["--app", "--runner-group", "gpu"],
+    )?;
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = text(&out.stderr);
+    assert!(
+      stderr.contains("could not list the runner groups of octo-org"),
+      "{stderr}"
+    );
+    assert!(stderr.contains(expected), "missing {expected:?}: {stderr}");
+    assert_eq!(hits(&server, ORG_JIT).await?, 0);
+  }
+  Ok(())
+}
+
+/// `status` of an App registration whose App file is gone says so.
+#[tokio::test]
+async fn status_reports_a_missing_app_file() -> TestResult {
+  let home = tempfile::tempdir()?;
+  let app_file = write_app(home.path(), "127.0.0.1")?;
+  let server = app_server().await?;
+  let out = register(home.path(), &server, "octo/demo", None, &["--app"])?;
+  assert!(out.status.success(), "stderr: {}", text(&out.stderr));
+  std::fs::remove_file(&app_file)?;
+  let status = Command::new(env!("CARGO_BIN_EXE_toolu-runner"))
+    .env("TOOLU_RUNNER_HOME", home.path())
+    .env("HOME", home.path())
+    .env("TOOLU_RUNNER_NO_KEYRING", "1")
+    .args(["status", "--config"])
+    .arg(repo_config(home.path()))
+    .output()?;
+  assert!(status.status.success(), "{}", text(&status.stderr));
+  let expected = format!(
+    "auth:      GitHub App (installation 1) — config error: no GitHub App saved at {}",
+    std::path::absolute(&app_file)?.display()
+  );
+  assert!(
+    text(&status.stdout).contains(&expected),
+    "{}",
+    text(&status.stdout)
+  );
+  Ok(())
+}

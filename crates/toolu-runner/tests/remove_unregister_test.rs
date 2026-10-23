@@ -430,3 +430,37 @@ async fn unaddressable_url_removes_locally_without_failing() -> TestResult<()> {
   );
   Ok(())
 }
+
+/// #201: `remove` of an App registration with no personal token says the
+/// unregister still needs one, and deletes nothing.
+#[tokio::test]
+async fn no_token_for_an_app_registration_says_a_personal_token_is_needed() -> TestResult<()> {
+  let dir = tempfile::tempdir()?;
+  let home = tempfile::tempdir()?;
+  let server = MockServer::start().await;
+  Mock::given(method("DELETE"))
+    .respond_with(ResponseTemplate::new(204))
+    .expect(0)
+    .mount(&server)
+    .await;
+  let config_path = seed_registration(dir.path(), &server.uri())?;
+  let mut raw = std::fs::read_to_string(&config_path)?;
+  raw.push_str(
+    "\n[auth]\nkind = \"app\"\napp_file = \"/nonexistent/github-app.json\"\ninstallation_id = 1\n",
+  );
+  std::fs::write(&config_path, raw)?;
+
+  let out = run_remove(&config_path, home.path(), &[])?;
+
+  assert!(!out.status.success());
+  assert!(config_path.exists(), "nothing local may be deleted");
+  let stderr = String::from_utf8_lossy(&out.stderr);
+  assert!(
+    stderr.contains(
+      "This registration re-mints with a GitHub App, but unregistering it still needs a \
+       personal token."
+    ),
+    "{stderr}"
+  );
+  Ok(())
+}

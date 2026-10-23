@@ -327,10 +327,17 @@ async fn unregister_on_github(
   // B-002 outcome, and a WARN scrolls past; --skip-unregister makes that
   // choice explicit and reproduces the old behavior exactly.
   let Some(token) = remove_bearer(&cfg.runner_url, flag)? else {
+    // `remove` does not mint App installation tokens yet (#201 follow-up).
+    let app_note = if cfg.auth.is_token() {
+      ""
+    } else {
+      " This registration re-mints with a GitHub App, but unregistering it still needs a \
+       personal token."
+    };
     return Err(
       format!(
-        "cannot unregister '{}' on GitHub: no token available.\nNothing local was deleted — \
-       {NO_BEARER_HELP}.",
+        "cannot unregister '{}' on GitHub: no token available.{app_note}\nNothing local was \
+         deleted — {NO_BEARER_HELP}.",
         cfg.runner_name
       )
       .into(),

@@ -46,6 +46,17 @@ pub(crate) fn load_app(
   Ok(app)
 }
 
+/// [`load_app`], then prove its key signs an App JWT (not sent anywhere).
+///
+/// # Errors
+///
+/// As [`load_app`], or `RunnerError::Config` when the key is not a usable
+/// RSA private key.
+pub(crate) fn check_app(path: &Path, masker: &Mutex<SecretMasker>) -> Result<(), RunnerError> {
+  let app = load_app(path, masker)?;
+  app_jwt(&app, masker).map(drop)
+}
+
 /// Sign a JWT for `app` and mask it (it is a credential for ten minutes).
 fn app_jwt(app: &StoredApp, masker: &Mutex<SecretMasker>) -> Result<String, RunnerError> {
   let jwt = protocol::app_jwt::build_app_jwt(&app.pem, app.app_id)?;
@@ -205,3 +216,7 @@ impl InstallationTokens {
       .map(|entry| entry.token.clone())
   }
 }
+
+#[cfg(test)]
+#[path = "tests/app_auth.rs"]
+mod tests;

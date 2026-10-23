@@ -600,3 +600,30 @@ async fn acquired_job_with_failed_completion_still_cleans_up() -> TestResult<()>
   assert_state(&config_path, false, &out);
   Ok(())
 }
+
+/// #201: an ephemeral App registration with no personal token still cleans
+/// up, and says why GitHub-side removal was not verified.
+#[tokio::test]
+async fn no_token_for_an_app_registration_says_why_unverified() -> TestResult<()> {
+  let home = tempfile::tempdir()?;
+  let server = job_server("true", 204).await?;
+  let config_path = write_registration(home.path(), &server)?;
+  let mut raw = std::fs::read_to_string(&config_path)?;
+  raw.push_str(
+    "\n[auth]\nkind = \"app\"\napp_file = \"/nonexistent/github-app.json\"\ninstallation_id = 1\n",
+  );
+  std::fs::write(&config_path, raw)?;
+  let out = wait_exit(spawn_run(home.path(), &config_path, None)?).await?;
+  assert_eq!(out.status.code(), Some(0), "stderr: {}", text(&out.stderr));
+  assert_eq!(count(&server, "DELETE", &delete_path()).await?, 0);
+  assert!(
+    text(&out.stdout).contains(
+      "not verified here (no personal GitHub token; an App registration's unregister still \
+       needs one)"
+    ),
+    "{}",
+    text(&out.stdout)
+  );
+  assert_state(&config_path, false, &out);
+  Ok(())
+}
