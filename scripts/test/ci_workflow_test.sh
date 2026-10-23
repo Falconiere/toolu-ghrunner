@@ -102,6 +102,8 @@ want_macos "macOS installs cargo-nextest"       "tool: cargo-nextest"
 # plutil only exists on macOS — validating the generated LaunchAgent as a real
 # plist is the single thing this leg can do that ubuntu cannot.
 want_macos "macOS validates the launchd plist"  "scripts/test/plist_test\.sh"
+want_macos "macOS runs install.sh under /bin/bash 3.2" "INSTALL_SH_REQUIRE_BASH3: \"1\""
+want_macos "macOS runs the bash 3.2 install.sh test" "bash tests/install_sh_bash32_test\.sh"
 
 want_ci "ci has a job timeout"          "^    timeout-minutes: [0-9]+$"
 want_macos "ci-macos has a job timeout" "^    timeout-minutes: [0-9]+$"
@@ -120,6 +122,8 @@ want_ci "ubuntu re-verifies the #103 reference report" "reference_compare\.py --
 want_ci "ubuntu replays the #103 docker capture" "--test integration -- compat_probe_replay_test:: --ignored"
 want_ci "ubuntu runs the live-lane honesty test" "live_lane"
 want_ci "ubuntu runs the install.sh smoke tests" "bash tests/install_sh_test\.sh"
+want_ci "ubuntu runs the portable install.sh test" "bash tests/install_sh_bash32_test\.sh"
+want_ci "ubuntu installs zsh and fish for the install.sh login-shell tests" "apt-get install -y --no-install-recommends zsh fish"
 want_ci "ubuntu lints the capture feature build" "cargo clippy -p toolu-runner --features capture --all-targets -- -D warnings"
 
 # --- #110: prebuilt, pinned ast-grep and a Rust build cache ---

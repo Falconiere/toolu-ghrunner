@@ -70,14 +70,14 @@ assert() {
   shift
   if "$@"; then echo "ok: $desc"; else echo "FAIL: $desc" >&2; fail=1; fi
 }
-# install.sh:245 — binary probed at extract root, executable.
-assert "binary at root, executable (install.sh:245)"        test -x "$ex/toolu-runner"
+# install.sh "extract" — binary probed at extract root, executable.
+assert "binary at root, executable (install.sh extract)"     test -x "$ex/toolu-runner"
 # install.sh install_service — scripts/ dir at root.
 assert "scripts/ dir at root (install.sh --service)"        test -d "$ex/scripts"
-# install.sh:287 — darwin --service plist.
-assert "plist present (install.sh:287 darwin --service)"    test -f "$ex/scripts/io.toolu-runner.plist"
-# install.sh:306 — linux --service unit.
-assert "systemd unit present (install.sh:306 linux --service)" test -f "$ex/scripts/toolu-runner.service"
+# install.sh install_service — darwin --service plist.
+assert "plist present (install.sh darwin --service)"        test -f "$ex/scripts/io.toolu-runner.plist"
+# install.sh install_service — linux --service unit.
+assert "systemd unit present (install.sh linux --service)"  test -f "$ex/scripts/toolu-runner.service"
 
 # Exact member set — no stray './' entries or extra files.
 members="$(tar -tzf "$tarball" | sort | tr '\n' ' ')"

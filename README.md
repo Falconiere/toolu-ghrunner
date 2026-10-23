@@ -55,9 +55,15 @@ It has no schedule (#120) and fails as `UNVERIFIED` when
 ## Install
 
 ```sh
-# macOS / Linux — installs to /usr/local/bin when it is writable,
-# otherwise to ~/.local/bin (no sudo needed; it prints a PATH hint)
+# macOS / Linux — installs, then hands the terminal to `toolu-runner setup`
 curl -fsSL https://get.toolu.sh/pkg/ghrunner/install | bash
+
+# ...install only
+curl -fsSL https://get.toolu.sh/pkg/ghrunner/install | bash -s -- --no-setup
+
+# ...unattended (cloud-init): setup flags after `bash -s --`, the token in the env
+curl -fsSL https://get.toolu.sh/pkg/ghrunner/install | TOOLU_RUNNER_TOKEN="$PAT" \
+  bash -s -- --source github --repo acme/web --auth token --yes
 
 # ...force /usr/local/bin on a host where it needs root
 curl -fsSL https://get.toolu.sh/pkg/ghrunner/install | sudo bash
@@ -69,8 +75,42 @@ curl -fsSL https://get.toolu.sh/pkg/ghrunner/install | bash -s -- --install-dir 
 brew install falconiere/tap/toolu-runner
 ```
 
+What the installer does:
+
+- **Downloads** `releases/latest/download/<asset>` (or `--version vX.Y.Z`) —
+  no GitHub API call, so no `jq` — and **verifies** it against that release's
+  `SHA256SUMS` with `sha256sum` (or `shasum -a 256` on macOS). A mismatch, or a
+  `SHA256SUMS` without the asset, stops before anything is installed. The
+  version it reports comes from the installed binary's `--version`.
+- **Installs** to `/usr/local/bin` when it is writable, otherwise to
+  `~/.local/bin` (no sudo needed). `--install-dir` is used as given.
+- **Sets up PATH for new shells** when the install dir is not on it already:
+  it writes `~/.toolu-runner/env` and `env.fish` and sources them from
+  `~/.profile`, `~/.bashrc` (plus `~/.bash_profile` / `~/.bash_login` when
+  present), `${ZDOTDIR:-~}/.zshenv` when zsh is installed or that file
+  exists, and
+  `${XDG_CONFIG_HOME:-~/.config}/fish/conf.d/toolu-runner.fish` — one marker block per file, so a
+  re-run changes nothing. `--home <dir>` also exports `TOOLU_RUNNER_HOME` there.
+  These files never hold a secret. `--no-modify-path` writes none of them and
+  prints the line to add; `--uninstall` removes the blocks and files again,
+  leaving the rest of each profile byte-identical (a profile left empty, such
+  as one the installer created, is deleted; the binary and runner state stay). A
+  file that cannot be written is a warning with the line to add, never a
+  failed install.
+- **Hands off to `toolu-runner setup`**: on a terminal it runs setup
+  interactively (reading `/dev/tty`, since under `curl | bash` stdin is the
+  script); every option the installer does not own is passed to setup in
+  order. With no terminal it runs setup only when setup options were given,
+  and otherwise prints one `next:` line. A release without a `setup` command
+  points at `register` instead, and setup options given to it exit 2.
+
+Output follows the setup screens: `✓` rows and colour on a terminal
+(`NO_COLOR` turns colour off), one plain line —
+`toolu-runner: installed <version> (checksum ok)` — when piped.
+
 Pass `--check` to print the plan (including which directory it would
-use) and exit without downloading anything. `--service` also installs
+use, the `SHA256SUMS` it verifies against and the setup options) and exit
+without downloading anything. `--service` also installs
 and starts the static single-slot unit shipped in the tarball, but only
 when the binary lands at `/usr/local/bin/toolu-runner` — that path is
 hardcoded in those units, so anywhere else the unit is skipped with a
@@ -850,6 +890,7 @@ survives unregistration.
 | `PATH` | — | `install-service` bakes the installing shell's `PATH` into the launchd unit. |
 | `TOOLU_RUNNER_REPO` | `Falconiere/toolu-ghrunner` | `install.sh` only — release source. |
 | `TOOLU_RUNNER_INSTALL_DIR` | `/usr/local/bin` | `install.sh` only — preferred install dir when `--install-dir` is absent; still falls back to `~/.local/bin` when not writable. |
+| `TOOLU_RUNNER_RELEASE_URL` | `https://github.com/$TOOLU_RUNNER_REPO/releases` | `install.sh` only — release base URL the tarball and `SHA256SUMS` are fetched from (`<base>/latest/download/…` or `<base>/download/<tag>/…`). |
 | `TOOLU_DAEMON_*` | — | the separate `toolu-daemon` bin only (token file, vCPU/memory budget, image, bind, queue ceiling, runtime) — see the [VPS host runbook](docs/vps-host-runbook.md). |
 | `HOME` / `USERPROFILE` | — | resolves `~/.toolu-runner/`. |
 | `HOSTNAME` / `COMPUTERNAME` | `unknown` | names this host in the broker session's `owner_name` (`<host> (PID: n)`). The default runner name at `register` comes from the OS hostname, not these. |

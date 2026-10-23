@@ -92,6 +92,11 @@ jobs:
             echo "ERROR: protocol crate must not depend on I/O crates"
             exit 1
           fi
+      # tests/install_sh_test.sh checks what real bash, zsh and fish login
+      # shells see after an install, and FAILS (never skips) when a shell is
+      # missing. bash is preinstalled; zsh and fish are not.
+      - name: Install zsh and fish for the install.sh tests
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends zsh fish
       - name: Run release-script tests
         # Explicit list, not a scripts/test/*.sh glob — plist_test.sh is
         # macOS-only (plutil) and would fail here. systemd_test.sh is NOT
@@ -105,6 +110,7 @@ jobs:
             bash "scripts/test/${t}_test.sh"
           done
           bash tests/install_sh_test.sh
+          bash tests/install_sh_bash32_test.sh
       # Committed #88 captures stay sanitized and hash-pinned, and the #88
       # documentation keeps every acceptance row (the live lanes are recorded,
       # not re-run, so only these two offline modes belong in CI).
@@ -150,6 +156,13 @@ jobs:
       # nextest does not run doctests.
       - name: Doctests
         run: cargo test --workspace --doc
+      # `curl | bash` on a Mac runs Apple's /bin/bash 3.2, where an empty
+      # "${array[@]}" under set -u is an error; this is the one leg that has it.
+      - name: install.sh under macOS /bin/bash 3.2
+        env:
+          INSTALL_SH_BASH: /bin/bash
+          INSTALL_SH_REQUIRE_BASH3: "1"
+        run: bash tests/install_sh_bash32_test.sh
       # plutil is macOS-only, so this is the one host where the generated
       # LaunchAgent is validated as a real plist rather than as a string.
       - name: Validate the launchd plist
