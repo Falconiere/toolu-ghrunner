@@ -15,7 +15,7 @@ use config::registration_auth::AuthSection;
 use shared::{RunnerError, SecretMasker};
 use wire::net::RunnerScope;
 
-use crate::cli::RegisterArgs;
+use crate::cli::RegisterAuthArgs;
 use crate::login_cmd;
 
 /// The bearer `register` mints with and the `[auth]` it persists.
@@ -44,7 +44,7 @@ impl RegisterAuth {
 /// Resolve how `register` authenticates: the GitHub App ([`pick_app`]) when
 /// one applies, else the personal-token chain ([`resolve_register_bearer`]).
 pub(crate) async fn resolve(
-  args: &RegisterArgs,
+  args: &RegisterAuthArgs,
   host: &str,
   home: &Path,
   url: &str,
@@ -136,16 +136,14 @@ pub(crate) async fn resolve_runner_group(
            --runner-group"
     ))
   })?;
-  match wire::net::runner_groups::pick_group(&groups, trimmed) {
-    Some(id) => Ok(id.to_string()),
-    None => {
-      let names: Vec<&str> = groups.iter().map(|g| g.name.as_str()).collect();
-      Err(RunnerError::Config(format!(
-        "runner group '{trimmed}' not found in {org} (groups: {})",
-        names.join(", ")
-      )))
-    },
-  }
+  let Some(id) = wire::net::runner_groups::pick_group(&groups, trimmed) else {
+    let names: Vec<&str> = groups.iter().map(|g| g.name.as_str()).collect();
+    return Err(RunnerError::Config(format!(
+      "runner group '{trimmed}' not found in {org} (groups: {})",
+      names.join(", ")
+    )));
+  };
+  Ok(id.to_string())
 }
 
 /// Resolve the `generate-jitconfig` bearer for `host`: flag >

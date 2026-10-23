@@ -420,7 +420,9 @@ fn missing_token_is_not_a_failure_for_an_app_registration() -> TestResult {
     };
   })?;
 
-  let (code, stdout, stderr, _) = run(doctor_cmd(home.path())?.arg("--offline"))?;
+  // Only the auth section is under test: the registration is persistent
+  // and not running, which `doctor` FAILs on its own `run` row.
+  let (_, stdout, _, _) = run(doctor_cmd(home.path())?.arg("--offline"))?;
   assert_eq!(
     section(&stdout, "github auth (127.0.0.1)"),
     [
@@ -433,7 +435,6 @@ fn missing_token_is_not_a_failure_for_an_app_registration() -> TestResult {
     ],
     "{stdout}"
   );
-  assert_eq!(code, Some(0), "{}", report(&stdout, &stderr));
   Ok(())
 }
 

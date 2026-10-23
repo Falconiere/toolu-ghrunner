@@ -244,24 +244,9 @@ pub(crate) struct RegisterArgs {
   /// an organization URL an org-level one.
   #[arg(long, value_name = "URL", value_hint = ValueHint::Url)]
   pub(crate) url: Option<String>,
-  /// GitHub API token for the `generate-jitconfig` REST call.
-  ///
-  /// Needs admin rights on the target repo/org. Optional — resolution order:
-  /// --app > this flag > `TOOLU_RUNNER_TOKEN` env > the GitHub App saved by
-  /// `create-app` for the URL's host > the stored `login` token. Used only
-  /// during registration, never at job runtime.
-  #[arg(long, value_name = "TOKEN", conflicts_with = "app")]
-  pub(crate) token: Option<String>,
-  /// Authenticate with the GitHub App saved by `create-app`
-  /// (`<home>/github-app.json`) instead of a personal token.
-  ///
-  /// Registration and every re-mint then use an App installation token, so
-  /// the runner needs no stored login or `TOOLU_RUNNER_TOKEN`. Used
-  /// automatically when that file exists for the URL's host and neither
-  /// --token nor `TOOLU_RUNNER_TOKEN` is given. The App must be installed on
-  /// the repository or organization.
-  #[arg(long)]
-  pub(crate) app: bool,
+  /// How `register` authenticates (`--token`, `--app`).
+  #[command(flatten)]
+  pub(crate) auth: RegisterAuthArgs,
   /// Runner name (default: the machine hostname).
   #[arg(long, value_name = "NAME")]
   pub(crate) name: Option<String>,
@@ -310,6 +295,30 @@ pub(crate) struct RegisterArgs {
   /// Without it, `register` refuses to overwrite an existing config.
   #[arg(long)]
   pub(crate) replace: bool,
+}
+
+/// `register`'s authentication flags: a personal token or the saved GitHub
+/// App (#201).
+#[derive(Debug, Args)]
+pub(crate) struct RegisterAuthArgs {
+  /// GitHub API token for the `generate-jitconfig` REST call.
+  ///
+  /// Needs admin rights on the target repo/org. Optional — resolution order:
+  /// --app > this flag > `TOOLU_RUNNER_TOKEN` env > the GitHub App saved by
+  /// `create-app` for the URL's host > the stored `login` token. Used only
+  /// during registration, never at job runtime.
+  #[arg(long, value_name = "TOKEN", conflicts_with = "app")]
+  pub(crate) token: Option<String>,
+  /// Authenticate with the GitHub App saved by `create-app`
+  /// (`<home>/github-app.json`) instead of a personal token.
+  ///
+  /// Registration and every re-mint then use an App installation token, so
+  /// the runner needs no stored login or `TOOLU_RUNNER_TOKEN`. Used
+  /// automatically when that file exists for the URL's host and neither
+  /// --token nor `TOOLU_RUNNER_TOKEN` is given. The App must be installed on
+  /// the repository or organization.
+  #[arg(long)]
+  pub(crate) app: bool,
 }
 
 /// Arguments for the `run` subcommand.

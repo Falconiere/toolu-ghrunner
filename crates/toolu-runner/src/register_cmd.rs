@@ -35,7 +35,7 @@ pub(crate) async fn cmd_register(args: RegisterArgs) -> Result<(), Box<dyn std::
   let masker = Arc::new(Mutex::new(SecretMasker::new()));
   crate::init_tracing_for(&masker).map_err(|e| format!("startup init: {e}"))?;
 
-  let (url, host) = resolve_url_and_host(args.url).map_err(|e| format!("{e}"))?;
+  let (url, host) = resolve_url_and_host(args.url.clone()).map_err(|e| format!("{e}"))?;
 
   let home = registry::runner_home();
   let config_path = match args.config.clone() {
@@ -43,7 +43,7 @@ pub(crate) async fn cmd_register(args: RegisterArgs) -> Result<(), Box<dyn std::
     None => register_config_path(&url, &home).map_err(|e| format!("{e}"))?,
   };
   let creds_path = credentials_path_for(&config_path);
-  let runner_name = runner_name_or_hostname(args.name);
+  let runner_name = runner_name_or_hostname(args.name.clone());
   let labels = config::labels::resolve_labels(
     &args.labels,
     args.no_default_labels,
@@ -58,7 +58,7 @@ pub(crate) async fn cmd_register(args: RegisterArgs) -> Result<(), Box<dyn std::
   // `String`: the variant is what tells a caller (and the diagnostics) that
   // this was a transport failure.
   let client = build_register_client(&network.resolve())?;
-  let auth = register_auth::resolve(&args, &host, &home, &url, &client, &masker).await?;
+  let auth = register_auth::resolve(&args.auth, &host, &home, &url, &client, &masker).await?;
   let runner_group =
     register_auth::resolve_runner_group(&args.runner_group, &url, &auth.bearer, &client)
       .await

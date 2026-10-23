@@ -69,37 +69,45 @@ fn an_app_registration_round_trips_its_auth_table() {
 }
 
 /// Replace the `[auth]` table of a saved App registration with `table`
-/// (`[auth]` is the last table `save_config` writes).
-fn load_with_auth_table(table: &str) -> Result<RunnerRegistrationConfig, shared::RunnerError> {
-  let dir = TempDir::new().expect("temp dir");
+/// (`[auth]` is the last table `save_config` writes) and load it back.
+fn load_with_auth_table(
+  table: &str,
+) -> Result<Result<RunnerRegistrationConfig, shared::RunnerError>, Box<dyn std::error::Error>> {
+  let dir = TempDir::new()?;
   let path = dir.path().join("config.toml");
-  save_config(&path, &registration(app())).expect("save");
-  let text = std::fs::read_to_string(&path).expect("read");
-  let (head, _auth) = text.split_once("[auth]").expect("auth table");
-  std::fs::write(&path, format!("{head}{table}")).expect("write");
-  load_config(&path)
+  save_config(&path, &registration(app()))?;
+  let text = std::fs::read_to_string(&path)?;
+  let (head, _auth) = text.split_once("[auth]").ok_or("no [auth] table")?;
+  std::fs::write(&path, format!("{head}{table}"))?;
+  Ok(load_config(&path))
 }
 
 #[test]
 fn an_explicit_token_table_loads_as_token() {
-  let cfg = load_with_auth_table("[auth]\nkind = \"token\"\n").expect("loads");
+  let cfg = load_with_auth_table("[auth]\nkind = \"token\"\n")
+    .expect("setup")
+    .expect("loads");
   assert_eq!(cfg.auth, AuthSection::Token);
 }
 
 #[test]
 fn an_app_table_without_installation_id_is_rejected() {
   let err = load_with_auth_table("[auth]\nkind = \"app\"\napp_file = \"/x/github-app.json\"\n")
+    .expect("setup")
     .expect_err("installation_id is required");
   assert!(err.to_string().contains("installation_id"), "{err}");
 }
 
 #[test]
 fn an_unknown_kind_or_key_is_rejected() {
-  let err = load_with_auth_table("[auth]\nkind = \"oauth\"\n").expect_err("unknown kind");
+  let err = load_with_auth_table("[auth]\nkind = \"oauth\"\n")
+    .expect("setup")
+    .expect_err("unknown kind");
   assert!(err.to_string().contains("oauth"), "{err}");
   let err = load_with_auth_table(
     "[auth]\nkind = \"app\"\napp_file = \"/x\"\ninstallation_id = 1\ninstalation = 2\n",
   )
+  .expect("setup")
   .expect_err("a typo'd key must not be ignored");
   assert!(err.to_string().contains("instalation"), "{err}");
 }

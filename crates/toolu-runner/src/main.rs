@@ -168,11 +168,6 @@ fn init_tracing_for(masker: &Arc<std::sync::Mutex<SecretMasker>>) -> Result<(), 
 /// black-holed connection does not hang the CLI.
 const UNREGISTER_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Initialize tracing for subcommands that do not run jobs (masker discarded).
-fn init_runner_tracing() -> Result<(), RunnerError> {
-  init_tracing_for(&Arc::new(std::sync::Mutex::new(SecretMasker::new())))
-}
-
 async fn cmd_remove(args: RemoveArgs) -> Result<(), Box<dyn std::error::Error>> {
   let masker = Arc::new(std::sync::Mutex::new(SecretMasker::new()));
   let redactor: Arc<dyn shared::startup::SecretRedactor> =

@@ -38,13 +38,15 @@ fn verified_claims(jwt: &str) -> Result<Value, jsonwebtoken::errors::Error> {
 }
 
 /// The `response.body` string of a capture fixture.
-fn fixture_body(capture: &str) -> String {
-  let value: Value = serde_json::from_str(capture).expect("fixture is JSON");
-  value
-    .pointer("/response/body")
-    .and_then(Value::as_str)
-    .expect("fixture has response.body")
-    .to_owned()
+fn fixture_body(capture: &str) -> Result<String, Box<dyn std::error::Error>> {
+  let value: Value = serde_json::from_str(capture)?;
+  Ok(
+    value
+      .pointer("/response/body")
+      .and_then(Value::as_str)
+      .ok_or("fixture has no response.body")?
+      .to_owned(),
+  )
 }
 
 #[test]
@@ -76,10 +78,8 @@ fn jwt_header_and_claims_match_githubs_rules_and_the_signature_verifies() {
     "iss is the App id"
   );
   assert_eq!(APP_JWT_BACKDATE_SECS, 60);
-  assert!(
-    APP_JWT_BACKDATE_SECS + APP_JWT_LIFETIME_SECS <= 600,
-    "exp - iat must not exceed GitHub's 10 minutes"
-  );
+  // exp - iat must not exceed GitHub's 10 minutes.
+  const { assert!(APP_JWT_BACKDATE_SECS + APP_JWT_LIFETIME_SECS <= 600) };
 }
 
 #[test]
@@ -99,9 +99,9 @@ fn a_tampered_payload_fails_verification() {
 
 #[test]
 fn build_app_jwt_signs_for_the_current_time() {
-  let before = chrono_free_now();
+  let before = unix_now().expect("clock");
   let jwt = build_app_jwt(PRIVATE_PEM, APP_ID).expect("signs");
-  let after = chrono_free_now();
+  let after = unix_now().expect("clock");
   let claims = verified_claims(&jwt).expect("verifies");
   let iat = claims
     .get("iat")
@@ -126,7 +126,8 @@ fn a_key_that_is_not_a_pem_is_an_error_that_does_not_echo_it() {
 #[test]
 fn installation_token_parses_the_documented_reply_and_debug_redacts_the_token() {
   let token: InstallationToken =
-    serde_json::from_str(&fixture_body(ACCESS_TOKENS_201)).expect("documented reply parses");
+    serde_json::from_str(&fixture_body(ACCESS_TOKENS_201).expect("fixture"))
+      .expect("documented reply parses");
   assert_eq!(token.token, "ghs_EXAMPLE-installation-token-201");
   assert_eq!(token.expires_at, "2016-07-11T22:14:10Z");
   let debug = format!("{token:?}");
@@ -139,7 +140,8 @@ fn installation_token_parses_the_documented_reply_and_debug_redacts_the_token() 
 #[test]
 fn installation_parses_the_documented_reply() {
   let installation: Installation =
-    serde_json::from_str(&fixture_body(INSTALLATION_200)).expect("documented reply parses");
+    serde_json::from_str(&fixture_body(INSTALLATION_200).expect("fixture"))
+      .expect("documented reply parses");
   assert_eq!(installation.id, 1);
   assert_eq!(
     installation.account.map(|account| account.login).as_deref(),
@@ -148,10 +150,9 @@ fn installation_parses_the_documented_reply() {
 }
 
 /// Unix seconds now, from `std` alone.
-fn chrono_free_now() -> i64 {
+fn unix_now() -> Result<i64, Box<dyn std::error::Error>> {
   let secs = std::time::SystemTime::now()
-    .duration_since(std::time::UNIX_EPOCH)
-    .expect("clock after the epoch")
+    .duration_since(std::time::UNIX_EPOCH)?
     .as_secs();
-  i64::try_from(secs).expect("fits i64")
+  Ok(i64::try_from(secs)?)
 }

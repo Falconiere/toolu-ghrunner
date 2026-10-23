@@ -21,8 +21,6 @@ pub const PUBLIC_PEM: &str =
 pub const APP_ID: i64 = 424_242;
 /// The App slug written to the test `github-app.json`.
 pub const APP_SLUG: &str = "toolu-runner-test-app";
-/// The installation id in GitHub's documented installation example.
-pub const INSTALLATION_ID: i64 = 1;
 /// The sanitized token in `access_tokens_201.json`.
 pub const INSTALLATION_TOKEN: &str = "ghs_EXAMPLE-installation-token-201";
 
