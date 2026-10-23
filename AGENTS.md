@@ -1,1006 +1,421 @@
 # toolu-runner
 
-Standalone GitHub Actions JIT runner — no orchestrator service and
-no OTel.
+Standalone GitHub Actions JIT runner — no orchestrator service, no OTel.
 
-## Crate Type
+## Workspace (12 crates, `members = ["crates/*"]`)
 
-- Layered workspace of **12 crates under `crates/`** (`members =
-  ["crates/*"]`). `toolu-runner`
-  is now a **bin-only** crate (the CLI entrypoint: `main.rs` +
-  `cli.rs` + `register_cmd.rs` + `run_cmd.rs` + `boot_cmd.rs` +
-  `service_cmd.rs` + `login_cmd.rs` + `status_cmd.rs` +
-  `create_app_cmd.rs` + `ephemeral.rs` + `network_setup.rs` + the
-  `check_*.rs` preflight + the `doctor_*.rs` health check).
-  The execution **engine** lives in
-  `execution`; the GitHub **JIT lifecycle** lives in `listener`.
-- Workspace members (dependency order): `protocol`, `shared`,
-  `network`, `config`, `expressions`, `cache`, `wire`, `observability`,
-  `execution`, `listener`, `toolu-runner`, plus the standalone `daemon`
-  bin (`toolu-daemon`, see `crates/daemon/README.md`; no internal deps,
-  `reqwest` only in its tests).
-- Dependency graph (acyclic):
-  - `protocol` — `shared` only (sync crypto + protocol/v1 types; no
-    async or network deps).
-  - `shared` — no internal deps (cross-cutting types, tracing init,
-    `SecretMasker`, `sanitize_job_id`, `runner_os`/`runner_arch`).
-  - `network` — `shared` only. The ONLY production `reqwest` client
-    construction (`client_builder`); it exists so `protocol` (which depends
-    on `shared`) stays free of `reqwest` (#94).
-  - `config`, `expressions` — each depend on `shared` only.
-  - `cache` — `shared` (`network` only as a dev-dependency: `L2Tier`
-    takes a caller-built client).
-  - `observability` — `shared` only; NOT `config` (see below).
-  - `wire` — `shared`, `protocol`, `network`.
-  - `execution` — `shared`, `expressions`, `cache`, `network`.
-  - `listener` — `execution`, `wire`, `observability`, `shared`,
-    `protocol` (the live-log client comes from `wire`).
-  - `toolu-runner` (bin) — `shared`, `protocol`, `network`, `config`,
-    `wire`, `observability`, `listener` at runtime (and, as dev-deps,
-    `execution` / `expressions` / `cache` for the integration tests).
+`toolu-runner` is **bin-only** (CLI entrypoint: `main.rs` + `cli.rs` +
+`register/run/boot/service/login/status/create_app_cmd.rs` (one `*_cmd.rs`
+each) + `ephemeral.rs` + `network_setup.rs` + `check_*.rs` + `doctor_*.rs`).
+Engine = `execution`;
+JIT lifecycle = `listener`. Plus standalone `daemon` bin (`toolu-daemon`,
+no internal deps, `reqwest` in tests only).
 
-## House Conventions & The Gate
+Dependency order: `protocol`, `shared`, `network`, `config`, `expressions`,
+`cache`, `wire`, `observability`, `execution`, `listener`, `toolu-runner`.
+Acyclic graph: `protocol`→`shared` only; `shared`→∅;
+`network`→`shared` (the ONLY production `reqwest` ctor, `client_builder`,
+so `protocol` stays `reqwest`-free, #94); `config`, `expressions`→`shared`;
+`cache`→`shared` (`network` dev-dep only — `L2Tier` takes a caller-built
+client); `observability`→`shared` (never `config`); `wire`→`shared`,
+`protocol`, `network`; `execution`→`shared`, `expressions`, `cache`,
+`network`; `listener`→`execution`, `wire`, `observability`, `shared`,
+`protocol` (live-log client comes from `wire`); `toolu-runner`→`shared`,
+`protocol`, `network`, `config`, `wire`, `observability`, `listener`
+(+ `execution`/`expressions`/`cache` as dev-deps for integration tests).
 
-This repo follows [toolu-conventions](https://github.com/Falconiere/toolu-conventions)
-(`CORE.md` + `stacks/rust`). Read that kit's `CORE.md` and
-`stacks/rust/STRUCTURE.md` first; the rules below are the ones that
-bite here.
+## Gate & house rules
 
-- **The gate is ONE command**, run before every push and mirrored
-  step-for-step by `.github/workflows/ci.yml`:
-  `./tools/check.sh all` = `cargo fmt --check` → `cargo clippy
-  --workspace --all-targets -D warnings` → the `#[allow]` ban →
-  `bash scripts/guardrails/run.sh` → `cargo nextest run --workspace` →
-  `cargo test --workspace --doc` (nextest does not run doctests; needs
-  `cargo-nextest` installed — CI uses `taiki-e/install-action`).
-  **No layer may be disabled to get it green** — not for an unrelated
-  failure, not "just this once".
-- **`scripts/guardrails/` is copied VERBATIM from the kit** and is
-  never hand-edited — change `guardrails.config.json` instead. It
-  needs `jq` **and** `ast-grep` on PATH (`cargo install ast-grep
-  --locked`) and exits 3 without either, so a missing dependency can
-  never look like a clean run.
-- **Workspace guardrail layout.** The root carries
-  `guardrails.workspace.json` (the manifest naming every crate) and
-  must **NOT** carry a `guardrails.config.json`; each crate carries
-  its own. `run.sh` re-execs once per crate with the working directory
-  inside it, so every path in a crate config is **crate-relative**.
-- **No `mod.rs` barrels.** A module that outgrows one file becomes
-  `src/foo.rs` (declaring `mod bar;`) **beside** `src/foo/bar.rs`.
-  There are zero `mod.rs` files in this repo and the gate keeps it
-  that way.
-- **Tests never share a file with production logic.** No inline
-  `#[cfg(test)] mod tests { … }` bodies — the test code lives in a
-  sibling `tests/` folder and the production file keeps only the
-  one-line include:
-  ```rust
-  #[cfg(test)]
-  #[path = "tests/parse_config.rs"]
-  mod tests;
-  ```
-  Each `tests/` tree stays **flat** (a directory inside a `tests/`
-  dir fails the folder-tree check). Crate-root integration tests stay
-  in the top-level `tests/`, one file per surface. Real data, no
-  mock-data tests.
-- **`toolu-runner` integration tests are two Cargo targets (#108).**
-  `autotests = false`; `tests/main.rs` (`integration`) declares every
-  `tests/*.rs` as a module, and `tests/process_env.rs` (`process_env`) holds
-  `auth_store_test` + `secret_sink_coverage_test`, which mutate process env /
-  install the global tracing subscriber. A new `tests/foo.rs` is NOT picked up
-  until you add `mod foo;` to `main.rs`. Test names carry the file as a prefix:
-  `cargo test -p toolu-runner --test integration -- foo::`. Shared helpers are
-  declared once in `main.rs` and reached with `use crate::<helper>;`, so each
-  is compiled once. A test that re-runs its own binary as a child must pass
-  the module-qualified name (`<file>::<test>`) to `--exact`: a filter that
-  matches nothing still exits 0.
-- **The other crates' integration tests are one target each (#109).**
-  `config`, `daemon`, `execution`, `listener`, `network`, `protocol`, `shared`
-  and `wire` use the same `autotests = false` + `tests/main.rs` (`integration`)
-  layout; `cache` has a single test file and keeps Cargo's default. `execution`
-  adds `process_env` (`tests/process_env.rs`) for `network_step_env_test`,
-  which sets proxy env vars process-wide around whole job runs that spawn
-  steps. Run one file with `cargo test -p <crate> --test integration --
-  <file>::` (`<file>::name` for a single test; libtest filters are OR'd
-  substrings). The `network/tests/helpers/*` fixtures and
-  `execution/tests/helpers/orphan_replay.rs` are declared in the crate root
-  (`main.rs`, or `process_env.rs` for the file it holds) that uses them.
-- **Every `src/` submodule folder carries a `README.md`** listing what
-  belongs there, what does not, and one row per file. `src.requireReadme`
-  in each crate's config enforces it — when you add a module folder,
-  add the README and the config entry together.
-- **Doc line on every public item and module** — `///` on every `pub`
-  fn, struct, enum, trait, variant and field, `//!` at the top of each
-  module. `missing_docs = "warn"` under `-D warnings` makes an
-  undocumented public item a CI failure.
-- **Env reads go through the crate's `config` module.** A guardrail
-  pattern rule (`no-direct-env-var`) bans `std::env::var` anywhere but
-  `config.rs` / `config/**` / `tests/**`, so every variable a crate
-  reads is declared and validated in one place. Every crate that reads
-  env has a `src/config.rs` holding its accessors.
-- **500 code-line ceiling per file** (blanks and comment-only lines
-  excluded; anything under a `tests/` dir is exempt). Split the design
-  before you fight the gate.
+Follows [toolu-conventions](https://github.com/Falconiere/toolu-conventions)
+(`CORE.md` + `stacks/rust/STRUCTURE.md` first; below is what bites here).
+
+- **Gate = `./tools/check.sh all`**, mirrored by `.github/workflows/ci.yml`:
+  `cargo fmt --check` → `cargo clippy --workspace --all-targets -D warnings` →
+  `#[allow]` ban → `bash scripts/guardrails/run.sh` → `cargo nextest run
+  --workspace` → `cargo test --workspace --doc` (nextest skips doctests;
+  needs `cargo-nextest`, CI uses `taiki-e/install-action`). **Never disable a
+  layer to go green.**
+- **`scripts/guardrails/` is VERBATIM from the kit** — change
+  `guardrails.config.json`, never the scripts. Needs `jq` **and** `ast-grep`
+  (`cargo install ast-grep --locked`); exits 3 without either.
+- Root carries `guardrails.workspace.json` only, **never**
+  `guardrails.config.json`; each crate carries its own. `run.sh` re-execs per
+  crate, so config paths are **crate-relative**.
+- **No `mod.rs` barrels**: `src/foo.rs` (declares `mod bar;`) beside
+  `src/foo/bar.rs`.
+- **Unit tests never share a file with prod logic**: sibling `tests/` dir +
+  one-line include (`#[cfg(test)] #[path = "tests/x.rs"] mod tests;`).
+  `tests/` trees stay **flat**; crate-root integration tests live in top-level
+  `tests/`, one file per surface. Real data, no mocks.
+- **Integration targets** (`autotests = false` + `tests/main.rs`, #108/#109;
+  `cache` keeps Cargo's default single file): `toolu-runner` has
+  `integration` (`main.rs` declares every `tests/*.rs`) + `process_env`
+  (`auth_store_test`, `secret_sink_coverage_test` — mutate env/subscriber);
+  `execution` adds `process_env` for `network_step_env_test` (process-wide
+  proxy env around job runs). `config`, `daemon`, `listener`, `network`,
+  `protocol`, `shared`, `wire` use one `integration` target. New
+  `tests/foo.rs` needs `mod foo;` in `main.rs`. Run with
+  `cargo test -p <crate> --test integration -- <file>::[name]` (filters are
+  OR'd substrings; `toolu-runner` examples prefixed `foo::`). Helpers declared
+  once in `main.rs` (`use crate::<helper>;`). Child-binary reruns pass the
+  module-qualified `<file>::<test>` to `--exact` (empty match still exits 0).
+  `network/tests/helpers/*`, `execution/tests/helpers/orphan_replay.rs`
+  declared in the using root (`main.rs` or `process_env.rs`).
+- **Every `src/` submodule dir has `README.md`** (belongs / doesn't + row per
+  file); `src.requireReadme` enforces it — add README + config entry together.
+- **`///` on every `pub` item/field/variant, `//!` per module**
+  (`missing_docs = "warn"` + `-D warnings` = CI failure).
+- **Env reads only via the crate's `config` module** (`no-direct-env-var`
+  bans `std::env::var` outside `config.rs` / `config/**` / `tests/**`);
+  every env-reading crate has `src/config.rs`.
+- **500 code lines/file** (blanks/comments excluded; `tests/` exempt).
 
 ### Deliberate deviations from the kit
 
-CORE allows deviating; documenting it here is what makes it a
-decision rather than drift.
+CORE allows deviating; recording it here makes it a decision, not drift.
 
 | Deviation | Kit says | Here | Why |
 | --- | --- | --- | --- |
-| Cargo workspace | one crate, no workspace | 12 crates under `crates/` | The layering (`protocol`/`shared` → … → `listener`) is what keeps `protocol` provably I/O-free; the kit's workspace guardrail machinery supports it. |
-| `rustfmt.toml` `tab_spaces` | `4` | `2` | Adopting 4 would reformat all 341 `.rs` files (4,212 hunks) and reset `git blame` for no behavioural gain. Every other rustfmt option matches the kit. |
-| Lint set | `unwrap_used`/`expect_used` = `warn` | `deny`, plus `panic`/`unreachable`/`todo`/`indexing_slicing`/cast lints denied | Stricter than the kit, not looser. A runner that panics mid-job kills a customer's build. |
-| `#[allow(…)]` / `#[expect(…)]` | not addressed | banned repo-wide (`tools/check.sh`) | Fix the lint, don't silence it. Note the check matches the outer form only — a crate-level `#![allow(…)]` (as in the two `benches/*.rs`) slips through. |
-| `clippy::cast_precision_loss` | on via `pedantic` | `allow` (the other three cast lints stay `deny`) | `PipelineContextData::n` is `f64` because GitHub's context numbers *are* doubles; the `i64`/`u64` widening in `job_message::context_data_de` is the wire contract. No lossless narrowing exists, so denying it would force a suppression at the one honest site. |
-| `functionSize.max` | `100` | `150` (matches `clippy.toml` `too-many-lines-threshold`) | One number, one enforcer — the two must agree, and 150 is the ceiling this codebase was written to. |
-| `knip` / `jscpd` | absent on Rust by design | absent | Node tools; clippy's `dead_code`/`unused_imports` and cargo cover the ground. The kit says the same. |
-| Code-review workflow | `deepseek` + generic checklist | `openrouter` + `.github/code-review-prompt.md`, `JEV_ENABLED`; the `review` job is skipped for the generated `release-pr` PR, and only when it is same-repo (a fork branch of that name is still reviewed) | Repo-tuned; strictly more configured than the template. The release PR is 100% git-cliff/`sed` output, so reviewing it only ever produced false positives; `scripts/test/code_review_workflow_test.sh` pins the skip and its fork guard. |
+| Cargo workspace | one crate | 12 crates | Layering keeps `protocol` provably I/O-free; kit workspace guardrails support it. |
+| `tab_spaces` | `4` | `2` | 4 would reformat 341 files (4,212 hunks) for no gain; all other rustfmt opts match. |
+| Lint set | `unwrap_used`/`expect_used` warn | `deny` + `panic`/`unreachable`/`todo`/`indexing_slicing`/cast denied | Stricter, not looser — a mid-job panic kills a customer build. |
+| `#[allow]` / `#[expect]` | — | banned repo-wide (`tools/check.sh`) | Fix the lint, don't silence it. Outer-form match only; crate-level `#![allow]` (two `benches/*.rs`) slips through. |
+| `cast_precision_loss` | on (pedantic) | `allow`, other three cast lints stay `deny` | `PipelineContextData::n` is `f64` (GitHub numbers are doubles); the `i64`/`u64` widening in `job_message::context_data_de` is the wire contract. |
+| `functionSize.max` | `100` | `150` (= `clippy.toml` `too-many-lines-threshold`) | One number, one enforcer. |
+| `knip` / `jscpd` | absent on Rust | absent | Covered by clippy `dead_code`/`unused_imports` + cargo. |
+| Code-review workflow | `deepseek` + generic checklist | `openrouter` + `.github/code-review-prompt.md`, `JEV_ENABLED`; `review` skipped for same-repo `release-pr` only (fork branch of that name still reviewed) | Release PR is 100% git-cliff/`sed`; review only produced false positives. `scripts/test/code_review_workflow_test.sh` pins skip + fork guard. |
 
-The `unwrap_used` / `expect_used` lints ban the panicking `.unwrap()` /
-`.expect()` methods. Non-panicking `Option` / `Result` fallbacks such as
-`.unwrap_or(...)`, `.unwrap_or_else(...)`, and `.unwrap_or_default()` are
-permitted and preferred over redundant matches that express the same default.
-Keep the lints enabled; these fallback methods do not suppress them.
+`unwrap_used`/`expect_used` ban panicking `.unwrap()`/`.expect()` only —
+`.unwrap_or[_else/_default]()` are permitted and preferred over equivalent
+matches. `secrets.scanExempt` in `crates/config` + `crates/toolu-runner`
+lists **synthetic** masking fixtures (`MIIphony`, `ghs_EXAMPLE…`,
+`ghp_deadbeef…`); extending it requires proving the value isn't a real
+credential.
 
-`secrets.scanExempt` in `crates/config` and `crates/toolu-runner`
-lists the **synthetic** credential fixtures (`MIIphony`,
-`ghs_EXAMPLE…`, `ghp_deadbeef…`) used to test secret masking. Adding
-to that list requires proving the value is not a real credential.
+## Runtime contracts
 
-## Crate-Specific Rules
+- **No OTel in v1**: `tracing-subscriber` + `EnvFilter` only (`info` unless
+  `TOOLU_RUNNER_ALLOW_VERBOSE=1`). JSON to `~/.toolu-runner/_diag/<service>.log`
+  (daily rotation, ignores `TOOLU_RUNNER_HOME`), pretty to stderr, redacted
+  per *Secret masking*.
+- **`protocol` is sync, no I/O/network**: deps limited to `serde`,
+  `serde_json`, `base64`, `jsonwebtoken`, `num-bigint-dig`, `pkcs1`, `sha1`,
+  `sha2`, `aes`, `cbc`, `rsa` (RSA-OAEP AES-key unwrap), `uuid` (+ dev-dep
+  `rand`); enforced by `protocol/Cargo.toml` (no `reqwest`/`tokio`/`opendal`/
+  `bollard`/`axum`). One-way `protocol`→`wire`: `protocol` holds `pub fn`
+  builders/parsers, async transport lives in `wire::net`; `protocol` tests
+  need no client/clock/tokio.
+- **Per-repo single-job concurrency**: registration at
+  `<home>/runners/<owner>/<repo>/` (`$TOOLU_RUNNER_HOME` else
+  `~/.toolu-runner` = persisted `data_dir`). `run` holds an exclusive `fs2`
+  `.lock` there for the whole loop (body JSON: `pid`, `started_at`,
+  `config_path`); a second `run` for the same repo reads the body and exits 2.
+  Legacy single-slot + org-level registrations lock `<home>/.lock`
+  (read-only fallback). Stale locks (holder dead AND mtime > 5 min) are
+  re-acquired. Cross-repo `offline`/`accelerated` runs need a distinct
+  `service_bind` per repo (else EADDRINUSE); `forwarder` binds nothing.
+- **Stable workspaces, default (#90)**: each `owner/repo` job runs in
+  `<work>/<repo>/<repo>` (`runner.workspace` = `<work>/<repo>`), tracked by
+  `<work>/_PipelineMapping/<owner>/<repo>/PipelineFolder.json`. The run `.lock`
+  does NOT cover it (`boot` has none): each job holds an `fs2` lease on the
+  mapping's `.lock` (fresh: `_PipelineMapping/_jobs/<job_id>.lock`) from before
+  context build until `run_job` returns; busy lease → fresh `<work>/<job_id>`.
+  Dirs are created only after container/services/env evaluation
+  (`PreparedWorkspace::create_dirs`). In job containers `RUNNER_WORKSPACE` /
+  `runner.workspace` = `/github` (parent of the `/github/workspace` mount).
+  `mode = "fresh"` keeps the pre-#90 per-job layout; harnesses pre-populating
+  `<work>/<job_id>` pin `WorkspaceMode::Fresh`.
+- **Cancellation**: `run` bridges SIGINT/SIGTERM to one
+  `tokio_util::sync::CancellationToken` shared by poll loop, renewal task and
+  job across re-mints; `--once` opts out to single-job.
+- **JIT protocol**: `v2` github.com, `v1` GHES, auto-selected at `register`;
+  `wire` `feature_detection` handles the shape diff.
+- **Handler dispatch**: no plugin layer, no local orchestrator (removed #97).
+  `steps_runner` splits `run:` vs `uses:`; `action_exec` matches
+  `runs.using` — node → docker → composite. Unsupported `runs.using` fails at
+  manifest parse (`actions/manifest.rs`).
+- **Service mode** (`[services] mode`, `ServicesMode` in `shared`):
+  `forwarder` (default) injects the REAL GitHub service URLs + runtime token
+  from the job message `SystemVssConnection` into step env
+  (`ACTIONS_RESULTS_URL`, `ACTIONS_RUNTIME_URL`(+`_TOKEN`), `ACTIONS_CACHE_URL`,
+  `ACTIONS_CACHE_SERVICE_V2`, `ACTIONS_ID_TOKEN_REQUEST_URL`(+`_TOKEN`));
+  `offline` hosts local fakes (airgap); `Accelerated` serves both cache
+  protocols (v2 Twirp via `RESULTS_URL`, v1 REST via `CACHE_URL`) from local
+  NVMe while proxying `ArtifactService` + rest to GitHub (real token kept).
+  Wired in `execution::service_endpoints`.
+- **Secret masking**: `shared::SecretMasker` (+ `MaskerRedactor`) registered
+  as the tracing `SecretRedactor`; `secrets.*` values and JSON-escaped
+  variants never reach `_diag/runner.log`.
+- **Always-online `run` loop (default)**: per iteration `RunLoop::drive`
+  reloads `config.toml`, runs one `GitHubListener` lifecycle, then
+  `listener::loop_decision::next_action`: completed job or `Auth` error (JIT
+  spent) → `remint_and_persist` (stored `login`/`TOOLU_RUNNER_TOKEN`) and
+  re-poll; other errors → decorrelated-jitter backoff (1s→60s, cancel-aware)
+  on the still-valid config; missing/auth-rejected re-mint bearer → fatal
+  naming `login`/`--token`/`TOOLU_RUNNER_TOKEN`; cancel or `.pending_remove`
+  between jobs → exit 0; `SessionConflict` (409 outlasting the listener's
+  30s×8 retry) → exit `5` (`SESSION_CONFLICT_EXIT_CODE`), never backed
+  off/re-minted, even under `--once`. **Ephemeral (#92)**: `ephemeral = true`
+  never re-mints — `next_ephemeral_action` decides (job ran, or acquired
+  before erroring per `job_acquired()`, → `Unregister`, latter exits 1;
+  cancel/`--once`/`.pending_remove` → exit, state kept; conflict → 5;
+  `Auth` → 1; else backoff on same JIT); `ephemeral.rs` unregisters + deletes
+  local state after the one job.
+- **No self-daemonization**: `run` blocks in foreground; persistence is the
+  OS supervisor via `install-service` (launchd LaunchAgent / systemd user
+  unit, `Restart=always` + `RestartPreventExitStatus=5`; legacy static
+  `scripts/` units from `install.sh --service` remain; launchd `KeepAlive`
+  can't condition on exit code).
+- **`boot`: zero-config one-shot container mode** (no flags; ENTRYPOINT for
+  the toolu.sh image). Env: `TOOLU_JITCONFIG` (required),
+  `TOOLU_DEADLINE` (optional epoch-ms watchdog). In-memory `RunnerConfig`,
+  no files/lock/auth-store/re-mint, one `GitHubListener::run`. Exit codes
+  (`cmd_boot`, applied directly): `0` Success/Skipped/no-job, `1`
+  Failure/Cancelled/listener error, `2` env/config error, `5` session
+  conflict, `124` deadline fired (pre-flight past-deadline check or mid-job
+  graceful-cancel-then-hard-exit).
+- **No `build_tool_*`** (cut); `service_auth`/`service_lifecycle` remain
+  (back the OIDC/artifact/cache axum services).
 
-- **No OTel in v1.** Tracing is `tracing-subscriber` + `EnvFilter`
-  only (`info` unless `TOOLU_RUNNER_ALLOW_VERBOSE=1`). JSON-formatted
-  to `~/.toolu-runner/_diag/<service>.log` (daily rotation; ignores
-  `TOOLU_RUNNER_HOME`), pretty-printed to stderr, redacted per
-  *Secret masking*.
-- **`protocol` crate is strictly sync, no I/O, no network.** Its
-  dependency set is restricted to `serde`, `serde_json`,
-  `base64`, `jsonwebtoken`, `num-bigint-dig`, `pkcs1`,
-  `sha1`, `sha2`, `aes`, `cbc`, `rsa`, `uuid` (dev-dep `rand`). `rsa`
-  was added for message-body decryption (RSA-OAEP AES-key unwrap).
-  Enforced by `protocol/Cargo.toml` (no `reqwest`, `tokio`, `opendal`,
-  `bollard`, `axum`). `wire::net` owns all async I/O.
-- **One-way `protocol` → `wire` boundary.** `protocol`
-  exposes `pub fn` builders and parsers; the async `pub async fn`
-  HTTP transport lives in `wire::net`. Tests against
-  `protocol` need no HTTP client, no clock, no tokio.
-- **Per-repo single-job concurrency.** Each registration lives in
-  `<home>/runners/<owner>/<repo>/` (home = `$TOOLU_RUNNER_HOME`, else
-  `~/.toolu-runner`; the dir is the persisted `data_dir`).
-  `toolu-runner run` acquires an exclusive `fs2` file lock on that
-  dir's `.lock` (body: JSON with `pid`, `started_at`, `config_path`),
-  so jobs for *different* repos run concurrently while a second `run`
-  for the same repo reads the body and exits 2 with the holder's PID.
-  Legacy single-slot registrations (read-only fallback; also org-level
-  registrations) lock `<home>/.lock`. Stale locks (holder PID dead AND
-  mtime > 5 min) are removed and re-acquired by the next `run`.
-  Caveat: concurrent cross-repo runs in `offline` / `accelerated`
-  services mode need a distinct `service_bind` per repo config
-  (EADDRINUSE otherwise); default `forwarder` binds nothing.
-- **Stable per-repository workspaces (#90).** `[workspace] mode =
-  "stable"` (default) runs every job for `owner/repo` in
-  `<work>/<repo>/<repo>` (upstream `_work` layout; `runner.workspace` =
-  `<work>/<repo>`), tracked by `<work>/_PipelineMapping/<owner>/<repo>/
-  PipelineFolder.json`. The run `.lock` does NOT protect it (registrations
-  share the work root, `boot` has no lock): each job holds an `fs2` lease on
-  its mapping's `.lock`, claimed before context build (fresh:
-  `_PipelineMapping/_jobs/<job_id>.lock`, taken when directories are created)
-  and held until `run_job` returns; a busy lease falls back to a fresh
-  `<work>/<job_id>`. Directories are created only after container/services/env
-  evaluation (`PreparedWorkspace::create_dirs`), so setup errors leave none. In a
-  job container `RUNNER_WORKSPACE` / `runner.workspace` is `/github`, the parent
-  of the `/github/workspace` mount (`PathTranslator::runner_workspace_to_container`). `mode = "fresh"` keeps the pre-#90 per-job
-  layout. Test harnesses that pre-populate `<work>/<job_id>` pin
-  `WorkspaceMode::Fresh`.
-- **Cancellation token wiring.** `toolu-runner run` builds a
-  `tokio_util::sync::CancellationToken` and bridges SIGINT / SIGTERM
-  to it. The poll loop, the renewal task, and the in-flight job all
-  listen to it (the whole always-online loop shares one token, held
-  across re-mints). `--once` is the single-job opt-out; the default is
-  the re-mint loop (see the always-online run loop rule below).
-- **JIT config protocol version:** `v2` for github.com, `v1` for
-  GHES. Selected automatically by host at `register` time; the
-  `feature_detection` module handles the wire-shape difference.
-- **Handler dispatch.** There is no plugin layer and no local
-  workflow orchestrator (removed in #97; GitHub orchestrates jobs). The
-  step loop (`steps_runner`) splits `run:` (script) from `uses:`; for a
-  `uses:` action, `action_exec` matches the resolved manifest's
-  `runs.using` — node → docker → composite. An unsupported `runs.using`
-  is rejected at manifest parse (`actions/manifest.rs`, "unsupported
-  runs.using" / "'using: X' is not supported").
-- **Service mode (forwarder / offline / accelerated).** Config
-  `[services] mode` (`ServicesMode` in `shared/src/config.rs`) selects
-  how artifacts / cache / OIDC reach their backends. In `forwarder`
-  mode (the default), the runner reads the REAL GitHub service URLs +
-  runtime token from the job message's `SystemVssConnection` endpoint
-  and injects them into step env (`ACTIONS_RESULTS_URL`,
-  `ACTIONS_RUNTIME_URL`, `ACTIONS_RUNTIME_TOKEN`, `ACTIONS_CACHE_URL`,
-  `ACTIONS_CACHE_SERVICE_V2`, `ACTIONS_ID_TOKEN_REQUEST_URL` /
-  `_TOKEN`), so GitHub-hosted `upload-artifact@v4` / `cache@v4` / OIDC
-  talk to real GitHub. In `offline` mode the runner hosts the local
-  fake services for airgapped use. In `ServicesMode::Accelerated` the
-  runner binds a local content-addressed cache that intercepts BOTH
-  GitHub Actions cache protocols (v2 Twirp `CacheService` via
-  `ACTIONS_RESULTS_URL`, legacy v1 REST via `ACTIONS_CACHE_URL`) and
-  serves them from local NVMe, while a selective reverse proxy forwards
-  `ArtifactService` and everything else to real GitHub — the injected
-  `ACTIONS_RUNTIME_TOKEN` stays the real token. Wired in the
-  `execution` crate's `service_endpoints` module.
-- **Secret masking:** `shared::SecretMasker` (wrapped by
-  `shared::MaskerRedactor`) is registered as the tracing
-  `SecretRedactor` so registered `secrets.*` values (and their
-  JSON-escaped variants) never reach `_diag/runner.log` unredacted.
-- **Always-online run loop (default).** `run` no longer exits after one
-  job. Per iteration `run_cmd::RunLoop` reloads `config.toml`, runs one
-  `GitHubListener` lifecycle, then dispatches
-  `listener::loop_decision::next_action`: on a completed job — or a
-  listener `Auth` error (the single-use JIT is dead) — it re-mints a
-  fresh JIT config with the stored `login` / `TOOLU_RUNNER_TOKEN` bearer
-  (`register_cmd::remint_and_persist`) and re-polls; on any other
-  (transient) error it sleeps a decorrelated-jitter backoff (1s → 60s
-  cap, cancel-aware) and retries the still-valid config. Fatal (exit
-  non-zero) on a missing or auth-rejected re-mint bearer, naming `login`
-  / `--token` (register) / `TOOLU_RUNNER_TOKEN`. Cancel (SIGINT/SIGTERM)
-  or a `.pending_remove` seen between jobs → clean exit 0. A listener
-  `SessionConflict` (session-create 409 that outlasted the listener's
-  bounded 30 s × 8 retry) → exit `5` (`shared::SESSION_CONFLICT_EXIT_CODE`,
-  upstream's `ReturnCode.SessionConflict`), with or without `--once` — the
-  loop never wraps it in backoff or a re-mint. `--once` opts back into
-  single-job semantics (exit with the listener's status). The per-repo
-  `.lock` is held for the whole loop. **Ephemeral exception (#92):** a
-  registration persisted with `ephemeral = true` (`register --ephemeral`)
-  never re-mints — `listener::loop_decision::next_ephemeral_action` decides
-  (a job ran, or was acquired before the lifecycle errored —
-  `GitHubListener::job_acquired` — → `Unregister`, the latter then exits 1; cancel / `--once` / `.pending_remove` → exit,
-  state kept; `SessionConflict` → 5; `Auth` → 1, state kept; else backoff on
-  the same unused JIT) and `ephemeral.rs` unregisters + deletes the local
-  registration after its one job.
-- **No self-daemonization for `run`.** `run` blocks in the foreground
-  and loops; it never double-forks. Boot/crash persistence is delegated
-  to the OS: `toolu-runner install-service` (`service_cmd.rs` below)
-  generates and activates a launchd LaunchAgent (macOS) or a systemd user
-  unit (Linux, `Restart=always`, `RestartPreventExitStatus=5` so a spent
-  session conflict stays down) wrapping `run --config <path>` — the
-  supervisor owns process lifetime, the loop owns registration lifetime.
-  No daemon code. (The static single-slot `scripts/` units installed by
-  `install.sh --service` still exist for legacy hosts; the systemd one also
-  carries `RestartPreventExitStatus=5`. launchd `KeepAlive` cannot condition
-  a restart on an exit code, so a LaunchAgent relaunches into a fresh
-  bounded conflict window.)
-- **`boot`: zero-config one-shot container mode.** No flags — env-driven
-  (`TOOLU_JITCONFIG` required, `TOOLU_DEADLINE` optional watchdog
-  backstop, epoch-ms) for the toolu.sh provider image's ENTRYPOINT.
-  Builds an in-memory `RunnerConfig` (no `config.toml`, no
-  `credentials.json`, no `.lock`, no auth store, no re-mint) and runs
-  `GitHubListener::run` once. `boot_cmd::cmd_boot` returns an explicit
-  process exit code that `main` applies directly (bypassing the other
-  subcommands' uniform Ok-is-0/Err-is-2 mapping): `0`
-  Success/Skipped/no-job, `1` Failure/Cancelled or a listener error, `2`
-  env/config error before polling, `5` a session conflict outlasted the
-  bounded retry, `124` the deadline watchdog fired
-  (checked before any network call for an already-past deadline, or
-  mid-job via a `CancellationToken` graceful-cancel-then-hard-exit).
-- **No `build_tool_*`** — build-tool modules were cut in the port.
-  `service_auth` / `service_lifecycle` are kept (they back the
-  OIDC/artifact/cache axum services).
+## Key modules (per-crate entry points; full file maps live in each `src/**/README.md`)
 
-## Key Modules
+- **`protocol/`** (sync): `auth` (PKCS#1 DER → RSA, PS256 JWT
+  sub/iss=clientId, aud=url, jti, nbf/iat −30s, exp +4m30s), `jit_config`
+  (3-blob base64 envelope), `runner_version::COMPATIBILITY_VERSION` (pinned
+  official-runner identity; product version separate, see
+  `docs/runner-updates.md`), `session` (ephemeral `00000000-…` request:
+  `CreateSessionRequest`/`Response`, `AgentInfo`, `EncryptionKey`,
+  `TaskAgentSession`, `build_session_request`), `auth` fns
+  (`parse_rsa_private_key`, `build_jwt`, `AccessToken`),
+  `messages` (`decrypt_message_body` AES-256-CBC + `strip_bom`;
+  `rsa_oaep`/`body_decrypt` unwrap encrypted session keys), `types`
+  (`.runner`/`.credentials`/`_rsaparams` blobs: `RunnerSettings`,
+  `CredentialData`, `RsaKeyParams`), `v1/` (GHES types + pure `resolve_service_url`),
+  `app_manifest` (prefilled manifest `administration:write`, `public=false`,
+  no webhook; `AppManifest::for_runner`, `ConversionResponse` +
+  `parse_conversion`, CSRF `new_state`, `form_html`,
+  `parse_callback_path` — backs `create-app`).
+- **`shared/`**: `config` (`RunnerConfig` incl. `node_dir`
+  `TOOLU_RUNNER_NODE_DIR`, `NetworkConfig` pure data with `Debug` proxy as
+  `<set>`, `ServicesMode`, `WorkspaceConfig`, `CacheConfig`/`L2Config`);
+  `error::RunnerError`; `events` (`RunnerEvent`, `ListenerEvent`,
+  `Conclusion`); `job_message/`; `paths` (`expand_tilde`: HOME →
+  USERPROFILE → `/var/lib/toolu-runner`; `sanitize_job_id`);
+  `platform` (`runner_os`/`runner_arch` in GitHub spelling shared by
+  `wire`/`listener`/`context_build` — but `AcquireJobRequest.runner_os` sends
+  RAW lowercase `std::env::consts::OS`, a live contract, don't converge);
+  `secret_masker` (single-pass Aho-Corasick, overlapping matches merge to one
+  `***`, `Cow` borrowed on no-match, batch `add_secrets` rebuilds once, WARN
+  fallback to longest-first loop); `startup` (tracing init, `SecretRedactor`,
+  redacting writer, `.env` loader).
+- **`network/` (#94)**: `client_builder(&NetworkConfig)` — only prod
+  `reqwest` ctor (pinned by `network_client_inventory_test`); env mode keeps
+  system proxy, config mode installs `Proxy::all` + percent-decoded Basic auth
+  + `NoProxy` (disables env vars); `ca_bundle` must be absolute regular file
+  with ≥1 valid anchor else `Config` error naming path; `@`-in-path/query or
+  unencoded `/ ? #` in password rejected; `describe` (redacted one-liner) +
+  `proxy_configured` share the validation. `proxy_env::ProxyEnv` is the ONE
+  proxy-env reader (hyper-util `Matcher` semantics; `parse_url`/`redact_url`/
+  `url_secrets` fail safe); `step_env` splits host/container vars
+  (`NODE_EXTRA_CA_CERTS` host-only); `secrets::proxy_secrets` drops usernames.
+  All env reads in `config.rs`; fixtures `tests/helpers/{tls,proxy}_fixtures.rs`
+  `#[path]`-included per test root.
+- **`config/`**: `config.rs` (registration/runtime/credentials types, four
+  `[services]/[cache]/[workspace]/[shadow]` sections + `shared` mappers,
+  TOML/JSON load+save at 0600, `jit_endpoint_for_host` (github.com →
+  `pipelinesgh.azureedge.net`, else `pipelines.<host>`),
+  `resolve_data/work_dir`);
+  `network.rs` (`[network]` section, `deny_unknown_fields`, omitted-when-empty,
+  preserved by re-mint/replace; `resolve()` trims `no_proxy`, expands `~`);
+  `labels.rs` (#92: `default_labels` = `self-hosted` + `RUNNER_OS`/`RUNNER_ARCH`
+  in `shared::platform` spelling, `resolve_labels` additive unless
+  `--no-default-labels`; pinned by `tests/fixtures/jit_labels_probe.json`);
+  `lockfile.rs` (`fs2` guard,
+  sysinfo + mtime>5min stale rule); `auth_store.rs` (home-pinned
+  `token-<host>.json` 0600 default / `keyring` opt-in via
+  `TOOLU_RUNNER_KEYRING`, `TOOLU_RUNNER_NO_KEYRING` back-compat override,
+  `pick_bearer` / `resolve_bearer` / `decide_bearer` with `BearerDecision`
+  (`Use` / `StartDeviceFlow` / `Fail` naming `--token` /
+  `TOOLU_RUNNER_TOKEN` / `login`; pure `keyring_opted_in` /
+  `no_keyring_forced`, `keyring_reachable` gate, `StoredToken`);
+  `app_store.rs` (`StoredApp` at `<home>/github-app.json` 0600:
+  `save_app`/`load_app`, `install_url`, `safe_summary`; backs `create-app`,
+  runtime minting deferred);
+  `registry.rs` (per-repo layout, `runner_home`/`runner_dir` incl. NUL
+  rejection, `list_registrations` returning `Ok(empty)` on missing dirs /
+  `Err` naming unreadable ones, `resolve_config_path`: flag > cwd-inferred >
+  sole > error); `repo_infer.rs` (`parse_remote_url` + `detect_repo` via
+  `git remote get-url` origin, errors name `--url`); `remint.rs` (`merge_reminted_config`, pure merge overwriting ONLY
+  `runner_id`/`auth_token`/`runtime.jit_config`); `service_unit.rs` (pure
+  `ServiceSpec` → `launchd_plist` (incl. `WorkingDirectory`,
+  `EnvironmentVariables`, `launchd_env_path` PATH fold) / `systemd_unit`
+  (incl. `RestartPreventExitStatus=5`)).
+- **`expressions/`**: `${{ }}` evaluator — `lexer`/`parser`/`evaluator`/
+  `template`/`functions` (incl. `hashFiles` via `glob_walk`+`hash`, JSON
+  convert)/`context_data`/`types`/`display` (upstream `ToDisplayString` →
+  `display_string`, `references` for `CheckHasRequiredContext`, `first_line`).
+- **`cache/`** (backs `Accelerated`): `cas/` (FastCDC+BLAKE3: manifest,
+  chunker, store, `chunk_io` with `Durability::Fsync`/`Deferred` defaulting
+  `Deferred` via `[cache] fsync_chunks`, index, gc; `read_chunk_or_restore`
+  self-heals corrupt chunks via L2/miss), `twirp/` v2 RPCs, `blob/`
+  Azure-compatible endpoint, `v1/` legacy REST, `tier/l2.rs` (S3 cold tier,
+  caller-supplied client, not production-wired), `server`/`proxy`/`scope`/
+  `trust`/`accelerated`.
+- **`wire/`**: `net/` async transport — `auth` (deleted-registration 4xx
+  `invalid_client`, live capture `oauth_invalid_client_400.json`, is `Auth`
+  not retried `Protocol`), `device_auth` (host-relative device flow backs
+  `login`), `session` (create/delete; 409 → `SessionConflict`), `messages`
+  (poll+ack), `run_service` (acquire/renew/complete), `results_service` (Twirp
+  step/log RPCs + signed blob URLs), `log_upload` (append-blob),
+  `v1` (GHES discovery + timeline), `register` (`generate-jitconfig`;
+  401/403→`Auth` fatal, else→`Network` so re-mint backs off on 5xx),
+  `app_manifest` (loopback `CallbackServer` 127.0.0.1:0 +
+  `convert_manifest_code` POST).
+  `reporting/`: `run_service` shapes + `map_conclusion`, `results_service`
+  types/URL helpers (`create_job/step_logs_metadata`), `feature_detection` V1/V2, `live_log` (HTTP/1.1 upgrade
+  on caller client; `live_log_client(&NetworkConfig)` is `http1_only`/30s, bad
+  `[network]` WARN-disables it), `log_upload`, `results_types`/`types`.
+- **`observability/`**: `journal/` JSONL per-job journal, on-disk v1 line
+  contract decoupled from `shared::events`; `writer` masks every line, buffers
+  256 pre-acquire events, names `<ts>-<job_id>.jsonl` under
+  `data_dir/_diag/jobs/`, prunes to 50, never fails the job; `reader` tails +
+  `scan_jobs`. Takes `data_dir` from caller, never resolves config. Fixture
+  `tests/fixtures/journal/canonical.jsonl` via `JOURNAL_CAPTURE=1`
+  (`journal_reader_test`/`journal_writer_test`).
+- **`execution/`** (engine): `Runner::execute_job` returns
+  `mpsc::Receiver<RunnerEvent>` — **stream is unmasked**, every sink masks its
+  own line. `job_runner::run_job` returns `JobTeardown`: stops cache servers +
+  emits `JobCompleted`, caller drops sender (closing completion channel)
+  before `finish()` runs GC + workspace sweep overlapping the round-trip.
+  `handlers/` by `runs.using` (script/node+node_exec auto-downloaded/docker/
+  composite/`resolve`); `actions/` resolve+download with single-flight
+  `prefetch` (cap 4, top-level + nested join it, failure evicts and never fails
+  the job); tarball extraction streams (`bytes_stream`→`StreamReader`→
+  `SyncIoBridge`→`spawn_blocking`, never buffered); `artifacts/` (append-blob
+  backend/service); `oidc/`; `context`/composite scaffolding/`step_*`
+  helpers/`step_attrs` (timeout-minutes/continue-on-error)/`step_display`
+  (two-phase names)/`action_exec`+`support`/`command_parser`/`depth_tracker`/
+  `file_commands`/`cgroup_join` (reserved)/`service_auth`+`lifecycle`. Step summaries (#83, below) and
+  job outputs (#88, below) included. `job_http` (#94: job + accelerated clients
+  from `RunnerConfig.network`, proxy-credential masks, host/container exports);
+  `service_endpoints`; `orphan_cleanup` (#89: `RUNNER_TRACKING_ID`,
+  pre-`JobCompleted` SIGKILL, 15s, never fails; SIP-blind Apple binaries covered
+  via registered process groups); `workspace_{layout,tracking,lease}` (#90) +
+  `workspace_gc` (only own `data_dir`, unleased, never the running job);
+  `shadow/` (off-by-default fingerprint records, never serves). `docker/`
+  (bollard; `DOCKER_HOST` mapping incl. Colima/OrbStack/Podman/Rancher; Linux-only
+  actions, remote-pre-failure keeps eligible posts; `Dockerfile` image reuse).
+  `node/` (#95: upstream `HandlerFactory`/`NodeUtil` node20→24 `migration`,
+  glibc/musl + container `/etc/*release` `platform` probe,
+  `ensure_node_runtime`: `TOOLU_RUNNER_NODE_DIR` preseed (upstream `externals/`
+  layout) → `data_dir/node/…` cache → download pins 20.20.2/24.21.0, 3 attempts).
+- **`listener/`** (JIT lifecycle): `handler::GitHubListener`: parse JIT →
+  RSA→JWT→OAuth2 → `retry_session_conflict` (409 = ~3min post-session ghost;
+  re-auth + retry 30s×8, cancel→`Ok(None)`) → `poll_and_execute` (1s→60s
+  backoff, `acquire_job`, early broker ack (`acknowledge_message` — death
+  mid-job trades redelivery for no cancel-watcher re-see) — run,
+  single-attempt WARN-only `acknowledge` demotion,
+  `retry_transient`-wrapped `complete_job` for `Network` only, 1s→60s jitter,
+  `REPORT_RETRY_MAX` 10min budget). Pure `message_route`/`broker_message`
+  (+`broker_refresh` answering `ForceTokenRefresh`) and
+  `loop_decision::{next_action → LoopAction, next_ephemeral_action →
+  EphemeralAction}` (precedence cancel > `--once` > `.pending_remove` >
+  outcome; variants `Reregister` / `BackoffRetry` / `Exit` / `Unregister`).
+  `execute_with_renewal`: 60s renewal task (also
+  hosts the 300s-latch `OutageWatchdog`; trip cancels token and
+  `outage_override` flips non-`Success` to `Failure` + `LOST_CONNECTION_MESSAGE`),
+  `tokio::join!` live-log + `setup_step::report_setup_step` ("Set up job" =
+  step 1, `change_order` 0 vs queue-seeded 1) before engine start; forwarder masks each `Log` once
+  (Cow) across upload/live-log/combined sinks; journal re-masks end-to-end
+  (`secret_sink_coverage_test`); `StepReportQueue` batches
+  `update_workflow_steps` per flush, WARN-drops (never feeds watchdog), 10s
+  `drain()` pre-conclusion;
+  finalize-split (per-step drain before conclusion, combined upload overlaps
+  `complete_job`; handles joined in `cleanup_session` on Ok+Err). Integration
+  tests in `src/tests/{watchdog_retry,watchdog_trip}.rs`. `capture::write_acquired`
+  (#103: 0600/0700 under `_diag/captures/`, WARN-never-fail, compiled always
+  but called only under `capture` cargo feature; sanitize with
+  `scripts/test/sanitize_capture.py`).
+- **`toolu-runner/`** (bin): `cli.rs` (clap surface incl. `after_help` env
+  footer, `debug_assert_cli` via shell-out tests — no lib target).
+  `main.rs`: dispatch (`register`/`run`/`boot` + `install-service` +
+  `login`/`logout` + `status` + `create-app` + `check`/`doctor`, each its
+  `*_cmd.rs`, plus inline `remove`) + `--config` resolution (flag >
+  cwd-inferred > sole > error) + inline `remove` (holds lock across DELETE; held+no-`--force` →
+  `.pending_remove`+exit 2; held+`--force` → state gone but `.lock` KEPT,
+  unregister skipped; else GitHub DELETE with 404-confirmed-by-lookup, then
+  delete state keeping `_diag/`; unregister-first so failure aborts intact;
+  bearer `--token` > `TOOLU_RUNNER_TOKEN` > stored `login`, none = hard
+  error unless `--skip-unregister`; helpers `remove_bearer`,
+  `wire::net::unregister_runner`, `delete_registration_state`).
+  `register_cmd` (`--url` optional, cwd-infer github.com only; `--labels`
+  additive, `--no-default-labels`, `--ephemeral`; bearer inline device flow
+  when interactive, else fail naming options; `generate-jitconfig` → persist
+  all-or-nothing with `data_dir` = registration dir; `remint_and_persist`
+  preserves service/cache/workspace/shadow byte-identical; labels via
+  `config::labels`, #92).
+  `network_setup::lifecycle_client` (per-iteration + `boot` env mode;
+  `NetworkMemo` logs/registers only on change; bad `[network]` = exit 2).
+  `ephemeral::finish_job` (unregister+delete keeping `_diag/`; no bearer or org
+  → local-only with "not verified" output; retryable error keeps state, exit 2).
+  `run_cmd::RunLoop::drive` (`BACKOFF_START`→`BACKOFF_MAX` cancel-aware sleep;
+  conflict exits 5 via downcast `CodedExit`, all else 2;
+  `TOOLU_RUNNER_SESSION_CONFLICT_INTERVAL_MS` overrides 30s wait for
+  `run`+`boot`; missing/rejected re-mint bearer fatal via
+  `REMINT_TOKEN_HELP`). `boot_cmd` (pure `parse_deadline_ms` + exit mapping;
+  `boot_cmd_test`/`boot_cmd_e2e_test`). `service_cmd` (identity from registration dir, `--print`/
+  `--no-activate`/default/`--remove` idempotent; launchd `bootstrap
+  gui/<uid>` (fallback `load -w`) / `bootout`, systemd `daemon-reload` +
+  `enable/disable --now` under `$HOME`; refuses `ephemeral` except `--remove`).
+  `login_cmd` (positional host, no `--config`; shared `run_device_flow`;
+  placeholder `DEVICE_CLIENT_ID` errors pre-network; `--client-id`/
+  `TOOLU_RUNNER_CLIENT_ID` required until the OAuth App exists, always on
+  GHES). `status_cmd` (registration + credential + backend + per-host login
+  state incl. keyring-migration hint; no network). `check_cmd` (#93 read-only
+  preflight: `--url`⊕`--config`, `--timeout` 1–300s def 10; exits 0 all-required-OK
+  / 1 required-failed / 2 usage-config; never locks/writes/sessions/credentials;
+  `check_endpoints` pure host table incl. ServerUrl overrides + GHES/IP skips,
+  `check_probe` one GET (any response but 407 passes; source-chain classified),
+  `check_tools` optional git/docker/node, `check_env` proxy+trust render,
+  `check_report` masked render; tested by `check_cmd_test`/`check_tools_test`
+  against loopback peers). `doctor_cmd` (all registrations, `--config`
+  narrows, `--offline` sends nothing; 0 no-FAIL / 1 FAIL / 2 bad path; never
+  locks — state via lock body + `holder_alive`; one credentialed
+  `GET <api>/user`; `doctor_{report,host,auth,registrations,service}.rs`,
+  network reuses `check_cmd::gather`; `doctor_*_test`). `create_app_cmd` (github.com only; loopback callback,
+  `--no-browser` prints URL; converts code, persists `<home>/github-app.json`;
+  prints install URL, never installs/mints — deferred, `register` flow unchanged;
+  `--name/--host/--no-browser/--force`).
 
-### `protocol/` — sync, no I/O, no network (deps: shared)
+### Step summaries (#83)
 
-- `auth.rs` — `parse_rsa_private_key` (PKCS#1 DER from
-  `.NET RSACryptoServiceProvider` params, computes CRT components),
-  `build_jwt` (PS256, claims: sub=clientId, iss=clientId,
-  aud=authorizationUrl, jti=uuid, nbf=now-30s, iat=now-30s,
-  exp=now+4m30s), `AccessToken` (OAuth2 response shape).
-- `jit_config.rs` — `JitConfig` (parses the 3-blob base64
-  envelope: `.runner` / `.credentials` / `.credentials_rsaparams`).
-- `runner_version.rs` — `COMPATIBILITY_VERSION`, the pinned official-runner
-  compatibility identity shared by session, poll and acknowledgement. Toolu
-  product version stays separate; operator-managed update policy is documented
-  in `docs/runner-updates.md`.
-- `session.rs` — `CreateSessionRequest` / `CreateSessionResponse`,
-  `AgentInfo`, `EncryptionKey` (encrypted-or-raw AES key),
-  `TaskAgentSession`, `build_session_request` (builds the
-  ephemeral `00000000-...` session).
-- `messages.rs` — `BrokerMessage`, `RunnerJobRequestBody`,
-  `BrokerMigrationBody`, `JobCancelBody`, `MessageType` (job / migration /
-  cancellation / control types; `Unknown(String)` for future ones),
-  `decrypt_message_body` (AES-256-CBC with PKCS#7 strip), `strip_bom`.
-  `rsa_oaep.rs` + `body_decrypt.rs` unwrap an `encrypted` session key.
-- `types.rs` — `RunnerSettings` (`.runner` blob), `CredentialData` /
-  `CredentialDataInner` (`.credentials` blob), `RsaKeyParams`
-  (`.credentials_rsaparams` blob; base64 big-endian integers).
-- `v1/` — `ConnectionData`, `JobEvent`, `LocationServiceData`,
-  `ServiceDefinition`, `TimelineRecord` (GHES V1 protocol types).
-  `resolve_service_url` (pure URL resolver).
-- `app_manifest.rs` — GitHub **App Manifest flow** helpers (github.com
-  onboarding, backs `create-app`): `AppManifest::for_runner` (prefilled
-  manifest — `administration:write`, `public=false`, no webhook) +
-  `to_json`, `ConversionResponse` + `parse_conversion` (the
-  `app-manifests/{code}/conversions` reply), `new_state` (CSRF nonce),
-  `form_html` (auto-submitting POST page), `parse_callback_path`
-  (redirect query → code, CSRF-checked).
+`RunnerEvent::StepSummary` = immutable masked doc + backend UUID; listener
+re-masks and uploads only when a Results endpoint exists (serial queue drained
+pre-completion), else skips. Bodies never touch diagnostic sinks (journal keeps
+ID + size only); read/size/upload errors never change the conclusion. Scope in
+`docs/step-summaries.md`.
 
-### `shared/` — cross-cutting types + tracing init (no deps)
+### CompleteJob / StepResult (#88)
 
-- `config.rs` — `RunnerConfig` (data_dir, workspace_root, cgroup_path,
-  services_mode, service_bind, cache, workspace_gc_hours, workspace,
-  shadow_enabled, node_dir — `TOOLU_RUNNER_NODE_DIR`, network) + `NetworkConfig`
-  (`[network]` proxy / `no_proxy` / `ca_bundle`, pure data; `Debug` shows
-  the proxy only as `<set>`) + `ServicesMode` (forwarder / offline / accelerated),
-  `WorkspaceConfig` (`mode`: `WorkspaceMode` stable / fresh,
-  `stable_gc_hours`), `CacheConfig`, `L2Config`.
-- `error.rs` — `RunnerError` enum (Protocol, Auth, Network, Config,
-  StepExecution, ScriptHandler, Expression, Docker, Oidc, Artifact,
-  Cache, Reporting, WorkspaceInit, LockHeld, etc.).
-- `events.rs` — `RunnerEvent` (`JobStarted`, `StepStarted`, `Log`,
-  `StepCompleted`, `JobCompleted`, `Annotation`, `LogGroup`,
-  `StepSkipped`) + `ListenerEvent` (wraps `RunnerEvent` plus
-  `SessionCreated`, `JobAcquired`, `LockRenewed`, `ReportedStatus`).
-  `Conclusion` (Success / Failure / Cancelled / Skipped).
-- `job_message/` — `AgentJobRequestMessage`, `ActionStep`,
-  `ActionStepDefinitionReference`, `TaskOrchestrationPlanReference`,
-  `JobResources`, `JobEndpoint`, `JobAuthorization`, `VariableValue`,
-  `MaskHint`, `TemplateToken`, `WorkspaceOptions`,
-  `PipelineContextData`, `DictEntry`.
-- `paths.rs` — `expand_tilde` (HOME → USERPROFILE →
-  `/var/lib/toolu-runner`) + `sanitize_job_id` (job id →
-  filesystem-safe file name; used by the journal).
-- `platform.rs` — `runner_os` / `runner_arch` (host OS/arch labels in
-  GitHub's spelling — `Linux`/`macOS`/`Windows`, `X64`/`ARM64`; both derived
-  from `std::env::consts`, warn-and-report-verbatim on an unknown target;
-  shared by `wire`, `listener`, and `execution::context_build`). NOTE
-  `listener::job_lifecycle`'s `AcquireJobRequest.runner_os` deliberately sends
-  the RAW lowercase `std::env::consts::OS` instead — a live acquisition
-  contract; do not converge it without evidence GitHub validates the field.
-- `secret_masker.rs` — `SecretMasker` (`add_secret` / batch `add_secrets` +
-  per-line `mask`) and `MaskerRedactor` (implements
-  `startup::SecretRedactor`; see *Secret masking*). `mask` returns `Cow<'_, str>` —
-  `Borrowed` when nothing matches (no per-line alloc on the common path),
-  `Owned` only when a span was replaced — running one
-  `aho_corasick::AhoCorasick` (`MatchKind::Standard`) overlapping pass,
-  merging overlapping/adjacent matches into a single `***` — not a
-  `String::replace` per registered pattern. The automaton is rebuilt once
-  at the end of `add_secret`; `add_secrets` inserts a whole batch and
-  rebuilds exactly once (job startup registers all message
-  variables/mask-hints through the batch path —
-  `ExecutionContext::register_secrets` / `add_masks`). Falls back to the
-  old longest-first `patterns` replace loop if the automaton ever fails
-  to build (WARN-logged) rather than skipping masking.
-- `startup.rs` — `init` / `init_with_redactor` (tracing init with
-  `RUST_LOG` / `TOOLU_RUNNER_LOG` EnvFilter), `SecretRedactor` trait,
-  `RedactingMakeWriter` / `RedactingWriter` (line-level secret
-  redaction), `.env` loader.
-
-### `network/` — proxy / custom-CA HTTP clients (deps: shared) (#94)
-
-- `client.rs` — `client_builder(&NetworkConfig)`: the only production
-  `reqwest` construction (pinned by
-  `toolu-runner/tests/network_client_inventory_test.rs`). Env mode (no
-  `proxy`) keeps reqwest's system proxy; config mode installs
-  `Proxy::all(proxy)` with percent-decoded Basic auth and
-  `NoProxy(no_proxy + LOOPBACK_BYPASS)`, which disables env proxy vars.
-  `ca_bundle` adds anchors (absolute, regular file, every PEM item a valid
-  trust anchor, ≥1 — else `RunnerError::Config` naming the path; never a
-  fallback). A proxy with an `@` in its path, query or fragment, or an `@` but no
-  parsed credentials (an unencoded `/ ? #` in the password), is rejected.
-  `describe` validates the same way and returns the redacted one-line
-  diagnostic (env mode: the proxy each scheme really uses, per
-  `ProxyEnv::effective`); `proxy_configured` is the config-mode test.
-- `proxy_env.rs` — the ONE proxy-env reading and URL handling (the bin's
-  `check` uses it too): `ProxyEnv` (`from_env`, `effective`, `secrets`) mirrors
-  hyper-util's `Matcher::from_system` (first *set* name per pair wins even when
-  empty, unparseable scheme var → `ALL_PROXY`, `REQUEST_METHOD` disables all);
-  `parse_url` (scheme-less → `http://`, only a leading RFC 3986 scheme counts),
-  `redact_url` (never echoes a value that does not parse cleanly) and
-  `url_secrets` (fails safe: such a value is masked whole).
-- `step_env.rs` — `step_env` → `StepNetworkEnv { host, container }`: proxy
-  vars in both casings (config values, or what `ProxyEnv::effective` says the
-  runner uses), `NODE_EXTRA_CA_CERTS` for host steps only.
-- `secrets.rs` — `proxy_secrets`: `url_credentials` (`url_secrets` minus a
-  `user:password` pair's user name) of each effective proxy value.
-- `config.rs` — the crate's env reads (the proxy pairs and `REQUEST_METHOD`). `tests/helpers/tls_fixtures.rs`
-  (rcgen PKI, rustls target) and `tests/helpers/proxy_fixtures.rs`
-  (recording CONNECT proxy) are `#[path]`-included once per test crate root
-  (`network`, `wire`, `execution` and `toolu-runner` `tests/main.rs`,
-  `execution`'s `tests/process_env.rs`, `cache`'s single test file).
-
-### `config/` — registration config, lock, token store (deps: shared)
-
-- `config.rs` — `RunnerRegistrationConfig`, `RuntimeConfig`,
-  `CredentialsFile`, the `[services]` / `[cache]` / `[workspace]` /
-  `[shadow]` sections (`ServicesSection`, `CacheSection`,
-  `WorkspaceSection`, `ShadowSection`) + their `shared::RunnerConfig`
-  mappers, `load_config` / `save_config` (TOML, 0600),
-  `load_credentials` / `save_credentials` (JSON, 0600),
-  `jit_endpoint_for_host` (github.com → `pipelinesgh.azureedge.net`,
-  any other host → `pipelines.<host>`), `resolve_data_dir`,
-  `resolve_work_dir`.
-- `network.rs` — `[network]` section (#94): `NetworkSection` (`proxy`,
-  `no_proxy`, `ca_bundle`; `deny_unknown_fields`; omitted on save when empty,
-  preserved by re-mint and by `register --replace`)
-  and `resolve()` → `shared::NetworkConfig` (trims `no_proxy`, `~`-expands
-  `ca_bundle`); `RunnerRegistrationConfig::network_config()`.
-- `labels.rs` — pure `register` label resolution (#92): `default_labels`
-  (`self-hosted` + `shared::platform` `RUNNER_OS`/`RUNNER_ARCH` spelling) and
-  `resolve_labels` (defaults unless `--no-default-labels`, then `--labels`;
-  empty entries dropped, case-insensitive dedupe keeping the first spelling,
-  256-char limit, upstream's error for `--no-default-labels` without labels).
-  Pinned against the live `generate-jitconfig` capture
-  `tests/fixtures/jit_labels_probe.json`.
-- `lockfile.rs` — single-job `fs2` file lock. `acquire(path,
-  config_path)` returns a `LockGuard`; `Drop` releases the OS
-  advisory lock. Stale-lock recovery uses `is_pid_alive` (sysinfo)
-  + mtime > 5 min.
-- `auth_store.rs` — GitHub token persistence. `AuthStore`
-  (`File(<runner home>/token-<host>.json)` 0600 DEFAULT / `Keyring` via
-  the `keyring` crate opt-in), `StoredToken`, per-host
-  `save`/`load`/`delete`, pure `pick_bearer` (flag > env > stored) +
-  `resolve_bearer`, and the pure TTY gate `decide_bearer` →
-  `BearerDecision` (`Use` / `StartDeviceFlow` / `Fail` naming `--token` /
-  `TOOLU_RUNNER_TOKEN` / `login`). `AuthStore::new` picks the backend:
-  `File` by default (macOS Keychain ACLs bind to the code signature —
-  every rebuild re-prompts; 0600 matches the on-disk `credentials.json`
-  threat model); `TOOLU_RUNNER_KEYRING` (pure `keyring_opted_in`) opts in
-  to the OS keyring, gated on the read-only `keyring_reachable` probe;
-  `TOOLU_RUNNER_NO_KEYRING` (pure `no_keyring_forced`, back-compat)
-  overrides the opt-in and skips the probe (headless/CI/locked
-  keyrings). The store is pinned to
-  the runner home (shared by all repos). Used for the
-  `generate-jitconfig` bearer — at `register` time and on every re-mint
-  in the always-online `run` loop.
-- `app_store.rs` — GitHub App credential persistence: `StoredApp`
-  (`save_app` / `load_app` at `<home>/github-app.json`, 0600) +
-  `install_url` / `safe_summary`. Home-root store shared by all repos;
-  backs `create-app`. Not yet consumed at runtime (installation-token
-  minting deferred).
-- `registry.rs` — per-repo registration layout + discovery:
-  `runner_home()` (`$TOOLU_RUNNER_HOME`, `~` expanded, >
-  `~/.toolu-runner`), `runner_dir` (`<home>/runners/<owner>/<repo>`,
-  path-component validation incl. NUL rejection), `RegistrationEntry`,
-  `list_registrations` (scan `runners/*/*/config.toml` + legacy root;
-  returns `Result` — missing dirs are `Ok(empty)`, an unreadable
-  existing dir is an `Err` naming the path, stray non-dir entries are
-  skipped), `resolve_config_path` (flag > cwd-inferred > sole
-  registration > error listing candidates).
-- `repo_infer.rs` — cwd repo inference: pure `parse_remote_url`
-  (scp-like / `https://` / `ssh://` remote forms) + `detect_repo`
-  (`git -C <cwd> remote get-url origin`; each error names the `--url`
-  escape hatch).
-- `remint.rs` — re-mint merge for the always-online `run` loop: pure
-  `merge_reminted_config(prior, jit_config, runner_id, client_id)`
-  clones `prior` and overwrites ONLY the three mint-derived fields
-  (`runner_id`, `auth_token` = client_id, `runtime.jit_config`),
-  leaving `[services]` / `[cache]` / `[workspace]` / `[shadow]` (and the
-  rest of `[runtime]`) byte-identical. Backs
-  `register_cmd::remint_and_persist`.
-- `service_unit.rs` — pure supervisor-unit builders for
-  `install-service`: `ServiceSpec` + `launchd_plist` (macOS LaunchAgent —
-  `KeepAlive` + `RunAtLoad`, XML-escaped, stdout/stderr to
-  `<data_dir>/_diag/service.{out,err}.log`, plus `WorkingDirectory` and an
-  `EnvironmentVariables` `PATH` built by `launchd_env_path`) / `systemd_unit`
-  (Linux user unit — `Restart=always`, `RestartSec=5`,
-  `RestartPreventExitStatus=5`, `WantedBy=default.target`, double-quoted `ExecStart` so paths with spaces
-  survive; ignores `env_path`/`work_dir`). `launchd_env_path` folds the
-  installing shell's `PATH` with `/opt/homebrew/{bin,sbin}`, `/usr/local/bin`
-  and the system four, first-occurrence-wins — launchd otherwise gives an agent
-  only `/usr/bin:/bin:/usr/sbin:/sbin`, and job steps inherit the runner
-  process's env. No I/O — the bin writes and activates the rendered text.
-
-### `expressions/` — the `${{ }}` evaluator (deps: shared)
-
-- The full `${{ }}` evaluator: `lexer`, `parser` (AST + precedence +
-  primary), `evaluator`, `template`, `functions` (builtins,
-  ` hashFiles` — registered with the dispatcher; `glob_walk` + `hash`
- back it — plus JSON convert), `context_data`, `types` (`ExprValue`),
- `display` (upstream's step display-name helpers: `display_string` —
- the prettified `ToDisplayString` fallback that unrolls `format()` back
- into `${{ }}` template text — `references` for the
- `CheckHasRequiredContext` gate, and `first_line`).
-
-### `cache/` — content-addressed CI cache (deps: shared)
-
-- Content-addressed CI cache backing `ServicesMode::Accelerated`:
-  `cas/` (content-addressed store — `manifest`, `chunker`, `store`,
-  `chunk_io`, `index`, `gc`; FastCDC + BLAKE3), `twirp/` (v2
-  `CacheService` RPCs), `blob/` (Azure-blob-compatible endpoint),
-  `v1/` (legacy REST on the CAS), `tier/l2.rs` (S3 cold tier; `from_config`
-  takes the `reqwest::Client` it sends through — not wired in production yet),
-  `server.rs`, `proxy.rs` (selective reverse proxy), `scope.rs` (read
-  ladder + write scope), `trust.rs` (branch-scoped writes),
-  `accelerated.rs`. `chunk_io::Durability` (`Fsync` / `Deferred`) gates
-  the per-chunk fsync on `write_atomic`: chunk writes default to
-  `Deferred` (`CasStore::with_fsync_chunks` / `[cache] fsync_chunks`,
-  default `false`; manifest writes are always `Fsync`). `store.rs`'s
-  `read_chunk_or_restore` self-heals a BLAKE3 verify-on-read mismatch —
-  removes the corrupt chunk (WARN-and-continue on a failed removal)
-  and falls through to an L2 restore or a clean miss, instead of
-  leaving the entry permanently poisoned.
-
-### `wire/` — async HTTP transport + reporting domain types (deps: shared, protocol, network)
-
-- `net/` — async network layer. **One-way dependency on `protocol`**
-  (request types from `protocol`, response types in `protocol` or
-  `reporting`). `auth` (token exchange; a 4xx OAuth `invalid_client` — GitHub's reply once
-  the runner registration was deleted, live capture
-  `tests/oauth_invalid_client_400.json` — is `RunnerError::Auth`, never a
-  retried `Protocol`), `device_auth` (GitHub
-  OAuth **device flow** — `request_device_code` / `poll_for_token`
-  / pure `parse_poll_response`; host-relative so GHES works;
-  backs `toolu-runner login`), `session` (create / delete
-  session; a 409 → `RunnerError::SessionConflict`), `messages` (poll + acknowledge), `run_service`
-  (acquire / renew / complete), `results_service` (Twirp RPCs:
-  `update_workflow_steps`, `create_job_logs_metadata`,
-  `create_step_logs_metadata`, signed blob URLs), `log_upload`
-  (Azure append-blob: create / block / commit), `v1` (GHES
-  `connectionData` discovery, timeline record POST), `register`
-  (the live JIT `generate-jitconfig` POST; non-2xx mapping is
-  loop-critical — 401/403 → `RunnerError::Auth` (fatal), any other
-  status → `RunnerError::Network` so the re-mint loop backs off on a
-  transient 5xx instead of dying), `app_manifest` (the
-  `create-app` loopback `CallbackServer` on `127.0.0.1:0` +
-  `convert_manifest_code` — POSTs `app-manifests/{code}/conversions`).
-- `reporting/` — domain types and async wrappers for the Run
-  Service and Results Service. `run_service` (request/response
-  shapes, `map_conclusion`), `results_service` (Twirp request
-  types, signed-URL helpers), `feature_detection` (V1 vs V2
-  detection), `live_log` (WebSocket streamer for real-time logs to
-  the GH UI; the handshake is an HTTP/1.1 upgrade on a caller-supplied
-  client — `live_log_client(&NetworkConfig)` builds it `http1_only` with a
-  30 s connect timeout, and the listener calls it with `RunnerConfig.network`
-  (a bad `[network]` WARNs and disables the live log) — wrapped by `WebSocketStream::from_raw_socket`,
-  so it shares every other client's proxy and trust (#94)), `log_upload`, `results_types`, `types` (`Status`,
-  `ReportConclusion`, `StepResult`, `Annotation`).
-
-### `observability/` — job journal (deps: shared)
-
-- `journal/` — per-job JSONL event journal. `types` pins the on-disk
-  line contract (v1: `{"v":1,"seq":N,"ts":"…","type":"<snake_case
-  event>",…}`, decoupled from `shared::events` — internally-tagged
-  serde enum flattened into a version/seq/ts envelope). `writer` masks
-  every line through the job's `SecretMasker` (a `step_metadata` line
-  records each row's non-secret action identity; infrastructure errors
-  land as `error` annotations), buffers pre-acquire
-  events (cap 256), names the file `<UTC ts>-<job_id>.jsonl` under
-  `data_dir/_diag/jobs/`, prunes to the newest 50, and NEVER fails
-  the job (WARN once, keep draining). `reader` is the incremental
-  replay/tail reader (`poll()` advances only past complete lines)
-  plus `scan_jobs` head/tail-window summaries. The crate reads NO
-  configuration: `writer::jobs_dir_for(data_dir)` joins `_diag/jobs`
-  onto the caller's (`listener::handler`) `data_dir`, never resolving it.
-  Test fixture: `tests/fixtures/journal/canonical.jsonl`, captured
-  from a real engine run via `JOURNAL_CAPTURE=1 cargo test -p
-  toolu-runner --test integration -- journal_writer_test::capture_canonical`, and
-  read back by `journal_reader_test.rs` / `journal_writer_test.rs`.
-
-### `execution/` — job execution engine (deps: shared, expressions, cache, network)
-
-- `lib.rs` — `Runner` struct (config, `execute_job` returns an
-  `mpsc::Receiver<RunnerEvent>`). **The event stream is unmasked** —
-  `RunnerEvent::Log` lines carry no masking; every consumer (job/step
-  log upload, the live-log WebSocket, the journal writer, the tracing
-  file sink) must mask its own line before it reaches a durable sink.
-- `execution/` — the engine. `job_runner::run_job` is the single
-  entry point, returning a `JobTeardown` (`job_teardown.rs`, `pub mod`
-  in `execution.rs`) instead of `()`: it stops local cache servers
-  and emits `JobCompleted` before returning, and the caller must drop
-  the job's event sender — closing the channel that reports completion
-  to GitHub — before calling `JobTeardown::finish`, which runs cache GC
-  and joins the `spawn_blocking` workspace sweep so both overlap the
-  completion round-trip instead of blocking it. `steps_runner` runs
-  the per-job step loop. `handlers/`
-  dispatches by `runs.using`: `script` (shell), `node` / `node_exec`
-  (Node.js actions, auto-downloaded), `docker` (bollard), `composite`
-  (composite actions), `resolve` (kind detection). `actions/` resolves
-  and downloads actions (`resolver`, `downloader`, `manifest`).
-  `actions/prefetch.rs` is the single-flight `ActionFetcher`: job start
-  kicks a capped (4) parallel prefetch of every distinct top-level remote
-  `uses:` ref (deduped via `actions/resolver.rs::resolve_action_refs`),
-  and step-time resolution (top-level AND composite nested) joins the
-  same in-flight fetch instead of re-downloading; a failed fetch evicts
-  its entry so step time retries fresh, and a prefetch failure alone
-  never fails the job. Tarball extraction (actions downloader + node
-  runtime) streams the HTTP body (`bytes_stream` → `StreamReader` →
-  `SyncIoBridge`) into a sync `extract_tarball(impl Read, …)` inside
-  `spawn_blocking` — no whole-tarball buffering, no CPU-bound work on
-  async workers. `artifacts/` (upload / download via
-  Azure append-blob; `backend` + `service` with `handlers` /
-  `lifecycle`). `oidc/` (OIDC token server + claims). `context` (env,
-  secrets, masking), `composite_*` (composite action scaffolding),
-  `step_env` / `step_naming` / `step_state` (step
-  helpers), `step_attrs` (execution-time `timeout-minutes` /
-  `continue-on-error` tokens, workflow and composite `action.yml`, with
-  upstream's diagnostics), `step_display` (upstream's two-phase display
-  names: job-start message contexts, then live contexts before the
-  condition; pre stages keep the job-start name), `action_exec` / `action_support` (action invocation
-  glue), `cgroup_join` (reserved), `command_parser`, `depth_tracker`,
-  `file_commands`, `service_auth` / `service_lifecycle` (back
-  OIDC/artifact/cache axum services). E0–E3 wired the live job path:
-  `command_dispatch` (stdout `::workflow-command::` pipeline),
-  `node_stage` / `post_drain` (pre/post step stages + `STATE_`),
-  `composite_uses` (local `./` + composite nested `uses:`),
-  `step_timeout` (`timeout-minutes` / `working-directory`),
-  `job_runner/job_http.rs` (#94: the job client and accelerated upstream
-  client from `RunnerConfig.network`, the job masks for proxy credentials,
-  the host-step export handed to `ExecutionContext::set_network_env` —
-  folded via `inherited_process_env` / Node's delta env under workflow env —
-  and the job / service container proxy vars, `or_insert`), `job_spec`
-  / `job_hooks` (job `outputs:`, `defaults.run`, job hook env),
-  `context_build` (full `${{ }}` context), `service_endpoints`
-  (forwarder / offline / accelerated service-URL injection).
-  `orphan_cleanup.rs` (#89) gives each job a `RUNNER_TRACKING_ID`
-  (`github_<uuid>`, host spawns only, via `step_process_env::apply`;
-  `process.clean=false` disables it) and, in `finish_execution` before
-  `JobCompleted`, `SIGKILL`s every other process still carrying it (sysinfo:
-  Linux `/proc`, macOS `KERN_PROCARGS2`; 15 s deadline; never fails the job).
-  SIP macOS hides Apple platform binaries' env, so the sweep also kills
-  same-uid processes started during the job in a step's registered process
-  group (`ProcessTracking::register_group` / `release_if_empty`; the module doc
-  has the reuse guards and the uncovered `setsid` case).
-  `workspace_layout.rs` (+ `workspace_tracking.rs`, `workspace_lease.rs`)
-  allocates and leases the job workspace (#90); `workspace_gc.rs` prunes
-  stable workspaces unused for `stable_gc_hours` (default never) and fresh
-  ones older than `gc_after_hours`, only when owned by this `data_dir` and
-  unleased (pre-#90 lease-less dirs: mtime only; never the running job's). `shadow/`
-  (`fingerprint`, `record`) does off-by-default per-`run:`-step
-  workspace fingerprinting, appending masked `would_hit` / `false_hit`
-  records to `_diag/shadow/<job_id>.jsonl` — records only, never
-  serves.
-- `docker/` — bollard wrapper. `client` (Docker daemon; `resolve_docker_host`
-  maps `execution::config::docker_host()` — i.e. `DOCKER_HOST` — to the
-  endpoint, defaulting to `unix:///var/run/docker.sock`, so Colima / OrbStack /
-  Podman / Rancher Desktop are reachable), `services` (service container
-  lifecycle), `path_translator` (host ↔ container path mapping).
-  Container actions use `action_container` (owned stage lifecycle/output),
-  `action_image` (registry pulls and Dockerfile image reuse), `action_archive`
-  (Docker ignore rules and symlink-preserving build contexts), and
-  `action_mounts` (standard action mounts and path translation).
-  `execution/docker_action` and `docker_stage` connect these to production
-  dispatch, inputs, workflow/file commands, and pre/main/post state. Docker
-  actions are Linux-only; local actions skip pre, and remote pre failures
-  retain eligible posts for cleanup. Stages borrow the job-container network or,
-  for host jobs with services, the service network through main and post.
-- `node/` — Node.js runtime selection + acquisition (#95). `migration`
-  ports upstream's node20 → node24 decision (`HandlerFactory`/`NodeUtil`:
-  job variables `actions.runner.{usenode24bydefault,requirenode24,warnonnode20}`,
-  `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24` / `ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION`
-  from the stage env or runner process; state on `ExecutionContext.node_migration`,
-  end-of-job warnings in `job_runner/complete_step.rs`). `platform` classifies
-  the host (dynamic loader ⇒ glibc/musl; unsupported OS/CPU errors) and job
-  containers (upstream's `/etc/*release` probe, cached per job by
-  `docker/container_os.rs`; Alpine is x64-only). `runtime::ensure_node_runtime`
-  is the single entry (`node_stage::run_node_stage`): authoritative
-  `TOOLU_RUNNER_NODE_DIR` preseed (`RunnerConfig.node_dir`, upstream
-  `externals/` layout, mounted ro at `/github/externals`) → cache
-  `data_dir/node/{version}[-alpine]` → download (nodejs.org /
-  `actions/alpine_nodejs`, pins 20.20.2 / 24.21.0) via `download` (staging,
-  `validate`'s `node --version` start check for host-runnable targets, atomic
-  rename; transient failures retried, 3 attempts).
-
-### `listener/` — GitHub JIT lifecycle (deps: execution, wire, observability, shared, protocol)
-
-- `handler::GitHubListener` is the entry point: parse JIT →
-  authenticate (RSA → JWT → OAuth2) → create session →
-  `poll_and_execute`. Session creation goes through
-  `session_conflict::retry_session_conflict`: a `SessionConflict` (409,
-  another live session for this registration — github.com keeps answering
-  409 for ~3 min after a session ends) re-authenticates and retries every
-  30 s for up to 8 attempts (`SessionConflictPolicy`, upstream's 4 min;
-  `GitHubListener::with_session_conflict_policy`), then returns the
-  conflict; cancel during the wait → `Ok(None)`; any other error ends the
-  retry with its own classification. `job_lifecycle::poll_and_execute` owns the
-  long-poll loop with exponential backoff (1s → 60s cap), acquire_job,
-  run_acquired_job, acknowledge_message, complete_job. The broker ack is
-  fired EARLY — right after `acquire_job` succeeds, not at job end (the
-  cancel watcher's cursor starts at 0 and would only re-see-and-skip the
-  un-acked job message; accepted trade: death mid-job loses broker
-  redelivery, the job waits out GitHub's lock timeout). `message_route`
-  is the pure "what does the runner do with this broker message type"
-  decision (unit-testable without a live broker); `broker_message`
-  applies it (unknown types skipped), `broker_refresh` answers
-  `ForceTokenRefresh`.
-  `execution_loop::execute_with_renewal` runs the job with a 60s
-  renewal task, an event forwarder that streams logs to the
-  Results Service, and a oneshot that captures the final conclusion.
-  Startup overlaps `connect_live_log` and `report_setup_step` under
-  `tokio::join!` (engine starts only after both). The forwarder masks
-  each `Log` line ONCE (Cow) and reuses it for all three sinks
-  (per-step upload, live-log, combined job log); the journal writer
-  still masks every line itself (deliberate — it is the end-to-end
-  leak guard, `secret_sink_coverage_test`). Step transitions go through
-  `step_report_queue.rs` (`StepReportQueue`): the forwarder enqueues
-  without awaiting the network, a dedicated task batches whatever is
-  queued into one `update_workflow_steps` per flush (per-request
-  `change_order` seeded 1; setup-step's direct report keeps 0), flush
-  failures WARN-drop and never feed the `OutageWatchdog`, and a
-  10s-bounded `drain()` completes before the conclusion fires.
-  Completion is finalize-split: per-step upload drain (feeds every
-  step's `completed_log_url` in `CompleteJobRequest.step_results`)
-  stays BEFORE the conclusion send; only the combined job-log upload
-  is spawned and overlaps `complete_job`, its `JoinHandle` carried on
-  `SessionCtx` (like `live_log`) and joined unconditionally in
-  `cleanup_session` on both Ok and Err paths.
-  `setup_step::report_setup_step` reports "Set up job" as step 1
-  (matches C# runner order). `step_reporter::StepCollector`
-  aggregates per-step results. `helpers::spawn_renewal` is the
-  background renewal task — fixed 60s interval, no backoff — and now
-  also hosts the mid-job outage watchdog (see `outage.rs` below):
-  `RunnerError::Network`-class renewal failures feed it, a trip cancels
-  the job's `CancellationToken` and sets a write-once flag that
-  `execute_with_renewal` reads (after joining the renewal task) to
-  override a non-`Success` conclusion to `Failure` plus a "lost
-  connection" annotation (folded by `outage_override::apply_outage_override`,
-  which owns `LOST_CONNECTION_MESSAGE`). `outage.rs` is the pure `OutageWatchdog`
-  (300s threshold, latch; `pub`, tested from `crates/listener/tests/`).
-  `retry.rs` (`pub(crate)`) has `retry_transient` — retries
-  `RunnerError::Network` only with jittered 1s→60s backoff, cancel-aware,
-  budget-bounded (`REPORT_RETRY_MAX` 10 min) — wrapping `complete_job` in
-  `job_lifecycle::poll_and_execute`, which also demotes
-  `acknowledge_message` to a single-attempt, WARN-only, non-gating call.
-  `src/tests/watchdog_retry.rs` + `src/tests/watchdog_trip.rs` (declared
-  from `lib.rs` with `#[cfg(test)] #[path = …]`) are the integration test
-  home for both. `log_uploader/` owns the per-step log
-  streamer and the combined job-log upload. `helpers::cleanup_session`
-  deletes the broker session on exit. Listener events are drained to
-  the `observability::journal` writer (replacing the old no-op drain).
-  `loop_decision::next_action` (→ `LoopAction`) is the pure
-  per-iteration decision for the bin's always-online `run` loop —
-  precedence cancel > `--once` > `.pending_remove` > outcome
-  (`Err(SessionConflict)` → `Exit(5)`, also under `--once`; `Ok(())`
-  and `Err(Auth)` → `Reregister` since the JIT is spent/dead, any other
-  `Err` → `BackoffRetry`) — unit-testable without a broker, mirroring
-  `message_route`. `next_ephemeral_action(outcome, job_acquired,
-  LoopSignals)` (→ `EphemeralAction`) is the same decision for an
-  `--ephemeral` registration (no re-mint; see the always-online rule's
-  ephemeral exception). `GitHubListener::job_acquired()` reports whether the
-  last `run()` acquired a job (set from `SessionCtx.job_acquired` right after
-  `acquire_job`), even when it then returned an `Err`.
-  `capture::write_acquired` (#103) writes the decoded acquire body to
-  `<data_dir>/_diag/captures/` (0600 file, 0700 dir, WARN-never-fail). It is
-  always compiled (tested in the gate), but its only call site, right after
-  `acquire_job`, exists only under the non-default `capture` cargo feature
-  (`listener/capture`, forwarded by `toolu-runner/capture`); release builds
-  never enable it. Raw captures hold secrets: sanitize with
-  `scripts/test/sanitize_capture.py` before committing anything.
-
-### `toolu-runner/` — CLI bin (deps: shared, protocol, network, config, wire, observability, listener)
-
-- `cli.rs` — the clap surface: `Cli` (top-level parser with
-  Examples/Environment `after_help` — `TOOLU_RUNNER_TOKEN` /
-  `TOOLU_RUNNER_CLIENT_ID` / `TOOLU_RUNNER_HOME` in the Environment
-  footer — `propagate_version`, `arg_required_else_help`), `Command`
-  enum, per-subcommand args structs with full `--help` text (`--url`
-  is `Option` — absent means "infer from the cwd git remote"; every
-  `--config` doc states the resolution default), the arg-default
-  helpers (`default_labels`, `runner_name_or_hostname`,
-  `work_folder_or_default`, `credentials_path_for`), and
-  `debug_assert_cli` (clap's definition self-check, run at startup in
-  debug builds — exercised by the shell-out CLI tests since the
-  bin-only crate has no lib target for a unit test).
-- `main.rs` — CLI entrypoint: parse + dispatch (`register` →
-  `register_cmd`, `run` → `run_cmd`, `boot` → `boot_cmd` (intercepted
-  before the generic dispatch — see `boot_cmd.rs` below), `install-service`
-  → `service_cmd`, `login`/`logout` → `login_cmd`, `status` →
-  `status_cmd`, `create-app` → `create_app_cmd`, `check` → `check_cmd`
-  and `doctor` → `doctor_cmd` (both intercepted like `boot` for their own
-  exit codes))
-  plus the inline `remove` handler.
-  `--config` resolution for `run` / `remove` / `status` /
-  `install-service`: flag > cwd-inferred
-  `runners/<owner>/<repo>/config.toml` > the sole registration (legacy
-  `<home>/config.toml` included) > error listing candidates
-  (`config::registry::resolve_config_path`). `remove` **acquires** the job
-  lock (`config::lockfile::acquire`) to decide whether a run is in flight —
-  atomic, reuses the stale-lock rule, and held across the DELETE so no `run`
-  can start mid-removal. Lock held + no `--force` → `.pending_remove` +
-  exit 2; lock held + `--force` → local state goes but `.lock` is KEPT (fs2
-  is inode-scoped; unlinking it would let a second `run` race the live job)
-  and the unregister is skipped. Otherwise it unregisters on GitHub
-  (`wire::net::unregister_runner` — DELETE `…/actions/runners/{id}`, name
-  lookup when no id; a 404 is confirmed by a lookup before counting as
-  "already gone", since GitHub also 404s what a token may not see) and only
-  then deletes `config.toml` / `credentials.json` / `.lock` /
-  `.pending_remove`, keeping `_diag/`. Unregister-first is load-bearing: the
-  persisted id/URL are the only handle, so a failed call aborts with local
-  state intact. Bearer `--token` > `TOOLU_RUNNER_TOKEN` > stored `login`
-  (empty = absent); NO token is a hard error, not a warning —
-  `--skip-unregister` is the explicit opt-out.
-- `register_cmd.rs` — `cmd_register` + `register_and_persist` (split
-  out of `main.rs`). `--url` optional: absent infers the repo from the
-  cwd git remote `origin` (`config::repo_infer`; github.com only —
-  GHES and org runners need an explicit `--url`). Bearer: `--token` >
-  `TOOLU_RUNNER_TOKEN` env > stored login token
-  (`config::auth_store::resolve_bearer` against the home-root store);
-  no token + interactive stderr → inline device flow
-  (`auth_store::decide_bearer` + `login_cmd::run_device_flow`),
-  non-interactive fails listing the manual options. POSTs
-  `generate-jitconfig` (`wire::net::register_jit`), parses the minted
-  config, persists config + credentials into
-  `<home>/runners/<owner>/<repo>/` (org URLs keep `<home>/config.toml`;
-  `--config` overrides) with `data_dir` = the registration dir —
-  all-or-nothing, config rollback on a credentials-write failure. Also
-  pre-creates the registration dir's `_diag/` (WARN-not-fatal — a
-  self-evident layout nicety; `run` recreates what it needs anyway).
-  `remint_and_persist` (loop path) mints a fresh JIT config, folds it
-  into the prior config via `config::remint::merge_reminted_config`
-  (preserving `[services]`/`[cache]`/`[workspace]`/`[shadow]` verbatim),
-  and rewrites `config.toml` / `credentials.json` all-or-nothing.
-- Labels/ephemeral (#92): `register` resolves labels through
-  `config::labels` (`--labels` additive to the defaults,
-  `--no-default-labels`) and persists `--ephemeral` as the config's
-  `ephemeral` key.
-- `network_setup.rs` — `lifecycle_client`: per `run` iteration (from the
-  reloaded `[network]`) and for `boot` (env mode), builds the listener /
-  re-mint client; a `NetworkMemo` (local to `RunLoop::drive`) makes it
-  register new `network::proxy_secrets` and log the `network::describe` line
-  only when they change from the previous pass. An unusable `[network]` exits 2 like a
-  corrupt config. `remove` and `check` build theirs from the registration's
-  `[network]`; `login`, `create-app` and the first `register` use env mode.
-- `ephemeral.rs` — `finish_job`: after an ephemeral registration's one job,
-  unregister it with the crate root's `remove_bearer` +
-  `wire::net::unregister_runner` (404 confirmed by lookup), then
-  `delete_registration_state` (`_diag/` kept). No bearer or an org URL →
-  local state removed and the output says GitHub-side removal was not
-  verified (GitHub removes a used JIT runner itself — verified live). A
-  retryable unregister error keeps the local state and fails naming
-  `toolu-runner remove` (exit 2).
-- `run_cmd.rs` — the always-online `run` loop (`cmd_run`, extracted from
-  `main.rs`). Startup: init tracing, resolve + load config, acquire the
-  per-repo `.lock` (held for the whole loop), bridge SIGINT/SIGTERM to
-  one `CancellationToken`, and WARN (unless `--once`) when no login token
-  is stored. `RunLoop::drive` reloads `config.toml` and runs one
-  `GitHubListener` lifecycle per iteration, then acts on
-  `listener::loop_decision::next_action` as the always-online rule above
-  describes (`BACKOFF_START` → `BACKOFF_MAX`, cancel-aware
-  `sleep_or_cancel`). A session conflict exits 5 through the typed
-  `CodedExit` error that `main` downcasts (every other `Err` stays exit
-  2). `config::session_conflict_policy` reads
-  `TOOLU_RUNNER_SESSION_CONFLICT_INTERVAL_MS` (test/ops override of the
-  30 s wait; attempts stay 8) for both `run` and `boot`. A missing or
-  auth-rejected re-mint bearer is fatal (`REMINT_TOKEN_HELP`).
-- `boot_cmd.rs` — `cmd_boot`: the zero-config one-shot container mode
-  (`toolu-runner boot`, no flags). Reads `TOOLU_JITCONFIG` /
-  `TOOLU_DEADLINE` straight from the env, builds an in-memory
-  `RunnerConfig` (no persisted state), bridges SIGINT/SIGTERM to a
-  `CancellationToken` (reuses `run_cmd::spawn_signal_bridge`), registers
-  the raw `TOOLU_JITCONFIG` blob with the `SecretMasker` behind the
-  tracing redactor, spawns a deadline watchdog task when `TOOLU_DEADLINE`
-  parses, and runs `GitHubListener::run` once — then aborts and joins the
-  watchdog handle (so its grace-period sleep can't hard-exit a finished
-  process, and a panic in it is logged). Returns the explicit exit code
-  the `boot` crate rule above tabulates. `parse_deadline_ms` and the exit-code mapping
-  are pure; pinned by the shell-out tests in
-  `tests/boot_cmd_test.rs` / `tests/boot_cmd_e2e_test.rs` (bin-only
-  crate, no lib target for inline unit tests).
-- `service_cmd.rs` — `cmd_install_service`: resolve the config like
-  `run`, derive the service identity from the registration dir
-  (`io.toolu.runner.<owner>.<repo>` / `toolu-runner-<owner>-<repo>.service`;
-  legacy root → `io.toolu.runner` / `toolu-runner.service`), render the
-  unit via `config::service_unit`, then per the flags: `--print` (stdout
-  only) / `--no-activate` (write + print the activation command) /
-  default (write + activate) / `--remove` (deactivate + delete,
-  idempotent). Activation shell-outs: launchd `launchctl bootstrap
-  gui/<uid>` (fallback `load -w`) / `bootout` (fallback `unload`);
-  systemd `systemctl --user daemon-reload` + `enable --now` /
-  `disable --now`. Files land at `~/Library/LaunchAgents/<label>.plist`
-  / `~/.config/systemd/user/<unit>` (honoring `$HOME`). Non-macOS/Linux
-  errors naming launchd/systemd. No network, no tracing init. Refuses an
-  `ephemeral = true` registration (render/install; `--remove` still works).
-- `login_cmd.rs` — `LoginArgs` / `LogoutArgs` (positional host; **no
-  `--config`** — the token store is pinned to
-  `config::registry::runner_home()`, shared by all repos) + `cmd_login`
-  / `cmd_logout` handlers, the shared `run_device_flow` (reused by
-  `register`'s inline flow), and the browser-open helper.
-  Holds the baked-in `const DEVICE_CLIENT_ID` (placeholder until the
-  OAuth App is registered — using it errors before any network call);
-  until then every device flow needs `--client-id` (login) or
-  `TOOLU_RUNNER_CLIENT_ID` env, and GHES always does.
-- `status_cmd.rs` — `cmd_status`: prints the persisted registration (incl.
-  `mode:` ephemeral / persistent),
-  credential presence, the token-store backend (file default / keyring
-  opt-in), and any stored device-flow login token for the registered host
-  **plus per-host login state** (the not-logged-in line carries the
-  keyring-migration hint). No network (split out of `main.rs`).
-- `check_cmd.rs` (#93) — `toolu-runner check`, the read-only preflight
-  (upstream `run.sh --check`): `CheckArgs` (`--url` conflicts with
-  `--config`, `--timeout` 1–300 s, default 10) + `cmd_check` → explicit exit
-  code that `main` applies directly like `boot`'s: `0` every applicable
-  required endpoint answered (optional WARNs allowed), `1` a required
-  endpoint failed, `2` usage/config error before probing. Target: `--url` >
-  `--config` > `crate::resolve_config(None)` > github.com defaults (the
-  header names which). Never takes the `.lock`, writes, opens a session or
-  sends a credential. Split by concern: `check_endpoints.rs` (pure host
-  table from upstream `ActionsCheck.cs`; registration `ServerUrl` /
-  `ServerUrlV2` / `AuthorizationUrl` override pipelines / broker / token;
-  GHES skips broker (V1) and results; IP-literal GHES skips codeload),
-  `check_probe.rs` (one GET per endpoint, production client defaults + bound,
-  no redirects; ANY response passes except 407; failures classified from the
-  error *source* chain — the top-level message embeds the URL),
-  `check_tools.rs` (git / docker / node subprocesses, `kill_on_drop` +
-  timeout; always optional), `check_env.rs` (renders `network::ProxyEnv` — the
-  proxy reading `run` itself uses — and rustls-native-certs trust anchors;
-  `network::redact_url` / `url_secrets` for proxy and `DOCKER_HOST` userinfo), `check_report.rs` (render through a
-  `SecretMasker` seeded with those credentials; exit code). Env reads for all
-  of it live in `config.rs`. Pinned by `tests/check_cmd_test.rs` /
-  `tests/check_tools_test.rs` against real loopback peers
-  (`tests/helpers/check_servers.rs`).
-- `doctor_cmd.rs` — `toolu-runner doctor`, the read-only health check over
-  every registration (`--config` narrows; `--offline` sends no request). Exit
-  code applied by `main` like `check`'s: `0` no `FAIL` row, `1` a `FAIL` row,
-  `2` a missing `--config` path. Never takes a `.lock` (run state = lock body +
-  `holder_alive`; holding it would make a starting `run` fail `LockHeld`),
-  writes, creates dirs or opens a session; its one credentialed request is
-  `GET <api>/user`. Sections live in `doctor_{report,host,auth,registrations,
-  service}.rs`; the network section reuses `check_cmd::gather`. Pinned by
-  `tests/doctor_*_test.rs`.
-- `create_app_cmd.rs` — `cmd_create_app`: runs GitHub's **App Manifest
-  flow** to create a user-owned GitHub App in one click (github.com
-  only; a `--host` other than github.com errors as unsupported). Binds a
-  loopback `CallbackServer` (`wire::net::app_manifest`) on `127.0.0.1:0`,
-  opens the browser to a prefilled manifest form
-  (`protocol::app_manifest`; `--no-browser` prints the URL instead),
-  catches the redirect, exchanges the code at
-  `POST app-manifests/{code}/conversions`, and persists the app
-  credentials to `<home>/github-app.json` (`config::app_store`, 0600).
-  PRINTS the install URL — does NOT install the app or mint installation
-  tokens (deferred; `register` still uses `--token`/env/device-flow this
-  release). Flags: `--name`, `--host`, `--no-browser`, `--force`.
+`StepResult` mirrors upstream `StepResult.cs` (snake_case, string
+status/conclusion, `action_name`/`ref`/`type` from `StepMetadata`, always-sent
+annotations) + engine-final "Complete job" row evaluating job outputs then
+`actionsEnvironment.url` (no `secrets` context; masker-changed value dropped
+with upstream warning). `CompleteJobRequest` echoes `billingOwnerId`, sends
+`infrastructureFailureCategory` only for typed `RunnerError::ActionFetch` on a
+failed step. Lanes in `docs/test-coverage.md` (#88).
 
 ## References
 
-- [toolu-conventions](https://github.com/Falconiere/toolu-conventions)
-  — the house kit this repo follows. `CORE.md` (stack-agnostic rules),
-  `stacks/rust/STRUCTURE.md` (the Rust layout), `stacks/rust/SETUP.md`
-  (what a scaffold ships), `guardrails/README.md` (the check module in
-  `scripts/guardrails/`). See "House Conventions & The Gate" above for
-  what applies here and the deviations on record.
-- [docs/architecture.md](docs/architecture.md) — high-level design +
-  sequence diagrams for register / run / cancel / reconnect.
-- [docs/macos-developer-tools.md](docs/macos-developer-tools.md) — macOS
-  Developer Tools (XProtect) setting that removes local build/test stalls;
-  each developer's choice, never scripted.
+- House kit: `CORE.md`, `stacks/rust/STRUCTURE.md` + `SETUP.md`,
+  `guardrails/README.md`. Deviations recorded above.
+- [docs/architecture.md](docs/architecture.md) — register/run/cancel/reconnect design + sequences.
+- [docs/macos-developer-tools.md](docs/macos-developer-tools.md) — un-stalling macOS builds (per-developer, never scripted).
 - [docs/known-bugs.md](docs/known-bugs.md) — listener bug tracker.
-- [docs/release-profile.md](docs/release-profile.md) — why `[profile.release]` is
-  `opt-level = "s"` + fat LTO, the 10% hot-path threshold and the benchmark
-  evidence; `scripts/test/release_profile_test.sh` pins it.
-- [docs/compatibility-matrix.md](docs/compatibility-matrix.md) — epic #67
-  acceptance matrix (generated from `compatibility-matrix.json`; CI runs
-  `scripts/test/compat_matrix_check.py --check`). Lanes, capture/sanitization,
-  the official-runner reference lane and recorded differences:
-  [docs/compatibility-evidence.md](docs/compatibility-evidence.md). Only a
-  `passed` lane with evidence is coverage.
-- [docs/toolu/specs/2026-06-18-toolu-runner-standalone-design.md](docs/toolu/specs/2026-06-18-toolu-runner-standalone-design.md)
-  — design spec (gitignored as `docs/toolu/`).
-- [docs/toolu/plans/2026-06-18-toolu-runner-standalone.md](docs/toolu/plans/2026-06-18-toolu-runner-standalone.md)
-  — build plan.
-- [docs/toolu/specs/2026-07-14-always-online-run-loop-design.md](docs/toolu/specs/2026-07-14-always-online-run-loop-design.md)
-  — always-online `run` loop + `install-service` design spec.
-- [docs/toolu/plans/2026-07-14-always-online-run-loop.md](docs/toolu/plans/2026-07-14-always-online-run-loop.md)
-  — always-online `run` loop build plan.
-
-### Step summary events (#83)
-
-`RunnerEvent::StepSummary` carries an immutable masked document and a backend
-UUID. When a Results Service endpoint is available, the listener masks again
-before enqueueing for upload and drains its serial queue before completion.
-Without an endpoint, it skips upload. Unlike log events, summary bodies must never be
-written to diagnostic sinks; journal events contain only the ID and byte size.
-Summary read/size/upload errors do not change the execution conclusion. See
-`docs/step-summaries.md` for verification scope and GHES's skipped status.
-
-### CompleteJob / StepResult payload (#88)
-
-`StepResult` follows upstream `StepResult.cs`: `snake_case` keys, string
-`status`/`conclusion`, `action_name`/`ref`/`type` from
-`RunnerEvent::StepMetadata` (`execution::step_metadata`), always-sent
-`annotations`. The engine reports a final "Complete job" row
-(`job_runner/complete_step.rs`) that evaluates job outputs and then
-`actionsEnvironment.url` (`execution::environment_url`, no `secrets`
-context); a value the masker changes is dropped with upstream's warning.
-`CompleteJobRequest` echoes `billingOwnerId` and sends
-`infrastructureFailureCategory` only from a typed
-`RunnerError::ActionFetch` on a step that ended failed. See
-`docs/test-coverage.md` (#88) for the verified and unverified lanes.
+- [docs/release-profile.md](docs/release-profile.md) — `[profile.release]` `s`+LTO rationale; pinned by `scripts/test/release_profile_test.sh`.
+- [docs/compatibility-matrix.md](docs/compatibility-matrix.md) (+
+  [docs/compatibility-evidence.md](docs/compatibility-evidence.md)) — epic #67 matrix
+  (from `compatibility-matrix.json`, `compat_matrix_check.py --check`); only an
+  evidenced `passed` lane counts.
+- `docs/toolu/specs/2026-06-18-*.md` + `docs/toolu/plans/2026-06-18-*.md` — standalone design + build plan (gitignored `docs/toolu/`).
+- `docs/toolu/specs/2026-07-14-always-online-run-loop-design.md` + `plans/…` — run loop + `install-service` spec/plan.
