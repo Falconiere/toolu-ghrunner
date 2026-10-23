@@ -1367,7 +1367,7 @@ now `RunnerError::Auth`, as upstream treats `invalid_client`.
 | AC-6, 92-S3 no job / restart | Same harness, idle broker then a job | SIGTERM before a job → exit 0, state kept, 0 DELETE; restarted `run` takes the job and cleans up | `restart_before_the_first_job_keeps_then_uses_the_registration` |
 | AC-7, 92-S3 unregister outcomes | Same harness, DELETE 500 / 404 + empty list / no token | 500 → exit 2, state kept, names `toolu-runner remove`; 404 confirmed by lookup → removed; no token → removed, "not verified" | `failed_unregister_keeps_the_registration`, `already_removed_runner_counts_as_unregistered`, `no_token_removes_local_state_and_says_unverified` |
 | AC-8 | Pure decision table, incl. "acquired, then completion failed" | every precedence row | `cargo test -p listener --test integration -- loop_decision_test::` |
-| Loop edges | Same `run` harness: org URL; one 500 on `/session` then a job; `--once` + 500; `.pending_remove` + 500; live 409 capture on every session POST; `completejob` 400 after the acquire | org → removed, "not verified", 0 DELETE; retry → 2 session POSTs, no mint, cleaned; `--once` → exit 1, 1 POST, kept; pending → exit 0, kept; conflict → exit 5 after 8 POSTs, kept; completion failure → cleaned, exit 1 | `ephemeral_run_test` (`org_registration_…`, `transient_failure_…`, `once_with_…`, `pending_remove_…`, `session_conflict_…`, `acquired_job_with_failed_completion_still_cleans_up`) |
+| Loop edges | Same `run` harness: org URL; one 500 on `/session` then a job; `--once` + 500; `.pending_remove` + 500; live 409 capture on every session POST; `completejob` 400 after the acquire | org → unregistered through `orgs/{org}` (#201), removed; retry → 2 session POSTs, no mint, cleaned; `--once` → exit 1, 1 POST, kept; pending → exit 0, kept; conflict → exit 5 after 8 POSTs, kept; completion failure → cleaned, exit 1 | `ephemeral_run_test` (`org_registration_…`, `transient_failure_…`, `once_with_…`, `pending_remove_…`, `session_conflict_…`, `acquired_job_with_failed_completion_still_cleans_up`) |
 | AC-9, 92-S4 | Persisted ephemeral config through the binary | `install-service --print` / `--no-activate` → exit 2, no unit; `--remove` works; `status` prints `mode:` | `cargo test -p toolu-runner --test integration -- install_service_test:: config_resolve_test::` |
 | AC-10, 92-S2 live | github.com runs above | run conclusions failure / success / cancelled; toolu exit 0; runners 404; label sets match | `bash scripts/test/ephemeral_92_live_check.sh` |
 | AC-12, 92-S3 already removed | Live 400 `invalid_client` capture replayed to `exchange_token` and through the `run` binary; live re-run against deleted runner 168 | `RunnerError::Auth`; `run` exits 1 at once, state kept, 0 DELETE / mint, hint names `toolu-runner remove` | `cargo test -p wire --test integration -- oauth_invalid_client::`; `dead_registration_before_a_job_exits_1_and_keeps_state` |
@@ -1738,3 +1738,32 @@ differences, by design: config mode replaces env `NO_PROXY` instead of
 merging it; upstream reads lower-case variables first, reqwest (and so env
 mode here) upper case first; `NODE_EXTRA_CA_CERTS` is new (upstream exports
 no CA).
+
+## GitHub App registration (#201)
+
+`register --app` mints the JIT config with a GitHub App installation token and
+records `[auth] kind = "app"`. Plain `register` does the same when
+`github-app.json` names the URL's host and no personal token is given. `run`
+then re-mints after every job with a cached or fresh installation token. Spec:
+`docs/toolu/specs/2026-10-23-github-app-installation-token-design.md`
+(gitignored).
+
+Real data:
+- Shell-out tests run the built binary in temporary homes against loopback
+  peers.
+- The peers replay live 401/404 captures (2026-10-23) and GitHub's documented
+  success examples from `crates/toolu-runner/tests/fixtures/github_app/`. Each
+  file records where it came from, and the example token is sanitized.
+- App JWTs are verified with the public half of a test key that is registered
+  to no App (`crates/protocol/tests/fixtures/app_jwt_test_key.pem`).
+
+| Criterion / scenario | Real input and production path | Expected result | Runnable check |
+| --- | --- | --- | --- |
+| S1 App JWT | `build_app_jwt_at` with the test key; tampered and non-PEM inputs | RS256, `iat` −60 s, `exp` +540 s, `iss` = App id; verifies with the public key; key errors never echo the PEM | `cargo test -p protocol --test integration -- app_jwt_test::` |
+| S2 register | Real `register --app` binary; loopback installation, `access_tokens` and `generate-jitconfig` | installation found, token minted, JIT minted with `Bearer <installation token>`, `[auth] kind = "app"` persisted; not installed → exit 2 naming where it is installed | `cargo test -p toolu-runner --test integration -- register_app_test:: github_app_wire_test::` |
+| S3 / AC-1 re-mint | Real `run` binary through two jobs | re-mint with the cached installation token; other sections byte-identical | `cargo test -p toolu-runner --test integration -- run_app_remint_test::` |
+| S4 / AC-2 failures | Live 401 / 404 `Integration not found` captures, a 503 | 401/404 fatal with the App's fix; 503 backs off | same suite |
+| AC-3 token registrations | pre-#201 `config.toml` text; token `register` / re-mint | a config without `[auth]` loads as token and saves without one; re-mint unchanged | `cargo test -p config --test integration -- registration_auth_test::` |
+| AC-4 masking | App PEM, JWTs and installation tokens through every durable sink | none reaches `_diag` or the journal | `cargo test -p toolu-runner --test process_env -- secret_sink_coverage_test::` |
+| S5 live, personal repo | **pending**: the throwaway App supplied for this check | register, job, re-mint, second job | live run on github.com |
+| S5 live, organization | **unverified**: `create-app` makes a private (`public: false`) App owned by the user, which GitHub lets only the owning account install | org runner registers and re-mints with an App installation token | moved to #202 (its live S4) |

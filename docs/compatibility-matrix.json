@@ -13827,7 +13827,7 @@
       "input": [
         "crates/toolu-runner/tests/fixtures/ephemeral_92_live.json"
       ],
-      "expected": "Mode contract tested: run re-mints per job; --once exits 1 on a transient failure keeping state; ephemeral run unregisters after one job; org registration removes local state with 'not verified'; install-service refuses an ephemeral registration (--remove still works); status prints the mode. Live: GitHub removes a used JIT runner without a DELETE (runner 170).",
+      "expected": "Mode contract tested: run re-mints per job; --once exits 1 on a transient failure keeping state; ephemeral run unregisters after one job; an org registration is unregistered through orgs/{org} (#201) and removed; install-service refuses an ephemeral registration (--remove still works); status prints the mode. Live: GitHub removes a used JIT runner without a DELETE (runner 170).",
       "production_path": "toolu-runner run_cmd/ephemeral/service_cmd/status_cmd; listener::loop_decision",
       "tests": [
         [
@@ -13844,7 +13844,7 @@
         ],
         [
           "crates/toolu-runner/tests/ephemeral_run_test.rs",
-          "org_registration_removes_local_state_and_says_unverified"
+          "org_registration_unregisters_through_the_org_runners_api"
         ],
         [
           "crates/toolu-runner/tests/ephemeral_run_test.rs",
