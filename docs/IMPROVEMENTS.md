@@ -351,8 +351,8 @@ single PR.
 ### IMP-DO-006 — README quick-start has no no-sudo install path
 - **Severity:** M | **Effort:** S
 - **Rationale:** `install.sh` defaults to `/usr/local/bin` which is unwritable on a Linux box without sudo. `install.sh` supports `--install-dir`, but `README.md:16` only shows the `curl | sh` form. Linux users running the quick start on a fresh VM get "no write permission to `/usr/local/bin`" with no next-step pointer.
-- **Fix:** Add a 4-line "no-sudo install" subsection under Quick start: `curl ... | bash -s -- --install-dir $HOME/.local/bin`, then `export PATH=$HOME/.local/bin:$PATH`. Reference the same `--install-dir` path the script already supports.
-- **Refs:** `README.md:14`, `install.sh:39`
+- **Fix:** Resolved in `install.sh`: when `/usr/local/bin` is not writable and no `--install-dir` was given, the script falls back to `$HOME/.local/bin` before downloading, prints the chosen dir, and ends with a PATH hint when that dir is not on `PATH`. The README install block shows the no-sudo default, the `| sudo bash` form and `--install-dir`. `--service` is skipped (with a pointer to `toolu-runner install-service`) whenever the binary is not at `/usr/local/bin/toolu-runner`, since the static units hardcode that path.
+- **Refs:** `README.md:14`, `install.sh:39`, `tests/install_sh_test.sh` (test 14)
 
 ### IMP-DO-007 — `install.sh` has no "existing install" or "service already running" handling
 - **Severity:** M | **Effort:** M

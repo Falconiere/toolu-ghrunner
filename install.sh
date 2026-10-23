@@ -5,7 +5,9 @@
 #   - detect arch (x86_64 / aarch64 / arm64)
 #   - detect OS (darwin / linux)
 #   - download the matching release artifact
-#   - install to /usr/local/bin/toolu-runner (or --install-dir)
+#   - install to /usr/local/bin/toolu-runner (or --install-dir); when
+#     /usr/local/bin is not writable (Apple Silicon macOS, non-root Linux)
+#     and no --install-dir was given, fall back to ~/.local/bin
 #   - optionally install + start the service unit (--service)
 #
 # Usage:
@@ -22,7 +24,15 @@ set -euo pipefail
 REPO="${TOOLU_RUNNER_REPO:-Falconiere/toolu-ghrunner}"
 BIN_NAME="toolu-runner"
 
-INSTALL_DIR="/usr/local/bin"
+DEFAULT_INSTALL_DIR="${TOOLU_RUNNER_INSTALL_DIR:-/usr/local/bin}"
+# Set lazily: HOME may be unset (set -u) in a bare container; then there is
+# no fallback and the default is used as is.
+FALLBACK_INSTALL_DIR=""
+# The static units under scripts/ hardcode this path (see install_service).
+STATIC_UNIT_BIN="/usr/local/bin/$BIN_NAME"
+INSTALL_DIR=""
+INSTALL_DIR_EXPLICIT=0
+INSTALL_DIR_FALLBACK=0
 VERSION=""
 SERVICE=0
 CHECK=0
@@ -36,28 +46,38 @@ USAGE:
 
 OPTIONS:
   --version <v>        Install a specific version (e.g. v0.1.0). Default: latest.
-  --install-dir <dir>  Directory to install the binary into. Default: /usr/local/bin.
-  --service            Also install + start the service unit (launchd plist on macOS,
-                       systemd unit on Linux). Requires the matching service file in
-                       the release tarball at scripts/.
+  --install-dir <dir>  Directory to install the binary into. Default: /usr/local/bin
+                       when writable, else \$HOME/.local/bin (printed, with a PATH
+                       hint). An explicit dir is used as given, no fallback.
+  --service            Also install + start the static service unit (launchd plist on
+                       macOS, systemd unit on Linux) shipped in the release tarball
+                       at scripts/. Those units hardcode $STATIC_UNIT_BIN, so
+                       the unit is skipped (with a warning) when the binary lands
+                       anywhere else — use "$BIN_NAME install-service" instead.
   --check              Print the install plan and exit. No download, no install.
   --help, -h           Show this message and exit.
 
 ENVIRONMENT:
   TOOLU_RUNNER_REPO    Override the GitHub owner/repo. Default: $REPO.
+  TOOLU_RUNNER_INSTALL_DIR
+                       Preferred install dir when --install-dir is absent. Still
+                       falls back to \$HOME/.local/bin when not writable.
 
 EXAMPLES:
   # Print the plan without downloading.
   bash install.sh --check
 
-  # Install the latest release.
+  # Install the latest release (/usr/local/bin, or ~/.local/bin without sudo).
   curl -fsSL https://get.toolu.sh/pkg/ghrunner/install | bash
+
+  # Force /usr/local/bin on a host where it needs root.
+  curl -fsSL https://get.toolu.sh/pkg/ghrunner/install | sudo bash
 
   # Install from a fork (TOOLU_RUNNER_REPO): fetch that fork's script directly.
   curl -fsSL https://raw.githubusercontent.com/\$TOOLU_RUNNER_REPO/main/install.sh | bash
 
-  # Install v0.1.0 to /opt/bin and set up the service.
-  bash install.sh --version v0.1.0 --install-dir /opt/bin --service
+  # Install v0.1.0 to /opt/bin (then "$BIN_NAME install-service" for a unit).
+  bash install.sh --version v0.1.0 --install-dir /opt/bin
 
 After install, register the runner with:
   $BIN_NAME register --url <repo_url> --token <reg_token> --name <name> --labels self-hosted,<os>,<arch>
@@ -84,7 +104,13 @@ while [[ $# -gt 0 ]]; do
       ;;
     --install-dir)
       [[ $# -ge 2 ]] || die "--install-dir requires a value"
+      # Strip trailing slashes so the static-unit path comparison below and
+      # the printed paths stay canonical (but keep a bare "/").
       INSTALL_DIR="$2"
+      while [[ "$INSTALL_DIR" == */ && "$INSTALL_DIR" != "/" ]]; do
+        INSTALL_DIR="${INSTALL_DIR%/}"
+      done
+      INSTALL_DIR_EXPLICIT=1
       shift 2
       ;;
     --service)
@@ -176,6 +202,68 @@ asset_url() {
 VERSION_LABEL="${VERSION:-latest}"
 ASSET_URL="$(asset_url "$VERSION" "$OS" "$ARCH")"
 
+# --- install dir resolution ------------------------------------------------
+
+# A dir is usable when it exists and is writable, or does not exist and its
+# nearest existing ancestor is writable (so mkdir -p will succeed).
+dir_writable() {
+  local d="$1"
+  while [[ ! -e "$d" ]]; do
+    local parent
+    parent="$(dirname "$d")"
+    [[ "$parent" != "$d" ]] || return 1
+    d="$parent"
+  done
+  [[ -d "$d" && -w "$d" ]]
+}
+
+# Explicit --install-dir is used as given (an unwritable one fails at install
+# time, no fallback). Otherwise prefer the default and fall back to
+# ~/.local/bin when the default is not writable — the common case on Apple
+# Silicon macOS (root-owned /usr/local/bin) and on any non-root Linux user.
+if [[ -n "${HOME:-}" ]]; then
+  FALLBACK_INSTALL_DIR="$HOME/.local/bin"
+fi
+if [[ "$INSTALL_DIR_EXPLICIT" -eq 1 ]]; then
+  :
+elif dir_writable "$DEFAULT_INSTALL_DIR" || [[ -z "$FALLBACK_INSTALL_DIR" ]]; then
+  INSTALL_DIR="$DEFAULT_INSTALL_DIR"
+else
+  INSTALL_DIR="$FALLBACK_INSTALL_DIR"
+  INSTALL_DIR_FALLBACK=1
+fi
+
+# The static units in the tarball hardcode $STATIC_UNIT_BIN; a unit pointing at
+# a binary that is not there would just crash-loop under launchd / systemd.
+SERVICE_STATUS="no"
+if [[ "$SERVICE" -eq 1 ]]; then
+  if [[ "$INSTALL_DIR/$BIN_NAME" == "$STATIC_UNIT_BIN" ]]; then
+    SERVICE_STATUS="yes"
+  else
+    SERVICE_STATUS="skipped (static unit expects $STATIC_UNIT_BIN; run \"$BIN_NAME install-service\" after registering)"
+  fi
+fi
+
+fallback_note() {
+  if [[ "$INSTALL_DIR_FALLBACK" -eq 1 ]]; then
+    echo "  note:          $DEFAULT_INSTALL_DIR is not writable; using $INSTALL_DIR (pass --install-dir to override, or re-run with sudo)"
+  fi
+}
+
+path_hint() {
+  case ":$PATH:" in
+    *":$INSTALL_DIR:"*) ;;
+    *)
+      cat <<EOF
+
+$INSTALL_DIR is not on your PATH. Add it to your shell profile:
+
+  export PATH="$INSTALL_DIR:\$PATH"
+EOF
+      ;;
+  esac
+}
+
 # --- --check: print plan, exit --------------------------------------------
 
 if [[ "$CHECK" -eq 1 ]]; then
@@ -184,7 +272,8 @@ if [[ "$CHECK" -eq 1 ]]; then
   echo "  detected os:   $OS"
   echo "  version:       $VERSION_LABEL"
   echo "  install dir:   $INSTALL_DIR"
-  echo "  service:       $([[ $SERVICE -eq 1 ]] && echo yes || echo no)"
+  fallback_note
+  echo "  service:       $SERVICE_STATUS"
   echo "  would download: $ASSET_URL"
   echo "  would install to: $INSTALL_DIR/$BIN_NAME"
   exit 0
@@ -209,6 +298,24 @@ if [[ -z "$VERSION" ]]; then
   ASSET_URL="$(asset_url "$VERSION" "$OS" "$ARCH")"
 fi
 
+# --- prepare install dir (before downloading anything) ---------------------
+
+if [[ ! -d "$INSTALL_DIR" ]]; then
+  if mkdir -p "$INSTALL_DIR" 2>/dev/null; then
+    :
+  else
+    err "install dir $INSTALL_DIR does not exist and could not be created"
+    err "re-run with sudo, or pass --install-dir <writable dir>"
+    exit 1
+  fi
+fi
+
+if [[ ! -w "$INSTALL_DIR" ]]; then
+  err "no write permission to $INSTALL_DIR"
+  err "re-run with sudo, or pass --install-dir <writable dir>"
+  exit 1
+fi
+
 # --- download + extract ----------------------------------------------------
 
 TMPDIR="$(mktemp -d -t toolu-runner-install.XXXXXX)"
@@ -221,6 +328,9 @@ echo "installing $BIN_NAME $VERSION_LABEL"
 echo "  arch:        $ARCH"
 echo "  os:          $OS"
 echo "  install dir: $INSTALL_DIR"
+if [[ "$INSTALL_DIR_FALLBACK" -eq 1 ]]; then
+  echo "  note:        $DEFAULT_INSTALL_DIR is not writable; using $INSTALL_DIR (pass --install-dir to override, or re-run with sudo)"
+fi
 echo "  download:    $ASSET_URL"
 
 if ! curl -fsSL --retry 3 -o "$ARCHIVE" "$ASSET_URL"; then
@@ -256,22 +366,6 @@ else
 fi
 
 # --- install binary --------------------------------------------------------
-
-if [[ ! -d "$INSTALL_DIR" ]]; then
-  if mkdir -p "$INSTALL_DIR" 2>/dev/null; then
-    :
-  else
-    err "install dir $INSTALL_DIR does not exist and could not be created"
-    err "re-run with sudo, or pass --install-dir <writable dir>"
-    exit 1
-  fi
-fi
-
-if [[ ! -w "$INSTALL_DIR" ]]; then
-  err "no write permission to $INSTALL_DIR"
-  err "re-run with sudo, or pass --install-dir <writable dir>"
-  exit 1
-fi
 
 install -m 0755 "$BIN_PATH" "$INSTALL_DIR/$BIN_NAME"
 echo "installed $BIN_NAME $VERSION_LABEL to $INSTALL_DIR/$BIN_NAME"
@@ -331,7 +425,10 @@ install_service() {
 }
 
 if [[ "$SERVICE" -eq 1 ]]; then
-  if ! install_service; then
+  if [[ "$SERVICE_STATUS" != "yes" ]]; then
+    err "--service skipped: the static unit in the tarball runs $STATIC_UNIT_BIN, but the binary is at $INSTALL_DIR/$BIN_NAME"
+    err "after registering, run \"$INSTALL_DIR/$BIN_NAME install-service\" — it writes a unit for this binary's real path"
+  elif ! install_service; then
     err "binary was installed but service setup failed; fix the issue and re-run with --service"
     exit 1
   fi
@@ -357,3 +454,4 @@ The registration token comes from:
 
 Run "$INSTALL_DIR/$BIN_NAME --help" to see all commands.
 EOF
+path_hint
