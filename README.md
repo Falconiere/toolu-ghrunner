@@ -93,7 +93,8 @@ What the installer does:
   re-run changes nothing. `--home <dir>` also exports `TOOLU_RUNNER_HOME` there.
   These files never hold a secret. `--no-modify-path` writes none of them and
   prints the line to add; `--uninstall` removes the blocks and files again,
-  leaving each profile byte-identical (the binary and runner state stay). A
+  leaving the rest of each profile byte-identical (a profile left empty, such
+  as one the installer created, is deleted; the binary and runner state stay). A
   file that cannot be written is a warning with the line to add, never a
   failed install.
 - **Hands off to `toolu-runner setup`**: on a terminal it runs setup

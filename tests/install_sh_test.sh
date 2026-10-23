@@ -125,6 +125,10 @@ if want legacy; then
   echo "$out_eq" | grep -q 'install dir:   /opt/bin$' || fail "--install-dir=/opt/bin should be used: $out_eq"
   echo "$out_eq" | grep -q 'setup args:    (none)' || fail "--opt=value forms must not reach setup: $out_eq"
   if "$SCRIPT" --check --home=relative >/dev/null 2>&1; then fail "--home=relative should be rejected"; fi
+  for empty in --version= --install-dir= --home=; do
+    if "$SCRIPT" --check "$empty" >/dev/null 2>&1; then fail "an empty $empty should be rejected"; fi
+  done
+  if "$SCRIPT" --check --install-dir "" >/dev/null 2>&1; then fail "an empty --install-dir should be rejected"; fi
   # A relative --install-dir is resolved against the working directory.
   out_rel="$(cd "$tmp" && "$SCRIPT" --check --install-dir rel/bin)"
   echo "$out_rel" | grep -q "install dir:   $tmp/rel/bin\$" || fail "relative --install-dir should be made absolute: $out_rel"
@@ -596,6 +600,21 @@ if want S4; then
   [[ "$RC" -eq 0 ]] || fail "S4 a second --uninstall should exit 0 (rc=$RC): $OUT"
   echo "$OUT" | grep -q 'nothing to remove' || fail "S4 second --uninstall should say nothing to remove: $OUT"
 
+  echo "S4: text appended after a block keeps its own line on --uninstall"
+  h="$(new_home s4-append)"
+  printf 'export A=1' >"$h/.bashrc"
+  run_install notty "$h" real --install-dir "$h/.local/bin"
+  [[ "$RC" -eq 0 ]] || fail "S4 append install should exit 0 (rc=$RC): $OUT"
+  printf 'export B=2\n' >>"$h/.bashrc"
+  # A re-run strips and re-adds the block; the user's lines must survive it.
+  printf '# >>> toolu-runner >>>\nold line\n# <<< toolu-runner <<<\n' >>"$h/.profile"
+  run_install notty "$h" real --install-dir "$h/.local/bin"
+  [[ "$RC" -eq 0 ]] || fail "S4 append re-run should exit 0 (rc=$RC): $OUT"
+  run_install notty "$h" real --uninstall
+  [[ "$RC" -eq 0 ]] || fail "S4 append --uninstall should exit 0 (rc=$RC): $OUT"
+  [[ "$(cat "$h/.bashrc"; printf x)" == $'export A=1\nexport B=2\nx' ]] \
+    || fail "S4 appended text must stay on its own line: $(od -c "$h/.bashrc" | head -3)"
+
   echo "S4: files the installer created are removed again"
   h="$(new_home s4-created)"
   run_install notty "$h" real --install-dir "$h/.local/bin"
@@ -800,6 +819,12 @@ if want S10; then
   echo "$OUT" | grep -qF "export PATH=\"$h/.local/bin:\$PATH\"" || fail "S10 should print the export line: $OUT"
   echo "$OUT" | grep -q "^next: $h/.local/bin/toolu-runner register" || fail "S10 next line should use the full path: $OUT"
   [[ ! -e "$h/.profile" ]] || fail "S10 must not source an env file it could not write"
+  run_install notty "$h" real --install-dir "$h/.local/bin" --home "$tmp/s10-envfile-home"
+  [[ "$RC" -eq 0 ]] || fail "S10 an unwritable env dir with --home should exit 0 (rc=$RC): $OUT"
+  echo "$OUT" | grep -qxF "toolu-runner: PATH not changed; add to your shell profile: export PATH=\"$h/.local/bin:\$PATH\"" \
+    || fail "S10 the PATH line should stand alone: $OUT"
+  echo "$OUT" | grep -qxF "toolu-runner: PATH not changed; add to your shell profile: export TOOLU_RUNNER_HOME=\"$tmp/s10-envfile-home\"" \
+    || fail "S10 the TOOLU_RUNNER_HOME line should stand alone: $OUT"
 
   echo "S10: an unwritable fish config dir only skips fish"
   h="$(new_home s10-fishfile)"

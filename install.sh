@@ -167,13 +167,13 @@ while [[ $# -gt 0 ]]; do
   esac
   case "$1" in
     --version)
-      [[ $# -ge 2 ]] || die "--version requires a value"
+      [[ $# -ge 2 && -n "$2" ]] || die "--version requires a value"
       VERSION="$2"
       OTHER_OPTS=1
       shift 2
       ;;
     --install-dir)
-      [[ $# -ge 2 ]] || die "--install-dir requires a value"
+      [[ $# -ge 2 && -n "$2" ]] || die "--install-dir requires a value"
       # Strip trailing slashes so the static-unit path comparison below and
       # the printed paths stay canonical (but keep a bare "/").
       INSTALL_DIR="$2"
@@ -185,7 +185,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --home)
-      [[ $# -ge 2 ]] || die "--home requires a value"
+      [[ $# -ge 2 && -n "$2" ]] || die "--home requires a value"
       RUNNER_HOME="$2"
       OTHER_OPTS=1
       shift 2
@@ -358,7 +358,7 @@ read_file() {
 
 # Lines starting with the begin marker (either form).
 begin_count() {
-  grep -c "^$PROFILE_BEGIN" "$1" 2>/dev/null || true
+  LC_ALL=C grep -c "^$PROFILE_BEGIN" "$1" 2>/dev/null || true
 }
 
 has_block() {
@@ -374,7 +374,7 @@ has_exact_block() {
 
 # Begin and end markers pair up (a hand-edited file may break that).
 blocks_balanced() {
-  B="$PROFILE_BEGIN" E="$PROFILE_END" awk '
+  LC_ALL=C B="$PROFILE_BEGIN" E="$PROFILE_END" awk '
     index($0, ENVIRON["B"]) == 1 { if (open) bad = 1; open = 1; next }
     $0 == ENVIRON["E"] { if (!open) bad = 1; open = 0; next }
     END { exit (bad || open) }
@@ -386,12 +386,15 @@ blocks_balanced() {
 # line by line.
 strip_blocks() {
   read_file "$1"
-  while [[ "$FILE_TEXT" == *"$BLOCK_NL"* ]]; do FILE_TEXT="${FILE_TEXT/"$BLOCK_NL"/}"; done
+  # The newline a BLOCK_NL added goes only while the block is still last;
+  # with text appended after it, that newline now ends the user's line.
+  if [[ "$FILE_TEXT" == *"$BLOCK_NL" ]]; then FILE_TEXT="${FILE_TEXT%"$BLOCK_NL"}"; fi
+  while [[ "$FILE_TEXT" == *"$BLOCK_NL"* ]]; do FILE_TEXT="${FILE_TEXT/"$BLOCK_NL"/$'\n'}"; done
   while [[ "$FILE_TEXT" == *"$BLOCK"* ]]; do FILE_TEXT="${FILE_TEXT/"$BLOCK"/}"; done
   case "$FILE_TEXT" in
     "$PROFILE_BEGIN"* | *$'\n'"$PROFILE_BEGIN"*)
       printf '%s' "$FILE_TEXT" >"$WORK_DIR/profile.tmp"
-      B="$PROFILE_BEGIN" E="$PROFILE_END" awk '
+      LC_ALL=C B="$PROFILE_BEGIN" E="$PROFILE_END" awk '
         index($0, ENVIRON["B"]) == 1 { skip = 1; next }
         skip && $0 == ENVIRON["E"] { skip = 0; next }
         !skip { print }
@@ -939,7 +942,9 @@ if [[ "$PRETTY" -eq 1 ]]; then
 else
   echo "$BIN_NAME: installed $INSTALLED_VERSION (checksum ok)"
   if [[ ${#MANUAL_LINES[@]} -gt 0 ]]; then
-    echo "$BIN_NAME: PATH not changed; add: $(join_args "${MANUAL_LINES[@]}")"
+    for line in "${MANUAL_LINES[@]}"; do
+      echo "$BIN_NAME: PATH not changed; add to your shell profile: $line"
+    done
   fi
 fi
 for w in ${PATH_WARNINGS[@]+"${PATH_WARNINGS[@]}"}; do
