@@ -180,13 +180,13 @@ credential.
 ## Key modules (per-crate entry points; full file maps live in each `src/**/README.md`)
 
 - **`protocol/`** (sync): `auth` (PKCS#1 DER → RSA, PS256 JWT
-  sub/iss=clientId, aud=url, jti, nbf/iat −30s, exp +4m30s), `jit_config`
+  sub/iss=clientId, aud=url, jti, nbf/iat −30s, exp +4m30s; `parse_rsa_private_key`,
+  `build_jwt`, `AccessToken`), `jit_config`
   (3-blob base64 envelope), `runner_version::COMPATIBILITY_VERSION` (pinned
   official-runner identity; product version separate, see
   `docs/runner-updates.md`), `session` (ephemeral `00000000-…` request:
   `CreateSessionRequest`/`Response`, `AgentInfo`, `EncryptionKey`,
-  `TaskAgentSession`, `build_session_request`), `auth` fns
-  (`parse_rsa_private_key`, `build_jwt`, `AccessToken`),
+  `TaskAgentSession`, `build_session_request`),
   `messages` (`decrypt_message_body` AES-256-CBC + `strip_bom`;
   `rsa_oaep`/`body_decrypt` unwrap encrypted session keys), `types`
   (`.runner`/`.credentials`/`_rsaparams` blobs: `RunnerSettings`,
