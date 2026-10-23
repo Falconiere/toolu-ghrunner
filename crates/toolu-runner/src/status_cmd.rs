@@ -5,6 +5,7 @@
 
 use config::auth_store::AuthStore;
 use config::config::load_config as load_reg_config;
+use config::registration_auth::AuthSection;
 use config::registry;
 
 use crate::cli::{StatusArgs, credentials_path_for};
@@ -37,6 +38,7 @@ pub(crate) fn cmd_status(args: StatusArgs) -> Result<(), Box<dyn std::error::Err
     "persistent (re-mints after each job)"
   };
   println!("mode:      {mode}");
+  println!("auth:      {}", auth_summary(&cfg.auth));
   println!("protocol:  {}", cfg.runtime.protocol_version);
   println!("data_dir:  {}", cfg.runtime.data_dir);
   println!("work_dir:  {}", cfg.runtime.work_dir);
@@ -67,4 +69,22 @@ pub(crate) fn cmd_status(args: StatusArgs) -> Result<(), Box<dyn std::error::Err
     ),
   }
   Ok(())
+}
+
+/// How the registration re-mints: a personal token, or the GitHub App named
+/// by its (local, never fetched) App file.
+fn auth_summary(auth: &AuthSection) -> String {
+  match auth {
+    AuthSection::Token => "token (TOOLU_RUNNER_TOKEN or the stored login)".to_owned(),
+    AuthSection::App {
+      app_file,
+      installation_id,
+    } => match config::app_store::load_app_file(std::path::Path::new(app_file)) {
+      Ok(app) => format!(
+        "GitHub App '{}' (App {}, installation {installation_id}, {app_file})",
+        app.slug, app.app_id
+      ),
+      Err(e) => format!("GitHub App (installation {installation_id}) — {e}"),
+    },
+  }
 }

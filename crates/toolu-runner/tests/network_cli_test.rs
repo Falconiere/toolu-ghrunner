@@ -74,6 +74,7 @@ fn write_registration(
       workspace: WorkspaceSection::default(),
       shadow: ShadowSection::default(),
       network,
+      auth: config::registration_auth::AuthSection::default(),
     },
   )?;
   save_credentials(

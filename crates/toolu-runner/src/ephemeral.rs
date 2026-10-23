@@ -5,9 +5,10 @@
 //! registration is a JIT runner, which GitHub also removes after one job, so
 //! this module verifies that instead of assuming it: with a bearer
 //! (`TOOLU_RUNNER_TOKEN` > stored `login`) it calls the same idempotent
-//! unregister as `remove` (DELETE, a 404 confirmed by a lookup). Without a
-//! bearer — or for an org URL the runners API cannot address — the local
-//! state still goes and the output says the GitHub side was not verified. A
+//! unregister as `remove` (DELETE on the repo or org runners API, a 404
+//! confirmed by a lookup). Without a bearer — or for a URL no runners API can
+//! address — the local state still goes and the output says the GitHub side
+//! was not verified. A
 //! retryable unregister failure keeps the local state (the persisted
 //! `runner_id` is the only handle) and fails naming `toolu-runner remove`.
 

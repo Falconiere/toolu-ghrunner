@@ -21,9 +21,11 @@ Higher-level domain wrappers and reporting-only types live in
 | `app_manifest.rs` | `CallbackServer` / `convert_manifest_code` | Loopback HTTP server for the GitHub App manifest flow's redirect callback, plus the `app-manifests/{code}/conversions` POST. |
 | `auth.rs` | `authenticate` / `exchange_token` | POSTs the signed JWT to swap it for an OAuth2 access token (the JWT itself is built in `protocol::auth`). A 4xx OAuth `invalid_client` reply (the registration was deleted on GitHub) is `RunnerError::Auth`. |
 | `device_auth.rs` | `request_device_code` / `poll_for_token` | GitHub OAuth device-authorization flow: request a device/user code, then poll until an access token or terminal failure. |
+| `github_app.rs` | `find_installation` / `create_installation_token` | GitHub App calls authenticated with the App JWT (`protocol::app_jwt`): the installation covering a repo or org, the App's installation list, and installation-token minting; `reuse_deadline` is the token-cache rule. 429/5xx are `Network`, every other non-2xx `Auth`. |
 | `log_upload.rs` | `upload_block_blob` / `upload_log` | Raw Azure Blob Storage PUT requests (BlockBlob and AppendBlob); the mode decision lives in `crate::reporting::log_upload`. |
 | `messages.rs` | `poll_message` / `acknowledge_message` | HTTP transport for the broker long-poll loop; response decryption lives in `protocol::messages`. |
-| `register.rs` | `register_jit` / `unregister_runner` | POSTs `generate-jitconfig` to mint a JIT registration, and DELETEs a runner registration. |
+| `register.rs` | `register_jit` / `unregister_runner` | POSTs `generate-jitconfig` to mint a JIT registration, and DELETEs a runner registration — repo- or org-scoped (`RunnerScope`, `resolve_target`). |
+| `runner_groups.rs` | `list_runner_groups` / `pick_group` | Lists an organization's runner groups and resolves a `--runner-group` name to its id. |
 | `results_service.rs` | `update_workflow_steps` / signed-blob-URL + metadata calls | Twirp JSON-over-HTTP POSTs to the GitHub Actions Results Service. |
 | `run_service.rs` | `acquire_job` / `renew_job` / `complete_job` | HTTP transport for the Actions Run Service job lifecycle; request/response shapes live in `crate::reporting::run_service`. |
 | `session.rs` | `create_session` / `delete_session` | HTTP transport for creating and deleting the broker session; a 409 is `RunnerError::SessionConflict`. |

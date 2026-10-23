@@ -62,6 +62,7 @@ fn write_registration(
     workspace: WorkspaceSection::default(),
     shadow: ShadowSection::default(),
     network: config::network::NetworkSection::default(),
+    auth: config::registration_auth::AuthSection::default(),
   };
   save_config(&config_path, &config)?;
   Ok(config_path)
@@ -386,6 +387,7 @@ fn fsync_chunks_round_trips_through_load_config() {
     workspace: WorkspaceSection::default(),
     shadow: ShadowSection::default(),
     network: config::network::NetworkSection::default(),
+    auth: config::registration_auth::AuthSection::default(),
   };
   save_config(&config_path, &config).expect("save config with fsync_chunks = true");
   let loaded = load_config(&config_path).expect("load config back");

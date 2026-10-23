@@ -3153,6 +3153,7 @@ dependencies = [
  "fs2",
  "futures-util",
  "hostname",
+ "jsonwebtoken",
  "listener",
  "network",
  "observability",

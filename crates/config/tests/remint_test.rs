@@ -62,6 +62,10 @@ fn non_default_config() -> RunnerRegistrationConfig {
       no_proxy: vec!["internal.corp".to_owned()],
       ca_bundle: Some("/etc/corp/ca.pem".to_owned()),
     },
+    auth: config::registration_auth::AuthSection::App {
+      app_file: "/home/u/.toolu-runner/github-app.json".to_owned(),
+      installation_id: 987_654,
+    },
   }
 }
 
@@ -97,6 +101,11 @@ fn remint_preserves_sections_through_a_full_toml_round_trip() {
   assert_eq!(reloaded.cache, original.cache);
   assert_eq!(reloaded.workspace, original.workspace);
   assert_eq!(reloaded.shadow, original.shadow);
+  assert_eq!(reloaded.network, original.network);
+  assert_eq!(
+    reloaded.auth, original.auth,
+    "an App registration stays an App"
+  );
   assert_eq!(reloaded.runner_url, original.runner_url);
   assert_eq!(reloaded.runner_name, original.runner_name);
   assert_eq!(reloaded.labels, original.labels);

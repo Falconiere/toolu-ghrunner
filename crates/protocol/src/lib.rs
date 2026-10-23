@@ -7,6 +7,9 @@
 
 #![doc(html_root_url = "https://docs.rs/toolu-runner-protocol/0.1.0")]
 
+/// GitHub App authentication: the RS256 App JWT and the installation /
+/// installation-token reply shapes.
+pub mod app_jwt;
 /// GitHub App manifest onboarding: manifest build, conversion-response parse,
 /// and the loopback CSRF/callback helpers.
 pub mod app_manifest;

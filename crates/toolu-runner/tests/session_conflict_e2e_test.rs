@@ -139,6 +139,7 @@ fn write_registration(home: &Path, jit_config: &str) -> TestResult<PathBuf> {
     workspace: WorkspaceSection::default(),
     shadow: ShadowSection::default(),
     network: config::network::NetworkSection::default(),
+    auth: config::registration_auth::AuthSection::default(),
   };
   save_config(&config_path, &cfg)?;
   save_credentials(

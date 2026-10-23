@@ -4,33 +4,36 @@
 //! Split out of `main.rs` to keep the CLI entrypoint under the crate's
 //! per-file complexity limit. `--url` is optional: when absent, the repo
 //! is inferred from the cwd git remote `origin` (github.com only — GHES
-//! keeps the explicit `--url` path). The REST bearer resolves flag >
-//! `TOOLU_RUNNER_TOKEN` env > stored `login` token, and an interactive
-//! terminal with no token runs the device flow inline
-//! ([`login_cmd::run_device_flow`]). State lands in the per-repo
-//! `<home>/runners/<owner>/<repo>/` dir unless `--config` overrides it.
+//! keeps the explicit `--url` path). The REST bearer and the persisted
+//! `[auth]` come from [`crate::register_auth`] (a GitHub App installation
+//! token, or the personal-token chain with the inline device flow). State
+//! lands in the per-repo `<home>/runners/<owner>/<repo>/` dir unless
+//! `--config` overrides it.
 
-use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use config::auth_store::{self, AuthStore, BearerDecision};
 use config::config::{
   CacheSection, CredentialsFile, RunnerRegistrationConfig, RuntimeConfig, ServicesSection,
   ShadowSection, WorkspaceSection, save_config as save_reg_config, save_credentials,
 };
+use config::registration_auth::AuthSection;
 use config::{registry, repo_infer};
-use shared::RunnerError;
+use shared::{RunnerError, SecretMasker};
 
 use crate::cli::{
   RegisterArgs, credentials_path_for, runner_name_or_hostname, work_folder_or_default,
 };
-use crate::login_cmd;
+use crate::register_auth;
 
 /// `register`: resolve the target repo and bearer, POST
 /// `generate-jitconfig`, and persist config + credentials (all-or-nothing).
 pub(crate) async fn cmd_register(args: RegisterArgs) -> Result<(), Box<dyn std::error::Error>> {
-  crate::init_runner_tracing().map_err(|e| format!("startup init: {e}"))?;
+  // The redactor's masker learns an App's secrets and every minted token
+  // before any request is sent.
+  let masker = Arc::new(Mutex::new(SecretMasker::new()));
+  crate::init_tracing_for(&masker).map_err(|e| format!("startup init: {e}"))?;
 
   let (url, host) = resolve_url_and_host(args.url).map_err(|e| format!("{e}"))?;
 
@@ -51,19 +54,23 @@ pub(crate) async fn cmd_register(args: RegisterArgs) -> Result<(), Box<dyn std::
   ensure_not_registered(&config_path, args.replace)?;
   let network = replaced_network(&config_path, args.replace);
 
-  let token = resolve_register_bearer(&host, args.token.clone(), &home).await?;
   // Propagate the `RunnerError` itself rather than flattening it to a
   // `String`: the variant is what tells a caller (and the diagnostics) that
   // this was a transport failure.
   let client = build_register_client(&network.resolve())?;
+  let auth = register_auth::resolve(&args, &host, &home, &url, &client, &masker).await?;
+  let runner_group =
+    register_auth::resolve_runner_group(&args.runner_group, &url, &auth.bearer, &client)
+      .await
+      .map_err(|e| format!("{e}"))?;
 
   let runner_id = register_and_persist(
     RegisterPersist {
       url: &url,
-      token: &token,
+      token: &auth.bearer,
       runner_name: &runner_name,
       labels: &labels,
-      runner_group: &args.runner_group,
+      runner_group: &runner_group,
       work_folder: &work_folder_or_default(args.work.as_ref()),
       host: &host,
       config_path: &config_path,
@@ -71,11 +78,12 @@ pub(crate) async fn cmd_register(args: RegisterArgs) -> Result<(), Box<dyn std::
       replace: args.replace,
       ephemeral: args.ephemeral,
       network,
+      auth: auth.section.clone(),
     },
     &client,
   )
   .await
-  .map_err(|e| format!("{e}"))?;
+  .map_err(|e| auth.explain(&e))?;
 
   report_registered(
     &runner_name,
@@ -85,6 +93,9 @@ pub(crate) async fn cmd_register(args: RegisterArgs) -> Result<(), Box<dyn std::
     &creds_path,
     &labels,
   );
+  if let Some(label) = &auth.app_label {
+    println!("authenticated as {label}: every re-mint mints an installation token");
+  }
   if args.ephemeral {
     println!(
       "ephemeral: `run` takes one job, then unregisters the runner and deletes this registration"
@@ -165,31 +176,6 @@ pub(crate) fn owner_repo_from_url(url: &str) -> Option<(String, String)> {
   Some((owner.to_owned(), repo.to_owned()))
 }
 
-/// Resolve the `generate-jitconfig` bearer for `host`: flag >
-/// `TOOLU_RUNNER_TOKEN` env > the stored `login` token (store pinned to
-/// the runner home, shared by all repos). With no token, an interactive
-/// stderr starts the inline device flow (persisting the minted token for
-/// next time); non-interactive fails listing the manual options.
-async fn resolve_register_bearer(
-  host: &str,
-  flag: Option<String>,
-  home: &Path,
-) -> Result<String, Box<dyn std::error::Error>> {
-  let store = AuthStore::new(home);
-  let resolved = auth_store::resolve_bearer(&store, host, flag)?;
-  match auth_store::decide_bearer(resolved, std::io::stderr().is_terminal()) {
-    BearerDecision::Use(token) => Ok(token),
-    BearerDecision::StartDeviceFlow => {
-      let stored = login_cmd::run_device_flow(host, None, &store, |dc| {
-        eprintln!("Enter code {} at {}", dc.user_code, dc.verification_uri);
-      })
-      .await?;
-      Ok(stored.access_token)
-    },
-    BearerDecision::Fail(msg) => Err(RunnerError::Auth(msg).into()),
-  }
-}
-
 /// Refuse to overwrite an existing registration unless `--replace` was given.
 fn ensure_not_registered(
   config_path: &Path,
@@ -259,6 +245,8 @@ pub(crate) struct RegisterPersist<'a> {
   /// `[network]` for the mint and the persisted config: the replaced
   /// registration's, else empty (env mode).
   pub(crate) network: config::network::NetworkSection,
+  /// `[auth]` to persist: token, or the App installation that minted.
+  pub(crate) auth: AuthSection,
 }
 
 /// The `[network]` a `register --replace` keeps: the existing registration's
@@ -287,7 +275,7 @@ fn replaced_network(config_path: &Path, replace: bool) -> config::network::Netwo
 /// `wire::net::register_jit`'s `RegisterParams`, not at the client level, so
 /// it holds regardless of whatever default timeout the caller's shared
 /// client carries.
-const MINT_TIMEOUT: Duration = Duration::from_secs(30);
+pub(crate) const MINT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Build the HTTP client for a one-shot `register` invocation (not shared
 /// across a loop — `run_cmd::RunLoop` builds and reuses its own for re-mints)
@@ -410,6 +398,7 @@ pub(crate) async fn remint_and_persist(
     replace: true,
     ephemeral: prior.ephemeral,
     network: prior.network.clone(),
+    auth: prior.auth.clone(),
   };
   let registration = mint_jit(&p, client).await?;
 
@@ -507,6 +496,7 @@ fn build_registration_config(
     workspace: WorkspaceSection::default(),
     shadow: ShadowSection::default(),
     network: p.network.clone(),
+    auth: p.auth.clone(),
   }
 }
 

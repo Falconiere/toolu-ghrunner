@@ -20,11 +20,15 @@ pub mod app_manifest;
 pub mod auth;
 /// GitHub OAuth device-flow login: request code, poll for token.
 pub mod device_auth;
+/// GitHub App installation lookup + installation-token minting (#201).
+pub mod github_app;
 pub mod log_upload;
 pub mod messages;
 pub mod register;
 pub mod results_service;
 pub mod run_service;
+/// Organization runner-group listing and name resolution (#201).
+pub mod runner_groups;
 pub mod session;
 /// Bounded Results Service step-summary upload.
 pub mod step_summary;
@@ -42,7 +46,8 @@ pub use log_upload::{
 };
 pub use messages::{PollParams, acknowledge_message, build_poll_url, poll_message};
 pub use register::{
-  JitRegistration, RegisterParams, build_request, parse_response, register_jit, unregister_runner,
+  JitRegistration, RegisterParams, RunnerScope, build_request, parse_response, register_jit,
+  resolve_target, unregister_runner,
 };
 pub use results_service::{
   create_job_logs_metadata, create_step_logs_metadata, get_job_logs_signed_blob_url,

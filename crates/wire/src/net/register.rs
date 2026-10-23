@@ -1,7 +1,9 @@
 //! Live JIT registration: the github.com `generate-jitconfig` call.
 //!
-//! POSTs the short-lived registration token to GitHub's
-//! `…/actions/runners/generate-jitconfig`, which returns the runner `id`
+//! POSTs the REST bearer to GitHub's
+//! `…/actions/runners/generate-jitconfig` — under `repos/{owner}/{repo}` for
+//! a repository URL, `orgs/{org}` for an organization URL ([`RunnerScope`]) —
+//! which returns the runner `id`
 //! plus an `encoded_jit_config` (the base64 3-blob envelope that
 //! [`protocol::JitConfig`] parses at run time). The RSA → JWT → `OAuth2`
 //! exchange happens at run time from that config, not here.
@@ -67,15 +69,15 @@ struct RunnerObject {
   id: i64,
 }
 
-/// Build the repo-scoped `generate-jitconfig` request from inputs.
+/// Build the `generate-jitconfig` request from inputs.
 ///
-/// Parses `owner/repo` from `url`; targets `api.github.com` for
-/// github.com and `<host>/api/v3` for GHES. `runner_group_id` defaults
-/// to `1` (the `Default` group) when `None`.
+/// Parses the [`RunnerScope`] from `url` (`owner/repo` or an org); targets
+/// `api.github.com` for github.com and `<host>/api/v3` for GHES.
+/// `runner_group_id` defaults to `1` (the `Default` group) when `None`.
 ///
 /// # Errors
 ///
-/// `RunnerError::Config` when `url` is not a `<host>/<owner>/<repo>` URL.
+/// `RunnerError::Config` when `url` has no host or no owner/org path.
 pub fn build_request(
   url: &str,
   name: &str,
@@ -93,44 +95,98 @@ pub fn build_request(
   Ok(RegisterRequest { url, body })
 }
 
-/// Resolve the repo-scoped `generate-jitconfig` endpoint from a repo URL.
+/// Resolve the `generate-jitconfig` endpoint from a registration URL.
 ///
 /// # Errors
 ///
-/// `RunnerError::Config` when `url` lacks a host or `owner/repo` path.
+/// `RunnerError::Config` when `url` lacks a host or an owner/org path.
 fn resolve_endpoint(url: &str) -> Result<String, RunnerError> {
   Ok(format!("{}/generate-jitconfig", resolve_runners_base(url)?))
 }
 
-/// Resolve the repo-scoped `…/actions/runners` API base from a repo URL.
-///
-/// github.com routes through `api.github.com`; other hosts keep the input
-/// scheme + authority and add `/api/v3`. A trailing `.git` is stripped.
+/// Which runners API a registration URL addresses.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RunnerScope {
+  /// A repository runner: `https://<host>/<owner>/<repo>`.
+  Repo {
+    /// The repository owner (user or organization).
+    owner: String,
+    /// The repository name, `.git` stripped.
+    repo: String,
+  },
+  /// An organization runner: `https://<host>/<org>`.
+  Org {
+    /// The organization login.
+    org: String,
+  },
+}
+
+impl RunnerScope {
+  /// The scope's REST path under the API base: `repos/{owner}/{repo}` or
+  /// `orgs/{org}`.
+  pub fn api_path(&self) -> String {
+    match self {
+      RunnerScope::Repo { owner, repo } => format!("repos/{owner}/{repo}"),
+      RunnerScope::Org { org } => format!("orgs/{org}"),
+    }
+  }
+
+  /// `owner/repo` or the org login, for messages.
+  pub fn display_name(&self) -> String {
+    match self {
+      RunnerScope::Repo { owner, repo } => format!("{owner}/{repo}"),
+      RunnerScope::Org { org } => org.clone(),
+    }
+  }
+}
+
+/// Resolve a registration URL into its REST API base ([`api_base`]) and
+/// [`RunnerScope`]: one path segment is an organization, two a repository
+/// (a trailing `.git` stripped; later segments ignored).
 ///
 /// # Errors
 ///
-/// `RunnerError::Config` when `url` lacks a host or `owner/repo` path.
-fn resolve_runners_base(url: &str) -> Result<String, RunnerError> {
+/// `RunnerError::Config` when `url` does not parse, has no host, or has no
+/// path segment.
+pub fn resolve_target(url: &str) -> Result<(String, RunnerScope), RunnerError> {
   let parsed =
     url::Url::parse(url).map_err(|e| RunnerError::Config(format!("invalid --url: {e}")))?;
   let host = parsed
     .host_str()
     .ok_or_else(|| RunnerError::Config("URL missing host".to_owned()))?;
-
   let mut segments = parsed
     .path_segments()
-    .ok_or_else(|| RunnerError::Config(format!("URL '{url}' has no path — expected owner/repo")))?
+    .ok_or_else(|| {
+      RunnerError::Config(format!(
+        "URL '{url}' has no path — expected owner/repo or an organization"
+      ))
+    })?
     .filter(|s| !s.is_empty());
-  let owner = segments
-    .next()
-    .ok_or_else(|| RunnerError::Config(format!("URL '{url}' missing owner segment")))?;
-  let repo_raw = segments
-    .next()
-    .ok_or_else(|| RunnerError::Config(format!("URL '{url}' missing repo segment")))?;
-  let repo = repo_raw.strip_suffix(".git").unwrap_or(repo_raw);
+  let owner = segments.next().ok_or_else(|| {
+    RunnerError::Config(format!("URL '{url}' names no owner/repo or organization"))
+  })?;
+  let scope = match segments.next() {
+    Some(repo_raw) => RunnerScope::Repo {
+      owner: owner.to_owned(),
+      repo: repo_raw.strip_suffix(".git").unwrap_or(repo_raw).to_owned(),
+    },
+    None => RunnerScope::Org {
+      org: owner.to_owned(),
+    },
+  };
+  Ok((api_base(&parsed, host), scope))
+}
 
-  let base = api_base(&parsed, host);
-  Ok(format!("{base}/repos/{owner}/{repo}/actions/runners"))
+/// Resolve the `…/actions/runners` API base from a registration URL:
+/// `<api>/repos/{owner}/{repo}/actions/runners` or
+/// `<api>/orgs/{org}/actions/runners` ([`resolve_target`]).
+///
+/// # Errors
+///
+/// `RunnerError::Config` when `url` lacks a host or an owner/org path.
+fn resolve_runners_base(url: &str) -> Result<String, RunnerError> {
+  let (base, scope) = resolve_target(url)?;
+  Ok(format!("{base}/{}/actions/runners", scope.api_path()))
 }
 
 /// The REST API base for a GitHub URL whose host is `host`: github.com
@@ -177,10 +233,11 @@ pub fn parse_response(body: &str, runner_name: &str) -> Result<JitRegistration, 
 /// Registration inputs for [`register_jit`] (and [`build_request`]).
 #[derive(Debug, Clone)]
 pub struct RegisterParams<'a> {
-  /// Repo URL (`https://<host>/<owner>/<repo>`).
+  /// Repo or org URL (`https://<host>/<owner>/<repo>`, `https://<host>/<org>`).
   pub url: &'a str,
-  /// API token with `administration:write` on the repo (PAT or App
-  /// installation token), sent as `Authorization: Bearer …`. NOT the
+  /// API token with `administration:write` on the repo, or org self-hosted
+  /// runner admin rights (PAT or App installation token), sent as
+  /// `Authorization: Bearer …`. NOT the
   /// classic runner registration token — `generate-jitconfig` is a
   /// plain REST endpoint and rejects registration tokens with 401.
   pub runner_token: &'a str,
@@ -295,7 +352,7 @@ enum DeleteOutcome {
   NotFound,
 }
 
-/// DELETE the runner with `id` from the repo.
+/// DELETE the runner with `id` from the repo or org.
 ///
 /// A 404 is returned as [`DeleteOutcome::NotFound`] rather than folded into
 /// either success or failure, because the caller's correct reading differs
@@ -339,7 +396,7 @@ async fn delete_runner(
   Ok(DeleteOutcome::Deleted)
 }
 
-/// Unregister a runner from its repo: `DELETE …/actions/runners/{id}`.
+/// Unregister a runner from its repo or org: `DELETE …/actions/runners/{id}`.
 ///
 /// Idempotent: an already-absent runner — 404, or no same-name match — is
 /// `Ok(())`, so a repeated `remove` is safe. `runner_id` comes from the
@@ -348,7 +405,7 @@ async fn delete_runner(
 ///
 /// # Errors
 ///
-/// `RunnerError::Config` (URL lacks host or `owner/repo`),
+/// `RunnerError::Config` (URL lacks a host or an owner/org path),
 /// `RunnerError::Network` (transport), `RunnerError::Auth` (non-2xx other
 /// than 404, GitHub's body included).
 pub async fn unregister_runner(

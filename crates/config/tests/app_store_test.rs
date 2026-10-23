@@ -115,3 +115,42 @@ fn safe_summary_excludes_secrets() {
 fn save_path_str(path: &Path) -> String {
   path.display().to_string()
 }
+
+// ── #201: the App file an App registration names ──────────────────────
+
+#[test]
+fn load_app_file_reads_the_saved_app() {
+  let home = TempDir::new().expect("temp home");
+  let app = sample_app();
+  app_store::save_app(home.path(), &app).expect("save_app");
+  let loaded = app_store::load_app_file(&app_store::app_path(home.path())).expect("load");
+  assert_eq!(loaded, app);
+}
+
+#[test]
+fn load_app_file_names_the_missing_file_and_create_app() {
+  let home = TempDir::new().expect("temp home");
+  let path = app_store::app_path(home.path());
+  let err = app_store::load_app_file(&path).expect_err("missing");
+  let msg = err.to_string();
+  assert!(msg.contains(&path.display().to_string()), "{msg}");
+  assert!(msg.contains("toolu-runner create-app"), "{msg}");
+}
+
+#[test]
+fn secret_values_lists_every_secret_and_debug_redacts_them() {
+  let app = sample_app();
+  assert_eq!(
+    app.secret_values(),
+    [DUMMY_PEM, CLIENT_SECRET, WEBHOOK_SECRET],
+    "the masker must learn the PEM, client secret and webhook secret"
+  );
+  let debug = format!("{app:?}");
+  for secret in ["MIIphony", CLIENT_SECRET, WEBHOOK_SECRET] {
+    assert!(!debug.contains(secret), "Debug leaked {secret}: {debug}");
+  }
+  assert!(
+    debug.contains("my-runner-app"),
+    "identity stays visible: {debug}"
+  );
+}

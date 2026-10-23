@@ -18,6 +18,7 @@ mod app_manifest_test;
 mod broker_poll_parser;
 mod completejob_wire_test;
 mod device_token_debug_test;
+mod github_app_test;
 mod job_outputs_test;
 mod live_log_proxy_test;
 mod oauth_invalid_client;

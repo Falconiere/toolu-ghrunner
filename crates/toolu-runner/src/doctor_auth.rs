@@ -21,7 +21,8 @@ pub(crate) struct AuthHost {
   host: String,
   /// Its REST API base (`https://api.github.com` or `<origin>/api/v3`).
   api_base: String,
-  /// A persistent registration on this host needs a bearer to re-mint.
+  /// A persistent token registration on this host needs a bearer to
+  /// re-mint (an App registration mints its own installation tokens).
   needs_bearer: bool,
   /// The first registration's `[network]` on this host.
   network: NetworkConfig,
@@ -44,12 +45,13 @@ pub(crate) fn auth_hosts(configs: &[&RunnerRegistrationConfig]) -> Vec<AuthHost>
     let Some((host, api_base)) = api_base(&config.runner_url) else {
       continue;
     };
+    let needs_bearer = !config.ephemeral && config.auth.is_token();
     match hosts.iter_mut().find(|known| known.api_base == api_base) {
-      Some(known) => known.needs_bearer |= !config.ephemeral,
+      Some(known) => known.needs_bearer |= needs_bearer,
       None => hosts.push(AuthHost {
         host,
         api_base,
-        needs_bearer: !config.ephemeral,
+        needs_bearer,
         network: config.network_config(),
       }),
     }
@@ -258,7 +260,7 @@ pub(crate) async fn auth_section(
     Ok(None) => Row::new(
       Level::Info,
       "token",
-      "none (only needed for persistent registrations)",
+      "none (only needed for persistent token registrations)",
     )
     .with_fix(login_fix(&target.host)),
   };

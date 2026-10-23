@@ -98,6 +98,8 @@ futures-util = "0.3"
 toml = "0.8"
 
 # Crypto fixtures for the auth / jit-config tests
+# Verifies the App JWTs the runner sends to the loopback GitHub peer (#201).
+jsonwebtoken = "9"
 rsa = "0.9"
 pkcs1 = "0.7"
 aes = "0.8"

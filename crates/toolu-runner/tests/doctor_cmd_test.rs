@@ -21,7 +21,7 @@ use crate::doctor_env::{
   ENV_REJECTED_FIX, REREGISTER, STORED_BEARER, TEST_BEARER, USER_401, VERSION, block, dead_pid,
   doctor_cmd, fix, heading, healthy_reply, implied_summary, install_fix, jit_ok, last_line, report,
   row, section, snapshot, store_login, user_authorization, user_peer, write_lock_body,
-  write_registration,
+  write_registration, write_registration_with,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -61,7 +61,7 @@ fn empty_home() -> TestResult {
       row(
         "INFO",
         "token",
-        "none (only needed for persistent registrations)"
+        "none (only needed for persistent token registrations)"
       ),
       fix("toolu-runner login"),
     ],
@@ -399,12 +399,41 @@ fn missing_token() -> TestResult {
       row(
         "INFO",
         "token",
-        "none (only needed for persistent registrations)"
+        "none (only needed for persistent token registrations)"
       ),
       fix("toolu-runner login 127.0.0.1"),
     ],
     "{stdout}"
   );
+  Ok(())
+}
+
+/// #201 AC-15: a persistent registration that re-mints with a GitHub App
+/// needs no personal token, so its missing login is not a failure.
+#[test]
+fn missing_token_is_not_a_failure_for_an_app_registration() -> TestResult {
+  let home = tempfile::tempdir()?;
+  write_registration_with(home.path(), "o", "r", "http://127.0.0.1:9", false, |cfg| {
+    cfg.auth = config::registration_auth::AuthSection::App {
+      app_file: "/nonexistent/github-app.json".to_owned(),
+      installation_id: 1,
+    };
+  })?;
+
+  let (code, stdout, stderr, _) = run(doctor_cmd(home.path())?.arg("--offline"))?;
+  assert_eq!(
+    section(&stdout, "github auth (127.0.0.1)"),
+    [
+      row(
+        "INFO",
+        "token",
+        "none (only needed for persistent token registrations)"
+      ),
+      fix("toolu-runner login 127.0.0.1"),
+    ],
+    "{stdout}"
+  );
+  assert_eq!(code, Some(0), "{}", report(&stdout, &stderr));
   Ok(())
 }
 

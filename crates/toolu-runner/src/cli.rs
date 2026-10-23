@@ -246,12 +246,22 @@ pub(crate) struct RegisterArgs {
   pub(crate) url: Option<String>,
   /// GitHub API token for the `generate-jitconfig` REST call.
   ///
-  /// Needs admin rights on the target repo/org (PAT or App installation
-  /// token). Optional — resolution order: this flag > `TOOLU_RUNNER_TOKEN`
-  /// env > the stored `login` token for the URL's host. Used only during
-  /// registration, never at job runtime.
-  #[arg(long, value_name = "TOKEN")]
+  /// Needs admin rights on the target repo/org. Optional — resolution order:
+  /// --app > this flag > `TOOLU_RUNNER_TOKEN` env > the GitHub App saved by
+  /// `create-app` for the URL's host > the stored `login` token. Used only
+  /// during registration, never at job runtime.
+  #[arg(long, value_name = "TOKEN", conflicts_with = "app")]
   pub(crate) token: Option<String>,
+  /// Authenticate with the GitHub App saved by `create-app`
+  /// (`<home>/github-app.json`) instead of a personal token.
+  ///
+  /// Registration and every re-mint then use an App installation token, so
+  /// the runner needs no stored login or `TOOLU_RUNNER_TOKEN`. Used
+  /// automatically when that file exists for the URL's host and neither
+  /// --token nor `TOOLU_RUNNER_TOKEN` is given. The App must be installed on
+  /// the repository or organization.
+  #[arg(long)]
+  pub(crate) app: bool,
   /// Runner name (default: the machine hostname).
   #[arg(long, value_name = "NAME")]
   pub(crate) name: Option<String>,
@@ -277,13 +287,13 @@ pub(crate) struct RegisterArgs {
   /// `run`. Not for `install-service`, whose unit restarts forever.
   #[arg(long)]
   pub(crate) ephemeral: bool,
-  /// Numeric runner group ID for org registrations (default: the Default
-  /// group).
+  /// Runner group for org registrations: a name or a numeric ID (default:
+  /// the Default group).
   ///
-  /// Group *names* are not supported by the JIT API: any non-numeric value
-  /// other than "Default" logs a warning and falls back to the Default
-  /// group (ID 1).
-  #[arg(long, default_value = "Default", value_name = "ID")]
+  /// For an organization URL a name is resolved through the org's runner
+  /// group list and its ID is recorded. Repository runners have only the
+  /// Default group: a name there logs a warning and uses it (ID 1).
+  #[arg(long, default_value = "Default", value_name = "NAME|ID")]
   pub(crate) runner_group: String,
   /// Working directory for job workspaces (default: ~/.toolu-runner/_work).
   #[arg(long, value_name = "DIR", value_hint = ValueHint::DirPath)]

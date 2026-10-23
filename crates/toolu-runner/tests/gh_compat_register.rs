@@ -14,7 +14,9 @@
 
 use serde_json::Value;
 use shared::RunnerError;
-use wire::net::{RegisterParams, build_request, parse_response, register_jit};
+use wire::net::{
+  RegisterParams, RunnerScope, build_request, parse_response, register_jit, resolve_target,
+};
 use wiremock::matchers::{body_json, header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -84,14 +86,84 @@ fn build_request_handles_ghes_dot_git_and_explicit_group() {
   assert_eq!(req.body.runner_group_id, 7);
 }
 
+/// An organization URL (one path segment) targets the org endpoint (#201).
 #[test]
-fn build_request_rejects_url_without_repo() {
-  let err = build_request("https://github.com/just-owner", "r", &[], None, "_work")
-    .expect_err("a URL missing the repo segment must error");
+fn build_request_targets_the_org_endpoint_for_an_org_url() {
+  let req = build_request("https://github.com/just-owner", "r", &[], Some(3), "_work")
+    .expect("an org URL builds the org-scoped request");
+  assert_eq!(
+    req.url,
+    "https://api.github.com/orgs/just-owner/actions/runners/generate-jitconfig"
+  );
+  assert_eq!(req.body.runner_group_id, 3, "the org runner group is sent");
+  let ghes = build_request("https://ghe.example.com/acme", "r", &[], None, "_work")
+    .expect("a GHES org URL builds");
+  assert_eq!(
+    ghes.url,
+    "https://ghe.example.com/api/v3/orgs/acme/actions/runners/generate-jitconfig"
+  );
+}
+
+/// A URL naming neither a repo nor an org cannot address any runners API.
+#[test]
+fn build_request_rejects_url_without_owner_or_org() {
+  let err = build_request("https://github.com/", "r", &[], None, "_work")
+    .expect_err("a URL with no path segment must error");
   assert!(
     matches!(err, RunnerError::Config(_)),
     "expected Config error, got {err:?}"
   );
+}
+
+/// `resolve_target` splits a URL into the API base and its scope.
+#[test]
+fn resolve_target_parses_repo_and_org_scopes() {
+  let (base, scope) =
+    resolve_target("https://github.com/octo-org/octo-repo.git").expect("repo URL resolves");
+  assert_eq!(base, "https://api.github.com");
+  assert_eq!(
+    scope,
+    RunnerScope::Repo {
+      owner: "octo-org".to_owned(),
+      repo: "octo-repo".to_owned()
+    }
+  );
+  assert_eq!(scope.api_path(), "repos/octo-org/octo-repo");
+  let (base, scope) = resolve_target("http://127.0.0.1:8080/octo-org").expect("org URL resolves");
+  assert_eq!(base, "http://127.0.0.1:8080/api/v3");
+  assert_eq!(scope.api_path(), "orgs/octo-org");
+  assert_eq!(scope.display_name(), "octo-org");
+}
+
+/// `register_jit` for an org URL POSTs the org endpoint and parses the reply.
+#[tokio::test]
+async fn register_jit_posts_the_org_endpoint() {
+  let server = MockServer::start().await;
+  let response_json: Value = serde_json::from_str(RESPONSE_FIXTURE).expect("fixture is valid JSON");
+  Mock::given(method("POST"))
+    .and(path(
+      "/api/v3/orgs/octo-org/actions/runners/generate-jitconfig",
+    ))
+    .and(header("authorization", "Bearer org-token"))
+    .and(body_json(serde_json::json!({
+      "name": "runner-1",
+      "runner_group_id": 1,
+      "labels": ["self-hosted"],
+      "work_folder": "_work",
+    })))
+    .respond_with(ResponseTemplate::new(201).set_body_json(response_json))
+    .expect(1)
+    .mount(&server)
+    .await;
+  let url = format!("{}/octo-org", server.uri());
+  let labels = ["self-hosted".to_owned()];
+  let reg = register_jit(
+    &reqwest::Client::new(),
+    &params_for(&url, "org-token", &labels, false),
+  )
+  .await
+  .expect("the org mint succeeds");
+  assert_eq!(reg.runner_id, FIXTURE_RUNNER_ID);
 }
 
 #[test]
@@ -820,14 +892,14 @@ async fn unregister_runner_surfaces_401_as_auth() {
   );
 }
 
-/// A URL with no `owner/repo` cannot name a runner — reject before any
-/// request rather than deleting something unintended.
+/// A URL naming neither a repo nor an org cannot name a runner — reject
+/// before any request rather than deleting something unintended.
 #[tokio::test]
-async fn unregister_runner_rejects_a_url_without_a_repo() {
+async fn unregister_runner_rejects_a_url_without_owner_or_org() {
   let client = reqwest::Client::new();
   let result = wire::net::unregister_runner(
     &client,
-    "https://github.com/octo-org",
+    "https://github.com/",
     "tok-1",
     461,
     "runner-1",
