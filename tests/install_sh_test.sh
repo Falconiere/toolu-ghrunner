@@ -233,7 +233,7 @@ fi
 # =========================================================================
 for tool in python3 setsid script timeout zsh fish sha256sum shasum; do
   command -v "$tool" >/dev/null 2>&1 \
-    || fail "$tool is required by the install.sh scenarios (install it; CI installs zsh and fish)"
+    || fail "$tool is required by the install.sh scenarios (install it; CI installs zsh and fish). This suite is Linux-only (util-linux setsid/script) and needs both sha256sum and shasum to cover both hash paths; on macOS run tests/install_sh_bash32_test.sh, which accepts either."
 done
 
 REAL_BIN="${TOOLU_RUNNER_TEST_BIN:-$ROOT/target/debug/toolu-runner}"
@@ -834,6 +834,22 @@ if want S10; then
   [[ "$RC" -eq 0 ]] || fail "S10 an unwritable fish dir should still exit 0 (rc=$RC): $OUT"
   echo "$OUT" | grep -q 'could not write ~/.config/fish/conf.d/toolu-runner.fish' || fail "S10 should warn about fish: $OUT"
   [[ "$(count_blocks "$h/.profile")" -eq 1 ]] || fail "S10 the other profiles should still be set up"
+
+  # Root reads any file, so the unreadable-profile case needs a normal user.
+  if [[ "$(id -u)" -ne 0 ]]; then
+    echo "S10: an unreadable profile is never overwritten"
+    h="$(new_home s10-unreadable)"
+    printf '# private bashrc\nexport SECRET_ALIAS=1\n' >"$h/.bashrc"
+    cp "$h/.bashrc" "$tmp/s10-bashrc.orig"
+    chmod 0200 "$h/.bashrc"
+    run_install notty "$h" real --install-dir "$h/.local/bin"
+    chmod 0600 "$h/.bashrc"
+    [[ "$RC" -eq 0 ]] || fail "S10 an unreadable profile should not fail the install (rc=$RC): $OUT"
+    echo "$OUT" | grep -qx 'install.sh: could not read ~/.bashrc; left unchanged' \
+      || fail "S10 should warn about the unreadable profile: $OUT"
+    cmp -s "$tmp/s10-bashrc.orig" "$h/.bashrc" || fail "S10 an unreadable profile was overwritten: $(cat "$h/.bashrc")"
+    [[ "$(count_blocks "$h/.profile")" -eq 1 ]] || fail "S10 the readable profiles should still be set up"
+  fi
 
   echo "S10: a relative --install-dir is written as an absolute path"
   h="$(new_home s10-rel)"

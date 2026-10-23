@@ -350,9 +350,10 @@ BLOCK="$PROFILE_BEGIN"$'\n'"$PROFILE_LINE"$'\n'"$PROFILE_END"$'\n'
 BLOCK_NL=$'\n'"$PROFILE_BEGIN (added the newline above)"$'\n'"$PROFILE_LINE"$'\n'"$PROFILE_END"$'\n'
 
 # read_file <file>: its exact bytes into FILE_TEXT (a command substitution
-# alone would drop trailing newlines).
+# alone would drop trailing newlines). 1 when the file cannot be read, so no
+# caller mistakes an unreadable profile for an empty one and overwrites it.
 read_file() {
-  FILE_TEXT="$(cat "$1"; printf x)"
+  FILE_TEXT="$(cat "$1" 2>/dev/null && printf x)" || { FILE_TEXT=""; return 1; }
   FILE_TEXT="${FILE_TEXT%x}"
 }
 
@@ -368,7 +369,7 @@ has_block() {
 # The file holds exactly one block, equal to ours.
 has_exact_block() {
   [[ "$(begin_count "$1")" -eq 1 ]] || return 1
-  read_file "$1"
+  read_file "$1" || return 1
   [[ "$FILE_TEXT" == *"$BLOCK"* || "$FILE_TEXT" == *"$BLOCK_NL"* ]]
 }
 
@@ -381,11 +382,11 @@ blocks_balanced() {
   ' "$1"
 }
 
-# strip_blocks <file>: the file without our blocks, into FILE_TEXT. Exact
-# blocks are cut byte for byte; any other block (an older line, say) goes
-# line by line.
+# strip_blocks <file>: the file without our blocks, into FILE_TEXT; 1 when it
+# cannot be read. Exact blocks are cut byte for byte; any other block (an
+# older line, say) goes line by line.
 strip_blocks() {
-  read_file "$1"
+  read_file "$1" || return 1
   # The newline a BLOCK_NL added goes only while the block is still last;
   # with text appended after it, that newline now ends the user's line.
   if [[ "$FILE_TEXT" == *"$BLOCK_NL" ]]; then FILE_TEXT="${FILE_TEXT%"$BLOCK_NL"}"; fi
@@ -398,8 +399,8 @@ strip_blocks() {
         index($0, ENVIRON["B"]) == 1 { skip = 1; next }
         skip && $0 == ENVIRON["E"] { skip = 0; next }
         !skip { print }
-      ' "$WORK_DIR/profile.tmp" >"$WORK_DIR/profile.stripped"
-      read_file "$WORK_DIR/profile.stripped"
+      ' "$WORK_DIR/profile.tmp" >"$WORK_DIR/profile.stripped" || return 1
+      read_file "$WORK_DIR/profile.stripped" || return 1
       ;;
   esac
 }
@@ -417,8 +418,9 @@ add_profile_block() {
     return 1
   fi
   FILE_TEXT=""
-  if [[ -f "$f" ]]; then
-    strip_blocks "$f"
+  if [[ -f "$f" ]] && ! strip_blocks "$f"; then
+    PATH_WARNINGS+=("could not read $(tilde "$f"); left unchanged")
+    return 1
   fi
   if [[ -n "$FILE_TEXT" && "$FILE_TEXT" != *$'\n' ]]; then
     FILE_TEXT="$FILE_TEXT$BLOCK_NL"
@@ -469,14 +471,17 @@ uninstall() {
   [[ -n "${HOME:-}" ]] || die "--uninstall needs HOME to find the shell profiles"
   WORK_DIR="$(mktemp -d -t toolu-runner-install.XXXXXX)"
   trap 'rm -rf "$WORK_DIR"' EXIT
-  local removed=() kept=() f
+  local removed=() kept=() unreadable=() f
   while IFS= read -r f; do
     if [[ ! -f "$f" ]] || ! has_block "$f"; then continue; fi
     if ! blocks_balanced "$f"; then
       kept+=("$(tilde "$f")")
       continue
     fi
-    strip_blocks "$f"
+    if ! strip_blocks "$f"; then
+      unreadable+=("$(tilde "$f")")
+      continue
+    fi
     if [[ -z "$FILE_TEXT" && ! -L "$f" ]]; then
       # Only the block was in it (the installer created it): remove the file.
       rm -f "$f"
@@ -504,6 +509,9 @@ uninstall() {
   fi
   if [[ ${#kept[@]} -gt 0 ]]; then
     err "left unchanged (unmatched toolu-runner marker; edit by hand): $(join_and "${kept[@]}")"
+  fi
+  if [[ ${#unreadable[@]} -gt 0 ]]; then
+    err "left unchanged (could not read): $(join_and "${unreadable[@]}")"
   fi
   echo "$BIN_NAME: the binary and runner state were left in place"
   exit 0
