@@ -22,7 +22,8 @@ Examples:
   toolu-runner doctor               # health: what is broken and the command that fixes it
 
 Environment:
-  TOOLU_RUNNER_TOKEN           GitHub bearer for `register` and re-mint (flag > env > saved App > login)
+  TOOLU_RUNNER_TOKEN           GitHub bearer: `register` (--token > env > saved App > login)
+                               and a token registration's re-mint (env > login)
   TOOLU_RUNNER_CLIENT_ID       OAuth App client_id for `login` (fallback for --client-id)
   TOOLU_RUNNER_HOME            runner state root (default ~/.toolu-runner)
   TOOLU_RUNNER_KEYRING         opt in to the OS keyring token store (default: 0600 file)

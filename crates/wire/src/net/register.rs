@@ -259,6 +259,10 @@ pub struct RegisterParams<'a> {
   /// the caller's shared `client` carries (the always-online loop reuses one
   /// client across the listener and every re-mint).
   pub timeout: Duration,
+  /// Add a hint to a 404 for a one-segment (organization) URL that it may be
+  /// a mistyped repository URL — for a first `register`, not for a re-mint of
+  /// an existing org registration.
+  pub hint_org_404: bool,
 }
 
 /// POST the built `generate-jitconfig` request; return status + body.
@@ -542,15 +546,16 @@ pub async fn register_jit(
     )));
   }
 
-  Err(org_hint(mint_failure(status, &text), status, params.url))
+  let failure = mint_failure(status, &text);
+  if params.hint_org_404 && status == reqwest::StatusCode::NOT_FOUND {
+    return Err(org_hint(failure, params.url));
+  }
+  Err(failure)
 }
 
 /// A 404 for a one-segment URL may be a mistyped repository URL read as an
 /// organization (#201): say so, since the URL decides the endpoint.
-fn org_hint(failure: RunnerError, status: reqwest::StatusCode, url: &str) -> RunnerError {
-  if status != reqwest::StatusCode::NOT_FOUND {
-    return failure;
-  }
+fn org_hint(failure: RunnerError, url: &str) -> RunnerError {
   let Ok((_, RunnerScope::Org { org })) = resolve_target(url) else {
     return failure;
   };

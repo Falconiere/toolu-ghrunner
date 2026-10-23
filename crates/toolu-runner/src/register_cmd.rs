@@ -62,7 +62,7 @@ pub(crate) async fn cmd_register(args: RegisterArgs) -> Result<(), Box<dyn std::
   let runner_group =
     register_auth::resolve_runner_group(&args.runner_group, &url, &auth.bearer, &client)
       .await
-      .map_err(|e| format!("{e}"))?;
+      .map_err(|e| auth.explain(&e))?;
 
   let runner_id = register_and_persist(
     RegisterPersist {
@@ -79,6 +79,7 @@ pub(crate) async fn cmd_register(args: RegisterArgs) -> Result<(), Box<dyn std::
       ephemeral: args.ephemeral,
       network,
       auth: auth.section.clone(),
+      hint_org_404: true,
     },
     &client,
   )
@@ -247,6 +248,8 @@ pub(crate) struct RegisterPersist<'a> {
   pub(crate) network: config::network::NetworkSection,
   /// `[auth]` to persist: token, or the App installation that minted.
   pub(crate) auth: AuthSection,
+  /// `register` only: a 404 for an org URL may be a mistyped repository URL.
+  pub(crate) hint_org_404: bool,
 }
 
 /// The `[network]` a `register --replace` keeps: the existing registration's
@@ -309,6 +312,7 @@ async fn mint_jit(
       work_folder: p.work_folder,
       replace: p.replace,
       timeout: MINT_TIMEOUT,
+      hint_org_404: p.hint_org_404,
     },
   )
   .await
@@ -399,6 +403,7 @@ pub(crate) async fn remint_and_persist(
     ephemeral: prior.ephemeral,
     network: prior.network.clone(),
     auth: prior.auth.clone(),
+    hint_org_404: false,
   };
   let registration = mint_jit(&p, client).await?;
 

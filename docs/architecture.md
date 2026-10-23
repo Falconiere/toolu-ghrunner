@@ -1430,7 +1430,7 @@ non-goal for v1 (logged + best-effort; no spec guarantee).
 | 1 | `run` with no `config.toml`                                   | Exit 2, point at `toolu-runner register`. |
 | 2 | `run` with `config.toml` but no `credentials.json`            | Exit 2, same pointer. |
 | 3 | `register` against a non-GH URL (`--url https://localhost/o/r`) | Exit 2 — runner only accepts `github.com` and GHES hosts (host must contain `.`). |
-| 4 | `register` with an invalid / expired token                    | Exit 2. A 401 reports `stored GitHub token invalid or expired — run 'toolu-runner login'`; other permanent non-2xx statuses carry GitHub's response body. |
+| 4 | `register` with an invalid / expired token                    | Exit 2. A 401 reports `GitHub rejected the bearer as invalid or expired (401) — for a personal token, run 'toolu-runner login'`; other permanent non-2xx statuses carry GitHub's response body (a 404 for a one-segment URL adds that it was read as an organization). |
 | 5 | `register` with name that conflicts                            | Exit 2 unless `--replace`; with `--replace`, overwrites. |
 | 6 | `run` started when a previous `run` holds `.lock`             | Exit 2 with the holder's PID read from the lock body. |
 | 7 | `remove` mid-job                                              | Writes `.pending_remove`, refuses with exit 2 unless `--force`; with `--force` it removes local state but keeps `.lock` and skips the GitHub unregister (the running job still reports against that registration). Live cancellation of the job is still step 10. |

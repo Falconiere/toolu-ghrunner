@@ -310,8 +310,9 @@ fn jit_row(config: &RunnerRegistrationConfig) -> Row {
   }
 }
 
-/// The `app` row of a registration that re-mints with a GitHub App (#201):
-/// its App file must load. Local only — nothing is signed or sent.
+/// The `app` row of a persistent registration that re-mints with a GitHub
+/// App (#201): its App file must load. An ephemeral one never re-mints, so it
+/// has no row. Local only — nothing is signed or sent.
 fn app_row(config: &RunnerRegistrationConfig) -> Option<Row> {
   let AuthSection::App {
     app_file,
@@ -320,6 +321,9 @@ fn app_row(config: &RunnerRegistrationConfig) -> Option<Row> {
   else {
     return None;
   };
+  if config.ephemeral {
+    return None;
+  }
   Some(
     match config::app_store::load_app_file(Path::new(app_file)) {
       Ok(app) => Row::new(
@@ -330,7 +334,7 @@ fn app_row(config: &RunnerRegistrationConfig) -> Option<Row> {
           app.slug, app.app_id
         ),
       ),
-      Err(error) => Row::new(Level::Fail, "app", error.to_string()).with_fix(format!(
+      Err(error) => Row::new(Level::Fail, "app", shareable(&error.to_string())).with_fix(format!(
         "restore {app_file}, or re-register: toolu-runner register --app --replace --url {}",
         config.runner_url
       )),

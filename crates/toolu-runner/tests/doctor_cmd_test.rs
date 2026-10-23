@@ -514,3 +514,23 @@ fn an_app_registration_reports_its_app_file() -> TestResult {
   assert_eq!(code, Some(1), "{}", report(&stdout, &stderr));
   Ok(())
 }
+
+/// An ephemeral App registration never re-mints, so it gets no `app` row
+/// even when its App file is gone.
+#[test]
+fn an_ephemeral_app_registration_has_no_app_row() -> TestResult {
+  let home = tempfile::tempdir()?;
+  write_registration_with(home.path(), "o", "r", "http://127.0.0.1:9", true, |cfg| {
+    cfg.auth = config::registration_auth::AuthSection::App {
+      app_file: "/nonexistent/github-app.json".to_owned(),
+      installation_id: 1,
+    };
+  })?;
+  let (_, stdout, _, _) = run(doctor_cmd(home.path())?.arg("--offline"))?;
+  let registration = block(&stdout, "o/r");
+  assert!(
+    !registration.iter().any(|line| line.contains(" app ")),
+    "{stdout}"
+  );
+  Ok(())
+}

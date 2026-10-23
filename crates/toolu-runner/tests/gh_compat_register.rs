@@ -141,6 +141,31 @@ async fn register_jit_names_the_org_reading_on_a_404() {
   );
 }
 
+/// The org hint is for a first registration only: a re-mint (no hint
+/// requested) and a repository URL keep `mint_failure`'s own message.
+#[tokio::test]
+async fn the_org_hint_is_absent_for_a_re_mint_and_for_a_repository() {
+  let server = MockServer::start().await;
+  Mock::given(method("POST"))
+    .respond_with(ResponseTemplate::new(404).set_body_string(r#"{"message":"Not Found"}"#))
+    .mount(&server)
+    .await;
+  let labels = ["self-hosted".to_owned()];
+  let org = format!("{}/octo-org", server.uri());
+  let repo = stub_repo_url(&server);
+  let mut remint = params_for(&org, "tok", &labels, false);
+  remint.hint_org_404 = false;
+  for params in [remint, params_for(&repo, "tok", &labels, false)] {
+    let err = register_jit(&reqwest::Client::new(), &params)
+      .await
+      .expect_err("404");
+    assert!(
+      matches!(&err, RunnerError::Auth(msg) if msg.contains("404") && !msg.contains("read as an organization")),
+      "{err:?}"
+    );
+  }
+}
+
 /// `resolve_target` splits a URL into the API base and its scope.
 #[test]
 fn resolve_target_parses_repo_and_org_scopes() {
@@ -260,6 +285,7 @@ fn params_for<'a>(
     work_folder: "_work",
     replace,
     timeout: std::time::Duration::from_secs(30),
+    hint_org_404: true,
   }
 }
 

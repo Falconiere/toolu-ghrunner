@@ -26,18 +26,25 @@ pub(crate) struct RegisterAuth {
   pub(crate) section: AuthSection,
   /// `GitHub App '<slug>' (installation <id>)` for an App registration.
   pub(crate) app_label: Option<String>,
+  /// [`implicit_note`] when the App was picked automatically (no `--app`).
+  pub(crate) implicit_note: Option<String>,
 }
 
 impl RegisterAuth {
-  /// A mint failure, naming the App permissions when an App was used.
+  /// A failure after authentication (runner groups, the mint), naming the
+  /// App permissions when an App was refused and, for an automatically picked
+  /// App, how to register without it.
   pub(crate) fn explain(&self, e: &RunnerError) -> String {
-    match (&self.app_label, e) {
-      (Some(label), RunnerError::Auth(_)) => format!(
-        "{e}\n(registering as {label}: the App needs Administration write access on a \
+    let permissions = if let (Some(label), RunnerError::Auth(_)) = (&self.app_label, e) {
+      format!(
+        "\n(registering as {label}: the App needs Administration write access on a \
          repository, Self-hosted runners write access on an organization)"
-      ),
-      _ => e.to_string(),
-    }
+      )
+    } else {
+      String::new()
+    };
+    let note = self.implicit_note.as_deref().unwrap_or_default();
+    format!("{e}{permissions}{note}")
   }
 }
 
@@ -59,6 +66,7 @@ pub(crate) async fn resolve(
       bearer,
       section: AuthSection::Token,
       app_label: None,
+      implicit_note: None,
     });
   };
   let registration = crate::app_auth::register_installation(client, &app, url, masker)
@@ -75,6 +83,7 @@ pub(crate) async fn resolve(
       "GitHub App '{}' (installation {})",
       app.slug, registration.installation_id
     )),
+    implicit_note: (!args.app).then(|| implicit_note(&app_file, host)),
   })
 }
 
@@ -107,18 +116,24 @@ fn pick_app(
   )))
 }
 
-/// Explain an App failure when the App was picked automatically (no
-/// `--app`): why it was used, and how to register without it.
-fn with_implicit_note(error: RunnerError, app_flag: bool, path: &Path, host: &str) -> RunnerError {
-  if app_flag {
-    return error;
-  }
-  let note = format!(
+/// Why an automatically picked App (no `--app`) was used, and how to
+/// register without it.
+fn implicit_note(path: &Path, host: &str) -> String {
+  format!(
     "\n(the GitHub App was used automatically because {} exists for {host}: pass --token or \
      set TOOLU_RUNNER_TOKEN to register with a personal token, or move the file aside to use \
      the stored `login` token)",
     path.display()
-  );
+  )
+}
+
+/// Append [`implicit_note`] to an App failure when the App was picked
+/// automatically, keeping the error kind.
+fn with_implicit_note(error: RunnerError, app_flag: bool, path: &Path, host: &str) -> RunnerError {
+  if app_flag {
+    return error;
+  }
+  let note = implicit_note(path, host);
   // Keep the kind the run loop and `main` act on; anything else is a setup
   // error of the App file.
   if let RunnerError::Auth(msg) = error {

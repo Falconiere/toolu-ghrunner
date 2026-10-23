@@ -583,3 +583,88 @@ async fn status_reports_a_missing_app_file() -> TestResult {
   );
   Ok(())
 }
+
+/// A full first page (GitHub's maximum, 100) without the requested group
+/// says only that page was searched. The page is GitHub's documented groups
+/// repeated with distinct ids and names.
+#[tokio::test]
+async fn a_full_runner_group_page_says_only_it_was_searched() -> TestResult {
+  let documented: Value = serde_json::from_str(&crate::github_app_fixtures::capture_body(
+    "runner_groups_200.json",
+  )?)?;
+  let template = documented
+    .pointer("/runner_groups/1")
+    .cloned()
+    .ok_or("documented group")?;
+  let groups: Vec<Value> = (1..=100)
+    .map(|id| {
+      let mut group = template.clone();
+      if let Some(object) = group.as_object_mut() {
+        object.insert("id".to_owned(), Value::from(id));
+        object.insert("name".to_owned(), Value::from(format!("group-{id}")));
+      }
+      group
+    })
+    .collect();
+  let home = tempfile::tempdir()?;
+  write_app(home.path(), "127.0.0.1")?;
+  let server = app_server().await?;
+  Mock::given(method("GET"))
+    .and(path("/api/v3/orgs/octo-org/actions/runner-groups"))
+    .respond_with(
+      ResponseTemplate::new(200)
+        .set_body_json(json!({"total_count": 140, "runner_groups": groups})),
+    )
+    .mount(&server)
+    .await;
+  let out = register(
+    home.path(),
+    &server,
+    "octo-org",
+    None,
+    &["--app", "--runner-group", "group-140"],
+  )?;
+  assert_eq!(out.status.code(), Some(2));
+  let stderr = text(&out.stderr);
+  assert!(
+    stderr.contains("runner group 'group-140' not found in octo-org"),
+    "{stderr}"
+  );
+  assert!(
+    stderr.contains("only the first page was searched — pass the group's numeric ID"),
+    "{stderr}"
+  );
+  assert_eq!(hits(&server, ORG_JIT).await?, 0);
+  Ok(())
+}
+
+/// F1: an automatically picked App refused at the runner-group list still
+/// says why the App was used.
+#[tokio::test]
+async fn an_automatic_app_refused_after_auth_says_why_it_was_used() -> TestResult {
+  let home = tempfile::tempdir()?;
+  write_app(home.path(), "127.0.0.1")?;
+  let server = app_server().await?;
+  Mock::given(method("GET"))
+    .and(path("/api/v3/orgs/octo-org/actions/runner-groups"))
+    .respond_with(ResponseTemplate::new(403).set_body_json(json!({
+      "message": "Resource not accessible by integration",
+      "status": "403",
+    })))
+    .mount(&server)
+    .await;
+  let out = register(
+    home.path(),
+    &server,
+    "octo-org",
+    None,
+    &["--runner-group", "gpu"],
+  )?;
+  assert_eq!(out.status.code(), Some(2));
+  let stderr = text(&out.stderr);
+  assert!(
+    stderr.contains("the GitHub App was used automatically because"),
+    "{stderr}"
+  );
+  Ok(())
+}
