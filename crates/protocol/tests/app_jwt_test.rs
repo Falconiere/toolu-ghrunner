@@ -137,7 +137,7 @@ fn a_time_whose_claims_overflow_is_an_error_not_a_clamped_claim() {
   let earliest = i64::MIN + APP_JWT_BACKDATE_SECS;
   let jwt = build_app_jwt_at(PRIVATE_PEM, APP_ID, earliest).expect("the earliest instant signs");
   let claims = verified_claims(&jwt).expect("signature verifies");
-  assert_eq!(claims["iat"], i64::MIN);
+  assert_eq!(claims.get("iat").and_then(Value::as_i64), Some(i64::MIN));
 }
 
 #[test]
