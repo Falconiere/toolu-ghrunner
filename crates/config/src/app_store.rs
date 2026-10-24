@@ -44,6 +44,15 @@ pub struct StoredApp {
   pub html_url: String,
   /// When the App was created, RFC3339.
   pub created_at: String,
+  /// Numeric id of the owning account (#202): the install link's
+  /// `target_id`. `None` in a pre-#202 file.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub owner_id: Option<i64>,
+  /// The installation `create-app` waited for (#202); `None` until the App
+  /// is installed, and in a pre-#202 file. Informational: `register --app`
+  /// still looks the installation up per repo or org.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub installation_id: Option<i64>,
 }
 
 /// Path of the app store file: `<home>/github-app.json`.
@@ -124,6 +133,8 @@ impl std::fmt::Debug for StoredApp {
       .field("pem", &"<redacted>")
       .field("html_url", &self.html_url)
       .field("created_at", &self.created_at)
+      .field("owner_id", &self.owner_id)
+      .field("installation_id", &self.installation_id)
       .finish()
   }
 }
@@ -138,9 +149,16 @@ impl StoredApp {
   }
 
   /// The install URL to print after creation:
+  /// `https://github.com/apps/{slug}/installations/new/permissions?target_id={owner_id}`
+  /// when the owner id is known (it skips GitHub's account picker; a private
+  /// App installs only on its owner), else
   /// `https://github.com/apps/{slug}/installations/new`.
   pub fn install_url(&self) -> String {
-    format!("https://github.com/apps/{}/installations/new", self.slug)
+    let base = format!("https://github.com/apps/{}/installations/new", self.slug);
+    match self.owner_id {
+      Some(owner_id) => format!("{base}/permissions?target_id={owner_id}"),
+      None => base,
+    }
   }
 
   /// A secret-free, human-readable summary for the terminal.

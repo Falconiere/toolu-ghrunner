@@ -119,6 +119,8 @@ pub fn write_app(home: &Path, host: &str) -> Result<PathBuf, Box<dyn Error>> {
     pem: PRIVATE_PEM.to_owned(),
     html_url: format!("https://{host}/apps/{APP_SLUG}"),
     created_at: "2026-10-23T00:00:00Z".to_owned(),
+    owner_id: None,
+    installation_id: None,
   };
   config::app_store::save_app(home, &app)?;
   Ok(config::app_store::app_path(home))

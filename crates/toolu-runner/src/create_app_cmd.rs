@@ -126,5 +126,7 @@ fn build_stored_app(resp: ConversionResponse, host: String) -> StoredApp {
     pem: resp.pem,
     html_url: resp.html_url,
     created_at: chrono::Utc::now().to_rfc3339(),
+    owner_id: None,
+    installation_id: None,
   }
 }

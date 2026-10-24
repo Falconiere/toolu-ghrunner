@@ -31,7 +31,65 @@ fn sample_app() -> StoredApp {
     pem: DUMMY_PEM.to_owned(),
     html_url: "https://github.com/apps/my-runner-app".to_owned(),
     created_at: "2026-07-13T00:00:00Z".to_owned(),
+    owner_id: Some(9_919),
+    installation_id: Some(987_654),
   }
+}
+
+/// A `github-app.json` exactly as `create-app` wrote it before #202 (no
+/// `owner_id` / `installation_id`).
+const PRE_202_FILE: &str = r#"{
+  "host": "github.com",
+  "app_id": 123456,
+  "slug": "my-runner-app",
+  "owner": "falconiere",
+  "client_id": "Iv1.abcdef1234567890",
+  "client_secret": "cs_super_secret_value",
+  "webhook_secret": null,
+  "pem": "-----BEGIN RSA PRIVATE KEY-----\nMIIphony\n-----END RSA PRIVATE KEY-----\n",
+  "html_url": "https://github.com/apps/my-runner-app",
+  "created_at": "2026-07-13T00:00:00Z"
+}"#;
+
+// ── #202 AC-8: optional owner / installation ids ─────────────────────
+
+#[test]
+fn a_pre_202_file_loads_without_the_new_ids_and_keeps_the_plain_install_url() {
+  let home = TempDir::new().expect("temp home");
+  std::fs::write(app_store::app_path(home.path()), PRE_202_FILE).expect("write");
+  let app = app_store::load_app(home.path())
+    .expect("load")
+    .expect("present");
+  assert_eq!((app.owner_id, app.installation_id), (None, None));
+  assert_eq!(
+    app.install_url(),
+    "https://github.com/apps/my-runner-app/installations/new"
+  );
+}
+
+#[test]
+fn a_known_owner_id_makes_the_install_url_skip_the_account_picker() {
+  assert_eq!(
+    sample_app().install_url(),
+    "https://github.com/apps/my-runner-app/installations/new/permissions?target_id=9919"
+  );
+}
+
+#[test]
+fn unset_ids_are_left_out_of_the_saved_file() {
+  let home = TempDir::new().expect("temp home");
+  let app = StoredApp {
+    owner_id: None,
+    installation_id: None,
+    ..sample_app()
+  };
+  app_store::save_app(home.path(), &app).expect("save");
+  let text = std::fs::read_to_string(app_store::app_path(home.path())).expect("read");
+  assert!(
+    !text.contains("owner_id") && !text.contains("installation_id"),
+    "{text}"
+  );
+  assert_eq!(app_store::load_app(home.path()).expect("load"), Some(app));
 }
 
 // ── AC-3: save/load roundtrip ─────────────────────────────────────────

@@ -57,6 +57,8 @@ fn app_store_save_hardens_new_home_to_0700() {
       pem: DUMMY_PEM.to_owned(),
       html_url: "https://github.com/apps/my-runner-app".to_owned(),
       created_at: "2026-07-15T00:00:00Z".to_owned(),
+      owner_id: None,
+      installation_id: None,
     },
   )
   .expect("save app");
