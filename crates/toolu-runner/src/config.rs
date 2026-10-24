@@ -93,6 +93,26 @@ pub(crate) fn session_conflict_policy() -> SessionConflictPolicy {
   SessionConflictPolicy::default()
 }
 
+/// How long `remove` waits for `run --all` to stop a registration it asked
+/// to drain (#208): 30 s, overridable in milliseconds by
+/// `TOOLU_RUNNER_REMOVE_WAIT_MS` (tests use a short wait for the busy case).
+/// An empty value counts as unset; zero or a non-integer is diagnosed and
+/// the default kept.
+pub(crate) fn remove_wait() -> Duration {
+  const KEY: &str = "TOOLU_RUNNER_REMOVE_WAIT_MS";
+  const DEFAULT: Duration = Duration::from_secs(30);
+  let Some(raw) = read(KEY).filter(|raw| !raw.is_empty()) else {
+    return DEFAULT;
+  };
+  parse_interval_ms(&raw).unwrap_or_else(|| {
+    report(
+      KEY,
+      "is not a positive integer of milliseconds; using the default 30 s",
+    );
+    DEFAULT
+  })
+}
+
 /// Where `doctor` reads the latest release when `TOOLU_RUNNER_RELEASES_URL`
 /// is unset: this repository's latest GitHub release.
 const DEFAULT_RELEASES_URL: &str =

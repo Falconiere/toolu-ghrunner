@@ -14,9 +14,14 @@ use std::time::Duration;
 
 use crate::check_tools::{RunError, first_line, run};
 use crate::doctor_report::{Level, Row};
-use crate::service_cmd::{
-  Supervisor, activation_hint, current_supervisor, current_uid, dest_path, home_dir, service_id,
-};
+use config::registry;
+
+use crate::machine_service::{InstalledUnit, SYSTEM_UNIT_DIR, UnitScope, installed_units};
+use crate::service_cmd::{Supervisor, activation_hint, current_supervisor, current_uid, home_dir};
+
+/// The fix for a registration no unit, or more than one unit, supervises:
+/// install (or migrate to) the one machine service.
+const INSTALL: &str = "toolu-runner install-service";
 
 /// What the supervisor says about an installed unit.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -115,41 +120,95 @@ async fn activity(
 }
 
 /// The `service` row for the registration at `config_path`, plus whether a
-/// unit file exists. `None` for an ephemeral registration (never supervised).
+/// unit supervises it. The units come from the same inventory migration
+/// uses (#208): none warns (an ephemeral registration gets no row), one is
+/// queried for its state, and two or more fail — `install-service` replaces
+/// the older ones with the machine unit.
 pub(crate) async fn service_row(
   config_path: &Path,
   ephemeral: bool,
   timeout: Duration,
 ) -> Option<(Row, bool)> {
-  if ephemeral {
-    return None;
-  }
   let Ok(supervisor) = current_supervisor() else {
-    return Some((
-      Row::new(
+    return (!ephemeral).then(|| {
+      let row = Row::new(
         Level::Skip,
         "service",
         "supervisor units are launchd (macOS) / systemd (Linux) only",
-      ),
-      false,
-    ));
+      );
+      (row, false)
+    });
   };
   let home = match home_dir() {
     Ok(home) => home,
-    Err(error) => return Some((Row::new(Level::Warn, "service", error.to_string()), false)),
+    Err(error) => {
+      return (!ephemeral).then(|| (Row::new(Level::Warn, "service", error.to_string()), false));
+    },
   };
-  let id = service_id(config_path);
-  let dest = dest_path(supervisor, &id, &home);
-  if !dest.exists() {
-    let row = Row::new(Level::Warn, "service", "not installed").with_fix(format!(
-      "toolu-runner install-service --config {}",
-      config_path.display()
-    ));
-    return Some((row, false));
+  // The inventory reads unit files: keep it off the async workers, like the
+  // journal scan.
+  let units = tokio::task::spawn_blocking(move || {
+    installed_units(
+      supervisor,
+      &home,
+      &registry::runner_home(),
+      Some(Path::new(SYSTEM_UNIT_DIR)),
+    )
+  })
+  .await
+  .unwrap_or_else(|e| {
+    tracing::warn!(error = %e, "the unit inventory did not finish");
+    Vec::new()
+  });
+  let mine: Vec<&InstalledUnit> = units
+    .iter()
+    .filter(|unit| unit.supervises_registration(config_path))
+    .collect();
+  match mine.as_slice() {
+    [] if ephemeral => None,
+    [] => Some((
+      Row::new(Level::Warn, "service", "not installed").with_fix(INSTALL),
+      false,
+    )),
+    [unit] if unit.scope == UnitScope::System => Some((system_unit_row(unit), true)),
+    [unit] => {
+      let hint = activation_hint(supervisor, &unit.path, &unit.id);
+      let activity = activity(supervisor, &unit.id.label, &unit.id.unit, hint, timeout).await;
+      Some((installed_row(&unit.path, &activity), true))
+    },
+    several => {
+      let paths: Vec<String> = several
+        .iter()
+        .map(|unit| unit.path.display().to_string())
+        .collect();
+      let row = Row::new(
+        Level::Fail,
+        "service",
+        format!(
+          "supervised by {} units: {}",
+          several.len(),
+          paths.join(", ")
+        ),
+      )
+      .with_fix(INSTALL);
+      Some((row, true))
+    },
   }
-  let hint = activation_hint(supervisor, &dest, &id);
-  let activity = activity(supervisor, &id.label, &id.unit, hint, timeout).await;
-  Some((installed_row(&dest, &activity), true))
+}
+
+/// The `service` row for a registration only a systemd **system** unit
+/// supervises: never queried through `systemctl --user` (that name is the
+/// user's machine unit); the fix names the system-scope query.
+pub(crate) fn system_unit_row(unit: &InstalledUnit) -> Row {
+  Row::new(
+    Level::Warn,
+    "service",
+    format!(
+      "system unit {} (system scope; #203 manages system units)",
+      unit.path.display()
+    ),
+  )
+  .with_fix(format!("systemctl status {}", unit.id.unit))
 }
 
 /// The `linger` row for `user` given `loginctl`'s parsed answer, or why

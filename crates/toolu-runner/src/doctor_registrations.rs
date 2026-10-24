@@ -14,6 +14,7 @@ use std::time::Duration;
 use config::config::{RunnerRegistrationConfig, load_config, load_credentials};
 use config::lockfile::{LockBody, pid_start_time};
 use config::registration_auth::AuthSection;
+use config::stop_marker::{self, StopMarker};
 use shared::RunnerError;
 use shared::paths::expand_tilde;
 
@@ -93,7 +94,8 @@ async fn read_body(lock: &Path) -> Result<String, RunState> {
 }
 
 /// Read the lock body at `lock` without opening it for locking; an empty
-/// body is re-read once after [`BODY_SETTLE`].
+/// body is re-read once after [`BODY_SETTLE`], and one still empty is a
+/// released lock (`LockGuard` clears the body on release).
 pub(crate) async fn run_state(lock: &Path) -> RunState {
   let mut raw = match read_body(lock).await {
     Ok(raw) => raw,
@@ -105,6 +107,9 @@ pub(crate) async fn run_state(lock: &Path) -> RunState {
       Ok(raw) => raw,
       Err(state) => return state,
     };
+    if raw.trim().is_empty() {
+      return RunState::Stopped;
+    }
   }
   match serde_json::from_str::<LockBody>(&raw) {
     Ok(body) if holder_alive(&body) => RunState::Active {
@@ -176,9 +181,24 @@ pub(crate) fn without_source_excerpt(error: &str) -> String {
     .join("; ")
 }
 
-/// The `run` row: a stopped persistent registration fails (its jobs queue
-/// forever), a stopped ephemeral one only warns.
-pub(crate) fn run_row(state: &RunState, ephemeral: bool, config_path: &Path) -> Row {
+/// Why the `run --all` service stopped a registration (`.stopped`), and
+/// the command that restarts it once the cause is fixed.
+pub(crate) struct ServiceStop<'a> {
+  /// The recorded stop.
+  pub(crate) marker: &'a StopMarker,
+  /// [`crate::supervisor_signal::reload_hint`].
+  pub(crate) reload: &'a str,
+}
+
+/// The `run` row: a registration the service stopped fails naming why; any
+/// other stopped persistent registration fails (its jobs queue forever), a
+/// stopped ephemeral one only warns.
+pub(crate) fn run_row(
+  state: &RunState,
+  ephemeral: bool,
+  config_path: &Path,
+  stopped: Option<&ServiceStop<'_>>,
+) -> Row {
   let detail = match state {
     RunState::Active { pid, since } => {
       return Row::new(
@@ -192,6 +212,17 @@ pub(crate) fn run_row(state: &RunState, ephemeral: bool, config_path: &Path) -> 
       format!("lock body unreadable ({error}); treated as not running")
     },
   };
+  if let Some(stop) = stopped {
+    return Row::new(
+      Level::Fail,
+      "run",
+      format!(
+        "stopped by the service at {}: {}",
+        stop.marker.stopped_at, stop.marker.error
+      ),
+    )
+    .with_fix(format!("fix the cause above, then: {}", stop.reload));
+  }
   let config = config_path.display();
   if ephemeral {
     Row::new(Level::Warn, "run", detail).with_fix(format!("toolu-runner run --config {config}"))
@@ -371,16 +402,23 @@ pub(crate) async fn check_registration(config_path: &Path, timeout: Duration) ->
     "persistent"
   };
   let data_dir = expand_tilde(Path::new(&config.runtime.data_dir));
+  let reload = crate::supervisor_signal::reload_hint(&config::registry::runner_home());
   let mut rows = vec![
     Row::new(Level::Ok, "config", config_path.display().to_string()),
     creds_row(&crate::cli::credentials_path_for(config_path)),
     jit_row(&config),
   ];
   rows.extend(app_row(&config));
+  let stopped = stop_marker::read(&data_dir).ok().flatten();
+  let stop = stopped.as_ref().map(|marker| ServiceStop {
+    marker,
+    reload: &reload,
+  });
   rows.push(run_row(
     &run_state(&data_dir.join(".lock")).await,
     config.ephemeral,
     config_path,
+    stop.as_ref(),
   ));
   let mut unit_installed = false;
   if let Some((row, installed)) =

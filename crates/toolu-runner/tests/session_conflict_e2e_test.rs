@@ -37,7 +37,7 @@ const CONFLICT_MESSAGE: &str = "another runner session is active for this regist
 const ACCESS_TOKEN: &str = "fake-token";
 
 /// The captured 409 reply: its status, every recorded header, its empty body.
-fn captured_conflict() -> TestResult<ResponseTemplate> {
+pub(crate) fn captured_conflict() -> TestResult<ResponseTemplate> {
   let fixture: Value = serde_json::from_str(CAPTURE)?;
   let field = |pointer: &str| {
     fixture

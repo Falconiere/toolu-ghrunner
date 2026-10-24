@@ -18,4 +18,5 @@ mod repo_infer_test;
 mod secret_file_perms_test;
 mod service_action_test;
 mod service_unit_test;
+mod stop_marker_test;
 mod workspace_section_test;

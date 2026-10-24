@@ -591,7 +591,7 @@ async fn start_cache_service(
     bearer: token.clone(),
     staging_root: maintenance.staging_root.clone(),
   });
-  let bind = format!("{}:0", config.service_bind);
+  let bind = cache::server::ephemeral_bind(&config.service_bind);
   let server = CacheServer::start(v1_router(state), &bind).await?;
   Ok((server, token, maintenance))
 }
@@ -679,7 +679,7 @@ async fn start_accelerated_service(
     client: job_http::accelerated_upstream_client(config)?,
   });
 
-  let bind = format!("{}:0", config.service_bind);
+  let bind = cache::server::ephemeral_bind(&config.service_bind);
   let server = CacheServer::start(app, &bind).await?;
   Ok((server, urls, bearer, maintenance))
 }

@@ -8,8 +8,9 @@ use std::time::Duration;
 
 use config::lockfile::{LockBody, is_pid_alive, pid_start_time};
 
-use super::{RunState, holder_alive, last_job_row, run_row, run_state};
+use super::{RunState, ServiceStop, holder_alive, last_job_row, run_row, run_state};
 use crate::doctor_report::{Level, Row};
+use config::stop_marker::StopMarker;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
@@ -66,7 +67,7 @@ fn a_live_holder_is_active_and_a_stopped_persistent_runner_fails() {
   };
   for ephemeral in [false, true] {
     assert_eq!(
-      run_row(&active, ephemeral, Path::new(CONFIG)),
+      run_row(&active, ephemeral, Path::new(CONFIG), None),
       Row::new(
         Level::Ok,
         "run",
@@ -77,19 +78,19 @@ fn a_live_holder_is_active_and_a_stopped_persistent_runner_fails() {
   }
 
   assert_eq!(
-    run_row(&RunState::Stopped, false, Path::new(CONFIG)),
+    run_row(&RunState::Stopped, false, Path::new(CONFIG), None),
     Row::new(Level::Fail, "run", "not running")
       .with_fix("toolu-runner install-service --config /h/runners/o/r/config.toml")
   );
   assert_eq!(
-    run_row(&RunState::Stopped, true, Path::new(CONFIG)),
+    run_row(&RunState::Stopped, true, Path::new(CONFIG), None),
     Row::new(Level::Warn, "run", "not running")
       .with_fix("toolu-runner run --config /h/runners/o/r/config.toml")
   );
 
   let unreadable = RunState::Unreadable("expected value".to_owned());
   assert_eq!(
-    run_row(&unreadable, false, Path::new(CONFIG)),
+    run_row(&unreadable, false, Path::new(CONFIG), None),
     Row::new(
       Level::Fail,
       "run",
@@ -98,7 +99,7 @@ fn a_live_holder_is_active_and_a_stopped_persistent_runner_fails() {
     .with_fix("toolu-runner install-service --config /h/runners/o/r/config.toml")
   );
   assert_eq!(
-    run_row(&unreadable, true, Path::new(CONFIG)),
+    run_row(&unreadable, true, Path::new(CONFIG), None),
     Row::new(
       Level::Warn,
       "run",
@@ -125,12 +126,11 @@ async fn run_state_reads_the_lock_body_without_locking() -> TestResult {
     }
   );
 
-  // A body that stays empty past the settle delay is a real truncated file.
+  // A body that stays empty past the settle delay is a released lock:
+  // `LockGuard` clears it, and the pid that wrote it may still be alive
+  // (`run --all` after one registration's loop ended, #208).
   std::fs::write(&lock, "")?;
-  assert_eq!(
-    run_state(&lock).await,
-    RunState::Unreadable("EOF while parsing a value at line 1 column 0".to_owned())
-  );
+  assert_eq!(run_state(&lock).await, RunState::Stopped);
   Ok(())
 }
 
@@ -345,4 +345,48 @@ fn an_unreadable_jobs_dir_warns_with_the_io_error() -> TestResult {
     )
   );
   Ok(())
+}
+
+/// #208: a registration `run --all` stopped fails with the recorded error
+/// and the reload command, ephemeral or not; a live holder still wins over
+/// a leftover record.
+#[test]
+fn a_registration_the_service_stopped_fails_naming_why() {
+  let marker = StopMarker {
+    stopped_at: "2026-10-23T22:00:00+00:00".to_owned(),
+    error: "re-mint rejected: 401 Bad credentials".to_owned(),
+  };
+  let stop = ServiceStop {
+    marker: &marker,
+    reload: "kill -HUP 77",
+  };
+  for ephemeral in [false, true] {
+    assert_eq!(
+      run_row(
+        &RunState::Stopped,
+        ephemeral,
+        Path::new(CONFIG),
+        Some(&stop)
+      ),
+      Row::new(
+        Level::Fail,
+        "run",
+        "stopped by the service at 2026-10-23T22:00:00+00:00: re-mint rejected: 401 Bad credentials"
+      )
+      .with_fix("fix the cause above, then: kill -HUP 77"),
+      "ephemeral={ephemeral}"
+    );
+  }
+  let active = RunState::Active {
+    pid: 4242,
+    since: "2026-10-23T22:05:00Z".to_owned(),
+  };
+  assert_eq!(
+    run_row(&active, false, Path::new(CONFIG), Some(&stop)),
+    Row::new(
+      Level::Ok,
+      "run",
+      "active (pid 4242, since 2026-10-23T22:05:00Z)"
+    )
+  );
 }

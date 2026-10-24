@@ -87,3 +87,47 @@ fn drop_releases_and_same_path_reacquires() {
   let reacquired = lockfile::acquire(&lock, &config).expect("re-acquire after drop");
   drop(reacquired);
 }
+
+/// #208: releasing a lock clears its holder body, so a reader that never
+/// takes the lock (`doctor`, `status`) cannot mistake a still-alive process
+/// — `run --all` after one registration's loop ended — for the holder.
+#[test]
+fn releasing_a_lock_clears_its_holder_body() {
+  let dir = tempfile::tempdir().expect("tempdir");
+  let lock = dir.path().join(".lock");
+  let config = dir.path().join("config.toml");
+  let guard = lockfile::acquire(&lock, &config).expect("acquire");
+  let held: LockBody =
+    serde_json::from_str(&std::fs::read_to_string(&lock).expect("read")).expect("parse body");
+  assert_eq!(held.pid, std::process::id());
+  assert_eq!(held.config_path, config.to_string_lossy());
+  drop(guard);
+  assert_eq!(
+    std::fs::read_to_string(&lock).expect("read released body"),
+    ""
+  );
+  // And the released lock is immediately acquirable again, body restored.
+  let _again = lockfile::acquire(&lock, &config).expect("re-acquire");
+  let again: LockBody =
+    serde_json::from_str(&std::fs::read_to_string(&lock).expect("read")).expect("parse body");
+  assert_eq!(again.pid, std::process::id());
+  assert_eq!(again.config_path, config.to_string_lossy());
+}
+
+/// A held lock whose body is empty (a holder between taking the lock and
+/// writing its body, or releasing it) is still held: a contender fails
+/// closed instead of stealing it.
+#[test]
+fn a_held_lock_with_an_empty_body_is_not_stolen() {
+  let dir = tempfile::tempdir().expect("tempdir");
+  let lock = dir.path().join(".lock");
+  let config = dir.path().join("config.toml");
+  let guard = lockfile::acquire(&lock, &config).expect("acquire");
+  std::fs::write(&lock, "").expect("empty the body while held");
+  let err = lockfile::acquire(&lock, &config).expect_err("a held lock must not be stolen");
+  assert!(
+    matches!(err, RunnerError::LockHeld { pid: 0, .. }),
+    "{err:?}"
+  );
+  drop(guard);
+}

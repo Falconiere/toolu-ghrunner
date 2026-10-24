@@ -32,13 +32,13 @@ use crate::job_lifecycle::poll_and_execute;
 /// `unwrap_used` are only allowed inside `#[tokio::test]` fns themselves
 /// (`clippy.toml: allow-expect-in-tests`), not their helpers — see
 /// `tests/watchdog_retry.rs`.
-type TestResult<T> = Result<T, Box<dyn std::error::Error>>;
+pub(crate) type TestResult<T> = Result<T, Box<dyn std::error::Error>>;
 
 /// A minimal `AgentJobRequestMessage`: one `SystemVssConnection` endpoint
 /// carrying a bearer, no cache/results/live-log URLs, and one trivial
 /// script step — this test's assertions are about broker request order,
 /// not the engine's own network surface.
-fn job_message(server_uri: &str, job_id: &str) -> AgentJobRequestMessage {
+pub(crate) fn job_message(server_uri: &str, job_id: &str) -> AgentJobRequestMessage {
   AgentJobRequestMessage {
     job_service_containers: None,
     job_container: None,
@@ -83,7 +83,11 @@ fn job_message(server_uri: &str, job_id: &str) -> AgentJobRequestMessage {
 
 /// `/message`: the job once, then 202 (no work) forever after — matches
 /// `tests/watchdog_trip.rs::mount_message_poll`.
-async fn mount_message_poll(server: &MockServer, runner_request_id: &str, run_service_url: &str) {
+pub(crate) async fn mount_message_poll(
+  server: &MockServer,
+  runner_request_id: &str,
+  run_service_url: &str,
+) {
   let body = serde_json::json!({
     "runner_request_id": runner_request_id,
     "run_service_url": run_service_url,
@@ -111,7 +115,7 @@ async fn mount_message_poll(server: &MockServer, runner_request_id: &str, run_se
 
 /// `/acquirejob`: 200 with the job body plus the `x-plan-id` header
 /// `acquire_job` reads off the response.
-async fn mount_acquire_job(
+pub(crate) async fn mount_acquire_job(
   server: &MockServer,
   plan_id: &str,
   msg: &AgentJobRequestMessage,
@@ -131,7 +135,7 @@ async fn mount_acquire_job(
 
 /// `/acknowledge`: always answers `status` — 500 exercises the WARN-only,
 /// non-gating contract.
-async fn mount_acknowledge(server: &MockServer, status: u16) {
+pub(crate) async fn mount_acknowledge(server: &MockServer, status: u16) {
   Mock::given(method("POST"))
     .and(path("/acknowledge"))
     .respond_with(ResponseTemplate::new(status))
@@ -140,7 +144,7 @@ async fn mount_acknowledge(server: &MockServer, status: u16) {
 }
 
 /// `/completejob`: always 200.
-async fn mount_complete_job(server: &MockServer) {
+pub(crate) async fn mount_complete_job(server: &MockServer) {
   Mock::given(method("POST"))
     .and(path("/completejob"))
     .respond_with(ResponseTemplate::new(200))
@@ -148,7 +152,7 @@ async fn mount_complete_job(server: &MockServer) {
     .await;
 }
 
-fn make_config(dir: &tempfile::TempDir) -> RunnerConfig {
+pub(crate) fn make_config(dir: &tempfile::TempDir) -> RunnerConfig {
   RunnerConfig {
     data_dir: dir.path().join("data"),
     workspace_root: dir.path().join("work"),
@@ -163,7 +167,7 @@ fn make_config(dir: &tempfile::TempDir) -> RunnerConfig {
 /// `tests/watchdog_trip.rs::make_ctx`. `WatchdogConfig::default` keeps the
 /// prod 60s renewal cadence, well past this fixture's `true` step, so no
 /// `/renewjob` route is needed.
-fn make_ctx(server_uri: String, config: RunnerConfig) -> SessionCtx {
+pub(crate) fn make_ctx(server_uri: String, config: RunnerConfig) -> SessionCtx {
   let (tx, mut rx) = mpsc::channel::<ListenerEvent>(256);
   tokio::spawn(async move { while rx.recv().await.is_some() {} });
   SessionCtx {
@@ -208,7 +212,7 @@ async fn run_scenario(job_id: &str, ack_status: u16) -> TestResult<Outcome> {
   mount_complete_job(&server).await;
 
   let mut ctx = make_ctx(server_uri, make_config(&dir));
-  let result = poll_and_execute(&mut ctx).await;
+  let result = poll_and_execute(&mut ctx, &CancellationToken::new()).await;
 
   let requests = server
     .received_requests()

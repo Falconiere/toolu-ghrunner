@@ -10,7 +10,8 @@
 | `completejob.rs` | Captured issue-88 jobs through `run_acquired_job` → `report_completion`: environment URL, secret suppression, billing owner, upstream `StepResult` keys and identity, infrastructure category latch, retry and cancellation. |
 | `annotation_reporting.rs` | Captured-job shell/composite annotations through a recorded Run Service POST. |
 | `broker_control.rs` | Committed V2 envelope shapes through the production message classifier: future types skipped with the original cursor, forced refresh vs known update messages, hosted shutdown, redelivered control messages. |
-| `early_ack.rs` | Broker acknowledgment ordering. |
+| `drain.rs` | #208 drain: an idle poll loop ends with no job, a pre-fired drain takes none, a drain after the acquire lets the real job finish and report `succeeded`. |
+| `early_ack.rs` | Broker acknowledgment ordering (its job fixture is shared with `drain.rs`). |
 | `execution_loop.rs` | Execution and renewal behavior. |
 | `finalize_split.rs` | Completion and teardown ordering. |
 | `helpers.rs` | Listener helper behavior. |

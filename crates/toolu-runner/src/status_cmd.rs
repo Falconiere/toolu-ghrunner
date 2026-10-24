@@ -3,10 +3,14 @@
 //! Split out of `main.rs` to keep the CLI entrypoint under the crate's
 //! per-file complexity limit. Reads only local files — no network.
 
+use std::path::Path;
+
 use config::auth_store::AuthStore;
 use config::config::load_config as load_reg_config;
+use config::lockfile::LockBody;
 use config::registration_auth::AuthSection;
-use config::registry;
+use config::{registry, stop_marker};
+use shared::paths::expand_tilde;
 
 use crate::cli::{StatusArgs, credentials_path_for};
 
@@ -21,7 +25,13 @@ pub(crate) fn cmd_status(args: StatusArgs) -> Result<(), Box<dyn std::error::Err
   if !config_path.exists() {
     return Err(format!("config not found at {}", config_path.display()).into());
   }
-  let cfg = load_reg_config(&config_path).map_err(|e| format!("{e}"))?;
+  // A TOML error quotes its source line, which can hold a secret the
+  // masker never learned: print only what `doctor` would share.
+  let cfg = load_reg_config(&config_path).map_err(|e| {
+    crate::doctor_registrations::without_quoted_strings(
+      &crate::doctor_registrations::without_source_excerpt(&e.to_string()),
+    )
+  })?;
   let creds_summary = if creds_path.exists() {
     "credentials present"
   } else {
@@ -44,6 +54,10 @@ pub(crate) fn cmd_status(args: StatusArgs) -> Result<(), Box<dyn std::error::Err
   println!("work_dir:  {}", cfg.runtime.work_dir);
   println!("jit_cfg:   {} bytes", cfg.runtime.jit_config.len());
   println!("creds:     {creds_summary}");
+  println!(
+    "run:       {}",
+    run_summary(&expand_tilde(Path::new(&cfg.runtime.data_dir)))
+  );
 
   // Login state (no network): report any stored device-flow login token
   // for the host the runner registered against. The token store is pinned
@@ -86,5 +100,36 @@ fn auth_summary(auth: &AuthSection) -> String {
       ),
       Err(e) => format!("GitHub App (installation {installation_id}) — {e}"),
     },
+  }
+}
+
+/// Whether a `run` serves the registration in `data_dir` (from its lock
+/// body, never by locking), else why `run --all` stopped it (`.stopped`),
+/// else `not running`.
+fn run_summary(data_dir: &Path) -> String {
+  let lock = data_dir.join(".lock");
+  // No lock file, or an empty body (a released lock), is "nobody holds it";
+  // anything else unreadable is said, not hidden.
+  let raw = match std::fs::read_to_string(&lock) {
+    Ok(raw) => raw,
+    Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+    Err(e) => return format!("unknown (cannot read {}: {e})", lock.display()),
+  };
+  if !raw.trim().is_empty() {
+    match serde_json::from_str::<LockBody>(&raw) {
+      Ok(body) if crate::doctor_registrations::holder_alive(&body) => {
+        return format!("active (pid {}, since {})", body.pid, body.started_at);
+      },
+      Ok(_) => {},
+      Err(e) => return format!("unknown (lock body unreadable: {e})"),
+    }
+  }
+  match stop_marker::read(data_dir) {
+    Ok(Some(marker)) => format!(
+      "stopped by the service at {}: {}",
+      marker.stopped_at, marker.error
+    ),
+    Ok(None) => "not running".to_owned(),
+    Err(e) => format!("not running ({e})"),
   }
 }

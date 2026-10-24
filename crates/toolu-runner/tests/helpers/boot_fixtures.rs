@@ -116,6 +116,23 @@ fn boot_e2e_job_message(script_command: &str) -> Result<shared::AgentJobRequestM
 /// exchange for one `RunnerJobRequest`, serving `boot_e2e_job_message`'s
 /// single script step (running `script_command`) as the acquired job body.
 pub async fn mount_job_lifecycle(server: &MockServer, script_command: &str) -> Result<(), String> {
+  mount_job(server, script_command, None).await
+}
+
+/// [`mount_job_lifecycle`] serving the job message only once: later polls
+/// fall through to whatever `/message` mock the caller mounts next (an idle
+/// long-poll), so an always-online loop takes exactly one job.
+pub async fn mount_job_once(server: &MockServer, script_command: &str) -> Result<(), String> {
+  mount_job(server, script_command, Some(1)).await
+}
+
+/// The job exchange behind [`mount_job_lifecycle`] / [`mount_job_once`]:
+/// the `/message` job is served `times` times (`None` = forever).
+async fn mount_job(
+  server: &MockServer,
+  script_command: &str,
+  times: Option<u64>,
+) -> Result<(), String> {
   let job_body = json!({
     "runner_request_id": "22222222-3333-4444-5555-666677778888",
     "run_service_url": server.uri(),
@@ -123,16 +140,18 @@ pub async fn mount_job_lifecycle(server: &MockServer, script_command: &str) -> R
   })
   .to_string();
 
-  Mock::given(method("GET"))
+  let message = Mock::given(method("GET"))
     .and(path("/message"))
     .respond_with(ResponseTemplate::new(200).set_body_json(json!({
       "messageId": 1,
       "messageType": "RunnerJobRequest",
       "body": job_body,
       "iv": null,
-    })))
-    .mount(server)
-    .await;
+    })));
+  match times {
+    Some(n) => message.up_to_n_times(n).mount(server).await,
+    None => message.mount(server).await,
+  }
 
   Mock::given(method("POST"))
     .and(path("/acknowledge"))

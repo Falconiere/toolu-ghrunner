@@ -9,9 +9,11 @@
 //! `launchd_env_path` is exercised against this test process's REAL `PATH`
 //! (that is the input the installing shell supplies), not a synthetic string.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use config::service_unit::{self, GUARANTEED_PATH_DIRS, ServiceSpec, launchd_env_path};
+use config::service_unit::{
+  self, GUARANTEED_PATH_DIRS, MachineSpec, ServiceSpec, Supervises, launchd_env_path,
+};
 
 // ── the spaces + ampersand spec, exact-matched against fixtures ──────
 
@@ -60,13 +62,14 @@ fn systemd_unit_matches_fixture_with_spaces_and_ampersand() {
 
 const PLAIN_WORK: &str = "/home/ci/.toolu-runner/runners/octocat/hello";
 const PLAIN_ENV_PATH: &str = "/opt/homebrew/bin:/usr/bin:/bin";
+const PLAIN_CONFIG: &str = "/home/ci/.toolu-runner/runners/octocat/hello/config.toml";
 
 /// Build the canonical space-free spec both minimal tests render.
 fn plain_spec() -> ServiceSpec<'static> {
   ServiceSpec {
     label: "io.toolu.runner.octocat.hello",
     exe: Path::new("/usr/local/bin/toolu-runner"),
-    config_path: Path::new("/home/ci/.toolu-runner/runners/octocat/hello/config.toml"),
+    config_path: Path::new(PLAIN_CONFIG),
     diag_dir: Path::new("/home/ci/.toolu-runner/runners/octocat/hello/_diag"),
     env_path: PLAIN_ENV_PATH,
     work_dir: Path::new(PLAIN_WORK),
@@ -106,7 +109,7 @@ fn systemd_unit_escapes_single_quote_in_paths() {
   let spec = ServiceSpec {
     label: "io.toolu.runner.octocat.hello",
     exe: Path::new("/opt/o'brien/toolu-runner"),
-    config_path: Path::new("/home/ci/.toolu-runner/runners/octocat/hello/config.toml"),
+    config_path: Path::new(PLAIN_CONFIG),
     diag_dir: Path::new("/home/ci/.toolu-runner/runners/octocat/hello/_diag"),
     env_path: PLAIN_ENV_PATH,
     work_dir: Path::new(PLAIN_WORK),
@@ -125,7 +128,7 @@ fn systemd_unit_escapes_dollar_and_percent_in_paths() {
   let spec = ServiceSpec {
     label: "io.toolu.runner.octocat.hello",
     exe: Path::new("/opt/100% $rusty/toolu-runner"),
-    config_path: Path::new("/home/ci/.toolu-runner/runners/octocat/hello/config.toml"),
+    config_path: Path::new(PLAIN_CONFIG),
     diag_dir: Path::new("/home/ci/.toolu-runner/runners/octocat/hello/_diag"),
     env_path: PLAIN_ENV_PATH,
     work_dir: Path::new(PLAIN_WORK),
@@ -232,5 +235,201 @@ fn legacy_systemd_unit_does_not_restart_a_session_conflict() {
       .lines()
       .any(|line| line == "RestartPreventExitStatus=5"),
     "scripts/toolu-runner.service must carry RestartPreventExitStatus=5"
+  );
+}
+
+// ── the machine unit (`run --all`, #208) ────────────────────────────
+
+const MACHINE_EXE: &str = "/Users/dev name/apps/toolu & runner/toolu-runner";
+const MACHINE_ENV_PATH: &str = "/opt/dev tools & bin:/usr/bin:/bin";
+/// A pinned home carrying a space, `%` and `"` — systemd `Environment=`
+/// escaping plus plist XML escaping.
+const MACHINE_HOME: &str = "/Users/dev name/100% \"toolu\" home";
+const MACHINE_DIAG: &str = "/Users/dev name/100% \"toolu\" home/_diag";
+const DEFAULT_HOME: &str = "/Users/dev name/.toolu-runner";
+const DEFAULT_DIAG: &str = "/Users/dev name/.toolu-runner/_diag";
+
+/// The machine spec: `home` is pinned in the unit env only when `pinned`;
+/// `work_dir` and `diag_dir` always follow the runner home.
+fn machine_spec(pinned: bool) -> MachineSpec<'static> {
+  let (home, diag) = if pinned {
+    (MACHINE_HOME, MACHINE_DIAG)
+  } else {
+    (DEFAULT_HOME, DEFAULT_DIAG)
+  };
+  MachineSpec {
+    exe: Path::new(MACHINE_EXE),
+    home: pinned.then(|| Path::new(home)),
+    diag_dir: Path::new(diag),
+    env_path: MACHINE_ENV_PATH,
+    work_dir: Path::new(home),
+  }
+}
+
+#[test]
+fn systemd_machine_unit_matches_fixture() {
+  let unit = service_unit::systemd_machine_unit(&machine_spec(false));
+  assert_eq!(unit, include_str!("fixtures/service/machine_plain.service"));
+}
+
+#[test]
+fn systemd_machine_unit_pins_a_custom_home_escaped() {
+  let unit = service_unit::systemd_machine_unit(&machine_spec(true));
+  assert_eq!(unit, include_str!("fixtures/service/machine_home.service"));
+}
+
+#[test]
+fn launchd_machine_plist_matches_fixture() {
+  let plist = service_unit::launchd_machine_plist(&machine_spec(false));
+  assert_eq!(plist, include_str!("fixtures/service/machine_plain.plist"));
+}
+
+#[test]
+fn launchd_machine_plist_pins_a_custom_home_escaped() {
+  let plist = service_unit::launchd_machine_plist(&machine_spec(true));
+  assert_eq!(plist, include_str!("fixtures/service/machine_home.plist"));
+}
+
+/// The machine identity is distinct from every per-registration identity
+/// and from the static `install.sh` agent's label.
+#[test]
+fn machine_identity_is_sh_toolu_runner_and_toolu_runner_service() {
+  assert_eq!(service_unit::MACHINE_LABEL, "sh.toolu.runner");
+  assert_eq!(service_unit::MACHINE_UNIT, "toolu-runner.service");
+}
+
+// ── what an installed unit supervises (migration, #208) ─────────────
+
+#[test]
+fn parse_targets_of_every_per_registration_fixture() {
+  let cases = [
+    (
+      include_str!("fixtures/service/systemd_spaces.service"),
+      SPACES_CONFIG,
+    ),
+    (
+      include_str!("fixtures/service/systemd_plain.service"),
+      PLAIN_CONFIG,
+    ),
+  ];
+  for (unit, config) in cases {
+    assert_eq!(
+      service_unit::parse_systemd_target(unit),
+      Some(Supervises::Config(PathBuf::from(config)))
+    );
+  }
+  for (plist, config) in [
+    (
+      include_str!("fixtures/service/launchd_spaces.plist"),
+      SPACES_CONFIG,
+    ),
+    (
+      include_str!("fixtures/service/launchd_plain.plist"),
+      PLAIN_CONFIG,
+    ),
+  ] {
+    assert_eq!(
+      service_unit::parse_launchd_target(plist),
+      Some(Supervises::Config(PathBuf::from(config)))
+    );
+  }
+}
+
+/// Every escape the renderer emits is undone: a config path with `'`, `$`,
+/// `%` and `"` round-trips through the rendered unit.
+#[test]
+fn parse_systemd_target_undoes_the_renderer_escapes() {
+  let config = Path::new("/home/o'neil/$HOME/100%/\"q\"/config.toml");
+  let spec = ServiceSpec {
+    config_path: config,
+    ..plain_spec()
+  };
+  let unit = service_unit::systemd_unit(&spec);
+  assert_eq!(
+    service_unit::parse_systemd_target(&unit),
+    Some(Supervises::Config(config.to_path_buf()))
+  );
+  let plist = service_unit::launchd_plist(&spec);
+  assert_eq!(
+    service_unit::parse_launchd_target(&plist),
+    Some(Supervises::Config(config.to_path_buf()))
+  );
+}
+
+#[test]
+fn parse_targets_of_the_machine_fixtures_are_all() {
+  for unit in [
+    include_str!("fixtures/service/machine_plain.service"),
+    include_str!("fixtures/service/machine_home.service"),
+  ] {
+    assert_eq!(
+      service_unit::parse_systemd_target(unit),
+      Some(Supervises::All)
+    );
+  }
+  for plist in [
+    include_str!("fixtures/service/machine_plain.plist"),
+    include_str!("fixtures/service/machine_home.plist"),
+  ] {
+    assert_eq!(
+      service_unit::parse_launchd_target(plist),
+      Some(Supervises::All)
+    );
+  }
+}
+
+/// The static `install.sh --service` units hard-code their config path,
+/// unquoted.
+#[test]
+fn parse_targets_of_the_static_install_sh_units() {
+  assert_eq!(
+    service_unit::parse_systemd_target(include_str!("../../../scripts/toolu-runner.service")),
+    Some(Supervises::Config(PathBuf::from(
+      "/etc/toolu-runner/config.toml"
+    )))
+  );
+  assert_eq!(
+    service_unit::parse_launchd_target(include_str!("../../../scripts/io.toolu-runner.plist")),
+    Some(Supervises::Config(PathBuf::from(
+      "/Users/Shared/toolu-runner/config.toml"
+    )))
+  );
+}
+
+#[test]
+fn parse_target_of_a_unit_that_runs_nothing_is_none() {
+  assert_eq!(
+    service_unit::parse_systemd_target("[Unit]\nDescription=x\n\n[Service]\nRestart=always\n"),
+    None
+  );
+  assert_eq!(
+    service_unit::parse_systemd_target("[Service]\nExecStart=/usr/bin/true\n"),
+    None
+  );
+  assert_eq!(
+    service_unit::parse_launchd_target("<plist><dict/></plist>"),
+    None
+  );
+}
+
+/// A machine unit's pinned home reads back exactly (escapes undone); an
+/// unpinned one pins none.
+#[test]
+fn parse_the_pinned_home_of_machine_units() {
+  assert_eq!(
+    service_unit::parse_systemd_home(include_str!("fixtures/service/machine_home.service")),
+    Some(PathBuf::from(MACHINE_HOME))
+  );
+  assert_eq!(
+    service_unit::parse_launchd_home(include_str!("fixtures/service/machine_home.plist")),
+    Some(PathBuf::from(MACHINE_HOME))
+  );
+  assert_eq!(
+    service_unit::parse_systemd_home(include_str!("fixtures/service/machine_plain.service")),
+    None
+  );
+  assert_eq!(
+    service_unit::parse_launchd_home(include_str!("fixtures/service/machine_plain.plist")),
+    None
   );
 }

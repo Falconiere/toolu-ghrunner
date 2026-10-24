@@ -9,7 +9,7 @@
 
 use std::path::{Path, PathBuf};
 
-use config::registry::{self, RegistrationEntry};
+use config::registry::{self, RegistrationEntry, RegistrationScope};
 use tempfile::TempDir;
 
 /// The TOML body `save_config` persists — what a real registration holds.
@@ -27,6 +27,23 @@ fn add_registration(home: &Path, owner: &str, repo: &str) -> Result<PathBuf, std
   let config_path = dir.join("config.toml");
   std::fs::write(&config_path, CONFIG_TOML)?;
   Ok(config_path)
+}
+
+/// Create `<home>/orgs/<org>/config.toml` and return its path.
+fn add_org_registration(home: &Path, org: &str) -> Result<PathBuf, std::io::Error> {
+  let dir = home.join("orgs").join(org);
+  std::fs::create_dir_all(&dir)?;
+  let config_path = dir.join("config.toml");
+  std::fs::write(&config_path, CONFIG_TOML)?;
+  Ok(config_path)
+}
+
+/// The scope of a per-repo registration.
+fn repo(owner: &str, name: &str) -> RegistrationScope {
+  RegistrationScope::Repo {
+    owner: owner.to_owned(),
+    repo: name.to_owned(),
+  }
 }
 
 /// Create the legacy single-slot `<home>/config.toml` and return its path.
@@ -164,6 +181,89 @@ fn runner_dir_rejects_non_component_names() {
   }
 }
 
+// ── org_dir: layout + path-component rejection (#208) ───────────────
+
+#[test]
+fn org_dir_builds_home_orgs_org() {
+  let home = Path::new("/var/lib/toolu-runner");
+  assert_eq!(
+    registry::org_dir(home, "acme").unwrap(),
+    PathBuf::from("/var/lib/toolu-runner/orgs/acme")
+  );
+}
+
+#[test]
+fn org_dir_rejects_non_component_names() {
+  let home = Path::new("/var/lib/toolu-runner");
+  for org in ["", ".", "..", "a/b", "a\\b", "ac\0me"] {
+    let err = registry::org_dir(home, org).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+      msg.contains("must be a single path component") && msg.contains("invalid org"),
+      "{org:?} must be rejected naming the org; got: {msg}"
+    );
+  }
+}
+
+/// AC-10: two org registrations and two repo registrations of one owner
+/// coexist with the legacy slot; each is listed once, repos first (by
+/// owner/repo), then orgs (by name), legacy last.
+#[test]
+fn list_registrations_lists_orgs_between_repos_and_legacy() {
+  let home = TempDir::new().unwrap();
+  let beta = add_org_registration(home.path(), "beta").unwrap();
+  let r2 = add_registration(home.path(), "acme", "r2").unwrap();
+  let acme = add_org_registration(home.path(), "acme").unwrap();
+  let r1 = add_registration(home.path(), "acme", "r1").unwrap();
+  let legacy = add_legacy_registration(home.path()).unwrap();
+  // Neither a stray file under orgs/ nor an org dir without a config.toml
+  // is a registration.
+  std::fs::write(home.path().join("orgs").join("stray.txt"), "junk").unwrap();
+  std::fs::create_dir_all(home.path().join("orgs").join("ghost")).unwrap();
+
+  let entries = registry::list_registrations(home.path()).unwrap();
+  assert_eq!(
+    entries,
+    vec![
+      RegistrationEntry {
+        config_path: r1,
+        scope: repo("acme", "r1"),
+      },
+      RegistrationEntry {
+        config_path: r2,
+        scope: repo("acme", "r2"),
+      },
+      RegistrationEntry {
+        config_path: acme,
+        scope: RegistrationScope::Org("acme".to_owned()),
+      },
+      RegistrationEntry {
+        config_path: beta,
+        scope: RegistrationScope::Org("beta".to_owned()),
+      },
+      RegistrationEntry {
+        config_path: legacy,
+        scope: RegistrationScope::Legacy,
+      },
+    ]
+  );
+  let labels: Vec<String> = entries.iter().map(|e| e.scope.label()).collect();
+  assert_eq!(
+    labels,
+    ["acme/r1", "acme/r2", "acme (org)", "beta (org)", "legacy"]
+  );
+}
+
+#[test]
+fn resolve_sole_org_registration_wins() {
+  let home = TempDir::new().unwrap();
+  let org = add_org_registration(home.path(), "acme").unwrap();
+  assert_eq!(
+    registry::resolve_config_path(None, home.path(), None).unwrap(),
+    org
+  );
+}
+
 // ── list_registrations: discovery, ordering, empty home ─────────────
 
 #[test]
@@ -200,7 +300,7 @@ fn list_registrations_ignores_stray_files_at_both_levels() {
     entries,
     vec![RegistrationEntry {
       config_path: real,
-      owner_repo: Some("octocat/hello-world".to_owned()),
+      scope: repo("octocat", "hello-world"),
     }],
     "stray files must be skipped, never error, never register"
   );
@@ -259,19 +359,19 @@ fn list_registrations_sorts_by_owner_repo_with_legacy_last() {
     vec![
       RegistrationEntry {
         config_path: apple,
-        owner_repo: Some("apple/pie".to_owned()),
+        scope: repo("apple", "pie"),
       },
       RegistrationEntry {
         config_path: apple_zz,
-        owner_repo: Some("apple/zz-top".to_owned()),
+        scope: repo("apple", "zz-top"),
       },
       RegistrationEntry {
         config_path: zebra,
-        owner_repo: Some("zebra/stripes".to_owned()),
+        scope: repo("zebra", "stripes"),
       },
       RegistrationEntry {
         config_path: legacy,
-        owner_repo: None,
+        scope: RegistrationScope::Legacy,
       },
     ]
   );
@@ -341,10 +441,17 @@ fn resolve_ambiguous_registrations_error_lists_each_candidate() {
   let home = TempDir::new().unwrap();
   add_registration(home.path(), "apple", "pie").unwrap();
   add_registration(home.path(), "zebra", "stripes").unwrap();
+  add_org_registration(home.path(), "acme").unwrap();
   add_legacy_registration(home.path()).unwrap();
   let err = registry::resolve_config_path(None, home.path(), None).unwrap_err();
   let msg = err.to_string();
-  for candidate in ["apple/pie", "zebra/stripes", "legacy", "--config"] {
+  for candidate in [
+    "apple/pie",
+    "zebra/stripes",
+    "acme (org)",
+    "legacy",
+    "--config",
+  ] {
     assert!(
       msg.contains(candidate),
       "ambiguity error must mention {candidate:?}; got: {msg}"

@@ -57,8 +57,7 @@ pub(crate) async fn cmd_run(args: RunArgs) -> Result<(), Box<dyn std::error::Err
 
   let config_path = crate::resolve_config(args.config)?;
   let cfg = load_run_config(&config_path)?;
-  let data_dir = resolve_data_dir(&cfg.runtime.data_dir).map_err(|e| format!("{e}"))?;
-  let lock_path = data_dir.join(".lock");
+  let lock_path = registration_lock_path(&cfg)?;
   // Held until `cmd_run` returns — including across an ephemeral cleanup,
   // which deletes the `.lock` path while still holding it (as `remove` does).
   let _lock_guard = lockfile::acquire(&lock_path, &config_path).map_err(|e| format!("{e}"))?;
@@ -67,23 +66,16 @@ pub(crate) async fn cmd_run(args: RunArgs) -> Result<(), Box<dyn std::error::Err
   let cancel = CancellationToken::new();
   spawn_signal_bridge(cancel.clone());
 
-  let store = AuthStore::new(&registry::runner_home());
-  let host = register_cmd::host_from_runner_url(&cfg.runner_url)?;
-  check_remint_auth(&cfg, args.once, &store, &host, &masker)?;
-
-  RunLoop {
-    config_path: config_path.clone(),
-    creds_path: credentials_path_for(&config_path),
-    pending_path: data_dir.join(".pending_remove"),
-    lock_path,
+  RunLoop::for_registration(LoopInputs {
+    config_path,
+    cfg: &cfg,
     masker,
-    store,
-    app_tokens: app_auth::InstallationTokens::default(),
-    host,
     cancel,
+    // A lone `run` is never drained: `.pending_remove` stops it at the next
+    // job boundary.
+    drain: CancellationToken::new(),
     once: args.once,
-    conflict_policy: crate::config::session_conflict_policy(),
-  }
+  })?
   .drive()
   .await
   // `_lock_guard` drops here, releasing the lock.
@@ -120,6 +112,31 @@ fn check_remint_auth(
   Ok(())
 }
 
+/// The registration's single-job `.lock` path (`<data_dir>/.lock`).
+pub(crate) fn registration_lock_path(
+  cfg: &RunnerRegistrationConfig,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
+  let data_dir = resolve_data_dir(&cfg.runtime.data_dir).map_err(|e| format!("{e}"))?;
+  Ok(data_dir.join(".lock"))
+}
+
+/// What [`RunLoop::for_registration`] needs: shared by `run` and the
+/// `run --all` supervisor, which each hold the registration's lock first.
+pub(crate) struct LoopInputs<'a> {
+  /// The registration's `config.toml`.
+  pub(crate) config_path: PathBuf,
+  /// Its config as loaded at startup (host, ephemeral, data dir).
+  pub(crate) cfg: &'a RunnerRegistrationConfig,
+  /// The process-wide secret masker (also the tracing redactor's).
+  pub(crate) masker: Arc<Mutex<SecretMasker>>,
+  /// Cancels the loop and any in-flight job (SIGINT/SIGTERM).
+  pub(crate) cancel: CancellationToken,
+  /// Stops the loop while idle; an in-flight job finishes first.
+  pub(crate) drain: CancellationToken,
+  /// `--once`: exit after the first job.
+  pub(crate) once: bool,
+}
+
 /// WARN once, before polling, when the runner will drop offline after the
 /// first job: no `--once` and no resolvable login token means re-mint has no
 /// bearer, so the loop exits after one job. `--once` opts out by design.
@@ -142,7 +159,7 @@ fn warn_if_no_login(store: &AuthStore, host: &str, once: bool) {
 
 /// Loop-invariant handles for the always-online run loop; the config
 /// itself is reloaded from `config_path` on every iteration.
-struct RunLoop {
+pub(crate) struct RunLoop {
   config_path: PathBuf,
   creds_path: PathBuf,
   pending_path: PathBuf,
@@ -154,17 +171,56 @@ struct RunLoop {
   app_tokens: crate::app_auth::InstallationTokens,
   host: String,
   cancel: CancellationToken,
+  /// Fired by `run --all` for a pending removal: the idle listener ends its
+  /// session, and the loop then exits like a cancellation (never re-mints).
+  drain: CancellationToken,
   once: bool,
   /// Session-conflict retry schedule handed to every listener lifecycle.
   conflict_policy: SessionConflictPolicy,
 }
 
 impl RunLoop {
+  /// Build the loop for one registration whose lock the caller holds, and
+  /// WARN (unless `--once`) when no login token is stored — the runner
+  /// would then exit after the first job.
+  pub(crate) fn for_registration(
+    inputs: LoopInputs<'_>,
+  ) -> Result<Self, Box<dyn std::error::Error>> {
+    let LoopInputs {
+      config_path,
+      cfg,
+      masker,
+      cancel,
+      drain,
+      once,
+    } = inputs;
+    let data_dir = resolve_data_dir(&cfg.runtime.data_dir).map_err(|e| format!("{e}"))?;
+    let store = AuthStore::new(&registry::runner_home());
+    let host = register_cmd::host_from_runner_url(&cfg.runner_url)?;
+    // Fail early on an unusable App; WARN when a token registration has no
+    // login (an ephemeral or App registration needs none).
+    check_remint_auth(cfg, once, &store, &host, &masker)?;
+    Ok(Self {
+      creds_path: credentials_path_for(&config_path),
+      pending_path: data_dir.join(".pending_remove"),
+      lock_path: data_dir.join(".lock"),
+      config_path,
+      masker,
+      store,
+      app_tokens: crate::app_auth::InstallationTokens::default(),
+      host,
+      cancel,
+      drain,
+      once,
+      conflict_policy: crate::config::session_conflict_policy(),
+    })
+  }
+
   /// Drive the loop until cancel, `--once`, `.pending_remove`, or a fatal
   /// error. Reloads the config each iteration so a re-mint (or a user edit)
   /// takes effect on the next pass. Backoff resets after any successful job
   /// or re-mint and is capped at [`BACKOFF_MAX`].
-  async fn drive(self) -> Result<(), Box<dyn std::error::Error>> {
+  pub(crate) async fn drive(self) -> Result<(), Box<dyn std::error::Error>> {
     let mut backoff = BACKOFF_START;
     // Last network settings registered / logged: the client is rebuilt each
     // pass (backoff retries included), the log line and secrets only on change.
@@ -184,7 +240,9 @@ impl RunLoop {
       // Fatal setup errors (corrupt config, unparseable JIT) deliberately
       // exit here without backoff — only listener outcomes are retried.
       let (raw, job_acquired) = self.run_once(&cfg, &client).await?;
-      let cancelled = self.cancel.is_cancelled();
+      // A drain ends the loop exactly like a cancellation: the idle listener
+      // returned no job, which must never trigger a re-mint.
+      let cancelled = self.cancel.is_cancelled() || self.drain.is_cancelled();
       let pending_remove = self.pending_path.exists();
       if cfg.ephemeral {
         let signals = LoopSignals {
@@ -210,7 +268,11 @@ impl RunLoop {
           if outcome.is_ok() {
             backoff = BACKOFF_START;
           }
-          match self.reregister(&cfg, &client).await? {
+          // Bound first: a `?` temporary in the scrutinee would live across
+          // the guard's `await`, making the loop future `!Send` (`run --all`
+          // spawns it).
+          let remint = self.reregister(&cfg, &client).await?;
+          match remint {
             Remint::Reset => backoff = BACKOFF_START,
             Remint::Retry if self.backoff_step(&mut backoff).await => return Ok(()),
             Remint::Retry => {},
@@ -236,7 +298,8 @@ impl RunLoop {
     let jit = require_jit_config(cfg)?;
     let listener = GitHubListener::new(&jit, runner_cfg, Arc::clone(&self.masker), client.clone())
       .map_err(|e| format!("listener init: {e}"))?
-      .with_session_conflict_policy(self.conflict_policy);
+      .with_session_conflict_policy(self.conflict_policy)
+      .with_drain(self.drain.clone());
     let outcome = listener.run(self.cancel.clone()).await;
     Ok((outcome, listener.job_acquired()))
   }
@@ -336,12 +399,16 @@ impl RunLoop {
   }
 
   /// Sleep `backoff` with jitter applied (see [`jittered_backoff`]),
-  /// waking early on cancel. Returns `true` if cancellation fired first.
+  /// waking early on cancel or drain. Returns `true` if either fired first.
   async fn sleep_or_cancel(&self, backoff: Duration) -> bool {
     let jittered = jittered_backoff(backoff);
     tokio::select! {
       () = self.cancel.cancelled() => {
         tracing::info!("cancelled during backoff; shutting down");
+        true
+      },
+      () = self.drain.cancelled() => {
+        tracing::info!("drained during backoff; stopping this registration");
         true
       },
       () = tokio::time::sleep(jittered) => false,
@@ -487,7 +554,7 @@ pub(crate) fn spawn_signal_bridge(cancel: CancellationToken) {
 /// Load + validate the persisted config and credentials for `run`.
 ///
 /// Errors if either file is missing (with a `register` hint) or unparseable.
-fn load_run_config(
+pub(crate) fn load_run_config(
   config_path: &std::path::Path,
 ) -> Result<RunnerRegistrationConfig, Box<dyn std::error::Error>> {
   if !config_path.exists() {

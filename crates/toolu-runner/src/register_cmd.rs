@@ -106,7 +106,30 @@ pub(crate) async fn cmd_register(args: RegisterArgs) -> Result<(), Box<dyn std::
       "ephemeral: `run` takes one job, then unregisters the runner and deletes this registration"
     );
   }
+  report_service_pickup(&home, &config_path);
   Ok(())
+}
+
+/// Tell a running `run --all` supervisor to start the new registration's
+/// loop now (SIGHUP), and say so. No supervisor, or a `--config` outside the
+/// runner home (the supervisor only scans the home): nothing to tell. A
+/// failed signal only warns — the registration itself is complete.
+fn report_service_pickup(home: &Path, config_path: &Path) {
+  let under_home = registry::list_registrations(home).is_ok_and(|entries| {
+    entries
+      .iter()
+      .any(|entry| entry.config_path.canonicalize().ok() == config_path.canonicalize().ok())
+  });
+  if !under_home {
+    return;
+  }
+  match crate::supervisor_signal::notify(home) {
+    Ok(Some(pid)) => println!("the toolu-runner service (pid {pid}) picks it up now"),
+    Ok(None) => {},
+    Err(e) => eprintln!(
+      "warning: could not notify the toolu-runner service: {e}; reload it to start this runner"
+    ),
+  }
 }
 
 /// Resolve the registration `(url, host)`: an explicit `--url` is
@@ -155,14 +178,33 @@ fn parse_and_validate_url(url: &str) -> Result<String, RunnerError> {
 ///
 /// Repo URLs (two path segments, `<owner>/<repo>[.git]`) — inferred or
 /// explicit, github.com or GHES — get the per-repo
-/// `<home>/runners/<owner>/<repo>/config.toml`. Org-level URLs (a single
-/// path segment) keep the legacy single-slot `<home>/config.toml`
-/// default, unchanged behavior. Shared with `setup`.
+/// `<home>/runners/<owner>/<repo>/config.toml`; org-level URLs (a single
+/// path segment) get `<home>/orgs/<org>/config.toml`, so one machine holds
+/// several (#208). The legacy single-slot `<home>/config.toml` still loads
+/// but is never written by default. Shared with `setup`.
+///
+/// # Errors
+///
+/// `RunnerError::Config` when the URL names neither, or a name is not a
+/// single path component.
 pub(crate) fn register_config_path(url: &str, home: &Path) -> Result<PathBuf, RunnerError> {
-  match owner_repo_from_url(url) {
-    Some((owner, repo)) => Ok(registry::runner_dir(home, &owner, &repo)?.join("config.toml")),
-    None => Ok(home.join("config.toml")),
+  if let Some((owner, repo)) = owner_repo_from_url(url) {
+    return Ok(registry::runner_dir(home, &owner, &repo)?.join("config.toml"));
   }
+  let org = url::Url::parse(url)
+    .ok()
+    .and_then(|parsed| {
+      parsed
+        .path_segments()?
+        .find(|segment| !segment.is_empty())
+        .map(str::to_owned)
+    })
+    .ok_or_else(|| {
+      RunnerError::Config(format!(
+        "--url '{url}' names no repository or organization — expected https://<host>/<owner>/<repo> or https://<host>/<org>"
+      ))
+    })?;
+  Ok(registry::org_dir(home, &org)?.join("config.toml"))
 }
 
 /// Lift `(owner, repo)` from a validated registration URL's first two
@@ -530,3 +572,7 @@ fn runner_group_id(group: &str) -> Option<i64> {
   }
   None
 }
+
+#[cfg(test)]
+#[path = "tests/register_cmd.rs"]
+mod tests;

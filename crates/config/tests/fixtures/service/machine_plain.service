@@ -1,0 +1,11 @@
+[Unit]
+Description=toolu-runner (sh.toolu.runner)
+
+[Service]
+ExecStart="/Users/dev name/apps/toolu & runner/toolu-runner" run --all
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

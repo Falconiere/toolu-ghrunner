@@ -6,7 +6,7 @@
 use crate::check_servers::{Recorder, run};
 use crate::doctor_env::{
   TEST_BEARER, block, doctor_cmd, fix, heading, healthy_reply, install_fix, jit_ok, report, row,
-  section, snapshot, write_registration,
+  section, service_install_fix, snapshot, write_registration,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -138,7 +138,7 @@ fn relative_config_flag_is_made_absolute() -> TestResult {
       row("FAIL", "run", "not running"),
       install_fix(&absolute),
       row("WARN", "service", "not installed"),
-      install_fix(&absolute),
+      service_install_fix(),
       row("INFO", "last job", "no jobs yet"),
     ],
     "{stdout}"

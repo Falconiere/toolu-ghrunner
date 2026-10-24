@@ -135,14 +135,24 @@ pub(crate) enum Command {
   /// online across many jobs. `--once` runs a single job and exits. An
   /// `--ephemeral` registration runs one job, then unregisters and deletes
   /// itself. SIGINT / SIGTERM cancel gracefully.
+  ///
+  /// `--all` supervises every registration under the runner home in one
+  /// process (what the machine service runs): one loop per registration,
+  /// SIGHUP rescans (new registrations start, pending removals stop), and a
+  /// fatal error stops only that registration's loop (`status` / `doctor`
+  /// name it). Exits 0 on SIGINT/SIGTERM, 2 when another `run --all`
+  /// already supervises the home.
   Run(RunArgs),
   /// Remove the runner registration.
   ///
   /// Unregisters the runner from GitHub, then deletes the persisted config
-  /// and credentials. Takes the job lock to decide: if a run holds it, the
-  /// removal refuses and writes a `.pending_remove` marker instead — pass
-  /// --force to remove anyway (which keeps the lock and skips the
-  /// unregister). A failed unregister, or no token at all, aborts before
+  /// and credentials. Takes the job lock to decide: if a run holds it, a
+  /// `.pending_remove` marker is written; when the holder is the machine
+  /// service (`run --all`) it is asked to stop just this runner and remove
+  /// waits up to 30 s (a job in flight finishes first), otherwise the
+  /// removal refuses — pass --force to remove anyway (which keeps the lock
+  /// and skips the unregister). Removing the last registration also
+  /// deactivates and deletes the machine service. A failed unregister, or no token at all, aborts before
   /// anything local is deleted so the removal can be retried;
   /// --skip-unregister removes local state only.
   Remove(RemoveArgs),
@@ -152,13 +162,18 @@ pub(crate) enum Command {
   /// present, and the stored device-flow login state for the registered
   /// host. Reads local files only.
   Status(StatusArgs),
-  /// Install a supervisor unit that keeps `run` alive across reboots.
+  /// Install the service that keeps the runner alive across reboots.
   ///
-  /// Generates and activates a launchd `LaunchAgent` (macOS) or systemd
-  /// user unit (Linux) wrapping `run --config <path>`, so the runner
-  /// restarts on crash and at boot. `--print` shows the unit without
-  /// writing it, `--no-activate` writes but does not load it, and
-  /// `--remove` deactivates and deletes it. launchd/systemd only.
+  /// Without --config: the one machine service for every registration —
+  /// launchd `sh.toolu.runner` (macOS) or systemd user unit
+  /// `toolu-runner.service` (Linux) running `run --all`. Older toolu units
+  /// that run a registration of this runner home are deactivated and
+  /// replaced first (stopping one cancels a job it is running, as `systemctl
+  /// stop` would); units running anything else are left alone with a
+  /// warning naming the command that removes them. With --config: a unit
+  /// for that one registration (`run --config <path>`). `--print` shows the
+  /// unit without writing it, `--no-activate` writes but does not load it,
+  /// and `--remove` deactivates and deletes it. launchd/systemd only.
   InstallService(InstallServiceArgs),
   /// Log in to GitHub via the OAuth device flow and store the token.
   ///
@@ -344,6 +359,14 @@ pub(crate) struct RunArgs {
   /// Pass this to run exactly one job and exit with its status.
   #[arg(long)]
   pub(crate) once: bool,
+  /// Supervise every registration under the runner home in one process.
+  ///
+  /// What the machine service runs: one always-online loop per
+  /// registration (each keeps its own job lock, backoff, re-mint and
+  /// ephemeral rules); SIGHUP rescans the registrations without disturbing
+  /// a running job.
+  #[arg(long, conflicts_with_all = ["config", "once"])]
+  pub(crate) all: bool,
 }
 
 /// Arguments for the `remove` subcommand.
@@ -364,8 +387,9 @@ pub(crate) struct RemoveArgs {
   pub(crate) token: Option<String>,
   /// Remove even while a run holds the job lock.
   ///
-  /// Without it, a held lock aborts the removal and writes a
-  /// `.pending_remove` marker for the running process. With it, local
+  /// Without it, a held lock writes a `.pending_remove` marker for the
+  /// running process; the machine service stops an idle runner within
+  /// seconds and remove then completes, otherwise remove exits 2. With it, local
   /// state goes but the lock file is KEPT (the running process still owns
   /// it) and the GitHub unregister is SKIPPED — that job is still
   /// reporting against the registration. It does not yet cancel the job.
@@ -394,13 +418,13 @@ pub(crate) struct StatusArgs {
 /// Arguments for the `install-service` subcommand.
 #[derive(Debug, Args)]
 pub(crate) struct InstallServiceArgs {
-  /// Path to the runner config file. Default: inferred from the cwd git
-  /// remote (runners/<owner>/<repo>/ under the runner home), else the
-  /// sole existing registration.
+  /// Install a unit for this one registration instead of the machine
+  /// service.
   ///
   /// The registration dir names the unit: a per-repo config yields
   /// `io.toolu.runner.<owner>.<repo>` (launchd) /
-  /// `toolu-runner-<owner>-<repo>.service` (systemd).
+  /// `toolu-runner-<owner>-<repo>.service` (systemd); an org config
+  /// `io.toolu.runner.orgs.<org>` / `toolu-runner-orgs-<org>.service`.
   #[arg(long, value_name = "FILE", value_hint = ValueHint::FilePath)]
   pub(crate) config: Option<PathBuf>,
   /// Print the generated unit to stdout without writing or activating it.

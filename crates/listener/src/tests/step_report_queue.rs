@@ -243,7 +243,7 @@ async fn step_report_queue_updates_arrive_before_completion_on_a_healthy_endpoin
   let dir = tempfile::tempdir()?;
   let mut ctx = make_ctx(server_uri, make_config(&dir));
 
-  let outcome = poll_and_execute(&mut ctx).await;
+  let outcome = poll_and_execute(&mut ctx, &CancellationToken::new()).await;
   match &outcome {
     Ok(Some(Conclusion::Success)) => {},
     other => return Err(format!("expected Ok(Some(Success)), got {other:?}").into()),
@@ -293,7 +293,7 @@ async fn step_report_queue_endpoint_down_still_completes_the_job() -> TestResult
   let mut ctx = make_ctx(broker_uri, make_config(&dir));
 
   let outcome = tokio::time::timeout(std::time::Duration::from_secs(20), async {
-    poll_and_execute(&mut ctx).await
+    poll_and_execute(&mut ctx, &CancellationToken::new()).await
   })
   .await
   .map_err(|_elapsed| {

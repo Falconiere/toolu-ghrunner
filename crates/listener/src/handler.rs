@@ -84,6 +84,8 @@ pub struct GitHubListener {
   /// Whether the last [`GitHubListener::run`] acquired a job (see
   /// [`GitHubListener::job_acquired`]).
   job_acquired: AtomicBool,
+  /// Stop taking jobs while idle (see [`GitHubListener::with_drain`]).
+  drain: CancellationToken,
 }
 
 impl GitHubListener {
@@ -111,7 +113,18 @@ impl GitHubListener {
       masker,
       conflict_policy: SessionConflictPolicy::default(),
       job_acquired: AtomicBool::new(false),
+      drain: CancellationToken::new(),
     })
+  }
+
+  /// Stop taking jobs when `drain` fires: while idle, [`GitHubListener::run`]
+  /// then ends the session and returns `Ok(None)` like a cancellation; a job
+  /// already acquired always runs to completion and is reported. `run --all`
+  /// drains a registration whose removal is pending (#208).
+  #[must_use]
+  pub fn with_drain(mut self, drain: CancellationToken) -> Self {
+    self.drain = drain;
+    self
   }
 
   /// Replace the session-conflict retry schedule (default: upstream's 30 s
@@ -173,7 +186,7 @@ impl GitHubListener {
       return Ok(None);
     };
 
-    let result = job_lifecycle::poll_and_execute(&mut ctx).await;
+    let result = job_lifecycle::poll_and_execute(&mut ctx, &self.drain).await;
     self.job_acquired.store(ctx.job_acquired, Ordering::SeqCst);
     if let Err(ref e) = result {
       log_job_error(e);

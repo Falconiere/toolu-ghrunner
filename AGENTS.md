@@ -6,8 +6,9 @@ Standalone GitHub Actions JIT runner — no orchestrator service, no OTel.
 
 `toolu-runner` is **bin-only** (CLI entrypoint: `main.rs` + `cli.rs` +
 `register/run/boot/service/login/status/create_app_cmd.rs` (one `*_cmd.rs`
-each) + `register_auth.rs` + `app_auth.rs` + `ephemeral.rs` +
-`network_setup.rs` + `check_*.rs` + `doctor_*.rs`).
+each) + `register_auth.rs` + `app_auth.rs` + `supervisor.rs`/`supervisor_signal.rs`/
+`machine_service.rs` (#208) + `ephemeral.rs` + `network_setup.rs` + `check_*.rs` +
+`doctor_*.rs`).
 Engine = `execution`;
 JIT lifecycle = `listener`. Plus standalone `daemon` bin (`toolu-daemon`,
 no internal deps, `reqwest` in tests only).
@@ -108,15 +109,18 @@ App-JWT tests, never uploaded to any GitHub App (authenticates nothing).
   `bollard`/`axum`). One-way `protocol`→`wire`: `protocol` holds `pub fn`
   builders/parsers, async transport lives in `wire::net`; `protocol` tests
   need no client/clock/tokio.
-- **Per-repo single-job concurrency**: registration at
-  `<home>/runners/<owner>/<repo>/` (`$TOOLU_RUNNER_HOME` else
-  `~/.toolu-runner` = persisted `data_dir`). `run` holds an exclusive `fs2`
+- **Per-registration single-job concurrency**: registration at
+  `<home>/runners/<owner>/<repo>/` or, for an org URL, `<home>/orgs/<org>/`
+  (#208; `$TOOLU_RUNNER_HOME` else `~/.toolu-runner` = persisted `data_dir`). `run` holds an exclusive `fs2`
   `.lock` there for the whole loop (body JSON: `pid`, `started_at`,
   `config_path`); a second `run` for the same repo reads the body and exits 2.
-  Legacy single-slot + org-level registrations lock `<home>/.lock`
-  (read-only fallback). Stale locks (holder dead AND mtime > 5 min) are
-  re-acquired. Cross-repo `offline`/`accelerated` runs need a distinct
-  `service_bind` per repo (else EADDRINUSE); `forwarder` binds nothing.
+  The legacy single-slot `<home>/config.toml` (never written by default
+  now) locks `<home>/.lock`. Stale locks (holder dead AND mtime > 5 min) are
+  re-acquired; a released `LockGuard` empties the body (`doctor`/`status`
+  read an empty body as stopped — under `run --all` the pid outlives one
+  registration's lock). Local `offline`/`accelerated` services bind
+  `<service_bind>:0`, so registrations sharing one `service_bind` never
+  clash (`cache/tests/server_bind_test.rs`).
 - **Stable workspaces, default (#90)**: each `owner/repo` job runs in
   `<work>/<repo>/<repo>` (`runner.workspace` = `<work>/<repo>`), tracked by
   `<work>/_PipelineMapping/<owner>/<repo>/PipelineFolder.json`. The run `.lock`
@@ -172,10 +176,30 @@ App-JWT tests, never uploaded to any GitHub App (authenticates nothing).
   `Auth` → 1; else backoff on same JIT); `ephemeral.rs` unregisters + deletes
   local state after the one job.
 - **No self-daemonization**: `run` blocks in foreground; persistence is the
-  OS supervisor via `install-service` (launchd LaunchAgent / systemd user
-  unit, `Restart=always` + `RestartPreventExitStatus=5`; legacy static
-  `scripts/` units from `install.sh --service` remain; launchd `KeepAlive`
-  can't condition on exit code).
+  OS supervisor. `install-service` (no `--config`) installs ONE machine unit
+  — launchd `sh.toolu.runner` / systemd user `toolu-runner.service`
+  (`ExecReload` = SIGHUP, no `RestartPreventExitStatus`) — running
+  `run --all`, after deactivating+deleting older toolu units that run a
+  registration of this home, a missing config, or another `run --all`
+  (units running a config outside the home are kept + warned; the
+  `/etc/systemd/system` static unit is report-only, #203). `--config <path>`
+  keeps the per-registration unit (`Restart=always` +
+  `RestartPreventExitStatus=5`; legacy root → `toolu-runner-legacy.service`,
+  orgs → `toolu-runner-orgs-<org>.service`); launchd `KeepAlive` can't
+  condition on exit code.
+- **`run --all` supervisor (#208)**: holds `<home>/supervisor.lock` (live
+  holder → exit 2); one `RunLoop` task per registration
+  (`RunLoop::for_registration`, shared with `run`); LockHeld retried every
+  5 s; SIGHUP rescans (start new, drain `.pending_remove`/vanished config via
+  `GitHubListener::with_drain` — idle only, never an acquired job — restart
+  ended loops); a loop's `Err` stops only it and is written masked to
+  `<data_dir>/.stopped` (`config::stop_marker`, shown by `status`/`doctor`);
+  exit 0 on SIGINT/SIGTERM, never a registration's code; runs ephemeral
+  registrations. `register` and `remove` SIGHUP it
+  (`supervisor_signal::notify`: lock held + `holder_alive`); `remove` of a
+  supervised registration waits ≤30 s (`TOOLU_RUNNER_REMOVE_WAIT_MS`) for
+  the drain, exits 2 if a job keeps it busy, and removing the last
+  registration uninstalls the machine unit.
 - **`boot`: zero-config one-shot container mode** (no flags; ENTRYPOINT for
   the toolu.sh image). Env: `TOOLU_JITCONFIG` (required),
   `TOOLU_DEADLINE` (optional epoch-ms watchdog). In-memory `RunnerConfig`,
@@ -243,8 +267,9 @@ App-JWT tests, never uploaded to any GitHub App (authenticates nothing).
   `labels.rs` (#92: `default_labels` = `self-hosted` + `RUNNER_OS`/`RUNNER_ARCH`
   in `shared::platform` spelling, `resolve_labels` additive unless
   `--no-default-labels`; pinned by `tests/fixtures/jit_labels_probe.json`);
-  `lockfile.rs` (`fs2` guard,
-  sysinfo + mtime>5min stale rule); `auth_store.rs` (home-pinned
+  `lockfile.rs` (`fs2` guard, body emptied on drop,
+  sysinfo + mtime>5min stale rule); `stop_marker.rs` (`<data_dir>/.stopped`
+  0600 JSON `{stopped_at, error}`: why `run --all` stopped a loop); `auth_store.rs` (home-pinned
   `token-<host>.json` 0600 default / `keyring` opt-in via
   `TOOLU_RUNNER_KEYRING`, `TOOLU_RUNNER_NO_KEYRING` back-compat override,
   `pick_bearer` / `resolve_bearer` / `decide_bearer` with `BearerDecision`
@@ -258,15 +283,21 @@ App-JWT tests, never uploaded to any GitHub App (authenticates nothing).
   `registration_auth.rs` (#201 `[auth]`: `AuthSection` tagged on `kind`,
   `Token` default and omitted on save (pre-#201 shape) or
   `App { app_file, installation_id }`, `deny_unknown_fields`);
-  `registry.rs` (per-repo layout, `runner_home`/`runner_dir` incl. NUL
-  rejection, `list_registrations` returning `Ok(empty)` on missing dirs /
+  `registry.rs` (`runners/<o>/<r>` + `orgs/<org>` layout, `runner_home`/
+  `runner_home_is_custom`/`runner_dir`/`org_dir` incl. NUL rejection,
+  `RegistrationScope {Repo, Org, Legacy}` + `label()`,
+  `list_registrations` (repos, orgs, legacy) returning `Ok(empty)` on missing dirs /
   `Err` naming unreadable ones, `resolve_config_path`: flag > cwd-inferred >
   sole > error); `repo_infer.rs` (`parse_remote_url` + `detect_repo` via
   `git remote get-url` origin, errors name `--url`); `remint.rs` (`merge_reminted_config`, pure merge overwriting ONLY
   `runner_id`/`auth_token`/`runtime.jit_config`, so `[network]`/`[auth]` survive); `service_unit.rs` (pure
   `ServiceSpec` → `launchd_plist` (incl. `WorkingDirectory`,
   `EnvironmentVariables`, `launchd_env_path` PATH fold) / `systemd_unit`
-  (incl. `RestartPreventExitStatus=5`)).
+  (incl. `RestartPreventExitStatus=5`); `MachineSpec` →
+  `launchd_machine_plist` / `systemd_machine_unit` (`run --all`,
+  `ExecReload` SIGHUP, `TOOLU_RUNNER_HOME` pinned only when custom);
+  `parse_systemd_target` / `parse_launchd_target` → `Supervises {All,
+  Config}` read a unit back for migration).
 - **`expressions/`**: `${{ }}` evaluator — `lexer`/`parser`/`evaluator`/
   `template`/`functions` (incl. `hashFiles` via `glob_walk`+`hash`, JSON
   convert)/`context_data`/`types`/`display` (upstream `ToDisplayString` →
@@ -335,8 +366,9 @@ App-JWT tests, never uploaded to any GitHub App (authenticates nothing).
   layout) → `data_dir/node/…` cache → download pins 20.20.2/24.21.0, 3 attempts).
 - **`listener/`** (JIT lifecycle): `handler::GitHubListener`: parse JIT →
   RSA→JWT→OAuth2 → `retry_session_conflict` (409 = ~3min post-session ghost;
-  re-auth + retry 30s×8, cancel→`Ok(None)`) → `poll_and_execute` (1s→60s
-  backoff, `acquire_job`, early broker ack (`acknowledge_message` — death
+  re-auth + retry 30s×8, cancel→`Ok(None)`) → `poll_and_execute` (idle poll
+  in `job_lifecycle/idle.rs`, where `with_drain` ends an idle loop with
+  `Ok(None)` but never an acquired job; 1s→60s backoff, `acquire_job`, early broker ack (`acknowledge_message` — death
   mid-job trades redelivery for no cancel-watcher re-see) — run,
   single-attempt WARN-only `acknowledge` demotion,
   `retry_transient`-wrapped `complete_job` for `Network` only, 1s→60s jitter,
@@ -366,13 +398,17 @@ App-JWT tests, never uploaded to any GitHub App (authenticates nothing).
   `login`/`logout` + `status` + `create-app` + `check`/`doctor`, each its
   `*_cmd.rs`, plus inline `remove`) + `--config` resolution (flag >
   cwd-inferred > sole > error) + inline `remove` (holds lock across DELETE; held+no-`--force` →
-  `.pending_remove`+exit 2; held+`--force` → state gone but `.lock` KEPT,
-  unregister skipped; else GitHub DELETE with 404-confirmed-by-lookup, then
-  delete state keeping `_diag/`; unregister-first so failure aborts intact;
+  `.pending_remove`, then a `run --all` holder is SIGHUPed and awaited ≤30 s
+  (drained → normal removal; busy → exit 2), any other holder → exit 2;
+  held+`--force` → state gone but `.lock` KEPT, unregister skipped, supervisor
+  notified; else GitHub DELETE with 404-confirmed-by-lookup, then
+  delete state (+`.stopped`) keeping `_diag/`, and the last registration's
+  removal uninstalls the machine unit; unregister-first so failure aborts intact;
   bearer `--token` > `TOOLU_RUNNER_TOKEN` > stored `login`, none = hard
   error unless `--skip-unregister`; helpers `remove_bearer`,
   `wire::net::unregister_runner`, `delete_registration_state`).
-  `register_cmd` (`--url` optional, cwd-infer github.com only; `--labels`
+  `register_cmd` (`--url` optional, cwd-infer github.com only; org URL →
+  `orgs/<org>/`, SIGHUPs a running `run --all`; `--labels`
   additive, `--no-default-labels`, `--ephemeral`; `generate-jitconfig` →
   persist all-or-nothing with `data_dir` = registration dir; `remint_and_persist`
   preserves service/cache/workspace/shadow/network/auth byte-identical; labels
@@ -395,8 +431,16 @@ App-JWT tests, never uploaded to any GitHub App (authenticates nothing).
   conflict exits 5 via downcast `CodedExit`, all else 2;
   `TOOLU_RUNNER_SESSION_CONFLICT_INTERVAL_MS` overrides 30s wait for
   `run`+`boot`; missing/rejected re-mint bearer fatal via
-  `REMINT_TOKEN_HELP`). `boot_cmd` (pure `parse_deadline_ms` + exit mapping;
-  `boot_cmd_test`/`boot_cmd_e2e_test`). `service_cmd` (identity from registration dir, `--print`/
+  `REMINT_TOKEN_HELP`; `RunLoop::for_registration` shared with `run --all`;
+  drain counts as cancel). `supervisor` (`run --all`, see Runtime contracts;
+  `supervisor_test`/`supervisor_fatal_test`/`supervisor_remove_test`).
+  `supervisor_signal` (`supervisor_pid`, `notify`, `reload_hint`,
+  `drain_and_wait` for `remove`). `machine_service` (machine identity,
+  `installed_units` inventory + `Disposition` shared with doctor's `service`
+  row (0 WARN / 1 queried / ≥2 FAIL), `cmd_install_machine`,
+  `uninstall_if_last`; `machine_service_test`). `boot_cmd` (pure `parse_deadline_ms` + exit mapping;
+  `boot_cmd_test`/`boot_cmd_e2e_test`). `service_cmd` (no `--config` → machine
+  unit; else identity from registration dir, `--print`/
   `--no-activate`/default/`--remove` idempotent; launchd `bootstrap
   gui/<uid>` (fallback `load -w`) / `bootout`, systemd `daemon-reload` +
   `enable/disable --now` under `$HOME`; refuses `ephemeral` except `--remove`).
@@ -404,7 +448,8 @@ App-JWT tests, never uploaded to any GitHub App (authenticates nothing).
   placeholder `DEVICE_CLIENT_ID` errors pre-network; `--client-id`/
   `TOOLU_RUNNER_CLIENT_ID` required until the OAuth App exists, always on
   GHES). `status_cmd` (registration + `auth:` token or the App's slug/id/
-  installation from its local file + credential + backend + per-host login
+  installation from its local file + credential + backend + `run:` line
+  (lock holder / `.stopped` / not running) + per-host login
   state incl. keyring-migration hint; no network). `check_cmd` (#93 read-only
   preflight: `--url`⊕`--config`, `--timeout` 1–300s def 10; exits 0 all-required-OK
   / 1 required-failed / 2 usage-config; never locks/writes/sessions/credentials;
