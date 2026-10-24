@@ -10,12 +10,14 @@ use config::registry;
 use config::service_unit::{
   MACHINE_LABEL, MACHINE_UNIT, MachineSpec, ServiceAction, Supervises, launchd_env_path,
   launchd_machine_plist, parse_launchd_home, parse_launchd_target, parse_systemd_home,
-  parse_systemd_target, service_action_summary, systemd_machine_unit,
+  parse_systemd_target, service_action_summary, systemd_machine_unit, systemd_system_machine_unit,
 };
 use shared::RunnerError;
 
 use crate::cli::InstallServiceArgs;
 use crate::service_cmd::{self, ServiceId, Supervisor};
+
+pub(crate) use crate::service_cmd::UnitScope;
 
 /// Where `install.sh --service` puts its static systemd unit (system scope).
 pub(crate) const SYSTEM_UNIT_DIR: &str = "/etc/systemd/system";
@@ -26,15 +28,6 @@ pub(crate) fn machine_id() -> ServiceId {
     label: MACHINE_LABEL.to_owned(),
     unit: MACHINE_UNIT.to_owned(),
   }
-}
-
-/// Which manager owns an installed unit.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum UnitScope {
-  /// The user's launchd domain / `systemctl --user`.
-  User,
-  /// The systemd system manager (root only; #203 owns it).
-  System,
 }
 
 /// What migration does with an installed toolu unit.
@@ -75,13 +68,10 @@ impl InstalledUnit {
   /// `run --config` unit for that very config.
   pub(crate) fn supervises_registration(&self, config_path: &Path) -> bool {
     match &self.supervises {
-      Some(Supervises::All) => {
-        self.scope == UnitScope::User
-          && self
-            .serves
-            .as_deref()
-            .is_some_and(|home| within(config_path, home))
-      },
+      Some(Supervises::All) => self
+        .serves
+        .as_deref()
+        .is_some_and(|home| within(config_path, home)),
       Some(Supervises::Config(path)) => same_file(path, config_path),
       None => false,
     }
@@ -107,16 +97,16 @@ impl InstalledUnit {
   }
 }
 
-/// Every toolu unit installed for this user (plus, on systemd, the static
-/// system unit under `system_dir`), each with its migration disposition
-/// relative to `runner_home`.
-pub(crate) fn installed_units(
+/// Inventory with the destination scope selected for this installation.
+pub(crate) fn installed_units_for_scope(
   supervisor: Supervisor,
+  target_scope: UnitScope,
   user_home: &Path,
   runner_home: &Path,
   system_dir: Option<&Path>,
 ) -> Vec<InstalledUnit> {
-  let machine_dest = service_cmd::dest_path(supervisor, &machine_id(), user_home);
+  let machine_dest =
+    service_cmd::dest_path_scoped(supervisor, target_scope, &machine_id(), user_home);
   // Unreadable registry: no unit counts as running a home registration, so
   // nothing is replaced on that ground (units are kept, never deleted);
   // `install-service` refuses before reaching here.
@@ -127,7 +117,8 @@ pub(crate) fn installed_units(
       Vec::new()
     },
   };
-  let mut units: Vec<InstalledUnit> = machine_dest
+  let user_dest = service_cmd::dest_path(supervisor, &machine_id(), user_home);
+  let mut units: Vec<InstalledUnit> = user_dest
     .parent()
     .map(|dir| unit_files(supervisor, dir))
     .unwrap_or_default()
@@ -137,13 +128,20 @@ pub(crate) fn installed_units(
   if supervisor == Supervisor::Systemd
     && let Some(dir) = system_dir
   {
-    let path = dir.join(MACHINE_UNIT);
-    if path.is_file() {
-      units.push(inspect(supervisor, path, UnitScope::System));
-    }
+    units.extend(
+      unit_files(supervisor, dir)
+        .into_iter()
+        .map(|path| inspect(supervisor, path, UnitScope::System)),
+    );
   }
   for unit in &mut units {
-    unit.disposition = disposition(unit, &machine_dest, &registrations, runner_home);
+    unit.disposition = disposition(
+      unit,
+      &machine_dest,
+      target_scope,
+      &registrations,
+      runner_home,
+    );
   }
   units
 }
@@ -162,7 +160,11 @@ fn unit_files(supervisor: Supervisor, dir: &Path) -> Vec<PathBuf> {
   let mut files: Vec<PathBuf> = entries
     .flatten()
     .map(|entry| entry.path())
-    .filter(|path| path.is_file() && is_toolu_unit(supervisor, path))
+    .filter(|path| {
+      is_toolu_unit(supervisor, path)
+        && std::fs::symlink_metadata(path)
+          .is_ok_and(|metadata| metadata.is_file() || metadata.file_type().is_symlink())
+    })
     .collect();
   files.sort();
   files
@@ -226,10 +228,11 @@ fn inspect(supervisor: Supervisor, path: PathBuf, scope: UnitScope) -> Installed
 fn disposition(
   unit: &InstalledUnit,
   machine_dest: &Path,
+  target_scope: UnitScope,
   registrations: &[PathBuf],
   runner_home: &Path,
 ) -> Disposition {
-  let at_machine_path = unit.scope == UnitScope::User && unit.path == machine_dest;
+  let at_machine_path = unit.scope == target_scope && unit.path == machine_dest;
   if let Some(home) = &unit.serves
     && !same_file(home, runner_home)
   {
@@ -238,6 +241,21 @@ fn disposition(
   match &unit.supervises {
     Some(Supervises::All) if at_machine_path => Disposition::Machine,
     Some(Supervises::All) => Disposition::Replace("another `run --all` unit for this home"),
+    Some(Supervises::Config(config))
+      if at_machine_path
+        && target_scope == UnitScope::System
+        && config.exists()
+        && !registrations.iter().any(|known| same_file(known, config)) =>
+    {
+      Disposition::Keep(format!(
+        "it runs {}, which is not a registration under {}",
+        config.display(),
+        runner_home.display()
+      ))
+    },
+    None if at_machine_path && target_scope == UnitScope::System => {
+      Disposition::Keep("it does not run `toolu-runner run`".to_owned())
+    },
     _ if at_machine_path => Disposition::Replace("it occupies the machine unit's file"),
     Some(Supervises::Config(config)) if !config.exists() => {
       Disposition::Replace("its config no longer exists")
@@ -278,19 +296,20 @@ pub(crate) fn cmd_install_machine(
   args: &InstallServiceArgs,
 ) -> Result<(), Box<dyn std::error::Error>> {
   let supervisor = service_cmd::current_supervisor()?;
+  let scope = service_cmd::current_unit_scope(supervisor)?;
   let runner_home = std::path::absolute(registry::runner_home())?;
   let id = machine_id();
   if args.print {
-    print!("{}", render(supervisor, &runner_home)?);
+    print!("{}", render(supervisor, scope, &runner_home)?);
     if let Ok(user_home) = service_cmd::home_dir() {
-      report_plan(supervisor, &user_home, &runner_home);
+      report_plan(supervisor, scope, &user_home, &runner_home);
     }
     return Ok(());
   }
   let user_home = service_cmd::home_dir()?;
-  let dest = service_cmd::dest_path(supervisor, &id, &user_home);
+  let dest = service_cmd::dest_path_scoped(supervisor, scope, &id, &user_home);
   if args.remove {
-    let outcome = service_cmd::remove_service(supervisor, &dest, &id)?;
+    let outcome = service_cmd::remove_service(supervisor, scope, &dest, &id)?;
     println!(
       "{}",
       service_action_summary(&outcome.action, &outcome.label, &outcome.path)
@@ -299,26 +318,45 @@ pub(crate) fn cmd_install_machine(
   }
   // Migration decides from the registrations: never on a partial listing.
   registry::list_registrations(&runner_home)?;
-  let units = installed_units(
+  let units = installed_units_for_scope(
     supervisor,
+    scope,
     &user_home,
     &runner_home,
     Some(Path::new(SYSTEM_UNIT_DIR)),
   );
-  refuse_other_home_at(&dest, &units)?;
+  refuse_foreign_at(&dest, &units)?;
+  let unit_text = render(supervisor, scope, &runner_home)?;
+  let linger = service_cmd::service_linger::before_install(supervisor, scope, args)?;
   if args.no_activate {
-    return write_only(supervisor, &dest, &runner_home, &units);
+    write_only(supervisor, scope, &dest, &runner_home, &unit_text, &units)?;
+    service_cmd::service_linger::warn_if_short_lived(linger);
+    return Ok(());
   }
-  replace_old_units(supervisor, &units)?;
-  report_kept(supervisor, &units);
-  registry::ensure_runner_home(&runner_home)?;
+  activate_machine_install(supervisor, scope, &runner_home, &dest, &unit_text, &units)?;
+  service_cmd::service_linger::warn_if_short_lived(linger);
+  Ok(())
+}
+
+fn activate_machine_install(
+  supervisor: Supervisor,
+  scope: UnitScope,
+  runner_home: &Path,
+  dest: &Path,
+  unit_text: &str,
+  units: &[InstalledUnit],
+) -> Result<(), Box<dyn std::error::Error>> {
+  replace_old_units(supervisor, scope, units)?;
+  report_kept(supervisor, scope, units);
+  registry::ensure_runner_home(runner_home)?;
   std::fs::create_dir_all(runner_home.join("_diag"))?;
-  service_cmd::write_unit(&dest, &render(supervisor, &runner_home)?)?;
-  service_cmd::activate(supervisor, &dest, &id)?;
+  service_cmd::write_unit(dest, unit_text)?;
+  let id = machine_id();
+  service_cmd::activate(supervisor, scope, dest, &id)?;
   let installed = ServiceAction::Installed { activated: true };
-  println!("{}", service_action_summary(&installed, &id.label, &dest));
+  println!("{}", service_action_summary(&installed, &id.label, dest));
   // A re-run over a running supervisor: have it rescan now.
-  if let Err(e) = crate::supervisor_signal::notify(&runner_home) {
+  if let Err(e) = crate::supervisor_signal::notify(runner_home) {
     eprintln!("warning: could not notify the running service: {e}");
   }
   Ok(())
@@ -327,17 +365,19 @@ pub(crate) fn cmd_install_machine(
 /// `--no-activate`: write the machine unit only; old units stay as they are.
 fn write_only(
   supervisor: Supervisor,
+  scope: UnitScope,
   dest: &Path,
   runner_home: &Path,
+  unit_text: &str,
   units: &[InstalledUnit],
 ) -> Result<(), Box<dyn std::error::Error>> {
   registry::ensure_runner_home(runner_home)?;
   std::fs::create_dir_all(runner_home.join("_diag"))?;
-  service_cmd::write_unit(dest, &render(supervisor, runner_home)?)?;
+  service_cmd::write_unit(dest, unit_text)?;
   println!("wrote {}", dest.display());
   println!(
     "activate it with:\n  {}",
-    service_cmd::activation_hint(supervisor, dest, &machine_id())
+    service_cmd::activation_hint(supervisor, scope, dest, &machine_id())
   );
   for unit in units {
     if let Disposition::Replace(why) = &unit.disposition {
@@ -347,31 +387,33 @@ fn write_only(
       );
     }
   }
-  report_kept(supervisor, units);
+  report_kept(supervisor, scope, units);
   Ok(())
 }
 
-/// One user runs one machine unit: refuse to overwrite the one at `dest`
-/// when it serves another runner home.
-fn refuse_other_home_at(dest: &Path, units: &[InstalledUnit]) -> Result<(), RunnerError> {
-  let other = units
+/// Refuse to overwrite a unit at the machine path when it serves a different
+/// live home or config. A root system unit may already occupy that path.
+fn refuse_foreign_at(dest: &Path, units: &[InstalledUnit]) -> Result<(), RunnerError> {
+  if std::fs::symlink_metadata(dest).is_ok_and(|meta| meta.file_type().is_symlink()) {
+    return Err(RunnerError::Config(format!(
+      "the machine service at {} is a symlink; remove it before installing so its target is not overwritten",
+      dest.display()
+    )));
+  }
+  let foreign = units
     .iter()
     .filter(|unit| unit.path == dest)
-    .find_map(|unit| {
-      if let Disposition::OtherHome(home) = &unit.disposition {
-        Some(home)
-      } else {
-        None
-      }
+    .find_map(|unit| match &unit.disposition {
+      Disposition::OtherHome(home) => Some(format!("another runner home {}", home.display())),
+      Disposition::Keep(why) => Some(why.clone()),
+      Disposition::Machine | Disposition::Replace(_) => None,
     });
-  match other {
-    Some(home) => Err(RunnerError::Config(format!(
-      "the machine service at {} runs the runner home {}; a user runs one machine service — \
-       remove it first (`TOOLU_RUNNER_HOME={} toolu-runner install-service --remove`), or \
-       supervise this home's registrations with `install-service --config <path>`",
+  match foreign {
+    Some(why) => Err(RunnerError::Config(format!(
+      "the machine service at {} serves {why}; it was kept and nothing changed — \
+       remove it first or supervise this home's registrations with \
+       `install-service --config <path>`",
       dest.display(),
-      home.display(),
-      home.display()
     ))),
     None => Ok(()),
   }
@@ -382,19 +424,23 @@ fn refuse_other_home_at(dest: &Path, units: &[InstalledUnit]) -> Result<(), Runn
 /// `systemctl stop` does, so a job it is running is cancelled (said per
 /// unit). A unit that cannot be deactivated keeps its file and aborts the
 /// install, so a running process is never left without its unit.
-fn replace_old_units(supervisor: Supervisor, units: &[InstalledUnit]) -> Result<(), RunnerError> {
+fn replace_old_units(
+  supervisor: Supervisor,
+  target_scope: UnitScope,
+  units: &[InstalledUnit],
+) -> Result<(), RunnerError> {
   for unit in units {
     let Disposition::Replace(why) = &unit.disposition else {
       continue;
     };
-    if unit.scope != UnitScope::User {
+    if unit.scope == UnitScope::System && target_scope != UnitScope::System {
       continue;
     }
     println!(
       "stopping {} ({why}); a job it is running is cancelled",
       unit.path.display()
     );
-    service_cmd::deactivate_checked(supervisor, &unit.path, &unit.id).map_err(|e| {
+    service_cmd::deactivate_checked(supervisor, unit.scope, &unit.path, &unit.id).map_err(|e| {
       RunnerError::Config(format!(
         "could not deactivate {}: {e}; it was kept and nothing else changed — fix the \
          supervisor connection and re-run, or remove it by hand: {}",
@@ -413,13 +459,13 @@ fn replace_old_units(supervisor: Supervisor, units: &[InstalledUnit]) -> Result<
 }
 
 /// Warn about each unit left running, with the command that removes it.
-fn report_kept(supervisor: Supervisor, units: &[InstalledUnit]) {
+fn report_kept(supervisor: Supervisor, target_scope: UnitScope, units: &[InstalledUnit]) {
   for unit in units {
     let why = match (&unit.disposition, unit.scope) {
       (Disposition::Keep(why), _) => why.clone(),
       (Disposition::OtherHome(home), _) => format!("it runs the runner home {}", home.display()),
-      (Disposition::Replace(why), UnitScope::System) => {
-        format!("{why}; it is a system unit (#203 manages those)")
+      (Disposition::Replace(why), UnitScope::System) if target_scope == UnitScope::User => {
+        format!("{why}; it is a system unit owned by root")
       },
       _ => continue,
     };
@@ -432,37 +478,56 @@ fn report_kept(supervisor: Supervisor, units: &[InstalledUnit]) {
 }
 
 /// `--print`: what a default install would do, on stderr.
-fn report_plan(supervisor: Supervisor, user_home: &Path, runner_home: &Path) {
-  let units = installed_units(
+fn report_plan(supervisor: Supervisor, scope: UnitScope, user_home: &Path, runner_home: &Path) {
+  let units = installed_units_for_scope(
     supervisor,
+    scope,
     user_home,
     runner_home,
     Some(Path::new(SYSTEM_UNIT_DIR)),
   );
   for unit in &units {
-    if let (Disposition::Replace(why), UnitScope::User) = (&unit.disposition, unit.scope) {
+    if let Disposition::Replace(why) = &unit.disposition
+      && (unit.scope == UnitScope::User || scope == UnitScope::System)
+    {
       eprintln!("would replace {} ({why})", unit.path.display());
     }
   }
-  report_kept(supervisor, &units);
+  report_kept(supervisor, scope, &units);
 }
 
 /// The machine unit text for this binary and `runner_home` (absolute).
-/// `TOOLU_RUNNER_HOME` is pinned in the unit only when it is customised.
-fn render(supervisor: Supervisor, runner_home: &Path) -> Result<String, RunnerError> {
+/// System units also pin HOME and the default runner home.
+fn render(
+  supervisor: Supervisor,
+  scope: UnitScope,
+  runner_home: &Path,
+) -> Result<String, RunnerError> {
   let exe = std::env::current_exe()
     .map_err(|e| RunnerError::Config(format!("cannot resolve the running binary's path: {e}")))?;
   let diag_dir = runner_home.join("_diag");
   let env_path = launchd_env_path(crate::config::path().as_deref());
+  let pin_runner_home = registry::runner_home_is_custom() || scope == UnitScope::System;
+  if supervisor == Supervisor::Systemd {
+    service_cmd::validate_unit_environment("PATH", &env_path)?;
+    if pin_runner_home {
+      service_cmd::validate_unit_environment("TOOLU_RUNNER_HOME", &runner_home.to_string_lossy())?;
+    }
+  }
   let spec = MachineSpec {
     exe: &exe,
-    home: registry::runner_home_is_custom().then_some(runner_home),
+    home: pin_runner_home.then_some(runner_home),
     diag_dir: &diag_dir,
     env_path: &env_path,
     work_dir: runner_home,
   };
   Ok(match supervisor {
     Supervisor::Launchd => launchd_machine_plist(&spec),
+    Supervisor::Systemd if scope == UnitScope::System => {
+      let user_home = service_cmd::home_dir()?;
+      service_cmd::validate_unit_environment("HOME", &user_home.to_string_lossy())?;
+      systemd_system_machine_unit(&spec, &user_home)
+    },
     Supervisor::Systemd => systemd_machine_unit(&spec),
   })
 }
@@ -484,12 +549,13 @@ pub(crate) fn uninstall_if_last(runner_home: &Path) -> Result<Option<PathBuf>, R
   else {
     return Ok(None);
   };
-  let dest = service_cmd::dest_path(supervisor, &machine_id(), &user_home);
+  let scope = service_cmd::current_unit_scope(supervisor)?;
+  let dest = service_cmd::dest_path_scoped(supervisor, scope, &machine_id(), &user_home);
   if !dest.is_file() {
     return Ok(None);
   }
   let runner_home = std::path::absolute(runner_home)?;
-  let unit = inspect(supervisor, dest.clone(), UnitScope::User);
+  let unit = inspect(supervisor, dest.clone(), scope);
   if !unit
     .serves
     .as_deref()
@@ -497,7 +563,7 @@ pub(crate) fn uninstall_if_last(runner_home: &Path) -> Result<Option<PathBuf>, R
   {
     return Ok(None);
   }
-  let outcome = service_cmd::remove_service(supervisor, &dest, &machine_id())?;
+  let outcome = service_cmd::remove_service(supervisor, scope, &dest, &machine_id())?;
   Ok((outcome.action == ServiceAction::Removed).then_some(dest))
 }
 

@@ -64,7 +64,11 @@ pub(crate) fn write_fixture(
 /// `install-service <args>` pinned to an isolated home (both env vars point
 /// at `home`), so the registration resolves there and any unit file lands
 /// under that same tree.
-fn install_cmd(home: &Path, config_path: &Path, extra: &[&str]) -> Command {
+fn install_cmd(
+  home: &Path,
+  config_path: &Path,
+  extra: &[&str],
+) -> Result<Command, Box<dyn std::error::Error>> {
   let mut cmd = Command::new(env!("CARGO_BIN_EXE_toolu-runner"));
   cmd
     .env("HOME", home)
@@ -73,7 +77,29 @@ fn install_cmd(home: &Path, config_path: &Path, extra: &[&str]) -> Command {
     .args(["install-service", "--config"])
     .arg(config_path)
     .args(extra);
-  cmd
+  #[cfg(target_os = "linux")]
+  cmd.env("PATH", nonroot_shims(home)?);
+  Ok(cmd)
+}
+
+/// Isolate Linux CLI tests from root's real system unit directory and logind.
+/// The separate systemd integration check exercises the real manager.
+#[cfg(unix)]
+pub(crate) fn nonroot_shims(home: &Path) -> Result<String, Box<dyn std::error::Error>> {
+  let (bin, _, path_env) = shim_env(home)?;
+  if cfg!(target_os = "linux") {
+    write_shim(
+      &bin,
+      "id",
+      "#!/bin/sh\ncase \"$1\" in -u) echo 1000;; -un) echo runner;; esac\n",
+    )?;
+    write_shim(
+      &bin,
+      "loginctl",
+      "#!/bin/sh\ncase \"$1\" in show-user) echo Linger=yes;; enable-linger) exit 0;; esac\n",
+    )?;
+  }
+  Ok(path_env)
 }
 
 /// The OS-conventional unit destination for `io.toolu.runner.octo.demo` under
@@ -104,6 +130,7 @@ fn expected_dest(home: &Path) -> PathBuf {
 fn expected_unit(
   config_path: &Path,
   path_env: Option<&str>,
+  runner_home: &Path,
 ) -> Result<String, Box<dyn std::error::Error>> {
   let config = config_path.canonicalize()?;
   // The bin canonicalizes only the config path; `_diag` derives from the
@@ -126,7 +153,7 @@ fn expected_unit(
   Ok(if cfg!(target_os = "macos") {
     service_unit::launchd_plist(&spec)
   } else {
-    service_unit::systemd_unit(&spec)
+    service_unit::systemd_unit_with_home(&spec, runner_home)
   })
 }
 
@@ -180,7 +207,7 @@ fn run_activate(
     "systemctl"
   };
   write_shim(&bin, supervisor, shim_body)?;
-  let output = install_cmd(home, config_path, &[])
+  let output = install_cmd(home, config_path, &[])?
     .env("PATH", &path_env)
     .env("SHIM_LOG", &log)
     .output()?;
@@ -294,6 +321,7 @@ fn non_numeric_uid_is_a_named_error() {
   write_shim(&bin, "id", "#!/bin/sh\necho not-a-uid\n").expect("id shim");
 
   let output = install_cmd(home.path(), &config_path, &[])
+    .expect("install command")
     .env("PATH", &path_env)
     .env("SHIM_LOG", &log)
     .output()
@@ -328,6 +356,7 @@ fn print_emits_the_unit_without_writing_a_file() {
   let config_path = write_fixture(home.path(), "octo", "demo").expect("write fixture");
 
   let output = install_cmd(home.path(), &config_path, &["--print"])
+    .expect("install command")
     .output()
     .expect("run install-service --print");
 
@@ -341,7 +370,17 @@ fn print_emits_the_unit_without_writing_a_file() {
     stdout,
     // `install_cmd` does not override PATH, so the child inherited this
     // process's — `None` reproduces exactly what the bin baked in.
-    expected_unit(&config_path, None).expect("build expected unit"),
+    expected_unit(
+      &config_path,
+      if cfg!(target_os = "linux") {
+        Some(nonroot_shims(home.path()).expect("test path"))
+      } else {
+        None
+      }
+      .as_deref(),
+      home.path()
+    )
+    .expect("build expected unit"),
     "--print must emit the exact unit the renderer produces for this spec"
   );
   assert!(
@@ -350,12 +389,29 @@ fn print_emits_the_unit_without_writing_a_file() {
   );
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn systemd_rejects_path_line_break_before_writing() {
+  let home = tempfile::tempdir().expect("tempdir");
+  let config_path = write_fixture(home.path(), "octo", "demo").expect("write fixture");
+  let path_env = nonroot_shims(home.path()).expect("non-root test shims");
+  let output = install_cmd(home.path(), &config_path, &["--no-activate"])
+    .expect("install command")
+    .env("PATH", format!("{path_env}\nEnvironment=INJECTED=yes"))
+    .output()
+    .expect("run install-service");
+  assert_eq!(output.status.code(), Some(2));
+  assert!(String::from_utf8_lossy(&output.stderr).contains("PATH contains a line break"));
+  assert!(!expected_dest(home.path()).exists());
+}
+
 #[test]
 fn no_activate_writes_the_unit_and_prints_the_activation_command() {
   let home = tempfile::tempdir().expect("tempdir");
   let config_path = write_fixture(home.path(), "octo", "demo").expect("write fixture");
 
   let output = install_cmd(home.path(), &config_path, &["--no-activate"])
+    .expect("install command")
     .output()
     .expect("run install-service --no-activate");
 
@@ -390,12 +446,14 @@ fn remove_deletes_the_unit_and_is_idempotent() {
   // Install (write-only) so there is a file to remove — never activated, so
   // `--remove`'s best-effort deactivation is a harmless no-op.
   install_cmd(home.path(), &config_path, &["--no-activate"])
+    .expect("install command")
     .output()
     .expect("run install-service --no-activate");
   let dest = expected_dest(home.path());
   assert!(dest.is_file(), "precondition: unit written");
 
   let first = install_cmd(home.path(), &config_path, &["--remove"])
+    .expect("install command")
     .output()
     .expect("run install-service --remove");
   assert!(
@@ -406,6 +464,7 @@ fn remove_deletes_the_unit_and_is_idempotent() {
   assert!(!dest.exists(), "--remove must delete the unit file");
 
   let second = install_cmd(home.path(), &config_path, &["--remove"])
+    .expect("install command")
     .output()
     .expect("run install-service --remove (again)");
   assert!(
@@ -439,6 +498,7 @@ fn ephemeral_registration_is_refused_but_remove_still_works() {
 
   for extra in [["--print"], ["--no-activate"]] {
     let output = install_cmd(home.path(), &config_path, &extra)
+      .expect("install command")
       .output()
       .expect("run install-service");
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -452,6 +512,7 @@ fn ephemeral_registration_is_refused_but_remove_still_works() {
   }
 
   let output = install_cmd(home.path(), &config_path, &["--remove"])
+    .expect("install command")
     .output()
     .expect("run install-service --remove");
   assert!(

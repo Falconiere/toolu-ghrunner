@@ -177,16 +177,21 @@ App-JWT tests, never uploaded to any GitHub App (authenticates nothing).
   local state after the one job.
 - **No self-daemonization**: `run` blocks in foreground; persistence is the
   OS supervisor. `install-service` (no `--config`) installs ONE machine unit
-  — launchd `sh.toolu.runner` / systemd user `toolu-runner.service`
+  — launchd `sh.toolu.runner` / systemd `toolu-runner.service` (user for
+  non-root, `/etc/systemd/system` for root)
   (`ExecReload` = SIGHUP, no `RestartPreventExitStatus`) — running
   `run --all`, after deactivating+deleting older toolu units that run a
   registration of this home, a missing config, or another `run --all`
-  (units running a config outside the home are kept + warned; the
-  `/etc/systemd/system` static unit is report-only, #203). `--config <path>`
+  (units running a config outside the home are kept + warned; root can
+  replace this home's or missing-config system units, while non-root only
+  reports them). `--config <path>`
   keeps the per-registration unit (`Restart=always` +
   `RestartPreventExitStatus=5`; legacy root → `toolu-runner-legacy.service`,
   orgs → `toolu-runner-orgs-<org>.service`); launchd `KeepAlive` can't
-  condition on exit code.
+  condition on exit code. Linux units bake in the installing PATH; root
+  units pin HOME + runner home. Non-root installation checks linger before
+  writes: affirmative prompt/`--enable-linger`/`--yes` enables it, explicit
+  No warns about logout, failed authorization aborts before migration.
 - **`run --all` supervisor (#208)**: holds `<home>/supervisor.lock` (live
   holder → exit 2); one `RunLoop` task per registration
   (`RunLoop::for_registration`, shared with `run`); LockHeld retried every
@@ -299,9 +304,11 @@ App-JWT tests, never uploaded to any GitHub App (authenticates nothing).
   `runner_id`/`auth_token`/`runtime.jit_config`, so `[network]`/`[auth]` survive); `service_unit.rs` (pure
   `ServiceSpec` → `launchd_plist` (incl. `WorkingDirectory`,
   `EnvironmentVariables`, `launchd_env_path` PATH fold) / `systemd_unit`
-  (incl. `RestartPreventExitStatus=5`); `MachineSpec` →
+  (incl. `RestartPreventExitStatus=5`) / `systemd_system_unit`
+  (root HOME + runner home); `MachineSpec` →
   `launchd_machine_plist` / `systemd_machine_unit` (`run --all`,
-  `ExecReload` SIGHUP, `TOOLU_RUNNER_HOME` pinned only when custom);
+  `ExecReload` SIGHUP; user runner home pinned only when custom),
+  `systemd_system_machine_unit` (root HOME + runner home, boot target);
   `parse_systemd_target` / `parse_launchd_target` → `Supervises {All,
   Config}` read a unit back for migration).
 - **`expressions/`**: `${{ }}` evaluator — `lexer`/`parser`/`evaluator`/
@@ -445,14 +452,15 @@ App-JWT tests, never uploaded to any GitHub App (authenticates nothing).
   `supervisor_test`/`supervisor_fatal_test`/`supervisor_remove_test`).
   `supervisor_signal` (`supervisor_pid`, `notify`, `reload_hint`,
   `drain_and_wait` for `remove`). `machine_service` (machine identity,
-  `installed_units` inventory + `Disposition` shared with doctor's `service`
+  `installed_units_for_scope` inventory + `Disposition` shared with doctor's `service`
   row (0 WARN / 1 queried / ≥2 FAIL), `cmd_install_machine`,
   `uninstall_if_last`; `machine_service_test`). `boot_cmd` (pure `parse_deadline_ms` + exit mapping;
   `boot_cmd_test`/`boot_cmd_e2e_test`). `service_cmd` (no `--config` → machine
   unit; else identity from registration dir, `--print`/
   `--no-activate`/default/`--remove` idempotent; launchd `bootstrap
   gui/<uid>` (fallback `load -w`) / `bootout`, systemd `daemon-reload` +
-  `enable/disable --now` under `$HOME`; refuses `ephemeral` except `--remove`).
+  `enable/disable --now` in user or root scope; `service_linger` checks
+  non-root persistence before writes; refuses `ephemeral` except `--remove`).
   `login_cmd` (positional host, no `--config`; shared `run_device_flow`;
   placeholder `DEVICE_CLIENT_ID` errors pre-network; `--client-id`/
   `TOOLU_RUNNER_CLIENT_ID` required until the OAuth App exists, always on

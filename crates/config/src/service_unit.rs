@@ -3,7 +3,7 @@
 //! Pure string builders that turn a [`ServiceSpec`] (one registration,
 //! `run --config <path>`) or a [`MachineSpec`] (the machine unit,
 //! `run --all`, #208) into a launchd user `LaunchAgent` plist (macOS) or a
-//! systemd user unit (Linux), plus the inverse — [`parse_systemd_target`] /
+//! systemd user or system unit (Linux), plus the inverse — [`parse_systemd_target`] /
 //! [`parse_launchd_target`] read back what an installed unit supervises, for
 //! migration. No I/O — the bin crate writes and activates the rendered text.
 //! Every interpolated path is escaped for its target format: XML entities in
@@ -68,10 +68,8 @@ pub struct ServiceSpec<'a> {
   pub config_path: &'a Path,
   /// `<data_dir>/_diag`; launchd's stdout/stderr logs land here.
   pub diag_dir: &'a Path,
-  /// `PATH` baked into the launchd `EnvironmentVariables` dict — build it with
-  /// [`launchd_env_path`]. Ignored by [`systemd_unit`]: the systemd user
-  /// manager already exports a usable `PATH`, and overriding it would change
-  /// behaviour for existing Linux installs.
+  /// `PATH` baked into the supervisor environment — build it with
+  /// [`launchd_env_path`].
   pub env_path: &'a str,
   /// launchd `WorkingDirectory` (the registration's `data_dir`). Without it a
   /// `LaunchAgent` starts in `/`. Ignored by [`systemd_unit`].
@@ -84,13 +82,12 @@ pub struct MachineSpec<'a> {
   /// Absolute path to the runner executable (`std::env::current_exe()`).
   pub exe: &'a Path,
   /// The runner home to pin as `TOOLU_RUNNER_HOME` in the unit environment —
-  /// `Some` only when the installing environment customised it; the default
-  /// `~/.toolu-runner` resolves the same under the supervisor.
+  /// `Some` when the installing environment customised it or the unit runs
+  /// under the root system manager, where the default home must be pinned.
   pub home: Option<&'a Path>,
   /// `<home>/_diag`; launchd's stdout/stderr logs land here.
   pub diag_dir: &'a Path,
-  /// `PATH` for the launchd `EnvironmentVariables` (see [`launchd_env_path`]).
-  /// Ignored by [`systemd_machine_unit`], like [`ServiceSpec::env_path`].
+  /// `PATH` for the supervisor environment (see [`launchd_env_path`]).
   pub env_path: &'a str,
   /// launchd `WorkingDirectory` (the runner home). Ignored by
   /// [`systemd_machine_unit`].
@@ -267,6 +264,33 @@ fn push_environment(s: &mut String, env: &[(&str, String)]) {
 /// session conflict, [`shared::SESSION_CONFLICT_EXIT_CODE`]) stays down;
 /// `WantedBy=default.target` enables it at login.
 pub fn systemd_unit(spec: &ServiceSpec<'_>) -> String {
+  render_systemd_unit(spec, "default.target", None, None)
+}
+
+/// Render a systemd user unit with a custom runner home pinned in its
+/// environment. This keeps auth and registration lookup on the same home.
+pub fn systemd_unit_with_home(spec: &ServiceSpec<'_>, runner_home: &Path) -> String {
+  render_systemd_unit(spec, "default.target", None, Some(runner_home))
+}
+
+/// Render a root-owned systemd system unit for one registration.
+/// `multi-user.target` starts it at boot without a login or linger.
+/// `user_home` is pinned because system services can start without `HOME`.
+pub fn systemd_system_unit(spec: &ServiceSpec<'_>, user_home: &Path, runner_home: &Path) -> String {
+  render_systemd_unit(
+    spec,
+    "multi-user.target",
+    Some(user_home),
+    Some(runner_home),
+  )
+}
+
+fn render_systemd_unit(
+  spec: &ServiceSpec<'_>,
+  target: &str,
+  user_home: Option<&Path>,
+  runner_home: Option<&Path>,
+) -> String {
   let exe = systemd_quote(spec.exe);
   let config = systemd_quote(spec.config_path);
 
@@ -279,6 +303,13 @@ pub fn systemd_unit(spec: &ServiceSpec<'_>) -> String {
   s.push_str(")\n");
   s.push('\n');
   s.push_str("[Service]\n");
+  push_systemd_environment(&mut s, "PATH", spec.env_path);
+  if let Some(home) = user_home {
+    push_systemd_environment(&mut s, "HOME", &home.to_string_lossy());
+  }
+  if let Some(home) = runner_home {
+    push_systemd_environment(&mut s, "TOOLU_RUNNER_HOME", &home.to_string_lossy());
+  }
   s.push_str("ExecStart=");
   s.push_str(&exe);
   s.push_str(" run --config ");
@@ -293,7 +324,9 @@ pub fn systemd_unit(spec: &ServiceSpec<'_>) -> String {
   s.push('\n');
   s.push('\n');
   s.push_str("[Install]\n");
-  s.push_str("WantedBy=default.target\n");
+  s.push_str("WantedBy=");
+  s.push_str(target);
+  s.push('\n');
   s
 }
 
@@ -305,6 +338,21 @@ pub fn systemd_unit(spec: &ServiceSpec<'_>) -> String {
 /// session-conflict code. `Environment=` pins `TOOLU_RUNNER_HOME` only when
 /// [`MachineSpec::home`] is set.
 pub fn systemd_machine_unit(spec: &MachineSpec<'_>) -> String {
+  render_systemd_machine_unit(spec, "default.target", None)
+}
+
+/// Render the root-owned machine systemd unit, enabled at boot by
+/// `multi-user.target` with no user manager or linger dependency.
+/// `user_home` is pinned because system services can start without `HOME`.
+pub fn systemd_system_machine_unit(spec: &MachineSpec<'_>, user_home: &Path) -> String {
+  render_systemd_machine_unit(spec, "multi-user.target", Some(user_home))
+}
+
+fn render_systemd_machine_unit(
+  spec: &MachineSpec<'_>,
+  target: &str,
+  user_home: Option<&Path>,
+) -> String {
   let mut s = String::new();
   s.push_str("[Unit]\n");
   s.push_str("Description=toolu-runner (");
@@ -312,10 +360,12 @@ pub fn systemd_machine_unit(spec: &MachineSpec<'_>) -> String {
   s.push_str(")\n");
   s.push('\n');
   s.push_str("[Service]\n");
+  push_systemd_environment(&mut s, "PATH", spec.env_path);
+  if let Some(home) = user_home {
+    push_systemd_environment(&mut s, "HOME", &home.to_string_lossy());
+  }
   if let Some(home) = spec.home {
-    s.push_str("Environment=");
-    s.push_str(&systemd_env_assignment("TOOLU_RUNNER_HOME", home));
-    s.push('\n');
+    push_systemd_environment(&mut s, "TOOLU_RUNNER_HOME", &home.to_string_lossy());
   }
   s.push_str("ExecStart=");
   s.push_str(&systemd_quote(spec.exe));
@@ -325,20 +375,28 @@ pub fn systemd_machine_unit(spec: &MachineSpec<'_>) -> String {
   s.push_str("RestartSec=5\n");
   s.push('\n');
   s.push_str("[Install]\n");
-  s.push_str("WantedBy=default.target\n");
+  s.push_str("WantedBy=");
+  s.push_str(target);
+  s.push('\n');
   s
 }
 
 /// A double-quoted systemd `Environment=` assignment. Inside the quotes
 /// `\\` and `"` need C escapes and `%` specifier expansion still runs, so
 /// `%` becomes `%%`; `$` is literal there (no variable expansion).
-fn systemd_env_assignment(key: &str, value: &Path) -> String {
-  let raw = format!("{key}={}", value.display());
+fn systemd_env_assignment(key: &str, value: &str) -> String {
+  let raw = format!("{key}={value}");
   let escaped = raw
     .replace('\\', "\\\\")
     .replace('"', "\\\"")
     .replace('%', "%%");
   format!("\"{escaped}\"")
+}
+
+fn push_systemd_environment(unit: &mut String, key: &str, value: &str) {
+  unit.push_str("Environment=");
+  unit.push_str(&systemd_env_assignment(key, value));
+  unit.push('\n');
 }
 
 /// What the unit text `unit` supervises, from its `ExecStart=` command line

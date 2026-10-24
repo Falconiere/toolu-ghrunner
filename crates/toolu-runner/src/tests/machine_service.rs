@@ -10,7 +10,7 @@ use config::service_unit::{
   systemd_unit,
 };
 
-use super::{Disposition, InstalledUnit, UnitScope, installed_units};
+use super::{Disposition, InstalledUnit, UnitScope, installed_units_for_scope};
 use crate::service_cmd::Supervisor;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -128,7 +128,7 @@ fn systemd_inventory_classifies_every_kind_of_old_unit() -> TestResult {
   std::fs::create_dir_all(&system)?;
   std::fs::write(system.join("toolu-runner.service"), STATIC_SYSTEMD)?;
 
-  let units = installed_units(sd, &h.user, &h.runner, Some(&system));
+  let units = installed_units_for_scope(sd, UnitScope::User, &h.user, &h.runner, Some(&system));
   assert!(named(&units, "nginx.service").is_none(), "not a toolu unit");
   let disposition = |file: &str| named(&units, file).map(|unit| unit.disposition.clone());
   assert_eq!(
@@ -194,7 +194,7 @@ fn the_machine_unit_is_recognised_and_another_run_all_unit_is_replaced() -> Test
     machine(sd, &h.runner),
   )?;
 
-  let units = installed_units(sd, &h.user, &h.runner, None);
+  let units = installed_units_for_scope(sd, UnitScope::User, &h.user, &h.runner, None);
   let machine_unit = named(&units, "toolu-runner.service").ok_or("no machine unit")?;
   assert_eq!(machine_unit.disposition, Disposition::Machine);
   assert!(machine_unit.supervises_registration(&h.repo));
@@ -226,7 +226,7 @@ fn launchd_inventory_includes_the_static_install_sh_agent() -> TestResult {
   std::fs::write(dir.join("sh.toolu.runner.plist"), machine(ld, &h.runner))?;
   std::fs::write(dir.join("com.example.other.plist"), machine(ld, &h.runner))?;
 
-  let units = installed_units(ld, &h.user, &h.runner, None);
+  let units = installed_units_for_scope(ld, UnitScope::User, &h.user, &h.runner, None);
   let by_label = |label: &str| units.iter().find(|unit| unit.id.label == label);
   assert!(by_label("com.example.other").is_none(), "not a toolu agent");
   assert_eq!(
@@ -271,7 +271,7 @@ fn a_per_registration_unit_supervises_only_its_own_registration() -> TestResult 
     dir.join("toolu-runner-octo-a.service"),
     per_registration(sd, "io.toolu.runner.octo.a", &h.repo),
   )?;
-  let units = installed_units(sd, &h.user, &h.runner, None);
+  let units = installed_units_for_scope(sd, UnitScope::User, &h.user, &h.runner, None);
   let unit = named(&units, "toolu-runner-octo-a.service").ok_or("unit missing")?;
   assert!(unit.supervises_registration(&h.repo));
   assert!(!unit.supervises_registration(&h.legacy));
@@ -303,7 +303,7 @@ fn a_machine_unit_pinned_to_another_home_is_not_this_homes() -> TestResult {
   std::fs::write(units_dir.join("toolu-runner-ci.service"), pinned(&other))?;
   std::fs::write(units_dir.join("toolu-runner-mine.service"), pinned(&this))?;
 
-  let units = installed_units(Supervisor::Systemd, &user, &this, None);
+  let units = installed_units_for_scope(Supervisor::Systemd, UnitScope::User, &user, &this, None);
   for file in ["toolu-runner.service", "toolu-runner-ci.service"] {
     let unit = named(&units, file).ok_or(file)?;
     assert_eq!(
@@ -320,5 +320,70 @@ fn a_machine_unit_pinned_to_another_home_is_not_this_homes() -> TestResult {
       "another `run --all` unit for this home"
     ))
   );
+  Ok(())
+}
+
+#[test]
+fn root_inventory_scans_each_scope_once_and_protects_foreign_system_unit() -> TestResult {
+  let h = homes()?;
+  let sd = Supervisor::Systemd;
+  let user_dir = h.user.join(".config/systemd/user");
+  let system_dir = h.user.join("etc-systemd-system");
+  std::fs::create_dir_all(&user_dir)?;
+  std::fs::create_dir_all(&system_dir)?;
+  std::fs::write(
+    user_dir.join("toolu-runner-octo-a.service"),
+    per_registration(sd, "io.toolu.runner.octo.a", &h.repo),
+  )?;
+  let machine_path = system_dir.join("toolu-runner.service");
+  std::fs::write(&machine_path, per_registration(sd, "foreign", &h.foreign))?;
+  let units =
+    installed_units_for_scope(sd, UnitScope::System, &h.user, &h.runner, Some(&system_dir));
+  assert_eq!(units.len(), 2, "each directory should be scanned once");
+  let foreign = units
+    .iter()
+    .find(|unit| unit.path == machine_path)
+    .ok_or("system unit missing")?;
+  assert!(matches!(&foreign.disposition, Disposition::Keep(why) if why.contains("elsewhere")));
+  assert!(super::refuse_foreign_at(&machine_path, &units).is_err());
+  assert_eq!(
+    named(&units, "toolu-runner-octo-a.service").map(|unit| unit.disposition.clone()),
+    Some(Disposition::Replace(
+      "the machine unit runs its registration"
+    ))
+  );
+
+  std::fs::write(&machine_path, per_registration(sd, "mine", &h.repo))?;
+  let units =
+    installed_units_for_scope(sd, UnitScope::System, &h.user, &h.runner, Some(&system_dir));
+  let mine = units
+    .iter()
+    .find(|unit| unit.path == machine_path)
+    .ok_or("system unit missing")?;
+  assert_eq!(
+    mine.disposition,
+    Disposition::Replace("the machine unit runs its registration")
+  );
+  assert!(super::refuse_foreign_at(&machine_path, &units).is_ok());
+  Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn root_inventory_sees_a_masked_machine_unit_symlink() -> TestResult {
+  let h = homes()?;
+  let system_dir = h.user.join("etc-systemd-system");
+  std::fs::create_dir_all(&system_dir)?;
+  let masked = system_dir.join("toolu-runner.service");
+  std::os::unix::fs::symlink("/dev/null", &masked)?;
+  let units = installed_units_for_scope(
+    Supervisor::Systemd,
+    UnitScope::System,
+    &h.user,
+    &h.runner,
+    Some(&system_dir),
+  );
+  assert!(units.iter().any(|unit| unit.path == masked));
+  assert!(super::refuse_foreign_at(&masked, &units).is_err());
   Ok(())
 }
