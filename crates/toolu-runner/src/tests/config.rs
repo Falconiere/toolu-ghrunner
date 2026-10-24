@@ -210,3 +210,16 @@ fn node_dir_keeps_a_relative_path_when_the_cwd_is_gone() {
     "the fallback must be reported by name; stderr: {stderr}"
   );
 }
+
+#[test]
+fn the_github_api_base_defaults_to_api_github_com_and_drops_a_trailing_slash() {
+  assert_eq!(super::api_base_or_default(None), "https://api.github.com");
+  assert_eq!(
+    super::api_base_or_default(Some(String::new())),
+    "https://api.github.com"
+  );
+  assert_eq!(
+    super::api_base_or_default(Some("http://127.0.0.1:8080/api/".to_owned())),
+    "http://127.0.0.1:8080/api"
+  );
+}

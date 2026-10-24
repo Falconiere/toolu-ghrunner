@@ -20,7 +20,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use crate::github_app_fixtures::{
   APP_ID, AppJwtGate, INSTALLATION_TOKEN, PRIVATE_PEM, authorizations, capture, edited_reply,
-  rfc3339_in, token_reply, verify_app_jwt,
+  rfc3339_in, set_json, token_reply, verify_app_jwt,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -317,7 +317,7 @@ async fn a_bearer_that_cannot_read_runner_groups_is_an_auth_error() -> TestResul
 #[tokio::test]
 async fn get_app_returns_the_app_the_jwt_names() -> TestResult {
   let server = MockServer::start().await;
-  let reply = edited_reply("app_200.json", |body| body["id"] = json!(APP_ID))?;
+  let reply = edited_reply("app_200.json", |body| set_json(body, "/id", json!(APP_ID)))?;
   Mock::given(method("GET"))
     .and(path("/api/v3/app"))
     .respond_with(AppJwtGate(reply))
@@ -349,7 +349,10 @@ async fn get_app_with_a_key_the_app_does_not_hold_is_a_fatal_auth_error() -> Tes
     return Err(format!("expected Auth, got {err:?}").into());
   };
   assert!(msg.contains("401"), "{msg}");
-  assert!(msg.contains("A JSON web token could not be decoded"), "{msg}");
+  assert!(
+    msg.contains("A JSON web token could not be decoded"),
+    "{msg}"
+  );
   Ok(())
 }
 

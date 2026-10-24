@@ -468,9 +468,10 @@ fn finish_ephemeral_exit(
   }))
 }
 
-/// A fatal `run` error that must exit with a specific process code instead
-/// of `main`'s generic 2 (today only the session conflict's
-/// [`SESSION_CONFLICT_EXIT_CODE`]).
+/// A fatal error that must exit with a specific process code instead of
+/// `main`'s generic 2: `run`'s session conflict
+/// ([`SESSION_CONFLICT_EXIT_CODE`]) and `create-app`'s unattended install
+/// timeout (1) and cancel (130).
 #[derive(Debug)]
 pub(crate) struct CodedExit {
   /// The process exit code `main` applies.
@@ -486,6 +487,13 @@ impl std::fmt::Display for CodedExit {
 }
 
 impl std::error::Error for CodedExit {}
+
+impl CodedExit {
+  /// A fatal error `main` prints as `message` and exits `code` with.
+  pub(crate) fn new(code: i32, message: String) -> Self {
+    Self { code, message }
+  }
+}
 
 /// Map a freshly loaded registration into the engine's runtime config.
 ///

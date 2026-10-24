@@ -127,6 +127,60 @@ pub(crate) fn releases_url() -> String {
     .unwrap_or_else(|| DEFAULT_RELEASES_URL.to_owned())
 }
 
+/// The REST API base `create-app` talks to when `TOOLU_RUNNER_GITHUB_API_URL`
+/// is unset (#202: github.com only).
+const DEFAULT_GITHUB_API_URL: &str = "https://api.github.com";
+
+/// How long `create-app` waits for the App's installation before asking
+/// (interactive) or giving up (unattended): 10 minutes.
+const DEFAULT_INSTALL_WAIT: Duration = Duration::from_secs(600);
+
+/// How often `create-app` polls `GET /app/installations`.
+const DEFAULT_INSTALL_POLL: Duration = Duration::from_secs(5);
+
+/// `TOOLU_RUNNER_GITHUB_API_URL`: the GitHub REST API base `create-app` uses
+/// for the org check, the manifest conversion and the App calls (a test peer
+/// or a mirror). Empty counts as unset; a trailing `/` is dropped.
+pub(crate) fn github_api_url() -> String {
+  api_base_or_default(read("TOOLU_RUNNER_GITHUB_API_URL"))
+}
+
+/// `raw` without a trailing `/`, or [`DEFAULT_GITHUB_API_URL`] when it is
+/// unset or empty.
+pub(crate) fn api_base_or_default(raw: Option<String>) -> String {
+  raw
+    .map(|raw| raw.trim_end_matches('/').to_owned())
+    .filter(|raw| !raw.is_empty())
+    .unwrap_or_else(|| DEFAULT_GITHUB_API_URL.to_owned())
+}
+
+/// `TOOLU_RUNNER_INSTALL_WAIT_MS`: how long `create-app` waits for the
+/// installation before asking or giving up (default 10 minutes).
+pub(crate) fn install_wait() -> Duration {
+  duration_ms("TOOLU_RUNNER_INSTALL_WAIT_MS", DEFAULT_INSTALL_WAIT)
+}
+
+/// `TOOLU_RUNNER_INSTALL_POLL_MS`: how often `create-app` polls for the
+/// installation (default 5 s).
+pub(crate) fn install_poll() -> Duration {
+  duration_ms("TOOLU_RUNNER_INSTALL_POLL_MS", DEFAULT_INSTALL_POLL)
+}
+
+/// A positive millisecond duration from `key`, else `default`. Empty counts
+/// as unset; zero or a non-integer is diagnosed and the default kept.
+fn duration_ms(key: &str, default: Duration) -> Duration {
+  let Some(raw) = read(key).filter(|raw| !raw.is_empty()) else {
+    return default;
+  };
+  parse_interval_ms(&raw).unwrap_or_else(|| {
+    report(
+      key,
+      "is not a positive integer of milliseconds; using the default",
+    );
+    default
+  })
+}
+
 /// Parse a positive whole number of milliseconds.
 pub(crate) fn parse_interval_ms(raw: &str) -> Option<Duration> {
   raw

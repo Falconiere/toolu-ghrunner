@@ -32,7 +32,7 @@ pub enum ManifestTarget {
 }
 
 impl ManifestTarget {
-  /// The form the manifest is POSTed to:
+  /// The form the manifest is sent to (an HTTP `POST`):
   /// `https://github.com/settings/apps/new` or
   /// `https://github.com/organizations/{org}/settings/apps/new`.
   pub fn form_action(&self) -> String {

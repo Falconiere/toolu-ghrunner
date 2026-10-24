@@ -86,7 +86,7 @@ fn form_html_contains_structural_markers() {
     &ManifestTarget::Personal,
   )
   .to_json()
-    .expect("manifest serializes");
+  .expect("manifest serializes");
   let html = form_html(
     &manifest_json,
     "STATE123",

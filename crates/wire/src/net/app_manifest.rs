@@ -82,7 +82,7 @@ impl CallbackServer {
     format!("http://127.0.0.1:{}/callback", self.local_addr.port())
   }
 
-  /// Serve `GET /` (the auto-submit form POSTing `manifest_json` to
+  /// Serve `GET /` (the auto-submit form that sends `manifest_json` to
   /// `form_action`, the target's `settings/apps/new` page) and
   /// `GET /callback` until a matching-state code arrives, or `timeout`
   /// elapses. Consumes `self`.
@@ -189,7 +189,13 @@ async fn serve_root<W: AsyncWriteExt + Unpin>(
   writer: &mut W,
   form_page: &str,
 ) -> Result<(), RunnerError> {
-  write_http_response(writer, "HTTP/1.1 200 OK", "text/html; charset=utf-8", form_page).await
+  write_http_response(
+    writer,
+    "HTTP/1.1 200 OK",
+    "text/html; charset=utf-8",
+    form_page,
+  )
+  .await
 }
 
 /// Write the `404` for an unrecognized path.

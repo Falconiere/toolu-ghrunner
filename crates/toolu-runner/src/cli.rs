@@ -36,11 +36,21 @@ Environment:
 /// Extended help footer for `create-app --help`.
 const CREATE_APP_AFTER_HELP: &str = "\
 Examples:
-  # create the runner's GitHub App on github.com (opens a browser)
-  toolu-runner create-app
+  # an App for your personal repositories (opens a browser twice: create, then install)
+  toolu-runner create-app --account octocat
 
-  # custom name, no browser (print the URL to open manually)
-  toolu-runner create-app --name my-org-runner --no-browser";
+  # an App owned by the organization acme, for org-level runners
+  toolu-runner create-app --org acme
+
+  # reuse an App another machine created (the key is checked with GitHub first)
+  toolu-runner create-app --import /etc/toolu/github-app.json
+  toolu-runner create-app --app-id 123456 --app-key ./toolu-runner.private-key.pem
+
+After creating (or importing) the App, create-app waits for its installation:
+o + Enter opens the install link again, c + Enter copies it, ctrl+c cancels
+(exit 130). After 10 minutes a terminal asks Keep waiting / Open again /
+Cancel; without one, create-app exits 1. The App is saved as soon as GitHub
+returns it, so `create-app --import <home>/github-app.json` resumes the wait.";
 
 /// Extended help footer for `boot --help`.
 const BOOT_AFTER_HELP: &str = "\
@@ -187,13 +197,15 @@ pub(crate) enum Command {
   ///
   /// Idempotent: a missing token is a no-op.
   Logout(login_cmd::LogoutArgs),
-  /// Create the runner's GitHub App via the App-manifest flow.
+  /// Create (or import) the runner's GitHub App and wait for its installation.
   ///
-  /// Opens a browser to GitHub's App-manifest page, captures the minted
-  /// App's credentials on a loopback callback, and saves them (0600) to
-  /// `<home>/github-app.json` — an account-level identity shared by every
-  /// repo. github.com only this release. Re-run with --force to replace a
-  /// previously created App.
+  /// Opens a browser to GitHub's App-manifest page (personal, or `--org`
+  /// for an org-owned App), captures the minted App's credentials on a
+  /// loopback callback, saves them (0600) to `<home>/github-app.json` — an
+  /// account-level identity shared by every machine and repo — then waits
+  /// until the App is installed and records the installation. `--import` /
+  /// `--app-id` reuse an existing App instead. github.com only this release.
+  /// Re-run with --force to replace a previously saved App.
   CreateApp(CreateAppArgs),
   /// Zero-config one-shot mode for the toolu.sh container image.
   ///
@@ -231,19 +243,54 @@ pub(crate) enum Command {
 #[derive(Debug, Args)]
 #[command(after_help = CREATE_APP_AFTER_HELP)]
 pub(crate) struct CreateAppArgs {
-  /// GitHub App name (default: toolu-runner-<hostname>).
+  /// GitHub App name (default: toolu-runner-<org>, toolu-runner-<account>,
+  /// else toolu-runner-<hostname>).
   ///
   /// Must be unique across all of GitHub — a duplicate name makes GitHub
   /// refuse the redirect, which surfaces here as a browser-flow timeout.
+  /// GitHub's form lets you change it before creating the App.
   #[arg(long, value_name = "NAME")]
   pub(crate) name: Option<String>,
+  /// Create the App owned by this organization, for org-level runners
+  /// (permission: Self-hosted runners, write).
+  ///
+  /// The org is checked on GitHub before the browser opens. Only org owners
+  /// (and its GitHub App managers) can create Apps for an org. With
+  /// `--import`, the installation is looked for on this org.
+  #[arg(long, value_name = "ORG", conflicts_with = "account")]
+  pub(crate) org: Option<String>,
+  /// Your personal account login: names the App toolu-runner-<LOGIN>
+  /// (a personal App gets Administration, write, for repo runners).
+  #[arg(long, value_name = "LOGIN")]
+  pub(crate) account: Option<String>,
+  /// Reuse an existing App from a github-app.json instead of creating one.
+  ///
+  /// The key is proven with a GitHub App JWT call before anything is saved.
+  #[arg(
+    long,
+    value_name = "FILE",
+    value_hint = ValueHint::FilePath,
+    conflicts_with_all = ["app_id", "name", "account"]
+  )]
+  pub(crate) import: Option<PathBuf>,
+  /// Reuse an existing App by id (with `--app-key`) instead of creating one.
+  #[arg(
+    long,
+    value_name = "ID",
+    requires = "app_key",
+    conflicts_with_all = ["name", "account"]
+  )]
+  pub(crate) app_id: Option<i64>,
+  /// The existing App's private-key PEM file (with `--app-id`).
+  #[arg(long, value_name = "PEM_FILE", value_hint = ValueHint::FilePath, requires = "app_id")]
+  pub(crate) app_key: Option<PathBuf>,
   /// GitHub host to create the App on (github.com only this release).
   ///
-  /// GHES and organization-owned Apps are not supported yet; any other
-  /// value is rejected before any browser launch or network call.
+  /// GHES is not supported yet; any other value is rejected before any
+  /// browser launch or network call.
   #[arg(long, default_value = "github.com", value_name = "HOST", value_hint = ValueHint::Hostname)]
   pub(crate) host: String,
-  /// Print the URL to open manually instead of launching a browser.
+  /// Print the URLs to open manually instead of launching a browser.
   #[arg(long)]
   pub(crate) no_browser: bool,
   /// Overwrite an existing saved GitHub App (`<home>/github-app.json`).

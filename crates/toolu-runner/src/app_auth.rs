@@ -20,7 +20,7 @@ use wire::net::github_app::{
 const APP_API_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Register `value` with the masker (a poisoned lock still masks).
-fn mask(masker: &Mutex<SecretMasker>, value: &str) {
+pub(crate) fn mask(masker: &Mutex<SecretMasker>, value: &str) {
   let mut guard = masker
     .lock()
     .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -69,7 +69,10 @@ pub(crate) fn check_app(path: &Path, masker: &Mutex<SecretMasker>) -> Result<(),
 }
 
 /// Sign a JWT for `app` and mask it (it is a credential for ten minutes).
-fn app_jwt(app: &StoredApp, masker: &Mutex<SecretMasker>) -> Result<String, RunnerError> {
+pub(crate) fn app_jwt(
+  app: &StoredApp,
+  masker: &Mutex<SecretMasker>,
+) -> Result<String, RunnerError> {
   let jwt = protocol::app_jwt::build_app_jwt(&app.pem, app.app_id)?;
   mask(masker, &jwt);
   Ok(jwt)

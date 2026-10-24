@@ -170,9 +170,17 @@ impl Respond for AppJwtGate {
 /// id they key on).
 pub fn edited_reply(
   name: &str,
-  edit: impl FnOnce(&mut Value),
+  edit: impl FnOnce(&mut Value) -> Result<(), Box<dyn Error>>,
 ) -> Result<ResponseTemplate, Box<dyn Error>> {
   let mut body: Value = serde_json::from_str(&capture_body(name)?)?;
-  edit(&mut body);
+  edit(&mut body)?;
   Ok(ResponseTemplate::new(200).set_body_json(body))
+}
+
+/// Replace the value at JSON `pointer` (which must exist) with `new`.
+pub fn set_json(value: &mut Value, pointer: &str, new: Value) -> Result<(), Box<dyn Error>> {
+  *value
+    .pointer_mut(pointer)
+    .ok_or_else(|| format!("no {pointer} in the fixture"))? = new;
+  Ok(())
 }

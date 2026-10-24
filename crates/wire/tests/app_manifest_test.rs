@@ -106,8 +106,8 @@ async fn org_form_posts_to_the_org_settings_with_the_org_permission() -> TestRes
   let server = CallbackServer::bind("STATE9".to_owned()).await?;
   let base = server.local_url().trim_end_matches('/').to_owned();
   let target = ManifestTarget::Org("acme".to_owned());
-  let manifest = AppManifest::for_target("toolu-runner-acme", &server.callback_url(), &target)
-    .to_json()?;
+  let manifest =
+    AppManifest::for_target("toolu-runner-acme", &server.callback_url(), &target).to_json()?;
   let handle = tokio::spawn(server.wait_for_code(
     manifest,
     "https://github.com/organizations/acme/settings/apps/new",
@@ -116,9 +116,8 @@ async fn org_form_posts_to_the_org_settings_with_the_org_permission() -> TestRes
   let client = reqwest::Client::new();
   let form = client.get(format!("{base}/")).send().await?.text().await?;
   assert!(
-    form.contains(
-      "action=\"https://github.com/organizations/acme/settings/apps/new?state=STATE9\""
-    ),
+    form
+      .contains("action=\"https://github.com/organizations/acme/settings/apps/new?state=STATE9\""),
     "form action missing/wrong: {form}"
   );
   let permissions = served_manifest(&form)?
