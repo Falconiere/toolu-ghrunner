@@ -96,6 +96,7 @@ fn write_registration(home: &Path, server: &MockServer, auth: AuthSection) -> Te
     shadow: ShadowSection::default(),
     network: config::network::NetworkSection::default(),
     auth,
+    provider: config::provider::ProviderSection::Github,
   };
   save_config(&config_path, &cfg)?;
   save_credentials(

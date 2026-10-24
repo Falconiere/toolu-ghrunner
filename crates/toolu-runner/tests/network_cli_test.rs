@@ -75,6 +75,7 @@ fn write_registration(
       shadow: ShadowSection::default(),
       network,
       auth: config::registration_auth::AuthSection::default(),
+      provider: config::provider::ProviderSection::Github,
     },
   )?;
   save_credentials(

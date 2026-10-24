@@ -1,0 +1,19 @@
+{
+  "provenance": {
+    "captured": "2026-10-24T03:20:40Z",
+    "host": "dev-console.toolu.sh (console.toolu.sh answered the same body)",
+    "request": "GET /runner/jobs/queued with `Authorization: Bearer tlu_h_` + 43 x `A` (well-formed, unknown host token)",
+    "method": "curl -i; status, content headers and body recorded verbatim",
+    "sanitization": "dropped Cloudflare report-to / nel / cf-ray / alt-svc headers; the response carries no credential"
+  },
+  "response": {
+    "body": "{\"error\":\"invalid or revoked token\"}",
+    "headers": {
+      "content-length": "36",
+      "content-type": "application/json",
+      "date": "Sat, 24 Oct 2026 03:20:40 GMT",
+      "server": "cloudflare"
+    },
+    "status": 401
+  }
+}

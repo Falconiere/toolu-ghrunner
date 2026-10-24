@@ -28,6 +28,8 @@ pub mod rsa_oaep;
 pub mod runner_version;
 /// Session lifecycle request/response shapes and the encryption key.
 pub mod session;
+/// toolu.sh `/runner/*` job-claim bodies and rules (#206).
+pub mod toolu_jobs;
 mod types;
 /// GHES V1 protocol types and the pure service-URL resolver.
 pub mod v1;

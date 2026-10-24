@@ -66,6 +66,7 @@ fn non_default_config() -> RunnerRegistrationConfig {
       app_file: "/home/u/.toolu-runner/github-app.json".to_owned(),
       installation_id: 987_654,
     },
+    provider: config::provider::ProviderSection::Github,
   }
 }
 

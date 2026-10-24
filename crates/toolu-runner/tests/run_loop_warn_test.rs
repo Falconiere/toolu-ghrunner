@@ -56,6 +56,7 @@ fn write_fixture(
     shadow: ShadowSection::default(),
     network: config::network::NetworkSection::default(),
     auth: config::registration_auth::AuthSection::default(),
+    provider: config::provider::ProviderSection::Github,
   };
   save_config(&config_path, &cfg)?;
   save_credentials(

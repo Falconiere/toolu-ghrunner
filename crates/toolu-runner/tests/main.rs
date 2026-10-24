@@ -32,6 +32,8 @@ mod proxy_fixtures;
 mod supervisor_fixtures;
 #[path = "../../network/tests/helpers/tls_fixtures.rs"]
 mod tls_fixtures;
+#[path = "helpers/toolu_fixtures.rs"]
+mod toolu_fixtures;
 
 mod actions_resolver_test;
 mod annotation_live;
@@ -109,6 +111,7 @@ mod network_cli_test;
 mod network_client_inventory_test;
 mod network_journal_mask_test;
 mod oidc_token_test;
+mod poll_loop_test;
 mod register_app_test;
 mod register_labels_test;
 mod register_replace_network_test;

@@ -57,6 +57,7 @@ fn sample_config() -> RunnerRegistrationConfig {
     shadow: ShadowSection::default(),
     network: config::network::NetworkSection::default(),
     auth: config::registration_auth::AuthSection::default(),
+    provider: config::provider::ProviderSection::Github,
   }
 }
 

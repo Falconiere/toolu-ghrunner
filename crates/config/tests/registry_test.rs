@@ -254,6 +254,68 @@ fn list_registrations_lists_orgs_between_repos_and_legacy() {
   );
 }
 
+/// Create `<home>/toolu/<org>/config.toml` and return its path.
+fn add_toolu_registration(home: &Path, org: &str) -> Result<PathBuf, std::io::Error> {
+  let dir = home.join("toolu").join(org);
+  std::fs::create_dir_all(&dir)?;
+  let config_path = dir.join("config.toml");
+  std::fs::write(&config_path, CONFIG_TOML)?;
+  Ok(config_path)
+}
+
+/// #206 AC-8: a toolu.sh machine registration (`toolu/<org>/`) is listed
+/// after the organizations and before the legacy slot; a `toolu` repo owner
+/// lives under `runners/` and never collides with it.
+#[test]
+fn list_registrations_lists_toolu_machines_between_orgs_and_legacy() {
+  let home = TempDir::new().unwrap();
+  let toolu = add_toolu_registration(home.path(), "org_123").unwrap();
+  let owner_named_toolu = add_registration(home.path(), "toolu", "web").unwrap();
+  let org = add_org_registration(home.path(), "acme").unwrap();
+  let legacy = add_legacy_registration(home.path()).unwrap();
+  std::fs::write(home.path().join("toolu").join("stray.txt"), "junk").unwrap();
+  std::fs::create_dir_all(home.path().join("toolu").join("ghost")).unwrap();
+
+  let entries = registry::list_registrations(home.path()).unwrap();
+  let paths: Vec<&PathBuf> = entries.iter().map(|e| &e.config_path).collect();
+  assert_eq!(paths, [&owner_named_toolu, &org, &toolu, &legacy]);
+  assert_eq!(
+    entries.get(2).map(|e| &e.scope),
+    Some(&RegistrationScope::Toolu("org_123".to_owned()))
+  );
+  let labels: Vec<String> = entries.iter().map(|e| e.scope.label()).collect();
+  assert_eq!(
+    labels,
+    ["toolu/web", "acme (org)", "org_123 (toolu.sh)", "legacy"]
+  );
+}
+
+#[test]
+fn toolu_dir_builds_home_toolu_org_and_rejects_non_components() {
+  let home = Path::new("/var/lib/toolu-runner");
+  assert_eq!(
+    registry::toolu_dir(home, "org_123").unwrap(),
+    PathBuf::from("/var/lib/toolu-runner/toolu/org_123")
+  );
+  for org in ["", ".", "..", "a/b", "a\\b", "or\0g"] {
+    let err = registry::toolu_dir(home, org).unwrap_err();
+    assert!(
+      err.to_string().contains("must be a single path component"),
+      "{org:?} must be rejected; got: {err}"
+    );
+  }
+}
+
+#[test]
+fn resolve_sole_toolu_registration_wins() {
+  let home = TempDir::new().unwrap();
+  let toolu = add_toolu_registration(home.path(), "org_123").unwrap();
+  assert_eq!(
+    registry::resolve_config_path(None, home.path(), None).unwrap(),
+    toolu
+  );
+}
+
 #[test]
 fn resolve_sole_org_registration_wins() {
   let home = TempDir::new().unwrap();

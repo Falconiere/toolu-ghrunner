@@ -113,6 +113,14 @@ pub(crate) fn remove_wait() -> Duration {
   })
 }
 
+/// How long a toolu.sh machine's poll loop waits after an empty queue (#206):
+/// 5 s, overridable in milliseconds by `TOOLU_RUNNER_POLL_INTERVAL_MS` (tests
+/// poll faster). An empty value counts as unset; zero or a non-integer is
+/// diagnosed and the default kept.
+pub(crate) fn poll_interval() -> Duration {
+  duration_ms("TOOLU_RUNNER_POLL_INTERVAL_MS", Duration::from_secs(5))
+}
+
 /// Where `doctor` reads the latest release when `TOOLU_RUNNER_RELEASES_URL`
 /// is unset: this repository's latest GitHub release.
 const DEFAULT_RELEASES_URL: &str =

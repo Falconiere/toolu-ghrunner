@@ -4,7 +4,8 @@
 GitHub's GitHub Actions JIT protocol — auth token exchange, device-flow
 login, App-manifest onboarding, broker session lifecycle, long-poll
 message acquire/acknowledge, run-service acquire/renew/complete, results
-Twirp RPCs, log blob upload, and GHES V1 service discovery.
+Twirp RPCs, log blob upload, GHES V1 service discovery — plus the toolu.sh
+`/runner/*` job-claim calls a paired machine polls (#206).
 
 **What does NOT belong here:** request/response type definitions and pure
 URL/JWT/crypto builders live in `protocol` (sync, no I/O, no network) —
@@ -29,6 +30,7 @@ Higher-level domain wrappers and reporting-only types live in
 | `results_service.rs` | `update_workflow_steps` / signed-blob-URL + metadata calls | Twirp JSON-over-HTTP POSTs to the GitHub Actions Results Service. |
 | `run_service.rs` | `acquire_job` / `renew_job` / `complete_job` | HTTP transport for the Actions Run Service job lifecycle; request/response shapes live in `crate::reporting::run_service`. |
 | `session.rs` | `create_session` / `delete_session` | HTTP transport for creating and deleting the broker session; a 409 is `RunnerError::SessionConflict`. |
+| `toolu_jobs.rs` | `TooluClient` / `TooluError` | toolu.sh `/runner/*` calls of a paired machine (#206): list queued jobs, claim, dispatched, heartbeat, complete, with the host token as bearer. 401 is `Revoked`, 409 `Conflict`, 404 `NotFound`, 429/5xx/transport `Transient`; bodies in `protocol::toolu_jobs`. |
 | `step_summary.rs` | `upload_step_summary` | Safe bounded summary signed-URL, blob and metadata requests. |
 | `v1.rs` | `fetch_connection_data` / `fetch_timeline` / `post_timeline_record` | HTTP fetches for GHES V1 service discovery and timeline reporting; pure URL resolvers live in `protocol::v1`. |
 

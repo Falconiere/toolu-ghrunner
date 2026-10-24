@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::network::NetworkSection;
+use crate::provider::ProviderSection;
 use crate::registration_auth::AuthSection;
 use shared::{
   CacheConfig, L2Config, NetworkConfig, RunnerError, ServicesMode, WorkspaceConfig, WorkspaceMode,
@@ -31,26 +32,42 @@ const SECRET_FILE_MODE: u32 = 0o600;
 ///
 /// Loaded by `run`, `status`, and `remove`. Written by `register` after
 /// the JIT endpoint is validated and the OAuth token is in hand.
+///
+/// The GitHub-only fields (`runner_url` … `runner_group`, and the runtime's
+/// `jit_config` / `protocol_version`) are absent from a toolu.sh machine's
+/// file (`[provider] kind = "toolu"`, #206): they load as empty and are not
+/// written back. [`load_config`] still requires them of a GitHub
+/// registration.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RunnerRegistrationConfig {
   /// The `--url` the user registered against, e.g.
   /// `https://github.com/Falconiere/toolu-ghrunner`.
+  #[serde(default, skip_serializing_if = "String::is_empty")]
   pub runner_url: String,
   /// Runner name — defaults to the hostname at `register` time.
+  #[serde(default, skip_serializing_if = "String::is_empty")]
   pub runner_name: String,
   /// Runner ID assigned by GH during registration.
+  #[serde(default, skip_serializing_if = "is_default")]
   pub runner_id: i64,
   /// Long-lived OAuth token (the `ghs_…` form on github.com).
+  #[serde(default, skip_serializing_if = "String::is_empty")]
   pub auth_token: String,
   /// Labels the runner advertises.
+  #[serde(default)]
   pub labels: Vec<String>,
   /// Runner group (defaults to `"Default"`).
+  #[serde(default, skip_serializing_if = "String::is_empty")]
   pub runner_group: String,
   /// `register --ephemeral`: `run` takes one job, then unregisters the runner
   /// and deletes this registration instead of re-minting. Absent in configs
   /// written before #92, which load as `false`.
   #[serde(default)]
   pub ephemeral: bool,
+  /// `[provider]` section (#206): GitHub (default; omitted) or a toolu.sh
+  /// machine.
+  #[serde(default, skip_serializing_if = "ProviderSection::is_github")]
+  pub provider: ProviderSection,
   /// Runtime section: paths + JIT config + protocol version.
   pub runtime: RuntimeConfig,
   /// `[services]` section: artifact/cache/OIDC serving mode.
@@ -312,14 +329,22 @@ fn default_gc_after_hours() -> u64 {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RuntimeConfig {
   /// Base64-encoded JIT config from GH. Loaded by `run` and parsed into
-  /// `protocol::JitConfig`.
+  /// `protocol::JitConfig`. Empty for a toolu.sh machine, whose JIT configs
+  /// arrive per claim and are never written.
+  #[serde(default, skip_serializing_if = "String::is_empty")]
   pub jit_config: String,
   /// Per-job workspace root.
   pub work_dir: String,
   /// Root for runner-internal state (logs, cache, lock, events).
   pub data_dir: String,
-  /// `"v2"` for github.com, `"v1"` for GHES.
+  /// `"v2"` for github.com, `"v1"` for GHES; empty for a toolu.sh machine.
+  #[serde(default, skip_serializing_if = "String::is_empty")]
   pub protocol_version: String,
+}
+
+/// `skip_serializing_if` for a GitHub-only value a toolu.sh machine lacks.
+fn is_default<T: Default + PartialEq>(value: &T) -> bool {
+  *value == T::default()
 }
 
 /// Long-lived OAuth credentials stored in `credentials.json`.
@@ -343,12 +368,43 @@ pub struct CredentialsFile {
 ///
 /// # Errors
 ///
-/// Returns `RunnerError::Config` on missing/unparseable file, and
+/// Returns `RunnerError::Config` on a missing/unparseable file, or a GitHub
+/// registration lacking a field `register` always writes, and
 /// `RunnerError::Io` on filesystem errors.
 pub fn load_config(path: &Path) -> Result<RunnerRegistrationConfig, RunnerError> {
   let raw = std::fs::read_to_string(path)
     .map_err(|e| RunnerError::Config(format!("read {}: {e}", path.display())))?;
-  toml::from_str(&raw).map_err(|e| RunnerError::Config(format!("parse {}: {e}", path.display())))
+  let config: RunnerRegistrationConfig = toml::from_str(&raw)
+    .map_err(|e| RunnerError::Config(format!("parse {}: {e}", path.display())))?;
+  if let Some(field) = missing_github_field(&config) {
+    return Err(RunnerError::Config(format!(
+      "parse {}: missing field `{field}` (a GitHub registration needs it; register again)",
+      path.display()
+    )));
+  }
+  Ok(config)
+}
+
+/// The first field `register` always writes that a GitHub registration lacks
+/// (absent, empty or zero); they load as defaults only for a toolu.sh
+/// machine, which has none of them.
+fn missing_github_field(config: &RunnerRegistrationConfig) -> Option<&'static str> {
+  if !config.provider.is_github() {
+    return None;
+  }
+  [
+    ("runner_url", config.runner_url.is_empty()),
+    ("runner_name", config.runner_name.is_empty()),
+    ("runner_id", config.runner_id == 0),
+    ("auth_token", config.auth_token.is_empty()),
+    ("runtime.jit_config", config.runtime.jit_config.is_empty()),
+    (
+      "runtime.protocol_version",
+      config.runtime.protocol_version.is_empty(),
+    ),
+  ]
+  .into_iter()
+  .find_map(|(field, missing)| missing.then_some(field))
 }
 
 /// Persist `config` to `path` as TOML, mode 0600 on Unix.

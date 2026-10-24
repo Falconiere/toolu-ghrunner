@@ -140,6 +140,7 @@ fn write_registration(home: &Path, jit_config: &str) -> TestResult<PathBuf> {
     shadow: ShadowSection::default(),
     network: config::network::NetworkSection::default(),
     auth: config::registration_auth::AuthSection::default(),
+    provider: config::provider::ProviderSection::Github,
   };
   save_config(&config_path, &cfg)?;
   save_credentials(

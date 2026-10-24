@@ -222,7 +222,7 @@ pub(crate) fn parse_deadline_ms(s: &str) -> Option<u64> {
 /// Both saturations WARN: either one can shift the watchdog's view of the
 /// deadline by decades, so a clock that fires `boot` early must leave a
 /// diagnostic behind rather than look like a normal timeout.
-fn now_epoch_ms() -> u64 {
+pub(crate) fn now_epoch_ms() -> u64 {
   let elapsed = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
     Ok(elapsed) => elapsed,
     Err(e) => {

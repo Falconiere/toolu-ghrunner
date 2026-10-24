@@ -72,6 +72,7 @@ fn persisted(
       shadow: ShadowSection::default(),
       network: config::network::NetworkSection::default(),
       auth: config::registration_auth::AuthSection::default(),
+      provider: config::provider::ProviderSection::Github,
     },
   )?;
   Ok((load_config(&config_path)?, config_path))
