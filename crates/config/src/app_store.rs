@@ -84,7 +84,7 @@ pub fn save_app(home: &Path, app: &StoredApp) -> Result<(), RunnerError> {
   // installation after a long wait).
   let staged = home.join(format!("{APP_STORE_FILE}.tmp"));
   crate::config::write_secret_file(&staged, body.as_bytes())?;
-  std::fs::rename(&staged, &path)?;
+  std::fs::rename(&staged, &path).map_err(RunnerError::Io)?;
   Ok(())
 }
 

@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use base64::Engine as _;
 use config::app_store::StoredApp;
 use serde_json::Value;
 use shared::SecretMasker;
@@ -17,9 +18,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, DuplexStream, Lines};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
 
-use super::{
-  WaitIo, WaitOutcome, WaitTarget, WaitTiming, installed_line, osc52_copy, wait_for_installation,
-};
+use super::{WaitIo, WaitOutcome, WaitTarget, WaitTiming, installed_line, wait_for_installation};
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
@@ -263,10 +262,13 @@ async fn typing_c_while_waiting_copies_the_link_over_osc_52() -> TestResult {
   driver_result?;
   assert!(matches!(outcome?, WaitOutcome::Installed(_)));
   let text = screen.text();
-  assert!(text.contains(&osc52_copy(URL)), "{text:?}");
-  // ESC ] 52 ; c ; base64(link) BEL — the bytes a terminal acts on.
-  assert!(osc52_copy("ab").starts_with("\u{1b}]52;c;YWI="));
-  assert!(osc52_copy("ab").ends_with('\u{7}'));
+  // ESC ] 52 ; c ; base64(link) BEL — the bytes a terminal acts on, built
+  // here independently of the code under test.
+  let osc52 = format!(
+    "\u{1b}]52;c;{}\u{7}",
+    base64::engine::general_purpose::STANDARD.encode(URL)
+  );
+  assert!(text.contains(&osc52), "{text:?}");
   Ok(())
 }
 

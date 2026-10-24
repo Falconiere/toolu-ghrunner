@@ -269,13 +269,45 @@ fn served_manifest(form: &str) -> TestResult<Value> {
     .and_then(|(_, rest)| rest.split_once('"'))
     .map(|(value, _)| value)
     .ok_or("form has no manifest")?;
-  let json = attr
-    .replace("&quot;", "\"")
-    .replace("&#39;", "'")
-    .replace("&lt;", "<")
-    .replace("&gt;", ">")
-    .replace("&amp;", "&");
-  Ok(serde_json::from_str(&json)?)
+  Ok(serde_json::from_str(&html_unescape(attr)?)?)
+}
+
+/// Decode an HTML attribute value: the named entities `&amp; &quot; &apos;
+/// &lt; &gt;` and every decimal (`&#39;`) or hex (`&#x27;`) character
+/// reference. An unknown or unterminated entity is an error, not passed on.
+fn html_unescape(text: &str) -> TestResult<String> {
+  let mut out = String::with_capacity(text.len());
+  let mut rest = text;
+  while let Some((before, after)) = rest.split_once('&') {
+    out.push_str(before);
+    let (entity, tail) = after
+      .split_once(';')
+      .ok_or_else(|| format!("unterminated entity in {text:?}"))?;
+    let decoded = match entity {
+      "amp" => '&',
+      "quot" => '"',
+      "apos" => '\'',
+      "lt" => '<',
+      "gt" => '>',
+      _ => {
+        let code = match entity
+          .strip_prefix("#x")
+          .or_else(|| entity.strip_prefix("#X"))
+        {
+          Some(hex) => u32::from_str_radix(hex, 16)?,
+          None => entity
+            .strip_prefix('#')
+            .ok_or_else(|| format!("unknown entity &{entity}; in {text:?}"))?
+            .parse()?,
+        };
+        char::from_u32(code).ok_or_else(|| format!("invalid character reference &{entity};"))?
+      },
+    };
+    out.push(decoded);
+    rest = tail;
+  }
+  out.push_str(rest);
+  Ok(out)
 }
 
 /// AC-2 / S2: an org App is created through the org form with the org
@@ -344,7 +376,7 @@ async fn org_create_waits_then_records_installation() -> TestResult {
   assert_eq!(app.get("installation_id"), Some(&json!(1)));
   assert_eq!(app.get("owner_id"), Some(&json!(7)));
   assert_eq!(app.get("owner"), Some(&json!("acme")));
-  assert_no_secrets(&format!("{}{}", done.stdout, done.stderr));
+  assert_no_secrets(&format!("{}{}", done.stdout, done.stderr), &server).await?;
   Ok(())
 }
 
@@ -570,15 +602,27 @@ async fn import_with_a_mismatched_key_saves_nothing() -> TestResult {
   Ok(())
 }
 
-/// No line of the test key, and not the client secret, in `text`.
-fn assert_no_secrets(text: &str) {
+/// No line of the test key, not the client secret, and none of the exact
+/// bearer credentials (App JWTs, installation tokens) the binary sent to
+/// `server` appear in `text`.
+async fn assert_no_secrets(text: &str, server: &MockServer) -> TestResult {
   for line in PRIVATE_PEM.lines().filter(|line| line.len() > 20) {
     assert!(!text.contains(line), "a PEM line leaked: {text}");
   }
   for secret in ["toolu-test-client-secret", "PLACEHOLDER_CLIENT_SECRET"] {
     assert!(!text.contains(secret), "a client secret leaked: {text}");
   }
-  assert!(!text.contains("eyJ"), "a JWT leaked: {text}");
+  let requests = server.received_requests().await.ok_or("recording off")?;
+  let bearers: Vec<&str> = requests
+    .iter()
+    .filter_map(|r| r.headers.get("authorization")?.to_str().ok())
+    .filter_map(|value| value.strip_prefix("Bearer "))
+    .collect();
+  assert!(!bearers.is_empty(), "the binary sent no bearer credential");
+  for bearer in bearers {
+    assert!(!text.contains(bearer), "a bearer credential leaked: {text}");
+  }
+  Ok(())
 }
 
 /// AC-6: `--app-id` + `--app-key` with the App's own key: the identity comes
@@ -622,7 +666,7 @@ async fn app_id_and_key_with_a_matching_key_saves_the_app_from_github() -> TestR
   assert_eq!(app.get("client_id"), Some(&json!("Iv1.ab1112223334445c")));
   assert_eq!(app.get("client_secret"), Some(&json!("")));
   assert_eq!(app.get("installation_id"), Some(&json!(1)));
-  assert_no_secrets(&format!("{}{}", done.stdout, done.stderr));
+  assert_no_secrets(&format!("{}{}", done.stdout, done.stderr), &server).await?;
   Ok(())
 }
 
@@ -815,7 +859,7 @@ async fn a_fatal_wait_error_is_masked_and_names_the_resume_command() -> TestResu
     done.stderr
   );
   assert!(done.stderr.contains("--org acme`"), "{}", done.stderr);
-  assert_no_secrets(&format!("{}{}", done.stdout, done.stderr));
+  assert_no_secrets(&format!("{}{}", done.stdout, done.stderr), &server).await?;
   Ok(())
 }
 

@@ -281,7 +281,7 @@ fn reopen<W: Write>(url: &str, open: &dyn Fn(&str), out: &mut W) -> std::io::Res
 
 /// The OSC 52 escape that asks the terminal to put `text` on the clipboard
 /// (works over SSH in terminals that support it).
-pub(crate) fn osc52_copy(text: &str) -> String {
+fn osc52_copy(text: &str) -> String {
   format!(
     "\u{1b}]52;c;{}\u{7}",
     base64::engine::general_purpose::STANDARD.encode(text)

@@ -32,7 +32,7 @@ pub(crate) async fn import_app(
   args: &CreateAppArgs,
   ctx: &AppContext<'_>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-  let (mut app, source) = source_app(args)?;
+  let (mut app, source) = source_app(args).await?;
   if app.host != args.host {
     return Err(
       format!(
@@ -42,7 +42,7 @@ pub(crate) async fn import_app(
       .into(),
     );
   }
-  if ctx.dest.exists() && !args.force && !same_file(&source, &ctx.dest) {
+  if ctx.dest.exists() && !args.force && !same_file(&source, &ctx.dest).await {
     return Err(existing_app_error(&ctx.dest).into());
   }
   register_secrets(ctx, &app);
@@ -66,14 +66,17 @@ pub(crate) async fn import_app(
 }
 
 /// The App to import and where it came from (for messages).
-fn source_app(args: &CreateAppArgs) -> Result<(StoredApp, String), Box<dyn std::error::Error>> {
+async fn source_app(
+  args: &CreateAppArgs,
+) -> Result<(StoredApp, String), Box<dyn std::error::Error>> {
   if let Some(file) = &args.import {
     return Ok((app_store::load_app_file(file)?, file.display().to_string()));
   }
   let (Some(app_id), Some(key)) = (args.app_id, &args.app_key) else {
     return Err("pass --import <file>, or --app-id <id> with --app-key <pem file>".into());
   };
-  let pem = std::fs::read_to_string(key)
+  let pem = tokio::fs::read_to_string(key)
+    .await
     .map_err(|e| format!("could not read the App key {}: {e}", key.display()))?;
   let app = StoredApp {
     host: args.host.clone(),
@@ -138,8 +141,11 @@ fn refresh_identity(app: &mut StoredApp, info: AppInfo) {
 
 /// Whether `a` and `b` name the same file (re-importing the saved App onto
 /// itself never needs `--force`).
-fn same_file(a: &str, b: &Path) -> bool {
-  match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+async fn same_file(a: &str, b: &Path) -> bool {
+  match (
+    tokio::fs::canonicalize(a).await,
+    tokio::fs::canonicalize(b).await,
+  ) {
     (Ok(a), Ok(b)) => a == b,
     _ => false,
   }
