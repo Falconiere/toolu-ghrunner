@@ -111,7 +111,8 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
 
 use crate::github_app_fixtures::{
-  APP_ID, AppJwtGate, PRIVATE_PEM, capture, edited_reply, set_json, verify_app_jwt, write_app,
+  APP_ID, AppJwtGate, EchoAuthorization, PRIVATE_PEM, capture, edited_reply, set_json,
+  verify_app_jwt, write_app,
 };
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
@@ -343,6 +344,7 @@ async fn org_create_waits_then_records_installation() -> TestResult {
   assert_eq!(app.get("installation_id"), Some(&json!(1)));
   assert_eq!(app.get("owner_id"), Some(&json!(7)));
   assert_eq!(app.get("owner"), Some(&json!("acme")));
+  assert_no_secrets(&format!("{}{}", done.stdout, done.stderr));
   Ok(())
 }
 
@@ -564,6 +566,283 @@ async fn import_with_a_mismatched_key_saves_nothing() -> TestResult {
   assert_eq!(
     std::fs::read(home.path().join("github-app.json"))?,
     existing
+  );
+  Ok(())
+}
+
+/// No line of the test key, and not the client secret, in `text`.
+fn assert_no_secrets(text: &str) {
+  for line in PRIVATE_PEM.lines().filter(|line| line.len() > 20) {
+    assert!(!text.contains(line), "a PEM line leaked: {text}");
+  }
+  for secret in ["toolu-test-client-secret", "PLACEHOLDER_CLIENT_SECRET"] {
+    assert!(!text.contains(secret), "a client secret leaked: {text}");
+  }
+  assert!(!text.contains("eyJ"), "a JWT leaked: {text}");
+}
+
+/// AC-6: `--app-id` + `--app-key` with the App's own key: the identity comes
+/// from `GET /app` (it starts empty), no client secret is invented, and the
+/// installation is recorded.
+#[tokio::test]
+async fn app_id_and_key_with_a_matching_key_saves_the_app_from_github() -> TestResult {
+  let home = tempfile::tempdir()?;
+  let key = home.path().join("key.pem");
+  std::fs::write(&key, PRIVATE_PEM)?;
+  let key_arg = key.to_string_lossy().into_owned();
+  let server = MockServer::start().await;
+  mount_app(&server).await?;
+  Mock::given(method("GET"))
+    .and(path("/app/installations"))
+    .respond_with(AppJwtGate(installed_on("acme", "all")?))
+    .mount(&server)
+    .await;
+  let args = ["--app-id", "424242", "--app-key", &key_arg];
+  let done = run(create_app(home.path(), &server, &args, 60_000), false).await?;
+  assert_eq!(
+    done.code,
+    Some(0),
+    "stdout:\n{}\nstderr:\n{}",
+    done.stdout,
+    done.stderr
+  );
+  assert!(
+    done
+      .stdout
+      .contains("Key matches App 424242 \u{b7} installed on acme")
+  );
+  let app = saved(home.path())?;
+  assert_eq!(app.get("slug"), Some(&json!("toolu-runner-acme")));
+  assert_eq!(app.get("owner"), Some(&json!("acme")));
+  assert_eq!(app.get("owner_id"), Some(&json!(7)));
+  assert_eq!(
+    app.get("html_url"),
+    Some(&json!("https://github.com/apps/toolu-runner-acme"))
+  );
+  assert_eq!(app.get("client_id"), Some(&json!("Iv1.ab1112223334445c")));
+  assert_eq!(app.get("client_secret"), Some(&json!("")));
+  assert_eq!(app.get("installation_id"), Some(&json!(1)));
+  assert_no_secrets(&format!("{}{}", done.stdout, done.stderr));
+  Ok(())
+}
+
+/// AC-6 + S2: `--import --org acme` of an App not yet installed saves it,
+/// waits through an empty poll and records the installation on acme.
+#[tokio::test]
+async fn import_with_org_waits_for_the_org_installation() -> TestResult {
+  let (source, home) = (tempfile::tempdir()?, tempfile::tempdir()?);
+  let file = write_app(source.path(), "github.com")?;
+  let server = MockServer::start().await;
+  mount_app(&server).await?;
+  Mock::given(method("GET"))
+    .and(path("/app/installations"))
+    .respond_with(AppJwtGate(
+      ResponseTemplate::new(200).set_body_json(json!([])),
+    ))
+    .up_to_n_times(2)
+    .mount(&server)
+    .await;
+  Mock::given(method("GET"))
+    .and(path("/app/installations"))
+    .respond_with(AppJwtGate(installed_on("acme", "all")?))
+    .mount(&server)
+    .await;
+  let file_arg = file.to_string_lossy().into_owned();
+  let args = ["--import", &file_arg, "--org", "acme"];
+  let done = run(create_app(home.path(), &server, &args, 60_000), false).await?;
+  assert_eq!(
+    done.code,
+    Some(0),
+    "stdout:\n{}\nstderr:\n{}",
+    done.stdout,
+    done.stderr
+  );
+  assert!(
+    done.stdout.contains("Key matches App 424242\n"),
+    "{}",
+    done.stdout
+  );
+  assert!(
+    done.stdout.contains("Install the App on acme:"),
+    "{}",
+    done.stdout
+  );
+  assert!(
+    done
+      .stdout
+      .contains("Installed \u{b7} installation 1 \u{b7} all repositories"),
+    "{}",
+    done.stdout
+  );
+  assert_eq!(saved(home.path())?.get("installation_id"), Some(&json!(1)));
+  Ok(())
+}
+
+/// The import guard: another saved App is not replaced without `--force`
+/// (checked before any request); re-importing the saved file onto itself
+/// needs no `--force`.
+#[tokio::test]
+async fn import_keeps_another_saved_app_and_may_reimport_itself() -> TestResult {
+  let (source, home) = (tempfile::tempdir()?, tempfile::tempdir()?);
+  let other = write_app(source.path(), "github.com")?;
+  let saved_file = write_app(home.path(), "github.com")?;
+  let before = std::fs::read(&saved_file)?;
+  let server = MockServer::start().await;
+  mount_app(&server).await?;
+  Mock::given(method("GET"))
+    .and(path("/app/installations"))
+    .respond_with(AppJwtGate(installed_on("acme", "all")?))
+    .mount(&server)
+    .await;
+
+  let other_arg = other.to_string_lossy().into_owned();
+  let done = run(
+    create_app(home.path(), &server, &["--import", &other_arg], 60_000),
+    false,
+  )
+  .await?;
+  assert_eq!(done.code, Some(2), "{}", done.stderr);
+  assert!(
+    done.stderr.contains("pass --force to overwrite it"),
+    "{}",
+    done.stderr
+  );
+  assert_eq!(std::fs::read(&saved_file)?, before);
+  assert!(
+    server
+      .received_requests()
+      .await
+      .ok_or("recording off")?
+      .is_empty()
+  );
+
+  let self_arg = saved_file.to_string_lossy().into_owned();
+  let done = run(
+    create_app(home.path(), &server, &["--import", &self_arg], 60_000),
+    false,
+  )
+  .await?;
+  assert_eq!(
+    done.code,
+    Some(0),
+    "stdout:\n{}\nstderr:\n{}",
+    done.stdout,
+    done.stderr
+  );
+  assert_eq!(saved(home.path())?.get("installation_id"), Some(&json!(1)));
+  Ok(())
+}
+
+/// Ctrl-C during the wait exits 130, keeps the App saved and names the
+/// resume command (with the `--org` the wait targeted).
+#[tokio::test]
+async fn ctrl_c_during_the_wait_exits_130_with_the_resume_command() -> TestResult {
+  let (source, home) = (tempfile::tempdir()?, tempfile::tempdir()?);
+  let file = write_app(source.path(), "github.com")?;
+  let server = MockServer::start().await;
+  mount_app(&server).await?;
+  Mock::given(method("GET"))
+    .and(path("/app/installations"))
+    .respond_with(AppJwtGate(
+      ResponseTemplate::new(200).set_body_json(json!([])),
+    ))
+    .mount(&server)
+    .await;
+  let file_arg = file.to_string_lossy().into_owned();
+  let args = ["--import", &file_arg, "--org", "acme"];
+  let mut child = create_app(home.path(), &server, &args, 60_000).spawn()?;
+  let pid = child.id().ok_or("no pid")?;
+  let mut stdout = BufReader::new(child.stdout.take().ok_or("no stdout")?);
+  loop {
+    let mut line = String::new();
+    if stdout.read_line(&mut line).await? == 0 {
+      return Err("the wait never started".into());
+    }
+    if line.starts_with("Waiting for the installation") {
+      break;
+    }
+  }
+  let killed = std::process::Command::new("kill")
+    .args(["-INT", &pid.to_string()])
+    .status()?;
+  assert!(killed.success());
+  let output = tokio::time::timeout(Duration::from_secs(30), child.wait_with_output()).await??;
+  let stderr = String::from_utf8_lossy(&output.stderr);
+  assert_eq!(output.status.code(), Some(130), "{stderr}");
+  assert!(
+    stderr.contains("cancelled \u{2014} the App is saved at"),
+    "{stderr}"
+  );
+  assert!(stderr.contains("create-app --import"), "{stderr}");
+  assert!(stderr.contains("--org acme`"), "{stderr}");
+  assert!(home.path().join("github-app.json").exists());
+  Ok(())
+}
+
+/// A fatal reply during the wait that echoes the App JWT is printed masked,
+/// with the saved App and the resume command.
+#[tokio::test]
+async fn a_fatal_wait_error_is_masked_and_names_the_resume_command() -> TestResult {
+  let (source, home) = (tempfile::tempdir()?, tempfile::tempdir()?);
+  let file = write_app(source.path(), "github.com")?;
+  let server = MockServer::start().await;
+  mount_app(&server).await?;
+  Mock::given(method("GET"))
+    .and(path("/app/installations"))
+    .respond_with(AppJwtGate(
+      ResponseTemplate::new(200).set_body_json(json!([])),
+    ))
+    .up_to_n_times(1)
+    .mount(&server)
+    .await;
+  Mock::given(method("GET"))
+    .and(path("/app/installations"))
+    .respond_with(EchoAuthorization(401))
+    .mount(&server)
+    .await;
+  let file_arg = file.to_string_lossy().into_owned();
+  let args = ["--import", &file_arg, "--org", "acme"];
+  let done = run(create_app(home.path(), &server, &args, 60_000), false).await?;
+  assert_eq!(done.code, Some(2), "{}", done.stderr);
+  assert!(
+    done.stderr.contains("upstream echoed: Bearer ***"),
+    "{}",
+    done.stderr
+  );
+  assert!(
+    done.stderr.contains("the App is saved at"),
+    "{}",
+    done.stderr
+  );
+  assert!(done.stderr.contains("--org acme`"), "{}", done.stderr);
+  assert_no_secrets(&format!("{}{}", done.stdout, done.stderr));
+  Ok(())
+}
+
+/// A `--org` that is not a GitHub login never reaches a URL.
+#[tokio::test]
+async fn an_org_that_is_not_a_login_exits_2_before_any_request() -> TestResult {
+  let home = tempfile::tempdir()?;
+  let server = MockServer::start().await;
+  let done = run(
+    create_app(home.path(), &server, &["--org", "a/../b"], 60_000),
+    false,
+  )
+  .await?;
+  assert_eq!(done.code, Some(2), "{}", done.stderr);
+  assert!(
+    done
+      .stderr
+      .contains("--org 'a/../b' is not a GitHub account name"),
+    "{}",
+    done.stderr
+  );
+  assert!(
+    server
+      .received_requests()
+      .await
+      .ok_or("recording off")?
+      .is_empty()
   );
   Ok(())
 }

@@ -479,7 +479,7 @@ App-JWT tests, never uploaded to any GitHub App (authenticates nothing).
   converts code, saves `<home>/github-app.json` AT ONCE; default name
   `toolu-runner-<org|account|hostname>`; then `wait_and_record`).
   `app_install` (`installation_on` = THE "App + its installation on an
-  account" lookup (wait, import, `setup`); `wait_for_installation` polls
+  account" lookup (wait, import; #204's `setup` to reuse it); `wait_for_installation` polls
   `/app/installations` with a fresh JWT, `Network` warns + continues, line
   commands `o`/`c` (OSC 52) on a terminal stdin, timeout prompt Keep/Open/
   Cancel or unattended `TimedOut`; Ctrl-C in `create_app_cmd::run_wait`;

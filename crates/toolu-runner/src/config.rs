@@ -169,16 +169,22 @@ pub(crate) fn install_poll() -> Duration {
 /// A positive millisecond duration from `key`, else `default`. Empty counts
 /// as unset; zero or a non-integer is diagnosed and the default kept.
 fn duration_ms(key: &str, default: Duration) -> Duration {
-  let Some(raw) = read(key).filter(|raw| !raw.is_empty()) else {
-    return default;
-  };
-  parse_interval_ms(&raw).unwrap_or_else(|| {
+  ms_or_default(read(key).as_deref(), default).unwrap_or_else(|| {
     report(
       key,
       "is not a positive integer of milliseconds; using the default",
     );
     default
   })
+}
+
+/// `raw` as a positive millisecond duration; `default` when unset or empty;
+/// `None` when it is set but not a positive integer.
+pub(crate) fn ms_or_default(raw: Option<&str>, default: Duration) -> Option<Duration> {
+  match raw.filter(|raw| !raw.is_empty()) {
+    None => Some(default),
+    Some(raw) => parse_interval_ms(raw),
+  }
 }
 
 /// Parse a positive whole number of milliseconds.

@@ -92,8 +92,7 @@ pub(crate) async fn send(
 pub(crate) fn api_failure(what: &str, status: StatusCode, body: &str) -> RunnerError {
   if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
     return RunnerError::Network(format!(
-      "{what} failed with status {status} (transient — the run loop will back off and \
-       retry): {body}"
+      "{what} failed with status {status} (transient — retried after a pause): {body}"
     ));
   }
   RunnerError::Auth(format!("{what} failed with status {status}: {body}"))
@@ -147,7 +146,8 @@ pub async fn find_installation(
 }
 
 /// Every installation of the App: `GET <api>/app/installations?per_page=100`
-/// (the first 100, enough to name where the App IS installed).
+/// (the first 100: enough to name where the App IS installed, and a private
+/// App — what `create-app` makes — installs only on its owner).
 ///
 /// # Errors
 ///

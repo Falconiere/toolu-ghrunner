@@ -223,3 +223,16 @@ fn the_github_api_base_defaults_to_api_github_com_and_drops_a_trailing_slash() {
     "http://127.0.0.1:8080/api"
   );
 }
+
+#[test]
+fn install_wait_settings_take_positive_milliseconds_or_the_default() {
+  let default = std::time::Duration::from_secs(600);
+  assert_eq!(super::ms_or_default(None, default), Some(default));
+  assert_eq!(super::ms_or_default(Some(""), default), Some(default));
+  assert_eq!(
+    super::ms_or_default(Some("250"), default),
+    Some(std::time::Duration::from_millis(250))
+  );
+  assert_eq!(super::ms_or_default(Some("0"), default), None);
+  assert_eq!(super::ms_or_default(Some("ten"), default), None);
+}

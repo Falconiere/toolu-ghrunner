@@ -784,8 +784,8 @@ without `--force`).
    `github.com/apps/{slug}/installations/new/permissions?target_id={owner_id}`.
    `wait_for_installation` polls `GET <api>/app/installations` with a fresh
    App JWT every 5 s (`TOOLU_RUNNER_INSTALL_POLL_MS`) until an installation's
-   account is the App's owner (`installation_on`, the one lookup `--import`
-   and `setup` share).
+   account is the App's owner (`installation_on`, the one lookup the wait and
+   `--import` share, and which the planned `setup` (#204) is meant to reuse).
    - Transient errors (transport, 429, 5xx) warn and keep polling; other
      errors are fatal.
    - On a terminal stdin, the lines `o` / `c` reopen / copy (OSC 52) the

@@ -347,7 +347,14 @@ async fn a_transient_failure_warns_and_keeps_waiting() -> TestResult {
   };
   let outcome = wait_for_installation(&target, TIMING, io).await?;
   assert!(matches!(outcome, WaitOutcome::Installed(_)));
-  assert!(out.text().contains("warning:"), "{}", out.text());
+  let text = out.text();
+  assert!(
+    text.contains(
+      "warning: GitHub App installation list failed with status 503 Service Unavailable \
+       (transient — retried after a pause): unicorn; still waiting"
+    ),
+    "{text}"
+  );
   Ok(())
 }
 
@@ -379,7 +386,13 @@ async fn a_rejected_app_ends_the_wait_with_its_error() -> TestResult {
     .await
     .err()
     .ok_or("a 401 must end the wait")?;
-  assert!(matches!(err, shared::RunnerError::Auth(_)), "{err:?}");
+  let shared::RunnerError::Auth(msg) = err else {
+    return Err(format!("expected Auth, got {err:?}").into());
+  };
+  assert!(
+    msg.contains("status 401") && msg.contains("A JSON web token could not be decoded"),
+    "{msg}"
+  );
   Ok(())
 }
 
@@ -430,4 +443,85 @@ fn target<'a>(
     account: "acme",
     masker,
   }
+}
+
+#[tokio::test]
+async fn typed_lines_do_not_trigger_extra_polls() -> TestResult {
+  let (server, installed) = peer().await?;
+  let (client, app, masker) = (
+    reqwest::Client::new(),
+    app(),
+    Mutex::new(SecretMasker::new()),
+  );
+  let base = server.uri();
+  let target = target(&client, &base, &app, &masker);
+  let (mut typing, lines) = keyboard();
+  let screen = Screen::default();
+  let mut out = screen.clone();
+  let io = WaitIo {
+    url: URL,
+    open: &|_: &str| {},
+    input: Some(lines),
+    out: &mut out,
+  };
+  let timing = WaitTiming {
+    timeout: Duration::from_secs(30),
+    poll: Duration::from_millis(800),
+  };
+  let driver = async {
+    screen.shows("Waiting for the installation", 1).await?;
+    for typed in 1..=5 {
+      typing.write_all(b"?\n").await?;
+      screen.shows("Still waiting.", typed).await?;
+    }
+    let polls = server
+      .received_requests()
+      .await
+      .ok_or("recording off")?
+      .len();
+    assert_eq!(polls, 1, "five typed lines must not add API calls");
+    installed.store(true, Ordering::SeqCst);
+    TestResult::Ok(())
+  };
+  let (outcome, driver_result) = tokio::join!(wait_for_installation(&target, timing, io), driver);
+  driver_result?;
+  assert!(matches!(outcome?, WaitOutcome::Installed(_)));
+  Ok(())
+}
+
+#[tokio::test]
+async fn the_installed_line_pluralizes_and_falls_back_without_a_count() -> TestResult {
+  let server = MockServer::start().await;
+  let mut two = body(REPOSITORIES_200)?;
+  *two.pointer_mut("/total_count").ok_or("no total_count")? = Value::from(2);
+  Mock::given(method("POST"))
+    .and(path("/app/installations/1/access_tokens"))
+    .respond_with(ResponseTemplate::new(201).set_body_json(body(ACCESS_TOKENS_201)?))
+    .mount(&server)
+    .await;
+  Mock::given(method("GET"))
+    .and(path("/installation/repositories"))
+    .respond_with(ResponseTemplate::new(200).set_body_json(two))
+    .mount(&server)
+    .await;
+  let (client, app, masker) = (
+    reqwest::Client::new(),
+    app(),
+    Mutex::new(SecretMasker::new()),
+  );
+  let base = server.uri();
+  let list: Vec<protocol::app_jwt::Installation> = serde_json::from_value(acme_installations()?)?;
+  let installation = list.into_iter().next().ok_or("one installation")?;
+  assert_eq!(
+    installed_line(&target(&client, &base, &app, &masker), &installation).await,
+    "Installed \u{b7} installation 1 \u{b7} 2 selected repositories"
+  );
+  // A peer that cannot mint a token: the count is left out, never fatal.
+  let empty = MockServer::start().await;
+  let empty_base = empty.uri();
+  assert_eq!(
+    installed_line(&target(&client, &empty_base, &app, &masker), &installation).await,
+    "Installed \u{b7} installation 1 \u{b7} selected repositories"
+  );
+  Ok(())
 }

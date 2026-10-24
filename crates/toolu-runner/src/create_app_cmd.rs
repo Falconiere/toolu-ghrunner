@@ -97,6 +97,11 @@ pub(crate) async fn cmd_create_app(
     masker: Mutex::new(SecretMasker::new()),
     no_browser: args.no_browser,
   };
+  for (flag, login) in [("--org", &args.org), ("--account", &args.account)] {
+    if let Some(login) = login {
+      check_login(flag, login)?;
+    }
+  }
   if args.import.is_some() || args.app_id.is_some() {
     return crate::app_import::import_app(args, &ctx).await;
   }
@@ -140,7 +145,24 @@ async fn create_app(
   println!("App created \u{b7} {} \u{b7} App {}", app.slug, app.app_id);
   println!("key saved to {} (0600)", ctx.dest.display());
   let account = app.owner.clone();
-  wait_and_record(ctx, app, &account).await
+  wait_and_record(ctx, app, &account, None).await
+}
+
+/// Reject a `--org` / `--account` value that cannot be a GitHub login (1–39
+/// ASCII letters, digits or inner hyphens) before it reaches a URL.
+fn check_login(flag: &str, login: &str) -> Result<(), String> {
+  let valid = (1..=39).contains(&login.len())
+    && login
+      .bytes()
+      .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+    && !login.starts_with('-')
+    && !login.ends_with('-');
+  if valid {
+    return Ok(());
+  }
+  Err(format!(
+    "{flag} '{login}' is not a GitHub account name (1-39 letters, digits or inner hyphens)"
+  ))
 }
 
 /// `GET /orgs/{org}` before anything else: a typo (or a user login) fails
@@ -189,18 +211,26 @@ pub(crate) fn register_secrets(ctx: &AppContext<'_>, app: &StoredApp) {
 }
 
 /// Print the install link, open it, wait for the installation on `account`,
-/// then record its id in `github-app.json`.
+/// then record its id in `github-app.json`. `org` is the `--org` the wait
+/// targets, repeated in the resume command every failure prints.
 ///
 /// # Errors
 ///
 /// [`CodedExit`] 1 when an unattended wait times out, 130 when it is
 /// cancelled (Ctrl-C or Cancel); a masked error when GitHub rejects the App.
+/// Each names the saved App and the command that resumes the wait.
 pub(crate) async fn wait_and_record(
   ctx: &AppContext<'_>,
   mut app: StoredApp,
   account: &str,
+  org: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
   let url = app.install_url();
+  let resume = format!(
+    "toolu-runner create-app --import {}{}",
+    ctx.dest.display(),
+    org.map(|org| format!(" --org {org}")).unwrap_or_default()
+  );
   println!("Install the App on {account}:\n  {url}");
   let target = WaitTarget {
     client: &ctx.client,
@@ -213,15 +243,35 @@ pub(crate) async fn wait_and_record(
     timeout: crate::config::install_wait(),
     poll: crate::config::install_poll(),
   };
-  let installation = match run_wait(ctx, &target, timing, &url).await? {
+  let outcome = run_wait(ctx, &target, timing, &url).await.map_err(|e| {
+    ctx.fail(&format!(
+      "{e} — the App is saved at {}; once that is fixed, run `{resume}`",
+      ctx.dest.display()
+    ))
+  })?;
+  let installation = match outcome {
     WaitOutcome::Installed(installation) => installation,
-    WaitOutcome::Cancelled => return Err(not_installed(ctx, CANCELLED_EXIT, "cancelled", &url)),
+    WaitOutcome::Cancelled => {
+      return Err(not_installed(
+        ctx,
+        CANCELLED_EXIT,
+        "cancelled",
+        &url,
+        &resume,
+      ));
+    },
     WaitOutcome::TimedOut => {
       let why = format!(
         "the App isn't installed on {account} after {} s",
         timing.timeout.as_secs()
       );
-      return Err(not_installed(ctx, INSTALL_TIMEOUT_EXIT, &why, &url));
+      return Err(not_installed(
+        ctx,
+        INSTALL_TIMEOUT_EXIT,
+        &why,
+        &url,
+        &resume,
+      ));
     },
   };
   let line = installed_line(&target, &installation).await;
@@ -238,7 +288,7 @@ async fn run_wait(
   target: &WaitTarget<'_>,
   timing: WaitTiming,
   url: &str,
-) -> Result<WaitOutcome, Box<dyn std::error::Error>> {
+) -> Result<WaitOutcome, RunnerError> {
   let no_browser = ctx.no_browser;
   let open = move |link: &str| {
     if !no_browser {
@@ -256,10 +306,13 @@ async fn run_wait(
     input,
     out: &mut out,
   };
-  Ok(tokio::select! {
-    outcome = wait_for_installation(target, timing, io) => outcome.map_err(|e| ctx.fail(&e))?,
-    _ = tokio::signal::ctrl_c() => WaitOutcome::Cancelled,
-  })
+  // Registered now, before the wait prints anything: a Ctrl-C from then on
+  // cancels cleanly instead of killing the process.
+  let mut interrupt = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
+  tokio::select! {
+    outcome = wait_for_installation(target, timing, io) => outcome,
+    _ = interrupt.recv() => Ok(WaitOutcome::Cancelled),
+  }
 }
 
 /// The exit for a wait that ended without an installation, naming how to
@@ -269,13 +322,13 @@ fn not_installed(
   code: i32,
   why: &str,
   url: &str,
+  resume: &str,
 ) -> Box<dyn std::error::Error> {
   Box::new(CodedExit::new(
     code,
     format!(
-      "{why} — the App is saved at {path}; install it at {url}, then run `toolu-runner \
-       create-app --import {path}`",
-      path = ctx.dest.display()
+      "{why} — the App is saved at {}; install it at {url}, then run `{resume}`",
+      ctx.dest.display()
     ),
   ))
 }

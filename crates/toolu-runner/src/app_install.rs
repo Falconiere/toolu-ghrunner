@@ -2,8 +2,9 @@
 //! browser trip): `create-app` prints the install link, polls
 //! `GET /app/installations` with a fresh App JWT until the App is installed
 //! on the target account, and reports the installation. [`installation_on`]
-//! is the one lookup — the wait loop, `--import` and `setup`'s "reuse the
-//! saved App" offer all ask it.
+//! is the one "saved App + its installation on this account" lookup: the
+//! wait loop and `--import` ask it, and the onboarding flow planned in #204
+//! is meant to reuse it rather than add another.
 //!
 //! On an interactive terminal the user may type `o` (open the link again) or
 //! `c` (copy it, OSC 52) followed by Enter while waiting; line-buffered, so
@@ -25,7 +26,7 @@ use wire::net::github_app::{
   create_installation_token, installation_repo_count, list_installations,
 };
 
-use crate::app_auth::{app_jwt, mask};
+use crate::app_auth::{app_jwt, mask, masked};
 
 /// Per-request timeout of the wait's App API calls.
 const API_TIMEOUT: Duration = Duration::from_secs(30);
@@ -140,8 +141,10 @@ where
     hint(interactive)
   )?;
   let mut deadline = Instant::now() + timing.timeout;
+  // Poll on the schedule only: a typed line must not trigger an API call.
+  let mut due = true;
   loop {
-    if let Some(installation) = poll_once(target, out).await? {
+    if due && let Some(installation) = poll_once(target, out).await? {
       return Ok(WaitOutcome::Installed(installation));
     }
     if Instant::now() >= deadline {
@@ -151,21 +154,43 @@ where
         return Ok(outcome);
       }
       deadline = Instant::now() + timing.timeout;
+      due = true;
       continue;
     }
-    let pause = tokio::time::sleep(timing.poll.min(deadline - Instant::now()));
-    let Some(lines) = input.as_mut() else {
-      pause.await;
-      continue;
-    };
-    tokio::select! {
-      () = pause => {},
-      line = lines.next_line() => match line? {
+    let pause = timing.poll.min(deadline - Instant::now());
+    due = pause_or_line(pause, &mut input, url, open, out).await?;
+  }
+}
+
+/// Sleep for `pause` unless a line arrives first; act on the line. `true`
+/// when the pause elapsed (time to poll), `false` after a line (no extra
+/// API call).
+async fn pause_or_line<R, W>(
+  pause: Duration,
+  input: &mut Option<Lines<R>>,
+  url: &str,
+  open: &dyn Fn(&str),
+  out: &mut W,
+) -> Result<bool, RunnerError>
+where
+  R: AsyncBufRead + Unpin,
+  W: Write,
+{
+  let sleep = tokio::time::sleep(pause);
+  let Some(lines) = input.as_mut() else {
+    sleep.await;
+    return Ok(true);
+  };
+  tokio::select! {
+    () = sleep => Ok(true),
+    line = lines.next_line() => {
+      match line? {
         Some(line) => line_command(line.trim(), url, open, out)?,
         // Input closed: stop reading; the timeout then cancels.
-        None => input = None,
-      },
-    }
+        None => *input = None,
+      }
+      Ok(false)
+    },
   }
 }
 
@@ -185,6 +210,7 @@ async fn poll_once<W: Write>(
   .await;
   match found {
     Err(RunnerError::Network(msg)) => {
+      let msg = masked(target.masker, &msg);
       writeln!(out, "warning: {msg}; still waiting")?;
       Ok(None)
     },

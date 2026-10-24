@@ -62,7 +62,7 @@ pub(crate) async fn import_app(
     return Ok(());
   }
   println!("Key matches App {}", app.app_id);
-  wait_and_record(ctx, app, &account).await
+  wait_and_record(ctx, app, &account, args.org.as_deref()).await
 }
 
 /// The App to import and where it came from (for messages).

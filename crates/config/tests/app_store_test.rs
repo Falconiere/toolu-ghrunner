@@ -212,3 +212,38 @@ fn secret_values_lists_every_secret_and_debug_redacts_them() {
     "identity stays visible: {debug}"
   );
 }
+
+/// #202: a re-save replaces the file through a staged sibling, so the old
+/// App is never truncated in place and no staging file is left behind.
+#[test]
+fn a_resave_replaces_the_file_atomically_and_leaves_no_staging_file() {
+  let home = TempDir::new().expect("temp home");
+  app_store::save_app(home.path(), &sample_app()).expect("first save");
+  let path = app_store::app_path(home.path());
+  #[cfg(unix)]
+  let first_inode = {
+    use std::os::unix::fs::MetadataExt as _;
+    std::fs::metadata(&path).expect("stat").ino()
+  };
+  let updated = StoredApp {
+    installation_id: Some(1),
+    ..sample_app()
+  };
+  app_store::save_app(home.path(), &updated).expect("second save");
+  assert_eq!(
+    app_store::load_app(home.path()).expect("load"),
+    Some(updated)
+  );
+  assert!(!home.path().join("github-app.json.tmp").exists());
+  #[cfg(unix)]
+  {
+    use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
+    let meta = std::fs::metadata(&path).expect("stat");
+    assert_ne!(
+      meta.ino(),
+      first_inode,
+      "the file must be replaced, not rewritten in place"
+    );
+    assert_eq!(meta.permissions().mode() & 0o777, 0o600);
+  }
+}

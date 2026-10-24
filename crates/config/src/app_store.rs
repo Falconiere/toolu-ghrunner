@@ -60,7 +60,8 @@ pub fn app_path(home: &Path) -> PathBuf {
   home.join(APP_STORE_FILE)
 }
 
-/// Write the app store 0600 (reuses [`crate::config::write_secret_file`]).
+/// Write the app store 0600 (reuses [`crate::config::write_secret_file`]),
+/// atomically: a staged `github-app.json.tmp` is renamed over the file.
 ///
 /// Creates the home directory if missing.
 ///
@@ -77,7 +78,14 @@ pub fn save_app(home: &Path, app: &StoredApp) -> Result<(), RunnerError> {
   let path = app_path(home);
   let body = serde_json::to_string_pretty(app)
     .map_err(|e| RunnerError::Config(format!("json encode: {e}")))?;
-  crate::config::write_secret_file(&path, body.as_bytes())
+  // Write a 0600 sibling, then rename it over the file: a crash or a full
+  // disk mid-write never truncates the saved App, whose private key GitHub
+  // cannot hand out again (#202 rewrites the file to record the
+  // installation after a long wait).
+  let staged = home.join(format!("{APP_STORE_FILE}.tmp"));
+  crate::config::write_secret_file(&staged, body.as_bytes())?;
+  std::fs::rename(&staged, &path)?;
+  Ok(())
 }
 
 /// Load the app store, or `None` when no App has been created.
