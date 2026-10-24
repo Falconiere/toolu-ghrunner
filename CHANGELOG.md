@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-24
+
+### Added
+- *(install)* verify SHA256SUMS, drop jq, set the shell environment, hand off to setup (#212)
+- *(register)* register and re-mint with a GitHub App installation token (#213)
+- *(service)* one machine-level service runs every registration (#214)
+- *(create-app)* org-owned Apps, scope-correct permissions, installation wait (#215)
+
+### Documentation
+- compress AGENTS.md to contract-focused reference (#210)
+
 ## [0.12.2] - 2026-10-23
 
 ### Fixed
