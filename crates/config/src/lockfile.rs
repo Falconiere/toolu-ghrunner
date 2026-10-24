@@ -59,15 +59,25 @@ pub struct LockBody {
 }
 
 /// Handle returned by [`acquire`]. Holds the lock file exclusively until
-/// dropped; releasing the lock is automatic.
+/// dropped; releasing the lock is automatic, and clears the holder body.
 pub struct LockGuard {
   /// Kept alive so the OS advisory lock on the file descriptor stays
-  /// held. `Drop` does not need to read it — dropping the `File` is
-  /// what releases the lock. Underscore-prefixed so the compiler sees
-  /// the field as intentionally retained-for-Drop, not dead code.
-  _file: std::fs::File,
+  /// held; dropping the `File` is what releases the lock.
+  file: std::fs::File,
   /// Cached for [`Debug`] and for stale-lock detection on retry.
   path: PathBuf,
+}
+
+impl Drop for LockGuard {
+  /// Truncate the body before the descriptor closes: a released lock names
+  /// no holder. Readers that never take the lock (`doctor`, `status`) judge
+  /// "running" from the body's pid, and that pid can outlive this lock —
+  /// `run --all` keeps running after one registration's loop ends (#208).
+  fn drop(&mut self) {
+    if let Err(e) = self.file.set_len(0) {
+      tracing::warn!(path = %self.path.display(), error = %e, "could not clear the released lock's body");
+    }
+  }
 }
 
 impl std::fmt::Debug for LockGuard {
@@ -130,7 +140,7 @@ pub fn acquire(path: &Path, config_path: &Path) -> Result<LockGuard, RunnerError
     if file.try_lock_exclusive().is_ok() {
       write_body(&file, &body)?;
       return Ok(LockGuard {
-        _file: file,
+        file,
         path: path.to_path_buf(),
       });
     }
@@ -157,14 +167,25 @@ fn handle_contended(path: &Path, body: &LockBody) -> Result<LockGuard, RunnerErr
     .unwrap_or_default();
   let age = now.saturating_sub(mtime);
 
-  if let Some(existing) = existing
-    && (is_pid_alive(existing.pid) || age < STALE_LOCK_AGE)
-  {
-    return Err(RunnerError::LockHeld {
-      pid: existing.pid,
-      started_at: existing.started_at,
-      config_path: existing.config_path,
-    });
+  match existing {
+    Some(existing) if is_pid_alive(existing.pid) || age < STALE_LOCK_AGE => {
+      return Err(RunnerError::LockHeld {
+        pid: existing.pid,
+        started_at: existing.started_at,
+        config_path: existing.config_path,
+      });
+    },
+    // A held lock whose body is empty or malformed (a holder between its
+    // `lock` and `write_body`, or between a release's truncate and close)
+    // is still held: fail closed until it is as old as a stale lock.
+    None if age < STALE_LOCK_AGE => {
+      return Err(RunnerError::LockHeld {
+        pid: 0,
+        started_at: "unknown (lock body unreadable)".to_owned(),
+        config_path: String::new(),
+      });
+    },
+    Some(_) | None => {},
   }
 
   // Stale lock — remove and retry once.
@@ -179,7 +200,7 @@ fn handle_contended(path: &Path, body: &LockBody) -> Result<LockGuard, RunnerErr
     .map_err(|e| RunnerError::Config(format!("lock acquire after stale-lock removal: {e}")))?;
   write_body(&file, body)?;
   Ok(LockGuard {
-    _file: file,
+    file,
     path: path.to_path_buf(),
   })
 }

@@ -17,7 +17,7 @@ pub mod lockfile;
 pub mod network;
 /// `[auth]` section: personal token (default) or GitHub App installation (#201).
 pub mod registration_auth;
-/// Per-repo runner registration registry (home layout + config resolution).
+/// Runner registration registry (repo / org / legacy layout + config resolution).
 pub mod registry;
 /// Re-mint merge that preserves user-editable config sections verbatim.
 pub mod remint;
@@ -25,3 +25,5 @@ pub mod remint;
 pub mod repo_infer;
 /// Supervisor unit rendering (launchd plist / systemd unit) for `install-service`.
 pub mod service_unit;
+/// `<data_dir>/.stopped`: why a `run --all` loop stopped (#208).
+pub mod stop_marker;

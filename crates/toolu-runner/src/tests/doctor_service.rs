@@ -184,3 +184,39 @@ async fn launchd_reports_an_unloaded_label_as_stopped_with_the_activation_hint()
   .await;
   assert_eq!(got, Activity::Stopped(hint));
 }
+
+/// #208: a registration only the static `install.sh` system unit runs gets a
+/// row about that system unit, never a `systemctl --user` query of the
+/// user's machine unit name.
+#[test]
+fn a_system_scope_unit_gets_a_system_row() -> Result<(), Box<dyn std::error::Error>> {
+  let dir = tempfile::tempdir()?;
+  let system = dir.path().join("system");
+  std::fs::create_dir_all(&system)?;
+  let unit_path = system.join("toolu-runner.service");
+  std::fs::write(
+    &unit_path,
+    include_str!("../../../../scripts/toolu-runner.service"),
+  )?;
+  let units = crate::machine_service::installed_units(
+    Supervisor::Systemd,
+    &dir.path().join("user"),
+    &dir.path().join("runner-home"),
+    Some(&system),
+  );
+  let unit = units.first().ok_or("the system unit is not inventoried")?;
+  assert!(unit.supervises_registration(Path::new("/etc/toolu-runner/config.toml")));
+  assert_eq!(
+    super::system_unit_row(unit),
+    Row::new(
+      Level::Warn,
+      "service",
+      format!(
+        "system unit {} (system scope; #203 manages system units)",
+        unit_path.display()
+      ),
+    )
+    .with_fix("systemctl status toolu-runner.service")
+  );
+  Ok(())
+}

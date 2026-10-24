@@ -388,7 +388,8 @@ async fn startup_overlap_runs_connect_live_log_and_setup_step_concurrently() -> 
     _dir,
   } = build_fixture().await?;
 
-  let job_handle = tokio::spawn(async move { poll_and_execute(&mut ctx).await });
+  let job_handle =
+    tokio::spawn(async move { poll_and_execute(&mut ctx, &CancellationToken::new()).await });
 
   wait_for_setup_call_while_ws_held(&recording, &ws_server).await?;
   release_and_wait_for_engine_step(&recording, &ws_server, &setup_gate, &ws_gate).await?;

@@ -14,6 +14,9 @@ pub mod capture;
 #[path = "tests/capture.rs"]
 mod capture_test;
 #[cfg(test)]
+#[path = "tests/drain.rs"]
+mod drain;
+#[cfg(test)]
 #[path = "tests/early_ack.rs"]
 mod early_ack;
 mod execution_loop;

@@ -173,7 +173,7 @@ fn help_stdout(subcommand: &str) -> Result<String, Box<dyn std::error::Error>> {
 #[test]
 fn config_flag_help_states_default_resolution_everywhere() -> Result<(), Box<dyn std::error::Error>>
 {
-  for subcommand in ["register", "run", "remove", "status", "install-service"] {
+  for subcommand in ["register", "run", "remove", "status"] {
     let stdout = help_stdout(subcommand)?;
     assert!(
       stdout.contains("inferred from the cwd git remote"),
@@ -184,6 +184,18 @@ fn config_flag_help_states_default_resolution_everywhere() -> Result<(), Box<dyn
       "{subcommand} --help does not state the sole-registration fallback: {stdout}"
     );
   }
+  // #208: `install-service` without --config installs the machine service
+  // (`run --all` for every registration) instead of resolving one.
+  let install = help_stdout("install-service")?;
+  assert!(
+    install.contains("Without --config: the one machine service for every registration"),
+    "install-service --help must say what no --config installs: {install}"
+  );
+  assert!(
+    install.contains("Install a unit for this one registration instead of the machine"),
+    "install-service --help must say what --config installs: {install}"
+  );
+
   // login/logout dropped --config entirely: the token store is pinned to
   // the runner home (TOOLU_RUNNER_HOME > ~/.toolu-runner), shared by all
   // per-repo registrations.

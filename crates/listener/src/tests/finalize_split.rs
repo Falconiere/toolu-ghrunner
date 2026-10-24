@@ -363,7 +363,7 @@ async fn finalize_split_completes_the_job_while_the_job_log_upload_is_held() -> 
   } = build_fixture("job-finalize-overlap", Some(gate.clone())).await?;
 
   let job = tokio::spawn(async move {
-    let result = poll_and_execute(&mut ctx).await;
+    let result = poll_and_execute(&mut ctx, &CancellationToken::new()).await;
     (result, ctx)
   });
   let (result, mut ctx) = tokio::time::timeout(Duration::from_secs(30), job)
@@ -448,9 +448,12 @@ async fn finalize_split_keeps_a_log_url_on_every_completed_step() -> TestResult<
     _dir,
   } = build_fixture("job-finalize-log-urls", None).await?;
 
-  let result = tokio::time::timeout(Duration::from_secs(30), poll_and_execute(&mut ctx))
-    .await
-    .map_err(|_elapsed| "poll_and_execute did not complete within the safety timeout")?;
+  let result = tokio::time::timeout(
+    Duration::from_secs(30),
+    poll_and_execute(&mut ctx, &CancellationToken::new()),
+  )
+  .await
+  .map_err(|_elapsed| "poll_and_execute did not complete within the safety timeout")?;
   assert_succeeded(&result)?;
   // Join the spawned job-log upload before the fixture drops, exactly as
   // `handler::GitHubListener::run` does.

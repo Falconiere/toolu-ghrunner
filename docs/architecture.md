@@ -86,9 +86,12 @@ toolu-ghrunner/                            workspace root
     │   ├── src/register_auth.rs           register's bearer: GitHub App (--app / saved App) or token chain; org runner-group names
     │   ├── src/app_auth.rs                GitHub App glue: load + mask, installation lookup, installation-token cache
     │   ├── src/run_cmd.rs                 the always-online run loop (re-mint after each job)
+    │   ├── src/supervisor.rs              run --all: one loop per registration, SIGHUP rescan (#208)
+    │   ├── src/supervisor_signal.rs       find + SIGHUP the run --all supervisor; remove's drain-and-wait
+    │   ├── src/machine_service.rs         the machine unit: install/migrate/uninstall + unit inventory
     │   ├── src/ephemeral.rs               end of an --ephemeral registration's one job (unregister + delete local state)
     │   ├── src/boot_cmd.rs                zero-config one-shot container mode (env-driven, no persisted state)
-    │   ├── src/service_cmd.rs             install-service (launchd / systemd user units)
+    │   ├── src/service_cmd.rs             install-service --config (per-registration units) + activation shell-outs
     │   ├── src/login_cmd.rs               login / logout (device flow)
     │   ├── src/status_cmd.rs              status (no network)
     │   ├── src/create_app_cmd.rs          create-app (GitHub App Manifest onboarding)
@@ -807,17 +810,80 @@ and the ephemeral cleanup still unregister with a personal token.
 
 ## Multi-repo concurrency
 
-Each registration owns its state dir, so the single-job `.lock` is per
-repo: two `run`s for *different* repos hold their locks independently
-and execute concurrently, while a second `run` for the *same* repo
-still exits 2 with the holder's PID. `run` / `status` / `remove` /
-`install-service` pick their registration via
-`config::registry::resolve_config_path`:
+Each registration owns its state dir — `runners/<owner>/<repo>/` for a
+repository, `orgs/<org>/` for an organization (#208; `orgs` is a reserved
+GitHub route, so no owner collides with it, and the two trees never nest) —
+so the single-job `.lock` is per registration: two `run`s for *different*
+registrations hold their locks independently and execute concurrently, while
+a second `run` for the *same* one still exits 2 with the holder's PID.
+`run` / `status` / `remove` / `install-service --config` pick their
+registration via `config::registry::resolve_config_path`:
 `--config` flag > the cwd-inferred `runners/<owner>/<repo>/config.toml`
-> the sole existing registration (the legacy `<home>/config.toml`
+> the sole existing registration (orgs and the legacy `<home>/config.toml`
 included) > an error listing every candidate.
 
-Two documented caveats for concurrent cross-repo runs:
+### One machine service: `run --all` (#208)
+
+The machine unit (`install-service` without `--config`: launchd
+`sh.toolu.runner`, systemd user `toolu-runner.service`) runs `run --all`.
+`supervisor.rs` installs the SIGHUP handler, takes `<home>/supervisor.lock`
+(a live holder → exit 2 naming it), then spawns one task per
+`list_registrations` entry. Each task takes the registration's `.lock` —
+retrying every 5 s while another process holds it (an older unit shutting
+down, a foreground `run`), so nothing is driven twice — clears its
+`.stopped`, and drives the same `RunLoop` `run --config` uses
+(`RunLoop::for_registration`): own backoff, re-mint and ephemeral rules.
+
+- **SIGHUP** (`register` and `remove` send it via `supervisor_signal::notify`,
+  which signals only a pid whose lock is held and whose process started
+  before the lock body was written): new registrations start; a live loop
+  whose `.pending_remove` exists or whose config vanished is **drained**;
+  an ended loop restarts. Running jobs are never touched.
+- **Drain** = `GitHubListener::with_drain`: honoured only by the idle poll
+  loop (`job_lifecycle/idle.rs`), so an idle registration ends its session
+  within a poll, while an acquired job always runs to completion. `RunLoop`
+  treats a drained `Ok(None)` as a cancellation, never as a job to re-mint
+  after.
+- **Fatal errors** (`drive` returns `Err`: re-mint rejected, session
+  conflict, corrupt config, ephemeral cleanup failure) end only that task,
+  logged in its `registration` span and recorded masked in
+  `<data_dir>/.stopped` (`config::stop_marker`), which `status` and `doctor`
+  show. The process exit code never reflects a registration: 0 after
+  SIGINT/SIGTERM (every loop cancelled and awaited), 2 only for supervisor
+  startup errors — so the machine unit has no `RestartPreventExitStatus`.
+- **Released locks clear their body.** `doctor` / `status` judge "running"
+  from the `.lock` body's pid without taking the lock; under `run --all`
+  that pid outlives one registration's loop, so `LockGuard` truncates the
+  body on drop and an empty body reads as stopped.
+- **Ephemeral** registrations run too: one job, unregister + delete, the
+  task ends, the service keeps running (a per-registration unit refuses
+  them because it would restart into a deleted registration).
+- **`remove`** of a supervised registration (no `--force`) writes
+  `.pending_remove`, SIGHUPs the supervisor and waits up to 30 s
+  (`TOOLU_RUNNER_REMOVE_WAIT_MS`) for the lock; a busy loop finishes its job
+  first and `remove` exits 2 naming that. After the last registration is
+  removed, the machine unit serving this home is deactivated and deleted.
+
+**Migration** (`machine_service::installed_units`): every toolu unit in the
+user unit dir (systemd `toolu-runner*.service`; launchd `io.toolu.runner*`,
+the static `io.toolu-runner`, `sh.toolu.runner`) is parsed back to what it
+runs (`config::service_unit::parse_*_target`). The default install
+deactivates and deletes — before activating the machine unit — each one at
+the machine unit's own path that is not the machine unit (the pre-#208
+legacy-root `toolu-runner.service`), each running a registration under the
+runner home, each whose config no longer exists (the static `install.sh`
+units' normal state), and any other `run --all` unit. A unit running a
+config outside the home is kept with a warning naming its removal command;
+the system-scope `/etc/systemd/system/toolu-runner.service` is only reported
+(#203 owns system units). A `run --all` unit serves its pinned
+`TOOLU_RUNNER_HOME` (else `~/.toolu-runner`): one for another home is kept,
+and the install refuses to overwrite one at the machine path. Deactivation is
+checked: a unit that cannot be stopped keeps its file and aborts the install.
+Stopping an old unit cancels a job it runs (said per unit), as the issue's
+"deactivate first" implies. `doctor` builds its `service` row from the same
+inventory and fails a registration two units supervise.
+
+Two documented caveats for concurrent registrations:
 
 - **Shared work root.** Job workspaces share the default `<home>/_work`
   root. Leases keep two jobs out of one workspace, and GC removes only
@@ -826,11 +892,11 @@ Two documented caveats for concurrent cross-repo runs:
   residual case is pre-#90 lease-less `<job_id>` dirs: they keep the old
   mtime rule, so any registration may prune them. Workspaces of a removed
   registration are never pruned by the others.
-- **`service_bind` collision.** `offline` / `accelerated` service modes
-  bind a local port; concurrent cross-repo runs sharing one
-  `service_bind` give the second run EADDRINUSE — use a distinct
-  `service_bind` per repo config. The default `forwarder` mode binds
-  nothing and is unaffected.
+- **`service_bind` is shared safely.** `offline` / `accelerated` jobs bind
+  their cache server on `format!("{bind}:0")` — an ephemeral port — so
+  concurrent registrations sharing one `service_bind` never collide
+  (`cache/tests/server_bind_test.rs`). The default `forwarder` mode binds
+  nothing.
 
 `remove` first unregisters the runner on GitHub
 (`wire::net::unregister_runner`: DELETE `…/actions/runners/{id}` by the
@@ -1179,8 +1245,8 @@ retries only that error, every 30 s for up to 8 attempts — upstream's
 SIGTERM during the wait returns `Ok(None)` (exit 0, like cancelling a
 long-poll). A conflict on all 8 attempts is final: `run` (default loop
 and `--once`) and `boot` exit **5**, upstream's
-`ReturnCode.SessionConflict`, and the generated systemd unit (plus the
-legacy `scripts/toolu-runner.service`) carries
+`ReturnCode.SessionConflict`, and the generated per-registration systemd
+unit (plus the legacy `scripts/toolu-runner.service`) carries
 `RestartPreventExitStatus=5`, matching upstream's service that stops on
 it. launchd `KeepAlive` cannot condition a restart on an exit code, so a
 LaunchAgent relaunches and each launch gets one fresh bounded window.
@@ -1203,13 +1269,16 @@ window in milliseconds.
 │   └── _PipelineMapping/
 │       ├── <owner>/<repo>/         # PipelineFolder.json + .lock (repository lease)
 │       └── _jobs/<job-id>.lock     # fresh-job lease ({"dataDir": …})
+├── supervisor.lock                 # held by `run --all` for its life (JSON body: its pid)
 ├── config.toml                     # legacy single-slot registration (read-only
-│                                   # fallback; org registrations still land here)
+│                                   # fallback; never written by default)
+├── orgs/<org>/                     # one dir per org registration (same contents as below)
 └── runners/<owner>/<repo>/         # one dir per repo registration = its data_dir
     ├── config.toml                 # registration + runtime config (0600)
     ├── credentials.json            # (0600)
-    ├── .lock                       # per-repo single-job lock file (0600, JSON body)
+    ├── .lock                       # per-registration single-job lock file (0600, JSON body; emptied on release)
     ├── .pending_remove             # marker written by `remove` while a run is in flight
+    ├── .stopped                    # why `run --all` stopped this registration (0600 JSON; cleared on restart)
     ├── node/<version>[-alpine]/    # downloaded Node.js runtimes (TOOLU_RUNNER_NODE_DIR preseed skips this)
     ├── cache/                      # content-addressed cache store (offline / accelerated services modes)
     └── _diag/                      # per-registration diagnostics
@@ -1217,7 +1286,8 @@ window in milliseconds.
         │   └── <ts>-<job-id>.jsonl # newest 50 kept, secret-masked
         ├── shadow/<job-id>.jsonl   # off-by-default shadow-mode records ([shadow] enabled)
         ├── captures/               # acquire-body captures (non-default `capture` feature only)
-        └── service.{out,err}.log   # launchd stdout/stderr (install-service on macOS)
+        └── service.{out,err}.log   # launchd stdout/stderr (install-service --config on macOS;
+                                    # the machine unit logs to <home>/_diag/)
 ```
 
 `.lock` body is JSON:

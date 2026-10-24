@@ -2,7 +2,8 @@
 //!
 //! Subcommands: `register` (live `generate-jitconfig`, persists real
 //! `jit_config` + `runner_id`), `run` (load config, hold `.lock`, run the
-//! listener until SIGINT/SIGTERM), `boot` (env-driven, zero-config
+//! listener until SIGINT/SIGTERM; `run --all` supervises every
+//! registration in one process), `boot` (env-driven, zero-config
 //! one-shot mode for the container image — no persisted state), `remove`
 //! (delete state or write `.pending_remove` mid-job), `status` (print
 //! config, no network), `check` (read-only connectivity / tools / proxy
@@ -41,12 +42,15 @@ mod doctor_report;
 mod doctor_service;
 mod ephemeral;
 mod login_cmd;
+mod machine_service;
 mod network_setup;
 mod register_auth;
 mod register_cmd;
 mod run_cmd;
 mod service_cmd;
 mod status_cmd;
+mod supervisor;
+mod supervisor_signal;
 
 use crate::cli::{Cli, Command, RemoveArgs, credentials_path_for};
 
@@ -86,10 +90,17 @@ async fn main() {
 async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
   match cli.command {
     Command::Register(args) => register_cmd::cmd_register(args).await,
+    Command::Run(args) if args.all => Box::pin(supervisor::cmd_run_all()).await,
     Command::Run(args) => Box::pin(run_cmd::cmd_run(args)).await,
     Command::Remove(args) => cmd_remove(args).await,
     Command::Status(args) => status_cmd::cmd_status(args),
-    Command::InstallService(args) => service_cmd::cmd_install_service(args),
+    // Unit files, `systemctl` / `launchctl`: all blocking, so off the runtime.
+    Command::InstallService(args) => tokio::task::spawn_blocking(move || {
+      service_cmd::cmd_install_service(&args).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| format!("install-service did not finish: {e}"))?
+    .map_err(Into::into),
     Command::Login(args) => login_cmd::cmd_login(args).await,
     Command::Logout(args) => login_cmd::cmd_logout(&args),
     Command::CreateApp(args) => {
@@ -181,7 +192,7 @@ async fn cmd_remove(args: RemoveArgs) -> Result<(), Box<dyn std::error::Error>> 
     println!("no registration found.");
     return Ok(());
   }
-  let cfg = load_reg_config(&config_path).map_err(|e| format!("{e}"))?;
+  let mut cfg = load_reg_config(&config_path).map_err(|e| format!("{e}"))?;
 
   let data_dir = resolve_data_dir(&cfg.runtime.data_dir).map_err(|e| format!("{e}"))?;
   let pending = data_dir.join(".pending_remove");
@@ -191,11 +202,12 @@ async fn cmd_remove(args: RemoveArgs) -> Result<(), Box<dyn std::error::Error>> 
   // already implements this crate's stale-lock rule (dead holder AND old
   // enough), and HOLDING it for the whole removal closes the window where a
   // `run` could start between the check and the multi-second DELETE.
-  let held = lockfile::acquire(&lock_path, &config_path);
-  let skip = skip_reason(&held, args.skip_unregister);
+  let home = registry::runner_home();
+  let mut held = lockfile::acquire(&lock_path, &config_path);
   if let Err(RunnerError::LockHeld { pid, .. }) = &held
     && !args.force
   {
+    let pid = *pid;
     // Best-effort, but not silent: the marker is more useful with the
     // holder's lock body in it, and an unreadable lock is itself worth
     // surfacing (permissions, a concurrent unlink).
@@ -204,12 +216,19 @@ async fn cmd_remove(args: RemoveArgs) -> Result<(), Box<dyn std::error::Error>> 
       String::new()
     });
     write_pending_marker(&pending, &body)?;
-    return Err(format!(
-      "a run is in flight (pid {pid}); wrote {} marker. Re-run with --force to remove anyway, or wait for the current job to finish.",
-      pending.display()
-    )
-    .into());
+    // Under `run --all` the marker drains just this registration's loop.
+    let wait = crate::config::remove_wait();
+    let guard = drained_lock(&home, pid, &lock_path, &config_path, &pending, wait).await?;
+    // The loop may have changed the registration while we waited: an
+    // ephemeral one that finished its job removed itself, a re-mint
+    // persisted a new runner id. Act on what is there now.
+    if !config_path.exists() {
+      return already_removed(&home, &cfg.runner_name, &lock_path, &pending, guard);
+    }
+    cfg = load_reg_config(&config_path).map_err(|e| format!("{e}"))?;
+    held = Ok(guard);
   }
+  let skip = skip_reason(&held, args.skip_unregister);
   let guard = held.ok();
 
   // Unregister on GitHub BEFORE touching local state: the persisted
@@ -222,6 +241,7 @@ async fn cmd_remove(args: RemoveArgs) -> Result<(), Box<dyn std::error::Error>> 
   let keep_lock = guard.is_none();
   delete_registration_state(&config_path, &creds_path, &pending, &lock_path, keep_lock)?;
   drop(guard);
+  let service = after_removal(&home, keep_lock)?;
 
   let gh = if unregistered {
     "unregistered on GitHub"
@@ -237,7 +257,92 @@ async fn cmd_remove(args: RemoveArgs) -> Result<(), Box<dyn std::error::Error>> 
     "removed runner '{}' ({gh}; config, credentials{lock_note} removed, _diag kept).",
     cfg.runner_name
   );
+  if let Some(unit) = service {
+    println!(
+      "removed the toolu-runner service ({}): no registrations remain",
+      unit.display()
+    );
+  }
   Ok(())
+}
+
+/// An ephemeral registration finished its job and removed itself while
+/// `remove` waited: drop the lock and marker this removal created, and
+/// uninstall the machine service if it was the last registration.
+fn already_removed(
+  home: &Path,
+  name: &str,
+  lock_path: &Path,
+  pending: &Path,
+  guard: lockfile::LockGuard,
+) -> Result<(), Box<dyn std::error::Error>> {
+  remove_best_effort(pending, "pending-remove marker");
+  remove_best_effort(lock_path, "job lock");
+  drop(guard);
+  println!("runner '{name}' already removed itself (its one job ended).");
+  if let Some(unit) = after_removal(home, false)? {
+    println!(
+      "removed the toolu-runner service ({}): no registrations remain",
+      unit.display()
+    );
+  }
+  Ok(())
+}
+
+/// The registration's lock once the `run --all` supervisor holding it
+/// (`pid`) has drained its loop; an error naming what to do when the holder
+/// is not the supervisor, or a job keeps the loop busy past `wait`.
+async fn drained_lock(
+  home: &Path,
+  pid: u32,
+  lock_path: &Path,
+  config_path: &Path,
+  pending: &Path,
+  wait: Duration,
+) -> Result<lockfile::LockGuard, Box<dyn std::error::Error>> {
+  match supervisor_signal::drain_and_wait(home, pid, lock_path, config_path, wait).await {
+    supervisor_signal::Drain::Released(guard) => Ok(guard),
+    supervisor_signal::Drain::StillBusy(pid) => Err(
+      format!(
+        "the toolu-runner service (pid {pid}) is running a job for this runner and stops it \
+         when the job ends ({} marker written). Re-run `toolu-runner remove` then, or pass \
+         --force to remove anyway.",
+        pending.display()
+      )
+      .into(),
+    ),
+    supervisor_signal::Drain::NotSupervised => Err(
+      format!(
+        "a run is in flight (pid {pid}); wrote {} marker. Re-run with --force to remove anyway, \
+         or wait for the current job to finish.",
+        pending.display()
+      )
+      .into(),
+    ),
+  }
+}
+
+/// After the state is gone: the last registration's removal also
+/// deactivates and deletes the machine unit (#208); a `--force` removal
+/// (a job still running) never does, and instead has the supervisor rescan
+/// so it drains the vanished registration.
+fn after_removal(
+  home: &Path,
+  keep_lock: bool,
+) -> Result<Option<PathBuf>, Box<dyn std::error::Error>> {
+  if keep_lock {
+    if let Err(e) = supervisor_signal::notify(home) {
+      tracing::warn!(error = %e, "could not notify the toolu-runner service");
+    }
+    return Ok(None);
+  }
+  machine_service::uninstall_if_last(home).map_err(|e| {
+    format!(
+      "the registration was removed, but removing the toolu-runner service failed: {e}; run \
+       `toolu-runner install-service --remove`"
+    )
+    .into()
+  })
 }
 
 /// Why `remove` will not call GitHub, if it will not.
@@ -445,6 +550,10 @@ fn delete_registration_state(
   std::fs::remove_file(config_path)?;
   remove_best_effort(creds_path, "credentials");
   remove_best_effort(pending, "pending-remove marker");
+  remove_best_effort(
+    &pending.with_file_name(::config::stop_marker::FILE_NAME),
+    "stop record",
+  );
   if !keep_lock {
     remove_best_effort(lock_path, "job lock");
   }

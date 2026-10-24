@@ -10,7 +10,7 @@ use std::os::unix::fs::PermissionsExt as _;
 use crate::check_servers::{OK, Recorder, closed_port, run};
 use crate::doctor_env::{
   REREGISTER, TEST_BEARER, block, doctor_cmd, fix, has_probe, healthy_reply, implied_summary,
-  install_fix, jit_ok, last_line, network_rows, report, row, section, skip_endpoint,
+  jit_ok, last_line, network_rows, report, row, section, service_install_fix, skip_endpoint,
   write_lock_body, write_registration, write_registration_with,
 };
 
@@ -272,7 +272,7 @@ fn healthy() -> TestResult {
         &format!("active (pid {}, since {since})", std::process::id())
       ),
       row("WARN", "service", "not installed"),
-      install_fix(&config),
+      service_install_fix(),
       row("INFO", "last job", "no jobs yet"),
     ],
     "{stdout}"

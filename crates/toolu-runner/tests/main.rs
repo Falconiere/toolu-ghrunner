@@ -28,6 +28,8 @@ mod github_app_fixtures;
 mod harness;
 #[path = "../../network/tests/helpers/proxy_fixtures.rs"]
 mod proxy_fixtures;
+#[path = "helpers/supervisor_fixtures.rs"]
+mod supervisor_fixtures;
 #[path = "../../network/tests/helpers/tls_fixtures.rs"]
 mod tls_fixtures;
 
@@ -101,6 +103,7 @@ mod listener_smoke_test;
 mod live_e2e;
 mod live_login_e2e;
 mod log_upload_mode_test;
+mod machine_service_test;
 mod net_test;
 mod network_cli_test;
 mod network_client_inventory_test;
@@ -120,4 +123,7 @@ mod secret_masker_real_test;
 mod session_conflict_e2e_test;
 mod shadow_mode_test;
 mod storage_layout_test;
+mod supervisor_fatal_test;
+mod supervisor_remove_test;
+mod supervisor_test;
 mod workspace_gc_test;

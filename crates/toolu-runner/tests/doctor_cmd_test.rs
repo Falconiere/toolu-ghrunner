@@ -20,8 +20,8 @@ use crate::check_servers::{Recorder, closed_port, run};
 use crate::doctor_env::{
   ENV_REJECTED_FIX, REREGISTER, STORED_BEARER, TEST_BEARER, USER_401, VERSION, block, dead_pid,
   doctor_cmd, fix, heading, healthy_reply, implied_summary, install_fix, jit_ok, last_line, report,
-  row, section, snapshot, store_login, user_authorization, user_peer, write_lock_body,
-  write_registration, write_registration_with,
+  row, section, service_install_fix, snapshot, store_login, user_authorization, user_peer,
+  write_lock_body, write_registration, write_registration_with,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -234,7 +234,7 @@ fn run_state() -> TestResult {
       row("FAIL", "run", "not running"),
       install_fix(&config),
       row("WARN", "service", "not installed"),
-      install_fix(&config),
+      service_install_fix(),
       row(
         "WARN",
         "pending",

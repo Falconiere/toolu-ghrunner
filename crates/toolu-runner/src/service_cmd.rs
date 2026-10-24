@@ -1,7 +1,9 @@
 //! `install-service` subcommand: generate + activate a supervisor unit.
 //!
-//! Writes a launchd `LaunchAgent` (macOS) or systemd user unit (Linux) that
-//! wraps `run --config <path>` so the runner survives crashes and reboots.
+//! Without `--config` it installs the machine unit that runs `run --all`
+//! ([`crate::machine_service`], #208). With `--config` it writes a launchd
+//! `LaunchAgent` (macOS) or systemd user unit (Linux) that wraps
+//! `run --config <path>` so one registration survives crashes and reboots.
 //! The unit text comes from `config::service_unit`; this module owns config
 //! resolution, service identity, file destinations, and the platform
 //! activation shell-outs (`launchctl` / `systemctl --user`). No network, no
@@ -30,6 +32,7 @@ pub(crate) enum Supervisor {
 
 /// A registration's supervisor identity: the launchd `Label` (also the
 /// systemd `Description` suffix) and the systemd unit file basename.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ServiceId {
   /// launchd `Label` + plist basename stem; systemd `Description` suffix.
   pub(crate) label: String,
@@ -37,14 +40,17 @@ pub(crate) struct ServiceId {
   pub(crate) unit: String,
 }
 
-/// `install-service`: derive the unit for the resolved registration, then
-/// print / write / activate / remove it per the flags. Resolves the config
-/// exactly like `run` (`--config` > cwd-inferred repo > sole registration).
+/// `install-service`: without `--config`, the machine unit
+/// ([`crate::machine_service::cmd_install_machine`]); with it, derive the
+/// unit for that registration, then print / write / activate / remove it per
+/// the flags.
 pub(crate) fn cmd_install_service(
-  args: InstallServiceArgs,
+  args: &InstallServiceArgs,
 ) -> Result<(), Box<dyn std::error::Error>> {
+  let Some(config_path) = args.config.clone() else {
+    return crate::machine_service::cmd_install_machine(args);
+  };
   let supervisor = current_supervisor()?;
-  let config_path = crate::resolve_config(args.config)?;
   let id = service_id(&config_path);
 
   // `--print` writes nothing and needs no HOME, so it renders to stdout and
@@ -120,9 +126,24 @@ pub(crate) fn install_service_core(
     });
   }
 
-  let dest = dest_path(supervisor, &id, &home_dir()?);
+  let home = home_dir()?;
+  let dest = dest_path(supervisor, &id, &home);
   if remove {
-    return remove_service(supervisor, &dest, &id);
+    let outcome = remove_service(supervisor, &dest, &id)?;
+    // Before #208 a legacy-root registration's unit was `toolu-runner.service`,
+    // now the machine unit's name: remove that file too when it runs this
+    // registration (never when it is the machine unit).
+    if let Some(old) = pre_208_legacy_unit(supervisor, config_path, &id, &home) {
+      let old_id = ServiceId {
+        label: id.label.clone(),
+        unit: config::service_unit::MACHINE_UNIT.to_owned(),
+      };
+      let removed = remove_service(supervisor, &old, &old_id)?;
+      if removed.action == ServiceAction::Removed {
+        return Ok(removed);
+      }
+    }
+    return Ok(outcome);
   }
 
   let unit_text = render_unit(supervisor, config_path, &id)?;
@@ -156,22 +177,64 @@ pub(crate) fn current_supervisor() -> Result<Supervisor, RunnerError> {
   }
 }
 
-/// Derive the service identity from a registration's config path. A per-repo
-/// config (`.../runners/<owner>/<repo>/config.toml`) yields
+/// Derive the per-registration service identity from a config path. A
+/// per-repo config (`.../runners/<owner>/<repo>/config.toml`) yields
 /// `io.toolu.runner.<owner>.<repo>` / `toolu-runner-<owner>-<repo>.service`;
-/// any other layout (the legacy `<home>/config.toml`) falls back to
-/// `io.toolu.runner` / `toolu-runner.service`.
+/// an org config (`.../orgs/<org>/config.toml`) yields
+/// `io.toolu.runner.orgs.<org>` / `toolu-runner-orgs-<org>.service`; any
+/// other layout (the legacy `<home>/config.toml`) falls back to
+/// `io.toolu.runner` / `toolu-runner-legacy.service` — `toolu-runner.service`
+/// is the machine unit's name since #208.
 pub(crate) fn service_id(config_path: &Path) -> ServiceId {
-  match owner_repo(config_path) {
-    Some((owner, repo)) => ServiceId {
+  if let Some((owner, repo)) = owner_repo(config_path) {
+    return ServiceId {
       label: format!("io.toolu.runner.{owner}.{repo}"),
       unit: format!("toolu-runner-{owner}-{repo}.service"),
-    },
-    None => ServiceId {
-      label: "io.toolu.runner".to_owned(),
-      unit: "toolu-runner.service".to_owned(),
-    },
+    };
   }
+  if let Some(org) = org_of(config_path) {
+    return ServiceId {
+      label: format!("io.toolu.runner.orgs.{org}"),
+      unit: format!("toolu-runner-orgs-{org}.service"),
+    };
+  }
+  ServiceId {
+    label: "io.toolu.runner".to_owned(),
+    unit: "toolu-runner-legacy.service".to_owned(),
+  }
+}
+
+/// The org of a `.../orgs/<org>/config.toml` path, or `None`.
+pub(crate) fn org_of(config_path: &Path) -> Option<String> {
+  let org_dir = config_path.parent()?;
+  if org_dir.parent()?.file_name()?.to_str()? != "orgs" {
+    return None;
+  }
+  Some(org_dir.file_name()?.to_str()?.to_owned())
+}
+
+/// A pre-#208 systemd unit for a legacy-root registration: the user's
+/// `toolu-runner.service` when it runs `run --config <config_path>`.
+fn pre_208_legacy_unit(
+  supervisor: Supervisor,
+  config_path: &Path,
+  id: &ServiceId,
+  home: &Path,
+) -> Option<PathBuf> {
+  if supervisor != Supervisor::Systemd || id.unit != "toolu-runner-legacy.service" {
+    return None;
+  }
+  let old = home
+    .join(".config/systemd/user")
+    .join(config::service_unit::MACHINE_UNIT);
+  let text = std::fs::read_to_string(&old).ok()?;
+  let config::service_unit::Supervises::Config(path) =
+    config::service_unit::parse_systemd_target(&text)?
+  else {
+    return None;
+  };
+  let same = path == config_path || path.canonicalize().ok() == config_path.canonicalize().ok();
+  same.then_some(old)
 }
 
 /// Extract `(owner, repo)` from a `.../runners/<owner>/<repo>/config.toml`
@@ -254,7 +317,7 @@ fn render_unit(
 }
 
 /// Write the unit text to `dest`, creating parent dirs (0644 content).
-fn write_unit(dest: &Path, unit: &str) -> Result<(), std::io::Error> {
+pub(crate) fn write_unit(dest: &Path, unit: &str) -> Result<(), std::io::Error> {
   if let Some(parent) = dest.parent() {
     std::fs::create_dir_all(parent)?;
   }
@@ -266,7 +329,7 @@ fn write_unit(dest: &Path, unit: &str) -> Result<(), std::io::Error> {
 /// caller reports nothing-to-do). Deletion failure IS an error; deactivation
 /// failure (unit never loaded) is not. Never prints — printing is the caller's
 /// job.
-fn remove_service(
+pub(crate) fn remove_service(
   supervisor: Supervisor,
   dest: &Path,
   id: &ServiceId,
@@ -298,7 +361,11 @@ fn remove_service(
 
 /// Activate the just-written unit. A non-zero manager exit is an error
 /// naming the command and its stderr (never swallowed).
-fn activate(supervisor: Supervisor, dest: &Path, id: &ServiceId) -> Result<(), RunnerError> {
+pub(crate) fn activate(
+  supervisor: Supervisor,
+  dest: &Path,
+  id: &ServiceId,
+) -> Result<(), RunnerError> {
   match supervisor {
     Supervisor::Launchd => activate_launchd(dest),
     Supervisor::Systemd => activate_systemd(&id.unit),
@@ -326,13 +393,22 @@ fn activate_systemd(unit: &str) -> Result<(), RunnerError> {
 /// Best-effort deactivation for `--remove`: a failure here (unit never
 /// loaded, unknown to the manager) is reported, not fatal — deleting the
 /// file is what removal guarantees.
-fn deactivate(supervisor: Supervisor, dest: &Path, id: &ServiceId) {
-  let result = match supervisor {
+pub(crate) fn deactivate(supervisor: Supervisor, dest: &Path, id: &ServiceId) {
+  if let Err(e) = deactivate_checked(supervisor, dest, id) {
+    eprintln!("warning: deactivation failed (unit may not have been loaded): {e}");
+  }
+}
+
+/// Deactivate the unit, returning the supervisor's failure — for callers
+/// that must not delete a unit file whose process may still run.
+pub(crate) fn deactivate_checked(
+  supervisor: Supervisor,
+  dest: &Path,
+  id: &ServiceId,
+) -> Result<(), RunnerError> {
+  match supervisor {
     Supervisor::Launchd => deactivate_launchd(dest, &id.label),
     Supervisor::Systemd => deactivate_systemd(&id.unit),
-  };
-  if let Err(e) = result {
-    eprintln!("warning: deactivation failed (unit may not have been loaded): {e}");
   }
 }
 

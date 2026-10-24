@@ -302,7 +302,7 @@ async fn run_scenario(scenario: Scenario) -> TestResult<TripOutcome> {
   let mut ctx = make_ctx(server_uri, make_config(&dir), watchdog)?;
 
   let start = Instant::now();
-  let result = poll_and_execute(&mut ctx).await;
+  let result = poll_and_execute(&mut ctx, &CancellationToken::new()).await;
   let elapsed = start.elapsed();
 
   let requests = server

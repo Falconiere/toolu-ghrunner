@@ -114,8 +114,9 @@ without downloading anything. `--service` also installs
 and starts the static single-slot unit shipped in the tarball, but only
 when the binary lands at `/usr/local/bin/toolu-runner` — that path is
 hardcoded in those units, so anywhere else the unit is skipped with a
-warning; use `toolu-runner install-service` after registering instead
-(it writes a unit for the binary's real path).
+warning; use `toolu-runner install-service` instead (it writes the machine
+service for the binary's real path, and replaces those static units when
+they run nothing — see *Running as a service*).
 
 Prebuilt for **macOS** (arm64, x86_64) and **Linux** (x86_64, arm64). The
 Linux binaries are built on Debian 12 (glibc 2.36), so any Debian 12 / Ubuntu
@@ -147,9 +148,10 @@ config with your stored `login` token (or `TOOLU_RUNNER_TOKEN`, or — for a
 `register --app` registration — a GitHub App installation token) and keeps
 listening, so one
 invocation survives many jobs, idle gaps, and re-dispatches — no manual
-re-register. Pass `--once` to run a single job and exit. To keep it
-running across reboots and crashes, `toolu-runner install-service` writes
-a launchd (macOS) / systemd (Linux) user unit that supervises it — see
+re-register. Pass `--once` to run a single job and exit. To keep every
+registration running across reboots and crashes, `toolu-runner
+install-service` installs **one service for the machine** — a launchd
+(macOS) / systemd (Linux) user unit running `toolu-runner run --all` — see
 *Running as a service* under [Configuration](#configuration).
 
 For autoscalers and throwaway hosts, `register --ephemeral` records a
@@ -161,20 +163,25 @@ same call `remove` uses; without one, toolu relies on GitHub removing a used
 JIT runner itself and says the removal was not verified. Shutting down before
 a job keeps the registration for the next `run`. If the unregister call fails,
 the registration is kept and `run` exits 2 — retry with `toolu-runner remove`.
-`install-service` refuses an ephemeral registration (its unit restarts
-forever).
+The machine service runs ephemeral registrations too: after the one job the
+registration deletes itself and the service keeps running the others.
+`install-service --config` (a unit for one registration) refuses one, since
+that unit would restart forever.
 
 | Mode | Jobs per process | After the job |
 |---|---|---|
 | `run` | unlimited | re-mint a fresh JIT config, keep polling |
 | `run --once` | 1 | exit; the spent registration stays on disk |
 | `run` on a `register --ephemeral` registration | 1 | unregister + delete the local registration |
+| `run --all` (the machine service) | unlimited, one loop per registration | each registration as above; a fatal error stops only its loop |
 | `boot` (container image) | 1 | exit; nothing was persisted |
 
 Each registration gets its own directory —
-`~/.toolu-runner/runners/<owner>/<repo>/` (config, credentials, lock,
-logs) — so one machine holds runners for many repos, and jobs for
-*different* repos run **concurrently**: the single-job lock is per repo.
+`~/.toolu-runner/runners/<owner>/<repo>/` for a repository,
+`~/.toolu-runner/orgs/<org>/` for an organization (config, credentials,
+lock, logs) — so one machine holds runners for many repos and several orgs,
+and jobs for *different* registrations run **concurrently**: the single-job
+lock is per registration.
 
 ### Headless / GHES
 
@@ -393,8 +400,9 @@ overwrite a saved App unless you pass `--force`.
 | `--runner-group <NAME\|ID>` | `register` | Runner group for org registrations: a name (resolved through the org's runner-group list, recorded by id) or a numeric id. Repository runners only have the Default group — a name there warns and uses it. |
 | `--replace` | `register` | Overwrite an existing registration with the same name. |
 | `--once` | `run` | Run a single job, then exit. The default is to stay online — after each job `run` re-mints a fresh JIT config (with `TOOLU_RUNNER_TOKEN` / the stored `login` token, or the registration's GitHub App) and keeps listening. |
-| `--print` / `--no-activate` / `--remove` | `install-service` | Print the unit without writing it (conflicts with `--remove`) / write it but don't activate / deactivate and delete it (idempotent). |
-| `--force` | `remove` | Remove even while a `run` holds the job lock. Local state goes, but the lock file is kept and the GitHub unregister is skipped (that job is still reporting against the registration), so remove the runner on GitHub by hand afterwards. It does not cancel the job. Without it, a held lock only writes a `.pending_remove` marker and `remove` exits 2. |
+| `--all` | `run` | Supervise every registration under the runner home in one process (what the machine service runs); SIGHUP rescans. Conflicts with `--config` / `--once`. |
+| `--print` / `--no-activate` / `--remove` | `install-service` | Print the unit without writing it (conflicts with `--remove`) / write it but don't activate / deactivate and delete it (idempotent). Without `--config` they act on the machine service. |
+| `--force` | `remove` | Remove even while a `run` holds the job lock. Local state goes, but the lock file is kept and the GitHub unregister is skipped (that job is still reporting against the registration), so remove the runner on GitHub by hand afterwards. It does not cancel the job. Without it, a held lock writes a `.pending_remove` marker: when the holder is the machine service, `remove` asks it to stop just that runner and waits up to 30 s for an idle one; otherwise (or with a job in flight) it exits 2. |
 | `--skip-unregister` | `remove` | Delete local state without calling GitHub (revoked token, deleted repo, no network); the runner stays registered there. Without it, `remove` with no token, or with a failed unregister, aborts before deleting anything. |
 | `--url <URL>` | `check` | Probe this GitHub host's endpoints instead of the resolved registration's (conflicts with `--config`). |
 | `--timeout <SECS>` | `check`, `doctor` | Per-probe bound, 1–300 seconds (default 10). |
@@ -408,7 +416,8 @@ overwrite a saved App unless you pass `--force`.
 `register`, `run`, `remove`, `status`, `install-service`, and `check`
 also take `--config <FILE>`; when omitted, the config resolves to the cwd-inferred
 `runners/<owner>/<repo>/config.toml` under the runner home, else the
-sole existing registration. `doctor --config` narrows its report to that one
+sole existing registration (`install-service` without it installs the
+machine service instead). `doctor --config` narrows its report to that one
 registration; without it, `doctor` checks them all. Every command documents itself in full:
 `toolu-runner <command> --help`.
 
@@ -440,11 +449,22 @@ One process, one job per registration. The single-job guarantee is an
 `~/.toolu-runner/runners/<owner>/<repo>/`) whose body carries the
 holder's PID — a second `run` for the same repo reads it, prints the
 PID, and exits `2`. Stale locks (dead PID, mtime > 5 min) are reclaimed
-automatically. Different repos lock independently, so cross-repo jobs
-run concurrently on one machine. (In `offline` / `accelerated` service
-modes, give each repo's config a distinct `service_bind` — concurrent
-runs would otherwise collide on the port; the default `forwarder` mode
-binds nothing.)
+automatically. Different registrations lock independently, so their jobs
+run concurrently on one machine. In `offline` / `accelerated` service
+modes each job's local cache server binds `service_bind` on an ephemeral
+port, so concurrent registrations sharing one `service_bind` never collide.
+
+`run --all` (what the machine service runs) drives one such loop per
+registration in a single process, each holding its own `.lock`. It holds
+`<home>/supervisor.lock` (a second `run --all` on the same home exits `2`),
+and on `SIGHUP` rescans: a new registration starts polling, one whose removal
+is pending is drained (it stops while idle; a running job always finishes
+first), and a stopped one restarts. A fatal error — a re-mint GitHub
+rejects, a session conflict, a corrupt config — stops only that loop and is
+recorded in its `.stopped` file, which `status` and `doctor` show. A
+registration another process still holds (an older unit shutting down, a
+foreground `run`) is retried every 5 s, never driven twice. The process
+exits `0` on `SIGINT`/`SIGTERM` and never with a registration's exit code.
 
 `SIGINT`/`SIGTERM` are bridged to a `CancellationToken` that the poll
 loop, the renewal task, and the in-flight job all observe. Nothing is
@@ -452,8 +472,9 @@ left orphaned.
 
 A session conflict (GitHub answers `409` while another live session holds the
 registration) is retried every 30 s, up to 8 attempts. If it outlasts that,
-`run` exits `5`, with or without `--once`, and the systemd unit from
-`install-service` does not restart on it. `TOOLU_RUNNER_SESSION_CONFLICT_INTERVAL_MS`
+`run` exits `5`, with or without `--once`, and a per-registration systemd
+unit (`install-service --config`) does not restart on it; under `run --all` it
+stops only that registration's loop. `TOOLU_RUNNER_SESSION_CONFLICT_INTERVAL_MS`
 overrides the 30 s wait for `run` and `boot`.
 
 ### What runs
@@ -896,20 +917,24 @@ hand-edit `jit_config` or `auth_token` — re-run `register --replace`.
 ├── token-<host>.json           # `login` token (0600, default store; keyring opt-in) — shared by all repos
 ├── _work/                      # job workspaces (shared default): <repo>/<repo>/ stable, <job-id>/ fresh
 │   └── _PipelineMapping/       # <owner>/<repo>/PipelineFolder.json + workspace leases
-├── config.toml                 # legacy single-slot registration; org registrations land here
+├── supervisor.lock             # held by `run --all` (JSON: its pid) — `register`/`remove` signal it
+├── config.toml                 # legacy single-slot registration (still loaded; never written by default)
+├── orgs/<org>/                 # one directory per organization registration (same files as below)
 └── runners/<owner>/<repo>/     # one directory per repo registration
     ├── config.toml             # registration + runtime config (0600)
     ├── credentials.json        # (0600)
-    ├── .lock                   # per-repo single-job lock (JSON: pid, started_at, config_path)
+    ├── .lock                   # per-registration single-job lock (JSON: pid, started_at, config_path; emptied on release)
     ├── .pending_remove         # written by `remove` while a run is in flight
+    ├── .stopped                # why `run --all` stopped this registration (cleared when it restarts)
     └── _diag/
         ├── runner.log          # JSON, secret-masked, daily-rotated
         └── jobs/               # per-job JSONL journals (newest 50)
 ```
 
 `remove` deletes a registration's `config.toml`, `credentials.json`,
-`.lock`, and `.pending_remove`; `_diag/` is kept, so job history
-survives unregistration.
+`.lock`, `.pending_remove` and `.stopped`; `_diag/` is kept, so job history
+survives unregistration. Removing the last registration also deactivates and
+deletes the machine service.
 
 </details>
 
@@ -952,25 +977,52 @@ implemented** — use the CLI flags. Job steps never inherit the runner's own
 <summary>Running as a service</summary>
 
 `toolu-runner` never daemonizes itself — `run` blocks in the foreground and
-loops. To keep a runner up across crashes and reboots, `install-service`
-generates and activates a per-registration supervisor unit that wraps
-`run --config <path>`. The config resolves exactly like `run` (the
-registration dir names the unit), so one machine can supervise a runner per
-repo. The supervisor owns process lifetime; the always-online loop owns
-registration lifetime.
+loops. To keep runners up across crashes and reboots, `install-service`
+installs **one service for the machine** that runs `toolu-runner run --all`,
+which supervises every registration under the runner home. The supervisor
+owns process lifetime; each registration's always-online loop owns that
+registration's lifetime.
 
 ```sh
-toolu-runner install-service                # write + activate the unit
-toolu-runner install-service --print        # print the unit, write nothing
+toolu-runner install-service                # migrate older units, write + activate the machine service
+toolu-runner install-service --print        # print the unit (stdout) and what it would replace (stderr)
 toolu-runner install-service --no-activate   # write it, print the load command
-toolu-runner install-service --remove       # deactivate + delete (idempotent)
+toolu-runner install-service --remove       # deactivate + delete the machine service (idempotent)
+toolu-runner install-service --config <path> # a unit for that one registration instead
 ```
 
-**launchd (macOS)** — a user `LaunchAgent` labelled
-`io.toolu.runner.<owner>.<repo>` at `~/Library/LaunchAgents/`, with
-`KeepAlive` + `RunAtLoad`. Activated with `launchctl bootstrap gui/<uid>`
-(falling back to legacy `launchctl load -w`); stdout/stderr go to
-`<data_dir>/_diag/service.{out,err}.log`.
+Adding a registration needs no restart: `register` sends the running service
+`SIGHUP` and the new runner starts polling ("the toolu-runner service (pid N)
+picks it up now"); other registrations' jobs are not disturbed. Reload by
+hand with `systemctl --user reload toolu-runner` (systemd) or
+`kill -HUP <pid>` — e.g. after fixing a registration `doctor` reports as
+*stopped by the service*. `remove` stops only that registration (an idle one
+within seconds; a running job finishes first) and, for the last registration,
+deactivates and deletes the service.
+
+**Migration.** `install-service` first finds older toolu units for this user:
+per-registration units, the pre-machine-service legacy-root unit (systemd
+`toolu-runner.service`, now the machine service's name), and the static
+`install.sh --service` agent (`io.toolu-runner`). It deactivates and deletes
+every one that runs a registration of this runner home, or whose config no
+longer exists — before starting the machine service, so no registration is
+ever driven twice (the per-registration `.lock` guarantees that anyway).
+Stopping an old unit stops its runner like `systemctl stop` does: **a job it
+is running is cancelled** (each one is named as it stops), so migrate
+between jobs. A unit that cannot be deactivated (no user bus over SSH, say)
+is kept and the install stops, naming the command that removes it. One user
+runs one machine service: `install-service` refuses to overwrite one that
+serves another runner home. A
+unit running a config **outside** the runner home is left running, with a
+warning naming the command that removes it. The static systemd unit from
+`install.sh --service` lives in `/etc/systemd/system/` (system scope, root
+only) and is only reported. `doctor` fails a registration two units
+supervise.
+
+**launchd (macOS)** — a user `LaunchAgent` labelled `sh.toolu.runner` at
+`~/Library/LaunchAgents/`, with `KeepAlive` + `RunAtLoad`. Activated with
+`launchctl bootstrap gui/<uid>` (falling back to legacy `launchctl load -w`);
+stdout/stderr go to `<home>/_diag/service.{out,err}.log`.
 
 The plist carries an `EnvironmentVariables` `PATH` — **the `PATH` of the shell
 that ran `install-service`**, plus `/opt/homebrew/{bin,sbin}`,
@@ -979,18 +1031,26 @@ the runner process's environment, and launchd otherwise hands an agent only
 `/usr/bin:/bin:/usr/sbin:/sbin` — without this a workflow that runs fine from
 your terminal fails under the supervisor with `command not found` for anything
 Homebrew installed. It is baked in at install time, so **re-run
-`install-service` after changing your `PATH`** (the command is idempotent —
-it rewrites and reloads the unit). `install-service --print` shows the exact
-value that will be used. The systemd unit is unchanged: the user manager
-already exports a usable `PATH`.
+`install-service` after changing your `PATH`** (the command rewrites the
+unit). `install-service --print` shows the exact value that will be used. The
+systemd unit does not set it: the user manager already exports a usable
+`PATH`. A customised `TOOLU_RUNNER_HOME` is pinned in both units' environment.
 
-**systemd (Linux)** — a user unit `toolu-runner-<owner>-<repo>.service` at
-`~/.config/systemd/user/`, with `Restart=always` + `RestartSec=5` (and
-`RestartPreventExitStatus=5`, so a session conflict that outlasted its retry
-stays down). Activated with `systemctl --user daemon-reload && systemctl
---user enable --now`; logs land in journald (`journalctl --user -u toolu-runner-<owner>-<repo>`). A
-headless host needs `loginctl enable-linger <user>` so the unit runs without
-an active login session.
+**systemd (Linux)** — the user unit `toolu-runner.service` at
+`~/.config/systemd/user/`, with `Restart=always` + `RestartSec=5` and
+`ExecReload` sending `SIGHUP`. Activated with `systemctl --user daemon-reload
+&& systemctl --user enable --now`; logs land in journald (`journalctl --user
+-u toolu-runner`). A headless host needs `loginctl enable-linger <user>` so the
+unit runs without an active login session.
+
+**One registration** — `install-service --config <path>` keeps the
+per-registration unit for scripted setups: `io.toolu.runner.<owner>.<repo>` /
+`toolu-runner-<owner>-<repo>.service` for a repo,
+`io.toolu.runner.orgs.<org>` / `toolu-runner-orgs-<org>.service` for an org,
+`io.toolu.runner` / `toolu-runner-legacy.service` for the legacy root, each
+running `run --config <path>` (systemd adds `RestartPreventExitStatus=5`, so a
+session conflict that outlasted its retry stays down). Don't combine it with
+the machine service for the same registration.
 
 Only launchd and systemd are supported — any other platform errors, naming
 those two as the targets.
@@ -998,8 +1058,8 @@ those two as the targets.
 The release tarball also ships **static single-slot** units under `scripts/`
 (`io.toolu-runner.plist`, `toolu-runner.service`); `install.sh --service`
 installs and starts them (systemd lands in `/etc/systemd/system/` and needs
-root). Those predate the per-repo layout — reach for `install-service` on any
-new host.
+root). Those predate the per-registration layout — use `install-service` on
+any new host.
 
 </details>
 
@@ -1104,7 +1164,10 @@ the proxy redacted.
 | `the ephemeral registration was kept — if the runner was removed on GitHub …` (exit 1) | The runner was deleted on GitHub before it got a job (the token exchange answered `invalid_client`). Run `toolu-runner remove`, then `register` again. |
 | `… (the job was acquired; its registration was removed)` (exit 1) | An ephemeral job was acquired but executing or reporting it failed; the registration was still cleaned up. Check the job on GitHub and `_diag/runner.log`. |
 | `ephemeral runner … finished its job, but unregistering it on GitHub failed` (exit 2) | The job ran; fix the token or connectivity, then `toolu-runner remove` to finish the cleanup. |
-| `… is an ephemeral registration … a service unit restarts run forever` | `install-service` does not supervise one-job registrations; register without `--ephemeral`, or start `run` from a one-shot supervisor. |
+| `… is an ephemeral registration … a service unit restarts run forever` | `install-service --config` does not supervise one-job registrations; use the machine service (`install-service` without `--config`), which does, or start `run` from a one-shot supervisor. |
+| `another toolu-runner run --all (pid N, …) already supervises <home>` (exit 2) | The machine service (or another `run --all`) already runs every registration of this home; there is nothing to start. |
+| `doctor`: `FAIL  run  stopped by the service at …: <error>` | `run --all` stopped that one registration (the others keep running). Fix the cause it names, then reload the service: the `fix:` line gives the command. |
+| `doctor`: `FAIL  service  supervised by 2 units: …` | An older per-registration unit still runs next to the machine service; `toolu-runner install-service` replaces it. |
 | `runner is already running as PID <pid> ...` | Another `run` holds this repo's `.lock`; its PID is in the error. Wait it out, or stop the holder with `kill -INT <pid>`. |
 | `generate-jitconfig` fails with a network error | A firewall is blocking `api.github.com` (github.com) or the GHES host. Run `toolu-runner check` to see which hosts fail and why. |
 | `run` hangs or fails before any job | Run `toolu-runner check`: it names the unreachable GitHub service, the failure class (`dns`/`tls`/`proxy`/…), and the proxy / CA settings in effect (including `[network]`). |

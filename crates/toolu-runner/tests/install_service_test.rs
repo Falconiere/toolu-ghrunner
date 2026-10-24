@@ -20,7 +20,7 @@ use config::service_unit::{self, ServiceSpec};
 /// Persist a real registration under `<home>/runners/<owner>/<repo>/` and
 /// return its config path. A helper (not a `#[test]`), so it threads errors
 /// out via `?` rather than `expect`/`unwrap`.
-fn write_fixture(
+pub(crate) fn write_fixture(
   home: &Path,
   owner: &str,
   repo: &str,
@@ -133,7 +133,11 @@ fn expected_unit(
 /// Write an executable shell script named `name` into `dir` (a PATH shim for
 /// `launchctl` / `systemctl`). The script appends its argv to `$SHIM_LOG`.
 #[cfg(unix)]
-fn write_shim(dir: &Path, name: &str, body: &str) -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) fn write_shim(
+  dir: &Path,
+  name: &str,
+  body: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
   use std::os::unix::fs::PermissionsExt;
   let path = dir.join(name);
   std::fs::write(&path, body)?;
@@ -144,7 +148,9 @@ fn write_shim(dir: &Path, name: &str, body: &str) -> Result<(), Box<dyn std::err
 /// Prepare a shim dir + log and return `(shim_dir, log_path, path_env)` —
 /// `path_env` prepends the shim dir to the current `PATH`.
 #[cfg(unix)]
-fn shim_env(home: &Path) -> Result<(PathBuf, PathBuf, String), Box<dyn std::error::Error>> {
+pub(crate) fn shim_env(
+  home: &Path,
+) -> Result<(PathBuf, PathBuf, String), Box<dyn std::error::Error>> {
   let bin = home.join("shim-bin");
   std::fs::create_dir_all(&bin)?;
   let log = home.join("shim.log");
@@ -311,7 +317,7 @@ fn non_numeric_uid_is_a_named_error() {
 /// The real `id -u` for the current user — the same value the bin embeds in
 /// its `gui/<uid>` launchd target (the `id` binary is NOT shimmed).
 #[cfg(unix)]
-fn real_uid() -> Result<String, Box<dyn std::error::Error>> {
+pub(crate) fn real_uid() -> Result<String, Box<dyn std::error::Error>> {
   let out = Command::new("id").arg("-u").output()?;
   Ok(String::from_utf8_lossy(&out.stdout).trim().to_owned())
 }

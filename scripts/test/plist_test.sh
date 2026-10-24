@@ -21,4 +21,18 @@ grep -q '<string>--config</string>' "$PLIST"
 grep -q '<key>KeepAlive</key>' "$PLIST"
 grep -q '<key>RunAtLoad</key>' "$PLIST"
 
+# The rendered machine LaunchAgent (#208) must be a valid plist too: lint the
+# committed renderer fixtures (byte-pinned by crates/config/tests).
+FIXTURES="$SCRIPT_DIR/../../crates/config/tests/fixtures/service"
+for fixture in "$FIXTURES"/machine_*.plist; do
+  if command -v xmllint >/dev/null; then
+    xmllint --noout "$fixture"
+  fi
+  if command -v plutil >/dev/null; then
+    plutil -lint "$fixture"
+  fi
+  grep -q '<string>sh.toolu.runner</string>' "$fixture"
+  grep -q '<string>--all</string>' "$fixture"
+done
+
 echo "plist_test passed"

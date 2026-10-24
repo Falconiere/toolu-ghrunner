@@ -1769,3 +1769,41 @@ Real data:
 | S5 live, organization | **unverified**: no App credentials either, and `create-app` makes a private (`public: false`) App owned by the user, which GitHub lets only the owning account install | an org runner registers and re-mints with an App installation token | deferred to #202 |
 
 **Unverified, live.** Nothing here ran against github.com with a real App. #202 creates and installs a real App for its own live S4, so it owns S5 for both a personal repo and an organization. The GitHub replies the tests replay are the live 401/404 captures and the documented success examples listed above.
+
+## One machine-level service (#208)
+
+`run --all`, the machine unit and its migration, org registration dirs, and
+`remove` under the service (issue #208; the design notes stay with the worker,
+uncommitted). The
+integration tests drive the real binary under temporary `HOME` /
+`TOOLU_RUNNER_HOME` dirs against wiremock brokers serving real RSA JIT
+envelopes and real shell job steps (`tests/helpers/supervisor_fixtures.rs`).
+Unit activation alone goes through PATH-stub `systemctl` / `launchctl` that log
+their argv: a real user manager reads units from its own dirs, not a temporary
+`HOME`, loading one would start a real service on the test host, and hosted CI
+has no systemd user bus.
+
+| AC / scenario | Exact observation | Tests | Platforms |
+| --- | --- | --- | --- |
+| AC-1 / S1 | Machine unit fixtures byte-equal (± pinned `TOOLU_RUNNER_HOME`, spaces, `&`, `%`, `"`); `install-service --print` equals the renderer output and writes nothing; `plutil -lint` on the machine plists | `cargo test -p config --test integration -- service_unit_test::`; `cargo test -p toolu-runner --test integration -- machine_service_test::print`; `scripts/test/plist_test.sh` | Linux local; CI ubuntu + macos-14 (plutil) |
+| AC-2, AC-6 / S2 | Two registrations: one session each, repeated long-polls, both `.lock` bodies = the supervisor pid and held; SIGTERM → exit 0 and one `DELETE /session/…` each | `supervisor_test::two_registrations_poll_concurrently_each_under_its_own_lock` | as above |
+| AC-3 / S3 | Third registration + `SIGHUP` → it polls; the idle two keep exactly one session, no delete; a running `sleep 3` job completes `succeeded` with one acquire; same pid. `register` with a running supervisor prints "picks it up now (pid N)" and the new broker sees a session with no manual signal; without one, no service line | `supervisor_test::sighup_starts_a_new_registration_without_disturbing_the_others`, `…::register_starts_its_loop_without_a_manual_signal` | as above |
+| AC-4 / S4 | Job completes, re-mint answers the captured GitHub 401 → that loop's `.stopped` names `re-mint rejected` + the token help (no bearer), the other keeps polling, `doctor --offline` exit 1 with `FAIL run stopped by the service … fix: … kill -HUP <pid>`, `status` `run:` line; `SIGHUP` restarts it and clears `.stopped` | `supervisor_fatal_test::a_rejected_remint_stops_only_its_registration`; a corrupt `config.toml` whose bad line holds a proxy password stops its loop with no trace of the password in `.stopped`, `doctor`, `status` or the log: `…::a_corrupt_config_never_leaks_its_source_line` | as above |
+| AC-5 | Captured live 409 on every session POST → exactly 8 attempts, `.stopped` names the conflict, the other loop polls, SIGTERM → exit 0 (never 5) | `supervisor_fatal_test::a_session_conflict_stops_only_its_registration_and_never_exits_5` | as above |
+| AC-7 / S5 | Default install deactivates the per-registration unit (written by the real CLI), the orphaned one, the pre-#208 legacy-root `toolu-runner.service` and (launchd) the static `io.toolu-runner` agent before starting the machine unit; only the machine unit and the outside-home unit remain, the latter warned with its removal command. Inventory classification over real unit text for both supervisors, incl. the system-scope static unit (report-only, `sudo` command) | `machine_service_test::default_mode_migrates_old_units_then_starts_the_machine_unit`, `…::no_activate_and_remove_touch_only_the_machine_unit`, `…::removing_a_legacy_registration_unit_removes_its_pre_208_name`; `cargo test -p toolu-runner --bin toolu-runner -- machine_service` (incl. a `run --all` unit pinned to another home — `/srv/tr-ci` vs `/srv/tr` — kept, never this home's machine unit); a held lock with an empty body is not stolen: `cargo test -p config --test integration -- lockfile` | systemd CLI path on Linux, launchd CLI path on the macOS CI leg; inventory both everywhere |
+| AC-8 / S5 | A foreground `run --config A` keeps A's lock body for ≥3 s after `run --all` starts (B driven); after it exits the supervisor takes A within 10 s | `supervisor_test::a_registration_held_by_a_foreground_run_is_never_driven_twice` | as above |
+| AC-9 / S6 | Remove one of two → drained (its session deleted), unregistered, deleted; the other keeps polling; unit kept. Remove the last → unit deactivated (`disable --now toolu-runner.service` / `bootout …/sh.toolu.runner`) and deleted. A `sleep 6` job → `remove` exits 2 after `TOOLU_RUNNER_REMOVE_WAIT_MS=500`, nothing removed, the job finishes `succeeded`, the loop stops without re-minting, a second `remove` completes and uninstalls | `supervisor_remove_test::` — also: an ephemeral runner whose job ends during the wait removed itself → `remove` exits 0 ("already removed itself", no stray `.lock`); `remove --force` mid-job then re-registering gets a successor loop that takes over after the job | as above |
+| AC-10 | `orgs/acme` + `runners/acme/web` driven side by side; `list_registrations` order repos → orgs → legacy; `register_config_path` maps one-segment URLs to `orgs/<org>/` and never nests | `supervisor_test::an_org_and_a_repo_registration_run_side_by_side`; `cargo test -p config --test integration -- registry_test::`; `cargo test -p toolu-runner --bin toolu-runner register_cmd` | as above |
+| AC-11 | Ephemeral registration under `run --all`: one acquire, `succeeded`, runner DELETE, no re-mint, config gone; the idle one keeps polling; process up | `supervisor_test::an_ephemeral_registration_runs_one_job_and_removes_itself` | as above |
+| AC-12 | Two `CacheServer`s on `0.0.0.0:0` get distinct ports and both answer | `cargo test -p cache --test server_bind_test` | as above |
+| AC-13 | Machine unit + the registration's own unit → `FAIL service supervised by 2 units` + `fix: toolu-runner install-service`; machine unit alone → one installed row | `machine_service_test::doctor_fails_a_registration_two_units_supervise` | as above |
+| AC-16 | A second `run --all` on the home exits 2 naming the first pid, no extra session | `supervisor_test::a_second_supervisor_on_the_same_home_exits_2` | as above |
+| Drain | Idle drain → `Ok(None)` within 3 s, no acquire; pre-fired drain takes no job; drain after the acquire → the real step finishes, `succeeded` | `cargo test -p listener --lib drain` | as above |
+
+**Org registration.** With #201's org-scoped mint, `register --url <peer>/acme`
+writes `orgs/acme/` and the running supervisor picks it up
+(`supervisor_test::register_starts_its_loop_without_a_manual_signal`).
+
+**Unverified lanes.** The live S7 lanes (AC-14) are recorded in the PR: no
+macOS desktop is available to this worker, no live test repository exists for
+the Linux job lanes, and its token lacks `admin:org` for the org lanes.

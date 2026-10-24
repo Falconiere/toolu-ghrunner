@@ -15,6 +15,7 @@ use crate::broker_message::{PollOutcome, classify_received_message, log_skipped_
 use crate::broker_refresh::refresh_access_token;
 
 mod completion;
+mod idle;
 
 use completion::report_completion;
 
@@ -24,13 +25,16 @@ const POLL_BACKOFF_START: Duration = Duration::from_secs(1);
 const POLL_BACKOFF_MAX: Duration = Duration::from_secs(60);
 
 /// Poll until a job arrives (or the lifecycle exits with no job), then
-/// acquire, run, and report it. `Ok(None)` means no job was ever acquired;
-/// `Ok(Some(conclusion))` is the completed job's final conclusion, threaded
-/// up so [`super::handler::GitHubListener::run`] can surface it.
+/// acquire, run, and report it. `Ok(None)` means no job was ever acquired —
+/// including when `drain` fired while idle; a drain after the acquire never
+/// stops the job. `Ok(Some(conclusion))` is the completed job's final
+/// conclusion, threaded up so [`super::handler::GitHubListener::run`] can
+/// surface it.
 pub(super) async fn poll_and_execute(
   ctx: &mut SessionCtx,
+  drain: &CancellationToken,
 ) -> Result<Option<Conclusion>, RunnerError> {
-  let Some(msg) = poll_until_job(ctx).await? else {
+  let Some(msg) = idle::poll_until_job(ctx, drain).await? else {
     return Ok(None);
   };
 
@@ -422,126 +426,11 @@ async fn send_job_acquired(ctx: &SessionCtx, run_service_url: &str, job_id: &str
   }
 }
 
-async fn poll_until_job(ctx: &mut SessionCtx) -> Result<Option<BrokerMessage>, RunnerError> {
-  let mut backoff = POLL_BACKOFF_START;
-  // Redelivery cursor: `0` until the first message, then the id of the last
-  // message handled. Sent on every poll so the broker skips re-served ones.
-  let mut last_message_id: i64 = 0;
-  loop {
-    let result = poll_once(ctx, &ctx.token, last_message_id).await;
-    if let Some(id) = result.message_id() {
-      if is_redelivery(last_message_id, &result) {
-        tracing::warn!(
-          message_id = id,
-          "broker redelivered an already-seen message"
-        );
-        if sleep_or_cancel(ctx, backoff).await {
-          return Ok(None);
-        }
-        backoff = backoff.saturating_mul(2).min(POLL_BACKOFF_MAX);
-        continue;
-      }
-      last_message_id = id;
-    }
-    match handle_idle_outcome(ctx, result, &mut backoff).await? {
-      IdleDecision::Continue => {},
-      IdleDecision::Exit => return Ok(None),
-      IdleDecision::Job(msg) => return Ok(Some(msg)),
-    }
-  }
-}
-
 /// A broker reply at or behind the cursor must not trigger a second action.
 pub(crate) fn is_redelivery(last_message_id: i64, outcome: &PollOutcome) -> bool {
   outcome
     .message_id()
     .is_some_and(|message_id| message_id <= last_message_id)
-}
-
-/// Effect of one broker outcome on the idle poll loop.
-enum IdleDecision {
-  Continue,
-  Exit,
-  Job(BrokerMessage),
-}
-
-/// Apply a classified broker outcome after its cursor has been advanced.
-async fn handle_idle_outcome(
-  ctx: &mut SessionCtx,
-  outcome: PollOutcome,
-  backoff: &mut Duration,
-) -> Result<IdleDecision, RunnerError> {
-  match outcome {
-    PollOutcome::Cancelled => return Ok(IdleDecision::Exit),
-    PollOutcome::NoWork => {},
-    PollOutcome::Migrated { url, .. } => ctx.broker_url = url,
-    PollOutcome::Job(msg) => return Ok(IdleDecision::Job(msg)),
-    PollOutcome::Cancel { msg: _, job_id } => {
-      handle_cancellation(ctx, &job_id);
-      return Ok(IdleDecision::Exit);
-    },
-    PollOutcome::NetworkError(e) => {
-      return Ok(match backoff_after_poll_error(ctx, &e, *backoff).await {
-        Some(next) => {
-          *backoff = next;
-          IdleDecision::Continue
-        },
-        None => IdleDecision::Exit,
-      });
-    },
-    control @ (PollOutcome::Skip { .. }
-    | PollOutcome::Unknown { .. }
-    | PollOutcome::UnsupportedControl { .. }
-    | PollOutcome::Shutdown { .. }
-    | PollOutcome::RefreshToken { .. }) => {
-      let decision = handle_idle_control(ctx, control).await?;
-      *backoff = POLL_BACKOFF_START;
-      return Ok(decision);
-    },
-  }
-  *backoff = POLL_BACKOFF_START;
-  Ok(IdleDecision::Continue)
-}
-
-/// Handle a control envelope after the idle cursor has advanced.
-async fn handle_idle_control(
-  ctx: &mut SessionCtx,
-  outcome: PollOutcome,
-) -> Result<IdleDecision, RunnerError> {
-  match outcome {
-    PollOutcome::Skip { .. }
-    | PollOutcome::Unknown { .. }
-    | PollOutcome::UnsupportedControl { .. } => log_skipped_control(&outcome),
-    PollOutcome::Shutdown { message_id } => {
-      tracing::info!(message_id, "broker requested runner shutdown");
-      ctx.cancel.cancel();
-      return Ok(IdleDecision::Exit);
-    },
-    PollOutcome::RefreshToken { message_id } => return refresh_idle_token(ctx, message_id).await,
-    PollOutcome::NoWork
-    | PollOutcome::Migrated { .. }
-    | PollOutcome::Job(_)
-    | PollOutcome::Cancel { .. }
-    | PollOutcome::NetworkError(_)
-    | PollOutcome::Cancelled => {},
-  }
-  Ok(IdleDecision::Continue)
-}
-
-/// Publish a replacement token only after a complete successful exchange.
-async fn refresh_idle_token(
-  ctx: &mut SessionCtx,
-  message_id: i64,
-) -> Result<IdleDecision, RunnerError> {
-  match refresh_access_token(ctx).await {
-    Ok(next) => {
-      ctx.token = next;
-      tracing::info!(message_id, "broker token refreshed");
-      Ok(IdleDecision::Continue)
-    },
-    Err(RunnerError::Cancelled) => Ok(IdleDecision::Exit),
-    Err(e) => Err(e),
-  }
 }
 
 /// Warn about a failed poll and sleep out the jittered backoff. Returns the
@@ -590,22 +479,6 @@ async fn poll_once(ctx: &SessionCtx, token: &str, last_message_id: i64) -> PollO
       Err(e) => PollOutcome::NetworkError(e),
     },
   }
-}
-
-/// Cancel the in-flight job token.
-///
-/// The shared `ctx.cancel` token is observed by the poll loop, the renewal
-/// task, and the running job, so cancelling it stops the whole pipeline.
-/// No broker ack is sent: `acknowledge` validates `runnerRequestId` (the
-/// job request's UUID) and a `JobCancellation` body carries only a `jobId`,
-/// so an ack keyed by it is always rejected with a 400. Redelivery is
-/// prevented by the poll's `lastMessageId` cursor advancing past the message.
-fn handle_cancellation(ctx: &SessionCtx, job_id: &str) {
-  tracing::info!(
-    job_id,
-    "received JobCancellation — cancelling in-flight job"
-  );
-  ctx.cancel.cancel();
 }
 
 /// Sleep for `duration`, returning `true` if cancellation fired first.

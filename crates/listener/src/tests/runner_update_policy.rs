@@ -6,6 +6,7 @@
 use std::sync::{Arc, Mutex};
 use tracing::instrument::WithSubscriber;
 
+use super::idle::{IdleDecision, handle_idle_outcome};
 use super::*;
 use crate::broker_message::classify_received_message;
 use crate::helpers::WatchdogConfig;

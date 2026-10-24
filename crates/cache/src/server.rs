@@ -17,6 +17,15 @@ pub struct CacheServer {
   addr: SocketAddr,
 }
 
+/// The address a job's local cache server binds for `service_bind` (an IP
+/// or host, never a port): port `0`, so the OS picks a free port per server
+/// and concurrent jobs of several registrations sharing one `service_bind`
+/// never collide (#208).
+#[must_use]
+pub fn ephemeral_bind(service_bind: &str) -> String {
+  format!("{service_bind}:0")
+}
+
 impl CacheServer {
   /// Bind `router` on `bind` and serve it with graceful shutdown.
   ///

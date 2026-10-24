@@ -5,7 +5,7 @@
 
 use crate::check_servers::run;
 use crate::doctor_env::{
-  block, doctor_cmd, fix, has_lines, install_fix, report, row, write_registration,
+  block, doctor_cmd, fix, has_lines, report, row, service_install_fix, write_registration,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -23,7 +23,7 @@ fn service_unit() -> TestResult {
       &block(&stdout, "o/r"),
       &[
         row("WARN", "service", "not installed"),
-        install_fix(&config)
+        service_install_fix()
       ]
     ),
     "{stdout}"

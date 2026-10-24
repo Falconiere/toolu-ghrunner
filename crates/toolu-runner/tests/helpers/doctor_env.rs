@@ -331,8 +331,13 @@ pub fn fix(text: &str) -> String {
   format!("        fix: {text}")
 }
 
-/// The `install-service` fix a stopped or unsupervised persistent
-/// registration carries.
+/// The `fix:` line under a `service` row no unit (or more than one unit)
+/// supervises: the machine service (#208).
+pub fn service_install_fix() -> String {
+  fix("toolu-runner install-service")
+}
+
+/// The `fix:` line under a registration's `run` row when it is not running.
 pub fn install_fix(config: &Path) -> String {
   fix(&format!(
     "toolu-runner install-service --config {}",
