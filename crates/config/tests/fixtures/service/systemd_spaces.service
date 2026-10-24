@@ -2,6 +2,7 @@
 Description=toolu-runner (io.toolu.runner.a & b.repo)
 
 [Service]
+Environment="PATH=/opt/dev tools & bin:/usr/bin:/bin"
 ExecStart="/Users/dev name/apps/toolu & runner/toolu-runner" run --config "/Users/dev name/.toolu-runner/runners/a & b/repo/config.toml"
 Restart=always
 RestartSec=5

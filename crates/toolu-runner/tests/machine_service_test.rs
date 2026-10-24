@@ -25,7 +25,7 @@ use config::service_unit::{
   parse_systemd_target,
 };
 
-use crate::install_service_test::{real_uid, shim_env, write_fixture, write_shim};
+use crate::install_service_test::{nonroot_shims, real_uid, shim_env, write_fixture, write_shim};
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
@@ -34,14 +34,17 @@ const MACOS: bool = cfg!(target_os = "macos");
 const RECORD_OK: &str = "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$SHIM_LOG\"\nexit 0\n";
 
 /// `toolu-runner <args>` pinned to `home`.
-fn toolu(home: &Path, args: &[&str]) -> Command {
+fn toolu(home: &Path, args: &[&str]) -> Result<Command, Box<dyn std::error::Error>> {
   let mut cmd = Command::new(env!("CARGO_BIN_EXE_toolu-runner"));
   cmd
     .env("HOME", home)
     .env("TOOLU_RUNNER_HOME", home)
     .env("TOOLU_RUNNER_NO_KEYRING", "1")
     .args(args);
-  cmd
+  if !MACOS {
+    cmd.env("PATH", nonroot_shims(home)?);
+  }
+  Ok(cmd)
 }
 
 /// Run `toolu-runner <args>` with the stub supervisor on `PATH`; returns the
@@ -53,7 +56,7 @@ fn with_stub(home: &Path, args: &[&str]) -> Result<(Output, String), Box<dyn std
     if MACOS { "launchctl" } else { "systemctl" },
     RECORD_OK,
   )?;
-  let output = toolu(home, args)
+  let output = toolu(home, args)?
     .env("PATH", &path_env)
     .env("SHIM_LOG", &log)
     .output()?;
@@ -134,11 +137,16 @@ fn text(bytes: &[u8]) -> String {
 fn print_shows_the_machine_unit_and_writes_nothing() -> TestResult {
   let home = tempfile::tempdir()?;
   write_fixture(home.path(), "octo", "demo")?;
-  let out = toolu(home.path(), &["install-service", "--print"]).output()?;
+  let out = toolu(home.path(), &["install-service", "--print"])?.output()?;
   assert!(out.status.success(), "{}", text(&out.stderr));
 
   let diag = home.path().join("_diag");
-  let env_path = launchd_env_path(std::env::var("PATH").ok().as_deref());
+  let child_path = if MACOS {
+    std::env::var("PATH").unwrap_or_default()
+  } else {
+    nonroot_shims(home.path())?
+  };
+  let env_path = launchd_env_path(Some(&child_path));
   let spec = MachineSpec {
     exe: Path::new(env!("CARGO_BIN_EXE_toolu-runner")),
     home: Some(home.path()),
@@ -175,7 +183,7 @@ fn default_mode_migrates_old_units_then_starts_the_machine_unit() -> TestResult 
   let made = toolu(
     home.path(),
     &["install-service", "--no-activate", "--config"],
-  )
+  )?
   .arg(&demo)
   .output()?;
   assert!(made.status.success(), "{}", text(&made.stderr));

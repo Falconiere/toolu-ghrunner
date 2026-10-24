@@ -2,6 +2,7 @@
 Description=toolu-runner (io.toolu.runner.100%%.repo)
 
 [Service]
+Environment="PATH=/opt/homebrew/bin:/usr/bin:/bin"
 ExecStart="/usr/local/bin/toolu-runner" run --config "/home/ci/.toolu-runner/runners/pct/repo/config.toml"
 Restart=always
 RestartSec=5
