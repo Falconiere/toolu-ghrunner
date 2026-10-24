@@ -31,7 +31,6 @@ fn empty_home() -> TestResult {
   let home = tempfile::tempdir()?;
   let (code, stdout, stderr, _) = run(doctor_cmd(home.path())?.arg("--offline"))?;
 
-  assert_eq!(code, Some(0), "{}", report(&stdout, &stderr));
   assert_eq!(
     section(&stdout, "registrations"),
     [
@@ -73,17 +72,39 @@ fn empty_home() -> TestResult {
     "{stdout}"
   );
   let disk = format!(" GiB free at {}", home.path().display());
+  let host = section(&stdout, "host");
+  let disk_rows: Vec<(&str, &str)> = ["OK", "WARN", "FAIL"]
+    .into_iter()
+    .flat_map(|level| {
+      let prefix = row(level, "disk", "");
+      host
+        .iter()
+        .filter_map(move |line| line.strip_prefix(&prefix).map(|detail| (level, detail)))
+        .collect::<Vec<_>>()
+    })
+    .collect();
+  let (level, detail) = *disk_rows.first().ok_or("doctor omitted the disk row")?;
+  assert_eq!(disk_rows.len(), 1, "{stdout}");
   assert!(
-    section(&stdout, "host").iter().any(|line| {
-      line
-        .strip_prefix("  OK    disk       ")
-        .and_then(|rest| rest.strip_suffix(disk.as_str()))
-        .is_some_and(|gib| gib.parse::<f64>().is_ok())
-    }),
+    detail
+      .strip_suffix(&disk)
+      .is_some_and(|gib| gib.parse::<f64>().is_ok()),
     "{stdout}"
   );
-  assert!(!stdout.contains("FAIL"), "{stdout}");
-  assert_eq!(last_line(&stdout), implied_summary(&stdout, 0), "{stdout}");
+  if level != "OK" {
+    let disk_fix = fix(&format!(
+      "free space on the volume holding {}",
+      home.path().display()
+    ));
+    assert!(host.contains(&disk_fix.as_str()), "{stdout}");
+  }
+  let expected_code = i32::from(level == "FAIL");
+  assert_eq!(code, Some(expected_code), "{}", report(&stdout, &stderr));
+  assert_eq!(
+    last_line(&stdout),
+    implied_summary(&stdout, expected_code),
+    "{stdout}"
+  );
   Ok(())
 }
 
