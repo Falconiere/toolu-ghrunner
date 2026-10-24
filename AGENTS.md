@@ -491,7 +491,8 @@ App-JWT tests, never uploaded to any GitHub App (authenticates nothing).
   `--no-activate`/default/`--remove` idempotent; launchd `bootstrap
   gui/<uid>` (fallback `load -w`) / `bootout`, systemd `daemon-reload` +
   `enable/disable --now` in user or root scope; `service_linger` checks
-  non-root persistence before writes; refuses `ephemeral` except `--remove`).
+  non-root persistence before writes; `system_unit_guard` rejects symlinks
+  and foreign root units; refuses `ephemeral` except `--remove`).
   `login_cmd` (positional host, no `--config`; shared `run_device_flow`;
   placeholder `DEVICE_CLIENT_ID` errors pre-network; `--client-id`/
   `TOOLU_RUNNER_CLIENT_ID` required until the OAuth App exists, always on

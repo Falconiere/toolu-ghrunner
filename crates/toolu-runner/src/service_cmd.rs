@@ -14,8 +14,8 @@ use std::process::{Command, Output};
 
 use config::config::{load_config as load_reg_config, resolve_data_dir};
 use config::service_unit::{
-  ServiceAction, ServiceSpec, Supervises, launchd_env_path, launchd_plist, parse_systemd_target,
-  service_action_summary, systemd_system_unit, systemd_unit, systemd_unit_with_home,
+  ServiceAction, ServiceSpec, launchd_env_path, launchd_plist, service_action_summary,
+  systemd_system_unit, systemd_unit, systemd_unit_with_home,
 };
 use shared::RunnerError;
 
@@ -24,6 +24,11 @@ use crate::cli::InstallServiceArgs;
 /// Linger preflight for non-root systemd installs.
 #[path = "service_linger.rs"]
 pub(crate) mod service_linger;
+
+/// Protect an existing root unit from symlink and foreign-target overwrites.
+#[path = "system_unit_guard.rs"]
+mod system_unit_guard;
+use system_unit_guard::check_existing_system_unit;
 
 /// The OS supervisor a unit targets. Selected at runtime from the build's
 /// target OS; anything but macOS/Linux is rejected before any work.
@@ -167,39 +172,6 @@ pub(crate) fn install_service_core(
     label: id.label,
     action: ServiceAction::Installed { activated: true },
   })
-}
-
-/// A root per-registration install may reuse its own unit, but cannot write
-/// through a symlink or overwrite a live registration with the same basename.
-fn check_existing_system_unit(dest: &Path, config_path: &Path) -> Result<(), RunnerError> {
-  let metadata = match std::fs::symlink_metadata(dest) {
-    Ok(metadata) => metadata,
-    Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-    Err(error) => return Err(error.into()),
-  };
-  if metadata.file_type().is_symlink() {
-    return Err(RunnerError::Config(format!(
-      "{} is a symlink; remove it before installing so its target is not overwritten",
-      dest.display()
-    )));
-  }
-  let text = std::fs::read_to_string(dest)?;
-  if let Some(Supervises::Config(existing)) = parse_systemd_target(&text)
-    && (!existing.exists() || same_path(&existing, config_path))
-  {
-    return Ok(());
-  }
-  Err(RunnerError::Config(format!(
-    "{} already runs another live service; nothing was changed",
-    dest.display()
-  )))
-}
-
-fn same_path(a: &Path, b: &Path) -> bool {
-  match (a.canonicalize(), b.canonicalize()) {
-    (Ok(a), Ok(b)) => a == b,
-    _ => a == b,
-  }
 }
 
 fn remove_registration_service(

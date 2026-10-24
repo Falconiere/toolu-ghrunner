@@ -14,7 +14,7 @@ use crate::install_service_test::{shim_env, write_fixture, write_shim};
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 const ID: &str = "#!/bin/sh\ncase \"$1\" in -u) echo \"$TEST_UID\";; -un) echo runner;; esac\n";
-const LOGINCTL: &str = "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$SHIM_LOG\"\ncase \"$1\" in\n  show-user) if [ \"$BAD_LINGER\" = 1 ]; then echo unknown; elif [ -f \"$LINGER_MARK\" ]; then echo Linger=yes; else echo Linger=no; fi;;\n  enable-linger) if [ \"$DENY_LINGER\" = 1 ]; then echo 'polkit denied it' >&2; exit 1; fi; if [ -e \"$EXPECTED_UNIT\" ]; then echo 'unit existed before linger' >&2; exit 10; fi; touch \"$LINGER_MARK\";;\nesac\n";
+const LOGINCTL: &str = "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$SHIM_LOG\"\ncase \"$1\" in\n  show-user) if [ \"$BAD_LINGER\" = 1 ]; then echo unknown; elif [ -f \"$LINGER_MARK\" ]; then echo Linger=yes; else echo Linger=no; fi;;\n  enable-linger) if [ \"$DENY_LINGER\" = 1 ]; then echo 'polkit denied it' >&2; exit 1; fi; if [ -e \"$EXPECTED_UNIT\" ]; then echo 'unit existed before linger' >&2; exit 10; fi; touch \"$LINGER_MARK\";;\n  *) echo \"unexpected loginctl command: $*\" >&2; exit 2;;\nesac\n";
 const SYSTEMCTL: &str = "#!/bin/sh\nprintf 'systemctl %s\\n' \"$*\" >> \"$SHIM_LOG\"\nexit 0\n";
 
 struct Harness {
@@ -172,6 +172,9 @@ fn no_terminal_names_the_unattended_flags_and_writes_nothing() -> TestResult {
 #[test]
 fn deliberate_no_on_a_terminal_installs_a_short_lived_user_unit() -> TestResult {
   let h = Harness::new()?;
+  Command::new("script").arg("-V").output().map_err(|error| {
+    format!("util-linux script is required for the pseudo-terminal test: {error}")
+  })?;
   let mut child = Command::new("timeout")
     .args([
       "10",

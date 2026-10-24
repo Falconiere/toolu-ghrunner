@@ -272,19 +272,31 @@ async fn drain_held_registration(
   old_name: &str,
 ) -> Result<Option<(RunnerRegistrationConfig, lockfile::LockGuard)>, Box<dyn std::error::Error>> {
   // Keep the holder's lock body in the marker when it can be read.
-  let body = std::fs::read_to_string(lock_path).unwrap_or_else(|e| {
-    tracing::warn!(error = %e, "could not read the job lock body — writing an empty marker");
-    String::new()
-  });
-  write_pending_marker(pending, &body)?;
+  let lock_body_path = lock_path.to_path_buf();
+  let marker_path = pending.to_path_buf();
+  tokio::task::spawn_blocking(move || {
+    let body = std::fs::read_to_string(&lock_body_path).unwrap_or_else(|e| {
+      tracing::warn!(error = %e, "could not read the job lock body — writing an empty marker");
+      String::new()
+    });
+    write_pending_marker(&marker_path, &body)
+  })
+  .await??;
   let wait = crate::config::remove_wait();
   let guard = drained_lock(home, pid, lock_path, config_path, pending, wait).await?;
   // An ephemeral job may have removed itself; a re-mint may have changed the ID.
-  if !config_path.exists() {
+  let reloaded_path = config_path.to_path_buf();
+  let cfg = tokio::task::spawn_blocking(move || {
+    if !reloaded_path.exists() {
+      return Ok(None);
+    }
+    load_reg_config(&reloaded_path).map(Some)
+  })
+  .await??;
+  let Some(cfg) = cfg else {
     already_removed(home, old_name, lock_path, pending, guard)?;
     return Ok(None);
-  }
-  let cfg = load_reg_config(config_path).map_err(|e| format!("{e}"))?;
+  };
   Ok(Some((cfg, guard)))
 }
 
