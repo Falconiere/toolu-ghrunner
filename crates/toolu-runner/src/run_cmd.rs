@@ -107,9 +107,12 @@ fn check_remint_auth(
     && !cfg.ephemeral
   {
     app_auth::check_app(Path::new(app_file), masker).map_err(|e| {
-      format!(
-        "{e} — the registration authenticates with this GitHub App; restore the file or \
-         run `toolu-runner register --app --replace`"
+      app_auth::masked(
+        masker,
+        &format!(
+          "{e} — the registration authenticates with this GitHub App; restore the file or \
+           run `toolu-runner register --app --replace`"
+        ),
       )
     })?;
   }

@@ -34,7 +34,7 @@ struct AppJwtClaims {
 ///
 /// `RunnerError::Config` when `pem` is not a usable RSA private key (the
 /// message never repeats the key), `RunnerError::Protocol` on a clock or
-/// signing failure.
+/// signing failure, or when `iat` / `exp` would overflow `i64`.
 pub fn build_app_jwt(pem: &str, app_id: i64) -> Result<String, RunnerError> {
   let now = std::time::SystemTime::now()
     .duration_since(std::time::UNIX_EPOCH)
@@ -57,9 +57,14 @@ pub fn build_app_jwt_at(pem: &str, app_id: i64, now_secs: i64) -> Result<String,
       "the GitHub App private key is not a usable RSA PEM: {err}"
     ))
   })?;
+  let out_of_range = || RunnerError::Protocol(format!("App JWT time {now_secs} is out of range"));
   let claims = AppJwtClaims {
-    iat: now_secs.saturating_sub(APP_JWT_BACKDATE_SECS),
-    exp: now_secs.saturating_add(APP_JWT_LIFETIME_SECS),
+    iat: now_secs
+      .checked_sub(APP_JWT_BACKDATE_SECS)
+      .ok_or_else(out_of_range)?,
+    exp: now_secs
+      .checked_add(APP_JWT_LIFETIME_SECS)
+      .ok_or_else(out_of_range)?,
     iss: app_id.to_string(),
   };
   jsonwebtoken::encode(&Header::new(Algorithm::RS256), &claims, &key)

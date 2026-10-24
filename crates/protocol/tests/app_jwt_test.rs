@@ -123,6 +123,23 @@ fn a_key_that_is_not_a_pem_is_an_error_that_does_not_echo_it() {
   );
 }
 
+/// A time whose `iat` or `exp` would overflow is an error, never a clamped
+/// claim; the earliest instant that still fits signs.
+#[test]
+fn a_time_whose_claims_overflow_is_an_error_not_a_clamped_claim() {
+  for now in [i64::MAX, i64::MAX - APP_JWT_LIFETIME_SECS + 1, i64::MIN] {
+    let err = build_app_jwt_at(PRIVATE_PEM, APP_ID, now).expect_err("claims overflow");
+    assert_eq!(
+      err.to_string(),
+      format!("protocol error: App JWT time {now} is out of range")
+    );
+  }
+  let earliest = i64::MIN + APP_JWT_BACKDATE_SECS;
+  let jwt = build_app_jwt_at(PRIVATE_PEM, APP_ID, earliest).expect("the earliest instant signs");
+  let claims = verified_claims(&jwt).expect("signature verifies");
+  assert_eq!(claims["iat"], i64::MIN);
+}
+
 #[test]
 fn installation_token_parses_the_documented_reply_and_debug_redacts_the_token() {
   let token: InstallationToken =
