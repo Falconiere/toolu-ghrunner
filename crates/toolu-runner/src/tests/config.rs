@@ -236,3 +236,44 @@ fn install_wait_settings_take_positive_milliseconds_or_the_default() {
   assert_eq!(super::ms_or_default(Some("0"), default), None);
   assert_eq!(super::ms_or_default(Some("ten"), default), None);
 }
+
+const POLL_CHILD_TEST: &str = "config::tests::poll_interval_child_probe";
+
+#[test]
+#[ignore = "child-process probe; exercised by poll_interval_reads_milliseconds_and_diagnoses_bad_values"]
+fn poll_interval_child_probe() {
+  println!("poll_interval_ms={}", super::poll_interval().as_millis());
+}
+
+/// #206: `TOOLU_RUNNER_POLL_INTERVAL_MS` sets the toolu.sh idle wait; unset or
+/// empty keeps 5 s, and a bad value is diagnosed by name and ignored.
+#[test]
+fn poll_interval_reads_milliseconds_and_diagnoses_bad_values() {
+  for (value, expected_ms, diagnosed) in [
+    (None, 5_000, false),
+    (Some(""), 5_000, false),
+    (Some("250"), 250, false),
+    (Some("0"), 5_000, true),
+    (Some("abc"), 5_000, true),
+  ] {
+    let mut child = Command::new(std::env::current_exe().expect("resolve current test binary"));
+    child.args(["--ignored", "--exact", POLL_CHILD_TEST, "--nocapture"]);
+    match value {
+      Some(v) => child.env("TOOLU_RUNNER_POLL_INTERVAL_MS", v),
+      None => child.env_remove("TOOLU_RUNNER_POLL_INTERVAL_MS"),
+    };
+    let output = child.output().expect("run poll-interval child probe");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{value:?}: {stderr}");
+    assert!(
+      stdout.contains(&format!("poll_interval_ms={expected_ms}\n")),
+      "{value:?}: {stdout}"
+    );
+    assert_eq!(
+      stderr.contains("TOOLU_RUNNER_POLL_INTERVAL_MS is not a positive integer"),
+      diagnosed,
+      "{value:?}: {stderr}"
+    );
+  }
+}

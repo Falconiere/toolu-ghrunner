@@ -49,6 +49,7 @@ fn seed_registration(dir: &Path, server_uri: &str) -> TestResult<PathBuf> {
     shadow: ShadowSection::default(),
     network: config::network::NetworkSection::default(),
     auth: config::registration_auth::AuthSection::default(),
+    provider: config::provider::ProviderSection::Github,
   };
   save_config(&config_path, &config)?;
   std::fs::write(dir.join("credentials.json"), "{}")?;

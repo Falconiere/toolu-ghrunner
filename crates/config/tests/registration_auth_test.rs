@@ -33,6 +33,7 @@ fn registration(auth: AuthSection) -> RunnerRegistrationConfig {
     shadow: ShadowSection::default(),
     network: NetworkSection::default(),
     auth,
+    provider: config::provider::ProviderSection::Github,
   }
 }
 

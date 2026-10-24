@@ -1,6 +1,6 @@
 //! `run --all`: one process supervises every registration under the runner
 //! home (#208) — what the machine unit runs. It holds `<home>/supervisor.lock`
-//! and drives one [`RunLoop`] per registration, each with its own `.lock`,
+//! and drives one [`RegistrationLoop`] per registration, each with its own `.lock`,
 //! backoff, re-mint and ephemeral rules. SIGHUP rescans: new registrations
 //! start, a pending removal (or vanished config) is drained, a stopped loop
 //! restarts. A fatal error ends only its loop and is recorded in
@@ -22,7 +22,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 
-use crate::run_cmd::{self, LoopInputs, RunLoop};
+use crate::run_cmd::{self, LoopInputs, RegistrationLoop};
 use crate::supervisor_signal;
 
 /// How often a loop retries a registration lock another process holds.
@@ -229,7 +229,7 @@ pub(crate) async fn off_runtime<T: Send + 'static>(
 }
 
 /// Take the registration's lock (waiting out another holder), clear its
-/// `.stopped`, and drive its [`RunLoop`].
+/// `.stopped`, and drive its [`RegistrationLoop`].
 async fn drive_registration(
   config_path: &Path,
   masker: &Arc<Mutex<SecretMasker>>,
@@ -250,7 +250,7 @@ async fn drive_registration(
   if !off_runtime(move || ready_to_drive(&path, &lock)).await? {
     return Ok(());
   }
-  let run_loop = RunLoop::for_registration(LoopInputs {
+  let run_loop = RegistrationLoop::for_registration(LoopInputs {
     config_path: config_path.to_owned(),
     cfg: &cfg,
     masker: Arc::clone(masker),

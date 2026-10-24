@@ -4,7 +4,9 @@
 //! `_diag/`): `<home>/runners/<owner>/<repo>/` for a repository runner,
 //! `<home>/orgs/<org>/` for an organization runner (#208 — `orgs` is a
 //! reserved GitHub route, so no owner can be named that, and the two trees
-//! never nest). The legacy single-slot `<home>/config.toml` is honored
+//! never nest), `<home>/toolu/<org>/` for a machine paired with a toolu.sh
+//! organization (#206; beside `runners/`, so a GitHub owner named `toolu`
+//! cannot collide). The legacy single-slot `<home>/config.toml` is honored
 //! read-only as a fallback. This module
 //! owns the home/dir layout, registration discovery, and the config-path
 //! resolution shared by `run` / `status` / `remove`: `--config` flag >
@@ -88,8 +90,24 @@ pub fn org_dir(home: &Path, org: &str) -> Result<PathBuf, RunnerError> {
   Ok(home.join("orgs").join(org))
 }
 
+/// toolu.sh machine registration dir (#206): `<home>/toolu/<org>`, keyed by
+/// the toolu.sh organization id so pairing the same org again replaces it.
+///
+/// `org` is used verbatim as one path component after the same rejection
+/// rules as [`runner_dir`].
+///
+/// # Errors
+///
+/// Returns `RunnerError::Config` when `org` is empty, `.`, `..`, or contains
+/// a `/` or `\` path separator or a NUL byte.
+pub fn toolu_dir(home: &Path, org: &str) -> Result<PathBuf, RunnerError> {
+  validate_component("org", org)?;
+  Ok(home.join("toolu").join(org))
+}
+
 /// Which runner a discovered registration serves. The derived order is the
-/// listing order: repositories, then organizations, then the legacy slot.
+/// listing order: repositories, organizations, toolu.sh machines, then the
+/// legacy slot.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum RegistrationScope {
   /// A repository runner under `runners/<owner>/<repo>/`.
@@ -101,18 +119,21 @@ pub enum RegistrationScope {
   },
   /// An organization runner under `orgs/<org>/`.
   Org(String),
+  /// A toolu.sh machine under `toolu/<org>/`, named by the toolu.sh org id.
+  Toolu(String),
   /// The legacy single-slot `<home>/config.toml`.
   Legacy,
 }
 
 impl RegistrationScope {
-  /// The registration's display name: `owner/repo`, `<org> (org)`, or
-  /// `legacy`.
+  /// The registration's display name: `owner/repo`, `<org> (org)`,
+  /// `<org> (toolu.sh)`, or `legacy`.
   #[must_use]
   pub fn label(&self) -> String {
     match self {
       Self::Repo { owner, repo } => format!("{owner}/{repo}"),
       Self::Org(org) => format!("{org} (org)"),
+      Self::Toolu(org) => format!("{org} (toolu.sh)"),
       Self::Legacy => "legacy".to_owned(),
     }
   }
@@ -128,16 +149,18 @@ pub struct RegistrationEntry {
 }
 
 /// Scan `home` for registrations: every `runners/<owner>/<repo>/config.toml`,
-/// every `orgs/<org>/config.toml`, plus the legacy `<home>/config.toml`. A
-/// missing home, `runners/` or `orgs/` dir yields no entries; an entry that
-/// is not a directory is silently skipped — stray files are not
-/// registrations. Deterministic order: repositories by owner then repo,
-/// organizations by name, the legacy entry last.
+/// every `orgs/<org>/config.toml` and `toolu/<org>/config.toml`, plus the
+/// legacy `<home>/config.toml`. A missing home, `runners/`, `orgs/` or
+/// `toolu/` dir yields no entries; an entry that is not a directory is
+/// silently skipped — stray files are not registrations. Deterministic
+/// order: repositories by owner then repo, organizations by name, toolu.sh
+/// machines by org, the legacy entry last.
 ///
 /// # Errors
 ///
-/// `RunnerError::Config` when an EXISTING `runners/` (or owner subdir) or
-/// `orgs/` dir cannot be read — the message names the path and the io error.
+/// `RunnerError::Config` when an EXISTING `runners/` (or owner subdir),
+/// `orgs/` or `toolu/` dir cannot be read — the message names the path and
+/// the io error.
 pub fn list_registrations(home: &Path) -> Result<Vec<RegistrationEntry>, RunnerError> {
   let mut entries = Vec::new();
   for owner in read_dir_entries(&home.join("runners"))? {
@@ -163,13 +186,21 @@ pub fn list_registrations(home: &Path) -> Result<Vec<RegistrationEntry>, RunnerE
       }
     }
   }
-  for org in read_dir_entries(&home.join("orgs"))? {
-    let config_path = org.path().join("config.toml");
-    if org.path().is_dir() && config_path.is_file() {
-      entries.push(RegistrationEntry {
-        config_path,
-        scope: RegistrationScope::Org(org.file_name().to_string_lossy().into_owned()),
-      });
+  for (tree, scope) in [
+    (
+      "orgs",
+      RegistrationScope::Org as fn(String) -> RegistrationScope,
+    ),
+    ("toolu", RegistrationScope::Toolu),
+  ] {
+    for org in read_dir_entries(&home.join(tree))? {
+      let config_path = org.path().join("config.toml");
+      if org.path().is_dir() && config_path.is_file() {
+        entries.push(RegistrationEntry {
+          config_path,
+          scope: scope(org.file_name().to_string_lossy().into_owned()),
+        });
+      }
     }
   }
   let legacy = home.join("config.toml");

@@ -11,6 +11,7 @@ mod home_perms_test;
 mod labels_test;
 mod lockfile_multi_test;
 mod network_section_test;
+mod provider_section_test;
 mod registration_auth_test;
 mod registry_test;
 mod remint_test;
