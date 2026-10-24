@@ -33,6 +33,25 @@ fn spawn_run(home: &Path, args: &[&str]) -> TestResult<Spawned> {
   )
 }
 
+/// A claimed JIT config's secrets, encoded and decoded: the envelope, its
+/// `.credentials_rsaparams` blob, and that key's private `d`, `p`, `q`.
+fn jit_secrets(jit: &str) -> TestResult<Vec<String>> {
+  use base64::Engine;
+  use base64::engine::general_purpose::STANDARD;
+  let envelope: serde_json::Value = serde_json::from_slice(&STANDARD.decode(jit)?)?;
+  let blob = envelope
+    .get(".credentials_rsaparams")
+    .and_then(serde_json::Value::as_str)
+    .ok_or("JIT has no .credentials_rsaparams")?;
+  let params: serde_json::Value = serde_json::from_slice(&STANDARD.decode(blob)?)?;
+  let mut secrets = vec![jit.to_owned(), blob.to_owned()];
+  for field in ["d", "p", "q"] {
+    let value = params.get(field).and_then(serde_json::Value::as_str);
+    secrets.push(value.ok_or(format!("rsaparams has no {field}"))?.to_owned());
+  }
+  Ok(secrets)
+}
+
 /// Every `/runner/*` request carried the machine's host token.
 fn assert_bearer(peer: &Peer) {
   let expected = format!("Bearer {HOST_TOKEN}");
@@ -127,7 +146,9 @@ async fn two_queued_jobs_run_back_to_back_with_in_lease_heartbeats() -> TestResu
   assert!(!logs.is_empty(), "the run left no logs");
   assert!(!logs.contains(HOST_TOKEN), "host token logged");
   for jit in peer.jits() {
-    assert!(!logs.contains(&jit), "a claimed JIT config was logged");
+    for secret in jit_secrets(&jit)? {
+      assert!(!logs.contains(&secret), "a claimed JIT's secret was logged");
+    }
   }
   Ok(())
 }
@@ -669,6 +690,7 @@ async fn a_rotated_host_token_is_used_on_the_next_pass() -> TestResult<()> {
   .await?;
   stop(child, home.path(), "run").await?;
   let logs = all_logs(home.path())?;
+  assert!(!logs.contains(HOST_TOKEN), "original host token logged");
   assert!(!logs.contains(ROTATED), "rotated host token logged");
   Ok(())
 }

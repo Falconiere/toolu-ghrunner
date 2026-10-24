@@ -135,6 +135,9 @@ impl Peer {
     Ok(Self { server, state })
   }
 
+  /// The peer's state. `into_inner` recovers the guard and never panics;
+  /// every lock holder is panic-free by the crate's lints, and a poisoned
+  /// state would already answer every request 500 (see [`respond`]).
   fn state(&self) -> MutexGuard<'_, State> {
     self.state.lock().unwrap_or_else(PoisonError::into_inner)
   }
@@ -224,12 +227,22 @@ fn respond(state: &Mutex<State>, request: &Request) -> ResponseTemplate {
       .get("authorization")
       .and_then(|v| v.to_str().ok())
       .map(str::to_owned),
-    body: serde_json::from_slice(&request.body).unwrap_or(Value::Null),
+    body: recorded_body(&request.body),
     status,
   });
   ResponseTemplate::new(status)
     .insert_header("content-type", "application/json")
     .set_body_string(body)
+}
+
+/// A request body as recorded: `Null` when empty (a GET), else its JSON, or
+/// its raw text when it does not parse, so a body assertion shows what came.
+fn recorded_body(bytes: &[u8]) -> Value {
+  if bytes.is_empty() {
+    return Value::Null;
+  }
+  serde_json::from_slice(bytes)
+    .unwrap_or_else(|_| Value::String(String::from_utf8_lossy(bytes).into_owned()))
 }
 
 /// The status and body for one request.
@@ -320,9 +333,8 @@ fn claim(state: &mut State, id: &str, now: u64) -> (u16, String) {
 /// The `:id` of `/runner/jobs/:id/<verb>`.
 fn job_id(path: &str) -> String {
   path
-    .trim_start_matches("/runner/jobs/")
-    .split('/')
-    .next()
+    .strip_prefix("/runner/jobs/")
+    .and_then(|rest| rest.split('/').next())
     .unwrap_or_default()
     .to_owned()
 }
