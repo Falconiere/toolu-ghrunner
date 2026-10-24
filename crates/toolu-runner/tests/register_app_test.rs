@@ -20,8 +20,8 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use crate::doctor_env::store_login;
 use crate::github_app_fixtures::{
-  APP_SLUG, INSTALLATION_TOKEN, authorizations, capture, rfc3339_in, token_reply, verify_app_jwt,
-  write_app,
+  APP_SLUG, EchoAuthorization, INSTALLATION_TOKEN, authorizations, capture, rfc3339_in,
+  token_reply, verify_app_jwt, write_app,
 };
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
@@ -508,6 +508,44 @@ async fn a_rejected_app_mint_names_the_permissions() -> TestResult {
   ] {
     assert!(stderr.contains(expected), "missing {expected:?}: {stderr}");
   }
+  assert!(!repo_config(home.path()).exists());
+  Ok(())
+}
+
+/// `register`'s error quotes GitHub's reply on stderr, which the tracing
+/// redactor never sees: a 401 echoing the App JWT prints it masked.
+#[tokio::test]
+async fn a_rejected_app_prints_an_echoed_jwt_masked() -> TestResult {
+  let home = tempfile::tempdir()?;
+  write_app(home.path(), "127.0.0.1")?;
+  let server = MockServer::start().await;
+  Mock::given(method("GET"))
+    .and(path(REPO_INSTALLATION))
+    .respond_with(capture("installation_200.json")?)
+    .mount(&server)
+    .await;
+  Mock::given(method("POST"))
+    .and(path(TOKENS))
+    .respond_with(EchoAuthorization(401))
+    .mount(&server)
+    .await;
+  let out = register(home.path(), &server, "octo/demo", None, &["--app"])?;
+  assert_eq!(out.status.code(), Some(2));
+  let jwts = authorizations(&server, TOKENS).await?;
+  let jwt = jwts
+    .first()
+    .and_then(|header| header.strip_prefix("Bearer "))
+    .ok_or("no App JWT was sent")?;
+  let stderr = text(&out.stderr);
+  assert!(
+    stderr.contains("GitHub App installation token failed with status 401"),
+    "{stderr}"
+  );
+  assert!(stderr.contains("upstream echoed: Bearer ***"), "{stderr}");
+  assert!(
+    !stderr.contains(jwt),
+    "the App JWT reached stderr: {stderr}"
+  );
   assert!(!repo_config(home.path()).exists());
   Ok(())
 }

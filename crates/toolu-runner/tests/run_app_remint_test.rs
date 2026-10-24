@@ -19,11 +19,12 @@ use config::config::{
 use config::registration_auth::AuthSection;
 use serde_json::json;
 use wiremock::matchers::{header, method, path};
-use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
+use wiremock::{Mock, MockServer, Respond, ResponseTemplate};
 
 use crate::boot_fixtures;
 use crate::github_app_fixtures::{
-  INSTALLATION_TOKEN, PRIVATE_PEM, authorizations, capture, rfc3339_in, token_reply, write_app,
+  EchoAuthorization, INSTALLATION_TOKEN, PRIVATE_PEM, authorizations, capture, rfc3339_in,
+  token_reply, write_app,
 };
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
@@ -275,7 +276,7 @@ async fn an_app_registration_re_mints_after_each_job_with_a_cached_token() -> Te
 
 /// Run an App registration whose `access_tokens` answers `reply`, until it
 /// exits on its own.
-async fn run_until_fatal(reply: ResponseTemplate) -> TestResult<(Output, MockServer)> {
+async fn run_until_fatal(reply: impl Respond + 'static) -> TestResult<(Output, MockServer)> {
   let home = tempfile::tempdir()?;
   let server = loop_server(&format!("Bearer {INSTALLATION_TOKEN}")).await?;
   Mock::given(method("POST"))
@@ -318,6 +319,68 @@ async fn an_uninstalled_app_ends_the_loop_with_the_fix() -> TestResult {
   assert!(
     stderr.contains("toolu-runner register --app --replace"),
     "{stderr}"
+  );
+  Ok(())
+}
+
+/// A fatal re-mint error quotes GitHub's reply on stderr, which the tracing
+/// redactor never sees: a 401 echoing the App JWT prints it masked.
+#[tokio::test]
+async fn a_rejected_re_mint_prints_an_echoed_app_jwt_masked() -> TestResult {
+  let (out, server) = run_until_fatal(EchoAuthorization(401)).await?;
+  assert_eq!(out.status.code(), Some(2), "stdout: {}", text(&out.stdout));
+  let jwts = authorizations(&server, TOKENS).await?;
+  let jwt = jwts
+    .first()
+    .and_then(|header| header.strip_prefix("Bearer "))
+    .ok_or("no App JWT was sent")?;
+  let stderr = text(&out.stderr);
+  assert!(
+    stderr.contains("re-mint rejected: GitHub App installation token failed with status 401"),
+    "{stderr}"
+  );
+  assert!(stderr.contains("upstream echoed: Bearer ***"), "{stderr}");
+  assert!(
+    !stderr.contains(jwt),
+    "the App JWT reached stderr: {stderr}"
+  );
+  Ok(())
+}
+
+/// The same for the mint itself: a `generate-jitconfig` 403 (its body is
+/// quoted; a 401's is not) echoing the installation token prints it masked.
+#[tokio::test]
+async fn a_rejected_mint_prints_an_echoed_installation_token_masked() -> TestResult {
+  let home = tempfile::tempdir()?;
+  let server = loop_server("Bearer unused").await?;
+  Mock::given(method("POST"))
+    .and(path(TOKENS))
+    .respond_with(token_reply(&rfc3339_in(3600))?)
+    .mount(&server)
+    .await;
+  Mock::given(method("POST"))
+    .and(path(JIT))
+    .respond_with(EchoAuthorization(403))
+    .with_priority(1)
+    .mount(&server)
+    .await;
+  let config_path = write_registration(home.path(), &server, app_auth(home.path())?)?;
+  let out = wait_exit(spawn_run(home.path(), &config_path, None)?).await?;
+  assert_eq!(out.status.code(), Some(2), "stdout: {}", text(&out.stdout));
+  assert_eq!(
+    authorizations(&server, JIT).await?,
+    vec![format!("Bearer {INSTALLATION_TOKEN}")],
+    "the mint must carry the installation token (else the check is vacuous)"
+  );
+  let stderr = text(&out.stderr);
+  assert!(
+    stderr.contains("re-mint rejected: generate-jitconfig failed with status 403"),
+    "{stderr}"
+  );
+  assert!(stderr.contains("upstream echoed: Bearer ***"), "{stderr}");
+  assert!(
+    !stderr.contains(INSTALLATION_TOKEN),
+    "the installation token reached stderr: {stderr}"
   );
   Ok(())
 }
@@ -426,21 +489,6 @@ async fn a_token_near_expiry_is_minted_again_for_each_re_mint() -> TestResult {
   Ok(())
 }
 
-/// A 503 whose body echoes the request's `Authorization` header, as a
-/// misbehaving proxy might.
-struct EchoAuthorization;
-
-impl Respond for EchoAuthorization {
-  fn respond(&self, request: &Request) -> ResponseTemplate {
-    let authorization = request
-      .headers
-      .get("authorization")
-      .and_then(|value| value.to_str().ok())
-      .unwrap_or_default();
-    ResponseTemplate::new(503).set_body_string(format!("upstream echoed: {authorization}"))
-  }
-}
-
 /// AC-10: the App JWT and the installation token reach `_diag` masked when an
 /// error body echoes them (the JWT on `access_tokens`, the token on
 /// `generate-jitconfig`), and each failure backs off.
@@ -450,7 +498,7 @@ async fn app_jwts_and_installation_tokens_never_reach_diag() -> TestResult {
   let server = loop_server(&format!("Bearer {INSTALLATION_TOKEN}")).await?;
   Mock::given(method("POST"))
     .and(path(TOKENS))
-    .respond_with(EchoAuthorization)
+    .respond_with(EchoAuthorization(503))
     .up_to_n_times(1)
     .with_priority(1)
     .mount(&server)
@@ -462,7 +510,7 @@ async fn app_jwts_and_installation_tokens_never_reach_diag() -> TestResult {
     .await;
   Mock::given(method("POST"))
     .and(path(JIT))
-    .respond_with(EchoAuthorization)
+    .respond_with(EchoAuthorization(503))
     .up_to_n_times(1)
     .with_priority(1)
     .mount(&server)

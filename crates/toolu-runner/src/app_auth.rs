@@ -27,6 +27,17 @@ fn mask(masker: &Mutex<SecretMasker>, value: &str) {
   guard.add_secret(value);
 }
 
+/// `text` with every secret `masker` knows replaced. A fatal error reaches
+/// `main`'s stderr line, which the tracing redactor never sees, so error text
+/// that may quote a GitHub reply passes through here first.
+pub(crate) fn masked(masker: &Mutex<SecretMasker>, text: &str) -> String {
+  masker
+    .lock()
+    .unwrap_or_else(std::sync::PoisonError::into_inner)
+    .mask(text)
+    .into_owned()
+}
+
 /// Load the App file at `path` and register its secrets with `masker`
 /// before anything can log them.
 ///
@@ -151,6 +162,66 @@ pub(crate) fn app_remint_help(app: &StoredApp, app_file: &str, installation_id: 
     app.app_id,
     app.install_url()
   )
+}
+
+/// The fatal message for a rejected re-mint, masked: it quotes GitHub's
+/// reply and ends with `help`.
+pub(crate) fn remint_rejected(masker: &Mutex<SecretMasker>, msg: &str, help: &str) -> String {
+  masked(masker, &format!("re-mint rejected: {msg} — {help}"))
+}
+
+/// The App side of a registration the run loop re-mints.
+pub(crate) struct AppTarget<'a> {
+  /// The registration's runner URL (repo or org).
+  pub(crate) url: &'a str,
+  /// `[auth] app_file`.
+  pub(crate) app_file: &'a str,
+  /// `[auth] installation_id`.
+  pub(crate) installation_id: i64,
+}
+
+/// What an App registration's re-mint does next.
+pub(crate) enum AppRemint {
+  /// Mint with `bearer`; `help` is the fix to print if GitHub rejects it.
+  Mint {
+    /// An installation token (masked).
+    bearer: String,
+    /// [`app_remint_help`] for this App.
+    help: String,
+  },
+  /// A transient failure (logged): back off and retry the current config.
+  Retry,
+}
+
+/// Load `target`'s App file and get the re-mint bearer: the cached
+/// installation token while it may be reused, else a fresh one.
+///
+/// # Errors
+///
+/// The App file is unreadable, or GitHub rejects the App (`Auth`) or its key
+/// no longer signs (`Config`): retrying the spent JIT config could never
+/// recover, so the message is fatal (masked, ending with the App's fix).
+pub(crate) async fn remint_bearer(
+  tokens: &InstallationTokens,
+  client: &reqwest::Client,
+  target: &AppTarget<'_>,
+  masker: &Mutex<SecretMasker>,
+) -> Result<AppRemint, Box<dyn std::error::Error>> {
+  let app = load_app(Path::new(target.app_file), masker)?;
+  let help = app_remint_help(&app, target.app_file, target.installation_id);
+  match tokens
+    .bearer(client, &app, target.url, target.installation_id, masker)
+    .await
+  {
+    Ok(bearer) => Ok(AppRemint::Mint { bearer, help }),
+    Err(RunnerError::Auth(msg) | RunnerError::Config(msg)) => {
+      Err(remint_rejected(masker, &msg, &help).into())
+    },
+    Err(e) => {
+      tracing::warn!(error = %e, "re-mint failed; backing off before retry");
+      Ok(AppRemint::Retry)
+    },
+  }
 }
 
 /// A cached installation token.

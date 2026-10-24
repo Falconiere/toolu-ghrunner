@@ -58,11 +58,15 @@ pub(crate) async fn cmd_register(args: RegisterArgs) -> Result<(), Box<dyn std::
   // `String`: the variant is what tells a caller (and the diagnostics) that
   // this was a transport failure.
   let client = build_register_client(&network.resolve())?;
-  let auth = register_auth::resolve(&args.auth, &host, &home, &url, &client, &masker).await?;
+  // Every error below may quote a GitHub reply; `main` prints it unredacted,
+  // so it is masked here (an App's key, JWTs and installation tokens).
+  let auth = register_auth::resolve(&args.auth, &host, &home, &url, &client, &masker)
+    .await
+    .map_err(|e| crate::app_auth::masked(&masker, &e.to_string()))?;
   let runner_group =
     register_auth::resolve_runner_group(&args.runner_group, &url, &auth.bearer, &client)
       .await
-      .map_err(|e| auth.explain(&e))?;
+      .map_err(|e| crate::app_auth::masked(&masker, &auth.explain(&e)))?;
 
   let runner_id = register_and_persist(
     RegisterPersist {
@@ -84,7 +88,7 @@ pub(crate) async fn cmd_register(args: RegisterArgs) -> Result<(), Box<dyn std::
     &client,
   )
   .await
-  .map_err(|e| auth.explain(&e))?;
+  .map_err(|e| crate::app_auth::masked(&masker, &auth.explain(&e)))?;
 
   report_registered(
     &runner_name,

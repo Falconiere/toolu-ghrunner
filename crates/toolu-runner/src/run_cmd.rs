@@ -26,6 +26,7 @@ use listener::session_conflict::SessionConflictPolicy;
 use shared::{Conclusion, RunnerError, SESSION_CONFLICT_EXIT_CODE, SecretMasker};
 use tokio_util::sync::CancellationToken;
 
+use crate::app_auth::{self, AppRemint, AppTarget};
 use crate::cli::{RunArgs, credentials_path_for};
 use crate::register_cmd;
 
@@ -48,8 +49,8 @@ const REMINT_TOKEN_HELP: &str = "re-mint needs a GitHub token: run `toolu-runner
 ///
 /// Startup (once): init tracing, resolve + load the config, acquire the
 /// per-repo `.lock`, bridge SIGINT/SIGTERM to a [`CancellationToken`], and
-/// WARN (unless `--once`) when no login token is stored — the runner would
-/// then exit after the first job. The lock is held for the loop's lifetime.
+/// check the re-mint's credentials ([`check_remint_auth`]). The lock is held
+/// for the loop's lifetime.
 pub(crate) async fn cmd_run(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
   let masker = Arc::new(Mutex::new(SecretMasker::new()));
   crate::init_tracing_for(&masker).map_err(|e| format!("startup init: {e}"))?;
@@ -68,27 +69,7 @@ pub(crate) async fn cmd_run(args: RunArgs) -> Result<(), Box<dyn std::error::Err
 
   let store = AuthStore::new(&registry::runner_home());
   let host = register_cmd::host_from_runner_url(&cfg.runner_url)?;
-  // An App registration that will re-mint needs a usable App: fail before
-  // polling (unreadable file, or a key that cannot sign), with its secrets
-  // masked from here on.
-  if let AuthSection::App { app_file, .. } = &cfg.auth
-    && !args.once
-    && !cfg.ephemeral
-  {
-    crate::app_auth::check_app(Path::new(app_file), &masker).map_err(|e| {
-      format!(
-        "{e} — the registration authenticates with this GitHub App; restore the file or \
-         run `toolu-runner register --app --replace`"
-      )
-    })?;
-  }
-  // An ephemeral registration never re-mints and an App registration
-  // re-mints with the App, so neither needs a login token.
-  warn_if_no_login(
-    &store,
-    &host,
-    args.once || cfg.ephemeral || !cfg.auth.is_token(),
-  );
+  check_remint_auth(&cfg, args.once, &store, &host, &masker)?;
 
   RunLoop {
     config_path: config_path.clone(),
@@ -97,7 +78,7 @@ pub(crate) async fn cmd_run(args: RunArgs) -> Result<(), Box<dyn std::error::Err
     lock_path,
     masker,
     store,
-    app_tokens: crate::app_auth::InstallationTokens::default(),
+    app_tokens: app_auth::InstallationTokens::default(),
     host,
     cancel,
     once: args.once,
@@ -106,6 +87,34 @@ pub(crate) async fn cmd_run(args: RunArgs) -> Result<(), Box<dyn std::error::Err
   .drive()
   .await
   // `_lock_guard` drops here, releasing the lock.
+}
+
+/// Before polling, check what the re-mint will authenticate with. An App
+/// registration that will re-mint needs a usable App: an unreadable file or a
+/// key that cannot sign fails here, and its secrets are masked from here on.
+/// Neither an ephemeral registration (it never re-mints) nor an App
+/// registration needs a login token, so only a token registration WARNs
+/// without one.
+fn check_remint_auth(
+  cfg: &RunnerRegistrationConfig,
+  once: bool,
+  store: &AuthStore,
+  host: &str,
+  masker: &Mutex<SecretMasker>,
+) -> Result<(), String> {
+  if let AuthSection::App { app_file, .. } = &cfg.auth
+    && !once
+    && !cfg.ephemeral
+  {
+    app_auth::check_app(Path::new(app_file), masker).map_err(|e| {
+      format!(
+        "{e} — the registration authenticates with this GitHub App; restore the file or \
+         run `toolu-runner register --app --replace`"
+      )
+    })?;
+  }
+  warn_if_no_login(store, host, once || cfg.ephemeral || !cfg.auth.is_token());
+  Ok(())
 }
 
 /// WARN once, before polling, when the runner will drop offline after the
@@ -281,29 +290,14 @@ impl RunLoop {
         app_file,
         installation_id,
       } => {
-        let app = crate::app_auth::load_app(Path::new(app_file), &self.masker)?;
-        let help = crate::app_auth::app_remint_help(&app, app_file, *installation_id);
-        let minted = self
-          .app_tokens
-          .bearer(
-            client,
-            &app,
-            &cfg.runner_url,
-            *installation_id,
-            &self.masker,
-          )
-          .await;
-        match minted {
-          Ok(bearer) => (bearer, help),
-          // `Config`: the key in the App file no longer signs — retrying
-          // the spent JIT config could never recover.
-          Err(RunnerError::Auth(msg) | RunnerError::Config(msg)) => {
-            return Err(format!("re-mint rejected: {msg} — {help}").into());
-          },
-          Err(e) => {
-            tracing::warn!(error = %e, "re-mint failed; backing off before retry");
-            return Ok(Remint::Retry);
-          },
+        let target = AppTarget {
+          url: &cfg.runner_url,
+          app_file,
+          installation_id: *installation_id,
+        };
+        match app_auth::remint_bearer(&self.app_tokens, client, &target, &self.masker).await? {
+          AppRemint::Mint { bearer, help } => (bearer, help),
+          AppRemint::Retry => return Ok(Remint::Retry),
         }
       },
     };
@@ -317,7 +311,9 @@ impl RunLoop {
     .await
     {
       Ok(()) => Ok(Remint::Reset),
-      Err(RunnerError::Auth(msg)) => Err(format!("re-mint rejected: {msg} — {help}").into()),
+      Err(RunnerError::Auth(msg)) => {
+        Err(app_auth::remint_rejected(&self.masker, &msg, &help).into())
+      },
       Err(e) => {
         tracing::warn!(error = %e, "re-mint failed; backing off before retry");
         Ok(Remint::Retry)

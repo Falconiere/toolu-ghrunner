@@ -383,7 +383,9 @@ App-JWT tests, never uploaded to any GitHub App (authenticates nothing).
   `resolve_runner_group` turns an org `--runner-group` name into its id).
   `app_auth` (#201: `load_app` masks `secret_values`, `register_installation`
   with a not-installed error naming where it is installed + install URL,
-  `InstallationTokens` one-entry memory cache, `app_remint_help`).
+  `InstallationTokens` one-entry memory cache, `app_remint_help`; `masked`
+  runs `register`'s errors and the fatal re-mint message through the masker,
+  since `main` prints them to stderr outside the tracing redactor).
   `network_setup::lifecycle_client` (per-iteration + `boot` env mode;
   `NetworkMemo` logs/registers only on change; bad `[network]` = exit 2).
   `ephemeral::finish_job` (unregister+delete keeping `_diag/`; org URLs via

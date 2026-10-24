@@ -72,7 +72,7 @@ pub(crate) async fn resolve(
   let registration = crate::app_auth::register_installation(client, &app, url, masker)
     .await
     .map_err(|e| with_implicit_note(e, args.app, &app_file, host))?;
-  let app_file = std::path::absolute(&app_file).unwrap_or(app_file);
+  let app_file = absolute_app_file(&app_file)?;
   Ok(RegisterAuth {
     bearer: registration.token,
     section: AuthSection::App {
@@ -84,6 +84,23 @@ pub(crate) async fn resolve(
       app.slug, registration.installation_id
     )),
     implicit_note: (!args.app).then(|| implicit_note(&app_file, host)),
+  })
+}
+
+/// `app_file` as the absolute path `[auth] app_file` persists: `run` reads it
+/// from whatever directory the supervisor starts it in.
+///
+/// # Errors
+///
+/// `RunnerError::Config` naming the file when it cannot be made absolute
+/// (an empty path, or a relative one when the current directory is
+/// unreadable), so a relative path is never persisted.
+fn absolute_app_file(app_file: &Path) -> Result<PathBuf, RunnerError> {
+  std::path::absolute(app_file).map_err(|e| {
+    RunnerError::Config(format!(
+      "cannot record the GitHub App file '{}' as an absolute path: {e}",
+      app_file.display()
+    ))
   })
 }
 
@@ -225,3 +242,7 @@ async fn resolve_register_bearer(
     BearerDecision::Fail(msg) => Err(RunnerError::Auth(msg).into()),
   }
 }
+
+#[cfg(test)]
+#[path = "tests/register_auth.rs"]
+mod tests;

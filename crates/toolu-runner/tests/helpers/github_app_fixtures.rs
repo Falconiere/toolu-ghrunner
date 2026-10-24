@@ -1,7 +1,8 @@
 //! Shared #201 fixtures: the protocol crate's real test RSA key, the GitHub
 //! App reply captures in `fixtures/github_app/` (live 401/404 captures and
 //! GitHub's documented success examples, see each file's `provenance`), JWT
-//! verification, and a real `github-app.json` writer.
+//! verification, a real `github-app.json` writer, and a peer that echoes the
+//! bearer it was sent.
 //!
 //! Declared once in `tests/main.rs`; test files use `crate::github_app_fixtures`.
 
@@ -10,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use jsonwebtoken::{Algorithm, DecodingKey, Validation};
 use serde_json::Value;
-use wiremock::ResponseTemplate;
+use wiremock::{Request, Respond, ResponseTemplate};
 
 /// The 2048-bit test key (generated for these tests, registered to no App).
 pub const PRIVATE_PEM: &str = include_str!("../../../protocol/tests/fixtures/app_jwt_test_key.pem");
@@ -121,4 +122,21 @@ pub fn write_app(home: &Path, host: &str) -> Result<PathBuf, Box<dyn Error>> {
   };
   config::app_store::save_app(home, &app)?;
   Ok(config::app_store::app_path(home))
+}
+
+/// A reply with this status whose body echoes the request's `Authorization`
+/// header, as a misbehaving proxy might: whatever quotes the body must mask
+/// the bearer.
+pub struct EchoAuthorization(pub u16);
+
+impl Respond for EchoAuthorization {
+  fn respond(&self, request: &Request) -> ResponseTemplate {
+    let authorization = request
+      .headers
+      .get("authorization")
+      .map_or("<no authorization header>", |value| {
+        value.to_str().unwrap_or("<non-UTF-8 authorization header>")
+      });
+    ResponseTemplate::new(self.0).set_body_string(format!("upstream echoed: {authorization}"))
+  }
 }
