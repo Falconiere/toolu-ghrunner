@@ -3,9 +3,11 @@
 //! renews the claim's lease and enforces its deadline; then report how it
 //! ended (`complete`).
 //!
-//! The job is cancelled on SIGINT/SIGTERM (the loop's cancel token), on the
-//! claim's deadline (an idle JIT whose job GitHub gave another runner), and on
-//! a 401 from toolu.sh mid-job (a revoked machine: nothing more is sent).
+//! The job is cancelled on SIGINT/SIGTERM (the loop's cancel token), at the
+//! claim's deadline whether or not it is still running (toolu.sh's limit for
+//! the job; it also ends an idle JIT whose job GitHub gave another runner),
+//! and on a 401 from toolu.sh mid-job (a revoked machine: nothing more is
+//! sent).
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -99,12 +101,16 @@ impl ClaimedJob<'_> {
       id: id.to_owned(),
       claim_epoch: claim.claim_epoch,
       lease_expires_at: claim.lease_expires_at,
-      deadline: claim.deadline,
+      deadline: tokio::time::Instant::now()
+        + Duration::from_millis(claim.deadline.saturating_sub(now_epoch_ms())),
       job_cancel: job_cancel.clone(),
       stop: stop.clone(),
     }));
+    // Stops the watcher however this lifecycle ends (returned, dropped or
+    // unwound), so a dead job's lease is never renewed.
+    let stop_watcher = stop.drop_guard();
     let outcome = listener.run(job_cancel).await;
-    stop.cancel();
+    drop(stop_watcher);
     match watcher.await {
       Ok(Some(why)) => Err(why),
       Ok(None) => Ok(outcome),
@@ -191,7 +197,8 @@ struct Watch {
   id: String,
   claim_epoch: u64,
   lease_expires_at: u64,
-  deadline: u64,
+  /// The claim's deadline.
+  deadline: tokio::time::Instant,
   /// Cancels the running job (deadline, revocation).
   job_cancel: CancellationToken,
   /// The lifecycle ended: stop at once.
@@ -206,17 +213,13 @@ async fn watch_claim(w: Watch) -> Option<String> {
   if let Some(end) = mark_dispatched(&w).await {
     return end;
   }
-  let deadline = tokio::time::sleep(Duration::from_millis(
-    w.deadline.saturating_sub(now_epoch_ms()),
-  ));
-  tokio::pin!(deadline);
   let (mut lease, mut renewing, mut deadline_fired) = (w.lease_expires_at, true, false);
   loop {
     let next = heartbeat_delay(lease, now_epoch_ms());
     let beat = tokio::select! {
       () = w.stop.cancelled() => Beat::Stop,
-      () = &mut deadline, if !deadline_fired => Beat::Deadline,
-      () = tokio::time::sleep(next), if renewing => heartbeat(&w).await,
+      () = tokio::time::sleep_until(w.deadline), if !deadline_fired => Beat::Deadline,
+      () = tokio::time::sleep(next), if renewing => heartbeat(&w, deadline_fired).await,
     };
     match beat {
       Beat::Renewed(at) => lease = at,
@@ -248,10 +251,12 @@ enum Beat {
   Revoked(String),
 }
 
-/// One heartbeat, abandoned when the lifecycle ends.
-async fn heartbeat(w: &Watch) -> Beat {
+/// One heartbeat, abandoned when the lifecycle ends or the deadline (not yet
+/// `deadline_fired`) passes, so a slow reply never delays the cancel.
+async fn heartbeat(w: &Watch, deadline_fired: bool) -> Beat {
   let renewal = tokio::select! {
     () = w.stop.cancelled() => return Beat::Stop,
+    () = tokio::time::sleep_until(w.deadline), if !deadline_fired => return Beat::Deadline,
     result = w.toolu.heartbeat(&w.id, w.claim_epoch) => result,
   };
   let e = match renewal {

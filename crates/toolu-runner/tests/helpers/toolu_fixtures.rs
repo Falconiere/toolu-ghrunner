@@ -42,6 +42,19 @@ pub struct Faults {
   pub taken: Vec<String>,
   /// Every heartbeat answers the live 401.
   pub heartbeat_401: bool,
+  /// Every heartbeat answers `409` (the claim was lost).
+  pub heartbeat_409: bool,
+  /// The first claims answer these `(status, error)` refusals, in order
+  /// (whatever job they name; the job stays queued).
+  pub claim_refusals: Vec<(u16, &'static str)>,
+  /// Every `POST` of this verb (`claim`, `dispatched`, `complete`) answers
+  /// the live 401.
+  pub revoke_verb: Option<&'static str>,
+  /// The first `n` completes answer 503.
+  pub complete_503: usize,
+  /// Claim deadlines are now + this many ms (default 600 000; negative =
+  /// already passed).
+  pub deadline_ms: Option<i64>,
 }
 
 /// One `/runner/*` request as the peer saw it.
@@ -68,7 +81,9 @@ struct State {
   lease_ms: u64,
   faults: Faults,
   lists: usize,
+  claims: usize,
   completes: usize,
+  failed_completes: usize,
   jits: Vec<String>,
   seen: Vec<Seen>,
 }
@@ -103,7 +118,9 @@ impl Peer {
       lease_ms,
       faults,
       lists: 0,
+      claims: 0,
       completes: 0,
+      failed_completes: 0,
       jits: Vec::new(),
       seen: Vec::new(),
     }));
@@ -208,13 +225,21 @@ fn route(state: &mut State, method_name: &str, path: &str) -> (u16, String) {
   let ok = || json!({ "ok": true }).to_string();
   match (method_name, path.rsplit('/').next().unwrap_or_default()) {
     ("GET", "queued") => list(state),
+    ("POST", verb) if state.faults.revoke_verb == Some(verb) => (401, invalid_token_body()),
     ("POST", "claim") => claim(state, &job_id(path)),
     ("POST", "heartbeat") if state.faults.heartbeat_401 => (401, invalid_token_body()),
+    ("POST", "heartbeat") if state.faults.heartbeat_409 => {
+      (409, json!({ "error": "claim superseded" }).to_string())
+    },
     ("POST", "heartbeat") => (
       200,
       json!({ "leaseExpiresAt": now_ms() + state.lease_ms }).to_string(),
     ),
     ("POST", "dispatched") => (200, ok()),
+    ("POST", "complete") if state.failed_completes < state.faults.complete_503 => {
+      state.failed_completes += 1;
+      (503, json!({ "error": "unavailable" }).to_string())
+    },
     ("POST", "complete") => {
       state.completes += 1;
       (200, ok())
@@ -245,9 +270,13 @@ fn list(state: &mut State) -> (u16, String) {
   (200, json!({ "jobs": jobs }).to_string())
 }
 
-/// `POST /runner/jobs/:id/claim`: a lost race for a `taken` job, else a
-/// fresh real JIT config and a `lease_ms` lease.
+/// `POST /runner/jobs/:id/claim`: the injected refusals first, a lost race
+/// for a `taken` job, else a fresh real JIT config and a `lease_ms` lease.
 fn claim(state: &mut State, id: &str) -> (u16, String) {
+  state.claims += 1;
+  if let Some((status, error)) = state.faults.claim_refusals.get(state.claims - 1) {
+    return (*status, json!({ "error": error }).to_string());
+  }
   if state.faults.taken.iter().any(|t| t == id) {
     state.queued.retain(|j| j != id);
     return (409, json!({ "error": "claim refused: taken" }).to_string());
@@ -267,9 +296,10 @@ fn claim(state: &mut State, id: &str) -> (u16, String) {
   };
   state.jits.push(jit.clone());
   let now = now_ms();
+  let deadline = now.saturating_add_signed(state.faults.deadline_ms.unwrap_or(600_000));
   let body = json!({
     "jitConfig": jit,
-    "deadline": now + 600_000,
+    "deadline": deadline,
     "claimEpoch": 7,
     "leaseExpiresAt": now + state.lease_ms,
   });

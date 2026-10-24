@@ -183,13 +183,35 @@ fn an_unknown_provider_kind_or_key_is_rejected() {
   assert!(err.to_string().contains("slot"), "{err}");
 }
 
+/// Every field `register` always writes is still required of a GitHub
+/// registration (it loads as a default only for a toolu.sh machine).
 #[test]
-fn a_github_config_without_runner_url_is_rejected() {
-  let text = PRE_206_GITHUB.replace("runner_url = \"https://github.com/octo/demo\"\n", "");
-  let err = load_text(&text)
-    .expect("setup")
-    .expect_err("a GitHub registration names its runner_url");
-  assert!(err.to_string().contains("runner_url"), "{err}");
+fn a_github_config_missing_a_registered_field_is_rejected() {
+  for (line, field) in [
+    (
+      "runner_url = \"https://github.com/octo/demo\"\n",
+      "runner_url",
+    ),
+    ("runner_name = \"runner-206\"\n", "runner_name"),
+    ("runner_id = 7\n", "runner_id"),
+    ("auth_token = \"Iv1.client\"\n", "auth_token"),
+    (
+      "jit_config = \"eyJqaXQiOiB0cnVlfQ==\"\n",
+      "runtime.jit_config",
+    ),
+    ("protocol_version = \"v2\"\n", "runtime.protocol_version"),
+  ] {
+    assert!(PRE_206_GITHUB.contains(line), "baseline lacks {line:?}");
+    let err = load_text(&PRE_206_GITHUB.replace(line, ""))
+      .expect("setup")
+      .expect_err(field);
+    assert!(
+      err
+        .to_string()
+        .contains(&format!("missing field `{field}`")),
+      "{field}: {err}"
+    );
+  }
 }
 
 #[test]

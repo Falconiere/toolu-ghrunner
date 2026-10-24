@@ -1141,7 +1141,7 @@ loop (reload config.toml + credentials.json, mask the host token)
            POST …/dispatched {claimEpoch}         (advisory)
            every heartbeat_delay(lease): POST …/heartbeat {claimEpoch}
              → leaseExpiresAt; 409/404 → stop renewing; 401 → cancel job, fatal
-           at deadline → cancel job (an idle JIT GitHub gave away)
+           at deadline → cancel the job (running or an idle JIT)
     POST /runner/jobs/:id/complete {outcome: done|failed, errorMessage?, claimEpoch}
       (transient: 5 attempts, not cancel-aware)
     next_action(outcome) → poll again | backoff | exit

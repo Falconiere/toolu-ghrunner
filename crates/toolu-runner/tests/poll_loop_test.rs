@@ -376,3 +376,300 @@ async fn an_ephemeral_machine_or_an_empty_token_is_refused_at_start() -> TestRes
   assert!(peer.seen().is_empty(), "{:#?}", peer.paths());
   Ok(())
 }
+
+/// `slots-full` is a wait, not a failure: the loop idles at the poll
+/// interval (never backs off), then claims once a slot frees.
+#[tokio::test]
+async fn slots_full_waits_then_claims() -> TestResult<()> {
+  let faults = Faults {
+    claim_refusals: vec![
+      (409, "claim refused: slots-full"),
+      (409, "claim refused: slots-full"),
+    ],
+    ..Faults::default()
+  };
+  let peer = Peer::start(&["job-a"], 60_000, faults, "true").await?;
+  let home = TempDir::new()?;
+  write_machine(home.path(), &peer.server.uri(), HOST_TOKEN, "")?;
+  let child = spawn_run(home.path(), &[])?;
+  peer.wait_for("/job-a/complete", 1).await?;
+  stop(child, home.path(), "run").await?;
+
+  let claims: Vec<u16> = peer
+    .seen_ending("/claim")
+    .iter()
+    .map(|s| s.status)
+    .collect();
+  assert_eq!(claims, [409, 409, 200], "{:#?}", peer.paths());
+  let log = log_of(home.path(), "run");
+  assert!(log.contains("slots are full; waiting"), "{log}");
+  assert!(
+    !log.contains("backing off"),
+    "slots-full must not back off:\n{log}"
+  );
+  Ok(())
+}
+
+/// The claim's deadline cancels a job still running at it; the cancelled
+/// job is reported `done` (it ran to a conclusion) and the broker hears a
+/// non-success conclusion.
+#[tokio::test]
+async fn the_claim_deadline_cancels_a_running_job() -> TestResult<()> {
+  let faults = Faults {
+    deadline_ms: Some(3_000),
+    ..Faults::default()
+  };
+  let peer = Peer::start(&["job-a"], 60_000, faults, "sleep 30").await?;
+  let home = TempDir::new()?;
+  write_machine(home.path(), &peer.server.uri(), HOST_TOKEN, "")?;
+  let started = Instant::now();
+  let child = spawn_run(home.path(), &[])?;
+  peer.wait_for("/job-a/complete", 1).await?;
+  assert!(
+    started.elapsed() < Duration::from_secs(25),
+    "the deadline did not cancel the job"
+  );
+  stop(child, home.path(), "run").await?;
+
+  assert_ne!(reported_conclusion(&peer.server).await?, "succeeded");
+  let complete = peer.seen_ending("/job-a/complete");
+  assert_eq!(
+    complete.first().map(|c| c.body.clone()),
+    Some(serde_json::json!({ "outcome": "done", "claimEpoch": 7 }))
+  );
+  let log = log_of(home.path(), "run");
+  assert!(log.contains("the claim's deadline passed"), "{log}");
+  Ok(())
+}
+
+/// A claim whose deadline already passed is never started: no broker
+/// session, and toolu.sh gets `failed` with the reason.
+#[tokio::test]
+async fn a_claim_past_its_deadline_is_reported_failed_without_running() -> TestResult<()> {
+  let faults = Faults {
+    deadline_ms: Some(-1_000),
+    ..Faults::default()
+  };
+  let peer = Peer::start(&["job-a"], 60_000, faults, "true").await?;
+  let home = TempDir::new()?;
+  write_machine(home.path(), &peer.server.uri(), HOST_TOKEN, "")?;
+  let child = spawn_run(home.path(), &[])?;
+  peer.wait_for("/job-a/complete", 1).await?;
+  stop(child, home.path(), "run").await?;
+
+  assert_eq!(sup::count(&peer.server, "POST", "/acquirejob").await?, 0);
+  assert!(peer.seen_ending("/job-a/dispatched").is_empty());
+  let complete = peer.seen_ending("/job-a/complete");
+  assert_eq!(
+    complete.first().map(|c| c.body.clone()),
+    Some(serde_json::json!({
+      "outcome": "failed",
+      "errorMessage": "config error: the claim's deadline passed before the job started",
+      "claimEpoch": 7,
+    })),
+    "{:#?}",
+    peer.paths()
+  );
+  Ok(())
+}
+
+/// A 409 heartbeat (the claim is no longer this machine's) stops renewing;
+/// the job still runs to its end and is reported.
+#[tokio::test]
+async fn a_lost_claim_stops_renewing_and_the_job_finishes() -> TestResult<()> {
+  let faults = Faults {
+    heartbeat_409: true,
+    ..Faults::default()
+  };
+  let peer = Peer::start(&["job-a"], LEASE_MS, faults, "sleep 4").await?;
+  let home = TempDir::new()?;
+  write_machine(home.path(), &peer.server.uri(), HOST_TOKEN, "")?;
+  let child = spawn_run(home.path(), &[])?;
+  peer.wait_for("/job-a/complete", 1).await?;
+  stop(child, home.path(), "run").await?;
+
+  assert_eq!(
+    peer.seen_ending("/heartbeat").len(),
+    1,
+    "{:#?}",
+    peer.paths()
+  );
+  assert_eq!(reported_conclusion(&peer.server).await?, "succeeded");
+  let log = log_of(home.path(), "run");
+  assert!(
+    log.contains("the claim was lost; the job runs to its end"),
+    "{log}"
+  );
+  Ok(())
+}
+
+/// A transient `complete` failure is retried until toolu.sh takes it.
+#[tokio::test]
+async fn a_transient_complete_failure_is_retried() -> TestResult<()> {
+  let faults = Faults {
+    complete_503: 2,
+    ..Faults::default()
+  };
+  let peer = Peer::start(&["job-a"], 60_000, faults, "true").await?;
+  let home = TempDir::new()?;
+  write_machine(home.path(), &peer.server.uri(), HOST_TOKEN, "")?;
+  let child = spawn_run(home.path(), &[])?;
+  peer.wait_for("/job-a/complete", 3).await?;
+  stop(child, home.path(), "run").await?;
+
+  let statuses: Vec<u16> = peer
+    .seen_ending("/job-a/complete")
+    .iter()
+    .map(|s| s.status)
+    .collect();
+  assert_eq!(statuses, [503, 503, 200]);
+  Ok(())
+}
+
+/// `run --once` runs one claimed job, reports it and exits 0, leaving the
+/// rest of the queue.
+#[tokio::test]
+async fn once_runs_one_job_and_exits_0() -> TestResult<()> {
+  let peer = Peer::start(&["job-a", "job-b"], 60_000, Faults::default(), "true").await?;
+  let home = TempDir::new()?;
+  write_machine(home.path(), &peer.server.uri(), HOST_TOKEN, "")?;
+  let out = wait_exit(spawn_run(home.path(), &["--once"])?).await?;
+  let log = log_of(home.path(), "run");
+  assert_eq!(out.status.code(), Some(0), "{log}");
+  assert_eq!(
+    peer.seen_ending("/complete").len(),
+    1,
+    "{:#?}",
+    peer.paths()
+  );
+  assert!(peer.seen_ending("/job-b/claim").is_empty());
+  Ok(())
+}
+
+/// The other claim refusals: `cap-reached` waits, a 404 (job gone) and a
+/// reply outside the contract (400) try the next job, a 503 backs off; the
+/// queue still drains.
+#[tokio::test]
+async fn claim_refusals_wait_skip_or_back_off_by_kind() -> TestResult<()> {
+  let faults = Faults {
+    claim_refusals: vec![
+      (409, "claim refused: cap-reached"),
+      (404, "claim refused: not-found"),
+      (400, "bad request"),
+      (503, "unavailable"),
+    ],
+    ..Faults::default()
+  };
+  let peer = Peer::start(&["job-a", "job-b"], 60_000, faults, "true").await?;
+  let home = TempDir::new()?;
+  write_machine(home.path(), &peer.server.uri(), HOST_TOKEN, "")?;
+  let child = spawn_run(home.path(), &[])?;
+  peer.wait_for("/complete", 2).await?;
+  stop(child, home.path(), "run").await?;
+
+  let claims: Vec<(String, u16)> = peer
+    .seen_ending("/claim")
+    .iter()
+    .map(|s| (s.path.clone(), s.status))
+    .collect();
+  let expected = [
+    ("/runner/jobs/job-a/claim", 409), // cap-reached: wait, re-list
+    ("/runner/jobs/job-a/claim", 404), // gone: try the next job
+    ("/runner/jobs/job-b/claim", 400), // off-contract: try the next job
+    ("/runner/jobs/job-a/claim", 503), // transient: back off, re-list
+    ("/runner/jobs/job-a/claim", 200),
+  ];
+  for (i, (path, status)) in expected.iter().enumerate() {
+    assert_eq!(
+      claims.get(i).map(|(p, s)| (p.as_str(), *s)),
+      Some((*path, *status)),
+      "{claims:#?}"
+    );
+  }
+  let log = log_of(home.path(), "run");
+  for line in [
+    "toolu.sh refused the claim (cap-reached); waiting",
+    "the job is no longer claimable; trying the next",
+    "toolu.sh answered the claim unexpectedly",
+    "claiming the job failed",
+  ] {
+    assert!(log.contains(line), "{line}:\n{log}");
+  }
+  Ok(())
+}
+
+/// A 401 on a claim, on `dispatched` (mid-job) or on `complete` is the same
+/// revocation: exit 2 naming `toolu-runner setup`, nothing sent after it.
+#[tokio::test]
+async fn a_401_on_claim_dispatched_or_complete_is_fatal() -> TestResult<()> {
+  for verb in ["claim", "dispatched", "complete"] {
+    let faults = Faults {
+      revoke_verb: Some(verb),
+      ..Faults::default()
+    };
+    let peer = Peer::start(&["job-a"], 60_000, faults, "true").await?;
+    let home = TempDir::new()?;
+    write_machine(home.path(), &peer.server.uri(), HOST_TOKEN, "")?;
+    let out = wait_exit(spawn_run(home.path(), &[])?).await?;
+    let log = log_of(home.path(), "run");
+    assert_eq!(out.status.code(), Some(2), "{verb}: {log}");
+    assert!(log.contains("toolu-runner setup"), "{verb}: {log}");
+    let last = peer.seen().last().map(|s| (s.path.clone(), s.status));
+    assert_eq!(
+      last,
+      Some((format!("/runner/jobs/job-a/{verb}"), 401)),
+      "{verb}: nothing may follow the 401: {:#?}",
+      peer.paths()
+    );
+  }
+  Ok(())
+}
+
+/// `.pending_remove` (a `remove` of a running registration) stops the loop
+/// between jobs with exit 0.
+#[tokio::test]
+async fn pending_remove_stops_the_loop_between_jobs() -> TestResult<()> {
+  let peer = Peer::start(&[], 60_000, Faults::default(), "true").await?;
+  let home = TempDir::new()?;
+  let config = write_machine(home.path(), &peer.server.uri(), HOST_TOKEN, "")?;
+  let child = spawn_run(home.path(), &[])?;
+  peer.wait_for("/queued", 1).await?;
+  std::fs::write(config.with_file_name(".pending_remove"), "")?;
+  let out = wait_exit(child).await?;
+  let log = log_of(home.path(), "run");
+  assert_eq!(out.status.code(), Some(0), "{log}");
+  assert!(
+    log.contains("stopping the toolu.sh poll loop between jobs"),
+    "{log}"
+  );
+  Ok(())
+}
+
+/// A re-paired host token (`credentials.json` rewritten) is used from the
+/// next pass on, and masked like the first.
+#[tokio::test]
+async fn a_rotated_host_token_is_used_on_the_next_pass() -> TestResult<()> {
+  /// A second synthetic token of the contract's shape.
+  const ROTATED: &str = "tlu_h_rotated206rotated206rotated206rotated206rot";
+  let peer = Peer::start(&[], 60_000, Faults::default(), "true").await?;
+  let home = TempDir::new()?;
+  let config = write_machine(home.path(), &peer.server.uri(), HOST_TOKEN, "")?;
+  let child = spawn_run(home.path(), &[])?;
+  peer.wait_for("/queued", 1).await?;
+  std::fs::write(
+    config.with_file_name("credentials.json"),
+    serde_json::json!({ "access_token": ROTATED, "issued_at": "2026-10-24T00:00:00Z" }).to_string(),
+  )?;
+  let rotated = format!("Bearer {ROTATED}");
+  sup::wait_until("a list with the rotated token", || {
+    peer
+      .seen()
+      .iter()
+      .any(|s| s.authorization.as_deref() == Some(rotated.as_str()))
+  })
+  .await?;
+  stop(child, home.path(), "run").await?;
+  let logs = all_logs(home.path());
+  assert!(!logs.contains(ROTATED), "rotated host token logged");
+  Ok(())
+}

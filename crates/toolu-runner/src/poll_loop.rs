@@ -1,17 +1,15 @@
-//! `run` for a toolu.sh machine (`[provider] kind = "toolu"`, #206): poll
-//! toolu.sh's `/runner/*` queue, claim one job at a time, run its JIT config
-//! once ([`crate::poll_job`]), and repeat.
-//!
-//! Contract: CodaSignal/toolu.sh `docs/guides/self-hosted-machines.md`. The
-//! guarantees are `run`'s: the caller holds the registration's `.lock`; the
-//! cancel token ends the loop (mid-job: a graceful cancel, then the job is
-//! reported); 429/5xx/transport failures back off 1 s → 60 s (reset once a
-//! poll finds nothing to claim or a job ran); a 401 is fatal
-//! (the machine was revoked). A lost claim race just moves on. The config
-//! and host token are reloaded every pass, so a re-pair or a `[network]`
-//! edit applies without a restart.
+//! `run` for a toolu.sh machine (`[provider] kind = "toolu"`, #206): list
+//! toolu.sh's `/runner/*` queue, claim one job, run its JIT config once
+//! ([`crate::poll_job`]), repeat. Contract: CodaSignal/toolu.sh
+//! `docs/guides/self-hosted-machines.md`; lock, cancel and drain as `run`.
+//! A 401 is fatal (revoked); 429/5xx/transport back off 1 s → 60 s (reset
+//! when a poll finds nothing to claim or a job ends without a transient
+//! error); a lost race or an off-contract claim reply moves to the next job.
+//! Config and host token reload every pass; the HTTP client only when
+//! `[network]` changes.
 
-use std::path::PathBuf;
+use std::ops::ControlFlow;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -19,8 +17,8 @@ use config::config::{RunnerRegistrationConfig, load_credentials, resolve_data_di
 use config::provider::ProviderSection;
 use listener::loop_decision::{LoopAction, next_action};
 use listener::session_conflict::SessionConflictPolicy;
-use protocol::toolu_jobs::{ClaimRefusal, parse_claim_refusal};
-use shared::{Conclusion, RunnerError, SecretMasker};
+use protocol::toolu_jobs::{ClaimRefusal, QueuedJobs, parse_claim_refusal};
+use shared::{Conclusion, NetworkConfig, RunnerError, SecretMasker};
 use tokio_util::sync::CancellationToken;
 use wire::net::toolu_jobs::{TooluClient, TooluError};
 
@@ -40,6 +38,17 @@ enum Pass {
   Backoff,
   /// A claimed job's JIT lifecycle ran with this outcome.
   Ran(Result<Option<Conclusion>, RunnerError>),
+}
+
+/// What one pass carries over to the next.
+#[derive(Default)]
+struct PassState {
+  /// Logs and masks a `[network]` change once.
+  network_memo: crate::network_setup::NetworkMemo,
+  /// The host token last registered with the masker.
+  masked_token: String,
+  /// The HTTP client and the `[network]` it was built for.
+  client: Option<(NetworkConfig, reqwest::Client)>,
 }
 
 /// Loop-invariant handles of a toolu.sh machine's poll loop.
@@ -103,37 +112,37 @@ impl PollLoop {
   /// fatal error (unusable config or host token, a revoked machine).
   pub(crate) async fn drive(self) -> Result<(), Box<dyn std::error::Error>> {
     let mut backoff = BACKOFF_START;
-    let mut network_memo = crate::network_setup::NetworkMemo::default();
-    let mut masked_token = String::new();
+    let mut state = PassState::default();
     loop {
-      if self.cancel.is_cancelled() || self.drain.is_cancelled() || self.pending_path.exists() {
+      if self.stopping() || self.pending_path.exists() {
         tracing::info!("stopping the toolu.sh poll loop between jobs");
         return Ok(());
       }
       // Bound first: a `?` temporary in the scrutinee would live across the
       // `await`s below, making the loop future `!Send` (`run --all`).
-      let pass = self.pass(&mut network_memo, &mut masked_token).await?;
+      let pass = self.pass(&mut state).await?;
       if let Some(end) = self.settle(pass, &mut backoff).await {
         return end;
       }
     }
   }
 
-  /// One pass on the freshly reloaded config: build the clients, then list
-  /// and claim ([`Self::poll_once`]).
-  async fn pass(
-    &self,
-    network_memo: &mut crate::network_setup::NetworkMemo,
-    masked_token: &mut String,
-  ) -> Result<Pass, Box<dyn std::error::Error>> {
+  /// Cancelled or drained: claim nothing more.
+  fn stopping(&self) -> bool {
+    self.cancel.is_cancelled() || self.drain.is_cancelled()
+  }
+
+  /// One pass on the freshly reloaded config: the clients, then list and
+  /// claim ([`Self::poll_once`]).
+  async fn pass(&self, state: &mut PassState) -> Result<Pass, Box<dyn std::error::Error>> {
     let cfg = load_run_config(&self.config_path)?;
-    let client = crate::network_setup::lifecycle_client(
-      &cfg.network_config(),
+    let client = state.client(&cfg, &self.masker)?;
+    let toolu = state.toolu(
+      &cfg,
+      &client,
       &self.masker,
-      LOOP_CLIENT_TIMEOUT,
-      network_memo,
+      (&self.config_path, &self.creds_path),
     )?;
-    let toolu = self.toolu_client(&cfg, &client, masked_token)?;
     self.poll_once(&cfg, &client, &toolu).await
   }
 
@@ -153,8 +162,12 @@ impl PollLoop {
       Pass::Backoff => true,
       Pass::Ran(outcome) => {
         let outcome = outcome.map(|_conclusion| ());
-        let cancelled = self.cancel.is_cancelled() || self.drain.is_cancelled();
-        match next_action(&outcome, self.once, cancelled, self.pending_path.exists()) {
+        match next_action(
+          &outcome,
+          self.once,
+          self.stopping(),
+          self.pending_path.exists(),
+        ) {
           LoopAction::Exit(code) => return Some(run_cmd::finish(code, outcome)),
           // A finished (or auth-dead) JIT is spent either way: poll again.
           LoopAction::Reregister => {
@@ -168,41 +181,6 @@ impl PollLoop {
     (wait && backoff_step(&self.cancel, &self.drain, backoff).await).then_some(Ok(()))
   }
 
-  /// The `/runner/*` client for this pass: the registration's API origin and
-  /// its host token, registered with the masker whenever it changes.
-  fn toolu_client(
-    &self,
-    cfg: &RunnerRegistrationConfig,
-    client: &reqwest::Client,
-    masked_token: &mut String,
-  ) -> Result<TooluClient, Box<dyn std::error::Error>> {
-    let ProviderSection::Toolu { api_url, .. } = &cfg.provider else {
-      return Err(
-        format!(
-          "{} is not a toolu.sh registration",
-          self.config_path.display()
-        )
-        .into(),
-      );
-    };
-    let creds = load_credentials(&self.creds_path).map_err(|e| format!("{e}"))?;
-    if creds.access_token != *masked_token {
-      self
-        .masker
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .add_secret(&creds.access_token);
-      masked_token.clone_from(&creds.access_token);
-    }
-    TooluClient::new(client.clone(), api_url, &creds.access_token).map_err(|e| {
-      format!(
-        "{e} ({}) — pair the machine again with `toolu-runner setup`",
-        self.config_path.display()
-      )
-      .into()
-    })
-  }
-
   /// List the queue and claim the first job this machine wins; run it.
   async fn poll_once(
     &self,
@@ -210,19 +188,15 @@ impl PollLoop {
     client: &reqwest::Client,
     toolu: &TooluClient,
   ) -> Result<Pass, Box<dyn std::error::Error>> {
-    let queued = match toolu.queued().await {
-      Ok(queued) => queued,
-      Err(TooluError::Revoked(why)) => return Err(revoked(&why)),
-      Err(e @ (TooluError::Conflict(_) | TooluError::NotFound | TooluError::Transient(_))) => {
-        tracing::warn!(error = %e, "listing toolu.sh jobs failed; backing off");
-        return Ok(Pass::Backoff);
-      },
-      Err(e @ TooluError::Protocol(_)) => {
-        tracing::warn!(error = %e, "toolu.sh answered the job list unexpectedly; backing off");
-        return Ok(Pass::Backoff);
-      },
+    let queued = match self.list(toolu).await? {
+      ControlFlow::Continue(queued) => queued,
+      ControlFlow::Break(pass) => return Ok(pass),
     };
     for job in &queued.jobs {
+      // A claim cannot be handed back: once stopping, claim nothing more.
+      if self.stopping() {
+        return Ok(Pass::Idle);
+      }
       let claim = match toolu.claim(&job.id).await {
         Ok(claim) => claim,
         Err(refusal) => match claim_refused(&job.id, refusal)? {
@@ -242,10 +216,101 @@ impl PollLoop {
     }
     Ok(Pass::Idle)
   }
+
+  /// `GET /runner/jobs/queued`, abandoned on cancel or drain: the jobs, or
+  /// the pass to end with.
+  async fn list(
+    &self,
+    toolu: &TooluClient,
+  ) -> Result<ControlFlow<Pass, QueuedJobs>, Box<dyn std::error::Error>> {
+    let listed = tokio::select! {
+      () = self.cancel.cancelled() => return Ok(ControlFlow::Break(Pass::Idle)),
+      () = self.drain.cancelled() => return Ok(ControlFlow::Break(Pass::Idle)),
+      listed = toolu.queued() => listed,
+    };
+    match listed {
+      Ok(queued) => Ok(ControlFlow::Continue(queued)),
+      Err(TooluError::Revoked(why)) => Err(revoked(&why)),
+      Err(e) => {
+        warn_list_failed(&e);
+        Ok(ControlFlow::Break(Pass::Backoff))
+      },
+    }
+  }
+}
+
+impl PassState {
+  /// The pass's HTTP client: the previous pass's while `[network]` is
+  /// unchanged (idle polls reuse one connection), else a fresh one.
+  fn client(
+    &mut self,
+    cfg: &RunnerRegistrationConfig,
+    masker: &Mutex<SecretMasker>,
+  ) -> Result<reqwest::Client, RunnerError> {
+    let network = cfg.network_config();
+    if let Some(client) = self
+      .client
+      .as_ref()
+      .filter(|(built_for, _)| *built_for == network)
+      .map(|(_, client)| client.clone())
+    {
+      return Ok(client);
+    }
+    let client = crate::network_setup::lifecycle_client(
+      &network,
+      masker,
+      LOOP_CLIENT_TIMEOUT,
+      &mut self.network_memo,
+    )?;
+    self.client = Some((network, client.clone()));
+    Ok(client)
+  }
+
+  /// The `/runner/*` client for this pass: the registration's API origin and
+  /// its host token (`paths` = its `config.toml`, `credentials.json`),
+  /// registered with the masker whenever it changes.
+  fn toolu(
+    &mut self,
+    cfg: &RunnerRegistrationConfig,
+    client: &reqwest::Client,
+    masker: &Mutex<SecretMasker>,
+    (config_path, creds_path): (&Path, &Path),
+  ) -> Result<TooluClient, String> {
+    let ProviderSection::Toolu { api_url, .. } = &cfg.provider else {
+      return Err(format!(
+        "{} is not a toolu.sh registration",
+        config_path.display()
+      ));
+    };
+    let creds = load_credentials(creds_path).map_err(|e| format!("{e}"))?;
+    if creds.access_token != self.masked_token {
+      masker
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .add_secret(&creds.access_token);
+      self.masked_token.clone_from(&creds.access_token);
+    }
+    TooluClient::new(client.clone(), api_url, &creds.access_token).map_err(|e| {
+      format!(
+        "{e} ({}) — pair the machine again with `toolu-runner setup`",
+        config_path.display()
+      )
+    })
+  }
+}
+
+/// Log a failed job list (the pass backs off).
+fn warn_list_failed(e: &TooluError) {
+  let what = if matches!(e, TooluError::Protocol(_)) {
+    "toolu.sh answered the job list unexpectedly; backing off"
+  } else {
+    "listing toolu.sh jobs failed; backing off"
+  };
+  tracing::warn!(error = %e, "{what}");
 }
 
 /// What a refused claim of `job` means: `None` to try the next listed job
-/// (a lost race, a job gone), else the pass to end with; `Err` when the
+/// (a lost race, a job gone, a reply outside the contract), else the pass to end with; `Err` when the
 /// machine was revoked.
 fn claim_refused(
   job: &str,
@@ -271,7 +336,13 @@ fn claim_refused(
         format!("toolu.sh refused the claim ({reason}); waiting"),
       ),
     },
-    e @ (TooluError::Transient(_) | TooluError::Protocol(_)) => (
+    // A claim reply outside the contract is about this job: skip it, so one
+    // bad job cannot block the rest of the queue.
+    e @ TooluError::Protocol(_) => (
+      None,
+      format!("toolu.sh answered the claim unexpectedly ({e}); trying the next"),
+    ),
+    e @ TooluError::Transient(_) => (
       Some(Pass::Backoff),
       format!("claiming the job failed ({e}); backing off"),
     ),

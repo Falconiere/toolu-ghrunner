@@ -159,7 +159,14 @@ impl TooluClient {
   }
 
   /// `<base>/<segments…>`, each segment percent-encoded as one component.
+  /// An empty, `.` or `..` segment (a job id no route can name; `url` would
+  /// silently drop the dots) is a [`TooluError::Protocol`].
   fn url(&self, segments: &[&str]) -> Result<url::Url, TooluError> {
+    if let Some(bad) = segments.iter().find(|s| matches!(**s, "" | "." | "..")) {
+      return Err(TooluError::Protocol(format!(
+        "toolu.sh job id {bad:?} is not a usable path segment"
+      )));
+    }
     let mut url = self.base.clone();
     url
       .path_segments_mut()

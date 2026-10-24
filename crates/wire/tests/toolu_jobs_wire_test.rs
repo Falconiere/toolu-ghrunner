@@ -182,6 +182,34 @@ async fn claim_encodes_the_id_and_parses_the_jit() {
 }
 
 #[tokio::test]
+async fn an_empty_or_dot_job_id_is_refused_before_any_request() {
+  let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+  let url = format!("http://{}", listener.local_addr().expect("addr"));
+  let client = TooluClient::new(reqwest::Client::new(), &url, HOST_TOKEN).expect("client");
+  for id in ["", ".", ".."] {
+    let err = client.claim(id).await.expect_err("refused");
+    assert_eq!(
+      err,
+      TooluError::Protocol(format!(
+        "toolu.sh job id {id:?} is not a usable path segment"
+      ))
+    );
+    let err = client.complete(
+      id,
+      &CompleteBody {
+        outcome: Outcome::Done,
+        error_message: None,
+        claim_epoch: 1,
+      },
+    );
+    assert!(matches!(err.await, Err(TooluError::Protocol(_))), "{id:?}");
+  }
+  let accepted =
+    tokio::time::timeout(std::time::Duration::from_millis(200), listener.accept()).await;
+  assert!(accepted.is_err(), "a request reached the peer");
+}
+
+#[tokio::test]
 async fn a_lost_claim_race_is_a_conflict_carrying_the_body() {
   let (client, server) = peer(response_bytes(409, &[], TAKEN_409.trim())).await;
   let err = client.claim("j1").await.expect_err("409");

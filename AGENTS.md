@@ -190,7 +190,7 @@ App-JWT tests, never uploaded to any GitHub App (authenticates nothing).
   transient retried 5×, not cancel-aware). Any 401 = revoked: a running job
   is cancelled, nothing more sent, exit 2 naming `toolu-runner setup`.
   429/5xx/transport back off 1 s→60 s (reset when a poll finds nothing to
-  claim or a job ran); empty queue waits `TOOLU_RUNNER_POLL_INTERVAL_MS`
+  claim or a job ends without a transient error); empty queue waits `TOOLU_RUNNER_POLL_INTERVAL_MS`
   (5 s). Lock, cancel, drain, `.pending_remove`, `--once` as `run`;
   `ephemeral = true` refused. Contract: CodaSignal/toolu.sh
   `docs/guides/self-hosted-machines.md`; pairing/`status`/`doctor`/`remove`
@@ -311,8 +311,8 @@ App-JWT tests, never uploaded to any GitHub App (authenticates nothing).
   and the App re-mint);
   `provider.rs` (#206 `[provider]`: `ProviderSection` tagged on `kind`,
   `Github` default and omitted on save, `Toolu { api_url, host_id, org }`,
-  `deny_unknown_fields`; `load_config` still requires a GitHub
-  registration's `runner_url`); `registration_auth.rs` (#201 `[auth]`: `AuthSection` tagged on `kind`,
+  `deny_unknown_fields`; `load_config` still requires every field `register`
+  writes of a GitHub registration); `registration_auth.rs` (#201 `[auth]`: `AuthSection` tagged on `kind`,
   `Token` default and omitted on save (pre-#201 shape) or
   `App { app_file, installation_id }`, `deny_unknown_fields`);
   `registry.rs` (`runners/<o>/<r>` + `orgs/<org>` + `toolu/<org>` layout,

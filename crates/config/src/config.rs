@@ -36,7 +36,7 @@ const SECRET_FILE_MODE: u32 = 0o600;
 /// The GitHub-only fields (`runner_url` … `runner_group`, and the runtime's
 /// `jit_config` / `protocol_version`) are absent from a toolu.sh machine's
 /// file (`[provider] kind = "toolu"`, #206): they load as empty and are not
-/// written back. [`load_config`] still requires `runner_url` of a GitHub
+/// written back. [`load_config`] still requires them of a GitHub
 /// registration.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RunnerRegistrationConfig {
@@ -369,21 +369,42 @@ pub struct CredentialsFile {
 /// # Errors
 ///
 /// Returns `RunnerError::Config` on a missing/unparseable file, or a GitHub
-/// registration without `runner_url`, and `RunnerError::Io` on filesystem
-/// errors.
+/// registration lacking a field `register` always writes, and
+/// `RunnerError::Io` on filesystem errors.
 pub fn load_config(path: &Path) -> Result<RunnerRegistrationConfig, RunnerError> {
   let raw = std::fs::read_to_string(path)
     .map_err(|e| RunnerError::Config(format!("read {}: {e}", path.display())))?;
   let config: RunnerRegistrationConfig = toml::from_str(&raw)
     .map_err(|e| RunnerError::Config(format!("parse {}: {e}", path.display())))?;
-  if config.provider.is_github() && config.runner_url.is_empty() {
+  if let Some(field) = missing_github_field(&config) {
     return Err(RunnerError::Config(format!(
-      "parse {}: missing field `runner_url` (a GitHub registration names the repository or \
-       organization it serves)",
+      "parse {}: missing field `{field}` (a GitHub registration needs it; register again)",
       path.display()
     )));
   }
   Ok(config)
+}
+
+/// The first field `register` always writes that a GitHub registration lacks
+/// (absent, empty or zero); they load as defaults only for a toolu.sh
+/// machine, which has none of them.
+fn missing_github_field(config: &RunnerRegistrationConfig) -> Option<&'static str> {
+  if !config.provider.is_github() {
+    return None;
+  }
+  [
+    ("runner_url", config.runner_url.is_empty()),
+    ("runner_name", config.runner_name.is_empty()),
+    ("runner_id", config.runner_id == 0),
+    ("auth_token", config.auth_token.is_empty()),
+    ("runtime.jit_config", config.runtime.jit_config.is_empty()),
+    (
+      "runtime.protocol_version",
+      config.runtime.protocol_version.is_empty(),
+    ),
+  ]
+  .into_iter()
+  .find_map(|(field, missing)| missing.then_some(field))
 }
 
 /// Persist `config` to `path` as TOML, mode 0600 on Unix.
