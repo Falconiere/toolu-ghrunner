@@ -12,7 +12,8 @@ use super::{
 };
 use crate::check_tools::RunError;
 use crate::doctor_report::{Level, Row};
-use crate::service_cmd::{Supervisor, current_supervisor};
+use crate::machine_service::{UnitScope, installed_units_for_scope};
+use crate::service_cmd::{Supervisor, activation_hint, current_supervisor};
 
 const UNIT: &str = "/h/.config/systemd/user/toolu-runner-o-r.service";
 
@@ -158,6 +159,7 @@ async fn the_foreign_supervisors_tool_is_reported_as_not_found_on_path() {
   };
   let got = activity(
     foreign,
+    UnitScope::User,
     "io.toolu.runner.doctor-test.absent",
     "toolu-runner-doctor-test-absent.service",
     "hint".to_owned(),
@@ -176,6 +178,7 @@ async fn launchd_reports_an_unloaded_label_as_stopped_with_the_activation_hint()
   let hint = "launchctl bootstrap gui/$(id -u) /h/Library/LaunchAgents/x.plist".to_owned();
   let got = activity(
     Supervisor::Launchd,
+    UnitScope::User,
     "io.toolu.runner.doctor-test.absent",
     "unused.service",
     hint.clone(),
@@ -185,11 +188,10 @@ async fn launchd_reports_an_unloaded_label_as_stopped_with_the_activation_hint()
   assert_eq!(got, Activity::Stopped(hint));
 }
 
-/// #208: a registration only the static `install.sh` system unit runs gets a
-/// row about that system unit, never a `systemctl --user` query of the
-/// user's machine unit name.
+/// A root system unit remains inventoried and its operator hint targets the
+/// system manager, not the user's manager.
 #[test]
-fn a_system_scope_unit_gets_a_system_row() -> Result<(), Box<dyn std::error::Error>> {
+fn a_system_scope_unit_uses_the_system_manager() -> Result<(), Box<dyn std::error::Error>> {
   let dir = tempfile::tempdir()?;
   let system = dir.path().join("system");
   std::fs::create_dir_all(&system)?;
@@ -198,25 +200,19 @@ fn a_system_scope_unit_gets_a_system_row() -> Result<(), Box<dyn std::error::Err
     &unit_path,
     include_str!("../../../../scripts/toolu-runner.service"),
   )?;
-  let units = crate::machine_service::installed_units(
+  let units = installed_units_for_scope(
     Supervisor::Systemd,
+    UnitScope::System,
     &dir.path().join("user"),
     &dir.path().join("runner-home"),
     Some(&system),
   );
   let unit = units.first().ok_or("the system unit is not inventoried")?;
   assert!(unit.supervises_registration(Path::new("/etc/toolu-runner/config.toml")));
+  assert_eq!(unit.scope, UnitScope::System);
   assert_eq!(
-    super::system_unit_row(unit),
-    Row::new(
-      Level::Warn,
-      "service",
-      format!(
-        "system unit {} (system scope; #203 manages system units)",
-        unit_path.display()
-      ),
-    )
-    .with_fix("systemctl status toolu-runner.service")
+    activation_hint(Supervisor::Systemd, unit.scope, &unit_path, &unit.id),
+    "systemctl daemon-reload && systemctl enable --now toolu-runner.service"
   );
   Ok(())
 }

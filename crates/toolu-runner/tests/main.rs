@@ -93,6 +93,7 @@ mod gh_compat_streaming;
 mod ghes_v1_test;
 mod github_app_wire_test;
 mod hash_files_test;
+mod headless_service_test;
 mod http2_features_test;
 mod install_service_test;
 mod job_container_live;

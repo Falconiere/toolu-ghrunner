@@ -16,8 +16,12 @@ use crate::check_tools::{RunError, first_line, run};
 use crate::doctor_report::{Level, Row};
 use config::registry;
 
-use crate::machine_service::{InstalledUnit, SYSTEM_UNIT_DIR, UnitScope, installed_units};
-use crate::service_cmd::{Supervisor, activation_hint, current_supervisor, current_uid, home_dir};
+use crate::machine_service::{
+  InstalledUnit, SYSTEM_UNIT_DIR, UnitScope, installed_units_for_scope,
+};
+use crate::service_cmd::{
+  Supervisor, activation_hint, current_supervisor, current_uid, current_unit_scope, home_dir,
+};
 
 /// The fix for a registration no unit, or more than one unit, supervises:
 /// install (or migrate to) the one machine service.
@@ -88,6 +92,7 @@ fn run_error(error: RunError, timeout: Duration) -> String {
 /// Ask the supervisor whether the unit is running.
 async fn activity(
   supervisor: Supervisor,
+  scope: UnitScope,
   label: &str,
   unit: &str,
   hint: String,
@@ -108,14 +113,30 @@ async fn activity(
         Err(error) => Activity::Unknown("launchctl".to_owned(), run_error(error, timeout)),
       }
     },
-    Supervisor::Systemd => match run("systemctl", &["--user", "is-active", unit], timeout).await {
-      Ok(ran) => match parse_is_active(&ran.stdout) {
-        Some(true) => Activity::Running,
-        Some(false) => Activity::Stopped(hint),
-        None => Activity::Unknown("systemctl".to_owned(), first_line(&ran.stderr).to_owned()),
-      },
-      Err(error) => Activity::Unknown("systemctl".to_owned(), run_error(error, timeout)),
+    Supervisor::Systemd => systemd_activity(scope, unit, hint, timeout).await,
+  }
+}
+
+async fn systemd_activity(
+  scope: UnitScope,
+  unit: &str,
+  hint: String,
+  timeout: Duration,
+) -> Activity {
+  let system_args = ["is-active", unit];
+  let user_args = ["--user", "is-active", unit];
+  let args: &[&str] = if scope == UnitScope::System {
+    &system_args
+  } else {
+    &user_args
+  };
+  match run("systemctl", args, timeout).await {
+    Ok(ran) => match parse_is_active(&ran.stdout) {
+      Some(true) => Activity::Running,
+      Some(false) => Activity::Stopped(hint),
+      None => Activity::Unknown("systemctl".to_owned(), first_line(&ran.stderr).to_owned()),
     },
+    Err(error) => Activity::Unknown("systemctl".to_owned(), run_error(error, timeout)),
   }
 }
 
@@ -139,35 +160,65 @@ pub(crate) async fn service_row(
       (row, false)
     });
   };
+  let scope = match tokio::task::spawn_blocking(move || current_unit_scope(supervisor)).await {
+    Ok(Ok(scope)) => scope,
+    Ok(Err(error)) => return Some((Row::new(Level::Warn, "service", error.to_string()), false)),
+    Err(error) => {
+      return Some((
+        Row::new(
+          Level::Warn,
+          "service",
+          format!("service scope task failed: {error}"),
+        ),
+        false,
+      ));
+    },
+  };
   let home = match home_dir() {
     Ok(home) => home,
     Err(error) => {
       return (!ephemeral).then(|| (Row::new(Level::Warn, "service", error.to_string()), false));
     },
   };
-  // The inventory reads unit files: keep it off the async workers, like the
-  // journal scan.
-  let scan = tokio::task::spawn_blocking(move || {
-    installed_units(
+  let units = match scan_units(supervisor, scope, home).await {
+    Ok(units) => units,
+    Err(row) => return Some((row, false)),
+  };
+  service_row_from_units(config_path, ephemeral, timeout, supervisor, &units).await
+}
+
+async fn scan_units(
+  supervisor: Supervisor,
+  scope: UnitScope,
+  home: std::path::PathBuf,
+) -> Result<Vec<InstalledUnit>, Row> {
+  // Keep filesystem inventory off the async workers, like the journal scan.
+  tokio::task::spawn_blocking(move || {
+    installed_units_for_scope(
       supervisor,
+      scope,
       &home,
       &registry::runner_home(),
       Some(Path::new(SYSTEM_UNIT_DIR)),
     )
   })
-  .await;
-  // A scan that did not finish is reported as such, never as "not installed".
-  let units = match scan {
-    Ok(units) => units,
-    Err(error) => {
-      let row = Row::new(
-        Level::Warn,
-        "service",
-        format!("could not inventory the supervisor units: {error}"),
-      );
-      return Some((row, false));
-    },
-  };
+  .await
+  .map_err(|error| {
+    Row::new(
+      Level::Warn,
+      "service",
+      format!("could not inventory the supervisor units: {error}"),
+    )
+  })
+}
+
+async fn service_row_from_units(
+  config_path: &Path,
+  ephemeral: bool,
+  timeout: Duration,
+  supervisor: Supervisor,
+  units: &[InstalledUnit],
+) -> Option<(Row, bool)> {
   let mine: Vec<&InstalledUnit> = units
     .iter()
     .filter(|unit| unit.supervises_registration(config_path))
@@ -178,45 +229,38 @@ pub(crate) async fn service_row(
       Row::new(Level::Warn, "service", "not installed").with_fix(INSTALL),
       false,
     )),
-    [unit] if unit.scope == UnitScope::System => Some((system_unit_row(unit), true)),
     [unit] => {
-      let hint = activation_hint(supervisor, &unit.path, &unit.id);
-      let activity = activity(supervisor, &unit.id.label, &unit.id.unit, hint, timeout).await;
-      Some((installed_row(&unit.path, &activity), true))
-    },
-    several => {
-      let paths: Vec<String> = several
-        .iter()
-        .map(|unit| unit.path.display().to_string())
-        .collect();
-      let row = Row::new(
-        Level::Fail,
-        "service",
-        format!(
-          "supervised by {} units: {}",
-          several.len(),
-          paths.join(", ")
-        ),
+      let hint = activation_hint(supervisor, unit.scope, &unit.path, &unit.id);
+      let activity = activity(
+        supervisor,
+        unit.scope,
+        &unit.id.label,
+        &unit.id.unit,
+        hint,
+        timeout,
       )
-      .with_fix(INSTALL);
-      Some((row, true))
+      .await;
+      Some((
+        installed_row(&unit.path, &activity),
+        unit.scope == UnitScope::User,
+      ))
     },
+    several => Some(several_units_row(several)),
   }
 }
 
-/// The `service` row for a registration only a systemd **system** unit
-/// supervises: never queried through `systemctl --user` (that name is the
-/// user's machine unit); the fix names the system-scope query.
-pub(crate) fn system_unit_row(unit: &InstalledUnit) -> Row {
-  Row::new(
-    Level::Warn,
+fn several_units_row(units: &[&InstalledUnit]) -> (Row, bool) {
+  let paths: Vec<String> = units
+    .iter()
+    .map(|unit| unit.path.display().to_string())
+    .collect();
+  let row = Row::new(
+    Level::Fail,
     "service",
-    format!(
-      "system unit {} (system scope; #203 manages system units)",
-      unit.path.display()
-    ),
+    format!("supervised by {} units: {}", units.len(), paths.join(", ")),
   )
-  .with_fix(format!("systemctl status {}", unit.id.unit))
+  .with_fix(INSTALL);
+  (row, units.iter().any(|unit| unit.scope == UnitScope::User))
 }
 
 /// The `linger` row for `user` given `loginctl`'s parsed answer, or why

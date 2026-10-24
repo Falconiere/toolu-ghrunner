@@ -27,8 +27,7 @@ const SPACES_WORK: &str = "/Users/dev name/.toolu-runner/runners/a & b/repo";
 /// Carries a space and an `&` so the fixture also pins `env_path` escaping.
 const SPACES_ENV_PATH: &str = "/opt/dev tools & bin:/usr/bin:/bin";
 
-/// The spaces spec. `env_path`/`work_dir` are only read by `launchd_plist`;
-/// the systemd test renders the same spec to prove they are ignored there.
+/// The spaces spec exercises `env_path` escaping in both unit formats.
 fn spaces_spec() -> ServiceSpec<'static> {
   ServiceSpec {
     label: SPACES_LABEL,
@@ -88,18 +87,35 @@ fn systemd_unit_minimal_spec_without_spaces() {
   assert_eq!(unit, include_str!("fixtures/service/systemd_plain.service"));
 }
 
-/// The systemd renderer must ignore `env_path`/`work_dir` entirely — the
-/// systemd user manager already exports a usable PATH, and overriding it would
-/// change behaviour for existing Linux installs (spec non-goal 4).
+/// Systemd gets the installing PATH; `WorkingDirectory` remains launchd-only.
 #[test]
-fn systemd_unit_ignores_the_launchd_only_fields() {
-  let baseline = service_unit::systemd_unit(&plain_spec());
+fn systemd_unit_declares_the_installing_path() {
   let mut altered = plain_spec();
   altered.env_path = "/totally/different/bin";
   altered.work_dir = Path::new("/totally/different/dir");
-  assert_eq!(service_unit::systemd_unit(&altered), baseline);
-  assert!(!baseline.contains("Environment="));
-  assert!(!baseline.contains("WorkingDirectory="));
+  let changed = service_unit::systemd_unit(&altered);
+  let path_lines: Vec<_> = changed
+    .lines()
+    .filter(|line| line.starts_with("Environment=\"PATH="))
+    .collect();
+  assert_eq!(path_lines, ["Environment=\"PATH=/totally/different/bin\""]);
+  assert!(!changed.contains("WorkingDirectory="));
+}
+
+#[test]
+fn systemd_path_assignment_escapes_quotes_backslashes_and_percent() {
+  let spec = ServiceSpec {
+    env_path: "/opt/a b/\"quoted\"/100%/back\\slash:$literal",
+    ..plain_spec()
+  };
+  let unit = service_unit::systemd_unit(&spec);
+  assert_eq!(
+    unit
+      .lines()
+      .filter(|line| line.starts_with("Environment="))
+      .collect::<Vec<_>>(),
+    ["Environment=\"PATH=/opt/a b/\\\"quoted\\\"/100%%/back\\\\slash:$literal\""]
+  );
 }
 
 #[test]
@@ -276,6 +292,54 @@ fn systemd_machine_unit_matches_fixture() {
 fn systemd_machine_unit_pins_a_custom_home_escaped() {
   let unit = service_unit::systemd_machine_unit(&machine_spec(true));
   assert_eq!(unit, include_str!("fixtures/service/machine_home.service"));
+}
+
+#[test]
+fn systemd_system_machine_unit_uses_multi_user_target() {
+  let unit = service_unit::systemd_system_machine_unit(&machine_spec(true), Path::new("/root"));
+  assert_eq!(unit, include_str!("fixtures/service/machine_root.service"));
+}
+
+#[test]
+fn systemd_system_registration_unit_uses_multi_user_target() {
+  let unit = service_unit::systemd_system_unit(
+    &plain_spec(),
+    Path::new("/root"),
+    Path::new("/home/ci/.toolu-runner"),
+  );
+  assert_eq!(unit, include_str!("fixtures/service/systemd_root.service"));
+}
+
+#[test]
+fn systemd_user_registration_unit_pins_a_custom_runner_home() {
+  let unit =
+    service_unit::systemd_unit_with_home(&plain_spec(), Path::new("/home/ci/custom runner home"));
+  assert!(
+    unit
+      .lines()
+      .any(|line| line == "Environment=\"TOOLU_RUNNER_HOME=/home/ci/custom runner home\"")
+  );
+}
+
+#[test]
+fn systemd_system_machine_unit_pins_the_default_runner_home() {
+  let spec = MachineSpec {
+    home: Some(Path::new(DEFAULT_HOME)),
+    ..machine_spec(false)
+  };
+  let unit = service_unit::systemd_system_machine_unit(&spec, Path::new("/root"));
+  let environment = unit
+    .lines()
+    .filter(|line| line.starts_with("Environment="))
+    .collect::<Vec<_>>();
+  assert_eq!(
+    environment,
+    [
+      "Environment=\"PATH=/opt/dev tools & bin:/usr/bin:/bin\"",
+      "Environment=\"HOME=/root\"",
+      &format!("Environment=\"TOOLU_RUNNER_HOME={DEFAULT_HOME}\""),
+    ]
+  );
 }
 
 #[test]

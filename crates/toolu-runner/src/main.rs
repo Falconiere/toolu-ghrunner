@@ -184,13 +184,9 @@ fn init_tracing_for(masker: &Arc<std::sync::Mutex<SecretMasker>>) -> Result<(), 
 const UNREGISTER_TIMEOUT: Duration = Duration::from_secs(30);
 
 async fn cmd_remove(args: RemoveArgs) -> Result<(), Box<dyn std::error::Error>> {
-  let masker = Arc::new(std::sync::Mutex::new(SecretMasker::new()));
-  let redactor: Arc<dyn shared::startup::SecretRedactor> =
-    Arc::new(MaskerRedactor(Arc::clone(&masker)));
-  startup::init_with_redactor(env!("CARGO_MANIFEST_DIR"), "runner", redactor)
-    .map_err(|e| format!("startup init: {e}"))?;
+  init_remove_tracing()?;
 
-  let config_path = resolve_config(args.config)?;
+  let config_path = resolve_config(args.config.clone())?;
   let creds_path = credentials_path_for(&config_path);
   if !config_path.exists() {
     println!("no registration found.");
@@ -207,33 +203,11 @@ async fn cmd_remove(args: RemoveArgs) -> Result<(), Box<dyn std::error::Error>> 
   // enough), and HOLDING it for the whole removal closes the window where a
   // `run` could start between the check and the multi-second DELETE.
   let home = registry::runner_home();
-  let mut held = lockfile::acquire(&lock_path, &config_path);
-  if let Err(RunnerError::LockHeld { pid, .. }) = &held
-    && !args.force
-  {
-    let pid = *pid;
-    // Best-effort, but not silent: the marker is more useful with the
-    // holder's lock body in it, and an unreadable lock is itself worth
-    // surfacing (permissions, a concurrent unlink).
-    let body = std::fs::read_to_string(&lock_path).unwrap_or_else(|e| {
-      tracing::warn!(error = %e, "could not read the job lock body — writing an empty marker");
-      String::new()
-    });
-    write_pending_marker(&pending, &body)?;
-    // Under `run --all` the marker drains just this registration's loop.
-    let wait = crate::config::remove_wait();
-    let guard = drained_lock(&home, pid, &lock_path, &config_path, &pending, wait).await?;
-    // The loop may have changed the registration while we waited: an
-    // ephemeral one that finished its job removed itself, a re-mint
-    // persisted a new runner id. Act on what is there now.
-    if !config_path.exists() {
-      return already_removed(&home, &cfg.runner_name, &lock_path, &pending, guard);
-    }
-    cfg = load_reg_config(&config_path).map_err(|e| format!("{e}"))?;
-    held = Ok(guard);
-  }
-  let skip = skip_reason(&held, args.skip_unregister);
-  let guard = held.ok();
+  let Some((skip, guard)) =
+    acquire_remove_lock(&args, &home, &config_path, &pending, &lock_path, &mut cfg).await?
+  else {
+    return Ok(());
+  };
 
   // Unregister on GitHub BEFORE touching local state: the persisted
   // runner_id and URL are the only way to name the runner, so deleting them
@@ -247,6 +221,95 @@ async fn cmd_remove(args: RemoveArgs) -> Result<(), Box<dyn std::error::Error>> 
   drop(guard);
   let service = after_removal(&home, keep_lock)?;
 
+  print_removal_summary(
+    &cfg.runner_name,
+    unregistered,
+    keep_lock,
+    service.as_deref(),
+  );
+  Ok(())
+}
+
+async fn acquire_remove_lock(
+  args: &RemoveArgs,
+  home: &Path,
+  config_path: &Path,
+  pending: &Path,
+  lock_path: &Path,
+  cfg: &mut RunnerRegistrationConfig,
+) -> Result<Option<(Option<SkipReason>, Option<lockfile::LockGuard>)>, Box<dyn std::error::Error>> {
+  let mut held = lockfile::acquire(lock_path, config_path);
+  if let Err(RunnerError::LockHeld { pid, .. }) = &held
+    && !args.force
+  {
+    match drain_held_registration(
+      home,
+      config_path,
+      pending,
+      lock_path,
+      *pid,
+      &cfg.runner_name,
+    )
+    .await?
+    {
+      Some((reloaded, guard)) => {
+        *cfg = reloaded;
+        held = Ok(guard);
+      },
+      None => return Ok(None),
+    }
+  }
+  let skip = skip_reason(&held, args.skip_unregister);
+  Ok(Some((skip, held.ok())))
+}
+
+async fn drain_held_registration(
+  home: &Path,
+  config_path: &Path,
+  pending: &Path,
+  lock_path: &Path,
+  pid: u32,
+  old_name: &str,
+) -> Result<Option<(RunnerRegistrationConfig, lockfile::LockGuard)>, Box<dyn std::error::Error>> {
+  // Keep the holder's lock body in the marker when it can be read.
+  let lock_body_path = lock_path.to_path_buf();
+  let marker_path = pending.to_path_buf();
+  tokio::task::spawn_blocking(move || {
+    let body = std::fs::read_to_string(&lock_body_path).unwrap_or_else(|e| {
+      tracing::warn!(error = %e, "could not read the job lock body — writing an empty marker");
+      String::new()
+    });
+    write_pending_marker(&marker_path, &body)
+  })
+  .await??;
+  let wait = crate::config::remove_wait();
+  let guard = drained_lock(home, pid, lock_path, config_path, pending, wait).await?;
+  // An ephemeral job may have removed itself; a re-mint may have changed the ID.
+  let reloaded_path = config_path.to_path_buf();
+  let cfg = tokio::task::spawn_blocking(move || {
+    if !reloaded_path.exists() {
+      return Ok(None);
+    }
+    load_reg_config(&reloaded_path).map(Some)
+  })
+  .await??;
+  let Some(cfg) = cfg else {
+    already_removed(home, old_name, lock_path, pending, guard)?;
+    return Ok(None);
+  };
+  Ok(Some((cfg, guard)))
+}
+
+fn init_remove_tracing() -> Result<(), Box<dyn std::error::Error>> {
+  let redactor: Arc<dyn shared::startup::SecretRedactor> = Arc::new(MaskerRedactor(Arc::new(
+    std::sync::Mutex::new(SecretMasker::new()),
+  )));
+  startup::init_with_redactor(env!("CARGO_MANIFEST_DIR"), "runner", redactor)
+    .map_err(|e| format!("startup init: {e}"))?;
+  Ok(())
+}
+
+fn print_removal_summary(name: &str, unregistered: bool, keep_lock: bool, service: Option<&Path>) {
   let gh = if unregistered {
     "unregistered on GitHub"
   } else {
@@ -257,17 +320,13 @@ async fn cmd_remove(args: RemoveArgs) -> Result<(), Box<dyn std::error::Error>> 
   } else {
     " and lock"
   };
-  println!(
-    "removed runner '{}' ({gh}; config, credentials{lock_note} removed, _diag kept).",
-    cfg.runner_name
-  );
+  println!("removed runner '{name}' ({gh}; config, credentials{lock_note} removed, _diag kept).");
   if let Some(unit) = service {
     println!(
       "removed the toolu-runner service ({}): no registrations remain",
       unit.display()
     );
   }
-  Ok(())
 }
 
 /// An ephemeral registration finished its job and removed itself while
@@ -431,27 +490,7 @@ async fn unregister_on_github(
     },
     None => {},
   }
-  // No token is an ERROR, not a warning-and-continue. Deleting the persisted
-  // runner_id and URL while the runner is still registered is precisely the
-  // B-002 outcome, and a WARN scrolls past; --skip-unregister makes that
-  // choice explicit and reproduces the old behavior exactly.
-  let Some(token) = remove_bearer(&cfg.runner_url, flag)? else {
-    // `remove` does not mint App installation tokens yet (#201 follow-up).
-    let app_note = if cfg.auth.is_token() {
-      ""
-    } else {
-      " This registration re-mints with a GitHub App, but unregistering it still needs a \
-       personal token."
-    };
-    return Err(
-      format!(
-        "cannot unregister '{}' on GitHub: no token available.{app_note}\nNothing local was \
-         deleted — {NO_BEARER_HELP}.",
-        cfg.runner_name
-      )
-      .into(),
-    );
-  };
+  let token = unregister_token(cfg, flag)?;
   println!(
     "unregistering runner '{}' (id {}) from {} …",
     cfg.runner_name, cfg.runner_id, cfg.runner_url
@@ -474,6 +513,31 @@ async fn unregister_on_github(
     Ok(()) => Ok(true),
     Err(e) => classify_unregister_failure(&cfg.runner_name, e),
   }
+}
+
+fn unregister_token(
+  cfg: &RunnerRegistrationConfig,
+  flag: Option<String>,
+) -> Result<String, Box<dyn std::error::Error>> {
+  // No token is an error: deleting the runner ID first would strand it.
+  if let Some(token) = remove_bearer(&cfg.runner_url, flag)? {
+    return Ok(token);
+  }
+  // `remove` does not mint App installation tokens yet (#201 follow-up).
+  let app_note = if cfg.auth.is_token() {
+    ""
+  } else {
+    " This registration re-mints with a GitHub App, but unregistering it still needs a \
+     personal token."
+  };
+  Err(
+    format!(
+      "cannot unregister '{}' on GitHub: no token available.{app_note}\nNothing local was \
+     deleted — {NO_BEARER_HELP}.",
+      cfg.runner_name
+    )
+    .into(),
+  )
 }
 
 /// Decide whether a failed unregister should still clear local state.

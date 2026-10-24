@@ -151,7 +151,7 @@ invocation survives many jobs, idle gaps, and re-dispatches — no manual
 re-register. Pass `--once` to run a single job and exit. To keep every
 registration running across reboots and crashes, `toolu-runner
 install-service` installs **one service for the machine** — a launchd
-(macOS) / systemd (Linux) user unit running `toolu-runner run --all` — see
+(macOS) agent or a systemd (Linux) user/system unit running `toolu-runner run --all` — see
 *Running as a service* under [Configuration](#configuration).
 
 For autoscalers and throwaway hosts, `register --ephemeral` records a
@@ -1022,7 +1022,7 @@ deletes the machine service.
 | `DOCKER_HOST` | `unix:///var/run/docker.sock` | Docker daemon endpoint, read the same way the Docker CLI reads it — required for Colima, OrbStack, Podman and Rancher Desktop, which do not publish the default socket. `unix://`, `tcp://` and `http://` are supported; an `ssh://` or `https://` value is rejected with an error naming the endpoint rather than silently falling back. |
 | `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` / `NO_PROXY` | — | proxy for the runner's HTTP clients when `config.toml` has no `[network] proxy` (also read in lower case; `REQUEST_METHOD` set disables them all). See [Proxy and custom CA](#proxy-and-custom-ca). |
 | `SSL_CERT_FILE` / `SSL_CERT_DIR` | — | replace the platform trust store for the runner's HTTP clients (the compiled-in Mozilla roots stay trusted). |
-| `PATH` | — | `install-service` bakes the installing shell's `PATH` into the launchd unit. |
+| `PATH` | — | `install-service` bakes the installing shell's `PATH` into launchd and systemd units. |
 | `TOOLU_RUNNER_REPO` | `Falconiere/toolu-ghrunner` | `install.sh` only — release source. |
 | `TOOLU_RUNNER_INSTALL_DIR` | `/usr/local/bin` | `install.sh` only — preferred install dir when `--install-dir` is absent; still falls back to `~/.local/bin` when not writable. |
 | `TOOLU_RUNNER_RELEASE_URL` | `https://github.com/$TOOLU_RUNNER_REPO/releases` | `install.sh` only — release base URL the tarball and `SHA256SUMS` are fetched from (`<base>/latest/download/…` or `<base>/download/<tag>/…`). |
@@ -1052,18 +1052,20 @@ toolu-runner install-service --print        # print the unit (stdout) and what i
 toolu-runner install-service --no-activate   # write it, print the load command
 toolu-runner install-service --remove       # deactivate + delete the machine service (idempotent)
 toolu-runner install-service --config <path> # a unit for that one registration instead
+toolu-runner install-service --enable-linger  # unattended Linux user install when linger is off
 ```
 
 Adding a registration needs no restart: `register` sends the running service
 `SIGHUP` and the new runner starts polling ("the toolu-runner service (pid N)
 picks it up now"); other registrations' jobs are not disturbed. Reload by
-hand with `systemctl --user reload toolu-runner` (systemd) or
+hand with `systemctl --user reload toolu-runner` (Linux user unit),
+`systemctl reload toolu-runner` (Linux root system unit), or
 `kill -HUP <pid>` — e.g. after fixing a registration `doctor` reports as
 *stopped by the service*. `remove` stops only that registration (an idle one
 within seconds; a running job finishes first) and, for the last registration,
 deactivates and deletes the service.
 
-**Migration.** `install-service` first finds older toolu units for this user:
+**Migration.** `install-service` first finds older toolu units for this home:
 per-registration units, the pre-machine-service legacy-root unit (systemd
 `toolu-runner.service`, now the machine service's name), and the static
 `install.sh --service` agent (`io.toolu-runner`). It deactivates and deletes
@@ -1073,13 +1075,14 @@ ever driven twice (the per-registration `.lock` guarantees that anyway).
 Stopping an old unit stops its runner like `systemctl stop` does: **a job it
 is running is cancelled** (each one is named as it stops), so migrate
 between jobs. A unit that cannot be deactivated (no user bus over SSH, say)
-is kept and the install stops, naming the command that removes it. One user
-runs one machine service: `install-service` refuses to overwrite one that
-serves another runner home. A
+is kept and the install stops, naming the command that removes it. A machine
+unit serving another runner home is never overwritten. A
 unit running a config **outside** the runner home is left running, with a
-warning naming the command that removes it. The static systemd unit from
-`install.sh --service` lives in `/etc/systemd/system/` (system scope, root
-only) and is only reported. `doctor` fails a registration two units
+warning naming the command that removes it. Root installations can replace a
+static systemd unit in `/etc/systemd/system/` when it serves this home or a
+missing config; non-root installations only report system units. A live
+foreign system unit at the destination blocks the root install. `doctor`
+fails a registration when two units
 supervise.
 
 **launchd (macOS)** — a user `LaunchAgent` labelled `sh.toolu.runner` at
@@ -1095,16 +1098,45 @@ the runner process's environment, and launchd otherwise hands an agent only
 your terminal fails under the supervisor with `command not found` for anything
 Homebrew installed. It is baked in at install time, so **re-run
 `install-service` after changing your `PATH`** (the command rewrites the
-unit). `install-service --print` shows the exact value that will be used. The
-systemd unit does not set it: the user manager already exports a usable
-`PATH`. A customised `TOOLU_RUNNER_HOME` is pinned in both units' environment.
+unit). `install-service --print` shows the exact value that will be used.
+Systemd units also carry this PATH, so job steps see the tools available to
+the installing shell. A customised `TOOLU_RUNNER_HOME` is pinned in user
+units. Root system units pin `HOME` and `TOOLU_RUNNER_HOME` even for the
+default home, since the system manager may not set `HOME`.
 
-**systemd (Linux)** — the user unit `toolu-runner.service` at
-`~/.config/systemd/user/`, with `Restart=always` + `RestartSec=5` and
-`ExecReload` sending `SIGHUP`. Activated with `systemctl --user daemon-reload
-&& systemctl --user enable --now`; logs land in journald (`journalctl --user
--u toolu-runner`). A headless host needs `loginctl enable-linger <user>` so the
-unit runs without an active login session.
+**systemd (Linux)** — a non-root install writes a user unit at
+`~/.config/systemd/user/toolu-runner.service`, with `Restart=always` +
+`RestartSec=5` and `ExecReload` sending `SIGHUP`. It activates via
+`systemctl --user daemon-reload` and `systemctl --user enable --now
+toolu-runner.service`; logs land in journald (`journalctl --user -u
+toolu-runner`). On a headless host, the installer checks linger before writing
+the unit. If linger is off, it asks “Keep running after you log out?” and
+shows `loginctl enable-linger <user>`. `--enable-linger` or `--yes` answers Yes
+for unattended installs. Choosing No installs a service that stops on logout
+and prints a warning. If enabling linger fails, no unit is installed; run
+`sudo loginctl enable-linger <user>` and retry. `--print` and `--remove` do not
+change linger. After changing PATH, re-run `install-service` to update the
+unit's environment.
+
+As root, `install-service` writes `/etc/systemd/system/toolu-runner.service`,
+uses `systemctl daemon-reload` and `systemctl enable --now`, and starts at boot
+without linger. `--config <path>` uses the same user or system scope as the
+machine unit. The root unit's environment pins the installing `HOME` and the
+resolved runner home. Use `systemctl is-active toolu-runner` and
+`journalctl -u toolu-runner` for the root unit.
+
+For a local systemd parser and inherited PATH check, run
+`bash scripts/test/headless_service_systemd.sh`. A real VPS check is
+`scripts/test/headless_service_live.sh`: it requires a disposable, registered
+non-root SSH target and a `workflow_dispatch` job on that runner with
+`nonce` and `expected_path` inputs, `run-name: ${{ inputs.nonce }}`, a step
+that compares `$PATH` to `expected_path`, and a log line
+`HEADLESS_PATH=$PATH`. Set `TOOLU_HEADLESS_SSH`, `TOOLU_HEADLESS_REPO`,
+`TOOLU_HEADLESS_WORKFLOW`, `TOOLU_HEADLESS_EXPECTED_PATH`, and
+`TOOLU_HEADLESS_ALLOW_REBOOT=1`. The script installs the unit, reconnects
+after logout and reboot, then dispatches and checks the workflow run. It
+also checks a root system-scope install after the job, then removes that
+root unit. It reports `UNVERIFIED` when the lane is unavailable.
 
 **One registration** — `install-service --config <path>` keeps the
 per-registration unit for scripted setups: `io.toolu.runner.<owner>.<repo>` /

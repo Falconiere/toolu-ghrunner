@@ -1867,3 +1867,20 @@ click.
 **Unverified, live.** S4/S5 did not run on the worker host: no browser
 session there. The replies the tests replay are the live captures and
 documented examples listed above.
+
+## Headless `install-service` (#203)
+
+Local CLI tests use the real binary, temporary runner homes, and subprocess
+shims for logind/systemctl so a test cannot alter the host's services. The
+systemd parser check uses the real local user manager. The logout, reboot,
+and GitHub job boundary needs a disposable VPS.
+
+| Criterion / scenario | Input and observable result | Runnable check |
+| --- | --- | --- |
+| S1 / AC-1 unit environment | Fixed PATH with spaces, quotes, backslashes, `%`, and duplicate entries; custom runner home; exact user/root unit fixtures and parser; transient service inherits declared PATH | `cargo test -p config --test integration -- service_unit_test::`; `bash scripts/test/headless_service_systemd.sh` |
+| S2 / AC-2 preview | Real CLI `--print` in temporary HOME as a non-root and root identity; PATH, HOME and runner home appear where applicable, with no unit write or manager call | `cargo test -p toolu-runner --test integration -- install_service_test::`; `cargo test -p toolu-runner --test integration -- headless_service_test::` |
+| AC-3 linger choice | Real CLI with `Linger=no`; `--enable-linger`, `--yes`, and a No entered through a pseudo-terminal; enable precedes unit write, No warns about logout | `cargo test -p toolu-runner --test integration -- headless_service_test::` |
+| S4 / AC-4 denied or unknown linger | A denying or malformed `loginctl` response with an old unit present; nonzero exit names remedy, new unit absent, old one intact | `cargo test -p toolu-runner --test integration -- headless_service_test::` |
+| S5 / AC-5 root scope | Root preview pins HOME and runner home; root destination and activation hint use the system manager; disposable VPS leg checks the real enabled system unit | `cargo test -p toolu-runner --test integration -- headless_service_test::`; `cargo test -p toolu-runner --bin toolu-runner -- doctor_service::tests::a_system_scope_unit_uses_the_system_manager`; `bash scripts/test/headless_service_live.sh` |
+| AC-6 migration safety | Real unit files in isolated user/system directories: this home's and missing-config units replaceable, foreign live config and symlink refused | `cargo test -p toolu-runner --bin toolu-runner -- machine_service::tests::`; `cargo test -p toolu-runner --bin toolu-runner -- service_cmd::tests::` |
+| S3 / AC-7 persistence and job PATH | **DEFERRED by user; UNVERIFIED because no disposable VPS was available.** Dedicated non-root VPS with SSH logout/reboot, `Linger=yes`, active user unit; dispatched workflow checks and prints PATH | `bash scripts/test/headless_service_live.sh` (retained for later; exits 2 with `UNVERIFIED` when `TOOLU_HEADLESS_SSH` is absent) |

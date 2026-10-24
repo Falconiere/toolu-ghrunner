@@ -15,7 +15,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Output;
 
-use crate::install_service_test::{real_uid, shim_env, write_shim};
+use crate::install_service_test::{nonroot_shims, real_uid, shim_env, write_shim};
 use crate::supervisor_fixtures::{
   RUNNER_ID, Scope, TestResult, count, idle_broker, job_broker, reported_conclusion, runner,
   spawn_run_all, stop, wait_for, wait_until, write_registration,
@@ -35,11 +35,16 @@ fn machine_dest(home: &Path) -> PathBuf {
 
 /// Write the machine unit with the real CLI (nothing activated).
 fn install_machine_unit(home: &Path) -> TestResult<()> {
-  let out = runner(home, false)
-    .args(["install-service", "--no-activate"])
-    .output()?;
+  let mut cmd = runner(home, false);
+  if !MACOS {
+    cmd.env("PATH", nonroot_shims(home)?);
+  }
+  let out = cmd.args(["install-service", "--no-activate"]).output()?;
   if !out.status.success() {
     return Err(String::from_utf8_lossy(&out.stderr).into_owned().into());
+  }
+  if !machine_dest(home).is_file() {
+    return Err("install-service succeeded without writing the machine unit".into());
   }
   Ok(())
 }
@@ -47,7 +52,10 @@ fn install_machine_unit(home: &Path) -> TestResult<()> {
 /// `remove --config <config>` with the bearer and the stub supervisor CLI;
 /// returns the output and the stub's argv log.
 fn remove(home: &Path, config: &Path, extra_env: &[(&str, &str)]) -> TestResult<(Output, String)> {
-  let (bin, log, path_env) = shim_env(home)?;
+  let (bin, log, mut path_env) = shim_env(home)?;
+  if !MACOS {
+    path_env = nonroot_shims(home)?;
+  }
   write_shim(
     &bin,
     if MACOS { "launchctl" } else { "systemctl" },

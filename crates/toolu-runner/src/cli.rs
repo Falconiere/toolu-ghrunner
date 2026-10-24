@@ -135,23 +135,10 @@ pub(crate) enum Command {
   Register(RegisterArgs),
   /// Run the listener loop, staying online across jobs.
   ///
-  /// Loads the persisted registration, acquires the registration's
-  /// exclusive job lock (`<home>/runners/<owner>/<repo>/.lock`; the legacy
-  /// root `<home>/.lock` for old layouts), creates a broker session, and polls
-  /// until a job arrives. After each job it re-mints a fresh JIT config
-  /// with `TOOLU_RUNNER_TOKEN` or the stored `login` token — or, for a
-  /// `register --app` registration, a GitHub App installation token — and
-  /// keeps listening, so one `run` stays
-  /// online across many jobs. `--once` runs a single job and exits. An
-  /// `--ephemeral` registration runs one job, then unregisters and deletes
-  /// itself. SIGINT / SIGTERM cancel gracefully.
-  ///
-  /// `--all` supervises every registration under the runner home in one
-  /// process (what the machine service runs): one loop per registration,
-  /// SIGHUP rescans (new registrations start, pending removals stop), and a
-  /// fatal error stops only that registration's loop (`status` / `doctor`
-  /// name it). Exits 0 on SIGINT/SIGTERM, 2 when another `run --all`
-  /// already supervises the home.
+  /// Acquires the registration lock, polls for jobs, and re-mints a JIT
+  /// config after each job. `--once` exits after one job; ephemeral runners
+  /// unregister after theirs. `--all` supervises every registration under the
+  /// runner home and rescans on SIGHUP. SIGINT / SIGTERM cancel gracefully.
   Run(RunArgs),
   /// Remove the runner registration.
   ///
@@ -174,16 +161,11 @@ pub(crate) enum Command {
   Status(StatusArgs),
   /// Install the service that keeps the runner alive across reboots.
   ///
-  /// Without --config: the one machine service for every registration —
-  /// launchd `sh.toolu.runner` (macOS) or systemd user unit
-  /// `toolu-runner.service` (Linux) running `run --all`. Older toolu units
-  /// that run a registration of this runner home are deactivated and
-  /// replaced first (stopping one cancels a job it is running, as `systemctl
-  /// stop` would); units running anything else are left alone with a
-  /// warning naming the command that removes them. With --config: a unit
-  /// for that one registration (`run --config <path>`). `--print` shows the
-  /// unit without writing it, `--no-activate` writes but does not load it,
-  /// and `--remove` deactivates and deletes it. launchd/systemd only.
+  /// Without --config: the one machine service for every registration.
+  /// With --config: a per-registration unit. Linux root uses a system unit; other users use a user
+  /// unit. Non-root systemd installs ask to enable linger if needed;
+  /// `--enable-linger` and `--yes` answer Yes. `--print` previews,
+  /// `--no-activate` writes only, and `--remove` deactivates and deletes.
   InstallService(InstallServiceArgs),
   /// Log in to GitHub via the OAuth device flow and store the token.
   ///
@@ -482,8 +464,7 @@ pub(crate) struct InstallServiceArgs {
   pub(crate) print: bool,
   /// Write the unit file but do not activate it.
   ///
-  /// Prints the exact `launchctl` / `systemctl --user` command to load it
-  /// yourself later.
+  /// Prints the exact `launchctl` / `systemctl` command to load it later.
   #[arg(long)]
   pub(crate) no_activate: bool,
   /// Deactivate and delete a previously installed unit (idempotent).
@@ -491,6 +472,21 @@ pub(crate) struct InstallServiceArgs {
   /// A missing unit reports nothing-to-do and exits 0.
   #[arg(long)]
   pub(crate) remove: bool,
+  /// Linger choice for a non-root systemd user service.
+  #[command(flatten)]
+  pub(crate) linger: LingerArgs,
+}
+
+/// Unattended answers to the linger question.
+#[derive(Debug, Args)]
+pub(crate) struct LingerArgs {
+  /// Enable systemd lingering when needed, so a user unit keeps running after
+  /// logout and starts at boot. Skipped for root system units and launchd.
+  #[arg(long)]
+  pub(crate) enable_linger: bool,
+  /// Answer yes to the linger question for unattended installation.
+  #[arg(long)]
+  pub(crate) yes: bool,
 }
 
 /// Arguments for the `boot` subcommand: none — it is driven entirely by

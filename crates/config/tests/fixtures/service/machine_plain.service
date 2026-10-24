@@ -2,6 +2,7 @@
 Description=toolu-runner (sh.toolu.runner)
 
 [Service]
+Environment="PATH=/opt/dev tools & bin:/usr/bin:/bin"
 ExecStart="/Users/dev name/apps/toolu & runner/toolu-runner" run --all
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=always

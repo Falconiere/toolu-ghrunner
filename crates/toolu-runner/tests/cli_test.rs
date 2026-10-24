@@ -219,7 +219,14 @@ fn config_flag_help_states_default_resolution_everywhere() -> Result<(), Box<dyn
 #[test]
 fn install_service_help_lists_flags_and_conflict() -> Result<(), Box<dyn std::error::Error>> {
   let stdout = help_stdout("install-service")?;
-  for flag in ["--config", "--print", "--no-activate", "--remove"] {
+  for flag in [
+    "--config",
+    "--print",
+    "--no-activate",
+    "--remove",
+    "--enable-linger",
+    "--yes",
+  ] {
     assert!(stdout.contains(flag), "missing {flag} in: {stdout}");
   }
   assert!(
