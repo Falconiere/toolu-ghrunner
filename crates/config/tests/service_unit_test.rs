@@ -90,13 +90,15 @@ fn systemd_unit_minimal_spec_without_spaces() {
 /// Systemd gets the installing PATH; `WorkingDirectory` remains launchd-only.
 #[test]
 fn systemd_unit_declares_the_installing_path() {
-  let baseline = service_unit::systemd_unit(&plain_spec());
   let mut altered = plain_spec();
   altered.env_path = "/totally/different/bin";
   altered.work_dir = Path::new("/totally/different/dir");
   let changed = service_unit::systemd_unit(&altered);
-  assert!(baseline.contains("Environment=\"PATH=/opt/homebrew/bin:/usr/bin:/bin\""));
-  assert!(changed.contains("Environment=\"PATH=/totally/different/bin\""));
+  let path_lines: Vec<_> = changed
+    .lines()
+    .filter(|line| line.starts_with("Environment=\"PATH="))
+    .collect();
+  assert_eq!(path_lines, ["Environment=\"PATH=/totally/different/bin\""]);
   assert!(!changed.contains("WorkingDirectory="));
 }
 

@@ -6,6 +6,8 @@ use config::service_unit::{Supervises, parse_systemd_target};
 use shared::RunnerError;
 
 /// Reuse only this registration's unit; reject symlinks and live foreign units.
+/// The destination is under root-owned `/etc/systemd/system`, so only another
+/// privileged writer can change it between inspection and installation.
 pub(super) fn check_existing_system_unit(
   dest: &Path,
   config_path: &Path,

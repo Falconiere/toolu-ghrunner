@@ -8,6 +8,8 @@
 //! resolution, service identity, file destinations, and the platform
 //! activation shell-outs (`launchctl` / `systemctl`). No network, no
 //! tracing init — like `status`, it only touches local files and subprocesses.
+//! The CLI dispatches this entire synchronous command through
+//! `tokio::task::spawn_blocking` in `main.rs`.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -66,18 +68,18 @@ pub(crate) struct ServiceId {
 pub(crate) fn cmd_install_service(
   args: &InstallServiceArgs,
 ) -> Result<(), Box<dyn std::error::Error>> {
-  let Some(config_path) = args.config.clone() else {
+  let Some(config_path) = args.config.as_ref() else {
     return crate::machine_service::cmd_install_machine(args);
   };
   let supervisor = current_supervisor()?;
   let scope = current_unit_scope(supervisor)?;
-  let id = service_id(&config_path);
+  let id = service_id(config_path);
 
   // `--print` writes nothing, so it renders to stdout and
   // returns before the core touches the filesystem (clap forbids `--print`
   // with `--remove`).
   if args.print {
-    print!("{}", render_unit(supervisor, scope, &config_path, &id)?);
+    print!("{}", render_unit(supervisor, scope, config_path, &id)?);
     return Ok(());
   }
 
@@ -85,7 +87,7 @@ pub(crate) fn cmd_install_service(
   // self-describing outcome; the caller prints from `outcome.action` alone
   // (never re-checking the flags it passed in). The status line is owned by
   // the pure `service_action_summary`, so the CLI output lives in one place.
-  let outcome = install_service_core(supervisor, scope, &config_path, args)?;
+  let outcome = install_service_core(supervisor, scope, config_path, args)?;
   let summary = service_action_summary(&outcome.action, &outcome.label, &outcome.path);
   if !summary.is_empty() {
     println!("{summary}");

@@ -175,6 +175,8 @@ fn deliberate_no_on_a_terminal_installs_a_short_lived_user_unit() -> TestResult 
   Command::new("script").arg("-V").output().map_err(|error| {
     format!("util-linux script is required for the pseudo-terminal test: {error}")
   })?;
+  // `script -c` runs this as shell text: quotes keep the executable path one
+  // token while the install-service arguments remain separate shell tokens.
   let mut child = Command::new("timeout")
     .args([
       "10",
