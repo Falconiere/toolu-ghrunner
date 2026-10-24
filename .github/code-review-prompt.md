@@ -10,6 +10,14 @@ substantiate from the code in front of you. **Do not speculate**: if a claim
 depends on code outside the diff, verify it or drop it. Prefer three real
 findings to fifteen guesses.
 
+Trace a reported call through its actual callers, including code outside the
+diff. Do not report a conditional defect such as "this blocks the runtime if
+the caller does not use `spawn_blocking`" until you verify that the condition
+holds. Check the actual escaping and shell parsing before claiming an
+injection or quoting defect. A test that needs an external tool may require it
+explicitly and fail with a clear prerequisite error; do not turn required
+coverage into a silent skip.
+
 ## Severity
 
 - **blocker** — a secret can leak, an error is silently lost, data is corrupted
