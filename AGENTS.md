@@ -8,7 +8,8 @@ Standalone GitHub Actions JIT runner — no orchestrator service, no OTel.
 `register/run/boot/service/login/status/create_app_cmd.rs` (one `*_cmd.rs`
 each) + `register_auth.rs` + `app_auth.rs` + `app_install.rs` + `app_import.rs` +
 `supervisor.rs`/`supervisor_signal.rs`/`machine_service.rs` (#208) +
-`ephemeral.rs` + `network_setup.rs` + `check_*.rs` + `doctor_*.rs`).
+`ephemeral.rs` + `network_setup.rs` + `poll_loop.rs`/`poll_job.rs` (#206) +
+`check_*.rs` + `doctor_*.rs`).
 Engine = `execution`;
 JIT lifecycle = `listener`. Plus standalone `daemon` bin (`toolu-daemon`,
 no internal deps, `reqwest` in tests only).
@@ -111,7 +112,8 @@ App-JWT tests, never uploaded to any GitHub App (authenticates nothing).
   need no client/clock/tokio.
 - **Per-registration single-job concurrency**: registration at
   `<home>/runners/<owner>/<repo>/` or, for an org URL, `<home>/orgs/<org>/`
-  (#208; `$TOOLU_RUNNER_HOME` else `~/.toolu-runner` = persisted `data_dir`). `run` holds an exclusive `fs2`
+  (#208), or for a toolu.sh machine `<home>/toolu/<org>/` (#206;
+  `$TOOLU_RUNNER_HOME` else `~/.toolu-runner` = persisted `data_dir`). `run` holds an exclusive `fs2`
   `.lock` there for the whole loop (body JSON: `pid`, `started_at`,
   `config_path`); a second `run` for the same repo reads the body and exits 2.
   The legacy single-slot `<home>/config.toml` (never written by default
@@ -175,6 +177,24 @@ App-JWT tests, never uploaded to any GitHub App (authenticates nothing).
   cancel/`--once`/`.pending_remove` → exit, state kept; conflict → 5;
   `Auth` → 1; else backoff on same JIT); `ephemeral.rs` unregisters + deletes
   local state after the one job.
+- **toolu.sh poll loop (#206)**: a `[provider] kind = "toolu"` registration
+  (`config::provider`; GitHub-only fields absent, host token `tlu_h_…` =
+  `credentials.json` `access_token`, `api_url` origin) makes `run` / `run
+  --all` drive `poll_loop::PollLoop` instead of the re-mint loop
+  (`run_cmd::RegistrationLoop`): `GET /runner/jobs/queued` → claim the first
+  job it wins (409 `taken`/404 → next; `slots-full` → wait) → `poll_job`
+  runs the claimed JIT once in memory (never written), a side task posts
+  `dispatched` then heartbeats at `heartbeat_delay` (⅓ of the lease, 1 s–5
+  min; 30 s once lapsed) and cancels at the claim `deadline` → `complete`
+  (`done` if a job ran to any conclusion, else `failed` + masked error;
+  transient retried 5×, not cancel-aware). Any 401 = revoked: a running job
+  is cancelled, nothing more sent, exit 2 naming `toolu-runner setup`.
+  429/5xx/transport back off 1 s→60 s (reset when a poll finds nothing to
+  claim or a job ran); empty queue waits `TOOLU_RUNNER_POLL_INTERVAL_MS`
+  (5 s). Lock, cancel, drain, `.pending_remove`, `--once` as `run`;
+  `ephemeral = true` refused. Contract: CodaSignal/toolu.sh
+  `docs/guides/self-hosted-machines.md`; pairing/`status`/`doctor`/`remove`
+  for these registrations are #207.
 - **No self-daemonization**: `run` blocks in foreground; persistence is the
   OS supervisor. `install-service` (no `--config`) installs ONE machine unit
   — launchd `sh.toolu.runner` / systemd user `toolu-runner.service`
@@ -231,7 +251,10 @@ App-JWT tests, never uploaded to any GitHub App (authenticates nothing).
   `organization_self_hosted_runners:write`); `public=false`, no webhook;
   `AppManifest::for_target`, `ConversionResponse` (`owner.id` optional) +
   `parse_conversion`, CSRF `new_state`, `form_html`,
-  `parse_callback_path` — backs `create-app`), `app_jwt` (#201: RS256
+  `parse_callback_path` — backs `create-app`), `toolu_jobs` (#206 toolu.sh
+  `/runner/*` bodies: `QueuedJobs`, `Claim` (redacted `Debug`),
+  `CompleteBody`/`Outcome`, `parse_claim_refusal`, `heartbeat_delay`),
+  `app_jwt` (#201: RS256
   `build_app_jwt[_at]`, `iat` −60s / `exp` +540s / `iss` = app id, key errors
   never echo the PEM; `Installation` (+ `repository_selection`),
   `InstallationToken` with redacted `Debug`; #202 `AppInfo`/`AppOwner`
@@ -286,13 +309,16 @@ App-JWT tests, never uploaded to any GitHub App (authenticates nothing).
   `Debug`; optional #202 `owner_id` / `installation_id` (omitted when unset,
   pre-#202 files load); written by `create-app`, read by `register --app`
   and the App re-mint);
-  `registration_auth.rs` (#201 `[auth]`: `AuthSection` tagged on `kind`,
+  `provider.rs` (#206 `[provider]`: `ProviderSection` tagged on `kind`,
+  `Github` default and omitted on save, `Toolu { api_url, host_id, org }`,
+  `deny_unknown_fields`; `load_config` still requires a GitHub
+  registration's `runner_url`); `registration_auth.rs` (#201 `[auth]`: `AuthSection` tagged on `kind`,
   `Token` default and omitted on save (pre-#201 shape) or
   `App { app_file, installation_id }`, `deny_unknown_fields`);
-  `registry.rs` (`runners/<o>/<r>` + `orgs/<org>` layout, `runner_home`/
-  `runner_home_is_custom`/`runner_dir`/`org_dir` incl. NUL rejection,
-  `RegistrationScope {Repo, Org, Legacy}` + `label()`,
-  `list_registrations` (repos, orgs, legacy) returning `Ok(empty)` on missing dirs /
+  `registry.rs` (`runners/<o>/<r>` + `orgs/<org>` + `toolu/<org>` layout,
+  `runner_home`/`runner_home_is_custom`/`runner_dir`/`org_dir`/`toolu_dir`
+  incl. NUL rejection, `RegistrationScope {Repo, Org, Toolu, Legacy}` +
+  `label()`, `list_registrations` (repos, orgs, toolu, legacy) returning `Ok(empty)` on missing dirs /
   `Err` naming unreadable ones, `resolve_config_path`: flag > cwd-inferred >
   sole > error); `repo_infer.rs` (`parse_remote_url` + `detect_repo` via
   `git remote get-url` origin, errors name `--url`); `remint.rs` (`merge_reminted_config`, pure merge overwriting ONLY
@@ -334,7 +360,10 @@ App-JWT tests, never uploaded to any GitHub App (authenticates nothing).
   `runner_groups` (org groups +
   `pick_group`),
   `app_manifest` (loopback `CallbackServer` 127.0.0.1:0 serving the
-  target's form + `convert_manifest_code` POST under the API base).
+  target's form + `convert_manifest_code` POST under the API base),
+  `toolu_jobs` (#206 `TooluClient`: host-token bearer, 401 `Revoked` / 409
+  `Conflict` / 404 `NotFound` / 429·5xx·transport `Transient`; live 401
+  captures in `toolu-runner/tests/fixtures/toolu_sh/`).
   `reporting/`: `run_service` shapes + `map_conclusion`, `results_service`
   types/URL helpers (`create_job/step_logs_metadata`), `feature_detection` V1/V2, `live_log` (HTTP/1.1 upgrade
   on caller client; `live_log_client(&NetworkConfig)` is `http1_only`/30s, bad
@@ -436,6 +465,8 @@ App-JWT tests, never uploaded to any GitHub App (authenticates nothing).
   `ephemeral::finish_job` (unregister+delete keeping `_diag/`; org URLs via
   `orgs/{org}` (#201); no bearer or unaddressable URL → local-only with "not
   verified" output; retryable error keeps state, exit 2).
+  `poll_loop`/`poll_job` (#206 toolu.sh machine loop, see Runtime
+  contracts; `poll_loop_test`, fixtures `toolu_fixtures`).
   `run_cmd::RunLoop::drive` (`BACKOFF_START`→`BACKOFF_MAX` cancel-aware sleep;
   conflict exits 5 via downcast `CodedExit`, all else 2;
   `TOOLU_RUNNER_SESSION_CONFLICT_INTERVAL_MS` overrides 30s wait for

@@ -15,6 +15,8 @@ pub mod labels;
 pub mod lockfile;
 /// `[network]` section: explicit proxy, bypass list and extra CA (#94).
 pub mod network;
+/// `[provider]` section: GitHub (default) or a toolu.sh machine (#206).
+pub mod provider;
 /// `[auth]` section: personal token (default) or GitHub App installation (#201).
 pub mod registration_auth;
 /// Runner registration registry (repo / org / legacy layout + config resolution).

@@ -74,9 +74,14 @@ impl TooluClient {
   ///
   /// `RunnerError::Config` when `api_url` is not an absolute `http(s)` URL
   /// with a host, or `host_token` is empty.
-  pub fn new(client: reqwest::Client, api_url: &str, host_token: &str) -> Result<Self, RunnerError> {
-    let base = url::Url::parse(api_url)
-      .map_err(|e| RunnerError::Config(format!("toolu.sh api_url {api_url:?} is not a URL: {e}")))?;
+  pub fn new(
+    client: reqwest::Client,
+    api_url: &str,
+    host_token: &str,
+  ) -> Result<Self, RunnerError> {
+    let base = url::Url::parse(api_url).map_err(|e| {
+      RunnerError::Config(format!("toolu.sh api_url {api_url:?} is not a URL: {e}"))
+    })?;
     if !matches!(base.scheme(), "http" | "https") || base.host_str().is_none() {
       return Err(RunnerError::Config(format!(
         "toolu.sh api_url {api_url:?} must be an absolute http(s) URL"
@@ -178,10 +183,9 @@ impl TooluClient {
       .await
       .map_err(|e| TooluError::Transient(format!("toolu.sh {what} request failed: {e}")))?;
     let status = response.status();
-    let body = response
-      .text()
-      .await
-      .map_err(|e| TooluError::Transient(format!("reading the toolu.sh {what} reply failed: {e}")))?;
+    let body = response.text().await.map_err(|e| {
+      TooluError::Transient(format!("reading the toolu.sh {what} reply failed: {e}"))
+    })?;
     if status.is_success() {
       return Ok(body);
     }
@@ -195,9 +199,9 @@ fn failure(what: &str, status: StatusCode, body: String) -> TooluError {
     StatusCode::UNAUTHORIZED => TooluError::Revoked(error_field(&body).unwrap_or(body)),
     StatusCode::CONFLICT => TooluError::Conflict(body),
     StatusCode::NOT_FOUND => TooluError::NotFound,
-    StatusCode::TOO_MANY_REQUESTS => TooluError::Transient(format!(
-      "toolu.sh {what} was rate-limited (429): {body}"
-    )),
+    StatusCode::TOO_MANY_REQUESTS => {
+      TooluError::Transient(format!("toolu.sh {what} was rate-limited (429): {body}"))
+    },
     s if s.is_server_error() => {
       TooluError::Transient(format!("toolu.sh {what} failed with status {s}: {body}"))
     },

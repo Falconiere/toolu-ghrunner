@@ -46,6 +46,8 @@ mod ephemeral;
 mod login_cmd;
 mod machine_service;
 mod network_setup;
+mod poll_job;
+mod poll_loop;
 mod register_auth;
 mod register_cmd;
 mod run_cmd;

@@ -41,13 +41,16 @@ fn response_bytes(status: u16, headers: &[(String, String)], body: &str) -> Vec<
   let mut out = format!("HTTP/1.1 {status} X\r\n");
   for (name, value) in headers {
     if !name.eq_ignore_ascii_case("content-length") {
-      out.push_str(&format!("{name}: {value}\r\n"));
+      out.push_str(name);
+      out.push_str(": ");
+      out.push_str(value);
+      out.push_str("\r\n");
     }
   }
-  out.push_str(&format!(
-    "content-length: {}\r\nconnection: close\r\n\r\n{body}",
-    body.len()
-  ));
+  out.push_str("content-length: ");
+  out.push_str(&body.len().to_string());
+  out.push_str("\r\nconnection: close\r\n\r\n");
+  out.push_str(body);
   out.into_bytes()
 }
 
@@ -79,7 +82,10 @@ async fn serve_once(listener: TcpListener, response: Vec<u8>) -> Received {
   let (socket, _) = listener.accept().await.expect("accept");
   let mut reader = BufReader::new(socket);
   let mut request_line = String::new();
-  reader.read_line(&mut request_line).await.expect("request line");
+  reader
+    .read_line(&mut request_line)
+    .await
+    .expect("request line");
   let mut authorization = None;
   let mut length = 0usize;
   let mut line = String::new();
@@ -152,7 +158,10 @@ async fn the_live_401_captures_are_revoked_with_their_error() {
     server.await.expect("server");
     assert_eq!(err, TooluError::Revoked(why.to_owned()));
     let message = err.to_string();
-    assert!(message.contains(why) && !message.contains(HOST_TOKEN), "{message}");
+    assert!(
+      message.contains(why) && !message.contains(HOST_TOKEN),
+      "{message}"
+    );
   }
 }
 
@@ -183,10 +192,22 @@ async fn a_lost_claim_race_is_a_conflict_carrying_the_body() {
 #[tokio::test]
 async fn not_found_rate_limit_server_error_and_other_statuses_are_classified() {
   for (status, check) in [
-    (404, (|e: &TooluError| *e == TooluError::NotFound) as fn(&TooluError) -> bool),
-    (429, |e| matches!(e, TooluError::Transient(m) if m.contains("429"))),
-    (503, |e| matches!(e, TooluError::Transient(m) if m.contains("503"))),
-    (400, |e| matches!(e, TooluError::Protocol(m) if m.contains("400"))),
+    (
+      404,
+      (|e: &TooluError| *e == TooluError::NotFound) as fn(&TooluError) -> bool,
+    ),
+    (
+      429,
+      |e| matches!(e, TooluError::Transient(m) if m.contains("429")),
+    ),
+    (
+      503,
+      |e| matches!(e, TooluError::Transient(m) if m.contains("503")),
+    ),
+    (
+      400,
+      |e| matches!(e, TooluError::Protocol(m) if m.contains("400")),
+    ),
   ] {
     let (client, server) = peer(response_bytes(status, &[], "{\"error\":\"x\"}")).await;
     let err = client.claim("j1").await.expect_err("non-2xx");
@@ -218,14 +239,20 @@ async fn heartbeat_dispatched_and_complete_send_the_claim_epoch() {
   let (client, server) = peer(json_200(HEARTBEAT_200)).await;
   let renewal = client.heartbeat("j1", 4).await.expect("200");
   let received = server.await.expect("server");
-  assert_eq!(received.request_line, "POST /runner/jobs/j1/heartbeat HTTP/1.1");
+  assert_eq!(
+    received.request_line,
+    "POST /runner/jobs/j1/heartbeat HTTP/1.1"
+  );
   assert_eq!(received.body, r#"{"claimEpoch":4}"#);
   assert_eq!(renewal.lease_expires_at, 1_792_772_891_368);
 
   let (client, server) = peer(json_200(OK_200)).await;
   client.dispatched("j1", 4).await.expect("200");
   let received = server.await.expect("server");
-  assert_eq!(received.request_line, "POST /runner/jobs/j1/dispatched HTTP/1.1");
+  assert_eq!(
+    received.request_line,
+    "POST /runner/jobs/j1/dispatched HTTP/1.1"
+  );
   assert_eq!(received.body, r#"{"claimEpoch":4}"#);
 
   let (client, server) = peer(json_200(OK_200)).await;
@@ -236,7 +263,10 @@ async fn heartbeat_dispatched_and_complete_send_the_claim_epoch() {
   };
   client.complete("j1", &body).await.expect("200");
   let received = server.await.expect("server");
-  assert_eq!(received.request_line, "POST /runner/jobs/j1/complete HTTP/1.1");
+  assert_eq!(
+    received.request_line,
+    "POST /runner/jobs/j1/complete HTTP/1.1"
+  );
   assert_eq!(received.body, r#"{"outcome":"done","claimEpoch":4}"#);
 }
 
@@ -248,13 +278,20 @@ fn a_bad_api_url_or_empty_token_is_a_config_error() {
     ("https://console.toolu.sh", ""),
   ] {
     let err = TooluClient::new(reqwest::Client::new(), url, token).expect_err("refused");
-    assert!(matches!(err, shared::RunnerError::Config(_)), "{url:?}: {err:?}");
+    assert!(
+      matches!(err, shared::RunnerError::Config(_)),
+      "{url:?}: {err:?}"
+    );
   }
 }
 
 #[test]
 fn debug_never_prints_the_host_token() {
-  let client = TooluClient::new(reqwest::Client::new(), "https://console.toolu.sh", HOST_TOKEN)
-    .expect("client");
+  let client = TooluClient::new(
+    reqwest::Client::new(),
+    "https://console.toolu.sh",
+    HOST_TOKEN,
+  )
+  .expect("client");
   assert!(!format!("{client:?}").contains(HOST_TOKEN));
 }

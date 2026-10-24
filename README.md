@@ -370,6 +370,27 @@ unparseable: no watchdog). It runs exactly one job and persists nothing — no
 | `5` | A session conflict outlasted the bounded retry. |
 | `124` | The `TOOLU_DEADLINE` watchdog fired: already past at start (exits before any network call), or mid-job (graceful cancel, then a hard exit after a 30 s grace period). |
 
+### toolu.sh machines
+
+A machine paired with a [toolu.sh](https://toolu.sh) organization runs the
+jobs toolu.sh routes to it: workflows opt in with
+`runs-on: [toolu-self-hosted]` (plus any labels the machine reports), and
+toolu.sh holds the GitHub credentials and mints each job's JIT config. The
+pairing itself is `toolu-runner setup`'s toolu.sh branch; it writes a
+registration under `~/.toolu-runner/toolu/<org>/` with
+`[provider] kind = "toolu"` and the machine's host token (0600).
+
+For that registration, `run` (and the machine service's `run --all`) polls
+toolu.sh instead of GitHub, one job at a time: list the queue, claim a job
+(losing a race to another machine is normal — it moves on), run the claimed
+JIT config once, renew the claim's lease while the job runs, and report how
+it ended. A network outage or a 5xx backs off (1 s → 60 s) and resumes;
+SIGINT/SIGTERM cancels a running job gracefully and still reports it. If
+toolu.sh answers 401 — the machine was revoked in the console — a running job
+is cancelled and `run` exits 2, asking you to pair again with
+`toolu-runner setup`. `TOOLU_RUNNER_POLL_INTERVAL_MS` sets the wait after an
+empty queue (default 5 s).
+
 ### GitHub App: `toolu-runner create-app`
 
 `create-app` creates the runner's GitHub App through GitHub's App Manifest

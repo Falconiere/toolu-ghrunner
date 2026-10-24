@@ -89,6 +89,7 @@ pub fn write_registration(
     shadow: ShadowSection::default(),
     network: config::network::NetworkSection::default(),
     auth: config::registration_auth::AuthSection::default(),
+    provider: config::provider::ProviderSection::Github,
   };
   save_config(&config_path, &cfg)?;
   save_credentials(
@@ -250,8 +251,24 @@ impl Drop for Spawned {
 
 /// Spawn `run <args>` with stdout/stderr captured to `<home>/<name>.log`.
 pub fn spawn_logged(home: &Path, token: bool, name: &str, args: &[&str]) -> TestResult<Spawned> {
+  spawn_command(runner(home, token), home, name, args)
+}
+
+/// [`spawn_logged`] without a token and with the extra environment `envs`.
+pub fn spawn_logged_with(
+  home: &Path,
+  name: &str,
+  args: &[&str],
+  envs: &[(&str, &str)],
+) -> TestResult<Spawned> {
+  let mut cmd = runner(home, false);
+  cmd.envs(envs.iter().copied());
+  spawn_command(cmd, home, name, args)
+}
+
+/// Spawn `cmd <args>` with stdout/stderr captured to `<home>/<name>.log`.
+fn spawn_command(mut cmd: Command, home: &Path, name: &str, args: &[&str]) -> TestResult<Spawned> {
   let log = std::fs::File::create(home.join(format!("{name}.log")))?;
-  let mut cmd = runner(home, token);
   cmd.args(args).stdout(log.try_clone()?).stderr(log);
   Ok(Spawned(Some(cmd.spawn()?)))
 }

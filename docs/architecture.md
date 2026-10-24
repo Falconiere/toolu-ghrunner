@@ -1119,6 +1119,44 @@ after one job. The cancellation token is wired through every
 `tokio::select!` — including the backoff sleeps — so SIGINT breaks the
 loop promptly.
 
+## Sequence: toolu.sh poll loop (#206)
+
+A registration with `[provider] kind = "toolu"` (a machine paired with a
+toolu.sh org, `<home>/toolu/<org>/`) never re-mints: toolu.sh holds the
+GitHub credentials and mints a JIT config per claimed job. `run` and
+`run --all` build `run_cmd::RegistrationLoop::Toolu(poll_loop::PollLoop)`;
+the lock, signal bridge and drain token are the same as above. Contract:
+CodaSignal/toolu.sh `docs/guides/self-hosted-machines.md` (bodies in
+`protocol::toolu_jobs`, calls in `wire::net::toolu_jobs`).
+
+```
+loop (reload config.toml + credentials.json, mask the host token)
+  GET  /runner/jobs/queued            401 → fatal; 429/5xx/net → backoff 1 s→60 s
+  for each listed job:
+    POST /runner/jobs/:id/claim       409 taken / 404 → next; slots-full → wait
+      → jitConfig (masked), claimEpoch, leaseExpiresAt, deadline
+    poll_job: GitHubListener::new(jit, build_runner_config(cfg))   (in memory)
+      ├─ listener.run(job_cancel)     ── the JIT lifecycle, as `boot`
+      └─ watch_claim task:
+           POST …/dispatched {claimEpoch}         (advisory)
+           every heartbeat_delay(lease): POST …/heartbeat {claimEpoch}
+             → leaseExpiresAt; 409/404 → stop renewing; 401 → cancel job, fatal
+           at deadline → cancel job (an idle JIT GitHub gave away)
+    POST /runner/jobs/:id/complete {outcome: done|failed, errorMessage?, claimEpoch}
+      (transient: 5 attempts, not cancel-aware)
+    next_action(outcome) → poll again | backoff | exit
+  empty / nothing claimable → wait TOOLU_RUNNER_POLL_INTERVAL_MS (5 s)
+```
+
+`heartbeat_delay` is a third of the remaining lease within [1 s, 5 min]
+(the contract's 10-minute lease renews after ~200 s, leaving two retries),
+30 s once it lapsed. `done` means a job ran to any conclusion; GitHub's
+`workflow_job.completed` stays authoritative on toolu.sh's side. A 401
+anywhere means the machine was revoked (deleted in the console): the job is
+cancelled, nothing more is sent, and `run` exits 2 naming
+`toolu-runner setup` (under `run --all`, only that loop stops, recorded in
+`.stopped`).
+
 ## Sequence: cancel
 
 Cancel from the GH UI reaches the runner as a broker `JobCancellation`
@@ -1318,6 +1356,8 @@ window in milliseconds.
 ├── config.toml                     # legacy single-slot registration (read-only
 │                                   # fallback; never written by default)
 ├── orgs/<org>/                     # one dir per org registration (same contents as below)
+├── toolu/<org>/                    # a toolu.sh machine (#206: [provider] kind = "toolu",
+│                                   # host token in credentials.json; no JIT on disk)
 └── runners/<owner>/<repo>/         # one dir per repo registration = its data_dir
     ├── config.toml                 # registration + runtime config (0600)
     ├── credentials.json            # (0600)

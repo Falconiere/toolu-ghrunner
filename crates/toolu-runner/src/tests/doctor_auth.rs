@@ -60,6 +60,7 @@ fn loaded(
       shadow: ShadowSection::default(),
       network,
       auth: config::registration_auth::AuthSection::default(),
+      provider: config::provider::ProviderSection::Github,
     },
   )?;
   Ok(load_config(&config_path)?)

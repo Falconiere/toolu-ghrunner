@@ -5,7 +5,9 @@
 //! completed job, cancel-aware jittered backoff on a transient failure, exit
 //! on cancel / `--once` / `.pending_remove`. An `--ephemeral` registration
 //! never re-mints: after its one job it is unregistered and deleted
-//! ([`crate::ephemeral`]). Extracted from `main.rs`.
+//! ([`crate::ephemeral`]). A toolu.sh machine (`[provider] kind = "toolu"`,
+//! #206) runs [`crate::poll_loop::PollLoop`] instead, picked by
+//! [`RegistrationLoop`]. Extracted from `main.rs`.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -16,6 +18,7 @@ use config::config::{
   RunnerRegistrationConfig, load_config as load_reg_config, load_credentials, resolve_data_dir,
   resolve_work_dir,
 };
+use config::provider::ProviderSection;
 use config::registration_auth::AuthSection;
 use config::{lockfile, registry};
 use listener::GitHubListener;
@@ -28,14 +31,15 @@ use tokio_util::sync::CancellationToken;
 
 use crate::app_auth::{self, AppRemint, AppTarget};
 use crate::cli::{RunArgs, credentials_path_for};
+use crate::poll_loop::PollLoop;
 use crate::register_cmd;
 
 /// Backoff floor: the first retry sleeps ~this, reset after any success.
-const BACKOFF_START: Duration = Duration::from_secs(1);
+pub(crate) const BACKOFF_START: Duration = Duration::from_secs(1);
 /// Backoff ceiling: doubling never exceeds this.
 const BACKOFF_MAX: Duration = Duration::from_secs(60);
 /// Request timeout of each lifecycle's listener / re-mint client.
-const LOOP_CLIENT_TIMEOUT: Duration = Duration::from_secs(60);
+pub(crate) const LOOP_CLIENT_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Guidance for the two fatal re-mint token paths (no stored bearer, or a
 /// bearer GitHub rejected): names every way to supply a fresh token, and the
@@ -66,7 +70,7 @@ pub(crate) async fn cmd_run(args: RunArgs) -> Result<(), Box<dyn std::error::Err
   let cancel = CancellationToken::new();
   spawn_signal_bridge(cancel.clone());
 
-  RunLoop::for_registration(LoopInputs {
+  RegistrationLoop::for_registration(LoopInputs {
     config_path,
     cfg: &cfg,
     masker,
@@ -154,6 +158,35 @@ fn warn_if_no_login(store: &AuthStore, host: &str, once: bool) {
        default — re-run `toolu-runner login`, or set TOOLU_RUNNER_KEYRING=1"
     ),
     Err(e) => tracing::warn!(error = %e, "could not check for a stored GitHub login"),
+  }
+}
+
+/// The loop that drives one registration: GitHub's re-mint loop, or a
+/// toolu.sh machine's poll loop (#206), chosen by its `[provider]`.
+pub(crate) enum RegistrationLoop {
+  /// `[provider] kind = "github"` (the default).
+  Github(RunLoop),
+  /// `[provider] kind = "toolu"`.
+  Toolu(PollLoop),
+}
+
+impl RegistrationLoop {
+  /// Build the loop `inputs.cfg`'s provider calls for.
+  pub(crate) fn for_registration(
+    inputs: LoopInputs<'_>,
+  ) -> Result<Self, Box<dyn std::error::Error>> {
+    Ok(match inputs.cfg.provider {
+      ProviderSection::Github => Self::Github(RunLoop::for_registration(inputs)?),
+      ProviderSection::Toolu { .. } => Self::Toolu(PollLoop::for_registration(inputs)?),
+    })
+  }
+
+  /// Drive the loop until it exits (see each loop's `drive`).
+  pub(crate) async fn drive(self) -> Result<(), Box<dyn std::error::Error>> {
+    match self {
+      Self::Github(run_loop) => run_loop.drive().await,
+      Self::Toolu(poll_loop) => poll_loop.drive().await,
+    }
   }
 }
 
@@ -387,32 +420,44 @@ impl RunLoop {
     }
   }
 
-  /// Sleep the current backoff (cancel-aware), then double it toward the
-  /// cap. Returns `true` when cancellation fired during the sleep, so the
-  /// caller exits 0.
+  /// [`backoff_step`] on this loop's cancel and drain tokens.
   async fn backoff_step(&self, backoff: &mut Duration) -> bool {
-    if self.sleep_or_cancel(*backoff).await {
-      return true;
-    }
-    *backoff = next_backoff(*backoff);
-    false
+    backoff_step(&self.cancel, &self.drain, backoff).await
   }
+}
 
-  /// Sleep `backoff` with jitter applied (see [`jittered_backoff`]),
-  /// waking early on cancel or drain. Returns `true` if either fired first.
-  async fn sleep_or_cancel(&self, backoff: Duration) -> bool {
-    let jittered = jittered_backoff(backoff);
-    tokio::select! {
-      () = self.cancel.cancelled() => {
-        tracing::info!("cancelled during backoff; shutting down");
-        true
-      },
-      () = self.drain.cancelled() => {
-        tracing::info!("drained during backoff; stopping this registration");
-        true
-      },
-      () = tokio::time::sleep(jittered) => false,
-    }
+/// Sleep the current backoff (jittered, see [`jittered_backoff`]; cancel-
+/// and drain-aware), then double it toward [`BACKOFF_MAX`]. Returns `true`
+/// when `cancel` or `drain` fired during the sleep, so the caller exits 0.
+pub(crate) async fn backoff_step(
+  cancel: &CancellationToken,
+  drain: &CancellationToken,
+  backoff: &mut Duration,
+) -> bool {
+  if sleep_or_stop(cancel, drain, jittered_backoff(*backoff)).await {
+    return true;
+  }
+  *backoff = next_backoff(*backoff);
+  false
+}
+
+/// Sleep `wait`, waking early on `cancel` or `drain`. Returns `true` if
+/// either fired first.
+pub(crate) async fn sleep_or_stop(
+  cancel: &CancellationToken,
+  drain: &CancellationToken,
+  wait: Duration,
+) -> bool {
+  tokio::select! {
+    () = cancel.cancelled() => {
+      tracing::info!("cancelled while waiting; shutting down");
+      true
+    },
+    () = drain.cancelled() => {
+      tracing::info!("drained while waiting; stopping this registration");
+      true
+    },
+    () = tokio::time::sleep(wait) => false,
   }
 }
 
@@ -429,7 +474,10 @@ enum Remint {
 /// `SessionConflict` reaches `main` as a [`CodedExit`]; any other non-zero
 /// code (`--once` over a failed job) surfaces the listener error for `main`'s
 /// generic non-zero exit.
-fn finish(code: i32, outcome: Result<(), RunnerError>) -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) fn finish(
+  code: i32,
+  outcome: Result<(), RunnerError>,
+) -> Result<(), Box<dyn std::error::Error>> {
   if code == 0 {
     return Ok(());
   }
@@ -499,7 +547,7 @@ impl CodedExit {
 ///
 /// Resolved per iteration so a re-mint's preserved `[services]`/`[cache]`/
 /// `[workspace]`/`[shadow]` sections (and any user edit) take effect.
-fn build_runner_config(
+pub(crate) fn build_runner_config(
   cfg: &RunnerRegistrationConfig,
 ) -> Result<shared::RunnerConfig, Box<dyn std::error::Error>> {
   let data_dir = resolve_data_dir(&cfg.runtime.data_dir).map_err(|e| format!("{e}"))?;

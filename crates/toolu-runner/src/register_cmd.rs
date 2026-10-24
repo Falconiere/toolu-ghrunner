@@ -548,6 +548,7 @@ fn build_registration_config(
     shadow: ShadowSection::default(),
     network: p.network.clone(),
     auth: p.auth.clone(),
+    provider: config::provider::ProviderSection::Github,
   }
 }
 

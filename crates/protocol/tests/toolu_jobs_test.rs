@@ -8,8 +8,8 @@
 use std::time::Duration;
 
 use protocol::toolu_jobs::{
-  Claim, ClaimRefusal, CompleteBody, EpochBody, LeaseRenewal, Outcome, QueuedJobs,
-  heartbeat_delay, parse_claim_refusal,
+  Claim, ClaimRefusal, CompleteBody, EpochBody, LeaseRenewal, Outcome, QueuedJobs, heartbeat_delay,
+  parse_claim_refusal,
 };
 
 /// `GET /runner/jobs/queued` for a machine (guide example).
@@ -20,8 +20,7 @@ const QUEUED: &str = r#"{
 }"#;
 
 /// `POST /runner/jobs/:id/claim` for a machine (guide example: no `image`).
-const CLAIM: &str =
-  r#"{ "jitConfig": "…", "deadline": 1792793291368, "claimEpoch": 0, "leaseExpiresAt": 1792772291368 }"#;
+const CLAIM: &str = r#"{ "jitConfig": "…", "deadline": 1792793291368, "claimEpoch": 0, "leaseExpiresAt": 1792772291368 }"#;
 
 #[test]
 fn a_machine_queued_list_parses() {
@@ -43,7 +42,8 @@ fn an_empty_queued_list_parses() {
 #[test]
 fn a_fleet_job_without_labels_still_parses() {
   // `runner-jobs.md`: a fleet summary carries vcpu/memoryMb, no labels.
-  let fleet = r#"{"jobs":[{"id":"j1","runnerTag":"toolu-ubuntu","vcpu":2,"memoryMb":8192,"createdAt":1}]}"#;
+  let fleet =
+    r#"{"jobs":[{"id":"j1","runnerTag":"toolu-ubuntu","vcpu":2,"memoryMb":8192,"createdAt":1}]}"#;
   let queued: QueuedJobs = serde_json::from_str(fleet).expect("parses");
   assert!(queued.jobs.first().expect("one job").labels.is_empty());
 }
@@ -59,7 +59,10 @@ fn a_machine_claim_parses() {
 
 #[test]
 fn a_fleet_claim_with_an_image_still_parses() {
-  let fleet = CLAIM.replace("\"claimEpoch\"", "\"image\": \"ghcr.io/x:1\", \"claimEpoch\"");
+  let fleet = CLAIM.replace(
+    "\"claimEpoch\"",
+    "\"image\": \"ghcr.io/x:1\", \"claimEpoch\"",
+  );
   let claim: Claim = serde_json::from_str(&fleet).expect("extra image ignored");
   assert_eq!(claim.claim_epoch, 0);
 }
@@ -130,7 +133,10 @@ fn heartbeat_delay_is_a_third_of_the_remaining_lease_within_bounds() {
   );
   // A short lease still waits at least 1 s; a long one at most 5 min.
   assert_eq!(heartbeat_delay(now + 1_500, now), Duration::from_secs(1));
-  assert_eq!(heartbeat_delay(now + 3_600_000, now), Duration::from_secs(300));
+  assert_eq!(
+    heartbeat_delay(now + 3_600_000, now),
+    Duration::from_secs(300)
+  );
   // A lapsed (or exactly expiring) lease is retried every 30 s, never hot.
   assert_eq!(heartbeat_delay(now, now), Duration::from_secs(30));
   assert_eq!(heartbeat_delay(now - 5_000, now), Duration::from_secs(30));
