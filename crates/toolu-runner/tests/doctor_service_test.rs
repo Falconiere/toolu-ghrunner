@@ -7,17 +7,23 @@ use crate::check_servers::run;
 use crate::doctor_env::{
   block, doctor_cmd, fix, has_lines, report, row, service_install_fix, write_registration,
 };
+use crate::install_service_test::nonroot_shims;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 #[test]
 fn service_unit() -> TestResult {
   let home = tempfile::tempdir()?;
+  let test_path = nonroot_shims(home.path())?;
   let config = write_registration(home.path(), "o", "r", "http://127.0.0.1:9", false)?;
   write_registration(home.path(), "o", "once", "http://127.0.0.1:9", true)?;
 
   // Without a unit: an exact WARN with the install command.
-  let (_, stdout, _, _) = run(doctor_cmd(home.path())?.arg("--offline"))?;
+  let (_, stdout, _, _) = run(
+    doctor_cmd(home.path())?
+      .arg("--offline")
+      .env("PATH", &test_path),
+  )?;
   assert!(
     has_lines(
       &block(&stdout, "o/r"),
@@ -43,7 +49,8 @@ fn service_unit() -> TestResult {
       .arg(&config)
       .current_dir(home.path())
       .env("HOME", home.path())
-      .env("TOOLU_RUNNER_HOME", home.path()),
+      .env("TOOLU_RUNNER_HOME", home.path())
+      .env("PATH", &test_path),
   )?;
   assert_eq!(code, Some(0), "{}", report(&out, &err));
   let macos = cfg!(target_os = "macos");
@@ -64,7 +71,11 @@ fn service_unit() -> TestResult {
       .to_owned()
   };
 
-  let (_, stdout, _, _) = run(doctor_cmd(home.path())?.arg("--offline"))?;
+  let (_, stdout, _, _) = run(
+    doctor_cmd(home.path())?
+      .arg("--offline")
+      .env("PATH", &test_path),
+  )?;
   let rows = block(&stdout, "o/r");
   let stopped = [
     row(
