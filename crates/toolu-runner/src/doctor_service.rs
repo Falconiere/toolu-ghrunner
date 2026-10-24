@@ -147,7 +147,7 @@ pub(crate) async fn service_row(
   };
   // The inventory reads unit files: keep it off the async workers, like the
   // journal scan.
-  let units = tokio::task::spawn_blocking(move || {
+  let scan = tokio::task::spawn_blocking(move || {
     installed_units(
       supervisor,
       &home,
@@ -155,11 +155,19 @@ pub(crate) async fn service_row(
       Some(Path::new(SYSTEM_UNIT_DIR)),
     )
   })
-  .await
-  .unwrap_or_else(|e| {
-    tracing::warn!(error = %e, "the unit inventory did not finish");
-    Vec::new()
-  });
+  .await;
+  // A scan that did not finish is reported as such, never as "not installed".
+  let units = match scan {
+    Ok(units) => units,
+    Err(error) => {
+      let row = Row::new(
+        Level::Warn,
+        "service",
+        format!("could not inventory the supervisor units: {error}"),
+      );
+      return Some((row, false));
+    },
+  };
   let mine: Vec<&InstalledUnit> = units
     .iter()
     .filter(|unit| unit.supervises_registration(config_path))

@@ -210,8 +210,10 @@ async fn supervise(
     Ok(()) => return tracing::info!("registration loop ended"),
     Err(e) => e.to_string(),
   };
+  // `record_stop` handles its own I/O errors; an `Err` here is the blocking
+  // task itself failing (a panic or a runtime shutdown), so say exactly that.
   if let Err(e) = off_runtime(move || record_stop(&config_path, &masker, &error)).await {
-    tracing::error!(error = %e, "could not record why the registration stopped");
+    tracing::error!(error = %e, "the task recording why the registration stopped did not finish");
   }
 }
 

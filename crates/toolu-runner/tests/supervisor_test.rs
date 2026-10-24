@@ -12,7 +12,6 @@
 //! - AC-16: a second `run --all` on the same home exits 2.
 
 use std::path::Path;
-use std::time::Duration;
 
 use crate::supervisor_fixtures::{
   Scope, TestResult, count, idle_broker, job_broker, lock_is_held, lock_pid, log_of,
@@ -216,7 +215,12 @@ async fn a_registration_held_by_a_foreground_run_is_never_driven_twice() -> Test
   let supervisor = spawn_run_all(home.path(), false)?;
   let supervisor_pid = supervisor.id();
   wait_for(&b, "GET", "/message", 1).await?;
-  tokio::time::sleep(Duration::from_secs(3)).await;
+  // The supervisor has tried A and been refused (its one WARN), not merely
+  // not got there yet.
+  wait_until("the supervisor to try A's lock", || {
+    log_of(home.path(), "supervisor").contains("held by another process")
+  })
+  .await?;
   assert_eq!(
     lock_pid(&config_a),
     Some(foreground_pid),
