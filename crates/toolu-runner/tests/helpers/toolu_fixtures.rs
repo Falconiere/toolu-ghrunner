@@ -86,6 +86,8 @@ struct State {
   failed_completes: usize,
   jits: Vec<String>,
   seen: Vec<Seen>,
+  /// The live 401 capture's body.
+  revoked_body: String,
 }
 
 /// A running peer and a handle on its toolu.sh state.
@@ -123,6 +125,7 @@ impl Peer {
       failed_completes: 0,
       jits: Vec::new(),
       seen: Vec::new(),
+      revoked_body: invalid_token_body()?,
     }));
     let shared = Arc::clone(&state);
     Mock::given(path_regex("^/runner/"))
@@ -177,32 +180,41 @@ impl Peer {
   }
 }
 
-/// Epoch milliseconds now.
-fn now_ms() -> u64 {
+/// Epoch milliseconds now; `None` for a clock before the epoch.
+fn now_ms() -> Option<u64> {
   SystemTime::now()
     .duration_since(UNIX_EPOCH)
     .ok()
     .and_then(|d| u64::try_from(d.as_millis()).ok())
-    .unwrap_or(0)
 }
 
-/// The live 401 capture's body.
-fn invalid_token_body() -> String {
-  serde_json::from_str::<Value>(INVALID_TOKEN_401)
-    .ok()
-    .and_then(|v| {
-      v.pointer("/response/body")
-        .and_then(Value::as_str)
-        .map(str::to_owned)
-    })
-    .unwrap_or_default()
+/// The live 401 capture's body; an error when the capture lacks one.
+fn invalid_token_body() -> TestResult<String> {
+  let capture: Value = serde_json::from_str(INVALID_TOKEN_401)?;
+  capture
+    .pointer("/response/body")
+    .and_then(Value::as_str)
+    .map(str::to_owned)
+    .ok_or_else(|| "fixtures/toolu_sh/invalid_token_401.json has no /response/body".into())
 }
 
-/// The toolu.sh state machine (see the module doc).
+/// A 500 the test sees in [`Peer::paths`] when the fixture itself broke.
+fn fixture_broken(why: &str) -> ResponseTemplate {
+  ResponseTemplate::new(500).set_body_string(format!("toolu fixture broken: {why}"))
+}
+
+/// The toolu.sh state machine (see the module doc). A poisoned state (an
+/// earlier responder panicked) or a clock before the epoch answers 500
+/// rather than carry on with bogus state.
 fn respond(state: &Mutex<State>, request: &Request) -> ResponseTemplate {
-  let mut state = state.lock().unwrap_or_else(PoisonError::into_inner);
+  let Ok(mut state) = state.lock() else {
+    return fixture_broken("state poisoned by an earlier panic");
+  };
+  let Some(now) = now_ms() else {
+    return fixture_broken("system clock is before the Unix epoch");
+  };
   let path = request.url.path().to_owned();
-  let (status, body) = route(&mut state, request.method.as_str(), &path);
+  let (status, body) = route(&mut state, request.method.as_str(), &path, now);
   state.seen.push(Seen {
     at: Instant::now(),
     method: request.method.to_string(),
@@ -221,19 +233,19 @@ fn respond(state: &Mutex<State>, request: &Request) -> ResponseTemplate {
 }
 
 /// The status and body for one request.
-fn route(state: &mut State, method_name: &str, path: &str) -> (u16, String) {
+fn route(state: &mut State, method_name: &str, path: &str, now: u64) -> (u16, String) {
   let ok = || json!({ "ok": true }).to_string();
   match (method_name, path.rsplit('/').next().unwrap_or_default()) {
     ("GET", "queued") => list(state),
-    ("POST", verb) if state.faults.revoke_verb == Some(verb) => (401, invalid_token_body()),
-    ("POST", "claim") => claim(state, &job_id(path)),
-    ("POST", "heartbeat") if state.faults.heartbeat_401 => (401, invalid_token_body()),
+    ("POST", verb) if state.faults.revoke_verb == Some(verb) => (401, state.revoked_body.clone()),
+    ("POST", "claim") => claim(state, &job_id(path), now),
+    ("POST", "heartbeat") if state.faults.heartbeat_401 => (401, state.revoked_body.clone()),
     ("POST", "heartbeat") if state.faults.heartbeat_409 => {
       (409, json!({ "error": "claim superseded" }).to_string())
     },
     ("POST", "heartbeat") => (
       200,
-      json!({ "leaseExpiresAt": now_ms() + state.lease_ms }).to_string(),
+      json!({ "leaseExpiresAt": now + state.lease_ms }).to_string(),
     ),
     ("POST", "dispatched") => (200, ok()),
     ("POST", "complete") if state.failed_completes < state.faults.complete_503 => {
@@ -260,7 +272,7 @@ fn list(state: &mut State) -> (u16, String) {
     .revoke_after_completes
     .is_some_and(|n| state.completes >= n)
   {
-    return (401, invalid_token_body());
+    return (401, state.revoked_body.clone());
   }
   let jobs: Vec<Value> = state
     .queued
@@ -272,7 +284,7 @@ fn list(state: &mut State) -> (u16, String) {
 
 /// `POST /runner/jobs/:id/claim`: the injected refusals first, a lost race
 /// for a `taken` job, else a fresh real JIT config and a `lease_ms` lease.
-fn claim(state: &mut State, id: &str) -> (u16, String) {
+fn claim(state: &mut State, id: &str, now: u64) -> (u16, String) {
   state.claims += 1;
   if let Some((status, error)) = state.faults.claim_refusals.get(state.claims - 1) {
     return (*status, json!({ "error": error }).to_string());
@@ -295,7 +307,6 @@ fn claim(state: &mut State, id: &str) -> (u16, String) {
     );
   };
   state.jits.push(jit.clone());
-  let now = now_ms();
   let deadline = now.saturating_add_signed(state.faults.deadline_ms.unwrap_or(600_000));
   let body = json!({
     "jitConfig": jit,

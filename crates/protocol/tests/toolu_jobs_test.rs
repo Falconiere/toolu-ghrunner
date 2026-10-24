@@ -113,6 +113,11 @@ fn claim_refusals_are_classified_from_the_409_body() {
     parse_claim_refusal(r#"{ "error": "claim refused: slots-full" }"#),
     ClaimRefusal::SlotsFull
   );
+  // The reason is matched trimmed: surrounding whitespace still classifies.
+  assert_eq!(
+    parse_claim_refusal(r#"{ "error": "claim refused:  taken \n" }"#),
+    ClaimRefusal::Taken
+  );
   assert_eq!(
     parse_claim_refusal(r#"{"error":"claim refused: cap-reached"}"#),
     ClaimRefusal::Other("cap-reached".to_owned())

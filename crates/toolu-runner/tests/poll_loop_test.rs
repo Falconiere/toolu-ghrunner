@@ -48,16 +48,15 @@ fn assert_bearer(peer: &Peer) {
 }
 
 /// The text of every runner log file under `home` (`_diag/runner.log*`,
-/// the per-job journals, and the spawned process's own log).
-fn all_logs(home: &Path) -> String {
+/// the per-job journals, and the spawned process's own log). An unreadable
+/// directory or log is an error, never silently skipped (the callers assert
+/// that secrets are absent).
+fn all_logs(home: &Path) -> TestResult<String> {
   let mut text = String::new();
   let mut stack = vec![home.to_owned()];
   while let Some(dir) = stack.pop() {
-    let Ok(entries) = std::fs::read_dir(&dir) else {
-      continue;
-    };
-    for entry in entries.flatten() {
-      let path = entry.path();
+    for entry in std::fs::read_dir(&dir)? {
+      let path = entry?.path();
       if path.is_dir() {
         stack.push(path);
       } else if path.extension().is_some_and(|e| e == "log" || e == "jsonl")
@@ -65,11 +64,11 @@ fn all_logs(home: &Path) -> String {
           .file_name()
           .is_some_and(|n| n.to_string_lossy().starts_with("runner.log"))
       {
-        text.push_str(&std::fs::read_to_string(&path).unwrap_or_default());
+        text.push_str(&std::fs::read_to_string(&path)?);
       }
     }
   }
-  text
+  Ok(text)
 }
 
 /// S1 / AC-1, AC-10: two queued jobs run back to back; per job the calls
@@ -124,7 +123,7 @@ async fn two_queued_jobs_run_back_to_back_with_in_lease_heartbeats() -> TestResu
   assert_eq!(reported_conclusion(&peer.server).await?, "succeeded");
   assert_bearer(&peer);
 
-  let logs = all_logs(home.path());
+  let logs = all_logs(home.path())?;
   assert!(!logs.is_empty(), "the run left no logs");
   assert!(!logs.contains(HOST_TOKEN), "host token logged");
   for jit in peer.jits() {
@@ -669,7 +668,7 @@ async fn a_rotated_host_token_is_used_on_the_next_pass() -> TestResult<()> {
   })
   .await?;
   stop(child, home.path(), "run").await?;
-  let logs = all_logs(home.path());
+  let logs = all_logs(home.path())?;
   assert!(!logs.contains(ROTATED), "rotated host token logged");
   Ok(())
 }
