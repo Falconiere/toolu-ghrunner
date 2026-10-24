@@ -14,7 +14,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use config::app_store::{self, StoredApp};
-use protocol::app_manifest::{self, AppManifest, ConversionResponse};
+use protocol::app_manifest::{self, AppManifest, ConversionResponse, ManifestTarget};
 use shared::RunnerError;
 use wire::net::app_manifest::{CallbackServer, convert_manifest_code};
 
@@ -53,14 +53,17 @@ pub(crate) async fn cmd_create_app(
 
   let state = app_manifest::new_state();
   let server = CallbackServer::bind(state).await?;
-  let manifest = AppManifest::for_runner(&name, &server.callback_url());
+  let target = ManifestTarget::Personal;
+  let manifest = AppManifest::for_target(&name, &server.callback_url(), &target);
   let manifest_json = manifest.to_json()?;
 
   prompt_browser(&server.local_url(), args.no_browser);
-  let code = server.wait_for_code(manifest_json, BROWSER_TIMEOUT).await?;
+  let code = server
+    .wait_for_code(manifest_json, &target.form_action(), BROWSER_TIMEOUT)
+    .await?;
 
   let client = build_client()?;
-  let resp = convert_manifest_code(&client, &args.host, &code).await?;
+  let resp = convert_manifest_code(&client, "https://api.github.com", &code).await?;
 
   let app = build_stored_app(resp, args.host.clone());
   app_store::save_app(home, &app)?;

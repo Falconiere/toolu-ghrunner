@@ -10,14 +10,17 @@ use std::time::Duration;
 use serde_json::json;
 use shared::RunnerError;
 use wire::net::RunnerScope;
-use wire::net::github_app::{create_installation_token, find_installation, list_installations};
+use wire::net::github_app::{
+  create_installation_token, find_installation, find_org, get_app, installation_repo_count,
+  list_installations,
+};
 use wire::net::runner_groups::{list_runner_groups, pick_group};
 use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use crate::github_app_fixtures::{
-  APP_ID, INSTALLATION_TOKEN, PRIVATE_PEM, authorizations, capture, rfc3339_in, token_reply,
-  verify_app_jwt,
+  APP_ID, AppJwtGate, INSTALLATION_TOKEN, PRIVATE_PEM, authorizations, capture, edited_reply,
+  rfc3339_in, token_reply, verify_app_jwt,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -306,5 +309,122 @@ async fn a_bearer_that_cannot_read_runner_groups_is_an_auth_error() -> TestResul
     matches!(&err, RunnerError::Auth(msg) if msg.contains("Resource not accessible")),
     "{err:?}"
   );
+  Ok(())
+}
+
+/// #202: `GET /app` with the App's own key returns its identity (documented
+/// example, id rewritten to the test App).
+#[tokio::test]
+async fn get_app_returns_the_app_the_jwt_names() -> TestResult {
+  let server = MockServer::start().await;
+  let reply = edited_reply("app_200.json", |body| body["id"] = json!(APP_ID))?;
+  Mock::given(method("GET"))
+    .and(path("/api/v3/app"))
+    .respond_with(AppJwtGate(reply))
+    .mount(&server)
+    .await;
+  let app = get_app(&reqwest::Client::new(), &api(&server), &jwt()?, TIMEOUT).await?;
+  assert_eq!(app.id, APP_ID);
+  assert_eq!(app.slug, "octoapp");
+  Ok(())
+}
+
+/// #202 S3 at the wire layer: a key the App does not hold gets GitHub's live
+/// 401, a fatal `Auth` error quoting it.
+#[tokio::test]
+async fn get_app_with_a_key_the_app_does_not_hold_is_a_fatal_auth_error() -> TestResult {
+  let server = MockServer::start().await;
+  Mock::given(method("GET"))
+    .and(path("/api/v3/app"))
+    .respond_with(AppJwtGate(ResponseTemplate::new(200)))
+    .mount(&server)
+    .await;
+  // Signed by the test key but naming another App: GitHub cannot verify it.
+  let other = protocol::app_jwt::build_app_jwt(PRIVATE_PEM, 999)?;
+  let err = get_app(&reqwest::Client::new(), &api(&server), &other, TIMEOUT)
+    .await
+    .err()
+    .ok_or("a mismatched key must be refused")?;
+  let RunnerError::Auth(msg) = err else {
+    return Err(format!("expected Auth, got {err:?}").into());
+  };
+  assert!(msg.contains("401"), "{msg}");
+  assert!(msg.contains("A JSON web token could not be decoded"), "{msg}");
+  Ok(())
+}
+
+/// #202: the org check sends no credential and reads the live 200 capture;
+/// the live 404 capture (a typo) is `Ok(None)`.
+#[tokio::test]
+async fn find_org_reads_the_org_and_treats_404_as_absent() -> TestResult {
+  let server = MockServer::start().await;
+  Mock::given(method("GET"))
+    .and(path("/api/v3/orgs/CodaSignal"))
+    .respond_with(capture("orgs_200.json")?)
+    .mount(&server)
+    .await;
+  Mock::given(method("GET"))
+    .and(path("/api/v3/orgs/toolu-no-such-org-202"))
+    .respond_with(capture("orgs_404.json")?)
+    .mount(&server)
+    .await;
+  let client = reqwest::Client::new();
+  let org = find_org(&client, &api(&server), "CodaSignal", TIMEOUT)
+    .await?
+    .ok_or("the org exists")?;
+  assert_eq!((org.login.as_str(), org.id), ("CodaSignal", 212_445_385));
+  let missing = find_org(&client, &api(&server), "toolu-no-such-org-202", TIMEOUT).await?;
+  assert_eq!(missing, None);
+  let requests = server.received_requests().await.ok_or("recording off")?;
+  assert!(
+    requests
+      .iter()
+      .all(|request| request.headers.get("authorization").is_none()),
+    "the org check must be unauthenticated"
+  );
+  Ok(())
+}
+
+/// #202: a rate-limited or failing org check is transient (`Network`).
+#[tokio::test]
+async fn find_org_server_errors_are_transient() -> TestResult {
+  let server = MockServer::start().await;
+  Mock::given(method("GET"))
+    .and(path("/api/v3/orgs/acme"))
+    .respond_with(ResponseTemplate::new(503))
+    .mount(&server)
+    .await;
+  let err = find_org(&reqwest::Client::new(), &api(&server), "acme", TIMEOUT)
+    .await
+    .err()
+    .ok_or("503 must fail")?;
+  assert!(matches!(err, RunnerError::Network(_)), "{err:?}");
+  Ok(())
+}
+
+/// #202: the selected-repository count comes from `total_count`, read with
+/// the installation token.
+#[tokio::test]
+async fn installation_repo_count_reads_total_count_with_the_token() -> TestResult {
+  let server = MockServer::start().await;
+  Mock::given(method("GET"))
+    .and(path("/api/v3/installation/repositories"))
+    .and(query_param("per_page", "1"))
+    .and(header(
+      "authorization",
+      format!("Bearer {INSTALLATION_TOKEN}").as_str(),
+    ))
+    .respond_with(capture("installation_repositories_200.json")?)
+    .expect(1)
+    .mount(&server)
+    .await;
+  let count = installation_repo_count(
+    &reqwest::Client::new(),
+    &api(&server),
+    INSTALLATION_TOKEN,
+    TIMEOUT,
+  )
+  .await?;
+  assert_eq!(count, 1);
   Ok(())
 }

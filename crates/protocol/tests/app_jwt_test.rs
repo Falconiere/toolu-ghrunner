@@ -11,8 +11,8 @@
 
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
 use protocol::app_jwt::{
-  APP_JWT_BACKDATE_SECS, APP_JWT_LIFETIME_SECS, Installation, InstallationToken, build_app_jwt,
-  build_app_jwt_at,
+  APP_JWT_BACKDATE_SECS, APP_JWT_LIFETIME_SECS, AppInfo, Installation, InstallationToken, OrgInfo,
+  build_app_jwt, build_app_jwt_at,
 };
 use serde_json::Value;
 
@@ -22,6 +22,10 @@ const ACCESS_TOKENS_201: &str =
   include_str!("../../toolu-runner/tests/fixtures/github_app/access_tokens_201.json");
 const INSTALLATION_200: &str =
   include_str!("../../toolu-runner/tests/fixtures/github_app/installation_200.json");
+const INSTALLATIONS_200: &str =
+  include_str!("../../toolu-runner/tests/fixtures/github_app/installations_200.json");
+const APP_200: &str = include_str!("../../toolu-runner/tests/fixtures/github_app/app_200.json");
+const ORGS_200: &str = include_str!("../../toolu-runner/tests/fixtures/github_app/orgs_200.json");
 
 /// A fixed instant, so every claim is an exact value.
 const NOW: i64 = 1_792_786_000;
@@ -189,6 +193,41 @@ fn installation_parses_the_documented_reply() {
     installation.account.map(|account| account.login).as_deref(),
     Some("github")
   );
+}
+
+/// #202: the installation list item carries `repository_selection`, which
+/// `create-app` prints as "all repositories" or a repo count.
+#[test]
+fn installation_list_items_carry_the_repository_selection() {
+  let list: Vec<Installation> =
+    serde_json::from_str(&fixture_body(INSTALLATIONS_200).expect("fixture"))
+      .expect("documented reply parses");
+  let first = list.first().expect("one installation");
+  assert_eq!(first.repository_selection.as_deref(), Some("selected"));
+}
+
+/// #202: `GET /app` (documented example) parses into the identity `--import`
+/// refreshes the saved App from.
+#[test]
+fn app_info_parses_the_documented_get_app_reply() {
+  let app: AppInfo =
+    serde_json::from_str(&fixture_body(APP_200).expect("fixture")).expect("documented reply");
+  assert_eq!(app.id, 1);
+  assert_eq!(app.slug, "octoapp");
+  assert_eq!(app.client_id, "Iv1.ab1112223334445c");
+  assert_eq!(app.html_url, "https://github.com/apps/octoapp");
+  let owner = app.owner.expect("documented owner");
+  assert_eq!((owner.login.as_str(), owner.id), ("octocat", 1));
+}
+
+/// #202: the live `GET /orgs/CodaSignal` capture parses into the org's login
+/// and id (the install link's `target_id`).
+#[test]
+fn org_info_parses_the_live_get_org_capture() {
+  let org: OrgInfo =
+    serde_json::from_str(&fixture_body(ORGS_200).expect("fixture")).expect("live capture");
+  assert_eq!(org.login, "CodaSignal");
+  assert_eq!(org.id, 212_445_385);
 }
 
 /// Unix seconds now, from `std` alone.

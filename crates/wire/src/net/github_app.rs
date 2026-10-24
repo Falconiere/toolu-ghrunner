@@ -1,6 +1,8 @@
 //! GitHub App REST calls (#201): find the App's installation for a
 //! registration and mint an installation token for it, authenticated with
-//! the App JWT (`protocol::app_jwt`).
+//! the App JWT (`protocol::app_jwt`). #202 adds what `create-app` needs:
+//! `GET /app` (proves a key), the unauthenticated org check, and the
+//! selected-repository count.
 //!
 //! [`api_failure`] is `register::mint_failure`'s rule: transport, 429 and
 //! 5xx are `RunnerError::Network` (the loop backs off); every other non-2xx
@@ -10,7 +12,7 @@
 
 use std::time::Duration;
 
-use protocol::app_jwt::{Installation, InstallationToken};
+use protocol::app_jwt::{AppInfo, Installation, InstallationToken, OrgInfo};
 use reqwest::StatusCode;
 use serde::de::DeserializeOwned;
 use shared::RunnerError;
@@ -49,9 +51,14 @@ pub(crate) fn github_request(
   bearer: &str,
   timeout: Duration,
 ) -> reqwest::RequestBuilder {
+  github_headers(request.bearer_auth(bearer), timeout)
+}
+
+/// Add the headers every GitHub REST call carries and a per-request timeout,
+/// with no credential.
+fn github_headers(request: reqwest::RequestBuilder, timeout: Duration) -> reqwest::RequestBuilder {
   request
     .timeout(timeout)
-    .bearer_auth(bearer)
     .header("Accept", "application/vnd.github+json")
     .header("X-GitHub-Api-Version", "2022-11-28")
     // GitHub's REST API rejects requests without a User-Agent (403).
@@ -183,4 +190,74 @@ pub async fn create_installation_token(
     )));
   }
   Ok(token)
+}
+
+/// The App the `jwt` authenticates as: `GET <api>/app`. A 2xx proves the key
+/// belongs to the App the JWT's `iss` names.
+///
+/// # Errors
+///
+/// `RunnerError::Auth` for 401 (the key does not match: GitHub cannot verify
+/// the JWT) or 404 (no such App), quoting GitHub; `RunnerError::Network` for
+/// transport / 429 / 5xx; `RunnerError::Protocol` for an unparseable 200.
+pub async fn get_app(
+  client: &reqwest::Client,
+  api_base: &str,
+  jwt: &str,
+  timeout: Duration,
+) -> Result<AppInfo, RunnerError> {
+  let url = format!("{api_base}/app");
+  let what = "GitHub App lookup";
+  let (status, body) = send(github_request(client.get(&url), jwt, timeout), what).await?;
+  decode(what, status, &body)
+}
+
+/// The organization `org`: `GET <api>/orgs/{org}`, sent with no credential
+/// (it runs before any exists). `Ok(None)` on 404: no such organization
+/// (a typo, or a user login).
+///
+/// # Errors
+///
+/// `RunnerError::Network` for transport / 429 / 5xx; `RunnerError::Auth`
+/// for any other non-2xx (e.g. a 403 unauthenticated rate limit);
+/// `RunnerError::Protocol` for an unparseable 200.
+pub async fn find_org(
+  client: &reqwest::Client,
+  api_base: &str,
+  org: &str,
+  timeout: Duration,
+) -> Result<Option<OrgInfo>, RunnerError> {
+  let url = format!("{api_base}/orgs/{org}");
+  let what = "GitHub organization lookup";
+  let (status, body) = send(github_headers(client.get(&url), timeout), what).await?;
+  if status == StatusCode::NOT_FOUND {
+    return Ok(None);
+  }
+  decode(what, status, &body).map(Some)
+}
+
+/// `GET /installation/repositories` reply, reduced to its count.
+#[derive(serde::Deserialize)]
+struct RepositoryPage {
+  total_count: u64,
+}
+
+/// How many repositories an installation selected:
+/// `GET <api>/installation/repositories?per_page=1` with an installation
+/// `token`, read from `total_count`.
+///
+/// # Errors
+///
+/// As [`get_app`].
+pub async fn installation_repo_count(
+  client: &reqwest::Client,
+  api_base: &str,
+  token: &str,
+  timeout: Duration,
+) -> Result<u64, RunnerError> {
+  let url = format!("{api_base}/installation/repositories");
+  let request = client.get(&url).query(&[("per_page", "1")]);
+  let what = "GitHub App installation repository count";
+  let (status, body) = send(github_request(request, token, timeout), what).await?;
+  decode::<RepositoryPage>(what, status, &body).map(|page| page.total_count)
 }
