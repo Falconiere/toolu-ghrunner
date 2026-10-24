@@ -468,10 +468,10 @@ fn finish_ephemeral_exit(
   }))
 }
 
-/// A fatal error that must exit with a specific process code instead of
-/// `main`'s generic 2: `run`'s session conflict
-/// ([`SESSION_CONFLICT_EXIT_CODE`]) and `create-app`'s unattended install
-/// timeout (1) and cancel (130).
+/// Any fatal error that must exit with a specific process code instead of
+/// `main`'s generic 2 (`main` downcasts to it). Built with [`CodedExit::new`];
+/// today's users are `run`'s session conflict ([`SESSION_CONFLICT_EXIT_CODE`])
+/// and `create-app`'s unattended install timeout (1) and cancel (130).
 #[derive(Debug)]
 pub(crate) struct CodedExit {
   /// The process exit code `main` applies.

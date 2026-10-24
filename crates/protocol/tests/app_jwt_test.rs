@@ -214,6 +214,7 @@ fn app_info_parses_the_documented_get_app_reply() {
     serde_json::from_str(&fixture_body(APP_200).expect("fixture")).expect("documented reply");
   assert_eq!(app.id, 1);
   assert_eq!(app.slug, "octoapp");
+  assert_eq!(app.name, "Octocat App");
   assert_eq!(app.client_id, "Iv1.ab1112223334445c");
   assert_eq!(app.html_url, "https://github.com/apps/octoapp");
   let owner = app.owner.expect("documented owner");
