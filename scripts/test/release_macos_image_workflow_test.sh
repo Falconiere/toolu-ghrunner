@@ -35,7 +35,7 @@ want() {
 }
 
 # job_body <job-key> — everything from `<job-key>:` up to the next job key at
-# the same indent. Job-scoped, because "some job runs on macos-14" is exactly
+# the same indent. Job-scoped, because "some job runs on macos-15" is exactly
 # the assertion that stays true after the wrong job is moved.
 job_body() {
   awk -v key="  $1:" '
@@ -63,7 +63,7 @@ if [[ -z "$BUILD_JOB" || -z "$IMAGE_JOB" ]]; then
 fi
 
 # --- the split that the whole workflow rests on ----------------------------
-want_in "$BUILD_JOB" "the binary is compiled on a real Mac"  "runs-on: macos-14"
+want_in "$BUILD_JOB" "the binary is compiled on a real Mac"  "runs-on: macos-15"
 want_in "$BUILD_JOB" "the compile is --locked"               "cargo build --release --locked --bin toolu-runner"
 want_in "$BUILD_JOB" "the artifact keeps its executable bit" "chmod \+x dist/toolu-runner-darwin-arm64"
 want_in "$IMAGE_JOB" "the image is packed on Linux"          "runs-on: ubuntu-24.04"
@@ -89,7 +89,7 @@ want "the image basename is the macOS one" "IMAGE_BASENAME: toolu-ghrunner-macos
 
 # --- the binary source (#121) -----------------------------------------------
 # A tag reaches this workflow only from release.yml, which already built the
-# darwin-arm64 tarball on macos-14: the prebuilt path skips the compile and
+# darwin-arm64 tarball on macos-15: the prebuilt path skips the compile and
 # packs that tarball's binary. PR / dispatch still compile here, under an
 # artifact name of their own so one name never carries two shapes.
 want_in "$BUILD_JOB" "the compile runs only off the prebuilt path" \
@@ -168,7 +168,7 @@ if python3 -c 'import yaml' >/dev/null 2>&1; then
   mutate_yaml "no verify job: release.yml's gate is the only one per tag" \
     's#^jobs:$#jobs:\n  verify:\n    runs-on: ubuntu-24.04\n    steps:\n      - run: cargo test --workspace#'
   mutate_yaml "build needs nothing inside this workflow" \
-    's#^    runs-on: macos-14$#    needs: verify\n&#'
+    's#^    runs-on: macos-15$#    needs: verify\n&#'
   mutate_yaml "workflow_call takes prebuilt_binaries (boolean, default false)" \
     's#^        default: false$#        default: true#'
   rm -f "$mut"

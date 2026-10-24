@@ -1474,7 +1474,7 @@ verify (ubuntu)      scripts/assert-version.sh — tag must equal the
       │              [workspace.package] version, else fail fast; then
       │              cargo fmt / clippy / nextest / doctests.
       ▼
-build (matrix ×4)    native runners, no cross: darwin/arm64 (macos-14),
+build (matrix ×4)    native runners, no cross: darwin/arm64 (macos-15),
       │              darwin/amd64 (macos-15-intel), linux/amd64
       │              (ubuntu-24.04), linux/arm64 (ubuntu-24.04-arm); the
       │              linux legs run in a rust:1.94.1-bookworm container
