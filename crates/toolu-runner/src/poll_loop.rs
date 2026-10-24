@@ -143,7 +143,7 @@ impl PollLoop {
     pass: Pass,
     backoff: &mut Duration,
   ) -> Option<Result<(), Box<dyn std::error::Error>>> {
-    let back_off = match pass {
+    let wait = match pass {
       Pass::Idle => {
         *backoff = BACKOFF_START;
         return sleep_or_stop(&self.cancel, &self.drain, self.poll_interval)
@@ -165,7 +165,7 @@ impl PollLoop {
         }
       },
     };
-    (back_off && backoff_step(&self.cancel, &self.drain, backoff).await).then_some(Ok(()))
+    (wait && backoff_step(&self.cancel, &self.drain, backoff).await).then_some(Ok(()))
   }
 
   /// The `/runner/*` client for this pass: the registration's API origin and
@@ -251,31 +251,33 @@ fn claim_refused(
   job: &str,
   refusal: TooluError,
 ) -> Result<Option<Pass>, Box<dyn std::error::Error>> {
-  match refusal {
-    TooluError::NotFound => {
-      tracing::info!(%job, "the job is no longer claimable; trying the next");
-      Ok(None)
-    },
+  let (next, what) = match refusal {
+    TooluError::Revoked(why) => return Err(revoked(&why)),
+    TooluError::NotFound => (
+      None,
+      "the job is no longer claimable; trying the next".to_owned(),
+    ),
     TooluError::Conflict(body) => match parse_claim_refusal(&body) {
-      ClaimRefusal::Taken => {
-        tracing::info!(%job, "another machine claimed the job first; trying the next");
-        Ok(None)
-      },
-      ClaimRefusal::SlotsFull => {
-        tracing::info!("toolu.sh says this machine's slots are full; waiting");
-        Ok(Some(Pass::Idle))
-      },
-      ClaimRefusal::Other(reason) => {
-        tracing::warn!(%job, %reason, "toolu.sh refused the claim; waiting");
-        Ok(Some(Pass::Idle))
-      },
+      ClaimRefusal::Taken => (
+        None,
+        "another machine claimed the job first; trying the next".to_owned(),
+      ),
+      ClaimRefusal::SlotsFull => (
+        Some(Pass::Idle),
+        "toolu.sh says this machine's slots are full; waiting".to_owned(),
+      ),
+      ClaimRefusal::Other(reason) => (
+        Some(Pass::Idle),
+        format!("toolu.sh refused the claim ({reason}); waiting"),
+      ),
     },
-    TooluError::Revoked(why) => Err(revoked(&why)),
-    e @ (TooluError::Transient(_) | TooluError::Protocol(_)) => {
-      tracing::warn!(%job, error = %e, "claiming the job failed; backing off");
-      Ok(Some(Pass::Backoff))
-    },
-  }
+    e @ (TooluError::Transient(_) | TooluError::Protocol(_)) => (
+      Some(Pass::Backoff),
+      format!("claiming the job failed ({e}); backing off"),
+    ),
+  };
+  tracing::info!(%job, "{what}");
+  Ok(next)
 }
 
 /// The fatal error of a 401: the machine was revoked (or never paired).

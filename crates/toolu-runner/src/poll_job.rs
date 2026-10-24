@@ -129,32 +129,36 @@ impl ClaimedJob<'_> {
     let body = complete_body(outcome, claim_epoch, self.masker);
     let mut delay = Duration::from_secs(1);
     for attempt in 1..=COMPLETE_ATTEMPTS {
-      match self.toolu.complete(id, &body).await {
+      let e = match self.toolu.complete(id, &body).await {
         Ok(()) => {
           tracing::info!(job = %id, outcome = ?body.outcome, "reported the job to toolu.sh");
           return Ok(());
         },
         Err(TooluError::Revoked(why)) => return Err(why),
-        Err(e @ (TooluError::Conflict(_) | TooluError::NotFound | TooluError::Protocol(_))) => {
-          tracing::warn!(job = %id, error = %e, "toolu.sh did not take the report; moving on");
-          return Ok(());
-        },
-        Err(e @ TooluError::Transient(_)) if attempt < COMPLETE_ATTEMPTS => {
-          tracing::warn!(job = %id, error = %e, attempt, "reporting the job failed; retrying");
-          tokio::time::sleep(delay).await;
-          delay = delay.saturating_mul(2);
-        },
-        Err(e @ TooluError::Transient(_)) => {
-          tracing::warn!(
-            job = %id,
-            error = %e,
-            "giving up reporting the job; toolu.sh reclaims it when the lease lapses"
-          );
-        },
+        Err(e) => e,
+      };
+      let retry = matches!(e, TooluError::Transient(_)) && attempt < COMPLETE_ATTEMPTS;
+      warn_unreported(id, &e, retry);
+      if !retry {
+        break;
       }
+      tokio::time::sleep(delay).await;
+      delay = delay.saturating_mul(2);
     }
     Ok(())
   }
+}
+
+/// Log a `complete` attempt toolu.sh did not take (`retry`: another follows).
+fn warn_unreported(id: &str, e: &TooluError, retry: bool) {
+  let what = if retry {
+    "reporting the job failed; retrying"
+  } else if matches!(e, TooluError::Transient(_)) {
+    "giving up reporting the job; toolu.sh reclaims it when the lease lapses"
+  } else {
+    "toolu.sh did not take the report; moving on"
+  };
+  tracing::warn!(job = %id, error = %e, "{what}");
 }
 
 /// The `complete` body for `outcome`.
@@ -209,32 +213,66 @@ async fn watch_claim(w: Watch) -> Option<String> {
   let (mut lease, mut renewing, mut deadline_fired) = (w.lease_expires_at, true, false);
   loop {
     let next = heartbeat_delay(lease, now_epoch_ms());
-    tokio::select! {
-      () = w.stop.cancelled() => return None,
-      () = &mut deadline, if !deadline_fired => {
+    let beat = tokio::select! {
+      () = w.stop.cancelled() => Beat::Stop,
+      () = &mut deadline, if !deadline_fired => Beat::Deadline,
+      () = tokio::time::sleep(next), if renewing => heartbeat(&w).await,
+    };
+    match beat {
+      Beat::Renewed(at) => lease = at,
+      Beat::Retry => {},
+      Beat::Lost => renewing = false,
+      Beat::Deadline => {
         deadline_fired = true;
-        tracing::warn!(job = %w.id, "the claim's deadline passed; cancelling the job");
-        w.job_cancel.cancel();
+        cancel_at_deadline(&w);
       },
-      () = tokio::time::sleep(next), if renewing => {
-        let renewal = tokio::select! {
-          () = w.stop.cancelled() => return None,
-          result = w.toolu.heartbeat(&w.id, w.claim_epoch) => result,
-        };
-        match renewal {
-          Ok(renewal) => lease = renewal.lease_expires_at,
-          Err(TooluError::Revoked(why)) => return Some(revoke(&w, why)),
-          Err(e @ (TooluError::Conflict(_) | TooluError::NotFound)) => {
-            tracing::warn!(job = %w.id, error = %e, "the claim was lost; the job runs to its end");
-            renewing = false;
-          },
-          Err(e @ (TooluError::Transient(_) | TooluError::Protocol(_))) => {
-            tracing::warn!(job = %w.id, error = %e, "renewing the lease failed; retrying");
-          },
-        }
-      },
+      Beat::Stop => return None,
+      Beat::Revoked(why) => return Some(revoke(&w, why)),
     }
   }
+}
+
+/// What one turn of the claim watch saw.
+enum Beat {
+  /// The lease now runs to this epoch-ms.
+  Renewed(u64),
+  /// A transient heartbeat failure: try again at the next beat.
+  Retry,
+  /// The claim is no longer this machine's: stop renewing.
+  Lost,
+  /// The claim's deadline passed.
+  Deadline,
+  /// The lifecycle ended.
+  Stop,
+  /// toolu.sh answered 401 with this reason.
+  Revoked(String),
+}
+
+/// One heartbeat, abandoned when the lifecycle ends.
+async fn heartbeat(w: &Watch) -> Beat {
+  let renewal = tokio::select! {
+    () = w.stop.cancelled() => return Beat::Stop,
+    result = w.toolu.heartbeat(&w.id, w.claim_epoch) => result,
+  };
+  let e = match renewal {
+    Ok(renewal) => return Beat::Renewed(renewal.lease_expires_at),
+    Err(TooluError::Revoked(why)) => return Beat::Revoked(why),
+    Err(e) => e,
+  };
+  let lost = matches!(e, TooluError::Conflict(_) | TooluError::NotFound);
+  let what = if lost {
+    "the claim was lost; the job runs to its end"
+  } else {
+    "renewing the lease failed; retrying"
+  };
+  tracing::warn!(job = %w.id, error = %e, "{what}");
+  if lost { Beat::Lost } else { Beat::Retry }
+}
+
+/// The claim's deadline passed: cancel the job.
+fn cancel_at_deadline(w: &Watch) {
+  tracing::warn!(job = %w.id, "the claim's deadline passed; cancelling the job");
+  w.job_cancel.cancel();
 }
 
 /// Post `dispatched` (advisory: only a 401 matters). `Some` ends the watch
@@ -247,16 +285,14 @@ async fn mark_dispatched(w: &Watch) -> Option<Option<String>> {
   match dispatched {
     Ok(()) => tracing::info!(job = %w.id, "told toolu.sh the job's listener started"),
     Err(TooluError::Revoked(why)) => return Some(Some(revoke(w, why))),
-    Err(
-      e @ (TooluError::Conflict(_)
-      | TooluError::NotFound
-      | TooluError::Transient(_)
-      | TooluError::Protocol(_)),
-    ) => {
-      tracing::warn!(job = %w.id, error = %e, "could not mark the claim dispatched; running anyway");
-    },
+    Err(e) => warn_undispatched(&w.id, &e),
   }
   None
+}
+
+/// Log a `dispatched` toolu.sh did not take (advisory; the job runs anyway).
+fn warn_undispatched(id: &str, e: &TooluError) {
+  tracing::warn!(job = %id, error = %e, "could not mark the claim dispatched; running anyway");
 }
 
 /// A 401 mid-job: cancel the job and hand back the reason.
