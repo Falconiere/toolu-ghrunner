@@ -21,7 +21,7 @@ use crate::doctor_env::{
   ENV_REJECTED_FIX, REREGISTER, STORED_BEARER, TEST_BEARER, USER_401, VERSION, block, dead_pid,
   doctor_cmd, fix, heading, healthy_reply, implied_summary, install_fix, jit_ok, last_line, report,
   row, section, snapshot, store_login, user_authorization, user_peer, write_lock_body,
-  write_registration,
+  write_registration, write_registration_with,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -61,7 +61,7 @@ fn empty_home() -> TestResult {
       row(
         "INFO",
         "token",
-        "none (only needed for persistent registrations)"
+        "none (only needed for persistent token registrations)"
       ),
       fix("toolu-runner login"),
     ],
@@ -399,7 +399,37 @@ fn missing_token() -> TestResult {
       row(
         "INFO",
         "token",
-        "none (only needed for persistent registrations)"
+        "none (only needed for persistent token registrations)"
+      ),
+      fix("toolu-runner login 127.0.0.1"),
+    ],
+    "{stdout}"
+  );
+  Ok(())
+}
+
+/// #201 AC-15: a persistent registration that re-mints with a GitHub App
+/// needs no personal token, so its missing login is not a failure.
+#[test]
+fn missing_token_is_not_a_failure_for_an_app_registration() -> TestResult {
+  let home = tempfile::tempdir()?;
+  write_registration_with(home.path(), "o", "r", "http://127.0.0.1:9", false, |cfg| {
+    cfg.auth = config::registration_auth::AuthSection::App {
+      app_file: "/nonexistent/github-app.json".to_owned(),
+      installation_id: 1,
+    };
+  })?;
+
+  // Only the auth section is under test: the registration is persistent
+  // and not running, which `doctor` FAILs on its own `run` row.
+  let (_, stdout, _, _) = run(doctor_cmd(home.path())?.arg("--offline"))?;
+  assert_eq!(
+    section(&stdout, "github auth (127.0.0.1)"),
+    [
+      row(
+        "INFO",
+        "token",
+        "none (only needed for persistent token registrations)"
       ),
       fix("toolu-runner login 127.0.0.1"),
     ],
@@ -439,5 +469,68 @@ fn rejected_token() -> TestResult {
   );
   assert!(!stdout.contains(TEST_BEARER), "{stdout}");
   assert!(!stderr.contains(TEST_BEARER), "{stderr}");
+  Ok(())
+}
+
+/// #201 F5: an App registration gets an `app` row: OK naming the App when its
+/// file loads, FAIL with the fix when it is gone.
+#[test]
+fn an_app_registration_reports_its_app_file() -> TestResult {
+  let home = tempfile::tempdir()?;
+  let app_file = crate::github_app_fixtures::write_app(home.path(), "127.0.0.1")?;
+  let app_file_text = app_file.to_string_lossy().into_owned();
+  let auth = config::registration_auth::AuthSection::App {
+    app_file: app_file_text.clone(),
+    installation_id: 1,
+  };
+  write_registration_with(home.path(), "o", "r", "http://127.0.0.1:9", false, |cfg| {
+    cfg.auth = auth;
+  })?;
+
+  let (_, stdout, _, _) = run(doctor_cmd(home.path())?.arg("--offline"))?;
+  let ok = row(
+    "OK",
+    "app",
+    "GitHub App 'toolu-runner-test-app' (App 424242, installation 1)",
+  );
+  assert!(block(&stdout, "o/r").contains(&ok.as_str()), "{stdout}");
+
+  std::fs::remove_file(&app_file)?;
+  let (code, stdout, stderr, _) = run(doctor_cmd(home.path())?.arg("--offline"))?;
+  let fail = row(
+    "FAIL",
+    "app",
+    &format!(
+      "config error: no GitHub App saved at {app_file_text} — run `toolu-runner create-app` first"
+    ),
+  );
+  let restore = fix(&format!(
+    "restore {app_file_text}, or re-register: toolu-runner register --app --replace --url \
+     http://127.0.0.1:9/o/r"
+  ));
+  let registration = block(&stdout, "o/r");
+  assert!(registration.contains(&fail.as_str()), "{stdout}");
+  assert!(registration.contains(&restore.as_str()), "{stdout}");
+  assert_eq!(code, Some(1), "{}", report(&stdout, &stderr));
+  Ok(())
+}
+
+/// An ephemeral App registration never re-mints, so it gets no `app` row
+/// even when its App file is gone.
+#[test]
+fn an_ephemeral_app_registration_has_no_app_row() -> TestResult {
+  let home = tempfile::tempdir()?;
+  write_registration_with(home.path(), "o", "r", "http://127.0.0.1:9", true, |cfg| {
+    cfg.auth = config::registration_auth::AuthSection::App {
+      app_file: "/nonexistent/github-app.json".to_owned(),
+      installation_id: 1,
+    };
+  })?;
+  let (_, stdout, _, _) = run(doctor_cmd(home.path())?.arg("--offline"))?;
+  let registration = block(&stdout, "o/r");
+  assert!(
+    !registration.iter().any(|line| line.contains(" app ")),
+    "{stdout}"
+  );
   Ok(())
 }

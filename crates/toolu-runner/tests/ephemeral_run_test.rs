@@ -14,7 +14,7 @@
 //! - AC-7: DELETE 500 keeps state and exits 2 naming `toolu-runner remove`;
 //!   404 + an empty runner list counts as removed; no token → removed,
 //!   "not verified".
-//! - Loop edges: org URL (unverified removal), a transient failure retried
+//! - Loop edges: org URL (unregistered through the org API), a transient failure retried
 //!   on the same registration, `--once`, `.pending_remove`, a session
 //!   conflict (exit 5), and a completion failure after the acquire (cleaned,
 //!   exit 1).
@@ -103,6 +103,7 @@ fn write_registration_at(home: &Path, server: &MockServer, url_path: &str) -> Te
     workspace: WorkspaceSection::default(),
     shadow: ShadowSection::default(),
     network: config::network::NetworkSection::default(),
+    auth: config::registration_auth::AuthSection::default(),
   };
   save_config(&config_path, &cfg)?;
   save_credentials(
@@ -481,23 +482,25 @@ async fn assert_kept(
   Ok(())
 }
 
-/// An org-level registration: the repo-scoped runners API cannot address it,
-/// so the local state goes and the output says GitHub-side removal was not
-/// verified (no DELETE is sent).
+/// #201: an org-level registration is unregistered through the org runners
+/// API after its job, then removed locally.
 #[tokio::test]
-async fn org_registration_removes_local_state_and_says_unverified() -> TestResult<()> {
+async fn org_registration_unregisters_through_the_org_runners_api() -> TestResult<()> {
   let home = tempfile::tempdir()?;
   let server = job_server("true", 204).await?;
+  let org_delete = format!("/api/v3/orgs/octo/actions/runners/{RUNNER_ID}");
+  Mock::given(method("DELETE"))
+    .and(path(org_delete.as_str()))
+    .respond_with(ResponseTemplate::new(204))
+    .mount(&server)
+    .await;
   let config_path = write_registration_at(home.path(), &server, "octo")?;
   let out = wait_exit(spawn_run(home.path(), &config_path, Some(TOKEN))?).await?;
   assert_eq!(out.status.code(), Some(0), "stderr: {}", text(&out.stderr));
   assert_eq!(count(&server, "POST", "/acquirejob").await?, 1);
-  assert_eq!(count(&server, "DELETE", &delete_path()).await?, 0);
+  assert_eq!(count(&server, "DELETE", &org_delete).await?, 1);
   let stdout = text(&out.stdout);
-  assert!(
-    stdout.contains("not verified here (no runners API endpoint"),
-    "{stdout}"
-  );
+  assert!(stdout.contains("unregistered on GitHub"), "{stdout}");
   assert_state(&config_path, false, &out);
   Ok(())
 }
@@ -594,6 +597,33 @@ async fn acquired_job_with_failed_completion_still_cleans_up() -> TestResult<()>
   assert!(stderr.contains("the job was acquired"), "{stderr}");
   assert_eq!(count(&server, "POST", "/acquirejob").await?, 1);
   assert_eq!(count(&server, "DELETE", &delete_path()).await?, 1);
+  assert_state(&config_path, false, &out);
+  Ok(())
+}
+
+/// #201: an ephemeral App registration with no personal token still cleans
+/// up, and says why GitHub-side removal was not verified.
+#[tokio::test]
+async fn no_token_for_an_app_registration_says_why_unverified() -> TestResult<()> {
+  let home = tempfile::tempdir()?;
+  let server = job_server("true", 204).await?;
+  let config_path = write_registration(home.path(), &server)?;
+  let mut raw = std::fs::read_to_string(&config_path)?;
+  raw.push_str(
+    "\n[auth]\nkind = \"app\"\napp_file = \"/nonexistent/github-app.json\"\ninstallation_id = 1\n",
+  );
+  std::fs::write(&config_path, raw)?;
+  let out = wait_exit(spawn_run(home.path(), &config_path, None)?).await?;
+  assert_eq!(out.status.code(), Some(0), "stderr: {}", text(&out.stderr));
+  assert_eq!(count(&server, "DELETE", &delete_path()).await?, 0);
+  assert!(
+    text(&out.stdout).contains(
+      "not verified here (no personal GitHub token; an App registration's unregister still \
+       needs one)"
+    ),
+    "{}",
+    text(&out.stdout)
+  );
   assert_state(&config_path, false, &out);
   Ok(())
 }

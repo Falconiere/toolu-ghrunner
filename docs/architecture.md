@@ -49,7 +49,8 @@ toolu-ghrunner/                            workspace root
     │   ├── network.rs                     [network] section → shared::NetworkConfig
     │   ├── lockfile.rs                    single-job fs2 lock (per registration dir)
     │   ├── auth_store.rs                  0600-file login-token store (keyring opt-in) + decide_bearer TTY gate
-    │   ├── app_store.rs                   GitHub App credential store (github-app.json)
+    │   ├── app_store.rs                   GitHub App credential store (github-app.json; load_app_file, secret_values)
+    │   ├── registration_auth.rs           [auth] section: token (default, omitted) | app (app_file, installation_id)
     │   ├── registry.rs                    runner home + runners/<owner>/<repo>/ discovery/resolution
     │   ├── repo_infer.rs                  cwd git remote → owner/repo inference
     │   ├── remint.rs                      re-mint merge (preserve [services]/[cache]/[workspace]/[shadow])
@@ -57,7 +58,7 @@ toolu-ghrunner/                            workspace root
     ├── expressions/                       the ${{ }} evaluator (→ shared)
     ├── cache/                             content-addressed CI cache (→ shared)
     ├── wire/                              async HTTP transport + reporting (→ shared, protocol, network)
-    │   ├── net/                           async I/O (reqwest): auth, session, messages, …, register, app_manifest (+ create-app loopback callback server)
+    │   ├── net/                           async I/O (reqwest): auth, session, messages, …, register (repo + org scope), github_app, runner_groups, app_manifest (+ create-app loopback callback server)
     │   └── reporting/                     Run/Results domain types, live_log, feature_detection
     ├── observability/                     per-job JSONL event journal (→ shared)
     │   └── journal/                       per-job JSONL event journal (types, writer, reader)
@@ -82,6 +83,8 @@ toolu-ghrunner/                            workspace root
     │   ├── src/main.rs                    dispatch + the inline remove handler
     │   ├── src/cli.rs                     clap surface: register / run / boot / remove / status / install-service / login / logout / create-app / check / doctor
     │   ├── src/register_cmd.rs            register + remint_and_persist (per-repo persist, config rollback)
+    │   ├── src/register_auth.rs           register's bearer: GitHub App (--app / saved App) or token chain; org runner-group names
+    │   ├── src/app_auth.rs                GitHub App glue: load + mask, installation lookup, installation-token cache
     │   ├── src/run_cmd.rs                 the always-online run loop (re-mint after each job)
     │   ├── src/ephemeral.rs               end of an --ephemeral registration's one job (unregister + delete local state)
     │   ├── src/boot_cmd.rs                zero-config one-shot container mode (env-driven, no persisted state)
@@ -325,8 +328,16 @@ call the listener makes flows through this module.
 - `v1::*` — GHES V1 `connectionData` discovery + timeline record
   POST.
 - `register::*` — the live JIT `generate-jitconfig` POST
-  (`register_jit`) and the runner `DELETE` (`unregister_runner`); see
-  "Sequence: register" and "Sequence: run" for the status mapping.
+  (`register_jit`) and the runner `DELETE` (`unregister_runner`), under
+  `repos/{owner}/{repo}` or `orgs/{org}` (`RunnerScope`, `resolve_target`);
+  see "Sequence: register" and "Sequence: run" for the status mapping.
+- `github_app::*` — GitHub App calls with the App JWT
+  (`protocol::app_jwt`): `find_installation` (repo or org; `None` when not
+  installed there), `list_installations`, `create_installation_token`, and
+  the pure `reuse_deadline` cache rule. 429/5xx → `Network`, every other
+  non-2xx → `Auth` (a deleted App is a 404 `Integration not found`).
+- `runner_groups::*` — an org's runner groups and `--runner-group` name
+  resolution (`pick_group`).
 - `device_auth::*` — GitHub OAuth device flow (`request_device_code` /
   `poll_for_token`), host-relative so GHES works; backs `login`.
 - `app_manifest::*` — the `create-app` loopback `CallbackServer` and the
@@ -752,10 +763,47 @@ PEM private key, client id/secret, webhook secret — to
 repos). It then PRINTS the app's install URL.
 
 `--force` overwrites an existing `github-app.json`; without it the
-command refuses before any network call. **Installation-token minting is
-deferred:** `create-app` neither installs the app nor exchanges an
-installation token this release — `register` still takes its bearer from
-`--token` / `TOOLU_RUNNER_TOKEN` / the stored device-flow login.
+command refuses before any network call. `create-app` does not install the
+App; once it is installed, `register --app` uses it (next section).
+
+## Sequence: register with a GitHub App (#201)
+
+`register --app` — or `register` with no `--token` / `TOOLU_RUNNER_TOKEN`
+when `github-app.json` belongs to the URL's host — authenticates as the App
+(`register_auth.rs`, `app_auth.rs`). The App's PEM, client secret and webhook
+secret are registered with the `SecretMasker` on load; every App JWT and
+installation token is registered before use.
+
+```
+toolu-runner register --app            GitHub REST (api.github.com | <host>/api/v3)
+ │ load github-app.json (0600), mask its secrets
+ │ build App JWT (RS256, iss=app_id, iat=now-60, exp=now+540)
+ │ GET /repos/{o}/{r}/installation  |  GET /orgs/{org}/installation  ──>
+ │ <── installation id  (404 → GET /app/installations to name where it IS
+ │                       installed; fail naming the install URL and --token)
+ │ POST /app/installations/{id}/access_tokens ──────────────────────────>
+ │ <── installation token (1 h)
+ │ org + --runner-group <name>: GET /orgs/{org}/actions/runner-groups ──>
+ │ POST /repos/{o}/{r}|/orgs/{org} /actions/runners/generate-jitconfig ─>
+ │ <── runner id + encoded JIT config
+ │ persist config.toml with [auth] kind="app", app_file, installation_id
+```
+
+At every re-mint, `RunLoop::reregister` dispatches on `[auth]`: a token
+registration resolves `TOOLU_RUNNER_TOKEN` > stored `login` exactly as
+before; an App registration reloads the App file and asks
+`app_auth::InstallationTokens` for a bearer — the cached installation token
+while `reuse_deadline` allows (≤ 50 min after minting, ≥ 5 min before
+`expires_at`; memory only), else a fresh `access_tokens` mint. `Auth` there
+(401 revoked key / bad JWT, 404 deleted App or removed installation, 403,
+422) is fatal with the App's fix (`register --app --replace`, the install
+URL), as is `Config` (the key in the App file no longer signs); `Network`
+(429, 5xx, transport) backs off and retries the still-valid JIT config.
+Unless `--once` or ephemeral, `run` loads the App file and signs a test JWT
+at startup (exit 2 before polling when either fails) and does not WARN
+about a missing login for an App registration; `doctor` does not require a
+personal token for one and reports its App file in an `app` row. `remove`
+and the ephemeral cleanup still unregister with a personal token.
 
 ## Multi-repo concurrency
 
@@ -826,7 +874,8 @@ with nothing deleted, naming every remedy.
 `register` → `run` → [ job → re-mint → poll ]* → cancel. A JIT config is
 single-use, so the listener runs exactly one job and returns; the bin's
 `run_cmd::RunLoop` then re-mints a fresh JIT config with the stored
-`login` / `TOOLU_RUNNER_TOKEN` bearer
+`login` / `TOOLU_RUNNER_TOKEN` bearer — or, for a `register --app`
+registration (`[auth] kind = "app"`), a GitHub App installation token
 (`register_cmd::remint_and_persist`, preserving the operator's
 `[services]` / `[cache]` / `[workspace]` / `[shadow]` sections verbatim)
 and builds a new listener. The per-repo `.lock` is held for the whole
@@ -896,7 +945,8 @@ SIGINT/SIGTERM        toolu-runner run             GH broker         Run Service
  │                          │                          │                  │
  │                          │ next_action = Reregister → RE-MINT:        │
  │                          │  POST generate-jitconfig with the stored   │
- │                          │  login / TOOLU_RUNNER_TOKEN bearer         │
+ │                          │  login / TOOLU_RUNNER_TOKEN bearer, or an  │
+ │                          │  App installation token ([auth] app)       │
  │                          ├──────────────────────>│ api.github.com     │
  │                          │<─ fresh JIT config; persist, preserving ──┤ │
  │                          │  [services]/[cache]/[workspace]/[shadow]   │
@@ -944,8 +994,8 @@ anything else backs off on the same unused JIT config.
 A re-mint POSTs `generate-jitconfig` again through
 `register_cmd::remint_and_persist`, which mints, folds the new config
 into the prior one via `config::remint::merge_reminted_config`
-(preserving `[services]` / `[cache]` / `[workspace]` / `[shadow]`
-verbatim), and rewrites `config.toml` / `credentials.json`
+(preserving `[services]` / `[cache]` / `[workspace]` / `[shadow]` /
+`[network]` / `[auth]` verbatim), and rewrites `config.toml` / `credentials.json`
 all-or-nothing. `wire::net::register` maps 429 and 5xx →
 `RunnerError::Network` (transient, backs off) and every other non-2xx —
 401 (bad bearer, with its own login-specific message), 403 (valid
@@ -1380,12 +1430,12 @@ non-goal for v1 (logged + best-effort; no spec guarantee).
 | 1 | `run` with no `config.toml`                                   | Exit 2, point at `toolu-runner register`. |
 | 2 | `run` with `config.toml` but no `credentials.json`            | Exit 2, same pointer. |
 | 3 | `register` against a non-GH URL (`--url https://localhost/o/r`) | Exit 2 — runner only accepts `github.com` and GHES hosts (host must contain `.`). |
-| 4 | `register` with an invalid / expired token                    | Exit 2. A 401 reports `stored GitHub token invalid or expired — run 'toolu-runner login'`; other permanent non-2xx statuses carry GitHub's response body. |
+| 4 | `register` with an invalid / expired token                    | Exit 2. A 401 reports `GitHub rejected the bearer as invalid or expired (401) — for a personal token, run 'toolu-runner login'`; other permanent non-2xx statuses carry GitHub's response body (a 404 for a one-segment URL adds that it was read as an organization). |
 | 5 | `register` with name that conflicts                            | Exit 2 unless `--replace`; with `--replace`, overwrites. |
 | 6 | `run` started when a previous `run` holds `.lock`             | Exit 2 with the holder's PID read from the lock body. |
 | 7 | `remove` mid-job                                              | Writes `.pending_remove`, refuses with exit 2 unless `--force`; with `--force` it removes local state but keeps `.lock` and skips the GitHub unregister (the running job still reports against that registration). Live cancellation of the job is still step 10. |
 | 7a | `remove` with no GitHub token                                | Exit 2 with nothing deleted, naming `login` / `--token` / `TOOLU_RUNNER_TOKEN` / `--skip-unregister`. Deleting the persisted `runner_id` + URL while the runner is still registered is the B-002 failure. |
-| 7b | `remove` when the unregister fails (bad token, network)      | Exit 2 with local state intact so the removal is retryable. A `RunnerError::Config` (org-level URL the repo-scoped API cannot address) instead warns and removes locally. |
+| 7b | `remove` when the unregister fails (bad token, network)      | Exit 2 with local state intact so the removal is retryable. A `RunnerError::Config` (a URL naming no owner/repo or org, which no runners API can address) instead warns and removes locally; org URLs unregister through `orgs/{org}` (#201). |
 | 8 | `run` started with network down at startup                    | The token exchange fails as `RunnerError::Network`, which the run loop treats as transient: jittered exponential backoff, 1s → 60s cap, retrying the same config (once polling, the poll loop backs off the same way). |
 | 9 | `run` mid-job, network drops < 5 min                          | In-flight step keeps running locally; lock renewal retries on its fixed 60 s tick; a step-status batch that fails to flush is WARN-dropped (not replayed); the completion report is retried on reconnect (`retry_transient`, up to 10 min). |
 | 10 | `run` mid-job, network drops > 5 min                         | The renewal-heartbeat `OutageWatchdog` (300 s, `Network`-class renewal failures only) cancels the job; the report is overridden to `failure` with a "lost connection" annotation and delivered on reconnect. Resolved: [known-bugs.md](known-bugs.md) B-001; see "Sequence: reconnect". |

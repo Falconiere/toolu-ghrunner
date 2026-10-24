@@ -22,6 +22,7 @@ use shared::RunnerError;
 use shared::startup;
 use shared::{MaskerRedactor, SecretMasker};
 
+mod app_auth;
 mod boot_cmd;
 mod check_cmd;
 mod check_endpoints;
@@ -41,6 +42,7 @@ mod doctor_service;
 mod ephemeral;
 mod login_cmd;
 mod network_setup;
+mod register_auth;
 mod register_cmd;
 mod run_cmd;
 mod service_cmd;
@@ -165,11 +167,6 @@ fn init_tracing_for(masker: &Arc<std::sync::Mutex<SecretMasker>>) -> Result<(), 
 /// register path's bound: long enough for a slow API, short enough that a
 /// black-holed connection does not hang the CLI.
 const UNREGISTER_TIMEOUT: Duration = Duration::from_secs(30);
-
-/// Initialize tracing for subcommands that do not run jobs (masker discarded).
-fn init_runner_tracing() -> Result<(), RunnerError> {
-  init_tracing_for(&Arc::new(std::sync::Mutex::new(SecretMasker::new())))
-}
 
 async fn cmd_remove(args: RemoveArgs) -> Result<(), Box<dyn std::error::Error>> {
   let masker = Arc::new(std::sync::Mutex::new(SecretMasker::new()));
@@ -298,14 +295,14 @@ fn remove_bearer(
 
 /// Unregister the runner on GitHub. `Ok(true)` when the call succeeded,
 /// `Ok(false)` when it was deliberately skipped and local state should still
-/// go — `--skip-unregister`, no token to authenticate with, or a URL this
-/// repo-scoped endpoint cannot address (an org-level registration).
+/// go — `--skip-unregister`, no token to authenticate with, or a URL no
+/// runners endpoint can address (it names no owner/repo or organization).
 ///
 /// Only a RETRYABLE failure is an error: leaving a live runner registered
 /// while deleting the only record of it is the bug this closes, so a bad
 /// token or a dead network must not proceed. A `RunnerError::Config` is
 /// different — the URL will never resolve, so failing would make `remove`
-/// permanently impossible for org registrations, which worked before.
+/// permanently impossible for such a registration.
 async fn unregister_on_github(
   cfg: &RunnerRegistrationConfig,
   flag: Option<String>,
@@ -330,10 +327,17 @@ async fn unregister_on_github(
   // B-002 outcome, and a WARN scrolls past; --skip-unregister makes that
   // choice explicit and reproduces the old behavior exactly.
   let Some(token) = remove_bearer(&cfg.runner_url, flag)? else {
+    // `remove` does not mint App installation tokens yet (#201 follow-up).
+    let app_note = if cfg.auth.is_token() {
+      ""
+    } else {
+      " This registration re-mints with a GitHub App, but unregistering it still needs a \
+       personal token."
+    };
     return Err(
       format!(
-        "cannot unregister '{}' on GitHub: no token available.\nNothing local was deleted — \
-       {NO_BEARER_HELP}.",
+        "cannot unregister '{}' on GitHub: no token available.{app_note}\nNothing local was \
+         deleted — {NO_BEARER_HELP}.",
         cfg.runner_name
       )
       .into(),
@@ -366,18 +370,18 @@ async fn unregister_on_github(
 /// Decide whether a failed unregister should still clear local state.
 ///
 /// `RunnerError::Config` from `unregister_runner` means the registration URL
-/// cannot be turned into a repo-scoped runners endpoint at all — an org-level
-/// URL, or one malformed enough that no host/owner/repo comes out. Either way
-/// no retry can succeed, and refusing would make `remove` impossible for a
-/// registration that removed fine before B-002. Everything else is
-/// potentially transient, so it fails with local state intact.
+/// cannot be turned into a repo or org runners endpoint at all — it is
+/// malformed enough that no host and owner/org comes out. No retry can
+/// succeed, and refusing would make `remove` impossible for a registration
+/// that removed fine before B-002. Everything else is potentially transient,
+/// so it fails with local state intact.
 fn classify_unregister_failure(
   name: &str,
   e: RunnerError,
 ) -> Result<bool, Box<dyn std::error::Error>> {
   if let RunnerError::Config(msg) = e {
-    // Quote GitHub's/our own reason rather than asserting a cause: this
-    // fires for any URL the runners API cannot address, not only org URLs.
+    // Quote our own reason rather than asserting a cause: this fires for
+    // any URL the runners API cannot address.
     tracing::warn!(
       "cannot address a runners API endpoint for '{name}' ({msg}) — removing local state only; \
        remove the runner on GitHub by hand"

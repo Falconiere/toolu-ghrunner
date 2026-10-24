@@ -36,6 +36,9 @@
   "secrets": {
     "neverTracked": [
       ".env"
+    ],
+    "scanExempt": [
+      "tests/fixtures/app_jwt_test_key.pem"
     ]
   },
   "shadowConfigs": [

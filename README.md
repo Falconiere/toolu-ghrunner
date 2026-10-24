@@ -143,7 +143,9 @@ needs your own App's client id — set `TOOLU_RUNNER_CLIENT_ID`, or run
 `toolu-runner login --client-id <id>` once.
 
 `run` stays online by default: after each job it re-mints a fresh JIT
-config with your stored `login` token and keeps listening, so one
+config with your stored `login` token (or `TOOLU_RUNNER_TOKEN`, or — for a
+`register --app` registration — a GitHub App installation token) and keeps
+listening, so one
 invocation survives many jobs, idle gaps, and re-dispatches — no manual
 re-register. Pass `--once` to run a single job and exit. To keep it
 running across reboots and crashes, `toolu-runner install-service` writes
@@ -183,10 +185,13 @@ GitHub Enterprise:
 # explicit repo or org URL (org runners always need --url)
 toolu-runner register --url https://github.com/owner/repo
 
-# explicit credential: a PAT or App installation token with
-# administration:write on the repo/org — flag or env
+# explicit credential: a PAT with admin rights on the repo/org — flag or env
 toolu-runner register --url https://github.com/owner/repo --token <pat>
 TOOLU_RUNNER_TOKEN=<pat> toolu-runner register
+
+# or a GitHub App saved by `create-app` and installed on the repo/org:
+# no personal token at registration or at any later re-mint
+toolu-runner register --app --url https://github.com/acme --runner-group mobile-ci
 
 # GHES: register an OAuth App on the instance, log in against it,
 # then register with an explicit --url (inference is github.com-only)
@@ -194,9 +199,43 @@ toolu-runner login ghes.example.com --client-id <id>
 toolu-runner register --url https://ghes.example.com/owner/repo
 ```
 
-Bearer resolution for `register`: `--token` > `TOOLU_RUNNER_TOKEN` >
+Bearer resolution for `register`: `--app` > `--token` > `TOOLU_RUNNER_TOKEN`
+> the GitHub App in `github-app.json` when it belongs to the URL's host >
 stored `login` token > inline device flow (interactive terminals only —
-non-interactive runs fail, listing those three options).
+non-interactive runs fail, listing the token options).
+
+#### Registering with a GitHub App
+
+`register --app` (or `register` with no token given, once `create-app` has
+saved `github-app.json` for that host) authenticates as the App: it signs an
+App JWT with the saved private key, finds the App's installation on the
+repository (`GET /repos/{owner}/{repo}/installation`) or organization
+(`GET /orgs/{org}/installation`), mints an installation token, and calls
+`generate-jitconfig` with it — `/repos/{owner}/{repo}/…` for a repository URL,
+`/orgs/{org}/…` for an organization URL. The registration records
+`[auth] kind = "app"` with the App file and the installation id, so every
+re-mint after a job mints its own installation token (kept in memory and
+reused for up to 50 minutes, never written to disk): the runner needs no
+stored login and no `TOOLU_RUNNER_TOKEN`. The App needs Administration
+(read and write) on a repository, or Self-hosted runners (read and write)
+on an organization. `create-app` currently requests only Administration, so
+for an organization runner add the Self-hosted runners organization
+permission in the App's settings (and accept it on the installation) first. For an organization URL, `--runner-group` takes a group
+name (resolved through the org's runner-group list and recorded by id) or a
+numeric id.
+
+When the App is not installed on the target, `register` fails naming the
+accounts it is installed on and its install URL. During `run`, GitHub
+rejecting the App (a revoked key, a deleted App, a removed installation: 401
+or 404) ends the loop with the fix; a 429 or 5xx backs off and retries. The
+private key, the minted tokens and the App JWTs are registered with the
+secret masker, so they never reach `_diag` logs. A token registration writes
+no `[auth]` section and behaves exactly as before. `remove` still takes a
+personal token (or `--skip-unregister`) for an App registration. When the App
+was picked automatically (no `--app`), its errors say so: pass `--token` /
+`TOOLU_RUNNER_TOKEN`, or move `github-app.json` aside, to register with a
+personal token instead. `doctor` checks a persistent App registration's App
+file (an `app` row).
 
 `login` / `logout` manage the stored token per host — they take a
 hostname (default `github.com`), not `--config`. `status` prints local
@@ -280,8 +319,10 @@ toolu-runner doctor --offline           # local checks only: no network request 
   job. That is `TOOLU_RUNNER_TOKEN`, else the stored `login` token. It is
   verified with one authenticated `GET <api>/user`, the only request that
   carries a credential. No bearer, an unreadable token store, or a bearer
-  GitHub rejects is a `FAIL` when a persistent registration needs it, and a
-  `WARN` or `INFO` otherwise. The token is masked in all output.
+  GitHub rejects is a `FAIL` when a persistent token registration needs it,
+  and a `WARN` or `INFO` otherwise (a registration with `[auth] kind = "app"`
+  re-mints with its GitHub App and needs no personal token). The token is
+  masked in all output.
 - **registrations:** for each registration:
   - `config.toml`, `credentials.json` (warns when its group or others can
     read it) and the JIT config all load.
@@ -332,8 +373,8 @@ the App gets `administration:write`, is not public and has no webhook),
 exchanges the returned code, and saves the App's credentials to
 `github-app.json` (0600) at the runner-home root, shared by every repo. It
 then prints a secret-free summary and the App's install URL. It does **not**
-install the App or mint installation tokens yet: `register` still takes
-`--token`, `TOOLU_RUNNER_TOKEN` or a stored `login`. github.com only — another
+install the App: open the install URL, pick the repositories or organization,
+then `register --app` (see [Registering with a GitHub App](#registering-with-a-github-app)). github.com only — another
 `--host` is rejected before any browser or network call — and it refuses to
 overwrite a saved App unless you pass `--force`.
 
@@ -342,15 +383,16 @@ overwrite a saved App unless you pass `--force`.
 | Flag | Command | What it does |
 |---|---|---|
 | `--url <URL>` | `register` | Repository or organization URL. Optional: absent, the repo is inferred from the cwd git remote `origin` (github.com only); org runners and GHES need it. |
-| `--token <TOKEN>` | `register`, `remove` | GitHub token (a PAT or App installation token with `administration:write`). Resolution: flag > `TOOLU_RUNNER_TOKEN` > stored `login` token; used only for the registration / unregister call, never at job runtime. |
+| `--token <TOKEN>` | `register`, `remove` | GitHub token (a PAT or App installation token with `administration:write`). Resolution: flag > `TOOLU_RUNNER_TOKEN` > (`register` only) the saved GitHub App for the host > stored `login` token; used only for the registration / unregister call, never at job runtime. |
+| `--app` | `register` | Authenticate with the GitHub App saved by `create-app` (an installation token); recorded as `[auth] kind = "app"` so every re-mint uses the App. Conflicts with `--token`. |
 | `--name <NAME>` | `register` | Runner name (default: the machine hostname). |
 | `--labels <LABELS>` | `register` | Comma-separated custom labels, **added** to the defaults `self-hosted`, `Linux`/`macOS`, `X64`/`ARM64` (GitHub's `RUNNER_OS`/`RUNNER_ARCH` spelling, as the official runner). Empty entries are ignored, case-duplicates kept once, at most 256 characters (UTF-16 units, as upstream counts them). |
 | `--no-default-labels` | `register` | Register only the `--labels` values (which are then required). |
 | `--ephemeral` | `register` | One-job registration: `run` takes one job, then unregisters and deletes it (see above). |
 | `--work <DIR>` | `register` | Job workspace directory (default `~/.toolu-runner/_work`). |
-| `--runner-group <ID>` | `register` | Numeric runner group ID for org registrations. Group *names* aren't supported by the JIT API — a non-numeric value warns and falls back to the Default group. |
+| `--runner-group <NAME\|ID>` | `register` | Runner group for org registrations: a name (resolved through the org's runner-group list, recorded by id) or a numeric id. Repository runners only have the Default group — a name there warns and uses it. |
 | `--replace` | `register` | Overwrite an existing registration with the same name. |
-| `--once` | `run` | Run a single job, then exit. The default is to stay online — after each job `run` re-mints a fresh JIT config with the stored `login` token and keeps listening. |
+| `--once` | `run` | Run a single job, then exit. The default is to stay online — after each job `run` re-mints a fresh JIT config (with `TOOLU_RUNNER_TOKEN` / the stored `login` token, or the registration's GitHub App) and keeps listening. |
 | `--print` / `--no-activate` / `--remove` | `install-service` | Print the unit without writing it (conflicts with `--remove`) / write it but don't activate / deactivate and delete it (idempotent). |
 | `--force` | `remove` | Remove even while a `run` holds the job lock. Local state goes, but the lock file is kept and the GitHub unregister is skipped (that job is still reporting against the registration), so remove the runner on GitHub by hand afterwards. It does not cancel the job. Without it, a held lock only writes a `.pending_remove` marker and `remove` exits 2. |
 | `--skip-unregister` | `remove` | Delete local state without calling GitHub (revoked token, deleted repo, no network); the runner stays registered there. Without it, `remove` with no token, or with a failed unregister, aborts before deleting anything. |
@@ -830,6 +872,11 @@ mode = "forwarder"   # "forwarder" (default) | "offline" | "accelerated"
 proxy     = "http://user:pass@proxy.corp:3128"
 no_proxy  = ["internal.corp", ".svc.local", "10.0.0.0/8"]
 ca_bundle = "~/certs/corp-root.pem"
+
+[auth]                                        # only for `register --app`
+kind            = "app"                       # absent = "token"
+app_file        = "/home/me/.toolu-runner/github-app.json"
+installation_id = 987654
 ```
 
 `[cache]` and `[cache.l2]` configure `accelerated` mode; `[workspace]` and
@@ -872,7 +919,7 @@ survives unregistration.
 | Variable | Default | Description |
 |---|---|---|
 | `TOOLU_RUNNER_HOME` | `~/.toolu-runner` | runner state root: the token store, `runners/<owner>/<repo>/` registrations, default `_work/`. |
-| `TOOLU_RUNNER_TOKEN` | — | bearer for `register`, `remove` and `run`'s re-mint after every job (resolution: `--token` > env > stored `login` token); `doctor` verifies it. |
+| `TOOLU_RUNNER_TOKEN` | — | bearer for `register`, `remove` and `run`'s re-mint after every job (resolution: `--token` > env > stored `login` token; a `register --app` registration re-mints with its GitHub App instead); `doctor` verifies it. |
 | `TOOLU_RUNNER_CLIENT_ID` | — | OAuth App client id for the device flow (`--client-id` fallback). |
 | `TOOLU_RUNNER_KEYRING` | — | when set (non-empty, not `0`), opts the token store in to the OS keyring (default is a 0600 file — on macOS the keychain re-prompts whenever the binary's code signature changes, e.g. every rebuild). |
 | `TOOLU_RUNNER_NO_KEYRING` | — | when set (non-empty, not `0`), forces the 0600-file token store and skips the OS keyring probe entirely; overrides `TOOLU_RUNNER_KEYRING` (headless hosts, CI, locked keyrings). |
@@ -1052,7 +1099,8 @@ the proxy redacted.
 | `registration already exists at ...` | Pass `--replace` to `register`. |
 | `... is not a git repository, so the repo cannot be inferred` / ``... has no `origin` remote`` at `register` | Zero-arg inference needs a cwd git repo with an `origin` remote — pass `--url` instead. |
 | `no GitHub OAuth App configured` | The built-in device-flow App isn't wired yet — set `TOOLU_RUNNER_CLIENT_ID` (or `login --client-id`), or skip the device flow with `--token` / `TOOLU_RUNNER_TOKEN`. |
-| `run` exits after one job (warned it would) | No stored `login` token, so re-mint has no bearer. Run `toolu-runner login` (or set `TOOLU_RUNNER_TOKEN`) to stay online; or pass `--once` if a single job is intended. `doctor` flags this (and a token GitHub has revoked) as `FAIL  token`. |
+| `run` exits after one job (warned it would) | No stored `login` token, so re-mint has no bearer. Run `toolu-runner login` (or set `TOOLU_RUNNER_TOKEN`) to stay online, or re-register with a GitHub App (`register --app --replace`) so re-mint needs no personal token; or pass `--once` if a single job is intended. `doctor` flags this (and a token GitHub has revoked) as `FAIL  token`. |
+| `re-mint rejected: GitHub App installation token failed with status 401 …` / `404 …` | GitHub no longer accepts the App: its private key was revoked, the App was deleted, or the installation was removed. Reinstall the App (the error names its install URL) or create a new one, then `toolu-runner register --app --replace`. |
 | `the ephemeral registration was kept — if the runner was removed on GitHub …` (exit 1) | The runner was deleted on GitHub before it got a job (the token exchange answered `invalid_client`). Run `toolu-runner remove`, then `register` again. |
 | `… (the job was acquired; its registration was removed)` (exit 1) | An ephemeral job was acquired but executing or reporting it failed; the registration was still cleaned up. Check the job on GitHub and `_diag/runner.log`. |
 | `ephemeral runner … finished its job, but unregistering it on GitHub failed` (exit 2) | The job ran; fix the token or connectivity, then `toolu-runner remove` to finish the cleanup. |

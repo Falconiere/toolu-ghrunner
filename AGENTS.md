@@ -6,7 +6,8 @@ Standalone GitHub Actions JIT runner — no orchestrator service, no OTel.
 
 `toolu-runner` is **bin-only** (CLI entrypoint: `main.rs` + `cli.rs` +
 `register/run/boot/service/login/status/create_app_cmd.rs` (one `*_cmd.rs`
-each) + `ephemeral.rs` + `network_setup.rs` + `check_*.rs` + `doctor_*.rs`).
+each) + `register_auth.rs` + `app_auth.rs` + `ephemeral.rs` +
+`network_setup.rs` + `check_*.rs` + `doctor_*.rs`).
 Engine = `execution`;
 JIT lifecycle = `listener`. Plus standalone `daemon` bin (`toolu-daemon`,
 no internal deps, `reqwest` in tests only).
@@ -90,7 +91,9 @@ CORE allows deviating; recording it here makes it a decision, not drift.
 matches. `secrets.scanExempt` in `crates/config` + `crates/toolu-runner`
 lists **synthetic** masking fixtures (`MIIphony`, `ghs_EXAMPLE…`,
 `ghp_deadbeef…`); extending it requires proving the value isn't a real
-credential.
+credential. `crates/protocol` exempts `tests/fixtures/app_jwt_test_key.pem`:
+a real 2048-bit key from `openssl genrsa -traditional 2048` for the #201
+App-JWT tests, never uploaded to any GitHub App (authenticates nothing).
 
 ## Runtime contracts
 
@@ -149,10 +152,17 @@ credential.
 - **Always-online `run` loop (default)**: per iteration `RunLoop::drive`
   reloads `config.toml`, runs one `GitHubListener` lifecycle, then
   `listener::loop_decision::next_action`: completed job or `Auth` error (JIT
-  spent) → `remint_and_persist` (stored `login`/`TOOLU_RUNNER_TOKEN`) and
+  spent) → `remint_and_persist` (stored `login`/`TOOLU_RUNNER_TOKEN`; for an
+  `[auth] kind = "app"` registration (#201) a GitHub App installation token
+  from `app_auth::InstallationTokens`, memory-cached ≤ 50 min) and
   re-poll; other errors → decorrelated-jitter backoff (1s→60s, cancel-aware)
   on the still-valid config; missing/auth-rejected re-mint bearer → fatal
-  naming `login`/`--token`/`TOOLU_RUNNER_TOKEN`; cancel or `.pending_remove`
+  naming `login`/`--token`/`TOOLU_RUNNER_TOKEN`/`register --app`
+  (`REMINT_TOKEN_HELP`), or for an App its fix (`app_remint_help`: install
+  URL, `register --app --replace`) — `Config` from the App path (a key that no
+  longer signs) is fatal too; unless `--once`/ephemeral, an App registration's
+  App file is loaded, masked and test-signed at start (unusable → exit 2
+  before polling); cancel or `.pending_remove`
   between jobs → exit 0; `SessionConflict` (409 outlasting the listener's
   30s×8 retry) → exit `5` (`SESSION_CONFLICT_EXIT_CODE`), never backed
   off/re-minted, even under `--once`. **Ephemeral (#92)**: `ephemeral = true`
@@ -194,7 +204,10 @@ credential.
   `app_manifest` (prefilled manifest `administration:write`, `public=false`,
   no webhook; `AppManifest::for_runner`, `ConversionResponse` +
   `parse_conversion`, CSRF `new_state`, `form_html`,
-  `parse_callback_path` — backs `create-app`).
+  `parse_callback_path` — backs `create-app`), `app_jwt` (#201: RS256
+  `build_app_jwt[_at]`, `iat` −60s / `exp` +540s / `iss` = app id, key errors
+  never echo the PEM; `Installation`, `InstallationToken` with redacted
+  `Debug`).
 - **`shared/`**: `config` (`RunnerConfig` incl. `node_dir`
   `TOOLU_RUNNER_NODE_DIR`, `NetworkConfig` pure data with `Debug` proxy as
   `<set>`, `ServicesMode`, `WorkspaceConfig`, `CacheConfig`/`L2Config`);
@@ -239,14 +252,18 @@ credential.
   `TOOLU_RUNNER_TOKEN` / `login`; pure `keyring_opted_in` /
   `no_keyring_forced`, `keyring_reachable` gate, `StoredToken`);
   `app_store.rs` (`StoredApp` at `<home>/github-app.json` 0600:
-  `save_app`/`load_app`, `install_url`, `safe_summary`; backs `create-app`,
-  runtime minting deferred);
+  `save_app`/`load_app`/`load_app_file`, `install_url`, `safe_summary`,
+  `secret_values` for the masker, redacted `Debug`; written by `create-app`,
+  read by `register --app` and the App re-mint);
+  `registration_auth.rs` (#201 `[auth]`: `AuthSection` tagged on `kind`,
+  `Token` default and omitted on save (pre-#201 shape) or
+  `App { app_file, installation_id }`, `deny_unknown_fields`);
   `registry.rs` (per-repo layout, `runner_home`/`runner_dir` incl. NUL
   rejection, `list_registrations` returning `Ok(empty)` on missing dirs /
   `Err` naming unreadable ones, `resolve_config_path`: flag > cwd-inferred >
   sole > error); `repo_infer.rs` (`parse_remote_url` + `detect_repo` via
   `git remote get-url` origin, errors name `--url`); `remint.rs` (`merge_reminted_config`, pure merge overwriting ONLY
-  `runner_id`/`auth_token`/`runtime.jit_config`); `service_unit.rs` (pure
+  `runner_id`/`auth_token`/`runtime.jit_config`, so `[network]`/`[auth]` survive); `service_unit.rs` (pure
   `ServiceSpec` → `launchd_plist` (incl. `WorkingDirectory`,
   `EnvironmentVariables`, `launchd_env_path` PATH fold) / `systemd_unit`
   (incl. `RestartPreventExitStatus=5`)).
@@ -267,8 +284,15 @@ credential.
   `login`), `session` (create/delete; 409 → `SessionConflict`), `messages`
   (poll+ack), `run_service` (acquire/renew/complete), `results_service` (Twirp
   step/log RPCs + signed blob URLs), `log_upload` (append-blob),
-  `v1` (GHES discovery + timeline), `register` (`generate-jitconfig`;
-  401/403→`Auth` fatal, else→`Network` so re-mint backs off on 5xx),
+  `v1` (GHES discovery + timeline), `register` (`generate-jitconfig` + runner
+  DELETE under `repos/{o}/{r}` or, for a one-segment URL, `orgs/{org}`
+  (`RunnerScope`/`resolve_target`, #201); 429/5xx→`Network` so re-mint backs
+  off, other non-2xx→`Auth` fatal), `github_app` (#201 App-JWT calls:
+  `find_installation` (`Ok(None)` on 404 for a known App, `Auth` on 404
+  `Integration not found`), `list_installations`, `create_installation_token`,
+  pure `reuse_deadline`; same 429/5xx→`Network` rule; live 401/404 captures
+  in `toolu-runner/tests/fixtures/github_app/`), `runner_groups` (org groups +
+  `pick_group`),
   `app_manifest` (loopback `CallbackServer` 127.0.0.1:0 +
   `convert_manifest_code` POST).
   `reporting/`: `run_service` shapes + `map_conclusion`, `results_service`
@@ -349,15 +373,24 @@ credential.
   error unless `--skip-unregister`; helpers `remove_bearer`,
   `wire::net::unregister_runner`, `delete_registration_state`).
   `register_cmd` (`--url` optional, cwd-infer github.com only; `--labels`
-  additive, `--no-default-labels`, `--ephemeral`; bearer inline device flow
-  when interactive, else fail naming options; `generate-jitconfig` → persist
-  all-or-nothing with `data_dir` = registration dir; `remint_and_persist`
-  preserves service/cache/workspace/shadow byte-identical; labels via
-  `config::labels`, #92).
+  additive, `--no-default-labels`, `--ephemeral`; `generate-jitconfig` →
+  persist all-or-nothing with `data_dir` = registration dir; `remint_and_persist`
+  preserves service/cache/workspace/shadow/network/auth byte-identical; labels
+  via `config::labels`, #92). `register_auth` (#201 bearer: `--app` >
+  `--token` > non-empty `TOOLU_RUNNER_TOKEN` > `github-app.json` whose host is
+  the URL host (`pick_app`) > stored `login` > inline device flow when
+  interactive, else fail naming options; App → `[auth] kind = "app"`;
+  `resolve_runner_group` turns an org `--runner-group` name into its id).
+  `app_auth` (#201: `load_app` masks `secret_values`, `register_installation`
+  with a not-installed error naming where it is installed + install URL,
+  `InstallationTokens` one-entry memory cache, `app_remint_help`; `masked`
+  runs `register`'s errors and the fatal re-mint message through the masker,
+  since `main` prints them to stderr outside the tracing redactor).
   `network_setup::lifecycle_client` (per-iteration + `boot` env mode;
   `NetworkMemo` logs/registers only on change; bad `[network]` = exit 2).
-  `ephemeral::finish_job` (unregister+delete keeping `_diag/`; no bearer or org
-  → local-only with "not verified" output; retryable error keeps state, exit 2).
+  `ephemeral::finish_job` (unregister+delete keeping `_diag/`; org URLs via
+  `orgs/{org}` (#201); no bearer or unaddressable URL → local-only with "not
+  verified" output; retryable error keeps state, exit 2).
   `run_cmd::RunLoop::drive` (`BACKOFF_START`→`BACKOFF_MAX` cancel-aware sleep;
   conflict exits 5 via downcast `CodedExit`, all else 2;
   `TOOLU_RUNNER_SESSION_CONFLICT_INTERVAL_MS` overrides 30s wait for
@@ -370,7 +403,8 @@ credential.
   `login_cmd` (positional host, no `--config`; shared `run_device_flow`;
   placeholder `DEVICE_CLIENT_ID` errors pre-network; `--client-id`/
   `TOOLU_RUNNER_CLIENT_ID` required until the OAuth App exists, always on
-  GHES). `status_cmd` (registration + credential + backend + per-host login
+  GHES). `status_cmd` (registration + `auth:` token or the App's slug/id/
+  installation from its local file + credential + backend + per-host login
   state incl. keyring-migration hint; no network). `check_cmd` (#93 read-only
   preflight: `--url`⊕`--config`, `--timeout` 1–300s def 10; exits 0 all-required-OK
   / 1 required-failed / 2 usage-config; never locks/writes/sessions/credentials;
@@ -382,9 +416,12 @@ credential.
   narrows, `--offline` sends nothing; 0 no-FAIL / 1 FAIL / 2 bad path; never
   locks — state via lock body + `holder_alive`; one credentialed
   `GET <api>/user`; `doctor_{report,host,auth,registrations,service}.rs`,
-  network reuses `check_cmd::gather`; `doctor_*_test`). `create_app_cmd` (github.com only; loopback callback,
+  network reuses `check_cmd::gather`; only a persistent *token* registration
+  needs a personal bearer, `[auth] kind = "app"` mints its own and gets an
+  `app` row that loads its App file (#201);
+  `doctor_*_test`). `create_app_cmd` (github.com only; loopback callback,
   `--no-browser` prints URL; converts code, persists `<home>/github-app.json`;
-  prints install URL, never installs/mints — deferred, `register` flow unchanged;
+  prints install URL, never installs — `register --app` then uses it;
   `--name/--host/--no-browser/--force`).
 
 ### Step summaries (#83)

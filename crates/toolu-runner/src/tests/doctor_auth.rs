@@ -59,6 +59,7 @@ fn loaded(
       workspace: WorkspaceSection::default(),
       shadow: ShadowSection::default(),
       network,
+      auth: config::registration_auth::AuthSection::default(),
     },
   )?;
   Ok(load_config(&config_path)?)
@@ -185,6 +186,37 @@ fn registrations_on_one_host_need_a_bearer_when_any_is_persistent() -> TestResul
       "{:?}",
       configs.iter().map(|c| c.ephemeral).collect::<Vec<_>>()
     );
+  }
+  Ok(())
+}
+
+/// #201: an App registration mints its own installation tokens, so only a
+/// persistent token registration makes the host need a personal bearer.
+#[test]
+fn an_app_registration_needs_no_personal_bearer() -> TestResult {
+  let home = tempfile::tempdir()?;
+  let mut app = loaded(
+    home.path(),
+    "app",
+    "https://ghes.example.com/o/app",
+    false,
+    no_network(),
+  )?;
+  app.auth = config::registration_auth::AuthSection::App {
+    app_file: "/home/u/.toolu-runner/github-app.json".to_owned(),
+    installation_id: 1,
+  };
+  let token = loaded(
+    home.path(),
+    "token",
+    "https://ghes.example.com/o/token",
+    false,
+    no_network(),
+  )?;
+  for (configs, needs_bearer) in [(vec![&app], false), (vec![&app, &token], true)] {
+    let hosts = auth_hosts(&configs);
+    let host = hosts.first().ok_or("no host")?;
+    assert_eq!(host.needs_bearer, needs_bearer);
   }
   Ok(())
 }

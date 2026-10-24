@@ -48,6 +48,7 @@ fn seed_registration(dir: &Path, server_uri: &str) -> TestResult<PathBuf> {
     workspace: WorkspaceSection::default(),
     shadow: ShadowSection::default(),
     network: config::network::NetworkSection::default(),
+    auth: config::registration_auth::AuthSection::default(),
   };
   save_config(&config_path, &config)?;
   std::fs::write(dir.join("credentials.json"), "{}")?;
@@ -361,12 +362,45 @@ async fn force_past_an_in_flight_run_does_not_unregister() -> TestResult<()> {
   Ok(())
 }
 
-/// An ORG-level registration (`runner_url` with no repo segment) has no
-/// address on the repo-scoped runners API. `remove` must still clear local
-/// state — org registrations removed fine before B-002, and no retry could
-/// ever make the URL resolve, so failing here would strand the operator.
+/// #201: an ORG-level registration (`runner_url` with one path segment) is
+/// unregistered through the org runners API, then removed locally.
 #[tokio::test]
-async fn org_level_url_removes_locally_without_failing() -> TestResult<()> {
+async fn org_level_url_unregisters_through_the_org_runners_api() -> TestResult<()> {
+  let dir = tempfile::tempdir()?;
+  let home = tempfile::tempdir()?;
+  let server = MockServer::start().await;
+  Mock::given(method("DELETE"))
+    .and(path_matcher(format!(
+      "/api/v3/orgs/octo-org/actions/runners/{RUNNER_ID}"
+    )))
+    .respond_with(ResponseTemplate::new(204))
+    .expect(1)
+    .mount(&server)
+    .await;
+
+  let config_path = seed_registration(dir.path(), &server.uri())?;
+  let raw = std::fs::read_to_string(&config_path)?;
+  std::fs::write(
+    &config_path,
+    raw.replace("/octo-org/octo-repo", "/octo-org"),
+  )?;
+
+  let out = run_remove(&config_path, home.path(), &["--token", "tok-1"])?;
+
+  assert!(
+    out.status.success(),
+    "an org registration must unregister and remove: {}",
+    String::from_utf8_lossy(&out.stderr)
+  );
+  assert!(!config_path.exists(), "config.toml should be gone");
+  Ok(())
+}
+
+/// A `runner_url` naming no owner/org at all has no address on the runners
+/// API. `remove` must still clear local state — no retry could ever make
+/// the URL resolve, so failing here would strand the operator.
+#[tokio::test]
+async fn unaddressable_url_removes_locally_without_failing() -> TestResult<()> {
   let dir = tempfile::tempdir()?;
   let home = tempfile::tempdir()?;
   let server = MockServer::start().await;
@@ -376,17 +410,16 @@ async fn org_level_url_removes_locally_without_failing() -> TestResult<()> {
     .mount(&server)
     .await;
 
-  // No repo segment: `resolve_runners_base` cannot build a runners URL.
+  // No path segment: `resolve_runners_base` cannot build a runners URL.
   let config_path = seed_registration(dir.path(), &server.uri())?;
   let raw = std::fs::read_to_string(&config_path)?;
-  let org_only = raw.replace("/octo-org/octo-repo", "/octo-org");
-  std::fs::write(&config_path, org_only)?;
+  std::fs::write(&config_path, raw.replace("/octo-org/octo-repo", "/"))?;
 
   let out = run_remove(&config_path, home.path(), &["--token", "tok-1"])?;
 
   assert!(
     out.status.success(),
-    "an org-level registration must still remove locally: {}",
+    "an unaddressable registration must still remove locally: {}",
     String::from_utf8_lossy(&out.stderr)
   );
   assert!(!config_path.exists(), "config.toml should be gone");
@@ -394,6 +427,40 @@ async fn org_level_url_removes_locally_without_failing() -> TestResult<()> {
   assert!(
     stdout.contains("still registered on GitHub"),
     "output must say the runner was left registered, got: {stdout}"
+  );
+  Ok(())
+}
+
+/// #201: `remove` of an App registration with no personal token says the
+/// unregister still needs one, and deletes nothing.
+#[tokio::test]
+async fn no_token_for_an_app_registration_says_a_personal_token_is_needed() -> TestResult<()> {
+  let dir = tempfile::tempdir()?;
+  let home = tempfile::tempdir()?;
+  let server = MockServer::start().await;
+  Mock::given(method("DELETE"))
+    .respond_with(ResponseTemplate::new(204))
+    .expect(0)
+    .mount(&server)
+    .await;
+  let config_path = seed_registration(dir.path(), &server.uri())?;
+  let mut raw = std::fs::read_to_string(&config_path)?;
+  raw.push_str(
+    "\n[auth]\nkind = \"app\"\napp_file = \"/nonexistent/github-app.json\"\ninstallation_id = 1\n",
+  );
+  std::fs::write(&config_path, raw)?;
+
+  let out = run_remove(&config_path, home.path(), &[])?;
+
+  assert!(!out.status.success());
+  assert!(config_path.exists(), "nothing local may be deleted");
+  let stderr = String::from_utf8_lossy(&out.stderr);
+  assert!(
+    stderr.contains(
+      "This registration re-mints with a GitHub App, but unregistering it still needs a \
+       personal token."
+    ),
+    "{stderr}"
   );
   Ok(())
 }

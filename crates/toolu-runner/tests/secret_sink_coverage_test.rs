@@ -94,6 +94,9 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 const JOB_MESSAGE: &str = include_str!("fixtures/job_message.json");
 /// An obviously-fake fixture value, not shaped like a real credential.
 const SECRET: &str = "s3cr3t-sink-coverage-9f21ab";
+/// #201: a GitHub App private key (the protocol crate's test key, registered
+/// to no App) that `run` holds for an App registration.
+const APP_PEM: &str = include_str!("../../protocol/tests/fixtures/app_jwt_test_key.pem");
 /// Twirp service path for the Results Service log/summary RPCs.
 const RESULTS_RECEIVER_SERVICE: &str = "/twirp/results.services.receiver.Receiver/";
 
@@ -439,22 +442,61 @@ async fn assert_upload_sinks_clean(
 
 /// Sink 4: `_diag/runner.log`. Real job stdout never reaches a
 /// `tracing::*!` call (confirmed by inspection — see module doc), so this
-/// directly issues one event carrying the raw secret to non-vacuously
-/// exercise the real `init_with_redactor` writer/redactor wiring.
+/// directly issues one event carrying the raw secret — and one carrying an
+/// App's private key, as an echoed error body would (#201) — to
+/// non-vacuously exercise the real `init_with_redactor` writer/redactor
+/// wiring.
 fn assert_runner_log_clean(tmp_home: &tempfile::TempDir) -> TestResult {
   tracing::error!(
     leaked_field = %SECRET,
     "diagnostic line simulating a future log statement carrying a raw secret"
   );
+  tracing::warn!(error = %APP_PEM, "re-mint failed; backing off before retry");
   let runner_log = read_runner_log(tmp_home)?;
   assert!(
     !runner_log.contains(SECRET),
     "secret leaked into _diag/runner.log"
   );
   assert!(
+    runner_log.contains("re-mint failed"),
+    "the PEM-carrying event never reached _diag/runner.log — the check below would be vacuous"
+  );
+  for line in APP_PEM.lines().filter(|line| line.len() >= 16) {
+    assert!(
+      !runner_log.contains(line),
+      "an App private-key line leaked into _diag/runner.log: {line}"
+    );
+  }
+  assert!(
     runner_log.contains("***"),
     "_diag/runner.log missing the expected mask marker — the assertion above would be vacuous"
   );
+  Ok(())
+}
+
+/// Register a saved App's secrets the way `run` does for an App
+/// registration (`app_auth::load_app`: `load_app_file`, then
+/// `add_secrets(secret_values())`).
+fn register_app_secrets(masker: &Mutex<SecretMasker>) -> TestResult {
+  let app_home = tempfile::tempdir()?;
+  let app = config::app_store::StoredApp {
+    host: "github.com".to_owned(),
+    app_id: 424_242,
+    slug: "toolu-runner-test-app".to_owned(),
+    owner: "octo".to_owned(),
+    client_id: "Iv1.toolutest0000000".to_owned(),
+    client_secret: "toolu-test-client-secret-201".to_owned(),
+    webhook_secret: None,
+    pem: APP_PEM.to_owned(),
+    html_url: "https://github.com/apps/toolu-runner-test-app".to_owned(),
+    created_at: "2026-10-23T00:00:00Z".to_owned(),
+  };
+  config::app_store::save_app(app_home.path(), &app)?;
+  let loaded = config::app_store::load_app_file(&config::app_store::app_path(app_home.path()))?;
+  masker
+    .lock()
+    .map_err(|e| format!("masker lock poisoned: {e}"))?
+    .add_secrets(loaded.secret_values());
   Ok(())
 }
 
@@ -465,6 +507,7 @@ async fn zero_unmasked_secret_in_all_four_durable_sinks() -> TestResult {
     .lock()
     .map_err(|e| format!("masker lock poisoned: {e}"))?
     .add_secret(SECRET);
+  register_app_secrets(&masker)?;
 
   // Sink 4's writer must be installed before the job runs so the job's own
   // tracing output lands in the same file (see module doc).

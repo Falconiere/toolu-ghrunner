@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::network::NetworkSection;
+use crate::registration_auth::AuthSection;
 use shared::{
   CacheConfig, L2Config, NetworkConfig, RunnerError, ServicesMode, WorkspaceConfig, WorkspaceMode,
   paths,
@@ -67,6 +68,10 @@ pub struct RunnerRegistrationConfig {
   /// `[network]` section: explicit proxy / extra CA (#94); omitted when empty.
   #[serde(default, skip_serializing_if = "NetworkSection::is_empty")]
   pub network: NetworkSection,
+  /// `[auth]` section (#201): a personal token (default; omitted) or a
+  /// GitHub App installation.
+  #[serde(default, skip_serializing_if = "AuthSection::is_token")]
+  pub auth: AuthSection,
 }
 
 impl RunnerRegistrationConfig {

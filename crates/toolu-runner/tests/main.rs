@@ -21,6 +21,8 @@ mod boot_fixtures;
 mod check_servers;
 #[path = "helpers/doctor_env.rs"]
 mod doctor_env;
+#[path = "helpers/github_app_fixtures.rs"]
+mod github_app_fixtures;
 #[cfg(feature = "live")]
 #[path = "helpers/live_harness.rs"]
 mod harness;
@@ -85,6 +87,7 @@ mod gh_compat_register;
 mod gh_compat_step_attrs;
 mod gh_compat_streaming;
 mod ghes_v1_test;
+mod github_app_wire_test;
 mod hash_files_test;
 mod http2_features_test;
 mod install_service_test;
@@ -103,10 +106,12 @@ mod network_cli_test;
 mod network_client_inventory_test;
 mod network_journal_mask_test;
 mod oidc_token_test;
+mod register_app_test;
 mod register_labels_test;
 mod register_replace_network_test;
 mod register_zero_arg_test;
 mod remove_unregister_test;
+mod run_app_remint_test;
 mod run_loop_live;
 mod run_loop_warn_test;
 mod run_service_classify_test;

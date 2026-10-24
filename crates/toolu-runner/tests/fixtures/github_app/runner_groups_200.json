@@ -1,0 +1,15 @@
+{
+  "provenance": {
+    "request": "GET /orgs/{org}/actions/runner-groups",
+    "sanitization": "none needed: the documented example carries no credential",
+    "source": "GitHub REST API documented example `components.examples.runner-groups-org` (github/rest-api-description main, descriptions/api.github.com/api.github.com.json (fetched 2026-10-23))",
+    "why_not_live": "no GitHub App exists on the capture host (Apps are created in a browser); the live success replies are S5 evidence"
+  },
+  "response": {
+    "body": "{\n  \"total_count\": 3,\n  \"runner_groups\": [\n    {\n      \"id\": 1,\n      \"name\": \"Default\",\n      \"visibility\": \"all\",\n      \"default\": true,\n      \"runners_url\": \"https://api.github.com/orgs/octo-org/actions/runner_groups/1/runners\",\n      \"inherited\": false,\n      \"allows_public_repositories\": true,\n      \"restricted_to_workflows\": false,\n      \"selected_workflows\": [],\n      \"workflow_restrictions_read_only\": false\n    },\n    {\n      \"id\": 2,\n      \"name\": \"octo-runner-group\",\n      \"visibility\": \"selected\",\n      \"default\": false,\n      \"selected_repositories_url\": \"https://api.github.com/orgs/octo-org/actions/runner_groups/2/repositories\",\n      \"runners_url\": \"https://api.github.com/orgs/octo-org/actions/runner_groups/2/runners\",\n      \"inherited\": true,\n      \"allows_public_repositories\": true,\n      \"restricted_to_workflows\": true,\n      \"selected_workflows\": [\n        \"octo-org/octo-repo/.github/workflows/deploy.yaml@refs/heads/main\"\n      ],\n      \"workflow_restrictions_read_only\": true\n    },\n    {\n      \"id\": 3,\n      \"name\": \"expensive-hardware\",\n      \"visibility\": \"private\",\n      \"default\": false,\n      \"runners_url\": \"https://api.github.com/orgs/octo-org/actions/runner_groups/3/runners\",\n      \"inherited\": false,\n      \"allows_public_repositories\": true,\n      \"restricted_to_workflows\": false,\n      \"selected_workflows\": [\n        \"octo-org/octo-repo/.github/workflows/deploy.yaml@refs/heads/main\"\n      ],\n      \"workflow_restrictions_read_only\": false\n    }\n  ]\n}",
+    "headers": {
+      "content-type": "application/json; charset=utf-8"
+    },
+    "status": 200
+  }
+}

@@ -22,7 +22,8 @@ Examples:
   toolu-runner doctor               # health: what is broken and the command that fixes it
 
 Environment:
-  TOOLU_RUNNER_TOKEN           GitHub bearer for `register` (flag > env > stored login token)
+  TOOLU_RUNNER_TOKEN           GitHub bearer: `register` (--token > env > saved App > login)
+                               and a token registration's re-mint (env > login)
   TOOLU_RUNNER_CLIENT_ID       OAuth App client_id for `login` (fallback for --client-id)
   TOOLU_RUNNER_HOME            runner state root (default ~/.toolu-runner)
   TOOLU_RUNNER_KEYRING         opt in to the OS keyring token store (default: 0600 file)
@@ -74,8 +75,12 @@ Examples:
   # zero-arg: repo inferred from the cwd git remote `origin` (github.com)
   cd my-repo && toolu-runner register
 
-  # explicit github.com repository, bearer from the stored `login` token
+  # explicit github.com repository; bearer from the saved GitHub App
+  # (`create-app`) or else the stored `login` token
   toolu-runner register --url https://github.com/owner/repo
+
+  # organization runner through the GitHub App, group chosen by name
+  toolu-runner register --app --url https://github.com/acme --runner-group ci
 
   # GHES organization, explicit token, custom name + extra labels
   # (registered as self-hosted,<OS>,<arch>,gpu)
@@ -124,7 +129,9 @@ pub(crate) enum Command {
   /// exclusive job lock (`<home>/runners/<owner>/<repo>/.lock`; the legacy
   /// root `<home>/.lock` for old layouts), creates a broker session, and polls
   /// until a job arrives. After each job it re-mints a fresh JIT config
-  /// with the stored `login` token and keeps listening, so one `run` stays
+  /// with `TOOLU_RUNNER_TOKEN` or the stored `login` token — or, for a
+  /// `register --app` registration, a GitHub App installation token — and
+  /// keeps listening, so one `run` stays
   /// online across many jobs. `--once` runs a single job and exits. An
   /// `--ephemeral` registration runs one job, then unregisters and deletes
   /// itself. SIGINT / SIGTERM cancel gracefully.
@@ -244,14 +251,9 @@ pub(crate) struct RegisterArgs {
   /// an organization URL an org-level one.
   #[arg(long, value_name = "URL", value_hint = ValueHint::Url)]
   pub(crate) url: Option<String>,
-  /// GitHub API token for the `generate-jitconfig` REST call.
-  ///
-  /// Needs admin rights on the target repo/org (PAT or App installation
-  /// token). Optional — resolution order: this flag > `TOOLU_RUNNER_TOKEN`
-  /// env > the stored `login` token for the URL's host. Used only during
-  /// registration, never at job runtime.
-  #[arg(long, value_name = "TOKEN")]
-  pub(crate) token: Option<String>,
+  /// How `register` authenticates (`--token`, `--app`).
+  #[command(flatten)]
+  pub(crate) auth: RegisterAuthArgs,
   /// Runner name (default: the machine hostname).
   #[arg(long, value_name = "NAME")]
   pub(crate) name: Option<String>,
@@ -277,13 +279,13 @@ pub(crate) struct RegisterArgs {
   /// `run`. Not for `install-service`, whose unit restarts forever.
   #[arg(long)]
   pub(crate) ephemeral: bool,
-  /// Numeric runner group ID for org registrations (default: the Default
-  /// group).
+  /// Runner group for org registrations: a name or a numeric ID (default:
+  /// the Default group).
   ///
-  /// Group *names* are not supported by the JIT API: any non-numeric value
-  /// other than "Default" logs a warning and falls back to the Default
-  /// group (ID 1).
-  #[arg(long, default_value = "Default", value_name = "ID")]
+  /// For an organization URL a name is resolved through the org's runner
+  /// group list and its ID is recorded. Repository runners have only the
+  /// Default group: a name there logs a warning and uses it (ID 1).
+  #[arg(long, default_value = "Default", value_name = "NAME|ID")]
   pub(crate) runner_group: String,
   /// Working directory for job workspaces (default: ~/.toolu-runner/_work).
   #[arg(long, value_name = "DIR", value_hint = ValueHint::DirPath)]
@@ -302,6 +304,30 @@ pub(crate) struct RegisterArgs {
   pub(crate) replace: bool,
 }
 
+/// `register`'s authentication flags: a personal token or the saved GitHub
+/// App (#201).
+#[derive(Debug, Args)]
+pub(crate) struct RegisterAuthArgs {
+  /// GitHub API token for the `generate-jitconfig` REST call.
+  ///
+  /// Needs admin rights on the target repo/org. Optional — resolution order:
+  /// --app > this flag > `TOOLU_RUNNER_TOKEN` env > the GitHub App saved by
+  /// `create-app` for the URL's host > the stored `login` token. Used only
+  /// during registration, never at job runtime.
+  #[arg(long, value_name = "TOKEN", conflicts_with = "app")]
+  pub(crate) token: Option<String>,
+  /// Authenticate with the GitHub App saved by `create-app`
+  /// (`<home>/github-app.json`) instead of a personal token.
+  ///
+  /// Registration and every re-mint then use an App installation token, so
+  /// the runner needs no stored login or `TOOLU_RUNNER_TOKEN`. Used
+  /// automatically when that file exists for the URL's host and neither
+  /// --token nor `TOOLU_RUNNER_TOKEN` is given. The App must be installed on
+  /// the repository or organization.
+  #[arg(long)]
+  pub(crate) app: bool,
+}
+
 /// Arguments for the `run` subcommand.
 #[derive(Debug, Args)]
 pub(crate) struct RunArgs {
@@ -313,7 +339,8 @@ pub(crate) struct RunArgs {
   /// Exit after the first job completes (single-job mode).
   ///
   /// The default is to stay online: after each job the runner re-mints a
-  /// fresh JIT config with the stored `login` token and keeps listening.
+  /// fresh JIT config (personal token, or the registration's GitHub App) and
+  /// keeps listening.
   /// Pass this to run exactly one job and exit with its status.
   #[arg(long)]
   pub(crate) once: bool,

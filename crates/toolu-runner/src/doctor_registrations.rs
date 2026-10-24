@@ -1,5 +1,6 @@
-//! `doctor` per-registration rows: whether the config, credentials and JIT
-//! config load, whether a `run` is serving it (from the lock body — never by
+//! `doctor` per-registration rows: whether the config, credentials, JIT
+//! config and (for an App registration) the GitHub App file load, whether a
+//! `run` is serving it (from the lock body — never by
 //! taking the lock), its supervisor unit, a pending removal, and the last job
 //! from its journal.
 //!
@@ -12,6 +13,7 @@ use std::time::Duration;
 
 use config::config::{RunnerRegistrationConfig, load_config, load_credentials};
 use config::lockfile::{LockBody, pid_start_time};
+use config::registration_auth::AuthSection;
 use shared::RunnerError;
 use shared::paths::expand_tilde;
 
@@ -308,6 +310,38 @@ fn jit_row(config: &RunnerRegistrationConfig) -> Row {
   }
 }
 
+/// The `app` row of a persistent registration that re-mints with a GitHub
+/// App (#201): its App file must load. An ephemeral one never re-mints, so it
+/// has no row. Local only — nothing is signed or sent.
+fn app_row(config: &RunnerRegistrationConfig) -> Option<Row> {
+  let AuthSection::App {
+    app_file,
+    installation_id,
+  } = &config.auth
+  else {
+    return None;
+  };
+  if config.ephemeral {
+    return None;
+  }
+  Some(
+    match config::app_store::load_app_file(Path::new(app_file)) {
+      Ok(app) => Row::new(
+        Level::Ok,
+        "app",
+        format!(
+          "GitHub App '{}' (App {}, installation {installation_id})",
+          app.slug, app.app_id
+        ),
+      ),
+      Err(error) => Row::new(Level::Fail, "app", shareable(&error.to_string())).with_fix(format!(
+        "restore {app_file}, or re-register: toolu-runner register --app --replace --url {}",
+        config.runner_url
+      )),
+    },
+  )
+}
+
 /// The `pending` row when a `.pending_remove` marker sits in `data_dir`.
 fn pending_row(data_dir: &Path, config_path: &Path) -> Option<Row> {
   data_dir.join(".pending_remove").exists().then(|| {
@@ -324,7 +358,7 @@ fn pending_row(data_dir: &Path, config_path: &Path) -> Option<Row> {
 }
 
 /// Check one registration's local state, rows in report order (config,
-/// creds, jit, run, service, pending, last job); supervisor queries are
+/// creds, jit, app, run, service, pending, last job); supervisor queries are
 /// bounded by `timeout`.
 pub(crate) async fn check_registration(config_path: &Path, timeout: Duration) -> Checked {
   let config = match load_config(config_path) {
@@ -341,12 +375,13 @@ pub(crate) async fn check_registration(config_path: &Path, timeout: Duration) ->
     Row::new(Level::Ok, "config", config_path.display().to_string()),
     creds_row(&crate::cli::credentials_path_for(config_path)),
     jit_row(&config),
-    run_row(
-      &run_state(&data_dir.join(".lock")).await,
-      config.ephemeral,
-      config_path,
-    ),
   ];
+  rows.extend(app_row(&config));
+  rows.push(run_row(
+    &run_state(&data_dir.join(".lock")).await,
+    config.ephemeral,
+    config_path,
+  ));
   let mut unit_installed = false;
   if let Some((row, installed)) =
     crate::doctor_service::service_row(config_path, config.ephemeral, timeout).await

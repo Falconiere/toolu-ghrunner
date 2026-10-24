@@ -20,7 +20,9 @@ use shared::RunnerError;
 const APP_STORE_FILE: &str = "github-app.json";
 
 /// Persisted GitHub App identity + secrets. `<home>/github-app.json`, 0600.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+///
+/// `Debug` redacts the three secrets (see [`StoredApp::secret_values`]).
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct StoredApp {
   /// GitHub host the App lives on (e.g. `github.com`).
   pub host: String,
@@ -76,8 +78,28 @@ pub fn save_app(home: &Path, app: &StoredApp) -> Result<(), RunnerError> {
 /// Returns `RunnerError::Io` on read failures other than a missing file,
 /// `RunnerError::Config` on parse failures.
 pub fn load_app(home: &Path) -> Result<Option<StoredApp>, RunnerError> {
-  let path = app_path(home);
-  match std::fs::read(&path) {
+  read_app(&app_path(home))
+}
+
+/// Load the App file an App registration names (`[auth] app_file`).
+///
+/// # Errors
+///
+/// `RunnerError::Config` naming `path` and `toolu-runner create-app` when the
+/// file is missing or does not parse; `RunnerError::Io` on other read
+/// failures.
+pub fn load_app_file(path: &Path) -> Result<StoredApp, RunnerError> {
+  read_app(path)?.ok_or_else(|| {
+    RunnerError::Config(format!(
+      "no GitHub App saved at {} — run `toolu-runner create-app` first",
+      path.display()
+    ))
+  })
+}
+
+/// Read and parse the App file at `path`; `None` when it does not exist.
+fn read_app(path: &Path) -> Result<Option<StoredApp>, RunnerError> {
+  match std::fs::read(path) {
     Ok(bytes) => serde_json::from_slice(&bytes)
       .map(Some)
       .map_err(|e| RunnerError::Config(format!("parse {}: {e}", path.display()))),
@@ -86,7 +108,35 @@ pub fn load_app(home: &Path) -> Result<Option<StoredApp>, RunnerError> {
   }
 }
 
+impl std::fmt::Debug for StoredApp {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    f.debug_struct("StoredApp")
+      .field("host", &self.host)
+      .field("app_id", &self.app_id)
+      .field("slug", &self.slug)
+      .field("owner", &self.owner)
+      .field("client_id", &self.client_id)
+      .field("client_secret", &"<redacted>")
+      .field(
+        "webhook_secret",
+        &self.webhook_secret.as_ref().map(|_| "<redacted>"),
+      )
+      .field("pem", &"<redacted>")
+      .field("html_url", &self.html_url)
+      .field("created_at", &self.created_at)
+      .finish()
+  }
+}
+
 impl StoredApp {
+  /// The values to register with the `SecretMasker` before the App is used:
+  /// the private-key PEM, the OAuth client secret and the webhook secret.
+  pub fn secret_values(&self) -> Vec<&str> {
+    let mut values = vec![self.pem.as_str(), self.client_secret.as_str()];
+    values.extend(self.webhook_secret.as_deref());
+    values
+  }
+
   /// The install URL to print after creation:
   /// `https://github.com/apps/{slug}/installations/new`.
   pub fn install_url(&self) -> String {

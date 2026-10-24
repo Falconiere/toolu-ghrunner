@@ -5,9 +5,10 @@
 //! registration is a JIT runner, which GitHub also removes after one job, so
 //! this module verifies that instead of assuming it: with a bearer
 //! (`TOOLU_RUNNER_TOKEN` > stored `login`) it calls the same idempotent
-//! unregister as `remove` (DELETE, a 404 confirmed by a lookup). Without a
-//! bearer — or for an org URL the runners API cannot address — the local
-//! state still goes and the output says the GitHub side was not verified. A
+//! unregister as `remove` (DELETE on the repo or org runners API, a 404
+//! confirmed by a lookup). Without a bearer — or for a URL no runners API can
+//! address — the local state still goes and the output says the GitHub side
+//! was not verified. A
 //! retryable unregister failure keeps the local state (the persisted
 //! `runner_id` is the only handle) and fails naming `toolu-runner remove`.
 
@@ -79,7 +80,12 @@ async fn unregister(
   client: &reqwest::Client,
 ) -> Result<GithubSide, Box<dyn std::error::Error>> {
   let Some(token) = crate::remove_bearer(&cfg.runner_url, None)? else {
-    return Ok(GithubSide::Unverified("no GitHub token"));
+    // The unregister takes a personal token even for an App registration.
+    return Ok(GithubSide::Unverified(if cfg.auth.is_token() {
+      "no GitHub token"
+    } else {
+      "no personal GitHub token; an App registration's unregister still needs one"
+    }));
   };
   let outcome = wire::net::unregister_runner(
     client,
