@@ -123,6 +123,30 @@ fn a_key_that_is_not_a_pem_is_an_error_that_does_not_echo_it() {
   );
 }
 
+/// A real key cut short (its PEM frame kept, half its body gone) is a
+/// `Config` error, as the run loop's fatal path expects, and echoes no line
+/// of the key.
+#[test]
+fn a_truncated_real_key_is_a_config_error_that_does_not_echo_it() {
+  let lines: Vec<&str> = PRIVATE_PEM.lines().collect();
+  let first = lines.first().expect("the fixture PEM has a first line");
+  let last = lines.last().expect("the fixture PEM has a last line");
+  let body = lines.get(1..lines.len() / 2).expect("half the body");
+  let truncated = format!("{first}\n{}\n{last}\n", body.join("\n"));
+  let err = build_app_jwt_at(&truncated, APP_ID, NOW).expect_err("a truncated key cannot sign");
+  let message = err.to_string();
+  assert!(
+    message.starts_with("config error: the GitHub App private key is not a usable RSA PEM"),
+    "{message}"
+  );
+  for line in body {
+    assert!(
+      !message.contains(line),
+      "the error echoed key material: {message}"
+    );
+  }
+}
+
 /// A time whose `iat` or `exp` would overflow is an error, never a clamped
 /// claim; the earliest instant that still fits signs.
 #[test]
@@ -152,6 +176,7 @@ fn installation_token_parses_the_documented_reply_and_debug_redacts_the_token() 
     !debug.contains(&token.token),
     "Debug leaked the token: {debug}"
   );
+  assert!(debug.contains("token: \"<redacted>\""), "{debug}");
 }
 
 #[test]

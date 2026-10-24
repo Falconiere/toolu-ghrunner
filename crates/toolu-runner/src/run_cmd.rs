@@ -273,8 +273,8 @@ impl RunLoop {
   }
 
   /// Re-mint a fresh JIT config for the next iteration. Re-resolves the
-  /// bearer (a `login` may have rotated it; an App registration reuses or
-  /// mints an installation token); a missing bearer or an auth-rejected mint
+  /// bearer (a `login` may have rotated it; an App registration reuses its
+  /// cached installation token or mints a fresh one); a missing bearer or an auth-rejected mint
   /// is fatal (naming [`REMINT_TOKEN_HELP`] or the App's fix), any other
   /// failure backs off and retries the still-valid current config.
   async fn reregister(

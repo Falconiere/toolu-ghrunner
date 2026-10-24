@@ -200,14 +200,16 @@ pub(crate) enum AppRemint {
 ///
 /// The App file is unreadable, or GitHub rejects the App (`Auth`) or its key
 /// no longer signs (`Config`): retrying the spent JIT config could never
-/// recover, so the message is fatal (masked, ending with the App's fix).
+/// recover, so the error is fatal. Every message is masked, and a rejection
+/// ends with the App's fix.
 pub(crate) async fn remint_bearer(
   tokens: &InstallationTokens,
   client: &reqwest::Client,
   target: &AppTarget<'_>,
   masker: &Mutex<SecretMasker>,
 ) -> Result<AppRemint, Box<dyn std::error::Error>> {
-  let app = load_app(Path::new(target.app_file), masker)?;
+  let app =
+    load_app(Path::new(target.app_file), masker).map_err(|e| masked(masker, &e.to_string()))?;
   let help = app_remint_help(&app, target.app_file, target.installation_id);
   match tokens
     .bearer(client, &app, target.url, target.installation_id, masker)
