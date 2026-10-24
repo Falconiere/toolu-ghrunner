@@ -511,7 +511,7 @@ fn render(
   if supervisor == Supervisor::Systemd {
     service_cmd::validate_unit_environment("PATH", &env_path)?;
     if pin_runner_home {
-      service_cmd::validate_unit_environment("TOOLU_RUNNER_HOME", &runner_home.to_string_lossy())?;
+      service_cmd::validate_path_environment("TOOLU_RUNNER_HOME", runner_home)?;
     }
   }
   let spec = MachineSpec {
@@ -525,7 +525,7 @@ fn render(
     Supervisor::Launchd => launchd_machine_plist(&spec),
     Supervisor::Systemd if scope == UnitScope::System => {
       let user_home = service_cmd::home_dir()?;
-      service_cmd::validate_unit_environment("HOME", &user_home.to_string_lossy())?;
+      service_cmd::validate_path_environment("HOME", &user_home)?;
       systemd_system_machine_unit(&spec, &user_home)
     },
     Supervisor::Systemd => systemd_machine_unit(&spec),

@@ -5,6 +5,7 @@
 #![cfg(target_os = "linux")]
 
 use std::io::Write;
+use std::os::unix::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
@@ -61,13 +62,21 @@ impl Harness {
     cmd
   }
 
-  fn calls(&self) -> String {
-    std::fs::read_to_string(&self.log).unwrap_or_default()
+  fn calls(&self) -> std::io::Result<String> {
+    match std::fs::read_to_string(&self.log) {
+      Ok(calls) => Ok(calls),
+      Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+      Err(error) => Err(error),
+    }
   }
 }
 
 fn said(output: &Output) -> String {
-  String::from_utf8_lossy(&output.stderr).into_owned()
+  format!(
+    "stdout: {}\nstderr: {}",
+    String::from_utf8_lossy(&output.stdout),
+    String::from_utf8_lossy(&output.stderr)
+  )
 }
 
 #[test]
@@ -83,7 +92,7 @@ fn affirmative_linger_finishes_before_a_user_unit_is_written() -> TestResult {
   assert!(h.dest.is_file(), "unit was not written");
   assert!(h.mark.is_file(), "linger was not enabled");
   assert_eq!(
-    h.calls(),
+    h.calls()?,
     "show-user runner --property=Linger\nenable-linger runner\nshow-user runner --property=Linger\n"
   );
   Ok(())
@@ -112,6 +121,15 @@ fn denied_linger_keeps_the_old_unit_and_writes_no_machine_unit() -> TestResult {
   let old_text =
     "[Service]\nExecStart=/usr/local/bin/toolu-runner run --config /tmp/gone/config.toml\n";
   std::fs::write(&old, old_text)?;
+  let preview = h
+    .command(&["install-service", "--print"], "1000")
+    .output()?;
+  assert!(preview.status.success(), "{}", said(&preview));
+  assert!(
+    said(&preview).contains(&format!("would replace {}", old.display())),
+    "{}",
+    said(&preview)
+  );
   let output = h
     .command(&["install-service", "--enable-linger"], "1000")
     .env("DENY_LINGER", "1")
@@ -123,7 +141,7 @@ fn denied_linger_keeps_the_old_unit_and_writes_no_machine_unit() -> TestResult {
   assert!(said(&output).contains("sudo loginctl enable-linger runner"));
   assert!(!h.dest.exists());
   assert_eq!(std::fs::read_to_string(old)?, old_text);
-  assert!(!h.calls().contains("systemctl"));
+  assert!(!h.calls()?.contains("systemctl"));
   Ok(())
 }
 
@@ -137,7 +155,7 @@ fn unknown_linger_state_aborts_before_writing() -> TestResult {
   assert_eq!(output.status.code(), Some(2), "{}", said(&output));
   assert!(said(&output).contains("unexpected `loginctl` output"));
   assert!(!h.dest.exists());
-  assert!(!h.calls().contains("enable-linger"));
+  assert!(!h.calls()?.contains("enable-linger"));
   Ok(())
 }
 
@@ -207,11 +225,26 @@ fn root_print_pins_home_without_querying_linger_or_writing() -> TestResult {
   )));
   assert!(unit.contains("Environment=\"PATH="));
   assert!(
-    h.calls().is_empty(),
+    h.calls()?.is_empty(),
     "root must not query linger: {}",
-    h.calls()
+    h.calls()?
   );
   assert_eq!(std::fs::read(system_path).ok(), before);
+  Ok(())
+}
+
+#[test]
+fn root_print_rejects_a_non_utf8_home_before_rendering() -> TestResult {
+  let h = Harness::new()?;
+  let mut raw_home = h.home.path().as_os_str().as_encoded_bytes().to_vec();
+  raw_home.push(0xff);
+  let output = h
+    .command(&["install-service", "--print"], "0")
+    .env("HOME", std::ffi::OsString::from_vec(raw_home))
+    .output()?;
+  assert_eq!(output.status.code(), Some(2), "{}", said(&output));
+  assert!(said(&output).contains("HOME contains non-UTF-8 bytes"));
+  assert!(!h.dest.exists());
   Ok(())
 }
 
@@ -223,7 +256,7 @@ fn nonroot_print_does_not_query_or_enable_linger() -> TestResult {
     .output()?;
   assert!(output.status.success(), "{}", said(&output));
   assert!(String::from_utf8_lossy(&output.stdout).contains("WantedBy=default.target"));
-  assert!(h.calls().is_empty());
+  assert!(h.calls()?.is_empty());
   assert!(!h.dest.exists());
   Ok(())
 }
@@ -247,6 +280,6 @@ fn root_registration_print_uses_system_unit_and_keeps_state_unchanged() -> TestR
   assert!(unit.contains("WantedBy=multi-user.target"));
   assert!(unit.contains("Environment=\"HOME="));
   assert!(unit.contains("Environment=\"TOOLU_RUNNER_HOME="));
-  assert!(h.calls().is_empty());
+  assert!(h.calls()?.is_empty());
   Ok(())
 }

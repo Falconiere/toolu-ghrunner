@@ -70,6 +70,7 @@ fn install_cmd(
   config_path: &Path,
   extra: &[&str],
 ) -> Result<Command, Box<dyn std::error::Error>> {
+  let config_path = config_path.canonicalize()?;
   let mut cmd = Command::new(env!("CARGO_BIN_EXE_toolu-runner"));
   cmd
     .env("HOME", home)

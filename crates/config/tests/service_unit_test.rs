@@ -95,7 +95,6 @@ fn systemd_unit_declares_the_installing_path() {
   altered.env_path = "/totally/different/bin";
   altered.work_dir = Path::new("/totally/different/dir");
   let changed = service_unit::systemd_unit(&altered);
-  assert_ne!(changed, baseline);
   assert!(baseline.contains("Environment=\"PATH=/opt/homebrew/bin:/usr/bin:/bin\""));
   assert!(changed.contains("Environment=\"PATH=/totally/different/bin\""));
   assert!(!changed.contains("WorkingDirectory="));
@@ -108,8 +107,12 @@ fn systemd_path_assignment_escapes_quotes_backslashes_and_percent() {
     ..plain_spec()
   };
   let unit = service_unit::systemd_unit(&spec);
-  assert!(
-    unit.contains("Environment=\"PATH=/opt/a b/\\\"quoted\\\"/100%%/back\\\\slash:$literal\"\n")
+  assert_eq!(
+    unit
+      .lines()
+      .filter(|line| line.starts_with("Environment="))
+      .collect::<Vec<_>>(),
+    ["Environment=\"PATH=/opt/a b/\\\"quoted\\\"/100%%/back\\\\slash:$literal\""]
   );
 }
 
@@ -309,7 +312,11 @@ fn systemd_system_registration_unit_uses_multi_user_target() {
 fn systemd_user_registration_unit_pins_a_custom_runner_home() {
   let unit =
     service_unit::systemd_unit_with_home(&plain_spec(), Path::new("/home/ci/custom runner home"));
-  assert!(unit.contains("Environment=\"TOOLU_RUNNER_HOME=/home/ci/custom runner home\"\n"));
+  assert!(
+    unit
+      .lines()
+      .any(|line| line == "Environment=\"TOOLU_RUNNER_HOME=/home/ci/custom runner home\"")
+  );
 }
 
 #[test]
@@ -319,10 +326,18 @@ fn systemd_system_machine_unit_pins_the_default_runner_home() {
     ..machine_spec(false)
   };
   let unit = service_unit::systemd_system_machine_unit(&spec, Path::new("/root"));
-  assert!(unit.contains("Environment=\"HOME=/root\"\n"));
-  assert!(unit.contains(&format!(
-    "Environment=\"TOOLU_RUNNER_HOME={DEFAULT_HOME}\"\n"
-  )));
+  let environment = unit
+    .lines()
+    .filter(|line| line.starts_with("Environment="))
+    .collect::<Vec<_>>();
+  assert_eq!(
+    environment,
+    [
+      "Environment=\"PATH=/opt/dev tools & bin:/usr/bin:/bin\"",
+      "Environment=\"HOME=/root\"",
+      &format!("Environment=\"TOOLU_RUNNER_HOME={DEFAULT_HOME}\""),
+    ]
+  );
 }
 
 #[test]

@@ -163,7 +163,16 @@ pub(crate) async fn service_row(
   let scope = match tokio::task::spawn_blocking(move || current_unit_scope(supervisor)).await {
     Ok(Ok(scope)) => scope,
     Ok(Err(error)) => return Some((Row::new(Level::Warn, "service", error.to_string()), false)),
-    Err(error) => return Some((Row::new(Level::Warn, "service", error.to_string()), false)),
+    Err(error) => {
+      return Some((
+        Row::new(
+          Level::Warn,
+          "service",
+          format!("service scope task failed: {error}"),
+        ),
+        false,
+      ));
+    },
   };
   let home = match home_dir() {
     Ok(home) => home,

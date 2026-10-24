@@ -97,13 +97,27 @@ fn ask(user: &str) -> Result<bool, RunnerError> {
         "linger is disabled and no terminal is available ({error}); pass --enable-linger or --yes"
       ))
     })?;
-  let mut reader = std::io::BufReader::new(tty.try_clone()?);
+  let mut reader = std::io::BufReader::new(tty.try_clone().map_err(|error| {
+    RunnerError::Config(format!(
+      "cannot open a reader for the linger terminal: {error}"
+    ))
+  })?);
   let mut input = String::new();
   loop {
-    tty.write_all(format!("Keep running after you log out?\nRuns: loginctl enable-linger {user}\n[y] Yes / [n] No, stop when I log out: ").as_bytes())?;
-    tty.flush()?;
+    tty.write_all(format!("Keep running after you log out?\nRuns: loginctl enable-linger {user}\n[y] Yes / [n] No, stop when I log out: ").as_bytes()).map_err(|error| {
+      RunnerError::Config(format!("cannot write the linger prompt to the terminal: {error}"))
+    })?;
+    tty
+      .flush()
+      .map_err(|error| RunnerError::Config(format!("cannot flush the linger prompt: {error}")))?;
     input.clear();
-    if reader.read_line(&mut input)? == 0 {
+    if reader.read_line(&mut input).map_err(|error| {
+      RunnerError::Config(format!(
+        "cannot read a linger answer from the terminal: {error}"
+      ))
+    })?
+      == 0
+    {
       return Err(RunnerError::Config(
         "no linger answer was given; nothing was installed".to_owned(),
       ));
@@ -111,7 +125,9 @@ fn ask(user: &str) -> Result<bool, RunnerError> {
     match input.trim().to_ascii_lowercase().as_str() {
       "y" | "yes" => return Ok(true),
       "n" | "no" => return Ok(false),
-      _ => tty.write_all(b"Please answer y or n.\n")?,
+      _ => tty.write_all(b"Please answer y or n.\n").map_err(|error| {
+        RunnerError::Config(format!("cannot write the linger retry prompt: {error}"))
+      })?,
     }
   }
 }

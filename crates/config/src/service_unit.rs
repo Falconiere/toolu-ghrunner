@@ -303,12 +303,12 @@ fn render_systemd_unit(
   s.push_str(")\n");
   s.push('\n');
   s.push_str("[Service]\n");
-  push_systemd_environment(&mut s, "PATH", spec.env_path);
+  push_systemd_env_line(&mut s, "PATH", spec.env_path);
   if let Some(home) = user_home {
-    push_systemd_environment(&mut s, "HOME", &home.to_string_lossy());
+    push_systemd_env_line(&mut s, "HOME", &home.to_string_lossy());
   }
   if let Some(home) = runner_home {
-    push_systemd_environment(&mut s, "TOOLU_RUNNER_HOME", &home.to_string_lossy());
+    push_systemd_env_line(&mut s, "TOOLU_RUNNER_HOME", &home.to_string_lossy());
   }
   s.push_str("ExecStart=");
   s.push_str(&exe);
@@ -360,12 +360,12 @@ fn render_systemd_machine_unit(
   s.push_str(")\n");
   s.push('\n');
   s.push_str("[Service]\n");
-  push_systemd_environment(&mut s, "PATH", spec.env_path);
+  push_systemd_env_line(&mut s, "PATH", spec.env_path);
   if let Some(home) = user_home {
-    push_systemd_environment(&mut s, "HOME", &home.to_string_lossy());
+    push_systemd_env_line(&mut s, "HOME", &home.to_string_lossy());
   }
   if let Some(home) = spec.home {
-    push_systemd_environment(&mut s, "TOOLU_RUNNER_HOME", &home.to_string_lossy());
+    push_systemd_env_line(&mut s, "TOOLU_RUNNER_HOME", &home.to_string_lossy());
   }
   s.push_str("ExecStart=");
   s.push_str(&systemd_quote(spec.exe));
@@ -393,7 +393,7 @@ fn systemd_env_assignment(key: &str, value: &str) -> String {
   format!("\"{escaped}\"")
 }
 
-fn push_systemd_environment(unit: &mut String, key: &str, value: &str) {
+fn push_systemd_env_line(unit: &mut String, key: &str, value: &str) {
   unit.push_str("Environment=");
   unit.push_str(&systemd_env_assignment(key, value));
   unit.push('\n');

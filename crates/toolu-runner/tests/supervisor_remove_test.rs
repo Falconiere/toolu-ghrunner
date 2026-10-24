@@ -43,15 +43,18 @@ fn install_machine_unit(home: &Path) -> TestResult<()> {
   if !out.status.success() {
     return Err(String::from_utf8_lossy(&out.stderr).into_owned().into());
   }
+  if !machine_dest(home).is_file() {
+    return Err("install-service succeeded without writing the machine unit".into());
+  }
   Ok(())
 }
 
 /// `remove --config <config>` with the bearer and the stub supervisor CLI;
 /// returns the output and the stub's argv log.
 fn remove(home: &Path, config: &Path, extra_env: &[(&str, &str)]) -> TestResult<(Output, String)> {
-  let (bin, log, path_env) = shim_env(home)?;
+  let (bin, log, mut path_env) = shim_env(home)?;
   if !MACOS {
-    nonroot_shims(home)?;
+    path_env = nonroot_shims(home)?;
   }
   write_shim(
     &bin,

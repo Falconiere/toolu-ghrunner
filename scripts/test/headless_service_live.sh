@@ -26,7 +26,10 @@ check_service() {
     systemctl --user is-active --quiet toolu-runner.service'
 }
 
-remote 'test "$(id -u)" -ne 0 && toolu-runner install-service --enable-linger'
+if ! remote 'test "$(id -u)" -ne 0 && toolu-runner install-service --enable-linger'; then
+  echo 'FAIL: non-root install or linger enable failed' >&2
+  exit 1
+fi
 check_service
 # The first SSH session has ended; a new login proves the user manager stayed
 # active after logout.
@@ -76,9 +79,12 @@ gh run view "$run_id" --repo "$TOOLU_HEADLESS_REPO" --log | \
 
 # On the same disposable host, check the root path and real system manager
 # after the non-root job has finished. Root has a separate runner home.
-remote 'sudo -n toolu-runner install-service && \
+if ! remote 'sudo -n toolu-runner install-service && \
   sudo -n test -f /etc/systemd/system/toolu-runner.service && \
   sudo -n systemctl is-enabled --quiet toolu-runner.service && \
-  test "$(sudo -n systemctl show -P FragmentPath toolu-runner.service)" = /etc/systemd/system/toolu-runner.service'
+  test "$(sudo -n systemctl show -P FragmentPath toolu-runner.service)" = /etc/systemd/system/toolu-runner.service'; then
+  echo 'FAIL: root system unit install or verification failed' >&2
+  exit 1
+fi
 remote 'sudo -n toolu-runner install-service --remove'
 echo "headless live check passed: https://github.com/$TOOLU_HEADLESS_REPO/actions/runs/$run_id"

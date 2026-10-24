@@ -186,7 +186,7 @@ const UNREGISTER_TIMEOUT: Duration = Duration::from_secs(30);
 async fn cmd_remove(args: RemoveArgs) -> Result<(), Box<dyn std::error::Error>> {
   init_remove_tracing()?;
 
-  let config_path = resolve_config(args.config)?;
+  let config_path = resolve_config(args.config.clone())?;
   let creds_path = credentials_path_for(&config_path);
   if !config_path.exists() {
     println!("no registration found.");
@@ -203,29 +203,11 @@ async fn cmd_remove(args: RemoveArgs) -> Result<(), Box<dyn std::error::Error>> 
   // enough), and HOLDING it for the whole removal closes the window where a
   // `run` could start between the check and the multi-second DELETE.
   let home = registry::runner_home();
-  let mut held = lockfile::acquire(&lock_path, &config_path);
-  if let Err(RunnerError::LockHeld { pid, .. }) = &held
-    && !args.force
-  {
-    match drain_held_registration(
-      &home,
-      &config_path,
-      &pending,
-      &lock_path,
-      *pid,
-      &cfg.runner_name,
-    )
-    .await?
-    {
-      Some((reloaded, guard)) => {
-        cfg = reloaded;
-        held = Ok(guard);
-      },
-      None => return Ok(()),
-    }
-  }
-  let skip = skip_reason(&held, args.skip_unregister);
-  let guard = held.ok();
+  let Some((skip, guard)) =
+    acquire_remove_lock(&args, &home, &config_path, &pending, &lock_path, &mut cfg).await?
+  else {
+    return Ok(());
+  };
 
   // Unregister on GitHub BEFORE touching local state: the persisted
   // runner_id and URL are the only way to name the runner, so deleting them
@@ -246,6 +228,39 @@ async fn cmd_remove(args: RemoveArgs) -> Result<(), Box<dyn std::error::Error>> 
     service.as_deref(),
   );
   Ok(())
+}
+
+async fn acquire_remove_lock(
+  args: &RemoveArgs,
+  home: &Path,
+  config_path: &Path,
+  pending: &Path,
+  lock_path: &Path,
+  cfg: &mut RunnerRegistrationConfig,
+) -> Result<Option<(Option<SkipReason>, Option<lockfile::LockGuard>)>, Box<dyn std::error::Error>> {
+  let mut held = lockfile::acquire(lock_path, config_path);
+  if let Err(RunnerError::LockHeld { pid, .. }) = &held
+    && !args.force
+  {
+    match drain_held_registration(
+      home,
+      config_path,
+      pending,
+      lock_path,
+      *pid,
+      &cfg.runner_name,
+    )
+    .await?
+    {
+      Some((reloaded, guard)) => {
+        *cfg = reloaded;
+        held = Ok(guard);
+      },
+      None => return Ok(None),
+    }
+  }
+  let skip = skip_reason(&held, args.skip_unregister);
+  Ok(Some((skip, held.ok())))
 }
 
 async fn drain_held_registration(
@@ -274,9 +289,9 @@ async fn drain_held_registration(
 }
 
 fn init_remove_tracing() -> Result<(), Box<dyn std::error::Error>> {
-  let masker = Arc::new(std::sync::Mutex::new(SecretMasker::new()));
-  let redactor: Arc<dyn shared::startup::SecretRedactor> =
-    Arc::new(MaskerRedactor(Arc::clone(&masker)));
+  let redactor: Arc<dyn shared::startup::SecretRedactor> = Arc::new(MaskerRedactor(Arc::new(
+    std::sync::Mutex::new(SecretMasker::new()),
+  )));
   startup::init_with_redactor(env!("CARGO_MANIFEST_DIR"), "runner", redactor)
     .map_err(|e| format!("startup init: {e}"))?;
   Ok(())

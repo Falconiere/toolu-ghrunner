@@ -407,12 +407,12 @@ fn render_systemd_registration(
   let runner_home = std::path::absolute(config::registry::runner_home())?;
   if scope == UnitScope::System {
     let user_home = home_dir()?;
-    validate_unit_environment("HOME", &user_home.to_string_lossy())?;
-    validate_unit_environment("TOOLU_RUNNER_HOME", &runner_home.to_string_lossy())?;
+    validate_path_environment("HOME", &user_home)?;
+    validate_path_environment("TOOLU_RUNNER_HOME", &runner_home)?;
     return Ok(systemd_system_unit(spec, &user_home, &runner_home));
   }
   if config::registry::runner_home_is_custom() {
-    validate_unit_environment("TOOLU_RUNNER_HOME", &runner_home.to_string_lossy())?;
+    validate_path_environment("TOOLU_RUNNER_HOME", &runner_home)?;
     return Ok(systemd_unit_with_home(spec, &runner_home));
   }
   Ok(systemd_unit(spec))
@@ -441,6 +441,16 @@ pub(crate) fn validate_unit_environment(key: &str, value: &str) -> Result<(), Ru
     )));
   }
   Ok(())
+}
+
+/// Reject paths that cannot round-trip through a UTF-8 systemd unit.
+pub(crate) fn validate_path_environment(key: &str, path: &Path) -> Result<(), RunnerError> {
+  let value = path.to_str().ok_or_else(|| {
+    RunnerError::Config(format!(
+      "{key} contains non-UTF-8 bytes and cannot be written to a systemd unit"
+    ))
+  })?;
+  validate_unit_environment(key, value)
 }
 
 /// Write the unit text to `dest`, creating parent dirs (0644 content).
