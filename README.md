@@ -225,9 +225,8 @@ re-mint after a job mints its own installation token (kept in memory and
 reused for up to 50 minutes, never written to disk): the runner needs no
 stored login and no `TOOLU_RUNNER_TOKEN`. The App needs Administration
 (read and write) on a repository, or Self-hosted runners (read and write)
-on an organization. `create-app` currently requests only Administration, so
-for an organization runner add the Self-hosted runners organization
-permission in the App's settings (and accept it on the installation) first. For an organization URL, `--runner-group` takes a group
+on an organization: `create-app` requests the first for a personal App and
+the second (`organization_self_hosted_runners: write`) for an `--org` App. For an organization URL, `--runner-group` takes a group
 name (resolved through the org's runner-group list and recorded by id) or a
 numeric id.
 
@@ -250,7 +249,7 @@ state — including login — without touching the network. `remove`
 unregisters. `check` is the network preflight and `doctor` the
 whole-machine health check (both below).
 `boot` is the flag-less one-shot mode of the container image and `create-app`
-the one-click GitHub App onboarding (also below). That's the whole CLI.
+the GitHub App onboarding: create (or import) and install (also below). That's the whole CLI.
 
 ### Preflight: `toolu-runner check`
 
@@ -373,17 +372,53 @@ unparseable: no watchdog). It runs exactly one job and persists nothing — no
 
 ### GitHub App: `toolu-runner create-app`
 
-`create-app` creates a user-owned GitHub App through GitHub's App Manifest
-flow, in one click. It binds a loopback callback on `127.0.0.1`, opens your
-browser to a prefilled manifest form (`--no-browser` prints the URL instead;
-the App gets `administration:write`, is not public and has no webhook),
-exchanges the returned code, and saves the App's credentials to
-`github-app.json` (0600) at the runner-home root, shared by every repo. It
-then prints a secret-free summary and the App's install URL. It does **not**
-install the App: open the install URL, pick the repositories or organization,
-then `register --app` (see [Registering with a GitHub App](#registering-with-a-github-app)). github.com only — another
-`--host` is rejected before any browser or network call — and it refuses to
-overwrite a saved App unless you pass `--force`.
+`create-app` creates the runner's GitHub App through GitHub's App Manifest
+flow, then waits for you to install it. One App serves every machine of an
+account, so it is named after the account: `toolu-runner-<org>` with
+`--org`, `toolu-runner-<login>` with `--account <login>`, else
+`toolu-runner-<hostname>` (GitHub's form lets you rename it; App names are
+unique across GitHub).
+
+1. **Target.** Without `--org` the App belongs to you and gets
+   `administration: write` (repository runners). `create-app --org acme`
+   first checks `GET /orgs/acme` (a typo exits 2 before anything else), then
+   posts the manifest to `github.com/organizations/acme/settings/apps/new`,
+   so the App is owned by the org and gets
+   `organization_self_hosted_runners: write` (organization runners; GitHub
+   needs no Administration permission at that scope). Only org owners (and
+   the org's GitHub App managers) can create it: GitHub refuses anyone else
+   and never redirects back, so the browser step times out after 5 minutes
+   naming the token route (`register --token …`).
+2. **Create** (first browser trip). A loopback callback on `127.0.0.1`
+   serves the prefilled form (`--no-browser` prints the URL instead); the
+   App is private and has no webhook. As soon as GitHub returns the App,
+   its credentials are saved to `github-app.json` (0600) at the runner-home
+   root: the App now exists on GitHub and its key can't be fetched again.
+3. **Install** (second browser trip). `create-app` prints and opens the
+   install link,
+   `github.com/apps/<slug>/installations/new/permissions?target_id=<owner id>`
+   (it skips the account picker), and polls `GET /app/installations` with
+   the App JWT every 5 seconds until the App is installed on its owner. On a
+   terminal, `o` + Enter opens the link again and `c` + Enter copies it (OSC
+   52); Ctrl-C cancels (exit 130). After 10 minutes a terminal asks Keep
+   waiting / Open the link again / Cancel; without a terminal `create-app`
+   exits 1. It then records `installation_id` in `github-app.json` and prints
+   `Installed · installation <id> · all repositories` (or the selected
+   repository count). Then `register --app` (see
+   [Registering with a GitHub App](#registering-with-a-github-app)).
+
+**One App, many machines.** `create-app --import <github-app.json>`, or
+`--app-id <id> --app-key <pem file>`, reuses an existing App instead of
+creating another: the key is proven with an App JWT call (`GET /app`)
+before anything is saved, a key that doesn't match exits 2 and writes
+nothing, and on success it prints `Key matches App <id> · installed on
+<account>` (or waits for the installation as above). Re-importing the saved
+`github-app.json` resumes a cancelled or timed-out wait.
+
+github.com only — another `--host` is rejected before any browser or network
+call — and it refuses to overwrite a saved App unless you pass `--force`.
+Exit codes: `0` installed, `1` unattended wait timed out, `2` usage, auth or
+config error, `130` cancelled.
 
 ### CLI flags reference
 
@@ -408,9 +443,13 @@ overwrite a saved App unless you pass `--force`.
 | `--timeout <SECS>` | `check`, `doctor` | Per-probe bound, 1–300 seconds (default 10). |
 | `--offline` | `doctor` | Make no network request; the update and network rows print `SKIP`, and a present token is reported unverified. |
 | `--client-id <ID>` | `login` | OAuth App client id for the device flow (fallback: `TOOLU_RUNNER_CLIENT_ID`). Needed until the built-in github.com App ships; always needed for GHES. |
-| `--name <NAME>` | `create-app` | GitHub App name (default `toolu-runner-<hostname>`). It must be unique across GitHub: a duplicate makes the browser flow time out. |
+| `--name <NAME>` | `create-app` | GitHub App name (default `toolu-runner-<org>`, `toolu-runner-<account>`, else `toolu-runner-<hostname>`). It must be unique across GitHub: a duplicate makes the browser flow time out. |
+| `--org <ORG>` | `create-app` | Create the App owned by this organization, with `organization_self_hosted_runners: write` (org runners); the org is checked on GitHub first. With `--import`, the installation is looked for on this org. |
+| `--account <LOGIN>` | `create-app` | Your personal login: names a personal App `toolu-runner-<LOGIN>`. Conflicts with `--org`. |
+| `--import <FILE>` | `create-app` | Reuse an App from a `github-app.json`; the key is proven with GitHub before anything is saved. |
+| `--app-id <ID>` / `--app-key <PEM_FILE>` | `create-app` | Reuse an App by id and private-key file (both required together); proven like `--import`. |
 | `--host <HOST>` | `create-app` | GitHub host to create the App on (default `github.com`, the only value accepted this release). |
-| `--no-browser` | `create-app` | Print the URL to open instead of launching a browser. |
+| `--no-browser` | `create-app` | Print the URLs (the manifest form, the install link) instead of launching a browser. |
 | `--force` | `create-app` | Overwrite an already saved App (`github-app.json` at the runner-home root). |
 
 `register`, `run`, `remove`, `status`, `install-service`, and `check`
@@ -952,6 +991,9 @@ deletes the machine service.
 | `TOOLU_RUNNER_SESSION_CONFLICT_INTERVAL_MS` | `30000` | wait between session-conflict retries, in milliseconds (a positive integer; the 8 attempts are fixed). Read by `run` and `boot`. |
 | `TOOLU_JITCONFIG` | — | `boot` only: GitHub's `encoded_jit_config`, verbatim. Required. |
 | `TOOLU_DEADLINE` | — | `boot` only: epoch milliseconds (decimal string) of the self-timeout backstop. Optional. |
+| `TOOLU_RUNNER_GITHUB_API_URL` | `https://api.github.com` | GitHub REST API base `create-app` uses for the org check, the manifest conversion and the App calls (a mirror or test peer). |
+| `TOOLU_RUNNER_INSTALL_WAIT_MS` | `600000` | how long `create-app` waits for the App's installation before asking (terminal) or exiting 1 (no terminal), in milliseconds. |
+| `TOOLU_RUNNER_INSTALL_POLL_MS` | `5000` | how often `create-app` polls for the installation, in milliseconds. |
 | `TOOLU_RUNNER_RELEASES_URL` | the latest `Falconiere/toolu-ghrunner` release on `api.github.com` | release document `doctor`'s newer-release check reads (a mirror); credentials in it are masked. |
 | `TOOLU_RUNNER_LOG` | `info` | tracing filter. Checked before `RUST_LOG`. Honoured only with `TOOLU_RUNNER_ALLOW_VERBOSE=1`; otherwise the runner always logs at `info`. |
 | `RUST_LOG` | — | tracing filter (standard fallback). Same `TOOLU_RUNNER_ALLOW_VERBOSE` gate. |

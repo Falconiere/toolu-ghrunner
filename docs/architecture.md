@@ -94,7 +94,9 @@ toolu-ghrunner/                            workspace root
     │   ├── src/service_cmd.rs             install-service --config (per-registration units) + activation shell-outs
     │   ├── src/login_cmd.rs               login / logout (device flow)
     │   ├── src/status_cmd.rs              status (no network)
-    │   ├── src/create_app_cmd.rs          create-app (GitHub App Manifest onboarding)
+    │   ├── src/create_app_cmd.rs          create-app (GitHub App Manifest onboarding, personal or --org)
+    │   ├── src/app_install.rs             create-app's installation wait (poll /app/installations, o/c, timeout prompt)
+    │   ├── src/app_import.rs              create-app --import / --app-id (prove the key with GET /app)
     │   ├── src/network_setup.rs           per-lifecycle [network] client + proxy-secret registration
     │   ├── src/config.rs                  env reads for the bin
     │   ├── src/check_*.rs                 check: read-only preflight (endpoints, tools, proxy/CA; exit 0/1/2)
@@ -284,7 +286,8 @@ Historically a single `toolu-runner` crate, now split across the
 layered graph above. `toolu-runner` itself is **bin-only** (the CLI:
 `main.rs` + `cli.rs` + `register_cmd.rs` + `run_cmd.rs` +
 `boot_cmd.rs` + `service_cmd.rs` + `login_cmd.rs` + `status_cmd.rs` +
-`create_app_cmd.rs` + `ephemeral.rs` + `network_setup.rs` +
+`create_app_cmd.rs` + `app_install.rs` + `app_import.rs` +
+`ephemeral.rs` + `network_setup.rs` +
 `config.rs`, plus the `check_*.rs` preflight and the `doctor_*.rs`
 health check). The module descriptions
 that follow are grouped by their **current** crate: `net/` +
@@ -337,13 +340,16 @@ call the listener makes flows through this module.
 - `github_app::*` — GitHub App calls with the App JWT
   (`protocol::app_jwt`): `find_installation` (repo or org; `None` when not
   installed there), `list_installations`, `create_installation_token`, and
-  the pure `reuse_deadline` cache rule. 429/5xx → `Network`, every other
-  non-2xx → `Auth` (a deleted App is a 404 `Integration not found`).
+  the pure `reuse_deadline` cache rule; for `create-app` (#202) `get_app`
+  (proves a key), the unauthenticated `find_org` (`None` on 404) and
+  `installation_repo_count`. 429/5xx → `Network`, every other non-2xx →
+  `Auth` (a deleted App is a 404 `Integration not found`).
 - `runner_groups::*` — an org's runner groups and `--runner-group` name
   resolution (`pick_group`).
 - `device_auth::*` — GitHub OAuth device flow (`request_device_code` /
   `poll_for_token`), host-relative so GHES works; backs `login`.
-- `app_manifest::*` — the `create-app` loopback `CallbackServer` and the
+- `app_manifest::*` — the `create-app` loopback `CallbackServer` (serving
+  the form for the target's `settings/apps/new`) and the
   `convert_manifest_code` exchange.
 
 ### `listener/` — JIT lifecycle
@@ -745,29 +751,68 @@ takes one job and unregisters the runner instead of re-minting (see
 
 ## Sequence: create-app
 
-`toolu-runner create-app` is a one-time onboarding convenience that runs
-GitHub's **App Manifest flow** to mint a user-owned GitHub App without
-hand-copying an app id and PEM through the web UI. github.com only
-(`--host` defaults to `github.com`; any other host errors as
-unsupported).
+`toolu-runner create-app` runs GitHub's **App Manifest flow** to mint the
+runner's GitHub App without hand-copying an app id and PEM through the web
+UI, then waits for its installation (#202). github.com only (`--host`
+defaults to `github.com`; any other host errors as unsupported). Offline
+guards come first: the host, then an existing `github-app.json` (refused
+without `--force`).
 
-The runner binds a loopback callback server on `127.0.0.1:0`
-(`wire::net::app_manifest::CallbackServer`), builds a prefilled manifest
-(`protocol::app_manifest::AppManifest::for_runner` —
-`administration:write`, `public = false`, no webhook), and opens the
-browser (unless `--no-browser`) to an auto-submitting form that POSTs the
-manifest to GitHub. GitHub redirects back to the loopback server with a
-temporary `code`, CSRF-checked against a `state` nonce
-(`parse_callback_path`); the runner exchanges it at
-`POST api.github.com/app-manifests/{code}/conversions`
-(`convert_manifest_code`) and persists the returned credentials — app id,
-PEM private key, client id/secret, webhook secret — to
-`<home>/github-app.json` (`config::app_store`, 0600, shared by all
-repos). It then PRINTS the app's install URL.
+1. **Target.** `protocol::app_manifest::ManifestTarget` is `Personal` or
+   `Org(org)`. It picks the form the manifest is posted to
+   (`github.com/settings/apps/new` vs
+   `github.com/organizations/{org}/settings/apps/new`) and the permission map
+   (`administration: write` vs `organization_self_hosted_runners: write`;
+   GitHub needs no Administration permission for org runners). For `--org`,
+   `wire::net::github_app::find_org` first sends an unauthenticated
+   `GET /orgs/{org}`: a 404 exits 2 before any socket or browser.
+2. **Create.** The runner binds a loopback callback server on `127.0.0.1:0`
+   (`wire::net::app_manifest::CallbackServer`), builds the manifest
+   (`AppManifest::for_target`: `public = false`, no webhook) and opens the
+   browser (unless `--no-browser`) to an auto-submitting form that sends the
+   manifest to the target's form. GitHub redirects back with a temporary
+   `code`, CSRF-checked against a `state` nonce (`parse_callback_path`). A
+   non-owner's org form is refused by GitHub and never redirects, so the
+   5-minute browser timeout names org owners and the token route. The code
+   is exchanged at `POST <api>/app-manifests/{code}/conversions`
+   (`convert_manifest_code`; `<api>` is `TOOLU_RUNNER_GITHUB_API_URL`,
+   default `https://api.github.com`), and the credentials (app id, PEM,
+   client id/secret, webhook secret, owner and `owner_id`) are saved **at
+   once** to `<home>/github-app.json` (`config::app_store`, 0600, shared by
+   all repos and machines).
+3. **Install** (`app_install.rs`). The install link is
+   `github.com/apps/{slug}/installations/new/permissions?target_id={owner_id}`.
+   `wait_for_installation` polls `GET <api>/app/installations` with a fresh
+   App JWT every 5 s (`TOOLU_RUNNER_INSTALL_POLL_MS`) until an installation's
+   account is the App's owner (`installation_on`, the one lookup `--import`
+   and `setup` share).
+   - Transient errors (transport, 429, 5xx) warn and keep polling; other
+     errors are fatal.
+   - On a terminal stdin, the lines `o` / `c` reopen / copy (OSC 52) the
+     link.
+   - At 10 min (`TOOLU_RUNNER_INSTALL_WAIT_MS`) a terminal is asked Keep
+     waiting / Open again / Cancel; without one the command exits 1.
+   - Ctrl-C or Cancel exits 130 (`run_cmd::CodedExit`), and the App stays
+     saved.
+   - Found: `installation_id` is written to `github-app.json` and the
+     command prints `Installed · installation <id> · all repositories` (or
+     the selected count, read with an installation token from
+     `GET /installation/repositories`).
 
-`--force` overwrites an existing `github-app.json`; without it the
-command refuses before any network call. `create-app` does not install the
-App; once it is installed, `register --app` uses it (next section).
+**Import** (`app_import.rs`). `--import <file>` or `--app-id <id> --app-key
+<pem>` reuses an existing App:
+
+- `GET <api>/app` with its JWT must succeed and name the same App before
+  anything is written. A 401 exits 2 and leaves the destination untouched.
+- The identity (slug, owner, `owner_id`, html URL, client id) is refreshed
+  from the reply.
+- The installation on the owner (or `--org`) is then looked up, or waited
+  for as above.
+- Re-importing the saved file onto itself needs no `--force` and resumes an
+  interrupted wait.
+
+Once the App is installed, `register --app` uses it (next section). It
+still finds the installation per repository or org.
 
 ## Sequence: register with a GitHub App (#201)
 
@@ -1259,7 +1304,7 @@ window in milliseconds.
 ```
 ~/.toolu-runner/                    # runner home ($TOOLU_RUNNER_HOME overrides)
 ├── token-<host>.json               # login token (0600, default store; keyring opt-in) — SHARED by all repos
-├── github-app.json                 # create-app credentials (0600) — SHARED by all repos
+├── github-app.json                 # create-app credentials + installation_id (0600) — SHARED by all repos
 ├── _diag/                          # the runner's own logs (always under ~/.toolu-runner: tracing starts before any registration loads)
 │   ├── runner.log                  # JSON, secret-masked, daily-rotated
 │   └── runner.log.YYYY-MM-DD       # rotated archives (older than 14 days removed at startup)

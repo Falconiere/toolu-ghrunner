@@ -1765,8 +1765,8 @@ Real data:
 | S4 / AC-2 failures | Live 401 / 404 `Integration not found` captures, a 503 | 401/404 fatal with the App's fix; 503 backs off | same suite |
 | AC-3 token registrations | pre-#201 `config.toml` text; token `register` / re-mint | a config without `[auth]` loads as token and saves without one; re-mint unchanged | `cargo test -p config --test integration -- registration_auth_test::` |
 | AC-4 masking | The App PEM through all four durable sinks; App JWTs and installation tokens echoed by a 503 into `_diag`; a 401/403 echoing the bearer at `register` and at a fatal re-mint | no PEM line in any sink; `_diag` shows `Bearer ***`; so does the stderr error | `cargo test -p toolu-runner --test process_env -- secret_sink_coverage_test::` (PEM); `run_app_remint_test::app_jwts_and_installation_tokens_never_reach_diag` (`_diag`); `register_app_test::a_rejected_app_prints_an_echoed_jwt_masked`, `run_app_remint_test::a_rejected_re_mint_prints_an_echoed_app_jwt_masked`, `run_app_remint_test::a_rejected_mint_prints_an_echoed_installation_token_masked` (stderr) |
-| S5 live, personal repo | **unverified**: no GitHub App credentials were available on the host | register, job, re-mint with an installation token, second job | deferred to #202 |
-| S5 live, organization | **unverified**: no App credentials either, and `create-app` makes a private (`public: false`) App owned by the user, which GitHub lets only the owning account install | an org runner registers and re-mints with an App installation token | deferred to #202 |
+| S5 live, personal repo | **unverified**: no GitHub App credentials were available on the host | register, job, re-mint with an installation token, second job | owned by #202 (see its section below) |
+| S5 live, organization | **unverified**: no App credentials either; #202 adds org-owned Apps (`create-app --org`) | an org runner registers and re-mints with an App installation token | owned by #202 (see its section below) |
 
 **Unverified, live.** Nothing here ran against github.com with a real App. #202 creates and installs a real App for its own live S4, so it owns S5 for both a personal repo and an organization. The GitHub replies the tests replay are the live 401/404 captures and the documented success examples listed above.
 
@@ -1807,3 +1807,61 @@ writes `orgs/acme/` and the running supervisor picks it up
 **Unverified lanes.** The live S7 lanes (AC-14) are recorded in the PR: no
 macOS desktop is available to this worker, no live test repository exists for
 the Linux job lanes, and its token lacks `admin:org` for the org lanes.
+
+## `create-app`: org-owned Apps and the installation wait (#202)
+
+`create-app --org <org>` creates an org-owned App with
+`organization_self_hosted_runners: write`. Without `--org` it creates a
+personal App with `administration: write`. Both wait for the installation and
+record `installation_id`. `--import` / `--app-id --app-key` reuse an existing
+App after `GET /app` proves the key. Spec:
+`docs/toolu/specs/2026-10-24-create-app-org-owned-apps-design.md`
+(gitignored).
+
+Real data:
+- The real binary runs in a temporary `TOOLU_RUNNER_HOME` with
+  `TOOLU_RUNNER_GITHUB_API_URL` pointed at a loopback peer.
+- The browser is replaced by HTTP GETs of the served form and of GitHub's
+  `/callback` redirect.
+- The peer replays live captures taken 2026-10-24:
+  - `orgs_200.json`: `GET /orgs/CodaSignal`;
+  - `orgs_404.json`: a missing org;
+  - `app_401_bad_jwt.json`: `GET /app` with a key the App does not hold.
+- It also replays GitHub's documented examples (`app_200.json`,
+  `installations_200.json`, `installation_repositories_200.json`) and the
+  protocol conversion fixture carrying the test key.
+- Every App call must carry a JWT that verifies with the test key's public
+  half.
+
+| Criterion / scenario | Real input and production path | Expected result | Runnable check |
+| --- | --- | --- | --- |
+| S1 / AC-1 manifest | `AppManifest::for_target` per target; the real `CallbackServer` fetched with reqwest | exact JSON (`organization_self_hosted_runners` vs `administration`); the org form action is `github.com/organizations/acme/settings/apps/new` | `cargo test -p protocol --test integration -- app_manifest_test::`; `cargo test -p wire --test integration -- app_manifest_test::` |
+| S2 / AC-2 org create + wait | Real binary `create-app --org acme`; peer: org 200, conversion, one empty `/app/installations` poll (answered only once `github-app.json` is 0600 on disk), then account `acme` | org form + permission served; App saved before the first poll; `Installed · installation 1 · all repositories`; `installation_id` and `owner_id` saved | `cargo test -p toolu-runner --test integration -- create_app_test::org_create_waits_then_records_installation` |
+| S2 / AC-3 unattended timeout | Same peer, never installed, `TOOLU_RUNNER_INSTALL_WAIT_MS=300`, stdin null | exit 1 naming the install link and `create-app --import`; App saved without `installation_id` | `create_app_test::unattended_wait_times_out_with_exit_1` |
+| S2 / AC-4 interactive | `wait_for_installation` in-process; input typed into a pipe after each prompt appears | the prompt offers Keep waiting / Open the link again / Cancel; `k` → installed; `o` reopens; `c` → cancelled; closed input → cancelled; `c` while waiting writes OSC 52; a 503 warns and keeps waiting; a 401 ends the wait | `cargo test -p toolu-runner --bin toolu-runner -- app_install` |
+| AC-5 unknown org | Real binary, live `orgs_404.json` | exit 2 `No organization "acmee" on github.com. Check the spelling.`; no callback URL; no file | `create_app_test::unknown_org_exits_2_before_any_browser` |
+| S3 / AC-6 import | Real binary `--import` (matching key) and `--app-id 999 --app-key` (the live 401) | match → `Key matches App 424242 · installed on acme`, identity refreshed; mismatch → exit 2, nothing written; an existing App is byte-identical even with `--force` | `create_app_test::import_*` |
+| AC-7 personal flow | Real binary `--account octocat` | personal form, `administration: write`, no org call; the wait as above | `create_app_test::personal_create_keeps_the_personal_form_and_permission` + the guard tests |
+| AC-8 file format | Pre-#202 `github-app.json` text; a saved App with `owner_id` | loads; `install_url` adds `/permissions?target_id=<owner_id>`; unset ids are left out | `cargo test -p config --test integration -- app_store_test::` |
+| S4 / AC-9 live org App | **unverified** until run | an org-owned App created with the org permission set and installed, `register --app --url https://github.com/<org>` registers an org runner, then the App is deleted | runbook below |
+| S5 / AC-10 live re-mint (from #201) | **unverified** until run | on a personal repo and on an org: `register --app` → `run` takes a job, re-mints with an installation token, takes a second job | runbook below |
+
+**Live runbook (S4 + S5).** It needs a browser session on github.com and an
+org you own. The manifest and install pages are GitHub's and take a person's
+click.
+
+1. Org leg:
+   - `toolu-runner create-app --org <org>`: create the App, then install it.
+     Record the App URL and the installation id it prints.
+   - `toolu-runner register --app --url https://github.com/<org> --labels toolu-runner-v1`.
+     Record the runner id.
+   - `toolu-runner run`, then dispatch `noop-live.yml` twice. Record both run
+     URLs; `_diag` shows the re-mint between them.
+2. Personal leg: the same with `create-app --account <login> --force`,
+   `register --app --url https://github.com/<login>/<repo>`.
+3. Afterwards, delete each App in its settings ("Delete GitHub App") and
+   remove the runners.
+
+**Unverified, live.** S4/S5 did not run on the worker host: no browser
+session there. The replies the tests replay are the live captures and
+documented examples listed above.
