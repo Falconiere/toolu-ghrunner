@@ -8,8 +8,10 @@ on:
     branches: [main]
 
 # A newer push to a PR supersedes the older run; pushes to main are never
-# cancelled — the same rule as ci.yml, whose three checks here (`host (…)`,
-# `container`) are required contexts too.
+# cancelled — the same rule as ci.yml. This workflow's three checks,
+# `host (ubuntu-24.04)`, `host (macos-15)` and `container`, are required
+# contexts on main like `ci` and `ci-macos`, so their names are pinned by
+# scripts/test/shell_templates_workflow_test.sh.
 concurrency:
   group: shell-templates-80-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}

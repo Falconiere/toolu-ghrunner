@@ -179,6 +179,7 @@ want_docker "the Docker lane replays the #103 docker capture" \
 want_scripts "scripts runs the release-script tests"      'bash "scripts/test/\$\{t\}_test\.sh"'
 want_scripts "scripts runs the check.sh test"             "check_script"
 want_scripts "scripts runs this test"                     "ci_workflow"
+want_scripts "scripts runs the shell-templates workflow test" "shell_templates_workflow"
 want_scripts "scripts runs the live-lane honesty test"    "live_lane"
 want_scripts "scripts checks the #103 compatibility matrix" "compat_matrix_check\.py --check"
 want_scripts "scripts re-verifies the #103 reference report" \
