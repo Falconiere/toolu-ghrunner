@@ -264,7 +264,8 @@ async fn an_org_registration_resolves_its_runner_group_name() -> TestResult {
   )?;
   assert!(out.status.success(), "stderr: {}", text(&out.stderr));
   assert_eq!(hits(&server, ORG_INSTALLATION).await?, 1);
-  let config = home.path().join("config.toml");
+  // #208: an org registration gets its own `orgs/<org>/` dir.
+  let config = home.path().join("orgs/octo-org/config.toml");
   assert_eq!(load_config(&config)?.runner_group, "2");
   assert_app_registration(home.path(), &config)
 }
