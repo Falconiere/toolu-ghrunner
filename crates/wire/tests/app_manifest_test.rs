@@ -7,7 +7,7 @@
 
 use std::time::Duration;
 
-use protocol::app_manifest::AppManifest;
+use protocol::app_manifest::{AppManifest, ManifestTarget};
 use tokio::io::AsyncWriteExt;
 use wire::net::app_manifest::{CallbackServer, build_conversion_url, map_conversion_error};
 
@@ -15,10 +15,23 @@ use wire::net::app_manifest::{CallbackServer, build_conversion_url, map_conversi
 /// `unwrap`/`expect`).
 type TestResult<T> = Result<T, Box<dyn std::error::Error>>;
 
-/// Build the onboard manifest JSON the served form embeds, with `redirect_url`
-/// pointed at the bound loopback callback.
+/// The personal manifest form (`ManifestTarget::Personal`).
+const PERSONAL_FORM: &str = "https://github.com/settings/apps/new";
+
+/// Build the personal onboard manifest JSON the served form embeds, with
+/// `redirect_url` pointed at the bound loopback callback.
 fn manifest_json(redirect_url: &str) -> TestResult<String> {
-  Ok(AppManifest::for_runner("t", redirect_url).to_json()?)
+  Ok(AppManifest::for_target("t", redirect_url, &ManifestTarget::Personal).to_json()?)
+}
+
+/// Pull the manifest JSON back out of the served form's hidden input.
+fn served_manifest(form: &str) -> TestResult<serde_json::Value> {
+  let manifest_attr = form
+    .split_once("name=\"manifest\" value=\"")
+    .and_then(|(_, rest)| rest.split_once('"'))
+    .map(|(value, _)| value)
+    .ok_or_else(|| std::io::Error::other("served form has no manifest input value"))?;
+  Ok(serde_json::from_str(&html_attr_unescape(manifest_attr))?)
 }
 
 /// Reverse the HTML attribute escaping the served form applies, so the manifest
@@ -41,7 +54,7 @@ async fn form_served_and_matching_callback_yields_code() -> TestResult<()> {
   let base = base.trim_end_matches('/').to_owned();
   // manifest is built after bind() so its redirect_url carries the bound port.
   let manifest = manifest_json(&server.callback_url())?;
-  let handle = tokio::spawn(server.wait_for_code(manifest, Duration::from_secs(10)));
+  let handle = tokio::spawn(server.wait_for_code(manifest, PERSONAL_FORM, Duration::from_secs(10)));
 
   let client = reqwest::Client::new();
 
@@ -86,6 +99,43 @@ async fn form_served_and_matching_callback_yields_code() -> TestResult<()> {
   Ok(())
 }
 
+/// #202 S1: an org target's form POSTs to the org's `settings/apps/new` and
+/// embeds the organization Self-hosted runners permission only.
+#[tokio::test]
+async fn org_form_posts_to_the_org_settings_with_the_org_permission() -> TestResult<()> {
+  let server = CallbackServer::bind("STATE9".to_owned()).await?;
+  let base = server.local_url().trim_end_matches('/').to_owned();
+  let target = ManifestTarget::Org("acme".to_owned());
+  let manifest =
+    AppManifest::for_target("toolu-runner-acme", &server.callback_url(), &target).to_json()?;
+  let handle = tokio::spawn(server.wait_for_code(
+    manifest,
+    "https://github.com/organizations/acme/settings/apps/new",
+    Duration::from_secs(10),
+  ));
+  let client = reqwest::Client::new();
+  let form = client.get(format!("{base}/")).send().await?.text().await?;
+  assert!(
+    form
+      .contains("action=\"https://github.com/organizations/acme/settings/apps/new?state=STATE9\""),
+    "form action missing/wrong: {form}"
+  );
+  let permissions = served_manifest(&form)?
+    .get("default_permissions")
+    .cloned()
+    .ok_or("no default_permissions")?;
+  assert_eq!(
+    permissions,
+    serde_json::json!({"organization_self_hosted_runners": "write"})
+  );
+  client
+    .get(format!("{base}/callback?code=c1&state=STATE9"))
+    .send()
+    .await?;
+  assert_eq!(handle.await??, "c1");
+  Ok(())
+}
+
 /// Blocker fix: a spurious/aborted connection (a probe that connects, writes a
 /// partial request line, then drops without a newline) must NOT end the flow —
 /// the real callback that follows still yields the code.
@@ -99,7 +149,7 @@ async fn spurious_connection_does_not_abort_the_flow() -> TestResult<()> {
     .map_or(base.as_str(), |(_, a)| a)
     .to_owned();
   let manifest = manifest_json(&server.callback_url())?;
-  let handle = tokio::spawn(server.wait_for_code(manifest, Duration::from_secs(10)));
+  let handle = tokio::spawn(server.wait_for_code(manifest, PERSONAL_FORM, Duration::from_secs(10)));
 
   // Two spurious connections that must NOT terminate the accept loop: a
   // partial (newline-less) line that drops mid-request, and a complete but
@@ -141,7 +191,7 @@ async fn callback_with_wrong_state_is_rejected() -> TestResult<()> {
   let base = server.local_url();
   let base = base.trim_end_matches('/').to_owned();
   let manifest = manifest_json(&server.callback_url())?;
-  let handle = tokio::spawn(server.wait_for_code(manifest, Duration::from_secs(10)));
+  let handle = tokio::spawn(server.wait_for_code(manifest, PERSONAL_FORM, Duration::from_secs(10)));
 
   let client = reqwest::Client::new();
   let resp = client
@@ -179,7 +229,12 @@ fn spent_code_errors_name_create_app_and_dotcom_url_is_api() {
   );
 
   assert_eq!(
-    build_conversion_url("github.com", "XYZ"),
+    build_conversion_url("https://api.github.com", "XYZ"),
     "https://api.github.com/app-manifests/XYZ/conversions"
+  );
+  // A test peer or mirror base with a trailing slash yields the same path.
+  assert_eq!(
+    build_conversion_url("http://127.0.0.1:9/", "XYZ"),
+    "http://127.0.0.1:9/app-manifests/XYZ/conversions"
   );
 }

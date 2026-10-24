@@ -490,6 +490,8 @@ fn register_app_secrets(masker: &Mutex<SecretMasker>) -> TestResult {
     pem: APP_PEM.to_owned(),
     html_url: "https://github.com/apps/toolu-runner-test-app".to_owned(),
     created_at: "2026-10-23T00:00:00Z".to_owned(),
+    owner_id: None,
+    installation_id: None,
   };
   config::app_store::save_app(app_home.path(), &app)?;
   let loaded = config::app_store::load_app_file(&config::app_store::app_path(app_home.path()))?;

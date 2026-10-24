@@ -44,6 +44,15 @@ pub struct StoredApp {
   pub html_url: String,
   /// When the App was created, RFC3339.
   pub created_at: String,
+  /// Numeric id of the owning account (#202): the install link's
+  /// `target_id`. `None` in a pre-#202 file.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub owner_id: Option<i64>,
+  /// The installation `create-app` waited for (#202); `None` until the App
+  /// is installed, and in a pre-#202 file. Informational: `register --app`
+  /// still looks the installation up per repo or org.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub installation_id: Option<i64>,
 }
 
 /// Path of the app store file: `<home>/github-app.json`.
@@ -51,7 +60,8 @@ pub fn app_path(home: &Path) -> PathBuf {
   home.join(APP_STORE_FILE)
 }
 
-/// Write the app store 0600 (reuses [`crate::config::write_secret_file`]).
+/// Write the app store 0600 (reuses [`crate::config::write_secret_file`]),
+/// atomically: a staged `github-app.json.tmp` is renamed over the file.
 ///
 /// Creates the home directory if missing.
 ///
@@ -68,7 +78,14 @@ pub fn save_app(home: &Path, app: &StoredApp) -> Result<(), RunnerError> {
   let path = app_path(home);
   let body = serde_json::to_string_pretty(app)
     .map_err(|e| RunnerError::Config(format!("json encode: {e}")))?;
-  crate::config::write_secret_file(&path, body.as_bytes())
+  // Write a 0600 sibling, then rename it over the file: a crash or a full
+  // disk mid-write never truncates the saved App, whose private key GitHub
+  // cannot hand out again (#202 rewrites the file to record the
+  // installation after a long wait).
+  let staged = home.join(format!("{APP_STORE_FILE}.tmp"));
+  crate::config::write_secret_file(&staged, body.as_bytes())?;
+  std::fs::rename(&staged, &path).map_err(RunnerError::Io)?;
+  Ok(())
 }
 
 /// Load the app store, or `None` when no App has been created.
@@ -124,6 +141,8 @@ impl std::fmt::Debug for StoredApp {
       .field("pem", &"<redacted>")
       .field("html_url", &self.html_url)
       .field("created_at", &self.created_at)
+      .field("owner_id", &self.owner_id)
+      .field("installation_id", &self.installation_id)
       .finish()
   }
 }
@@ -138,9 +157,16 @@ impl StoredApp {
   }
 
   /// The install URL to print after creation:
+  /// `https://github.com/apps/{slug}/installations/new/permissions?target_id={owner_id}`
+  /// when the owner id is known (it skips GitHub's account picker; a private
+  /// App installs only on its owner), else
   /// `https://github.com/apps/{slug}/installations/new`.
   pub fn install_url(&self) -> String {
-    format!("https://github.com/apps/{}/installations/new", self.slug)
+    let base = format!("https://github.com/apps/{}/installations/new", self.slug);
+    match self.owner_id {
+      Some(owner_id) => format!("{base}/permissions?target_id={owner_id}"),
+      None => base,
+    }
   }
 
   /// A secret-free, human-readable summary for the terminal.

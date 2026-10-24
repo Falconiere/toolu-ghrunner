@@ -1,4 +1,5 @@
-//! GitHub App authentication: the App JWT and the App API reply shapes.
+//! GitHub App authentication: the App JWT and the App API reply shapes
+//! (installations, tokens, `GET /app`, `GET /orgs/{org}`).
 //!
 //! A GitHub App proves who it is with a short-lived RS256 JWT signed by its
 //! private key (`iss` = the App id). GitHub rejects a JWT whose `exp` lies
@@ -80,6 +81,9 @@ pub struct Installation {
   /// The user or organization the App is installed on.
   #[serde(default)]
   pub account: Option<InstallationAccount>,
+  /// `"all"` or `"selected"` repositories; `None` when GitHub omits it.
+  #[serde(default)]
+  pub repository_selection: Option<String>,
 }
 
 /// The account an [`Installation`] belongs to.
@@ -87,6 +91,44 @@ pub struct Installation {
 pub struct InstallationAccount {
   /// The user or organization login.
   pub login: String,
+}
+
+/// `GET /app` reply: the App the JWT authenticates as (#202 `--import`
+/// proves its key with it and refreshes the saved identity from it).
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct AppInfo {
+  /// Numeric App id.
+  pub id: i64,
+  /// URL slug.
+  pub slug: String,
+  /// Display name.
+  pub name: String,
+  /// The account that owns the App.
+  #[serde(default)]
+  pub owner: Option<AppOwner>,
+  /// The App's public page.
+  pub html_url: String,
+  /// OAuth client id; empty when GitHub omits it.
+  #[serde(default)]
+  pub client_id: String,
+}
+
+/// The account owning an [`AppInfo`].
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct AppOwner {
+  /// User or organization login.
+  pub login: String,
+  /// Numeric account id.
+  pub id: i64,
+}
+
+/// `GET /orgs/{org}` reply, reduced to what `create-app --org` needs.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct OrgInfo {
+  /// The organization login, as GitHub spells it.
+  pub login: String,
+  /// Numeric organization id.
+  pub id: i64,
 }
 
 /// `POST /app/installations/{id}/access_tokens` reply: a bearer for the

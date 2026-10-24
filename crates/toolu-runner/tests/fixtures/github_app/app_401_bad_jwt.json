@@ -1,0 +1,19 @@
+{
+  "provenance": {
+    "captured": "2026-10-24T02:29Z",
+    "host": "api.github.com",
+    "meaning": "a private key that does not match the App: create-app --import refuses and saves nothing",
+    "method": "curl, status/headers/body recorded verbatim; RS256 App JWT signed by the protocol crate's test key (registered to no App)",
+    "request": "GET /app, JWT iss=15368 (an existing App) signed with a key that App does not hold",
+    "sanitization": "none needed: the reply carries no credential"
+  },
+  "response": {
+    "body": "{\"message\":\"A JSON web token could not be decoded\",\"documentation_url\":\"https://docs.github.com/rest\",\"status\":\"401\"}",
+    "headers": {
+      "date": "Sat, 24 Oct 2026 02:29:40 GMT",
+      "content-type": "application/json; charset=utf-8",
+      "x-github-request-id": "B9C8:32DC9C:2743BF4:7FF8427:6ADC1813"
+    },
+    "status": 401
+  }
+}

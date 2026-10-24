@@ -18,9 +18,6 @@ use shared::RunnerError;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 
-/// The `action` target the served form POSTs the manifest to.
-const MANIFEST_ACTION: &str = "https://github.com/settings/apps/new";
-
 /// Upper bound on the request line we read before treating a connection as a
 /// bad request (guards against a peer that never sends a newline).
 const MAX_REQUEST_LINE: u64 = 8 * 1024;
@@ -85,7 +82,8 @@ impl CallbackServer {
     format!("http://127.0.0.1:{}/callback", self.local_addr.port())
   }
 
-  /// Serve `GET /` (the auto-submit form embedding `manifest_json`) and
+  /// Serve `GET /` (the auto-submit form that sends `manifest_json` to
+  /// `form_action`, the target's `settings/apps/new` page) and
   /// `GET /callback` until a matching-state code arrives, or `timeout`
   /// elapses. Consumes `self`.
   ///
@@ -98,13 +96,14 @@ impl CallbackServer {
   pub async fn wait_for_code(
     self,
     manifest_json: String,
+    form_action: &str,
     timeout: Duration,
   ) -> Result<String, RunnerError> {
     let Self {
       listener, state, ..
     } = self;
-    let outcome =
-      tokio::time::timeout(timeout, accept_loop(&listener, &manifest_json, &state)).await;
+    let form_page = form_html(&manifest_json, &state, form_action);
+    let outcome = tokio::time::timeout(timeout, accept_loop(&listener, &form_page, &state)).await;
     match outcome {
       Ok(result) => result,
       Err(_elapsed) => Err(RunnerError::Network(
@@ -124,7 +123,7 @@ impl CallbackServer {
 /// keeps looping.
 async fn accept_loop(
   listener: &TcpListener,
-  manifest_json: &str,
+  form_page: &str,
   state: &str,
 ) -> Result<String, RunnerError> {
   loop {
@@ -132,7 +131,7 @@ async fn accept_loop(
       .accept()
       .await
       .map_err(|e| RunnerError::Network(format!("callback accept failed: {e}")))?;
-    match handle_connection(&mut stream, manifest_json, state).await {
+    match handle_connection(&mut stream, form_page, state).await {
       Ok(Some(code)) => return Ok(code),
       Ok(None) => {},
       Err(e) => return Err(e),
@@ -150,7 +149,7 @@ async fn accept_loop(
 /// arrives.
 async fn handle_connection(
   stream: &mut tokio::net::TcpStream,
-  manifest_json: &str,
+  form_page: &str,
   state: &str,
 ) -> Result<Option<String>, RunnerError> {
   let (read_half, mut write_half) = stream.split();
@@ -159,7 +158,7 @@ async fn handle_connection(
   };
 
   if target == "/" {
-    log_write_err(serve_root(&mut write_half, manifest_json, state).await);
+    log_write_err(serve_root(&mut write_half, form_page).await);
     return Ok(None);
   }
   if target.starts_with("/callback") {
@@ -185,14 +184,18 @@ async fn read_target_or_log<R: tokio::io::AsyncRead + Unpin>(read_half: R) -> Op
   }
 }
 
-/// Write the auto-submit form (embedding `manifest_json`) for `GET /`.
+/// Write the pre-rendered auto-submit form page for `GET /`.
 async fn serve_root<W: AsyncWriteExt + Unpin>(
   writer: &mut W,
-  manifest_json: &str,
-  state: &str,
+  form_page: &str,
 ) -> Result<(), RunnerError> {
-  let body = form_html(manifest_json, state, MANIFEST_ACTION);
-  write_http_response(writer, "HTTP/1.1 200 OK", "text/html; charset=utf-8", &body).await
+  write_http_response(
+    writer,
+    "HTTP/1.1 200 OK",
+    "text/html; charset=utf-8",
+    form_page,
+  )
+  .await
 }
 
 /// Write the `404` for an unrecognized path.
@@ -302,7 +305,8 @@ async fn write_http_response<W: AsyncWriteExt + Unpin>(
     .map_err(|e| RunnerError::Network(format!("flushing callback response failed: {e}")))
 }
 
-/// POST the manifest code to GitHub, returning the created app's credentials.
+/// POST the manifest code to `<api_base>/app-manifests/{code}/conversions`,
+/// returning the created app's credentials.
 ///
 /// Sets `Accept: application/vnd.github+json` and a `User-Agent` (GitHub's
 /// REST API 403s requests without one). On a 2xx the body is parsed by
@@ -315,10 +319,10 @@ async fn write_http_response<W: AsyncWriteExt + Unpin>(
 /// (404/422), and `RunnerError::Protocol` when a 2xx body does not parse.
 pub async fn convert_manifest_code(
   client: &reqwest::Client,
-  host: &str,
+  api_base: &str,
   code: &str,
 ) -> Result<ConversionResponse, RunnerError> {
-  let url = build_conversion_url(host, code);
+  let url = build_conversion_url(api_base, code);
   let response = client
     .post(&url)
     .header("Accept", "application/vnd.github+json")
@@ -346,16 +350,14 @@ pub async fn convert_manifest_code(
   }
 }
 
-/// Build the `app-manifests/{code}/conversions` endpoint URL for `host`.
-///
-/// `github.com` routes through `api.github.com`; any other host is treated as
-/// GHES and routed through `https://{host}/api/v3/…` as a best-effort fallback.
-pub fn build_conversion_url(host: &str, code: &str) -> String {
-  if host.eq_ignore_ascii_case("github.com") {
-    format!("https://api.github.com/app-manifests/{code}/conversions")
-  } else {
-    format!("https://{host}/api/v3/app-manifests/{code}/conversions")
-  }
+/// Build the `app-manifests/{code}/conversions` endpoint URL under the REST
+/// `api_base` (`https://api.github.com` for github.com; a trailing `/` is
+/// ignored).
+pub fn build_conversion_url(api_base: &str, code: &str) -> String {
+  format!(
+    "{}/app-manifests/{code}/conversions",
+    api_base.trim_end_matches('/')
+  )
 }
 
 /// Map a non-2xx conversion status into a [`RunnerError`].

@@ -1,8 +1,8 @@
 //! Shared #201 fixtures: the protocol crate's real test RSA key, the GitHub
 //! App reply captures in `fixtures/github_app/` (live 401/404 captures and
 //! GitHub's documented success examples, see each file's `provenance`), JWT
-//! verification, a real `github-app.json` writer, and a peer that echoes the
-//! bearer it was sent.
+//! verification, a real `github-app.json` writer, a peer that echoes the
+//! bearer it was sent, and (#202) a peer that answers only a valid App JWT.
 //!
 //! Declared once in `tests/main.rs`; test files use `crate::github_app_fixtures`.
 
@@ -119,6 +119,8 @@ pub fn write_app(home: &Path, host: &str) -> Result<PathBuf, Box<dyn Error>> {
     pem: PRIVATE_PEM.to_owned(),
     html_url: format!("https://{host}/apps/{APP_SLUG}"),
     created_at: "2026-10-23T00:00:00Z".to_owned(),
+    owner_id: None,
+    installation_id: None,
   };
   config::app_store::save_app(home, &app)?;
   Ok(config::app_store::app_path(home))
@@ -139,4 +141,46 @@ impl Respond for EchoAuthorization {
       });
     ResponseTemplate::new(self.0).set_body_string(format!("upstream echoed: {authorization}"))
   }
+}
+
+/// A reply GitHub gives only to a valid App JWT: when the request's bearer
+/// verifies as an App JWT for [`APP_ID`] signed by the test key, `ok`;
+/// otherwise the live `app_401_bad_jwt.json` capture (#202) — what GitHub
+/// answers a key the App does not hold.
+pub struct AppJwtGate(pub ResponseTemplate);
+
+impl Respond for AppJwtGate {
+  fn respond(&self, request: &Request) -> ResponseTemplate {
+    let verified = request
+      .headers
+      .get("authorization")
+      .and_then(|value| value.to_str().ok())
+      .is_some_and(|authorization| verify_app_jwt(authorization).is_ok());
+    if verified {
+      return self.0.clone();
+    }
+    capture("app_401_bad_jwt.json").unwrap_or_else(|e| {
+      ResponseTemplate::new(500).set_body_string(format!("fixture unreadable: {e}"))
+    })
+  }
+}
+
+/// A documented reply's JSON body with `edit` applied, as a 200 (#202: the
+/// documented examples name `octocat`; the tests rewrite the account or App
+/// id they key on).
+pub fn edited_reply(
+  name: &str,
+  edit: impl FnOnce(&mut Value) -> Result<(), Box<dyn Error>>,
+) -> Result<ResponseTemplate, Box<dyn Error>> {
+  let mut body: Value = serde_json::from_str(&capture_body(name)?)?;
+  edit(&mut body)?;
+  Ok(ResponseTemplate::new(200).set_body_json(body))
+}
+
+/// Replace the value at JSON `pointer` (which must exist) with `new`.
+pub fn set_json(value: &mut Value, pointer: &str, new: Value) -> Result<(), Box<dyn Error>> {
+  *value
+    .pointer_mut(pointer)
+    .ok_or_else(|| format!("no {pointer} in the fixture"))? = new;
+  Ok(())
 }

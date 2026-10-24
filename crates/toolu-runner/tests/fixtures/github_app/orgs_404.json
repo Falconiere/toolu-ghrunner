@@ -1,0 +1,19 @@
+{
+  "provenance": {
+    "captured": "2026-10-24T02:29Z",
+    "host": "api.github.com",
+    "meaning": "a mistyped organization (or a user login): create-app --org refuses before any browser",
+    "method": "curl, status/headers/body recorded verbatim; unauthenticated, as create-app's org check sends it",
+    "request": "GET /orgs/toolu-no-such-org-202",
+    "sanitization": "none needed: the reply carries no credential"
+  },
+  "response": {
+    "body": "{\"message\":\"Not Found\",\"documentation_url\":\"https://docs.github.com/rest/orgs/orgs#get-an-organization\",\"status\":\"404\"}",
+    "headers": {
+      "date": "Sat, 24 Oct 2026 02:29:25 GMT",
+      "content-type": "application/json; charset=utf-8",
+      "x-github-request-id": "E928:367180:29A3DA3:8792FBC:6ADC1805"
+    },
+    "status": 404
+  }
+}

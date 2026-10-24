@@ -1,0 +1,19 @@
+{
+  "provenance": {
+    "captured": "2026-10-24T02:29Z",
+    "host": "api.github.com",
+    "meaning": "an organization that exists: create-app's org check passes and reads its id",
+    "method": "curl, status/headers/body recorded verbatim; unauthenticated, as create-app's org check sends it",
+    "request": "GET /orgs/CodaSignal",
+    "sanitization": "none needed: the reply carries no credential"
+  },
+  "response": {
+    "body": "{\"login\":\"CodaSignal\",\"id\":212445385,\"node_id\":\"O_kgDODKmoyQ\",\"url\":\"https://api.github.com/orgs/CodaSignal\",\"repos_url\":\"https://api.github.com/orgs/CodaSignal/repos\",\"events_url\":\"https://api.github.com/orgs/CodaSignal/events\",\"hooks_url\":\"https://api.github.com/orgs/CodaSignal/hooks\",\"issues_url\":\"https://api.github.com/orgs/CodaSignal/issues\",\"members_url\":\"https://api.github.com/orgs/CodaSignal/members{/member}\",\"public_members_url\":\"https://api.github.com/orgs/CodaSignal/public_members{/member}\",\"avatar_url\":\"https://avatars.githubusercontent.com/u/212445385?v=4\",\"description\":\"AI helps you build. We help you build it right.\",\"name\":\"CodaSignal\",\"company\":null,\"blog\":\"https://codasignal.com\",\"location\":\"United States of America\",\"email\":\"hello@codasignal.com\",\"twitter_username\":null,\"is_verified\":false,\"has_organization_projects\":true,\"has_repository_projects\":true,\"public_repos\":0,\"public_gists\":0,\"followers\":1,\"following\":0,\"html_url\":\"https://github.com/CodaSignal\",\"created_at\":\"2025-05-19T22:13:21Z\",\"updated_at\":\"2026-05-14T22:28:27Z\",\"archived_at\":null,\"type\":\"Organization\"}",
+    "headers": {
+      "date": "Sat, 24 Oct 2026 02:29:25 GMT",
+      "content-type": "application/json; charset=utf-8",
+      "x-github-request-id": "E91A:2D18F1:28672D8:83B3CEA:6ADC1805"
+    },
+    "status": 200
+  }
+}

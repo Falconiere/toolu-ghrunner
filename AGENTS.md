@@ -6,9 +6,9 @@ Standalone GitHub Actions JIT runner — no orchestrator service, no OTel.
 
 `toolu-runner` is **bin-only** (CLI entrypoint: `main.rs` + `cli.rs` +
 `register/run/boot/service/login/status/create_app_cmd.rs` (one `*_cmd.rs`
-each) + `register_auth.rs` + `app_auth.rs` + `supervisor.rs`/`supervisor_signal.rs`/
-`machine_service.rs` (#208) + `ephemeral.rs` + `network_setup.rs` + `check_*.rs` +
-`doctor_*.rs`).
+each) + `register_auth.rs` + `app_auth.rs` + `app_install.rs` + `app_import.rs` +
+`supervisor.rs`/`supervisor_signal.rs`/`machine_service.rs` (#208) +
+`ephemeral.rs` + `network_setup.rs` + `check_*.rs` + `doctor_*.rs`).
 Engine = `execution`;
 JIT lifecycle = `listener`. Plus standalone `daemon` bin (`toolu-daemon`,
 no internal deps, `reqwest` in tests only).
@@ -225,13 +225,17 @@ App-JWT tests, never uploaded to any GitHub App (authenticates nothing).
   `rsa_oaep`/`body_decrypt` unwrap encrypted session keys), `types`
   (`.runner`/`.credentials`/`_rsaparams` blobs: `RunnerSettings`,
   `CredentialData`, `RsaKeyParams`), `v1/` (GHES types + pure `resolve_service_url`),
-  `app_manifest` (prefilled manifest `administration:write`, `public=false`,
-  no webhook; `AppManifest::for_runner`, `ConversionResponse` +
+  `app_manifest` (#202 `ManifestTarget` `Personal` | `Org(org)` →
+  `form_action` (`settings/apps/new` vs `organizations/{org}/settings/apps/new`)
+  + `default_permissions` (`administration:write` vs
+  `organization_self_hosted_runners:write`); `public=false`, no webhook;
+  `AppManifest::for_target`, `ConversionResponse` (`owner.id` optional) +
   `parse_conversion`, CSRF `new_state`, `form_html`,
   `parse_callback_path` — backs `create-app`), `app_jwt` (#201: RS256
   `build_app_jwt[_at]`, `iat` −60s / `exp` +540s / `iss` = app id, key errors
-  never echo the PEM; `Installation`, `InstallationToken` with redacted
-  `Debug`).
+  never echo the PEM; `Installation` (+ `repository_selection`),
+  `InstallationToken` with redacted `Debug`; #202 `AppInfo`/`AppOwner`
+  (`GET /app`), `OrgInfo` (`GET /orgs/{org}`)).
 - **`shared/`**: `config` (`RunnerConfig` incl. `node_dir`
   `TOOLU_RUNNER_NODE_DIR`, `NetworkConfig` pure data with `Debug` proxy as
   `<set>`, `ServicesMode`, `WorkspaceConfig`, `CacheConfig`/`L2Config`);
@@ -277,9 +281,11 @@ App-JWT tests, never uploaded to any GitHub App (authenticates nothing).
   `TOOLU_RUNNER_TOKEN` / `login`; pure `keyring_opted_in` /
   `no_keyring_forced`, `keyring_reachable` gate, `StoredToken`);
   `app_store.rs` (`StoredApp` at `<home>/github-app.json` 0600:
-  `save_app`/`load_app`/`load_app_file`, `install_url`, `safe_summary`,
-  `secret_values` for the masker, redacted `Debug`; written by `create-app`,
-  read by `register --app` and the App re-mint);
+  `save_app`/`load_app`/`load_app_file`, `install_url` (`…/installations/new/permissions?target_id=<owner_id>`
+  when known), `safe_summary`, `secret_values` for the masker, redacted
+  `Debug`; optional #202 `owner_id` / `installation_id` (omitted when unset,
+  pre-#202 files load); written by `create-app`, read by `register --app`
+  and the App re-mint);
   `registration_auth.rs` (#201 `[auth]`: `AuthSection` tagged on `kind`,
   `Token` default and omitted on save (pre-#201 shape) or
   `App { app_file, installation_id }`, `deny_unknown_fields`);
@@ -321,11 +327,14 @@ App-JWT tests, never uploaded to any GitHub App (authenticates nothing).
   off, other non-2xx→`Auth` fatal), `github_app` (#201 App-JWT calls:
   `find_installation` (`Ok(None)` on 404 for a known App, `Auth` on 404
   `Integration not found`), `list_installations`, `create_installation_token`,
-  pure `reuse_deadline`; same 429/5xx→`Network` rule; live 401/404 captures
-  in `toolu-runner/tests/fixtures/github_app/`), `runner_groups` (org groups +
+  pure `reuse_deadline`; #202 `get_app` (proves a key), unauthenticated
+  `find_org` (`Ok(None)` on 404), `installation_repo_count`; same
+  429/5xx→`Network` rule; live 401/404 captures (+ #202 `orgs_200/404`,
+  `app_401_bad_jwt`) in `toolu-runner/tests/fixtures/github_app/`),
+  `runner_groups` (org groups +
   `pick_group`),
-  `app_manifest` (loopback `CallbackServer` 127.0.0.1:0 +
-  `convert_manifest_code` POST).
+  `app_manifest` (loopback `CallbackServer` 127.0.0.1:0 serving the
+  target's form + `convert_manifest_code` POST under the API base).
   `reporting/`: `run_service` shapes + `map_conclusion`, `results_service`
   types/URL helpers (`create_job/step_logs_metadata`), `feature_detection` V1/V2, `live_log` (HTTP/1.1 upgrade
   on caller client; `live_log_client(&NetworkConfig)` is `http1_only`/30s, bad
@@ -464,10 +473,23 @@ App-JWT tests, never uploaded to any GitHub App (authenticates nothing).
   network reuses `check_cmd::gather`; only a persistent *token* registration
   needs a personal bearer, `[auth] kind = "app"` mints its own and gets an
   `app` row that loads its App file (#201);
-  `doctor_*_test`). `create_app_cmd` (github.com only; loopback callback,
-  `--no-browser` prints URL; converts code, persists `<home>/github-app.json`;
-  prints install URL, never installs — `register --app` then uses it;
-  `--name/--host/--no-browser/--force`).
+  `doctor_*_test`). `create_app_cmd` (#202; github.com only; offline guards
+  (host, existing file) → `--org` check `GET /orgs/{org}` (404 → exit 2) →
+  loopback callback serving the target's form, `--no-browser` prints URL;
+  converts code, saves `<home>/github-app.json` AT ONCE; default name
+  `toolu-runner-<org|account|hostname>`; then `wait_and_record`).
+  `app_install` (`installation_on` = THE "App + its installation on an
+  account" lookup (wait, import; #204's `setup` to reuse it); `wait_for_installation` polls
+  `/app/installations` with a fresh JWT, `Network` warns + continues, line
+  commands `o`/`c` (OSC 52) on a terminal stdin, timeout prompt Keep/Open/
+  Cancel or unattended `TimedOut`; Ctrl-C in `create_app_cmd::run_wait`;
+  exits via `CodedExit` 1 timeout / 130 cancel). `app_import`
+  (`--import`/`--app-id`+`--app-key`: `GET /app` proof before any write,
+  identity refreshed from it, then lookup or wait). Env hooks in `config.rs`:
+  `TOOLU_RUNNER_GITHUB_API_URL` (default `https://api.github.com`),
+  `TOOLU_RUNNER_INSTALL_WAIT_MS` (600000), `TOOLU_RUNNER_INSTALL_POLL_MS`
+  (5000); tested in-process (`src/tests/app_install.rs`) and through the
+  binary (`create_app_test`).
 
 ### Step summaries (#83)
 

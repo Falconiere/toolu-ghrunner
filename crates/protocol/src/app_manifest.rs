@@ -1,7 +1,9 @@
 //! GitHub App manifest onboarding flow — strictly sync, no I/O, no network.
 //!
 //! The runner onboards itself as a GitHub App via the manifest flow: it POSTs
-//! an [`AppManifest`] to `settings/apps/new`, GitHub redirects back to a
+//! an [`AppManifest`] to its [`ManifestTarget`]'s form (`settings/apps/new`
+//! for a personal account, `organizations/{org}/settings/apps/new` for an
+//! organization), GitHub redirects back to a
 //! loopback callback with a temporary `code`, and the caller exchanges that
 //! code for the minted app credentials ([`ConversionResponse`]). This module
 //! owns the pure pieces: manifest construction, response parsing, CSRF state,
@@ -13,7 +15,45 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use shared::RunnerError;
 
-/// GitHub App manifest posted to `settings/apps/new` (onboard-only shape).
+/// The GitHub web origin the manifest forms live under (github.com only).
+const GITHUB_WEB: &str = "https://github.com";
+
+/// Which account the App is created for: decides the manifest form and the
+/// permissions (#202).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ManifestTarget {
+  /// The signed-in user's account: repository runners need the repository
+  /// permission `administration: write`.
+  Personal,
+  /// An organization (by login): organization runners need
+  /// `organization_self_hosted_runners: write`, and GitHub needs no
+  /// Administration permission at that scope.
+  Org(String),
+}
+
+impl ManifestTarget {
+  /// The form the manifest is sent to (an HTTP `POST`):
+  /// `https://github.com/settings/apps/new` or
+  /// `https://github.com/organizations/{org}/settings/apps/new`.
+  pub fn form_action(&self) -> String {
+    match self {
+      Self::Personal => format!("{GITHUB_WEB}/settings/apps/new"),
+      Self::Org(org) => format!("{GITHUB_WEB}/organizations/{org}/settings/apps/new"),
+    }
+  }
+
+  /// The manifest's `default_permissions` for this target.
+  pub fn default_permissions(&self) -> BTreeMap<String, String> {
+    let key = match self {
+      Self::Personal => "administration",
+      Self::Org(_) => "organization_self_hosted_runners",
+    };
+    BTreeMap::from([(key.to_owned(), "write".to_owned())])
+  }
+}
+
+/// GitHub App manifest posted to a [`ManifestTarget`]'s form (onboard-only
+/// shape).
 ///
 /// Serializes (in declaration order) to exactly `{name, url, redirect_url,
 /// public, default_permissions, default_events}` — deliberately no
@@ -29,21 +69,18 @@ pub struct AppManifest {
 }
 
 impl AppManifest {
-  /// Build the onboard-only manifest: `administration:write`, `public=false`,
-  /// no webhook.
+  /// Build the onboard-only manifest for `target`: its permissions
+  /// ([`ManifestTarget::default_permissions`]), `public=false`, no webhook.
   ///
   /// `url` is a homepage placeholder; `redirect_url` is the loopback callback
   /// the manifest flow returns to.
-  pub fn for_runner(name: &str, redirect_url: &str) -> Self {
-    let mut default_permissions = BTreeMap::new();
-    default_permissions.insert("administration".to_owned(), "write".to_owned());
-
+  pub fn for_target(name: &str, redirect_url: &str, target: &ManifestTarget) -> Self {
     Self {
       name: name.to_owned(),
       url: "https://github.com/toolu/toolu-runner".to_owned(),
       redirect_url: redirect_url.to_owned(),
       public: false,
-      default_permissions,
+      default_permissions: target.default_permissions(),
       default_events: Vec::new(),
     }
   }
@@ -64,6 +101,10 @@ impl AppManifest {
 pub struct ConversionOwner {
   /// The owner's login handle.
   pub login: String,
+  /// The owner's numeric account id (the install link's `target_id`);
+  /// `None` when GitHub omits it.
+  #[serde(default)]
+  pub id: Option<i64>,
 }
 
 /// Response body from `POST /app-manifests/{code}/conversions`.
