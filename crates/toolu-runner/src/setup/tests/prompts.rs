@@ -105,11 +105,9 @@ fn closed_terminal_is_a_clean_stop() {
     rx,
     pending: std::collections::VecDeque::new(),
   };
-  let end = match keys.next_key() {
-    Ok(_) => panic!("a closed channel must end the prompt"),
-    Err(end) => end,
-  };
-  assert!(matches!(end, PromptEnd::Closed), "{end:?}");
+  let end = keys.next_key().err();
+  assert!(matches!(end, Some(PromptEnd::Closed)), "{end:?}");
+  let Some(end) = end else { return };
   let err = <crate::setup::plan::SetupError as From<PromptEnd>>::from(end);
   assert_eq!(
     err.code, 0,
