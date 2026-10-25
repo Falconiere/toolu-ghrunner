@@ -45,6 +45,9 @@ pub(crate) enum PromptEnd {
   Back,
   /// The terminal could not be read or written.
   Io(String),
+  /// The terminal closed (EOF on `/dev/tty`): nobody is there to
+  /// answer, so setup stops cleanly instead of failing.
+  Closed,
 }
 
 impl From<PromptEnd> for SetupError {
@@ -53,6 +56,7 @@ impl From<PromptEnd> for SetupError {
       PromptEnd::Cancelled => SetupError::cancelled(),
       PromptEnd::Back => SetupError::usage("cancelled at the prompt (Esc)"),
       PromptEnd::Io(message) => SetupError::runtime(message),
+      PromptEnd::Closed => SetupError::closed_terminal(),
     }
   }
 }
@@ -188,10 +192,7 @@ impl TtyKeys {
     if let Some(byte) = self.pending.pop_front() {
       return Ok(byte);
     }
-    self
-      .rx
-      .recv()
-      .map_err(|_closed| PromptEnd::Io("the terminal closed".to_owned()))
+    self.rx.recv().map_err(|_closed| PromptEnd::Closed)
   }
 
   fn byte_within(&mut self, wait: Duration) -> Option<u8> {

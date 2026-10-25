@@ -94,3 +94,26 @@ fn input_accepts_spaces_and_utf8() {
   let value = run_secret(&mut keys(b"a b\r"), &mut out, "Token").unwrap();
   assert_eq!(value, "a b");
 }
+
+#[test]
+fn closed_terminal_is_a_clean_stop() {
+  // The reader thread is gone (EOF on /dev/tty): the prompt ends as
+  // Closed, and setup converts that to exit 0, not a failure.
+  let (tx, rx) = std::sync::mpsc::channel::<u8>();
+  drop(tx);
+  let mut keys = TtyKeys {
+    rx,
+    pending: std::collections::VecDeque::new(),
+  };
+  let end = match keys.next_key() {
+    Ok(_) => panic!("a closed channel must end the prompt"),
+    Err(end) => end,
+  };
+  assert!(matches!(end, PromptEnd::Closed), "{end:?}");
+  let err = <crate::setup::plan::SetupError as From<PromptEnd>>::from(end);
+  assert_eq!(
+    err.code, 0,
+    "closed terminal exits cleanly: {}",
+    err.message
+  );
+}

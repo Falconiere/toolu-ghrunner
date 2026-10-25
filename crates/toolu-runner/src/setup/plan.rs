@@ -40,6 +40,17 @@ impl SetupError {
       message: "cancelled".to_owned(),
     }
   }
+
+  /// The terminal closed mid-prompt: a clean stop (exit 0), since
+  /// nothing is wrong with the machine or the answers — there is
+  /// simply nobody there to give them. Setup resumes on re-run.
+  pub(crate) fn closed_terminal() -> Self {
+    Self {
+      code: 0,
+      message: "the terminal closed — setup stopped; run `toolu-runner setup` again to continue"
+        .to_owned(),
+    }
+  }
 }
 
 impl std::fmt::Display for SetupError {
