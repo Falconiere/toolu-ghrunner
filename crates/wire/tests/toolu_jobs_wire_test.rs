@@ -234,7 +234,7 @@ async fn not_found_rate_limit_server_error_and_other_statuses_are_classified() {
     ),
     (
       400,
-      |e| matches!(e, TooluError::Protocol(m) if m.contains("400")),
+      |e| *e == TooluError::Refused("x".to_owned()),
     ),
   ] {
     let (client, server) = peer(response_bytes(status, &[], "{\"error\":\"x\"}")).await;

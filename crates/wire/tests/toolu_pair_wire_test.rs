@@ -120,7 +120,7 @@ async fn an_approved_poll_is_the_grant_and_a_503_is_transient() {
 }
 
 #[tokio::test]
-async fn a_refused_enrollment_token_is_revoked_and_a_reserved_label_is_protocol() {
+async fn a_refused_enrollment_token_is_revoked_and_a_reserved_label_is_refused() {
   let (url, server) = bare_peer(replay(ENROLL_401)).await;
   let err = enroll(&reqwest::Client::new(), &url, "tlu_e_used", &report())
     .await
@@ -139,7 +139,7 @@ async fn a_refused_enrollment_token_is_revoked_and_a_reserved_label_is_protocol(
     .expect_err("400");
   server.await.expect("server");
   assert!(
-    matches!(&err, TooluError::Protocol(m) if m.contains("toolu-gpu")),
+    matches!(&err, TooluError::Refused(m) if m.contains("toolu-gpu")),
     "{err:?}"
   );
 }

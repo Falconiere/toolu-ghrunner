@@ -4,7 +4,8 @@
 //!
 //! The contract is CodaSignal/toolu.sh `docs/guides/self-hosted-machines.md`
 //! ("Device-code pairing", "Enrollment tokens", "Machine self-service"). Pure
-//! types and rules only; the HTTP calls live in `wire::net::toolu_jobs`.
+//! types and rules only; the HTTP calls live in `wire::net::toolu_pair`
+//! (pairing, enrollment) and `wire::net::toolu_jobs` (`/runner/host`).
 //! Every type carrying a credential (`device_code`, `host_token`,
 //! `enroll_token`) prints it as `<redacted>` in `Debug`.
 

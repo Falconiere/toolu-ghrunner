@@ -301,7 +301,7 @@ impl PassState {
 
 /// Log a failed job list (the pass backs off).
 fn warn_list_failed(e: &TooluError) {
-  let what = if matches!(e, TooluError::Protocol(_)) {
+  let what = if matches!(e, TooluError::Protocol(_) | TooluError::Refused(_)) {
     "toolu.sh answered the job list unexpectedly; backing off"
   } else {
     "listing toolu.sh jobs failed; backing off"
@@ -338,7 +338,7 @@ fn claim_refused(
     },
     // A claim reply outside the contract is about this job: skip it, so one
     // bad job cannot block the rest of the queue.
-    e @ TooluError::Protocol(_) => (
+    e @ (TooluError::Protocol(_) | TooluError::Refused(_)) => (
       None,
       format!("toolu.sh answered the claim unexpectedly ({e}); trying the next"),
     ),

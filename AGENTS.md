@@ -212,7 +212,8 @@ outside a `tests/` tree.
   at `interval`, +5 s per `slow_down`, transient retried until expiry;
   denied → exit 2, expired → exit 1 unattended or enter-for-a-new-code on a
   TTY; nothing written before approval) or `POST /runner/enroll` (401 →
-  exit 2). Host token, device code and enrollment token join the
+  exit 2; token from `--enroll-token` or `TOOLU_RUNNER_ENROLL_TOKEN`; 400
+  `Refused` → exit 2, a 404 (machines off) / malformed reply → exit 1). Host token, device code and enrollment token join the
   `SecretMasker` first; credentials (0600) are written before
   `config.toml`; a running `run --all` is SIGHUPed. Then `GET /runner/host`
   (`paired: host · workspace`), the machine service, and "first poll" = the
@@ -223,6 +224,8 @@ outside a `tests/` tree.
   enrollment token is then not used), never paired twice; one pairing per
   home. `runner_version` = toolu-runner's product version. API origin
   `TOOLU_RUNNER_TOOLU_API_URL` (default `https://console.toolu.sh`).
+  Re-run menu: Keep as is reads `GET /runner/host` (a revoked machine is an
+  error row, exit 2 after the rest are checked), Reconfigure = refresh.
   `status` prints the toolu.sh block (no GitHub lines), `doctor` a `toolu`
   row + a `toolu.sh (<host>)` section (`GET /runner/host`; 401 → FAIL with
   remove + setup fix; skipped `--offline`; no GitHub auth/network target),
@@ -406,8 +409,8 @@ outside a `tests/` tree.
   `app_manifest` (loopback `CallbackServer` 127.0.0.1:0 serving the
   target's form + `convert_manifest_code` POST under the API base),
   `toolu_jobs` (#206 `TooluClient`: host-token bearer, 401 `Revoked` / 409
-  `Conflict` / 404 `NotFound` / 429·5xx·transport `Transient`; #207
-  `host`/`update_host`/`revoke_host`; live 401 captures in
+  `Conflict` / 404 `NotFound` / 400 `Refused` / 429·5xx·transport
+  `Transient`; #207 `host`/`update_host`/`revoke_host`; live 401 captures in
   `toolu-runner/tests/fixtures/toolu_sh/`), `toolu_pair` (#207 public
   `pair_start`/`pair_token` (400 `error` → `PairPoll`)/`enroll`; live
   pairing captures in the same dir).

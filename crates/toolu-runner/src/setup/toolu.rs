@@ -245,8 +245,8 @@ fn refused(what: &str, e: TooluError) -> SetupError {
       "toolu.sh does not offer self-hosted machines at {} ({what}: 404)",
       crate::config::toolu_api_url()
     )),
-    TooluError::Protocol(why) => SetupError::usage(format!("toolu.sh refused to {what}: {why}")),
-    TooluError::Conflict(why) | TooluError::Transient(why) => {
+    TooluError::Refused(why) => SetupError::usage(format!("toolu.sh refused to {what}: {why}")),
+    TooluError::Protocol(why) | TooluError::Conflict(why) | TooluError::Transient(why) => {
       SetupError::runtime(format!("could not {what} with toolu.sh: {why}"))
     },
   }
@@ -264,10 +264,11 @@ fn revoked(config_path: &Path, why: &str) -> SetupError {
 fn host_failure(config_path: &Path, what: &str, e: TooluError) -> SetupError {
   match e {
     TooluError::Revoked(why) => revoked(config_path, &why),
-    TooluError::Protocol(why) => SetupError::usage(format!("toolu.sh refused to {what}: {why}")),
-    e @ (TooluError::Conflict(_) | TooluError::NotFound | TooluError::Transient(_)) => {
-      SetupError::runtime(format!("could not {what} on toolu.sh: {e}"))
-    },
+    TooluError::Refused(why) => SetupError::usage(format!("toolu.sh refused to {what}: {why}")),
+    e @ (TooluError::Conflict(_)
+    | TooluError::NotFound
+    | TooluError::Transient(_)
+    | TooluError::Protocol(_)) => SetupError::runtime(format!("could not {what} on toolu.sh: {e}")),
   }
 }
 
@@ -333,7 +334,11 @@ fn client_for(
   toolu_host::client_for(
     cfg,
     &crate::cli::credentials_path_for(config_path),
-    flow.masker,
+    |token| {
+      if let Ok(mut masker) = flow.masker.lock() {
+        masker.add_secret(token);
+      }
+    },
   )
   .map_err(SetupError::runtime)
 }
@@ -378,18 +383,25 @@ pub(super) async fn refresh(
 }
 
 /// Keep as is: what toolu.sh says about the machine; writes nothing.
-pub(super) async fn keep(flow: &Flow<'_>, entry: &RegistrationEntry) -> Result<(), SetupError> {
+/// `Ok(false)` when toolu.sh no longer accepts it (shown as an error row,
+/// so the other registrations are still checked).
+pub(super) async fn keep(flow: &Flow<'_>, entry: &RegistrationEntry) -> Result<bool, SetupError> {
   let cfg = load(&entry.config_path)?;
   let client = client_for(&cfg, &entry.config_path, flow)?;
   match client.host().await {
     Ok(host) => flow.out.done("online", &toolu_host::host_line(&host)),
-    Err(TooluError::Revoked(why)) => return Err(revoked(&entry.config_path, &why)),
+    Err(TooluError::Revoked(why)) => {
+      flow
+        .out
+        .error("online", &revoked(&entry.config_path, &why).message);
+      return Ok(false);
+    },
     Err(e) => flow.out.warn(
       "online",
       &format!("could not ask toolu.sh about the machine: {e}"),
     ),
   }
-  Ok(())
+  Ok(true)
 }
 
 /// Service, first poll, and the `runs-on` line.

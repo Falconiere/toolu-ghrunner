@@ -191,3 +191,45 @@ async fn doctor_fails_a_revoked_machine_and_skips_offline() -> TestResult<()> {
   assert!(printed.contains("toolu.sh ("), "{printed}");
   Ok(())
 }
+
+/// `--skip-unregister` removes local state without asking toolu.sh, and says
+/// the machine still exists there.
+#[tokio::test]
+async fn skip_unregister_leaves_the_machine_on_toolu() -> TestResult<()> {
+  let peer = Peer::start(&[], 600_000, Faults::default(), "true").await?;
+  let home = TempDir::new()?;
+  let config = write_machine(home.path(), &peer.server.uri(), HOST_TOKEN, "")?;
+  let path = config.to_string_lossy().into_owned();
+  let out = run(
+    home.path(),
+    &["remove", "--config", &path, "--skip-unregister"],
+  )?;
+  let printed = text(&out);
+  assert!(out.status.success(), "{printed}");
+  assert!(peer.seen().is_empty(), "{:?}", peer.paths());
+  assert!(!config.exists(), "{printed}");
+  assert!(
+    printed.contains("still a machine on toolu.sh — revoke it in the console"),
+    "{printed}"
+  );
+  Ok(())
+}
+
+/// Without its host token the machine cannot be revoked: nothing local goes.
+#[tokio::test]
+async fn a_missing_host_token_keeps_local_state() -> TestResult<()> {
+  let peer = Peer::start(&[], 600_000, Faults::default(), "true").await?;
+  let home = TempDir::new()?;
+  let config = write_machine(home.path(), &peer.server.uri(), HOST_TOKEN, "")?;
+  std::fs::remove_file(config.with_file_name("credentials.json"))?;
+  let out = run(
+    home.path(),
+    &["remove", "--config", &config.to_string_lossy()],
+  )?;
+  let printed = text(&out);
+  assert!(!out.status.success(), "{printed}");
+  assert!(config.exists(), "{printed}");
+  assert!(printed.contains("Nothing local was deleted"), "{printed}");
+  assert!(peer.seen().is_empty(), "{:?}", peer.paths());
+  Ok(())
+}

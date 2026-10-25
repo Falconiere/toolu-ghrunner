@@ -4,17 +4,16 @@
 //! the machine, and revoke it.
 
 use std::path::Path;
-use std::sync::Mutex;
 
 use config::config::{RunnerRegistrationConfig, load_credentials};
 use config::provider::ProviderSection;
 use protocol::toolu_pair::HostInfo;
-use shared::SecretMasker;
 use wire::net::toolu_jobs::{TooluClient, TooluError};
 
 /// The `/runner/*` client of the toolu.sh registration `cfg` whose
-/// credentials sit at `creds_path`, through its `[network]`. The host token
-/// is added to `masker` before it can reach any output.
+/// credentials sit at `creds_path`, through its `[network]`. `mask` receives
+/// the host token first, so the caller's output masker learns it before
+/// anything can print it.
 ///
 /// # Errors
 ///
@@ -23,16 +22,14 @@ use wire::net::toolu_jobs::{TooluClient, TooluError};
 pub(crate) fn client_for(
   cfg: &RunnerRegistrationConfig,
   creds_path: &Path,
-  masker: &Mutex<SecretMasker>,
+  mask: impl FnOnce(&str),
 ) -> Result<TooluClient, String> {
   let ProviderSection::Toolu { api_url, .. } = &cfg.provider else {
     return Err("not a toolu.sh registration".to_owned());
   };
   let creds = load_credentials(creds_path)
     .map_err(|e| format!("cannot read the host token ({}): {e}", creds_path.display()))?;
-  if let Ok(mut masker) = masker.lock() {
-    masker.add_secret(&creds.access_token);
-  }
+  mask(&creds.access_token);
   let client = network::client_builder(&cfg.network_config())
     .and_then(|builder| {
       builder
@@ -76,8 +73,9 @@ pub(crate) async fn revoke(
   cfg: &RunnerRegistrationConfig,
   creds_path: &Path,
 ) -> Result<bool, Box<dyn std::error::Error>> {
-  let masker = Mutex::new(SecretMasker::new());
-  let client = client_for(cfg, creds_path, &masker).map_err(|e| {
+  // Nothing `remove` prints carries the token (`TooluError` never echoes the
+  // bearer), so there is no output masker to teach.
+  let client = client_for(cfg, creds_path, |_token| {}).map_err(|e| {
     format!(
       "cannot revoke the machine on toolu.sh: {e}\nNothing local was deleted — restore \
        credentials.json, or pass --skip-unregister to remove local state and revoke the \

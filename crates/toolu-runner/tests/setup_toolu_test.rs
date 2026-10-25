@@ -17,7 +17,9 @@ use tempfile::TempDir;
 
 use crate::install_service_test::{nonroot_shims, shim_env, write_shim};
 use crate::supervisor_fixtures::{TestResult, spawn_logged_with, stop, wait_exit};
-use crate::toolu_fixtures::{Faults, HOST_ID, HOST_TOKEN, ORG, Peer, WORKSPACE};
+use crate::toolu_fixtures::{
+  Faults, HOST_ID, HOST_TOKEN, HostFault, ORG, Peer, WORKSPACE, write_machine,
+};
 
 /// A stub supervisor CLI: log argv, succeed.
 const RECORD_OK: &str = "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$SHIM_LOG\"\nexit 0\n";
@@ -590,5 +592,169 @@ async fn browser_open() -> TestResult<()> {
       assert!(!opened.exists(), "a headless box opened a browser");
     }
   }
+  Ok(())
+}
+
+/// A 503 on a pairing poll is retried at the interval, keeping the code.
+#[tokio::test]
+async fn a_transient_poll_keeps_the_code() -> TestResult<()> {
+  let faults = Faults {
+    pair_scripts: vec![vec!["503", "approved"]],
+    ..Faults::default()
+  };
+  let peer = Peer::start(&[], 600_000, faults, "true").await?;
+  let (home, path_env) = home()?;
+  let out = setup(
+    home.path(),
+    &path_env,
+    &peer.server.uri(),
+    &["--source", "toolu", "--no-service"],
+    &[],
+  )?;
+  let printed = text(&out);
+  assert_eq!(out.status.code(), Some(0), "{printed}");
+  assert_eq!(
+    peer.seen_ending("/runner/pair").len(),
+    1,
+    "{:?}",
+    peer.paths()
+  );
+  assert_eq!(peer.seen_ending("/runner/pair/token").len(), 2);
+  Ok(())
+}
+
+/// toolu.sh without self-hosted machines (its routes answer 404) exits 1
+/// naming the origin, writing nothing.
+#[tokio::test]
+async fn machines_off_on_toolu_exits_1() -> TestResult<()> {
+  let off = wiremock::MockServer::start().await;
+  let (home, path_env) = home()?;
+  let before = state(home.path());
+  let out = setup(
+    home.path(),
+    &path_env,
+    &off.uri(),
+    &["--source", "toolu"],
+    &[],
+  )?;
+  let printed = text(&out);
+  assert_eq!(out.status.code(), Some(1), "{printed}");
+  assert!(
+    printed.contains(&format!(
+      "toolu.sh does not offer self-hosted machines at {}",
+      off.uri()
+    )),
+    "{printed}"
+  );
+  assert_eq!(state(home.path()), before);
+  Ok(())
+}
+
+/// The service never polling within the online timeout exits 1, keeping
+/// the registration so a re-run resumes.
+#[tokio::test]
+async fn first_poll_timeout_exits_1_and_keeps_the_pairing() -> TestResult<()> {
+  let faults = Faults {
+    enroll_tokens: vec![ENROLL.to_owned()],
+    ..Faults::default()
+  };
+  let peer = Peer::start(&[], 600_000, faults, "true").await?;
+  let (home, path_env) = home()?;
+  let out = setup(
+    home.path(),
+    &path_env,
+    &peer.server.uri(),
+    &["--enroll-token", ENROLL],
+    &[("TOOLU_RUNNER_ONLINE_TIMEOUT_MS", "1000")],
+  )?;
+  let printed = text(&out);
+  assert_eq!(out.status.code(), Some(1), "{printed}");
+  assert!(
+    printed.contains("did not start polling within 1s"),
+    "{printed}"
+  );
+  assert!(machine_dir(home.path()).join("config.toml").exists());
+  Ok(())
+}
+
+/// `TOOLU_RUNNER_ENROLL_TOKEN` stands in for `--enroll-token` (and implies
+/// the toolu.sh source), keeping the token out of argv.
+#[tokio::test]
+async fn the_enrollment_token_can_come_from_the_environment() -> TestResult<()> {
+  let faults = Faults {
+    enroll_tokens: vec![ENROLL.to_owned()],
+    ..Faults::default()
+  };
+  let peer = Peer::start(&[], 600_000, faults, "true").await?;
+  let (home, path_env) = home()?;
+  let out = setup(
+    home.path(),
+    &path_env,
+    &peer.server.uri(),
+    &["--no-service"],
+    &[("TOOLU_RUNNER_ENROLL_TOKEN", ENROLL)],
+  )?;
+  let printed = text(&out);
+  assert_eq!(out.status.code(), Some(0), "{printed}");
+  assert_eq!(peer.machines(), 1);
+  assert!(machine_dir(home.path()).join("config.toml").exists());
+  Ok(())
+}
+
+/// Re-running on a machine revoked in the console exits 2 with the fix.
+#[tokio::test]
+async fn rerun_on_a_revoked_machine_names_the_fix() -> TestResult<()> {
+  let faults = Faults {
+    host_fault: Some(HostFault::Revoked),
+    ..Faults::default()
+  };
+  let peer = Peer::start(&[], 600_000, faults, "true").await?;
+  let (home, path_env) = home()?;
+  let config = write_machine(home.path(), &peer.server.uri(), HOST_TOKEN, "")?;
+  let out = setup(
+    home.path(),
+    &path_env,
+    &peer.server.uri(),
+    &["--source", "toolu", "--no-service"],
+    &[],
+  )?;
+  let printed = text(&out);
+  assert_eq!(out.status.code(), Some(2), "{printed}");
+  let fix = format!(
+    "toolu-runner remove --config {} && toolu-runner setup --source toolu",
+    config.display()
+  );
+  assert!(printed.contains(&fix), "{printed}");
+  assert!(!printed.contains(HOST_TOKEN), "{printed}");
+  Ok(())
+}
+
+/// Keep as is on a paired box asks toolu.sh about the machine and changes
+/// nothing.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn keep_as_is_reads_the_machine() -> TestResult<()> {
+  let peer = Peer::start(&[], 600_000, Faults::default(), "true").await?;
+  let (home, path_env) = home()?;
+  write_machine(home.path(), &peer.server.uri(), HOST_TOKEN, "")?;
+  let before = state(home.path());
+  let (code, output) = crate::setup_cmd_test::run_pty_env(
+    home.path(),
+    &path_env,
+    &[],
+    &[("What would you like to do?", b"\r")],
+    &[("TOOLU_RUNNER_TOKEN", "")],
+  )?;
+  assert_eq!(code, Some(0), "output: {output}");
+  assert!(
+    output.contains(&format!("host {HOST_ID} · workspace {WORKSPACE} · enabled")),
+    "{output}"
+  );
+  assert!(output.contains("Nothing to change"), "{output}");
+  let after: Vec<_> = state(home.path())
+    .into_iter()
+    .filter(|(rel, _)| rel != "answers.txt")
+    .collect();
+  assert_eq!(after, before);
   Ok(())
 }

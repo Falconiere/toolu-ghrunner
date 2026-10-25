@@ -6,7 +6,6 @@
 //! machine's last-seen time on toolu.sh; it changes nothing else.
 
 use std::path::Path;
-use std::sync::Mutex;
 use std::time::Duration;
 
 use config::config::RunnerRegistrationConfig;
@@ -71,11 +70,7 @@ async fn host_row(
   masker: &mut SecretMasker,
 ) -> Row {
   let creds_path = crate::cli::credentials_path_for(config_path);
-  let local = Mutex::new(SecretMasker::new());
-  let client = toolu_host::client_for(config, &creds_path, &local);
-  if let Ok(creds) = config::config::load_credentials(&creds_path) {
-    masker.add_secret(&creds.access_token);
-  }
+  let client = toolu_host::client_for(config, &creds_path, |token| masker.add_secret(token));
   let client = match client {
     Ok(client) => client,
     Err(error) => {

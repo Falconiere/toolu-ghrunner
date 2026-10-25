@@ -444,9 +444,12 @@ pub(crate) async fn check_registration(config_path: &Path, timeout: Duration) ->
   );
   Checked {
     heading: format!(
-      "  {} ({mode}, runner {}):",
+      "  {} ({mode}, {}):",
       label(config_path),
-      config.runner_name
+      match &config.provider {
+        config::provider::ProviderSection::Toolu { host_id, .. } => format!("host {host_id}"),
+        config::provider::ProviderSection::Github => format!("runner {}", config.runner_name),
+      }
     ),
     rows,
     work_dir: Some(expand_tilde(Path::new(&config.runtime.work_dir))),

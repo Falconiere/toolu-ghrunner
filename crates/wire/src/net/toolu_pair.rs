@@ -4,7 +4,8 @@
 //! device-code pairing, `POST /runner/pair/token` polls it, `POST
 //! /runner/enroll` redeems a single-use enrollment token. Statuses map like
 //! [`super::toolu_jobs`]: 401 [`TooluError::Revoked`] (a refused enrollment
-//! token), 429/5xx/transport [`TooluError::Transient`], anything else
+//! token), 400 [`TooluError::Refused`] (refused input, e.g. a reserved
+//! label), 429/5xx/transport [`TooluError::Transient`], anything else
 //! [`TooluError::Protocol`]. Bodies and rules are `protocol::toolu_pair`; the
 //! wait loop (interval, `slow_down`, expiry) is the caller's.
 

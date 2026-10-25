@@ -336,8 +336,12 @@ pub(crate) async fn cmd_doctor(args: DoctorArgs) -> i32 {
     .iter()
     .filter_map(|block| block.config.as_ref())
     .collect();
-  for target in doctor_auth::auth_hosts(&configs) {
-    sections.push(doctor_auth::auth_section(&target, args.offline, timeout, &mut masker).await);
+  // A home with only toolu.sh machines has no GitHub credential to check.
+  let toolu_only = !configs.is_empty() && configs.iter().all(|config| !config.provider.is_github());
+  if !toolu_only {
+    for target in doctor_auth::auth_hosts(&configs) {
+      sections.push(doctor_auth::auth_section(&target, args.offline, timeout, &mut masker).await);
+    }
   }
   sections.push(registrations_section(&selection, &checked));
   for (path, block) in selection.configs.iter().zip(&checked) {

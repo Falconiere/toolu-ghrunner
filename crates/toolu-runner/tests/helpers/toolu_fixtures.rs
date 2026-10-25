@@ -57,7 +57,8 @@ pub struct Faults {
   pub deadline_ms: Option<i64>,
   /// #207 pairing: what each `POST /runner/pair/token` of the n-th pairing
   /// answers, in order (`authorization_pending`, `slow_down`,
-  /// `access_denied`, `expired_token`, or `approved`); the last entry
+  /// `access_denied`, `expired_token`, `approved`, or `503` for a transient
+  /// failure); the last entry
   /// repeats, and a poll after the grant answers `expired_token`.
   pub pair_scripts: Vec<Vec<&'static str>>,
   /// #207: the `interval` a pairing asks for, in seconds (default 1).
@@ -438,6 +439,9 @@ fn pair_token(state: &mut State, sent: &Value) -> (u16, String) {
     .copied()
     .unwrap_or("approved");
   state.pair_polls += 1;
+  if step == "503" {
+    return (503, json!({ "error": "unavailable" }).to_string());
+  }
   if step != "approved" {
     return (400, json!({ "error": step }).to_string());
   }

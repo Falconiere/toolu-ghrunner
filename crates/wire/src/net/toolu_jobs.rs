@@ -30,6 +30,9 @@ pub enum TooluError {
   Conflict(String),
   /// 404: no such job.
   NotFound,
+  /// 400: toolu.sh refused the request's input (a reserved label, a bad
+  /// field); carries the body's `error` (or the raw body).
+  Refused(String),
   /// 429, 5xx, or the request never got an answer: retry later.
   Transient(String),
   /// Any other status, or a 2xx body that does not parse.
@@ -42,6 +45,7 @@ impl std::fmt::Display for TooluError {
       Self::Revoked(why) => write!(f, "toolu.sh rejected the host token (401: {why})"),
       Self::Conflict(body) => write!(f, "toolu.sh refused the claim (409: {body})"),
       Self::NotFound => f.write_str("toolu.sh does not know the job (404)"),
+      Self::Refused(why) => write!(f, "toolu.sh refused the request (400: {why})"),
       Self::Transient(why) | Self::Protocol(why) => f.write_str(why),
     }
   }
@@ -272,6 +276,7 @@ pub(super) fn failure(what: &str, status: StatusCode, body: String) -> TooluErro
     StatusCode::UNAUTHORIZED => TooluError::Revoked(error_field(&body).unwrap_or(body)),
     StatusCode::CONFLICT => TooluError::Conflict(body),
     StatusCode::NOT_FOUND => TooluError::NotFound,
+    StatusCode::BAD_REQUEST => TooluError::Refused(error_field(&body).unwrap_or(body)),
     StatusCode::TOO_MANY_REQUESTS => {
       TooluError::Transient(format!("toolu.sh {what} was rate-limited (429): {body}"))
     },

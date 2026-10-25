@@ -58,7 +58,10 @@ struct Flow<'a> {
 }
 
 /// `setup` entry point (see the module docs for the flow and codes).
-pub(crate) async fn cmd_setup(args: SetupArgs) -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) async fn cmd_setup(mut args: SetupArgs) -> Result<(), Box<dyn std::error::Error>> {
+  if args.enroll_token.is_none() {
+    args.enroll_token = crate::config::enroll_token();
+  }
   match run_setup(&args).await {
     Ok(()) => Ok(()),
     Err(e) => Err(Box::new(CodedExit::new(e.code, e.message))),
@@ -119,7 +122,7 @@ async fn run_setup(args: &SetupArgs) -> Result<(), SetupError> {
           toolu::refresh(&flow, &entry, &mut prompts).await
         },
         Rerun::Reconfigure(entry) => reconfigure::reconfigure(entry, &flow, &mut prompts).await,
-        Rerun::Add => fresh(&flow, &mut prompts, None).await,
+        Rerun::Add => fresh(&flow, &mut prompts, source).await,
       };
     }
     fresh(&flow, &mut prompts, source).await
@@ -269,10 +272,13 @@ fn spawn_signal_restore(cancel: tokio_util::sync::CancellationToken) {
 async fn keep_as_is(flow: &Flow<'_>) -> Result<(), SetupError> {
   let (facts, home, args, masker, out) = (flow.facts, flow.home, flow.args, flow.masker, flow.out);
   let client = http_client()?;
+  let mut revoked = 0_usize;
   for entry in &facts.existing {
     if matches!(entry.scope, RegistrationScope::Toolu(_)) {
       out.done("registration", &entry.scope.label());
-      toolu::keep(flow, entry).await?;
+      if !toolu::keep(flow, entry).await? {
+        revoked += 1;
+      }
       continue;
     }
     let cfg = config::config::load_config(&entry.config_path).map_err(|e| {
@@ -310,6 +316,11 @@ async fn keep_as_is(flow: &Flow<'_>) -> Result<(), SetupError> {
         ),
       ),
     }
+  }
+  if revoked > 0 {
+    return Err(SetupError::usage(format!(
+      "{revoked} toolu.sh machine(s) were revoked; see the fix above"
+    )));
   }
   out.done("keep", "Nothing to change.");
   Ok(())
