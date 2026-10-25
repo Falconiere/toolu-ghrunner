@@ -115,3 +115,15 @@ fn closed_terminal_is_a_clean_stop() {
     err.message
   );
 }
+
+#[test]
+fn press_enter_waits_for_enter_and_ctrl_c_cancels() {
+  let mut out = Vec::new();
+  run_press_enter(&mut keys(b"x \r"), &mut out, "Press enter").unwrap();
+  assert!(String::from_utf8_lossy(&out).contains("Press enter"));
+  let mut out = Vec::new();
+  assert!(matches!(
+    run_press_enter(&mut keys(b"\x03"), &mut out, "Press enter"),
+    Err(PromptEnd::Cancelled)
+  ));
+}

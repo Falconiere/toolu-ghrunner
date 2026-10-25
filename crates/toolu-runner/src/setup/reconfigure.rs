@@ -12,6 +12,7 @@ use super::{Flow, build_and_apply, machine, plan};
 pub(super) fn empty_args() -> SetupArgs {
   SetupArgs {
     source: None,
+    enroll_token: None,
     org: None,
     repo: Vec::new(),
     github_url: None,

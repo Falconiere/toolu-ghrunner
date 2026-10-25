@@ -277,7 +277,7 @@ pub(crate) async fn apply_plan(
     applied.push(register_one(plan, home, auth, &labels, &url, masker).await?);
   }
   if plan.service.install {
-    install_machine_service(plan).await?;
+    install_machine_service(plan.service.enable_linger).await?;
     let client = poll_client(plan, home)?;
     for runner in &applied {
       let summary = github::poll_online(
@@ -364,16 +364,16 @@ async fn register_one(
 
 /// Install/update the one machine unit (`run --all`) off the async
 /// runtime; linger was already decided by setup.
-async fn install_machine_service(plan: &ResolvedPlan) -> Result<(), SetupError> {
+pub(crate) async fn install_machine_service(enable_linger: bool) -> Result<(), SetupError> {
   let args = crate::cli::InstallServiceArgs {
     config: None,
     print: false,
     no_activate: false,
     remove: false,
     linger: crate::cli::LingerArgs {
-      enable_linger: plan.service.enable_linger,
+      enable_linger,
       yes: false,
-      decided: Some(plan.service.enable_linger),
+      decided: Some(enable_linger),
     },
   };
   tokio::task::spawn_blocking(move || {

@@ -338,6 +338,12 @@ impl Prompts {
     run_secret(&mut self.keys, &mut self.out, title)
   }
 
+  /// Wait for enter after showing `text` (ctrl+c cancels, esc goes back).
+  pub(crate) fn press_enter(&mut self, text: &str) -> Result<(), PromptEnd> {
+    let _guard = RawGuard::new()?;
+    run_press_enter(&mut self.keys, &mut self.out, text)
+  }
+
   /// A yes/no answer (arrows or `y`/`n`, enter confirms).
   pub(crate) fn confirm(&mut self, title: &str, default: bool) -> Result<bool, PromptEnd> {
     let _guard = RawGuard::new()?;
@@ -543,6 +549,23 @@ pub(crate) fn run_secret(
       Key::Esc => return Err(PromptEnd::Back),
       Key::CtrlC => return Err(PromptEnd::Cancelled),
       Key::Up | Key::Down | Key::Char(_) => {},
+    }
+  }
+}
+
+/// Wait for enter over any key source; other keys are ignored.
+pub(crate) fn run_press_enter(
+  keys: &mut impl KeySource,
+  out: &mut impl std::io::Write,
+  text: &str,
+) -> Result<(), PromptEnd> {
+  write(out, &format!("\r\x1b[K   {text}"))?;
+  loop {
+    match keys.next_key()? {
+      Key::Enter => return write(out, "\r\n"),
+      Key::Esc => return Err(PromptEnd::Back),
+      Key::CtrlC => return Err(PromptEnd::Cancelled),
+      Key::Up | Key::Down | Key::Space | Key::Backspace | Key::Char(_) => {},
     }
   }
 }

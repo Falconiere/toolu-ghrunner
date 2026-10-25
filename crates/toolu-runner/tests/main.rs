@@ -126,6 +126,7 @@ mod secret_masker_init_test;
 mod secret_masker_real_test;
 mod session_conflict_e2e_test;
 mod setup_cmd_test;
+mod setup_toolu_test;
 mod shadow_mode_test;
 mod storage_layout_test;
 mod supervisor_fatal_test;
