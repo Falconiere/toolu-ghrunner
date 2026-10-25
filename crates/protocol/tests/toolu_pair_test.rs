@@ -179,3 +179,13 @@ fn debug_never_prints_a_credential() {
   }
   assert!(printed.contains("<redacted>"));
 }
+
+#[test]
+fn the_patch_drops_platform_and_arch() {
+  let json = serde_json::to_value(report().patch()).expect("serializes");
+  let guide: serde_json::Value = serde_json::from_str(
+    r#"{"hostname":"build-box","labels":["gpu"],"runner_version":"2.329.0","vcpu":8,"memory_mb":32768}"#,
+  )
+  .expect("guide body");
+  assert_eq!(json, guide);
+}

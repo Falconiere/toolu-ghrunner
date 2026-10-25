@@ -35,6 +35,37 @@ pub struct MachineReport {
   pub runner_version: String,
 }
 
+impl MachineReport {
+  /// The `PATCH /runner/host` body refreshing this report (the route takes
+  /// no `platform` / `arch`: unknown fields are a 400).
+  pub fn patch(&self) -> HostPatch {
+    HostPatch {
+      hostname: self.hostname.clone(),
+      labels: self.labels.clone(),
+      runner_version: self.runner_version.clone(),
+      vcpu: self.vcpu,
+      memory_mb: self.memory_mb,
+    }
+  }
+}
+
+/// The `PATCH /runner/host` body: what a re-run of `setup` refreshes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct HostPatch {
+  /// The box's hostname.
+  pub hostname: String,
+  /// Custom runner labels.
+  pub labels: Vec<String>,
+  /// The toolu-runner version running on the box.
+  pub runner_version: String,
+  /// Logical CPUs; omitted when unknown.
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub vcpu: Option<u64>,
+  /// Total memory in MiB; omitted when unknown.
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub memory_mb: Option<u64>,
+}
+
 /// `POST /runner/pair` 200: the device code to poll with and the user code
 /// to show.
 #[derive(Clone, PartialEq, Eq, Deserialize)]

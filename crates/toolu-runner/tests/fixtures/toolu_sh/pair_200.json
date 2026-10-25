@@ -1,0 +1,19 @@
+{
+  "provenance": {
+    "captured": "2026-10-25T12:48:08Z",
+    "host": "dev-console.toolu.sh",
+    "request": "POST /runner/pair with a linux/x64 machine report (hostname `toolu-runner-207-capture`, labels `[\"capture-207\"]`, runner_version `0.12.2`)",
+    "method": "curl -i; status, content headers and body recorded verbatim",
+    "sanitization": "dropped Cloudflare report-to / nel / cf-ray / alt-svc headers; the real device_code (a credential) replaced by a synthetic 43-character base64url string, content-length recomputed; user_code kept (expired, single use, no value)"
+  },
+  "response": {
+    "body": "{\"device_code\":\"pairdevicecode207pairdevicecode207pairdevic\",\"user_code\":\"B6ZW-U3AZ\",\"verification_uri\":\"https://dev-console.toolu.sh/pair\",\"verification_uri_complete\":\"https://dev-console.toolu.sh/pair?code=B6ZW-U3AZ\",\"expires_in\":900,\"interval\":5}",
+    "headers": {
+      "content-length": "249",
+      "content-type": "application/json",
+      "date": "Sun, 25 Oct 2026 12:48:08 GMT",
+      "server": "cloudflare"
+    },
+    "status": 200
+  }
+}

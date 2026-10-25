@@ -1,0 +1,19 @@
+{
+  "provenance": {
+    "captured": "2026-10-25T12:48:25Z",
+    "host": "dev-console.toolu.sh",
+    "request": "POST /runner/enroll with a well-formed, unknown `tlu_e_` + 43 x `A` token",
+    "method": "curl -i; status, content headers and body recorded verbatim",
+    "sanitization": "dropped Cloudflare report-to / nel / cf-ray / alt-svc headers; the response carries no credential"
+  },
+  "response": {
+    "body": "{\"error\":\"invalid_enroll_token\"}",
+    "headers": {
+      "content-length": "32",
+      "content-type": "application/json",
+      "date": "Sun, 25 Oct 2026 12:48:24 GMT",
+      "server": "cloudflare"
+    },
+    "status": 401
+  }
+}
