@@ -15,4 +15,5 @@ Doesn't belong: registration minting (`register_cmd`), App creation internals (`
 | `stage.rs` | Plan staging: target → auth → scope → details → service. |
 | `scope.rs` | Runner group / repository picker, name, collision, linger. |
 | `apply.rs` | The one write path: token store, registrations, machine unit, online verify; idempotent resume. |
+| `reconfigure.rs` | Re-run menu's Reconfigure: a fresh plan derived from the picked registration's own config, caller flags winning. |
 | `tests/` | Unit tests per module (flat, included via `#[path]`). |
