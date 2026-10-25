@@ -2,11 +2,14 @@
 # synthetic test fixtures (ghs_EXAMPLE… tokens used to verify secret
 # masking — flagged as github-app-token otherwise).
 #
-# NOTE: this file governs LOCAL `gitleaks detect` runs (auto-detected at the
-# repo root). The CI review action pins its own config via
-# `--config $GITHUB_ACTION_PATH/gitleaks.toml`, so CI suppression for the
-# JSON fixtures (which cannot carry inline `gitleaks:allow` comments) must
-# live in falconiere/toolu-ghactions' gitleaks.toml.
+# NOTE: this file governs LOCAL `gitleaks detect` runs only (auto-detected at
+# the repo root). The CI review action pins its own config via
+# `--config $GITHUB_ACTION_PATH/gitleaks.toml`, so nothing here reaches it.
+# The list that silences BOTH is .gitleaksignore: gitleaks reads it from the
+# scan root regardless of `--config`, one `path:rule:line` fingerprint per
+# synthetic fixture, each annotated with why the value authenticates nothing
+# and pinned by scripts/test/gitleaks_ignore_test.sh. Keep this allowlist
+# for the broad local path exemptions; add a NEW fixture to .gitleaksignore.
 [extend]
 useDefault = true
 

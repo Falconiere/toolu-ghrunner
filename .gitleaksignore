@@ -1,0 +1,46 @@
+# .gitleaksignore — the committed synthetic fixtures the secret scan may skip.
+#
+# One fingerprint per line, `<path>:<rule-id>:<line>` (the shape gitleaks emits
+# for `detect --no-git`). gitleaks reads this file from the scan root whatever
+# `--config` it was given, so it is the ONE list that silences the CI review
+# action's scan (which pins its own config) AND a local `gitleaks detect`;
+# .gitleaks.toml's path allowlist reaches local runs only. Every entry below is
+# a value that authenticates nothing — the same bar as `secrets.scanExempt` in
+# the crates' guardrails.config.json: extending this file requires proving the
+# value is not a real credential. Fingerprints are line-anchored, so an edit
+# that moves a flagged line brings the finding back until the entry is updated;
+# scripts/test/gitleaks_ignore_test.sh fails when an entry no longer points at
+# an existing line, and refuses any path outside a tests/ tree.
+
+# `MIIphony`: a PEM-shaped dummy with no key material, used to exercise the
+# PEM parser's error path and the secret masker.
+crates/config/tests/app_store_test.rs:private-key:15
+crates/shared/tests/secret_masker_test.rs:private-key:218
+
+# A 2048-bit key generated with `openssl genrsa` for the #201 App-JWT tests and
+# never uploaded to any GitHub App (AGENTS.md): it signs test JWTs that no
+# server accepts.
+crates/protocol/tests/fixtures/app_jwt_test_key.pem:private-key:1
+
+# Captured job messages rewritten by scripts/test/sanitize_capture.py: every
+# `AccessToken` is a version-5 UUID placeholder derived from a salt, not from
+# the original value, and the evidence checks hash-pin these bytes.
+crates/execution/tests/completejob_88_env_message.json:generic-api-key:412
+crates/execution/tests/completejob_88_secret_message.json:generic-api-key:362
+crates/execution/tests/completejob_88_steps_message.json:generic-api-key:590
+crates/execution/tests/defaults_run_job.json:generic-api-key:1168
+crates/execution/tests/incoming_contexts_call.json:generic-api-key:882
+crates/execution/tests/incoming_contexts_matrix_0.json:generic-api-key:931
+crates/execution/tests/incoming_contexts_matrix_1.json:generic-api-key:931
+crates/execution/tests/job_outputs_message.json:generic-api-key:1076
+
+# Synthetic JIT configs (example hosts, zero-filled RSA parameters) that the
+# parser tests decode; `encoded` is base64 of that synthetic envelope.
+crates/toolu-runner/tests/fixtures/generate_jitconfig_response.json:generic-api-key:26
+crates/toolu-runner/tests/fixtures/jit_config_ghes.json:generic-api-key:3
+crates/toolu-runner/tests/fixtures/jit_config_github_com.json:generic-api-key:3
+
+# `ghs_EXAMPLE…` placeholders standing in for the runtime token the masking
+# tests must redact; also listed in .gitleaks.toml and guardrails scanExempt.
+crates/toolu-runner/tests/fixtures/job_message.json:github-app-token:67
+crates/toolu-runner/tests/fixtures/job_message.json:github-app-token:85
