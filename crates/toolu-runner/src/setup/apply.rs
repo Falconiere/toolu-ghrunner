@@ -54,12 +54,7 @@ pub(crate) async fn scope_bearer(
   masker: &Mutex<SecretMasker>,
   token_value: Option<&str>,
 ) -> Result<AuthContext, SetupError> {
-  let first_url = plan
-    .target
-    .urls(&plan.github_base)
-    .into_iter()
-    .next()
-    .unwrap_or_default();
+  let first_url = plan.target.first_url(&plan.github_base)?;
   match &plan.auth {
     AuthPlan::Token => {
       let token = token_value.ok_or_else(|| {
@@ -228,9 +223,13 @@ fn poll_client(plan: &ResolvedPlan, home: &Path) -> Result<reqwest::Client, Setu
   };
   let config_path = crate::register_cmd::register_config_path(&url, home)
     .map_err(|e| SetupError::usage(e.to_string()))?;
-  let network = config::config::load_config(&config_path)
-    .map(|cfg| cfg.network.resolve())
-    .unwrap_or_default();
+  let network = match config::config::load_config(&config_path) {
+    Ok(cfg) => cfg.network.resolve(),
+    Err(e) => {
+      tracing::warn!(%e, path = %config_path.display(), "could not read registration config for the online poll; using env network mode");
+      shared::NetworkConfig::default()
+    },
+  };
   crate::register_cmd::build_register_client(&network)
     .map_err(|e| SetupError::runtime(e.to_string()))
 }

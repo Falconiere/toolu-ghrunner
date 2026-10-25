@@ -260,7 +260,12 @@ async fn unattended_org_token_registers_and_reports_online() -> TestResult {
   let text = output_text(&output);
   assert_eq!(output.status.code(), Some(0), "{text}");
   assert!(text.contains("setup: online"), "{text}");
-  assert!(text.contains("runs-on: self-hosted, Linux, X64"), "{text}");
+  let runs_on = format!(
+    "runs-on: self-hosted, {}, {}",
+    shared::platform::runner_os(),
+    shared::platform::runner_arch()
+  );
+  assert!(text.contains(&runs_on), "{text}");
   assert!(text.contains("toolu-runner doctor"), "{text}");
   assert!(org_config(home.path()).exists(), "org registration written");
   assert!(
@@ -384,7 +389,8 @@ async fn add_another_keeps_the_first() -> TestResult {
   let first = run_setup(home.path(), &path_env, &server, ORG_FLAGS)?;
   assert_eq!(first.status.code(), Some(0), "{}", output_text(&first));
   let first_config = std::fs::read(org_config(home.path()))?;
-  let unit_before = std::fs::read(unit_file(home.path())).unwrap_or_default();
+  let unit_before =
+    std::fs::read(unit_file(home.path())).expect("unit file must exist after first setup");
   let second = run_setup(
     home.path(),
     &path_env,
@@ -402,7 +408,7 @@ async fn add_another_keeps_the_first() -> TestResult {
     "first registration untouched"
   );
   assert_eq!(
-    std::fs::read(unit_file(home.path())).unwrap_or_default(),
+    std::fs::read(unit_file(home.path())).expect("unit file must still exist after second setup"),
     unit_before,
     "same machine unit"
   );

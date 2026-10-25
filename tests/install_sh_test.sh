@@ -807,7 +807,7 @@ if want S10; then
   [[ "$RC" -eq 0 ]] || fail "S10 --no-modify-path should exit 0 (rc=$RC): $OUT"
   [[ ! -e "$h/.toolu-runner" && ! -e "$h/.profile" ]] || fail "S10 --no-modify-path must write nothing"
   echo "$OUT" | grep -qF "export PATH=\"$h/.local/bin:\$PATH\"" || fail "S10 should print the export line: $OUT"
-  echo "$OUT" | grep -q "^next: $h/.local/bin/toolu-runner register" \
+  echo "$OUT" | grep -q "^next: $h/.local/bin/toolu-runner setup" \
     || fail "S10 next line should use the full path when it is not on PATH: $OUT"
 
   echo "S10: an unwritable ~/.toolu-runner is a warning, not a failed install"
@@ -818,7 +818,7 @@ if want S10; then
   echo "$OUT" | grep -qx "toolu-runner: installed $WORKSPACE_VERSION (checksum ok)" || fail "S10 should report the install: $OUT"
   echo "$OUT" | grep -q 'could not write ~/.toolu-runner/env' || fail "S10 should warn about the env file: $OUT"
   echo "$OUT" | grep -qF "export PATH=\"$h/.local/bin:\$PATH\"" || fail "S10 should print the export line: $OUT"
-  echo "$OUT" | grep -q "^next: $h/.local/bin/toolu-runner register" || fail "S10 next line should use the full path: $OUT"
+  echo "$OUT" | grep -q "^next: $h/.local/bin/toolu-runner setup" || fail "S10 next line should use the full path: $OUT"
   [[ ! -e "$h/.profile" ]] || fail "S10 must not source an env file it could not write"
   run_install notty "$h" real --install-dir "$h/.local/bin" --home "$tmp/s10-envfile-home"
   [[ "$RC" -eq 0 ]] || fail "S10 an unwritable env dir with --home should exit 0 (rc=$RC): $OUT"

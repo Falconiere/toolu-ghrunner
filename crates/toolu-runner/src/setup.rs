@@ -93,8 +93,13 @@ async fn run_setup(args: &SetupArgs) -> Result<(), SetupError> {
     None
   };
   let interactive = prompts.is_some();
+  // Signals outside a raw-mode prompt (during apply or the online
+  // poll) cancel this token; `run_setup` races the flow against it
+  // and exits 130 through the normal error path, so destructors run
+  // and the terminal is restored by dropping the prompts.
+  let cancel = tokio_util::sync::CancellationToken::new();
   if interactive {
-    spawn_signal_restore();
+    spawn_signal_restore(cancel.clone());
   }
 
   let flow = Flow {
@@ -107,19 +112,25 @@ async fn run_setup(args: &SetupArgs) -> Result<(), SetupError> {
     masker: &masker,
   };
   // Re-run menu (interactive, configured machine, no explicit target).
-  if !facts.existing.is_empty()
-    && args.org.is_none()
-    && args.repo.is_empty()
-    && let Some(choice) = rerun_choice(&facts, &mut prompts, out)?
-  {
-    return match choice {
-      Rerun::Keep => keep_as_is(&flow).await,
-      Rerun::Remove(entry) => remove_one(&entry, &home, &masker).await,
-      Rerun::Reconfigure(entry) => reconfigure::reconfigure(entry, &flow, &mut prompts).await,
-      Rerun::Add => build_and_apply(&flow, &mut prompts).await,
-    };
+  let work = async {
+    if !facts.existing.is_empty()
+      && args.org.is_none()
+      && args.repo.is_empty()
+      && let Some(choice) = rerun_choice(&facts, &mut prompts, out)?
+    {
+      return match choice {
+        Rerun::Keep => keep_as_is(&flow).await,
+        Rerun::Remove(entry) => remove_one(&entry, &home, &masker).await,
+        Rerun::Reconfigure(entry) => reconfigure::reconfigure(entry, &flow, &mut prompts).await,
+        Rerun::Add => build_and_apply(&flow, &mut prompts).await,
+      };
+    }
+    build_and_apply(&flow, &mut prompts).await
+  };
+  tokio::select! {
+    result = work => result,
+    () = cancel.cancelled() => Err(SetupError::cancelled()),
   }
-  build_and_apply(&flow, &mut prompts).await
 }
 
 /// What the re-run menu picked.
@@ -186,7 +197,10 @@ fn rerun_choice(
   }
 }
 
-/// Whether a `/dev/tty` prompt could be opened at all.
+/// Whether a `/dev/tty` prompt could be opened at all. A one-time
+/// `open(2)` at startup (the controlling terminal is already ours, so
+/// it cannot block waiting for a peer); the result only decides
+/// interactive vs unattended before any prompt work begins.
 fn tty_available() -> bool {
   std::fs::OpenOptions::new()
     .read(true)
@@ -195,10 +209,13 @@ fn tty_available() -> bool {
     .is_ok()
 }
 
-/// Restore the terminal and exit with the signal's code on
-/// SIGTERM/SIGHUP while prompts may hold raw mode.
-fn spawn_signal_restore() {
-  tokio::spawn(async {
+/// On SIGTERM/SIGHUP/SIGINT: restore the terminal and cancel the
+/// flow's token, so setup exits 130 (or the error path's code)
+/// gracefully instead of dying mid-write. Inside a raw-mode prompt
+/// Ctrl+C already arrives as a byte and cancels the prompt itself;
+/// this covers the canonical-mode stretches (apply, online poll).
+fn spawn_signal_restore(cancel: tokio_util::sync::CancellationToken) {
+  tokio::spawn(async move {
     let Ok(mut term) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
     else {
       return;
@@ -210,13 +227,13 @@ fn spawn_signal_restore() {
     else {
       return;
     };
-    let code = tokio::select! {
-      _ = term.recv() => 143,
-      _ = hup.recv() => 129,
-      _ = int.recv() => 130,
-    };
+    tokio::select! {
+      _ = term.recv() => {},
+      _ = hup.recv() => {},
+      _ = int.recv() => {},
+    }
     prompts::restore_terminal();
-    std::process::exit(code);
+    cancel.cancel();
   });
 }
 

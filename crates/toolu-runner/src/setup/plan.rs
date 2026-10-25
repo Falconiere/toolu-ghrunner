@@ -88,6 +88,17 @@ impl Target {
     }
   }
 
+  /// The first registration URL, or a usage error when the target
+  /// has none (an empty repo selection must never become an empty
+  /// URL passed to a network call).
+  pub(crate) fn first_url(&self, github_base: &str) -> Result<String, SetupError> {
+    self
+      .urls(github_base)
+      .into_iter()
+      .next()
+      .ok_or_else(|| SetupError::usage("no registration URLs in plan"))
+  }
+
   /// The target's display name for messages.
   pub(crate) fn label(&self) -> String {
     match self {

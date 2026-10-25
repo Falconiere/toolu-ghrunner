@@ -62,9 +62,15 @@ pub(crate) async fn list_groups(
   org: &str,
   bearer: &str,
 ) -> Option<Vec<RunnerGroup>> {
-  wire::net::runner_groups::list_runner_groups(client, api_base, org, bearer, READ_TIMEOUT)
+  match wire::net::runner_groups::list_runner_groups(client, api_base, org, bearer, READ_TIMEOUT)
     .await
-    .ok()
+  {
+    Ok(groups) => Some(groups),
+    Err(e) => {
+      tracing::warn!(%e, "could not list runner groups for {org}");
+      None
+    },
+  }
 }
 
 /// Whether `group` is (or names) the Default group.
@@ -164,7 +170,10 @@ pub(crate) async fn probe_token(
         "GitHub answered {status} while checking organization membership — try again in a moment"
       )));
     }
-    let body: serde_json::Value = response.json().await.unwrap_or_default();
+    let body: serde_json::Value = response
+      .json()
+      .await
+      .map_err(|e| SetupError::runtime(format!("GitHub's membership reply did not parse: {e}")))?;
     let admin = status.is_success()
       && body.get("state").and_then(serde_json::Value::as_str) == Some("active")
       && body.get("role").and_then(serde_json::Value::as_str) == Some("admin");

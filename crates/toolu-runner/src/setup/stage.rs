@@ -159,11 +159,7 @@ pub(crate) async fn stage_plan(
     && let Target::Repos { repos: chosen } = &target
     && !chosen.is_empty()
   {
-    let first_url = target
-      .urls(github_base)
-      .into_iter()
-      .next()
-      .unwrap_or_default();
+    let first_url = target.first_url(github_base)?;
     let base = github::api_base(&first_url)?;
     github::probe_token(client, &base, &auth_ctx.bearer, None, chosen).await?;
   }
@@ -436,11 +432,7 @@ async fn authenticate(
   };
   let ctx = apply::scope_bearer(&staged_plan, home, client, masker, token_value.as_deref()).await?;
   if matches!(auth, AuthPlan::Token) {
-    let first_url = target
-      .urls(github_base)
-      .into_iter()
-      .next()
-      .unwrap_or_default();
+    let first_url = target.first_url(github_base)?;
     let base = github::api_base(&first_url)?;
     let (org, repos) = match target {
       Target::Org { org } => (Some(org.as_str()), Vec::new()),

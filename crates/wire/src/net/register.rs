@@ -417,7 +417,9 @@ pub async fn find_runner(
       .get("runners")
       .and_then(serde_json::Value::as_array)
       .cloned()
-      .unwrap_or_default();
+      .ok_or_else(|| {
+        RunnerError::Protocol("list-runners reply missing 'runners' array".to_owned())
+      })?;
     let count = runners.len();
     for runner in &runners {
       if runner.get("name").and_then(serde_json::Value::as_str) == Some(name) {
@@ -440,16 +442,22 @@ pub async fn find_runner(
           id: runner
             .get("id")
             .and_then(serde_json::Value::as_i64)
-            .unwrap_or_default(),
+            .ok_or_else(|| {
+              RunnerError::Protocol("list-runners reply missing runner id".to_owned())
+            })?,
           status: runner
             .get("status")
             .and_then(serde_json::Value::as_str)
-            .unwrap_or_default()
+            .ok_or_else(|| {
+              RunnerError::Protocol("list-runners reply missing runner status".to_owned())
+            })?
             .to_owned(),
           busy: runner
             .get("busy")
             .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false),
+            .ok_or_else(|| {
+              RunnerError::Protocol("list-runners reply missing runner busy flag".to_owned())
+            })?,
           labels,
         }));
       }

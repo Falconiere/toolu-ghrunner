@@ -80,11 +80,15 @@ pub(crate) fn parse_key(bytes: &[u8]) -> Option<(Key, usize)> {
     b' ' => (Key::Space, 1),
     0x7f | 0x08 => (Key::Backspace, 1),
     byte if byte >= 0x80 => {
-      // A multi-byte UTF-8 character typed at the terminal.
-      let text = std::str::from_utf8(bytes).unwrap_or("");
-      match text.chars().next() {
-        Some(c) => (Key::Char(c), c.len_utf8()),
-        None => (Key::Char(byte as char), 1),
+      // A multi-byte UTF-8 character typed at the terminal. Invalid
+      // UTF-8 (a malformed test byte stream) surfaces as the raw byte,
+      // never as a silent NUL.
+      match std::str::from_utf8(bytes) {
+        Ok(text) => match text.chars().next() {
+          Some(c) => (Key::Char(c), c.len_utf8()),
+          None => (Key::Char(byte as char), 1),
+        },
+        Err(_) => (Key::Char(byte as char), 1),
       }
     },
     0x1b => match (bytes.get(1), bytes.get(2)) {
@@ -145,7 +149,7 @@ pub(crate) fn restore_terminal() {
 type PanicHook = Box<dyn Fn(&std::panic::PanicHookInfo<'_>) + Send + Sync>;
 
 struct RawGuard {
-  previous_hook: Option<PanicHook>,
+  previous_hook: std::sync::Arc<std::sync::Mutex<Option<PanicHook>>>,
 }
 
 impl RawGuard {
@@ -153,15 +157,20 @@ impl RawGuard {
     crossterm::terminal::enable_raw_mode()
       .map_err(|e| PromptEnd::Io(format!("could not enter raw terminal mode: {e}")))?;
     RAW_ACTIVE.store(true, Ordering::SeqCst);
-    let previous = std::panic::take_hook();
-    std::panic::set_hook(Box::new(|info| {
+    // The hook restores the terminal, then runs the previous hook
+    // (default message/backtrace behavior is preserved, not replaced).
+    let previous = std::sync::Arc::new(std::sync::Mutex::new(Some(std::panic::take_hook())));
+    let hook_previous = std::sync::Arc::clone(&previous);
+    std::panic::set_hook(Box::new(move |info| {
       restore_terminal();
-      // The previous hook was taken by the guard; the default hook is
-      // re-created here only for the message, never installed.
-      eprintln!("{info}");
+      if let Ok(guard) = hook_previous.lock()
+        && let Some(previous) = guard.as_ref()
+      {
+        previous(info);
+      }
     }));
     Ok(Self {
-      previous_hook: Some(previous),
+      previous_hook: previous,
     })
   }
 }
@@ -169,7 +178,9 @@ impl RawGuard {
 impl Drop for RawGuard {
   fn drop(&mut self) {
     restore_terminal();
-    if let Some(previous) = self.previous_hook.take() {
+    if let Ok(mut guard) = self.previous_hook.lock()
+      && let Some(previous) = guard.take()
+    {
       std::panic::set_hook(previous);
     }
   }
@@ -265,6 +276,10 @@ impl Prompts {
       .try_clone()
       .map_err(|e| PromptEnd::Io(format!("could not open the terminal for writing: {e}")))?;
     let (tx, rx) = channel::<u8>();
+    // Deliberately detached: the reader blocks on the terminal, so it
+    // cannot be joined without closing the tty under a live prompt.
+    // It exits on EOF, on a read error, or when the receiver is gone
+    // (Prompts dropped), and it lives at most for this process.
     std::thread::spawn(move || {
       let mut buf = [0_u8; 64];
       loop {
