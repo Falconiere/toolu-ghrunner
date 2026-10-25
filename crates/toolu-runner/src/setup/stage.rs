@@ -108,18 +108,6 @@ pub(crate) async fn stage_plan(
   }
   let saved_app = config::app_store::app_path(home).exists();
   let mut auth = plan::auth_plan(args, saved_app)?;
-  // GHES + App: the token is the only route.
-  let ghes = host != "github.com" && !plan::is_loopback(host);
-  if ghes
-    && matches!(
-      auth,
-      AuthPlan::CreateApp | AuthPlan::Import { .. } | AuthPlan::SavedApp
-    )
-  {
-    return Err(SetupError::usage(
-      "GitHub Apps are github.com-only in setup: re-run with --auth token for a GHES host",
-    ));
-  }
   // Headless + create: steer to import/token.
   if facts.headless && matches!(auth, AuthPlan::CreateApp) {
     if interactive {
@@ -165,9 +153,24 @@ pub(crate) async fn stage_plan(
   let (runner_group, repos) =
     scope::resolve_scope(&scope_flow, &mut target, &auth_ctx, prompts).await?;
   let _ = repos;
+  // The picker may have chosen the repos only now: probe them before
+  // any registration is attempted (the exit-2 admin gate).
+  if matches!(auth, AuthPlan::Token)
+    && let Target::Repos { repos: chosen } = &target
+    && !chosen.is_empty()
+  {
+    let first_url = target
+      .urls(github_base)
+      .into_iter()
+      .next()
+      .unwrap_or_default();
+    let base = github::api_base(&first_url)?;
+    github::probe_token(client, &base, &auth_ctx.bearer, None, chosen).await?;
+  }
   // Details.
   let name = scope::resolve_name(args, prompts)?;
-  scope::check_collision(&scope_flow, &target, &name, &auth_ctx, prompts).await?;
+  let confirmed_replace =
+    scope::check_collision(&scope_flow, &target, &name, &auth_ctx, prompts).await?;
   let labels_preview = config::labels::resolve_labels(
     &args.labels,
     args.no_default_labels,
@@ -189,7 +192,7 @@ pub(crate) async fn stage_plan(
       work_folder: crate::cli::work_folder_or_default(args.work_dir.as_ref()),
       mode: super::plan::PlanMode {
         ephemeral: args.mode.ephemeral,
-        replace: args.mode.replace,
+        replace: args.mode.replace || confirmed_replace,
         no_default_labels: args.no_default_labels,
       },
       service: super::plan::PlanService {
@@ -280,6 +283,13 @@ fn existing_match(
     return Ok(None);
   }
   let wanted_name = crate::cli::runner_name_or_hostname(args.name.clone());
+  let wanted_labels = config::labels::resolve_labels(
+    &args.labels,
+    args.no_default_labels,
+    &config::labels::default_labels(),
+  )
+  .map_err(|e| SetupError::usage(e.to_string()))?;
+  let wanted_work = crate::cli::work_folder_or_default(args.work_dir.as_ref());
   let mut matched: Vec<String> = Vec::new();
   let mut any_existing = false;
   for url in target.urls(github_base) {
@@ -289,9 +299,13 @@ fn existing_match(
       any_existing = true;
       let cfg = config::config::load_config(&config_path)
         .map_err(|e| SetupError::runtime(e.to_string()))?;
-      if cfg.runner_name != wanted_name {
+      if cfg.runner_name != wanted_name
+        || cfg.labels != wanted_labels
+        || cfg.ephemeral != args.mode.ephemeral
+        || cfg.runtime.work_dir != wanted_work
+      {
         return Err(SetupError::usage(format!(
-          "runner '{}' is already registered for {url} — pass --replace to reconfigure it",
+          "runner '{}' is already registered for {url} with different settings — pass --replace to reconfigure it",
           cfg.runner_name
         )));
       }
@@ -302,9 +316,33 @@ fn existing_match(
     }
   }
   if any_existing && matched.len() == target.urls(github_base).len() {
+    // A service that never landed (apply failed after registering) is
+    // not "keep as is": fall through so apply installs it and polls.
+    if !args.mode.no_service && !machine_unit_present() {
+      return Ok(None);
+    }
     return Ok(Some(matched.join("; ")));
   }
   Ok(None)
+}
+
+/// Whether the machine unit file exists at its expected destination.
+fn machine_unit_present() -> bool {
+  let Ok(supervisor) = crate::service_cmd::current_supervisor() else {
+    return true;
+  };
+  let Ok(user_home) = crate::service_cmd::home_dir() else {
+    return true;
+  };
+  let id = crate::machine_service::machine_id();
+  crate::service_cmd::dest_path(supervisor, &id, &user_home).exists()
+    || crate::service_cmd::dest_path_scoped(
+      supervisor,
+      crate::machine_service::UnitScope::System,
+      &id,
+      &user_home,
+    )
+    .exists()
 }
 
 /// Authenticate for the scope reads: resolves the bearer in memory and
@@ -491,6 +529,15 @@ pub(crate) fn review_lines(plan: &ResolvedPlan, auth_label: Option<&str>) -> Vec
         "ephemeral (one job)"
       } else {
         "persistent"
+      }
+    ),
+    format!(
+      "runner group: {} · linger: {}",
+      plan.runner_group.as_deref().unwrap_or("Default"),
+      if plan.service.enable_linger {
+        "on"
+      } else {
+        "off"
       }
     ),
   ]

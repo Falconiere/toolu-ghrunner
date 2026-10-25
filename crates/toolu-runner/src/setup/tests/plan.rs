@@ -85,3 +85,18 @@ fn auth_grammar_names_missing_flags() {
   assert_eq!(auth_plan(&a, true).unwrap(), AuthPlan::SavedApp);
   assert_eq!(auth_plan(&a, false).unwrap(), AuthPlan::CreateApp);
 }
+
+#[test]
+fn github_url_never_echoes_credentials() {
+  let err = validate_github_url(Some("http://user:s3cr3t-pw@ghes.example.com")).unwrap_err();
+  assert!(
+    !err.message.contains("s3cr3t-pw"),
+    "password echoed: {}",
+    err.message
+  );
+  assert!(
+    !err.message.contains("user:"),
+    "userinfo echoed: {}",
+    err.message
+  );
+}

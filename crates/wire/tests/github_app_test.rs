@@ -85,6 +85,13 @@ type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 /// Serve `handler(request_head) -> body` on 127.0.0.1 for successive requests.
 fn peer(handler: fn(&str) -> String) -> Result<String, Box<dyn std::error::Error>> {
+  peer_with_status(move |head| (200, handler(head)))
+}
+
+/// Serve `handler(request_head) -> (status, body)` on 127.0.0.1.
+fn peer_with_status(
+  handler: impl Fn(&str) -> (u16, String) + Send + 'static,
+) -> Result<String, Box<dyn std::error::Error>> {
   let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
   let port = listener.local_addr()?.port();
   std::thread::spawn(move || {
@@ -99,9 +106,9 @@ fn peer(handler: fn(&str) -> String) -> Result<String, Box<dyn std::error::Error
         }
       }
       let head = String::from_utf8_lossy(&buf).into_owned();
-      let body = handler(&head);
+      let (status, body) = handler(&head);
       let reply = format!(
-        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+        "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
         body.len(),
         body
       );
@@ -240,5 +247,26 @@ async fn runner_groups_parse_default_flags() -> TestResult {
   assert!(first.default);
   assert!(!first.allows_public_repositories);
   assert_eq!(groups.get(1).map(|group| group.id), Some(7));
+  Ok(())
+}
+
+#[tokio::test]
+async fn find_runner_non_json_401_is_auth_not_network() -> TestResult {
+  let base = peer_with_status(|_| (401, "not json".to_owned()))?;
+  let client = reqwest::Client::new();
+  let err = wire::net::register::find_runner(
+    &client,
+    &format!("{base}/acme"),
+    "token",
+    "target",
+    std::time::Duration::from_secs(5),
+  )
+  .await
+  .err()
+  .ok_or("expected an error")?;
+  assert!(
+    matches!(err, shared::RunnerError::Auth(_)),
+    "401 with a non-JSON body must be Auth, got {err:?}"
+  );
   Ok(())
 }

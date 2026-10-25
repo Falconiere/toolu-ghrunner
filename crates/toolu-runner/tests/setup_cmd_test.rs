@@ -258,7 +258,7 @@ async fn unattended_org_token_registers_and_reports_online() -> TestResult {
   let text = output_text(&output);
   assert_eq!(output.status.code(), Some(0), "{text}");
   assert!(text.contains("setup: online"), "{text}");
-  assert!(text.contains("runs-on:"), "{text}");
+  assert!(text.contains("runs-on: self-hosted, Linux, X64"), "{text}");
   assert!(text.contains("toolu-runner doctor"), "{text}");
   assert!(org_config(home.path()).exists(), "org registration written");
   assert!(
@@ -295,6 +295,10 @@ async fn dry_run_writes_nothing() -> TestResult {
   let text = output_text(&output);
   assert_eq!(output.status.code(), Some(0), "{text}");
   assert!(text.contains("target:"), "review printed: {text}");
+  assert!(
+    text.contains("runner group:"),
+    "review shows the group: {text}"
+  );
   assert!(text.contains("dry run"), "{text}");
   assert_eq!(snapshot(home.path()), before, "dry run wrote state");
   Ok(())
@@ -642,5 +646,19 @@ async fn reconfigure_preserves_network() -> TestResult {
     vec!["markers.example.com".to_owned()],
     "[network] preserved through reconfigure"
   );
+  Ok(())
+}
+
+#[tokio::test]
+async fn token_probe_rejects_non_admin() -> TestResult {
+  let (home_dir, path_env) = home()?;
+  let state = PeerState::new();
+  state.admin.store(false, Ordering::SeqCst);
+  let server = peer(state).await?;
+  let output = run_setup(home_dir.path(), &path_env, &server, ORG_FLAGS)?;
+  let text = output_text(&output);
+  assert_eq!(output.status.code(), Some(2), "{text}");
+  assert!(text.contains("not an admin"), "{text}");
+  assert!(!org_config(home_dir.path()).exists());
   Ok(())
 }

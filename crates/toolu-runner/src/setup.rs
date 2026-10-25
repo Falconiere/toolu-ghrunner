@@ -205,9 +205,14 @@ fn spawn_signal_restore() {
     let Ok(mut hup) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup()) else {
       return;
     };
+    let Ok(mut int) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
+    else {
+      return;
+    };
     let code = tokio::select! {
       _ = term.recv() => 143,
       _ = hup.recv() => 129,
+      _ = int.recv() => 130,
     };
     prompts::restore_terminal();
     std::process::exit(code);
@@ -349,19 +354,39 @@ async fn reconfigure(
   flow: &Flow<'_>,
   prompts: &mut Option<Prompts>,
 ) -> Result<(), SetupError> {
-  let (args, github_base, host, home, out, masker) = (
-    flow.args,
-    flow.github_base,
-    flow.host,
-    flow.home,
-    flow.out,
-    flow.masker,
-  );
+  let (args, home, out, masker) = (flow.args, flow.home, flow.out, flow.masker);
   let cfg = config::config::load_config(&entry.config_path)
     .map_err(|e| SetupError::runtime(e.to_string()))?;
   let mut owned = empty_args();
   owned.mode.replace = true;
   owned.name = Some(cfg.runner_name.clone());
+  // The picked registration's own settings are the defaults: its
+  // labels verbatim (no defaults re-added), work dir and ephemeral.
+  owned.labels.clone_from(&cfg.labels);
+  owned.no_default_labels = true;
+  owned.work_dir = Some(std::path::PathBuf::from(&cfg.runtime.work_dir));
+  owned.mode.ephemeral = cfg.ephemeral;
+  // Its GitHub base comes from its own registration URL, never from
+  // this invocation's --github-url (a GHES registration stays on GHES).
+  let base: Option<String> = match &entry.scope {
+    config::registry::RegistrationScope::Repo { owner, repo } => {
+      let suffix = format!("/{owner}/{repo}");
+      cfg.runner_url.strip_suffix(&suffix).map(str::to_owned)
+    },
+    config::registry::RegistrationScope::Org(org) => {
+      let suffix = format!("/{org}");
+      cfg.runner_url.strip_suffix(&suffix).map(str::to_owned)
+    },
+    config::registry::RegistrationScope::Toolu(_) | config::registry::RegistrationScope::Legacy => {
+      None
+    },
+  };
+  let Some(base) = base else {
+    return Err(SetupError::usage(
+      "setup cannot reconfigure a toolu.sh or legacy registration; use `toolu-runner remove` and register again",
+    ));
+  };
+  owned.github_url = Some(base);
   match &cfg.auth {
     config::registration_auth::AuthSection::App { .. } => owned.auth = Some("app".to_owned()),
     config::registration_auth::AuthSection::Token => owned.auth = Some("token".to_owned()),
@@ -375,11 +400,16 @@ async fn reconfigure(
     },
   }
   let owned = owned_with(args, owned);
+  let derived_base = owned
+    .github_url
+    .clone()
+    .unwrap_or_else(|| flow.github_base.to_owned());
+  let derived_host = plan::host_of(&derived_base);
   let facts = machine::gather(home).map_err(SetupError::runtime)?;
   let inner = Flow {
     args: &owned,
-    github_base,
-    host,
+    github_base: &derived_base,
+    host: &derived_host,
     home,
     facts: &facts,
     out,

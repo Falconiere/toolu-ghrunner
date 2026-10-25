@@ -154,6 +154,16 @@ pub(crate) async fn probe_token(
       .await
       .map_err(|e| SetupError::runtime(format!("could not reach GitHub: {e}")))?;
     let status = response.status();
+    if status.as_u16() == 429 || status.is_server_error() {
+      return Err(SetupError::runtime(format!(
+        "GitHub answered {status} while checking organization membership — try again in a moment"
+      )));
+    }
+    if status.as_u16() != 404 && !status.is_success() {
+      return Err(SetupError::runtime(format!(
+        "GitHub answered {status} while checking organization membership — try again in a moment"
+      )));
+    }
     let body: serde_json::Value = response.json().await.unwrap_or_default();
     let admin = status.is_success()
       && body.get("state").and_then(serde_json::Value::as_str) == Some("active")

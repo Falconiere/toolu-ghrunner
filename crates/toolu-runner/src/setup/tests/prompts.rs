@@ -81,3 +81,16 @@ fn parse_key_reads_escape_sequences() {
   assert_eq!(parse_key(b"\x03"), Some((Key::CtrlC, 1)));
   assert_eq!(parse_key(b"\x1b"), Some((Key::Esc, 1)));
 }
+
+#[test]
+fn input_accepts_spaces_and_utf8() {
+  let mut out = Vec::new();
+  let value = run_input(&mut keys("my runner\r".as_bytes()), &mut out, "Name", "x").unwrap();
+  assert_eq!(value, "my runner");
+  let mut out = Vec::new();
+  let value = run_input(&mut keys("caf\u{e9}\r".as_bytes()), &mut out, "Name", "x").unwrap();
+  assert_eq!(value, "caf\u{e9}");
+  let mut out = Vec::new();
+  let value = run_secret(&mut keys(b"a b\r"), &mut out, "Token").unwrap();
+  assert_eq!(value, "a b");
+}

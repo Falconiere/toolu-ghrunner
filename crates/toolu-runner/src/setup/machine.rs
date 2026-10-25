@@ -46,10 +46,21 @@ pub(crate) fn gather(home: &std::path::Path) -> Result<MachineFacts, String> {
     memory: total_memory(),
     supervisor: supervisor_name(),
     linger: linger_state(),
-    headless: crate::config::ssh_session() || !crate::config::display_present(),
+    headless: classify_headless(
+      crate::config::ssh_session(),
+      crate::config::display_present(),
+      cfg!(target_os = "macos"),
+    ),
     home: home.to_path_buf(),
     existing,
   })
+}
+
+/// Whether the session looks headless: SSH always is; on macOS a
+/// local GUI session sets neither `DISPLAY` nor `WAYLAND_DISPLAY`, so
+/// only SSH counts there.
+pub(crate) fn classify_headless(ssh: bool, display: bool, macos: bool) -> bool {
+  ssh || (!macos && !display)
 }
 
 /// Total memory from `/proc/meminfo` on Linux; `None` elsewhere rather

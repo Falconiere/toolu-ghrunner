@@ -153,15 +153,17 @@ pub(crate) fn resolve_name(
 
 /// Collision: a same-name runner already in the target needs
 /// `--replace` (unattended) or a confirm (interactive).
+/// Returns whether the user confirmed replacing an existing runner
+/// (threaded into the plan's `replace` by the caller).
 pub(crate) async fn check_collision(
   flow: &ScopeFlow<'_>,
   target: &Target,
   name: &str,
   auth_ctx: &AuthContext,
   prompts: &mut Option<Prompts>,
-) -> Result<(), SetupError> {
+) -> Result<bool, SetupError> {
   if flow.args.mode.replace {
-    return Ok(());
+    return Ok(true);
   }
   for url in target.urls(flow.github_base) {
     // A locally registered target is a resume, not a collision: the
@@ -183,6 +185,7 @@ pub(crate) async fn check_collision(
           if !yes {
             return Err(SetupError::cancelled());
           }
+          return Ok(true);
         },
         None => {
           return Err(SetupError::usage(format!(
@@ -192,7 +195,7 @@ pub(crate) async fn check_collision(
       }
     }
   }
-  Ok(())
+  Ok(false)
 }
 
 /// The linger answer: flag, service-step question, or off. Setup

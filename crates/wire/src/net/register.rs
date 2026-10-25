@@ -394,21 +394,25 @@ pub async fn find_runner(
       .send()
       .await
       .map_err(|e| RunnerError::Network(format!("list-runners request failed: {e}")))?;
+    // Status first: a non-JSON error body must not become a
+    // (retryable) Network error and hide an auth refusal.
     let status = response.status();
-    let body: serde_json::Value = response
-      .json()
+    let text = response
+      .text()
       .await
       .map_err(|e| RunnerError::Network(format!("reading list-runners body failed: {e}")))?;
     if status.as_u16() == 429 || status.is_server_error() {
       return Err(RunnerError::Network(format!(
-        "list-runners failed with status {status}: {body}"
+        "list-runners failed with status {status}: {text}"
       )));
     }
     if !status.is_success() {
       return Err(RunnerError::Auth(format!(
-        "list-runners failed with status {status}: {body}"
+        "list-runners failed with status {status}: {text}"
       )));
     }
+    let body: serde_json::Value = serde_json::from_str(&text)
+      .map_err(|e| RunnerError::Protocol(format!("list-runners reply did not parse: {e}")))?;
     let runners = body
       .get("runners")
       .and_then(serde_json::Value::as_array)

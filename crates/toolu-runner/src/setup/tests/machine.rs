@@ -13,3 +13,21 @@ fn gather_lists_existing_registrations() {
   assert!(facts.summary().contains("1 existing runner(s)"));
   std::fs::remove_dir_all(&home).ok();
 }
+
+#[test]
+fn headless_classification_matches_platforms() {
+  assert!(classify_headless(true, true, false));
+  assert!(
+    classify_headless(true, false, true),
+    "SSH on a Mac is headless"
+  );
+  assert!(
+    !classify_headless(false, false, true),
+    "a Mac desktop is not headless"
+  );
+  assert!(
+    classify_headless(false, false, false),
+    "no display on Linux is headless"
+  );
+  assert!(!classify_headless(false, true, false));
+}

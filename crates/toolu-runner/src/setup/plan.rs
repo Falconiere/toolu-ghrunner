@@ -166,6 +166,9 @@ pub(crate) fn validate_github_url(raw: Option<&str>) -> Result<String, SetupErro
   let trimmed = raw.trim_end_matches('/');
   let parsed = url::Url::parse(trimmed)
     .map_err(|e| SetupError::usage(format!("--github-url '{raw}' is not a URL: {e}")))?;
+  if !parsed.username().is_empty() || parsed.password().is_some() {
+    return Err(SetupError::usage("--github-url must not carry credentials"));
+  }
   let host = parsed
     .host_str()
     .ok_or_else(|| SetupError::usage(format!("--github-url '{raw}' has no host")))?;

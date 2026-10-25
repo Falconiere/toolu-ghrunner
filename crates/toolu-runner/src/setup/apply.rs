@@ -176,6 +176,21 @@ pub(crate) async fn persist_import(plan: &ResolvedPlan, home: &Path) -> Result<(
   let AuthPlan::Import { file, app_id, key } = &plan.auth else {
     return Ok(());
   };
+  // Already saved as this same App (a resumed run): persisting again
+  // would fail in create-app's existing-file guard for no reason.
+  let wanted_id = match (file, app_id) {
+    (Some(file), _) => config::app_store::load_app_file(file)
+      .map(|app| app.app_id)
+      .unwrap_or_default(),
+    (None, Some(app_id)) => *app_id,
+    (None, None) => 0,
+  };
+  if wanted_id != 0
+    && let Ok(Some(saved)) = config::app_store::load_app(home)
+    && saved.app_id == wanted_id
+  {
+    return Ok(());
+  }
   let org = match &plan.target {
     super::plan::Target::Org { org } => Some(org.clone()),
     super::plan::Target::Repos { .. } => None,
@@ -202,6 +217,22 @@ pub(crate) async fn persist_import(plan: &ResolvedPlan, home: &Path) -> Result<(
         message: e.to_string(),
       }
     })
+}
+
+/// The online-poll client, built from a registration's own
+/// `[network]` (a proxied/CA-pinned registration polls the same way).
+fn poll_client(plan: &ResolvedPlan, home: &Path) -> Result<reqwest::Client, SetupError> {
+  let Some(url) = plan.target.urls(&plan.github_base).into_iter().next() else {
+    return crate::register_cmd::build_register_client(&shared::NetworkConfig::default())
+      .map_err(|e| SetupError::runtime(e.to_string()));
+  };
+  let config_path = crate::register_cmd::register_config_path(&url, home)
+    .map_err(|e| SetupError::usage(e.to_string()))?;
+  let network = config::config::load_config(&config_path)
+    .map(|cfg| cfg.network.resolve())
+    .unwrap_or_default();
+  crate::register_cmd::build_register_client(&network)
+    .map_err(|e| SetupError::runtime(e.to_string()))
 }
 
 /// Store a personal token in the existing 0600 token store.
@@ -248,8 +279,7 @@ pub(crate) async fn apply_plan(
   }
   if plan.service.install {
     install_machine_service(plan).await?;
-    let client = crate::register_cmd::build_register_client(&shared::NetworkConfig::default())
-      .map_err(|e| SetupError::runtime(e.to_string()))?;
+    let client = poll_client(plan, home)?;
     for runner in &applied {
       let summary = github::poll_online(
         &client,

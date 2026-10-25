@@ -25,7 +25,7 @@ pub(crate) enum Key {
   Space,
   /// Enter (confirm).
   Enter,
-  /// Escape alone (back one step).
+  /// Escape alone (cancel this prompt; setup exits).
   Esc,
   /// Ctrl+C (cancel).
   CtrlC,
@@ -40,7 +40,8 @@ pub(crate) enum Key {
 pub(crate) enum PromptEnd {
   /// Ctrl+C: the whole run cancels (exit 130).
   Cancelled,
-  /// Esc: back one step.
+  /// Esc: cancels this prompt; setup exits (the menu stages do not
+  /// implement per-step back-navigation).
   Back,
   /// The terminal could not be read or written.
   Io(String),
@@ -50,7 +51,7 @@ impl From<PromptEnd> for SetupError {
   fn from(end: PromptEnd) -> Self {
     match end {
       PromptEnd::Cancelled => SetupError::cancelled(),
-      PromptEnd::Back => SetupError::usage("went back; no answer given"),
+      PromptEnd::Back => SetupError::usage("cancelled at the prompt (Esc)"),
       PromptEnd::Io(message) => SetupError::runtime(message),
     }
   }
@@ -74,6 +75,14 @@ pub(crate) fn parse_key(bytes: &[u8]) -> Option<(Key, usize)> {
     b'\r' | b'\n' => (Key::Enter, 1),
     b' ' => (Key::Space, 1),
     0x7f | 0x08 => (Key::Backspace, 1),
+    byte if byte >= 0x80 => {
+      // A multi-byte UTF-8 character typed at the terminal.
+      let text = std::str::from_utf8(bytes).unwrap_or("");
+      match text.chars().next() {
+        Some(c) => (Key::Char(c), c.len_utf8()),
+        None => (Key::Char(byte as char), 1),
+      }
+    },
     0x1b => match (bytes.get(1), bytes.get(2)) {
       (Some(b'['), Some(b'A')) => (Key::Up, 3),
       (Some(b'['), Some(b'B')) => (Key::Down, 3),
@@ -166,7 +175,6 @@ impl Drop for RawGuard {
 pub(crate) struct Prompts {
   keys: TtyKeys,
   out: std::fs::File,
-  _guard: RawGuard,
 }
 
 /// Keys read from the `/dev/tty` byte channel.
@@ -215,6 +223,24 @@ impl KeySource for TtyKeys {
         },
         None => Key::Esc,
       },
+      byte if byte >= 0x80 => {
+        let width = match byte {
+          0xC0..=0xDF => 2,
+          0xE0..=0xEF => 3,
+          _ => 4,
+        };
+        let mut buf = vec![byte];
+        for _ in 1..width {
+          match self.byte() {
+            Ok(next) => buf.push(next),
+            Err(_) => break,
+          }
+        }
+        std::str::from_utf8(&buf)
+          .ok()
+          .and_then(|text| text.chars().next())
+          .map_or(Key::Char(byte as char), Key::Char)
+      },
       byte => Key::Char(byte as char),
     };
     Ok(key)
@@ -235,7 +261,6 @@ impl Prompts {
     let out = reader
       .try_clone()
       .map_err(|e| PromptEnd::Io(format!("could not open the terminal for writing: {e}")))?;
-    let guard = RawGuard::new()?;
     let (tx, rx) = channel::<u8>();
     std::thread::spawn(move || {
       let mut buf = [0_u8; 64];
@@ -258,17 +283,17 @@ impl Prompts {
         pending: VecDeque::new(),
       },
       out,
-      _guard: guard,
     })
   }
 
-  /// One-of-many selection (`↑/↓`, enter, esc back, ctrl+c cancel).
+  /// One-of-many selection (`↑/↓`, enter, esc cancels, ctrl+c cancels).
   pub(crate) fn select(
     &mut self,
     title: &str,
     options: &[String],
     default: usize,
   ) -> Result<usize, PromptEnd> {
+    let _guard = RawGuard::new()?;
     run_select(&mut self.keys, &mut self.out, title, options, default)
   }
 
@@ -279,21 +304,25 @@ impl Prompts {
     options: &[String],
     preselected: &[bool],
   ) -> Result<Vec<usize>, PromptEnd> {
+    let _guard = RawGuard::new()?;
     run_multi_select(&mut self.keys, &mut self.out, title, options, preselected)
   }
 
-  /// A one-line text answer (enter confirms, esc back).
+  /// A one-line text answer (enter confirms, esc cancels).
   pub(crate) fn input(&mut self, title: &str, default: &str) -> Result<String, PromptEnd> {
+    let _guard = RawGuard::new()?;
     run_input(&mut self.keys, &mut self.out, title, default)
   }
 
   /// A secret line: typed bytes never reach the terminal.
   pub(crate) fn secret(&mut self, title: &str) -> Result<String, PromptEnd> {
+    let _guard = RawGuard::new()?;
     run_secret(&mut self.keys, &mut self.out, title)
   }
 
   /// A yes/no answer (arrows or `y`/`n`, enter confirms).
   pub(crate) fn confirm(&mut self, title: &str, default: bool) -> Result<bool, PromptEnd> {
+    let _guard = RawGuard::new()?;
     run_confirm(&mut self.keys, &mut self.out, title, default)
   }
 }
@@ -454,6 +483,10 @@ pub(crate) fn run_input(
           value
         });
       },
+      Key::Space => {
+        value.push(' ');
+        write(out, " ")?;
+      },
       Key::Backspace => {
         if value.pop().is_some() {
           write(out, "\x08 \x08")?;
@@ -465,7 +498,7 @@ pub(crate) fn run_input(
       },
       Key::Esc => return Err(PromptEnd::Back),
       Key::CtrlC => return Err(PromptEnd::Cancelled),
-      Key::Up | Key::Down | Key::Space | Key::Char(_) => {},
+      Key::Up | Key::Down | Key::Char(_) => {},
     }
   }
 }
@@ -484,13 +517,14 @@ pub(crate) fn run_secret(
         write(out, "••••\r\n")?;
         return Ok(value);
       },
+      Key::Space => value.push(' '),
       Key::Backspace => {
         value.pop();
       },
       Key::Char(c) if !c.is_control() => value.push(c),
       Key::Esc => return Err(PromptEnd::Back),
       Key::CtrlC => return Err(PromptEnd::Cancelled),
-      Key::Up | Key::Down | Key::Space | Key::Char(_) => {},
+      Key::Up | Key::Down | Key::Char(_) => {},
     }
   }
 }
