@@ -167,13 +167,14 @@ pub(crate) async fn stage_plan(
   let name = scope::resolve_name(args, prompts)?;
   let confirmed_replace =
     scope::check_collision(&scope_flow, &target, &name, &auth_ctx, prompts).await?;
-  let labels_preview = config::labels::resolve_labels(
+  // Validate the labels now (an invalid label fails before Review);
+  // the resolved list itself is recomputed at apply.
+  let _labels_preview = config::labels::resolve_labels(
     &args.labels,
     args.no_default_labels,
     &config::labels::default_labels(),
   )
   .map_err(|e| SetupError::usage(e.to_string()))?;
-  let _ = labels_preview;
   let service = !args.mode.no_service;
   let enable_linger = scope::resolve_linger(args, prompts, facts, service)?;
   Ok(StageOutcome::Plan(Box::new(Staged {

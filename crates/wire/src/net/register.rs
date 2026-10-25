@@ -437,7 +437,10 @@ pub async fn find_runner(
               })
               .collect()
           })
-          .unwrap_or_default();
+          .unwrap_or_else(|| {
+            tracing::warn!("list-runners reply missing labels array for runner {name}");
+            Vec::new()
+          });
         return Ok(Some(RunnerSummary {
           id: runner
             .get("id")
