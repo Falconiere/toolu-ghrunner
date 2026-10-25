@@ -357,6 +357,20 @@ pub struct RunnerSummary {
   pub labels: Vec<String>,
 }
 
+/// A required field of one runner object in a list-runners reply:
+/// a missing or mistyped field is a `Protocol` error, never a
+/// silently defaulted value.
+fn required<'v, T>(
+  runner: &'v serde_json::Value,
+  field: &str,
+  get: impl Fn(&'v serde_json::Value) -> Option<T>,
+) -> Result<T, RunnerError> {
+  runner
+    .get(field)
+    .and_then(get)
+    .ok_or_else(|| RunnerError::Protocol(format!("list-runners reply missing runner {field}")))
+}
+
 /// The runner registered under `name` for `url`'s repo/org, if any:
 /// the list-runners endpoint with the `?name=` filter, paged to
 /// exhaustion (`per_page=100`), still re-checking the echoed name.
@@ -444,25 +458,9 @@ pub async fn find_runner(
             },
           );
         return Ok(Some(RunnerSummary {
-          id: runner
-            .get("id")
-            .and_then(serde_json::Value::as_i64)
-            .ok_or_else(|| {
-              RunnerError::Protocol("list-runners reply missing runner id".to_owned())
-            })?,
-          status: runner
-            .get("status")
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| {
-              RunnerError::Protocol("list-runners reply missing runner status".to_owned())
-            })?
-            .to_owned(),
-          busy: runner
-            .get("busy")
-            .and_then(serde_json::Value::as_bool)
-            .ok_or_else(|| {
-              RunnerError::Protocol("list-runners reply missing runner busy flag".to_owned())
-            })?,
+          id: required(runner, "id", serde_json::Value::as_i64)?,
+          status: required(runner, "status", serde_json::Value::as_str)?.to_owned(),
+          busy: required(runner, "busy", serde_json::Value::as_bool)?,
           labels,
         }));
       }
