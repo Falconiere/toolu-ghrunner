@@ -317,7 +317,6 @@ async fn remove_one(
   .map_err(|e| SetupError::runtime(e.to_string()))
 }
 
-/// An empty flag set for bearer resolution helpers.
 /// Build a plan (flags and/or prompts), review it, and apply it.
 async fn build_and_apply(flow: &Flow<'_>, prompts: &mut Option<Prompts>) -> Result<(), SetupError> {
   let (args, github_base, host, home, facts, out, masker) = (

@@ -165,3 +165,7 @@ fn owned_with(args: &SetupArgs, mut owned: SetupArgs) -> SetupArgs {
   }
   owned
 }
+
+#[cfg(test)]
+#[path = "tests/reconfigure.rs"]
+mod tests;
