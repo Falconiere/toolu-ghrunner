@@ -86,6 +86,20 @@ want "tag pushed as annotated vX.Y.Z"    "$TAG_SH" "git tag -a \"v\\\$\{current\
 # is a distinct identity, so its push does fire it.
 want "mints an App token"                "$WF" "uses: actions/create-github-app-token@"
 want "mint step is id app-token"         "$WF" "id: app-token"
+# The dedicated release App, not the homebrew publish App that stood in for it:
+# both jobs mint from TOOLU_RELEASE_APP_ID / TOOLU_RELEASE_PRIVATE_KEY, and the
+# homebrew App's secrets stay confined to release-homebrew.yml, whose install
+# covers the tap repo rather than this one.
+want "mints from the toolu-release App id" "$WF" "app-id: \\$\{\{ secrets\.TOOLU_RELEASE_APP_ID \}\}"
+want "mints with the toolu-release key"    "$WF" "private-key: \\$\{\{ secrets\.TOOLU_RELEASE_PRIVATE_KEY \}\}"
+n_mints="$(grep -Ec -- "app-id: \\$\{\{ secrets\.TOOLU_RELEASE_APP_ID \}\}" "$WF")"
+if [[ "$n_mints" == "2" ]]; then
+  echo "ok: both jobs mint from the toolu-release App"
+else
+  echo "FAIL: expected both jobs to mint from TOOLU_RELEASE_APP_ID, found $n_mints" >&2
+  fail=1
+fi
+reject "homebrew App does not drive this repo's release" "$WF" "secrets\.HOMEBREW_APP_"
 want "checkout auths with the App token" "$WF" "token: \\\$\{\{ steps\.app-token\.outputs\.token \}\}"
 want "gh auths with the App token"       "$WF" "GH_TOKEN: \\\$\{\{ steps\.app-token\.outputs\.token \}\}"
 # Scoping: no owner/repositories inputs, so the action defaults to this repo and
