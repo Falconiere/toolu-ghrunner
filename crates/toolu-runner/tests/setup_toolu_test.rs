@@ -677,8 +677,8 @@ async fn first_poll_timeout_exits_1_and_keeps_the_pairing() -> TestResult<()> {
   Ok(())
 }
 
-/// `TOOLU_RUNNER_ENROLL_TOKEN` stands in for `--enroll-token` (and implies
-/// the toolu.sh source), keeping the token out of argv.
+/// With `--source toolu`, `TOOLU_RUNNER_ENROLL_TOKEN` stands in for
+/// `--enroll-token`, keeping the token out of argv.
 #[tokio::test]
 async fn the_enrollment_token_can_come_from_the_environment() -> TestResult<()> {
   let faults = Faults {
@@ -691,13 +691,47 @@ async fn the_enrollment_token_can_come_from_the_environment() -> TestResult<()> 
     home.path(),
     &path_env,
     &peer.server.uri(),
-    &["--no-service"],
+    &["--source", "toolu", "--no-service"],
     &[("TOOLU_RUNNER_ENROLL_TOKEN", ENROLL)],
   )?;
   let printed = text(&out);
   assert_eq!(out.status.code(), Some(0), "{printed}");
   assert_eq!(peer.machines(), 1);
+  assert!(
+    peer.seen_ending("/runner/pair").is_empty(),
+    "{:?}",
+    peer.paths()
+  );
   assert!(machine_dir(home.path()).join("config.toml").exists());
+  Ok(())
+}
+
+/// A `TOOLU_RUNNER_ENROLL_TOKEN` left exported never picks the source: a
+/// GitHub setup stays GitHub and toolu.sh is never called.
+#[tokio::test]
+async fn an_exported_enrollment_token_does_not_hijack_github() -> TestResult<()> {
+  let peer = Peer::start(&[], 600_000, Faults::default(), "true").await?;
+  let (home, path_env) = home()?;
+  let out = setup(
+    home.path(),
+    &path_env,
+    &peer.server.uri(),
+    &[
+      "--org",
+      "acme",
+      "--github-url",
+      "http://127.0.0.1:9",
+      "--auth",
+      "token",
+      "--yes",
+    ],
+    &[("TOOLU_RUNNER_ENROLL_TOKEN", ENROLL)],
+  )?;
+  let printed = text(&out);
+  assert!(!printed.contains("GitHub-only"), "{printed}");
+  assert!(!printed.contains("--enroll-token"), "{printed}");
+  assert!(peer.seen().is_empty(), "{:?}", peer.paths());
+  assert!(!machine_dir(home.path()).exists());
   Ok(())
 }
 
@@ -751,6 +785,44 @@ async fn keep_as_is_reads_the_machine() -> TestResult<()> {
     "{output}"
   );
   assert!(output.contains("Nothing to change"), "{output}");
+  let after: Vec<_> = state(home.path())
+    .into_iter()
+    .filter(|(rel, _)| rel != "answers.txt")
+    .collect();
+  assert_eq!(after, before);
+  Ok(())
+}
+
+/// Keep as is on a revoked machine shows the error row and exits 2 after
+/// checking everything, changing nothing.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn keep_as_is_reports_a_revoked_machine() -> TestResult<()> {
+  let faults = Faults {
+    host_fault: Some(HostFault::Revoked),
+    ..Faults::default()
+  };
+  let peer = Peer::start(&[], 600_000, faults, "true").await?;
+  let (home, path_env) = home()?;
+  let config = write_machine(home.path(), &peer.server.uri(), HOST_TOKEN, "")?;
+  let before = state(home.path());
+  let (code, output) = crate::setup_cmd_test::run_pty_env(
+    home.path(),
+    &path_env,
+    &[],
+    &[("What would you like to do?", b"\r")],
+    &[("TOOLU_RUNNER_TOKEN", "")],
+  )?;
+  assert_eq!(code, Some(2), "output: {output}");
+  assert!(output.contains("it was revoked"), "{output}");
+  assert!(
+    output.contains(&format!(
+      "toolu-runner remove --config {}",
+      config.display()
+    )),
+    "{output}"
+  );
+  assert!(!output.contains("Nothing to change"), "{output}");
   let after: Vec<_> = state(home.path())
     .into_iter()
     .filter(|(rel, _)| rel != "answers.txt")

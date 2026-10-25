@@ -58,10 +58,7 @@ struct Flow<'a> {
 }
 
 /// `setup` entry point (see the module docs for the flow and codes).
-pub(crate) async fn cmd_setup(mut args: SetupArgs) -> Result<(), Box<dyn std::error::Error>> {
-  if args.enroll_token.is_none() {
-    args.enroll_token = crate::config::enroll_token();
-  }
+pub(crate) async fn cmd_setup(args: SetupArgs) -> Result<(), Box<dyn std::error::Error>> {
   match run_setup(&args).await {
     Ok(()) => Ok(()),
     Err(e) => Err(Box::new(CodedExit::new(e.code, e.message))),

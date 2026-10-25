@@ -212,7 +212,8 @@ outside a `tests/` tree.
   at `interval`, +5 s per `slow_down`, transient retried until expiry;
   denied → exit 2, expired → exit 1 unattended or enter-for-a-new-code on a
   TTY; nothing written before approval) or `POST /runner/enroll` (401 →
-  exit 2; token from `--enroll-token` or `TOOLU_RUNNER_ENROLL_TOKEN`; 400
+  exit 2; token from `--enroll-token`, or with `--source toolu` from
+  `TOOLU_RUNNER_ENROLL_TOKEN`, which never picks the source; 400
   `Refused` → exit 2, a 404 (machines off) / malformed reply → exit 1). Host token, device code and enrollment token join the
   `SecretMasker` first; credentials (0600) are written before
   `config.toml`; a running `run --all` is SIGHUPed. Then `GET /runner/host`

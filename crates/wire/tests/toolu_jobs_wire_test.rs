@@ -232,10 +232,7 @@ async fn not_found_rate_limit_server_error_and_other_statuses_are_classified() {
       503,
       |e| matches!(e, TooluError::Transient(m) if m.contains("503")),
     ),
-    (
-      400,
-      |e| *e == TooluError::Refused("x".to_owned()),
-    ),
+    (400, |e| *e == TooluError::Refused("x".to_owned())),
   ] {
     let (client, server) = peer(response_bytes(status, &[], "{\"error\":\"x\"}")).await;
     let err = client.claim("j1").await.expect_err("non-2xx");

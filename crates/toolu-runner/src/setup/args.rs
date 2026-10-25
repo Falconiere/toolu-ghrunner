@@ -15,8 +15,9 @@ pub(crate) struct SetupArgs {
   #[arg(long, value_name = "SOURCE")]
   pub(crate) source: Option<String>,
   /// Pair with toolu.sh using a single-use enrollment token minted in the
-  /// console (implies `--source toolu`; asks nothing). `TOOLU_RUNNER_ENROLL_TOKEN`
-  /// is read when this is absent, keeping the token out of `ps`.
+  /// console (implies `--source toolu`; asks nothing). With `--source toolu`,
+  /// `TOOLU_RUNNER_ENROLL_TOKEN` is read when this is absent (keeps the token
+  /// out of `ps`); the variable alone never picks the source.
   #[arg(long, value_name = "TOKEN")]
   pub(crate) enroll_token: Option<String>,
   /// Register an organization-level runner for this GitHub organization.

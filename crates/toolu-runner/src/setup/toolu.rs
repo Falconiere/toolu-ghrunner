@@ -67,6 +67,16 @@ pub(crate) fn flag_source(args: &SetupArgs) -> Result<Option<Source>, SetupError
   Ok(source)
 }
 
+/// The enrollment token once the source is toolu.sh: `--enroll-token`, else
+/// `TOOLU_RUNNER_ENROLL_TOKEN`. The variable never picks the source, so one
+/// left exported cannot turn a GitHub setup into a pairing.
+fn enroll_token(args: &SetupArgs) -> Option<String> {
+  args
+    .enroll_token
+    .clone()
+    .or_else(crate::config::enroll_token)
+}
+
 /// Exit 2 naming the first GitHub-only flag given with the toolu.sh source.
 fn reject_github_flags(args: &SetupArgs) -> Result<(), SetupError> {
   let given = [
@@ -114,7 +124,8 @@ fn paired<'a>(flow: &'a Flow<'a>) -> Vec<&'a RegistrationEntry> {
 pub(super) async fn run(flow: &Flow<'_>, prompts: &mut Option<Prompts>) -> Result<(), SetupError> {
   let (args, masker) = (flow.args, flow.masker);
   reject_github_flags(args)?;
-  if let Some(token) = &args.enroll_token
+  let token = enroll_token(args);
+  if let Some(token) = &token
     && let Ok(mut masker) = masker.lock()
   {
     masker.add_secret(token);
@@ -122,7 +133,7 @@ pub(super) async fn run(flow: &Flow<'_>, prompts: &mut Option<Prompts>) -> Resul
   let api = crate::config::toolu_api_url();
   let existing = paired(flow);
   if args.dry_run() {
-    review(flow, &api, existing.first().copied());
+    review(flow, &api, existing.first().copied(), token.is_some());
     return Ok(());
   }
   if let Some(entry) = existing.first() {
@@ -132,7 +143,7 @@ pub(super) async fn run(flow: &Flow<'_>, prompts: &mut Option<Prompts>) -> Resul
     super::scope::resolve_linger(args, prompts, flow.facts, !args.mode.no_service)?;
   let report = toolu_wait::machine_report(&args.labels, flow.facts.cpus, flow.facts.memory_mb);
   let client = super::http_client()?;
-  let grant = match &args.enroll_token {
+  let grant = match &token {
     Some(token) => enroll(&client, &api, token, &report)
       .await
       .map_err(|e| refused("enroll", e))?,
@@ -354,7 +365,7 @@ pub(super) async fn refresh(
   reject_github_flags(args)?;
   let mut cfg = load(&entry.config_path)?;
   let client = client_for(&cfg, &entry.config_path, flow)?;
-  if args.enroll_token.is_some() {
+  if enroll_token(args).is_some() {
     out.warn(
       "enroll",
       "this machine is already paired; the enrollment token was not used",
@@ -463,17 +474,17 @@ async fn wait_for_service(lock: &Path, timeout: Duration) -> Result<(), SetupErr
 }
 
 /// `--dry-run`: the toolu.sh Review, no request.
-fn review(flow: &Flow<'_>, api: &str, existing: Option<&RegistrationEntry>) {
+fn review(flow: &Flow<'_>, api: &str, existing: Option<&RegistrationEntry>, enrolling: bool) {
   let (args, out) = (flow.args, flow.out);
   out.rail("Review");
   out.line(&format!("source: toolu.sh ({api})"));
-  let method = match (existing, &args.enroll_token) {
+  let method = match (existing, enrolling) {
     (Some(entry), _) => format!(
       "refresh the paired machine ({}) with PATCH /runner/host",
       entry.config_path.display()
     ),
-    (None, Some(_)) => "enrollment token (no questions)".to_owned(),
-    (None, None) => "pairing code typed in the toolu.sh console".to_owned(),
+    (None, true) => "enrollment token (no questions)".to_owned(),
+    (None, false) => "pairing code typed in the toolu.sh console".to_owned(),
   };
   out.line(&format!("method: {method}"));
   out.line(&format!("labels: {}", args.labels.join(", ")));

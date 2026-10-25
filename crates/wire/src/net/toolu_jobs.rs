@@ -1,12 +1,14 @@
-//! toolu.sh `/runner/*` job-claim calls (#206): list, claim, dispatched,
-//! heartbeat, complete — what a paired machine's poll loop sends.
+//! toolu.sh `/runner/*` calls of a paired machine: the job claim (#206: list,
+//! claim, dispatched, heartbeat, complete — what the poll loop sends) and the
+//! machine's own `/runner/host` (#207: read, refresh, revoke).
 //!
 //! Every call carries `Authorization: Bearer <host token>` (`tlu_h_…`).
 //! Statuses map to [`TooluError`] by the contract's meaning
 //! (CodaSignal/toolu.sh `self-hosted-machines.md`, `runner-jobs.md`): 401 is
 //! a revoked or unknown machine, 409 a refused or lost claim, 404 an unknown
-//! job; 429, 5xx and transport failures are transient, so the loop backs
-//! off. Bodies and rules are `protocol::toolu_jobs`.
+//! job, 400 refused input; 429, 5xx and transport failures are transient, so
+//! the loop backs off. Bodies and rules are `protocol::toolu_jobs` and
+//! `protocol::toolu_pair`.
 
 use std::time::Duration;
 
