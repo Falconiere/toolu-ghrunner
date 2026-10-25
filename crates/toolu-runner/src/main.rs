@@ -42,6 +42,7 @@ mod doctor_host;
 mod doctor_registrations;
 mod doctor_report;
 mod doctor_service;
+mod doctor_toolu;
 mod ephemeral;
 mod login_cmd;
 mod machine_service;
@@ -56,6 +57,7 @@ mod setup;
 mod status_cmd;
 mod supervisor;
 mod supervisor_signal;
+mod toolu_host;
 
 use crate::cli::{Cli, Command, RemoveArgs, credentials_path_for};
 
@@ -214,7 +216,11 @@ pub(crate) async fn cmd_remove(args: RemoveArgs) -> Result<(), Box<dyn std::erro
   // Unregister on GitHub BEFORE touching local state: the persisted
   // runner_id and URL are the only way to name the runner, so deleting them
   // first would strand it with no way to retry.
-  let unregistered = unregister_on_github(&cfg, args.token, skip).await?;
+  let unregistered = if cfg.provider.is_github() {
+    unregister_on_github(&cfg, args.token, skip).await?
+  } else {
+    skip.is_none() && toolu_host::revoke(&cfg, &creds_path).await?
+  };
 
   // A live run still owns `.lock`; deleting it would let a second `run`
   // acquire a fresh one against the same data_dir and race the running job.
@@ -224,7 +230,7 @@ pub(crate) async fn cmd_remove(args: RemoveArgs) -> Result<(), Box<dyn std::erro
   let service = after_removal(&home, keep_lock)?;
 
   print_removal_summary(
-    &cfg.runner_name,
+    removed_name(&cfg),
     unregistered,
     keep_lock,
     service.as_deref(),
@@ -311,18 +317,35 @@ fn init_remove_tracing() -> Result<(), Box<dyn std::error::Error>> {
   Ok(())
 }
 
-fn print_removal_summary(name: &str, unregistered: bool, keep_lock: bool, service: Option<&Path>) {
-  let gh = if unregistered {
-    "unregistered on GitHub"
-  } else {
-    "still registered on GitHub — remove it there by hand"
+/// What `remove`'s summary calls the registration (`runner '<name>'`, or a
+/// toolu.sh machine's host id) and whether it is a toolu.sh machine.
+fn removed_name(cfg: &RunnerRegistrationConfig) -> (String, bool) {
+  match &cfg.provider {
+    ::config::provider::ProviderSection::Toolu { host_id, .. } => {
+      (format!("toolu.sh machine {host_id}"), true)
+    },
+    ::config::provider::ProviderSection::Github => (format!("runner '{}'", cfg.runner_name), false),
+  }
+}
+
+fn print_removal_summary(
+  (what, toolu): (String, bool),
+  unregistered: bool,
+  keep_lock: bool,
+  service: Option<&Path>,
+) {
+  let gh = match (unregistered, toolu) {
+    (true, false) => "unregistered on GitHub",
+    (false, false) => "still registered on GitHub — remove it there by hand",
+    (true, true) => "revoked on toolu.sh",
+    (false, true) => "still a machine on toolu.sh — revoke it in the console",
   };
   let lock_note = if keep_lock {
     ", job lock left for the running process"
   } else {
     " and lock"
   };
-  println!("removed runner '{name}' ({gh}; config, credentials{lock_note} removed, _diag kept).");
+  println!("removed {what} ({gh}; config, credentials{lock_note} removed, _diag kept).");
   if let Some(unit) = service {
     println!(
       "removed the toolu-runner service ({}): no registrations remain",

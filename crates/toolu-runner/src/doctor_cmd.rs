@@ -2,12 +2,14 @@
 //! a toolu runner, and how do I fix what is not?".
 //!
 //! Gathers the install, host, GitHub auth, registration and network
-//! sections, renders them through a `SecretMasker` and returns an explicit
+//! sections (plus a toolu.sh section per paired machine, #207), renders them
+//! through a `SecretMasker` and returns an explicit
 //! exit code that `main` applies directly (like `check` / `boot`): `0` no
 //! `FAIL` row, `1` at least one, `2` a usage error before anything is
 //! checked. Never takes a registration's lock, writes a file, opens a session
-//! or registers; the only credentialed request is the auth section's
-//! `GET <api>/user`, and `--offline` makes no request at all.
+//! or registers; the only credentialed requests are the auth section's
+//! `GET <api>/user` and a toolu.sh machine's `GET /runner/host`, and
+//! `--offline` makes no request at all.
 
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
@@ -34,8 +36,10 @@ const DOCTOR_AFTER_HELP: &str = "\
 Sections: install (version, newer release), host (platform, uid, free disk,
 systemd lingering), github auth (the bearer `run` re-mints with, verified by one
 authenticated GET <api>/user per host), registrations (config, credentials,
-JIT, whether `run` is serving it, supervisor unit, pending removal, last job)
-and network (the same probes as `check`, per host). Each WARN/FAIL row is
+JIT, whether `run` is serving it, supervisor unit, pending removal, last job),
+toolu.sh (a paired machine as toolu.sh sees it: one GET /runner/host with its
+host token) and network (the same probes as `check`, per GitHub host). Each
+WARN/FAIL row is
 followed by the command that fixes it, where one exists.
 
 Read-only: never takes a registration's lock, writes a file, opens a session or
@@ -184,6 +188,10 @@ fn network_targets(selection: &Selection, checked: &[Checked]) -> Vec<Result<Tar
     let Some(config) = &block.config else {
       continue;
     };
+    // A toolu.sh machine talks to toolu.sh, not GitHub: its own section.
+    if !config.provider.is_github() {
+      continue;
+    }
     let key: HostKey = url::Url::parse(&config.runner_url).ok().map(|url| {
       (
         url.host_str().map(str::to_owned),
@@ -202,7 +210,14 @@ fn network_targets(selection: &Selection, checked: &[Checked]) -> Vec<Result<Tar
   }
   let mut targets: Vec<Result<Target, String>> =
     hosts.into_iter().map(|(_, target, _)| target).collect();
-  if targets.is_empty() {
+  if targets.is_empty()
+    && !checked.iter().any(|block| {
+      block
+        .config
+        .as_ref()
+        .is_some_and(|config| !config.provider.is_github())
+    })
+  {
     targets.push(check_cmd::unregistered_target(
       "https://github.com",
       "no registration".to_owned(),
@@ -325,6 +340,14 @@ pub(crate) async fn cmd_doctor(args: DoctorArgs) -> i32 {
     sections.push(doctor_auth::auth_section(&target, args.offline, timeout, &mut masker).await);
   }
   sections.push(registrations_section(&selection, &checked));
+  for (path, block) in selection.configs.iter().zip(&checked) {
+    if let Some(config) = &block.config
+      && let Some(section) =
+        crate::doctor_toolu::section(path, config, args.offline, timeout, &mut masker).await
+    {
+      sections.push(section);
+    }
+  }
   for target in network_targets(&selection, &checked) {
     sections.push(network_section(target, args.offline, timeout, &mut masker).await);
   }

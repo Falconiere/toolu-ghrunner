@@ -131,4 +131,5 @@ mod storage_layout_test;
 mod supervisor_fatal_test;
 mod supervisor_remove_test;
 mod supervisor_test;
+mod toolu_registration_test;
 mod workspace_gc_test;

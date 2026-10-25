@@ -6,8 +6,9 @@
 use std::path::Path;
 
 use config::auth_store::AuthStore;
-use config::config::load_config as load_reg_config;
+use config::config::{RunnerRegistrationConfig, load_config as load_reg_config};
 use config::lockfile::LockBody;
+use config::provider::ProviderSection;
 use config::registration_auth::AuthSection;
 use config::{registry, stop_marker};
 use shared::paths::expand_tilde;
@@ -37,6 +38,15 @@ pub(crate) fn cmd_status(args: StatusArgs) -> Result<(), Box<dyn std::error::Err
   } else {
     "credentials MISSING"
   };
+  if let ProviderSection::Toolu {
+    api_url,
+    host_id,
+    org,
+  } = &cfg.provider
+  {
+    print_toolu(&cfg, api_url, host_id, org, creds_summary);
+    return Ok(());
+  }
   println!("runner:    {}", cfg.runner_name);
   println!("url:       {}", cfg.runner_url);
   println!("runner_id: {}", cfg.runner_id);
@@ -83,6 +93,28 @@ pub(crate) fn cmd_status(args: StatusArgs) -> Result<(), Box<dyn std::error::Err
     ),
   }
   Ok(())
+}
+
+/// A toolu.sh machine (#207): no GitHub runner, JIT or login to show; the
+/// host token is the registration's own `credentials.json`.
+fn print_toolu(
+  cfg: &RunnerRegistrationConfig,
+  api_url: &str,
+  host_id: &str,
+  org: &str,
+  creds_summary: &str,
+) {
+  println!("source:    toolu.sh ({api_url})");
+  println!("org:       {org}");
+  println!("host_id:   {host_id}");
+  println!("labels:    {:?}", cfg.labels);
+  println!("data_dir:  {}", cfg.runtime.data_dir);
+  println!("work_dir:  {}", cfg.runtime.work_dir);
+  println!("creds:     {creds_summary} (host token)");
+  println!(
+    "run:       {}",
+    run_summary(&expand_tilde(Path::new(&cfg.runtime.data_dir)))
+  );
 }
 
 /// How the registration re-mints: a personal token, or the GitHub App named
