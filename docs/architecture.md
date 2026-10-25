@@ -681,6 +681,25 @@ and after to record `would_hit` / `false_hit` to
 `_diag/shadow/<job_id>.jsonl` — observation only, it never serves a
 cached result.
 
+## Sequence: setup
+
+`toolu-runner setup` (#204) drives the building blocks below through
+one resolved plan: machine check (no questions) → GitHub target (an
+org name is checked live before any credential is asked for) → auth
+(a saved or newly created GitHub App, an imported App, or a personal
+token whose real permissions are probed) → scope (runner group or
+repository picker) → runner details → background service → Review →
+apply → online confirmation (GitHub's runner list, at most 60 s).
+Nothing is written before the Review; the one exception is a GitHub
+App created on the way, saved 0600 the moment GitHub returns it
+because its key cannot be fetched again. Every prompt has a flag, so
+the same flow runs unattended with `--yes` or no terminal; a missing
+answer exits 2 naming its flag. Re-running setup on a configured
+machine offers Keep as is (verify only, changes nothing), Add another
+runner (same machine service), Reconfigure, or Remove. The GitHub
+path is implemented in `crates/toolu-runner/src/setup/`; the toolu.sh
+source branch is #207.
+
 ## Sequence: register
 
 `--url` is optional. With no arguments, `register` infers the target

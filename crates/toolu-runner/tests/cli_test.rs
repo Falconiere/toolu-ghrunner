@@ -330,3 +330,30 @@ fn version_prints_package_version() {
     env!("CARGO_PKG_VERSION"),
   );
 }
+
+#[test]
+fn setup_help_lists_every_prompt_flag() {
+  let output = toolu_runner()
+    .args(["setup", "--help"])
+    .output()
+    .expect("should run toolu-runner setup --help");
+  assert!(output.status.success(), "setup --help should exit cleanly");
+  let stdout = String::from_utf8_lossy(&output.stdout);
+  for flag in [
+    "--source", "--org", "--repo", "--github-url", "--auth", "--import",
+    "--app-id", "--app-key", "--token", "--token-stdin", "--runner-group",
+    "--name", "--labels", "--work-dir", "--ephemeral", "--replace",
+    "--no-service", "--enable-linger", "--yes", "--dry-run",
+  ] {
+    assert!(stdout.contains(flag), "missing {flag} in setup help: {stdout}");
+  }
+}
+
+#[test]
+fn setup_rejects_conflicting_token_sources_and_bad_auth() {
+  let output = toolu_runner()
+    .args(["setup", "--token", "x", "--token-stdin", "--org", "acme"])
+    .output()
+    .expect("should run toolu-runner setup");
+  assert_eq!(output.status.code(), Some(2));
+}

@@ -302,7 +302,7 @@ pub(crate) struct RegisterPersist<'a> {
 /// section, so the mint goes through its proxy / CA and the rewritten
 /// `config.toml` does not drop it. A fresh registration (or one whose config
 /// no longer parses, with a WARN) starts in env mode.
-fn replaced_network(config_path: &Path, replace: bool) -> config::network::NetworkSection {
+pub(crate) fn replaced_network(config_path: &Path, replace: bool) -> config::network::NetworkSection {
   if !replace || !config_path.exists() {
     return config::network::NetworkSection::default();
   }
@@ -335,7 +335,7 @@ pub(crate) const MINT_TIMEOUT: Duration = Duration::from_secs(30);
 ///
 /// `RunnerError::Config` for an unusable `[network]` (fail closed), or the
 /// TLS backend's build error.
-fn build_register_client(network: &shared::NetworkConfig) -> Result<reqwest::Client, RunnerError> {
+pub(crate) fn build_register_client(network: &shared::NetworkConfig) -> Result<reqwest::Client, RunnerError> {
   network::client_builder(network)?
     .build()
     .map_err(|e| RunnerError::Network(format!("HTTP client: {e}")))

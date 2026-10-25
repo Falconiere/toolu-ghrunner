@@ -8,7 +8,9 @@
         "tests"
       ]
     },
-    "requireReadme": []
+    "requireReadme": [
+      "setup"
+    ]
   },
   "fileSize": {
     "max": 500,

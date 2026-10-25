@@ -40,6 +40,13 @@ pub(crate) fn before_install(
   if query_linger(&user)? {
     return Ok(LingerDecision::Persistent);
   }
+  if let Some(decided) = args.linger.decided {
+    if decided {
+      enable(&user)?;
+      return Ok(LingerDecision::Persistent);
+    }
+    return Ok(LingerDecision::StopOnLogout);
+  }
   if args.linger.enable_linger || args.linger.yes || ask(&user)? {
     enable(&user)?;
     return Ok(LingerDecision::Persistent);

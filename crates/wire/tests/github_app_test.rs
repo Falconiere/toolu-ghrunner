@@ -50,6 +50,8 @@ fn groups() -> Vec<RunnerGroup> {
   .map(|(id, name)| RunnerGroup {
     id,
     name: name.to_owned(),
+    default: id == 1,
+    allows_public_repositories: id != 1,
   })
   .collect()
 }
@@ -73,4 +75,155 @@ fn pick_group_refuses_an_ambiguous_or_absent_name() {
     "two case-folded matches"
   );
   assert_eq!(pick_group(&groups(), "release"), None);
+}
+
+// --- #204 wire helpers: real loopback peer, canned GitHub replies ---
+
+use std::io::{Read as _, Write as _};
+
+/// Serve `handler(request_head) -> body` on 127.0.0.1 for successive requests.
+fn peer(handler: fn(&str) -> String) -> String {
+  let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+  let port = listener.local_addr().expect("addr").port();
+  std::thread::spawn(move || {
+    for stream in listener.incoming() {
+      let Ok(mut stream) = stream else { continue };
+      let mut buf = Vec::new();
+      let mut chunk = [0_u8; 4096];
+      while !buf.windows(4).any(|w| w == b"\r\n\r\n") {
+        match stream.read(&mut chunk) {
+          Ok(0) | Err(_) => break,
+          Ok(n) => buf.extend(chunk.iter().take(n)),
+        }
+      }
+      let head = String::from_utf8_lossy(&buf).into_owned();
+      let body = handler(&head);
+      let reply = format!(
+        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+        body.len(),
+        body
+      );
+      let _ = stream.write_all(reply.as_bytes());
+    }
+  });
+  format!("http://127.0.0.1:{port}")
+}
+
+fn page_of(head: &str) -> u32 {
+  // The `page=` inside `per_page=` must not win: only a `?page=` or
+  // `&page=` boundary counts.
+  let query = head.split_whitespace().nth(1).unwrap_or_default();
+  query
+    .split('&')
+    .find_map(|part| part.strip_prefix("page="))
+    .and_then(|n| n.parse().ok())
+    .unwrap_or(1)
+}
+
+fn runners_page(head: &str) -> String {
+  if page_of(head) == 1 {
+    let runners: Vec<String> = (0..100)
+      .map(|i| format!(r#"{{"id":{i},"name":"r{i}","status":"offline","busy":false,"labels":[]}}"#))
+      .collect();
+    format!(r#"{{"total_count":101,"runners":[{}]}}"#, runners.join(","))
+  } else {
+    r#"{"total_count":101,"runners":[{"id":900,"name":"target","status":"online","busy":true,"labels":[{"id":1,"name":"self-hosted","type":"read-only"},{"id":2,"name":"gpu","type":"custom"}]}]}"#.to_owned()
+  }
+}
+
+#[tokio::test]
+async fn find_runner_paginates_and_maps_labels() {
+  let base = peer(runners_page);
+  let client = reqwest::Client::new();
+  let found = wire::net::register::find_runner(
+    &client,
+    &format!("{base}/acme"),
+    "token",
+    "target",
+    std::time::Duration::from_secs(5),
+  )
+  .await
+  .expect("find_runner")
+  .expect("runner present");
+  assert_eq!(found.id, 900);
+  assert_eq!(found.status, "online");
+  assert!(found.busy);
+  assert_eq!(found.labels, vec!["self-hosted".to_owned(), "gpu".to_owned()]);
+}
+
+#[tokio::test]
+async fn find_runner_absent_returns_none() {
+  let base = peer(|_| r#"{"total_count":0,"runners":[]}"#.to_owned());
+  let client = reqwest::Client::new();
+  let found = wire::net::register::find_runner(
+    &client,
+    &format!("{base}/acme"),
+    "token",
+    "ghost",
+    std::time::Duration::from_secs(5),
+  )
+  .await
+  .expect("find_runner");
+  assert_eq!(found, None);
+}
+
+fn repos_page(head: &str) -> String {
+  if head.contains("/installation/repositories") {
+    if page_of(head) == 1 {
+      let repos: Vec<String> = (0..100)
+        .map(|i| format!(r#"{{"full_name":"acme/r{i}"}}"#))
+        .collect();
+      format!(r#"{{"total_count":102,"repositories":[{}]}}"#, repos.join(","))
+    } else {
+      r#"{"total_count":102,"repositories":[{"full_name":"acme/last"},{"full_name":"acme/final"}]}"#.to_owned()
+    }
+  } else {
+    r#"[{"full_name":"octo/web"},{"full_name":"octo/api"}]"#.to_owned()
+  }
+}
+
+#[tokio::test]
+async fn repo_lists_paginate_to_exhaustion() {
+  let base = peer(repos_page);
+  let client = reqwest::Client::new();
+  let installed = wire::net::github_app::installation_repositories(
+    &client,
+    &base,
+    "token",
+    std::time::Duration::from_secs(5),
+  )
+  .await
+  .expect("installation repos");
+  assert_eq!(installed.len(), 102);
+  assert_eq!(installed[101].full_name, "acme/final");
+  let mine = wire::net::github_app::user_repositories(
+    &client,
+    &base,
+    "token",
+    std::time::Duration::from_secs(5),
+  )
+  .await
+  .expect("user repos");
+  assert_eq!(mine.len(), 2);
+  assert_eq!(mine[0].full_name, "octo/web");
+}
+
+#[tokio::test]
+async fn runner_groups_parse_default_flags() {
+  let base = peer(|_| {
+    r#"{"total_count":2,"runner_groups":[{"id":1,"name":"Default","default":true,"allows_public_repositories":false},{"id":7,"name":"ci","default":false,"allows_public_repositories":true}]}"#.to_owned()
+  });
+  let client = reqwest::Client::new();
+  let groups = wire::net::runner_groups::list_runner_groups(
+    &client,
+    &base,
+    "acme",
+    "token",
+    std::time::Duration::from_secs(5),
+  )
+  .await
+  .expect("groups");
+  assert!(groups[0].default);
+  assert!(!groups[0].allows_public_repositories);
+  assert_eq!(groups[1].id, 7);
 }

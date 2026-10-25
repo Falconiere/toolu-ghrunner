@@ -261,3 +261,81 @@ pub async fn installation_repo_count(
   let (status, body) = send(github_request(request, token, timeout), what).await?;
   decode::<RepositoryPage>(what, status, &body).map(|page| page.total_count)
 }
+
+/// One repository a credential can see (`full_name` = `owner/repo`).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+pub struct RepoRef {
+  /// The repository's `owner/repo` name.
+  pub full_name: String,
+}
+
+/// `GET /installation/repositories` reply page.
+#[derive(serde::Deserialize)]
+struct InstallationReposPage {
+  repositories: Vec<RepoRef>,
+}
+
+/// Every repository the App installation token can see:
+/// `GET <api>/installation/repositories`, paged to exhaustion
+/// (`per_page=100` until a short page).
+///
+/// # Errors
+///
+/// As [`get_app`].
+pub async fn installation_repositories(
+  client: &reqwest::Client,
+  api_base: &str,
+  token: &str,
+  timeout: Duration,
+) -> Result<Vec<RepoRef>, RunnerError> {
+  let mut all = Vec::new();
+  let mut page = 1_u32;
+  loop {
+    let url = format!("{api_base}/installation/repositories");
+    let request = client
+      .get(&url)
+      .query(&[("per_page", "100"), ("page", &page.to_string())]);
+    let what = "GitHub App installation repositories";
+    let (status, body) = send(github_request(request, token, timeout), what).await?;
+    let parsed: InstallationReposPage = decode(what, status, &body)?;
+    let short = parsed.repositories.len() < 100;
+    all.extend(parsed.repositories);
+    if short {
+      return Ok(all);
+    }
+    page = page.saturating_add(1);
+  }
+}
+
+/// Every repository the personal token's owner can reach as owner or
+/// organization member: `GET <api>/user/repos`, paged to exhaustion.
+///
+/// # Errors
+///
+/// As [`get_app`].
+pub async fn user_repositories(
+  client: &reqwest::Client,
+  api_base: &str,
+  token: &str,
+  timeout: Duration,
+) -> Result<Vec<RepoRef>, RunnerError> {
+  let mut all = Vec::new();
+  let mut page = 1_u32;
+  loop {
+    let url = format!("{api_base}/user/repos");
+    let request = client.get(&url).query(&[
+      ("per_page", "100"),
+      ("page", &page.to_string()),
+      ("affiliation", "owner,organization_member"),
+    ]);
+    let what = "GitHub user repositories";
+    let (status, body) = send(github_request(request, token, timeout), what).await?;
+    let parsed: Vec<RepoRef> = decode(what, status, &body)?;
+    let short = parsed.len() < 100;
+    all.extend(parsed);
+    if short {
+      return Ok(all);
+    }
+    page = page.saturating_add(1);
+  }
+}

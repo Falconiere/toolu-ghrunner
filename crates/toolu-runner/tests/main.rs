@@ -123,6 +123,7 @@ mod run_loop_live;
 mod run_loop_warn_test;
 mod run_service_classify_test;
 mod secret_masker_init_test;
+mod setup_cmd_test;
 mod secret_masker_real_test;
 mod session_conflict_e2e_test;
 mod shadow_mode_test;

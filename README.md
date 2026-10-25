@@ -126,6 +126,18 @@ Linux binaries are built on Debian 12 (glibc 2.36), so any Debian 12 / Ubuntu
 ## Quick start
 
 ```sh
+# Guided onboarding: checks this machine, asks for the GitHub target
+# and credentials (every question has a flag), reviews, registers,
+# installs the background service, and confirms the runner is online.
+toolu-runner setup
+
+# The same result unattended (no terminal, no prompts):
+TOOLU_RUNNER_TOKEN=<pat> toolu-runner setup --source github --org acme --auth token --yes
+```
+
+Or by hand:
+
+```sh
 # 1. Register — the repo is inferred from the cwd git remote `origin`
 cd my-repo && toolu-runner register
 

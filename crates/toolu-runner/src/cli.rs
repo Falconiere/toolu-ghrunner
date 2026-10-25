@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use clap::{Args, Parser, Subcommand, ValueHint};
 
-use crate::{check_cmd, doctor_cmd, login_cmd};
+use crate::{check_cmd, doctor_cmd, login_cmd, setup};
 
 /// Extended help footer for the top-level `--help`.
 const TOP_AFTER_HELP: &str = "\
@@ -219,6 +219,16 @@ pub(crate) enum Command {
   /// job lock, writes a file or registers. `--offline` makes no network
   /// request. Exit 0 = no failure, 1 = a failure, 2 = usage error.
   Doctor(doctor_cmd::DoctorArgs),
+  /// Set up this machine as a runner: check it, ask (or take flags for)
+  /// the GitHub target and credentials, review, register, install the
+  /// machine service, and confirm GitHub reports the runner online.
+  ///
+  /// With `--yes` or no terminal, no question is asked: a missing answer
+  /// exits 2 naming its flag and writes nothing. Re-running on a
+  /// configured machine offers Keep as is / Add another runner /
+  /// Reconfigure / Remove. Exit 0 ok, 1 runtime failure, 2 usage or
+  /// auth, 130 cancelled.
+  Setup(setup::args::SetupArgs),
 }
 
 /// Arguments for the `create-app` subcommand.
@@ -487,6 +497,10 @@ pub(crate) struct LingerArgs {
   /// Answer yes to the linger question for unattended installation.
   #[arg(long)]
   pub(crate) yes: bool,
+  /// A linger answer already decided by the caller (`setup` asks in its
+  /// own service step): the installer then never prompts.
+  #[arg(skip)]
+  pub(crate) decided: Option<bool>,
 }
 
 /// Arguments for the `boot` subcommand: none — it is driven entirely by

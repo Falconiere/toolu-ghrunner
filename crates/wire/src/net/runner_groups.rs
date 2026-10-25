@@ -23,6 +23,13 @@ pub struct RunnerGroup {
   pub id: i64,
   /// The group name shown in the org settings.
   pub name: String,
+  /// GitHub's `default` flag: the org's Default group.
+  #[serde(default)]
+  pub default: bool,
+  /// Whether the group allows public repositories (GitHub's
+  /// `allows_public_repositories`); the Default group does not.
+  #[serde(default)]
+  pub allows_public_repositories: bool,
 }
 
 /// The list reply envelope.

@@ -344,6 +344,120 @@ async fn find_runner_id_by_name(
   )
 }
 
+
+/// One runner from the list-runners reply, as `setup` verifies it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunnerSummary {
+  /// The runner id GitHub assigned.
+  pub id: i64,
+  /// GitHub's status string (`online` / `offline`).
+  pub status: String,
+  /// Whether the runner is currently running a job.
+  pub busy: bool,
+  /// The runner's label names (GitHub sends `[{id, name, type}]`).
+  pub labels: Vec<String>,
+}
+
+/// The runner registered under `name` for `url`'s repo/org, if any:
+/// the list-runners endpoint with the `?name=` filter, paged to
+/// exhaustion (`per_page=100`), still re-checking the echoed name.
+///
+/// # Errors
+///
+/// `RunnerError::Network` for transport / 429 / 5xx answers,
+/// `RunnerError::Auth` for other non-2xx, `RunnerError::Protocol`
+/// for an unparseable reply, `RunnerError::Config` for a bad `url`.
+pub async fn find_runner(
+  client: &reqwest::Client,
+  url: &str,
+  token: &str,
+  name: &str,
+  timeout: Duration,
+) -> Result<Option<RunnerSummary>, RunnerError> {
+  let base = resolve_runners_base(url)?;
+  let mut page = 1_u32;
+  loop {
+    let response = client
+      .get(&base)
+      .timeout(timeout)
+      .query(&[
+        ("name", name.to_owned()),
+        ("per_page", "100".to_owned()),
+        ("page", page.to_string()),
+      ])
+      .bearer_auth(token)
+      .header("Accept", "application/vnd.github+json")
+      .header("X-GitHub-Api-Version", "2022-11-28")
+      .header(
+        "User-Agent",
+        concat!("toolu-runner/", env!("CARGO_PKG_VERSION")),
+      )
+      .send()
+      .await
+      .map_err(|e| RunnerError::Network(format!("list-runners request failed: {e}")))?;
+    let status = response.status();
+    let body: serde_json::Value = response
+      .json()
+      .await
+      .map_err(|e| RunnerError::Network(format!("reading list-runners body failed: {e}")))?;
+    if status.as_u16() == 429 || status.is_server_error() {
+      return Err(RunnerError::Network(format!(
+        "list-runners failed with status {status}: {body}"
+      )));
+    }
+    if !status.is_success() {
+      return Err(RunnerError::Auth(format!(
+        "list-runners failed with status {status}: {body}"
+      )));
+    }
+    let runners = body
+      .get("runners")
+      .and_then(serde_json::Value::as_array)
+      .cloned()
+      .unwrap_or_default();
+    let count = runners.len();
+    for runner in &runners {
+      if runner.get("name").and_then(serde_json::Value::as_str) == Some(name) {
+        let labels = runner
+          .get("labels")
+          .and_then(serde_json::Value::as_array)
+          .map(|labels| {
+            labels
+              .iter()
+              .filter_map(|label| {
+                label
+                  .get("name")
+                  .and_then(serde_json::Value::as_str)
+                  .map(str::to_owned)
+              })
+              .collect()
+          })
+          .unwrap_or_default();
+        return Ok(Some(RunnerSummary {
+          id: runner
+            .get("id")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or_default(),
+          status: runner
+            .get("status")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+          busy: runner
+            .get("busy")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+          labels,
+        }));
+      }
+    }
+    if count < 100 {
+      return Ok(None);
+    }
+    page = page.saturating_add(1);
+  }
+}
+
 /// Outcome of a DELETE against a specific runner id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DeleteOutcome {
