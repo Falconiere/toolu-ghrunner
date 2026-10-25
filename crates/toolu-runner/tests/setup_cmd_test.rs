@@ -9,7 +9,7 @@
 #[cfg(target_os = "linux")]
 use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Output, Stdio};
+use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 #[cfg(target_os = "linux")]
@@ -508,7 +508,7 @@ fn run_pty(
     args.join(" "),
     answers.display()
   );
-  let mut child: Child = Command::new("script")
+  let mut child: std::process::Child = Command::new("script")
     .args(["-qec", &cmdline, "/dev/null"])
     .env("HOME", home)
     .env("TOOLU_RUNNER_HOME", home)
