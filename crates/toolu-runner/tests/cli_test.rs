@@ -340,12 +340,31 @@ fn setup_help_lists_every_prompt_flag() {
   assert!(output.status.success(), "setup --help should exit cleanly");
   let stdout = String::from_utf8_lossy(&output.stdout);
   for flag in [
-    "--source", "--org", "--repo", "--github-url", "--auth", "--import",
-    "--app-id", "--app-key", "--token", "--token-stdin", "--runner-group",
-    "--name", "--labels", "--work-dir", "--ephemeral", "--replace",
-    "--no-service", "--enable-linger", "--yes", "--dry-run",
+    "--source",
+    "--org",
+    "--repo",
+    "--github-url",
+    "--auth",
+    "--import",
+    "--app-id",
+    "--app-key",
+    "--token",
+    "--token-stdin",
+    "--runner-group",
+    "--name",
+    "--labels",
+    "--work-dir",
+    "--ephemeral",
+    "--replace",
+    "--no-service",
+    "--enable-linger",
+    "--yes",
+    "--dry-run",
   ] {
-    assert!(stdout.contains(flag), "missing {flag} in setup help: {stdout}");
+    assert!(
+      stdout.contains(flag),
+      "missing {flag} in setup help: {stdout}"
+    );
   }
 }
 

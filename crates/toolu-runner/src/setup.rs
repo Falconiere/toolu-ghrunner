@@ -28,11 +28,11 @@ use shared::SecretMasker;
 
 use crate::run_cmd::CodedExit;
 
-use stage::{StageOutcome, stage_plan};
 use args::SetupArgs;
 use plan::SetupError;
 use prompts::Prompts;
 use render::Out;
+use stage::{StageOutcome, stage_plan};
 
 /// `setup` entry point (see the module docs for the flow and codes).
 pub(crate) async fn cmd_setup(args: SetupArgs) -> Result<(), Box<dyn std::error::Error>> {
@@ -45,7 +45,8 @@ pub(crate) async fn cmd_setup(args: SetupArgs) -> Result<(), Box<dyn std::error:
 /// The whole flow, in [`SetupError`] terms.
 async fn run_setup(args: &SetupArgs) -> Result<(), SetupError> {
   let masker = Arc::new(Mutex::new(SecretMasker::new()));
-  crate::init_tracing_for(&masker).map_err(|e| SetupError::runtime(format!("startup init: {e}")))?;
+  crate::init_tracing_for(&masker)
+    .map_err(|e| SetupError::runtime(format!("startup init: {e}")))?;
   if args.source.as_deref() == Some("toolu") {
     return Err(SetupError::usage(
       "the toolu.sh source is not available yet (#207); re-run with --source github",
@@ -87,17 +88,45 @@ async fn run_setup(args: &SetupArgs) -> Result<(), SetupError> {
         Rerun::Keep => keep_as_is(&facts, &home, args, &masker, &out).await,
         Rerun::Remove(entry) => remove_one(&entry, &home, &masker).await,
         Rerun::Reconfigure(entry) => {
-          reconfigure(entry, args, &github_base, &host, &home, &mut prompts, &out, &masker).await
+          reconfigure(
+            entry,
+            args,
+            &github_base,
+            &host,
+            &home,
+            &mut prompts,
+            &out,
+            &masker,
+          )
+          .await
         },
-        Rerun::Add => build_and_apply(
-          args, &github_base, &host, &home, None, &facts, &mut prompts, &out, &masker,
-        )
-        .await,
+        Rerun::Add => {
+          build_and_apply(
+            args,
+            &github_base,
+            &host,
+            &home,
+            None,
+            &facts,
+            &mut prompts,
+            &out,
+            &masker,
+          )
+          .await
+        },
       };
     }
   }
   build_and_apply(
-    args, &github_base, &host, &home, None, &facts, &mut prompts, &out, &masker,
+    args,
+    &github_base,
+    &host,
+    &home,
+    None,
+    &facts,
+    &mut prompts,
+    &out,
+    &masker,
   )
   .await
 }
@@ -126,7 +155,11 @@ fn rerun_choice(
   };
   out.rail("This machine already has runners");
   for entry in &facts.existing {
-    out.line(&format!("{} ({})", entry.scope.label(), entry.config_path.display()));
+    out.line(&format!(
+      "{} ({})",
+      entry.scope.label(),
+      entry.config_path.display()
+    ));
   }
   let options = vec![
     "Keep as is".to_owned(),
@@ -173,8 +206,7 @@ fn tty_available() -> bool {
 /// SIGTERM/SIGHUP while prompts may hold raw mode.
 fn spawn_signal_restore() {
   tokio::spawn(async {
-    let mut term = match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-    {
+    let mut term = match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
       Ok(signal) => signal,
       Err(_) => return,
     };
@@ -202,9 +234,16 @@ async fn keep_as_is(
 ) -> Result<(), SetupError> {
   let client = http_client()?;
   for entry in &facts.existing {
-    let cfg = config::config::load_config(&entry.config_path)
-      .map_err(|e| SetupError::runtime(format!("could not read {}: {e}", entry.config_path.display())))?;
-    out.done("registration", &format!("{} at {}", cfg.runner_name, cfg.runner_url));
+    let cfg = config::config::load_config(&entry.config_path).map_err(|e| {
+      SetupError::runtime(format!(
+        "could not read {}: {e}",
+        entry.config_path.display()
+      ))
+    })?;
+    out.done(
+      "registration",
+      &format!("{} at {}", cfg.runner_name, cfg.runner_url),
+    );
     match verify_bearer(&cfg, home, args, &client, masker).await {
       Some(bearer) => {
         match github::find_runner(&client, &cfg.runner_url, &bearer, &cfg.runner_name).await {
@@ -212,13 +251,22 @@ async fn keep_as_is(
             "online",
             &format!("{} is {} on GitHub", cfg.runner_name, runner.status),
           ),
-          Ok(None) => out.warn("online", &format!("{} is not listed on GitHub", cfg.runner_name)),
-          Err(e) => out.warn("online", &format!("could not check {}: {e}", cfg.runner_name)),
+          Ok(None) => out.warn(
+            "online",
+            &format!("{} is not listed on GitHub", cfg.runner_name),
+          ),
+          Err(e) => out.warn(
+            "online",
+            &format!("could not check {}: {e}", cfg.runner_name),
+          ),
         }
       },
       None => out.warn(
         "online",
-        &format!("{} live state not verified (no credential available)", cfg.runner_name),
+        &format!(
+          "{} live state not verified (no credential available)",
+          cfg.runner_name
+        ),
       ),
     }
   }
@@ -393,7 +441,19 @@ async fn build_and_apply(
 ) -> Result<(), SetupError> {
   let client = http_client()?;
   loop {
-    let staged = match stage_plan(args, github_base, host, home, facts, prompts, out, &client, masker).await? {
+    let staged = match stage_plan(
+      args,
+      github_base,
+      host,
+      home,
+      facts,
+      prompts,
+      out,
+      &client,
+      masker,
+    )
+    .await?
+    {
       StageOutcome::Plan(staged) => staged,
       StageOutcome::Kept => return Ok(()),
     };
@@ -452,20 +512,14 @@ async fn build_and_apply(
     };
     for runner in &applied {
       if staged.plan.service {
-        out.done(
-          "online",
-          &format!("{} is online on GitHub", runner.name),
-        );
+        out.done("online", &format!("{} is online on GitHub", runner.name));
       } else {
         out.done(
           "service",
           "skipped (--no-service): start it with `toolu-runner run` or `toolu-runner install-service`",
         );
       }
-      println!(
-        "runs-on: self-hosted, {}",
-        runner.labels.join(", ")
-      );
+      println!("runs-on: self-hosted, {}", runner.labels.join(", "));
       out.done(
         "registered",
         &format!(
@@ -473,7 +527,11 @@ async fn build_and_apply(
           runner.name,
           runner.runner_id,
           runner.url,
-          if runner.fresh { "" } else { " (already registered)" }
+          if runner.fresh {
+            ""
+          } else {
+            " (already registered)"
+          }
         ),
       );
     }
@@ -484,4 +542,3 @@ async fn build_and_apply(
     return Ok(());
   }
 }
-

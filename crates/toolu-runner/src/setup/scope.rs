@@ -28,9 +28,10 @@ pub(crate) async fn resolve_scope(
       let url = format!("{github_base}/{org}");
       let base = github::api_base(&url)?;
       if let Some(group) = &args.runner_group {
-        let resolved = crate::register_auth::resolve_runner_group(group, &url, &auth_ctx.bearer, client)
-          .await
-          .map_err(|e| SetupError::usage(e.to_string()))?;
+        let resolved =
+          crate::register_auth::resolve_runner_group(group, &url, &auth_ctx.bearer, client)
+            .await
+            .map_err(|e| SetupError::usage(e.to_string()))?;
         return Ok((Some(resolved), Vec::new()));
       }
       let groups = github::list_groups(client, &base, org, &auth_ctx.bearer).await;
@@ -45,7 +46,10 @@ pub(crate) async fn resolve_scope(
         if let Some(group) = groups.first() {
           out.done("runner-group", &format!("{} (the only group)", group.name));
           if group.default || group.id == 1 {
-            out.warn("runner-group", "the Default group doesn't serve public repos");
+            out.warn(
+              "runner-group",
+              "the Default group doesn't serve public repos",
+            );
           }
           return Ok((Some(group.id.to_string()), Vec::new()));
         }
@@ -59,13 +63,13 @@ pub(crate) async fn resolve_scope(
           .map_err(SetupError::from)?;
         groups[index].id
       } else {
-        groups
-          .iter()
-          .find(|g| g.default)
-          .map_or(1, |g| g.id)
+        groups.iter().find(|g| g.default).map_or(1, |g| g.id)
       };
       if github::is_default_group(&groups, chosen) {
-        out.warn("runner-group", "the Default group doesn't serve public repos");
+        out.warn(
+          "runner-group",
+          "the Default group doesn't serve public repos",
+        );
       }
       Ok((Some(chosen.to_string()), Vec::new()))
     },
@@ -74,7 +78,9 @@ pub(crate) async fn resolve_scope(
         return Ok((None, repos.clone()));
       }
       let api = github::api_base(&format!("{github_base}/x"))?;
-      let available = github::list_repositories(client, &api, &auth_ctx.bearer, auth_ctx.app_installation).await?;
+      let available =
+        github::list_repositories(client, &api, &auth_ctx.bearer, auth_ctx.app_installation)
+          .await?;
       if available.is_empty() {
         return Err(SetupError::usage(
           "the credential can see no repositories; pass --repo <owner/name> for one it administers",
@@ -86,7 +92,11 @@ pub(crate) async fn resolve_scope(
         ));
       };
       let picked = prompts
-        .multi_select("Which repositories?", &available, &vec![false; available.len()])
+        .multi_select(
+          "Which repositories?",
+          &available,
+          &vec![false; available.len()],
+        )
         .map_err(SetupError::from)?;
       if picked.is_empty() {
         return Err(SetupError::usage("no repositories chosen"));
@@ -94,7 +104,10 @@ pub(crate) async fn resolve_scope(
       let chosen: Vec<String> = picked.iter().map(|i| available[*i].clone()).collect();
       // One owner per plan (one credential/installation).
       let owner = chosen[0].split('/').next().unwrap_or_default().to_owned();
-      if chosen.iter().any(|r| r.split('/').next() != Some(owner.as_str())) {
+      if chosen
+        .iter()
+        .any(|r| r.split('/').next() != Some(owner.as_str()))
+      {
         return Err(SetupError::usage(
           "the picker chose repositories from several owners; one setup run covers one account",
         ));
@@ -106,7 +119,10 @@ pub(crate) async fn resolve_scope(
 }
 
 /// The runner name: flag, prompt, or the hostname.
-pub(crate) fn resolve_name(args: &SetupArgs, prompts: &mut Option<Prompts>) -> Result<String, SetupError> {
+pub(crate) fn resolve_name(
+  args: &SetupArgs,
+  prompts: &mut Option<Prompts>,
+) -> Result<String, SetupError> {
   if let Some(name) = &args.name {
     return Ok(name.clone());
   }
@@ -138,9 +154,7 @@ pub(crate) async fn check_collision(
   for url in target.urls(github_base) {
     // A locally registered target is a resume, not a collision: the
     // runner on GitHub is this registration's own.
-    if crate::register_cmd::register_config_path(&url, home)
-      .is_ok_and(|path| path.exists())
-    {
+    if crate::register_cmd::register_config_path(&url, home).is_ok_and(|path| path.exists()) {
       continue;
     }
     if let Ok(Some(existing)) = github::find_runner(client, &url, &auth_ctx.bearer, name).await {
@@ -182,9 +196,11 @@ pub(crate) fn resolve_linger(
   }
   match prompts.as_mut() {
     Some(prompts) => prompts
-      .confirm("Keep the service running after you log out (enable linger)?", true)
+      .confirm(
+        "Keep the service running after you log out (enable linger)?",
+        true,
+      )
       .map_err(SetupError::from),
     None => Ok(false),
   }
 }
-

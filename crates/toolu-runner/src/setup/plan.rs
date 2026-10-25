@@ -70,7 +70,10 @@ impl Target {
   pub(crate) fn urls(&self, github_base: &str) -> Vec<String> {
     match self {
       Self::Org { org } => vec![format!("{github_base}/{org}")],
-      Self::Repos { repos } => repos.iter().map(|repo| format!("{github_base}/{repo}")).collect(),
+      Self::Repos { repos } => repos
+        .iter()
+        .map(|repo| format!("{github_base}/{repo}"))
+        .collect(),
     }
   }
 
@@ -163,11 +166,12 @@ pub(crate) fn validate_github_url(raw: Option<&str>) -> Result<String, SetupErro
     },
   }
   if !parsed.username().is_empty() || parsed.password().is_some() {
-    return Err(SetupError::usage(
-      "--github-url must not carry credentials",
-    ));
+    return Err(SetupError::usage("--github-url must not carry credentials"));
   }
-  if parsed.query().is_some() || parsed.fragment().is_some() || parsed.path() != "/" && parsed.path() != "" {
+  if parsed.query().is_some()
+    || parsed.fragment().is_some()
+    || parsed.path() != "/" && parsed.path() != ""
+  {
     return Err(SetupError::usage(
       "--github-url is the GitHub web base only (no path, query or fragment)",
     ));

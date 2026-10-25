@@ -46,7 +46,8 @@ fn multi_select_toggles_and_all() {
   .unwrap();
   assert_eq!(chosen, vec![0, 1]);
   let mut out = Vec::new();
-  let chosen = run_multi_select(&mut keys(b"a\r"), &mut out, "Repos", &options, &[false; 3]).unwrap();
+  let chosen =
+    run_multi_select(&mut keys(b"a\r"), &mut out, "Repos", &options, &[false; 3]).unwrap();
   assert_eq!(chosen, vec![0, 1, 2]);
 }
 
@@ -56,7 +57,10 @@ fn secret_never_echoes_typed_bytes() {
   let value = run_secret(&mut keys(b"ghp_secretvalue\r"), &mut out, "Token").unwrap();
   assert_eq!(value, "ghp_secretvalue");
   let rendered = String::from_utf8(out).unwrap();
-  assert!(!rendered.contains("ghp_secretvalue"), "secret echoed: {rendered}");
+  assert!(
+    !rendered.contains("ghp_secretvalue"),
+    "secret echoed: {rendered}"
+  );
   assert!(rendered.contains("••••"));
 }
 

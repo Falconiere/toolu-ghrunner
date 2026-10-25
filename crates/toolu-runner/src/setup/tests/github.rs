@@ -18,7 +18,9 @@ async fn org_check_separates_missing_from_refused() {
   let server = peer().await;
   Mock::given(method("GET"))
     .and(path("/orgs/acme"))
-    .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"login":"acme","id":1})))
+    .respond_with(
+      ResponseTemplate::new(200).set_body_json(serde_json::json!({"login":"acme","id":1})),
+    )
     .mount(&server)
     .await;
   Mock::given(method("GET"))
@@ -41,7 +43,11 @@ async fn org_check_separates_missing_from_refused() {
     OrgCheck::Missing
   );
   let err = check_org(&client(), &base, "limited").await.unwrap_err();
-  assert_eq!(err.code, 1, "403 must not render as a typo: {}", err.message);
+  assert_eq!(
+    err.code, 1,
+    "403 must not render as a typo: {}",
+    err.message
+  );
 }
 
 #[tokio::test]

@@ -318,7 +318,9 @@ pub(crate) fn run_select(
   loop {
     match keys.next_key()? {
       Key::Up => {
-        index = index.checked_sub(1).unwrap_or(options.len().saturating_sub(1));
+        index = index
+          .checked_sub(1)
+          .unwrap_or(options.len().saturating_sub(1));
         render_select(out, title, options, index)?;
       },
       Key::Down => {
@@ -374,7 +376,9 @@ pub(crate) fn run_multi_select(
   loop {
     match keys.next_key()? {
       Key::Up => {
-        index = index.checked_sub(1).unwrap_or(options.len().saturating_sub(1));
+        index = index
+          .checked_sub(1)
+          .unwrap_or(options.len().saturating_sub(1));
         render_multi(out, title, options, &chosen, index)?;
       },
       Key::Down => {

@@ -74,7 +74,12 @@ pub(crate) async fn stage_plan(
     out.done("keep", "Nothing to change.");
     return Ok(StageOutcome::Kept);
   }
-  if prompts.is_none() && matches!(plan::auth_plan(args, saved_app_hint(home))?, AuthPlan::CreateApp) {
+  if prompts.is_none()
+    && matches!(
+      plan::auth_plan(args, saved_app_hint(home))?,
+      AuthPlan::CreateApp
+    )
+  {
     return Err(SetupError::usage(
       "creating a GitHub App needs a browser: re-run interactively, or use --auth import / --auth token",
     ));
@@ -83,7 +88,12 @@ pub(crate) async fn stage_plan(
   let mut auth = plan::auth_plan(args, saved_app)?;
   // GHES + App: the token is the only route.
   let ghes = host != "github.com" && !plan::is_loopback(host);
-  if ghes && matches!(auth, AuthPlan::CreateApp | AuthPlan::Import { .. } | AuthPlan::SavedApp) {
+  if ghes
+    && matches!(
+      auth,
+      AuthPlan::CreateApp | AuthPlan::Import { .. } | AuthPlan::SavedApp
+    )
+  {
     return Err(SetupError::usage(
       "GitHub Apps are github.com-only in setup: re-run with --auth token for a GHES host",
     ));
@@ -122,18 +132,45 @@ pub(crate) async fn stage_plan(
   }
   // Authenticate (in memory), creating the App interactively if asked.
   let (auth_ctx, token_value) = authenticate(
-    &mut auth, &target, github_base, home, args, prompts, out, client, masker, facts,
+    &mut auth,
+    &target,
+    github_base,
+    home,
+    args,
+    prompts,
+    out,
+    client,
+    masker,
+    facts,
   )
   .await?;
   // Scope: runner group (org) or repositories (personal).
   let (runner_group, repos) = scope::resolve_scope(
-    &mut target, &auth, &auth_ctx, github_base, args, prompts, out, client,
+    &mut target,
+    &auth,
+    &auth_ctx,
+    github_base,
+    args,
+    prompts,
+    out,
+    client,
   )
   .await?;
   let _ = repos;
   // Details.
   let name = scope::resolve_name(args, prompts)?;
-  scope::check_collision(&target, github_base, home, &name, &auth_ctx, args, prompts, client, out).await?;
+  scope::check_collision(
+    &target,
+    github_base,
+    home,
+    &name,
+    &auth_ctx,
+    args,
+    prompts,
+    client,
+    out,
+  )
+  .await?;
   let labels_preview = config::labels::resolve_labels(
     &args.labels,
     args.no_default_labels,
@@ -188,10 +225,7 @@ async fn resolve_target(
       "no target given: pass --org <name> or --repo <owner/name>",
     ));
   };
-  let options = vec![
-    "An organization".to_owned(),
-    "My repositories".to_owned(),
-  ];
+  let options = vec!["An organization".to_owned(), "My repositories".to_owned()];
   let kind = prompts
     .select("Where should the runners register?", &options, 0)
     .map_err(SetupError::from)?;
@@ -204,7 +238,11 @@ async fn resolve_target(
         continue;
       }
       match check_org_live(org.trim(), github_base, client).await {
-        Ok(()) => return Ok(Target::Org { org: org.trim().to_owned() }),
+        Ok(()) => {
+          return Ok(Target::Org {
+            org: org.trim().to_owned(),
+          });
+        },
         Err(e) if e.code == 2 => {
           out.warn("target", &e.message);
           continue;
@@ -358,7 +396,11 @@ async fn authenticate(
   };
   let ctx = apply::scope_bearer(&staged_plan, home, client, masker, token_value.as_deref()).await?;
   if matches!(auth, AuthPlan::Token) {
-    let first_url = target.urls(github_base).into_iter().next().unwrap_or_default();
+    let first_url = target
+      .urls(github_base)
+      .into_iter()
+      .next()
+      .unwrap_or_default();
     let base = github::api_base(&first_url)?;
     let (org, repos) = match target {
       Target::Org { org } => (Some(org.as_str()), Vec::new()),
@@ -414,7 +456,9 @@ pub(crate) fn review_lines(plan: &ResolvedPlan, auth_label: Option<&str>) -> Vec
   let auth = match (&plan.auth, auth_label) {
     (_, Some(label)) => label.to_owned(),
     (AuthPlan::Token, _) => "personal access token".to_owned(),
-    (AuthPlan::CreateApp, _) => "create a GitHub App (saved 0600 as soon as GitHub returns it)".to_owned(),
+    (AuthPlan::CreateApp, _) => {
+      "create a GitHub App (saved 0600 as soon as GitHub returns it)".to_owned()
+    },
     (AuthPlan::Import { .. }, _) => "existing GitHub App (import)".to_owned(),
     (AuthPlan::SavedApp, _) => "saved GitHub App".to_owned(),
   };
@@ -428,11 +472,24 @@ pub(crate) fn review_lines(plan: &ResolvedPlan, auth_label: Option<&str>) -> Vec
     format!("source: GitHub ({})", plan.github_base),
     format!("target: {}", plan.target.label()),
     format!("auth: {auth}"),
-    format!("runner: {} · labels {} · work dir {}", plan.name, labels.join(", "), plan.work_folder),
+    format!(
+      "runner: {} · labels {} · work dir {}",
+      plan.name,
+      labels.join(", "),
+      plan.work_folder
+    ),
     format!(
       "service: {} · mode: {}",
-      if plan.service { "machine service (run --all)" } else { "none (--no-service)" },
-      if plan.ephemeral { "ephemeral (one job)" } else { "persistent" }
+      if plan.service {
+        "machine service (run --all)"
+      } else {
+        "none (--no-service)"
+      },
+      if plan.ephemeral {
+        "ephemeral (one job)"
+      } else {
+        "persistent"
+      }
     ),
   ]
 }

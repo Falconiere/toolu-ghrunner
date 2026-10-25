@@ -76,8 +76,8 @@ pub(crate) async fn scope_bearer(
     },
     AuthPlan::SavedApp | AuthPlan::CreateApp => {
       let path = config::app_store::app_path(home);
-      let app = crate::app_auth::load_app(&path, masker)
-        .map_err(|e| SetupError::usage(e.to_string()))?;
+      let app =
+        crate::app_auth::load_app(&path, masker).map_err(|e| SetupError::usage(e.to_string()))?;
       app_context(client, &app, &path, &first_url, masker).await
     },
     AuthPlan::Import { file, app_id, key } => {
@@ -115,9 +115,9 @@ async fn imported_app(
       "--auth import needs --import <file>, or --app-id <id> with --app-key <pem>",
     ));
   };
-  let pem = tokio::fs::read_to_string(key).await.map_err(|e| {
-    SetupError::usage(format!("could not read the App key {}: {e}", key.display()))
-  })?;
+  let pem = tokio::fs::read_to_string(key)
+    .await
+    .map_err(|e| SetupError::usage(format!("could not read the App key {}: {e}", key.display())))?;
   Ok(config::app_store::StoredApp {
     host: "github.com".to_owned(),
     app_id,
@@ -172,10 +172,7 @@ async fn app_context(
 /// # Errors
 ///
 /// The `create-app` failure, with its exit code preserved.
-pub(crate) async fn persist_import(
-  plan: &ResolvedPlan,
-  home: &Path,
-) -> Result<(), SetupError> {
+pub(crate) async fn persist_import(plan: &ResolvedPlan, home: &Path) -> Result<(), SetupError> {
   let AuthPlan::Import { file, app_id, key } = &plan.auth else {
     return Ok(());
   };
@@ -353,7 +350,7 @@ async fn install_machine_service(plan: &ResolvedPlan) -> Result<(), SetupError> 
   tokio::task::spawn_blocking(move || {
     crate::machine_service::cmd_install_machine(&args).map_err(|e| e.to_string())
   })
-    .await
-    .map_err(|e| SetupError::runtime(format!("the service install did not finish: {e}")))?
-    .map_err(SetupError::runtime)
+  .await
+  .map_err(|e| SetupError::runtime(format!("the service install did not finish: {e}")))?
+  .map_err(SetupError::runtime)
 }

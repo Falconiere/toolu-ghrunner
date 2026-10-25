@@ -82,11 +82,8 @@ fn linger_state() -> Option<bool> {
     return None;
   }
   let user = crate::service_cmd::run_stdout("id", &["-un"]).ok()?;
-  let out = crate::service_cmd::run_stdout(
-    "loginctl",
-    &["show-user", &user, "--property=Linger"],
-  )
-  .ok()?;
+  let out =
+    crate::service_cmd::run_stdout("loginctl", &["show-user", &user, "--property=Linger"]).ok()?;
   crate::doctor_service::parse_linger(&out)
 }
 

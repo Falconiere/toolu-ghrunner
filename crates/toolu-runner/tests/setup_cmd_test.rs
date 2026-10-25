@@ -58,7 +58,11 @@ fn scope_key(path: &str) -> String {
     .split('/')
     .filter(|part| !part.is_empty())
     .collect();
-  let take = if parts.first() == Some(&"repos") { 3 } else { 2 };
+  let take = if parts.first() == Some(&"repos") {
+    3
+  } else {
+    2
+  };
   parts.into_iter().take(take).collect::<Vec<_>>().join("/")
 }
 
@@ -71,9 +75,7 @@ impl Respond for Peer {
     let path = request.url.path().to_owned();
     let method = request.method.as_str();
     let state = &self.0;
-    let json_reply = |status: u16, body: Value| {
-      ResponseTemplate::new(status).set_body_json(body)
-    };
+    let json_reply = |status: u16, body: Value| ResponseTemplate::new(status).set_body_json(body);
     match (method, path.as_str()) {
       ("GET", "/api/v3/orgs/acme") => json_reply(200, json!({"login": "acme", "id": 1})),
       ("GET", "/api/v3/orgs/ghost") => json_reply(404, json!({"message": "Not Found"})),
@@ -116,8 +118,7 @@ impl Respond for Peer {
           .lock()
           .unwrap_or_else(std::sync::PoisonError::into_inner)
           .push(scope_key(p));
-        let body: Value =
-          serde_json::from_str(RESPONSE_FIXTURE).unwrap_or(json!({}));
+        let body: Value = serde_json::from_str(RESPONSE_FIXTURE).unwrap_or(json!({}));
         ResponseTemplate::new(201).set_body_json(body)
       },
       ("GET", p) if p.ends_with("/actions/runners") => {
@@ -164,7 +165,11 @@ fn home() -> Result<(tempfile::TempDir, String), Box<dyn std::error::Error>> {
   let (bin, log, _) = shim_env(home.path())?;
   write_shim(
     &bin,
-    if cfg!(target_os = "macos") { "launchctl" } else { "systemctl" },
+    if cfg!(target_os = "macos") {
+      "launchctl"
+    } else {
+      "systemctl"
+    },
     RECORD_OK,
   )?;
   let _ = log;
@@ -260,7 +265,10 @@ async fn unattended_org_token_registers_and_reports_online() -> TestResult {
   assert!(text.contains("runs-on:"), "{text}");
   assert!(text.contains("toolu-runner doctor"), "{text}");
   assert!(org_config(home.path()).exists(), "org registration written");
-  assert!(unit_file(home.path()).exists(), "machine unit written: {text}");
+  assert!(
+    unit_file(home.path()).exists(),
+    "machine unit written: {text}"
+  );
   let cfg = config::config::load_config(&org_config(home.path()))?;
   assert_eq!(cfg.runner_name, NAME);
   Ok(())
@@ -386,7 +394,11 @@ async fn add_another_keeps_the_first() -> TestResult {
   let text = output_text(&second);
   assert_eq!(second.status.code(), Some(0), "{text}");
   assert!(home.path().join("runners/octo/web/config.toml").exists());
-  assert_eq!(std::fs::read(org_config(home.path()))?, first_config, "first registration untouched");
+  assert_eq!(
+    std::fs::read(org_config(home.path()))?,
+    first_config,
+    "first registration untouched"
+  );
   assert_eq!(
     std::fs::read(unit_file(home.path())).unwrap_or_default(),
     unit_before,
@@ -422,8 +434,16 @@ async fn ghes_app_auth_names_token() -> TestResult {
     .env("PATH", &path_env)
     .stdin(Stdio::null())
     .args([
-      "setup", "--github-url", "https://ghes.example.com", "--org", "acme", "--auth", "app",
-      "--name", NAME, "--yes",
+      "setup",
+      "--github-url",
+      "https://ghes.example.com",
+      "--org",
+      "acme",
+      "--auth",
+      "app",
+      "--name",
+      NAME,
+      "--yes",
     ])
     .output()?;
   let _ = server;
@@ -527,7 +547,10 @@ fn run_pty(
     let deadline = Instant::now() + Duration::from_secs(60);
     while !seen(&captured, marker) {
       if Instant::now() > deadline {
-        let held = captured.lock().map(|h| String::from_utf8_lossy(&h).into_owned()).unwrap_or_default();
+        let held = captured
+          .lock()
+          .map(|h| String::from_utf8_lossy(&h).into_owned())
+          .unwrap_or_default();
         return Err(format!("pty marker {marker:?} never appeared; output: {held}").into());
       }
       std::thread::sleep(Duration::from_millis(100));
@@ -585,7 +608,10 @@ async fn remove_via_menu_exits_after_removal() -> TestResult {
     ],
   )?;
   assert_eq!(code, Some(0), "output: {output}");
-  assert!(!org_config(home.path()).exists(), "registration removed: {output}");
+  assert!(
+    !org_config(home.path()).exists(),
+    "registration removed: {output}"
+  );
   Ok(())
 }
 

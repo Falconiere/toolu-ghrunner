@@ -344,7 +344,6 @@ async fn find_runner_id_by_name(
   )
 }
 
-
 /// One runner from the list-runners reply, as `setup` verifies it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunnerSummary {

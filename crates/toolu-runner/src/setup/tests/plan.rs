@@ -36,7 +36,11 @@ fn github_url_defaults_and_validates() {
   ] {
     let err = validate_github_url(Some(bad)).unwrap_err();
     assert_eq!(err.code, 2, "{bad}");
-    assert!(err.message.contains("--github-url"), "{bad}: {}", err.message);
+    assert!(
+      err.message.contains("--github-url"),
+      "{bad}: {}",
+      err.message
+    );
   }
 }
 
@@ -53,7 +57,9 @@ fn flag_target_org_and_repos() {
   let a = parsed(&["--org", "acme"]);
   assert_eq!(
     flag_target(&a).unwrap(),
-    Some(Target::Org { org: "acme".to_owned() })
+    Some(Target::Org {
+      org: "acme".to_owned()
+    })
   );
   let a = parsed(&["--repo", "acme/web"]);
   assert_eq!(

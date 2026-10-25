@@ -148,7 +148,10 @@ async fn find_runner_paginates_and_maps_labels() {
   assert_eq!(found.id, 900);
   assert_eq!(found.status, "online");
   assert!(found.busy);
-  assert_eq!(found.labels, vec!["self-hosted".to_owned(), "gpu".to_owned()]);
+  assert_eq!(
+    found.labels,
+    vec!["self-hosted".to_owned(), "gpu".to_owned()]
+  );
 }
 
 #[tokio::test]
@@ -173,9 +176,13 @@ fn repos_page(head: &str) -> String {
       let repos: Vec<String> = (0..100)
         .map(|i| format!(r#"{{"full_name":"acme/r{i}"}}"#))
         .collect();
-      format!(r#"{{"total_count":102,"repositories":[{}]}}"#, repos.join(","))
+      format!(
+        r#"{{"total_count":102,"repositories":[{}]}}"#,
+        repos.join(",")
+      )
     } else {
-      r#"{"total_count":102,"repositories":[{"full_name":"acme/last"},{"full_name":"acme/final"}]}"#.to_owned()
+      r#"{"total_count":102,"repositories":[{"full_name":"acme/last"},{"full_name":"acme/final"}]}"#
+        .to_owned()
     }
   } else {
     r#"[{"full_name":"octo/web"},{"full_name":"octo/api"}]"#.to_owned()
