@@ -622,20 +622,34 @@ async fn reconfigure_preserves_network() -> TestResult {
   let server = peer(PeerState::new()).await?;
   let first = run_setup(home.path(), &path_env, &server, ORG_FLAGS)?;
   assert_eq!(first.status.code(), Some(0), "{}", output_text(&first));
-  // Give the registration a [network] section the reconfigure must keep.
+  // Give the registration a [network] section the reconfigure must keep,
+  // plus a stored runner group the reconfigure must not re-prompt for.
   let config_path = org_config(home.path());
   let mut cfg = config::config::load_config(&config_path)?;
   cfg.network.no_proxy = vec!["markers.example.com".to_owned()];
+  cfg.runner_group = "Default".to_owned();
   config::config::save_config(&config_path, &cfg)?;
+  // Caller flags on the reconfigure invocation must survive the menu:
+  // --no-service (unit not recreated), --labels (additive), --work-dir.
+  std::fs::remove_file(unit_file(home.path()))?;
+  let work = home.path().join("reconfigured-work");
+  let work_arg = work.to_string_lossy().into_owned();
   let url = server.uri();
   let (code, output) = run_pty(
     home.path(),
     &path_env,
-    &["--github-url", &url],
+    &[
+      "--github-url",
+      &url,
+      "--no-service",
+      "--labels",
+      "reconfigured",
+      "--work-dir",
+      &work_arg,
+    ],
     &[
       ("What would you like to do?", b"\x1b[B\x1b[B\r"),
       ("Which runner?", b"\r"),
-      ("Runner group", b"\r"),
       ("Apply this setup?", b"\r"),
     ],
   )?;
@@ -645,6 +659,18 @@ async fn reconfigure_preserves_network() -> TestResult {
     after.network.no_proxy,
     vec!["markers.example.com".to_owned()],
     "[network] preserved through reconfigure"
+  );
+  assert_eq!(after.runner_group, "Default", "stored group kept: {output}");
+  assert!(
+    after.labels.iter().any(|l| l == "reconfigured")
+      && after.labels.iter().any(|l| l == "self-hosted"),
+    "caller labels additive over defaults: {:?}",
+    after.labels
+  );
+  assert_eq!(after.runtime.work_dir, work_arg, "caller --work-dir kept");
+  assert!(
+    !unit_file(home.path()).exists(),
+    "caller --no-service kept: unit must not be recreated"
   );
   Ok(())
 }

@@ -185,6 +185,11 @@ pub(crate) async fn probe_token(
       .await
       .map_err(|e| SetupError::runtime(format!("could not reach GitHub: {e}")))?;
     let status = response.status();
+    if status.as_u16() == 429 || status.is_server_error() {
+      return Err(SetupError::runtime(format!(
+        "GitHub answered {status} while checking {repo} — try again in a moment"
+      )));
+    }
     if !status.is_success() {
       return Err(SetupError::usage(format!(
         "GitHub answered {status} for {repo}: the token cannot see it, or it does not exist"

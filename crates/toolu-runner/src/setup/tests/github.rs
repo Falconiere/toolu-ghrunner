@@ -106,6 +106,35 @@ async fn poll_online_retries_until_listed_online() {
 }
 
 #[tokio::test]
+async fn repo_throttle_is_runtime_not_admin_gate() {
+  let server = peer().await;
+  Mock::given(method("GET"))
+    .and(path("/user"))
+    .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"login":"octo"})))
+    .mount(&server)
+    .await;
+  Mock::given(method("GET"))
+    .and(path("/repos/octo/web"))
+    .respond_with(ResponseTemplate::new(429))
+    .mount(&server)
+    .await;
+  let err = probe_token(
+    &client(),
+    &server.uri(),
+    "tok",
+    None,
+    &["octo/web".to_owned()],
+  )
+  .await
+  .unwrap_err();
+  assert_eq!(
+    err.code, 1,
+    "429 on a repo check must be a retryable runtime error: {}",
+    err.message
+  );
+}
+
+#[tokio::test]
 async fn membership_throttle_is_runtime_not_admin_gate() {
   let server = peer().await;
   Mock::given(method("GET"))

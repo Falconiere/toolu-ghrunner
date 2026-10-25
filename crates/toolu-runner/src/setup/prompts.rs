@@ -248,9 +248,11 @@ impl KeySource for TtyKeys {
 }
 
 impl Prompts {
-  /// Open `/dev/tty` (read+write), enter raw mode, and start the byte
-  /// reader thread. Fails when no terminal is available — callers treat
-  /// that as unattended, never as an echoed-secret fallback.
+  /// Open `/dev/tty` (read+write) and start the byte reader thread.
+  /// Raw mode is entered per prompt by `RawGuard`, never held across
+  /// apply, so Ctrl+C keeps working outside prompts. Fails when no
+  /// terminal is available — callers treat that as unattended, never
+  /// as an echoed-secret fallback.
   pub(crate) fn open() -> Result<Self, PromptEnd> {
     use std::io::Read as _;
     let mut reader = std::fs::OpenOptions::new()

@@ -366,6 +366,11 @@ async fn reconfigure(
   owned.no_default_labels = true;
   owned.work_dir = Some(std::path::PathBuf::from(&cfg.runtime.work_dir));
   owned.mode.ephemeral = cfg.ephemeral;
+  // Its runner group too: an org runner in a non-Default group must
+  // not be silently moved back to Default.
+  if !cfg.runner_group.is_empty() {
+    owned.runner_group = Some(cfg.runner_group.clone());
+  }
   // Its GitHub base comes from its own registration URL, never from
   // this invocation's --github-url (a GHES registration stays on GHES).
   let base: Option<String> = match &entry.scope {
@@ -426,7 +431,34 @@ fn owned_with(args: &SetupArgs, mut owned: SetupArgs) -> SetupArgs {
   }
   if !args.labels.is_empty() {
     owned.labels.clone_from(&args.labels);
+    // Caller-supplied labels follow normal `--labels` semantics
+    // (additive unless the caller also said --no-default-labels).
+    owned.no_default_labels = args.no_default_labels;
   }
+  // Every other caller flag survives the menu too: dropping
+  // --no-service / --enable-linger / --work-dir / import flags here
+  // would make Reconfigure do something the caller never asked for.
+  if args.runner_group.is_some() {
+    owned.runner_group.clone_from(&args.runner_group);
+  }
+  if args.work_dir.is_some() {
+    owned.work_dir.clone_from(&args.work_dir);
+  }
+  if args.import.is_some() {
+    owned.import.clone_from(&args.import);
+  }
+  if args.app_id.is_some() {
+    owned.app_id = args.app_id;
+  }
+  if args.app_key.is_some() {
+    owned.app_key.clone_from(&args.app_key);
+  }
+  owned.token_stdin = owned.token_stdin || args.token_stdin;
+  owned.mode.no_service = owned.mode.no_service || args.mode.no_service;
+  owned.mode.ephemeral = owned.mode.ephemeral || args.mode.ephemeral;
+  owned.flow.enable_linger = owned.flow.enable_linger || args.flow.enable_linger;
+  owned.flow.yes = owned.flow.yes || args.flow.yes;
+  owned.flow.dry_run = owned.flow.dry_run || args.flow.dry_run;
   if args.org.is_some() {
     owned.org.clone_from(&args.org);
   }

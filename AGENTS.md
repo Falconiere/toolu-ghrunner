@@ -523,7 +523,7 @@ outside a `tests/` tree.
   network reuses `check_cmd::gather`; only a persistent *token* registration
   needs a personal bearer, `[auth] kind = "app"` mints its own and gets an
   `app` row that loads its App file (#201);
-  `doctor_*_test`). `setup` + `setup/{args,plan,prompts,render,machine,github,apply}.rs`
+  `doctor_*_test`). `setup` + `setup/{args,plan,prompts,render,machine,github,scope,stage,apply}.rs`
   (#204 GitHub-path onboarding: one `ResolvedPlan` from flags or `/dev/tty`
   prompts (raw mode via `crossterm`, own key parser), Review-before-write,
   idempotent apply reusing `register_and_persist`/`cmd_create_app`/
