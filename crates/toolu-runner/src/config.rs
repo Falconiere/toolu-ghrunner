@@ -205,8 +205,8 @@ pub(crate) fn toolu_api_url() -> String {
     .unwrap_or_else(|| DEFAULT_TOOLU_API_URL.to_owned())
 }
 
-/// `TOOLU_RUNNER_ENROLL_TOKEN`: `setup --source toolu`'s enrollment token
-/// when `--enroll-token` is not given (keeps the single-use `tlu_e_` token out
+/// `TOOLU_RUNNER_ENROLL_TOKEN`: `setup`'s enrollment token once the source is
+/// toolu.sh (`--source toolu` or the prompt) and `--enroll-token` is not given (keeps the single-use `tlu_e_` token out
 /// of `ps` and shell history). Empty counts as unset.
 pub(crate) fn enroll_token() -> Option<String> {
   read("TOOLU_RUNNER_ENROLL_TOKEN").filter(|raw| !raw.is_empty())

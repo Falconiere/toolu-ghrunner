@@ -728,6 +728,12 @@ async fn an_exported_enrollment_token_does_not_hijack_github() -> TestResult<()>
     &[("TOOLU_RUNNER_ENROLL_TOKEN", ENROLL)],
   )?;
   let printed = text(&out);
+  // The GitHub path ran: its live org check hit the dead GitHub URL.
+  assert_eq!(out.status.code(), Some(1), "{printed}");
+  assert!(
+    printed.contains("could not check the organization \"acme\" on GitHub"),
+    "{printed}"
+  );
   assert!(!printed.contains("GitHub-only"), "{printed}");
   assert!(!printed.contains("--enroll-token"), "{printed}");
   assert!(peer.seen().is_empty(), "{:?}", peer.paths());
@@ -793,8 +799,9 @@ async fn keep_as_is_reads_the_machine() -> TestResult<()> {
   Ok(())
 }
 
-/// Keep as is on a revoked machine shows the error row and exits 2 after
-/// checking everything, changing nothing.
+/// Keep as is on a revoked machine shows the error row, still checks the
+/// next registration (a healthy machine of another org), then exits 2,
+/// changing nothing.
 #[cfg(target_os = "linux")]
 #[tokio::test]
 async fn keep_as_is_reports_a_revoked_machine() -> TestResult<()> {
@@ -805,6 +812,24 @@ async fn keep_as_is_reports_a_revoked_machine() -> TestResult<()> {
   let peer = Peer::start(&[], 600_000, faults, "true").await?;
   let (home, path_env) = home()?;
   let config = write_machine(home.path(), &peer.server.uri(), HOST_TOKEN, "")?;
+  // A second, healthy machine listed after it (`toolu/zz_org`).
+  let healthy = Peer::start(&[], 600_000, Faults::default(), "true").await?;
+  let other = home.path().join("toolu").join("zz_org");
+  std::fs::create_dir_all(&other)?;
+  std::fs::copy(
+    config.with_file_name("credentials.json"),
+    other.join("credentials.json"),
+  )?;
+  std::fs::write(
+    other.join("config.toml"),
+    std::fs::read_to_string(&config)?
+      .replace(&peer.server.uri(), &healthy.server.uri())
+      .replace(&format!("org = \"{ORG}\""), "org = \"zz_org\"")
+      .replace(
+        &machine_dir(home.path()).display().to_string(),
+        &other.display().to_string(),
+      ),
+  )?;
   let before = state(home.path());
   let (code, output) = crate::setup_cmd_test::run_pty_env(
     home.path(),
@@ -814,6 +839,11 @@ async fn keep_as_is_reports_a_revoked_machine() -> TestResult<()> {
     &[("TOOLU_RUNNER_TOKEN", "")],
   )?;
   assert_eq!(code, Some(2), "output: {output}");
+  let revoked_at = output.find("it was revoked").ok_or("no revoked row")?;
+  let healthy_at = output
+    .find(&format!("host {HOST_ID} · workspace {WORKSPACE} · enabled"))
+    .ok_or("the healthy machine was not checked")?;
+  assert!(revoked_at < healthy_at, "{output}");
   assert!(output.contains("it was revoked"), "{output}");
   assert!(
     output.contains(&format!(

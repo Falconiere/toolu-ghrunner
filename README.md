@@ -138,7 +138,8 @@ TOOLU_RUNNER_TOKEN=<pat> toolu-runner setup --source github --org acme --auth to
 # type the code setup shows at console.toolu.sh/pair ...
 toolu-runner setup --source toolu
 # ... or, unattended, redeem a single-use enrollment token from the console
-# (or TOOLU_RUNNER_ENROLL_TOKEN=<token> with --source toolu, out of shell history)
+# (or TOOLU_RUNNER_ENROLL_TOKEN=<token> with --source toolu: out of shell history;
+# the variable alone never switches a setup to toolu.sh)
 toolu-runner setup --source toolu --enroll-token <token>
 ```
 
