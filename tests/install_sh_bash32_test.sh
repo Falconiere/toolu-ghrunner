@@ -109,7 +109,7 @@ echo "install: verified, version from the binary, env files"
 run "$h" real
 [[ "$RC" -eq 0 ]] || fail "install should exit 0 (rc=$RC): $OUT"
 echo "$OUT" | grep -q "^toolu-runner: installed $VERSION (checksum ok)\$" || fail "install line: $OUT"
-echo "$OUT" | grep -q '^next: toolu-runner register' || fail "next line: $OUT"
+echo "$OUT" | grep -q '^next: toolu-runner setup' || fail "next line: $OUT"
 cmp -s "$REAL_BIN" "$h/.local/bin/toolu-runner" || fail "installed binary differs"
 [[ -f "$h/.toolu-runner/env" ]] || fail "env file missing"
 
@@ -122,9 +122,9 @@ done
 got="$(env -i "HOME=$h" PATH=/usr/bin:/bin TERM=dumb "$BASH_UNDER_TEST" -lc 'command -v toolu-runner' 2>/dev/null)" || true
 [[ "$got" == "$h/.local/bin/toolu-runner" ]] || fail "a login shell should find the binary, got '$got'"
 
-echo "setup options: no setup command exits 2; a setup command gets them"
+echo "setup options: unattended setup exits 2; a setup command gets them"
 run "$h" real --source github --org acme
-[[ "$RC" -eq 2 ]] || fail "setup options without setup should exit 2 (rc=$RC): $OUT"
+[[ "$RC" -eq 2 ]] || fail "setup options unattended should exit 2 (rc=$RC): $OUT"
 run "$h" setup --source github --org "acme corp" -- --yes
 [[ "$RC" -eq 0 ]] || fail "setup handoff should exit 0 (rc=$RC): $OUT"
 [[ "$(tr '\n' '|' <"$h/setup.log")" == "--source|github|--org|acme corp|--yes|" ]] \

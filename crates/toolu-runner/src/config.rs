@@ -121,6 +121,35 @@ pub(crate) fn poll_interval() -> Duration {
   duration_ms("TOOLU_RUNNER_POLL_INTERVAL_MS", Duration::from_secs(5))
 }
 
+/// How long `setup` polls GitHub for the runner to report `online`:
+/// 60 s, overridable in milliseconds by `TOOLU_RUNNER_ONLINE_TIMEOUT_MS`
+/// (tests shorten it). An empty value counts as unset; zero or a
+/// non-integer is diagnosed and the default kept.
+pub(crate) fn online_timeout() -> Duration {
+  duration_ms("TOOLU_RUNNER_ONLINE_TIMEOUT_MS", Duration::from_secs(60))
+}
+
+/// `NO_COLOR`: any non-empty value asks `setup` for plain output.
+pub(crate) fn no_color() -> bool {
+  read("NO_COLOR").is_some_and(|value| !value.is_empty())
+}
+
+/// Whether this session arrived over SSH (`SSH_CONNECTION` or `SSH_TTY`
+/// set non-empty): a headless signal for `setup`'s machine check.
+pub(crate) fn ssh_session() -> bool {
+  ["SSH_CONNECTION", "SSH_TTY"]
+    .iter()
+    .any(|key| read(key).is_some_and(|value| !value.is_empty()))
+}
+
+/// Whether a graphical display is reachable (`DISPLAY` or
+/// `WAYLAND_DISPLAY` set non-empty): the opposite headless signal.
+pub(crate) fn display_present() -> bool {
+  ["DISPLAY", "WAYLAND_DISPLAY"]
+    .iter()
+    .any(|key| read(key).is_some_and(|value| !value.is_empty()))
+}
+
 /// Where `doctor` reads the latest release when `TOOLU_RUNNER_RELEASES_URL`
 /// is unset: this repository's latest GitHub release.
 const DEFAULT_RELEASES_URL: &str =

@@ -62,6 +62,9 @@ rustls-native-certs = "0.8"
 url = ">=2, <2.5.8"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 hostname = "0.4"
+# `setup` prompts: raw terminal mode on /dev/tty (safe API only; the
+# prompt logic and key parsing are ours in setup/prompts.rs).
+crossterm = "0.29"
 # Free-space probe for `doctor` (`fs2::available_space`; also the lock crate).
 fs2 = "0.4"
 # `doctor` reads the release document's `tag_name` and the `/user` login.

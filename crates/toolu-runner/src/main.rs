@@ -52,6 +52,7 @@ mod register_auth;
 mod register_cmd;
 mod run_cmd;
 mod service_cmd;
+mod setup;
 mod status_cmd;
 mod supervisor;
 mod supervisor_signal;
@@ -107,6 +108,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     .map_err(Into::into),
     Command::Login(args) => login_cmd::cmd_login(args).await,
     Command::Logout(args) => login_cmd::cmd_logout(&args),
+    Command::Setup(args) => setup::cmd_setup(args).await,
     Command::CreateApp(args) => {
       let home = registry::runner_home();
       create_app_cmd::cmd_create_app(&args, &home).await
@@ -183,7 +185,7 @@ fn init_tracing_for(masker: &Arc<std::sync::Mutex<SecretMasker>>) -> Result<(), 
 /// black-holed connection does not hang the CLI.
 const UNREGISTER_TIMEOUT: Duration = Duration::from_secs(30);
 
-async fn cmd_remove(args: RemoveArgs) -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) async fn cmd_remove(args: RemoveArgs) -> Result<(), Box<dyn std::error::Error>> {
   init_remove_tracing()?;
 
   let config_path = resolve_config(args.config.clone())?;

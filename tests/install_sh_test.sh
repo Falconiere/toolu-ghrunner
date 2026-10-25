@@ -11,8 +11,9 @@
 # with SHA256SUMS made by the release workflow's own command, into temporary
 # HOME directories, then check what real bash / zsh / fish login shells see.
 # They use the real built toolu-runner (target/debug, built when missing; or
-# TOOLU_RUNNER_TEST_BIN). Only the setup handoff needs a fixture binary: no
-# released toolu-runner has a `setup` subcommand yet (#204).
+# TOOLU_RUNNER_TEST_BIN). The setup handoff uses a fixture binary that
+# records its argv; the real binary's own `setup` (#204) is covered by the
+# Rust scenario tests in crates/toolu-runner/tests/setup_cmd_test.rs.
 #
 # Requires python3, setsid, script (util-linux), timeout, zsh and fish. A
 # missing one FAILS the run: it must never look like a pass.
@@ -726,13 +727,13 @@ if want S7; then
     fail "S7 env files must not mention TOOLU_RUNNER_TOKEN"
   fi
 
-  echo "S7: messages that echo setup options mask token values"
+  echo "S7: unknown setup options are refused without echoing token values"
   h="$(new_home s7-echo)"
   run_install notty "$h" real --source github --token "$arg_secret" --enroll-token="$env_secret" --yes
-  [[ "$RC" -eq 2 ]] || fail "S7 setup options without setup should exit 2 (rc=$RC): $OUT"
+  [[ "$RC" -eq 2 ]] || fail "S7 an unknown setup option should exit 2 (rc=$RC): $OUT"
   if echo "$OUT" | grep -q -e "$arg_secret" -e "$env_secret"; then fail "S7 a token value was echoed: $OUT"; fi
-  echo "$OUT" | grep -qF -- "--source github --token •••• --enroll-token=•••• --yes" \
-    || fail "S7 the message should show the options with tokens masked: $OUT"
+  echo "$OUT" | grep -qF -- "unexpected argument '--enroll-token'" \
+    || fail "S7 the refusal should name the unknown option, not its value: $OUT"
   out_check="$("$SCRIPT" --check --token "$arg_secret")"
   if echo "$out_check" | grep -q -- "$arg_secret"; then fail "S7 --check echoed a token: $out_check"; fi
   run_install notty "$h" real --no-setup --token "$arg_secret"
@@ -741,15 +742,15 @@ if want S7; then
 fi
 
 # =========================================================================
-# S8 / S8b: no setup subcommand, conflicting flags
+# S8 / S8b: the real binary's setup, conflicting flags
 # =========================================================================
 if want S8; then
-  echo "S8: setup flags with a binary that has no setup exit 2"
+  echo "S8: setup flags exec the real setup, which refuses unattended"
   h="$(new_home s8)"
   run_install notty "$h" real --install-dir "$h/.local/bin" --source github --org acme
   [[ "$RC" -eq 2 ]] || fail "S8 should exit 2 (rc=$RC): $OUT"
-  echo "$OUT" | grep -q "has no setup command" || fail "S8 should say setup is missing: $OUT"
-  echo "$OUT" | grep -q -- "--source github --org acme" || fail "S8 should name the unused flags: $OUT"
+  if echo "$OUT" | grep -q "has no setup command"; then fail "S8 the binary has setup now: $OUT"; fi
+  echo "$OUT" | grep -q "setup: machine" || fail "S8 should show setup's machine check: $OUT"
   [[ -x "$h/.local/bin/toolu-runner" ]] || fail "S8 the binary should stay installed"
 
   echo "S8: conflicting flags fail before any download"
@@ -766,11 +767,11 @@ if want S8; then
 fi
 
 if want S8b; then
-  echo "S8b: the real binary (no setup yet) with no flags points at register"
+  echo "S8b: the real binary with no flags points at setup"
   h="$(new_home s8b)"
   run_install notty "$h" real --install-dir "$h/.local/bin"
   [[ "$RC" -eq 0 ]] || fail "S8b should exit 0 (rc=$RC): $OUT"
-  echo "$OUT" | grep -q '^next: toolu-runner register --url ' || fail "S8b should point at register: $OUT"
+  echo "$OUT" | grep -q '^next: toolu-runner setup' || fail "S8b should point at setup: $OUT"
   if echo "$OUT" | grep -q -- '--token'; then fail "S8b next line must not ask for a token flag: $OUT"; fi
   echo "ok: S8b"
 fi
@@ -806,7 +807,7 @@ if want S10; then
   [[ "$RC" -eq 0 ]] || fail "S10 --no-modify-path should exit 0 (rc=$RC): $OUT"
   [[ ! -e "$h/.toolu-runner" && ! -e "$h/.profile" ]] || fail "S10 --no-modify-path must write nothing"
   echo "$OUT" | grep -qF "export PATH=\"$h/.local/bin:\$PATH\"" || fail "S10 should print the export line: $OUT"
-  echo "$OUT" | grep -q "^next: $h/.local/bin/toolu-runner register" \
+  echo "$OUT" | grep -q "^next: $h/.local/bin/toolu-runner setup" \
     || fail "S10 next line should use the full path when it is not on PATH: $OUT"
 
   echo "S10: an unwritable ~/.toolu-runner is a warning, not a failed install"
@@ -817,7 +818,7 @@ if want S10; then
   echo "$OUT" | grep -qx "toolu-runner: installed $WORKSPACE_VERSION (checksum ok)" || fail "S10 should report the install: $OUT"
   echo "$OUT" | grep -q 'could not write ~/.toolu-runner/env' || fail "S10 should warn about the env file: $OUT"
   echo "$OUT" | grep -qF "export PATH=\"$h/.local/bin:\$PATH\"" || fail "S10 should print the export line: $OUT"
-  echo "$OUT" | grep -q "^next: $h/.local/bin/toolu-runner register" || fail "S10 next line should use the full path: $OUT"
+  echo "$OUT" | grep -q "^next: $h/.local/bin/toolu-runner setup" || fail "S10 next line should use the full path: $OUT"
   [[ ! -e "$h/.profile" ]] || fail "S10 must not source an env file it could not write"
   run_install notty "$h" real --install-dir "$h/.local/bin" --home "$tmp/s10-envfile-home"
   [[ "$RC" -eq 0 ]] || fail "S10 an unwritable env dir with --home should exit 0 (rc=$RC): $OUT"

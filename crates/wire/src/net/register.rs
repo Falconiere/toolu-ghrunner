@@ -344,6 +344,134 @@ async fn find_runner_id_by_name(
   )
 }
 
+/// One runner from the list-runners reply, as `setup` verifies it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunnerSummary {
+  /// The runner id GitHub assigned.
+  pub id: i64,
+  /// GitHub's status string (`online` / `offline`).
+  pub status: String,
+  /// Whether the runner is currently running a job.
+  pub busy: bool,
+  /// The runner's label names (GitHub sends `[{id, name, type}]`).
+  pub labels: Vec<String>,
+}
+
+/// A required field of one runner object in a list-runners reply:
+/// a missing or mistyped field is a `Protocol` error, never a
+/// silently defaulted value.
+fn required<'v, T>(
+  runner: &'v serde_json::Value,
+  field: &str,
+  get: impl Fn(&'v serde_json::Value) -> Option<T>,
+) -> Result<T, RunnerError> {
+  runner
+    .get(field)
+    .and_then(get)
+    .ok_or_else(|| RunnerError::Protocol(format!("list-runners reply missing runner {field}")))
+}
+
+/// The runner registered under `name` for `url`'s repo/org, if any:
+/// the list-runners endpoint with the `?name=` filter, paged to
+/// exhaustion (`per_page=100`), still re-checking the echoed name.
+///
+/// # Errors
+///
+/// `RunnerError::Network` for transport / 429 / 5xx answers,
+/// `RunnerError::Auth` for other non-2xx, `RunnerError::Protocol`
+/// for an unparseable reply, `RunnerError::Config` for a bad `url`.
+pub async fn find_runner(
+  client: &reqwest::Client,
+  url: &str,
+  token: &str,
+  name: &str,
+  timeout: Duration,
+) -> Result<Option<RunnerSummary>, RunnerError> {
+  let base = resolve_runners_base(url)?;
+  let mut page = 1_u32;
+  loop {
+    let response = client
+      .get(&base)
+      .timeout(timeout)
+      .query(&[
+        ("name", name.to_owned()),
+        ("per_page", "100".to_owned()),
+        ("page", page.to_string()),
+      ])
+      .bearer_auth(token)
+      .header("Accept", "application/vnd.github+json")
+      .header("X-GitHub-Api-Version", "2022-11-28")
+      .header(
+        "User-Agent",
+        concat!("toolu-runner/", env!("CARGO_PKG_VERSION")),
+      )
+      .send()
+      .await
+      .map_err(|e| RunnerError::Network(format!("list-runners request failed: {e}")))?;
+    // Status first: a non-JSON error body must not become a
+    // (retryable) Network error and hide an auth refusal.
+    let status = response.status();
+    let text = response
+      .text()
+      .await
+      .map_err(|e| RunnerError::Network(format!("reading list-runners body failed: {e}")))?;
+    if status.as_u16() == 429 || status.is_server_error() {
+      return Err(RunnerError::Network(format!(
+        "list-runners failed with status {status}: {text}"
+      )));
+    }
+    if !status.is_success() {
+      return Err(RunnerError::Auth(format!(
+        "list-runners failed with status {status}: {text}"
+      )));
+    }
+    let body: serde_json::Value = serde_json::from_str(&text)
+      .map_err(|e| RunnerError::Protocol(format!("list-runners reply did not parse: {e}")))?;
+    let runners = body
+      .get("runners")
+      .and_then(serde_json::Value::as_array)
+      .cloned()
+      .ok_or_else(|| {
+        RunnerError::Protocol("list-runners reply missing 'runners' array".to_owned())
+      })?;
+    let count = runners.len();
+    for runner in &runners {
+      if runner.get("name").and_then(serde_json::Value::as_str) == Some(name) {
+        let labels = runner
+          .get("labels")
+          .and_then(serde_json::Value::as_array)
+          .map_or_else(
+            || {
+              tracing::warn!("list-runners reply missing labels array for runner {name}");
+              Vec::new()
+            },
+            |labels| {
+              labels
+                .iter()
+                .filter_map(|label| {
+                  label
+                    .get("name")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+                })
+                .collect()
+            },
+          );
+        return Ok(Some(RunnerSummary {
+          id: required(runner, "id", serde_json::Value::as_i64)?,
+          status: required(runner, "status", serde_json::Value::as_str)?.to_owned(),
+          busy: required(runner, "busy", serde_json::Value::as_bool)?,
+          labels,
+        }));
+      }
+    }
+    if count < 100 {
+      return Ok(None);
+    }
+    page = page.saturating_add(1);
+  }
+}
+
 /// Outcome of a DELETE against a specific runner id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DeleteOutcome {
