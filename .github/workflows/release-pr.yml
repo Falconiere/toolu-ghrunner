@@ -18,8 +18,10 @@ name: release-pr
 # The token MUST NOT be the default GITHUB_TOKEN: GitHub suppresses workflow
 # runs for events raised by the built-in GITHUB_TOKEN, so a tag pushed under it
 # would land silently and release.yml would never run. Both jobs therefore mint a
-# short-lived GitHub App installation token from secrets.HOMEBREW_APP_ID /
-# secrets.HOMEBREW_APP_PRIVATE_KEY, which does trigger downstream workflows.
+# short-lived installation token for the "Toolu - Release" GitHub App from
+# secrets.TOOLU_RELEASE_APP_ID / secrets.TOOLU_RELEASE_PRIVATE_KEY, which does
+# trigger downstream workflows. (The Homebrew tap push in release.yml keeps its
+# own, tap-scoped App.)
 #
 # This replaces the RELEASE_PLZ_TOKEN PAT, matching git-better and comemory. An
 # App key is not tied to a person's account and cannot silently expire, and the
@@ -27,8 +29,8 @@ name: release-pr
 # rather than anything going red.
 #
 # The App must be installed on Falconiere/toolu-ghrunner with Contents:
-# read+write and Pull requests: read+write, and both secrets must be synced onto
-# this repo — neither is true yet, see docs/architecture.md § Release pipeline.
+# read+write and Pull requests: read+write; the two secrets are on this repo
+# (2026-10-25). See docs/architecture.md § Release pipeline.
 # No owner/repositories inputs are passed, so the action defaults to the current
 # repository and each token is scoped to this repo alone.
 #
@@ -64,8 +66,8 @@ jobs:
         id: app-token
         uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ secrets.HOMEBREW_APP_ID }}
-          private-key: ${{ secrets.HOMEBREW_APP_PRIVATE_KEY }}
+          app-id: ${{ secrets.TOOLU_RELEASE_APP_ID }}
+          private-key: ${{ secrets.TOOLU_RELEASE_PRIVATE_KEY }}
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # git-cliff needs full history + tags
@@ -92,8 +94,8 @@ jobs:
         id: app-token
         uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ secrets.HOMEBREW_APP_ID }}
-          private-key: ${{ secrets.HOMEBREW_APP_PRIVATE_KEY }}
+          app-id: ${{ secrets.TOOLU_RELEASE_APP_ID }}
+          private-key: ${{ secrets.TOOLU_RELEASE_PRIVATE_KEY }}
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
