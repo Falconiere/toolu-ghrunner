@@ -38,7 +38,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [ubuntu-24.04, macos-14]
+        runner: [ubuntu-24.04, macos-15]
         tag: [alpha]
     runs-on: ${{ fromJSON(inputs.runner || toJSON(matrix.runner)) }}
     env:

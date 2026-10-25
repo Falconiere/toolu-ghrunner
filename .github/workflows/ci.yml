@@ -11,11 +11,38 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# The gate is ONE serial command locally (./tools/check.sh all). CI runs the
+# same layers, but spread over parallel jobs and sharded test runs, because the
+# serial shape was 9-10 min per PR and 70 % of it was one nextest run:
+#
+#   * the run is slot-bound — on both legs its wall time equals the sum of
+#     every test's duration divided by the core count (966 s / 4 on ubuntu,
+#     1283 s / 3 on the 3-core macOS runner) — and 58 % of that slot time is
+#     eight tests that sleep through a real `timeout-minutes: 1` or a real
+#     deadline watchdog;
+#   * nextest's `--partition` splits one run into N independent runs over the
+#     same deterministic test set, so N matrix shards cut the run N-fold while
+#     every shard still compiles once from the shared dependency cache.
+#     `slice:k/N` deals the sorted test list round-robin; measured against the
+#     per-test durations of a real run it leaves the worst shard at ~156 s
+#     (ubuntu, N=2) and ~166 s (macOS, N=3), where `hash:` clustered five of
+#     the eight sleepers into one shard (188 s / 196 s) and `count:` is
+#     deprecated in its favour.
+#
+# Branch protection requires the contexts `ci` and `ci-macos`, so those two
+# names survive as aggregator jobs over the real ones (`needs` + `if:
+# always()`, failing on any non-success result). A matrix job's checks are
+# named `test (1)`, `test (2)`…, which a required context cannot match.
+#
+# Every Swatinem/rust-cache step saves only from main: a PR run restores the
+# main cache (same Cargo.lock → full hit) and a per-PR copy of the same key
+# was what pushed this repository over the 10 GB cache limit, evicting the
+# caches that were still useful.
 jobs:
-  ci:
+  # Format, lints and the structure guardrails: everything the gate checks
+  # without running a test. OS-independent, so the ubuntu leg alone runs it.
+  lint:
     runs-on: ubuntu-latest
-    # Median run ~6 min; a hang must not hold a runner for GitHub's 360 min
-    # default.
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -23,10 +50,8 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@v2
         with:
-          tool: cargo-nextest
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Clippy
@@ -69,11 +94,74 @@ jobs:
           "$dir/ast-grep" --version
       - name: Structure
         run: bash scripts/guardrails/run.sh
+      - name: Protocol crate is sync + I/O-free (AC #22)
+        run: |
+          if cargo tree -p protocol | grep -qE 'reqwest|tokio|opendal|bollard|axum'; then
+            echo "ERROR: protocol crate must not depend on I/O crates"
+            exit 1
+          fi
+
+  # The workspace test suite on Linux, in two shards. `--partition slice:k/N`
+  # assigns every test to exactly one shard, so the shards together run the
+  # full suite exactly once. N is written out (`/2`) rather than read from a
+  # context property, so the denominator is a plain number a reader can check
+  # against the matrix — and scripts/test/ci_workflow_test.sh does check it:
+  # a matrix with fewer shards than the denominator would silently skip part
+  # of the suite (nextest itself rejects only the other direction, k > N).
+  # Adding a shard therefore means adding a number to the matrix AND bumping
+  # the denominator; a step gated on one shard (`if: matrix.shard == …`) must
+  # name a shard that exists, which the same test checks. Steps that run once
+  # per leg (doctests, the install.sh login-shell tests) are spread over the
+  # shards so no shard is the straggler.
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.94.1
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
       - name: Test
-        run: cargo nextest run --workspace
+        run: cargo nextest run --workspace --partition slice:${{ matrix.shard }}/2
+      # tests/install_sh_test.sh checks what real bash, zsh and fish login
+      # shells see after an install, and FAILS (never skips) when a shell is
+      # missing. bash is preinstalled; zsh and fish are not. Both scripts build
+      # the toolu-runner binary, which the test step above has already built in
+      # the same profile, so they belong to a test shard rather than `scripts`.
+      - name: Install zsh and fish for the install.sh tests
+        if: matrix.shard == 1
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends zsh fish
+      - name: install.sh login-shell tests
+        if: matrix.shard == 1
+        run: |
+          bash tests/install_sh_test.sh
+          bash tests/install_sh_bash32_test.sh
       # nextest does not run doctests.
       - name: Doctests
+        if: matrix.shard == 2
         run: cargo test --workspace --doc
+
+  # The #[ignore]d real-container tests: the Linux Docker lane the compat
+  # matrix (#103) cites as `ci-docker` evidence. Serial by design (one Docker
+  # daemon), so it runs beside the shards instead of after them.
+  docker-replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.94.1
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Docker action runtime and production replay
         env:
           DOCKER_HOST: unix:///var/run/docker.sock
@@ -86,17 +174,14 @@ jobs:
           cargo test -p execution --test integration -- node_container_test:: --ignored --test-threads=1
           cargo test -p execution --test integration -- compat_probe_replay_test:: --ignored --test-threads=1
           cargo test -p execution --test integration -- network_container_env_test:: --ignored --test-threads=1
-      - name: Protocol crate is sync + I/O-free (AC #22)
-        run: |
-          if cargo tree -p protocol | grep -qE 'reqwest|tokio|opendal|bollard|axum'; then
-            echo "ERROR: protocol crate must not depend on I/O crates"
-            exit 1
-          fi
-      # tests/install_sh_test.sh checks what real bash, zsh and fish login
-      # shells see after an install, and FAILS (never skips) when a shell is
-      # missing. bash is preinstalled; zsh and fish are not.
-      - name: Install zsh and fish for the install.sh tests
-        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends zsh fish
+
+  # The shell and Python checks over the repo's own files: no toolchain, no
+  # build, so they never wait on a compile.
+  scripts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
       - name: Run release-script tests
         # Explicit list, not a scripts/test/*.sh glob — plist_test.sh is
         # macOS-only (plutil) and would fail here. systemd_test.sh is NOT
@@ -106,11 +191,9 @@ jobs:
         # fails here exactly as it does in a clean sandbox today — a gap for
         # a later step to close, not this one.
         run: |
-          for t in assert_version changelog_extract package_release release_workflow release_finalize_workflow generate_homebrew_formula release_homebrew_workflow release_image_workflow release_macos_image_workflow macos_entrypoint docker_entrypoint dockerfile release_profile release_pr_workflow release_pr_script code_review_workflow ci_workflow check_script daemon_live_workflow daemon_systemd live_lane; do
+          for t in assert_version changelog_extract package_release release_workflow release_finalize_workflow generate_homebrew_formula release_homebrew_workflow release_image_workflow release_macos_image_workflow macos_entrypoint docker_entrypoint dockerfile release_profile release_pr_workflow release_pr_script code_review_workflow ci_workflow shell_templates_workflow check_script daemon_live_workflow daemon_systemd live_lane; do
             bash "scripts/test/${t}_test.sh"
           done
-          bash tests/install_sh_test.sh
-          bash tests/install_sh_bash32_test.sh
       # Committed #88 captures stay sanitized and hash-pinned, and the #88
       # documentation keeps every acceptance row (the live lanes are recorded,
       # not re-run, so only these two offline modes belong in CI).
@@ -131,34 +214,66 @@ jobs:
           python3 scripts/test/reference_compare.py --verify docs/compat-reference-103.json
           python3 -m unittest scripts/test/test_compat_matrix_check.py scripts/test/test_sanitize_capture.py scripts/test/test_reference_compare.py
 
-  # The OS-dependent half of the gate on a real macOS host. Formatting, the
-  # #[allow] ban and the guardrail structure checks are OS-independent and stay
-  # on the ubuntu leg alone — a second ast-grep install would add time for no
-  # additional signal. arm64 only: Apple Silicon is what this
-  # runner is deployed on, and the release workflow already cross-builds Intel.
-  ci-macos:
-    runs-on: macos-14
+  # The required `ci` context: green only when every Linux job above is. A
+  # skipped or cancelled dependency fails it too — `if: always()` makes it run
+  # in those cases, and the step rejects every result but success.
+  ci:
+    needs: [lint, test, docker-replay, scripts]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every Linux job succeeded
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          for result in $RESULTS; do
+            [[ "$result" == success ]] || exit 1
+          done
+
+  # The OS-dependent half of the gate on a real macOS host, in three shards:
+  # the macOS runner has three cores, so the same suite takes 1.8x the ubuntu
+  # wall time per shard. Formatting, the #[allow] ban and the guardrail
+  # structure checks are OS-independent and stay on the ubuntu leg alone — a
+  # second ast-grep install would add time for no additional signal. arm64
+  # only: Apple Silicon is what this runner is deployed on, and the release
+  # workflow already builds Intel natively. macos-15, not macos-14: GitHub
+  # retires the macOS 14 images on 2026-11-02 (actions/runner-images#13518),
+  # with brownouts before that. Clippy and the once-per-leg scripts are spread
+  # over the shards like the ubuntu leg's extras.
+  test-macos:
+    runs-on: macos-15
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.94.1
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install cargo-nextest
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-nextest
       - name: Clippy
+        if: matrix.shard == 2
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
-        run: cargo nextest run --workspace
+        run: cargo nextest run --workspace --partition slice:${{ matrix.shard }}/3
       # nextest does not run doctests.
       - name: Doctests
+        if: matrix.shard == 3
         run: cargo test --workspace --doc
       # `curl | bash` on a Mac runs Apple's /bin/bash 3.2, where an empty
       # "${array[@]}" under set -u is an error; this is the one leg that has it.
       - name: install.sh under macOS /bin/bash 3.2
+        if: matrix.shard == 3
         env:
           INSTALL_SH_BASH: /bin/bash
           INSTALL_SH_REQUIRE_BASH3: "1"
@@ -166,4 +281,21 @@ jobs:
       # plutil is macOS-only, so this is the one host where the generated
       # LaunchAgent is validated as a real plist rather than as a string.
       - name: Validate the launchd plist
+        if: matrix.shard == 3
         run: bash scripts/test/plist_test.sh
+
+  # The required `ci-macos` context, aggregated the same way as `ci`.
+  ci-macos:
+    needs: [test-macos]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every macOS shard succeeded
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          for result in $RESULTS; do
+            [[ "$result" == success ]] || exit 1
+          done

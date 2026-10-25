@@ -37,7 +37,12 @@ Follows [toolu-conventions](https://github.com/Falconiere/toolu-conventions)
   `#[allow]` ban → `bash scripts/guardrails/run.sh` → `cargo nextest run
   --workspace` → `cargo test --workspace --doc` (nextest skips doctests;
   needs `cargo-nextest`, CI uses `taiki-e/install-action`). **Never disable a
-  layer to go green.**
+  layer to go green.** CI runs the same layers as parallel jobs — `lint`,
+  `test` (2 ubuntu shards) / `test-macos` (3 macos-15 shards) via `cargo
+  nextest run --partition slice:k/N`, `docker-replay`, `scripts` — behind
+  the aggregator jobs `ci` / `ci-macos` that branch protection requires;
+  `scripts/test/ci_workflow_test.sh` pins the layout (every layer present,
+  shard-gated steps name a real shard). Rust caches save from main only.
 - **`scripts/guardrails/` is VERBATIM from the kit** — change
   `guardrails.config.json`, never the scripts. Needs `jq` **and** `ast-grep`
   (`cargo install ast-grep --locked`); exits 3 without either.

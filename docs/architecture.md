@@ -1435,10 +1435,14 @@ release-tag          sees the untagged version on main and pushes the
 ```
 
 **Credentials the front half needs.** Both jobs mint an installation token from
-`HOMEBREW_APP_ID` + `HOMEBREW_APP_PRIVATE_KEY`, the publish App shared with
-git-better and comemory. Two prerequisites:
+`TOOLU_RELEASE_APP_ID` + `TOOLU_RELEASE_PRIVATE_KEY`, the `toolu-release`
+GitHub App dedicated to this repository's release automation (a
+`TOOLU_RELEASE_CLIENT_ID` is synced too; the mint action accepts either id, and
+the workflow passes the App id). The homebrew-tap push further down keeps the
+separate `HOMEBREW_APP_*` publish App, whose installation covers the tap repo.
+Two prerequisites:
 
-1. Those secrets are synced here by Infisical — done, verify with
+1. Those secrets are synced here by Infisical — verify with
    `gh secret list --repo Falconiere/toolu-ghrunner`. An absent or empty
    `app-id` yields `401 Bad credentials` from the mint step.
 2. The App must be installed on `Falconiere/toolu-ghrunner` with **Contents:
@@ -1474,7 +1478,7 @@ verify (ubuntu)      scripts/assert-version.sh — tag must equal the
       │              [workspace.package] version, else fail fast; then
       │              cargo fmt / clippy / nextest / doctests.
       ▼
-build (matrix ×4)    native runners, no cross: darwin/arm64 (macos-14),
+build (matrix ×4)    native runners, no cross: darwin/arm64 (macos-15),
       │              darwin/amd64 (macos-15-intel), linux/amd64
       │              (ubuntu-24.04), linux/arm64 (ubuntu-24.04-arm); the
       │              linux legs run in a rust:1.94.1-bookworm container

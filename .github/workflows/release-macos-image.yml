@@ -12,7 +12,7 @@ name: release-macos-image
 #    digest IS the deliverable — no `imagetools create` stitching.
 # 2. The compile and the pack happen on different hosts. Rust cannot
 #    cross-compile to darwin without an Apple SDK, and GitHub's macOS runners
-#    have no Docker daemon, so the binary comes from macos-14 and `image`
+#    have no Docker daemon, so the binary comes from macos-15 and `image`
 #    packs it on ubuntu-24.04. The image carries no OS and runs no build
 #    step, so nothing about the pack needs a Mac.
 #
@@ -24,13 +24,13 @@ name: release-macos-image
 # A tag reaches this workflow ONLY through release.yml (`workflow_call`,
 # `needs: build`) — the same chaining, and for the same reasons, as
 # release-image.yml (#121): one gate per tag, and the darwin/arm64 binary is
-# the one release.yml's macos-14 leg already built and packaged. With
+# the one release.yml's macos-15 leg already built and packaged. With
 # `prebuilt_binaries: true` the `build` job is skipped and `image` packs the
 # `toolu-runner` out of that release tarball, so the carrier holds the
 # tarball's binary byte for byte (checked before the push).
 #
 # PRs touching the image inputs and workflow_dispatch have no release
-# artifacts: they compile on macos-14 in `build` and pack without pushing.
+# artifacts: they compile on macos-15 in `build` and pack without pushing.
 # Neither repeats the gate, because neither publishes. Login, push and the
 # digest print all require BOTH a tag ref AND release.yml's call
 # (`inputs.prebuilt_binaries == true` — compared, never bare: `&&` returns its
@@ -41,7 +41,7 @@ on:
   workflow_call:
     inputs:
       prebuilt_binaries:
-        description: Pack the toolu-runner-darwin-arm64 release tarball this run's caller uploaded, instead of compiling on macos-14.
+        description: Pack the toolu-runner-darwin-arm64 release tarball this run's caller uploaded, instead of compiling on macos-15.
         type: boolean
         default: false
   pull_request:
@@ -67,12 +67,12 @@ env:
   IMAGE_BASENAME: toolu-ghrunner-macos
 
 jobs:
-  # The one host that can produce the payload. macos-14 is Apple Silicon, so
+  # The one host that can produce the payload. macos-15 is Apple Silicon, so
   # this is a native build — no cross-compilation, no Apple SDK plumbing.
-  # Skipped on the prebuilt path: release.yml's macos-14 leg already built it.
+  # Skipped on the prebuilt path: release.yml's macos-15 leg already built it.
   build:
     if: ${{ !inputs.prebuilt_binaries }}
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.94.1

@@ -7,6 +7,23 @@ on:
   push:
     branches: [main]
 
+# A newer push to a PR supersedes the older run; pushes to main are never
+# cancelled — the same rule as ci.yml. This workflow's three checks,
+# `host (ubuntu-24.04)`, `host (macos-15)` and `container`, are required
+# contexts on main like `ci` and `ci-macos`, so their names are pinned by
+# scripts/test/shell_templates_workflow_test.sh.
+#
+# The first steps of each job probe the OFFICIAL runner's shell semantics
+# with no Rust at all; the last step of each job then compiles and runs the
+# `execution` crate's integration tests against those probes (`cargo test -p
+# execution --test integration -- shell_templates_test:: …` on the hosts,
+# `shell_templates_container_test::` in the container job). That compile is
+# why both jobs pin the toolchain and restore the dependency cache: without
+# them every run built the crate's dependencies cold on a runner-image Rust.
+concurrency:
+  group: shell-templates-80-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
@@ -17,8 +34,14 @@ jobs:
       matrix:
         os: [ubuntu-24.04, macos-15]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.94.1
+      # Saved from main only, restored everywhere — see ci.yml.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Official runner default shell preserves pipeline status
         run: false | true
       - name: Official runner explicit bash fails the pipeline
@@ -70,8 +93,13 @@ jobs:
 
   container:
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.94.1
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Real toolu job-container replay
         run: |
           mkdir -p "$RUNNER_TEMP/shell80"

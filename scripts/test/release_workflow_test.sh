@@ -65,7 +65,7 @@ else
   echo "ok: release build matrix is not cached"
 fi
 # --- build (4 native targets) ---
-want "macos-14 (darwin arm64)"         "runner: macos-14"
+want "macos-15 (darwin arm64)"         "runner: macos-15"
 want "macos-15-intel (darwin amd64)"   "runner: macos-15-intel"
 want "ubuntu-24.04 (linux amd64)"      "runner: ubuntu-24\.04[[:space:]]*$"
 want "ubuntu-24.04-arm (linux arm64)"  "runner: ubuntu-24\.04-arm"

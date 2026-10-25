@@ -1285,7 +1285,10 @@ cargo build --profile debugging  # opt-in full debuginfo for a debugger (target/
 ./tools/check.sh all             # the full local gate
 ```
 
-`./tools/check.sh all` is the one command CI mirrors step-for-step:
+`./tools/check.sh all` is the one command CI mirrors layer-for-layer —
+spread over parallel jobs, with the nextest run sharded (`--partition
+slice:k/N`) across two ubuntu and three macOS runners, so a PR check
+finishes in about half the serial time:
 
 ```
 cargo fmt --check
