@@ -61,6 +61,17 @@ pub(crate) struct SetupArgs {
   /// Working directory for job workspaces (default: ~/.toolu-runner/_work).
   #[arg(long, value_name = "DIR")]
   pub(crate) work_dir: Option<PathBuf>,
+  /// Registration-mode flags (ephemeral / replace / no service).
+  #[command(flatten)]
+  pub(crate) mode: SetupMode,
+  /// Flow flags (linger / unattended / dry run).
+  #[command(flatten)]
+  pub(crate) flow: SetupFlow,
+}
+
+/// Registration-mode flags.
+#[derive(Debug, Args)]
+pub(crate) struct SetupMode {
   /// One job, then the runner unregisters and deletes itself.
   #[arg(long)]
   pub(crate) ephemeral: bool,
@@ -70,6 +81,11 @@ pub(crate) struct SetupArgs {
   /// Do not install the background machine service.
   #[arg(long)]
   pub(crate) no_service: bool,
+}
+
+/// Flow flags.
+#[derive(Debug, Args)]
+pub(crate) struct SetupFlow {
   /// Enable systemd lingering with the service (non-root Linux).
   #[arg(long)]
   pub(crate) enable_linger: bool,
@@ -80,4 +96,16 @@ pub(crate) struct SetupArgs {
   /// Print the Review and exit without writing anything.
   #[arg(long)]
   pub(crate) dry_run: bool,
+}
+
+impl SetupArgs {
+  /// `--yes`: unattended, every answer from a flag.
+  pub(crate) fn yes(&self) -> bool {
+    self.flow.yes
+  }
+
+  /// `--dry-run`: print the Review and exit.
+  pub(crate) fn dry_run(&self) -> bool {
+    self.flow.dry_run
+  }
 }

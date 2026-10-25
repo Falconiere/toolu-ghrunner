@@ -228,8 +228,7 @@ pub(crate) async fn poll_online(
   loop {
     match find_runner(client, url, bearer, name).await {
       Ok(Some(runner)) if runner.status == "online" => return Ok(runner),
-      Ok(_) => {},
-      Err(RunnerError::Network(_)) => {},
+      Ok(_) | Err(RunnerError::Network(_)) => {},
       Err(e) => {
         return Err(SetupError::usage(format!(
           "could not check whether '{name}' is online: {e}"

@@ -107,6 +107,26 @@ pub(crate) enum AuthPlan {
   Token,
 }
 
+/// Registration-mode choices of a plan.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PlanMode {
+  /// Ephemeral registration.
+  pub(crate) ephemeral: bool,
+  /// Replace a same-name runner/registration.
+  pub(crate) replace: bool,
+  /// Drop the default labels.
+  pub(crate) no_default_labels: bool,
+}
+
+/// Service choices of a plan.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PlanService {
+  /// Install the machine service.
+  pub(crate) install: bool,
+  /// The linger answer (decided in setup, never by the installer).
+  pub(crate) enable_linger: bool,
+}
+
 /// One fully-resolved setup plan: the only thing apply executes.
 #[derive(Debug, Clone)]
 pub(crate) struct ResolvedPlan {
@@ -124,18 +144,12 @@ pub(crate) struct ResolvedPlan {
   pub(crate) name: String,
   /// Extra labels from flags/prompts.
   pub(crate) labels: Vec<String>,
-  /// Whether to drop the default labels.
-  pub(crate) no_default_labels: bool,
   /// Work dir string persisted in the registration.
   pub(crate) work_folder: String,
-  /// Ephemeral registration.
-  pub(crate) ephemeral: bool,
-  /// Replace a same-name runner/registration.
-  pub(crate) replace: bool,
-  /// Install the machine service.
-  pub(crate) service: bool,
-  /// The linger answer (decided in setup, never by the installer).
-  pub(crate) enable_linger: bool,
+  /// Registration-mode choices.
+  pub(crate) mode: PlanMode,
+  /// Service choices.
+  pub(crate) service: PlanService,
 }
 
 /// Validate `--github-url`: `https` (or `http` only for loopback), no

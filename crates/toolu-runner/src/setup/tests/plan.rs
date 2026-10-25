@@ -8,13 +8,14 @@ fn parsed(extra: &[&str]) -> SetupArgs {
   use clap::Parser as _;
   let mut argv = vec!["toolu-runner", "setup"];
   argv.extend(extra.iter().copied());
-  match crate::cli::Cli::try_parse_from(argv) {
-    Ok(crate::cli::Cli {
-      command: crate::cli::Command::Setup(args),
-    }) => args,
-    Ok(_) => panic!("not a setup invocation"),
-    Err(e) => panic!("parse: {e}"),
-  }
+  let cli = crate::cli::Cli::try_parse_from(argv).expect("setup flags parse");
+  let crate::cli::Cli {
+    command: crate::cli::Command::Setup(parsed_args),
+  } = cli
+  else {
+    return parsed(&[]);
+  };
+  parsed_args
 }
 
 #[test]

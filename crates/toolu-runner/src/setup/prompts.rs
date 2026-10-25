@@ -7,8 +7,9 @@
 //! which is also how the unit tests drive prompts with byte streams.
 
 use std::collections::VecDeque;
+use std::fmt::Write as _;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
+use std::sync::mpsc::{Receiver, channel};
 use std::time::Duration;
 
 use super::plan::SetupError;
@@ -127,8 +128,11 @@ pub(crate) fn restore_terminal() {
 /// Raw-mode guard: restores on drop, and chains a panic hook that
 /// restores before the previous hook runs (`panic = "abort"` never
 /// unwinds, so the hook is the only restore path on panic).
+/// The chained panic-hook type.
+type PanicHook = Box<dyn Fn(&std::panic::PanicHookInfo<'_>) + Send + Sync>;
+
 struct RawGuard {
-  previous_hook: Option<Box<dyn Fn(&std::panic::PanicHookInfo<'_>) + Send + Sync>>,
+  previous_hook: Option<PanicHook>,
 }
 
 impl RawGuard {
@@ -179,17 +183,14 @@ impl TtyKeys {
     self
       .rx
       .recv()
-      .map_err(|_| PromptEnd::Io("the terminal closed".to_owned()))
+      .map_err(|_closed| PromptEnd::Io("the terminal closed".to_owned()))
   }
 
   fn byte_within(&mut self, wait: Duration) -> Option<u8> {
     if let Some(byte) = self.pending.pop_front() {
       return Some(byte);
     }
-    match self.rx.recv_timeout(wait) {
-      Ok(byte) => Some(byte),
-      Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => None,
-    }
+    self.rx.recv_timeout(wait).ok()
   }
 }
 
@@ -341,7 +342,7 @@ pub(crate) fn run_select(
           return Ok(chosen);
         }
       },
-      _ => {},
+      Key::Space | Key::Backspace | Key::Char(_) => {},
     }
   }
 }
@@ -355,9 +356,9 @@ fn render_select(
   let mut text = format!("\r\x1b[K◆ {title}\r\n");
   for (i, option) in options.iter().enumerate() {
     let marker = if i == index { "›" } else { " " };
-    text.push_str(&format!("\r\x1b[K│ {marker} {option}\r\n"));
+    let _ = write!(text, "\r\x1b[K│ {marker} {option}\r\n");
   }
-  text.push_str(&format!("\x1b[{}A", options.len() + 1));
+  let _ = write!(text, "\x1b[{}A", options.len() + 1);
   write(out, &text)
 }
 
@@ -393,9 +394,7 @@ pub(crate) fn run_multi_select(
       },
       Key::Char('a') => {
         let all = chosen.iter().all(|c| *c);
-        for slot in chosen.iter_mut() {
-          *slot = !all;
-        }
+        chosen.fill(!all);
         render_multi(out, title, options, &chosen, index)?;
       },
       Key::Enter => {
@@ -410,7 +409,7 @@ pub(crate) fn run_multi_select(
       },
       Key::Esc => return Err(PromptEnd::Back),
       Key::CtrlC => return Err(PromptEnd::Cancelled),
-      _ => {},
+      Key::Backspace | Key::Char(_) => {},
     }
   }
 }
@@ -430,9 +429,9 @@ fn render_multi(
     } else {
       "[ ]"
     };
-    text.push_str(&format!("\r\x1b[K│ {marker} {box_} {option}\r\n"));
+    let _ = write!(text, "\r\x1b[K│ {marker} {box_} {option}\r\n");
   }
-  text.push_str(&format!("\x1b[{}A", options.len() + 1));
+  let _ = write!(text, "\x1b[{}A", options.len() + 1);
   write(out, &text)
 }
 
@@ -466,7 +465,7 @@ pub(crate) fn run_input(
       },
       Key::Esc => return Err(PromptEnd::Back),
       Key::CtrlC => return Err(PromptEnd::Cancelled),
-      _ => {},
+      Key::Up | Key::Down | Key::Space | Key::Char(_) => {},
     }
   }
 }
@@ -491,7 +490,7 @@ pub(crate) fn run_secret(
       Key::Char(c) if !c.is_control() => value.push(c),
       Key::Esc => return Err(PromptEnd::Back),
       Key::CtrlC => return Err(PromptEnd::Cancelled),
-      _ => {},
+      Key::Up | Key::Down | Key::Space | Key::Char(_) => {},
     }
   }
 }
@@ -528,7 +527,7 @@ pub(crate) fn run_confirm(
       },
       Key::Esc => return Err(PromptEnd::Back),
       Key::CtrlC => return Err(PromptEnd::Cancelled),
-      _ => {},
+      Key::Backspace | Key::Char(_) => {},
     }
   }
 }

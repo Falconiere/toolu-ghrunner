@@ -101,11 +101,7 @@ impl Respond for Peer {
         200,
         json!([{"full_name": "octo/web"}, {"full_name": "octo/api"}]),
       ),
-      ("GET", "/api/v3/repos/octo/web") => json_reply(
-        200,
-        json!({"permissions": {"admin": state.admin.load(Ordering::SeqCst)}}),
-      ),
-      ("GET", "/api/v3/repos/octo/api") => json_reply(
+      ("GET", p) if p == "/api/v3/repos/octo/web" || p == "/api/v3/repos/octo/api" => json_reply(
         200,
         json!({"permissions": {"admin": state.admin.load(Ordering::SeqCst)}}),
       ),
@@ -471,7 +467,7 @@ async fn partial_apply_resumes() -> TestResult {
   let (home, path_env) = home()?;
   let state = PeerState::new();
   state.fail_api_generate.store(true, Ordering::SeqCst);
-  let server = peer(state.clone()).await?;
+  let server = peer(Arc::clone(&state)).await?;
   let flags = [
     "--repo", "octo/web", "--repo", "octo/api", "--auth", "token", "--name", NAME, "--yes",
   ];

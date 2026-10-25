@@ -238,7 +238,7 @@ pub(crate) async fn apply_plan(
   }
   let labels = config::labels::resolve_labels(
     &plan.labels,
-    plan.no_default_labels,
+    plan.mode.no_default_labels,
     &config::labels::default_labels(),
   )
   .map_err(|e| SetupError::usage(e.to_string()))?;
@@ -246,7 +246,7 @@ pub(crate) async fn apply_plan(
   for url in plan.target.urls(&plan.github_base) {
     applied.push(register_one(plan, home, auth, &labels, &url, masker).await?);
   }
-  if plan.service {
+  if plan.service.install {
     install_machine_service(plan).await?;
     let client = crate::register_cmd::build_register_client(&shared::NetworkConfig::default())
       .map_err(|e| SetupError::runtime(e.to_string()))?;
@@ -278,7 +278,7 @@ async fn register_one(
   let config_path = crate::register_cmd::register_config_path(url, home)
     .map_err(|e| SetupError::usage(e.to_string()))?;
   let creds_path = crate::cli::credentials_path_for(&config_path);
-  if config_path.exists() && !plan.replace {
+  if config_path.exists() && !plan.mode.replace {
     let existing = config::config::load_config(&config_path)
       .map_err(|e| SetupError::runtime(format!("could not read {}: {e}", config_path.display())))?;
     if existing.runner_name == plan.name {
@@ -311,8 +311,8 @@ async fn register_one(
       host: &plan.host,
       config_path: &config_path,
       creds_path: &creds_path,
-      replace: plan.replace || replacing,
-      ephemeral: plan.ephemeral,
+      replace: plan.mode.replace || replacing,
+      ephemeral: plan.mode.ephemeral,
       network,
       auth: auth.section.clone(),
       hint_org_404: false,
@@ -342,9 +342,9 @@ async fn install_machine_service(plan: &ResolvedPlan) -> Result<(), SetupError> 
     no_activate: false,
     remove: false,
     linger: crate::cli::LingerArgs {
-      enable_linger: plan.enable_linger,
+      enable_linger: plan.service.enable_linger,
       yes: false,
-      decided: Some(plan.enable_linger),
+      decided: Some(plan.service.enable_linger),
     },
   };
   tokio::task::spawn_blocking(move || {

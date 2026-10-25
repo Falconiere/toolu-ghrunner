@@ -6,23 +6,32 @@ use super::apply::AuthContext;
 use super::args::SetupArgs;
 use super::github;
 use super::machine::MachineFacts;
-use super::plan::{AuthPlan, SetupError, Target};
+use super::plan::{SetupError, Target};
 use super::prompts::Prompts;
 use super::render::Out;
 
+/// The shared scope-staging inputs (one credential, one account).
+pub(crate) struct ScopeFlow<'a> {
+  /// GitHub web base.
+  pub(crate) github_base: &'a str,
+  /// The runner home (collision resume check).
+  pub(crate) home: &'a std::path::Path,
+  /// The caller's flags.
+  pub(crate) args: &'a SetupArgs,
+  /// The step renderer.
+  pub(crate) out: Out,
+  /// The HTTP client for live reads.
+  pub(crate) client: &'a reqwest::Client,
+}
+
 /// Scope: the runner group for an org, or the repositories to register.
-#[allow(clippy::too_many_arguments)]
 pub(crate) async fn resolve_scope(
+  flow: &ScopeFlow<'_>,
   target: &mut Target,
-  auth: &AuthPlan,
   auth_ctx: &AuthContext,
-  github_base: &str,
-  args: &SetupArgs,
   prompts: &mut Option<Prompts>,
-  out: &Out,
-  client: &reqwest::Client,
 ) -> Result<(Option<String>, Vec<String>), SetupError> {
-  let _ = auth;
+  let (github_base, args, out, client) = (flow.github_base, flow.args, flow.out, flow.client);
   match target {
     Target::Org { org } => {
       let url = format!("{github_base}/{org}");
@@ -61,7 +70,7 @@ pub(crate) async fn resolve_scope(
         let index = prompts
           .select("Runner group", &names, default)
           .map_err(SetupError::from)?;
-        groups[index].id
+        groups.get(index).map_or(1, |group| group.id)
       } else {
         groups.iter().find(|g| g.default).map_or(1, |g| g.id)
       };
@@ -101,9 +110,16 @@ pub(crate) async fn resolve_scope(
       if picked.is_empty() {
         return Err(SetupError::usage("no repositories chosen"));
       }
-      let chosen: Vec<String> = picked.iter().map(|i| available[*i].clone()).collect();
+      let chosen: Vec<String> = picked
+        .iter()
+        .filter_map(|i| available.get(*i).cloned())
+        .collect();
       // One owner per plan (one credential/installation).
-      let owner = chosen[0].split('/').next().unwrap_or_default().to_owned();
+      let owner = chosen
+        .first()
+        .and_then(|repo| repo.split('/').next())
+        .unwrap_or_default()
+        .to_owned();
       if chosen
         .iter()
         .any(|r| r.split('/').next() != Some(owner.as_str()))
@@ -112,7 +128,7 @@ pub(crate) async fn resolve_scope(
           "the picker chose repositories from several owners; one setup run covers one account",
         ));
       }
-      *repos = chosen.clone();
+      repos.clone_from(&chosen);
       Ok((None, chosen))
     },
   }
@@ -138,28 +154,27 @@ pub(crate) fn resolve_name(
 /// Collision: a same-name runner already in the target needs
 /// `--replace` (unattended) or a confirm (interactive).
 pub(crate) async fn check_collision(
+  flow: &ScopeFlow<'_>,
   target: &Target,
-  github_base: &str,
-  home: &std::path::Path,
   name: &str,
   auth_ctx: &AuthContext,
-  args: &SetupArgs,
   prompts: &mut Option<Prompts>,
-  client: &reqwest::Client,
-  out: &Out,
 ) -> Result<(), SetupError> {
-  if args.replace {
+  if flow.args.mode.replace {
     return Ok(());
   }
-  for url in target.urls(github_base) {
+  for url in target.urls(flow.github_base) {
     // A locally registered target is a resume, not a collision: the
     // runner on GitHub is this registration's own.
-    if crate::register_cmd::register_config_path(&url, home).is_ok_and(|path| path.exists()) {
+    if crate::register_cmd::register_config_path(&url, flow.home).is_ok_and(|path| path.exists()) {
       continue;
     }
-    if let Ok(Some(existing)) = github::find_runner(client, &url, &auth_ctx.bearer, name).await {
-      let _ = existing;
-      out.warn("runner", &format!("'{name}' is already a runner in {url}"));
+    if let Ok(Some(_existing)) =
+      github::find_runner(flow.client, &url, &auth_ctx.bearer, name).await
+    {
+      flow
+        .out
+        .warn("runner", &format!("'{name}' is already a runner in {url}"));
       match prompts.as_mut() {
         Some(prompts) => {
           let yes = prompts
@@ -188,8 +203,8 @@ pub(crate) fn resolve_linger(
   facts: &MachineFacts,
   service: bool,
 ) -> Result<bool, SetupError> {
-  if !service || args.enable_linger {
-    return Ok(args.enable_linger);
+  if !service || args.flow.enable_linger {
+    return Ok(args.flow.enable_linger);
   }
   if facts.supervisor != "systemd" || facts.linger == Some(true) {
     return Ok(false);

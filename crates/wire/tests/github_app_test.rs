@@ -81,10 +81,12 @@ fn pick_group_refuses_an_ambiguous_or_absent_name() {
 
 use std::io::{Read as _, Write as _};
 
+type TestResult = Result<(), Box<dyn std::error::Error>>;
+
 /// Serve `handler(request_head) -> body` on 127.0.0.1 for successive requests.
-fn peer(handler: fn(&str) -> String) -> String {
-  let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-  let port = listener.local_addr().expect("addr").port();
+fn peer(handler: fn(&str) -> String) -> Result<String, Box<dyn std::error::Error>> {
+  let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+  let port = listener.local_addr()?.port();
   std::thread::spawn(move || {
     for stream in listener.incoming() {
       let Ok(mut stream) = stream else { continue };
@@ -106,7 +108,7 @@ fn peer(handler: fn(&str) -> String) -> String {
       let _ = stream.write_all(reply.as_bytes());
     }
   });
-  format!("http://127.0.0.1:{port}")
+  Ok(format!("http://127.0.0.1:{port}"))
 }
 
 fn page_of(head: &str) -> u32 {
@@ -132,8 +134,8 @@ fn runners_page(head: &str) -> String {
 }
 
 #[tokio::test]
-async fn find_runner_paginates_and_maps_labels() {
-  let base = peer(runners_page);
+async fn find_runner_paginates_and_maps_labels() -> TestResult {
+  let base = peer(runners_page)?;
   let client = reqwest::Client::new();
   let found = wire::net::register::find_runner(
     &client,
@@ -142,9 +144,8 @@ async fn find_runner_paginates_and_maps_labels() {
     "target",
     std::time::Duration::from_secs(5),
   )
-  .await
-  .expect("find_runner")
-  .expect("runner present");
+  .await?
+  .ok_or("runner present")?;
   assert_eq!(found.id, 900);
   assert_eq!(found.status, "online");
   assert!(found.busy);
@@ -152,11 +153,12 @@ async fn find_runner_paginates_and_maps_labels() {
     found.labels,
     vec!["self-hosted".to_owned(), "gpu".to_owned()]
   );
+  Ok(())
 }
 
 #[tokio::test]
-async fn find_runner_absent_returns_none() {
-  let base = peer(|_| r#"{"total_count":0,"runners":[]}"#.to_owned());
+async fn find_runner_absent_returns_none() -> TestResult {
+  let base = peer(|_| r#"{"total_count":0,"runners":[]}"#.to_owned())?;
   let client = reqwest::Client::new();
   let found = wire::net::register::find_runner(
     &client,
@@ -165,9 +167,9 @@ async fn find_runner_absent_returns_none() {
     "ghost",
     std::time::Duration::from_secs(5),
   )
-  .await
-  .expect("find_runner");
+  .await?;
   assert_eq!(found, None);
+  Ok(())
 }
 
 fn repos_page(head: &str) -> String {
@@ -190,8 +192,8 @@ fn repos_page(head: &str) -> String {
 }
 
 #[tokio::test]
-async fn repo_lists_paginate_to_exhaustion() {
-  let base = peer(repos_page);
+async fn repo_lists_paginate_to_exhaustion() -> TestResult {
+  let base = peer(repos_page)?;
   let client = reqwest::Client::new();
   let installed = wire::net::github_app::installation_repositories(
     &client,
@@ -199,27 +201,32 @@ async fn repo_lists_paginate_to_exhaustion() {
     "token",
     std::time::Duration::from_secs(5),
   )
-  .await
-  .expect("installation repos");
+  .await?;
   assert_eq!(installed.len(), 102);
-  assert_eq!(installed[101].full_name, "acme/final");
+  assert_eq!(
+    installed.last().map(|repo| repo.full_name.as_str()),
+    Some("acme/final")
+  );
   let mine = wire::net::github_app::user_repositories(
     &client,
     &base,
     "token",
     std::time::Duration::from_secs(5),
   )
-  .await
-  .expect("user repos");
+  .await?;
   assert_eq!(mine.len(), 2);
-  assert_eq!(mine[0].full_name, "octo/web");
+  assert_eq!(
+    mine.first().map(|repo| repo.full_name.as_str()),
+    Some("octo/web")
+  );
+  Ok(())
 }
 
 #[tokio::test]
-async fn runner_groups_parse_default_flags() {
+async fn runner_groups_parse_default_flags() -> TestResult {
   let base = peer(|_| {
     r#"{"total_count":2,"runner_groups":[{"id":1,"name":"Default","default":true,"allows_public_repositories":false},{"id":7,"name":"ci","default":false,"allows_public_repositories":true}]}"#.to_owned()
-  });
+  })?;
   let client = reqwest::Client::new();
   let groups = wire::net::runner_groups::list_runner_groups(
     &client,
@@ -228,9 +235,10 @@ async fn runner_groups_parse_default_flags() {
     "token",
     std::time::Duration::from_secs(5),
   )
-  .await
-  .expect("groups");
-  assert!(groups[0].default);
-  assert!(!groups[0].allows_public_repositories);
-  assert_eq!(groups[1].id, 7);
+  .await?;
+  let first = groups.first().ok_or("first group")?;
+  assert!(first.default);
+  assert!(!first.allows_public_repositories);
+  assert_eq!(groups.get(1).map(|group| group.id), Some(7));
+  Ok(())
 }

@@ -32,7 +32,25 @@ use args::SetupArgs;
 use plan::SetupError;
 use prompts::Prompts;
 use render::Out;
-use stage::{StageOutcome, stage_plan};
+use stage::StageOutcome;
+
+/// The shared flow inputs.
+struct Flow<'a> {
+  /// The caller's flags.
+  args: &'a SetupArgs,
+  /// GitHub web base.
+  github_base: &'a str,
+  /// Registration host.
+  host: &'a str,
+  /// The runner home.
+  home: &'a Path,
+  /// Machine-check facts.
+  facts: &'a machine::MachineFacts,
+  /// The step renderer (Copy).
+  out: Out,
+  /// The secret masker.
+  masker: &'a Arc<Mutex<SecretMasker>>,
+}
 
 /// `setup` entry point (see the module docs for the flow and codes).
 pub(crate) async fn cmd_setup(args: SetupArgs) -> Result<(), Box<dyn std::error::Error>> {
@@ -63,16 +81,13 @@ async fn run_setup(args: &SetupArgs) -> Result<(), SetupError> {
   let host = plan::host_of(&github_base);
   let home = registry::runner_home();
   let facts = machine::gather(&home).map_err(SetupError::runtime)?;
-  let interactive = !args.yes && !args.dry_run && tty_available();
+  let interactive = !args.yes() && !args.dry_run() && tty_available();
   let out = Out {
     plain: render::plain_mode(std::io::stdout().is_terminal(), crate::config::no_color()),
   };
   out.done("machine", &facts.summary());
   let mut prompts = if interactive {
-    match Prompts::open() {
-      Ok(prompts) => Some(prompts),
-      Err(_) => None,
-    }
+    Prompts::open().ok()
   } else {
     None
   };
@@ -81,54 +96,29 @@ async fn run_setup(args: &SetupArgs) -> Result<(), SetupError> {
     spawn_signal_restore();
   }
 
-  // Re-run menu (interactive, configured machine, no explicit target).
-  if !facts.existing.is_empty() && args.org.is_none() && args.repo.is_empty() {
-    if let Some(choice) = rerun_choice(&facts, &mut prompts, &out)? {
-      return match choice {
-        Rerun::Keep => keep_as_is(&facts, &home, args, &masker, &out).await,
-        Rerun::Remove(entry) => remove_one(&entry, &home, &masker).await,
-        Rerun::Reconfigure(entry) => {
-          reconfigure(
-            entry,
-            args,
-            &github_base,
-            &host,
-            &home,
-            &mut prompts,
-            &out,
-            &masker,
-          )
-          .await
-        },
-        Rerun::Add => {
-          build_and_apply(
-            args,
-            &github_base,
-            &host,
-            &home,
-            None,
-            &facts,
-            &mut prompts,
-            &out,
-            &masker,
-          )
-          .await
-        },
-      };
-    }
-  }
-  build_and_apply(
+  let flow = Flow {
     args,
-    &github_base,
-    &host,
-    &home,
-    None,
-    &facts,
-    &mut prompts,
-    &out,
-    &masker,
-  )
-  .await
+    github_base: &github_base,
+    host: &host,
+    home: &home,
+    facts: &facts,
+    out,
+    masker: &masker,
+  };
+  // Re-run menu (interactive, configured machine, no explicit target).
+  if !facts.existing.is_empty()
+    && args.org.is_none()
+    && args.repo.is_empty()
+    && let Some(choice) = rerun_choice(&facts, &mut prompts, out)?
+  {
+    return match choice {
+      Rerun::Keep => keep_as_is(&flow).await,
+      Rerun::Remove(entry) => remove_one(&entry, &home, &masker).await,
+      Rerun::Reconfigure(entry) => reconfigure(entry, &flow, &mut prompts).await,
+      Rerun::Add => build_and_apply(&flow, &mut prompts).await,
+    };
+  }
+  build_and_apply(&flow, &mut prompts).await
 }
 
 /// What the re-run menu picked.
@@ -148,7 +138,7 @@ enum Rerun {
 fn rerun_choice(
   facts: &machine::MachineFacts,
   prompts: &mut Option<Prompts>,
-  out: &Out,
+  out: Out,
 ) -> Result<Option<Rerun>, SetupError> {
   let Some(prompts) = prompts.as_mut() else {
     return Ok(None);
@@ -182,7 +172,9 @@ fn rerun_choice(
       let index = prompts
         .select("Which runner?", &names, 0)
         .map_err(SetupError::from)?;
-      let entry = facts.existing[index].clone();
+      let Some(entry) = facts.existing.get(index).cloned() else {
+        return Ok(None);
+      };
       Ok(Some(if picked == 2 {
         Rerun::Reconfigure(entry)
       } else {
@@ -206,13 +198,12 @@ fn tty_available() -> bool {
 /// SIGTERM/SIGHUP while prompts may hold raw mode.
 fn spawn_signal_restore() {
   tokio::spawn(async {
-    let mut term = match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
-      Ok(signal) => signal,
-      Err(_) => return,
+    let Ok(mut term) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+    else {
+      return;
     };
-    let mut hup = match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup()) {
-      Ok(signal) => signal,
-      Err(_) => return,
+    let Ok(mut hup) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup()) else {
+      return;
     };
     let code = tokio::select! {
       _ = term.recv() => 143,
@@ -225,13 +216,8 @@ fn spawn_signal_restore() {
 
 /// Keep as is: verify every registration locally and, when a bearer can
 /// be resolved, live on GitHub. Writes nothing.
-async fn keep_as_is(
-  facts: &machine::MachineFacts,
-  home: &Path,
-  args: &SetupArgs,
-  masker: &Arc<Mutex<SecretMasker>>,
-  out: &Out,
-) -> Result<(), SetupError> {
+async fn keep_as_is(flow: &Flow<'_>) -> Result<(), SetupError> {
+  let (facts, home, args, masker, out) = (flow.facts, flow.home, flow.args, flow.masker, flow.out);
   let client = http_client()?;
   for entry in &facts.existing {
     let cfg = config::config::load_config(&entry.config_path).map_err(|e| {
@@ -343,12 +329,16 @@ fn empty_args() -> SetupArgs {
     labels: Vec::new(),
     no_default_labels: false,
     work_dir: None,
-    ephemeral: false,
-    replace: false,
-    no_service: false,
-    enable_linger: false,
-    yes: false,
-    dry_run: false,
+    mode: crate::setup::args::SetupMode {
+      ephemeral: false,
+      replace: false,
+      no_service: false,
+    },
+    flow: crate::setup::args::SetupFlow {
+      enable_linger: false,
+      yes: false,
+      dry_run: false,
+    },
   }
 }
 
@@ -356,18 +346,21 @@ fn empty_args() -> SetupArgs {
 /// `--replace` semantics.
 async fn reconfigure(
   entry: config::registry::RegistrationEntry,
-  args: &SetupArgs,
-  github_base: &str,
-  host: &str,
-  home: &Path,
+  flow: &Flow<'_>,
   prompts: &mut Option<Prompts>,
-  out: &Out,
-  masker: &Arc<Mutex<SecretMasker>>,
 ) -> Result<(), SetupError> {
+  let (args, github_base, host, home, out, masker) = (
+    flow.args,
+    flow.github_base,
+    flow.host,
+    flow.home,
+    flow.out,
+    flow.masker,
+  );
   let cfg = config::config::load_config(&entry.config_path)
     .map_err(|e| SetupError::runtime(e.to_string()))?;
   let mut owned = empty_args();
-  owned.replace = true;
+  owned.mode.replace = true;
   owned.name = Some(cfg.runner_name.clone());
   match &cfg.auth {
     config::registration_auth::AuthSection::App { .. } => owned.auth = Some("app".to_owned()),
@@ -378,42 +371,43 @@ async fn reconfigure(
       owned.repo = vec![format!("{owner}/{repo}")];
     },
     config::registry::RegistrationScope::Org(org) => owned.org = Some(org.clone()),
-    _ => {},
+    config::registry::RegistrationScope::Toolu(_) | config::registry::RegistrationScope::Legacy => {
+    },
   }
-  build_and_apply(
-    &owned_with(args, owned),
+  let owned = owned_with(args, owned);
+  let facts = machine::gather(home).map_err(SetupError::runtime)?;
+  let inner = Flow {
+    args: &owned,
     github_base,
     host,
     home,
-    None,
-    &machine::gather(home).map_err(SetupError::runtime)?,
-    prompts,
+    facts: &facts,
     out,
     masker,
-  )
-  .await
+  };
+  build_and_apply(&inner, prompts).await
 }
 
 /// Flags for a reconfigure: the picked registration's name/labels as
 /// defaults, the caller's flags winning where set.
 fn owned_with(args: &SetupArgs, mut owned: SetupArgs) -> SetupArgs {
   if args.name.is_some() {
-    owned.name = args.name.clone();
+    owned.name.clone_from(&args.name);
   }
   if !args.labels.is_empty() {
-    owned.labels = args.labels.clone();
+    owned.labels.clone_from(&args.labels);
   }
   if args.org.is_some() {
-    owned.org = args.org.clone();
+    owned.org.clone_from(&args.org);
   }
   if !args.repo.is_empty() {
-    owned.repo = args.repo.clone();
+    owned.repo.clone_from(&args.repo);
   }
   if args.auth.is_some() {
-    owned.auth = args.auth.clone();
+    owned.auth.clone_from(&args.auth);
   }
   if args.token.is_some() {
-    owned.token = args.token.clone();
+    owned.token.clone_from(&args.token);
   }
   owned
 }
@@ -427,46 +421,43 @@ fn http_client() -> Result<reqwest::Client, SetupError> {
 }
 
 /// Build a plan (flags and/or prompts), review it, and apply it.
-#[allow(clippy::too_many_arguments)]
-async fn build_and_apply(
-  args: &SetupArgs,
-  github_base: &str,
-  host: &str,
-  home: &Path,
-  _locked: Option<()>,
-  facts: &machine::MachineFacts,
-  prompts: &mut Option<Prompts>,
-  out: &Out,
-  masker: &Arc<Mutex<SecretMasker>>,
-) -> Result<(), SetupError> {
+async fn build_and_apply(flow: &Flow<'_>, prompts: &mut Option<Prompts>) -> Result<(), SetupError> {
+  let (args, github_base, host, home, facts, out, masker) = (
+    flow.args,
+    flow.github_base,
+    flow.host,
+    flow.home,
+    flow.facts,
+    flow.out,
+    flow.masker,
+  );
+  let _ = host;
   let client = http_client()?;
   loop {
-    let staged = match stage_plan(
+    let stage_flow = stage::StageFlow {
       args,
       github_base,
       host,
       home,
       facts,
-      prompts,
       out,
-      &client,
+      client: &client,
       masker,
-    )
-    .await?
-    {
-      StageOutcome::Plan(staged) => staged,
+    };
+    let staged = match stage::stage_plan(&stage_flow, prompts).await? {
+      StageOutcome::Plan(staged) => *staged,
       StageOutcome::Kept => return Ok(()),
     };
     out.rail("Review");
     for line in stage::review_lines(&staged.plan, staged.auth_label.as_deref()) {
       out.line(&line);
     }
-    if args.dry_run {
+    if args.dry_run() {
       out.end("dry run: nothing was written");
       return Ok(());
     }
     if let Some(prompts) = prompts.as_mut()
-      && !args.yes
+      && !args.yes()
     {
       let options = vec![
         "Apply".to_owned(),
@@ -492,7 +483,7 @@ async fn build_and_apply(
     )
     .await?;
     apply::persist_import(&staged.plan, home).await?;
-    if staged.plan.service {
+    if staged.plan.service.install {
       out.waiting("online", "waiting for GitHub to report the runner online");
     }
     let applied = match apply::apply_plan(
@@ -511,7 +502,7 @@ async fn build_and_apply(
       },
     };
     for runner in &applied {
-      if staged.plan.service {
+      if staged.plan.service.install {
         out.done("online", &format!("{} is online on GitHub", runner.name));
       } else {
         out.done(

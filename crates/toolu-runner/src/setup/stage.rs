@@ -21,7 +21,7 @@ use super::scope;
 /// What staging produced: a plan to review, or a Keep-as-is verdict.
 pub(crate) enum StageOutcome {
   /// Review and apply this plan.
-  Plan(Staged),
+  Plan(Box<Staged>),
   /// An identical registration already covers the target.
   Kept,
 }
@@ -33,21 +33,43 @@ pub(crate) struct Staged {
   pub(crate) auth_label: Option<String>,
 }
 
+/// The shared staging inputs.
+pub(crate) struct StageFlow<'a> {
+  /// The caller's flags.
+  pub(crate) args: &'a SetupArgs,
+  /// GitHub web base.
+  pub(crate) github_base: &'a str,
+  /// Registration host.
+  pub(crate) host: &'a str,
+  /// The runner home.
+  pub(crate) home: &'a Path,
+  /// Machine-check facts.
+  pub(crate) facts: &'a MachineFacts,
+  /// The step renderer.
+  pub(crate) out: Out,
+  /// The HTTP client for live reads.
+  pub(crate) client: &'a reqwest::Client,
+  /// The secret masker.
+  pub(crate) masker: &'a Arc<Mutex<SecretMasker>>,
+}
+
 /// The staged plan building: target → auth → scope → details → service.
 /// Reads only; the one write is a GitHub App created interactively
 /// (disclosed on the Review).
-#[allow(clippy::too_many_arguments)]
 pub(crate) async fn stage_plan(
-  args: &SetupArgs,
-  github_base: &str,
-  host: &str,
-  home: &Path,
-  facts: &MachineFacts,
+  flow: &StageFlow<'_>,
   prompts: &mut Option<Prompts>,
-  out: &Out,
-  client: &reqwest::Client,
-  masker: &Arc<Mutex<SecretMasker>>,
 ) -> Result<StageOutcome, SetupError> {
+  let (args, github_base, host, home, facts, out, client) = (
+    flow.args,
+    flow.github_base,
+    flow.host,
+    flow.home,
+    flow.facts,
+    flow.out,
+    flow.client,
+  );
+  let _ = flow.host;
   let interactive = prompts.is_some();
   let _ = interactive;
   // Auth grammar and the GHES rule are flag validation, decided
@@ -131,46 +153,21 @@ pub(crate) async fn stage_plan(
     }
   }
   // Authenticate (in memory), creating the App interactively if asked.
-  let (auth_ctx, token_value) = authenticate(
-    &mut auth,
-    &target,
+  let (auth_ctx, token_value) = authenticate(flow, &mut auth, &target, prompts).await?;
+  // Scope: runner group (org) or repositories (personal).
+  let scope_flow = scope::ScopeFlow {
     github_base,
     home,
     args,
-    prompts,
     out,
     client,
-    masker,
-    facts,
-  )
-  .await?;
-  // Scope: runner group (org) or repositories (personal).
-  let (runner_group, repos) = scope::resolve_scope(
-    &mut target,
-    &auth,
-    &auth_ctx,
-    github_base,
-    args,
-    prompts,
-    out,
-    client,
-  )
-  .await?;
+  };
+  let (runner_group, repos) =
+    scope::resolve_scope(&scope_flow, &mut target, &auth_ctx, prompts).await?;
   let _ = repos;
   // Details.
   let name = scope::resolve_name(args, prompts)?;
-  scope::check_collision(
-    &target,
-    github_base,
-    home,
-    &name,
-    &auth_ctx,
-    args,
-    prompts,
-    client,
-    out,
-  )
-  .await?;
+  scope::check_collision(&scope_flow, &target, &name, &auth_ctx, prompts).await?;
   let labels_preview = config::labels::resolve_labels(
     &args.labels,
     args.no_default_labels,
@@ -178,9 +175,9 @@ pub(crate) async fn stage_plan(
   )
   .map_err(|e| SetupError::usage(e.to_string()))?;
   let _ = labels_preview;
-  let service = !args.no_service;
+  let service = !args.mode.no_service;
   let enable_linger = scope::resolve_linger(args, prompts, facts, service)?;
-  Ok(StageOutcome::Plan(Staged {
+  Ok(StageOutcome::Plan(Box::new(Staged {
     plan: ResolvedPlan {
       github_base: github_base.to_owned(),
       host: host.to_owned(),
@@ -189,16 +186,20 @@ pub(crate) async fn stage_plan(
       runner_group,
       name,
       labels: args.labels.clone(),
-      no_default_labels: args.no_default_labels,
       work_folder: crate::cli::work_folder_or_default(args.work_dir.as_ref()),
-      ephemeral: args.ephemeral,
-      replace: args.replace,
-      service,
-      enable_linger,
+      mode: super::plan::PlanMode {
+        ephemeral: args.mode.ephemeral,
+        replace: args.mode.replace,
+        no_default_labels: args.no_default_labels,
+      },
+      service: super::plan::PlanService {
+        install: service,
+        enable_linger,
+      },
     },
     token_value,
     auth_label: auth_ctx.label.clone(),
-  }))
+  })))
 }
 
 /// Whether a saved App exists under `home`.
@@ -211,7 +212,7 @@ async fn resolve_target(
   args: &SetupArgs,
   github_base: &str,
   prompts: &mut Option<Prompts>,
-  out: &Out,
+  out: Out,
   client: &reqwest::Client,
 ) -> Result<Target, SetupError> {
   if let Some(target) = plan::flag_target(args)? {
@@ -243,10 +244,7 @@ async fn resolve_target(
             org: org.trim().to_owned(),
           });
         },
-        Err(e) if e.code == 2 => {
-          out.warn("target", &e.message);
-          continue;
-        },
+        Err(e) if e.code == 2 => out.warn("target", &e.message),
         Err(e) => return Err(e),
       }
     }
@@ -278,7 +276,7 @@ fn existing_match(
   home: &Path,
   args: &SetupArgs,
 ) -> Result<Option<String>, SetupError> {
-  if args.replace {
+  if args.mode.replace {
     return Ok(None);
   }
   let wanted_name = crate::cli::runner_name_or_hostname(args.name.clone());
@@ -311,20 +309,20 @@ fn existing_match(
 
 /// Authenticate for the scope reads: resolves the bearer in memory and
 /// (token auth) probes the token's real permissions.
-#[allow(clippy::too_many_arguments)]
 async fn authenticate(
+  flow: &StageFlow<'_>,
   auth: &mut AuthPlan,
   target: &Target,
-  github_base: &str,
-  home: &Path,
-  args: &SetupArgs,
   prompts: &mut Option<Prompts>,
-  out: &Out,
-  client: &reqwest::Client,
-  masker: &Arc<Mutex<SecretMasker>>,
-  facts: &MachineFacts,
 ) -> Result<(AuthContext, Option<String>), SetupError> {
-  let _ = facts;
+  let (args, github_base, home, out, client, masker) = (
+    flow.args,
+    flow.github_base,
+    flow.home,
+    flow.out,
+    flow.client,
+    flow.masker,
+  );
   if matches!(auth, AuthPlan::CreateApp) {
     // Interactive only (headless/unattended were steered away above):
     // create through the existing create-app flow. The App is saved at
@@ -387,12 +385,16 @@ async fn authenticate(
     runner_group: None,
     name: String::new(),
     labels: Vec::new(),
-    no_default_labels: false,
     work_folder: String::new(),
-    ephemeral: false,
-    replace: false,
-    service: false,
-    enable_linger: false,
+    mode: super::plan::PlanMode {
+      ephemeral: false,
+      replace: false,
+      no_default_labels: false,
+    },
+    service: super::plan::PlanService {
+      install: false,
+      enable_linger: false,
+    },
   };
   let ctx = apply::scope_bearer(&staged_plan, home, client, masker, token_value.as_deref()).await?;
   if matches!(auth, AuthPlan::Token) {
@@ -418,7 +420,7 @@ async fn authenticate(
 fn token_from(
   args: &SetupArgs,
   prompts: &mut Option<Prompts>,
-  out: &Out,
+  out: Out,
 ) -> Result<String, SetupError> {
   if let Some(token) = &args.token {
     out.warn(
@@ -464,7 +466,7 @@ pub(crate) fn review_lines(plan: &ResolvedPlan, auth_label: Option<&str>) -> Vec
   };
   let labels = config::labels::resolve_labels(
     &plan.labels,
-    plan.no_default_labels,
+    plan.mode.no_default_labels,
     &config::labels::default_labels(),
   )
   .unwrap_or_else(|_| plan.labels.clone());
@@ -480,12 +482,12 @@ pub(crate) fn review_lines(plan: &ResolvedPlan, auth_label: Option<&str>) -> Vec
     ),
     format!(
       "service: {} · mode: {}",
-      if plan.service {
+      if plan.service.install {
         "machine service (run --all)"
       } else {
         "none (--no-service)"
       },
-      if plan.ephemeral {
+      if plan.mode.ephemeral {
         "ephemeral (one job)"
       } else {
         "persistent"

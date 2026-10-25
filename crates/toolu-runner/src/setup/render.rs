@@ -12,7 +12,7 @@ pub(crate) struct Out {
 
 impl Out {
   /// A completed step.
-  pub(crate) fn done(&self, step: &str, result: &str) {
+  pub(crate) fn done(self, step: &str, result: &str) {
     if self.plain {
       println!("setup: {step} {result}");
     } else {
@@ -21,7 +21,7 @@ impl Out {
   }
 
   /// A warning step (continues).
-  pub(crate) fn warn(&self, step: &str, result: &str) {
+  pub(crate) fn warn(self, step: &str, result: &str) {
     if self.plain {
       println!("setup: {step} warning: {result}");
     } else {
@@ -30,7 +30,7 @@ impl Out {
   }
 
   /// A failed step.
-  pub(crate) fn error(&self, step: &str, result: &str) {
+  pub(crate) fn error(self, step: &str, result: &str) {
     if self.plain {
       println!("setup: {step} error: {result}");
     } else {
@@ -39,7 +39,7 @@ impl Out {
   }
 
   /// A waiting line (blinking marker in a terminal; static plain text).
-  pub(crate) fn waiting(&self, step: &str, result: &str) {
+  pub(crate) fn waiting(self, step: &str, result: &str) {
     if self.plain {
       println!("setup: {step} waiting: {result}");
     } else {
@@ -48,14 +48,14 @@ impl Out {
   }
 
   /// The rail opening for a section that will ask the user something.
-  pub(crate) fn rail(&self, title: &str) {
+  pub(crate) fn rail(self, title: &str) {
     if !self.plain {
       println!("┌ {title}");
     }
   }
 
   /// A rail body line.
-  pub(crate) fn line(&self, text: &str) {
+  pub(crate) fn line(self, text: &str) {
     if self.plain {
       println!("{text}");
     } else {
@@ -64,7 +64,7 @@ impl Out {
   }
 
   /// The rail closing line.
-  pub(crate) fn end(&self, text: &str) {
+  pub(crate) fn end(self, text: &str) {
     if self.plain {
       println!("{text}");
     } else {
