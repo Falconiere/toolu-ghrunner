@@ -12,6 +12,7 @@ use wire::net::toolu_jobs::TooluError;
 use wire::net::toolu_pair::pair_token;
 
 use super::plan::SetupError;
+use super::prompts::{Key, KeySource, PromptEnd};
 use super::render::Out;
 
 /// What `slow_down` adds to the poll interval (the contract's five seconds).
@@ -175,6 +176,30 @@ fn clear_line(out: Out) {
   if !out.plain {
     print!("\r\x1b[2K");
     let _ = std::io::stdout().flush();
+  }
+}
+
+/// "Press enter for a new code" over any key source: enter goes on, ctrl+c
+/// cancels (exit 130), esc goes back; other keys are ignored.
+pub(crate) fn run_press_enter(
+  keys: &mut impl KeySource,
+  out: &mut impl std::io::Write,
+  text: &str,
+) -> Result<(), PromptEnd> {
+  let mut write = |text: &str| {
+    out
+      .write_all(text.as_bytes())
+      .and_then(|()| out.flush())
+      .map_err(|e| PromptEnd::Io(format!("could not write to the terminal: {e}")))
+  };
+  write(&format!("\r\x1b[K   {text}"))?;
+  loop {
+    match keys.next_key()? {
+      Key::Enter => return write("\r\n"),
+      Key::Esc => return Err(PromptEnd::Back),
+      Key::CtrlC => return Err(PromptEnd::Cancelled),
+      Key::Up | Key::Down | Key::Space | Key::Backspace | Key::Char(_) => {},
+    }
   }
 }
 

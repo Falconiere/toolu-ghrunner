@@ -9,7 +9,8 @@ Standalone GitHub Actions JIT runner — no orchestrator service, no OTel.
 each) + `register_auth.rs` + `app_auth.rs` + `app_install.rs` + `app_import.rs` +
 `supervisor.rs`/`supervisor_signal.rs`/`machine_service.rs` (#208) +
 `ephemeral.rs` + `network_setup.rs` + `poll_loop.rs`/`poll_job.rs` (#206) +
-`toolu_host.rs` (#207) + `check_*.rs` + `doctor_*.rs` + `setup.rs`/`setup/`).
+`toolu_host.rs` (#207) + `remove_state.rs` + `check_*.rs` + `doctor_*.rs` +
+`setup.rs`/`setup/`).
 Engine = `execution`;
 JIT lifecycle = `listener`. Plus standalone `daemon` bin (`toolu-daemon`,
 no internal deps, `reqwest` in tests only).

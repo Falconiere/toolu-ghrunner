@@ -2,7 +2,8 @@ use std::time::Duration;
 
 use protocol::toolu_pair::PairPoll;
 
-use super::{arch, countdown, display_uri, machine_report, next_interval};
+use super::super::prompts::{ByteKeys, PromptEnd};
+use super::{arch, countdown, display_uri, machine_report, next_interval, run_press_enter};
 
 #[test]
 fn slow_down_adds_five_seconds_and_nothing_shortens_the_interval() {
@@ -55,4 +56,16 @@ fn the_report_carries_this_box_and_the_product_version() {
   assert_eq!(report.labels, ["gpu"]);
   assert_eq!(report.runner_version, env!("CARGO_PKG_VERSION"));
   assert!(!report.hostname.is_empty());
+}
+
+#[test]
+fn press_enter_waits_for_enter_and_ctrl_c_cancels() {
+  let mut out = Vec::new();
+  run_press_enter(&mut ByteKeys::new(b"x \r"), &mut out, "Press enter").unwrap();
+  assert!(String::from_utf8_lossy(&out).contains("Press enter"));
+  let mut out = Vec::new();
+  assert!(matches!(
+    run_press_enter(&mut ByteKeys::new(b"\x03"), &mut out, "Press enter"),
+    Err(PromptEnd::Cancelled)
+  ));
 }

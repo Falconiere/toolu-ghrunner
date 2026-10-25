@@ -234,10 +234,13 @@ async fn pair(
 /// A refused or failed pairing / enrollment request as a [`SetupError`].
 fn refused(what: &str, e: TooluError) -> SetupError {
   match e {
-    TooluError::Revoked(_) => SetupError::usage(
+    TooluError::Revoked(_) if what == "enroll" => SetupError::usage(
       "toolu.sh refused the enrollment token (invalid, expired, revoked or already used). \
        Nothing was saved.",
     ),
+    TooluError::Revoked(why) => {
+      SetupError::usage(format!("toolu.sh refused to {what} (401: {why})"))
+    },
     TooluError::NotFound => SetupError::runtime(format!(
       "toolu.sh does not offer self-hosted machines at {} ({what}: 404)",
       crate::config::toolu_api_url()
