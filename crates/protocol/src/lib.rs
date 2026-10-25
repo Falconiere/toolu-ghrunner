@@ -30,6 +30,8 @@ pub mod runner_version;
 pub mod session;
 /// toolu.sh `/runner/*` job-claim bodies and rules (#206).
 pub mod toolu_jobs;
+/// toolu.sh machine pairing, enrollment and self-service bodies (#207).
+pub mod toolu_pair;
 mod types;
 /// GHES V1 protocol types and the pure service-URL resolver.
 pub mod v1;
