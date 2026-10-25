@@ -9,10 +9,12 @@
 # cannot verify by running anything:
 #
 # - every layer of the gate still runs in SOME job, on the right OS;
-# - the shards together run the whole suite exactly once (`--partition
-#   slice:k/N` with N = strategy.job-total), and every once-per-leg step that
-#   is gated on a shard names a shard that exists — a step pinned to shard 3
-#   silently never runs again if the matrix shrinks to two;
+# - the shards together run the whole suite exactly once: `--partition
+#   slice:k/N` with a literal N that equals the matrix length (a larger N would
+#   silently skip part of the suite; nextest rejects only k > N), and every
+#   once-per-leg step that is gated on a shard names a shard that exists — a
+#   step pinned to shard 3 silently never runs again if the matrix shrinks to
+#   two;
 # - the aggregators need every real job and reject every result but success;
 # - the macOS leg exists, runs on a supported arm64 image, and is not inert.
 #
@@ -142,7 +144,7 @@ else
 fi
 
 # --- test / test-macos: the sharded nextest run (#118 nextest, sharded) ---
-PARTITION='cargo nextest run --workspace --partition slice:\$\{\{ matrix\.shard \}\}/\$\{\{ strategy\.job-total \}\}'
+PARTITION='cargo nextest run --workspace --partition slice:\$\{\{ matrix\.shard \}\}/[0-9]+$'
 for leg in test test-macos; do
   if [[ "$leg" == test ]]; then body="$TEST_JOB"; else body="$MACOS_JOB"; fi
   want_in "$body" "$leg installs cargo-nextest"                 "tool: cargo-nextest"
@@ -273,7 +275,12 @@ for leg, names in once_per_leg.items():
     assert seen == names, f"{leg}: shard-gated steps {sorted(seen)} != expected {sorted(names)}"
     tests = [s for s in jobs[leg]["steps"] if s.get("name") == "Test"]
     assert len(tests) == 1 and "if" not in tests[0], f"{leg}: the Test step must run on every shard"
-print("ok: PyYAML deep-check (job set + timeouts + aggregator coverage + shard-gated steps name real shards)")
+    # The literal denominator must equal the matrix length: with fewer shards
+    # than the denominator, the missing slices are never run and nothing fails.
+    m = re.search(r"--partition slice:\$\{\{ matrix\.shard \}\}/(\d+)$", tests[0]["run"].strip())
+    assert m, f"{leg}: the Test step must run `--partition slice:${{{{ matrix.shard }}}}/<N>`, got {tests[0]['run']!r}"
+    assert int(m.group(1)) == len(shards), f"{leg}: partition denominator {m.group(1)} != {len(shards)} shards in the matrix"
+print("ok: PyYAML deep-check (job set + timeouts + aggregator coverage + shard-gated steps name real shards + denominators match the matrices)")
 PY
   then :; else
     echo "FAIL: PyYAML deep-check failed" >&2

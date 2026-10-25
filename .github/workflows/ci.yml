@@ -103,12 +103,16 @@ jobs:
 
   # The workspace test suite on Linux, in two shards. `--partition slice:k/N`
   # assigns every test to exactly one shard, so the shards together run the
-  # full suite exactly once. `strategy.job-total` is N, so adding a shard means
-  # adding a number to the matrix and nothing else — but a step gated on one
-  # shard (`if: matrix.shard == …`) must name a shard that exists, which
-  # scripts/test/ci_workflow_test.sh checks. Steps that run once per leg
-  # (doctests, the install.sh login-shell tests) are spread over the shards so
-  # no shard is the straggler.
+  # full suite exactly once. N is written out (`/2`) rather than read from a
+  # context property, so the denominator is a plain number a reader can check
+  # against the matrix — and scripts/test/ci_workflow_test.sh does check it:
+  # a matrix with fewer shards than the denominator would silently skip part
+  # of the suite (nextest itself rejects only the other direction, k > N).
+  # Adding a shard therefore means adding a number to the matrix AND bumping
+  # the denominator; a step gated on one shard (`if: matrix.shard == …`) must
+  # name a shard that exists, which the same test checks. Steps that run once
+  # per leg (doctests, the install.sh login-shell tests) are spread over the
+  # shards so no shard is the straggler.
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -127,7 +131,7 @@ jobs:
         with:
           tool: cargo-nextest
       - name: Test
-        run: cargo nextest run --workspace --partition slice:${{ matrix.shard }}/${{ strategy.job-total }}
+        run: cargo nextest run --workspace --partition slice:${{ matrix.shard }}/2
       # tests/install_sh_test.sh checks what real bash, zsh and fish login
       # shells see after an install, and FAILS (never skips) when a shell is
       # missing. bash is preinstalled; zsh and fish are not. Both scripts build
@@ -261,7 +265,7 @@ jobs:
         if: matrix.shard == 2
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
-        run: cargo nextest run --workspace --partition slice:${{ matrix.shard }}/${{ strategy.job-total }}
+        run: cargo nextest run --workspace --partition slice:${{ matrix.shard }}/3
       # nextest does not run doctests.
       - name: Doctests
         if: matrix.shard == 3

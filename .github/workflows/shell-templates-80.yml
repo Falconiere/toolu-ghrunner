@@ -12,6 +12,14 @@ on:
 # `host (ubuntu-24.04)`, `host (macos-15)` and `container`, are required
 # contexts on main like `ci` and `ci-macos`, so their names are pinned by
 # scripts/test/shell_templates_workflow_test.sh.
+#
+# The first steps of each job probe the OFFICIAL runner's shell semantics
+# with no Rust at all; the last step of each job then compiles and runs the
+# `execution` crate's integration tests against those probes (`cargo test -p
+# execution --test integration -- shell_templates_test:: …` on the hosts,
+# `shell_templates_container_test::` in the container job). That compile is
+# why both jobs pin the toolchain and restore the dependency cache: without
+# them every run built the crate's dependencies cold on a runner-image Rust.
 concurrency:
   group: shell-templates-80-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
