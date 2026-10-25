@@ -26,8 +26,11 @@ entries=0
 while IFS= read -r line || [[ -n "$line" ]]; do
   [[ -z "$line" || "$line" == \#* ]] && continue
   entries=$((entries + 1))
-  if [[ ! "$line" =~ ^([^:[:space:]]+):([a-z0-9-]+):([0-9]+)$ ]]; then
-    echo "FAIL: not a <path>:<rule-id>:<line> fingerprint: $line" >&2
+  # Line numbers are 1-based and gitleaks never emits a leading zero, so `:0`
+  # and `:09` are malformed, not merely stale — and a leading zero would even
+  # trip bash's arithmetic below as an octal literal.
+  if [[ ! "$line" =~ ^([^:[:space:]]+):([a-z0-9-]+):([1-9][0-9]*)$ ]]; then
+    echo "FAIL: not a <path>:<rule-id>:<line> fingerprint (1-based line, no leading zero): $line" >&2
     fail=1
     continue
   fi
@@ -67,6 +70,8 @@ if [[ -z "${GITLEAKS_IGNORE_FILE:-}" ]]; then
   mutations=(
     "s#^${path}:#${path}.missing:#"
     "s#^\(${path}:[a-z0-9-]*\):[0-9]*\$#\1:999999#"
+    "s#^\(${path}:[a-z0-9-]*\):\([0-9]*\)\$#\1:0\2#"
+    "s#^\(${path}:[a-z0-9-]*\):[0-9]*\$#\1:0#"
     "s#^${path}:#crates/shared/src/lib.rs:#"
   )
   for m in "${mutations[@]}"; do
