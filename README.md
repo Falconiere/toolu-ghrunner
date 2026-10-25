@@ -133,7 +133,19 @@ toolu-runner setup
 
 # The same result unattended (no terminal, no prompts):
 TOOLU_RUNNER_TOKEN=<pat> toolu-runner setup --source github --org acme --auth token --yes
+
+# Or let toolu.sh route jobs to this machine (no GitHub credential on it):
+# type the code setup shows at console.toolu.sh/pair ...
+toolu-runner setup --source toolu
+# ... or, unattended, redeem a single-use enrollment token from the console
+toolu-runner setup --source toolu --enroll-token <token>
 ```
+
+A toolu.sh machine stores only its host token (0600, never logged) under
+`~/.toolu-runner/toolu/<org>/`, runs under the same machine service, and
+takes jobs whose workflow says `runs-on: [toolu-self-hosted]`. Re-running
+setup refreshes its labels and version instead of pairing again; `status`,
+`doctor` and `remove` (which revokes it on toolu.sh first) understand it.
 
 Or by hand:
 

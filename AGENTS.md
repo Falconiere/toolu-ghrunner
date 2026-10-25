@@ -9,7 +9,7 @@ Standalone GitHub Actions JIT runner — no orchestrator service, no OTel.
 each) + `register_auth.rs` + `app_auth.rs` + `app_install.rs` + `app_import.rs` +
 `supervisor.rs`/`supervisor_signal.rs`/`machine_service.rs` (#208) +
 `ephemeral.rs` + `network_setup.rs` + `poll_loop.rs`/`poll_job.rs` (#206) +
-`check_*.rs` + `doctor_*.rs`).
+`toolu_host.rs` (#207) + `check_*.rs` + `doctor_*.rs` + `setup.rs`/`setup/`).
 Engine = `execution`;
 JIT lifecycle = `listener`. Plus standalone `daemon` bin (`toolu-daemon`,
 no internal deps, `reqwest` in tests only).
@@ -203,8 +203,30 @@ outside a `tests/` tree.
   claim or a job ends without a transient error); empty queue waits `TOOLU_RUNNER_POLL_INTERVAL_MS`
   (5 s). Lock, cancel, drain, `.pending_remove`, `--once` as `run`;
   `ephemeral = true` refused. Contract: CodaSignal/toolu.sh
-  `docs/guides/self-hosted-machines.md`; pairing/`status`/`doctor`/`remove`
-  for these registrations are #207.
+  `docs/guides/self-hosted-machines.md`.
+- **toolu.sh pairing (#207)**: `setup --source toolu` (or `--enroll-token`,
+  or picking toolu.sh at the interactive source prompt) creates that
+  registration at `<home>/toolu/<org>/`: device code (`POST /runner/pair`,
+  `go to`/`enter` lines, browser only when not headless, `pair/token` polled
+  at `interval`, +5 s per `slow_down`, transient retried until expiry;
+  denied → exit 2, expired → exit 1 unattended or enter-for-a-new-code on a
+  TTY; nothing written before approval) or `POST /runner/enroll` (401 →
+  exit 2). Host token, device code and enrollment token join the
+  `SecretMasker` first; credentials (0600) are written before
+  `config.toml`; a running `run --all` is SIGHUPed. Then `GET /runner/host`
+  (`paired: host · workspace`), the machine service, and "first poll" = the
+  service holds the registration lock (≤ `TOOLU_RUNNER_ONLINE_TIMEOUT_MS`)
+  and `GET /runner/host` says `enabled`; ends with `runs-on:
+  [toolu-self-hosted]`. A home already paired is refreshed with `PATCH
+  /runner/host` (`--labels` else stored labels + version/capacity; an
+  enrollment token is then not used), never paired twice; one pairing per
+  home. `runner_version` = toolu-runner's product version. API origin
+  `TOOLU_RUNNER_TOOLU_API_URL` (default `https://console.toolu.sh`).
+  `status` prints the toolu.sh block (no GitHub lines), `doctor` a `toolu`
+  row + a `toolu.sh (<host>)` section (`GET /runner/host`; 401 → FAIL with
+  remove + setup fix; skipped `--offline`; no GitHub auth/network target),
+  `remove` revokes with `DELETE /runner/host` first (401 = already revoked,
+  proceeds; else nothing local deleted).
 - **No self-daemonization**: `run` blocks in foreground; persistence is the
   OS supervisor. `install-service` (no `--config`) installs ONE machine unit
   — launchd `sh.toolu.runner` / systemd `toolu-runner.service` (user for
@@ -269,6 +291,10 @@ outside a `tests/` tree.
   `parse_callback_path` — backs `create-app`), `toolu_jobs` (#206 toolu.sh
   `/runner/*` bodies: `QueuedJobs`, `Claim` (redacted `Debug`),
   `CompleteBody`/`Outcome`, `parse_claim_refusal`, `heartbeat_delay`),
+  `toolu_pair` (#207: `MachineReport` (+ `patch()` → `HostPatch`, no
+  platform/arch), `PairStart`/`PairTokenRequest`/`HostGrant`/`EnrollRequest`
+  with redacted `Debug`, `PairPoll` + `parse_pair_refusal`, `HostInfo`,
+  `SELF_HOSTED_LABEL`),
   `app_jwt` (#201: RS256
   `build_app_jwt[_at]`, `iat` −60s / `exp` +540s / `iss` = app id, key errors
   never echo the PEM; `Installation` (+ `repository_selection`),
@@ -379,8 +405,11 @@ outside a `tests/` tree.
   `app_manifest` (loopback `CallbackServer` 127.0.0.1:0 serving the
   target's form + `convert_manifest_code` POST under the API base),
   `toolu_jobs` (#206 `TooluClient`: host-token bearer, 401 `Revoked` / 409
-  `Conflict` / 404 `NotFound` / 429·5xx·transport `Transient`; live 401
-  captures in `toolu-runner/tests/fixtures/toolu_sh/`).
+  `Conflict` / 404 `NotFound` / 429·5xx·transport `Transient`; #207
+  `host`/`update_host`/`revoke_host`; live 401 captures in
+  `toolu-runner/tests/fixtures/toolu_sh/`), `toolu_pair` (#207 public
+  `pair_start`/`pair_token` (400 `error` → `PairPoll`)/`enroll`; live
+  pairing captures in the same dir).
   `reporting/`: `run_service` shapes + `map_conclusion`, `results_service`
   types/URL helpers (`create_job/step_logs_metadata`), `feature_detection` V1/V2, `live_log` (HTTP/1.1 upgrade
   on caller client; `live_log_client(&NetworkConfig)` is `http1_only`/30s, bad
@@ -519,17 +548,22 @@ outside a `tests/` tree.
   against loopback peers). `doctor_cmd` (all registrations, `--config`
   narrows, `--offline` sends nothing; 0 no-FAIL / 1 FAIL / 2 bad path; never
   locks — state via lock body + `holder_alive`; one credentialed
-  `GET <api>/user`; `doctor_{report,host,auth,registrations,service}.rs`,
+  `GET <api>/user` (+ `GET /runner/host` per toolu.sh machine); `doctor_{report,host,auth,registrations,service}.rs`,
   network reuses `check_cmd::gather`; only a persistent *token* registration
   needs a personal bearer, `[auth] kind = "app"` mints its own and gets an
   `app` row that loads its App file (#201);
-  `doctor_*_test`). `setup` + `setup/{args,plan,prompts,render,machine,github,scope,stage,apply,reconfigure}.rs`
+  `doctor_*_test`). `setup` + `setup/{args,plan,prompts,render,machine,github,scope,stage,apply,reconfigure,toolu,toolu_wait}.rs`
   (#204 GitHub-path onboarding: one `ResolvedPlan` from flags or `/dev/tty`
   prompts (raw mode via `crossterm`, own key parser), Review-before-write,
   idempotent apply reusing `register_and_persist`/`cmd_create_app`/
   `cmd_install_machine`, online poll via `wire::net::register::find_runner`;
-  exits 0/1/2/130 via `CodedExit`; toolu.sh source refused until #207;
-  `setup_cmd_test` S1–S10 against a stateful loopback peer + `script(1)` PTY).
+  exits 0/1/2/130 via `CodedExit`; the toolu.sh branch is `setup/toolu.rs`
+  + `toolu_wait.rs` (#207, see Runtime contracts);
+  `setup_cmd_test` S1–S10 against a stateful loopback peer + `script(1)` PTY,
+  `setup_toolu_test` against `toolu_fixtures::Peer`). `toolu_host` (#207:
+  a toolu.sh registration's `client_for` (token masked), `host_line`,
+  `revoke` for `remove`; `doctor_toolu` its doctor rows;
+  `toolu_registration_test`).
   `create_app_cmd` (#202; github.com only; offline guards
   (host, existing file) → `--org` check `GET /orgs/{org}` (404 → exit 2) →
   loopback callback serving the target's form, `--no-browser` prints URL;

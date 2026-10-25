@@ -287,7 +287,7 @@ layered graph above. `toolu-runner` itself is **bin-only** (the CLI:
 `main.rs` + `cli.rs` + `register_cmd.rs` + `run_cmd.rs` +
 `boot_cmd.rs` + `service_cmd.rs` + `login_cmd.rs` + `status_cmd.rs` +
 `create_app_cmd.rs` + `app_install.rs` + `app_import.rs` +
-`ephemeral.rs` + `network_setup.rs` +
+`ephemeral.rs` + `network_setup.rs` + `toolu_host.rs` + `setup.rs`/`setup/` +
 `config.rs`, plus the `check_*.rs` preflight and the `doctor_*.rs`
 health check). The module descriptions
 that follow are grouped by their **current** crate: `net/` +
@@ -696,9 +696,36 @@ because its key cannot be fetched again. Every prompt has a flag, so
 the same flow runs unattended with `--yes` or no terminal; a missing
 answer exits 2 naming its flag. Re-running setup on a configured
 machine offers Keep as is (verify only, changes nothing), Add another
-runner (same machine service), Reconfigure, or Remove. The GitHub
-path is implemented in `crates/toolu-runner/src/setup/`; the toolu.sh
-source branch is #207.
+runner (same machine service), Reconfigure, or Remove. The flow is
+implemented in `crates/toolu-runner/src/setup/`; its toolu.sh branch is
+the next sequence.
+
+## Sequence: setup, toolu.sh pairing (#207)
+
+`setup --source toolu` (or `--enroll-token`, or toolu.sh at the job-source
+prompt) turns the box into a machine of a toolu.sh org; it never holds a
+GitHub credential. Contract: CodaSignal/toolu.sh
+`docs/guides/self-hosted-machines.md` (bodies `protocol::toolu_pair`, calls
+`wire::net::toolu_pair` + `TooluClient::{host, update_host, revoke_host}`).
+
+```
+already paired (<home>/toolu/<org>/)?  → PATCH /runner/host {labels, runner_version, …}
+else
+  --enroll-token  → POST /runner/enroll            401 → exit 2, nothing written
+  else            → POST /runner/pair → show `go to` + `enter <code>` (browser if not headless)
+                    every interval: POST /runner/pair/token
+                      authorization_pending → wait; slow_down → interval += 5 s
+                      access_denied → exit 2; expired_token → exit 1 / enter = new code
+                      200 {host_token, host_id, org, labels}
+  mask host_token → credentials.json (0600) → config.toml ([provider] kind = "toolu")
+  SIGHUP a running `run --all`; GET /runner/host → "paired: host · workspace"
+service: install the machine unit → wait until it holds the registration lock
+         → GET /runner/host enabled → "first poll" → `runs-on: [toolu-self-hosted]`
+```
+
+`remove` revokes a machine with `DELETE /runner/host` before deleting its
+state (401 = already revoked); `status` and `doctor` read it locally and, for
+`doctor`, with one `GET /runner/host`.
 
 ## Sequence: register
 
@@ -1376,7 +1403,8 @@ window in milliseconds.
 │                                   # fallback; never written by default)
 ├── orgs/<org>/                     # one dir per org registration (same contents as below)
 ├── toolu/<org>/                    # a toolu.sh machine (#206: [provider] kind = "toolu",
-│                                   # host token in credentials.json; no JIT on disk)
+│                                   # host token in credentials.json; no JIT on disk;
+│                                   # written by `setup --source toolu`, #207)
 └── runners/<owner>/<repo>/         # one dir per repo registration = its data_dir
     ├── config.toml                 # registration + runtime config (0600)
     ├── credentials.json            # (0600)
