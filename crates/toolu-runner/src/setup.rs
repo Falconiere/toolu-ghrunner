@@ -540,7 +540,7 @@ async fn build_and_apply(flow: &Flow<'_>, prompts: &mut Option<Prompts>) -> Resu
           "skipped (--no-service): start it with `toolu-runner run` or `toolu-runner install-service`",
         );
       }
-      println!("runs-on: self-hosted, {}", runner.labels.join(", "));
+      println!("runs-on: {}", runner.labels.join(", "));
       out.done(
         "registered",
         &format!(
