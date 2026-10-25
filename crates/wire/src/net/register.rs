@@ -426,21 +426,23 @@ pub async fn find_runner(
         let labels = runner
           .get("labels")
           .and_then(serde_json::Value::as_array)
-          .map(|labels| {
-            labels
-              .iter()
-              .filter_map(|label| {
-                label
-                  .get("name")
-                  .and_then(serde_json::Value::as_str)
-                  .map(str::to_owned)
-              })
-              .collect()
-          })
-          .unwrap_or_else(|| {
-            tracing::warn!("list-runners reply missing labels array for runner {name}");
-            Vec::new()
-          });
+          .map_or_else(
+            || {
+              tracing::warn!("list-runners reply missing labels array for runner {name}");
+              Vec::new()
+            },
+            |labels| {
+              labels
+                .iter()
+                .filter_map(|label| {
+                  label
+                    .get("name")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+                })
+                .collect()
+            },
+          );
         return Ok(Some(RunnerSummary {
           id: runner
             .get("id")
