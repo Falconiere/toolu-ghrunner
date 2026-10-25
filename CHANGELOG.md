@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-25
+
+### Added
+- *(install)* verify SHA256SUMS, drop jq, set the shell environment, hand off to setup (#212)
+- *(register)* register and re-mint with a GitHub App installation token (#213)
+- *(service)* one machine-level service runs every registration (#214)
+- *(create-app)* org-owned Apps, scope-correct permissions, installation wait (#215)
+- *(run)* poll toolu.sh and run its dispatched jobs on a paired machine (#216)
+- *(service)* support headless systemd installs (#217)
+- *(setup)* toolu-runner setup — interactive and unattended GitHub onboarding (#204) (#221)
+
+### Documentation
+- compress AGENTS.md to contract-focused reference (#210)
+
 ## [0.12.2] - 2026-10-23
 
 ### Fixed
