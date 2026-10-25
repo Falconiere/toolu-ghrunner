@@ -101,6 +101,11 @@ lists **synthetic** masking fixtures (`MIIphony`, `ghs_EXAMPLE…`,
 credential. `crates/protocol` exempts `tests/fixtures/app_jwt_test_key.pem`:
 a real 2048-bit key from `openssl genrsa -traditional 2048` for the #201
 App-JWT tests, never uploaded to any GitHub App (authenticates nothing).
+The same fixtures are fingerprinted (`path:rule:line`, annotated) in the root
+`.gitleaksignore`, the one list the CI review action's gitleaks scan honours
+(it pins its own config, so `.gitleaks.toml` reaches local runs only);
+`scripts/test/gitleaks_ignore_test.sh` fails on a stale entry or any path
+outside a `tests/` tree.
 
 ## Runtime contracts
 
