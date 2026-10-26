@@ -1,0 +1,214 @@
+#!/usr/bin/env bash
+# deploy.sh — build every release artifact on this machine and publish the
+# release, without waiting on CI. The local twin of release.yml + its chained
+# release-image / release-macos-image / release-homebrew workflows, sharing
+# their recipes: scripts/build-release.sh, scripts/publish-release.sh,
+# scripts/commit-homebrew-formula.sh.
+#
+#   build    darwin arm64 + amd64 on this Mac (amd64 cross-built), linux
+#            amd64 + arm64 inside rust:1.94.1-bookworm (release.yml's linux
+#            image: same glibc floor) — tarballs + daemon tarballs in dist/release/
+#   push     images at :<v> (+ :<v>-docker, macOS :<v>) — never :latest /
+#            :vN — then the GitHub Release (prerelease when the tag has '-')
+#            and, for a stable tag, the Homebrew formula in
+#            Falconiere/homebrew-tap. Creating the release creates the tag;
+#            release.yml sees the release already exists and skips its own run.
+#
+# Requires of the release: tag == Cargo version, the tag absent on origin, a
+# clean tree whose HEAD is on origin/main with a passing ci.yml run, a
+# CHANGELOG.md section for the version (the release notes), push access to
+# the tap; it asks you to type the tag before pushing. --change-log instead
+# writes the notes from the commits since the last tag with git-cliff
+# (cliff.toml); CHANGELOG.md is not edited. <v> is the tag minus its leading
+# 'v'. The digest-pinned refs toolu.sh needs are printed at the end.
+#
+# Usage:
+#   scripts/deploy.sh --tag v0.13.0 [--yes] [--change-log]
+#   scripts/deploy.sh --tag v0.13.0 --dry-run   # print, run nothing
+#
+# Requires of the Mac: Apple Silicon (darwin binaries need Apple's SDK),
+# cargo + rustup, Docker with buildx and multi-platform push that can see the
+# repo's path (Docker Desktop, or Colima + docker-buildx with `rosetta: true`:
+# its default qemu amd64 emulation segfaults gcc mid-build), `docker login
+# ghcr.io` with write:packages, `gh auth login`, and git-cliff (--change-log).
+set -euo pipefail
+
+REPO="Falconiere/toolu-ghrunner"
+TAP_REPO="Falconiere/homebrew-tap"
+IMAGE="ghcr.io/falconiere/toolu-ghrunner"
+MACOS_IMAGE="ghcr.io/falconiere/toolu-ghrunner-macos"
+RUST_IMAGE="rust:1.94.1-bookworm"
+
+TAG=""
+YES=0
+DRY_RUN=0
+CHANGE_LOG=0
+
+usage() {
+  sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//'
+}
+
+die() {
+  echo "deploy: $*" >&2
+  exit 2
+}
+
+# Echo every command; run it unless --dry-run.
+run() {
+  echo "+ $*"
+  [[ $DRY_RUN -eq 1 ]] || "$@"
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --tag) TAG="${2:-}"; shift 2 || die "--tag needs a value" ;;
+    --yes) YES=1; shift ;;
+    --dry-run) DRY_RUN=1; shift ;;
+    --change-log) CHANGE_LOG=1; shift ;;
+    -h | --help) usage; exit 0 ;;
+    *) die "unknown option '$1' (see --help)" ;;
+  esac
+done
+
+[[ -n $TAG ]] || die "--tag is required (e.g. v0.13.0)"
+# Keeps the tag safe inside every command below and, with assert-version's
+# semver, a valid Docker image tag.
+[[ $TAG =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,100}$ ]] || die "tag '$TAG' may only hold letters, digits, '.', '_' and '-'"
+
+cd "$(dirname "$0")/.."
+version="${TAG#v}"
+rel="dist/release"
+
+[[ $TAG == v* ]] || die "the tag starts with 'v' (e.g. v$version)"
+bash scripts/assert-version.sh "$TAG" || exit 1
+runner_ref="$IMAGE:$version"
+docker_ref="$IMAGE:$version-docker"
+macos_ref="$MACOS_IMAGE:$version"
+stable=0
+[[ $TAG != *-* ]] && stable=1
+
+echo "==> deploy $TAG"
+echo "    images: $runner_ref, $docker_ref, $macos_ref"
+echo "    GitHub release $TAG on $REPO$([[ $stable -eq 1 ]] && echo " + Homebrew formula in $TAP_REPO" || echo ' (prerelease, no Homebrew)')"
+echo "    notes: $([[ $CHANGE_LOG -eq 1 ]] && echo "git-cliff, commits since the last tag" || echo "CHANGELOG.md [$version]")"
+
+notes="$(mktemp)"
+tap="$(mktemp -d)"
+trap 'rm -f "$notes"; rm -rf "$tap"' EXIT
+if [[ $DRY_RUN -eq 0 ]]; then
+  [[ "$(uname -s)/$(uname -m)" == Darwin/arm64 ]] \
+    || die "needs an Apple Silicon Mac: the darwin binaries cannot be built elsewhere"
+  for tool in cargo rustup docker git; do
+    command -v "$tool" >/dev/null 2>&1 || die "'$tool' not found"
+  done
+  docker buildx version >/dev/null 2>&1 || die "docker buildx is not available"
+  # The linux builds bind-mount the repo. Colima shares only $HOME by default
+  # and mounts anything else as an empty dir, found only after the darwin builds.
+  docker run --rm -v "$PWD:/src" "$RUST_IMAGE" test -f /src/Cargo.toml \
+    || die "Docker cannot see $PWD; share it with the Docker VM (Colima: add it to mounts in ~/.colima/default/colima.yaml, then colima restart; Docker Desktop: Settings > Resources > File sharing)"
+  # The darwin builds must use rust-toolchain.toml's compiler, as CI does; a
+  # cargo that ignores it (Homebrew's, ahead of ~/.cargo/bin) ships another.
+  rust="$(awk -F'"' '/^channel/ {print $2; exit}' rust-toolchain.toml)"
+  [[ "$(cargo --version)" == "cargo $rust "* ]] \
+    || die "cargo is not the pinned $rust (rust-toolchain.toml): put rustup's ~/.cargo/bin ahead of other cargo installs on PATH"
+  command -v gh >/dev/null 2>&1 || die "'gh' not found"
+  [[ -z "$(git status --porcelain)" ]] || die "working tree is dirty; a release ships a committed tree"
+  git fetch -q origin main
+  git merge-base --is-ancestor HEAD origin/main || die "HEAD is not on origin/main; merge it first"
+  head="$(git rev-parse HEAD)"
+  # The tag (and with it any release) must not exist yet: release-tag.sh may
+  # already have pushed it, and release.yml then owns this version.
+  # shortcut: no resume — a deploy that created the release but failed on
+  # Homebrew also stops here on retry; the message gives the manual steps.
+  if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
+    die "tag $TAG already exists on origin; release.yml owns it. (Finishing a deploy whose Homebrew step failed: gh release download $TAG -R $REPO -p SHA256SUMS -D <dir>; scripts/commit-homebrew-formula.sh $TAG <dir>/SHA256SUMS <$TAP_REPO clone>; git -C <clone> push)"
+  fi
+  # The gate CI already ran on this commit, on Linux and macOS, instead of
+  # a local re-run that would only cover this Mac.
+  passed="$(gh run list -R "$REPO" --workflow ci.yml --commit "$head" --status success --json databaseId -q length)"
+  [[ $passed -gt 0 ]] || die "ci.yml has not passed on $head yet (gh run list -R $REPO --workflow ci.yml --commit $head)"
+  if [[ $CHANGE_LOG -eq 1 ]]; then
+    command -v git-cliff >/dev/null 2>&1 || die "'git-cliff' not found (--change-log)"
+    git fetch -q --tags origin
+    # Same section release-pr.sh would prepend, minus its "## [x.y.z]" heading.
+    git-cliff --unreleased --tag "$TAG" --strip all | sed '/^## \[/d' >"$notes"
+    grep -q '[^[:space:]]' "$notes" || die "git-cliff found no releasable commits since the last tag"
+  else
+    bash scripts/changelog-extract.sh "$version" >"$notes" \
+      || die "CHANGELOG.md has no [$version] section (or pass --change-log)"
+  fi
+  echo "==> release notes"
+  cat "$notes"
+  if [[ $stable -eq 1 ]]; then
+    # Prove the tap push works now: after the release exists it is too late.
+    gh repo clone "$TAP_REPO" "$tap" -- --depth 1 -q
+    [[ -n "$(git -C "$tap" config user.email)" ]] || die "git has no user.email for the $TAP_REPO commit"
+    git -C "$tap" push --dry-run -q || die "cannot push to $TAP_REPO (gh auth setup-git, or check access)"
+  fi
+fi
+
+echo "==> build"
+# CI builds with neither; a release binary must not carry this Mac's flags.
+unset RUSTFLAGS CARGO_ENCODED_RUSTFLAGS
+# publish-release.sh uploads every tarball here, so start from none.
+run rm -rf "$rel"
+run mkdir -p "$rel"
+run rustup target add x86_64-apple-darwin
+run bash scripts/build-release.sh darwin arm64 "$rel"
+run bash scripts/build-release.sh darwin amd64 "$rel" x86_64-apple-darwin
+for arch in amd64 arm64; do
+  run docker run --rm --platform "linux/$arch" -v "$PWD:/src" -w /src \
+    -v toolu-deploy-cargo-registry:/usr/local/cargo/registry \
+    -e CARGO_TARGET_DIR="/src/target/linux-$arch" \
+    "$RUST_IMAGE" bash scripts/build-release.sh linux "$arch" "$rel"
+done
+# The image builds read the binaries out of the tarballs, as release-image.yml
+# and release-macos-image.yml do: the images ship the released bytes.
+for target in linux-amd64 linux-arm64 darwin-arm64; do
+  echo "+ tar -xzf $rel/toolu-runner-$target.tar.gz -O toolu-runner > dist/toolu-runner-$target"
+  if [[ $DRY_RUN -eq 0 ]]; then
+    tar -xzf "$rel/toolu-runner-$target.tar.gz" -O toolu-runner >"dist/toolu-runner-$target"
+    chmod 0755 "dist/toolu-runner-$target"
+  fi
+done
+
+if [[ $YES -eq 0 && $DRY_RUN -eq 0 ]]; then
+  printf 'Publish %s (images, GitHub release, Homebrew)? Type the tag to confirm: ' "$TAG"
+  read -r answer </dev/tty || die "no terminal to confirm on; pass --yes"
+  [[ $answer == "$TAG" ]] || die "not confirmed; nothing was pushed"
+fi
+# Re-checked after the long build: a tag pushed meanwhile means release.yml
+# is already releasing this version from its own commit.
+if [[ $DRY_RUN -eq 0 ]] && git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
+  die "tag $TAG appeared on origin during the build; release.yml owns it. Nothing was pushed."
+fi
+
+echo "==> push images"
+# The labels release-image.yml / release-macos-image.yml stamp.
+labels=(--label "org.opencontainers.image.source=https://github.com/$REPO"
+  --label "org.opencontainers.image.revision=$(git rev-parse HEAD)"
+  --label "org.opencontainers.image.version=$TAG")
+run docker buildx build --platform linux/amd64,linux/arm64 --build-arg RUNNER_BINARY=prebuilt \
+  "${labels[@]}" --target runner -t "$runner_ref" --push .
+run docker buildx build --platform linux/amd64,linux/arm64 --build-arg RUNNER_BINARY=prebuilt \
+  "${labels[@]}" --target docker -t "$docker_ref" --push .
+run docker buildx build --platform linux/arm64 -f Dockerfile.macos "${labels[@]}" -t "$macos_ref" --push .
+
+echo "==> GitHub release"
+run env GH_REPO="$REPO" bash scripts/publish-release.sh "$TAG" "$rel" "$notes" "$(git rev-parse HEAD)"
+if [[ $stable -eq 1 ]]; then
+  echo "==> Homebrew formula"
+  # The clone is as old as the build; other projects' releases push to the tap.
+  run git -C "$tap" pull -q --ff-only
+  run bash scripts/commit-homebrew-formula.sh "$TAG" "$rel/SHA256SUMS" "$tap"
+  run git -C "$tap" push
+fi
+
+echo "==> done: digest-pinned refs (pin these in toolu.sh, never the tag)"
+for ref in "$runner_ref" "$docker_ref" "$macos_ref"; do
+  if [[ $DRY_RUN -eq 1 ]]; then
+    echo "    ${ref%:*}@sha256:<digest of :${ref##*:}>"
+  else
+    echo "    ${ref%:*}@$(docker buildx imagetools inspect "$ref" | awk '/^Digest:/ {print $2; exit}')"
+  fi
+done

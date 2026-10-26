@@ -347,7 +347,13 @@ async fn a_transient_failure_warns_and_keeps_waiting() -> TestResult {
     input: None,
     out: &mut out,
   };
-  let outcome = wait_for_installation(&target, TIMING, io).await?;
+  // Two signed polls and a pause must land before the deadline; TIMING's
+  // 150 ms timed out under a loaded gate run.
+  let slow = WaitTiming {
+    timeout: Duration::from_secs(30),
+    ..TIMING
+  };
+  let outcome = wait_for_installation(&target, slow, io).await?;
   assert!(matches!(outcome, WaitOutcome::Installed(_)));
   let text = out.text();
   assert!(

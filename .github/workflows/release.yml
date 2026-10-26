@@ -32,7 +32,37 @@ permissions:
   contents: read
 
 jobs:
+  # scripts/deploy.sh publishes a release from a Mac, and `gh release create`
+  # creating the tag fires this workflow too. Seeing that release already
+  # exists, skip the whole run: `verify` and everything after it would rebuild,
+  # re-push the deploy's images (moving their tags) and fail to publish. A
+  # tag pushed by release-tag.sh has no release yet, so it runs as before.
+  # ("Re-run all jobs" on a published tag therefore skips too; re-run failed
+  # jobs instead.) Only gh's "release not found" means no release: any other
+  # error fails the run rather than re-releasing over a deploy.
+  published:
+    runs-on: ubuntu-24.04
+    outputs:
+      exists: ${{ steps.check.outputs.exists }}
+    steps:
+      - name: Check for an existing release
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if err="$(gh release view "${GITHUB_REF_NAME}" -R "${GITHUB_REPOSITORY}" 2>&1 >/dev/null)"; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::release ${GITHUB_REF_NAME} already exists (scripts/deploy.sh) — skipping the CI release"
+          elif [[ "$err" == *"release not found"* ]]; then
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::cannot tell whether release ${GITHUB_REF_NAME} exists: ${err}"
+            exit 1
+          fi
+
   verify:
+    needs: published
+    if: needs.published.outputs.exists != 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -89,28 +119,18 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.94.1
-      # Native host build (no --target): each runner's host triple IS the
-      # release target. --locked pins the committed Cargo.lock.
-      - name: Build release binary
-        run: cargo build --release --locked --bin toolu-runner
-      - name: Package tarball
-        run: bash scripts/package-release.sh "${{ matrix.os }}" "${{ matrix.arch }}" target/release/toolu-runner dist
+      # Native host build (no triple): each runner's host triple IS the
+      # release target. The same recipe scripts/deploy.sh runs locally; on
+      # linux it also builds + packages toolu-daemon (linux-only: it runs on
+      # the toolu-operated compute box and talks to a local Docker socket).
+      - name: Build and package
+        run: bash scripts/build-release.sh "${{ matrix.os }}" "${{ matrix.arch }}" dist
       - name: Upload tarball
         uses: actions/upload-artifact@v7
         with:
           name: toolu-runner-${{ matrix.os }}-${{ matrix.arch }}
           path: dist/toolu-runner-${{ matrix.os }}-${{ matrix.arch }}.tar.gz
           if-no-files-found: error
-
-      # toolu-daemon ships linux-only: it runs on the toolu-operated compute
-      # box, never a developer's Mac, and crates/daemon depends on bollard
-      # talking to a local Docker socket — there is no macOS story for it.
-      - name: Build daemon release binary
-        if: matrix.os == 'linux'
-        run: cargo build --release --locked --bin toolu-daemon
-      - name: Package daemon tarball
-        if: matrix.os == 'linux'
-        run: bash scripts/package-daemon-release.sh "${{ matrix.os }}" "${{ matrix.arch }}" target/release/toolu-daemon dist
       - name: Upload daemon tarball
         if: matrix.os == 'linux'
         uses: actions/upload-artifact@v7
@@ -131,30 +151,14 @@ jobs:
         with:
           path: dist
           merge-multiple: true
-      - name: Compute SHA256SUMS
-        working-directory: dist
-        run: sha256sum -- *.tar.gz > SHA256SUMS
       - name: Extract release notes from CHANGELOG
         run: bash scripts/changelog-extract.sh "${GITHUB_REF_NAME}" > release-notes.md
-      - name: Determine prerelease flag
-        id: pre
-        # A tag containing '-' (e.g. v0.2.0-rc.1) is a prerelease, keeping
-        # GitHub's `latest` (which install.sh resolves) stable-only.
-        run: |
-          if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
-            echo "flag=--prerelease" >> "$GITHUB_OUTPUT"
-          else
-            echo "flag=" >> "$GITHUB_OUTPUT"
-          fi
+      # SHA256SUMS, the prerelease flag ('-' in the tag) and `gh release
+      # create` — the same recipe scripts/deploy.sh publishes with.
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create "${GITHUB_REF_NAME}" \
-            dist/toolu-runner-*.tar.gz dist/toolu-daemon-*.tar.gz dist/SHA256SUMS \
-            --title "${GITHUB_REF_NAME}" \
-            --notes-file release-notes.md \
-            ${{ steps.pre.outputs.flag }}
+        run: bash scripts/publish-release.sh "${GITHUB_REF_NAME}" dist release-notes.md
 
   # Read the uploaded assets back off the release and verify them. Chained,
   # not event-triggered — see the header note. Assets are attached

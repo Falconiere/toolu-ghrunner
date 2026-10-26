@@ -1521,6 +1521,9 @@ version the release PR wrote.
 push tag vX.Y.Z
       │
       ▼
+published (ubuntu)   a release for the tag already exists (scripts/deploy.sh
+      │              published it from a Mac) → skip every job below.
+      ▼
 verify (ubuntu)      scripts/assert-version.sh — tag must equal the
       │              [workspace.package] version, else fail fast; then
       │              cargo fmt / clippy / nextest / doctests.
@@ -1529,8 +1532,9 @@ build (matrix ×4)    native runners, no cross: darwin/arm64 (macos-15),
       │              darwin/amd64 (macos-15-intel), linux/amd64
       │              (ubuntu-24.04), linux/arm64 (ubuntu-24.04-arm); the
       │              linux legs run in a rust:1.94.1-bookworm container
-      │              (the image's glibc). cargo build --release --locked,
-      │              then scripts/package-release.sh assembles
+      │              (the image's glibc). scripts/build-release.sh:
+      │              cargo build --release --locked, then
+      │              scripts/package-release.sh assembles
       │              toolu-runner-<os>-<arch>.tar.gz (binary + scripts/).
       │              The linux legs also build toolu-daemon and package
       │              toolu-daemon-linux-<arch>.tar.gz
@@ -1545,9 +1549,10 @@ build (matrix ×4)    native runners, no cross: darwin/arm64 (macos-15),
       │                                    tarballs' binaries into the GHCR
       │                                    images (byte-identical, checked).
       ▼
-publish (ubuntu)     sha256sum → SHA256SUMS; scripts/changelog-extract.sh
-      │              → release notes; gh release create (contents: write,
-      │              --prerelease iff the tag contains '-').
+publish (ubuntu)     scripts/changelog-extract.sh → release notes;
+      │              scripts/publish-release.sh: sha256sum → SHA256SUMS,
+      │              gh release create (contents: write, --prerelease iff
+      │              the tag contains '-').
       ├──────────────┐
       ▼              ▼
 finalize         homebrew        both `uses:` reusable workflows, chained on
@@ -1601,10 +1606,11 @@ race to wait out.
 
 `.github/workflows/release-homebrew.yml` (`contents: read`, skipped
 for prerelease tags via a job-level `if:` on `github.ref_name`)
-downloads `SHA256SUMS` the same way, renders `Formula/toolu-runner.rb`
-via `scripts/generate-homebrew-formula.sh` (an `on_macos`/`on_linux` ×
+downloads `SHA256SUMS` the same way, renders and commits
+`Formula/toolu-runner.rb` with `scripts/commit-homebrew-formula.sh` (via
+`scripts/generate-homebrew-formula.sh`: an `on_macos`/`on_linux` ×
 `on_arm`/`on_intel` formula selecting one of the four release
-tarballs), and pushes it to the external `Falconiere/homebrew-tap`
+tarballs), then pushes it to the external `Falconiere/homebrew-tap`
 repo using a short-lived GitHub App installation token minted from
 `HOMEBREW_APP_ID` + `HOMEBREW_APP_PRIVATE_KEY` (scoped with `owner` +
 `repositories: homebrew-tap`) — the default `GITHUB_TOKEN` has no
