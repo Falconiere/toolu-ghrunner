@@ -94,6 +94,8 @@ echo "    images: $runner_ref, $docker_ref, $macos_ref"
 echo "    GitHub release $TAG on $REPO$([[ $stable -eq 1 ]] && echo " + Homebrew formula in $TAP_REPO" || echo ' (prerelease, no Homebrew)')"
 echo "    notes: $([[ $CHANGE_LOG -eq 1 ]] && echo "git-cliff, commits since the last tag" || echo "CHANGELOG.md [$version]")"
 
+# The commit checked against origin/main below; the release and labels name it.
+head="$(git rev-parse HEAD)"
 notes="$(mktemp)"
 tap="$(mktemp -d)"
 trap 'rm -f "$notes"; rm -rf "$tap"' EXIT
@@ -179,11 +181,14 @@ fi
 if [[ $DRY_RUN -eq 0 ]] && git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
   die "tag $TAG appeared on origin during the build; release.yml owns it. Nothing was pushed."
 fi
+# A checkout or commit during the build means the binaries are not $head's.
+[[ $DRY_RUN -eq 1 || "$(git rev-parse HEAD)" == "$head" ]] \
+  || die "HEAD moved during the build (was $head); nothing was pushed, rerun from a clean checkout"
 
 echo "==> push images"
 # The labels release-image.yml / release-macos-image.yml stamp.
 labels=(--label "org.opencontainers.image.source=https://github.com/$REPO"
-  --label "org.opencontainers.image.revision=$(git rev-parse HEAD)"
+  --label "org.opencontainers.image.revision=$head"
   --label "org.opencontainers.image.version=$TAG")
 run docker buildx build --platform linux/amd64,linux/arm64 --build-arg RUNNER_BINARY=prebuilt \
   "${labels[@]}" --target runner -t "$runner_ref" --push .
@@ -192,7 +197,7 @@ run docker buildx build --platform linux/amd64,linux/arm64 --build-arg RUNNER_BI
 run docker buildx build --platform linux/arm64 -f Dockerfile.macos "${labels[@]}" -t "$macos_ref" --push .
 
 echo "==> GitHub release"
-run env GH_REPO="$REPO" bash scripts/publish-release.sh "$TAG" "$rel" "$notes" "$(git rev-parse HEAD)"
+run env GH_REPO="$REPO" bash scripts/publish-release.sh "$TAG" "$rel" "$notes" "$head"
 if [[ $stable -eq 1 ]]; then
   echo "==> Homebrew formula"
   # The clone is as old as the build; other projects' releases push to the tap.
