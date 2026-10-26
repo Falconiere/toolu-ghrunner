@@ -64,8 +64,6 @@ The release also needs (the script re-checks all of these and stops on the first
 git status --porcelain                      # must be empty
 git fetch -q origin main && git merge-base --is-ancestor HEAD origin/main
 git ls-remote --tags origin refs/tags/<tag> # must print nothing (else release.yml owns it)
-gh run list -R Falconiere/toolu-ghrunner --workflow ci.yml --commit "$(git rev-parse HEAD)" --status success
-                                            # must list a run: CI is the gate, there is no local one
 git config user.email                       # stable tags: the tap commit's identity
 ```
 

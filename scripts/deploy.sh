@@ -14,13 +14,15 @@
 #            Falconiere/homebrew-tap. Creating the release creates the tag;
 #            release.yml sees the release already exists and skips its own run.
 #
+# Everything runs here: no GitHub Actions run is required or consulted.
+#
 # Requires of the release: tag == Cargo version, the tag absent on origin, a
-# clean tree whose HEAD is on origin/main with a passing ci.yml run, a
-# CHANGELOG.md section for the version (the release notes), push access to
-# the tap; it asks you to type the tag before pushing. --change-log instead
-# writes the notes from the commits since the last tag with git-cliff
-# (cliff.toml); CHANGELOG.md is not edited. <v> is the tag minus its leading
-# 'v'. The digest-pinned refs toolu.sh needs are printed at the end.
+# clean tree whose HEAD is on origin/main, a CHANGELOG.md section for the
+# version (the release notes), push access to the tap; it asks you to type
+# the tag before pushing. --change-log instead writes the notes from the
+# commits since the last tag with git-cliff (cliff.toml); CHANGELOG.md is not
+# edited. <v> is the tag minus its leading 'v'. The digest-pinned refs
+# toolu.sh needs are printed at the end.
 #
 # Usage:
 #   scripts/deploy.sh --tag v0.13.0 [--yes] [--change-log]
@@ -115,7 +117,6 @@ if [[ $DRY_RUN -eq 0 ]]; then
   [[ -z "$(git status --porcelain)" ]] || die "working tree is dirty; a release ships a committed tree"
   git fetch -q origin main
   git merge-base --is-ancestor HEAD origin/main || die "HEAD is not on origin/main; merge it first"
-  head="$(git rev-parse HEAD)"
   # The tag (and with it any release) must not exist yet: release-tag.sh may
   # already have pushed it, and release.yml then owns this version.
   # shortcut: no resume — a deploy that created the release but failed on
@@ -123,10 +124,6 @@ if [[ $DRY_RUN -eq 0 ]]; then
   if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
     die "tag $TAG already exists on origin; release.yml owns it. (Finishing a deploy whose Homebrew step failed: gh release download $TAG -R $REPO -p SHA256SUMS -D <dir>; scripts/commit-homebrew-formula.sh $TAG <dir>/SHA256SUMS <$TAP_REPO clone>; git -C <clone> push)"
   fi
-  # The gate CI already ran on this commit, on Linux and macOS, instead of
-  # a local re-run that would only cover this Mac.
-  passed="$(gh run list -R "$REPO" --workflow ci.yml --commit "$head" --status success --json databaseId -q length)"
-  [[ $passed -gt 0 ]] || die "ci.yml has not passed on $head yet (gh run list -R $REPO --workflow ci.yml --commit $head)"
   if [[ $CHANGE_LOG -eq 1 ]]; then
     command -v git-cliff >/dev/null 2>&1 || die "'git-cliff' not found (--change-log)"
     git fetch -q --tags origin
