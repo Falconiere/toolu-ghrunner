@@ -48,9 +48,6 @@ jobs:
       - name: Download SHA256SUMS from the release
         run: gh release download "$TAG" --repo "${{ github.repository }}" -p SHA256SUMS -D dist
 
-      - name: Generate Formula/toolu-runner.rb
-        run: bash scripts/generate-homebrew-formula.sh "$TAG" dist/SHA256SUMS > toolu-runner.rb
-
       # NOTE: same App as release-pr.yml / comemory / git-better. Scoped to
       # homebrew-tap so the install token cannot write this repo.
       - name: Mint homebrew-tap token
@@ -75,25 +72,15 @@ jobs:
       - name: Push formula to homebrew-tap
         env:
           TAP_TOKEN: ${{ steps.tap-token.outputs.token }}
+        # Render + commit (an unchanged formula commits nothing, so the push
+        # is a no-op) is scripts/commit-homebrew-formula.sh, the recipe
+        # scripts/deploy.sh uses too; only the push credentials are CI's own.
         run: |
           set -euo pipefail
-          mkdir -p tap/Formula
-          cp toolu-runner.rb tap/Formula/toolu-runner.rb
+          git -C tap config user.name "toolu-runner release bot"
+          git -C tap config user.email "actions@users.noreply.github.com"
+          bash scripts/commit-homebrew-formula.sh "$TAG" dist/SHA256SUMS tap
           cd tap
-          git config user.name "toolu-runner release bot"
-          git config user.email "actions@users.noreply.github.com"
-          # Stage BEFORE comparing. On a first release the formula does not yet
-          # exist in the tap, so it is untracked — and `git diff` ignores
-          # untracked files, reporting "no changes" and skipping the push while
-          # the job still exits 0. `--cached` compares the index against HEAD,
-          # which sees a new file as an addition and an unchanged formula as a
-          # no-op.
-          git add Formula/toolu-runner.rb
-          if git diff --cached --quiet -- Formula/toolu-runner.rb; then
-            echo "::notice::formula unchanged, nothing to push"
-            exit 0
-          fi
-          git commit -m "toolu-runner ${TAG}"
           # Auth via an extraheader (same technique actions/checkout uses)
           # instead of embedding the token in the remote URL or persisting it
           # into .git/config, so it never appears in `git remote -v` output or

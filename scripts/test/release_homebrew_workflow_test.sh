@@ -21,14 +21,16 @@ if [[ ! -f "$WF" ]]; then
 fi
 
 want() {
-  local desc="$1" pat="$2"
-  if grep -Eq -- "$pat" "$WF"; then
+  local desc="$1" pat="$2" file="${3:-$WF}"
+  if grep -Eq -- "$pat" "$file"; then
     echo "ok: $desc"
   else
-    echo "FAIL: $desc — pattern not found: $pat" >&2
+    echo "FAIL: $desc — pattern not found in $file: $pat" >&2
     fail=1
   fi
 }
+# Render + stage + commit live in the script shared with scripts/deploy.sh.
+COMMIT_SH="scripts/commit-homebrew-formula.sh"
 
 # Asserts a pattern is ABSENT. Guards against a regression re-introducing a
 # construct, which `want` cannot express.
@@ -88,7 +90,8 @@ reject "caller owns concurrency"          "^concurrency:"
 want "least-privilege permissions"        "^permissions:"
 want "contents: read only"                "contents: read"
 want "downloads SHA256SUMS from release"  "gh release download"
-want "generates the formula via script"   "generate-homebrew-formula\.sh"
+want "commits via the shared script"      'bash scripts/commit-homebrew-formula\.sh "[$]TAG" dist/SHA256SUMS tap'
+want "generates the formula via script"   "generate-homebrew-formula\.sh" "$COMMIT_SH"
 # App install token — same pattern as release-pr.yml / comemory / git-better.
 # Reject a long-lived PAT so the expired-HOMEBREW_TAP_TOKEN failure cannot return.
 want "mints an App token"                 "uses: actions/create-github-app-token@v3"
@@ -102,21 +105,27 @@ want "pushes with a one-shot extraheader" 'git -c http\.https://github\.com/\.ex
 # `git diff` (without --cached) ignores untracked files — it would report "no
 # changes", skip the push, and still exit 0. Assert the --cached form, and
 # reject the bare one so the regression cannot return.
-want "skips an unchanged formula"         "git diff --cached --quiet"
+want "skips an unchanged formula"         'git -C "[$]tap" diff --cached --quiet' "$COMMIT_SH"
 # `git diff --quiet` (no --cached) compares the WORKTREE, which cannot see an
 # untracked file — that is the bug. Reject the bare form.
 reject "no bare worktree diff"            "git diff --quiet"
+if grep -Eq -- "git( -C [^ ]+)? diff --quiet" "$COMMIT_SH"; then
+  echo "FAIL: $COMMIT_SH uses a bare worktree diff, which cannot see a new formula" >&2
+  fail=1
+else
+  echo "ok: no bare worktree diff in $COMMIT_SH"
+fi
 if awk '
-  /^ *git add Formula\/toolu-runner\.rb$/          { staged = 1 }
-  staged && /git diff --cached --quiet/            { ordered = 1 }
+  /^git -C "[$]tap" add Formula\/toolu-runner\.rb$/ { staged = 1 }
+  staged && /diff --cached --quiet/                 { ordered = 1 }
   END { exit !ordered }
-' "$WF"; then
+' "$COMMIT_SH"; then
   echo "ok: stages the formula before diffing it"
 else
   echo "FAIL: 'git add' must precede 'git diff --cached' or a new formula is never pushed" >&2
   fail=1
 fi
-want "commits with the tag in the message" 'git commit -m "toolu-runner \$\{TAG\}"'
+want "commits with the tag in the message" 'commit -q -m "toolu-runner \$\{tag\}"' "$COMMIT_SH"
 
 if python3 -c 'import yaml' >/dev/null 2>&1; then
   if python3 - "$WF" <<'PY'

@@ -1,30 +1,29 @@
 #!/usr/bin/env bash
 # deploy.sh — build every release artifact on this machine and push it,
 # without waiting on CI. The local twin of release.yml + its chained
-# release-image / release-macos-image / release-homebrew workflows.
+# release-image / release-macos-image / release-homebrew workflows, sharing
+# their recipes: scripts/build-release.sh, scripts/publish-release.sh,
+# scripts/commit-homebrew-formula.sh.
 #
-#   build    darwin arm64 + amd64 (cargo, native + x86_64-apple-darwin),
-#            linux amd64 + arm64 (cargo inside rust:1.94.1-bookworm, the
-#            image release.yml's linux legs use: same glibc floor), then the
-#            install.sh tarballs + daemon tarballs + SHA256SUMS in dist/release/
+#   build    darwin arm64 + amd64 on this Mac (amd64 cross-built), linux
+#            amd64 + arm64 inside rust:1.94.1-bookworm (release.yml's linux
+#            image: same glibc floor) — tarballs + daemon tarballs in dist/release/
 #   push     --env dev   images only, every tag suffixed -dev:
 #                          ghcr.io/falconiere/toolu-ghrunner:<v>-dev (+ -dev-docker)
 #                          ghcr.io/falconiere/toolu-ghrunner-macos:<v>-dev
-#            --env prod  images at :<v> (+ :<v>-docker, macOS :<v>) — this
-#                        script never pushes :latest / :vN — then the GitHub
-#                        Release (prerelease when the tag has '-') and, for a
-#                        stable tag, the Homebrew formula in Falconiere/homebrew-tap.
-#                        Creating the release creates the tag, which can start
-#                        release.yml (push: tags v*): CI then re-pushes the
-#                        images (incl. :latest / :vN) and its publish step fails
-#                        because the release already exists.
+#            --env prod  images at :<v> (+ :<v>-docker, macOS :<v>) — never
+#                        :latest / :vN — then the GitHub Release (prerelease
+#                        when the tag has '-') and, for a stable tag, the
+#                        Homebrew formula in Falconiere/homebrew-tap. Creating
+#                        the release creates the tag; release.yml sees the
+#                        release already exists and skips its own run.
 #
-# prod also requires: tag == Cargo version, a clean tree whose HEAD is on
-# origin/main, a CHANGELOG.md section for the version (the release notes), no
-# existing release, and a green ./tools/check.sh all; it asks you to type the
-# tag before pushing. --change-log instead writes the notes from the commits
-# since the last tag with git-cliff (cliff.toml); CHANGELOG.md is not edited.
-# <v> is the tag minus its leading 'v'. Images are pushed by tag; the
+# prod also requires: tag == Cargo version, the tag absent on origin, a clean
+# tree whose HEAD is on origin/main with a passing ci.yml run, a CHANGELOG.md
+# section for the version (the release notes), push access to the tap; it
+# asks you to type the tag before pushing. --change-log instead writes the
+# notes from the commits since the last tag with git-cliff (cliff.toml);
+# CHANGELOG.md is not edited. <v> is the tag minus its leading 'v'. The
 # digest-pinned refs toolu.sh needs are printed at the end.
 #
 # Usage:
@@ -80,8 +79,8 @@ done
 [[ $ENV == prod || $ENV == dev ]] || die "--env must be prod or dev"
 [[ -n $TAG ]] || die "--tag is required (e.g. v0.13.0)"
 [[ $CHANGE_LOG -eq 0 || $ENV == prod ]] || die "--change-log writes release notes; only --env prod cuts a release"
-# Docker's tag charset; it also keeps the tag safe inside every command below.
-[[ $TAG =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,100}$ ]] || die "tag '$TAG' is not a valid image tag"
+# Keeps the tag safe inside every command below.
+[[ $TAG =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,100}$ ]] || die "tag '$TAG' may only hold letters, digits, '.', '_' and '-'"
 
 cd "$(dirname "$0")/.."
 version="${TAG#v}"
@@ -94,23 +93,29 @@ if [[ $ENV == prod ]]; then
 else
   suffix="-dev"
 fi
+# Docker's tag grammar, checked now rather than after an hour of building.
+[[ $version$suffix =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]] \
+  || die "tag '$TAG' gives image tag ':$version$suffix', which Docker rejects"
 runner_ref="$IMAGE:$version$suffix"
 docker_ref="$IMAGE:$version$suffix-docker"
 macos_ref="$MACOS_IMAGE:$version$suffix"
+stable_prod=0
+[[ $ENV == prod && $TAG != *-* ]] && stable_prod=1
 
 echo "==> deploy $TAG to $ENV"
 echo "    images: $runner_ref, $docker_ref, $macos_ref"
 if [[ $ENV == prod ]]; then
-  echo "    GitHub release $TAG on $REPO$([[ $TAG == *-* ]] && echo ' (prerelease, no Homebrew)' || echo " + Homebrew formula in $TAP_REPO")"
+  echo "    GitHub release $TAG on $REPO$([[ $stable_prod -eq 1 ]] && echo " + Homebrew formula in $TAP_REPO" || echo ' (prerelease, no Homebrew)')"
   echo "    notes: $([[ $CHANGE_LOG -eq 1 ]] && echo "git-cliff, commits since the last tag" || echo "CHANGELOG.md [$version]")"
 fi
 
 notes="$(mktemp)"
-trap 'rm -f "$notes"' EXIT
+tap="$(mktemp -d)"
+trap 'rm -f "$notes"; rm -rf "$tap"' EXIT
 if [[ $DRY_RUN -eq 0 ]]; then
   [[ "$(uname -s)/$(uname -m)" == Darwin/arm64 ]] \
     || die "needs an Apple Silicon Mac: the darwin binaries cannot be built elsewhere"
-  for tool in cargo rustup docker git shasum; do
+  for tool in cargo rustup docker git; do
     command -v "$tool" >/dev/null 2>&1 || die "'$tool' not found"
   done
   docker buildx version >/dev/null 2>&1 || die "docker buildx is not available"
@@ -119,6 +124,18 @@ if [[ $DRY_RUN -eq 0 ]]; then
     [[ -z "$(git status --porcelain)" ]] || die "working tree is dirty; prod deploys a committed tree"
     git fetch -q origin main
     git merge-base --is-ancestor HEAD origin/main || die "HEAD is not on origin/main; merge it first"
+    head="$(git rev-parse HEAD)"
+    # The tag (and with it any release) must not exist yet: release-tag.sh may
+    # already have pushed it, and release.yml then owns this version.
+    # shortcut: no resume — a deploy that created the release but failed on
+    # Homebrew also stops here on retry; the message gives the manual steps.
+    if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
+      die "tag $TAG already exists on origin; release.yml owns it. (Finishing a deploy whose Homebrew step failed: gh release download $TAG -R $REPO -p SHA256SUMS -D <dir>; scripts/commit-homebrew-formula.sh $TAG <dir>/SHA256SUMS <$TAP_REPO clone>; git -C <clone> push)"
+    fi
+    # The gate CI already ran on this commit, on Linux and macOS, instead of
+    # a local re-run that would only cover this Mac.
+    passed="$(gh run list -R "$REPO" --workflow ci.yml --commit "$head" --status success --json databaseId -q length)"
+    [[ $passed -gt 0 ]] || die "ci.yml has not passed on $head yet (gh run list -R $REPO --workflow ci.yml --commit $head)"
     if [[ $CHANGE_LOG -eq 1 ]]; then
       command -v git-cliff >/dev/null 2>&1 || die "'git-cliff' not found (--change-log)"
       git fetch -q --tags origin
@@ -131,49 +148,35 @@ if [[ $DRY_RUN -eq 0 ]]; then
     fi
     echo "==> release notes"
     cat "$notes"
-    # shortcut: no resume — a run that created the release but failed on
-    # Homebrew stops here on retry; push the tap by hand (steps below), or add
-    # a --skip-release flag if this recurs.
-    if gh release view "$TAG" -R "$REPO" >/dev/null 2>&1; then
-      die "release $TAG already exists on $REPO (to finish a failed Homebrew step: gh release download $TAG -R $REPO -p SHA256SUMS, then scripts/generate-homebrew-formula.sh $TAG SHA256SUMS > Formula/toolu-runner.rb in a $TAP_REPO clone, commit, push)"
+    if [[ $stable_prod -eq 1 ]]; then
+      # Prove the tap push works now: after the release exists it is too late.
+      gh repo clone "$TAP_REPO" "$tap" -- --depth 1 -q
+      [[ -n "$(git -C "$tap" config user.email)" ]] || die "git has no user.email for the $TAP_REPO commit"
+      git -C "$tap" push --dry-run -q || die "cannot push to $TAP_REPO (gh auth setup-git, or check access)"
     fi
   fi
-fi
-
-if [[ $ENV == prod ]]; then
-  echo "==> gate"
-  run ./tools/check.sh all
 fi
 
 echo "==> build"
 run mkdir -p "$rel"
 run rustup target add x86_64-apple-darwin
-for arch in arm64 amd64; do
-  triple="aarch64-apple-darwin"
-  [[ $arch == amd64 ]] && triple="x86_64-apple-darwin"
-  run cargo build --release --locked --bin toolu-runner --target "$triple"
-  run install -m 0755 "target/$triple/release/toolu-runner" "dist/toolu-runner-darwin-$arch"
-done
+run bash scripts/build-release.sh darwin arm64 "$rel"
+run bash scripts/build-release.sh darwin amd64 "$rel" x86_64-apple-darwin
 for arch in amd64 arm64; do
   run docker run --rm --platform "linux/$arch" -v "$PWD:/src" -w /src \
     -v toolu-deploy-cargo-registry:/usr/local/cargo/registry \
     -e CARGO_TARGET_DIR="/src/target/linux-$arch" \
-    "$RUST_IMAGE" cargo build --release --locked --bin toolu-runner --bin toolu-daemon
-  run install -m 0755 "target/linux-$arch/release/toolu-runner" "dist/toolu-runner-linux-$arch"
-  run install -m 0755 "target/linux-$arch/release/toolu-daemon" "dist/toolu-daemon-linux-$arch"
+    "$RUST_IMAGE" bash scripts/build-release.sh linux "$arch" "$rel"
 done
-
-echo "==> package"
-for target in darwin-arm64 darwin-amd64 linux-amd64 linux-arm64; do
-  run bash scripts/package-release.sh "${target%-*}" "${target#*-}" "dist/toolu-runner-$target" "$rel"
+# The image builds read the binaries out of the tarballs, as release-image.yml
+# and release-macos-image.yml do: the images ship the released bytes.
+for target in linux-amd64 linux-arm64 darwin-arm64; do
+  echo "+ tar -xzf $rel/toolu-runner-$target.tar.gz -O toolu-runner > dist/toolu-runner-$target"
+  if [[ $DRY_RUN -eq 0 ]]; then
+    tar -xzf "$rel/toolu-runner-$target.tar.gz" -O toolu-runner >"dist/toolu-runner-$target"
+    chmod 0755 "dist/toolu-runner-$target"
+  fi
 done
-for arch in amd64 arm64; do
-  run bash scripts/package-daemon-release.sh linux "$arch" "dist/toolu-daemon-linux-$arch" "$rel"
-done
-echo "+ (cd $rel && shasum -a 256 *.tar.gz > SHA256SUMS)"
-if [[ $DRY_RUN -eq 0 ]]; then
-  (cd "$rel" && shasum -a 256 ./*.tar.gz | sed 's|  \./|  |' >SHA256SUMS)
-fi
 
 if [[ $ENV == prod && $YES -eq 0 && $DRY_RUN -eq 0 ]]; then
   printf 'Publish %s to prod (images, GitHub release, Homebrew)? Type the tag to confirm: ' "$TAG"
@@ -190,23 +193,10 @@ run docker buildx build --platform linux/arm64 -f Dockerfile.macos -t "$macos_re
 
 if [[ $ENV == prod ]]; then
   echo "==> GitHub release"
-  prerelease=()
-  [[ $TAG == *-* ]] && prerelease=(--prerelease)
-  run gh release create "$TAG" -R "$REPO" --target "$(git rev-parse HEAD)" --title "$TAG" \
-    --notes-file "$notes" ${prerelease[@]+"${prerelease[@]}"} "$rel"/*.tar.gz "$rel/SHA256SUMS"
-
-  if [[ $TAG != *-* ]]; then
+  run env GH_REPO="$REPO" bash scripts/publish-release.sh "$TAG" "$rel" "$notes" "$(git rev-parse HEAD)"
+  if [[ $stable_prod -eq 1 ]]; then
     echo "==> Homebrew formula"
-    tap="$(mktemp -d)"
-    trap 'rm -f "$notes"; rm -rf "$tap"' EXIT
-    run gh repo clone "$TAP_REPO" "$tap" -- --depth 1
-    echo "+ scripts/generate-homebrew-formula.sh $TAG $rel/SHA256SUMS > $tap/Formula/toolu-runner.rb"
-    if [[ $DRY_RUN -eq 0 ]]; then
-      mkdir -p "$tap/Formula"
-      bash scripts/generate-homebrew-formula.sh "$TAG" "$rel/SHA256SUMS" >"$tap/Formula/toolu-runner.rb"
-    fi
-    run git -C "$tap" add Formula/toolu-runner.rb
-    run git -C "$tap" commit -m "toolu-runner $TAG"
+    run bash scripts/commit-homebrew-formula.sh "$TAG" "$rel/SHA256SUMS" "$tap"
     run git -C "$tap" push
   fi
 fi

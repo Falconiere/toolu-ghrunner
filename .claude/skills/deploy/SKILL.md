@@ -18,6 +18,11 @@ What each env pushes (from the script header — `scripts/deploy.sh --help`):
 | `dev` | `ghcr.io/falconiere/toolu-ghrunner:<v>-dev`, `:<v>-dev-docker`, `ghcr.io/falconiere/toolu-ghrunner-macos:<v>-dev` | GitHub release, Homebrew, `:latest` |
 | `prod` | the same images at `:<v>`, then the GitHub release (prerelease when the tag has `-`), then the Homebrew formula (stable tags) | `:latest` / `:vN` |
 
+The build, release and formula steps are the same scripts CI runs
+(`scripts/build-release.sh`, `publish-release.sh`, `commit-homebrew-formula.sh`).
+A prod deploy creates the tag; `release.yml`'s `published` job sees the
+release and skips the CI run.
+
 `<v>` is the tag minus its leading `v`.
 
 ## Rules
@@ -58,13 +63,20 @@ gh auth status                              # prod only
 command -v git-cliff                        # --change-log only
 ```
 
-Prod also needs a clean tree on `origin/main`:
+Prod also needs (the script re-checks all of these and stops on the first miss):
 
 ```bash
 git status --porcelain                      # must be empty
 git fetch -q origin main && git merge-base --is-ancestor HEAD origin/main
-gh release view <tag> -R Falconiere/toolu-ghrunner   # must FAIL (no release yet)
+git ls-remote --tags origin refs/tags/<tag> # must print nothing (else release.yml owns it)
+gh run list -R Falconiere/toolu-ghrunner --workflow ci.yml --commit "$(git rev-parse HEAD)" --status success
+                                            # must list a run: CI is the gate, there is no local one
+git config user.email                       # stable tags: the tap commit's identity
 ```
+
+Write access to `Falconiere/homebrew-tap` (stable tags) is proven by the
+script itself (clone + `git push --dry-run`) before anything is pushed; a
+failure there names `gh auth setup-git`.
 
 A missing login is the user's to fix: suggest `! docker login ghcr.io` /
 `! gh auth login` (the `!` runs it in their session); never handle their token.
@@ -82,14 +94,12 @@ bad argument (message says which), exit 1 a prod version mismatch.
 
 Show the user, in a short list: env, tag, the three image refs, and for prod
 the release + Homebrew lines and the notes source (the dry run's `notes:`
-line). For prod, also warn: creating the release creates the git tag, which
-may start `.github/workflows/release.yml` (`push: tags: v*`) — CI would
-re-push the images (incl. `:latest`) and fail its own publish step.
+line).
 
 - dev: proceed unless the user objects.
 - prod: wait for an explicit yes. Anything else → stop.
 
-### 5. Run (long: gate + 4 builds + 3 image pushes, often 30–60 min)
+### 5. Run (long: 4 builds + 3 image pushes, often 30–60 min)
 
 ```bash
 scripts/deploy.sh --env <env> --tag <tag> [--change-log] [--yes]   # --yes: prod, after step 4
@@ -97,8 +107,8 @@ scripts/deploy.sh --env <env> --tag <tag> [--change-log] [--yes]   # --yes: prod
 
 Run it in the background, logging to a file in your scratchpad, and wait for
 the completion notification instead of polling. Its `==> ` lines mark the
-phase: `gate`, `build`, `package`, `push images`, `GitHub release`,
-`Homebrew formula`, `done`. Give the user a one-line update at each phase.
+phase: `build`, `push images`, `GitHub release`, `Homebrew formula`,
+`done`. Give the user a one-line update at each phase.
 
 ### 6. On failure
 
@@ -106,10 +116,10 @@ Report the phase, the exit code and the last error lines; then:
 
 | failed in | state | next |
 | --- | --- | --- |
-| before `push images` (checks, gate, build, package) | nothing pushed | fix the cause, rerun from step 3 |
+| before `push images` (checks, build) | nothing pushed | fix the cause, rerun from step 3 |
 | `push images` | some image tags pushed | safe to rerun the same command (same tags overwrite) |
 | `GitHub release` | images pushed, no release | rerun the same command |
-| `Homebrew formula` | release exists | do NOT rerun (it stops at "release already exists"); the error / script prints the manual tap steps — offer them to the user |
+| `Homebrew formula` | release + tag exist | do NOT rerun (it stops at "tag already exists"); that error prints the manual tap steps — offer them to the user |
 
 Never delete a release, tag or image to recover without the user asking.
 
@@ -118,6 +128,7 @@ Never delete a release, tag or image to recover without the user asking.
 From the `==> done` block: the three digest-pinned refs
 (`…@sha256:…` — the values to pin in toolu.sh, never the tag), plus for prod
 the release URL (`gh release view <tag> -R Falconiere/toolu-ghrunner --json url -q .url`)
-and whether the Homebrew push ran. For prod, check whether `release.yml` fired:
-`gh run list -R Falconiere/toolu-ghrunner --workflow release.yml -L 1` — tell the
-user if it did.
+and whether the Homebrew push ran. For prod, confirm `release.yml` skipped:
+`gh run list -R Falconiere/toolu-ghrunner --workflow release.yml -L 1` — its
+`published` job should have succeeded and every other job been skipped; if not,
+tell the user.
