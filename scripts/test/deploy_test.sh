@@ -59,4 +59,31 @@ exits "a tag giving an image tag starting with '.' exits 2" 2 --env dev --tag v.
 exits "unknown option exits 2" 2 --env dev --tag v1 --bogus
 exits "--change-log is prod-only" 2 --env dev --tag v1 --change-log
 
+# --- preflight: a Docker VM that cannot see the repo stops before any build ---
+# Stubs: an Apple Silicon host, and a docker whose bind mount is empty (Colima
+# outside $HOME) — `docker run` fails, everything else succeeds.
+stub="$(mktemp -d)"
+trap 'rm -rf "$stub"' EXIT
+CALLS="$stub/calls"
+export CALLS
+cat >"$stub/uname" <<'STUB'
+#!/bin/sh
+case "$1" in -s) echo Darwin ;; -m) echo arm64 ;; esac
+STUB
+cat >"$stub/cargo" <<'STUB'
+#!/bin/sh
+echo "$(basename "$0") $*" >>"$CALLS"
+[ "$1" != run ]
+STUB
+cp "$stub/cargo" "$stub/rustup"
+cp "$stub/cargo" "$stub/docker"
+chmod +x "$stub"/*
+unseen="$(PATH="$stub:$PATH" bash "$SCRIPT" --env dev --tag v9.9.9 2>&1)"
+got=$?
+if [[ $got -eq 2 ]]; then echo "ok: an unshared repo path exits 2"; else echo "FAIL: an unshared repo path exits 2 (exit $got)" >&2; fail=1; fi
+has "an unshared repo path names the Colima fix" "$unseen" "Docker cannot see $PWD"
+has "the preflight mounts the repo" "$(cat "$CALLS")" "docker run --rm -v $PWD:/src rust:1.94.1-bookworm test -f /src/Cargo.toml"
+lacks "an unshared repo path builds nothing" "$unseen" "==> build"
+lacks "an unshared repo path never runs rustup" "$(cat "$CALLS")" "rustup"
+
 exit "$fail"

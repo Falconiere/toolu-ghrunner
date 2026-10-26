@@ -32,8 +32,9 @@
 #   scripts/deploy.sh --env prod --tag v0.13.0 --dry-run   # print, run nothing
 #
 # Requires: an Apple Silicon Mac (darwin binaries need Apple's SDK), cargo +
-# rustup, Docker with buildx and multi-platform push (Docker Desktop), `docker
-# login ghcr.io` with write:packages, `gh auth login` (prod), and git-cliff
+# rustup, Docker with buildx and multi-platform push (Docker Desktop, or
+# Colima + docker-buildx) that can see the repo's path, `docker login
+# ghcr.io` with write:packages, `gh auth login` (prod), and git-cliff
 # (--change-log).
 set -euo pipefail
 
@@ -119,6 +120,10 @@ if [[ $DRY_RUN -eq 0 ]]; then
     command -v "$tool" >/dev/null 2>&1 || die "'$tool' not found"
   done
   docker buildx version >/dev/null 2>&1 || die "docker buildx is not available"
+  # The linux builds bind-mount the repo. Colima shares only $HOME by default
+  # and mounts anything else as an empty dir, found only after the darwin builds.
+  docker run --rm -v "$PWD:/src" "$RUST_IMAGE" test -f /src/Cargo.toml \
+    || die "Docker cannot see $PWD; share it with the Docker VM (Colima: add it to mounts in ~/.colima/default/colima.yaml, then colima restart; Docker Desktop: Settings > Resources > File sharing)"
   if [[ $ENV == prod ]]; then
     command -v gh >/dev/null 2>&1 || die "'gh' not found"
     [[ -z "$(git status --porcelain)" ]] || die "working tree is dirty; prod deploys a committed tree"
