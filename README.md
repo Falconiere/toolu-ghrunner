@@ -1352,6 +1352,18 @@ TOOLU_RUNNER_LIVE_TOKEN=<ghs_...> \
 `TOOLU_RUNNER_LIVE_REPO` picks the target repo (the `live` workflow defaults to
 `Falconiere/toolu-runner-test`).
 
+### Manual deploy
+
+`scripts/deploy.sh` builds every release artifact on an Apple Silicon Mac
+and pushes it without CI (`--help` lists the prerequisites):
+
+```sh
+scripts/deploy.sh --env dev  --tag v0.13.0                # images only, tagged :0.13.0-dev
+scripts/deploy.sh --env prod --tag v0.13.0                # images :0.13.0, GitHub release, Homebrew
+scripts/deploy.sh --env prod --tag v0.13.0 --change-log   # release notes from git-cliff, not CHANGELOG.md
+scripts/deploy.sh --env prod --tag v0.13.0 --dry-run      # print every command, run none
+```
+
 ### Workspace
 
 Twelve crates under `crates/` (ten libraries plus the `toolu-runner` and `toolu-daemon` bins), acyclic dependency graph:
