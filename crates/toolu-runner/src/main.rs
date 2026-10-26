@@ -24,6 +24,7 @@ use shared::startup;
 use shared::{MaskerRedactor, SecretMasker};
 
 mod app_auth;
+mod app_headless;
 mod app_import;
 mod app_install;
 mod boot_cmd;

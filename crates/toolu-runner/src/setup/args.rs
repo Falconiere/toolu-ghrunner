@@ -68,6 +68,9 @@ pub(crate) struct SetupArgs {
   /// Working directory for job workspaces (default: ~/.toolu-runner/_work).
   #[arg(long, value_name = "DIR")]
   pub(crate) work_dir: Option<PathBuf>,
+  /// Where the browser runs when setup creates a GitHub App (#205).
+  #[command(flatten)]
+  pub(crate) session: crate::cli::HeadlessFlags,
   /// Registration-mode flags (ephemeral / replace / no service).
   #[command(flatten)]
   pub(crate) mode: SetupMode,

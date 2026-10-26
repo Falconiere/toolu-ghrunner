@@ -1868,6 +1868,28 @@ click.
 session there. The replies the tests replay are the live captures and
 documented examples listed above.
 
+## `create-app` over SSH: relay, paste, `--no-relay` (#205)
+
+The relay peer in `create_app_test` implements the get.toolu.sh contract
+(CodaSignal/toolu.sh `docs/guides/gh-app-relay.md`): `GET /gh/callback`
+stores the code under `state`, `POST /gh/claim` hashes the secret and hands
+the code over once, else `204` + `Retry-After`. The test plays the laptop's
+browser after GitHub's redirect. Pty cases run the binary under `script(1)`
+(Linux only; the macOS lanes were not run locally).
+
+| Criterion / scenario | Real input and production path | Expected result | Runnable check |
+| --- | --- | --- | --- |
+| S1 / AC-1, AC-5, AC-6 | Real binary `create-app --headless --org acme`; relay peer + org/conversion/installation fixtures | screen-06 lines; link payload `{manifest, target: org, org, state}` with `redirect_url = <relay>/gh/callback`; claim secret hashes to the link's `state`; one conversion; App saved and installed; neither secret nor code in stdout/stderr or any file under HOME | `cargo test -p toolu-runner --test integration -- create_app_test::headless_relay_claims_the_code_and_converts_once` |
+| AC-4 code planting | Same, conversion returning owner `mallory` / name `evil-app` | exit 2 naming what came back and what was asked; no `github-app.json`; no installation poll | `create_app_test::headless_refuses_an_app_owned_by_someone_else`, `create_app_test::headless_refuses_an_app_with_another_name` |
+| S2 / AC-2 | Pty, relay on a closed port, `p` then the code | warning, paste prompt, one conversion, App installed; the code in no HOME file | `create_app_test::headless_paste_converts_when_the_relay_is_unreachable` |
+| S3 / AC-3 | Pty, `--no-relay`, a URL with another run's `state`, then this run's | `✕ That URL is from a different setup run. Nothing was exchanged.`; the wrong code is never converted, the right one once; zero `/gh/*` requests; redirect `http://127.0.0.1:<port>/cb` | `create_app_test::no_relay_rejects_a_wrong_state_and_never_contacts_the_relay` |
+| Usage guards | `--no-relay` with stdin null; `--headless --no-headless` | exit 2, no link, no request | `create_app_test::no_relay_without_a_terminal_and_conflicting_flags_exit_2` |
+| AC-6 pure pieces | FIPS 180-2 `abc` vector; user/org manifests; pasted URLs and codes | `relay_state`, `relay_link` fragment, `is_manifest_code`, `parse_pasted` | `cargo test -p protocol --test integration -- app_manifest_test::` |
+| AC-7 claim | Raw loopback peer: 200, 204 (+`Retry-After` 2 / 600 / none), 500, 429, 400, unsafe code, no code | `Code`, `Pending(2/30/2 s)`, `Network`, `Protocol` | `cargo test -p wire --test integration -- app_manifest_test::claim` |
+| AC-8 desktop unchanged | The #202 loopback cases with `--no-headless` | as before | `create_app_test::` (#202 rows above) |
+| AC-9 setup | Pty `setup --org acme --auth app --headless` | the relay link instead of the old steer; Ctrl-C exits 130, nothing saved | `cargo test -p toolu-runner --test integration -- setup_cmd_test::headless_create_reaches_the_relay_link` |
+| S4 / AC-10 live | **unverified** | `setup` on a VPS over SSH, App created from a laptop browser, runner online, App deleted afterwards | needs a person with a browser and a GitHub account |
+
 ## Headless `install-service` (#203)
 
 Local CLI tests use the real binary, temporary runner homes, and subprocess

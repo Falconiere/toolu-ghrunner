@@ -74,7 +74,10 @@ async fn run_setup(args: &SetupArgs) -> Result<(), SetupError> {
   let github_base = plan::validate_github_url(args.github_url.as_deref())?;
   let host = plan::host_of(&github_base);
   let home = registry::runner_home();
-  let facts = machine::gather(&home).map_err(SetupError::runtime)?;
+  let mut facts = machine::gather(&home).map_err(SetupError::runtime)?;
+  if let Some(headless) = args.session.forced() {
+    facts.headless = headless;
+  }
   let interactive = !args.yes() && !args.dry_run() && tty_available();
   let out = Out {
     plain: render::plain_mode(std::io::stdout().is_terminal(), crate::config::no_color()),

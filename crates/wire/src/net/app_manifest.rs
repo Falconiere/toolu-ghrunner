@@ -7,12 +7,14 @@
 //! `GET /callback?code=…&state=…`, and [`convert_manifest_code`], which
 //! exchanges that one-time code for the minted app credentials. Both run over
 //! real sockets with no HTTP framework, keeping the round trip testable.
+//! [`claim_relay_code`] is the headless path's (#205): it polls the
+//! get.toolu.sh relay for the code GitHub's redirect left there.
 
 use std::net::SocketAddr;
 use std::time::Duration;
 
 use protocol::app_manifest::{
-  ConversionResponse, form_html, parse_callback_path, parse_conversion,
+  ConversionResponse, form_html, is_manifest_code, parse_callback_path, parse_conversion,
 };
 use shared::RunnerError;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
@@ -380,5 +382,74 @@ pub fn map_conversion_error(status: u16, body: &str) -> RunnerError {
       "app manifest conversion failed with HTTP {status}: {snippet}; re-run `create-app` to \
        start a fresh flow"
     ))
+  }
+}
+
+/// Default wait between claims when the relay's `204` names none (its
+/// contract says `Retry-After: 2`).
+const RELAY_DEFAULT_RETRY: Duration = Duration::from_secs(2);
+
+/// One claim's answer from the relay.
+#[derive(Debug, PartialEq, Eq)]
+pub enum RelayClaim {
+  /// The code, handed over exactly once.
+  Code(String),
+  /// Not there yet (or expired, or another secret's): poll again after this.
+  Pending(Duration),
+}
+
+/// `POST <relay_base>/gh/claim` with `{"secret": secret}` (the get.toolu.sh
+/// contract, CodaSignal/toolu.sh#88): `200 {"code"}` once, else `204` with
+/// `Retry-After` (seconds, clamped to 1–30, default 2).
+///
+/// # Errors
+///
+/// `RunnerError::Network` on transport failure, 429 or 5xx (worth retrying,
+/// and the paste fallback stays open); `RunnerError::Protocol` on a `400`
+/// (the relay refused the body), any other status, or a `200` whose code is
+/// not a safe manifest code.
+pub async fn claim_relay_code(
+  client: &reqwest::Client,
+  relay_base: &str,
+  secret: &str,
+) -> Result<RelayClaim, RunnerError> {
+  let url = format!("{}/gh/claim", relay_base.trim_end_matches('/'));
+  let response = client
+    .post(&url)
+    .json(&serde_json::json!({ "secret": secret }))
+    .send()
+    .await
+    .map_err(|e| RunnerError::Network(format!("relay claim request failed: {e}")))?;
+  let status = response.status();
+  if status == reqwest::StatusCode::NO_CONTENT {
+    let wait = response
+      .headers()
+      .get(reqwest::header::RETRY_AFTER)
+      .and_then(|value| value.to_str().ok())
+      .and_then(|value| value.trim().parse::<u64>().ok())
+      .map_or(RELAY_DEFAULT_RETRY, |secs| {
+        Duration::from_secs(secs.clamp(1, 30))
+      });
+    return Ok(RelayClaim::Pending(wait));
+  }
+  if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+    return Err(RunnerError::Network(format!(
+      "relay claim answered HTTP {status}"
+    )));
+  }
+  if !status.is_success() {
+    return Err(RunnerError::Protocol(format!(
+      "relay claim refused with HTTP {status}"
+    )));
+  }
+  let body: serde_json::Value = response
+    .json()
+    .await
+    .map_err(|e| RunnerError::Protocol(format!("relay claim body unreadable: {e}")))?;
+  match body.get("code").and_then(serde_json::Value::as_str) {
+    Some(code) if is_manifest_code(code) => Ok(RelayClaim::Code(code.to_owned())),
+    _ => Err(RunnerError::Protocol(
+      "relay claim returned no usable manifest code".to_owned(),
+    )),
   }
 }

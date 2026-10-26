@@ -454,6 +454,29 @@ unique across GitHub).
    repository count). Then `register --app` (see
    [Registering with a GitHub App](#registering-with-a-github-app)).
 
+**Over SSH, with no browser on the machine** (#205, picked automatically
+over SSH or with no display; `--headless` / `--no-headless` override the
+guess). Steps 2–3 run from another machine's browser. `create-app` prints
+`This machine has no browser. Open this link on your laptop:` and a
+`https://get.toolu.sh/gh/app#…` link: the page reads the manifest from the
+URL fragment (never sent to a server) and posts it to GitHub, whose redirect
+goes to `get.toolu.sh/gh/callback`. The machine keeps a 256-bit secret,
+prints only its SHA-256 as the round trip's `state`, and polls
+`POST get.toolu.sh/gh/claim` with the secret, so the relay hands the code
+to this machine only, once. While it waits, `p` + Enter lets you paste the
+code the callback page shows (the relay can't be reached, say) and `c` +
+Enter copies the link. Anyone holding the link could plant a code for an
+App of their own, so the App GitHub returns must carry the requested name
+(and owner, when `--org`/`--account` names it): otherwise it is refused,
+nothing is saved, and the message names the App to delete. If the code was
+already used, `create-app` names where to delete the App and start again.
+`--no-relay` contacts no relay: GitHub redirects to
+`http://127.0.0.1:<port>/cb`, which fails to load on your laptop; paste that
+address-bar URL (`p` + Enter), and the machine checks its `state` (a URL
+from another run prints `✕ That URL is from a different setup run. Nothing
+was exchanged.`). `--no-relay` needs a terminal. After 15 minutes without a
+code `create-app` exits 1. `setup` takes the same three flags.
+
 **One App, many machines.** `create-app --import <github-app.json>`, or
 `--app-id <id> --app-key <pem file>`, reuses an existing App instead of
 creating another: the key is proven with an App JWT call (`GET /app`)
@@ -498,6 +521,8 @@ config error, `130` cancelled.
 | `--host <HOST>` | `create-app` | GitHub host to create the App on (default `github.com`, the only value accepted this release). |
 | `--no-browser` | `create-app` | Print the URLs (the manifest form, the install link) instead of launching a browser. |
 | `--force` | `create-app` | Overwrite an already saved App (`github-app.json` at the runner-home root). |
+| `--headless` / `--no-headless` | `create-app`, `setup` | Create the App from another machine's browser through the get.toolu.sh relay link (default over SSH or with no display), or force this machine's browser and the loopback callback. |
+| `--no-relay` | `create-app`, `setup` | Headless without the relay: paste the address-bar URL GitHub redirects to (`127.0.0.1/cb?code=…&state=…`); its `state` is checked. Needs a terminal. |
 
 `register`, `run`, `remove`, `status`, `install-service`, and `check`
 also take `--config <FILE>`; when omitted, the config resolves to the cwd-inferred
@@ -1041,6 +1066,7 @@ deletes the machine service.
 | `TOOLU_RUNNER_GITHUB_API_URL` | `https://api.github.com` | GitHub REST API base `create-app` uses for the org check, the manifest conversion and the App calls (a mirror or test peer). |
 | `TOOLU_RUNNER_INSTALL_WAIT_MS` | `600000` | how long `create-app` waits for the App's installation before asking (terminal) or exiting 1 (no terminal), in milliseconds. |
 | `TOOLU_RUNNER_INSTALL_POLL_MS` | `5000` | how often `create-app` polls for the installation, in milliseconds. |
+| `TOOLU_RUNNER_RELAY_URL` | `https://get.toolu.sh` | relay origin a headless `create-app` prints its form link under and claims the manifest code from (a test peer). |
 | `TOOLU_RUNNER_RELEASES_URL` | the latest `Falconiere/toolu-ghrunner` release on `api.github.com` | release document `doctor`'s newer-release check reads (a mirror); credentials in it are masked. |
 | `TOOLU_RUNNER_LOG` | `info` | tracing filter. Checked before `RUST_LOG`. Honoured only with `TOOLU_RUNNER_ALLOW_VERBOSE=1`; otherwise the runner always logs at `info`. |
 | `RUST_LOG` | — | tracing filter (standard fallback). Same `TOOLU_RUNNER_ALLOW_VERBOSE` gate. |

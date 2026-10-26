@@ -94,6 +94,9 @@ fn create_app_help_lists_flags() {
     "--host <HOST>",
     "--no-browser",
     "--force",
+    "--headless",
+    "--no-headless",
+    "--no-relay",
   ] {
     assert!(stdout.contains(flag), "missing {flag} in: {stdout}");
   }
@@ -121,11 +124,17 @@ const CONVERSION: &str = include_str!("../../protocol/tests/fixtures/conversion_
 const CODE: &str = "code202";
 
 /// The conversion fixture as GitHub returns it for an App `owner` (id
-/// `owner_id`) owns, carrying the test key.
+/// `owner_id`) owns, named `toolu-runner-<owner>`, carrying the test key.
 fn conversion(owner: &str, owner_id: i64) -> TestResult<ResponseTemplate> {
+  conversion_named(owner, owner_id, &format!("toolu-runner-{owner}"))
+}
+
+/// [`conversion`] for an App called `name`.
+fn conversion_named(owner: &str, owner_id: i64, name: &str) -> TestResult<ResponseTemplate> {
   let mut body: Value = serde_json::from_str(CONVERSION)?;
   set_json(&mut body, "/id", json!(APP_ID))?;
   set_json(&mut body, "/slug", json!(format!("toolu-runner-{owner}")))?;
+  set_json(&mut body, "/name", json!(name))?;
   set_json(&mut body, "/owner", json!({"login": owner, "id": owner_id}))?;
   set_json(&mut body, "/pem", json!(PRIVATE_PEM))?;
   Ok(ResponseTemplate::new(201).set_body_json(body))
@@ -198,6 +207,9 @@ fn create_app(
     .kill_on_drop(true)
     .arg("create-app")
     .arg("--no-browser")
+    // The loopback flow under test: a DISPLAY-less Linux host would
+    // otherwise be classified headless (#205).
+    .arg("--no-headless")
     .args(args);
   cmd
 }
@@ -888,5 +900,461 @@ async fn an_org_that_is_not_a_login_exits_2_before_any_request() -> TestResult {
       .ok_or("recording off")?
       .is_empty()
   );
+  Ok(())
+}
+
+// ── #205: creating the App over SSH (relay, paste, --no-relay) ────────
+
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
+use base64::Engine as _;
+use protocol::app_manifest::relay_state;
+use wiremock::matchers::path_regex;
+
+/// The code GitHub's redirect carries in the headless tests.
+const RELAY_CODE: &str = "c0de205relay";
+
+/// A relay peer implementing the get.toolu.sh contract (CodaSignal/toolu.sh
+/// #88, `docs/guides/gh-app-relay.md`): `GET /gh/callback` stores `code`
+/// under `state`; `POST /gh/claim {secret}` hands it over once when
+/// `SHA-256(secret)` is that `state`, else `204` with `Retry-After: 1`.
+#[derive(Clone, Default)]
+struct Relay {
+  codes: Arc<Mutex<HashMap<String, String>>>,
+}
+
+impl Respond for Relay {
+  fn respond(&self, request: &Request) -> ResponseTemplate {
+    let Ok(mut codes) = self.codes.lock() else {
+      return ResponseTemplate::new(500);
+    };
+    match (request.method.as_str(), request.url.path()) {
+      ("GET", "/gh/callback") => {
+        let query: HashMap<String, String> = request.url.query_pairs().into_owned().collect();
+        match (query.get("code"), query.get("state")) {
+          (Some(code), Some(state)) => {
+            codes.insert(state.clone(), code.clone());
+            ResponseTemplate::new(200).set_body_string("Return to your terminal")
+          },
+          _ => ResponseTemplate::new(400),
+        }
+      },
+      ("POST", "/gh/claim") => {
+        let secret = serde_json::from_slice::<Value>(&request.body)
+          .ok()
+          .and_then(|body| body.get("secret")?.as_str().map(str::to_owned));
+        let Some(secret) = secret else {
+          return ResponseTemplate::new(400).set_body_json(json!({"error": "invalid_request"}));
+        };
+        match codes.remove(&relay_state(&secret)) {
+          Some(code) => ResponseTemplate::new(200).set_body_json(json!({"code": code})),
+          None => ResponseTemplate::new(204).insert_header("retry-after", "1"),
+        }
+      },
+      _ => ResponseTemplate::new(404),
+    }
+  }
+}
+
+/// Mount the relay on `server` (its `/gh/*` paths never clash with the API).
+async fn mount_relay(server: &MockServer) {
+  Mock::given(path_regex("^/gh/"))
+    .respond_with(Relay::default())
+    .mount(server)
+    .await;
+}
+
+/// `create-app --headless <args>` against `server` as API and relay.
+fn headless(home: &Path, server: &MockServer, args: &[&str]) -> tokio::process::Command {
+  let mut cmd = tokio::process::Command::new(env!("CARGO_BIN_EXE_toolu-runner"));
+  cmd
+    .env("TOOLU_RUNNER_HOME", home)
+    .env("HOME", home)
+    .env("TOOLU_RUNNER_GITHUB_API_URL", server.uri())
+    .env("TOOLU_RUNNER_RELAY_URL", server.uri())
+    .env("TOOLU_RUNNER_INSTALL_POLL_MS", "50")
+    .env("TOOLU_RUNNER_INSTALL_WAIT_MS", "60000")
+    .stdin(Stdio::null())
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped())
+    .kill_on_drop(true)
+    .args(["create-app", "--headless"])
+    .args(args);
+  cmd
+}
+
+/// The `{manifest, target, org, state}` payload of the printed relay link
+/// found in `text`.
+fn link_payload(text: &str) -> TestResult<Value> {
+  let encoded: String = text
+    .split_once("/gh/app#")
+    .ok_or("no relay link printed")?
+    .1
+    .chars()
+    .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+    .collect();
+  let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(encoded)?;
+  Ok(serde_json::from_slice(&bytes)?)
+}
+
+/// Run a headless `cmd`; once the link prints, play the laptop's browser
+/// after GitHub's redirect: `GET <relay>/gh/callback?code=<code>&state=…`.
+async fn run_relay(
+  mut cmd: tokio::process::Command,
+  server: &MockServer,
+  code: &str,
+) -> TestResult<(Finished, Value)> {
+  let mut child = cmd.spawn()?;
+  let mut stdout = BufReader::new(child.stdout.take().ok_or("no stdout")?);
+  let mut seen = String::new();
+  let payload = loop {
+    let mut line = String::new();
+    if stdout.read_line(&mut line).await? == 0 {
+      return Err(format!("no link before EOF: {seen}").into());
+    }
+    seen.push_str(&line);
+    if line.contains("/gh/app#") {
+      break link_payload(&line)?;
+    }
+  };
+  let state = payload["state"].as_str().ok_or("no state")?.to_owned();
+  reqwest::get(format!(
+    "{}/gh/callback?code={code}&state={state}",
+    server.uri()
+  ))
+  .await?
+  .error_for_status()?;
+  let mut rest = String::new();
+  tokio::time::timeout(Duration::from_secs(60), stdout.read_to_string(&mut rest)).await??;
+  seen.push_str(&rest);
+  let output = tokio::time::timeout(Duration::from_secs(60), child.wait_with_output()).await??;
+  let finished = Finished {
+    code: output.status.code(),
+    stdout: seen,
+    stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+    form: String::new(),
+  };
+  Ok((finished, payload))
+}
+
+/// The secrets the box sent in its claims.
+async fn claimed_secrets(server: &MockServer) -> TestResult<Vec<String>> {
+  let requests = server.received_requests().await.ok_or("recording off")?;
+  Ok(
+    requests
+      .iter()
+      .filter(|r| r.url.path() == "/gh/claim")
+      .filter_map(|r| serde_json::from_slice::<Value>(&r.body).ok())
+      .filter_map(|body| body.get("secret")?.as_str().map(str::to_owned))
+      .collect(),
+  )
+}
+
+/// AC-5: no file under `home` (`_diag/` logs, `github-app.json`) holds any
+/// of `needles`.
+fn assert_no_file_holds(home: &Path, needles: &[&str]) -> TestResult {
+  let mut dirs = vec![home.to_path_buf()];
+  while let Some(dir) = dirs.pop() {
+    for entry in std::fs::read_dir(dir)? {
+      let path = entry?.path();
+      if path.is_dir() {
+        dirs.push(path);
+        continue;
+      }
+      let text = String::from_utf8_lossy(&std::fs::read(&path)?).into_owned();
+      for needle in needles {
+        assert!(!text.contains(needle), "{} holds {needle:?}", path.display());
+      }
+    }
+  }
+  Ok(())
+}
+
+/// The org check and the org's installation (one empty poll first).
+async fn mount_acme(server: &MockServer, home: &Path) -> TestResult {
+  Mock::given(method("GET"))
+    .and(path("/orgs/acme"))
+    .respond_with(edited_reply("orgs_200.json", |org| {
+      set_json(org, "/login", json!("acme"))?;
+      set_json(org, "/id", json!(7))
+    })?)
+    .mount(server)
+    .await;
+  mount_installations(server, home, installed_on("acme", "all")?).await;
+  Ok(())
+}
+
+/// AC-1 / AC-5 / AC-6 / S1: over the relay the box prints the link, claims
+/// the code with a secret whose SHA-256 is the link's state, converts it
+/// once, saves the App and records its installation — and neither the
+/// secret nor the code shows anywhere.
+#[tokio::test]
+async fn headless_relay_claims_the_code_and_converts_once() -> TestResult {
+  let home = tempfile::tempdir()?;
+  let server = MockServer::start().await;
+  mount_relay(&server).await;
+  mount_acme(&server, home.path()).await?;
+  Mock::given(method("POST"))
+    .and(path(format!("/app-manifests/{RELAY_CODE}/conversions")))
+    .respond_with(conversion("acme", 7)?)
+    .expect(1)
+    .mount(&server)
+    .await;
+
+  let cmd = headless(home.path(), &server, &["--org", "acme"]);
+  let (done, payload) = run_relay(cmd, &server, RELAY_CODE).await?;
+  assert_eq!(
+    done.code,
+    Some(0),
+    "stdout:\n{}\nstderr:\n{}",
+    done.stdout,
+    done.stderr
+  );
+  for line in [
+    "This machine has no browser. Open this link on your laptop:",
+    "Waiting for GitHub\u{2026}",
+    "App created \u{b7} toolu-runner-acme \u{b7} App 424242",
+    "Installed \u{b7} installation 1 \u{b7} all repositories",
+  ] {
+    assert!(done.stdout.contains(line), "missing {line:?} in:\n{}", done.stdout);
+  }
+  assert_eq!(payload["target"], "org");
+  assert_eq!(payload["org"], "acme");
+  assert_eq!(payload["manifest"]["name"], "toolu-runner-acme");
+  assert_eq!(
+    payload["manifest"]["redirect_url"],
+    json!(format!("{}/gh/callback", server.uri()))
+  );
+  let state = payload["state"].as_str().ok_or("no state")?;
+  assert!(state.len() == 64 && state.bytes().all(|b| b.is_ascii_hexdigit()));
+  let secrets = claimed_secrets(&server).await?;
+  let secret = secrets.last().ok_or("the box never claimed")?;
+  assert!(secrets.iter().all(|s| s == secret), "one secret per run");
+  assert_eq!(relay_state(secret), state, "the claim proves the link's state");
+  let text = format!("{}{}", done.stdout, done.stderr);
+  for needle in [secret.as_str(), RELAY_CODE] {
+    assert!(!text.contains(needle), "{needle:?} leaked:\n{text}");
+  }
+  assert_no_file_holds(home.path(), &[secret, RELAY_CODE])?;
+  assert_eq!(saved(home.path())?.get("installation_id"), Some(&json!(1)));
+  assert_no_secrets(&text, &server).await?;
+  Ok(())
+}
+
+/// AC-4: a code planted through the printed link for an App someone else
+/// owns is refused: exit 2, nothing saved, no installation wait.
+#[tokio::test]
+async fn headless_refuses_an_app_owned_by_someone_else() -> TestResult {
+  let home = tempfile::tempdir()?;
+  let server = MockServer::start().await;
+  mount_relay(&server).await;
+  mount_acme(&server, home.path()).await?;
+  Mock::given(method("POST"))
+    .and(path(format!("/app-manifests/{RELAY_CODE}/conversions")))
+    .respond_with(conversion_named("mallory", 666, "toolu-runner-acme")?)
+    .expect(1)
+    .mount(&server)
+    .await;
+
+  let cmd = headless(home.path(), &server, &["--org", "acme"]);
+  let (done, _) = run_relay(cmd, &server, RELAY_CODE).await?;
+  assert_eq!(done.code, Some(2), "stderr:\n{}", done.stderr);
+  assert!(
+    done.stderr.contains("owned by mallory")
+      && done.stderr.contains("asked for \"toolu-runner-acme\" owned by acme")
+      && done.stderr.contains("It was not saved"),
+    "{}",
+    done.stderr
+  );
+  assert!(!home.path().join("github-app.json").exists());
+  let requests = server.received_requests().await.ok_or("recording off")?;
+  assert!(requests.iter().all(|r| r.url.path() != "/app/installations"));
+  Ok(())
+}
+
+/// AC-4: an App under another name than requested is refused the same way.
+#[tokio::test]
+async fn headless_refuses_an_app_with_another_name() -> TestResult {
+  let home = tempfile::tempdir()?;
+  let server = MockServer::start().await;
+  mount_relay(&server).await;
+  Mock::given(method("POST"))
+    .and(path(format!("/app-manifests/{RELAY_CODE}/conversions")))
+    .respond_with(conversion_named("octocat", 9, "evil-app")?)
+    .expect(1)
+    .mount(&server)
+    .await;
+
+  let cmd = headless(home.path(), &server, &["--account", "octocat"]);
+  let (done, payload) = run_relay(cmd, &server, RELAY_CODE).await?;
+  assert_eq!(done.code, Some(2), "stderr:\n{}", done.stderr);
+  assert_eq!(payload["target"], "user");
+  assert!(
+    done.stderr.contains("returned the App \"evil-app\"")
+      && done.stderr.contains("asked for \"toolu-runner-octocat\""),
+    "{}",
+    done.stderr
+  );
+  assert!(!home.path().join("github-app.json").exists());
+  Ok(())
+}
+
+/// `--no-relay` needs a terminal to paste into: exit 2 before any link or
+/// request; `--headless --no-headless` is a usage error.
+#[tokio::test]
+async fn no_relay_without_a_terminal_and_conflicting_flags_exit_2() -> TestResult {
+  let home = tempfile::tempdir()?;
+  let server = MockServer::start().await;
+  mount_relay(&server).await;
+  for (args, needle) in [
+    (vec!["--no-relay"], "--no-relay needs a terminal"),
+    (vec!["--no-headless"], "cannot be used with"),
+  ] {
+    let output = headless(home.path(), &server, &args).output().await?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(2), "{stderr}");
+    assert!(stderr.contains(needle), "{stderr}");
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("/gh/app#"));
+  }
+  let requests = server.received_requests().await.ok_or("recording off")?;
+  assert!(requests.is_empty(), "no request may be sent");
+  Ok(())
+}
+
+#[cfg(target_os = "linux")]
+use crate::setup_cmd_test::{PtyKeys, drive_pty};
+
+/// `script(1)` running `create-app <args>` on a pty (stdin is the
+/// terminal), against `server` as API and `relay` as relay.
+#[cfg(target_os = "linux")]
+fn pty_create_app(home: &Path, server: &MockServer, relay: &str, args: &str) -> Command {
+  let mut cmd = Command::new("script");
+  cmd
+    .args([
+      "-qec",
+      &format!("{} create-app {args}", env!("CARGO_BIN_EXE_toolu-runner")),
+      "/dev/null",
+    ])
+    .env("HOME", home)
+    .env("TOOLU_RUNNER_HOME", home)
+    .env("TOOLU_RUNNER_GITHUB_API_URL", server.uri())
+    .env("TOOLU_RUNNER_RELAY_URL", relay)
+    .env("TOOLU_RUNNER_INSTALL_POLL_MS", "50")
+    .env("TOOLU_RUNNER_INSTALL_WAIT_MS", "60000")
+    .env_remove("NO_COLOR");
+  cmd
+}
+
+/// AC-2 / AC-5 / S2: the relay cannot be reached, so the user types `p` and
+/// pastes the code from the callback page: the conversion proceeds.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn headless_paste_converts_when_the_relay_is_unreachable() -> TestResult {
+  let home = tempfile::tempdir()?;
+  let server = MockServer::start().await;
+  let closed = std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?;
+  Mock::given(method("POST"))
+    .and(path("/app-manifests/c0de205paste/conversions"))
+    .respond_with(conversion("octocat", 9)?)
+    .expect(1)
+    .mount(&server)
+    .await;
+  mount_installations(&server, home.path(), installed_on("octocat", "all")?).await;
+
+  let mut cmd = pty_create_app(
+    home.path(),
+    &server,
+    &format!("http://{closed}"),
+    "--headless --account octocat",
+  );
+  let (code, output) = drive_pty(
+    &mut cmd,
+    &[
+      ("can't reach the relay", PtyKeys::Bytes(b"p\n")),
+      (
+        "Paste the code from the callback page",
+        PtyKeys::Bytes(b"c0de205paste\n"),
+      ),
+    ],
+  )?;
+  assert_eq!(code, Some(0), "{output}");
+  assert!(output.contains("p paste code \u{b7} c copy link"), "{output}");
+  assert!(
+    output.contains("App created \u{b7} toolu-runner-octocat \u{b7} App 424242"),
+    "{output}"
+  );
+  assert_eq!(saved(home.path())?.get("installation_id"), Some(&json!(1)));
+  assert_no_file_holds(home.path(), &["c0de205paste"])?;
+  Ok(())
+}
+
+/// AC-3 / S3: under `--no-relay` a pasted URL from another run is rejected
+/// and nothing is exchanged; this run's URL then converts once — and the
+/// relay never hears from the box.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn no_relay_rejects_a_wrong_state_and_never_contacts_the_relay() -> TestResult {
+  let home = tempfile::tempdir()?;
+  let server = MockServer::start().await;
+  mount_relay(&server).await;
+  Mock::given(method("POST"))
+    .and(path("/app-manifests/c0de205bad/conversions"))
+    .respond_with(conversion("octocat", 9)?)
+    .expect(0)
+    .mount(&server)
+    .await;
+  Mock::given(method("POST"))
+    .and(path("/app-manifests/c0de205good/conversions"))
+    .respond_with(conversion("octocat", 9)?)
+    .expect(1)
+    .mount(&server)
+    .await;
+  mount_installations(&server, home.path(), installed_on("octocat", "all")?).await;
+
+  let wrong = format!(
+    "http://127.0.0.1:50123/cb?code=c0de205bad&state={}\n",
+    relay_state("another setup run")
+  );
+  let right = |out: &str| -> Vec<u8> {
+    let payload = link_payload(out).unwrap_or_default();
+    format!(
+      "{}?code=c0de205good&state={}\n",
+      payload["manifest"]["redirect_url"].as_str().unwrap_or_default(),
+      payload["state"].as_str().unwrap_or_default()
+    )
+    .into_bytes()
+  };
+  let mut cmd = pty_create_app(
+    home.path(),
+    &server,
+    &server.uri(),
+    "--no-relay --account octocat",
+  );
+  let (code, output) = drive_pty(
+    &mut cmd,
+    &[
+      ("p paste URL", PtyKeys::Bytes(b"p\n")),
+      ("Paste the address-bar URL", PtyKeys::Bytes(wrong.as_bytes())),
+      ("different setup run", PtyKeys::From(&right)),
+    ],
+  )?;
+  assert_eq!(code, Some(0), "{output}");
+  assert!(
+    output.contains("\u{2715} That URL is from a different setup run. Nothing was exchanged."),
+    "{output}"
+  );
+  let payload = link_payload(&output)?;
+  let redirect = payload["manifest"]["redirect_url"].as_str().ok_or("redirect")?;
+  assert!(
+    redirect.starts_with("http://127.0.0.1:") && redirect.ends_with("/cb"),
+    "{redirect}"
+  );
+  let requests = server.received_requests().await.ok_or("recording off")?;
+  assert!(
+    requests.iter().all(|r| !r.url.path().starts_with("/gh/")),
+    "--no-relay contacted the relay"
+  );
+  assert_eq!(saved(home.path())?.get("installation_id"), Some(&json!(1)));
   Ok(())
 }

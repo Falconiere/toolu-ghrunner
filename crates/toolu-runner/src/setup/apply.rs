@@ -200,6 +200,8 @@ pub(crate) async fn persist_import(plan: &ResolvedPlan, home: &Path) -> Result<(
     host: "github.com".to_owned(),
     no_browser: true,
     force: false,
+    session: crate::cli::HeadlessFlags::default(),
+    expected_owner: None,
   };
   crate::create_app_cmd::cmd_create_app(&args, home)
     .await

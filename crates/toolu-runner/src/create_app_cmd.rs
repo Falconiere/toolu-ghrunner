@@ -9,7 +9,8 @@
 //! code→credentials exchange and the App calls live in [`wire::net`]; the
 //! `0600` persistence lives in [`config::app_store`]; the installation wait
 //! in [`crate::app_install`]; `--import` / `--app-id` in
-//! [`crate::app_import`]. This handler wires them together, guarding on
+//! [`crate::app_import`]; the headless (SSH) round trip in
+//! [`crate::app_headless`] (#205). This handler wires them together, guarding on
 //! host + an existing App file BEFORE checking the org, binding a socket,
 //! opening a browser, or making any other network call.
 
@@ -21,7 +22,7 @@ use std::time::Duration;
 use config::app_store::{self, StoredApp};
 use protocol::app_manifest::{self, AppManifest, ConversionResponse, ManifestTarget};
 use shared::{RunnerError, SecretMasker};
-use tokio::io::AsyncBufReadExt as _;
+use tokio::io::{AsyncBufReadExt as _, BufReader, Lines, Stdin};
 use wire::net::app_manifest::{CallbackServer, convert_manifest_code};
 use wire::net::github_app::find_org;
 
@@ -48,6 +49,17 @@ const INSTALL_TIMEOUT_EXIT: i32 = 1;
 /// Exit code of a cancelled wait (epic #199).
 const CANCELLED_EXIT: i32 = 130;
 
+/// Line input from this process's terminal.
+pub(crate) type StdinLines = Lines<BufReader<Stdin>>;
+
+/// Stdin's lines when it is a terminal, else `None` (unattended). One
+/// reader per run: a second one would lose the line the first is blocked on.
+pub(crate) fn stdin_lines() -> Option<StdinLines> {
+  std::io::stdin()
+    .is_terminal()
+    .then(|| BufReader::new(tokio::io::stdin()).lines())
+}
+
 /// What every `create-app` mode shares: the HTTP client, the API base, where
 /// the App is saved, and the masker its secrets are registered with.
 pub(crate) struct AppContext<'a> {
@@ -61,7 +73,7 @@ pub(crate) struct AppContext<'a> {
   pub(crate) api_base: String,
   /// Masks the App's secrets, JWTs and tokens in every printed error.
   pub(crate) masker: Mutex<SecretMasker>,
-  /// `--no-browser`.
+  /// `--no-browser`, or a headless session (no browser to launch).
   pub(crate) no_browser: bool,
 }
 
@@ -89,13 +101,14 @@ pub(crate) async fn cmd_create_app(
   if args.host != SUPPORTED_HOST {
     return Err(unsupported_host_error(&args.host).into());
   }
+  let headless = is_headless(args);
   let ctx = AppContext {
     home,
     dest: app_store::app_path(home),
     client: build_client()?,
     api_base: crate::config::github_api_url(),
     masker: Mutex::new(SecretMasker::new()),
-    no_browser: args.no_browser,
+    no_browser: args.no_browser || headless,
   };
   for (flag, login) in [("--org", &args.org), ("--account", &args.account)] {
     if let Some(login) = login {
@@ -108,19 +121,35 @@ pub(crate) async fn cmd_create_app(
   if ctx.dest.exists() && !args.force {
     return Err(existing_app_error(&ctx.dest).into());
   }
-  create_app(args, &ctx).await
+  create_app(args, &ctx, headless).await
+}
+
+/// Headless when a flag says so, else when the session looks it (SSH, or no
+/// display off macOS — the same guess as `setup`'s machine check).
+fn is_headless(args: &CreateAppArgs) -> bool {
+  args.session.forced().unwrap_or_else(|| {
+    crate::setup::machine::classify_headless(
+      crate::config::ssh_session(),
+      crate::config::display_present(),
+      cfg!(target_os = "macos"),
+    )
+  })
 }
 
 /// Create mode: org check, the manifest round trip, save at once, wait.
 async fn create_app(
   args: &CreateAppArgs,
   ctx: &AppContext<'_>,
+  headless: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
   let target = match &args.org {
     Some(org) => ManifestTarget::Org(check_org(ctx, org).await?),
     None => ManifestTarget::Personal,
   };
   let name = default_name(args);
+  if headless {
+    return crate::app_headless::create_headless(args, ctx, &target, &name).await;
+  }
 
   let state = app_manifest::new_state();
   let server = CallbackServer::bind(state).await?;
@@ -145,7 +174,7 @@ async fn create_app(
   println!("App created \u{b7} {} \u{b7} App {}", app.slug, app.app_id);
   println!("key saved to {} (0600)", ctx.dest.display());
   let account = app.owner.clone();
-  wait_and_record(ctx, app, &account, None).await
+  wait_and_record(ctx, app, &account, None, stdin_lines()).await
 }
 
 /// Reject a `--org` / `--account` value that cannot be a GitHub login (1–39
@@ -212,7 +241,8 @@ pub(crate) fn register_secrets(ctx: &AppContext<'_>, app: &StoredApp) {
 
 /// Print the install link, open it, wait for the installation on `account`,
 /// then record its id in `github-app.json`. `org` is the `--org` the wait
-/// targets, repeated in the resume command every failure prints.
+/// targets, repeated in the resume command every failure prints; `input` is
+/// the run's one terminal reader ([`stdin_lines`]).
 ///
 /// # Errors
 ///
@@ -224,6 +254,7 @@ pub(crate) async fn wait_and_record(
   mut app: StoredApp,
   account: &str,
   org: Option<&str>,
+  input: Option<StdinLines>,
 ) -> Result<(), Box<dyn std::error::Error>> {
   let url = app.install_url();
   let resume = format!(
@@ -243,7 +274,7 @@ pub(crate) async fn wait_and_record(
     timeout: crate::config::install_wait(),
     poll: crate::config::install_poll(),
   };
-  let outcome = run_wait(ctx, &target, timing, &url).await.map_err(|e| {
+  let outcome = run_wait(ctx, &target, timing, &url, input).await.map_err(|e| {
     ctx.fail(&format!(
       "{e} — the App is saved at {}; once that is fixed, run `{resume}`",
       ctx.dest.display()
@@ -288,6 +319,7 @@ async fn run_wait(
   target: &WaitTarget<'_>,
   timing: WaitTiming,
   url: &str,
+  input: Option<StdinLines>,
 ) -> Result<WaitOutcome, RunnerError> {
   let no_browser = ctx.no_browser;
   let open = move |link: &str| {
@@ -296,9 +328,6 @@ async fn run_wait(
     }
   };
   open(url);
-  let input = std::io::stdin()
-    .is_terminal()
-    .then(|| tokio::io::BufReader::new(tokio::io::stdin()).lines());
   let mut out = std::io::stdout();
   let io = WaitIo {
     url,
@@ -376,7 +405,7 @@ fn build_client() -> Result<reqwest::Client, RunnerError> {
 /// Assemble the persisted [`StoredApp`] from the conversion response,
 /// stamping `created_at` as RFC3339 now — the same mechanism
 /// `config::auth_store::StoredToken.issued_at` uses.
-fn build_stored_app(resp: ConversionResponse, host: String) -> StoredApp {
+pub(crate) fn build_stored_app(resp: ConversionResponse, host: String) -> StoredApp {
   StoredApp {
     host,
     app_id: resp.id,

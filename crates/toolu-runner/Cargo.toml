@@ -73,6 +73,9 @@ serde_json = "1"
 fastrand = "2"
 # `create-app` copies the install link to the clipboard over OSC 52 (#202).
 base64 = "0.22"
+# `create-app` over SSH (#205): the relay secret comes from the OS RNG
+# (0.2 is already in the lock through `rand_core`).
+getrandom = "0.2"
 # `setup` reports total memory to toolu.sh (#207); already built for `config`.
 sysinfo = "0.37"
 
