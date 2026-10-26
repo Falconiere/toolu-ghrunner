@@ -129,15 +129,19 @@ fn state(home: &Path) -> Vec<(String, Vec<u8>)> {
 }
 
 /// AC-5: the host token is in `credentials.json` and nowhere else — not in
-/// any other file under the home (logs included) nor in `printed`.
-fn assert_token_contained(home: &Path, printed: &str) {
-  assert!(!printed.contains(HOST_TOKEN), "token printed: {printed}");
+/// any other file under the home (logs included) nor in `printed`; each of
+/// `secrets` (a device code, an enrollment token) is nowhere at all.
+fn assert_secrets_contained(home: &Path, printed: &str, secrets: &[&str]) {
   let creds = format!("toolu/{ORG}/credentials.json");
-  for (rel, bytes) in files(home) {
-    if rel != creds {
+  for secret in secrets.iter().chain([&HOST_TOKEN]) {
+    assert!(!printed.contains(secret), "{secret} printed: {printed}");
+    for (rel, bytes) in files(home) {
+      if *secret == HOST_TOKEN && rel == creds {
+        continue;
+      }
       assert!(
-        !String::from_utf8_lossy(&bytes).contains(HOST_TOKEN),
-        "host token leaked into {rel}"
+        !String::from_utf8_lossy(&bytes).contains(secret),
+        "{secret} leaked into {rel}"
       );
     }
   }
@@ -262,7 +266,7 @@ async fn pairing() -> TestResult<()> {
     std::fs::metadata(&creds_path)?.permissions().mode() & 0o777,
     0o600
   );
-  assert_token_contained(home.path(), &printed);
+  assert_secrets_contained(home.path(), &printed, &["devicecode207-1"]);
   Ok(())
 }
 
@@ -350,8 +354,7 @@ async fn enroll() -> TestResult<()> {
     "{:?}",
     peer.paths()
   );
-  assert!(!printed.contains(ENROLL), "{printed}");
-  assert_token_contained(first.path(), &printed);
+  assert_secrets_contained(first.path(), &printed, &[ENROLL]);
 
   let (second, path_env) = home()?;
   let before = state(second.path());
@@ -422,7 +425,7 @@ async fn service_first_poll() -> TestResult<()> {
   }
   peer.wait_for("/runner/jobs/queued", 1).await?;
   stop(service, home.path(), "service").await?;
-  assert_token_contained(home.path(), &printed);
+  assert_secrets_contained(home.path(), &printed, &[]);
   Ok(())
 }
 
@@ -858,5 +861,232 @@ async fn keep_as_is_reports_a_revoked_machine() -> TestResult<()> {
     .filter(|(rel, _)| rel != "answers.txt")
     .collect();
   assert_eq!(after, before);
+  Ok(())
+}
+
+/// toolu.sh's live refusal of a `toolu-` label (`pair_reserved_label_400.json`).
+const RESERVED: &str = "labels in toolu's reserved \"toolu-\" namespace: toolu-gpu";
+
+/// A reserved label is refused (400) by both the pairing and the enrollment
+/// route: exit 2 naming toolu.sh's reason, nothing written, no machine.
+#[tokio::test]
+async fn a_reserved_label_is_refused_and_nothing_is_written() -> TestResult<()> {
+  let faults = Faults {
+    enroll_tokens: vec![ENROLL.to_owned()],
+    ..Faults::default()
+  };
+  let peer = Peer::start(&[], 600_000, faults, "true").await?;
+  let (home, path_env) = home()?;
+  let before = state(home.path());
+  for (args, what) in [
+    (vec!["--source", "toolu"], "start pairing"),
+    (vec!["--enroll-token", ENROLL], "enroll"),
+  ] {
+    let mut args = args;
+    args.extend(["--no-service", "--labels", "toolu-gpu"]);
+    let out = setup(home.path(), &path_env, &peer.server.uri(), &args, &[])?;
+    let printed = text(&out);
+    assert_eq!(out.status.code(), Some(2), "{args:?}: {printed}");
+    assert!(
+      printed.contains(&format!("toolu.sh refused to {what}: {RESERVED}")),
+      "{args:?}: {printed}"
+    );
+    assert_eq!(state(home.path()), before, "{args:?}: {printed}");
+  }
+  assert_eq!(peer.machines(), 0, "{:?}", peer.paths());
+  Ok(())
+}
+
+/// A re-run whose labels toolu.sh refuses (PATCH 400) exits 2 and keeps the
+/// stored registration as it was.
+#[tokio::test]
+async fn a_refused_label_update_keeps_the_registration() -> TestResult<()> {
+  let peer = Peer::start(&[], 600_000, Faults::default(), "true").await?;
+  let (home, path_env) = home()?;
+  write_machine(home.path(), &peer.server.uri(), HOST_TOKEN, "")?;
+  let before = state(home.path());
+  let out = setup(
+    home.path(),
+    &path_env,
+    &peer.server.uri(),
+    &["--source", "toolu", "--no-service", "--labels", "toolu-gpu"],
+    &[],
+  )?;
+  let printed = text(&out);
+  assert_eq!(out.status.code(), Some(2), "{printed}");
+  assert!(
+    printed.contains(&format!(
+      "toolu.sh refused to update the machine: {RESERVED}"
+    )),
+    "{printed}"
+  );
+  assert_eq!(state(home.path()), before, "{printed}");
+  Ok(())
+}
+
+/// Enrollment against toolu.sh without self-hosted machines (404) or with a
+/// reply outside the contract exits 1, writing nothing.
+#[tokio::test]
+async fn enrollment_without_machines_or_with_a_bad_reply_exits_1() -> TestResult<()> {
+  let off = wiremock::MockServer::start().await;
+  let malformed = wiremock::MockServer::start().await;
+  wiremock::Mock::given(wiremock::matchers::method("POST"))
+    .and(wiremock::matchers::path("/runner/enroll"))
+    .respond_with(wiremock::ResponseTemplate::new(200).set_body_string("{\"ok\":true}"))
+    .mount(&malformed)
+    .await;
+  let (home, path_env) = home()?;
+  let before = state(home.path());
+  for (api, want) in [
+    (
+      off.uri(),
+      format!(
+        "toolu.sh does not offer self-hosted machines at {} (enroll: 404)",
+        off.uri()
+      ),
+    ),
+    (malformed.uri(), "could not enroll with toolu.sh".to_owned()),
+  ] {
+    let out = setup(
+      home.path(),
+      &path_env,
+      &api,
+      &["--enroll-token", ENROLL, "--no-service"],
+      &[],
+    )?;
+    let printed = text(&out);
+    assert_eq!(out.status.code(), Some(1), "{api}: {printed}");
+    assert!(printed.contains(&want), "{api}: {printed}");
+    assert_eq!(state(home.path()), before, "{api}: {printed}");
+  }
+  Ok(())
+}
+
+/// A pairing poll answered outside the contract (an unknown `error`, or a
+/// 404) exits 1 and saves nothing.
+#[tokio::test]
+async fn a_pairing_poll_outside_the_contract_exits_1() -> TestResult<()> {
+  for (step, want) in [
+    (
+      "server_error",
+      "toolu.sh refused the pairing poll: server_error",
+    ),
+    (
+      "404",
+      "polling the pairing failed: toolu.sh answered 404 (no such job, or self-hosted machines \
+       are off)",
+    ),
+  ] {
+    let faults = Faults {
+      pair_scripts: vec![vec![step]],
+      ..Faults::default()
+    };
+    let peer = Peer::start(&[], 600_000, faults, "true").await?;
+    let (home, path_env) = home()?;
+    let before = state(home.path());
+    let out = setup(
+      home.path(),
+      &path_env,
+      &peer.server.uri(),
+      &["--source", "toolu", "--no-service"],
+      &[],
+    )?;
+    let printed = text(&out);
+    assert_eq!(out.status.code(), Some(1), "{step}: {printed}");
+    assert!(printed.contains(want), "{step}: {printed}");
+    assert_eq!(state(home.path()), before, "{step}: {printed}");
+  }
+  Ok(())
+}
+
+/// A machine revoked between approval and its first `GET /runner/host`
+/// exits 2 with the remove + setup fix.
+#[tokio::test]
+async fn a_machine_revoked_right_after_pairing_names_the_fix() -> TestResult<()> {
+  let faults = Faults {
+    pair_scripts: vec![vec!["approved"]],
+    host_fault: Some(HostFault::Revoked),
+    ..Faults::default()
+  };
+  let peer = Peer::start(&[], 600_000, faults, "true").await?;
+  let (home, path_env) = home()?;
+  let out = setup(
+    home.path(),
+    &path_env,
+    &peer.server.uri(),
+    &["--source", "toolu", "--no-service"],
+    &[],
+  )?;
+  let printed = text(&out);
+  assert_eq!(out.status.code(), Some(2), "{printed}");
+  let fix = format!(
+    "toolu-runner remove --config {} && toolu-runner setup --source toolu",
+    machine_dir(home.path()).join("config.toml").display()
+  );
+  assert!(printed.contains(&fix), "{printed}");
+  assert_secrets_contained(home.path(), &printed, &["devicecode207-1"]);
+  Ok(())
+}
+
+/// Remove in the re-run menu revokes a toolu.sh machine with its own host
+/// token (`DELETE /runner/host`, no GitHub bearer) and deletes its state.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn the_menu_removes_a_toolu_machine() -> TestResult<()> {
+  let peer = Peer::start(&[], 600_000, Faults::default(), "true").await?;
+  let (home, path_env) = home()?;
+  let config = write_machine(home.path(), &peer.server.uri(), HOST_TOKEN, "")?;
+  let (code, output) = crate::setup_cmd_test::run_pty_env(
+    home.path(),
+    &path_env,
+    &[],
+    &[
+      ("What would you like to do?", b"\x1b[B\x1b[B\x1b[B\r"),
+      ("Which runner?", b"\r"),
+    ],
+    &[("TOOLU_RUNNER_TOKEN", "")],
+  )?;
+  assert_eq!(code, Some(0), "output: {output}");
+  let deletes: Vec<_> = peer
+    .seen_ending("/runner/host")
+    .into_iter()
+    .filter(|s| s.method == "DELETE")
+    .collect();
+  assert_eq!(deletes.len(), 1, "{:?}", peer.paths());
+  assert_eq!(
+    deletes.first().and_then(|s| s.authorization.as_deref()),
+    Some(format!("Bearer {HOST_TOKEN}").as_str())
+  );
+  assert!(!config.exists(), "{output}");
+  assert!(!config.with_file_name("credentials.json").exists());
+  Ok(())
+}
+
+/// Reconfigure in the re-run menu refreshes a toolu.sh machine with
+/// `PATCH /runner/host`; it never pairs again.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn the_menu_reconfigures_a_toolu_machine() -> TestResult<()> {
+  let peer = Peer::start(&[], 600_000, Faults::default(), "true").await?;
+  let (home, path_env) = home()?;
+  write_machine(home.path(), &peer.server.uri(), HOST_TOKEN, "")?;
+  let (code, output) = crate::setup_cmd_test::run_pty_env(
+    home.path(),
+    &path_env,
+    &["--no-service"],
+    &[
+      ("What would you like to do?", b"\x1b[B\x1b[B\r"),
+      ("Which runner?", b"\r"),
+    ],
+    &[("TOOLU_RUNNER_TOKEN", "")],
+  )?;
+  assert_eq!(code, Some(0), "output: {output}");
+  assert!(
+    output.contains(&format!("updated: host {HOST_ID} · workspace {WORKSPACE}")),
+    "{output}"
+  );
+  let methods: Vec<String> = peer.seen().into_iter().map(|s| s.method).collect();
+  assert_eq!(methods, ["PATCH"], "{:?}", peer.paths());
+  assert!(peer.seen_ending("/runner/pair").is_empty());
   Ok(())
 }

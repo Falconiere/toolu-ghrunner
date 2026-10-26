@@ -80,9 +80,13 @@ async fn a_failed_revoke_keeps_local_state() -> TestResult<()> {
     &["remove", "--config", &config.to_string_lossy()],
   )?;
   let printed = text(&out);
-  assert!(!out.status.success(), "{printed}");
+  assert_eq!(out.status.code(), Some(2), "{printed}");
   assert!(config.exists(), "{printed}");
   assert!(config.with_file_name("credentials.json").exists());
+  assert!(
+    printed.contains("revoking the machine on toolu.sh failed: "),
+    "{printed}"
+  );
   assert!(printed.contains("Nothing local was deleted"), "{printed}");
   Ok(())
 }
@@ -121,12 +125,13 @@ async fn status_prints_the_toolu_machine() -> TestResult<()> {
   let printed = text(&out);
   assert!(out.status.success(), "{printed}");
   for want in [
-    "source:    toolu.sh (http://127.0.0.1:9)",
-    ORG,
-    HOST_ID,
-    "host token",
+    "source:    toolu.sh (http://127.0.0.1:9)".to_owned(),
+    format!("org:       {ORG}"),
+    format!("host_id:   {HOST_ID}"),
+    "labels:    []".to_owned(),
+    "(host token)".to_owned(),
   ] {
-    assert!(printed.contains(want), "missing {want}: {printed}");
+    assert!(printed.contains(&want), "missing {want}: {printed}");
   }
   for unwanted in ["jit_cfg", "login:", "runner_id", HOST_TOKEN] {
     assert!(!printed.contains(unwanted), "has {unwanted}: {printed}");
@@ -189,6 +194,12 @@ async fn doctor_fails_a_revoked_machine_and_skips_offline() -> TestResult<()> {
   let printed = text(&offline);
   assert_eq!(peer.seen().len(), before, "offline sent a request");
   assert!(printed.contains("toolu.sh ("), "{printed}");
+  assert!(
+    printed
+      .lines()
+      .any(|line| line.contains("SKIP") && line.contains("host") && line.ends_with("offline")),
+    "no offline host row: {printed}"
+  );
   Ok(())
 }
 
@@ -227,8 +238,12 @@ async fn a_missing_host_token_keeps_local_state() -> TestResult<()> {
     &["remove", "--config", &config.to_string_lossy()],
   )?;
   let printed = text(&out);
-  assert!(!out.status.success(), "{printed}");
+  assert_eq!(out.status.code(), Some(2), "{printed}");
   assert!(config.exists(), "{printed}");
+  assert!(
+    printed.contains("cannot revoke the machine on toolu.sh: cannot read the host token ("),
+    "{printed}"
+  );
   assert!(printed.contains("Nothing local was deleted"), "{printed}");
   assert!(peer.seen().is_empty(), "{:?}", peer.paths());
   Ok(())

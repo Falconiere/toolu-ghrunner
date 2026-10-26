@@ -239,6 +239,11 @@ async fn not_found_rate_limit_server_error_and_other_statuses_are_classified() {
     server.await.expect("server");
     assert!(check(&err), "status {status}: {err:?}");
   }
+  // `/runner/host` and the pairing routes share the variant: no job wording.
+  assert_eq!(
+    TooluError::NotFound.to_string(),
+    "toolu.sh answered 404 (no such job, or self-hosted machines are off)"
+  );
 }
 
 #[tokio::test]

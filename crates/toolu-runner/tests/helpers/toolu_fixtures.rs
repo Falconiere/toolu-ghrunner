@@ -31,6 +31,10 @@ pub const ORG: &str = "org_test";
 /// The live-captured 401 (`fixtures/toolu_sh/invalid_token_401.json`).
 const INVALID_TOKEN_401: &str = include_str!("../fixtures/toolu_sh/invalid_token_401.json");
 
+/// The live-captured reserved-label 400 (`fixtures/toolu_sh/pair_reserved_label_400.json`,
+/// a pairing that asked for `toolu-gpu`).
+const RESERVED_LABEL_400: &str = include_str!("../fixtures/toolu_sh/pair_reserved_label_400.json");
+
 /// Faults the peer injects.
 #[derive(Default, Clone)]
 pub struct Faults {
@@ -57,8 +61,8 @@ pub struct Faults {
   pub deadline_ms: Option<i64>,
   /// #207 pairing: what each `POST /runner/pair/token` of the n-th pairing
   /// answers, in order (`authorization_pending`, `slow_down`,
-  /// `access_denied`, `expired_token`, `approved`, or `503` for a transient
-  /// failure); the last entry
+  /// `access_denied`, `expired_token`, `approved`, any other `error`, `503`
+  /// for a transient failure, or `404`); the last entry
   /// repeats, and a poll after the grant answers `expired_token`.
   pub pair_scripts: Vec<Vec<&'static str>>,
   /// #207: the `interval` a pairing asks for, in seconds (default 1).
@@ -109,6 +113,8 @@ struct State {
   seen: Vec<Seen>,
   /// The live 401 capture's body.
   revoked_body: String,
+  /// The live reserved-label 400 capture's body.
+  reserved_body: String,
   /// #207: pairings started so far.
   pairings: usize,
   /// #207: token polls of the current pairing.
@@ -156,7 +162,8 @@ impl Peer {
       failed_completes: 0,
       jits: Vec::new(),
       seen: Vec::new(),
-      revoked_body: invalid_token_body()?,
+      revoked_body: capture_body(INVALID_TOKEN_401, "invalid_token_401.json")?,
+      reserved_body: capture_body(RESERVED_LABEL_400, "pair_reserved_label_400.json")?,
       pairings: 0,
       pair_polls: 0,
       delivered: false,
@@ -232,14 +239,14 @@ fn now_ms() -> Option<u64> {
     .and_then(|d| u64::try_from(d.as_millis()).ok())
 }
 
-/// The live 401 capture's body; an error when the capture lacks one.
-fn invalid_token_body() -> TestResult<String> {
-  let capture: Value = serde_json::from_str(INVALID_TOKEN_401)?;
+/// A live capture's response body; an error when the capture lacks one.
+fn capture_body(raw: &str, name: &str) -> TestResult<String> {
+  let capture: Value = serde_json::from_str(raw)?;
   capture
     .pointer("/response/body")
     .and_then(Value::as_str)
     .map(str::to_owned)
-    .ok_or_else(|| "fixtures/toolu_sh/invalid_token_401.json has no /response/body".into())
+    .ok_or_else(|| format!("fixtures/toolu_sh/{name} has no /response/body").into())
 }
 
 /// A 500 the test sees in [`Peer::paths`] when the fixture itself broke.
@@ -304,6 +311,7 @@ fn route(
       (401, state.revoked_body.clone())
     },
     ("GET", "host") => (200, host_body(state)),
+    ("PATCH", "host") if reserved(sent) => (400, state.reserved_body.clone()),
     ("PATCH", "host") => {
       if let Some(labels) = sent.get("labels").and_then(Value::as_array) {
         state.host_labels = labels
@@ -407,6 +415,9 @@ pub const WORKSPACE: &str = "Example team";
 
 /// `POST /runner/pair`: a fresh pairing with the configured interval.
 fn pair(state: &mut State, sent: &Value) -> (u16, String) {
+  if reserved(sent) {
+    return (400, state.reserved_body.clone());
+  }
   state.pairings += 1;
   state.pair_polls = 0;
   state.delivered = false;
@@ -442,6 +453,9 @@ fn pair_token(state: &mut State, sent: &Value) -> (u16, String) {
   if step == "503" {
     return (503, json!({ "error": "unavailable" }).to_string());
   }
+  if step == "404" {
+    return (404, json!({ "error": "not found" }).to_string());
+  }
   if step != "approved" {
     return (400, json!({ "error": step }).to_string());
   }
@@ -449,8 +463,12 @@ fn pair_token(state: &mut State, sent: &Value) -> (u16, String) {
   (200, grant(state))
 }
 
-/// `POST /runner/enroll`: a known, unused token creates a machine once.
+/// `POST /runner/enroll`: a known, unused token creates a machine once; a
+/// reserved label is refused first (the token stays unused).
 fn enroll(state: &mut State, sent: &Value) -> (u16, String) {
+  if reserved(sent) {
+    return (400, state.reserved_body.clone());
+  }
   let token = sent
     .get("enroll_token")
     .and_then(Value::as_str)
@@ -473,6 +491,14 @@ fn grant(state: &mut State) -> String {
     "labels": state.host_labels,
   })
   .to_string()
+}
+
+/// Whether the request asks for a label in toolu's reserved `toolu-`
+/// namespace (answered with the live 400, which names `toolu-gpu`).
+fn reserved(sent: &Value) -> bool {
+  labels_of(sent)
+    .iter()
+    .any(|label| label.starts_with("toolu-"))
 }
 
 /// The request's `labels`.
@@ -517,7 +543,7 @@ fn job_id(path: &str) -> String {
     .to_owned()
 }
 
-/// Write `<home>/toolu/<ORG>/{config.toml,credentials.json}` as #207 will:
+/// Write `<home>/toolu/<ORG>/{config.toml,credentials.json}` as `setup` does:
 /// `[provider] kind = "toolu"` at `api_url`, no GitHub fields, the host token
 /// as `access_token`. `extra` is appended to the top-level keys.
 pub fn write_machine(home: &Path, api_url: &str, token: &str, extra: &str) -> TestResult<PathBuf> {

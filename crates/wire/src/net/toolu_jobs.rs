@@ -30,7 +30,8 @@ pub enum TooluError {
   /// 409: the claim was refused or is no longer this machine's; carries the
   /// raw body.
   Conflict(String),
-  /// 404: no such job.
+  /// 404: the route does not know what it names (a job no longer
+  /// claimable), or toolu.sh runs without self-hosted machines.
   NotFound,
   /// 400: toolu.sh refused the request's input (a reserved label, a bad
   /// field); carries the body's `error` (or the raw body).
@@ -46,7 +47,9 @@ impl std::fmt::Display for TooluError {
     match self {
       Self::Revoked(why) => write!(f, "toolu.sh rejected the host token (401: {why})"),
       Self::Conflict(body) => write!(f, "toolu.sh refused the claim (409: {body})"),
-      Self::NotFound => f.write_str("toolu.sh does not know the job (404)"),
+      Self::NotFound => {
+        f.write_str("toolu.sh answered 404 (no such job, or self-hosted machines are off)")
+      },
       Self::Refused(why) => write!(f, "toolu.sh refused the request (400: {why})"),
       Self::Transient(why) | Self::Protocol(why) => f.write_str(why),
     }
@@ -175,7 +178,7 @@ impl TooluClient {
   /// # Errors
   ///
   /// [`TooluError`] by status; a refused label set is a 400
-  /// [`TooluError::Protocol`] carrying toolu.sh's `error`.
+  /// [`TooluError::Refused`] carrying toolu.sh's `error`.
   pub async fn update_host(&self, patch: &HostPatch) -> Result<HostInfo, TooluError> {
     let url = self.url(&["runner", "host"])?;
     let request = self.client.patch(url).json(patch);
