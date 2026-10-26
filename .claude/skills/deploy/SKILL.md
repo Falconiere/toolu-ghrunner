@@ -30,7 +30,10 @@ release and skips the CI run.
   deploy in this conversation AND said yes to the dry-run plan in step 4.
   Earlier approvals (another tag, another session) do not count.
 - **Never bypass a failed check.** No `--no-verify`, no editing the script to
-  skip the gate, no deleting a release or tag to "retry clean". Stop and report.
+  skip a check, no deleting a release or tag to "retry clean". Stop and report.
+- **No tests run in a deploy.** The script consults no CI run and runs no test
+  gate (the user's choice: it exists for when Actions cannot run); say so in
+  step 4 so the yes is given knowing it.
 - **The script's confirm prompt reads `/dev/tty`, which you do not have.**
   Pass `--yes` only after the user's explicit yes in chat (step 4).
 - One deploy at a time; never run two in parallel (they share `dist/`).
@@ -64,8 +67,6 @@ The release also needs (the script re-checks all of these and stops on the first
 git status --porcelain                      # must be empty
 git fetch -q origin main && git merge-base --is-ancestor HEAD origin/main
 git ls-remote --tags origin refs/tags/<tag> # must print nothing (else release.yml owns it)
-gh run list -R Falconiere/toolu-ghrunner --workflow ci.yml --commit "$(git rev-parse HEAD)" --status success
-                                            # must list a run: CI is the gate, there is no local one
 git config user.email                       # stable tags: the tap commit's identity
 ```
 
@@ -88,7 +89,8 @@ bad argument (message says which), exit 1 a version mismatch.
 ### 4. Confirm
 
 Show the user, in a short list: tag, the three image refs, the release +
-Homebrew lines and the notes source (the dry run's `notes:` line). Wait for
+Homebrew lines, the notes source (the dry run's `notes:` line), the commit
+being released, and that no tests run. Wait for
 an explicit yes. Anything else → stop.
 
 ### 5. Run (long: 4 builds + 3 image pushes, often 30–60 min)

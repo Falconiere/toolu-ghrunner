@@ -14,13 +14,15 @@
 #            Falconiere/homebrew-tap. Creating the release creates the tag;
 #            release.yml sees the release already exists and skips its own run.
 #
+# Everything runs here: no GitHub Actions run is required or consulted.
+#
 # Requires of the release: tag == Cargo version, the tag absent on origin, a
-# clean tree whose HEAD is on origin/main with a passing ci.yml run, a
-# CHANGELOG.md section for the version (the release notes), push access to
-# the tap; it asks you to type the tag before pushing. --change-log instead
-# writes the notes from the commits since the last tag with git-cliff
-# (cliff.toml); CHANGELOG.md is not edited. <v> is the tag minus its leading
-# 'v'. The digest-pinned refs toolu.sh needs are printed at the end.
+# clean tree whose HEAD is on origin/main, a CHANGELOG.md section for the
+# version (the release notes), push access to the tap; it asks you to type
+# the tag before pushing. --change-log instead writes the notes from the
+# commits since the last tag with git-cliff (cliff.toml); CHANGELOG.md is not
+# edited. <v> is the tag minus its leading 'v'. The digest-pinned refs
+# toolu.sh needs are printed at the end.
 #
 # Usage:
 #   scripts/deploy.sh --tag v0.13.0 [--yes] [--change-log]
@@ -92,6 +94,8 @@ echo "    images: $runner_ref, $docker_ref, $macos_ref"
 echo "    GitHub release $TAG on $REPO$([[ $stable -eq 1 ]] && echo " + Homebrew formula in $TAP_REPO" || echo ' (prerelease, no Homebrew)')"
 echo "    notes: $([[ $CHANGE_LOG -eq 1 ]] && echo "git-cliff, commits since the last tag" || echo "CHANGELOG.md [$version]")"
 
+# The commit checked against origin/main below; the release and labels name it.
+head="$(git rev-parse HEAD)"
 notes="$(mktemp)"
 tap="$(mktemp -d)"
 trap 'rm -f "$notes"; rm -rf "$tap"' EXIT
@@ -115,7 +119,6 @@ if [[ $DRY_RUN -eq 0 ]]; then
   [[ -z "$(git status --porcelain)" ]] || die "working tree is dirty; a release ships a committed tree"
   git fetch -q origin main
   git merge-base --is-ancestor HEAD origin/main || die "HEAD is not on origin/main; merge it first"
-  head="$(git rev-parse HEAD)"
   # The tag (and with it any release) must not exist yet: release-tag.sh may
   # already have pushed it, and release.yml then owns this version.
   # shortcut: no resume — a deploy that created the release but failed on
@@ -123,10 +126,6 @@ if [[ $DRY_RUN -eq 0 ]]; then
   if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
     die "tag $TAG already exists on origin; release.yml owns it. (Finishing a deploy whose Homebrew step failed: gh release download $TAG -R $REPO -p SHA256SUMS -D <dir>; scripts/commit-homebrew-formula.sh $TAG <dir>/SHA256SUMS <$TAP_REPO clone>; git -C <clone> push)"
   fi
-  # The gate CI already ran on this commit, on Linux and macOS, instead of
-  # a local re-run that would only cover this Mac.
-  passed="$(gh run list -R "$REPO" --workflow ci.yml --commit "$head" --status success --json databaseId -q length)"
-  [[ $passed -gt 0 ]] || die "ci.yml has not passed on $head yet (gh run list -R $REPO --workflow ci.yml --commit $head)"
   if [[ $CHANGE_LOG -eq 1 ]]; then
     command -v git-cliff >/dev/null 2>&1 || die "'git-cliff' not found (--change-log)"
     git fetch -q --tags origin
@@ -182,11 +181,14 @@ fi
 if [[ $DRY_RUN -eq 0 ]] && git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
   die "tag $TAG appeared on origin during the build; release.yml owns it. Nothing was pushed."
 fi
+# A checkout or commit during the build means the binaries are not $head's.
+[[ $DRY_RUN -eq 1 || "$(git rev-parse HEAD)" == "$head" ]] \
+  || die "HEAD moved during the build (was $head); nothing was pushed, rerun from a clean checkout"
 
 echo "==> push images"
 # The labels release-image.yml / release-macos-image.yml stamp.
 labels=(--label "org.opencontainers.image.source=https://github.com/$REPO"
-  --label "org.opencontainers.image.revision=$(git rev-parse HEAD)"
+  --label "org.opencontainers.image.revision=$head"
   --label "org.opencontainers.image.version=$TAG")
 run docker buildx build --platform linux/amd64,linux/arm64 --build-arg RUNNER_BINARY=prebuilt \
   "${labels[@]}" --target runner -t "$runner_ref" --push .
@@ -195,7 +197,7 @@ run docker buildx build --platform linux/amd64,linux/arm64 --build-arg RUNNER_BI
 run docker buildx build --platform linux/arm64 -f Dockerfile.macos "${labels[@]}" -t "$macos_ref" --push .
 
 echo "==> GitHub release"
-run env GH_REPO="$REPO" bash scripts/publish-release.sh "$TAG" "$rel" "$notes" "$(git rev-parse HEAD)"
+run env GH_REPO="$REPO" bash scripts/publish-release.sh "$TAG" "$rel" "$notes" "$head"
 if [[ $stable -eq 1 ]]; then
   echo "==> Homebrew formula"
   # The clone is as old as the build; other projects' releases push to the tap.

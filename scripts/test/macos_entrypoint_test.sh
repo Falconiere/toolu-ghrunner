@@ -28,7 +28,12 @@ if [[ ! -x "$SRC" ]]; then
   fail=1
 fi
 
-TMPROOT="$(mktemp -d)"
+# Physical path: macOS mktemp gives /var/folders/…, a symlink the entrypoint
+# resolves to /private/var/…, which every path comparison below would miss.
+# Each step exits on failure: an empty TMPROOT would make the cleanup trap
+# `rm -rf` the current directory (bash < 5.3 treats `cd ""` as a no-op).
+tmp="$(mktemp -d)" || exit 1
+TMPROOT="$(cd "$tmp" && pwd -P)" || exit 1
 trap 'rm -rf "$TMPROOT"' EXIT
 
 # image_tree <name> [node_default] — a materialised image filesystem: the
@@ -275,6 +280,8 @@ chmod 700 "$TMPROOT"
 # A directory in place of the marker file is the reproducible stand-in for an
 # I/O failure: `head` fails, and its reason must reach the warning rather than
 # /dev/null, or an operator sees only "no node on PATH" with no cause.
+# GNU head says "Is a directory"; macOS 27's says only "Error reading <path>",
+# so the check is that head's own message sits inside the warning.
 root="$(image_tree unreadablemarker 24.21.0)"
 rm -f "$root/node/default"
 mkdir -p "$root/node/default"
@@ -282,7 +289,7 @@ home="$TMPROOT/home-unreadablemarker"
 out="$(PATH=/usr/bin:/bin TOOLU_RUNNER_HOME="$home" TOOLU_JITCONFIG=x "$root/entrypoint" 2>&1)"
 check "an unreadable marker still boots the job" "argv=boot" "$(grep '^argv=' <<<"$out")"
 check "…and adds no node to PATH"                "node=none" "$(grep '^node=' <<<"$out")"
-if grep -qE "(could not read .*node/default|node/default is unusable)" <<<"$out" && grep -qi "directory" <<<"$out"; then
+if grep -qE "(could not read .*node/default \(|node/default is unusable \(').*head: .*(Is a directory|Error reading)" <<<"$out"; then
   echo "ok: the read failure is reported with its reason"
 else
   echo "FAIL: expected the head error inside the warning; got: $out" >&2
