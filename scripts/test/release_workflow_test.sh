@@ -39,6 +39,7 @@ want "build needs verify"              "needs: verify"
 want "verify needs the published check" "needs: published"
 want "verify skips a published release" "if: needs\.published\.outputs\.exists != 'true'"
 want "published check reads the release" 'gh release view "\$\{GITHUB_REF_NAME\}"'
+want "only 'not found' means unpublished" '"[$]err" == \*"release not found"\*'
 want "publish needs build"             "needs: build"
 # --- gate (verify) ---
 want "asserts tag == Cargo version"    "assert-version\.sh"

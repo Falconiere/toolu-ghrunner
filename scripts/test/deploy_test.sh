@@ -35,6 +35,9 @@ has "builds linux in the release rust image" "$rel" "rust:1.94.1-bookworm bash s
 has "stages the image binaries from the tarballs" "$rel" "tar -xzf dist/release/toolu-runner-darwin-arm64.tar.gz -O toolu-runner > dist/toolu-runner-darwin-arm64"
 has "publishes with the shared recipe" "$rel" "+ env GH_REPO=Falconiere/toolu-ghrunner bash scripts/publish-release.sh v$version dist/release"
 has "commits the Homebrew formula with the shared recipe" "$rel" "+ bash scripts/commit-homebrew-formula.sh v$version dist/release/SHA256SUMS"
+has "refreshes the tap clone before committing" "$rel" "pull -q --ff-only"
+has "starts from an empty dist/release" "$rel" "+ rm -rf dist/release"
+has "stamps the OCI version label" "$rel" "--label org.opencontainers.image.version=v$version"
 lacks "re-runs no local gate (it requires CI green on HEAD)" "$rel" "tools/check.sh"
 lacks "never moves :latest" "$rel" ":latest"
 lacks "pushes no -dev tag" "$rel" "-dev"
@@ -63,7 +66,7 @@ STUB
 cat >"$stub/cargo" <<'STUB'
 #!/bin/sh
 echo "$(basename "$0") $*" >>"$CALLS"
-[ "$1" != run ]
+[ "$1" != run ] || [ -n "${DOCKER_SEES:-}" ]
 STUB
 cp "$stub/cargo" "$stub/rustup"
 cp "$stub/cargo" "$stub/docker"
@@ -75,5 +78,14 @@ has "an unshared repo path names the Colima fix" "$unseen" "Docker cannot see $P
 has "the preflight mounts the repo" "$(cat "$CALLS")" "docker run --rm -v $PWD:/src rust:1.94.1-bookworm test -f /src/Cargo.toml"
 lacks "an unshared repo path builds nothing" "$unseen" "==> build"
 lacks "an unshared repo path never runs rustup" "$(cat "$CALLS")" "rustup"
+
+# --- preflight: a cargo that is not rust-toolchain.toml's (the stub prints no
+# version, like a Homebrew cargo ahead of ~/.cargo/bin) stops before any build ---
+: >"$CALLS"
+unpinned="$(DOCKER_SEES=1 PATH="$stub:$PATH" bash "$SCRIPT" --tag "v$version" 2>&1)"
+got=$?
+if [[ $got -eq 2 ]]; then echo "ok: an unpinned cargo exits 2"; else echo "FAIL: an unpinned cargo exits 2 (exit $got)" >&2; fail=1; fi
+has "an unpinned cargo names the toolchain" "$unpinned" "cargo is not the pinned"
+lacks "an unpinned cargo builds nothing" "$unpinned" "==> build"
 
 exit "$fail"

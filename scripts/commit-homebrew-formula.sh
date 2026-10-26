@@ -18,7 +18,7 @@ tag="${1:-}"
 sums="${2:-}"
 tap="${3:-}"
 
-if [[ -z "$tag" || ! -f "$sums" || ! -d "$tap/.git" ]]; then
+if [[ -z "$tag" || ! -f "$sums" || ! -e "$tap/.git" ]]; then
   echo "commit-homebrew-formula: usage: commit-homebrew-formula.sh <tag> <sha256sums_path> <tap_dir>" >&2
   exit 2
 fi

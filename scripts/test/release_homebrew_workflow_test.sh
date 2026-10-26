@@ -35,8 +35,8 @@ COMMIT_SH="scripts/commit-homebrew-formula.sh"
 # Asserts a pattern is ABSENT. Guards against a regression re-introducing a
 # construct, which `want` cannot express.
 reject() {
-  local desc="$1" pat="$2"
-  if grep -Eq -- "$pat" "$WF"; then
+  local desc="$1" pat="$2" file="${3:-$WF}"
+  if grep -Eq -- "$pat" "$file"; then
     echo "FAIL: $desc — pattern found but must not be: $pat" >&2
     fail=1
   else
@@ -109,12 +109,7 @@ want "skips an unchanged formula"         'git -C "[$]tap" diff --cached --quiet
 # `git diff --quiet` (no --cached) compares the WORKTREE, which cannot see an
 # untracked file — that is the bug. Reject the bare form.
 reject "no bare worktree diff"            "git diff --quiet"
-if grep -Eq -- "git( -C [^ ]+)? diff --quiet" "$COMMIT_SH"; then
-  echo "FAIL: $COMMIT_SH uses a bare worktree diff, which cannot see a new formula" >&2
-  fail=1
-else
-  echo "ok: no bare worktree diff in $COMMIT_SH"
-fi
+reject "no bare worktree diff in $COMMIT_SH" "git( -C [^ ]+)? diff --quiet" "$COMMIT_SH"
 if awk '
   /^git -C "[$]tap" add Formula\/toolu-runner\.rb$/ { staged = 1 }
   staged && /diff --cached --quiet/                 { ordered = 1 }

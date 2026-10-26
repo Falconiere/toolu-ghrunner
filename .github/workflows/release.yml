@@ -38,7 +38,8 @@ jobs:
   # re-push the deploy's images (moving their tags) and fail to publish. A
   # tag pushed by release-tag.sh has no release yet, so it runs as before.
   # ("Re-run all jobs" on a published tag therefore skips too; re-run failed
-  # jobs instead.)
+  # jobs instead.) Only gh's "release not found" means no release: any other
+  # error fails the run rather than re-releasing over a deploy.
   published:
     runs-on: ubuntu-24.04
     outputs:
@@ -49,11 +50,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view "${GITHUB_REF_NAME}" -R "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+          if err="$(gh release view "${GITHUB_REF_NAME}" -R "${GITHUB_REPOSITORY}" 2>&1 >/dev/null)"; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
             echo "::notice::release ${GITHUB_REF_NAME} already exists (scripts/deploy.sh) — skipping the CI release"
-          else
+          elif [[ "$err" == *"release not found"* ]]; then
             echo "exists=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::cannot tell whether release ${GITHUB_REF_NAME} exists: ${err}"
+            exit 1
           fi
 
   verify:

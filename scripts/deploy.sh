@@ -106,6 +106,11 @@ if [[ $DRY_RUN -eq 0 ]]; then
   # and mounts anything else as an empty dir, found only after the darwin builds.
   docker run --rm -v "$PWD:/src" "$RUST_IMAGE" test -f /src/Cargo.toml \
     || die "Docker cannot see $PWD; share it with the Docker VM (Colima: add it to mounts in ~/.colima/default/colima.yaml, then colima restart; Docker Desktop: Settings > Resources > File sharing)"
+  # The darwin builds must use rust-toolchain.toml's compiler, as CI does; a
+  # cargo that ignores it (Homebrew's, ahead of ~/.cargo/bin) ships another.
+  rust="$(awk -F'"' '/^channel/ {print $2; exit}' rust-toolchain.toml)"
+  [[ "$(cargo --version)" == "cargo $rust "* ]] \
+    || die "cargo is not the pinned $rust (rust-toolchain.toml): put rustup's ~/.cargo/bin ahead of other cargo installs on PATH"
   command -v gh >/dev/null 2>&1 || die "'gh' not found"
   [[ -z "$(git status --porcelain)" ]] || die "working tree is dirty; a release ships a committed tree"
   git fetch -q origin main
@@ -127,7 +132,7 @@ if [[ $DRY_RUN -eq 0 ]]; then
     git fetch -q --tags origin
     # Same section release-pr.sh would prepend, minus its "## [x.y.z]" heading.
     git-cliff --unreleased --tag "$TAG" --strip all | sed '/^## \[/d' >"$notes"
-    [[ -s $notes ]] || die "git-cliff found no releasable commits since the last tag"
+    grep -q '[^[:space:]]' "$notes" || die "git-cliff found no releasable commits since the last tag"
   else
     bash scripts/changelog-extract.sh "$version" >"$notes" \
       || die "CHANGELOG.md has no [$version] section (or pass --change-log)"
@@ -143,6 +148,10 @@ if [[ $DRY_RUN -eq 0 ]]; then
 fi
 
 echo "==> build"
+# CI builds with neither; a release binary must not carry this Mac's flags.
+unset RUSTFLAGS CARGO_ENCODED_RUSTFLAGS
+# publish-release.sh uploads every tarball here, so start from none.
+run rm -rf "$rel"
 run mkdir -p "$rel"
 run rustup target add x86_64-apple-darwin
 run bash scripts/build-release.sh darwin arm64 "$rel"
@@ -168,18 +177,29 @@ if [[ $YES -eq 0 && $DRY_RUN -eq 0 ]]; then
   read -r answer </dev/tty || die "no terminal to confirm on; pass --yes"
   [[ $answer == "$TAG" ]] || die "not confirmed; nothing was pushed"
 fi
+# Re-checked after the long build: a tag pushed meanwhile means release.yml
+# is already releasing this version from its own commit.
+if [[ $DRY_RUN -eq 0 ]] && git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
+  die "tag $TAG appeared on origin during the build; release.yml owns it. Nothing was pushed."
+fi
 
 echo "==> push images"
+# The labels release-image.yml / release-macos-image.yml stamp.
+labels=(--label "org.opencontainers.image.source=https://github.com/$REPO"
+  --label "org.opencontainers.image.revision=$(git rev-parse HEAD)"
+  --label "org.opencontainers.image.version=$TAG")
 run docker buildx build --platform linux/amd64,linux/arm64 --build-arg RUNNER_BINARY=prebuilt \
-  --target runner -t "$runner_ref" --push .
+  "${labels[@]}" --target runner -t "$runner_ref" --push .
 run docker buildx build --platform linux/amd64,linux/arm64 --build-arg RUNNER_BINARY=prebuilt \
-  --target docker -t "$docker_ref" --push .
-run docker buildx build --platform linux/arm64 -f Dockerfile.macos -t "$macos_ref" --push .
+  "${labels[@]}" --target docker -t "$docker_ref" --push .
+run docker buildx build --platform linux/arm64 -f Dockerfile.macos "${labels[@]}" -t "$macos_ref" --push .
 
 echo "==> GitHub release"
 run env GH_REPO="$REPO" bash scripts/publish-release.sh "$TAG" "$rel" "$notes" "$(git rev-parse HEAD)"
 if [[ $stable -eq 1 ]]; then
   echo "==> Homebrew formula"
+  # The clone is as old as the build; other projects' releases push to the tap.
+  run git -C "$tap" pull -q --ff-only
   run bash scripts/commit-homebrew-formula.sh "$TAG" "$rel/SHA256SUMS" "$tap"
   run git -C "$tap" push
 fi
