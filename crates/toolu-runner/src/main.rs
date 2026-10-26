@@ -42,6 +42,7 @@ mod doctor_host;
 mod doctor_registrations;
 mod doctor_report;
 mod doctor_service;
+mod doctor_toolu;
 mod ephemeral;
 mod login_cmd;
 mod machine_service;
@@ -50,12 +51,16 @@ mod poll_job;
 mod poll_loop;
 mod register_auth;
 mod register_cmd;
+mod remove_state;
 mod run_cmd;
 mod service_cmd;
 mod setup;
 mod status_cmd;
 mod supervisor;
 mod supervisor_signal;
+mod toolu_host;
+
+use remove_state::{delete_registration_state, remove_best_effort, write_pending_marker};
 
 use crate::cli::{Cli, Command, RemoveArgs, credentials_path_for};
 
@@ -214,7 +219,11 @@ pub(crate) async fn cmd_remove(args: RemoveArgs) -> Result<(), Box<dyn std::erro
   // Unregister on GitHub BEFORE touching local state: the persisted
   // runner_id and URL are the only way to name the runner, so deleting them
   // first would strand it with no way to retry.
-  let unregistered = unregister_on_github(&cfg, args.token, skip).await?;
+  let unregistered = if cfg.provider.is_github() {
+    unregister_on_github(&cfg, args.token, skip).await?
+  } else {
+    skip.is_none() && toolu_host::revoke(&cfg, &creds_path).await?
+  };
 
   // A live run still owns `.lock`; deleting it would let a second `run`
   // acquire a fresh one against the same data_dir and race the running job.
@@ -224,7 +233,7 @@ pub(crate) async fn cmd_remove(args: RemoveArgs) -> Result<(), Box<dyn std::erro
   let service = after_removal(&home, keep_lock)?;
 
   print_removal_summary(
-    &cfg.runner_name,
+    removed_name(&cfg),
     unregistered,
     keep_lock,
     service.as_deref(),
@@ -311,18 +320,35 @@ fn init_remove_tracing() -> Result<(), Box<dyn std::error::Error>> {
   Ok(())
 }
 
-fn print_removal_summary(name: &str, unregistered: bool, keep_lock: bool, service: Option<&Path>) {
-  let gh = if unregistered {
-    "unregistered on GitHub"
-  } else {
-    "still registered on GitHub — remove it there by hand"
+/// What `remove`'s summary calls the registration (`runner '<name>'`, or a
+/// toolu.sh machine's host id) and whether it is a toolu.sh machine.
+fn removed_name(cfg: &RunnerRegistrationConfig) -> (String, bool) {
+  match &cfg.provider {
+    ::config::provider::ProviderSection::Toolu { host_id, .. } => {
+      (format!("toolu.sh machine {host_id}"), true)
+    },
+    ::config::provider::ProviderSection::Github => (format!("runner '{}'", cfg.runner_name), false),
+  }
+}
+
+fn print_removal_summary(
+  (what, toolu): (String, bool),
+  unregistered: bool,
+  keep_lock: bool,
+  service: Option<&Path>,
+) {
+  let gh = match (unregistered, toolu) {
+    (true, false) => "unregistered on GitHub",
+    (false, false) => "still registered on GitHub — remove it there by hand",
+    (true, true) => "revoked on toolu.sh",
+    (false, true) => "still a machine on toolu.sh — revoke it in the console",
   };
   let lock_note = if keep_lock {
     ", job lock left for the running process"
   } else {
     " and lock"
   };
-  println!("removed runner '{name}' ({gh}; config, credentials{lock_note} removed, _diag kept).");
+  println!("removed {what} ({gh}; config, credentials{lock_note} removed, _diag kept).");
   if let Some(unit) = service {
     println!(
       "removed the toolu-runner service ({}): no registrations remain",
@@ -570,78 +596,4 @@ fn classify_unregister_failure(
     )
     .into(),
   )
-}
-
-/// Write the `.pending_remove` marker with owner-only perms (0600 on unix).
-///
-/// The body is the copied `.lock` JSON (holder PID, `started_at`,
-/// `config_path`); it must not be world-readable, matching every other
-/// runner state file. `mode(0o600)` only applies when `create` actually
-/// creates the file, so an explicit `set_permissions` re-tightens a
-/// pre-existing marker left at looser perms.
-fn write_pending_marker(path: &Path, body: &str) -> std::io::Result<()> {
-  #[cfg(unix)]
-  {
-    use std::io::Write;
-    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-    let mut f = std::fs::OpenOptions::new()
-      .write(true)
-      .create(true)
-      .truncate(true)
-      .mode(0o600)
-      .open(path)?;
-    f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
-    f.write_all(body.as_bytes())
-  }
-  #[cfg(not(unix))]
-  {
-    std::fs::write(path, body)
-  }
-}
-
-/// Delete a registration's persisted state: `config.toml`,
-/// `credentials.json`, any `.pending_remove` marker, and the `.lock` file
-/// (best-effort past the config itself). `_diag/` (logs + job journal) is
-/// deliberately kept for `watch` history, and empty parent dirs stay in
-/// place.
-///
-/// `keep_lock` spares `.lock` when a live run still owns it. fs2's advisory
-/// lock is inode-scoped and `LockGuard` has no `Drop` that unlinks the path,
-/// so removing the file would leave the running process holding a lock on an
-/// unlinked inode — a later `run` would create a fresh `.lock`, acquire it,
-/// and execute a second job against the same `data_dir` and workspace.
-fn delete_registration_state(
-  config_path: &Path,
-  creds_path: &Path,
-  pending: &Path,
-  lock_path: &Path,
-  keep_lock: bool,
-) -> Result<(), std::io::Error> {
-  std::fs::remove_file(config_path)?;
-  remove_best_effort(creds_path, "credentials");
-  remove_best_effort(pending, "pending-remove marker");
-  remove_best_effort(
-    &pending.with_file_name(::config::stop_marker::FILE_NAME),
-    "stop record",
-  );
-  if !keep_lock {
-    remove_best_effort(lock_path, "job lock");
-  }
-  Ok(())
-}
-
-/// Remove `path`, `WARNing` rather than failing if it cannot go.
-///
-/// These are best-effort past `config.toml` — the registration is already
-/// gone once that is deleted — but "best-effort" here means WARN-and-
-/// continue, not silence: a leftover `.lock` in particular is what a later
-/// `run` weighs in its stale-lock check, so an operator wondering why it
-/// reports a job in flight deserves the reason in the log. A missing file
-/// is the expected case and stays quiet.
-fn remove_best_effort(path: &Path, what: &str) {
-  match std::fs::remove_file(path) {
-    Ok(()) => {},
-    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
-    Err(e) => tracing::warn!(error = %e, path = %path.display(), "could not remove the {what}"),
-  }
 }

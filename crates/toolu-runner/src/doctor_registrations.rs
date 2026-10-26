@@ -406,8 +406,9 @@ pub(crate) async fn check_registration(config_path: &Path, timeout: Duration) ->
   let mut rows = vec![
     Row::new(Level::Ok, "config", config_path.display().to_string()),
     creds_row(&crate::cli::credentials_path_for(config_path)),
-    jit_row(&config),
   ];
+  // A toolu.sh machine has no stored JIT: its claims carry one each (#206).
+  rows.push(crate::doctor_toolu::provider_row(&config).unwrap_or_else(|| jit_row(&config)));
   rows.extend(app_row(&config));
   let stopped = stop_marker::read(&data_dir).ok().flatten();
   let stop = stopped.as_ref().map(|marker| ServiceStop {
@@ -443,9 +444,12 @@ pub(crate) async fn check_registration(config_path: &Path, timeout: Duration) ->
   );
   Checked {
     heading: format!(
-      "  {} ({mode}, runner {}):",
+      "  {} ({mode}, {}):",
       label(config_path),
-      config.runner_name
+      match &config.provider {
+        config::provider::ProviderSection::Toolu { host_id, .. } => format!("host {host_id}"),
+        config::provider::ProviderSection::Github => format!("runner {}", config.runner_name),
+      }
     ),
     rows,
     work_dir: Some(expand_tilde(Path::new(&config.runtime.work_dir))),

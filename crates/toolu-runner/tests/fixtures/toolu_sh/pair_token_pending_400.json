@@ -1,0 +1,19 @@
+{
+  "provenance": {
+    "captured": "2026-10-25T12:48:25Z",
+    "host": "dev-console.toolu.sh",
+    "request": "POST /runner/pair/token with the device code just issued, nobody approved yet",
+    "method": "curl -i; status, content headers and body recorded verbatim",
+    "sanitization": "dropped Cloudflare report-to / nel / cf-ray / alt-svc headers; the response carries no credential"
+  },
+  "response": {
+    "body": "{\"error\":\"authorization_pending\"}",
+    "headers": {
+      "content-length": "33",
+      "content-type": "application/json",
+      "date": "Sun, 25 Oct 2026 12:48:22 GMT",
+      "server": "cloudflare"
+    },
+    "status": 400
+  }
+}

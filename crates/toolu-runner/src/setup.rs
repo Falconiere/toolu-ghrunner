@@ -1,6 +1,7 @@
-//! `toolu-runner setup` (#204): interactive and flag-driven onboarding
-//! for the GitHub path. Machine check → target → auth → scope → runner
-//! details → service → Review → apply → online confirmation, plus the
+//! `toolu-runner setup` (#204): interactive and flag-driven onboarding.
+//! Machine check → job source → (GitHub) target → auth → scope → runner
+//! details → service → Review → apply → online confirmation, or (toolu.sh,
+//! #207, [`toolu`]) pairing or enrollment → service → first poll; plus the
 //! re-run menu on a configured machine. Nothing is written before
 //! Review (a GitHub App created on the way is the disclosed exception:
 //! GitHub returns its key exactly once).
@@ -19,12 +20,14 @@ pub(crate) mod reconfigure;
 pub(crate) mod render;
 pub(crate) mod scope;
 pub(crate) mod stage;
+pub(crate) mod toolu;
+pub(crate) mod toolu_wait;
 
 use std::io::IsTerminal as _;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use config::registry;
+use config::registry::{self, RegistrationScope};
 use shared::SecretMasker;
 
 use crate::run_cmd::CodedExit;
@@ -34,6 +37,7 @@ use plan::SetupError;
 use prompts::Prompts;
 use render::Out;
 use stage::StageOutcome;
+use toolu::Source;
 
 /// The shared flow inputs.
 struct Flow<'a> {
@@ -66,18 +70,7 @@ async fn run_setup(args: &SetupArgs) -> Result<(), SetupError> {
   let masker = Arc::new(Mutex::new(SecretMasker::new()));
   crate::init_tracing_for(&masker)
     .map_err(|e| SetupError::runtime(format!("startup init: {e}")))?;
-  if args.source.as_deref() == Some("toolu") {
-    return Err(SetupError::usage(
-      "the toolu.sh source is not available yet (#207); re-run with --source github",
-    ));
-  }
-  if let Some(source) = &args.source
-    && source != "github"
-  {
-    return Err(SetupError::usage(format!(
-      "--source '{source}' is not one of github|toolu"
-    )));
-  }
+  let source = toolu::flag_source(args)?;
   let github_base = plan::validate_github_url(args.github_url.as_deref())?;
   let host = plan::host_of(&github_base);
   let home = registry::runner_home();
@@ -111,25 +104,59 @@ async fn run_setup(args: &SetupArgs) -> Result<(), SetupError> {
     out,
     masker: &masker,
   };
-  // Re-run menu (interactive, configured machine, no explicit target).
+  // Re-run menu (interactive, configured machine, no explicit target;
+  // `--source github` alone still shows it).
+  let explicit = args.org.is_some() || !args.repo.is_empty() || source == Some(Source::Toolu);
   let work = async {
     if !facts.existing.is_empty()
-      && args.org.is_none()
-      && args.repo.is_empty()
+      && !explicit
       && let Some(choice) = rerun_choice(&facts, &mut prompts, out)?
     {
       return match choice {
         Rerun::Keep => keep_as_is(&flow).await,
         Rerun::Remove(entry) => remove_one(&entry, &home, &masker).await,
+        Rerun::Reconfigure(entry) if matches!(entry.scope, RegistrationScope::Toolu(_)) => {
+          toolu::refresh(&flow, &entry, &mut prompts).await
+        },
         Rerun::Reconfigure(entry) => reconfigure::reconfigure(entry, &flow, &mut prompts).await,
-        Rerun::Add => build_and_apply(&flow, &mut prompts).await,
+        Rerun::Add => fresh(&flow, &mut prompts, source).await,
       };
     }
-    build_and_apply(&flow, &mut prompts).await
+    fresh(&flow, &mut prompts, source).await
   };
   tokio::select! {
     result = work => result,
     () = cancel.cancelled() => Err(SetupError::cancelled()),
+  }
+}
+
+/// A fresh setup from `source`, asking for it on a terminal when the
+/// flags left it open (unattended: GitHub, #204's default).
+async fn fresh(
+  flow: &Flow<'_>,
+  prompts: &mut Option<Prompts>,
+  source: Option<Source>,
+) -> Result<(), SetupError> {
+  let source = match (source, prompts.as_mut()) {
+    (Some(source), _) => source,
+    (None, Some(prompts)) => {
+      let options = vec![
+        "GitHub      register with a repo or an organization".to_owned(),
+        "toolu.sh    pair with your toolu.sh workspace".to_owned(),
+      ];
+      match prompts
+        .select("Where should this runner get jobs from?", &options, 0)
+        .map_err(SetupError::from)?
+      {
+        1 => Source::Toolu,
+        _ => Source::Github,
+      }
+    },
+    (None, None) => Source::Github,
+  };
+  match source {
+    Source::Toolu => toolu::run(flow, prompts).await,
+    Source::Github => build_and_apply(flow, prompts).await,
   }
 }
 
@@ -242,7 +269,15 @@ fn spawn_signal_restore(cancel: tokio_util::sync::CancellationToken) {
 async fn keep_as_is(flow: &Flow<'_>) -> Result<(), SetupError> {
   let (facts, home, args, masker, out) = (flow.facts, flow.home, flow.args, flow.masker, flow.out);
   let client = http_client()?;
+  let mut revoked = 0_usize;
   for entry in &facts.existing {
+    if matches!(entry.scope, RegistrationScope::Toolu(_)) {
+      out.done("registration", &entry.scope.label());
+      if !toolu::keep(flow, entry).await? {
+        revoked += 1;
+      }
+      continue;
+    }
     let cfg = config::config::load_config(&entry.config_path).map_err(|e| {
       SetupError::runtime(format!(
         "could not read {}: {e}",
@@ -278,6 +313,11 @@ async fn keep_as_is(flow: &Flow<'_>) -> Result<(), SetupError> {
         ),
       ),
     }
+  }
+  if revoked > 0 {
+    return Err(SetupError::usage(format!(
+      "{revoked} toolu.sh machine(s) were revoked; see the fix above"
+    )));
   }
   out.done("keep", "Nothing to change.");
   Ok(())
@@ -323,7 +363,12 @@ async fn remove_one(
   let cfg = config::config::load_config(&entry.config_path)
     .map_err(|e| SetupError::runtime(e.to_string()))?;
   let client = http_client()?;
-  let token = verify_bearer(&cfg, home, &reconfigure::empty_args(), &client, masker).await;
+  // A toolu.sh machine revokes itself with its own host token.
+  let token = if cfg.provider.is_github() {
+    verify_bearer(&cfg, home, &reconfigure::empty_args(), &client, masker).await
+  } else {
+    None
+  };
   crate::cmd_remove(crate::cli::RemoveArgs {
     config: Some(entry.config_path.clone()),
     token,
@@ -449,7 +494,7 @@ async fn build_and_apply(flow: &Flow<'_>, prompts: &mut Option<Prompts>) -> Resu
 }
 
 /// The env-mode HTTP client setup's live reads share.
-fn http_client() -> Result<reqwest::Client, SetupError> {
+pub(crate) fn http_client() -> Result<reqwest::Client, SetupError> {
   network::client_builder(&shared::NetworkConfig::default())
     .map_err(|e| SetupError::runtime(format!("could not build the HTTP client: {e}")))?
     .build()

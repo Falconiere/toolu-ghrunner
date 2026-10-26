@@ -26,6 +26,8 @@ Environment:
                                and a token registration's re-mint (env > login)
   TOOLU_RUNNER_CLIENT_ID       OAuth App client_id for `login` (fallback for --client-id)
   TOOLU_RUNNER_HOME            runner state root (default ~/.toolu-runner)
+  TOOLU_RUNNER_ENROLL_TOKEN    toolu.sh enrollment token once `setup` chose toolu.sh (fallback for --enroll-token)
+  TOOLU_RUNNER_TOOLU_API_URL   toolu.sh origin `setup` pairs with (default https://console.toolu.sh)
   TOOLU_RUNNER_KEYRING         opt in to the OS keyring token store (default: 0600 file)
   TOOLU_RUNNER_NO_KEYRING      force the file token store; overrides TOOLU_RUNNER_KEYRING
   TOOLU_RUNNER_NODE_DIR        offline Node.js runtimes (official runner externals/ layout);

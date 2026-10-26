@@ -338,6 +338,12 @@ impl Prompts {
     run_secret(&mut self.keys, &mut self.out, title)
   }
 
+  /// Wait for enter after showing `text` (ctrl+c cancels, esc goes back).
+  pub(crate) fn press_enter(&mut self, text: &str) -> Result<(), PromptEnd> {
+    let _guard = RawGuard::new()?;
+    super::toolu_wait::run_press_enter(&mut self.keys, &mut self.out, text)
+  }
+
   /// A yes/no answer (arrows or `y`/`n`, enter confirms).
   pub(crate) fn confirm(&mut self, title: &str, default: bool) -> Result<bool, PromptEnd> {
     let _guard = RawGuard::new()?;

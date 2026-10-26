@@ -3263,6 +3263,7 @@ dependencies = [
  "serde_json",
  "sha1",
  "shared",
+ "sysinfo",
  "tar",
  "temp-env",
  "tempfile",

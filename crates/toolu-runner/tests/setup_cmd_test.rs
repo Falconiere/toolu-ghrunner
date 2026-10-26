@@ -506,6 +506,18 @@ fn run_pty(
   args: &[&str],
   steps: &[(&str, &[u8])],
 ) -> Result<(Option<i32>, String), Box<dyn std::error::Error>> {
+  run_pty_env(home, path_env, args, steps, &[])
+}
+
+/// [`run_pty`] with extra environment `envs` (the toolu.sh tests, #207).
+#[cfg(target_os = "linux")]
+pub(crate) fn run_pty_env(
+  home: &Path,
+  path_env: &str,
+  args: &[&str],
+  steps: &[(&str, &[u8])],
+  envs: &[(&str, &str)],
+) -> Result<(Option<i32>, String), Box<dyn std::error::Error>> {
   let answers = home.join("answers.txt");
   std::fs::write(&answers, b"")?;
   let cmdline = format!(
@@ -523,6 +535,7 @@ fn run_pty(
     .env("TOOLU_RUNNER_ONLINE_TIMEOUT_MS", "10000")
     .env("PATH", path_env)
     .env("SHIM_LOG", home.join("shim.log"))
+    .envs(envs.iter().copied())
     .env_remove("NO_COLOR")
     .stdin(Stdio::piped())
     .stdout(Stdio::piped())

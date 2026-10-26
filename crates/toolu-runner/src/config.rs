@@ -191,6 +191,27 @@ pub(crate) fn api_base_or_default(raw: Option<String>) -> String {
     .unwrap_or_else(|| DEFAULT_GITHUB_API_URL.to_owned())
 }
 
+/// The toolu.sh API origin `setup` pairs with when
+/// `TOOLU_RUNNER_TOOLU_API_URL` is unset (#207).
+const DEFAULT_TOOLU_API_URL: &str = "https://console.toolu.sh";
+
+/// `TOOLU_RUNNER_TOOLU_API_URL`: the toolu.sh origin `setup` pairs with and
+/// records as the machine's `api_url` (the dev stack, or a test peer). Empty
+/// counts as unset; a trailing `/` is dropped.
+pub(crate) fn toolu_api_url() -> String {
+  read("TOOLU_RUNNER_TOOLU_API_URL")
+    .map(|raw| raw.trim_end_matches('/').to_owned())
+    .filter(|raw| !raw.is_empty())
+    .unwrap_or_else(|| DEFAULT_TOOLU_API_URL.to_owned())
+}
+
+/// `TOOLU_RUNNER_ENROLL_TOKEN`: `setup`'s enrollment token once the source is
+/// toolu.sh (`--source toolu` or the prompt) and `--enroll-token` is not given (keeps the single-use `tlu_e_` token out
+/// of `ps` and shell history). Empty counts as unset.
+pub(crate) fn enroll_token() -> Option<String> {
+  read("TOOLU_RUNNER_ENROLL_TOKEN").filter(|raw| !raw.is_empty())
+}
+
 /// `TOOLU_RUNNER_INSTALL_WAIT_MS`: how long `create-app` waits for the
 /// installation before asking or giving up (default 10 minutes).
 pub(crate) fn install_wait() -> Duration {

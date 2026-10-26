@@ -14,8 +14,8 @@ pub(crate) struct MachineFacts {
   pub(crate) platform: String,
   /// Logical CPU count.
   pub(crate) cpus: usize,
-  /// Total memory, human-readable, when it can be read.
-  pub(crate) memory: Option<String>,
+  /// Total memory in MiB, when it can be read.
+  pub(crate) memory_mb: Option<u64>,
   /// Service manager: `systemd`, `launchd`, or `none detected`.
   pub(crate) supervisor: String,
   /// Linger state on systemd user installs, when known.
@@ -43,7 +43,7 @@ pub(crate) fn gather(home: &std::path::Path) -> Result<MachineFacts, String> {
       shared::platform::runner_arch()
     ),
     cpus: std::thread::available_parallelism().map_or(1, std::num::NonZero::get),
-    memory: total_memory(),
+    memory_mb: total_memory_mb(),
     supervisor: supervisor_name(),
     linger: linger_state(),
     headless: classify_headless(
@@ -63,18 +63,12 @@ pub(crate) fn classify_headless(ssh: bool, display: bool, macos: bool) -> bool {
   ssh || (!macos && !display)
 }
 
-/// Total memory from `/proc/meminfo` on Linux; `None` elsewhere rather
-/// than a guessed number.
-fn total_memory() -> Option<String> {
-  let meminfo = std::fs::read_to_string("/proc/meminfo").ok()?;
-  let kb: u64 = meminfo
-    .lines()
-    .find(|line| line.starts_with("MemTotal:"))?
-    .split_whitespace()
-    .nth(1)?
-    .parse()
-    .ok()?;
-  Some(format!("{} GiB", kb / 1_048_576))
+/// Total memory in MiB (Linux and macOS alike); `None` when the platform
+/// reports none, rather than a guessed number.
+fn total_memory_mb() -> Option<u64> {
+  let mut system = sysinfo::System::new();
+  system.refresh_memory();
+  Some(system.total_memory() / 1_048_576).filter(|mb| *mb > 0)
 }
 
 /// The service manager name for display.
@@ -101,7 +95,10 @@ fn linger_state() -> Option<bool> {
 impl MachineFacts {
   /// The `setup: machine …` summary for the plain renderer.
   pub(crate) fn summary(&self) -> String {
-    let memory = self.memory.as_deref().unwrap_or("memory unknown");
+    let memory = self.memory_mb.map_or_else(
+      || "memory unknown".to_owned(),
+      |mb| format!("{} GiB", mb / 1024),
+    );
     let linger = match self.linger {
       Some(true) => ", linger on",
       Some(false) => ", linger off",

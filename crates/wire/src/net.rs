@@ -34,6 +34,8 @@ pub mod session;
 pub mod step_summary;
 /// toolu.sh `/runner/*` job-claim calls of a paired machine (#206).
 pub mod toolu_jobs;
+/// toolu.sh pairing and enrollment calls of a box becoming a machine (#207).
+pub mod toolu_pair;
 pub mod v1;
 
 pub use app_manifest::{CallbackServer, convert_manifest_code};

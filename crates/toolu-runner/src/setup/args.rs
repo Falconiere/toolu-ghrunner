@@ -10,10 +10,17 @@ use clap::Args;
 /// Arguments for the `setup` subcommand.
 #[derive(Debug, Args)]
 pub(crate) struct SetupArgs {
-  /// Where jobs come from: `github`, or `toolu` (toolu.sh, not yet
-  /// available — #207).
+  /// Where jobs come from: `github`, or `toolu` (pair with a toolu.sh
+  /// workspace).
   #[arg(long, value_name = "SOURCE")]
   pub(crate) source: Option<String>,
+  /// Pair with toolu.sh using a single-use enrollment token minted in the
+  /// console (implies `--source toolu`; asks nothing). Once the source is
+  /// toolu.sh (this flag, `--source toolu` or the prompt),
+  /// `TOOLU_RUNNER_ENROLL_TOKEN` is read when this is absent (keeps the token
+  /// out of `ps`); the variable alone never picks the source.
+  #[arg(long, value_name = "TOKEN")]
+  pub(crate) enroll_token: Option<String>,
   /// Register an organization-level runner for this GitHub organization.
   #[arg(long, value_name = "ORG", conflicts_with = "repo")]
   pub(crate) org: Option<String>,

@@ -14,7 +14,7 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 use wire::net::toolu_jobs::{TooluClient, TooluError};
 
-const INVALID_TOKEN_401: &str =
+pub(crate) const INVALID_TOKEN_401: &str =
   include_str!("../../toolu-runner/tests/fixtures/toolu_sh/invalid_token_401.json");
 const MISSING_BEARER_401: &str =
   include_str!("../../toolu-runner/tests/fixtures/toolu_sh/missing_bearer_401.json");
@@ -27,17 +27,17 @@ const HEARTBEAT_200: &str =
 const OK_200: &str = include_str!("../../toolu-runner/tests/fixtures/toolu_sh/ok_200.json");
 
 /// A synthetic, well-formed host token (`tlu_h_` + 43 base64url chars).
-const HOST_TOKEN: &str = "tlu_h_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
+pub(crate) const HOST_TOKEN: &str = "tlu_h_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
 
 /// What the peer received.
-struct Received {
-  request_line: String,
-  authorization: Option<String>,
-  body: String,
+pub(crate) struct Received {
+  pub(crate) request_line: String,
+  pub(crate) authorization: Option<String>,
+  pub(crate) body: String,
 }
 
 /// Raw HTTP response bytes for `status` with `headers` and `body`.
-fn response_bytes(status: u16, headers: &[(String, String)], body: &str) -> Vec<u8> {
+pub(crate) fn response_bytes(status: u16, headers: &[(String, String)], body: &str) -> Vec<u8> {
   let mut out = format!("HTTP/1.1 {status} X\r\n");
   for (name, value) in headers {
     if !name.eq_ignore_ascii_case("content-length") {
@@ -55,7 +55,7 @@ fn response_bytes(status: u16, headers: &[(String, String)], body: &str) -> Vec<
 }
 
 /// A live capture's status, headers and body.
-fn capture(fixture: &str) -> (u16, Vec<(String, String)>, String) {
+pub(crate) fn capture(fixture: &str) -> (u16, Vec<(String, String)>, String) {
   let value: Value = serde_json::from_str(fixture).expect("fixture is JSON");
   let status = value
     .pointer("/response/status")
@@ -78,7 +78,7 @@ fn capture(fixture: &str) -> (u16, Vec<(String, String)>, String) {
 }
 
 /// Accept one request, record it, answer `response`.
-async fn serve_once(listener: TcpListener, response: Vec<u8>) -> Received {
+pub(crate) async fn serve_once(listener: TcpListener, response: Vec<u8>) -> Received {
   let (socket, _) = listener.accept().await.expect("accept");
   let mut reader = BufReader::new(socket);
   let mut request_line = String::new();
@@ -117,14 +117,14 @@ async fn serve_once(listener: TcpListener, response: Vec<u8>) -> Received {
 }
 
 /// A loopback peer answering one request with `response`, and a client for it.
-async fn peer(response: Vec<u8>) -> (TooluClient, tokio::task::JoinHandle<Received>) {
+pub(crate) async fn peer(response: Vec<u8>) -> (TooluClient, tokio::task::JoinHandle<Received>) {
   let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
   let url = format!("http://{}", listener.local_addr().expect("addr"));
   let client = TooluClient::new(reqwest::Client::new(), &url, HOST_TOKEN).expect("client");
   (client, tokio::spawn(serve_once(listener, response)))
 }
 
-fn json_200(body: &str) -> Vec<u8> {
+pub(crate) fn json_200(body: &str) -> Vec<u8> {
   response_bytes(
     200,
     &[("content-type".to_owned(), "application/json".to_owned())],
@@ -232,16 +232,18 @@ async fn not_found_rate_limit_server_error_and_other_statuses_are_classified() {
       503,
       |e| matches!(e, TooluError::Transient(m) if m.contains("503")),
     ),
-    (
-      400,
-      |e| matches!(e, TooluError::Protocol(m) if m.contains("400")),
-    ),
+    (400, |e| *e == TooluError::Refused("x".to_owned())),
   ] {
     let (client, server) = peer(response_bytes(status, &[], "{\"error\":\"x\"}")).await;
     let err = client.claim("j1").await.expect_err("non-2xx");
     server.await.expect("server");
     assert!(check(&err), "status {status}: {err:?}");
   }
+  // `/runner/host` and the pairing routes share the variant: no job wording.
+  assert_eq!(
+    TooluError::NotFound.to_string(),
+    "toolu.sh answered 404 (no such job, or self-hosted machines are off)"
+  );
 }
 
 #[tokio::test]

@@ -12,3 +12,4 @@ mod integration;
 mod message_crypto;
 mod message_types;
 mod toolu_jobs_test;
+mod toolu_pair_test;

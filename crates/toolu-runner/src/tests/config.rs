@@ -277,3 +277,42 @@ fn poll_interval_reads_milliseconds_and_diagnoses_bad_values() {
     );
   }
 }
+
+/// #207: the toolu.sh origin drops a trailing `/` and falls back to the
+/// console when unset or empty; an empty enrollment token counts as unset.
+#[test]
+fn toolu_api_url_and_enroll_token_treat_empty_as_unset() {
+  temp_env::with_vars(
+    [
+      ("TOOLU_RUNNER_TOOLU_API_URL", None::<&str>),
+      ("TOOLU_RUNNER_ENROLL_TOKEN", None),
+    ],
+    || {
+      assert_eq!(super::toolu_api_url(), "https://console.toolu.sh");
+      assert_eq!(super::enroll_token(), None);
+    },
+  );
+  temp_env::with_vars(
+    [
+      ("TOOLU_RUNNER_TOOLU_API_URL", Some("")),
+      ("TOOLU_RUNNER_ENROLL_TOKEN", Some("")),
+    ],
+    || {
+      assert_eq!(super::toolu_api_url(), "https://console.toolu.sh");
+      assert_eq!(super::enroll_token(), None);
+    },
+  );
+  temp_env::with_vars(
+    [
+      (
+        "TOOLU_RUNNER_TOOLU_API_URL",
+        Some("https://dev-console.toolu.sh/"),
+      ),
+      ("TOOLU_RUNNER_ENROLL_TOKEN", Some("tlu_e_x")),
+    ],
+    || {
+      assert_eq!(super::toolu_api_url(), "https://dev-console.toolu.sh");
+      assert_eq!(super::enroll_token().as_deref(), Some("tlu_e_x"));
+    },
+  );
+}
