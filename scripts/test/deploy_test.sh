@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# deploy_test.sh — scripts/deploy.sh --dry-run: which refs each env pushes,
-# what prod alone touches, and the argument guards. Nothing is built or pushed.
+# deploy_test.sh — scripts/deploy.sh: the refs a release pushes and what it
+# never touches, the argument guards (both --dry-run), and the Docker
+# preflight (stubbed). Nothing is built or pushed.
 set -uo pipefail
 
 cd "$(dirname "$0")/../.." || exit 1 # repo root
@@ -23,41 +24,30 @@ exits() { # <label> <want> <args...>
   if [[ $got -eq $want ]]; then echo "ok: $label"; else echo "FAIL: $label (exit $got, want $want)" >&2; fail=1; fi
 }
 
-# --- dev: -dev images only ---
-dev="$(bash "$SCRIPT" --env dev --tag v9.9.9 --dry-run 2>&1)" || { echo "FAIL: dev dry-run exited non-zero" >&2; fail=1; }
-has "dev pushes the -dev runner image" "$dev" "-t ghcr.io/falconiere/toolu-ghrunner:9.9.9-dev --push"
-has "dev pushes the -dev docker image" "$dev" "-t ghcr.io/falconiere/toolu-ghrunner:9.9.9-dev-docker --push"
-has "dev pushes the -dev macOS image" "$dev" "-t ghcr.io/falconiere/toolu-ghrunner-macos:9.9.9-dev --push"
-has "dev builds darwin with the shared recipe" "$dev" "+ bash scripts/build-release.sh darwin arm64 dist/release"
-has "dev cross-builds darwin/amd64" "$dev" "+ bash scripts/build-release.sh darwin amd64 dist/release x86_64-apple-darwin"
-has "dev builds linux in the release rust image" "$dev" "rust:1.94.1-bookworm bash scripts/build-release.sh linux arm64 dist/release"
-has "dev stages the image binaries from the tarballs" "$dev" "tar -xzf dist/release/toolu-runner-darwin-arm64.tar.gz -O toolu-runner > dist/toolu-runner-darwin-arm64"
-lacks "dev creates no GitHub release" "$dev" "publish-release.sh"
-lacks "dev leaves Homebrew alone" "$dev" "commit-homebrew-formula.sh"
-
-# --- prod: version tags, release, Homebrew, gate; never :latest ---
-prod="$(bash "$SCRIPT" --env prod --tag "v$version" --dry-run 2>&1)" || { echo "FAIL: prod dry-run exited non-zero" >&2; fail=1; }
-has "prod pushes the versioned runner image" "$prod" "-t ghcr.io/falconiere/toolu-ghrunner:$version --push"
-has "prod pushes the versioned docker image" "$prod" "-t ghcr.io/falconiere/toolu-ghrunner:$version-docker --push"
-has "prod publishes with the shared recipe" "$prod" "+ env GH_REPO=Falconiere/toolu-ghrunner bash scripts/publish-release.sh v$version dist/release"
-has "prod commits the Homebrew formula with the shared recipe" "$prod" "+ bash scripts/commit-homebrew-formula.sh v$version dist/release/SHA256SUMS"
-lacks "prod re-runs no local gate (it requires CI green on HEAD)" "$prod" "tools/check.sh"
-lacks "prod never moves :latest" "$prod" ":latest"
-lacks "prod pushes no -dev tag" "$prod" "-dev"
-has "prod notes come from CHANGELOG.md by default" "$prod" "notes: CHANGELOG.md [$version]"
-cliff="$(bash "$SCRIPT" --env prod --tag "v$version" --change-log --dry-run 2>&1)"
+# --- a release: version tags, GitHub release, Homebrew; never :latest ---
+rel="$(bash "$SCRIPT" --tag "v$version" --dry-run 2>&1)" || { echo "FAIL: dry-run exited non-zero" >&2; fail=1; }
+has "pushes the versioned runner image" "$rel" "-t ghcr.io/falconiere/toolu-ghrunner:$version --push"
+has "pushes the versioned docker image" "$rel" "-t ghcr.io/falconiere/toolu-ghrunner:$version-docker --push"
+has "pushes the versioned macOS image" "$rel" "-t ghcr.io/falconiere/toolu-ghrunner-macos:$version --push"
+has "builds darwin with the shared recipe" "$rel" "+ bash scripts/build-release.sh darwin arm64 dist/release"
+has "cross-builds darwin/amd64" "$rel" "+ bash scripts/build-release.sh darwin amd64 dist/release x86_64-apple-darwin"
+has "builds linux in the release rust image" "$rel" "rust:1.94.1-bookworm bash scripts/build-release.sh linux arm64 dist/release"
+has "stages the image binaries from the tarballs" "$rel" "tar -xzf dist/release/toolu-runner-darwin-arm64.tar.gz -O toolu-runner > dist/toolu-runner-darwin-arm64"
+has "publishes with the shared recipe" "$rel" "+ env GH_REPO=Falconiere/toolu-ghrunner bash scripts/publish-release.sh v$version dist/release"
+has "commits the Homebrew formula with the shared recipe" "$rel" "+ bash scripts/commit-homebrew-formula.sh v$version dist/release/SHA256SUMS"
+lacks "re-runs no local gate (it requires CI green on HEAD)" "$rel" "tools/check.sh"
+lacks "never moves :latest" "$rel" ":latest"
+lacks "pushes no -dev tag" "$rel" "-dev"
+has "notes come from CHANGELOG.md by default" "$rel" "notes: CHANGELOG.md [$version]"
+cliff="$(bash "$SCRIPT" --tag "v$version" --change-log --dry-run 2>&1)"
 has "--change-log notes come from git-cliff" "$cliff" "notes: git-cliff"
 
 # --- guards ---
-exits "prod tag must match the Cargo version" 1 --env prod --tag v0.0.0-nope
-exits "prod tag needs a leading v" 2 --env prod --tag "$version"
-exits "unknown env exits 2" 2 --env staging --tag v1.0.0
-exits "missing tag exits 2" 2 --env dev
-exits "tag with a slash exits 2" 2 --env dev --tag feat/x
-exits "a tag that leaves an empty image tag exits 2" 2 --env dev --tag v
-exits "a tag giving an image tag starting with '.' exits 2" 2 --env dev --tag v.x
-exits "unknown option exits 2" 2 --env dev --tag v1 --bogus
-exits "--change-log is prod-only" 2 --env dev --tag v1 --change-log
+exits "the tag must match the Cargo version" 1 --tag v0.0.0-nope
+exits "the tag needs a leading v" 2 --tag "$version"
+exits "missing tag exits 2" 2
+exits "tag with a slash exits 2" 2 --tag feat/x
+exits "unknown option (the removed --env) exits 2" 2 --env dev --tag "v$version"
 
 # --- preflight: a Docker VM that cannot see the repo stops before any build ---
 # Stubs: an Apple Silicon host, and a docker whose bind mount is empty (Colima
@@ -78,7 +68,7 @@ STUB
 cp "$stub/cargo" "$stub/rustup"
 cp "$stub/cargo" "$stub/docker"
 chmod +x "$stub"/*
-unseen="$(PATH="$stub:$PATH" bash "$SCRIPT" --env dev --tag v9.9.9 2>&1)"
+unseen="$(PATH="$stub:$PATH" bash "$SCRIPT" --tag "v$version" 2>&1)"
 got=$?
 if [[ $got -eq 2 ]]; then echo "ok: an unshared repo path exits 2"; else echo "FAIL: an unshared repo path exits 2 (exit $got)" >&2; fail=1; fi
 has "an unshared repo path names the Colima fix" "$unseen" "Docker cannot see $PWD"

@@ -1355,13 +1355,12 @@ TOOLU_RUNNER_LIVE_TOKEN=<ghs_...> \
 ### Manual deploy
 
 `scripts/deploy.sh` builds every release artifact on an Apple Silicon Mac
-and pushes it without CI (`--help` lists the prerequisites):
+and publishes the release without CI (`--help` lists the prerequisites):
 
 ```sh
-scripts/deploy.sh --env dev  --tag v0.13.0                # images only, tagged :0.13.0-dev
-scripts/deploy.sh --env prod --tag v0.13.0                # images :0.13.0, GitHub release, Homebrew
-scripts/deploy.sh --env prod --tag v0.13.0 --change-log   # release notes from git-cliff, not CHANGELOG.md
-scripts/deploy.sh --env prod --tag v0.13.0 --dry-run      # print every command, run none
+scripts/deploy.sh --tag v0.13.0                # images :0.13.0, GitHub release, Homebrew
+scripts/deploy.sh --tag v0.13.0 --change-log   # release notes from git-cliff, not CHANGELOG.md
+scripts/deploy.sh --tag v0.13.0 --dry-run      # print every command, run none
 ```
 
 ### Workspace
