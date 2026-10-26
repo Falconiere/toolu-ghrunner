@@ -10,10 +10,14 @@
 #   push     --env dev   images only, every tag suffixed -dev:
 #                          ghcr.io/falconiere/toolu-ghrunner:<v>-dev (+ -dev-docker)
 #                          ghcr.io/falconiere/toolu-ghrunner-macos:<v>-dev
-#            --env prod  images at :<v> (+ :<v>-docker, macOS :<v>) — never
-#                        :latest / :vN, those stay CI's — then the GitHub
+#            --env prod  images at :<v> (+ :<v>-docker, macOS :<v>) — this
+#                        script never pushes :latest / :vN — then the GitHub
 #                        Release (prerelease when the tag has '-') and, for a
-#                        stable tag, the Homebrew formula in Falconiere/homebrew-tap
+#                        stable tag, the Homebrew formula in Falconiere/homebrew-tap.
+#                        Creating the release creates the tag, which can start
+#                        release.yml (push: tags v*): CI then re-pushes the
+#                        images (incl. :latest / :vN) and its publish step fails
+#                        because the release already exists.
 #
 # prod also requires: tag == Cargo version, a clean tree whose HEAD is on
 # origin/main, a CHANGELOG.md section for the version (the release notes), no
