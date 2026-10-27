@@ -1018,7 +1018,11 @@ async fn run_relay(
       break link_payload(&line)?;
     }
   };
-  let state = payload["state"].as_str().ok_or("no state")?.to_owned();
+  let state = payload
+    .pointer("/state")
+    .and_then(Value::as_str)
+    .ok_or("no state")?
+    .to_owned();
   reqwest::get(format!(
     "{}/gh/callback?code={code}&state={state}",
     server.uri()
@@ -1064,7 +1068,11 @@ fn assert_no_file_holds(home: &Path, needles: &[&str]) -> TestResult {
       }
       let text = String::from_utf8_lossy(&std::fs::read(&path)?).into_owned();
       for needle in needles {
-        assert!(!text.contains(needle), "{} holds {needle:?}", path.display());
+        assert!(
+          !text.contains(needle),
+          "{} holds {needle:?}",
+          path.display()
+        );
       }
     }
   }
@@ -1117,21 +1125,35 @@ async fn headless_relay_claims_the_code_and_converts_once() -> TestResult {
     "App created \u{b7} toolu-runner-acme \u{b7} App 424242",
     "Installed \u{b7} installation 1 \u{b7} all repositories",
   ] {
-    assert!(done.stdout.contains(line), "missing {line:?} in:\n{}", done.stdout);
+    assert!(
+      done.stdout.contains(line),
+      "missing {line:?} in:\n{}",
+      done.stdout
+    );
   }
-  assert_eq!(payload["target"], "org");
-  assert_eq!(payload["org"], "acme");
-  assert_eq!(payload["manifest"]["name"], "toolu-runner-acme");
+  assert_eq!(payload.pointer("/target"), Some(&json!("org")));
+  assert_eq!(payload.pointer("/org"), Some(&json!("acme")));
   assert_eq!(
-    payload["manifest"]["redirect_url"],
-    json!(format!("{}/gh/callback", server.uri()))
+    payload.pointer("/manifest/name"),
+    Some(&json!("toolu-runner-acme"))
   );
-  let state = payload["state"].as_str().ok_or("no state")?;
+  assert_eq!(
+    payload.pointer("/manifest/redirect_url"),
+    Some(&json!(format!("{}/gh/callback", server.uri())))
+  );
+  let state = payload
+    .pointer("/state")
+    .and_then(Value::as_str)
+    .ok_or("no state")?;
   assert!(state.len() == 64 && state.bytes().all(|b| b.is_ascii_hexdigit()));
   let secrets = claimed_secrets(&server).await?;
   let secret = secrets.last().ok_or("the box never claimed")?;
   assert!(secrets.iter().all(|s| s == secret), "one secret per run");
-  assert_eq!(relay_state(secret), state, "the claim proves the link's state");
+  assert_eq!(
+    relay_state(secret),
+    state,
+    "the claim proves the link's state"
+  );
   let text = format!("{}{}", done.stdout, done.stderr);
   for needle in [secret.as_str(), RELAY_CODE] {
     assert!(!text.contains(needle), "{needle:?} leaked:\n{text}");
@@ -1162,14 +1184,20 @@ async fn headless_refuses_an_app_owned_by_someone_else() -> TestResult {
   assert_eq!(done.code, Some(2), "stderr:\n{}", done.stderr);
   assert!(
     done.stderr.contains("owned by mallory")
-      && done.stderr.contains("asked for \"toolu-runner-acme\" owned by acme")
+      && done
+        .stderr
+        .contains("asked for \"toolu-runner-acme\" owned by acme")
       && done.stderr.contains("It was not saved"),
     "{}",
     done.stderr
   );
   assert!(!home.path().join("github-app.json").exists());
   let requests = server.received_requests().await.ok_or("recording off")?;
-  assert!(requests.iter().all(|r| r.url.path() != "/app/installations"));
+  assert!(
+    requests
+      .iter()
+      .all(|r| r.url.path() != "/app/installations")
+  );
   Ok(())
 }
 
@@ -1189,7 +1217,7 @@ async fn headless_refuses_an_app_with_another_name() -> TestResult {
   let cmd = headless(home.path(), &server, &["--account", "octocat"]);
   let (done, payload) = run_relay(cmd, &server, RELAY_CODE).await?;
   assert_eq!(done.code, Some(2), "stderr:\n{}", done.stderr);
-  assert_eq!(payload["target"], "user");
+  assert_eq!(payload.pointer("/target"), Some(&json!("user")));
   assert!(
     done.stderr.contains("returned the App \"evil-app\"")
       && done.stderr.contains("asked for \"toolu-runner-octocat\""),
@@ -1279,7 +1307,10 @@ async fn headless_paste_converts_when_the_relay_is_unreachable() -> TestResult {
     ],
   )?;
   assert_eq!(code, Some(0), "{output}");
-  assert!(output.contains("p paste code \u{b7} c copy link"), "{output}");
+  assert!(
+    output.contains("p paste code \u{b7} c copy link"),
+    "{output}"
+  );
   assert!(
     output.contains("App created \u{b7} toolu-runner-octocat \u{b7} App 424242"),
     "{output}"
@@ -1320,8 +1351,14 @@ async fn no_relay_rejects_a_wrong_state_and_never_contacts_the_relay() -> TestRe
     let payload = link_payload(out).unwrap_or_default();
     format!(
       "{}?code=c0de205good&state={}\n",
-      payload["manifest"]["redirect_url"].as_str().unwrap_or_default(),
-      payload["state"].as_str().unwrap_or_default()
+      payload
+        .pointer("/manifest/redirect_url")
+        .and_then(Value::as_str)
+        .unwrap_or_default(),
+      payload
+        .pointer("/state")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
     )
     .into_bytes()
   };
@@ -1335,7 +1372,10 @@ async fn no_relay_rejects_a_wrong_state_and_never_contacts_the_relay() -> TestRe
     &mut cmd,
     &[
       ("p paste URL", PtyKeys::Bytes(b"p\n")),
-      ("Paste the address-bar URL", PtyKeys::Bytes(wrong.as_bytes())),
+      (
+        "Paste the address-bar URL",
+        PtyKeys::Bytes(wrong.as_bytes()),
+      ),
       ("different setup run", PtyKeys::From(&right)),
     ],
   )?;
@@ -1345,7 +1385,10 @@ async fn no_relay_rejects_a_wrong_state_and_never_contacts_the_relay() -> TestRe
     "{output}"
   );
   let payload = link_payload(&output)?;
-  let redirect = payload["manifest"]["redirect_url"].as_str().ok_or("redirect")?;
+  let redirect = payload
+    .pointer("/manifest/redirect_url")
+    .and_then(Value::as_str)
+    .ok_or("redirect")?;
   assert!(
     redirect.starts_with("http://127.0.0.1:") && redirect.ends_with("/cb"),
     "{redirect}"

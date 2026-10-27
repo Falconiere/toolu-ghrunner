@@ -302,7 +302,7 @@ async fn claim_failures_are_classified() -> TestResult<()> {
     (json(429, "{}"), true),
     (json(400, r#"{"error":"invalid_request"}"#), false),
     (json(200, r#"{"code":"../../user"}"#), false),
-    (json(200, r#"{}"#), false),
+    (json(200, "{}"), false),
   ] {
     let (url, server) = relay(response).await?;
     let err = claim_relay_code(&reqwest::Client::new(), &url, "s")

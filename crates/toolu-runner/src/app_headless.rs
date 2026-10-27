@@ -137,9 +137,12 @@ async fn exchange(
 ) -> Result<ConversionResponse, Box<dyn std::error::Error>> {
   convert_manifest_code(&ctx.client, &ctx.api_base, code)
     .await
-    .map_err(|e| match e {
-      RunnerError::Auth(_) => ctx.fail(&spent_code_help(target)),
-      other => ctx.fail(&other),
+    .map_err(|e| {
+      if matches!(e, RunnerError::Auth(_)) {
+        ctx.fail(&spent_code_help(target))
+      } else {
+        ctx.fail(&e)
+      }
     })
 }
 
@@ -365,7 +368,9 @@ pub(crate) fn check_returned_app(
      again with --name <the name you want>; if you did not create it, do not install it.",
     resp.name,
     resp.owner.login,
-    owner.map(|owner| format!(" owned by {owner}")).unwrap_or_default(),
+    owner
+      .map(|owner| format!(" owned by {owner}"))
+      .unwrap_or_default(),
     resp.html_url
   ))
 }

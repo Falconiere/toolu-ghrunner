@@ -274,12 +274,14 @@ pub(crate) async fn wait_and_record(
     timeout: crate::config::install_wait(),
     poll: crate::config::install_poll(),
   };
-  let outcome = run_wait(ctx, &target, timing, &url, input).await.map_err(|e| {
-    ctx.fail(&format!(
-      "{e} — the App is saved at {}; once that is fixed, run `{resume}`",
-      ctx.dest.display()
-    ))
-  })?;
+  let outcome = run_wait(ctx, &target, timing, &url, input)
+    .await
+    .map_err(|e| {
+      ctx.fail(&format!(
+        "{e} — the App is saved at {}; once that is fixed, run `{resume}`",
+        ctx.dest.display()
+      ))
+    })?;
   let installation = match outcome {
     WaitOutcome::Installed(installation) => installation,
     WaitOutcome::Cancelled => {

@@ -153,14 +153,12 @@ fn relay_state_is_the_sha256_hex_of_the_secret() {
 }
 
 /// Decode the fragment of a relay link printed for `base`.
-fn fragment(link: &str, base: &str) -> serde_json::Value {
+fn fragment(link: &str, base: &str) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
   let encoded = link
     .strip_prefix(&format!("{base}/gh/app#"))
-    .expect("link is <base>/gh/app#<fragment>");
-  let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
-    .decode(encoded)
-    .expect("fragment is base64url without padding");
-  serde_json::from_slice(&bytes).expect("fragment is JSON")
+    .ok_or("link is not <base>/gh/app#<fragment>")?;
+  let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(encoded)?;
+  Ok(serde_json::from_slice(&bytes)?)
 }
 
 /// AC-6: an org link carries the manifest as an object, `target: "org"`,
@@ -172,17 +170,20 @@ fn org_relay_link_carries_manifest_target_org_and_state() {
   let manifest = AppManifest::for_target("toolu-runner-acme", &relay_callback_url(base), &target);
   let state = relay_state("secret");
   let link = relay_link(&format!("{base}/"), &manifest, &target, &state).expect("link");
-  let payload = fragment(&link, base);
-  assert_eq!(payload["target"], "org");
-  assert_eq!(payload["org"], "acme");
-  assert_eq!(payload["state"], state.as_str());
+  let payload = fragment(&link, base).expect("fragment decodes");
+  assert_eq!(payload.pointer("/target"), Some(&serde_json::json!("org")));
+  assert_eq!(payload.pointer("/org"), Some(&serde_json::json!("acme")));
   assert_eq!(
-    payload["manifest"]["redirect_url"],
-    "https://get.toolu.sh/gh/callback"
+    payload.pointer("/state"),
+    Some(&serde_json::json!(state.as_str()))
   );
   assert_eq!(
-    payload["manifest"]["default_permissions"],
-    serde_json::json!({"organization_self_hosted_runners": "write"})
+    payload.pointer("/manifest/redirect_url"),
+    Some(&serde_json::json!("https://get.toolu.sh/gh/callback"))
+  );
+  assert_eq!(
+    payload.pointer("/manifest/default_permissions"),
+    Some(&serde_json::json!({"organization_self_hosted_runners": "write"}))
   );
 }
 
@@ -196,12 +197,12 @@ fn personal_relay_link_has_user_target_and_no_org() {
     &ManifestTarget::Personal,
   );
   let link = relay_link(base, &manifest, &ManifestTarget::Personal, "ab").expect("link");
-  let payload = fragment(&link, base);
-  assert_eq!(payload["target"], "user");
+  let payload = fragment(&link, base).expect("fragment decodes");
+  assert_eq!(payload.pointer("/target"), Some(&serde_json::json!("user")));
   assert!(payload.get("org").is_none(), "{payload}");
   assert_eq!(
-    payload["manifest"]["redirect_url"],
-    "http://127.0.0.1:50123/cb"
+    payload.pointer("/manifest/redirect_url"),
+    Some(&serde_json::json!("http://127.0.0.1:50123/cb"))
   );
 }
 
@@ -222,7 +223,10 @@ fn manifest_codes_are_path_safe_tokens() {
 fn pasted_urls_are_bound_to_this_runs_state() {
   let state = relay_state("s");
   let good = format!("http://127.0.0.1:50123/cb?code=c0de&state={state}");
-  assert_eq!(parse_pasted(&good, &state, true), Pasted::Code("c0de".to_owned()));
+  assert_eq!(
+    parse_pasted(&good, &state, true),
+    Pasted::Code("c0de".to_owned())
+  );
   assert_eq!(
     parse_pasted(&format!("  {good}#frag \n"), &state, true),
     Pasted::Code("c0de".to_owned())
@@ -230,7 +234,10 @@ fn pasted_urls_are_bound_to_this_runs_state() {
   let other = relay_state("another run");
   let wrong = format!("http://127.0.0.1:50123/cb?code=c0de&state={other}");
   assert_eq!(parse_pasted(&wrong, &state, true), Pasted::WrongState);
-  assert_eq!(parse_pasted("http://127.0.0.1:1/cb?code=c0de", &state, true), Pasted::Invalid);
+  assert_eq!(
+    parse_pasted("http://127.0.0.1:1/cb?code=c0de", &state, true),
+    Pasted::Invalid
+  );
   let unsafe_code = format!("http://x/cb?code=../x&state={state}");
   assert_eq!(parse_pasted(&unsafe_code, &state, true), Pasted::Invalid);
 }
@@ -240,7 +247,10 @@ fn pasted_urls_are_bound_to_this_runs_state() {
 #[test]
 fn bare_codes_need_the_relay_mode() {
   let state = relay_state("s");
-  assert_eq!(parse_pasted(" c0de\n", &state, false), Pasted::Code("c0de".to_owned()));
+  assert_eq!(
+    parse_pasted(" c0de\n", &state, false),
+    Pasted::Code("c0de".to_owned())
+  );
   assert_eq!(parse_pasted("c0de", &state, true), Pasted::Invalid);
   assert_eq!(parse_pasted("not a code", &state, false), Pasted::Invalid);
 }
