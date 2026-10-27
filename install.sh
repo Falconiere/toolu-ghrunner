@@ -17,6 +17,7 @@
 #   curl -fsSL https://get.toolu.sh/pkg/ghrunner/install | bash
 #   curl -fsSL https://get.toolu.sh/pkg/ghrunner/install | bash -s -- --no-setup
 #   curl -fsSL https://get.toolu.sh/pkg/ghrunner/install | bash -s -- <setup flags>
+#   curl -fsSL https://get.toolu.sh/pkg/ghrunner/install | bash -s -- --toolu <enrollment-token>
 #   bash install.sh --check                   # print the install plan, no download
 #   bash install.sh --uninstall               # undo the shell-profile changes
 #   bash install.sh --help                    # show all options
@@ -84,7 +85,9 @@ OPTIONS:
   --check              Print the install plan and exit. No download, no install.
   --help, -h           Show this message and exit.
 
-Every other option is passed to "$BIN_NAME setup", in order. With a terminal,
+Every other option is passed to "$BIN_NAME setup", in order. --toolu <token>
+(the toolu.sh console enrollment flag) is passed as --enroll-token, which
+makes setup pair with toolu.sh. With a terminal,
 setup runs interactively (it reads /dev/tty). Without one, setup runs only when
 setup options were given; otherwise the next command is printed.
 
@@ -117,6 +120,9 @@ EXAMPLES:
   curl -fsSL https://get.toolu.sh/pkg/ghrunner/install | TOOLU_RUNNER_TOKEN="\$PAT" \\
     bash -s -- --source github --repo acme/web --auth token --yes
 
+  # Unattended toolu.sh enrollment. bash -s -- passes --toolu to this script.
+  curl -fsSL https://get.toolu.sh/pkg/ghrunner/install | bash -s -- --toolu <enrollment-token>
+
   # Force /usr/local/bin on a host where it needs root.
   curl -fsSL https://get.toolu.sh/pkg/ghrunner/install | sudo bash
 
@@ -135,8 +141,9 @@ die() {
 }
 
 # Arguments as one shell-like line for messages. The value of a secret-bearing
-# option (--token X, --token=X, --enroll-token X) shows as ••••: these lines
-# end up in terminals and cloud-init logs.
+# option (--token / --enroll-token / --toolu, bare or =form) shows as ••••:
+# these lines end up in terminals and cloud-init logs. --toolu is still
+# redacted here in case a message runs before apply_toolu_flag rewrites it.
 join_args() {
   local out="" a hide=0
   for a in "$@"; do
@@ -145,13 +152,52 @@ join_args() {
       hide=0
     else
       case "$a" in
-        --token|--enroll-token) hide=1 ;;
-        --token=*|--enroll-token=*) a="${a%%=*}=••••" ;;
+        --token|--enroll-token|--toolu) hide=1 ;;
+        --token=*|--enroll-token=*|--toolu=*) a="${a%%=*}=••••" ;;
       esac
     fi
     out="${out:+$out }$a"
   done
   printf '%s' "$out"
+}
+
+# `--toolu <token>` is the flag the toolu.sh console one-liner passes.
+# setup's flag is `--enroll-token` (it implies `--source toolu`). Rewrite
+# before any message or the setup handoff, so a missing token exits 2
+# before a download and the token never appears in a message. A token that
+# starts with `-` is refused: the next flag is never taken as the value, and
+# setup's parser would reject it after the download anyway.
+apply_toolu_flag() {
+  local token seen_toolu=0 seen_enroll=0
+  local -a rebuilt
+  rebuilt=()
+  while [[ $# -gt 0 ]]; do
+    if [[ "$1" == --toolu=* ]]; then set -- --toolu "${1#*=}" "${@:2}"; fi
+    case "$1" in
+      --toolu)
+        token="${2:-}"
+        [[ $# -ge 2 && -n "$token" && "$token" != -* ]] \
+          || die "--toolu requires an enrollment token (a non-empty value that does not start with -)"
+        [[ "$seen_toolu" -eq 0 ]] || die "--toolu was given twice"
+        [[ "$seen_enroll" -eq 0 ]] || die "--toolu and --enroll-token cannot both be given"
+        seen_toolu=1
+        rebuilt+=("--enroll-token" "$token")
+        shift 2
+        ;;
+      --enroll-token | --enroll-token=*)
+        [[ "$seen_toolu" -eq 0 ]] || die "--toolu and --enroll-token cannot both be given"
+        seen_enroll=1
+        rebuilt+=("$1")
+        shift
+        ;;
+      *)
+        rebuilt+=("$1")
+        shift
+        ;;
+    esac
+  done
+  # Never empty: called with at least one argument, each kept or fatal.
+  SETUP_ARGS=("${rebuilt[@]}")
 }
 
 # --- arg parsing -----------------------------------------------------------
@@ -229,6 +275,10 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ ${#SETUP_ARGS[@]} -gt 0 ]]; then
+  apply_toolu_flag "${SETUP_ARGS[@]}"
+fi
 
 # A value written into a shell file between double quotes must not be able to
 # end the quotes or expand.

@@ -63,6 +63,7 @@ if want legacy; then
   echo "$help_out" | grep -q "install.sh" || fail "--help output missing 'install.sh'"
   echo "$help_out" | grep -q -- "--no-setup" || fail "--help should document --no-setup"
   echo "$help_out" | grep -q -- "--uninstall" || fail "--help should document --uninstall"
+  echo "$help_out" | grep -q -- "bash -s -- --toolu" || fail "--help should show the --toolu one-liner"
   if echo "$help_out" | grep -q 'registration_token\|--token <reg_token>'; then
     fail "--help still asks for a registration token"
   fi
@@ -119,6 +120,58 @@ if want legacy; then
   out_ns="$("$SCRIPT" --check --no-setup)"
   echo "$out_ns" | grep -q 'setup:         skipped (--no-setup)' \
     || fail "--check --no-setup should report the skipped handoff: $out_ns"
+
+  # The console one-liner is `bash -s -- --toolu <token>`. setup's flag is
+  # `--enroll-token`; the token must not be printed.
+  echo "legacy 9b: --toolu becomes --enroll-token"
+  tok="toolu-test-enroll-6c2e"
+  out_tu="$("$SCRIPT" --check --toolu "$tok")"
+  echo "$out_tu" | grep -q 'setup args:    --enroll-token ••••$' \
+    || fail "--toolu should become a redacted --enroll-token: $out_tu"
+  if echo "$out_tu" | grep -q -- "$tok"; then fail "--check echoed the enrollment token: $out_tu"; fi
+  out_tu_eq="$("$SCRIPT" --check --labels gpu --toolu="$tok")"
+  echo "$out_tu_eq" | grep -q 'setup args:    --labels gpu --enroll-token ••••$' \
+    || fail "--toolu= should rewrite and keep earlier setup flags: $out_tu_eq"
+  if echo "$out_tu_eq" | grep -q -- "$tok"; then fail "--toolu= echoed the token: $out_tu_eq"; fi
+  out_pipe="$(bash -s -- --check --toolu "$tok" <"$SCRIPT")"
+  echo "$out_pipe" | grep -q 'setup args:    --enroll-token ••••$' \
+    || fail "bash -s -- --toolu should rewrite: $out_pipe"
+  rc_tu=0
+  err_tu="$("$SCRIPT" --check --toolu 2>&1)" || rc_tu=$?
+  [[ "$rc_tu" -eq 2 ]] || fail "--toolu with no value should exit 2 (rc=$rc_tu): $err_tu"
+  echo "$err_tu" | grep -q -- '--toolu requires an enrollment token' \
+    || fail "missing --toolu should name the flag: $err_tu"
+  rc_tu=0
+  err_tu="$("$SCRIPT" --toolu --check 2>&1)" || rc_tu=$?
+  [[ "$rc_tu" -eq 2 ]] || fail "--toolu must not swallow the next flag (rc=$rc_tu): $err_tu"
+  rc_tu=0
+  # setup's parser rejects a value starting with `-` (and echoes part of it).
+  err_tu="$("$SCRIPT" --check --toolu=-secretish 2>&1)" || rc_tu=$?
+  [[ "$rc_tu" -eq 2 ]] || fail "a --toolu value starting with - should exit 2 (rc=$rc_tu): $err_tu"
+  if echo "$err_tu" | grep -q -- 'secretish'; then fail "a --toolu error echoed the token: $err_tu"; fi
+  rc_tu=0
+  err_tu="$("$SCRIPT" --check --toolu= 2>&1)" || rc_tu=$?
+  [[ "$rc_tu" -eq 2 ]] || fail "an empty --toolu= should exit 2 (rc=$rc_tu): $err_tu"
+  rc_tu=0
+  err_tu="$("$SCRIPT" --check --toolu "" 2>&1)" || rc_tu=$?
+  [[ "$rc_tu" -eq 2 ]] || fail "an empty --toolu value should exit 2 (rc=$rc_tu): $err_tu"
+  rc_tu=0
+  err_tu="$("$SCRIPT" --check --toolu "$tok" --toolu "$tok" 2>&1)" || rc_tu=$?
+  [[ "$rc_tu" -eq 2 ]] || fail "--toolu twice should exit 2 (rc=$rc_tu): $err_tu"
+  if echo "$err_tu" | grep -q -- "$tok"; then fail "a --toolu error echoed the token: $err_tu"; fi
+  rc_tu=0
+  err_tu="$("$SCRIPT" --check --toolu "$tok" --enroll-token "$tok" 2>&1)" || rc_tu=$?
+  [[ "$rc_tu" -eq 2 ]] || fail "--toolu with --enroll-token should exit 2 (rc=$rc_tu): $err_tu"
+  echo "$err_tu" | grep -q -- '--toolu and --enroll-token cannot both be given' \
+    || fail "conflict should name both flags: $err_tu"
+  if echo "$err_tu" | grep -q -- "$tok"; then fail "a conflict error echoed the token: $err_tu"; fi
+  out_sep="$("$SCRIPT" --check -- --toolu "$tok")"
+  echo "$out_sep" | grep -q 'setup args:    --enroll-token ••••$' \
+    || fail "-- --toolu should still rewrite: $out_sep"
+  rc_tu=0
+  err_tu="$("$SCRIPT" --no-setup --toolu "$tok" 2>&1)" || rc_tu=$?
+  [[ "$rc_tu" -eq 2 ]] || fail "--no-setup --toolu should exit 2 (rc=$rc_tu): $err_tu"
+  if echo "$err_tu" | grep -q -- "$tok"; then fail "--no-setup --toolu echoed the token: $err_tu"; fi
 
   # --opt=value forms are the installer's, not setup's.
   out_eq="$("$SCRIPT" --check --version=v1.2.3 --install-dir=/opt/bin --home=/srv/toolu)"
@@ -701,6 +754,18 @@ if want S6b; then
   grep -qx "home=$tmp/s6b-home" "$LOG" || fail "S6b setup should get TOOLU_RUNNER_HOME: $(cat "$LOG")"
   echo "$OUT" | grep -qx 'toolu-runner: installed 9.9.9 (checksum ok)' || fail "S6b plain line missing: $OUT"
   [[ ! -e "$h/.toolu-runner/env" ]] || fail "S6b --no-modify-path must not write env files"
+
+  echo "S6b: --toolu is handed to setup as --enroll-token"
+  h="$(new_home s6b-toolu)"
+  enroll_tok="toolu-test-enroll-6c2e"
+  run_install pipe "$h" setup --no-modify-path --toolu "$enroll_tok"
+  [[ "$RC" -eq 0 ]] || fail "S6b --toolu should exit 0 (rc=$RC): $OUT"
+  [[ "$(grep '^arg=' "$LOG" | tr '\n' '|')" == "arg=--enroll-token|arg=$enroll_tok|" ]] \
+    || fail "S6b --toolu argv wrong: $(cat "$LOG")"
+  if echo "$OUT" | grep -q -- "$enroll_tok"; then fail "S6b installer output echoed the token: $OUT"; fi
+  if grep -R -q -- "$enroll_tok" "$h" 2>/dev/null; then
+    fail "S6b the enrollment token was written under HOME"
+  fi
   echo "ok: S6b"
 fi
 
@@ -727,13 +792,13 @@ if want S7; then
     fail "S7 env files must not mention TOOLU_RUNNER_TOKEN"
   fi
 
-  echo "S7: unknown setup options are refused without echoing token values"
+  echo "S7: a GitHub setup that also gets --enroll-token is refused without echoing tokens"
   h="$(new_home s7-echo)"
   run_install notty "$h" real --source github --token "$arg_secret" --enroll-token="$env_secret" --yes
-  [[ "$RC" -eq 2 ]] || fail "S7 an unknown setup option should exit 2 (rc=$RC): $OUT"
+  [[ "$RC" -eq 2 ]] || fail "S7 a conflicting setup option should exit 2 (rc=$RC): $OUT"
   if echo "$OUT" | grep -q -e "$arg_secret" -e "$env_secret"; then fail "S7 a token value was echoed: $OUT"; fi
-  echo "$OUT" | grep -qF -- "unexpected argument '--enroll-token'" \
-    || fail "S7 the refusal should name the unknown option, not its value: $OUT"
+  echo "$OUT" | grep -qF -- "--enroll-token pairs with toolu.sh" \
+    || fail "S7 the refusal should name --enroll-token, not its value: $OUT"
   out_check="$("$SCRIPT" --check --token "$arg_secret")"
   if echo "$out_check" | grep -q -- "$arg_secret"; then fail "S7 --check echoed a token: $out_check"; fi
   run_install notty "$h" real --no-setup --token "$arg_secret"
