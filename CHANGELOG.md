@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-27
+
+### Added
+- *(create-app)* create the GitHub App over SSH with no browser (#205) (#226)
+
 ## [0.13.0] - 2026-10-26
 
 ### Added
