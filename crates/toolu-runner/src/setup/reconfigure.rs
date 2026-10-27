@@ -27,6 +27,7 @@ pub(super) fn empty_args() -> SetupArgs {
     labels: Vec::new(),
     no_default_labels: false,
     work_dir: None,
+    session: crate::cli::HeadlessFlags::default(),
     mode: crate::setup::args::SetupMode {
       ephemeral: false,
       replace: false,
@@ -147,6 +148,7 @@ fn owned_with(args: &SetupArgs, mut owned: SetupArgs) -> SetupArgs {
     owned.app_key.clone_from(&args.app_key);
   }
   owned.token_stdin = owned.token_stdin || args.token_stdin;
+  owned.session = args.session;
   owned.mode.no_service = owned.mode.no_service || args.mode.no_service;
   owned.mode.ephemeral = owned.mode.ephemeral || args.mode.ephemeral;
   owned.flow.enable_linger = owned.flow.enable_linger || args.flow.enable_linger;

@@ -135,3 +135,136 @@ fn new_state_is_a_fresh_token() {
   assert_ne!(a, b, "each state token must be fresh");
   assert_eq!(a.len(), 36, "state token is a hyphenated uuid v4");
 }
+
+// ── #205: the headless relay (get.toolu.sh, CodaSignal/toolu.sh#88) ──
+
+use base64::Engine as _;
+use protocol::app_manifest::{
+  Pasted, is_manifest_code, new_relay_secret, parse_pasted, relay_callback_url, relay_link,
+  relay_state,
+};
+
+/// A relay secret is 64 lowercase hex characters and fresh on every call.
+#[test]
+fn relay_secrets_are_fresh_hex() {
+  let (a, b) = (new_relay_secret(), new_relay_secret());
+  assert_eq!(a.len(), 64);
+  assert!(
+    a.bytes()
+      .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c)),
+    "{a}"
+  );
+  assert_ne!(a, b);
+}
+
+/// AC-6: `state` is the lowercase hex SHA-256 of the secret (FIPS 180-2).
+#[test]
+fn relay_state_is_the_sha256_hex_of_the_secret() {
+  assert_eq!(
+    relay_state("abc"),
+    "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+  );
+}
+
+/// Decode the fragment of a relay link printed for `base`.
+fn fragment(link: &str, base: &str) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+  let encoded = link
+    .strip_prefix(&format!("{base}/gh/app#"))
+    .ok_or("link is not <base>/gh/app#<fragment>")?;
+  let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(encoded)?;
+  Ok(serde_json::from_slice(&bytes)?)
+}
+
+/// AC-6: an org link carries the manifest as an object, `target: "org"`,
+/// the org login and the state; the redirect is the relay's callback.
+#[test]
+fn org_relay_link_carries_manifest_target_org_and_state() {
+  let base = "https://get.toolu.sh";
+  let target = ManifestTarget::Org("acme".to_owned());
+  let manifest = AppManifest::for_target("toolu-runner-acme", &relay_callback_url(base), &target);
+  let state = relay_state("secret");
+  let link = relay_link(&format!("{base}/"), &manifest, &target, &state).expect("link");
+  let payload = fragment(&link, base).expect("fragment decodes");
+  assert_eq!(payload.pointer("/target"), Some(&serde_json::json!("org")));
+  assert_eq!(payload.pointer("/org"), Some(&serde_json::json!("acme")));
+  assert_eq!(
+    payload.pointer("/state"),
+    Some(&serde_json::json!(state.as_str()))
+  );
+  assert_eq!(
+    payload.pointer("/manifest/redirect_url"),
+    Some(&serde_json::json!("https://get.toolu.sh/gh/callback"))
+  );
+  assert_eq!(
+    payload.pointer("/manifest/default_permissions"),
+    Some(&serde_json::json!({"organization_self_hosted_runners": "write"}))
+  );
+}
+
+/// AC-6: a personal link says `target: "user"` and carries no `org` key.
+#[test]
+fn personal_relay_link_has_user_target_and_no_org() {
+  let base = "http://127.0.0.1:9";
+  let manifest = AppManifest::for_target(
+    "toolu-runner-box",
+    "http://127.0.0.1:50123/cb",
+    &ManifestTarget::Personal,
+  );
+  let link = relay_link(base, &manifest, &ManifestTarget::Personal, "ab").expect("link");
+  let payload = fragment(&link, base).expect("fragment decodes");
+  assert_eq!(payload.pointer("/target"), Some(&serde_json::json!("user")));
+  assert!(payload.get("org").is_none(), "{payload}");
+  assert_eq!(
+    payload.pointer("/manifest/redirect_url"),
+    Some(&serde_json::json!("http://127.0.0.1:50123/cb"))
+  );
+}
+
+/// A manifest code is one URL-path-safe token: nothing that could leave the
+/// `/app-manifests/{code}/conversions` path segment.
+#[test]
+fn manifest_codes_are_path_safe_tokens() {
+  assert!(is_manifest_code("9f3c2e0a71e"));
+  assert!(is_manifest_code("a-b_C9"));
+  for bad in ["", "../app", "a/b", "a b", "a?b", "a%2e", &"x".repeat(513)] {
+    assert!(!is_manifest_code(bad), "{bad:?} accepted");
+  }
+}
+
+/// S3: a pasted address-bar URL yields its code only when its `state` is
+/// this run's; a wrong state is told apart from garbage.
+#[test]
+fn pasted_urls_are_bound_to_this_runs_state() {
+  let state = relay_state("s");
+  let good = format!("http://127.0.0.1:50123/cb?code=c0de&state={state}");
+  assert_eq!(
+    parse_pasted(&good, &state, true),
+    Pasted::Code("c0de".to_owned())
+  );
+  assert_eq!(
+    parse_pasted(&format!("  {good}#frag \n"), &state, true),
+    Pasted::Code("c0de".to_owned())
+  );
+  let other = relay_state("another run");
+  let wrong = format!("http://127.0.0.1:50123/cb?code=c0de&state={other}");
+  assert_eq!(parse_pasted(&wrong, &state, true), Pasted::WrongState);
+  assert_eq!(
+    parse_pasted("http://127.0.0.1:1/cb?code=c0de", &state, true),
+    Pasted::Invalid
+  );
+  let unsafe_code = format!("http://x/cb?code=../x&state={state}");
+  assert_eq!(parse_pasted(&unsafe_code, &state, true), Pasted::Invalid);
+}
+
+/// A bare code (the relay callback page's) is accepted only when no URL is
+/// required (`--no-relay` needs the state, so the URL).
+#[test]
+fn bare_codes_need_the_relay_mode() {
+  let state = relay_state("s");
+  assert_eq!(
+    parse_pasted(" c0de\n", &state, false),
+    Pasted::Code("c0de".to_owned())
+  );
+  assert_eq!(parse_pasted("c0de", &state, true), Pasted::Invalid);
+  assert_eq!(parse_pasted("not a code", &state, false), Pasted::Invalid);
+}

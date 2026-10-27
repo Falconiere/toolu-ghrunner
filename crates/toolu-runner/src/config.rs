@@ -191,6 +191,20 @@ pub(crate) fn api_base_or_default(raw: Option<String>) -> String {
     .unwrap_or_else(|| DEFAULT_GITHUB_API_URL.to_owned())
 }
 
+/// The get.toolu.sh relay `create-app` uses on a headless box when
+/// `TOOLU_RUNNER_RELAY_URL` is unset (#205, CodaSignal/toolu.sh#88).
+const DEFAULT_RELAY_URL: &str = "https://get.toolu.sh";
+
+/// `TOOLU_RUNNER_RELAY_URL`: the relay origin a headless `create-app`
+/// prints its form link under and claims the manifest code from (a test
+/// peer). Empty counts as unset; a trailing `/` is dropped.
+pub(crate) fn relay_url() -> String {
+  read("TOOLU_RUNNER_RELAY_URL")
+    .map(|raw| raw.trim_end_matches('/').to_owned())
+    .filter(|raw| !raw.is_empty())
+    .unwrap_or_else(|| DEFAULT_RELAY_URL.to_owned())
+}
+
 /// The toolu.sh API origin `setup` pairs with when
 /// `TOOLU_RUNNER_TOOLU_API_URL` is unset (#207).
 const DEFAULT_TOOLU_API_URL: &str = "https://console.toolu.sh";

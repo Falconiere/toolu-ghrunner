@@ -18,4 +18,5 @@ Doesn't belong: registration minting (`register_cmd`), App creation internals (`
 | `reconfigure.rs` | Re-run menu's Reconfigure: a fresh plan derived from the picked registration's own config, caller flags winning. |
 | `toolu.rs` | toolu.sh branch (#207): source flags, GitHub-only flag refusal, pair / enroll, persist `<home>/toolu/<org>/` (0600 token), refresh via `PATCH /runner/host`, service + first poll, dry-run Review. |
 | `toolu_wait.rs` | Machine report, device-code wait (interval, `slow_down`, countdown line, expiry). |
+| `tty_lines.rs` | The `/dev/tty` reader thread, and lending its input to `create-app`'s waits (#205: the paste and line commands inside setup). |
 | `tests/` | Unit tests per module (flat, included via `#[path]`). |

@@ -526,7 +526,8 @@ pub(crate) fn run_pty_env(
     args.join(" "),
     answers.display()
   );
-  let mut child: std::process::Child = Command::new("script")
+  let mut cmd = Command::new("script");
+  cmd
     .args(["-qec", &cmdline, "/dev/null"])
     .env("HOME", home)
     .env("TOOLU_RUNNER_HOME", home)
@@ -536,7 +537,32 @@ pub(crate) fn run_pty_env(
     .env("PATH", path_env)
     .env("SHIM_LOG", home.join("shim.log"))
     .envs(envs.iter().copied())
-    .env_remove("NO_COLOR")
+    .env_remove("NO_COLOR");
+  let steps: Vec<(&str, PtyKeys<'_>)> = steps
+    .iter()
+    .map(|(marker, keys)| (*marker, PtyKeys::Bytes(keys)))
+    .collect();
+  drive_pty(&mut cmd, &steps)
+}
+
+/// What to type once a pty step's marker shows.
+#[cfg(target_os = "linux")]
+pub(crate) enum PtyKeys<'a> {
+  /// These bytes.
+  Bytes(&'a [u8]),
+  /// Bytes computed from the terminal output so far (a printed link).
+  From(&'a dyn Fn(&str) -> Vec<u8>),
+}
+
+/// Spawn `script` (already given its `-qec <cmdline> /dev/null` and env)
+/// and, for each `(marker, keys)` step, wait until `marker` shows on the
+/// pty, then type `keys`. Returns (exit code, all terminal output).
+#[cfg(target_os = "linux")]
+pub(crate) fn drive_pty(
+  script: &mut Command,
+  steps: &[(&str, PtyKeys<'_>)],
+) -> Result<(Option<i32>, String), Box<dyn std::error::Error>> {
+  let mut child: std::process::Child = script
     .stdin(Stdio::piped())
     .stdout(Stdio::piped())
     .stderr(Stdio::piped())
@@ -558,34 +584,107 @@ pub(crate) fn run_pty_env(
     }
   });
   let mut stdin = child.stdin.take().ok_or("no stdin")?;
-  let seen = |captured: &Arc<Mutex<Vec<u8>>>, marker: &str| -> bool {
+  let text = |captured: &Arc<Mutex<Vec<u8>>>| -> String {
     captured
       .lock()
-      .map(|held| String::from_utf8_lossy(&held).contains(marker))
-      .unwrap_or(false)
+      .map(|held| String::from_utf8_lossy(&held).into_owned())
+      .unwrap_or_default()
   };
   for (marker, keys) in steps {
     let deadline = Instant::now() + Duration::from_secs(60);
-    while !seen(&captured, marker) {
+    while !text(&captured).contains(marker) {
       if Instant::now() > deadline {
-        let held = captured
-          .lock()
-          .map(|h| String::from_utf8_lossy(&h).into_owned())
-          .unwrap_or_default();
+        let held = text(&captured);
+        let _ = child.kill();
         return Err(format!("pty marker {marker:?} never appeared; output: {held}").into());
       }
       std::thread::sleep(Duration::from_millis(100));
     }
-    stdin.write_all(keys)?;
+    let bytes = match keys {
+      PtyKeys::Bytes(bytes) => bytes.to_vec(),
+      PtyKeys::From(compute) => compute(&text(&captured)),
+    };
+    stdin.write_all(&bytes)?;
     stdin.flush()?;
   }
   let status = child.wait()?;
   let _ = reader.join();
-  let held = captured
-    .lock()
-    .map(|held| String::from_utf8_lossy(&held).into_owned())
-    .unwrap_or_default();
-  Ok((status.code(), held))
+  Ok((status.code(), text(&captured)))
+}
+
+/// AC-9 (#205): an interactive headless `setup --auth app` no longer steers
+/// away from creating the App — it shows the relay link (screen 06); `p`
+/// typed on the terminal reaches the wait through setup's own `/dev/tty`
+/// (stdin here is a file); Ctrl-C there exits 130 with nothing saved.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn headless_create_reaches_the_relay_link() -> TestResult {
+  let (home, path_env) = home()?;
+  let server = peer(PeerState::new()).await?;
+  let url = server.uri();
+  let api = format!("{url}/api/v3");
+  let closed = std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?;
+  let relay = format!("http://{closed}");
+  let (code, output) = run_pty_env(
+    home.path(),
+    &path_env,
+    &[
+      "--github-url",
+      &url,
+      "--org",
+      "acme",
+      "--auth",
+      "app",
+      "--headless",
+    ],
+    &[
+      ("p paste code", b"p\n"),
+      ("Paste the code from the callback page", b"\x03"),
+    ],
+    &[
+      ("TOOLU_RUNNER_GITHUB_API_URL", &api),
+      ("TOOLU_RUNNER_RELAY_URL", &relay),
+    ],
+  )?;
+  assert_eq!(code, Some(130), "output: {output}");
+  assert!(!output.contains("needs a browser"), "old steer: {output}");
+  assert!(output.contains(&format!("{relay}/gh/app#")), "{output}");
+  assert!(!home.path().join("github-app.json").exists());
+  Ok(())
+}
+
+/// #205: a personal App installs only on its own account, so creating one
+/// for repositories an organization owns is refused before anything exists.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn app_for_org_owned_repos_is_refused_before_creation() -> TestResult {
+  let (home, path_env) = home()?;
+  let server = peer(PeerState::new()).await?;
+  let url = server.uri();
+  let api = format!("{url}/api/v3");
+  let (code, output) = run_pty_env(
+    home.path(),
+    &path_env,
+    &[
+      "--github-url",
+      &url,
+      "--repo",
+      "acme/web",
+      "--auth",
+      "app",
+      "--headless",
+    ],
+    &[],
+    &[
+      ("TOOLU_RUNNER_GITHUB_API_URL", &api),
+      ("TOOLU_RUNNER_RELAY_URL", "http://127.0.0.1:9"),
+    ],
+  )?;
+  assert_eq!(code, Some(2), "output: {output}");
+  assert!(output.contains("acme is an organization"), "{output}");
+  assert!(!output.contains("/gh/app#"), "no link may print: {output}");
+  assert!(!home.path().join("github-app.json").exists());
+  Ok(())
 }
 
 #[cfg(target_os = "linux")]

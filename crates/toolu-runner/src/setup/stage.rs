@@ -70,8 +70,6 @@ pub(crate) async fn stage_plan(
     flow.client,
   );
   let _ = flow.host;
-  let interactive = prompts.is_some();
-  let _ = interactive;
   // Auth grammar and the GHES rule are flag validation, decided
   // before any network call; the org's live check still precedes
   // asking for any credential.
@@ -108,38 +106,6 @@ pub(crate) async fn stage_plan(
   }
   let saved_app = config::app_store::app_path(home).exists();
   let mut auth = plan::auth_plan(args, saved_app)?;
-  // Headless + create: steer to import/token.
-  if facts.headless && matches!(auth, AuthPlan::CreateApp) {
-    if interactive {
-      out.warn(
-        "auth",
-        "this machine looks headless, and creating a GitHub App here needs a browser (#205 covers SSH); use an existing App or a token",
-      );
-      let options = vec![
-        "Use an existing App (--import)".to_owned(),
-        "Paste a personal access token".to_owned(),
-        "Cancel".to_owned(),
-      ];
-      match prompts
-        .as_mut()
-        .map(|p| p.select("How should setup authenticate?", &options, 1))
-        .transpose()
-        .map_err(SetupError::from)?
-      {
-        Some(0) => {
-          return Err(SetupError::usage(
-            "re-run with --auth import --import <file> (the App to reuse)",
-          ));
-        },
-        Some(1) => auth = AuthPlan::Token,
-        _ => return Err(SetupError::cancelled()),
-      }
-    } else {
-      return Err(SetupError::usage(
-        "creating a GitHub App needs a browser this machine does not have: use --auth import or --auth token",
-      ));
-    }
-  }
   // Authenticate (in memory), creating the App interactively if asked.
   let (auth_ctx, token_value) = authenticate(flow, &mut auth, &target, prompts).await?;
   // Scope: runner group (org) or repositories (personal).
@@ -359,53 +325,7 @@ async fn authenticate(
     flow.masker,
   );
   if matches!(auth, AuthPlan::CreateApp) {
-    // Interactive only (headless/unattended were steered away above):
-    // create through the existing create-app flow. The App is saved at
-    // creation — the disclosed Review exception.
-    let org = match target {
-      Target::Org { org } => Some(org.clone()),
-      Target::Repos { .. } => None,
-    };
-    let create_args = crate::cli::CreateAppArgs {
-      name: None,
-      org,
-      account: None,
-      import: None,
-      app_id: None,
-      app_key: None,
-      host: "github.com".to_owned(),
-      no_browser: false,
-      force: false,
-    };
-    match crate::create_app_cmd::cmd_create_app(&create_args, home).await {
-      Ok(()) => {
-        *auth = AuthPlan::SavedApp;
-        out.done("auth", "GitHub App created and saved (0600)");
-      },
-      Err(e) => {
-        if prompts.is_some() {
-          out.warn("auth", &format!("GitHub did not create the App: {e}"));
-          let options = vec![
-            "Paste a personal access token instead".to_owned(),
-            "Cancel".to_owned(),
-          ];
-          let picked = prompts
-            .as_mut()
-            .map(|p| p.select("Use a token instead?", &options, 0))
-            .transpose()
-            .map_err(SetupError::from)?;
-          if picked == Some(0) {
-            *auth = AuthPlan::Token;
-          } else {
-            return Err(SetupError::runtime(e.to_string()));
-          }
-        } else {
-          return Err(SetupError::usage(format!(
-            "{e} — if GitHub refused the App (only org owners can create one), re-run with --auth token"
-          )));
-        }
-      },
-    }
+    create_app(flow, auth, target, prompts).await?;
   }
   let token_value = if matches!(auth, AuthPlan::Token) {
     Some(token_from(args, prompts, out)?)
@@ -445,6 +365,117 @@ async fn authenticate(
     out.done("auth", label);
   }
   Ok((ctx, token_value))
+}
+
+/// The `create-app` run `setup` makes for `target`: the session's headless
+/// verdict, and the repositories' owner as the App's expected owner.
+fn create_app_args(flow: &StageFlow<'_>, target: &Target) -> crate::cli::CreateAppArgs {
+  let (org, owner) = match target {
+    Target::Org { org } => (Some(org.clone()), None),
+    Target::Repos { repos } => (
+      None,
+      repos
+        .first()
+        .and_then(|repo| repo.split_once('/'))
+        .map(|(owner, _)| owner.to_owned()),
+    ),
+  };
+  let headless = flow.facts.headless;
+  crate::cli::CreateAppArgs {
+    name: None,
+    org,
+    account: None,
+    import: None,
+    app_id: None,
+    app_key: None,
+    host: "github.com".to_owned(),
+    no_browser: false,
+    force: false,
+    session: crate::cli::HeadlessFlags {
+      headless,
+      no_headless: !headless,
+      no_relay: flow.args.session.no_relay,
+    },
+    // A personal App only installs on its owner: the repositories' owner.
+    expected_owner: owner,
+  }
+}
+
+/// A personal App is private, so it installs only on its own account:
+/// repositories an organization owns need an org App or a token. Checked
+/// before anything is created; a failed lookup lets the creation go on (the
+/// owner check after it still applies).
+async fn refuse_org_owned_repos(flow: &StageFlow<'_>, owner: &str) -> Result<(), SetupError> {
+  let api = crate::config::github_api_url();
+  let found =
+    wire::net::github_app::find_org(flow.client, &api, owner, std::time::Duration::from_secs(30))
+      .await;
+  if let Ok(Some(_)) = found {
+    return Err(SetupError::usage(format!(
+      "{owner} is an organization: a personal GitHub App can't be installed on its \
+       repositories. Register an organization runner (--org {owner}), or use --auth token"
+    )));
+  }
+  Ok(())
+}
+
+/// Create the App interactively (unattended was refused earlier) through
+/// create-app — over SSH its relay link (#205). The App is saved at
+/// creation — the disclosed Review exception. A refusal offers the token.
+async fn create_app(
+  flow: &StageFlow<'_>,
+  auth: &mut AuthPlan,
+  target: &Target,
+  prompts: &mut Option<Prompts>,
+) -> Result<(), SetupError> {
+  let create_args = create_app_args(flow, target);
+  let out = flow.out;
+  if let Some(owner) = &create_args.expected_owner {
+    refuse_org_owned_repos(flow, owner).await?;
+  }
+  // The paste and line commands read setup's own terminal (#205).
+  let input = prompts.as_ref().map(Prompts::lend_lines);
+  match crate::create_app_cmd::cmd_create_app(&create_args, flow.home, input).await {
+    Ok(()) => {
+      *auth = AuthPlan::SavedApp;
+      out.done("auth", "GitHub App created and saved (0600)");
+    },
+    Err(e)
+      if e
+        .downcast_ref::<crate::run_cmd::CodedExit>()
+        .is_some_and(|coded| coded.code == 130) =>
+    {
+      // Ctrl-C while waiting for GitHub: a cancel, not a failed App.
+      return Err(SetupError::cancelled());
+    },
+    Err(e) => return offer_token(&e.to_string(), auth, prompts, out),
+  }
+  Ok(())
+}
+
+/// The App was not set up: offer the token instead (interactive), or name
+/// `--auth token` (unattended).
+fn offer_token(
+  e: &str,
+  auth: &mut AuthPlan,
+  prompts: &mut Option<Prompts>,
+  out: Out,
+) -> Result<(), SetupError> {
+  let Some(prompts) = prompts.as_mut() else {
+    return Err(SetupError::usage(format!(
+      "{e} — if GitHub refused the App (only org owners can create one), re-run with --auth token"
+    )));
+  };
+  out.warn("auth", &format!("The GitHub App was not set up: {e}"));
+  let options = vec![
+    "Paste a personal access token instead".to_owned(),
+    "Cancel".to_owned(),
+  ];
+  if prompts.select("Use a token instead?", &options, 0)? == 0 {
+    *auth = AuthPlan::Token;
+    return Ok(());
+  }
+  Err(SetupError::runtime(e.to_owned()))
 }
 
 /// The token value: flag (warned), stdin, env, or a no-echo prompt.

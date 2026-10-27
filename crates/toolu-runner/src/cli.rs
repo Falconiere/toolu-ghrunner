@@ -52,7 +52,13 @@ After creating (or importing) the App, create-app waits for its installation:
 o + Enter opens the install link again, c + Enter copies it, ctrl+c cancels
 (exit 130). After 10 minutes a terminal asks Keep waiting / Open again /
 Cancel; without one, create-app exits 1. The App is saved as soon as GitHub
-returns it, so `create-app --import <home>/github-app.json` resumes the wait.";
+returns it, so `create-app --import <home>/github-app.json` resumes the wait.
+
+Over SSH, or with no display, create-app prints a get.toolu.sh link to open on
+another machine and picks the code up from the relay (TOOLU_RUNNER_RELAY_URL)
+with a secret only this machine holds; p + Enter pastes the code from the
+callback page instead. With --no-relay this machine never contacts the relay:
+paste the address-bar URL of the page that fails to load. --headless / --no-headless override the guess.";
 
 /// Extended help footer for `boot --help`.
 const BOOT_AFTER_HELP: &str = "\
@@ -287,12 +293,51 @@ pub(crate) struct CreateAppArgs {
   /// Print the URLs to open manually instead of launching a browser.
   #[arg(long)]
   pub(crate) no_browser: bool,
+  /// Where the browser runs (`--headless` / `--no-headless` / `--no-relay`).
+  #[command(flatten)]
+  pub(crate) session: HeadlessFlags,
+  /// The account the App must belong to when no `--org`/`--account` names
+  /// it (`setup`'s repository owner): a returned App owned by anyone else is
+  /// refused.
+  #[arg(skip)]
+  pub(crate) expected_owner: Option<String>,
   /// Overwrite an existing saved GitHub App (`<home>/github-app.json`).
   ///
   /// Without it, `create-app` refuses (before any network call) when an
   /// App is already saved under the runner home.
   #[arg(long)]
   pub(crate) force: bool,
+}
+
+/// How a GitHub App gets created relative to this machine's browser
+/// (#205, design screen 06); shared by `create-app` and `setup`.
+#[derive(Debug, Default, Clone, Copy, Args)]
+pub(crate) struct HeadlessFlags {
+  /// Create the App from another machine's browser (default over SSH or
+  /// with no display): print a link and pick the code up from the relay.
+  #[arg(long, conflicts_with = "no_headless")]
+  pub(crate) headless: bool,
+  /// Use this machine's browser and the loopback callback, even over SSH.
+  #[arg(long, conflicts_with = "no_relay")]
+  pub(crate) no_headless: bool,
+  /// Headless without the get.toolu.sh relay: paste the address-bar URL of
+  /// the page GitHub redirects to (implies --headless; needs a terminal).
+  #[arg(long)]
+  pub(crate) no_relay: bool,
+}
+
+impl HeadlessFlags {
+  /// The flags' verdict, if they give one: `--headless` / `--no-relay` →
+  /// headless, `--no-headless` → desktop, none → `None` (guess).
+  pub(crate) fn forced(self) -> Option<bool> {
+    if self.headless || self.no_relay {
+      Some(true)
+    } else if self.no_headless {
+      Some(false)
+    } else {
+      None
+    }
+  }
 }
 
 /// Arguments for the `register` subcommand.

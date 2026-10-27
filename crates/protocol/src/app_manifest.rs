@@ -7,11 +7,15 @@
 //! loopback callback with a temporary `code`, and the caller exchanges that
 //! code for the minted app credentials ([`ConversionResponse`]). This module
 //! owns the pure pieces: manifest construction, response parsing, CSRF state,
-//! the auto-submitting HTML form, and callback query parsing. The async HTTP
-//! exchange lives in `wire::net`.
+//! the auto-submitting HTML form, and callback query parsing — plus the
+//! headless relay's pieces (#205: [`relay_state`], [`relay_link`],
+//! [`parse_pasted`]). The async HTTP exchange lives in `wire::net`.
 
 use std::collections::BTreeMap;
 
+use std::fmt::Write as _;
+
+use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use shared::RunnerError;
 
@@ -227,4 +231,125 @@ fn html_attr_escape(input: &str) -> String {
     .replace('\'', "&#39;")
     .replace('<', "&lt;")
     .replace('>', "&gt;")
+}
+
+/// The relay's `redirect_url`: `<relay_base>/gh/callback` (the get.toolu.sh
+/// contract, CodaSignal/toolu.sh#88).
+pub fn relay_callback_url(relay_base: &str) -> String {
+  format!("{}/gh/callback", relay_base.trim_end_matches('/'))
+}
+
+/// A fresh relay secret: two UUID v4s (244 bits from the OS RNG) as 64
+/// lowercase hex characters. Only its [`relay_state`] is ever printed.
+pub fn new_relay_secret() -> String {
+  format!(
+    "{}{}",
+    uuid::Uuid::new_v4().simple(),
+    uuid::Uuid::new_v4().simple()
+  )
+}
+
+/// The `state` of a headless round trip: the lowercase hex SHA-256 of the
+/// secret only the box keeps. The link, GitHub and the relay see only this
+/// hash; claiming the code takes the secret itself.
+pub fn relay_state(secret: &str) -> String {
+  use sha2::Digest as _;
+  let digest = sha2::Sha256::digest(secret.as_bytes());
+  let mut hex = String::with_capacity(64);
+  for byte in digest {
+    // Writing to a `String` cannot fail.
+    let _ = write!(hex, "{byte:02x}");
+  }
+  hex
+}
+
+/// The fragment payload the relay's form page reads (never sent to a server).
+#[derive(Serialize)]
+struct RelayPayload<'a> {
+  manifest: &'a AppManifest,
+  target: &'static str,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  org: Option<&'a str>,
+  state: &'a str,
+}
+
+/// The link the user opens on another machine:
+/// `<relay_base>/gh/app#<base64url {manifest, target: "user"|"org", org, state}>`.
+/// The relay's static page builds the GitHub form from the fragment.
+///
+/// # Errors
+///
+/// Returns `RunnerError::Protocol` on serialize failure.
+pub fn relay_link(
+  relay_base: &str,
+  manifest: &AppManifest,
+  target: &ManifestTarget,
+  state: &str,
+) -> Result<String, RunnerError> {
+  let (kind, org) = match target {
+    ManifestTarget::Personal => ("user", None),
+    ManifestTarget::Org(org) => ("org", Some(org.as_str())),
+  };
+  let payload = RelayPayload {
+    manifest,
+    target: kind,
+    org,
+    state,
+  };
+  let json = serde_json::to_vec(&payload)
+    .map_err(|err| RunnerError::Protocol(format!("relay link serialize failed: {err}")))?;
+  Ok(format!(
+    "{}/gh/app#{}",
+    relay_base.trim_end_matches('/'),
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json)
+  ))
+}
+
+/// Whether `code` can be a manifest code: 1–512 ASCII letters, digits, `-`
+/// or `_`. It lands in the `/app-manifests/{code}/conversions` path, so a
+/// code from the relay or a paste is checked before it is used.
+pub fn is_manifest_code(code: &str) -> bool {
+  (1..=512).contains(&code.len())
+    && code
+      .bytes()
+      .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
+/// What a pasted line holds.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Pasted {
+  /// A usable code (from a URL whose `state` is this run's, or a bare code).
+  Code(String),
+  /// A URL whose `state` belongs to another run: nothing may be exchanged.
+  WrongState,
+  /// Neither a usable URL nor (where allowed) a bare code.
+  Invalid,
+}
+
+/// Read a pasted line: an address-bar URL `…?code=…&state=…` (its `state`
+/// must be `expected_state`) or, unless `need_url`, the bare code the
+/// relay's callback page shows.
+pub fn parse_pasted(input: &str, expected_state: &str, need_url: bool) -> Pasted {
+  let input = input.trim();
+  let Some((_, query)) = input.split_once('?') else {
+    return if !need_url && is_manifest_code(input) {
+      Pasted::Code(input.to_owned())
+    } else {
+      Pasted::Invalid
+    };
+  };
+  let query = query.split_once('#').map_or(query, |(query, _)| query);
+  let (mut code, mut state) = (None, None);
+  for pair in query.split('&') {
+    match pair.split_once('=') {
+      Some(("code", value)) => code = Some(value),
+      Some(("state", value)) => state = Some(value),
+      _ => {},
+    }
+  }
+  match (code, state) {
+    (Some(_), Some(state)) if state != expected_state => Pasted::WrongState,
+    (Some(code), Some(_)) if is_manifest_code(code) => Pasted::Code(code.to_owned()),
+    _ => Pasted::Invalid,
+  }
 }

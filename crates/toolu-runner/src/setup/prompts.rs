@@ -190,6 +190,7 @@ impl Drop for RawGuard {
 pub(crate) struct Prompts {
   keys: TtyKeys,
   out: std::fs::File,
+  redirect: super::tty_lines::Redirect,
 }
 
 /// Keys read from the `/dev/tty` byte channel.
@@ -266,8 +267,7 @@ impl Prompts {
   /// terminal is available — callers treat that as unattended, never
   /// as an echoed-secret fallback.
   pub(crate) fn open() -> Result<Self, PromptEnd> {
-    use std::io::Read as _;
-    let mut reader = std::fs::OpenOptions::new()
+    let reader = std::fs::OpenOptions::new()
       .read(true)
       .write(true)
       .open("/dev/tty")
@@ -276,32 +276,22 @@ impl Prompts {
       .try_clone()
       .map_err(|e| PromptEnd::Io(format!("could not open the terminal for writing: {e}")))?;
     let (tx, rx) = channel::<u8>();
-    // Deliberately detached: the reader blocks on the terminal, so it
-    // cannot be joined without closing the tty under a live prompt.
-    // It exits on EOF, on a read error, or when the receiver is gone
-    // (Prompts dropped), and it lives at most for this process.
-    std::thread::spawn(move || {
-      let mut buf = [0_u8; 64];
-      loop {
-        match reader.read(&mut buf) {
-          Ok(0) | Err(_) => return,
-          Ok(n) => {
-            for byte in buf.iter().take(n) {
-              if tx.send(*byte).is_err() {
-                return;
-              }
-            }
-          },
-        }
-      }
-    });
+    let redirect = super::tty_lines::Redirect::default();
+    super::tty_lines::spawn_reader(reader, tx, std::sync::Arc::clone(&redirect));
     Ok(Self {
       keys: TtyKeys {
         rx,
         pending: VecDeque::new(),
       },
       out,
+      redirect,
     })
+  }
+
+  /// Lend the terminal's input to an async line reader while `create-app`
+  /// waits inside setup (#205); the prompts get it back once it is dropped.
+  pub(crate) fn lend_lines(&self) -> crate::create_app_cmd::TermLines {
+    super::tty_lines::lend(&self.redirect)
   }
 
   /// One-of-many selection (`↑/↓`, enter, esc cancels, ctrl+c cancels).

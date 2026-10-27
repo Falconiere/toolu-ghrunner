@@ -9,7 +9,8 @@
 //! code→credentials exchange and the App calls live in [`wire::net`]; the
 //! `0600` persistence lives in [`config::app_store`]; the installation wait
 //! in [`crate::app_install`]; `--import` / `--app-id` in
-//! [`crate::app_import`]. This handler wires them together, guarding on
+//! [`crate::app_import`]; the headless (SSH) round trip in
+//! [`crate::app_headless`] (#205). This handler wires them together, guarding on
 //! host + an existing App file BEFORE checking the org, binding a socket,
 //! opening a browser, or making any other network call.
 
@@ -21,7 +22,7 @@ use std::time::Duration;
 use config::app_store::{self, StoredApp};
 use protocol::app_manifest::{self, AppManifest, ConversionResponse, ManifestTarget};
 use shared::{RunnerError, SecretMasker};
-use tokio::io::AsyncBufReadExt as _;
+use tokio::io::{AsyncBufRead, AsyncBufReadExt as _, BufReader, Lines};
 use wire::net::app_manifest::{CallbackServer, convert_manifest_code};
 use wire::net::github_app::find_org;
 
@@ -34,6 +35,9 @@ use crate::run_cmd::CodedExit;
 
 /// The only GitHub host `create-app` supports this release.
 const SUPPORTED_HOST: &str = "github.com";
+
+/// GitHub's limit on an App name's length, in characters.
+pub(crate) const MAX_APP_NAME: usize = 34;
 
 /// How long to wait for the browser round trip before giving up.
 const BROWSER_TIMEOUT: Duration = Duration::from_secs(300);
@@ -48,6 +52,19 @@ const INSTALL_TIMEOUT_EXIT: i32 = 1;
 /// Exit code of a cancelled wait (epic #199).
 const CANCELLED_EXIT: i32 = 130;
 
+/// Line input from the person at the terminal: stdin for `create-app`,
+/// setup's lent `/dev/tty` channel inside `setup`.
+pub(crate) type TermLines = Lines<Box<dyn AsyncBufRead + Unpin + Send>>;
+
+/// Stdin's lines when it is a terminal, else `None` (unattended). One
+/// reader per run: a second one would lose the line the first is blocked on.
+pub(crate) fn stdin_lines() -> Option<TermLines> {
+  std::io::stdin().is_terminal().then(|| {
+    let reader: Box<dyn AsyncBufRead + Unpin + Send> = Box::new(BufReader::new(tokio::io::stdin()));
+    reader.lines()
+  })
+}
+
 /// What every `create-app` mode shares: the HTTP client, the API base, where
 /// the App is saved, and the masker its secrets are registered with.
 pub(crate) struct AppContext<'a> {
@@ -61,8 +78,10 @@ pub(crate) struct AppContext<'a> {
   pub(crate) api_base: String,
   /// Masks the App's secrets, JWTs and tokens in every printed error.
   pub(crate) masker: Mutex<SecretMasker>,
-  /// `--no-browser`.
+  /// `--no-browser`, or a headless session (no browser to launch).
   pub(crate) no_browser: bool,
+  /// The run's one terminal reader, taken by whichever wait runs.
+  pub(crate) input: Mutex<Option<TermLines>>,
 }
 
 impl AppContext<'_> {
@@ -70,6 +89,15 @@ impl AppContext<'_> {
   /// outside the tracing redactor).
   pub(crate) fn fail(&self, e: &dyn std::fmt::Display) -> Box<dyn std::error::Error> {
     masked(&self.masker, &e.to_string()).into()
+  }
+
+  /// Take the terminal reader (`None` when unattended or already taken).
+  pub(crate) fn take_input(&self) -> Option<TermLines> {
+    self
+      .input
+      .lock()
+      .unwrap_or_else(std::sync::PoisonError::into_inner)
+      .take()
   }
 }
 
@@ -81,21 +109,26 @@ impl AppContext<'_> {
 /// Exit 2 for a usage, auth or config problem (unsupported host, existing
 /// App without `--force`, unknown org, a key that does not match, …); exit
 /// 1 when an unattended wait times out; exit 130 when the wait is cancelled.
+/// `input` is the terminal the waits read their line commands (and a pasted
+/// code) from: [`stdin_lines`], or setup's `/dev/tty` channel.
 pub(crate) async fn cmd_create_app(
   args: &CreateAppArgs,
   home: &Path,
+  input: Option<TermLines>,
 ) -> Result<(), Box<dyn std::error::Error>> {
   // Guards first — before any bind / browser / network.
   if args.host != SUPPORTED_HOST {
     return Err(unsupported_host_error(&args.host).into());
   }
+  let headless = is_headless(args);
   let ctx = AppContext {
     home,
     dest: app_store::app_path(home),
     client: build_client()?,
     api_base: crate::config::github_api_url(),
     masker: Mutex::new(SecretMasker::new()),
-    no_browser: args.no_browser,
+    no_browser: args.no_browser || headless,
+    input: Mutex::new(input),
   };
   for (flag, login) in [("--org", &args.org), ("--account", &args.account)] {
     if let Some(login) = login {
@@ -108,19 +141,41 @@ pub(crate) async fn cmd_create_app(
   if ctx.dest.exists() && !args.force {
     return Err(existing_app_error(&ctx.dest).into());
   }
-  create_app(args, &ctx).await
+  create_app(args, &ctx, headless).await
+}
+
+/// Headless when a flag says so, else when the session looks it (SSH, or no
+/// display off macOS — the same guess as `setup`'s machine check).
+fn is_headless(args: &CreateAppArgs) -> bool {
+  args
+    .session
+    .forced()
+    .unwrap_or_else(crate::setup::machine::session_headless)
 }
 
 /// Create mode: org check, the manifest round trip, save at once, wait.
 async fn create_app(
   args: &CreateAppArgs,
   ctx: &AppContext<'_>,
+  headless: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
+  let name = default_name(args);
+  if headless {
+    // Before the org check: a refusal here sends nothing.
+    let has_input = ctx
+      .input
+      .lock()
+      .unwrap_or_else(std::sync::PoisonError::into_inner)
+      .is_some();
+    crate::app_headless::preflight(args, &name, has_input)?;
+  }
   let target = match &args.org {
     Some(org) => ManifestTarget::Org(check_org(ctx, org).await?),
     None => ManifestTarget::Personal,
   };
-  let name = default_name(args);
+  if headless {
+    return crate::app_headless::create_headless(args, ctx, &target, &name).await;
+  }
 
   let state = app_manifest::new_state();
   let server = CallbackServer::bind(state).await?;
@@ -177,15 +232,19 @@ async fn check_org(ctx: &AppContext<'_>, org: &str) -> Result<String, Box<dyn st
 
 /// The App name: `--name`, else `toolu-runner-<org>`, else
 /// `toolu-runner-<account>`, else `toolu-runner-<hostname>` (no credential
-/// exists yet to learn the personal login).
+/// exists yet to learn the personal login); a derived name is cut to
+/// [`MAX_APP_NAME`].
 fn default_name(args: &CreateAppArgs) -> String {
   if let Some(name) = &args.name {
     return name.clone();
   }
-  match args.org.as_ref().or(args.account.as_ref()) {
+  let name = match args.org.as_ref().or(args.account.as_ref()) {
     Some(account) => format!("toolu-runner-{account}"),
     None => format!("toolu-runner-{}", runner_name_or_hostname(None)),
-  }
+  };
+  // GitHub refuses App names over 34 characters (a long hostname or org).
+  let cut: String = name.chars().take(MAX_APP_NAME).collect();
+  cut.trim_end_matches(['-', '.']).to_owned()
 }
 
 /// Add the org-refusal hint to a failed browser round trip for an org (a
@@ -212,7 +271,8 @@ pub(crate) fn register_secrets(ctx: &AppContext<'_>, app: &StoredApp) {
 
 /// Print the install link, open it, wait for the installation on `account`,
 /// then record its id in `github-app.json`. `org` is the `--org` the wait
-/// targets, repeated in the resume command every failure prints.
+/// targets, repeated in the resume command every failure prints. The
+/// line commands come from the run's terminal reader ([`AppContext::take_input`]).
 ///
 /// # Errors
 ///
@@ -243,12 +303,14 @@ pub(crate) async fn wait_and_record(
     timeout: crate::config::install_wait(),
     poll: crate::config::install_poll(),
   };
-  let outcome = run_wait(ctx, &target, timing, &url).await.map_err(|e| {
-    ctx.fail(&format!(
-      "{e} — the App is saved at {}; once that is fixed, run `{resume}`",
-      ctx.dest.display()
-    ))
-  })?;
+  let outcome = run_wait(ctx, &target, timing, &url, ctx.take_input())
+    .await
+    .map_err(|e| {
+      ctx.fail(&format!(
+        "{e} — the App is saved at {}; once that is fixed, run `{resume}`",
+        ctx.dest.display()
+      ))
+    })?;
   let installation = match outcome {
     WaitOutcome::Installed(installation) => installation,
     WaitOutcome::Cancelled => {
@@ -288,17 +350,16 @@ async fn run_wait(
   target: &WaitTarget<'_>,
   timing: WaitTiming,
   url: &str,
+  input: Option<TermLines>,
 ) -> Result<WaitOutcome, RunnerError> {
   let no_browser = ctx.no_browser;
   let open = move |link: &str| {
     if !no_browser {
       crate::login_cmd::open_browser_best_effort(link);
     }
+    !no_browser
   };
   open(url);
-  let input = std::io::stdin()
-    .is_terminal()
-    .then(|| tokio::io::BufReader::new(tokio::io::stdin()).lines());
   let mut out = std::io::stdout();
   let io = WaitIo {
     url,
@@ -376,7 +437,7 @@ fn build_client() -> Result<reqwest::Client, RunnerError> {
 /// Assemble the persisted [`StoredApp`] from the conversion response,
 /// stamping `created_at` as RFC3339 now — the same mechanism
 /// `config::auth_store::StoredToken.issued_at` uses.
-fn build_stored_app(resp: ConversionResponse, host: String) -> StoredApp {
+pub(crate) fn build_stored_app(resp: ConversionResponse, host: String) -> StoredApp {
   StoredApp {
     host,
     app_id: resp.id,

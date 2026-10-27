@@ -19,7 +19,7 @@ Higher-level domain wrappers and reporting-only types live in
 
 | File | Primary item | Purpose |
 | --- | --- | --- |
-| `app_manifest.rs` | `CallbackServer` / `convert_manifest_code` | Loopback HTTP server for the GitHub App manifest flow's redirect callback, plus the `app-manifests/{code}/conversions` POST. |
+| `app_manifest.rs` | `CallbackServer` / `convert_manifest_code` / `claim_relay_code` | Loopback HTTP server for the GitHub App manifest flow's redirect callback, the `app-manifests/{code}/conversions` POST, and the headless relay claim (#205). |
 | `auth.rs` | `authenticate` / `exchange_token` | POSTs the signed JWT to swap it for an OAuth2 access token (the JWT itself is built in `protocol::auth`). A 4xx OAuth `invalid_client` reply (the registration was deleted on GitHub) is `RunnerError::Auth`. |
 | `device_auth.rs` | `request_device_code` / `poll_for_token` | GitHub OAuth device-authorization flow: request a device/user code, then poll until an access token or terminal failure. |
 | `github_app.rs` | `find_installation` / `create_installation_token` | GitHub App calls authenticated with the App JWT (`protocol::app_jwt`): the installation covering a repo or org, the App's installation list, and installation-token minting; `reuse_deadline` is the token-cache rule. 429/5xx are `Network`, every other non-2xx `Auth`. |

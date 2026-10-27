@@ -7,6 +7,7 @@ Standalone GitHub Actions JIT runner — no orchestrator service, no OTel.
 `toolu-runner` is **bin-only** (CLI entrypoint: `main.rs` + `cli.rs` +
 `register/run/boot/service/login/status/create_app_cmd.rs` (one `*_cmd.rs`
 each) + `register_auth.rs` + `app_auth.rs` + `app_install.rs` + `app_import.rs` +
+`app_headless.rs` (#205) +
 `supervisor.rs`/`supervisor_signal.rs`/`machine_service.rs` (#208) +
 `ephemeral.rs` + `network_setup.rs` + `poll_loop.rs`/`poll_job.rs` (#206) +
 `toolu_host.rs` (#207) + `remove_state.rs` + `check_*.rs` + `doctor_*.rs` +
@@ -293,7 +294,9 @@ outside a `tests/` tree.
   `organization_self_hosted_runners:write`); `public=false`, no webhook;
   `AppManifest::for_target`, `ConversionResponse` (`owner.id` optional) +
   `parse_conversion`, CSRF `new_state`, `form_html`,
-  `parse_callback_path` — backs `create-app`), `toolu_jobs` (#206 toolu.sh
+  `parse_callback_path` — backs `create-app`; #205 `relay_state`,
+  `relay_link`, `relay_callback_url`, `is_manifest_code`, `parse_pasted` →
+  `Pasted`), `toolu_jobs` (#206 toolu.sh
   `/runner/*` bodies: `QueuedJobs`, `Claim` (redacted `Debug`),
   `CompleteBody`/`Outcome`, `parse_claim_refusal`, `heartbeat_delay`),
   `toolu_pair` (#207: `MachineReport` (+ `patch()` → `HostPatch`, no
@@ -408,7 +411,9 @@ outside a `tests/` tree.
   `runner_groups` (org groups +
   `pick_group`),
   `app_manifest` (loopback `CallbackServer` 127.0.0.1:0 serving the
-  target's form + `convert_manifest_code` POST under the API base),
+  target's form + `convert_manifest_code` POST under the API base; #205
+  `claim_relay_code` → `RelayClaim` (400/unsafe code `Protocol`, any other
+  failure `Network`)),
   `toolu_jobs` (#206 `TooluClient`: host-token bearer, 401 `Revoked` / 409
   `Conflict` / 404 `NotFound` / 400 `Refused` / 429·5xx·transport
   `Transient`; #207 `host`/`update_host`/`revoke_host`; live 401 captures in
@@ -573,7 +578,23 @@ outside a `tests/` tree.
   (host, existing file) → `--org` check `GET /orgs/{org}` (404 → exit 2) →
   loopback callback serving the target's form, `--no-browser` prints URL;
   converts code, saves `<home>/github-app.json` AT ONCE; default name
-  `toolu-runner-<org|account|hostname>`; then `wait_and_record`).
+  `toolu-runner-<org|account|hostname>` cut to 34 chars; then `wait_and_record`; one stdin
+  reader per run: `AppContext::take_input`, `stdin_lines` for the command,
+  setup's lent `/dev/tty` via `setup::tty_lines` inside `setup`). `app_headless` (#205, screen 06: headless
+  = `--headless`/`--no-relay` > `--no-headless` > `setup::machine::
+  classify_headless`; 244-bit secret (`new_relay_secret`: two UUID v4s), `state` = its SHA-256; link
+  `<relay>/gh/app#<base64url {manifest,target,org,state}>`; claims
+  `POST <relay>/gh/claim` (204 → `Retry-After`, unreachable → warn + 5 s;
+  the claim stays in flight beside the input, never cancelled mid-request),
+  `p`/`c` line commands, any other line read as the paste
+  (`protocol::app_manifest::parse_pasted`); `--no-relay` redirects to
+  `127.0.0.1:<port>/cb`, needs a terminal, never contacts the relay;
+  `check_returned_app` refuses an App whose name — or owner when `--org`/
+  `--account`/setup's repo owner names it — differs (relay code planting),
+  nothing saved; 15 min → exit 1, Ctrl-C → 130; `setup` refuses a personal
+  App for org-owned repositories before creating it). Relay origin
+  `TOOLU_RUNNER_RELAY_URL` (default `https://get.toolu.sh`; contract
+  CodaSignal/toolu.sh `docs/guides/gh-app-relay.md`).
   `app_install` (`installation_on` = THE "App + its installation on an
   account" lookup (wait, import; #204's `setup` to reuse it); `wait_for_installation` polls
   `/app/installations` with a fresh JWT, `Network` warns + continues, line

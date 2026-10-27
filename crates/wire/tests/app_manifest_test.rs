@@ -238,3 +238,85 @@ fn spent_code_errors_name_create_app_and_dotcom_url_is_api() {
     "http://127.0.0.1:9/app-manifests/XYZ/conversions"
   );
 }
+
+// ── #205: claiming the code from the get.toolu.sh relay ──────────────
+
+use tokio::net::TcpListener;
+use wire::net::app_manifest::{RelayClaim, claim_relay_code};
+
+use crate::toolu_jobs_wire_test::{Received, response_bytes, serve_once};
+
+/// A loopback relay answering one claim with `response`.
+async fn relay(response: Vec<u8>) -> TestResult<(String, tokio::task::JoinHandle<Received>)> {
+  let listener = TcpListener::bind("127.0.0.1:0").await?;
+  let url = format!("http://{}/", listener.local_addr()?);
+  Ok((url, tokio::spawn(serve_once(listener, response))))
+}
+
+fn json(status: u16, body: &str) -> Vec<u8> {
+  response_bytes(
+    status,
+    &[("content-type".to_owned(), "application/json".to_owned())],
+    body,
+  )
+}
+
+/// AC-7: a `200 {"code"}` is the code; the claim POSTs the secret itself to
+/// `/gh/claim` (trailing `/` on the base trimmed).
+#[tokio::test]
+async fn claim_returns_the_code_and_posts_the_secret() -> TestResult<()> {
+  let (url, server) = relay(json(200, r#"{"code":"9f3c2e0a71e"}"#)).await?;
+  let claim = claim_relay_code(&reqwest::Client::new(), &url, "s3cret").await?;
+  assert_eq!(claim, RelayClaim::Code("9f3c2e0a71e".to_owned()));
+  let received = server.await?;
+  assert_eq!(received.request_line, "POST /gh/claim HTTP/1.1");
+  assert_eq!(
+    serde_json::from_str::<serde_json::Value>(&received.body)?,
+    serde_json::json!({"secret": "s3cret"})
+  );
+  Ok(())
+}
+
+/// AC-7: `204` is pending, honouring `Retry-After` (clamped) or 2 s.
+#[tokio::test]
+async fn claim_pending_honours_retry_after() -> TestResult<()> {
+  for (headers, want) in [
+    (vec![("retry-after".to_owned(), "2".to_owned())], 2),
+    (vec![("retry-after".to_owned(), "600".to_owned())], 30),
+    (vec![], 2),
+  ] {
+    let (url, server) = relay(response_bytes(204, &headers, "")).await?;
+    let claim = claim_relay_code(&reqwest::Client::new(), &url, "s").await?;
+    assert_eq!(claim, RelayClaim::Pending(Duration::from_secs(want)));
+    server.await?;
+  }
+  Ok(())
+}
+
+/// AC-7: 5xx/429/404/403 are `Network` (retry; paste stays open), a 400
+/// and an unsafe code are `Protocol` (fatal, nothing exchanged).
+#[tokio::test]
+async fn claim_failures_are_classified() -> TestResult<()> {
+  for (response, network) in [
+    (json(500, "{}"), true),
+    (json(429, "{}"), true),
+    (json(404, "{}"), true),
+    (json(403, "{}"), true),
+    (json(400, r#"{"error":"invalid_request"}"#), false),
+    (json(200, r#"{"code":"../../user"}"#), false),
+    (json(200, "{}"), false),
+  ] {
+    let (url, server) = relay(response).await?;
+    let err = claim_relay_code(&reqwest::Client::new(), &url, "s")
+      .await
+      .err()
+      .ok_or("claim should fail")?;
+    assert_eq!(
+      matches!(err, shared::RunnerError::Network(_)),
+      network,
+      "{err}"
+    );
+    server.await?;
+  }
+  Ok(())
+}
