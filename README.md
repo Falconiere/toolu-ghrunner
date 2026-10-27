@@ -476,7 +476,13 @@ loads the `get.toolu.sh/gh/app` form page): GitHub redirects to
 address-bar URL (`p` + Enter), and the machine checks its `state` (a URL
 from another run prints `✕ That URL is from a different setup run. Nothing
 was exchanged.`). `--no-relay` needs a terminal. After 15 minutes without a
-code `create-app` exits 1. `setup` takes the same three flags.
+code `create-app` exits 1. A default App name is cut to GitHub's
+34-character limit (a longer `--name` exits 2 before any request), so the
+name check never meets a rename GitHub forced. `setup` takes the same three
+flags, reads the paste from its own terminal (`/dev/tty`, even when stdin is
+the install script), and refuses to create a personal App for repositories
+an organization owns (it could not be installed there): use `--org` or
+`--auth token`.
 
 **One App, many machines.** `create-app --import <github-app.json>`, or
 `--app-id <id> --app-key <pem file>`, reuses an existing App instead of
