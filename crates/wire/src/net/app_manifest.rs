@@ -404,10 +404,10 @@ pub enum RelayClaim {
 ///
 /// # Errors
 ///
-/// `RunnerError::Network` on transport failure, 429 or 5xx (worth retrying,
-/// and the paste fallback stays open); `RunnerError::Protocol` on a `400`
-/// (the relay refused the body), any other status, or a `200` whose code is
-/// not a safe manifest code.
+/// `RunnerError::Network` on transport failure or any non-2xx status but
+/// `400` (worth retrying, and the paste fallback stays open);
+/// `RunnerError::Protocol` on a `400` (the relay refused the body) or a
+/// `200` whose code is not a safe manifest code.
 pub async fn claim_relay_code(
   client: &reqwest::Client,
   relay_base: &str,
@@ -432,14 +432,16 @@ pub async fn claim_relay_code(
       });
     return Ok(RelayClaim::Pending(wait));
   }
-  if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
-    return Err(RunnerError::Network(format!(
-      "relay claim answered HTTP {status}"
-    )));
-  }
-  if !status.is_success() {
+  if status == reqwest::StatusCode::BAD_REQUEST {
     return Err(RunnerError::Protocol(format!(
       "relay claim refused with HTTP {status}"
+    )));
+  }
+  // A relay that is down, not deployed (404) or blocked by a proxy (403)
+  // is as good as unreachable: keep polling, the paste stays open.
+  if !status.is_success() {
+    return Err(RunnerError::Network(format!(
+      "relay claim answered HTTP {status}"
     )));
   }
   let body: serde_json::Value = response

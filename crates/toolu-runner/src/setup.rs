@@ -22,6 +22,7 @@ pub(crate) mod scope;
 pub(crate) mod stage;
 pub(crate) mod toolu;
 pub(crate) mod toolu_wait;
+pub(crate) mod tty_lines;
 
 use std::io::IsTerminal as _;
 use std::path::Path;

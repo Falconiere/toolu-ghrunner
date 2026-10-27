@@ -613,8 +613,9 @@ pub(crate) fn drive_pty(
 }
 
 /// AC-9 (#205): an interactive headless `setup --auth app` no longer steers
-/// away from creating the App — it shows the relay link (screen 06), and
-/// Ctrl-C there exits 130 with nothing saved.
+/// away from creating the App — it shows the relay link (screen 06); `p`
+/// typed on the terminal reaches the wait through setup's own `/dev/tty`
+/// (stdin here is a file); Ctrl-C there exits 130 with nothing saved.
 #[cfg(target_os = "linux")]
 #[tokio::test]
 async fn headless_create_reaches_the_relay_link() -> TestResult {
@@ -636,7 +637,10 @@ async fn headless_create_reaches_the_relay_link() -> TestResult {
       "app",
       "--headless",
     ],
-    &[("Open this link on your laptop", b"\x03")],
+    &[
+      ("p paste code", b"p\n"),
+      ("Paste the code from the callback page", b"\x03"),
+    ],
     &[
       ("TOOLU_RUNNER_GITHUB_API_URL", &api),
       ("TOOLU_RUNNER_RELAY_URL", &relay),
@@ -645,6 +649,40 @@ async fn headless_create_reaches_the_relay_link() -> TestResult {
   assert_eq!(code, Some(130), "output: {output}");
   assert!(!output.contains("needs a browser"), "old steer: {output}");
   assert!(output.contains(&format!("{relay}/gh/app#")), "{output}");
+  assert!(!home.path().join("github-app.json").exists());
+  Ok(())
+}
+
+/// #205: a personal App installs only on its own account, so creating one
+/// for repositories an organization owns is refused before anything exists.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn app_for_org_owned_repos_is_refused_before_creation() -> TestResult {
+  let (home, path_env) = home()?;
+  let server = peer(PeerState::new()).await?;
+  let url = server.uri();
+  let api = format!("{url}/api/v3");
+  let (code, output) = run_pty_env(
+    home.path(),
+    &path_env,
+    &[
+      "--github-url",
+      &url,
+      "--repo",
+      "acme/web",
+      "--auth",
+      "app",
+      "--headless",
+    ],
+    &[],
+    &[
+      ("TOOLU_RUNNER_GITHUB_API_URL", &api),
+      ("TOOLU_RUNNER_RELAY_URL", "http://127.0.0.1:9"),
+    ],
+  )?;
+  assert_eq!(code, Some(2), "output: {output}");
+  assert!(output.contains("acme is an organization"), "{output}");
+  assert!(!output.contains("/gh/app#"), "no link may print: {output}");
   assert!(!home.path().join("github-app.json").exists());
   Ok(())
 }

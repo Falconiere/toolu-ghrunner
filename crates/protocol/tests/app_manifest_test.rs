@@ -140,8 +140,22 @@ fn new_state_is_a_fresh_token() {
 
 use base64::Engine as _;
 use protocol::app_manifest::{
-  Pasted, is_manifest_code, parse_pasted, relay_callback_url, relay_link, relay_state,
+  Pasted, is_manifest_code, new_relay_secret, parse_pasted, relay_callback_url, relay_link,
+  relay_state,
 };
+
+/// A relay secret is 64 lowercase hex characters and fresh on every call.
+#[test]
+fn relay_secrets_are_fresh_hex() {
+  let (a, b) = (new_relay_secret(), new_relay_secret());
+  assert_eq!(a.len(), 64);
+  assert!(
+    a.bytes()
+      .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c)),
+    "{a}"
+  );
+  assert_ne!(a, b);
+}
 
 /// AC-6: `state` is the lowercase hex SHA-256 of the secret (FIPS 180-2).
 #[test]

@@ -239,6 +239,16 @@ pub fn relay_callback_url(relay_base: &str) -> String {
   format!("{}/gh/callback", relay_base.trim_end_matches('/'))
 }
 
+/// A fresh relay secret: two UUID v4s (244 bits from the OS RNG) as 64
+/// lowercase hex characters. Only its [`relay_state`] is ever printed.
+pub fn new_relay_secret() -> String {
+  format!(
+    "{}{}",
+    uuid::Uuid::new_v4().simple(),
+    uuid::Uuid::new_v4().simple()
+  )
+}
+
 /// The `state` of a headless round trip: the lowercase hex SHA-256 of the
 /// secret only the box keeps. The link, GitHub and the relay see only this
 /// hash; claiming the code takes the secret itself.

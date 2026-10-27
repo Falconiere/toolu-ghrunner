@@ -2,15 +2,17 @@
 //! design screen 06): the box prints a get.toolu.sh link to open on another
 //! machine, and GitHub's one-time code comes back through the relay
 //! (CodaSignal/toolu.sh#88), bound to a secret only this box holds — or by
-//! one paste. `--no-relay` contacts no relay at all: GitHub redirects to a
+//! one paste. Under `--no-relay` this box never contacts the relay (the
+//! laptop still loads its static form page): GitHub redirects to a
 //! `127.0.0.1` URL that fails to load on the laptop, and the user pastes it.
 //!
 //! Anyone holding the printed link knows its `state` and could plant a code
 //! for an App they own, so the App GitHub returns must carry the requested
 //! name (and owner, when known) before anything is saved.
 
-use std::fmt::Write as _;
+use std::future::Future;
 use std::io::{IsTerminal as _, Write};
+use std::pin::Pin;
 use std::time::Duration;
 
 use config::app_store;
@@ -18,14 +20,13 @@ use protocol::app_manifest::{
   self, AppManifest, ConversionResponse, ManifestTarget, Pasted, parse_pasted,
 };
 use shared::RunnerError;
-use tokio::io::{AsyncBufRead, Lines};
 use tokio::time::Instant;
 use wire::net::app_manifest::{RelayClaim, claim_relay_code, convert_manifest_code};
 
 use crate::app_install::osc52_copy;
 use crate::cli::CreateAppArgs;
 use crate::create_app_cmd::{
-  AppContext, StdinLines, build_stored_app, register_secrets, wait_and_record,
+  AppContext, TermLines, build_stored_app, register_secrets, wait_and_record,
 };
 use crate::run_cmd::CodedExit;
 
@@ -64,31 +65,50 @@ pub(crate) enum CodeOutcome {
   TimedOut,
 }
 
-/// Headless create: print the link, wait for the code, exchange it, check
-/// it is the App asked for, save it at once, then wait for its installation.
+/// What a headless create refuses before any request: `--no-relay` with no
+/// terminal to paste into, or a name GitHub's form would make the user
+/// change (the changed App would then be refused after it exists).
 ///
 /// # Errors
 ///
-/// Exit 2 for `--no-relay` without a terminal, a relay refusal, a spent code
-/// or an App that is not the one asked for (nothing saved); [`CodedExit`] 1
-/// when no code arrives in time, 130 on Ctrl-C; the installation wait's own
-/// errors after the App is saved.
+/// A message naming the fix.
+pub(crate) fn preflight(args: &CreateAppArgs, name: &str, has_input: bool) -> Result<(), String> {
+  if args.session.no_relay && !has_input {
+    return Err(
+      "--no-relay needs a terminal to paste the URL into: run create-app from an interactive \
+       shell, or drop --no-relay to let the relay bring the code back"
+        .to_owned(),
+    );
+  }
+  let len = name.chars().count();
+  if len > crate::create_app_cmd::MAX_APP_NAME {
+    return Err(format!(
+      "the App name \"{name}\" is {len} characters; GitHub allows {}: pass a shorter --name",
+      crate::create_app_cmd::MAX_APP_NAME
+    ));
+  }
+  Ok(())
+}
+
+/// Headless create: print the link, wait for the code, exchange it, check
+/// it is the App asked for, save it at once, then wait for its installation.
+/// [`preflight`] has passed.
+///
+/// # Errors
+///
+/// Exit 2 for a relay refusal, a closed terminal under `--no-relay`, a
+/// spent code or an App that is not the one asked for (nothing saved);
+/// [`CodedExit`] 1 when no code arrives in time, 130 on Ctrl-C; the
+/// installation wait's own errors after the App is saved.
 pub(crate) async fn create_headless(
   args: &CreateAppArgs,
   ctx: &AppContext<'_>,
   target: &ManifestTarget,
   name: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-  let mut input = crate::create_app_cmd::stdin_lines();
+  let mut input = ctx.take_input();
   let no_relay = args.session.no_relay;
-  if no_relay && input.is_none() {
-    return Err(
-      "--no-relay needs a terminal to paste the URL into: run create-app from an interactive \
-       shell, or drop --no-relay to let the relay bring the code back"
-        .into(),
-    );
-  }
-  let secret = new_secret()?;
+  let secret = app_manifest::new_relay_secret();
   add_secret(ctx, &secret);
   let state = app_manifest::relay_state(&secret);
   let relay_base = crate::config::relay_url();
@@ -106,7 +126,7 @@ pub(crate) async fn create_headless(
     state: &state,
     link: &link,
   };
-  let code = await_code(&source, &mut input, &mut std::io::stdout()).await?;
+  let code = await_code(&source, target, &mut input, &mut std::io::stdout()).await?;
   add_secret(ctx, &code);
   let resp = exchange(ctx, &code, target).await?;
   let owner = expected_owner(args, target);
@@ -117,7 +137,12 @@ pub(crate) async fn create_headless(
   println!("App created \u{b7} {} \u{b7} App {}", app.slug, app.app_id);
   println!("key saved to {} (0600)", ctx.dest.display());
   let account = app.owner.clone();
-  wait_and_record(ctx, app, &account, None, input).await
+  // Back for the installation wait: the same reader, no line lost.
+  *ctx
+    .input
+    .lock()
+    .unwrap_or_else(std::sync::PoisonError::into_inner) = input;
+  wait_and_record(ctx, app, &account, None).await
 }
 
 /// Mask `value` in every error printed from here on.
@@ -146,10 +171,13 @@ async fn exchange(
     })
 }
 
-/// Print the waiting screen and wait for the code; Ctrl-C cancels.
+/// Print the waiting screen and wait for the code; Ctrl-C cancels. A
+/// timeout for an org names who may create its Apps (GitHub's refusal page
+/// never redirects).
 async fn await_code(
   source: &CodeSource<'_>,
-  input: &mut Option<StdinLines>,
+  target: &ManifestTarget,
+  input: &mut Option<TermLines>,
   out: &mut std::io::Stdout,
 ) -> Result<String, Box<dyn std::error::Error>> {
   let mut interrupt = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
@@ -166,88 +194,156 @@ async fn await_code(
     CodeOutcome::Code(code) => Ok(code),
     CodeOutcome::TimedOut => Err(Box::new(CodedExit::new(
       TIMED_OUT_EXIT,
-      format!(
-        "no code arrived after {} minutes \u{2014} run create-app again for a fresh link{}",
-        CODE_WAIT.as_secs() / 60,
-        if source.relay.is_some() {
-          " (p + Enter pastes the code from the callback page; --no-relay skips the relay)"
-        } else {
-          ""
-        }
-      ),
+      timed_out_message(source, target),
     ))),
   }
 }
 
+/// Why no code came and what to do next.
+fn timed_out_message(source: &CodeSource<'_>, target: &ManifestTarget) -> String {
+  let paste = if source.relay.is_some() {
+    " (p + Enter pastes the code from the callback page; --no-relay skips the relay)"
+  } else {
+    ""
+  };
+  let refused = match target {
+    ManifestTarget::Org(org) => format!(
+      ". If GitHub refused the form: only owners of {org} (and its GitHub App managers) can \
+       create an App for it"
+    ),
+    ManifestTarget::Personal => String::new(),
+  };
+  format!(
+    "no code arrived after {} minutes \u{2014} run create-app again for a fresh link{paste}{refused}",
+    CODE_WAIT.as_secs() / 60
+  )
+}
+
+/// A relay claim in flight: kept across loop turns, never dropped mid-request
+/// (the relay hands a code out once).
+type InFlight<'a> = Pin<Box<dyn Future<Output = Result<RelayClaim, RunnerError>> + 'a>>;
+
+/// What woke the wait.
+enum Wake {
+  /// The in-flight claim finished.
+  Claim(Result<RelayClaim, RunnerError>),
+  /// A line was typed (or the input closed).
+  Line(std::io::Result<Option<String>>),
+  /// Time to claim again, or the deadline.
+  Tick,
+}
+
 /// Print the waiting screen, then poll the relay (if any) and read pasted
-/// lines until a code for this run arrives or `timeout` passes.
+/// lines until a code for this run arrives or `timeout` passes. A claim in
+/// flight never holds up typed input.
 ///
 /// # Errors
 ///
-/// A relay refusal (`Protocol`: a 400 or an unusable code) and write
-/// failures; an unreachable relay only warns and keeps polling.
-pub(crate) async fn wait_for_code<R, W>(
+/// A relay refusal (`Protocol`: a 400 or an unusable code), a terminal
+/// closed with no relay (`Config`) and write failures; an unreachable relay
+/// only warns and keeps polling.
+pub(crate) async fn wait_for_code<W: Write>(
   source: &CodeSource<'_>,
-  input: &mut Option<Lines<R>>,
+  input: &mut Option<TermLines>,
   out: &mut W,
   timeout: Duration,
-) -> Result<CodeOutcome, RunnerError>
-where
-  R: AsyncBufRead + Unpin,
-  W: Write,
-{
+) -> Result<CodeOutcome, RunnerError> {
   let blink = std::io::stdout().is_terminal() && !crate::config::no_color();
   waiting_screen(source, input.is_some(), blink, out)?;
   let deadline = Instant::now() + timeout;
   let mut next_claim = Instant::now();
   let mut warned = false;
+  let mut inflight: Option<InFlight<'_>> = None;
   loop {
-    let now = Instant::now();
-    if now >= deadline {
+    if Instant::now() >= deadline {
       return Ok(CodeOutcome::TimedOut);
     }
-    if let Some(relay) = source.relay
-      && now >= next_claim
-    {
-      match claim(source, relay, &mut warned, out).await? {
-        Ok(code) => return Ok(CodeOutcome::Code(code)),
-        Err(wait) => next_claim = Instant::now() + wait,
-      }
-      continue;
-    }
-    let wake = if source.relay.is_some() {
-      next_claim.min(deadline)
-    } else {
-      deadline
+    start_claim(source, &mut inflight, next_claim);
+    let wake_at = match (&inflight, source.relay) {
+      (None, Some(_)) => next_claim.min(deadline),
+      _ => deadline,
     };
-    let Some(lines) = input.as_mut() else {
-      tokio::time::sleep_until(wake).await;
-      continue;
+    let wake = tokio::select! {
+      claim = poll_claim(&mut inflight), if inflight.is_some() => Wake::Claim(claim),
+      line = next_line(input), if input.is_some() => Wake::Line(line),
+      () = tokio::time::sleep_until(wake_at) => Wake::Tick,
     };
-    tokio::select! {
-      () = tokio::time::sleep_until(wake) => {},
-      line = lines.next_line() => match line? {
-        Some(line) => {
-          if let Some(code) = on_line(line.trim(), source, out)? {
-            return Ok(CodeOutcome::Code(code));
-          }
-        },
-        // Input closed: stop reading; the relay and the deadline remain.
-        None => *input = None,
+    match wake {
+      Wake::Tick => {},
+      Wake::Claim(result) => {
+        inflight = None;
+        match on_claim(result, &mut warned, out)? {
+          Ok(code) => return Ok(CodeOutcome::Code(code)),
+          Err(wait) => next_claim = Instant::now() + wait,
+        }
+      },
+      Wake::Line(line) => {
+        if let Some(code) = on_input(line?, input, source, out)? {
+          return Ok(CodeOutcome::Code(code));
+        }
       },
     }
   }
 }
 
-/// One claim: `Ok(code)`, or how long to wait before the next one. An
-/// unreachable relay warns once (the paste stays open) and is retried.
-async fn claim<W: Write>(
+/// Start a claim when one is due and none is in flight.
+fn start_claim<'a>(source: &CodeSource<'a>, inflight: &mut Option<InFlight<'a>>, due: Instant) {
+  if let Some(relay) = source.relay
+    && inflight.is_none()
+    && Instant::now() >= due
+  {
+    *inflight = Some(Box::pin(claim_relay_code(
+      source.client,
+      relay,
+      source.secret,
+    )));
+  }
+}
+
+/// Await the claim in flight (the branch is enabled only when there is one).
+async fn poll_claim(inflight: &mut Option<InFlight<'_>>) -> Result<RelayClaim, RunnerError> {
+  match inflight.as_mut() {
+    Some(claim) => claim.await,
+    None => std::future::pending().await,
+  }
+}
+
+/// The next typed line (the branch is enabled only while input is open).
+async fn next_line(input: &mut Option<TermLines>) -> std::io::Result<Option<String>> {
+  match input.as_mut() {
+    Some(lines) => lines.next_line().await,
+    None => std::future::pending().await,
+  }
+}
+
+/// Act on a line, or on closed input: with a relay the wait goes on without
+/// the paste; under `--no-relay` nothing else can bring a code.
+fn on_input<W: Write>(
+  line: Option<String>,
+  input: &mut Option<TermLines>,
   source: &CodeSource<'_>,
-  relay: &str,
+  out: &mut W,
+) -> Result<Option<String>, RunnerError> {
+  match line {
+    Some(line) => Ok(on_line(line.trim(), source, out)?),
+    None if source.relay.is_some() => {
+      *input = None;
+      Ok(None)
+    },
+    None => Err(RunnerError::Config(
+      "the terminal closed before a URL was pasted; run create-app again".to_owned(),
+    )),
+  }
+}
+
+/// One claim's answer: `Ok(code)`, or how long to wait before the next one.
+/// An unreachable relay warns once (the paste stays open) and is retried.
+fn on_claim<W: Write>(
+  result: Result<RelayClaim, RunnerError>,
   warned: &mut bool,
   out: &mut W,
 ) -> Result<Result<String, Duration>, RunnerError> {
-  match claim_relay_code(source.client, relay, source.secret).await {
+  match result {
     Ok(RelayClaim::Code(code)) => Ok(Ok(code)),
     Ok(RelayClaim::Pending(wait)) => Ok(Err(wait)),
     Err(RunnerError::Network(msg)) => {
@@ -386,17 +482,4 @@ fn spent_code_help(target: &ManifestTarget) -> String {
     "GitHub refused the code: it was already used or has expired. If GitHub created an App, \
      delete it at {apps}, then run create-app again"
   )
-}
-
-/// 32 bytes from the OS RNG as 64 hex characters.
-fn new_secret() -> Result<String, RunnerError> {
-  let mut bytes = [0_u8; 32];
-  getrandom::getrandom(&mut bytes)
-    .map_err(|e| RunnerError::Config(format!("no OS randomness for the relay secret: {e}")))?;
-  let mut hex = String::with_capacity(64);
-  for byte in bytes {
-    // Writing to a `String` cannot fail.
-    let _ = write!(hex, "{byte:02x}");
-  }
-  Ok(hex)
 }

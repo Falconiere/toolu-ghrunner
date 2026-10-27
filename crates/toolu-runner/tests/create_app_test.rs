@@ -1228,16 +1228,25 @@ async fn headless_refuses_an_app_with_another_name() -> TestResult {
   Ok(())
 }
 
-/// `--no-relay` needs a terminal to paste into: exit 2 before any link or
-/// request; `--headless --no-headless` is a usage error.
+/// `--no-relay` needs a terminal to paste into and an App name must fit
+/// GitHub's 34 characters: exit 2 before any link or request (the org check
+/// included); `--headless --no-headless` is a usage error.
 #[tokio::test]
 async fn no_relay_without_a_terminal_and_conflicting_flags_exit_2() -> TestResult {
   let home = tempfile::tempdir()?;
   let server = MockServer::start().await;
   mount_relay(&server).await;
+  let long = "x".repeat(35);
   for (args, needle) in [
     (vec!["--no-relay"], "--no-relay needs a terminal"),
+    // Before the org check, too.
+    (
+      vec!["--no-relay", "--org", "acme"],
+      "--no-relay needs a terminal",
+    ),
     (vec!["--no-headless"], "cannot be used with"),
+    // A name GitHub's form would make the user change.
+    (vec!["--name", long.as_str()], "GitHub allows 34"),
   ] {
     let output = headless(home.path(), &server, &args).output().await?;
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -1320,6 +1329,46 @@ async fn headless_paste_converts_when_the_relay_is_unreachable() -> TestResult {
   Ok(())
 }
 
+/// #205 review: a relay that accepts the connection but never answers holds
+/// a claim for the client's 30 s timeout; the paste must not wait for it.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn headless_paste_is_not_held_up_by_a_silent_relay() -> TestResult {
+  let home = tempfile::tempdir()?;
+  let server = MockServer::start().await;
+  // Listening, never accepting: every claim hangs.
+  let silent = std::net::TcpListener::bind("127.0.0.1:0")?;
+  let relay = format!("http://{}", silent.local_addr()?);
+  Mock::given(method("POST"))
+    .and(path("/app-manifests/c0de205paste/conversions"))
+    .respond_with(conversion("octocat", 9)?)
+    .expect(1)
+    .mount(&server)
+    .await;
+  mount_installations(&server, home.path(), installed_on("octocat", "all")?).await;
+
+  let mut cmd = pty_create_app(home.path(), &server, &relay, "--headless --account octocat");
+  let started = std::time::Instant::now();
+  let (code, output) = drive_pty(
+    &mut cmd,
+    &[
+      ("p paste code", PtyKeys::Bytes(b"p\n")),
+      (
+        "Paste the code from the callback page",
+        PtyKeys::Bytes(b"c0de205paste\n"),
+      ),
+    ],
+  )?;
+  assert_eq!(code, Some(0), "{output}");
+  assert!(
+    started.elapsed() < Duration::from_secs(20),
+    "the paste waited for the claim: {:?}",
+    started.elapsed()
+  );
+  drop(silent);
+  Ok(())
+}
+
 /// AC-3 / S3: under `--no-relay` a pasted URL from another run is rejected
 /// and nothing is exchanged; this run's URL then converts once — and the
 /// relay never hears from the box.
@@ -1399,5 +1448,42 @@ async fn no_relay_rejects_a_wrong_state_and_never_contacts_the_relay() -> TestRe
     "--no-relay contacted the relay"
   );
   assert_eq!(saved(home.path())?.get("installation_id"), Some(&json!(1)));
+  Ok(())
+}
+
+/// Ctrl-D at the paste prompt under `--no-relay`: nothing can bring the
+/// code any more, so the wait ends at once (exit 2) instead of at the
+/// 15-minute deadline.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn no_relay_closed_terminal_ends_the_wait() -> TestResult {
+  let home = tempfile::tempdir()?;
+  let server = MockServer::start().await;
+  let mut cmd = pty_create_app(
+    home.path(),
+    &server,
+    &server.uri(),
+    "--no-relay --account octocat",
+  );
+  let (code, output) = drive_pty(&mut cmd, &[("p paste URL", PtyKeys::Bytes(b"\x04"))])?;
+  assert_eq!(code, Some(2), "{output}");
+  assert!(output.contains("the terminal closed"), "{output}");
+  assert!(!home.path().join("github-app.json").exists());
+  Ok(())
+}
+
+/// A derived name over GitHub's 34 characters (a long org, account or
+/// hostname) is cut before it reaches the link, not refused after GitHub's
+/// form made the user rename it.
+#[tokio::test]
+async fn a_long_derived_name_is_cut_to_34_characters() -> TestResult {
+  let home = tempfile::tempdir()?;
+  let server = MockServer::start().await;
+  mount_relay(&server).await;
+  let account = "a".repeat(39);
+  let cmd = headless(home.path(), &server, &["--account", &account]);
+  let (_, payload) = run_relay(cmd, &server, RELAY_CODE).await?;
+  let want: String = format!("toolu-runner-{account}").chars().take(34).collect();
+  assert_eq!(payload.pointer("/manifest/name"), Some(&json!(want)));
   Ok(())
 }

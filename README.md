@@ -423,8 +423,8 @@ empty queue (default 5 s).
 flow, then waits for you to install it. One App serves every machine of an
 account, so it is named after the account: `toolu-runner-<org>` with
 `--org`, `toolu-runner-<login>` with `--account <login>`, else
-`toolu-runner-<hostname>` (GitHub's form lets you rename it; App names are
-unique across GitHub).
+`toolu-runner-<hostname>`, cut to GitHub's 34-character limit (GitHub's form
+lets you rename it; App names are unique across GitHub).
 
 1. **Target.** Without `--org` the App belongs to you and gets
    `administration: write` (repository runners). `create-app --org acme`
@@ -460,7 +460,7 @@ guess). Steps 2–3 run from another machine's browser. `create-app` prints
 `This machine has no browser. Open this link on your laptop:` and a
 `https://get.toolu.sh/gh/app#…` link: the page reads the manifest from the
 URL fragment (never sent to a server) and posts it to GitHub, whose redirect
-goes to `get.toolu.sh/gh/callback`. The machine keeps a 256-bit secret,
+goes to `get.toolu.sh/gh/callback`. The machine keeps a random 244-bit secret,
 prints only its SHA-256 as the round trip's `state`, and polls
 `POST get.toolu.sh/gh/claim` with the secret, so the relay hands the code
 to this machine only, once. While it waits, `p` + Enter lets you paste the
@@ -470,7 +470,8 @@ App of their own, so the App GitHub returns must carry the requested name
 (and owner, when `--org`/`--account` names it): otherwise it is refused,
 nothing is saved, and the message names the App to delete. If the code was
 already used, `create-app` names where to delete the App and start again.
-`--no-relay` contacts no relay: GitHub redirects to
+Under `--no-relay` the machine never contacts the relay (your laptop still
+loads the `get.toolu.sh/gh/app` form page): GitHub redirects to
 `http://127.0.0.1:<port>/cb`, which fails to load on your laptop; paste that
 address-bar URL (`p` + Enter), and the machine checks its `state` (a URL
 from another run prints `✕ That URL is from a different setup run. Nothing

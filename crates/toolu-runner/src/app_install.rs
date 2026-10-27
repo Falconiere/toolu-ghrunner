@@ -103,8 +103,9 @@ enum TimeoutChoice {
 pub(crate) struct WaitIo<'a, R, W> {
   /// The install link.
   pub(crate) url: &'a str,
-  /// Opens the link (a browser launch, or nothing under `--no-browser`).
-  pub(crate) open: &'a dyn Fn(&str),
+  /// Opens the link; `false` when there is no browser to launch
+  /// (`--no-browser`, a headless session).
+  pub(crate) open: &'a dyn Fn(&str) -> bool,
   /// Input lines; `None` when stdin is not a terminal.
   pub(crate) input: Option<Lines<R>>,
   /// Where prompts and status lines go.
@@ -169,7 +170,7 @@ async fn pause_or_line<R, W>(
   pause: Duration,
   input: &mut Option<Lines<R>>,
   url: &str,
-  open: &dyn Fn(&str),
+  open: &dyn Fn(&str) -> bool,
   out: &mut W,
 ) -> Result<bool, RunnerError>
 where
@@ -225,7 +226,7 @@ async fn at_deadline<R, W>(
   interactive: bool,
   input: &mut Option<Lines<R>>,
   url: &str,
-  open: &dyn Fn(&str),
+  open: &dyn Fn(&str) -> bool,
   out: &mut W,
 ) -> Result<Option<WaitOutcome>, RunnerError>
 where
@@ -260,7 +261,7 @@ fn hint(interactive: bool) -> &'static str {
 fn line_command<W: Write>(
   line: &str,
   url: &str,
-  open: &dyn Fn(&str),
+  open: &dyn Fn(&str) -> bool,
   out: &mut W,
 ) -> std::io::Result<()> {
   match line {
@@ -274,9 +275,15 @@ fn line_command<W: Write>(
 }
 
 /// Open the link again and say so.
-fn reopen<W: Write>(url: &str, open: &dyn Fn(&str), out: &mut W) -> std::io::Result<()> {
-  open(url);
-  writeln!(out, "Opened {url}")
+fn reopen<W: Write>(url: &str, open: &dyn Fn(&str) -> bool, out: &mut W) -> std::io::Result<()> {
+  if open(url) {
+    writeln!(out, "Opened {url}")
+  } else {
+    writeln!(
+      out,
+      "No browser on this machine \u{2014} open it on another one: {url}"
+    )
+  }
 }
 
 /// The OSC 52 escape that asks the terminal to put `text` on the clipboard

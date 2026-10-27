@@ -20,7 +20,8 @@ pub(crate) struct MachineFacts {
   pub(crate) supervisor: String,
   /// Linger state on systemd user installs, when known.
   pub(crate) linger: Option<bool>,
-  /// SSH session or no display: App creation needs a steer.
+  /// SSH session or no display: App creation goes through the relay
+  /// link (#205).
   pub(crate) headless: bool,
   /// The runner home registrations live under.
   pub(crate) home: PathBuf,
@@ -46,14 +47,20 @@ pub(crate) fn gather(home: &std::path::Path) -> Result<MachineFacts, String> {
     memory_mb: total_memory_mb(),
     supervisor: supervisor_name(),
     linger: linger_state(),
-    headless: classify_headless(
-      crate::config::ssh_session(),
-      crate::config::display_present(),
-      cfg!(target_os = "macos"),
-    ),
+    headless: session_headless(),
     home: home.to_path_buf(),
     existing,
   })
+}
+
+/// This session's headless guess ([`classify_headless`] over the env),
+/// shared with `create-app` (#205).
+pub(crate) fn session_headless() -> bool {
+  classify_headless(
+    crate::config::ssh_session(),
+    crate::config::display_present(),
+    cfg!(target_os = "macos"),
+  )
 }
 
 /// Whether the session looks headless: SSH always is; on macOS a

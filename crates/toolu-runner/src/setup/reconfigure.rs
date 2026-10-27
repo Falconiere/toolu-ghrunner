@@ -148,9 +148,7 @@ fn owned_with(args: &SetupArgs, mut owned: SetupArgs) -> SetupArgs {
     owned.app_key.clone_from(&args.app_key);
   }
   owned.token_stdin = owned.token_stdin || args.token_stdin;
-  owned.session.headless = args.session.headless;
-  owned.session.no_headless = args.session.no_headless;
-  owned.session.no_relay = args.session.no_relay;
+  owned.session = args.session;
   owned.mode.no_service = owned.mode.no_service || args.mode.no_service;
   owned.mode.ephemeral = owned.mode.ephemeral || args.mode.ephemeral;
   owned.flow.enable_linger = owned.flow.enable_linger || args.flow.enable_linger;

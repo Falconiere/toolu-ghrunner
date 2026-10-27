@@ -293,13 +293,15 @@ async fn claim_pending_honours_retry_after() -> TestResult<()> {
   Ok(())
 }
 
-/// AC-7: 5xx/429 are `Network` (retry; paste stays open), a 400 and an
-/// unsafe code are `Protocol` (fatal, nothing exchanged).
+/// AC-7: 5xx/429/404/403 are `Network` (retry; paste stays open), a 400
+/// and an unsafe code are `Protocol` (fatal, nothing exchanged).
 #[tokio::test]
 async fn claim_failures_are_classified() -> TestResult<()> {
   for (response, network) in [
     (json(500, "{}"), true),
     (json(429, "{}"), true),
+    (json(404, "{}"), true),
+    (json(403, "{}"), true),
     (json(400, r#"{"error":"invalid_request"}"#), false),
     (json(200, r#"{"code":"../../user"}"#), false),
     (json(200, "{}"), false),

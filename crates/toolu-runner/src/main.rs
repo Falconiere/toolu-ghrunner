@@ -117,7 +117,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     Command::Setup(args) => setup::cmd_setup(args).await,
     Command::CreateApp(args) => {
       let home = registry::runner_home();
-      create_app_cmd::cmd_create_app(&args, &home).await
+      create_app_cmd::cmd_create_app(&args, &home, create_app_cmd::stdin_lines()).await
     },
     // Intercepted in `main` before `run` is called (see above).
     Command::Boot(_) | Command::Check(_) | Command::Doctor(_) => Ok(()),

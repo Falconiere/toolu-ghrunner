@@ -57,8 +57,8 @@ returns it, so `create-app --import <home>/github-app.json` resumes the wait.
 Over SSH, or with no display, create-app prints a get.toolu.sh link to open on
 another machine and picks the code up from the relay (TOOLU_RUNNER_RELAY_URL)
 with a secret only this machine holds; p + Enter pastes the code from the
-callback page instead. --no-relay contacts no relay: paste the address-bar URL
-of the page that fails to load. --headless / --no-headless override the guess.";
+callback page instead. With --no-relay this machine never contacts the relay:
+paste the address-bar URL of the page that fails to load. --headless / --no-headless override the guess.";
 
 /// Extended help footer for `boot --help`.
 const BOOT_AFTER_HELP: &str = "\
@@ -311,7 +311,7 @@ pub(crate) struct CreateAppArgs {
 
 /// How a GitHub App gets created relative to this machine's browser
 /// (#205, design screen 06); shared by `create-app` and `setup`.
-#[derive(Debug, Default, Args)]
+#[derive(Debug, Default, Clone, Copy, Args)]
 pub(crate) struct HeadlessFlags {
   /// Create the App from another machine's browser (default over SSH or
   /// with no display): print a link and pick the code up from the relay.
@@ -329,7 +329,7 @@ pub(crate) struct HeadlessFlags {
 impl HeadlessFlags {
   /// The flags' verdict, if they give one: `--headless` / `--no-relay` →
   /// headless, `--no-headless` → desktop, none → `None` (guess).
-  pub(crate) fn forced(&self) -> Option<bool> {
+  pub(crate) fn forced(self) -> Option<bool> {
     if self.headless || self.no_relay {
       Some(true)
     } else if self.no_headless {

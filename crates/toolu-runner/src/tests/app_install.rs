@@ -157,7 +157,10 @@ async fn keep_waiting_at_the_timeout_then_the_installation_is_found() -> TestRes
   let screen = Screen::default();
   let mut out = screen.clone();
   let opened = Mutex::new(Vec::<String>::new());
-  let open = |url: &str| opened.lock().expect("lock").push(url.to_owned());
+  let open = |url: &str| {
+    opened.lock().expect("lock").push(url.to_owned());
+    true
+  };
   let io = WaitIo {
     url: URL,
     open: &open,
@@ -202,7 +205,10 @@ async fn open_again_reopens_the_link_and_cancel_ends_the_wait() -> TestResult {
   let screen = Screen::default();
   let mut out = screen.clone();
   let opened = Mutex::new(Vec::<String>::new());
-  let open = |url: &str| opened.lock().expect("lock").push(url.to_owned());
+  let open = |url: &str| {
+    opened.lock().expect("lock").push(url.to_owned());
+    true
+  };
   let io = WaitIo {
     url: URL,
     open: &open,
@@ -228,6 +234,48 @@ async fn open_again_reopens_the_link_and_cancel_ends_the_wait() -> TestResult {
   Ok(())
 }
 
+/// #205: with no browser to launch (headless), "open again" says so and
+/// prints the link instead of claiming it opened.
+#[tokio::test]
+async fn open_again_without_a_browser_prints_the_link() -> TestResult {
+  let (server, _never) = peer().await?;
+  let (client, app, masker) = (
+    reqwest::Client::new(),
+    app(),
+    Mutex::new(SecretMasker::new()),
+  );
+  let base = server.uri();
+  let target = target(&client, &base, &app, &masker);
+  let (mut typing, lines) = keyboard();
+  let screen = Screen::default();
+  let mut out = screen.clone();
+  let io = WaitIo {
+    url: URL,
+    open: &|_: &str| false,
+    input: Some(lines),
+    out: &mut out,
+  };
+  let driver = async {
+    screen.shows(PROMPT, 1).await?;
+    typing.write_all(b"o\n").await?;
+    screen.shows(PROMPT, 2).await?;
+    typing.write_all(b"c\n").await?;
+    TestResult::Ok(())
+  };
+  let (outcome, driver_result) = tokio::join!(wait_for_installation(&target, TIMING, io), driver);
+  driver_result?;
+  outcome?;
+  let text = screen.text();
+  assert!(
+    text.contains(&format!(
+      "No browser on this machine \u{2014} open it on another one: {URL}"
+    )),
+    "{text}"
+  );
+  assert!(!text.contains("Opened "), "{text}");
+  Ok(())
+}
+
 #[tokio::test]
 async fn typing_c_while_waiting_copies_the_link_over_osc_52() -> TestResult {
   let (server, installed) = peer().await?;
@@ -243,7 +291,7 @@ async fn typing_c_while_waiting_copies_the_link_over_osc_52() -> TestResult {
   let mut out = screen.clone();
   let io = WaitIo {
     url: URL,
-    open: &|_: &str| {},
+    open: &|_: &str| true,
     input: Some(lines),
     out: &mut out,
   };
@@ -285,7 +333,7 @@ async fn unattended_gives_up_at_the_timeout() -> TestResult {
   let mut out = Screen::default();
   let io: WaitIo<'_, BufReader<DuplexStream>, _> = WaitIo {
     url: URL,
-    open: &|_: &str| {},
+    open: &|_: &str| true,
     input: None,
     out: &mut out,
   };
@@ -310,7 +358,7 @@ async fn closed_input_cancels_at_the_timeout() -> TestResult {
   let mut out = Screen::default();
   let io = WaitIo {
     url: URL,
-    open: &|_: &str| {},
+    open: &|_: &str| true,
     input: Some(lines),
     out: &mut out,
   };
@@ -343,7 +391,7 @@ async fn a_transient_failure_warns_and_keeps_waiting() -> TestResult {
   let mut out = Screen::default();
   let io: WaitIo<'_, BufReader<DuplexStream>, _> = WaitIo {
     url: URL,
-    open: &|_: &str| {},
+    open: &|_: &str| true,
     input: None,
     out: &mut out,
   };
@@ -386,7 +434,7 @@ async fn a_rejected_app_ends_the_wait_with_its_error() -> TestResult {
   let mut out = Screen::default();
   let io: WaitIo<'_, BufReader<DuplexStream>, _> = WaitIo {
     url: URL,
-    open: &|_: &str| {},
+    open: &|_: &str| true,
     input: None,
     out: &mut out,
   };
@@ -468,7 +516,7 @@ async fn typed_lines_do_not_trigger_extra_polls() -> TestResult {
   let mut out = screen.clone();
   let io = WaitIo {
     url: URL,
-    open: &|_: &str| {},
+    open: &|_: &str| true,
     input: Some(lines),
     out: &mut out,
   };
