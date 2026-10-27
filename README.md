@@ -65,7 +65,7 @@ curl -fsSL https://get.toolu.sh/pkg/ghrunner/install | bash -s -- --no-setup
 curl -fsSL https://get.toolu.sh/pkg/ghrunner/install | TOOLU_RUNNER_TOKEN="$PAT" \
   bash -s -- --source github --repo acme/web --auth token --yes
 
-# ...unattended toolu.sh enrollment (the console one-liner). `bash -s --` passes the flag
+# ...unattended toolu.sh enrollment (the console one-liner); `bash -s --` hands `--toolu` to the installer
 curl -fsSL https://get.toolu.sh/pkg/ghrunner/install | bash -s -- --toolu <enrollment-token>
 
 # ...force /usr/local/bin on a host where it needs root

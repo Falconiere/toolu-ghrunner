@@ -145,6 +145,11 @@ if want legacy; then
   err_tu="$("$SCRIPT" --toolu --check 2>&1)" || rc_tu=$?
   [[ "$rc_tu" -eq 2 ]] || fail "--toolu must not swallow the next flag (rc=$rc_tu): $err_tu"
   rc_tu=0
+  # setup's parser rejects a value starting with `-` (and echoes part of it).
+  err_tu="$("$SCRIPT" --check --toolu=-secretish 2>&1)" || rc_tu=$?
+  [[ "$rc_tu" -eq 2 ]] || fail "a --toolu value starting with - should exit 2 (rc=$rc_tu): $err_tu"
+  if echo "$err_tu" | grep -q -- 'secretish'; then fail "a --toolu error echoed the token: $err_tu"; fi
+  rc_tu=0
   err_tu="$("$SCRIPT" --check --toolu= 2>&1)" || rc_tu=$?
   [[ "$rc_tu" -eq 2 ]] || fail "an empty --toolu= should exit 2 (rc=$rc_tu): $err_tu"
   rc_tu=0

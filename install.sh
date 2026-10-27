@@ -165,50 +165,39 @@ join_args() {
 # setup's flag is `--enroll-token` (it implies `--source toolu`). Rewrite
 # before any message or the setup handoff, so a missing token exits 2
 # before a download and the token never appears in a message. A token that
-# starts with `--` is refused so the next flag is never taken as the value.
+# starts with `-` is refused: the next flag is never taken as the value, and
+# setup's parser would reject it after the download anyway.
 apply_toolu_flag() {
-  local a token seen_toolu=0 seen_enroll=0
+  local token seen_toolu=0 seen_enroll=0
   local -a rebuilt
   rebuilt=()
   while [[ $# -gt 0 ]]; do
-    a="$1"
-    case "$a" in
+    if [[ "$1" == --toolu=* ]]; then set -- --toolu "${1#*=}" "${@:2}"; fi
+    case "$1" in
       --toolu)
         token="${2:-}"
-        [[ $# -ge 2 && -n "$token" && "$token" != --* ]] \
-          || die "--toolu requires an enrollment token (a non-empty value that does not start with --)"
+        [[ $# -ge 2 && -n "$token" && "$token" != -* ]] \
+          || die "--toolu requires an enrollment token (a non-empty value that does not start with -)"
         [[ "$seen_toolu" -eq 0 ]] || die "--toolu was given twice"
         [[ "$seen_enroll" -eq 0 ]] || die "--toolu and --enroll-token cannot both be given"
         seen_toolu=1
         rebuilt+=("--enroll-token" "$token")
         shift 2
         ;;
-      --toolu=*)
-        token="${a#*=}"
-        [[ -n "$token" && "$token" != --* ]] \
-          || die "--toolu requires an enrollment token (a non-empty value that does not start with --)"
-        [[ "$seen_toolu" -eq 0 ]] || die "--toolu was given twice"
-        [[ "$seen_enroll" -eq 0 ]] || die "--toolu and --enroll-token cannot both be given"
-        seen_toolu=1
-        rebuilt+=("--enroll-token" "$token")
-        shift
-        ;;
       --enroll-token | --enroll-token=*)
         [[ "$seen_toolu" -eq 0 ]] || die "--toolu and --enroll-token cannot both be given"
         seen_enroll=1
-        rebuilt+=("$a")
+        rebuilt+=("$1")
         shift
         ;;
       *)
-        rebuilt+=("$a")
+        rebuilt+=("$1")
         shift
         ;;
     esac
   done
-  SETUP_ARGS=()
-  if [[ ${#rebuilt[@]} -gt 0 ]]; then
-    SETUP_ARGS=("${rebuilt[@]}")
-  fi
+  # Never empty: called with at least one argument, each kept or fatal.
+  SETUP_ARGS=("${rebuilt[@]}")
 }
 
 # --- arg parsing -----------------------------------------------------------
