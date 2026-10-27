@@ -2,7 +2,8 @@
 
 **What belongs here:** the artifact storage abstraction (`ArtifactBackend`)
 plus a filesystem-backed implementation, and (in `service/`) the local HTTP
-service that mimics GitHub's artifact API for offline mode.
+service implementation. The production job runner does not start this
+service in `offline` mode; normal artifact traffic uses GitHub's endpoints.
 
 **What does NOT belong here:** the local-vs-real service URL decision
 (forwarder / offline / accelerated) — that lives in

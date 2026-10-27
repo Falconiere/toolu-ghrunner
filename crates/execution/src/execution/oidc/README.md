@@ -3,7 +3,8 @@
 **What belongs here:** the local OIDC token service backing
 `ACTIONS_ID_TOKEN_REQUEST_URL` — either proxying to GitHub's real OIDC
 provider or minting a locally-signed JWT, plus the GitHub Actions OIDC claim
-shape.
+shape. The production job runner does not start this server; forwarder and
+accelerated jobs use GitHub's OIDC URL directly.
 
 **What does NOT belong here:** deciding whether a job even needs a local
 OIDC server vs. forwarding real GitHub URLs — that mode selection lives in

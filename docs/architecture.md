@@ -1,6 +1,6 @@
 # toolu-runner Architecture
 
-**Date:** 2026-06-18 · **Status:** maintained (v0.12.x) · **Author:** toolu
+**Reviewed:** 2026-10-27 · **Scope:** current workspace (v0.14.0)
 
 This document is the architectural reference for `toolu-runner`. It
 mirrors the layout of the source tree and explains how the ten
@@ -8,8 +8,9 @@ library crates plus the `toolu-runner` and `toolu-daemon` binaries (twelve
 workspace members in total) fit together, how the listener lifecycle runs, and how the
 runner behaves under failure.
 
-For the design rationale, see
-[docs/toolu/specs/2026-06-18-toolu-runner-standalone-design.md](toolu/specs/2026-06-18-toolu-runner-standalone-design.md).
+Dated records under `specs/` and `plans/` preserve implementation decisions;
+this document describes current behavior. Acceptance evidence lives in
+[test coverage](test-coverage.md) and the [compatibility matrix](compatibility-matrix.md).
 
 ## Overview
 
@@ -51,7 +52,9 @@ toolu-ghrunner/                            workspace root
     │   ├── auth_store.rs                  0600-file login-token store (keyring opt-in) + decide_bearer TTY gate
     │   ├── app_store.rs                   GitHub App credential store (github-app.json; load_app_file, secret_values)
     │   ├── registration_auth.rs           [auth] section: token (default, omitted) | app (app_file, installation_id)
-    │   ├── registry.rs                    runner home + runners/<owner>/<repo>/ discovery/resolution
+    │   ├── registry.rs                    runner home + repo/org/toolu.sh registration discovery/resolution
+    │   ├── provider.rs                    GitHub or toolu.sh provider configuration
+    │   ├── stop_marker.rs                 masked reason a supervised registration stopped
     │   ├── repo_infer.rs                  cwd git remote → owner/repo inference
     │   ├── remint.rs                      re-mint merge (preserve [services]/[cache]/[workspace]/[shadow])
     │   └── service_unit.rs                launchd plist / systemd unit builders (install-service)
@@ -81,7 +84,7 @@ toolu-ghrunner/                            workspace root
     │   └── log_uploader/                  per-step + combined job-log upload
     ├── toolu-runner/                      bin only (the CLI)
     │   ├── src/main.rs                    dispatch + the inline remove handler
-    │   ├── src/cli.rs                     clap surface: register / run / boot / remove / status / install-service / login / logout / create-app / check / doctor
+    │   ├── src/cli.rs                     clap surface: setup / register / run / boot / remove / status / install-service / login / logout / create-app / check / doctor
     │   ├── src/register_cmd.rs            register + remint_and_persist (per-repo persist, config rollback)
     │   ├── src/register_auth.rs           register's bearer: GitHub App (--app / saved App) or token chain; org runner-group names
     │   ├── src/app_auth.rs                GitHub App glue: load + mask, installation lookup, installation-token cache
@@ -97,6 +100,11 @@ toolu-ghrunner/                            workspace root
     │   ├── src/create_app_cmd.rs          create-app (GitHub App Manifest onboarding, personal or --org)
     │   ├── src/app_install.rs             create-app's installation wait (poll /app/installations, o/c, timeout prompt)
     │   ├── src/app_import.rs              create-app --import / --app-id (prove the key with GET /app)
+    │   ├── src/setup.rs + setup/          guided GitHub or toolu.sh onboarding, review/apply, online confirmation
+    │   ├── src/app_headless.rs            headless App manifest relay and pasted callback flow
+    │   ├── src/poll_loop.rs + poll_job.rs  toolu.sh queue/claim/lease/completion lifecycle
+    │   ├── src/toolu_host.rs              paired host credentials, refresh, status and revocation
+    │   ├── src/remove_state.rs            registration deletion and empty-directory cleanup
     │   ├── src/network_setup.rs           per-lifecycle [network] client + proxy-secret registration
     │   ├── src/config.rs                  env reads for the bin
     │   ├── src/check_*.rs                 check: read-only preflight (endpoints, tools, proxy/CA; exit 0/1/2)
@@ -380,7 +388,8 @@ The entry point is `handler::GitHubListener::run`. It wires:
   OAuth token, then use that token on later broker operations. Transient
   exchange errors retry within a bounded budget; terminal errors return.
 - HTTP 200 with `RunnerRefresh`, `AgentRefresh`, or `RunnerRefreshConfig` →
-  WARN and advance the cursor; local update handling is deferred to #78.
+  WARN and advance the cursor; updates are operator-managed (see
+  [runner updates](runner-updates.md)).
 - HTTP 200 with `HostedRunnerShutdown` → cancel the listener lifecycle.
 - Network error → jittered exponential backoff (1s → 60s cap), continue.
 
@@ -512,12 +521,14 @@ evaluator: lexer → parser (AST + precedence + primary) → evaluator
 `format`, `join`, `toJSON`, `fromJSON`, `hashFiles`, etc.) plus
 GH-specific helpers.
 
-Artifacts (`artifacts/`) and cache (`cache/`) run as in-process
-axum micro-services: artifact upload / download via Azure
-append-blob, and cache as a content-addressed store (`cache/cas/`,
-FastCDC chunks addressed by BLAKE3) that backs the
-[accelerated mode](#accelerated-mode-cache-acceleration) described
-below.
+The job runner starts local cache services in `offline` (legacy v1 only)
+and `accelerated` (v1 plus v2) modes. Both use `cache/cas/`: FastCDC chunks
+addressed by BLAKE3. `offline` exports only the cache URL and its runtime
+token; it does not forward GitHub service URLs. Local artifact (`artifacts/`)
+and OIDC (`oidc/`) implementations exist but are not started on the production
+job path. `forwarder` uses GitHub endpoints;
+[accelerated mode](#accelerated-mode-cache-acceleration) proxies non-cache
+Results traffic to GitHub and retains the upstream OIDC endpoint.
 
 ### `docker/`, `node/`
 
@@ -1020,7 +1031,7 @@ run a job, since nothing deletes it on a normal exit — is therefore not
 When the lock IS held, `--force` removes local state but **keeps `.lock`**
 (fs2's lock is inode-scoped, so unlinking it would let a second `run`
 acquire a fresh one and race the live job) and skips the unregister (that
-job still renews against this registration; live cancellation is step 10).
+job still renews against this registration). It does not cancel the job.
 `--skip-unregister` skips the call outright for a revoked token, deleted
 repo, or no network. No token at all is an **error**, not a warning: exit 2
 with nothing deleted, naming every remedy.
@@ -1390,8 +1401,7 @@ window in milliseconds.
 ├── token-<host>.json               # login token (0600, default store; keyring opt-in) — SHARED by all repos
 ├── github-app.json                 # create-app credentials + installation_id (0600) — SHARED by all repos
 ├── _diag/                          # the runner's own logs (always under ~/.toolu-runner: tracing starts before any registration loads)
-│   ├── runner.log                  # JSON, secret-masked, daily-rotated
-│   └── runner.log.YYYY-MM-DD       # rotated archives (older than 14 days removed at startup)
+│   └── runner.log.YYYY-MM-DD       # JSON, secret-masked; daily files older than 14 days pruned at startup
 ├── _work/                          # job workspaces (upstream layout, shared default)
 │   ├── <repo>/<repo>/              # stable workspace (GITHUB_WORKSPACE), reused per repository
 │   ├── <job-id>/                   # fresh workspace ([workspace] mode = "fresh", or a busy lease)
@@ -1634,10 +1644,10 @@ release per tag, never cancelled mid-flight.
 
 ## Failure modes
 
-The following are the v1 failure paths. Anything not listed is
-non-goal for v1 (logged + best-effort; no spec guarantee).
+Representative CLI failure paths are listed below. Under `run --all`, a
+registration failure stops only that loop and writes its `.stopped` marker.
 
-| # | Scenario                                                      | v1 behavior |
+| # | Scenario                                                      | Current behavior |
 |---|---------------------------------------------------------------|-------------|
 | 1 | `run` with no `config.toml`                                   | Exit 2, point at `toolu-runner register`. |
 | 2 | `run` with `config.toml` but no `credentials.json`            | Exit 2, same pointer. |
@@ -1645,15 +1655,15 @@ non-goal for v1 (logged + best-effort; no spec guarantee).
 | 4 | `register` with an invalid / expired token                    | Exit 2. A 401 reports `GitHub rejected the bearer as invalid or expired (401) — for a personal token, run 'toolu-runner login'`; other permanent non-2xx statuses carry GitHub's response body (a 404 for a one-segment URL adds that it was read as an organization). |
 | 5 | `register` with name that conflicts                            | Exit 2 unless `--replace`; with `--replace`, overwrites. |
 | 6 | `run` started when a previous `run` holds `.lock`             | Exit 2 with the holder's PID read from the lock body. |
-| 7 | `remove` mid-job                                              | Writes `.pending_remove`, refuses with exit 2 unless `--force`; with `--force` it removes local state but keeps `.lock` and skips the GitHub unregister (the running job still reports against that registration). Live cancellation of the job is still step 10. |
+| 7 | `remove` mid-job | Writes `.pending_remove`; a supervised registration drains for up to 30 seconds and an acquired job is allowed to finish. If still locked (or not supervised), exits 2. `--force` removes local state, keeps `.lock`, skips GitHub unregister and does not cancel the job. |
 | 7a | `remove` with no GitHub token                                | Exit 2 with nothing deleted, naming `login` / `--token` / `TOOLU_RUNNER_TOKEN` / `--skip-unregister`. Deleting the persisted `runner_id` + URL while the runner is still registered is the B-002 failure. |
 | 7b | `remove` when the unregister fails (bad token, network)      | Exit 2 with local state intact so the removal is retryable. A `RunnerError::Config` (a URL naming no owner/repo or org, which no runners API can address) instead warns and removes locally; org URLs unregister through `orgs/{org}` (#201). |
 | 8 | `run` started with network down at startup                    | The token exchange fails as `RunnerError::Network`, which the run loop treats as transient: jittered exponential backoff, 1s → 60s cap, retrying the same config (once polling, the poll loop backs off the same way). |
 | 9 | `run` mid-job, network drops < 5 min                          | In-flight step keeps running locally; lock renewal retries on its fixed 60 s tick; a step-status batch that fails to flush is WARN-dropped (not replayed); the completion report is retried on reconnect (`retry_transient`, up to 10 min). |
-| 10 | `run` mid-job, network drops > 5 min                         | The renewal-heartbeat `OutageWatchdog` (300 s, `Network`-class renewal failures only) cancels the job; the report is overridden to `failure` with a "lost connection" annotation and delivered on reconnect. Resolved: [known-bugs.md](known-bugs.md) B-001; see "Sequence: reconnect". |
+| 10 | `run` mid-job, network drops > 5 min                         | The renewal-heartbeat `OutageWatchdog` (300 s, `Network`-class renewal failures only) cancels the job; a non-success report is overridden to `failure` with a "lost connection" annotation and retried on reconnect for up to 10 minutes. Resolved: [known-bugs.md](known-bugs.md) B-001; see "Sequence: reconnect". |
 | 11 | Disk full mid-job                                            | Current step fails with `RunnerError::Io`; step marked `failure`; job completes `failure`; `run` stays alive for next job. |
 | 12 | `remove` with no registration                                 | Exit 0 with "no registration found." |
-| 13 | Session create returns 409 (another live session)             | Retry every 30 s, 8 attempts; still conflicting → exit 5 (`run`, `--once`, `boot`); systemd does not restart it. See "Session-create conflicts (#91)". |
+| 13 | Session create returns 409 (another live session)             | Retry every 30 s, 8 attempts; still conflicting → exit 5 (`run`, `--once`, `boot`). Per-registration systemd units do not restart it; `run --all` stops only that registration. See "Session-create conflicts (#91)". |
 
 The failure-mode integration tests (lock acquire / conflict / stale
 recovery, `run` without config or credentials, `register` URL validation
@@ -1661,24 +1671,17 @@ and `remove` with no registration) live in
 `crates/toolu-runner/tests/failure_modes_test.rs`; the rows that need a
 live GitHub are not covered there.
 
-## Open questions
+## Verification and scope limits
 
-The full open-questions list is in the design spec at
-[docs/toolu/specs/2026-06-18-toolu-runner-standalone-design.md](toolu/specs/2026-06-18-toolu-runner-standalone-design.md#open-questions).
-The short version (updated as items land):
-
-1. **GHES test instance.** The dispatch-gated harness now exists
-   (`.github/workflows/live-ghes.yml`; it skips without the
-   `TOOLU_RUNNER_LIVE_GHES_*` secrets). Live verification against a
-   real instance is still pending access; tracked in
-   [known-bugs.md](known-bugs.md).
-2. **Homebrew tap.** Shipped —
-   `brew install falconiere/tap/toolu-runner` (`release-homebrew.yml`).
-3. **Code signing on macOS.** Not signed in v1. Notarization in
-   v1.1 if user demand warrants.
-4. **Telemetry opt-in.** OTel cut for v1. A `tracing-subscriber`
-   JSON-formatter + optional OTel layer (behind a feature flag) is
-   a v1.1 fast-follow.
+- **GHES:** the dispatch-only `live-ghes.yml` harness fails as `UNVERIFIED`
+  without `TOOLU_RUNNER_LIVE_GHES_*` credentials. The compatibility matrix
+  records which scenarios have evidence; GitHub.com results do not establish
+  GHES parity.
+- **macOS distribution:** release scripts do not sign or notarize the binary.
+- **Telemetry:** diagnostics use `tracing-subscriber` and the local journal.
+  OpenTelemetry is not part of the current runtime.
+- **Local services:** offline artifact/OIDC startup and production S3 tier
+  wiring are absent. See [known limitations](known-bugs.md).
 
 ## Incoming expression contexts
 
@@ -1703,7 +1706,8 @@ Composite invocation inputs remain separate from workflow inputs and from
 other invocations. Acquired local actions identify their repository as `self`
 and carry the local path separately from the optional remote action name.
 
-Deferred display names/timeouts are tracked in #99. Composite field evaluation,
+Deferred display names, timeouts and continue-on-error are implemented in
+`step_display` / `step_attrs` (#99). Composite field evaluation,
 local failure status, and cleanup conditions are covered by #102. The measured scope and reference
 run evidence are in [test-coverage.md](test-coverage.md#incoming-contexts-acceptance-68).
 

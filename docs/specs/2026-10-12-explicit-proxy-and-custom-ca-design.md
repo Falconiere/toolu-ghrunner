@@ -1,5 +1,10 @@
 # Explicit proxy and custom CA configuration — Design
 
+> Historical implementation record. Current behavior is documented in
+> [architecture](../architecture.md); acceptance status and remaining gaps are
+> tracked in [test coverage](../test-coverage.md) and the
+> [compatibility matrix](../compatibility-matrix.md).
+
 **Date:** 2026-10-12   **Status:** Approved   **Author:** Claude (epic #67 worker)   **Topic:** issue #94 — an optional `[network]` config applied to every runner HTTP client and exported to steps
 
 ## Problem

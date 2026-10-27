@@ -8,43 +8,41 @@
 > The table directly below is the original v1 design-spec map; a `live` entry
 > there means a test exists, not that it ran.
 
-Maps each of the 23 acceptance criteria from the design spec to the
-test(s) that cover it, with a "lane" indicating whether the test runs in
-the default `cargo test --workspace` lane or only with the `live`
-feature enabled.
+The original design criteria below now point at the current test surfaces.
+They are an index, not a fixed test count or a claim that every live lane passed.
 
-Lane legend:
+- **default** — `cargo nextest run --workspace`; doctests run separately with
+  `cargo test --workspace --doc`. Tests use local files, subprocesses and
+  loopback services; ignored Docker and live cases require separate runs.
+- **live** — `cargo test -p toolu-runner --features live -- --ignored --test-threads=1`
+  with `TOOLU_RUNNER_LIVE_TOKEN` and `TOOLU_RUNNER_LIVE_REPO`.
+- **scripts** — shell/Python checks run by `.github/workflows/ci.yml` in
+  addition to the Rust gate.
 
-- **default** — runs in `cargo test --workspace` (hermetic, no network).
-- **live** — runs in `cargo test -p toolu-runner --features live -- --ignored`
-  (requires a real test repo + PAT).
-- **out-of-scope** — covered by a non-test artifact (install script,
-  CI gate, design spec).
-
-| AC  | Description                                      | Test(s)                                                                                                                                                                                                                                                                                                                                                       | Lane         |
-| --- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
-| 1a  | Local status output (no network)                 | `crates/toolu-runner/tests/cli_test.rs::help_lists_all_subcommands` (clap surface), `crates/toolu-runner/tests/failure_modes_test.rs::legacy_env_warning_emitted_to_stderr_when_var_set` (exercises the `status` subcommand end-to-end through the binary).                                                                                                            | default      |
-| 1b  | Runner online within 30s of `register`           | `crates/toolu-runner/tests/live_e2e.rs::register_creates_config_and_credentials`, `crates/toolu-runner/tests/live_e2e.rs::register_replace_overwrites_existing` (gated; verifies config + credentials on disk after a real `register` call against the GH API).                                                                                       | live         |
-| 2   | No-op job (`run: echo hello`) completes          | `crates/toolu-runner/tests/live_e2e.rs::noop_job_completes` (gated; dispatches the noop workflow, runs the runner, asserts `conclusion: success` on the GH run).                                                                                                                                                                                                  | live         |
-| 3   | Multi-step job (run, uses, docker://)            | `crates/toolu-runner/tests/live_e2e.rs::multi_step_job` (gated; pushes `tests/fixtures/multistep-workflow.yml`: checkout + setup-node + a pinned `docker://alpine` container action whose Alpine-only output and marker a later step asserts). Real container execution is evidenced by `crates/execution/tests/compat_probe_replay_test.rs` (CI Docker step) and the #103 reference run; the live test itself is unverified while no live token is configured. | live         |
-| 4   | Action resolution (`actions/checkout@v4`)        | `crates/toolu-runner/tests/live_e2e.rs::action_resolution` (gated), `crates/toolu-runner/tests/actions_resolver_test.rs` (planned; see `crates/execution/src/execution/actions/resolver.rs::parse_action_ref` and `resolve_action_refs` for the parser-level coverage).                                                                                                  | live         |
-| 5   | Expression evaluation (`${{ }}` full syntax)     | `crates/toolu-runner/tests/live_e2e.rs::expression_evaluation` (gated; `tests/fixtures/expression-workflow.yml` asserts the exact typed inputs, and a second dispatch with `who: ''` must conclude `failure`), `crates/toolu-runner/tests/expression_eval_test.rs` — 28 tests covering literals, context/property/index access, function calls (`contains`, `startsWith`, `endsWith`, `format`, `join`, `toJson`, `fromJson`, `success`, `failure`, `always`, `cancelled`), binary ops, unary `!`, wildcards, and parse errors.                                                       | default+live |
-| 6   | Secret masking in logs                           | `crates/toolu-runner/tests/secret_masker_real_test.rs` — 10 tests driving the real `SecretMasker` against recorded log fixtures (`tests/fixtures/secret-masking-input.txt` → `secret-masking-expected.txt`), JSON-escaped variants, multi-line secrets, longest-first replacement, and the full `RedactingWriter` pipeline.                                                | default      |
-| 7   | OIDC token issuance                              | `crates/toolu-runner/tests/oidc_token_test.rs` — 6 tests spinning up the real `OidcServer` axum endpoint on `127.0.0.1:0`, posting to `/_apis/pipeline/oidc/requestToken`, decoding the returned JWT, verifying the default and overridden audiences, the 10-min expiry, and bearer-token auth.                                                                       | default      |
-| 8   | Artifact upload + download                       | `crates/execution/src/execution/artifacts/` (types only; v1 artifact service lives in `execution::execution::artifacts`). Live flow gated on artifact end-to-end tests landing in step 10.                                                                                                                                                                       | out-of-scope |
-| 9   | Cache save + restore                             | `crates/cache/src/` (types only; v1 cache service lives in the `cache` crate). Live flow gated on cache end-to-end tests landing in step 10.                                                                                                                                                                                      | out-of-scope |
-| 10  | Reusable workflows                               | Server-side: GitHub resolves `uses:` workflow calls and sends the expanded job; the local parser/resolver was removed in #97. Context evidence: `expression-context-call.yml` (see below). | n/a (server-side) |
-| 11  | Composite actions                                | `crates/toolu-runner/tests/composite_action_test.rs` — 12 tests parsing a real-shape composite `action.yml` (with `inputs`, `outputs`, `runs.using: composite`, multi-step `steps[]`), preparing composites (scope + depth tracking, depth limit), evaluating `${{ steps.X.outputs.Y }}` output expressions, and unsupported `runs.using` rejection.   | default      |
-| 12  | Reconnect after transient network failure        | `crates/toolu-runner/tests/net_test.rs` — `exchange_token_returns_protocol_error_on_http_failure` (401) and `poll_message_returns_none_on_202` (long-poll no-work). Listener-side exponential backoff in `crates/listener/src/job_lifecycle.rs` (covered by the listener smoke test). Live mid-job outage scenarios in the design spec are tracked in `docs/known-bugs.md`. | default      |
-| 13  | Concurrent single-job guarantee (file lock)      | `crates/toolu-runner/tests/failure_modes_test.rs::lock_acquire_writes_body_and_releases_on_drop`, `lock_conflict_returns_held_pid`, `lock_replaces_stale_lock_when_holder_pid_dead`. Live two-process race in `crates/toolu-runner/tests/live_e2e.rs::concurrent_single_job` (gated).                                                                                  | default      |
-| 14  | Cancel by GH (UI cancel → 30s)                   | `crates/toolu-runner/tests/live_e2e.rs::cancel_by_github` (gated; dispatches a `sleep 300` job, calls `POST /actions/runs/{id}/cancel`, asserts `conclusion: cancelled` within 60s).                                                                                                                                                                              | live         |
-| 15  | GHES V1 protocol                                 | `crates/toolu-runner/tests/ghes_v1_test.rs` — 6 tests driving `wire::net::v1::{fetch_connection_data, post_timeline_record, fetch_timeline}` against a `wiremock` server returning the real V1 service-discovery shape, plus the `protocol::v1::resolve_service_url` URL resolver exercised end-to-end.                                                          | default      |
-| 16  | Service install (launchd + systemd)              | `install.sh` (single shell script that emits a launchd plist on macOS, a systemd unit on Linux). Manual smoke only — no automated test for the service files.                                                                                                                                                                                                   | out-of-scope |
-| 17  | Install script                                   | `tests/install_sh_test.sh` (CI release-script step, not cargo): real loopback release fixtures, SHA256SUMS verification, PATH env files checked by bash/zsh/fish login shells, `--uninstall`, setup handoff; `tests/install_sh_bash32_test.sh` runs it under macOS `/bin/bash` 3.2 on ci-macos (#200).                                                         | out-of-scope |
-| 19  | Lint + typecheck gate                            | `lefthook.yml::pre-commit::rust-clippy` runs `cargo clippy --workspace --all-targets -- -D warnings`; `tools/check.sh all` runs `cargo fmt --all -- --check` + clippy + file-size + no-allow + no-unwrap. The `cargo build --workspace`, `cargo test --workspace`, and `cargo clippy` invocations in the build pipeline are the live gate.            | out-of-scope |
-| 20  | Live bug tracking                                | `docs/known-bugs.md` is the single source of truth; updated when the listener smoke test or live tests surface a behavior gap.                                                                                                                                                                                                                                | out-of-scope |
-| 21  | Protocol crate is sync + I/O-free                | `crates/protocol/Cargo.toml` dep list is restricted to `serde*`, `base64`, `jsonwebtoken`, `num-bigint-dig`, `pkcs1`, `sha1`, `sha2`, `aes`, `cbc`, `uuid` (no `reqwest`, `tokio`, `opendal`, `bollard`, `axum`). `crates/protocol/tests/integration.rs` is `#[test]` only — no `#[tokio::test]`, no `wiremock`.                                                                  | default      |
-| 23  | Real-data test suite                             | This file. The 5 new test files (`expression_eval_test.rs`, `secret_masker_real_test.rs`, `oidc_token_test.rs`, `composite_action_test.rs`, `ghes_v1_test.rs`) plus the recorded fixtures under `tests/fixtures/` form the suite. Live tests under `tests/live_e2e.rs (harness: tests/helpers/)` complete the picture with `--features live`.                    | default+live |
+| AC | Description | Current coverage | Lane |
+| --- | --- | --- | --- |
+| 1a | Local status and CLI | `crates/toolu-runner/tests/cli_test.rs`, `failure_modes_test.rs` | default |
+| 1b | Registration | `crates/toolu-runner/tests/gh_compat_register.rs`, `register_app_test.rs`; `live_e2e.rs` for real GitHub registration | default + live |
+| 2 | No-op job | `crates/toolu-runner/tests/live_e2e.rs::noop_job_completes` | live |
+| 3 | Mixed shell, Node and Docker steps | `crates/toolu-runner/tests/live_e2e.rs::multi_step_job`; `crates/execution/tests/compat_probe_replay_test.rs` in the CI Docker lane | live + Docker |
+| 4 | Action resolution | `crates/toolu-runner/tests/actions_resolver_test.rs`, `crates/execution/tests/action_downloads_test.rs`; `live_e2e.rs::action_resolution` | default + live |
+| 5 | Expressions | `crates/toolu-runner/tests/expression_eval_test.rs`, the `expressions` crate tests and `live_e2e.rs::expression_evaluation` | default + live |
+| 6 | Secret masking | `crates/toolu-runner/tests/secret_masker_real_test.rs`, `secret_masker_init_test.rs`; multiline sink coverage below | default |
+| 7 | OIDC | `crates/toolu-runner/tests/oidc_token_test.rs` covers the local server; `gh_compat_forwarder.rs` covers forwarded environment. Backend evidence is recorded in the compatibility matrix. | default + recorded backend evidence |
+| 8 | Artifacts | `crates/execution/src/execution/artifacts/backend.rs` and `service/` implement the local service, which the job runner does not start. Production forwarding/proxy and backend evidence are tracked under #103 in the compatibility matrix. | recorded backend evidence |
+| 9 | Cache | `crates/toolu-runner/tests/cache_v1_test.rs`, `cache_twirp_test.rs`, `cache_blob_test.rs`, `cache_accelerated_test.rs`, `cache_proxy_test.rs`; live tests remain separate | default + live |
+| 10 | Reusable workflows | GitHub expands workflow calls before sending the job; incoming-context and #103 evidence cover the acquired result | server-side + recorded evidence |
+| 11 | Composites | `crates/toolu-runner/tests/composite_action_test.rs` and the execution crate's composite replay tests; #102 below | default |
+| 12 | Reconnect and outages | `crates/toolu-runner/tests/net_test.rs`, `run_service_classify_test.rs`; `crates/listener/src/tests/watchdog_trip.rs`, `watchdog_retry.rs`. Live outage limits: [known-bugs.md](known-bugs.md). | default; live outage separate |
+| 13 | Registration locks | `crates/toolu-runner/tests/failure_modes_test.rs`, `crates/config/tests/lockfile_multi_test.rs`; `live_e2e.rs::concurrent_single_job` | default + live |
+| 14 | GitHub cancellation | `crates/toolu-runner/tests/live_e2e.rs::cancel_by_github`; conditional cleanup replay is mapped under #100 below | default + live |
+| 15 | GHES V1 | `crates/toolu-runner/tests/ghes_v1_test.rs` exercises captured-shape discovery/timeline responses; `.github/workflows/live-ghes.yml` is the separate credentialed lane | default + live-ghes |
+| 16 | launchd/systemd service install | `crates/config/tests/service_unit_test.rs`, `crates/toolu-runner/tests/install_service_test.rs`, `machine_service_test.rs`, `headless_service_test.rs`; live logout/reboot evidence below | default + scripts; live host separate |
+| 17 | Installer | `tests/install_sh_test.sh`, `tests/install_sh_bash32_test.sh` (macOS Bash 3.2) | scripts |
+| 19 | Quality gate | `./tools/check.sh all`: fmt, clippy, allow/expect ban, guardrails, nextest and doctests; CI adds script and Docker lanes | default + scripts + Docker |
+| 20 | Bug/limitation tracking | [known-bugs.md](known-bugs.md) and the acceptance matrix | documentation |
+| 21 | Protocol boundary | `crates/protocol/Cargo.toml` and `crates/protocol/tests/main.rs` (declares the integration modules); synchronous crypto/parser tests without an HTTP runtime | default |
+| 23 | Real-data evidence | Committed fixtures and per-feature provenance below; live and reference evidence retain their own lane status | default + recorded/live lanes |
 
 ## Recorded fixtures
 
@@ -63,17 +61,24 @@ Lane legend:
 
 Every workflow `live_e2e.rs` pushes is a committed fixture (`noop-`, `multistep-`, `expression-`, `journal-`, `action-resolution-`, `cancel-workflow.yml`); `scripts/test/live_lane_test.sh` (CI) keeps inline YAML out and pins the Docker/input assertions. Live tests fail with `UNVERIFIED: …` when `TOOLU_RUNNER_LIVE_TOKEN` / `TOOLU_RUNNER_LIVE_REPO` are absent; they never skip as a pass.
 
-## Summary
+## Running the coverage
 
-- 23 ACs total.
-- 15 ACs covered by default-lane tests (no network).
-- 5 ACs covered by live-only tests (require a real test repo).
-- 3 ACs are out-of-scope for the test suite (install script, service files, lint gate — enforced by `tools/check.sh` and `lefthook.yml`).
+Use `./tools/check.sh all` for the default gate; it includes nextest and
+separate doctests. CI additionally runs the shell/Python and Docker lanes
+listed in `.github/workflows/ci.yml`. Do not infer their status from a local
+gate pass. Test totals change as coverage grows; use the command's summary
+instead of a hard-coded count here.
 
-Total test count after step 11: see `cargo test --workspace` summary
-below. Live tests compile under `--features live` but only run with
-`--ignored` and the required env vars (`TOOLU_RUNNER_LIVE_TOKEN`,
-`TOOLU_RUNNER_LIVE_REPO`).
+Most crates collect integration modules in `tests/main.rs` with
+`autotests = false`. For example:
+
+```sh
+cargo test -p toolu-runner --test integration -- cli_test::
+```
+
+Ignored live tests need the appropriate feature, `--ignored` and credentials.
+The dated per-feature results below describe their recorded runs, not a fresh
+verification of every platform at the current HEAD.
 
 ## Issue #86 — explicit multiline workflow masks
 

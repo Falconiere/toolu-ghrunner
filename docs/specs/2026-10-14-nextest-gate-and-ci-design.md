@@ -1,5 +1,10 @@
 # Run the test suite with cargo-nextest in the gate and CI — Design
 
+> Historical implementation record. Current behavior is documented in
+> [architecture](../architecture.md); acceptance status and remaining gaps are
+> tracked in [test coverage](../test-coverage.md) and the
+> [compatibility matrix](../compatibility-matrix.md).
+
 **Date:** 2026-10-14   **Status:** Approved   **Author:** epic worker (#118)   **Topic:** replace `cargo test --workspace` with `cargo nextest run --workspace` + a separate doctest step in `tools/check.sh`, `ci.yml` (ubuntu and macOS) and `release.yml`
 
 ## Problem

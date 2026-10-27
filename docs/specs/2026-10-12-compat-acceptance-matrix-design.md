@@ -1,5 +1,10 @@
 # Compatibility acceptance matrix and reference-runner lane — Design
 
+> Historical implementation record. Current behavior is documented in
+> [architecture](../architecture.md); acceptance status and remaining gaps are
+> tracked in [test coverage](../test-coverage.md) and the
+> [compatibility matrix](../compatibility-matrix.md).
+
 **Date:** 2026-10-12   **Status:** Approved   **Author:** epic worker (#103)   **Topic:** epic #67 evidence matrix, pinned official-runner comparison, capture/replay, honest live lanes
 
 ## Problem

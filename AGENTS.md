@@ -89,7 +89,7 @@ CORE allows deviating; recording it here makes it a decision, not drift.
 | Cargo workspace | one crate | 12 crates | Layering keeps `protocol` provably I/O-free; kit workspace guardrails support it. |
 | `tab_spaces` | `4` | `2` | 4 would reformat 341 files (4,212 hunks) for no gain; all other rustfmt opts match. |
 | Lint set | `unwrap_used`/`expect_used` warn | `deny` + `panic`/`unreachable`/`todo`/`indexing_slicing`/cast denied | Stricter, not looser — a mid-job panic kills a customer build. |
-| `#[allow]` / `#[expect]` | — | banned repo-wide (`tools/check.sh`) | Fix the lint, don't silence it. Outer-form match only; crate-level `#![allow]` (two `benches/*.rs`) slips through. |
+| `#[allow]` / `#[expect]` | — | banned repo-wide (`tools/check.sh`) | Fix the lint, don't silence it. Both outer and crate-level forms are banned; `benches/` is the explicit exception. |
 | `cast_precision_loss` | on (pedantic) | `allow`, other three cast lints stay `deny` | `PipelineContextData::n` is `f64` (GitHub numbers are doubles); the `i64`/`u64` widening in `job_message::context_data_de` is the wire contract. |
 | `functionSize.max` | `100` | `150` (= `clippy.toml` `too-many-lines-threshold`) | One number, one enforcer. |
 | `knip` / `jscpd` | absent on Rust | absent | Covered by clippy `dead_code`/`unused_imports` + cargo. |
@@ -160,7 +160,8 @@ outside a `tests/` tree.
   from the job message `SystemVssConnection` into step env
   (`ACTIONS_RESULTS_URL`, `ACTIONS_RUNTIME_URL`(+`_TOKEN`), `ACTIONS_CACHE_URL`,
   `ACTIONS_CACHE_SERVICE_V2`, `ACTIONS_ID_TOKEN_REQUEST_URL`(+`_TOKEN`));
-  `offline` hosts local fakes (airgap); `Accelerated` serves both cache
+  `offline` starts only the local v1 cache (no artifact/OIDC startup or
+  GitHub service forwarding); `Accelerated` serves both cache
   protocols (v2 Twirp via `RESULTS_URL`, v1 REST via `CACHE_URL`) from local
   NVMe while proxying `ArtifactService` + rest to GitHub (real token kept).
   Wired in `execution::service_endpoints`.

@@ -1,5 +1,10 @@
 # Release profile: opt-level "s" + fat LTO, gated on benchmarks — Plan
 
+> Historical implementation record. Current behavior is documented in
+> [architecture](../architecture.md); acceptance status and remaining gaps are
+> tracked in [test coverage](../test-coverage.md) and the
+> [compatibility matrix](../compatibility-matrix.md).
+
 **Date:** 2026-10-14   **Status:** Approved   **Spec:** docs/specs/2026-10-14-release-opt-level-s-fat-lto-design.md   **Topic:** issue #112 — measured release profile
 
 ## Evidence and approach

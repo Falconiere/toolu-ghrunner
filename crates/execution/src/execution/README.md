@@ -25,7 +25,7 @@ orchestrator: GitHub expands workflows and sends the engine a single job.
 | `command_parser.rs` | `parse_command` | Parses one stdout line into a `WorkflowCommand` (error/warning/notice/debug/group/set-output/add-mask/save-state/…). |
 | `composite_env.rs` | `build_step_env` | Composite-action step-skip evaluation, per-step env building, and file-command path management shared by the composite executor. |
 | `composite_exec.rs` | `execute_composite_action` | Runs a composite action's `steps:` sequentially as shell subprocesses or nested `uses:`, threading `GITHUB_OUTPUT`/`ENV`/`PATH` file commands between steps. |
-| `composite_expr.rs` | `interpolate_composite_expr` | Minimal `${{ }}` interpolation for composite steps (`inputs.*`, `steps.*.outputs.*`, `runner.*`, `env.*`). |
+| `composite_expr.rs` | `interpolate_composite_expr` | Full expression evaluation against the invocation snapshot, with field-specific context/function validation. |
 | `composite_scope.rs` | `ScopeName` / `CompositeOutputs` | Output-isolation scope identifier and a composite manifest's `outputs:` expression map. |
 | `composite_shell.rs` | `run_shell_script` | Adapts a composite `run:` step to the shared `ScriptHandler` shell/template, streaming, timeout and cancellation contract. |
 | `composite_uses.rs` | `run_nested_uses_step` | Builds a synthetic `ActionStep` for a composite's nested `uses:` step and recurses through `action_exec::execute_action`, bounded by `DepthTracker`. |
@@ -44,9 +44,10 @@ orchestrator: GitHub expands workflows and sends the engine a single job.
 | `job_hooks.rs` | `run_job_hook` | Runs the self-hosted `ACTIONS_RUNNER_HOOK_JOB_STARTED`/`_COMPLETED` scripts around a job; started is a hard gate, completed is best-effort. |
 | `container_job.rs` | Job-container lifecycle | Validates the host and wraps main/post execution in container setup/cleanup. |
 | `job_context.rs` | Job context construction | Extracts message variables/context and materializes the event payload. |
+| `job_cancellation.rs` | `JobCancellation` | Separate graceful job cancellation from shutdown; share one cleanup deadline and re-evaluate running conditions. |
 | `job_environment.rs` | `apply_job_environment` | Evaluates acquired workflow/job env mappings in order, before container setup, using one snapshot per layer. |
 | `job_runner.rs` | `run_job` | The job entry point: prepares dirs, starts local services per `ServicesMode`, seeds job env, wraps the prepared job body in optional container lifecycle, and returns a `JobTeardown`; `job_runner/` contains the prepared body. |
-| `job_spec.rs` | `JobSpec` | Job-level `outputs:` expression map plus merged `defaults.run` (shell/working-directory), and `evaluate_job_outputs` to resolve them post-run. |
+| `job_spec.rs` | `JobSpec` | Acquired `jobOutputs` token plus ordered `defaults.run` mappings (later run mappings replace earlier ones); `evaluate_acquired_outputs` resolves outputs after posts. |
 | `job_teardown.rs` | `JobTeardown` | Deferred post-completion work returned by `run_job`: cache staging sweep + GC pass, and joining the workspace-sweep task, run only after the event sender is dropped. |
 | `node_stage.rs` | `run_node_stage` | Runs one Node.js action entrypoint (`pre`/`main`/`post`), rebuilding env per stage and dispatching its stdout workflow commands. |
 | `orphan_cleanup.rs` | `ProcessTracking` / `sweep` | Issue #89: per-job `RUNNER_TRACKING_ID` (`process.clean=false` disables it) and the job-end sweep that `SIGKILL`s every other process still carrying it (Linux `/proc`, macOS `KERN_PROCARGS2`) or started during the job inside a registered step process group (`register_group`; covers SIP macOS platform binaries whose environment is hidden), deadline-bounded, never failing the job. |
@@ -85,8 +86,6 @@ orchestrator: GitHub expands workflows and sends the engine a single job.
 When you add a file here, add its row above so the index stays current. No
 `mod.rs` barrel — declare submodules from the parent file (`src/foo.rs`
 declares `mod bar;` for `src/foo/bar.rs`) and import concrete paths.
-
-| `job_cancellation.rs` | Separate graceful job cancellation from shutdown; share one cleanup deadline and re-evaluate running conditions. |
 
 Problem matcher output support:
 

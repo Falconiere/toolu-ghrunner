@@ -1,5 +1,10 @@
 # Registration CLI parity: `--ephemeral` and `--no-default-labels` — Design
 
+> Historical implementation record. Current behavior is documented in
+> [architecture](../architecture.md); acceptance status and remaining gaps are
+> tracked in [test coverage](../test-coverage.md) and the
+> [compatibility matrix](../compatibility-matrix.md).
+
 **Date:** 2026-10-11   **Status:** Approved   **Author:** Claude (epic #67 worker)   **Topic:** issue #92 — upstream `config.sh --ephemeral` / `--no-default-labels` on `toolu-runner register`
 
 ## Problem

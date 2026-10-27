@@ -1,5 +1,10 @@
 # Explicit proxy and custom CA configuration — Plan
 
+> Historical implementation record. Current behavior is documented in
+> [architecture](../architecture.md); acceptance status and remaining gaps are
+> tracked in [test coverage](../test-coverage.md) and the
+> [compatibility matrix](../compatibility-matrix.md).
+
 **Date:** 2026-10-12   **Status:** Approved   **Spec:** docs/specs/2026-10-12-explicit-proxy-and-custom-ca-design.md   **Topic:** issue #94 — `[network]` config for every HTTP client, exported to steps
 
 ## Evidence and approach

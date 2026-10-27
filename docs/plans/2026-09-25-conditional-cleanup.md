@@ -1,5 +1,10 @@
 # Conditional cleanup — Plan
 
+> Historical implementation record. Current behavior is documented in
+> [architecture](../architecture.md); acceptance status and remaining gaps are
+> tracked in [test coverage](../test-coverage.md) and the
+> [compatibility matrix](../compatibility-matrix.md).
+
 **Date:** 2026-09-25   **Status:** Approved   **Spec:** docs/specs/2026-09-25-conditional-cleanup-design.md   **Topic:** #100
 
 ## Evidence and approach

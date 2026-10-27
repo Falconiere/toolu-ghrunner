@@ -6,7 +6,7 @@ callers) — no I/O, matching the crate-wide `protocol` rule.
 
 **What does NOT belong here:** the async HTTP fetch of `/_apis/connectionData`
 that produces the `ConnectionData` this module resolves against lives in
-`wire::net` (`toolu-runner::net` per this module's doc comment), across the
+`wire::net::v1`, across the
 one-way `protocol` -> `wire` boundary; the V2 (github.com) JIT config and
 session types live in the parent crate's `jit_config.rs` / `session.rs`.
 
