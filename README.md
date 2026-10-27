@@ -1042,7 +1042,7 @@ hand-edit `jit_config` or `auth_token` — re-run `register --replace`.
 ~/.toolu-runner/                # runner home — override with $TOOLU_RUNNER_HOME
 ├── token-<host>.json           # `login` token (0600, default store; keyring opt-in) — shared by all repos
 ├── github-app.json             # saved GitHub App (0600), shared by registrations
-├── _diag/                     # process diagnostics: runner.log.YYYY-MM-DD, daily rotation
+├── _diag/                      # process diagnostics: runner.log.YYYY-MM-DD, daily rotation
 ├── _work/                      # job workspaces (shared default): <repo>/<repo>/ stable, <job-id>/ fresh
 │   └── _PipelineMapping/       # <owner>/<repo>/PipelineFolder.json + workspace leases
 ├── supervisor.lock             # held by `run --all` (JSON: its pid) — `register`/`remove` signal it
@@ -1080,6 +1080,7 @@ deletes the machine service.
 | `TOOLU_RUNNER_TOOLU_API_URL` | `https://console.toolu.sh` | API origin for toolu.sh pairing and enrollment. |
 | `TOOLU_RUNNER_POLL_INTERVAL_MS` | `5000` | Wait after an empty toolu.sh queue. |
 | `TOOLU_RUNNER_REMOVE_WAIT_MS` | `30000` | Maximum wait for a supervised registration to drain during removal. |
+| `TOOLU_RUNNER_ONLINE_TIMEOUT_MS` | `60000` | How long `setup` waits for the new runner (or toolu.sh machine's first poll) to come online. |
 | `TOOLU_RUNNER_TOKEN` | — | bearer for `register`, `remove` and `run`'s re-mint after every job (resolution: `--token` > env > (`register` only) saved App > stored `login` token; a `register --app` registration re-mints with its GitHub App instead); `doctor` verifies it. |
 | `TOOLU_RUNNER_CLIENT_ID` | — | OAuth App client id for the device flow (`--client-id` fallback). |
 | `TOOLU_RUNNER_KEYRING` | — | when set (non-empty, not `0`), opts the token store in to the OS keyring (default is a 0600 file — on macOS the keychain re-prompts whenever the binary's code signature changes, e.g. every rebuild). |

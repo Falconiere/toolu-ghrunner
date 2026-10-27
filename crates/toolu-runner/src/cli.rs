@@ -123,8 +123,9 @@ Examples:
 /// Standalone GitHub Actions JIT runner.
 ///
 /// Registers a just-in-time runner against a GitHub repository or
-/// organization. Each JIT config is single-use; `run` re-mints after each
-/// job with the saved GitHub App or a token from the environment or `login`.
+/// organization. Each JIT config is single-use; unless the registration is
+/// ephemeral, `run` re-mints after each job with the saved GitHub App or a
+/// token from the environment or `login`.
 /// `setup` also supports pairing with toolu.sh. All state lives under
 /// `~/.toolu-runner`.
 pub(crate) struct Cli {
@@ -139,8 +140,9 @@ pub(crate) enum Command {
   ///
   /// POSTs GitHub's `generate-jitconfig` REST endpoint and persists the
   /// minted runner config and credentials locally (all-or-nothing). The
-  /// JIT config is single-use; `run` re-mints after each job using the
-  /// registration's GitHub App or a token from the environment or `login`.
+  /// JIT config is single-use; unless `--ephemeral`, `run` re-mints after
+  /// each job using the registration's GitHub App or a token from the
+  /// environment or `login`.
   Register(RegisterArgs),
   /// Run the listener loop, staying online across jobs.
   ///

@@ -132,9 +132,9 @@ fi
 # `run: node …` step needs. Shipping one without the other is a silent
 # regression in exactly one of the two.
 #
-# PATH is scrubbed to the system dirs for these cases: this host has a `node`
-# of its own, and inheriting it would make "the seed reached $PATH" pass for
-# the wrong reason and "no bogus node is exported" fail for one.
+# PATH is scrubbed to the system dirs for these cases: inheriting a host `node`
+# would make "the seed reached $PATH" pass for the wrong reason, and the
+# negative cases below assert that PATH is left exactly as given.
 root="$(image_tree seeded 24.21.0)"
 home="$TMPROOT/home-seeded"
 out="$(PATH=/usr/bin:/bin TOOLU_RUNNER_HOME="$home" TOOLU_JITCONFIG=x "$root/entrypoint" 2>&1)"
@@ -208,13 +208,6 @@ home="$TMPROOT/home-badmarker"
 out="$(PATH=/usr/bin:/bin TOOLU_RUNNER_HOME="$home" TOOLU_JITCONFIG=x "$root/entrypoint" 2>&1)"
 check "a marker that is not a bare version leaves PATH unchanged" "path=/usr/bin:/bin" "$(grep '^path=' <<<"$out")"
 check "…and the job still boots"                       "argv=boot" "$(grep '^argv=' <<<"$out")"
-# Host Node may still resolve; the invalid seed must leave PATH unchanged.
-if grep '^path=' <<<"$out" | grep -q 'evil'; then
-  echo "FAIL: the corrupted marker reached PATH: $(grep '^path=' <<<"$out")" >&2
-  fail=1
-else
-  echo "ok: no part of the corrupted marker reaches PATH"
-fi
 
 # --- a seed link that cannot be created is a warning, not a dead job -------
 # The link is an optimisation — the engine downloads any runtime it cannot

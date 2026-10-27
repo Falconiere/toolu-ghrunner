@@ -1,7 +1,7 @@
 //! GitHub Actions JIT protocol layer — strictly sync, no I/O, no network.
 //!
 //! This crate owns the protocol types and pure crypto (RSA, JWT, JIT config
-//! parsing, AES-CBC decryption). All network calls live in `toolu-runner::net`.
+//! parsing, AES-CBC decryption). All network calls live in `wire::net`.
 //! The boundary is enforced by the restricted dep set in `Cargo.toml` and
 //! verified in CI.
 

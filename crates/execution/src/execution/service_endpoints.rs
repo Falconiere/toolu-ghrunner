@@ -4,7 +4,7 @@
 //!
 //! Forwarder mode is the default; [`crate::execution::job_runner`] injects
 //! [`forward_env`] into the per-job env that every step inherits. Offline mode
-//! hosts local services instead (see `[services] mode`).
+//! starts only the local v1 cache instead (see `[services] mode`).
 
 use shared::AgentJobRequestMessage;
 

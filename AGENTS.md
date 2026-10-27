@@ -633,7 +633,7 @@ failed step. Lanes in `docs/test-coverage.md` (#88).
   `guardrails/README.md`. Deviations recorded above.
 - [docs/architecture.md](docs/architecture.md) — register/run/cancel/reconnect design + sequences.
 - [docs/macos-developer-tools.md](docs/macos-developer-tools.md) — un-stalling macOS builds (per-developer, never scripted).
-- [docs/known-bugs.md](docs/known-bugs.md) — listener bug tracker.
+- [docs/known-bugs.md](docs/known-bugs.md) — known limitations and resolved bugs.
 - [docs/release-profile.md](docs/release-profile.md) — `[profile.release]` `s`+LTO rationale; pinned by `scripts/test/release_profile_test.sh`.
 - [docs/compatibility-matrix.md](docs/compatibility-matrix.md) (+
   [docs/compatibility-evidence.md](docs/compatibility-evidence.md)) — epic #67 matrix

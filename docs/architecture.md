@@ -103,8 +103,8 @@ toolu-ghrunner/                            workspace root
     │   ├── src/setup.rs + setup/          guided GitHub or toolu.sh onboarding, review/apply, online confirmation
     │   ├── src/app_headless.rs            headless App manifest relay and pasted callback flow
     │   ├── src/poll_loop.rs + poll_job.rs  toolu.sh queue/claim/lease/completion lifecycle
-    │   ├── src/toolu_host.rs              paired host credentials, refresh, status and revocation
-    │   ├── src/remove_state.rs            registration deletion and empty-directory cleanup
+    │   ├── src/toolu_host.rs              paired host client (masked host token), host line and revocation
+    │   ├── src/remove_state.rs            .pending_remove marker + registration state deletion (keeps _diag/ and dirs)
     │   ├── src/network_setup.rs           per-lifecycle [network] client + proxy-secret registration
     │   ├── src/config.rs                  env reads for the bin
     │   ├── src/check_*.rs                 check: read-only preflight (endpoints, tools, proxy/CA; exit 0/1/2)

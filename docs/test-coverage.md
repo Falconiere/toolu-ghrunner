@@ -18,6 +18,10 @@ They are an index, not a fixed test count or a claim that every live lane passed
   with `TOOLU_RUNNER_LIVE_TOKEN` and `TOOLU_RUNNER_LIVE_REPO`.
 - **scripts** — shell/Python checks run by `.github/workflows/ci.yml` in
   addition to the Rust gate.
+- **Docker** — the `#[ignore]`d real-container tests in CI's `docker-replay` job.
+- **live-ghes** — the dispatch-only `.github/workflows/live-ghes.yml` lane.
+- **recorded** — evidence captured from past runs and kept in the
+  compatibility matrix, not re-run here.
 
 | AC | Description | Current coverage | Lane |
 | --- | --- | --- | --- |
@@ -79,6 +83,13 @@ cargo test -p toolu-runner --test integration -- cli_test::
 Ignored live tests need the appropriate feature, `--ignored` and credentials.
 The dated per-feature results below describe their recorded runs, not a fresh
 verification of every platform at the current HEAD.
+
+Some older standalone evidence checkers pin source-file hashes from those
+runs. `context_capture_check.py`, `job_environment_evidence_check.py` and
+`runner_version_evidence_check.py` currently reject changed source hashes at
+HEAD; they are not part of the CI gate. Use the recorded revision when
+reproducing those historical checks. Do not refresh their hashes to imply
+that a past live run verified today's code.
 
 ## Issue #86 — explicit multiline workflow masks
 

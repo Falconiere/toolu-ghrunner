@@ -134,7 +134,7 @@ impl RunnerRegistrationConfig {
 /// `[services]` config section selecting how artifacts/cache/OIDC are served.
 ///
 /// `mode = "forwarder"` (default) forwards real GitHub service URLs from the
-/// job message; `mode = "offline"` hosts local services for hermetic runs.
+/// job message; `mode = "offline"` starts only the local v1 cache.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ServicesSection {
   /// `"forwarder"` (default), `"offline"`, or `"accelerated"`.

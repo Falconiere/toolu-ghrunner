@@ -10,8 +10,8 @@ Twirp RPCs, log blob upload, GHES V1 service discovery — plus the toolu.sh
 **What does NOT belong here:** request/response type definitions and pure
 URL/JWT/crypto builders live in `protocol` (sync, no I/O, no network) —
 this module is the async transport layer on top of them. HTTP calls use
-a caller-built `reqwest::Client` (directly or through `TooluClient`);
-reporting shapes also live in `crate::reporting`. The manifest callback
+a caller-built `reqwest::Client` (directly or through `TooluClient`).
+The manifest callback
 server owns its loopback listener, and toolu.sh calls return `TooluError`.
 Higher-level domain wrappers and reporting-only types live in
 `crate::reporting`, which composes these thin transport functions.

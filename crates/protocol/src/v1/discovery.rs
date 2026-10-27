@@ -1,7 +1,7 @@
 //! Pure URL resolution for GHES V1 service definitions.
 //!
 //! The async HTTP fetch (`/_apis/connectionData`) lives in
-//! `toolu-runner::net::v1_discovery` — only the local lookup stays here.
+//! `wire::net::v1::fetch_connection_data` — only the local lookup stays here.
 
 use super::types::{ConnectionData, service_guids};
 

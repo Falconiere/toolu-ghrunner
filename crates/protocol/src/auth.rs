@@ -1,6 +1,6 @@
 //! Sync crypto for the JIT auth flow: RSA key reconstruction, JWT signing.
 //!
-//! Network calls (`exchange_token`, `authenticate`) live in `toolu-runner::net`.
+//! Network calls (`exchange_token`, `authenticate`) live in `wire::net::auth`.
 //! Keeping this module pure sync lets us unit-test the JWT + RSA math
 //! without spinning up an HTTP client.
 

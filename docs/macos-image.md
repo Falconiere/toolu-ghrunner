@@ -198,7 +198,8 @@ credential.
 ## Provider integration contract
 
 This repository publishes the carrier image and launcher. The consuming
-provider must select a macOS instance, use `applications[]` with `/entrypoint`,
+provider must select a macOS instance, use `applications[]` with
+`"command": "entrypoint"` (relative to the image root, as above),
 pin the macOS carrier image separately from the Linux image, and route macOS
 labels to that instance type. The provider implementation lives in `toolu.sh`;
 its deployment status cannot be established from this repository. The request

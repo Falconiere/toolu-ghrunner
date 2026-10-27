@@ -135,7 +135,8 @@ still agree:
 - Assertions must pin identity, not a loose substring. `assert!(!out.contains(s))`
   where the exact masked output is knowable is a weak assertion.
 - Unit tests live in flat sibling `tests/` directories, included with
-  `#[cfg(test)] #[path = "tests/<name>.rs"] mod tests;`. Inline test-module
+  `#[cfg(test)] #[path = "tests/<name>.rs"] mod <module>;` (the module name
+  varies, e.g. `mod tests;` or `mod setup_tests;`). Inline test-module
   bodies alongside production logic are forbidden, including for private items.
 
 ### 7. Documentation accuracy

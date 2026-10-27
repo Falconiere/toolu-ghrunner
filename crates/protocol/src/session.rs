@@ -1,6 +1,6 @@
 //! Session lifecycle types — request/response shapes and a pure builder.
 //!
-//! The async `create_session` / `delete_session` live in `toolu-runner::net`
+//! The async `create_session` / `delete_session` live in `wire::net::session`
 //! because they hit the broker over HTTP. Keeping this module pure lets
 //! `build_session_request` be unit-tested without an HTTP stack.
 

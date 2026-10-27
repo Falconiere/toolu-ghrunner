@@ -11,7 +11,8 @@ per feature and lane; [test coverage](test-coverage.md) links the tests and
 captures. A local replay does not prove GitHub.com or GHES behavior.
 
 The manually dispatched [live workflow](../.github/workflows/live.yml) requires
-`TOOLU_RUNNER_LIVE_TOKEN` and a test repository (`TOOLU_RUNNER_LIVE_REPO`). The
+the `TOOLU_RUNNER_LIVE_TOKEN` secret; its test repository is the
+`TOOLU_RUNNER_LIVE_REPO` variable (default `Falconiere/toolu-runner-test`). The
 [GHES workflow](../.github/workflows/live-ghes.yml) requires its corresponding
 `TOOLU_RUNNER_LIVE_GHES_*` configuration. Missing credentials fail the lane as
 `UNVERIFIED`; a test being present is not evidence that the live lane passed.
@@ -41,6 +42,9 @@ The manually dispatched [live workflow](../.github/workflows/live.yml) requires
 - **Host storage:** workspace GC does not prune the registration's `_temp`,
   `_tool` or file-command `tmp` directories. Monitor disk use on long-lived
   hosts; the job-end process sweep is not disk cleanup.
+- **Job log memory:** the listener keeps every masked log line of a job in
+  memory (`execution_loop` `all_job_lines`) for the combined log upload, so a
+  long, verbose job grows the runner's memory until it completes.
 - **Removal during a job:** normal removal drains a supervised registration
   for up to 30 seconds and keeps its state if still busy. `remove --force`
   removes local state while retaining the held lock; it neither cancels the
