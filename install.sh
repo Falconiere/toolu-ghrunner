@@ -141,8 +141,9 @@ die() {
 }
 
 # Arguments as one shell-like line for messages. The value of a secret-bearing
-# option (--token X, --token=X, --enroll-token X) shows as ••••: these lines
-# end up in terminals and cloud-init logs.
+# option (--token / --enroll-token / --toolu, bare or =form) shows as ••••:
+# these lines end up in terminals and cloud-init logs. --toolu is still
+# redacted here in case a message runs before apply_toolu_flag rewrites it.
 join_args() {
   local out="" a hide=0
   for a in "$@"; do
@@ -163,9 +164,10 @@ join_args() {
 # `--toolu <token>` is the flag the toolu.sh console one-liner passes.
 # setup's flag is `--enroll-token` (it implies `--source toolu`). Rewrite
 # before any message or the setup handoff, so a missing token exits 2
-# before a download and the token never appears in a message.
+# before a download and the token never appears in a message. A token that
+# starts with `--` is refused so the next flag is never taken as the value.
 apply_toolu_flag() {
-  local a token seen=0
+  local a token seen_toolu=0 seen_enroll=0
   local -a rebuilt
   rebuilt=()
   while [[ $# -gt 0 ]]; do
@@ -173,18 +175,28 @@ apply_toolu_flag() {
     case "$a" in
       --toolu)
         token="${2:-}"
-        [[ $# -ge 2 && -n "$token" && "$token" != --* ]] || die "--toolu requires an enrollment token"
-        [[ "$seen" -eq 0 ]] || die "--toolu was given twice"
-        seen=1
+        [[ $# -ge 2 && -n "$token" && "$token" != --* ]] \
+          || die "--toolu requires an enrollment token (a non-empty value that does not start with --)"
+        [[ "$seen_toolu" -eq 0 ]] || die "--toolu was given twice"
+        [[ "$seen_enroll" -eq 0 ]] || die "--toolu and --enroll-token cannot both be given"
+        seen_toolu=1
         rebuilt+=("--enroll-token" "$token")
         shift 2
         ;;
       --toolu=*)
         token="${a#*=}"
-        [[ -n "$token" && "$token" != --* ]] || die "--toolu requires an enrollment token"
-        [[ "$seen" -eq 0 ]] || die "--toolu was given twice"
-        seen=1
+        [[ -n "$token" && "$token" != --* ]] \
+          || die "--toolu requires an enrollment token (a non-empty value that does not start with --)"
+        [[ "$seen_toolu" -eq 0 ]] || die "--toolu was given twice"
+        [[ "$seen_enroll" -eq 0 ]] || die "--toolu and --enroll-token cannot both be given"
+        seen_toolu=1
         rebuilt+=("--enroll-token" "$token")
+        shift
+        ;;
+      --enroll-token | --enroll-token=*)
+        [[ "$seen_toolu" -eq 0 ]] || die "--toolu and --enroll-token cannot both be given"
+        seen_enroll=1
+        rebuilt+=("$a")
         shift
         ;;
       *)
