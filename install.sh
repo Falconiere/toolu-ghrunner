@@ -17,6 +17,7 @@
 #   curl -fsSL https://get.toolu.sh/pkg/ghrunner/install | bash
 #   curl -fsSL https://get.toolu.sh/pkg/ghrunner/install | bash -s -- --no-setup
 #   curl -fsSL https://get.toolu.sh/pkg/ghrunner/install | bash -s -- <setup flags>
+#   curl -fsSL https://get.toolu.sh/pkg/ghrunner/install | bash -s -- --toolu <enrollment-token>
 #   bash install.sh --check                   # print the install plan, no download
 #   bash install.sh --uninstall               # undo the shell-profile changes
 #   bash install.sh --help                    # show all options
@@ -84,7 +85,9 @@ OPTIONS:
   --check              Print the install plan and exit. No download, no install.
   --help, -h           Show this message and exit.
 
-Every other option is passed to "$BIN_NAME setup", in order. With a terminal,
+Every other option is passed to "$BIN_NAME setup", in order. --toolu <token>
+(the toolu.sh console enrollment flag) is passed as --enroll-token, which
+makes setup pair with toolu.sh. With a terminal,
 setup runs interactively (it reads /dev/tty). Without one, setup runs only when
 setup options were given; otherwise the next command is printed.
 
@@ -117,6 +120,9 @@ EXAMPLES:
   curl -fsSL https://get.toolu.sh/pkg/ghrunner/install | TOOLU_RUNNER_TOKEN="\$PAT" \\
     bash -s -- --source github --repo acme/web --auth token --yes
 
+  # Unattended toolu.sh enrollment. bash -s -- passes --toolu to this script.
+  curl -fsSL https://get.toolu.sh/pkg/ghrunner/install | bash -s -- --toolu <enrollment-token>
+
   # Force /usr/local/bin on a host where it needs root.
   curl -fsSL https://get.toolu.sh/pkg/ghrunner/install | sudo bash
 
@@ -145,13 +151,52 @@ join_args() {
       hide=0
     else
       case "$a" in
-        --token|--enroll-token) hide=1 ;;
-        --token=*|--enroll-token=*) a="${a%%=*}=••••" ;;
+        --token|--enroll-token|--toolu) hide=1 ;;
+        --token=*|--enroll-token=*|--toolu=*) a="${a%%=*}=••••" ;;
       esac
     fi
     out="${out:+$out }$a"
   done
   printf '%s' "$out"
+}
+
+# `--toolu <token>` is the flag the toolu.sh console one-liner passes.
+# setup's flag is `--enroll-token` (it implies `--source toolu`). Rewrite
+# before any message or the setup handoff, so a missing token exits 2
+# before a download and the token never appears in a message.
+apply_toolu_flag() {
+  local a token seen=0
+  local -a rebuilt
+  rebuilt=()
+  while [[ $# -gt 0 ]]; do
+    a="$1"
+    case "$a" in
+      --toolu)
+        token="${2:-}"
+        [[ $# -ge 2 && -n "$token" && "$token" != --* ]] || die "--toolu requires an enrollment token"
+        [[ "$seen" -eq 0 ]] || die "--toolu was given twice"
+        seen=1
+        rebuilt+=("--enroll-token" "$token")
+        shift 2
+        ;;
+      --toolu=*)
+        token="${a#*=}"
+        [[ -n "$token" && "$token" != --* ]] || die "--toolu requires an enrollment token"
+        [[ "$seen" -eq 0 ]] || die "--toolu was given twice"
+        seen=1
+        rebuilt+=("--enroll-token" "$token")
+        shift
+        ;;
+      *)
+        rebuilt+=("$a")
+        shift
+        ;;
+    esac
+  done
+  SETUP_ARGS=()
+  if [[ ${#rebuilt[@]} -gt 0 ]]; then
+    SETUP_ARGS=("${rebuilt[@]}")
+  fi
 }
 
 # --- arg parsing -----------------------------------------------------------
@@ -229,6 +274,10 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ ${#SETUP_ARGS[@]} -gt 0 ]]; then
+  apply_toolu_flag "${SETUP_ARGS[@]}"
+fi
 
 # A value written into a shell file between double quotes must not be able to
 # end the quotes or expand.

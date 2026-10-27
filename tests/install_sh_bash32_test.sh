@@ -104,6 +104,10 @@ run "$h" real --check
 echo "$OUT" | grep -q 'setup args:    (none)' || fail "--check should list no setup args: $OUT"
 run "$h" real --check --source github --token secret-value --yes
 echo "$OUT" | grep -q 'setup args:    --source github --token •••• --yes' || fail "--check setup args: $OUT"
+run "$h" real --check --toolu toolu-test-enroll-6c2e --labels gpu
+[[ "$RC" -eq 0 ]] || fail "--toolu --check should exit 0 (rc=$RC): $OUT"
+echo "$OUT" | grep -q 'setup args:    --enroll-token •••• --labels gpu' || fail "--toolu rewrite: $OUT"
+if echo "$OUT" | grep -q 'toolu-test-enroll-6c2e'; then fail "--check printed the enrollment token: $OUT"; fi
 
 echo "install: verified, version from the binary, env files"
 run "$h" real
