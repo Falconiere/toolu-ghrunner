@@ -787,13 +787,13 @@ if want S7; then
     fail "S7 env files must not mention TOOLU_RUNNER_TOKEN"
   fi
 
-  echo "S7: unknown setup options are refused without echoing token values"
+  echo "S7: a GitHub setup that also gets --enroll-token is refused without echoing tokens"
   h="$(new_home s7-echo)"
   run_install notty "$h" real --source github --token "$arg_secret" --enroll-token="$env_secret" --yes
-  [[ "$RC" -eq 2 ]] || fail "S7 an unknown setup option should exit 2 (rc=$RC): $OUT"
+  [[ "$RC" -eq 2 ]] || fail "S7 a conflicting setup option should exit 2 (rc=$RC): $OUT"
   if echo "$OUT" | grep -q -e "$arg_secret" -e "$env_secret"; then fail "S7 a token value was echoed: $OUT"; fi
-  echo "$OUT" | grep -qF -- "unexpected argument '--enroll-token'" \
-    || fail "S7 the refusal should name the unknown option, not its value: $OUT"
+  echo "$OUT" | grep -qF -- "--enroll-token pairs with toolu.sh" \
+    || fail "S7 the refusal should name --enroll-token, not its value: $OUT"
   out_check="$("$SCRIPT" --check --token "$arg_secret")"
   if echo "$out_check" | grep -q -- "$arg_secret"; then fail "S7 --check echoed a token: $out_check"; fi
   run_install notty "$h" real --no-setup --token "$arg_secret"
