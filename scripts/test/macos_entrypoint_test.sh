@@ -132,9 +132,9 @@ fi
 # `run: node …` step needs. Shipping one without the other is a silent
 # regression in exactly one of the two.
 #
-# PATH is scrubbed to the system dirs for these cases: this host has a `node`
-# of its own, and inheriting it would make "the seed reached $PATH" pass for
-# the wrong reason and "no bogus node is exported" fail for one.
+# PATH is scrubbed to the system dirs for these cases: inheriting a host `node`
+# would make "the seed reached $PATH" pass for the wrong reason, and the
+# negative cases below assert that PATH is left exactly as given.
 root="$(image_tree seeded 24.21.0)"
 home="$TMPROOT/home-seeded"
 out="$(PATH=/usr/bin:/bin TOOLU_RUNNER_HOME="$home" TOOLU_JITCONFIG=x "$root/entrypoint" 2>&1)"
@@ -206,17 +206,8 @@ chmod +x "$root/node/24.21.0:evil/bin/node"
 printf '24.21.0:evil\n' >"$root/node/default"
 home="$TMPROOT/home-badmarker"
 out="$(PATH=/usr/bin:/bin TOOLU_RUNNER_HOME="$home" TOOLU_JITCONFIG=x "$root/entrypoint" 2>&1)"
-check "a marker that is not a bare version is refused" "node=none" "$(grep '^node=' <<<"$out")"
+check "a marker that is not a bare version leaves PATH unchanged" "path=/usr/bin:/bin" "$(grep '^path=' <<<"$out")"
 check "…and the job still boots"                       "argv=boot" "$(grep '^argv=' <<<"$out")"
-# The decisive assertion: `command -v node` reports nothing either way (the
-# injected entry resolves to nothing), so the proof is that no part of the
-# marker reached PATH at all.
-if grep '^path=' <<<"$out" | grep -q 'evil'; then
-  echo "FAIL: the corrupted marker reached PATH: $(grep '^path=' <<<"$out")" >&2
-  fail=1
-else
-  echo "ok: no part of the corrupted marker reaches PATH"
-fi
 
 # --- a seed link that cannot be created is a warning, not a dead job -------
 # The link is an optimisation — the engine downloads any runtime it cannot
@@ -288,7 +279,7 @@ mkdir -p "$root/node/default"
 home="$TMPROOT/home-unreadablemarker"
 out="$(PATH=/usr/bin:/bin TOOLU_RUNNER_HOME="$home" TOOLU_JITCONFIG=x "$root/entrypoint" 2>&1)"
 check "an unreadable marker still boots the job" "argv=boot" "$(grep '^argv=' <<<"$out")"
-check "…and adds no node to PATH"                "node=none" "$(grep '^node=' <<<"$out")"
+check "…and leaves PATH unchanged"             "path=/usr/bin:/bin" "$(grep '^path=' <<<"$out")"
 if grep -qE "(could not read .*node/default \(|node/default is unusable \(').*head: .*(Is a directory|Error reading)" <<<"$out"; then
   echo "ok: the read failure is reported with its reason"
 else
@@ -313,7 +304,7 @@ printf '99.0.0\n' >"$root/node/default"
 home="$TMPROOT/home-brokenseed"
 out="$(PATH=/usr/bin:/bin TOOLU_RUNNER_HOME="$home" TOOLU_JITCONFIG=x "$root/entrypoint" 2>&1)"
 check "an unusable node default still boots the job" "argv=boot" "$(grep '^argv=' <<<"$out")"
-check "…and no bogus node is exported"               "node=none" "$(grep '^node=' <<<"$out")"
+check "…and no bogus node path is exported"    "path=/usr/bin:/bin" "$(grep '^path=' <<<"$out")"
 
 # --- data dir defaults to $HOME/.toolu-runner when unset -------------------
 root="$(image_tree defaulthome)"

@@ -66,13 +66,14 @@ jobs:
           # injected on top of it.
           REVIEW_PROMPT_FILE: .github/code-review-prompt.md
           CODEBASE_OVERVIEW: |
-            Standalone GitHub Actions JIT runner in Rust. A 10-crate workspace
+            Standalone GitHub Actions JIT runner in Rust. A 12-crate workspace
             under crates/, layered and acyclic: protocol (sync crypto and wire
             types, no I/O) and shared (cross-cutting types, tracing, secret
-            masking) at the bottom; config, expressions, cache, wire,
+            masking) at the bottom; network, config, expressions, cache, wire,
             observability in the middle; execution (the step engine) and
             listener (the GitHub JIT lifecycle) above them; toolu-runner is the
-            bin-only CLI on top.
+            bin-only CLI on top. The standalone daemon bin serves the VPS host
+            job-container API and has no internal crate dependencies.
 
             It authenticates to GitHub with a single-use JIT config, long-polls
             a broker for jobs, and runs workflow steps on the host — so it

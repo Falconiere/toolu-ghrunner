@@ -1,4 +1,13 @@
-# Improvements
+# Historical runner audit — 2026-06-18
+
+> Historical audit, not a current backlog. The snapshot below contains old
+> paths, resolved issues and proposals that have not all been reverified.
+> Do not treat its claims or suggested fixes as current behavior. Confirmed
+> current limitations are maintained in [known limitations](../known-bugs.md);
+> current behavior is described in [architecture](../architecture.md).
+> Retained to avoid losing unresolved observations; the original `IMPROVEMENTS.md`
+> entry point and obsolete follow-up proposal have been removed.
+
 
 Multi-dimension audit of `toolu-runner` (2026-06-18). Format:
 `IMP-{DIM}-{NNN}` — title — dimension — severity (S/M/L) — effort

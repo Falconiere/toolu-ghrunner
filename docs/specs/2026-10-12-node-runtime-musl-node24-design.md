@@ -1,5 +1,10 @@
 # Node runtime: musl/Alpine builds, node24 migration flags, offline preseed — Design
 
+> Historical implementation record. Current behavior is documented in
+> [architecture](../architecture.md); acceptance status and remaining gaps are
+> tracked in [test coverage](../test-coverage.md) and the
+> [compatibility matrix](../compatibility-matrix.md).
+
 **Date:** 2026-10-12   **Status:** Approved   **Author:** Claude (epic #67 worker)   **Topic:** issue #95 — run Node actions on a runtime that starts in their execution environment and pick node20/node24 exactly as upstream
 
 ## Problem

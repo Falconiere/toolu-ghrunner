@@ -8,7 +8,7 @@ no VPS host had ever booted a job. The daemon runs on a toolu-operated box,
 sits behind a Cloudflare Tunnel, and turns `POST /v1/jobs` into one
 sysbox-isolated container running `toolu-runner boot`.
 
-Three properties are forced by that client and must not be traded away:
+The daemon enforces four properties:
 
 - **Admit and queue, never refuse.** The Worker delivers `workflow_job.queued`
   exactly once and has no requeue path, so a 429 permanently fails a customer's

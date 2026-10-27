@@ -6,8 +6,9 @@ use std::path::PathBuf;
 ///   GitHub service URLs + runtime token out of the job message into step
 ///   env, so the JS toolkit `@v4` actions talk to real GitHub — matching the
 ///   official `actions/runner`.
-/// - [`Offline`](ServicesMode::Offline) hosts local fake artifact/cache/OIDC
-///   services and points step env at them, for hermetic / airgapped runs.
+/// - [`Offline`](ServicesMode::Offline) starts only a local legacy v1 cache
+///   and points `ACTIONS_CACHE_URL` / `ACTIONS_RUNTIME_TOKEN` at it; no
+///   artifact/OIDC service is started and no GitHub URL is forwarded.
 /// - [`Accelerated`](ServicesMode::Accelerated) forwards everything except
 ///   cache traffic, which a local content-addressed store serves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -15,7 +16,7 @@ pub enum ServicesMode {
   /// Forward real GitHub service URLs from the job message (default).
   #[default]
   Forwarder,
-  /// Host local services and wire step env at them.
+  /// Start only the local v1 cache and wire step env at it.
   Offline,
   /// Forward everything but cache; a local CAS intercepts cache traffic.
   Accelerated,

@@ -1,7 +1,8 @@
 # tier/
 
 **What belongs here:** optional cold-storage tiers behind the L1 CAS — today,
-the S3-compatible mirror of immutable chunks and manifests.
+the S3-compatible mirror of immutable chunks and manifests. The production
+job runner does not construct this tier; `[cache.l2]` is currently unwired.
 
 **What does NOT belong here:** the L1 (hot, local) content-addressed store
 itself lives in `../cas/`, which is what calls into this tier on a local miss

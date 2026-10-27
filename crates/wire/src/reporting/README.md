@@ -7,8 +7,8 @@ BlockBlob-vs-AppendBlob upload-mode decision.
 
 **What does NOT belong here:** the actual HTTP calls (the
 `reqwest::Client` request/response round trip) live in `crate::net`,
-which the wrappers here delegate to — this module owns shapes and
-decisions, not sockets. Building the JWT/RSA auth handshake or parsing
+which the HTTP wrappers here delegate to. `live_log.rs` owns the WebSocket
+upgrade and stream over a caller-built HTTP client. Building the JWT/RSA auth handshake or parsing
 the JIT config envelope is `protocol`, not here.
 
 ## Contents

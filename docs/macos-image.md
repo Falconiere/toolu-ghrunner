@@ -195,16 +195,12 @@ see [container-image.md](container-image.md#tag-surface). Pin the
 digest: this payload runs customer build code holding a live GitHub
 credential.
 
-## toolu.sh side (not done here)
+## Provider integration contract
 
-This repo publishes the image; routing macOS jobs to it is a change in
-`toolu.sh` that does **not** exist yet:
-
-- a macOS branch in `providers/namespace/client.ts` (`applications[]`
-  with `command`, the macOS shape, the selectors) — today
-  `createNamespaceInstance` hardcodes `os: "linux"`,
-  `machineArch: "amd64"` and `containers[]`;
-- a second image pin (e.g. `NAMESPACE_MACOS_RUNNER_IMAGE`) beside
-  `NAMESPACE_RUNNER_IMAGE`;
-- a `runs-on` → platform decision, so only macOS-labelled jobs get a Mac
-  (they cost multiples of a Linux instance).
+This repository publishes the carrier image and launcher. The consuming
+provider must select a macOS instance, use `applications[]` with
+`"command": "entrypoint"` (relative to the image root, as above),
+pin the macOS carrier image separately from the Linux image, and route macOS
+labels to that instance type. The provider implementation lives in `toolu.sh`;
+its deployment status cannot be established from this repository. The request
+example above describes the integration contract, not a deployment assertion.

@@ -1,5 +1,10 @@
 # Orphan process cleanup (`RUNNER_TRACKING_ID`) — Design
 
+> Historical implementation record. Current behavior is documented in
+> [architecture](../architecture.md); acceptance status and remaining gaps are
+> tracked in [test coverage](../test-coverage.md) and the
+> [compatibility matrix](../compatibility-matrix.md).
+
 **Date:** 2026-10-10   **Status:** Approved   **Revision:** 3   **Author:** Claude   **Topic:** Issue #89, per-job process tracking and job-end orphan termination
 
 ## Problem

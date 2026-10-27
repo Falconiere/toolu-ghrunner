@@ -1,5 +1,10 @@
 # Runner identity and updates — Implementation plan
 
+> Historical implementation record. Current behavior is documented in
+> [architecture](../architecture.md); acceptance status and remaining gaps are
+> tracked in [test coverage](../test-coverage.md) and the
+> [compatibility matrix](../compatibility-matrix.md).
+
 **Date:** 2026-09-25   **Status:** Approved   **Spec:** docs/specs/2026-09-25-runner-version-design.md   **Topic:** Issue #78
 
 ## Evidence and approach

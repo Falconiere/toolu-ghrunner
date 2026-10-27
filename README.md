@@ -4,7 +4,7 @@
 
 **A self-hosted GitHub Actions runner, rewritten in Rust.**
 
-One static binary. No .NET. No orchestrator service. No daemon you
+One native binary. No .NET. No orchestrator service. No daemon you
 didn't ask for.
 
 [![ci](https://github.com/Falconiere/toolu-ghrunner/actions/workflows/ci.yml/badge.svg)](https://github.com/Falconiere/toolu-ghrunner/actions/workflows/ci.yml)
@@ -19,7 +19,9 @@ didn't ask for.
 [Container image](docs/container-image.md) ·
 [macOS image](docs/macos-image.md) ·
 [VPS host runbook](docs/vps-host-runbook.md) ·
-[Docs](docs/architecture.md)
+[Architecture](docs/architecture.md) ·
+[Compatibility](docs/compatibility-matrix.md) ·
+[Known limitations](docs/known-bugs.md)
 
 </div>
 
@@ -505,7 +507,7 @@ config error, `130` cancelled.
 | Flag | Command | What it does |
 |---|---|---|
 | `--url <URL>` | `register` | Repository or organization URL. Optional: absent, the repo is inferred from the cwd git remote `origin` (github.com only); org runners and GHES need it. |
-| `--token <TOKEN>` | `register`, `remove` | GitHub token (a PAT or App installation token with `administration:write`). Resolution: flag > `TOOLU_RUNNER_TOKEN` > (`register` only) the saved GitHub App for the host > stored `login` token; used only for the registration / unregister call, never at job runtime. |
+| `--token <TOKEN>` | `register`, `remove` | GitHub token with repository Administration or organization Self-hosted runners write access. Resolution: flag > `TOOLU_RUNNER_TOKEN` > (`register` only) the saved GitHub App for the host > stored `login` token; used only for the registration / unregister call, never at job runtime. |
 | `--app` | `register` | Authenticate with the GitHub App saved by `create-app` (an installation token); recorded as `[auth] kind = "app"` so every re-mint uses the App. Conflicts with `--token`. |
 | `--name <NAME>` | `register` | Runner name (default: the machine hostname). |
 | `--labels <LABELS>` | `register` | Comma-separated custom labels, **added** to the defaults `self-hosted`, `Linux`/`macOS`, `X64`/`ARM64` (GitHub's `RUNNER_OS`/`RUNNER_ARCH` spelling, as the official runner). Empty entries are ignored, case-duplicates kept once, at most 256 characters (UTF-16 units, as upstream counts them). |
@@ -562,6 +564,9 @@ sequenceDiagram
         R->>RS: stream logs + step results
         R->>RS: renew lock (every 60s)
         R->>RS: complete job (conclusion, outputs, step results, environment URL)
+        R->>GH: delete session, re-mint JIT config
+        Note over R: authenticate again with the new JIT config
+        R->>GH: create next broker session
     end
 ```
 
@@ -605,7 +610,7 @@ overrides the 30 s wait for `run` and `boot`.
 | **Steps** | `run:` shell, `uses:` Node.js actions (runtime auto-downloaded + cached, musl/Alpine aware, node24 migration, offline preseed), composite actions, Linux Docker actions (`runs.using: docker` and `uses: docker://`) |
 | **Workflows** | matrices, `needs:` job graphs and job outputs, reusable workflows, `if:` conditions, `timeout-minutes`, `working-directory`, `defaults.run` |
 | **Expressions** | `${{ }}` with signed/radix numbers, reference equality, lazy `case()` and `format()`, insertion-ordered pretty `toJSON`, G15 number rendering, and `.*` / `[*]` filters; unknown named values fail visibly |
-| **Services** | artifacts, cache, and OIDC — forwarded to real GitHub by default, hosted locally in `offline` mode, or a local content-addressed cache accelerator in `accelerated` mode |
+| **Services** | artifacts, cache, and OIDC forwarded to GitHub by default; local cache in `accelerated` mode; legacy v1 cache only in `offline` mode |
 | **Safety** | secret masking across logs, stdout, and the journal; strict-mode clippy (no `unwrap`, no `panic`, no `unsafe`) |
 
 Remote `uses:` actions are resolved with the acquired job's GitHub service,
@@ -849,10 +854,13 @@ for real-Docker replay and the separately recorded live/reference limitations.
 
 - **`forwarder`** (default) — the runner reads the real GitHub service
   URLs and runtime token out of the job message and injects them into
-  step env, so stock `upload-artifact@v4` / `cache@v4` / OIDC talk
-  straight to GitHub. Drop-in compatible.
-- **`offline`** — the runner hosts local stand-ins for those services.
-  For airgapped hosts.
+  step env for upstream artifact, cache and OIDC access. Cache v2 flag
+  forwarding still has a [known compatibility gap](docs/known-bugs.md#current-limitations)
+  that can prevent saves and restores.
+- **`offline`** — starts only the local legacy v1 cache service and sets
+  `ACTIONS_CACHE_URL` / `ACTIONS_RUNTIME_TOKEN`. It does not start the
+  local artifact or OIDC implementations, or forward GitHub service URLs;
+  it is not a complete airgapped replacement for GitHub Actions services.
 - **`accelerated`** — a local content-addressed cache intercepts
   GitHub Actions cache traffic (both the v2 Twirp `CacheService` and
   the legacy v1 REST protocol) and serves it from local NVMe,
@@ -871,9 +879,10 @@ importantly `upload-artifact@v4` / `download-artifact@v4` — is
 reverse-proxied verbatim to the real service, and `ACTIONS_RUNTIME_TOKEN`
 stays the real GitHub token. Reads are shared across branches (chunks
 are content-verified on every read); writes are branch-scoped, so a
-`pull_request` job cannot poison a protected branch's cache. An
-optional S3 cold tier (`[cache.l2]`) mirrors immutable chunks and
-manifests off-box.
+`pull_request` job cannot poison a protected branch's cache. The
+S3 cold-tier implementation exists in the cache crate, but the job runner
+does not wire it up: setting `[cache.l2] enabled = true` does not mirror
+chunks or manifests off-box.
 
 ```toml
 [services]
@@ -886,12 +895,6 @@ entry_ttl_days     = 7              # matches GitHub
 protected_branches = ["main", "master"]
 chunk_avg_bytes    = 65536          # FastCDC target chunk size
 fsync_chunks       = false          # per-chunk fsync before rename — see below
-
-[cache.l2]                          # optional S3 cold tier
-enabled  = false
-bucket   = ""
-endpoint = ""
-region   = ""
 
 [workspace]
 mode = "stable"            # "stable": reuse _work/<repo>/<repo> per repository (upstream layout); "fresh": new _work/<job-id> per job
@@ -925,8 +928,9 @@ corrupt chunk, but still returns an error partway through the body —
 the status and `Content-Length` were already sent, so that first read
 looks to the client like an aborted/truncated download, not a clean
 miss. Only the corrupt chunk's removal is immediate: every SUBSEQUENT
-lookup is a clean cache miss (or a clean restore from the optional S3
-tier), never a permanently poisoned entry. Set `fsync_chunks = true`
+lookup is a clean cache miss, never a permanently poisoned entry.
+The library can restore from L2 when a caller supplies one, but the job
+runner currently uses local storage only. Set `fsync_chunks = true`
 to restore the previous per-chunk fsync before rename.
 
 ### Docker: `buildx` needs `--driver-opt network=host`
@@ -1021,9 +1025,10 @@ app_file        = "/home/me/.toolu-runner/github-app.json"
 installation_id = 987654
 ```
 
-`[cache]` and `[cache.l2]` configure `accelerated` mode; `[workspace]` and
-`[shadow]` apply in every services mode. All four are optional and default as
-shown — see [Cache acceleration](#cache-acceleration).
+`[cache]` configures local cache storage; `[workspace]` and `[shadow]`
+apply in every services mode. These sections are optional and default as
+shown — see [Cache acceleration](#cache-acceleration). `[cache.l2]` is
+parsed and preserved but is not connected to production job execution.
 
 Credentials live beside it in `credentials.json` (also 0600). Don't
 hand-edit `jit_config` or `auth_token` — re-run `register --replace`.
@@ -1036,11 +1041,14 @@ hand-edit `jit_config` or `auth_token` — re-run `register --replace`.
 ```
 ~/.toolu-runner/                # runner home — override with $TOOLU_RUNNER_HOME
 ├── token-<host>.json           # `login` token (0600, default store; keyring opt-in) — shared by all repos
+├── github-app.json             # saved GitHub App (0600), shared by registrations
+├── _diag/                      # process diagnostics: runner.log.YYYY-MM-DD, daily rotation
 ├── _work/                      # job workspaces (shared default): <repo>/<repo>/ stable, <job-id>/ fresh
 │   └── _PipelineMapping/       # <owner>/<repo>/PipelineFolder.json + workspace leases
 ├── supervisor.lock             # held by `run --all` (JSON: its pid) — `register`/`remove` signal it
 ├── config.toml                 # legacy single-slot registration (still loaded; never written by default)
 ├── orgs/<org>/                 # one directory per organization registration (same files as below)
+├── toolu/<org>/                # toolu.sh registration + host-token credentials
 └── runners/<owner>/<repo>/     # one directory per repo registration
     ├── config.toml             # registration + runtime config (0600)
     ├── credentials.json        # (0600)
@@ -1048,9 +1056,12 @@ hand-edit `jit_config` or `auth_token` — re-run `register --replace`.
     ├── .pending_remove         # written by `remove` while a run is in flight
     ├── .stopped                # why `run --all` stopped this registration (cleared when it restarts)
     └── _diag/
-        ├── runner.log          # JSON, secret-masked, daily-rotated
         └── jobs/               # per-job JSONL journals (newest 50)
 ```
+
+Process diagnostics always use `~/.toolu-runner/_diag/`, even when
+`TOOLU_RUNNER_HOME` changes the state root. Per-job journals use the
+registration's `runtime.data_dir`.
 
 `remove` deletes a registration's `config.toml`, `credentials.json`,
 `.lock`, `.pending_remove` and `.stopped`; `_diag/` is kept, so job history
@@ -1064,8 +1075,13 @@ deletes the machine service.
 
 | Variable | Default | Description |
 |---|---|---|
-| `TOOLU_RUNNER_HOME` | `~/.toolu-runner` | runner state root: the token store, `runners/<owner>/<repo>/` registrations, default `_work/`. |
-| `TOOLU_RUNNER_TOKEN` | — | bearer for `register`, `remove` and `run`'s re-mint after every job (resolution: `--token` > env > stored `login` token; a `register --app` registration re-mints with its GitHub App instead); `doctor` verifies it. |
+| `TOOLU_RUNNER_HOME` | `~/.toolu-runner` | State root: token/App stores, repo/org/toolu.sh registrations, default `_work/`; does not move process diagnostic logs. |
+| `TOOLU_RUNNER_ENROLL_TOKEN` | — | Enrollment token for `setup` after toolu.sh is selected; fallback for `--enroll-token`, never selects the source itself. |
+| `TOOLU_RUNNER_TOOLU_API_URL` | `https://console.toolu.sh` | API origin for toolu.sh pairing and enrollment. |
+| `TOOLU_RUNNER_POLL_INTERVAL_MS` | `5000` | Wait after an empty toolu.sh queue. |
+| `TOOLU_RUNNER_REMOVE_WAIT_MS` | `30000` | Maximum wait for a supervised registration to drain during removal. |
+| `TOOLU_RUNNER_ONLINE_TIMEOUT_MS` | `60000` | How long `setup` waits for the new runner (or toolu.sh machine's first poll) to come online. |
+| `TOOLU_RUNNER_TOKEN` | — | bearer for `register`, `remove` and `run`'s re-mint after every job (resolution: `--token` > env > (`register` only) saved App > stored `login` token; a `register --app` registration re-mints with its GitHub App instead); `doctor` verifies it. |
 | `TOOLU_RUNNER_CLIENT_ID` | — | OAuth App client id for the device flow (`--client-id` fallback). |
 | `TOOLU_RUNNER_KEYRING` | — | when set (non-empty, not `0`), opts the token store in to the OS keyring (default is a 0600 file — on macOS the keychain re-prompts whenever the binary's code signature changes, e.g. every rebuild). |
 | `TOOLU_RUNNER_NO_KEYRING` | — | when set (non-empty, not `0`), forces the 0600-file token store and skips the OS keyring probe entirely; overrides `TOOLU_RUNNER_KEYRING` (headless hosts, CI, locked keyrings). |
@@ -1092,8 +1108,8 @@ deletes the machine service.
 | `HOME` / `USERPROFILE` | — | resolves `~/.toolu-runner/`. |
 | `HOSTNAME` / `COMPUTERNAME` | `unknown` | names this host in the broker session's `owner_name` (`<host> (PID: n)`). The default runner name at `register` comes from the OS hostname, not these. |
 
-`TOOLU_RUNNER_CONFIG` / `_WORK` / `_LABELS` are specced but **not yet
-implemented** — use the CLI flags. Job steps never inherit the runner's own
+`TOOLU_RUNNER_CONFIG` / `_WORK` / `_LABELS` are not recognized; use the
+CLI flags. Job steps never inherit the runner's own
 `TOOLU_RUNNER_*` variables.
 
 </details>
@@ -1331,16 +1347,17 @@ the proxy redacted.
 
 ## Development
 
-Requires Rust 1.94.1 (pinned in `rust-toolchain.toml`), plus `jq` and
-[ast-grep](https://ast-grep.github.io) for the structure gate:
+Requires Rust 1.94.1 (pinned in `rust-toolchain.toml`), `jq`,
+[ast-grep](https://ast-grep.github.io), and cargo-nextest:
 
 ```sh
 cargo install ast-grep --locked
+cargo install cargo-nextest --locked
 ```
 
 ```sh
 cargo build --workspace --all-targets   # also builds the test units, so the test run reuses the libraries
-cargo nextest run --workspace    # the full suite, no network required (cargo install cargo-nextest --locked)
+cargo nextest run --workspace    # default suite; ignored Docker/live lanes run separately
 cargo test --workspace --doc     # doctests; nextest does not run them
 cargo build --profile debugging  # opt-in full debuginfo for a debugger (target/debugging/)
 
@@ -1355,7 +1372,7 @@ finishes in about half the serial time:
 ```
 cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
-the #[allow(..)] / #[expect(..)] ban
+the #[allow(..)] / #[expect(..)] ban (including crate-level forms; benches/ exempt)
 bash scripts/guardrails/run.sh          # the structure gate
 cargo nextest run --workspace
 cargo test --workspace --doc            # nextest skips doctests
@@ -1381,7 +1398,7 @@ see [docs/macos-developer-tools.md](docs/macos-developer-tools.md).
 The live suite talks to a real repo and is token-gated:
 
 ```sh
-TOOLU_RUNNER_LIVE_TOKEN=<ghs_...> \
+TOOLU_RUNNER_LIVE_TOKEN=<token> TOOLU_RUNNER_LIVE_REPO=owner/test-repo \
   cargo test -p toolu-runner --features live -- --ignored --test-threads=1
 ```
 
@@ -1394,9 +1411,9 @@ TOOLU_RUNNER_LIVE_TOKEN=<ghs_...> \
 and publishes the release without CI (`--help` lists the prerequisites):
 
 ```sh
-scripts/deploy.sh --tag v0.13.0                # images :0.13.0, GitHub release, Homebrew
-scripts/deploy.sh --tag v0.13.0 --change-log   # release notes from git-cliff, not CHANGELOG.md
-scripts/deploy.sh --tag v0.13.0 --dry-run      # print every command, run none
+scripts/deploy.sh --tag vX.Y.Z                # tag must match Cargo.toml; publishes release, images, Homebrew
+scripts/deploy.sh --tag vX.Y.Z --change-log   # release notes from git-cliff, not CHANGELOG.md
+scripts/deploy.sh --tag vX.Y.Z --dry-run      # print every command, run none
 ```
 
 ### Workspace
@@ -1427,7 +1444,7 @@ Twelve crates under `crates/` (ten libraries plus the `toolu-runner` and `toolu-
   `observability`, `shared`, `protocol`.
 - **`toolu-runner`** — the CLI **bin** (`register` / `run` / `boot` /
   `remove` / `status` / `install-service` / `login` / `logout` /
-  `create-app` / `check` / `doctor`). → `shared`, `protocol`, `network`,
+  `create-app` / `check` / `doctor` / `setup`). → `shared`, `protocol`, `network`,
   `config`, `wire`, `observability`, `listener`.
 - **`daemon`** — the `toolu-daemon` bin: the HTTP service on a toolu-operated
   VPS host that turns `POST /v1/jobs` into one sysbox-isolated container
@@ -1442,9 +1459,9 @@ sequence diagrams for register / run / cancel / reconnect.
 PRs welcome. Before you open one:
 
 1. `./tools/check.sh all` passes.
-2. `cargo nextest run --workspace` passes.
-3. Listener or reporting change? Add a test under `crates/toolu-runner/tests/`.
-4. User-facing change? Update `README.md` and `docs/architecture.md` in the
+2. Listener or reporting change? Add coverage in the owning crate; use
+   `crates/toolu-runner/tests/` for cross-crate CLI/lifecycle integration.
+3. User-facing change? Update `README.md` and `docs/architecture.md` in the
    same commit. `CHANGELOG.md` is generated from conventional-commit subjects
    at release time (git-cliff), so don't edit it by hand.
 
@@ -1453,7 +1470,7 @@ count; tests are exempt); function bodies under 150. Tests live in a
 sibling `tests/` folder, never in the same file as the logic. Every new
 `src/` submodule folder needs a `README.md` and an entry in that crate's
 `guardrails.config.json` `src.requireReadme`. See `AGENTS.md` →
-"House Conventions & The Gate".
+"Gate & house rules".
 
 ### Step failure and cancellation cleanup
 

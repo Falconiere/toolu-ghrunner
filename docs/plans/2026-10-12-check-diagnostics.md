@@ -1,5 +1,10 @@
 # `toolu-runner check` — Plan
 
+> Historical implementation record. Current behavior is documented in
+> [architecture](../architecture.md); acceptance status and remaining gaps are
+> tracked in [test coverage](../test-coverage.md) and the
+> [compatibility matrix](../compatibility-matrix.md).
+
 **Date:** 2026-10-12   **Status:** Approved   **Spec:** docs/specs/2026-10-12-check-diagnostics-design.md   **Topic:** issue #93 — operator preflight diagnostics subcommand
 
 ## Evidence and approach

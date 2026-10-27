@@ -1,5 +1,10 @@
 # Run the test suite with cargo-nextest in the gate and CI — Plan
 
+> Historical implementation record. Current behavior is documented in
+> [architecture](../architecture.md); acceptance status and remaining gaps are
+> tracked in [test coverage](../test-coverage.md) and the
+> [compatibility matrix](../compatibility-matrix.md).
+
 **Date:** 2026-10-14   **Status:** Approved   **Spec:** docs/specs/2026-10-14-nextest-gate-and-ci-design.md   **Topic:** issue #118 — nextest in gate, CI and release verify
 
 ## Evidence and approach

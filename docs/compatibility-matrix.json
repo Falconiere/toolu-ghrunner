@@ -19962,8 +19962,8 @@
       "issue": 103,
       "criterion": "Regression: artifact upload/download through the real GitHub artifact backend",
       "input": [],
-      "expected": "Live: upload-artifact v7 bytes artifact-103-<run_id>\\n verified via the API on both lanes; download-artifact v8 ran only on the official lane (toolu skipped it after the cache failure). Offline local service rejects path traversal.",
-      "production_path": "forwarder env (ACTIONS_RESULTS_URL/ACTIONS_RUNTIME_TOKEN); execution::execution::artifacts (offline)",
+      "expected": "Live: upload-artifact v7 bytes artifact-103-<run_id>\\n verified via the API on both lanes; download-artifact v8 ran only on the official lane (toolu skipped it after the cache failure). The local artifact service implementation (not started by offline mode) rejects path traversal.",
+      "production_path": "forwarder env (ACTIONS_RESULTS_URL/ACTIONS_RUNTIME_TOKEN); execution::execution::artifacts (local implementation, not started by the job runner)",
       "tests": [
         [
           "crates/execution/src/execution/artifacts/tests/backend.rs",
@@ -20011,8 +20011,8 @@
       "issue": 103,
       "criterion": "Regression: OIDC token request allowed with id-token: write and denied without it",
       "input": [],
-      "expected": "With id-token: write the token's aud/repository/job_workflow_ref claims match; without it ACTIONS_ID_TOKEN_REQUEST_URL is absent — identical on both lanes. Offline server mints/validates locally.",
-      "production_path": "execution::execution::service_endpoints; execution::oidc (offline)",
+      "expected": "With id-token: write the token's aud/repository/job_workflow_ref claims match; without it ACTIONS_ID_TOKEN_REQUEST_URL is absent — identical on both lanes. The local OIDC server implementation (not started by the job runner) mints/validates locally.",
+      "production_path": "execution::execution::service_endpoints; execution::oidc (local implementation, not started by the job runner)",
       "tests": [
         [
           "crates/toolu-runner/tests/oidc_token_test.rs",

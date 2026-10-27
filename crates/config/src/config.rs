@@ -134,7 +134,7 @@ impl RunnerRegistrationConfig {
 /// `[services]` config section selecting how artifacts/cache/OIDC are served.
 ///
 /// `mode = "forwarder"` (default) forwards real GitHub service URLs from the
-/// job message; `mode = "offline"` hosts local services for hermetic runs.
+/// job message; `mode = "offline"` starts only the local v1 cache.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ServicesSection {
   /// `"forwarder"` (default), `"offline"`, or `"accelerated"`.
@@ -194,7 +194,8 @@ pub struct CacheSection {
   /// `FastCDC` target average chunk size in bytes.
   #[serde(default = "default_chunk_avg_bytes")]
   pub chunk_avg_bytes: u32,
-  /// `[cache.l2]` S3 cold tier.
+  /// `[cache.l2]` S3 cold tier (parsed and preserved; the job runner does not
+  /// construct the tier, so enabling it mirrors nothing off-box).
   #[serde(default)]
   pub l2: L2Section,
   /// Restore the previous per-chunk `fsync` before rename (default `false`).
@@ -231,7 +232,8 @@ impl CacheSection {
   }
 }
 
-/// `[cache.l2]` config section: optional S3 cold tier.
+/// `[cache.l2]` config section: optional S3 cold tier. Parsed and preserved
+/// across re-mints, but not wired into production job execution.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct L2Section {
   /// Enable the S3 mirror.

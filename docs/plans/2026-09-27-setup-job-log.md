@@ -1,5 +1,10 @@
 # Set up job diagnostics — Plan
 
+> Historical implementation record. Current behavior is documented in
+> [architecture](../architecture.md); acceptance status and remaining gaps are
+> tracked in [test coverage](../test-coverage.md) and the
+> [compatibility matrix](../compatibility-matrix.md).
+
 **Date:** 2026-09-27   **Status:** Approved   **Spec:** docs/specs/2026-09-27-setup-job-log-design.md   **Topic:** #87
 
 ## Evidence and approach

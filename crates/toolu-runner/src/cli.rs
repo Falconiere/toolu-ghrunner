@@ -17,7 +17,7 @@ const TOP_AFTER_HELP: &str = "\
 Examples:
   toolu-runner login                # one-time GitHub OAuth device-flow login
   toolu-runner register             # repo inferred from the cwd git remote
-  toolu-runner run                  # poll for the job, execute it, exit
+  toolu-runner run                  # stay online, re-minting after each job
   toolu-runner check                # preflight: GitHub reachability, tools, proxy/CA
   toolu-runner doctor               # health: what is broken and the command that fixes it
 
@@ -85,6 +85,7 @@ Exit codes:
        errored (auth, network, protocol)
   2    environment/config error before polling (missing TOOLU_JITCONFIG,
        unparseable JIT envelope)
+  5    session conflict outlasted the bounded retry
   124  the TOOLU_DEADLINE watchdog fired";
 
 /// Extended help footer for `register --help`.
@@ -122,9 +123,10 @@ Examples:
 /// Standalone GitHub Actions JIT runner.
 ///
 /// Registers a just-in-time runner against a GitHub repository or
-/// organization and executes one workflow job per registration — a JIT
-/// config is single-use, so the flow is `login` once, then `register` +
-/// `run` per job. No orchestrator service; all state lives under
+/// organization. Each JIT config is single-use; unless the registration is
+/// ephemeral, `run` re-mints after each job with the saved GitHub App or a
+/// token from the environment or `login`.
+/// `setup` also supports pairing with toolu.sh. All state lives under
 /// `~/.toolu-runner`.
 pub(crate) struct Cli {
   #[command(subcommand)]
@@ -138,8 +140,9 @@ pub(crate) enum Command {
   ///
   /// POSTs GitHub's `generate-jitconfig` REST endpoint and persists the
   /// minted runner config and credentials locally (all-or-nothing). The
-  /// registration is single-use (JIT): the first `run` consumes it —
-  /// re-register for each job.
+  /// JIT config is single-use; unless `--ephemeral`, `run` re-mints after
+  /// each job using the registration's GitHub App or a token from the
+  /// environment or `login`.
   Register(RegisterArgs),
   /// Run the listener loop, staying online across jobs.
   ///
@@ -180,8 +183,8 @@ pub(crate) enum Command {
   /// Prints a one-time code, opens the verification page, polls until
   /// the grant completes, then stores the token as a 0600 file under the
   /// runner home (or in the OS keyring with `TOOLU_RUNNER_KEYRING=1`).
-  /// `register` uses this token when neither --token nor
-  /// `TOOLU_RUNNER_TOKEN` is set.
+  /// `register` uses this token when no explicit token or saved GitHub App
+  /// is selected. Token registrations also use it for re-minting.
   Login(login_cmd::LoginArgs),
   /// Delete the stored login token for a host.
   ///
@@ -227,9 +230,10 @@ pub(crate) enum Command {
   /// job lock, writes a file or registers. `--offline` makes no network
   /// request. Exit 0 = no failure, 1 = a failure, 2 = usage error.
   Doctor(doctor_cmd::DoctorArgs),
-  /// Set up this machine as a runner: check it, ask (or take flags for)
-  /// the GitHub target and credentials, review, register, install the
-  /// machine service, and confirm GitHub reports the runner online.
+  /// Set up this machine as a runner for GitHub or toolu.sh.
+  ///
+  /// Check the machine, ask (or take flags) for the job source and credentials,
+  /// review, register or pair, install the machine service, and confirm online.
   ///
   /// With `--yes` or no terminal, no question is asked: a missing answer
   /// exits 2 naming its flag and writes nothing. Re-running on a

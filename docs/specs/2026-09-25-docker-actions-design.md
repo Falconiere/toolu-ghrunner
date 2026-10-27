@@ -1,5 +1,10 @@
 # Docker container actions — Design
 
+> Historical implementation record. Current behavior is documented in
+> [architecture](../architecture.md); acceptance status and remaining gaps are
+> tracked in [test coverage](../test-coverage.md) and the
+> [compatibility matrix](../compatibility-matrix.md).
+
 **Date:** 2026-09-25   **Status:** Approved   **Author:** Codex   **Topic:** #75 / epic #67
 
 ## Problem

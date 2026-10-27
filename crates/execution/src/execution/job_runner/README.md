@@ -1,10 +1,11 @@
 # job_runner/
 
-**What belongs here:** the prepared job's step execution setup, including
-action prefetch, acquired run defaults, and the final "Complete job" row (job outputs and environment URL).
+**What belongs here:** job entry sequencing, HTTP-client setup, prepared-step
+execution, action prefetch, acquired run defaults, and the final "Complete job"
+row (job outputs and environment URL).
 
-**What does NOT belong here:** workspace setup, service startup, or teardown;
-those stay in `job_runner.rs`.
+**What does NOT belong here:** workspace/service implementations and teardown
+helpers; `entry.rs` orchestrates those through the parent `job_runner.rs`.
 
 | File | Primary item | Purpose |
 | --- | --- | --- |

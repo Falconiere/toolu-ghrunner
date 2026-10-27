@@ -134,9 +134,10 @@ still agree:
   HTTP server and is house style — do **not** flag it as a mock.
 - Assertions must pin identity, not a loose substring. `assert!(!out.contains(s))`
   where the exact masked output is knowable is a weak assertion.
-- Rust tests live in `tests/`; an inline `#[cfg(test)] mod tests` inside `src/`
-  is correct and established when the item under test is private
-  (`pub(crate)` / `pub(super)`) — do not flag it as misplaced.
+- Unit tests live in flat sibling `tests/` directories, included with
+  `#[cfg(test)] #[path = "tests/<name>.rs"] mod <module>;` (the module name
+  varies, e.g. `mod tests;` or `mod setup_tests;`). Inline test-module
+  bodies alongside production logic are forbidden, including for private items.
 
 ### 7. Documentation accuracy
 
@@ -166,7 +167,7 @@ because they are expensive to undo:
   `reqwest`, `tokio`, `opendal`, `bollard`, or `axum` may appear there.
 - The `protocol` → `wire` boundary is one-way: `protocol` exposes pure builders
   and parsers; all async HTTP lives in `wire::net`.
-- `execution` depends on `shared`, `expressions`, and `cache` only — it cannot
+- `execution` depends on `shared`, `expressions`, `cache`, and `network` only — it cannot
   reach `observability` or `listener`.
 - One responsibility per file, named after its export. A new module belongs in
   its own file rather than appended to an existing one.

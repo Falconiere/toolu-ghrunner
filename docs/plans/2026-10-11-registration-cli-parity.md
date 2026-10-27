@@ -1,5 +1,10 @@
 # Registration CLI parity: `--ephemeral` and `--no-default-labels` — Plan
 
+> Historical implementation record. Current behavior is documented in
+> [architecture](../architecture.md); acceptance status and remaining gaps are
+> tracked in [test coverage](../test-coverage.md) and the
+> [compatibility matrix](../compatibility-matrix.md).
+
 **Date:** 2026-10-11   **Status:** Approved   **Spec:** docs/specs/2026-10-11-registration-cli-parity-design.md   **Topic:** issue #92
 
 ## Evidence and approach
