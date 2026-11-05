@@ -7,7 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.14.1] - 2026-11-05
+## [0.15.0] - 2026-11-05
+
+### Changed
+- *(release)* [**breaking**] macOS builds are Apple Silicon only: Intel Macs get no new builds, and `install.sh` and Homebrew refuse them. v0.14.0 is the last Intel release (`install.sh --version v0.14.0`) (#247)
+- *(release)* publish the GitHub Release and Homebrew formula only after every image pushes (#247)
+- *(install)* a Rosetta shell on Apple Silicon now installs the native arm64 build (#247)
 
 ### Documentation
 - refresh guides against current runner behavior (#229)
