@@ -42,7 +42,7 @@ want "published check reads the release" 'gh release view "\$\{GITHUB_REF_NAME\}
 want "only 'not found' means unpublished" '"[$]err" == \*"release not found"\*'
 want "publish needs the build and both images" "needs: \[build, image, macos-image\]"
 want "publish downloads only the tarballs" "pattern: toolu-\*"
-# --- verify: the version check only ---
+# --- verify: the version and on-main checks only ---
 want "asserts tag == Cargo version"    "assert-version\.sh"
 # --- Rust build cache (#110): the tag-only build matrix does not restore one
 # (low hit rate, a cold tag build is the norm).
