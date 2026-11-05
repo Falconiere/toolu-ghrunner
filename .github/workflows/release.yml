@@ -71,7 +71,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0 # brings origin/main for the ancestry check
+          fetch-depth: 0 # fetches every branch, including origin/main, for the ancestry check
       - name: Assert tag matches Cargo version
         run: bash scripts/assert-version.sh "${GITHUB_REF_NAME}"
       # The PR checks are the only gate, and they cover only what landed on main.
