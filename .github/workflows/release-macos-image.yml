@@ -149,7 +149,7 @@ jobs:
         run: |
           image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${IMAGE_BASENAME}"
           if [[ "${GITHUB_REF_TYPE}" != "tag" ]]; then
-            tags=(-t "${IMAGE_BASENAME}:pr")
+            tags=(-t "${IMAGE_BASENAME}:local")
           else
             version="${GITHUB_REF_NAME#v}"
             tags=(-t "${image}:${version}")

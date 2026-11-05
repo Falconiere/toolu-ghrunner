@@ -285,7 +285,7 @@ expect v0.8.0-rc.1 tag "$IMG:0.8.0-rc.1"
 # and nothing that looks like a publishable ref. `github.ref_name` there is a
 # branch, which the tag rule would happily mangle into
 # `ghcr.io/...:main`.
-expect main branch "toolu-ghrunner-macos:pr"
+expect main branch "toolu-ghrunner-macos:local"
 
 if [[ "$fail" -ne 0 ]]; then
   echo "release_macos_image_workflow_test: FAILED" >&2

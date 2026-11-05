@@ -50,7 +50,7 @@ Follows [toolu-conventions](https://github.com/Falconiere/toolu-conventions)
   (`release.yml` only refuses a tag whose commit is off main). Rust caches save
   per PR (a job compiles cold until its first green run on that PR). No
   development environment; prereleases are `vX.Y.Z-rc.N` tags (PR hand-sets the
-  `-rc.N` version + `CHANGELOG.md` section).
+  `-rc.N` version + `Cargo.lock` + `CHANGELOG.md` section).
 - **`scripts/guardrails/` is VERBATIM from the kit** — change
   `guardrails.config.json`, never the scripts. Needs `jq` **and** `ast-grep`
   (`cargo install ast-grep --locked`); exits 3 without either.

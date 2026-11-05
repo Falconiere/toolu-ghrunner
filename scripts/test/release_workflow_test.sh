@@ -57,7 +57,7 @@ BUILD_JOB=$(job_body build)
 # A merge never re-runs lint or tests: the release PR passed them, and the
 # release build is the only compile a tag does.
 if printf '%s\n' "$VERIFY_JOB" | grep -Eq -- "cargo |rust-toolchain|rust-cache"; then
-  echo "FAIL: verify only asserts the version; the release PR already ran the gate" >&2
+  echo "FAIL: verify runs no lint, tests or build; the PR checks are the only gate" >&2
   fail=1
 else
   echo "ok: verify runs no lint, tests or build"

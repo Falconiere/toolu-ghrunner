@@ -13,7 +13,7 @@
 #   * nothing new since the last tag -> "no releasable commits"
 #
 # Requires: git, git-cliff (workflow pins GIT_CLIFF_VERSION), and in normal
-# mode cargo + gh with GH_TOKEN (the RELEASE_PLZ_TOKEN PAT).
+# mode cargo + gh with GH_TOKEN (the toolu-release App token).
 #
 # Env:
 #   DRY_RUN=1  stop after the local commit: skip `cargo update` (no Cargo.lock

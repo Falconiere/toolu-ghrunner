@@ -22,7 +22,7 @@ concurrency:
 #     deadline watchdog;
 #   * nextest's `--partition` splits one run into N independent runs over the
 #     same deterministic test set, so N matrix shards cut the run N-fold while
-#     every shard still compiles once from the shared dependency cache.
+#     every shard compiles for itself on a PR's first run.
 #     `slice:k/N` deals the sorted test list round-robin; measured against the
 #     per-test durations of a real run it leaves the worst shard at ~156 s
 #     (ubuntu, N=2) and ~166 s (macOS, N=3), where `hash:` clustered five of
@@ -38,8 +38,8 @@ concurrency:
 # to save a shared cache. GitHub scopes a PR's cache to that PR, so a job compiles
 # cold until it first succeeds there: a failed or cancelled job saves nothing.
 # cache-on-failure stays off because a key is saved once, so a cancelled build's
-# partial cache would stick for the whole PR. Old PR caches are evicted past the
-# 10 GB limit, which costs nothing now that no shared cache sits beside them.
+# partial cache would stick for the whole PR. Open PRs can evict each other's
+# caches past the 10 GB limit; no shared cache sits beside them to lose.
 jobs:
   # Format, lints and the structure guardrails: everything the gate checks
   # without running a test. OS-independent, so the ubuntu leg alone runs it.

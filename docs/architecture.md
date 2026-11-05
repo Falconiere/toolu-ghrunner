@@ -1467,8 +1467,9 @@ a branch that is up to date with `main`, so the PR run covered what lands. An
 admin merge bypasses that, and `release.yml` refuses a tag whose commit is not
 on `main`. There is no development environment; a prerelease is a
 `vX.Y.Z-rc.N` tag through the same path, except that `release-pr.sh` only
-computes stable versions: the PR bumping to it sets the `-rc.N` version and its
-`CHANGELOG.md` section by hand.
+computes stable versions: the PR bumping to it sets the `-rc.N` version, refreshes
+`Cargo.lock` with `cargo update --workspace` and writes its `CHANGELOG.md` section
+by hand.
 
 The front half was originally release-plz; it was replaced by git-cliff
 because release-plz's `git_only` mode runs `cargo package` on every
