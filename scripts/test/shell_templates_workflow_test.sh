@@ -100,6 +100,8 @@ for job in host shell-templates container; do
     echo "FAIL: $job needs timeout-minutes" >&2
     fail=1
   fi
+  # The aggregator compiles nothing, so it has no toolchain or cache to pin.
+  [[ "$job" == shell-templates ]] && continue
   if printf '%s\n' "$body" | awk '
       /dtolnay\/rust-toolchain@/ { tc = 1 }
       /Swatinem\/rust-cache@v[0-9]+/ { if (tc) ok = 1 }
