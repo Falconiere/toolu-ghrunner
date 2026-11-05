@@ -1,7 +1,8 @@
 name: release
 
 # Tag-driven release: merging the release PR tags main (release-pr.yml), and the
-# tag runs this: verify tag==Cargo version -> build 4 native targets -> package tarballs (install.sh layout) + SHA256SUMS
+# tag runs this: verify tag==Cargo version and the commit is on main -> build 4
+# native targets -> package tarballs (install.sh layout) + SHA256SUMS
 # -> publish a GitHub Release with CHANGELOG-derived notes -> smoke-test the
 # published assets and push the Homebrew formula. The workflow reads the repo,
 # never writes to it. See docs/toolu/specs/2026-07-08-release-automation-design.md
@@ -13,8 +14,9 @@ name: release
 #
 # The container images are chained here too (#121) — release-image.yml and
 # release-macos-image.yml have no tag trigger of their own. No fmt/clippy/test
-# here: the release PR passed them on a branch up to date with main (branch
-# protection), and that is the commit this tag names. The images pack the
+# here: what lands on main passed them on a branch up to date with main (branch
+# protection; an admin merge bypasses it), so `verify` refuses a tag naming a
+# commit that is not on main. The images pack the
 # binaries `build` produced instead of compiling them again: a called
 # workflow's jobs run inside THIS run, so they can download its artifacts.
 # They follow `build`, not `publish`: they read the tarball artifacts, never
@@ -67,8 +69,17 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # brings origin/main for the ancestry check
       - name: Assert tag matches Cargo version
         run: bash scripts/assert-version.sh "${GITHUB_REF_NAME}"
+      # The PR checks are the only gate, and they cover only what landed on main.
+      - name: Assert the tag names a commit on main
+        run: |
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" origin/main; then
+            echo "::error::${GITHUB_REF_NAME} names ${GITHUB_SHA}, which is not on main, so no PR checks covered it"
+            exit 1
+          fi
 
   build:
     needs: verify

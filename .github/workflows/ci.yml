@@ -35,8 +35,10 @@ concurrency:
 # named `test (1)`, `test (2)`…, which a required context cannot match.
 #
 # Swatinem/rust-cache saves from the PR run itself, since nothing runs on main
-# to save a shared cache. GitHub scopes a PR's cache to that PR, so its first
-# push compiles cold and later pushes hit. Old PR caches are evicted past the
+# to save a shared cache. GitHub scopes a PR's cache to that PR, so a job compiles
+# cold until it first succeeds there: a failed or cancelled job saves nothing.
+# cache-on-failure stays off because a key is saved once, so a cancelled build's
+# partial cache would stick for the whole PR. Old PR caches are evicted past the
 # 10 GB limit, which costs nothing now that no shared cache sits beside them.
 jobs:
   # Format, lints and the structure guardrails: everything the gate checks

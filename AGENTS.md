@@ -47,8 +47,10 @@ Follows [toolu-conventions](https://github.com/Falconiere/toolu-conventions)
   shard-gated steps name a real shard). **CI runs on pull requests only**:
   a merge to main just refreshes the release PR (`release-pr.yml`); merging
   that PR tags main, and the tag builds + publishes with no gate of its own
-  (`release.yml`). Rust caches save per PR (first push of a PR compiles cold).
-  No development environment; prereleases are `vX.Y.Z-rc.N` tags.
+  (`release.yml` only refuses a tag whose commit is off main). Rust caches save
+  per PR (a job compiles cold until its first green run on that PR). No
+  development environment; prereleases are `vX.Y.Z-rc.N` tags (PR hand-sets the
+  `-rc.N` version + `CHANGELOG.md` section).
 - **`scripts/guardrails/` is VERBATIM from the kit** — change
   `guardrails.config.json`, never the scripts. Needs `jq` **and** `ast-grep`
   (`cargo install ast-grep --locked`); exits 3 without either.

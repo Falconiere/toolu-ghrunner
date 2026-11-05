@@ -36,7 +36,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.94.1
-      # Saved from main only, restored everywhere — see ci.yml.
       - uses: Swatinem/rust-cache@v2
       - name: Official runner default shell preserves pipeline status
         run: false | true

@@ -62,6 +62,14 @@ if printf '%s\n' "$VERIFY_JOB" | grep -Eq -- "cargo |rust-toolchain|rust-cache";
 else
   echo "ok: verify runs no lint, tests or build"
 fi
+# Job-scoped and positive, so a renamed or emptied verify job cannot pass.
+if printf '%s\n' "$VERIFY_JOB" | grep -Eq -- 'git merge-base --is-ancestor "\$\{GITHUB_SHA\}" origin/main' \
+  && printf '%s\n' "$VERIFY_JOB" | grep -Eq -- 'fetch-depth: 0'; then
+  echo "ok: verify refuses a tag whose commit is not on main"
+else
+  echo "FAIL: verify must refuse a tag whose commit is not on main" >&2
+  fail=1
+fi
 if printf '%s\n' "$BUILD_JOB" | grep -Eq -- "Swatinem/rust-cache"; then
   echo "FAIL: the release build matrix must not use rust-cache (tag-only, low hit rate)" >&2
   fail=1

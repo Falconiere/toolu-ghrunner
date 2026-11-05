@@ -1464,8 +1464,11 @@ and the only write it makes to `main` is a pull request a human merges.
 
 Nothing re-runs after a merge because branch protection requires the checks on
 a branch that is up to date with `main`, so the PR run covered what lands. An
-admin merge bypasses that. There is no development environment; a prerelease is
-a `vX.Y.Z-rc.N` tag through the same path.
+admin merge bypasses that, and `release.yml` refuses a tag whose commit is not
+on `main`. There is no development environment; a prerelease is a
+`vX.Y.Z-rc.N` tag through the same path, except that `release-pr.sh` only
+computes stable versions: the PR bumping to it sets the `-rc.N` version and its
+`CHANGELOG.md` section by hand.
 
 The front half was originally release-plz; it was replaced by git-cliff
 because release-plz's `git_only` mode runs `cargo package` on every
@@ -1546,7 +1549,8 @@ published (ubuntu)   a release for the tag already exists (scripts/deploy.sh
       │              published it from a Mac) → skip every job below.
       ▼
 verify (ubuntu)      scripts/assert-version.sh — tag must equal the
-      │              [workspace.package] version, else fail fast.
+      │              [workspace.package] version, and its commit must be
+      │              on main, else fail fast.
       ▼
 build (matrix ×4)    native runners, no cross: darwin/arm64 (macos-15),
       │              darwin/amd64 (macos-15-intel), linux/amd64

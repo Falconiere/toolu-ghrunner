@@ -70,7 +70,7 @@ want "pushing needs a tag ref AND release.yml's call" \
   'push=\$\{\{ inputs\.prebuilt_binaries == true && github\.ref_type == .tag. \}\}'
 # Every publish condition, not just the push: a dispatch with a tag selected
 # has a tag ref but is not release.yml's call, so a bare `ref_type == 'tag'`
-# anywhere (login, digest export, manifest) would publish ungated.
+# anywhere (login, digest export, manifest) would publish from a dispatch.
 # `== true` is part of the required form: `&&` yields its first falsy OPERAND,
 # so a bare null input (every dispatch) would render the push flag as an empty string.
 bare="$(grep -n "ref_type == 'tag'" "$WF" | grep -v "inputs\.prebuilt_binaries == true && github\.ref_type == 'tag'" || true)"
