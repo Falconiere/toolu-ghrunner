@@ -48,7 +48,8 @@ Follows [toolu-conventions](https://github.com/Falconiere/toolu-conventions)
   a merge to main just refreshes the release PR (`release-pr.yml`); merging
   that PR tags main, and the tag builds, pushes the images, then publishes the
   GitHub Release only if every image pushed, with no gate of its own
-  (`release.yml` only refuses a tag whose commit is off main). Rust caches save
+  (`release.yml` only refuses a tag that differs from the Cargo version or whose
+  commit is off main). Rust caches save
   per PR (a job compiles cold until its first green run on that PR). No
   development environment; prereleases are `vX.Y.Z-rc.N` tags (PR hand-sets the
   `-rc.N` version + `Cargo.lock` + `CHANGELOG.md` section).
