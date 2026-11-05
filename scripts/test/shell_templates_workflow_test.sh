@@ -2,9 +2,9 @@
 # shell_templates_workflow_test.sh — static validation of
 # .github/workflows/shell-templates-80.yml.
 #
-# Three of this workflow's checks — `host (ubuntu-24.04)`, `host (macos-15)`
-# and `container` — are required status contexts on main, next to ci.yml's
-# `ci` / `ci-macos` and the code review. A renamed job, a dropped matrix leg or
+# Two of this workflow's checks — `shell-templates` and `container` — are
+# required status contexts on main, next to ci.yml's `ci` / `ci-macos` and the
+# code review. A renamed job, a dropped matrix leg or
 # a retired runner image would leave the required context pending on every PR
 # and block merging, and a deleted job reports nothing rather than failing, so
 # the names are asserted from outside. The run-shape rules the workflow shares
@@ -46,6 +46,20 @@ fi
 # --- the required contexts ---
 want "a 'host' job exists"      "^  host:"
 want "a 'container' job exists" "^  container:"
+want "a 'shell-templates' job exists" "^  shell-templates:"
+want "shell-templates needs the host matrix" "^    needs: \[host\]$"
+want "shell-templates rejects every result but success" '== success \]\] \|\| exit 1'
+
+# --- the release PR runs nothing; a fork's branch of that name still does ---
+NOT_RELEASE_PR="github\.head_ref != 'release-pr' \|\| github\.event\.pull_request\.head\.repo\.full_name != github\.repository"
+want "shell-templates skips only the release PR" "^    if: \\$\\{\\{ always\\(\\) && \\($NOT_RELEASE_PR\\) \\}\\}$"
+guarded=$(grep -Ec "^    if: \\$\\{\\{ $NOT_RELEASE_PR \\}\\}$" "$WF")
+if [[ "$guarded" == 2 ]]; then
+  echo "ok: host and container skip the release PR"
+else
+  echo "FAIL: host and container must skip the release PR (found $guarded guarded jobs)" >&2
+  fail=1
+fi
 # The matrix spells the two `host (…)` contexts; macos-14 is retired on
 # 2026-11-02 (actions/runner-images#13518), so the macOS leg must be 15+.
 want "host runs on ubuntu-24.04 and a supported macOS image" \
@@ -118,6 +132,9 @@ if [[ -z "${SHELL_TEMPLATES_WORKFLOW_FILE:-}" ]]; then
     's/^      - uses: Swatinem.rust-cache@v2$/&\n        with:\n          save-if: false/'
     's/^  pull_request:$/  push:\n    branches: [main]\n&/'
     '/^    timeout-minutes: 20$/d'
+    '/^    if: \$.*head_ref/d'
+    's/ || github.event.pull_request.head.repo.full_name != github.repository//'
+    '/^  shell-templates:$/d'
   )
   for m in "${mutations[@]}"; do
     sed -e "$m" "$WF" >"$tmp/wf.yml"

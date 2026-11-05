@@ -1459,6 +1459,7 @@ and the only write it makes to `main` is a pull request a human merges.
 | Event | What runs |
 | --- | --- |
 | Pull request to `main` | Format, lint and tests: `ci.yml`, `shell-templates-80.yml` (plus `code-review.yml`) |
+| The release PR itself | Nothing: every required job skips on the same-repo `release-pr` branch, and a skipped job counts as success |
 | Merge to `main` | `release-pr.yml` only: opens or refreshes the release PR. No lint, tests or build |
 | Merge of the release PR | `release-pr.yml` tags main; the tag runs `release.yml`: build, images, GitHub Release, Homebrew |
 

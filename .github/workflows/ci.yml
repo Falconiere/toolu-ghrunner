@@ -34,6 +34,12 @@ concurrency:
 # always()`, failing on any non-success result). A matrix job's checks are
 # named `test (1)`, `test (2)`…, which a required context cannot match.
 #
+# The release PR runs nothing: every job carries the same head-branch `if`, and a
+# job skipped that way reports success to branch protection. Its diff is only the
+# generated version bump, and the code it releases already passed these gates on
+# its own PR to main. Merging it only builds and deploys. The head-repo half keeps
+# a fork's branch named `release-pr` from skipping its checks.
+#
 # Swatinem/rust-cache saves from the PR run itself, since nothing runs on main
 # to save a shared cache. GitHub scopes a PR's cache to that PR, so a job compiles
 # cold until it first succeeds there: a failed or cancelled job saves nothing.
@@ -44,6 +50,7 @@ jobs:
   # Format, lints and the structure guardrails: everything the gate checks
   # without running a test. OS-independent, so the ubuntu leg alone runs it.
   lint:
+    if: ${{ github.head_ref != 'release-pr' || github.event.pull_request.head.repo.full_name != github.repository }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -114,6 +121,7 @@ jobs:
   # per leg (doctests, the install.sh login-shell tests) are spread over the
   # shards so no shard is the straggler.
   test:
+    if: ${{ github.head_ref != 'release-pr' || github.event.pull_request.head.repo.full_name != github.repository }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -152,6 +160,7 @@ jobs:
   # matrix (#103) cites as `ci-docker` evidence. Serial by design (one Docker
   # daemon), so it runs beside the shards instead of after them.
   docker-replay:
+    if: ${{ github.head_ref != 'release-pr' || github.event.pull_request.head.repo.full_name != github.repository }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -174,6 +183,7 @@ jobs:
   # The shell and Python checks over the repo's own files: no toolchain, no
   # build, so they never wait on a compile.
   scripts:
+    if: ${{ github.head_ref != 'release-pr' || github.event.pull_request.head.repo.full_name != github.repository }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -215,7 +225,7 @@ jobs:
   # in those cases, and the step rejects every result but success.
   ci:
     needs: [lint, test, docker-replay, scripts]
-    if: always()
+    if: ${{ always() && (github.head_ref != 'release-pr' || github.event.pull_request.head.repo.full_name != github.repository) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -238,6 +248,7 @@ jobs:
   # with brownouts before that. Clippy and the once-per-leg scripts are spread
   # over the shards like the ubuntu leg's extras.
   test-macos:
+    if: ${{ github.head_ref != 'release-pr' || github.event.pull_request.head.repo.full_name != github.repository }}
     runs-on: macos-15
     timeout-minutes: 20
     strategy:
@@ -280,7 +291,7 @@ jobs:
   # The required `ci-macos` context, aggregated the same way as `ci`.
   ci-macos:
     needs: [test-macos]
-    if: always()
+    if: ${{ always() && (github.head_ref != 'release-pr' || github.event.pull_request.head.repo.full_name != github.repository) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

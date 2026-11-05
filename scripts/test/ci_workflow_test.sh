@@ -16,6 +16,7 @@
 #   step pinned to shard 3 silently never runs again if the matrix shrinks to
 #   two;
 # - the aggregators need every real job and reject every result but success;
+# - the same-repo release PR skips every job, and a fork's branch of that name does not;
 # - the macOS leg exists, runs on a supported arm64 image, and is not inert.
 #
 # The macOS leg is the regression this file originally existed for.
@@ -219,7 +220,8 @@ done
 # --- aggregators: the required contexts ---
 for agg in ci ci-macos; do
   body=$(job_body "$agg")
-  want_in "$body" "$agg runs even when a dependency failed" "^    if: always\(\)$"
+  want_in "$body" "$agg runs even when a dependency failed, except on the release PR" \
+    "^    if: \\$\\{\\{ always\\(\\) && \\(github\\.head_ref != 'release-pr' \\|\\| github\\.event\\.pull_request\\.head\\.repo\\.full_name != github\\.repository\\) \\}\\}$"
   want_in "$body" "$agg reads every dependency's result"     'join\(needs\.\*\.result'
   want_in "$body" "$agg rejects every result but success"    '== success \]\] \|\| exit 1'
 done
@@ -253,12 +255,15 @@ jobs = wf["jobs"]
 aggregators = {"ci", "ci-macos"}
 real = {"lint", "test", "docker-replay", "scripts", "test-macos"}
 assert set(jobs) == real | aggregators, f"jobs: {sorted(jobs)}"
+NOT_RELEASE_PR = "github.head_ref != 'release-pr' || github.event.pull_request.head.repo.full_name != github.repository"
+for name in real:
+    assert jobs[name].get("if") == "${{ " + NOT_RELEASE_PR + " }}", f"{name}: if={jobs[name].get('if')!r}"
 for name, job in jobs.items():
     assert isinstance(job.get("timeout-minutes"), int), f"{name}: no timeout-minutes"
 covered = set()
 for agg in aggregators:
     needs = jobs[agg]["needs"]
-    assert jobs[agg].get("if") == "always()", f"{agg}: if={jobs[agg].get('if')!r}"
+    assert jobs[agg].get("if") == "${{ always() && (" + NOT_RELEASE_PR + ") }}", f"{agg}: if={jobs[agg].get('if')!r}"
     assert not (set(needs) & covered), f"{agg}: a job is aggregated twice"
     covered |= set(needs)
 assert covered == real, f"jobs behind no aggregator: {sorted(real - covered)}"
