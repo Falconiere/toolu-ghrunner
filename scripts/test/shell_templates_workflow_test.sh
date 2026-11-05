@@ -4,9 +4,9 @@
 #
 # Two of this workflow's checks — `shell-templates` and `container` — are
 # required status contexts on main, next to ci.yml's `ci` / `ci-macos` and the
-# code review. A renamed job, a dropped matrix leg or
-# a retired runner image would leave the required context pending on every PR
-# and block merging, and a deleted job reports nothing rather than failing, so
+# code review. A renamed required job would leave its context pending on every
+# PR and block merging, a dropped matrix leg would pass `shell-templates` with
+# less coverage, and a deleted job reports nothing rather than failing, so
 # the names are asserted from outside. The run-shape rules the workflow shares
 # with ci.yml (superseded PR runs cancelled, nothing run after a merge, a timeout
 # on every job, a Rust cache saved from the PR run) are pinned here for the same
@@ -48,6 +48,7 @@ want "a 'host' job exists"      "^  host:"
 want "a 'container' job exists" "^  container:"
 want "a 'shell-templates' job exists" "^  shell-templates:"
 want "shell-templates needs the host matrix" "^    needs: \[host\]$"
+want "shell-templates reads the host result" 'RESULTS: \$\{\{ join\(needs\.\*\.result'
 want "shell-templates rejects every result but success" '== success \]\] \|\| exit 1'
 
 # --- the release PR runs nothing; a fork's branch of that name still does ---
@@ -135,6 +136,7 @@ if [[ -z "${SHELL_TEMPLATES_WORKFLOW_FILE:-}" ]]; then
     '/^    if: \$.*head_ref/d'
     's/ || github.event.pull_request.head.repo.full_name != github.repository//'
     '/^  shell-templates:$/d'
+    '/RESULTS: .*join(needs/d'
   )
   for m in "${mutations[@]}"; do
     sed -e "$m" "$WF" >"$tmp/wf.yml"

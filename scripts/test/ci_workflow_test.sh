@@ -217,6 +217,12 @@ for leg in lint test docker-replay test-macos; do
   fi
 done
 
+# --- the release PR runs nothing; a fork's branch of that name still does ---
+for job in lint test docker-replay scripts test-macos; do
+  want_in "$(job_body "$job")" "$job skips only the release PR" \
+    "^    if: \\$\\{\\{ github\\.head_ref != 'release-pr' \\|\\| github\\.event\\.pull_request\\.head\\.repo\\.full_name != github\\.repository \\}\\}$"
+done
+
 # --- aggregators: the required contexts ---
 for agg in ci ci-macos; do
   body=$(job_body "$agg")
