@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-11-05
+
+### Added
+- *(release)* [**breaking**] drop Intel Mac builds and run no checks on release PRs (#249)
+
+### Documentation
+- refresh guides against current runner behavior (#229)
+
+### Fixed
+- *(install)* map console --toolu to --enroll-token (#228)
+
 ## [0.14.0] - 2026-10-27
 
 ### Added
