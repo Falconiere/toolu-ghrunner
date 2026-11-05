@@ -184,12 +184,13 @@ runners have no Docker daemon). Before pushing, it checks that the carrier's
 `/toolu-runner` is byte-identical to the binary in the tarball. It then pushes
 `ghcr.io/<owner>/toolu-ghrunner-macos:<version>` plus
 `:latest` and the `:vN` compat line for stable tags, and prints the
-digest-pinned ref. The GitHub Release is cut only after this job and the
-Linux image jobs succeed:
+digest-pinned ref:
 
 ```
 ghcr.io/<owner>/toolu-ghrunner-macos@sha256:…
 ```
+
+The GitHub Release is cut only after this job and the Linux image jobs succeed.
 
 The tag rule, and why `vN` resets at 1.0.0, is the Linux image's rule —
 see [container-image.md](container-image.md#tag-surface). Pin the
