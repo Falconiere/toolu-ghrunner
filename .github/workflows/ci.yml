@@ -221,8 +221,9 @@ jobs:
           python3 -m unittest scripts/test/test_compat_matrix_check.py scripts/test/test_sanitize_capture.py scripts/test/test_reference_compare.py
 
   # The required `ci` context: green only when every Linux job above is. A
-  # skipped or cancelled dependency fails it too — `if: always()` makes it run
-  # in those cases, and the step rejects every result but success.
+  # skipped or cancelled dependency fails it too — `always()` makes it run in
+  # those cases, and the step rejects every result but success. Only the release
+  # PR skips it, along with everything it needs.
   ci:
     needs: [lint, test, docker-replay, scripts]
     if: ${{ always() && (github.head_ref != 'release-pr' || github.event.pull_request.head.repo.full_name != github.repository) }}

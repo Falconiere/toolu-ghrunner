@@ -87,7 +87,7 @@ job_body() {
     injob                                      { print }
   ' "$WF"
 }
-for job in host container; do
+for job in host shell-templates container; do
   body=$(job_body "$job")
   if [[ -z "$body" ]]; then
     echo "FAIL: could not extract the $job job from $WF" >&2
