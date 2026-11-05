@@ -1,15 +1,15 @@
 name: ci
+# Pull requests only. Nothing re-runs after a merge: branch protection requires
+# these checks on a branch that is up to date with main, so the PR run already
+# covered what lands. Merging only refreshes the release PR (release-pr.yml).
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
 
-# A newer push to a PR supersedes the older run; pushes to main are never
-# cancelled (cancel-in-progress is false for push events).
+# A newer push to a PR supersedes the older run.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 # The gate is ONE serial command locally (./tools/check.sh all). CI runs the
 # same layers, but spread over parallel jobs and sharded test runs, because the
@@ -22,7 +22,7 @@ concurrency:
 #     deadline watchdog;
 #   * nextest's `--partition` splits one run into N independent runs over the
 #     same deterministic test set, so N matrix shards cut the run N-fold while
-#     every shard still compiles once from the shared dependency cache.
+#     every shard compiles for itself on a PR's first run.
 #     `slice:k/N` deals the sorted test list round-robin; measured against the
 #     per-test durations of a real run it leaves the worst shard at ~156 s
 #     (ubuntu, N=2) and ~166 s (macOS, N=3), where `hash:` clustered five of
@@ -34,10 +34,12 @@ concurrency:
 # always()`, failing on any non-success result). A matrix job's checks are
 # named `test (1)`, `test (2)`…, which a required context cannot match.
 #
-# Every Swatinem/rust-cache step saves only from main: a PR run restores the
-# main cache (same Cargo.lock → full hit) and a per-PR copy of the same key
-# was what pushed this repository over the 10 GB cache limit, evicting the
-# caches that were still useful.
+# Swatinem/rust-cache saves from the PR run itself, since nothing runs on main
+# to save a shared cache. GitHub scopes a PR's cache to that PR, so a job compiles
+# cold until it first succeeds there: a failed or cancelled job saves nothing.
+# cache-on-failure stays off because a key is saved once, so a cancelled build's
+# partial cache would stick for the whole PR. Open PRs can evict each other's
+# caches past the 10 GB limit; no shared cache sits beside them to lose.
 jobs:
   # Format, lints and the structure guardrails: everything the gate checks
   # without running a test. OS-independent, so the ubuntu leg alone runs it.
@@ -50,8 +52,6 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Clippy
@@ -124,8 +124,6 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.94.1
       - uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install cargo-nextest
         uses: taiki-e/install-action@v2
         with:
@@ -160,8 +158,6 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.94.1
       - uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Docker action runtime and production replay
         env:
           DOCKER_HOST: unix:///var/run/docker.sock
@@ -237,8 +233,7 @@ jobs:
   # wall time per shard. Formatting, the #[allow] ban and the guardrail
   # structure checks are OS-independent and stay on the ubuntu leg alone — a
   # second ast-grep install would add time for no additional signal. arm64
-  # only: Apple Silicon is what this runner is deployed on, and the release
-  # workflow already builds Intel natively. macos-15, not macos-14: GitHub
+  # only: Apple Silicon is the only macOS target this runner ships. macos-15, not macos-14: GitHub
   # retires the macOS 14 images on 2026-11-02 (actions/runner-images#13518),
   # with brownouts before that. Clippy and the once-per-leg scripts are spread
   # over the shards like the ubuntu leg's extras.
@@ -255,8 +250,6 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install cargo-nextest
         uses: taiki-e/install-action@v2
         with:

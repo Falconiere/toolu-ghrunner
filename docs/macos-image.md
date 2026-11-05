@@ -174,11 +174,11 @@ ls -l out            # entrypoint + toolu-runner must both be 0755
 ```
 
 Publishing is tag-driven. Pushing `vX.Y.Z` runs
-[`release.yml`](../.github/workflows/release.yml). It runs the
-fmt/clippy/test gate once, builds the darwin/arm64 release tarball on
+[`release.yml`](../.github/workflows/release.yml). It builds the
+darwin/arm64 release tarball on
 `macos-15` (a real Mac), and then calls
 [`release-macos-image.yml`](../.github/workflows/release-macos-image.yml).
-That workflow has no gate of its own and does not compile again. It extracts
+That workflow does not compile again. It extracts
 `toolu-runner` from that tarball and packs it on `ubuntu-24.04` (GitHub's macOS
 runners have no Docker daemon). Before pushing, it checks that the carrier's
 `/toolu-runner` is byte-identical to the binary in the tarball. It then pushes
@@ -189,6 +189,8 @@ digest-pinned ref:
 ```
 ghcr.io/<owner>/toolu-ghrunner-macos@sha256:…
 ```
+
+The GitHub Release is cut only after this job and the Linux image jobs succeed.
 
 The tag rule, and why `vN` resets at 1.0.0, is the Linux image's rule —
 see [container-image.md](container-image.md#tag-surface). Pin the

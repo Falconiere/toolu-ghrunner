@@ -77,12 +77,17 @@ want_in() {
 
 # --- triggers (a leg that never fires proves nothing) ---
 want "workflow runs on pull_request"      "^  pull_request:"
-want "workflow runs on pushes to main"    "^  push:"
+# A merge runs nothing here: the PR run on an up-to-date branch already covered it.
+if grep -Eq -- "^  push:" "$WF"; then
+  echo "FAIL: ci.yml must not run on push; a merge only refreshes the release PR" >&2
+  fail=1
+else
+  echo "ok: ci.yml does not run on push"
+fi
 
-# --- #119: superseded PR runs are cancelled, main never is ---
+# --- #119: superseded PR runs are cancelled ---
 want "ci groups runs per ref"             '^  group: ci-\$\{\{ github\.ref \}\}$'
-want "cancel-in-progress only for pull_request" \
-  "^  cancel-in-progress: \\$\\{\\{ github\\.event_name == 'pull_request' \\}\\}$"
+want "cancels superseded runs" "^  cancel-in-progress: true$"
 
 # --- the jobs ---
 for job in lint test docker-replay scripts ci test-macos ci-macos; do
@@ -189,10 +194,15 @@ want_scripts "scripts re-verifies the #103 reference report" \
   "reference_compare\.py --verify docs/compat-reference-103\.json"
 want_scripts "scripts checks the #88 CompleteJob evidence" "completejob_evidence_check\.py --local"
 
-# --- Rust build cache: after the toolchain, saved from main only ---
+# --- Rust build cache: after the toolchain, saved from the PR run ---
 # The cache step must come after the toolchain: rust-cache keys on rustc -vV.
-# `save-if` main-only: a per-PR copy of main's key is what pushed the repo over
-# the 10 GB cache limit.
+# No `save-if` limited to main: nothing runs on main, so it would never save.
+if grep -Eq -- "save-if:" "$WF"; then
+  echo "FAIL: a save-if on main never saves now that ci.yml runs on PRs only" >&2
+  fail=1
+else
+  echo "ok: no job limits its Rust cache save"
+fi
 for leg in lint test docker-replay test-macos; do
   body=$(job_body "$leg")
   if printf '%s\n' "$body" | awk '
@@ -204,8 +214,6 @@ for leg in lint test docker-replay test-macos; do
     echo "FAIL: $leg needs a Swatinem/rust-cache step after dtolnay/rust-toolchain" >&2
     fail=1
   fi
-  want_in "$body" "$leg saves the Rust cache from main only" \
-    "^          save-if: \\$\\{\\{ github\\.ref == 'refs/heads/main' \\}\\}$"
 done
 
 # --- aggregators: the required contexts ---

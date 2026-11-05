@@ -7,7 +7,6 @@
 One native binary. No .NET. No orchestrator service. No daemon you
 didn't ask for.
 
-[![ci](https://github.com/Falconiere/toolu-ghrunner/actions/workflows/ci.yml/badge.svg)](https://github.com/Falconiere/toolu-ghrunner/actions/workflows/ci.yml)
 [![live](https://github.com/Falconiere/toolu-ghrunner/actions/workflows/live.yml/badge.svg)](https://github.com/Falconiere/toolu-ghrunner/actions/workflows/live.yml)
 [![rust 1.94.1](https://img.shields.io/badge/rust-1.94.1-b7410e.svg)](rust-toolchain.toml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -80,6 +79,9 @@ curl -fsSL https://get.toolu.sh/pkg/ghrunner/install | bash -s -- --install-dir 
 brew install falconiere/tap/toolu-runner
 ```
 
+macOS builds are Apple Silicon only. The last release for Intel Macs is
+v0.14.0: `bash -s -- --version v0.14.0`.
+
 What the installer does:
 
 - **Downloads** `releases/latest/download/<asset>` (or `--version vX.Y.Z`) —
@@ -123,7 +125,7 @@ warning; use `toolu-runner install-service` instead (it writes the machine
 service for the binary's real path, and replaces those static units when
 they run nothing — see *Running as a service*).
 
-Prebuilt for **macOS** (arm64, x86_64) and **Linux** (x86_64, arm64). The
+Prebuilt for **macOS** (arm64 only) and **Linux** (x86_64, arm64). The
 Linux binaries are built on Debian 12 (glibc 2.36), so any Debian 12 / Ubuntu
 24.04 or newer host runs them; today's builds reference nothing past glibc
 2.34, which covers Ubuntu 22.04 too.

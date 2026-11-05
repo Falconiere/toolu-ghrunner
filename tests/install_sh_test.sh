@@ -107,6 +107,38 @@ if want legacy; then
   echo "$out_s2" | grep -q 'toolu-runner install-service' \
     || fail "skipped service line should point at toolu-runner install-service"
 
+  echo "legacy 7: Intel Mac"
+  intel_stub="$tmp/intel-stub"
+  mkdir -p "$intel_stub"
+  cat >"$intel_stub/uname" <<'EOF'
+#!/bin/sh
+if [ "$1" = -m ]; then echo x86_64; else echo Darwin; fi
+EOF
+  cat >"$intel_stub/sysctl" <<'EOF'
+#!/bin/sh
+exit 1
+EOF
+  chmod 0755 "$intel_stub/uname" "$intel_stub/sysctl"
+  if intel_out="$(PATH="$intel_stub:$PATH" "$SCRIPT" --check 2>&1)"; then
+    fail "an Intel Mac must be refused without --version: $intel_out"
+  fi
+  echo "$intel_out" | grep -q 'Intel Macs are no longer supported' \
+    || fail "the Intel Mac refusal should say why: $intel_out"
+  intel_old="$(PATH="$intel_stub:$PATH" "$SCRIPT" --check --version v0.14.0)" \
+    || fail "--version must still reach an older Intel Mac release"
+  echo "$intel_old" | grep -q '/download/v0.14.0/toolu-runner-darwin-amd64.tar.gz' \
+    || fail "--version should pin the Intel Mac tarball: $intel_old"
+
+  rosetta_stub="$tmp/rosetta-stub"
+  mkdir -p "$rosetta_stub"
+  cp "$intel_stub/uname" "$rosetta_stub/uname"
+  printf '#!/bin/sh\necho 1\n' >"$rosetta_stub/sysctl"
+  chmod 0755 "$rosetta_stub/sysctl"
+  rosetta_out="$(PATH="$rosetta_stub:$PATH" "$SCRIPT" --check)" \
+    || fail "a Rosetta shell on Apple Silicon must not be refused"
+  echo "$rosetta_out" | grep -q 'toolu-runner-darwin-arm64.tar.gz' \
+    || fail "a Rosetta shell should get the native build: $rosetta_out"
+
   echo "legacy 8: bash -n"
   bash -n "$SCRIPT" || fail "bash -n $SCRIPT failed"
 

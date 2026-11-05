@@ -56,7 +56,7 @@ release and skips the CI run.
 uname -sm                                   # Darwin arm64 — anything else: stop, cannot build darwin
 docker buildx version && docker info >/dev/null   # Docker Desktop, or Colima with rosetta: true
 docker login ghcr.io </dev/null             # already logged in? (needs write:packages)
-rustup --version && cargo --version
+cargo --version
 gh auth status
 command -v git-cliff                        # --change-log only
 ```
@@ -93,7 +93,7 @@ Homebrew lines, the notes source (the dry run's `notes:` line), the commit
 being released, and that no tests run. Wait for
 an explicit yes. Anything else → stop.
 
-### 5. Run (long: 4 builds + 3 image pushes, often 30–60 min)
+### 5. Run (long: 3 builds + 3 image pushes, often 30–60 min)
 
 ```bash
 scripts/deploy.sh --tag <tag> [--change-log] --yes   # --yes only after step 4

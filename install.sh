@@ -617,7 +617,16 @@ detect_os() {
 
 ARCH="$(detect_arch)"
 OS="$(detect_os)"
+# A Rosetta shell reports x86_64 on Apple Silicon, which has the native build.
+if [[ "$OS-$ARCH" == darwin-amd64 && "$(sysctl -n hw.optional.arm64 2>/dev/null)" == 1 ]]; then
+  ARCH=arm64
+fi
 ASSET="$BIN_NAME-$OS-$ARCH.tar.gz"
+
+# Only tags up to v0.14.0 carry this asset, so a pinned one may still install.
+if [[ "$OS-$ARCH" == darwin-amd64 && -z "$VERSION" ]]; then
+  die "Intel Macs are no longer supported; the last release for them is v0.14.0 (--version v0.14.0)"
+fi
 
 # --- URL construction ------------------------------------------------------
 

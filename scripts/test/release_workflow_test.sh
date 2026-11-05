@@ -2,8 +2,8 @@
 # release_workflow_test.sh — static validation of .github/workflows/release.yml.
 #
 # A real tag push can't be exercised offline, so this asserts the invariants the
-# release contract depends on: trigger, job graph, the 4-target matrix, the
-# gate, --locked builds, packaging + checksums, prerelease handling, and least-
+# release contract depends on: trigger, job graph, the 3-target matrix, no
+# re-run gate, --locked builds, packaging + checksums, prerelease handling, and least-
 # privilege permissions. Uses grep (dependency-free, runs on every runner); if
 # PyYAML is importable it additionally asserts the file parses and the job DAG.
 set -uo pipefail
@@ -40,14 +40,12 @@ want "verify needs the published check" "needs: published"
 want "verify skips a published release" "if: needs\.published\.outputs\.exists != 'true'"
 want "published check reads the release" 'gh release view "\$\{GITHUB_REF_NAME\}"'
 want "only 'not found' means unpublished" '"[$]err" == \*"release not found"\*'
-want "publish needs build"             "needs: build"
-# --- gate (verify) ---
+want "publish needs the build and both images" "needs: \[build, image, macos-image\]"
+want "publish downloads only the tarballs" "pattern: toolu-\*"
+# --- verify: the version and on-main checks only ---
 want "asserts tag == Cargo version"    "assert-version\.sh"
-want "runs cargo fmt check"            "cargo fmt --all -- --check"
-want "runs clippy -D warnings"         "cargo clippy --workspace --all-targets -- -D warnings"
-want "runs cargo test"                 "cargo test --workspace"
-# --- Rust build cache (#110): the gate job restores it after the toolchain; the
-# tag-only build matrix does not (low hit rate, a cold tag build is the norm).
+# --- Rust build cache (#110): the tag-only build matrix does not restore one
+# (low hit rate, a cold tag build is the norm).
 job_body() {
   awk -v key="  $1:" '
     $0 == key                                  { injob = 1; print; next }
@@ -57,13 +55,20 @@ job_body() {
 }
 VERIFY_JOB=$(job_body verify)
 BUILD_JOB=$(job_body build)
-if printf '%s\n' "$VERIFY_JOB" | awk '
-    /dtolnay\/rust-toolchain@/ { tc = 1 }
-    /Swatinem\/rust-cache@v[0-9]+/ { if (tc) ok = 1 }
-    END { exit !ok }'; then
-  echo "ok: verify restores a Rust cache after the toolchain"
+# A merge never re-runs lint or tests: the release PR passed them, and the
+# release build is the only compile a tag does.
+if printf '%s\n' "$VERIFY_JOB" | grep -Eq -- "cargo |rust-toolchain|rust-cache"; then
+  echo "FAIL: verify runs no lint, tests or build; the PR checks are the only gate" >&2
+  fail=1
 else
-  echo "FAIL: verify needs a Swatinem/rust-cache step after dtolnay/rust-toolchain" >&2
+  echo "ok: verify runs no lint, tests or build"
+fi
+# Job-scoped and positive, so a renamed or emptied verify job cannot pass.
+if printf '%s\n' "$VERIFY_JOB" | grep -Eq -- 'git merge-base --is-ancestor "\$\{GITHUB_SHA\}" origin/main' \
+  && printf '%s\n' "$VERIFY_JOB" | grep -Eq -- 'fetch-depth: 0'; then
+  echo "ok: verify refuses a tag whose commit is not on main"
+else
+  echo "FAIL: verify must refuse a tag whose commit is not on main" >&2
   fail=1
 fi
 if printf '%s\n' "$BUILD_JOB" | grep -Eq -- "Swatinem/rust-cache"; then
@@ -72,9 +77,14 @@ if printf '%s\n' "$BUILD_JOB" | grep -Eq -- "Swatinem/rust-cache"; then
 else
   echo "ok: release build matrix is not cached"
 fi
-# --- build (4 native targets) ---
+# --- build (3 native targets) ---
 want "macos-15 (darwin arm64)"         "runner: macos-15"
-want "macos-15-intel (darwin amd64)"   "runner: macos-15-intel"
+if grep -q "macos-15-intel" "$WF"; then
+  echo "FAIL: Intel Macs are not a release target" >&2
+  fail=1
+else
+  echo "ok: no Intel Mac build"
+fi
 want "ubuntu-24.04 (linux amd64)"      "runner: ubuntu-24\.04[[:space:]]*$"
 want "ubuntu-24.04-arm (linux arm64)"  "runner: ubuntu-24\.04-arm"
 want "builds via build-release.sh"     'bash scripts/build-release\.sh "\$\{\{ matrix\.os \}\}" "\$\{\{ matrix\.arch \}\}" dist'
@@ -106,7 +116,7 @@ want "one release per tag"             "^concurrency:"
 want "never cancels a release"         "cancel-in-progress: false"
 want "chains finalize off publish"     "uses: \./\.github/workflows/release-finalize\.yml"
 want "chains homebrew off publish"     "uses: \./\.github/workflows/release-homebrew\.yml"
-# --- the image workflows are chained too (#121): one gate per tag, and they
+# --- the image workflows are chained too (#121): they
 # pack the binaries `build` already produced instead of compiling again ---
 want "chains the Linux image off build"  "uses: \./\.github/workflows/release-image\.yml"
 want "chains the macOS image off build"  "uses: \./\.github/workflows/release-macos-image\.yml"
@@ -133,10 +143,10 @@ fi
 
 # --- exactly 4 matrix targets ---
 n_runners="$(grep -Ec -- "^ +- runner:" "$WF")"
-if [[ "$n_runners" == "4" ]]; then
-  echo "ok: exactly 4 matrix targets"
+if [[ "$n_runners" == "3" ]]; then
+  echo "ok: exactly 3 matrix targets"
 else
-  echo "FAIL: expected 4 matrix targets, found $n_runners" >&2
+  echo "FAIL: expected 3 matrix targets, found $n_runners" >&2
   fail=1
 fi
 
@@ -150,10 +160,11 @@ assert set(jobs) == {"published", "verify", "build", "publish", "finalize", "hom
 assert jobs["verify"]["needs"] == "published", jobs["verify"].get("needs")
 assert jobs["verify"]["if"] == "needs.published.outputs.exists != 'true'", jobs["verify"].get("if")
 assert jobs["build"]["needs"] == "verify", jobs["build"].get("needs")
-assert jobs["publish"]["needs"] == "build", jobs["publish"].get("needs")
+assert jobs["publish"]["needs"] == ["build", "image", "macos-image"], jobs["publish"].get("needs")
+assert "if" not in jobs["publish"], "publish must keep the default success() gate on its needs"
 inc = jobs["build"]["strategy"]["matrix"]["include"]
 got = {(m["os"], m["arch"]) for m in inc}
-exp = {("darwin","arm64"),("darwin","amd64"),("linux","amd64"),("linux","arm64")}
+exp = {("darwin","arm64"),("linux","amd64"),("linux","arm64")}
 assert got == exp, f"matrix os/arch: {got}"
 assert jobs["publish"]["permissions"]["contents"] == "write"
 # The downstream chain: both must run AFTER the release exists. A callee is
@@ -174,7 +185,7 @@ assert set(hb_secrets) == {"HOMEBREW_APP_ID", "HOMEBREW_APP_PRIVATE_KEY"}, (
 # finalize needs no secret at all: github.token is granted to callees automatically.
 assert "secrets" not in jobs["finalize"], "finalize needs no secrets"
 # The image workflows (#121): after `build` (its tarballs are their input),
-# not after `publish` — they never read the GitHub Release. packages: write is
+# before `publish` — a release exists only once its images pushed. packages: write is
 # granted here because a callee can only narrow the caller's token, never
 # widen it. github.token is all they use, so no secrets cross.
 for j, wf_file in (("image", "release-image.yml"), ("macos-image", "release-macos-image.yml")):
@@ -191,7 +202,7 @@ for m in inc:
         assert m.get("container") == builder, f"linux/{m['arch']} container {m.get('container')!r} != Dockerfile builder {builder!r}"
     else:
         assert "container" not in m, f"darwin/{m['arch']} must build on the host"
-print("ok: PyYAML deep-check (job DAG + 4 os/arch + publish write perm + chained finalize/homebrew + scoped App secrets + chained images + linux legs on the builder image)")
+print("ok: PyYAML deep-check (job DAG + 3 os/arch + publish write perm + chained finalize/homebrew + scoped App secrets + chained images + linux legs on the builder image)")
 PY
   then :; else
     echo "FAIL: PyYAML deep-check failed" >&2

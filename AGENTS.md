@@ -44,7 +44,15 @@ Follows [toolu-conventions](https://github.com/Falconiere/toolu-conventions)
   nextest run --partition slice:k/N`, `docker-replay`, `scripts` — behind
   the aggregator jobs `ci` / `ci-macos` that branch protection requires;
   `scripts/test/ci_workflow_test.sh` pins the layout (every layer present,
-  shard-gated steps name a real shard). Rust caches save from main only.
+  shard-gated steps name a real shard). **CI runs on pull requests only**:
+  a merge to main just refreshes the release PR (`release-pr.yml`); merging
+  that PR tags main, and the tag builds, pushes the images, then publishes the
+  GitHub Release only if every image pushed, with no gate of its own
+  (`release.yml` only refuses a tag that differs from the Cargo version or whose
+  commit is off main). Rust caches save
+  per PR (a job compiles cold until its first green run on that PR). No
+  development environment; prereleases are `vX.Y.Z-rc.N` tags (PR hand-sets the
+  `-rc.N` version + `Cargo.lock` + `CHANGELOG.md` section).
 - **`scripts/guardrails/` is VERBATIM from the kit** — change
   `guardrails.config.json`, never the scripts. Needs `jq` **and** `ast-grep`
   (`cargo install ast-grep --locked`); exits 3 without either.

@@ -1456,6 +1456,21 @@ work into a version bump; the **back half**
 binaries. The version is no longer hand-edited — git-cliff authors it,
 and the only write it makes to `main` is a pull request a human merges.
 
+| Event | What runs |
+| --- | --- |
+| Pull request to `main` | Format, lint and tests: `ci.yml`, `shell-templates-80.yml` (plus `code-review.yml`) |
+| Merge to `main` | `release-pr.yml` only: opens or refreshes the release PR. No lint, tests or build |
+| Merge of the release PR | `release-pr.yml` tags main; the tag runs `release.yml`: build, images, GitHub Release, Homebrew |
+
+Nothing re-runs after a merge because branch protection requires the checks on
+a branch that is up to date with `main`, so the PR run covered what lands. An
+admin merge bypasses that, and `release.yml` refuses a tag whose commit is not
+on `main`. There is no development environment; a prerelease is a
+`vX.Y.Z-rc.N` tag through the same path, except that `release-pr.sh` only
+computes stable versions: the PR bumping to it sets the `-rc.N` version, refreshes
+`Cargo.lock` with `cargo update --workspace` and writes its `CHANGELOG.md` section
+by hand.
+
 The front half was originally release-plz; it was replaced by git-cliff
 because release-plz's `git_only` mode runs `cargo package` on every
 workspace member, which cannot handle this unpublished workspace's
@@ -1535,12 +1550,11 @@ published (ubuntu)   a release for the tag already exists (scripts/deploy.sh
       │              published it from a Mac) → skip every job below.
       ▼
 verify (ubuntu)      scripts/assert-version.sh — tag must equal the
-      │              [workspace.package] version, else fail fast; then
-      │              cargo fmt / clippy / nextest / doctests.
+      │              [workspace.package] version, and its commit must be
+      │              on main, else fail fast.
       ▼
-build (matrix ×4)    native runners, no cross: darwin/arm64 (macos-15),
-      │              darwin/amd64 (macos-15-intel), linux/amd64
-      │              (ubuntu-24.04), linux/arm64 (ubuntu-24.04-arm); the
+build (matrix ×3)    native runners, no cross: darwin/arm64 (macos-15),
+      │              linux/amd64 (ubuntu-24.04), linux/arm64 (ubuntu-24.04-arm); the
       │              linux legs run in a rust:1.94.1-bookworm container
       │              (the image's glibc). scripts/build-release.sh:
       │              cargo build --release --locked, then
@@ -1549,24 +1563,22 @@ build (matrix ×4)    native runners, no cross: darwin/arm64 (macos-15),
       │              The linux legs also build toolu-daemon and package
       │              toolu-daemon-linux-<arch>.tar.gz
       │              (scripts/package-daemon-release.sh).
-      ├──────────────────────────────┐
-      │                              ▼
-      │              image + macos-image   `uses:` release-image.yml /
-      │                                    release-macos-image.yml on
-      │                                    `needs: build` with
-      │                                    prebuilt_binaries: true — no
-      │                                    gate of their own; they pack the
-      │                                    tarballs' binaries into the GHCR
-      │                                    images (byte-identical, checked).
       ▼
-publish (ubuntu)     scripts/changelog-extract.sh → release notes;
+image + macos-image  `uses:` release-image.yml / release-macos-image.yml
+      │              with prebuilt_binaries: true — they pack the tarballs'
+      │              binaries into the GHCR images (byte-identical, checked).
+      ▼
+publish (ubuntu)     `needs: [build, image, macos-image]`: any failed image
+      │              push means no GitHub Release and no Homebrew formula
+      │              (images already pushed stay; re-run the failed jobs).
+      │              scripts/changelog-extract.sh → release notes;
       │              scripts/publish-release.sh: sha256sum → SHA256SUMS,
       │              gh release create (contents: write, --prerelease iff
       │              the tag contains '-').
       ├──────────────┐
       ▼              ▼
 finalize         homebrew        both `uses:` reusable workflows, chained on
-(matrix ×4)      (stable only)   `needs: publish` — NOT triggered by the
+(matrix ×3)      (stable only)   `needs: publish` — NOT triggered by the
                                  release event. See below.
 ```
 
@@ -1618,8 +1630,8 @@ race to wait out.
 for prerelease tags via a job-level `if:` on `github.ref_name`)
 downloads `SHA256SUMS` the same way, renders and commits
 `Formula/toolu-runner.rb` with `scripts/commit-homebrew-formula.sh` (via
-`scripts/generate-homebrew-formula.sh`: an `on_macos`/`on_linux` ×
-`on_arm`/`on_intel` formula selecting one of the four release
+`scripts/generate-homebrew-formula.sh`: an `on_macos` (Apple Silicon only) /
+`on_linux` × `on_arm`/`on_intel` formula selecting one of the three release
 tarballs), then pushes it to the external `Falconiere/homebrew-tap`
 repo using a short-lived GitHub App installation token minted from
 `HOMEBREW_APP_ID` + `HOMEBREW_APP_PRIVATE_KEY` (scoped with `owner` +

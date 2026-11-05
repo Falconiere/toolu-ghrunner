@@ -1,9 +1,10 @@
 name: release
 
-# Tag-driven release: push vX.Y.Z -> verify tag==Cargo version -> gate ->
-# build 4 native targets -> package tarballs (install.sh layout) + SHA256SUMS
-# -> publish a GitHub Release with CHANGELOG-derived notes -> smoke-test the
-# published assets and push the Homebrew formula. The workflow reads the repo,
+# Tag-driven release: merging the release PR tags main (release-pr.yml), and the
+# tag runs this: verify tag==Cargo version and the commit is on main -> build 3
+# native targets -> package tarballs (install.sh layout) + SHA256SUMS
+# -> push the GHCR images -> publish a GitHub Release with CHANGELOG-derived
+# notes -> smoke-test the published assets and push the Homebrew formula. The workflow reads the repo,
 # never writes to it. See docs/toolu/specs/2026-07-08-release-automation-design.md
 #
 # finalize + homebrew are chained here as reusable workflows rather than
@@ -12,12 +13,15 @@ name: release
 # event-triggered versions of them could never fire.
 #
 # The container images are chained here too (#121) — release-image.yml and
-# release-macos-image.yml have no tag trigger of their own. So a tag runs the
-# fmt/clippy/test gate exactly once (`verify` below), and the images pack the
+# release-macos-image.yml have no tag trigger of their own. No fmt/clippy/test
+# here: what lands on main passed them on a branch up to date with main (branch
+# protection; an admin merge bypasses it), so `verify` refuses a tag naming a
+# commit that is not on main. The images pack the
 # binaries `build` produced instead of compiling them again: a called
 # workflow's jobs run inside THIS run, so they can download its artifacts.
-# They follow `build`, not `publish`: they read the tarball artifacts, never
-# the GitHub Release.
+# They follow `build`: they read the tarball artifacts, never the GitHub Release.
+# `publish` follows them: a failed image push leaves no GitHub Release, so no
+# Homebrew formula either. Images already pushed stay; re-run the failed jobs.
 on:
   push:
     tags: ['v*']
@@ -66,25 +70,17 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # fetches every branch, including origin/main, for the ancestry check
       - name: Assert tag matches Cargo version
         run: bash scripts/assert-version.sh "${GITHUB_REF_NAME}"
-      - uses: dtolnay/rust-toolchain@1.94.1
-        with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-nextest
-      - name: Format
-        run: cargo fmt --all -- --check
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: Test
-        run: cargo nextest run --workspace
-      # nextest does not run doctests.
-      - name: Doctests
-        run: cargo test --workspace --doc
+      # The PR checks are the only gate, and they cover only what landed on main.
+      - name: Assert the tag names a commit on main
+        run: |
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" origin/main; then
+            echo "::error::${GITHUB_REF_NAME} names ${GITHUB_SHA}, which is not on main, so no PR checks covered it"
+            exit 1
+          fi
 
   build:
     needs: verify
@@ -95,9 +91,6 @@ jobs:
           - runner: macos-15
             os: darwin
             arch: arm64
-          - runner: macos-15-intel
-            os: darwin
-            arch: amd64
           - runner: ubuntu-24.04
             os: linux
             arch: amd64
@@ -140,7 +133,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: build
+    needs: [build, image, macos-image]
     runs-on: ubuntu-24.04
     permissions:
       contents: write # create the release + upload assets
@@ -149,6 +142,8 @@ jobs:
       - name: Download all tarballs
         uses: actions/download-artifact@v8
         with:
+          # Not the images' digest-* artifacts, which are in this run by now.
+          pattern: toolu-*
           path: dist
           merge-multiple: true
       - name: Extract release notes from CHANGELOG

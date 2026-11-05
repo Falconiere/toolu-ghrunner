@@ -70,6 +70,13 @@ fi
 want "pr job calls release-pr.sh"        "$WF" "run: bash scripts/release-pr\.sh"
 want "tag job calls release-tag.sh"      "$WF" "run: bash scripts/release-tag\.sh"
 want "pins the git-cliff version"        "$WF" "GIT_CLIFF_VERSION"
+# A merge only refreshes the release PR or tags it: no lint, tests or build.
+if grep -Eq -- "cargo (fmt|clippy|test|nextest|build)" "$WF"; then
+  echo "FAIL: $WF must not lint, test or build on merge" >&2
+  fail=1
+else
+  echo "ok: a merge runs no lint, tests or build"
+fi
 # --- scripts: git-cliff drives the bump and the changelog ---
 want "computes bump via git-cliff"       "$PR_SH" "git-cliff --bumped-version"
 want "prepends CHANGELOG (no rewrite)"   "$PR_SH" "git-cliff --unreleased --bump --prepend CHANGELOG\.md"

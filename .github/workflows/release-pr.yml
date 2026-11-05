@@ -12,8 +12,10 @@ name: release-pr
 #     prepends the new section to CHANGELOG.md. Nothing ships until a human
 #     merges that PR.
 #   * release-tag — once the bump has merged to main, pushes the matching
-#     `vX.Y.Z` git tag. That tag fires release.yml (verify -> build ->
+#     `vX.Y.Z` git tag. That tag fires release.yml (build -> images ->
 #     GitHub Release -> Homebrew).
+#
+# This is all a merge runs: no lint, tests or build. Those ran on the PR (ci.yml).
 #
 # The token MUST NOT be the default GITHUB_TOKEN: GitHub suppresses workflow
 # runs for events raised by the built-in GITHUB_TOKEN, so a tag pushed under it

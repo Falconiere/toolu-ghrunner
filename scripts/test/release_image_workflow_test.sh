@@ -55,7 +55,7 @@ want "legs are stitched per variant, not per arch alone" \
 
 # ---------------------------------------------------------------------------
 # Trigger + binary-source tier (#121): a tag reaches this workflow ONLY as a
-# reusable call from release.yml, after release.yml's single gate and build,
+# reusable call from release.yml, after release.yml's build,
 # and that call ships the release tarball's binary instead of compiling it.
 # ---------------------------------------------------------------------------
 want "the tag path builds from the release tarball's binary" \
@@ -69,10 +69,10 @@ want "the image build checks its copy against the tarball binary's sha256" \
 want "pushing needs a tag ref AND release.yml's call" \
   'push=\$\{\{ inputs\.prebuilt_binaries == true && github\.ref_type == .tag. \}\}'
 # Every publish condition, not just the push: a dispatch with a tag selected
-# has a tag ref but never ran release.yml's gate, so a bare `ref_type == 'tag'`
-# anywhere (login, digest export, manifest) would publish ungated.
+# has a tag ref but is not release.yml's call, so a bare `ref_type == 'tag'`
+# anywhere (login, digest export, manifest) would publish from a dispatch.
 # `== true` is part of the required form: `&&` yields its first falsy OPERAND,
-# so a bare null input (every PR) would render the push flag as an empty string.
+# so a bare null input (every dispatch) would render the push flag as an empty string.
 bare="$(grep -n "ref_type == 'tag'" "$WF" | grep -v "inputs\.prebuilt_binaries == true && github\.ref_type == 'tag'" || true)"
 if [[ -n "$bare" ]]; then
   echo "FAIL: a publish condition checks the tag ref without release.yml's call: $bare" >&2
@@ -97,12 +97,12 @@ call = on.get("workflow_call") or {}
 inp = (call.get("inputs") or {}).get("prebuilt_binaries") or {}
 if inp.get("type") != "boolean" or inp.get("default") is not False:
     fail("workflow_call takes prebuilt_binaries (boolean, default false)")
-if "paths" not in (on.get("pull_request") or {}):
-    fail("PRs touching the image inputs still build")
+if "pull_request" in on:
+    fail("no PR trigger: pull requests run only lint, format and tests")
 if "workflow_dispatch" not in on:
     fail("workflow_dispatch still builds on demand")
 if "verify" in jobs:
-    fail("no verify job: release.yml's gate is the only one per tag")
+    fail("no verify job: the PR checks are the only gate")
 if "needs" in jobs.get("build", {}):
     fail("build needs nothing inside this workflow")
 PY
@@ -114,7 +114,7 @@ if python3 -c 'import yaml' >/dev/null 2>&1; then
     echo "$out" >&2
     fail=1
   else
-    echo "ok: reached by workflow_call(prebuilt_binaries) + PR + dispatch; no tag trigger, no verify"
+    echo "ok: reached by workflow_call(prebuilt_binaries) + dispatch; no tag or PR trigger, no verify"
   fi
   # Each property must be able to fail: re-introduce the old shape.
   mut="$(mktemp)"
@@ -133,8 +133,10 @@ if python3 -c 'import yaml' >/dev/null 2>&1; then
   }
   mutate_yaml "no push trigger: a tag reaches this workflow only through release.yml" \
     "s#^  workflow_dispatch:\$#  workflow_dispatch:\n  push:\n    tags: ['v*']#"
-  mutate_yaml "no verify job: release.yml's gate is the only one per tag" \
+  mutate_yaml "no verify job: the PR checks are the only gate" \
     's#^jobs:$#jobs:\n  verify:\n    runs-on: ubuntu-24.04\n    steps:\n      - run: cargo test --workspace#'
+  mutate_yaml "no PR trigger: pull requests run only lint, format and tests" \
+    's#^  workflow_dispatch:$#  workflow_dispatch:\n  pull_request:#'
   mutate_yaml "build needs nothing inside this workflow" \
     's#^    runs-on: \${{ matrix.runner }}$#    needs: verify\n&#'
   mutate_yaml "workflow_call takes prebuilt_binaries (boolean, default false)" \

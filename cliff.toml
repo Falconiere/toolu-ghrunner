@@ -7,7 +7,7 @@
 #     [workspace.package] version and regenerates CHANGELOG.md.
 #   * Once that PR merges, the workflow pushes the matching `vX.Y.Z` tag,
 #     which fires the tag-triggered .github/workflows/release.yml
-#     (build 4 targets -> GitHub Release -> Homebrew).
+#     (build 3 targets -> GitHub Release -> Homebrew).
 #
 # This replaced release-plz: its git_only mode runs `cargo package` on every
 # workspace member, which cannot handle this unpublished workspace's
