@@ -5,8 +5,7 @@
 # their recipes: scripts/build-release.sh, scripts/publish-release.sh,
 # scripts/commit-homebrew-formula.sh.
 #
-#   build    darwin arm64 + amd64 on this Mac (amd64 cross-built), linux
-#            amd64 + arm64 inside rust:1.94.1-bookworm (release.yml's linux
+#   build    darwin arm64 on this Mac, linux amd64 + arm64 inside rust:1.94.1-bookworm (release.yml's linux
 #            image: same glibc floor) — tarballs + daemon tarballs in dist/release/
 #   push     images at :<v> (+ :<v>-docker, macOS :<v>) — never :latest /
 #            :vN — then the GitHub Release (prerelease when the tag has '-')
@@ -29,7 +28,7 @@
 #   scripts/deploy.sh --tag v0.13.0 --dry-run   # print, run nothing
 #
 # Requires of the Mac: Apple Silicon (darwin binaries need Apple's SDK),
-# cargo + rustup, Docker with buildx and multi-platform push that can see the
+# cargo, Docker with buildx and multi-platform push that can see the
 # repo's path (Docker Desktop, or Colima + docker-buildx with `rosetta: true`:
 # its default qemu amd64 emulation segfaults gcc mid-build), `docker login
 # ghcr.io` with write:packages, `gh auth login`, and git-cliff (--change-log).
@@ -102,7 +101,7 @@ trap 'rm -f "$notes"; rm -rf "$tap"' EXIT
 if [[ $DRY_RUN -eq 0 ]]; then
   [[ "$(uname -s)/$(uname -m)" == Darwin/arm64 ]] \
     || die "needs an Apple Silicon Mac: the darwin binaries cannot be built elsewhere"
-  for tool in cargo rustup docker git; do
+  for tool in cargo docker git; do
     command -v "$tool" >/dev/null 2>&1 || die "'$tool' not found"
   done
   docker buildx version >/dev/null 2>&1 || die "docker buildx is not available"
@@ -152,9 +151,7 @@ unset RUSTFLAGS CARGO_ENCODED_RUSTFLAGS
 # publish-release.sh uploads every tarball here, so start from none.
 run rm -rf "$rel"
 run mkdir -p "$rel"
-run rustup target add x86_64-apple-darwin
 run bash scripts/build-release.sh darwin arm64 "$rel"
-run bash scripts/build-release.sh darwin amd64 "$rel" x86_64-apple-darwin
 for arch in amd64 arm64; do
   run docker run --rm --platform "linux/$arch" -v "$PWD:/src" -w /src \
     -v toolu-deploy-cargo-registry:/usr/local/cargo/registry \

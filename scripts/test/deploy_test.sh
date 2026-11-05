@@ -30,7 +30,8 @@ has "pushes the versioned runner image" "$rel" "-t ghcr.io/falconiere/toolu-ghru
 has "pushes the versioned docker image" "$rel" "-t ghcr.io/falconiere/toolu-ghrunner:$version-docker --push"
 has "pushes the versioned macOS image" "$rel" "-t ghcr.io/falconiere/toolu-ghrunner-macos:$version --push"
 has "builds darwin with the shared recipe" "$rel" "+ bash scripts/build-release.sh darwin arm64 dist/release"
-has "cross-builds darwin/amd64" "$rel" "+ bash scripts/build-release.sh darwin amd64 dist/release x86_64-apple-darwin"
+lacks "builds no Intel Mac target" "$rel" "x86_64-apple-darwin"
+lacks "builds no darwin/amd64 tarball" "$rel" "darwin amd64"
 has "builds linux in the release rust image" "$rel" "rust:1.94.1-bookworm bash scripts/build-release.sh linux arm64 dist/release"
 has "stages the image binaries from the tarballs" "$rel" "tar -xzf dist/release/toolu-runner-darwin-arm64.tar.gz -O toolu-runner > dist/toolu-runner-darwin-arm64"
 has "publishes with the shared recipe" "$rel" "+ env GH_REPO=Falconiere/toolu-ghrunner bash scripts/publish-release.sh v$version dist/release"
@@ -78,7 +79,6 @@ cat >"$stub/cargo" <<'STUB'
 echo "$(basename "$0") $*" >>"$CALLS"
 [ "$1" != run ] || [ -n "${DOCKER_SEES:-}" ]
 STUB
-cp "$stub/cargo" "$stub/rustup"
 cp "$stub/cargo" "$stub/docker"
 chmod +x "$stub"/*
 unseen="$(PATH="$stub:$PATH" bash "$SCRIPT" --tag "v$version" 2>&1)"
@@ -87,7 +87,6 @@ if [[ $got -eq 2 ]]; then echo "ok: an unshared repo path exits 2"; else echo "F
 has "an unshared repo path names the Colima fix" "$unseen" "Docker cannot see $PWD"
 has "the preflight mounts the repo" "$(cat "$CALLS")" "docker run --rm -v $PWD:/src rust:1.94.1-bookworm test -f /src/Cargo.toml"
 lacks "an unshared repo path builds nothing" "$unseen" "==> build"
-lacks "an unshared repo path never runs rustup" "$(cat "$CALLS")" "rustup"
 
 # --- preflight: a cargo that is not rust-toolchain.toml's (the stub prints no
 # version, like a Homebrew cargo ahead of ~/.cargo/bin) stops before any build ---

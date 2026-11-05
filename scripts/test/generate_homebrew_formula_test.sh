@@ -13,7 +13,6 @@ trap 'rm -rf "$tmp"' EXIT
 sums="$tmp/SHA256SUMS"
 cat >"$sums" <<'EOF'
 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  toolu-runner-darwin-arm64.tar.gz
-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  toolu-runner-darwin-amd64.tar.gz
 cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc  toolu-runner-linux-amd64.tar.gz
 dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd  toolu-runner-linux-arm64.tar.gz
 EOF
@@ -36,7 +35,13 @@ check "version (no v prefix)"  'version "0.1.0"'                  "$out"
 check "MIT license"            'license "MIT"'                    "$out"
 check "darwin arm64 url"       "toolu-runner-darwin-arm64.tar.gz" "$out"
 check "darwin arm64 sha"       'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' "$out"
-check "darwin amd64 url"       "toolu-runner-darwin-amd64.tar.gz" "$out"
+check "macOS is Apple Silicon only" 'depends_on arch: :arm64'     "$out"
+if grep -Fq "darwin-amd64" <<<"$out"; then
+  echo "FAIL: formula still names an Intel Mac tarball" >&2
+  fail=1
+else
+  echo "ok: no Intel Mac tarball"
+fi
 check "linux amd64 url"        "toolu-runner-linux-amd64.tar.gz"  "$out"
 check "linux arm64 url"        "toolu-runner-linux-arm64.tar.gz"  "$out"
 check "installs the binary"    'bin.install "toolu-runner"'       "$out"

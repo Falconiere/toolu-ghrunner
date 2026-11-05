@@ -79,6 +79,9 @@ curl -fsSL https://get.toolu.sh/pkg/ghrunner/install | bash -s -- --install-dir 
 brew install falconiere/tap/toolu-runner
 ```
 
+macOS builds are Apple Silicon only. The last release for Intel Macs is
+v0.14.0: `bash -s -- --version v0.14.0`.
+
 What the installer does:
 
 - **Downloads** `releases/latest/download/<asset>` (or `--version vX.Y.Z`) —

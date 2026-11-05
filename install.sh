@@ -619,6 +619,11 @@ ARCH="$(detect_arch)"
 OS="$(detect_os)"
 ASSET="$BIN_NAME-$OS-$ARCH.tar.gz"
 
+# Only tags up to v0.14.0 carry this asset, so a pinned one may still install.
+if [[ "$OS-$ARCH" == darwin-amd64 && -z "$VERSION" ]]; then
+  die "Intel Macs are no longer supported; the last release for them is v0.14.0 (--version v0.14.0)"
+fi
+
 # --- URL construction ------------------------------------------------------
 
 # A specific version is .../download/<tag>/<file>; "latest" is

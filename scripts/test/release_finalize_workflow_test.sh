@@ -4,9 +4,9 @@
 #
 # A published-release event can't be exercised offline, so this asserts the
 # invariants the finalize contract depends on: trigger, read-only permissions,
-# the 4-target matrix, checksum verification, size sanity, and tarball layout.
+# the 3-target matrix, checksum verification, size sanity, and tarball layout.
 # Uses grep (dependency-free, runs on every runner); if PyYAML is importable
-# it additionally asserts the file parses and the matrix is exactly 4 targets.
+# it additionally asserts the file parses and the matrix is exactly 3 targets.
 set -uo pipefail
 
 cd "$(dirname "$0")/../.." || exit 1 # repo root
@@ -71,7 +71,7 @@ reject "caller owns concurrency"        "^concurrency:"
 # --- permissions (read-only: never edits the release or the repo) ---
 want "least-privilege permissions"     "^permissions:"
 want "contents: read only"             "contents: read"
-# --- matrix (4 native targets, same set as release.yml) ---
+# --- matrix (3 native targets, same set as release.yml) ---
 want "darwin arm64"                    "os: darwin"
 want "amd64"                           "arch: amd64"
 want "linux"                           "os: linux"
@@ -85,10 +85,10 @@ want "verifies binary at tarball root" "toolu-runner scripts/io\.toolu-runner\.p
 
 # --- exactly 4 matrix targets ---
 n_targets="$(grep -Ec -- "^ +- os:" "$WF")"
-if [[ "$n_targets" == "4" ]]; then
-  echo "ok: exactly 4 matrix targets"
+if [[ "$n_targets" == "3" ]]; then
+  echo "ok: exactly 3 matrix targets"
 else
-  echo "FAIL: expected 4 matrix targets, found $n_targets" >&2
+  echo "FAIL: expected 3 matrix targets, found $n_targets" >&2
   fail=1
 fi
 
@@ -104,10 +104,10 @@ jobs = wf.get("jobs", {})
 assert set(jobs) == {"smoke-test"}, f"jobs: {list(jobs)}"
 inc = jobs["smoke-test"]["strategy"]["matrix"]["include"]
 got = {(m["os"], m["arch"]) for m in inc}
-exp = {("darwin","arm64"),("darwin","amd64"),("linux","amd64"),("linux","arm64")}
+exp = {("darwin","arm64"),("linux","amd64"),("linux","arm64")}
 assert got == exp, f"matrix os/arch: {got}"
 assert wf["permissions"]["contents"] == "read"
-print("ok: PyYAML deep-check (job set + 4 os/arch + read-only perm)")
+print("ok: PyYAML deep-check (job set + 3 os/arch + read-only perm)")
 PY
   then :; else
     echo "FAIL: PyYAML deep-check failed" >&2

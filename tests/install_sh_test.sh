@@ -107,6 +107,24 @@ if want legacy; then
   echo "$out_s2" | grep -q 'toolu-runner install-service' \
     || fail "skipped service line should point at toolu-runner install-service"
 
+  echo "legacy 7: Intel Mac"
+  intel_stub="$tmp/intel-stub"
+  mkdir -p "$intel_stub"
+  cat >"$intel_stub/uname" <<'EOF'
+#!/bin/sh
+if [ "$1" = -m ]; then echo x86_64; else echo Darwin; fi
+EOF
+  chmod 0755 "$intel_stub/uname"
+  if intel_out="$(PATH="$intel_stub:$PATH" "$SCRIPT" --check 2>&1)"; then
+    fail "an Intel Mac must be refused without --version: $intel_out"
+  fi
+  echo "$intel_out" | grep -q 'Intel Macs are no longer supported' \
+    || fail "the Intel Mac refusal should say why: $intel_out"
+  intel_old="$(PATH="$intel_stub:$PATH" "$SCRIPT" --check --version v0.14.0)" \
+    || fail "--version must still reach an older Intel Mac release"
+  echo "$intel_old" | grep -q '/download/v0.14.0/toolu-runner-darwin-amd64.tar.gz' \
+    || fail "--version should pin the Intel Mac tarball: $intel_old"
+
   echo "legacy 8: bash -n"
   bash -n "$SCRIPT" || fail "bash -n $SCRIPT failed"
 

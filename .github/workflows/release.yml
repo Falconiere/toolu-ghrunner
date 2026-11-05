@@ -1,7 +1,7 @@
 name: release
 
 # Tag-driven release: merging the release PR tags main (release-pr.yml), and the
-# tag runs this: verify tag==Cargo version and the commit is on main -> build 4
+# tag runs this: verify tag==Cargo version and the commit is on main -> build 3
 # native targets -> package tarballs (install.sh layout) + SHA256SUMS
 # -> push the GHCR images -> publish a GitHub Release with CHANGELOG-derived
 # notes -> smoke-test the published assets and push the Homebrew formula. The workflow reads the repo,
@@ -91,9 +91,6 @@ jobs:
           - runner: macos-15
             os: darwin
             arch: arm64
-          - runner: macos-15-intel
-            os: darwin
-            arch: amd64
           - runner: ubuntu-24.04
             os: linux
             arch: amd64

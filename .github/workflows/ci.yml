@@ -233,8 +233,7 @@ jobs:
   # wall time per shard. Formatting, the #[allow] ban and the guardrail
   # structure checks are OS-independent and stay on the ubuntu leg alone — a
   # second ast-grep install would add time for no additional signal. arm64
-  # only: Apple Silicon is what this runner is deployed on, and the release
-  # workflow already builds Intel natively. macos-15, not macos-14: GitHub
+  # only: Apple Silicon is the only macOS target this runner ships. macos-15, not macos-14: GitHub
   # retires the macOS 14 images on 2026-11-02 (actions/runner-images#13518),
   # with brownouts before that. Clippy and the once-per-leg scripts are spread
   # over the shards like the ubuntu leg's extras.

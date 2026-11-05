@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # generate-homebrew-formula.sh — render Formula/toolu-runner.rb for a release.
 #
-# Reads the 4-target SHA256SUMS emitted by the release workflow and prints a
+# Reads the 3-target SHA256SUMS emitted by the release workflow and prints a
 # self-contained Homebrew formula that selects the right prebuilt tarball via
-# on_macos/on_linux + on_arm/on_intel at install time. This repo builds
+# on_macos (Apple Silicon only) / on_linux + on_arm/on_intel at install time. This repo builds
 # outside cargo-dist (see docs/toolu/specs/2026-07-08-release-automation-design.md),
 # so the formula is hand-authored instead of tool-generated.
 #
@@ -12,7 +12,7 @@
 #     <tag>              e.g. v0.1.0 (leading 'v' required — matches the
 #                        release asset URLs)
 #     <sha256sums_path>  path to a SHA256SUMS file (sha256sum(1) format)
-#                        covering all 4 toolu-runner-<os>-<arch>.tar.gz assets
+#                        covering all 3 toolu-runner-<os>-<arch>.tar.gz assets
 #
 # Exit codes:
 #   0  formula printed to stdout
@@ -52,7 +52,6 @@ sha_for() {
 }
 
 darwin_arm64_sha="$(sha_for "toolu-runner-darwin-arm64.tar.gz")"
-darwin_amd64_sha="$(sha_for "toolu-runner-darwin-amd64.tar.gz")"
 linux_amd64_sha="$(sha_for "toolu-runner-linux-amd64.tar.gz")"
 linux_arm64_sha="$(sha_for "toolu-runner-linux-arm64.tar.gz")"
 
@@ -64,14 +63,9 @@ class TooluRunner < Formula
   license "MIT"
 
   on_macos do
-    on_arm do
-      url "https://github.com/${repo}/releases/download/${tag}/toolu-runner-darwin-arm64.tar.gz"
-      sha256 "${darwin_arm64_sha}"
-    end
-    on_intel do
-      url "https://github.com/${repo}/releases/download/${tag}/toolu-runner-darwin-amd64.tar.gz"
-      sha256 "${darwin_amd64_sha}"
-    end
+    depends_on arch: :arm64
+    url "https://github.com/${repo}/releases/download/${tag}/toolu-runner-darwin-arm64.tar.gz"
+    sha256 "${darwin_arm64_sha}"
   end
 
   on_linux do
