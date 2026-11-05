@@ -3,8 +3,8 @@ name: release
 # Tag-driven release: merging the release PR tags main (release-pr.yml), and the
 # tag runs this: verify tag==Cargo version and the commit is on main -> build 4
 # native targets -> package tarballs (install.sh layout) + SHA256SUMS
-# -> publish a GitHub Release with CHANGELOG-derived notes -> smoke-test the
-# published assets and push the Homebrew formula. The workflow reads the repo,
+# -> push the GHCR images -> publish a GitHub Release with CHANGELOG-derived
+# notes -> smoke-test the published assets and push the Homebrew formula. The workflow reads the repo,
 # never writes to it. See docs/toolu/specs/2026-07-08-release-automation-design.md
 #
 # finalize + homebrew are chained here as reusable workflows rather than
@@ -19,8 +19,9 @@ name: release
 # commit that is not on main. The images pack the
 # binaries `build` produced instead of compiling them again: a called
 # workflow's jobs run inside THIS run, so they can download its artifacts.
-# They follow `build`, not `publish`: they read the tarball artifacts, never
-# the GitHub Release.
+# They follow `build`: they read the tarball artifacts, never the GitHub Release.
+# `publish` follows them: a failed image push leaves no GitHub Release, so no
+# Homebrew formula either. Images already pushed stay; re-run the failed jobs.
 on:
   push:
     tags: ['v*']
@@ -135,7 +136,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: build
+    needs: [build, image, macos-image]
     runs-on: ubuntu-24.04
     permissions:
       contents: write # create the release + upload assets
@@ -144,6 +145,8 @@ jobs:
       - name: Download all tarballs
         uses: actions/download-artifact@v8
         with:
+          # Not the images' digest-* artifacts, which are in this run by now.
+          pattern: toolu-*
           path: dist
           merge-multiple: true
       - name: Extract release notes from CHANGELOG

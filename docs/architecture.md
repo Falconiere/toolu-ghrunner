@@ -1564,17 +1564,15 @@ build (matrix ×4)    native runners, no cross: darwin/arm64 (macos-15),
       │              The linux legs also build toolu-daemon and package
       │              toolu-daemon-linux-<arch>.tar.gz
       │              (scripts/package-daemon-release.sh).
-      ├──────────────────────────────┐
-      │                              ▼
-      │              image + macos-image   `uses:` release-image.yml /
-      │                                    release-macos-image.yml on
-      │                                    `needs: build` with
-      │                                    prebuilt_binaries: true — they
-      │                                    pack the
-      │                                    tarballs' binaries into the GHCR
-      │                                    images (byte-identical, checked).
       ▼
-publish (ubuntu)     scripts/changelog-extract.sh → release notes;
+image + macos-image  `uses:` release-image.yml / release-macos-image.yml
+      │              with prebuilt_binaries: true — they pack the tarballs'
+      │              binaries into the GHCR images (byte-identical, checked).
+      ▼
+publish (ubuntu)     `needs: [build, image, macos-image]`: any failed image
+      │              push means no GitHub Release and no Homebrew formula
+      │              (images already pushed stay; re-run the failed jobs).
+      │              scripts/changelog-extract.sh → release notes;
       │              scripts/publish-release.sh: sha256sum → SHA256SUMS,
       │              gh release create (contents: write, --prerelease iff
       │              the tag contains '-').

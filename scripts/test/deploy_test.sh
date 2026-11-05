@@ -34,6 +34,15 @@ has "cross-builds darwin/amd64" "$rel" "+ bash scripts/build-release.sh darwin a
 has "builds linux in the release rust image" "$rel" "rust:1.94.1-bookworm bash scripts/build-release.sh linux arm64 dist/release"
 has "stages the image binaries from the tarballs" "$rel" "tar -xzf dist/release/toolu-runner-darwin-arm64.tar.gz -O toolu-runner > dist/toolu-runner-darwin-arm64"
 has "publishes with the shared recipe" "$rel" "+ env GH_REPO=Falconiere/toolu-ghrunner bash scripts/publish-release.sh v$version dist/release"
+# set -e stops at a failed push, so this order means no release without images.
+last_push="$(grep -n -- '--push' <<<"$rel" | tail -1 | cut -d: -f1)"
+first_publish="$(grep -n 'publish-release.sh' <<<"$rel" | head -1 | cut -d: -f1)"
+if [[ -n "$last_push" && -n "$first_publish" && $last_push -lt $first_publish ]]; then
+  echo "ok: every image pushes before the release publishes"
+else
+  echo "FAIL: images must push before the release (last push line $last_push, publish line $first_publish)" >&2
+  fail=1
+fi
 has "commits the Homebrew formula with the shared recipe" "$rel" "+ bash scripts/commit-homebrew-formula.sh v$version dist/release/SHA256SUMS"
 has "refreshes the tap clone before committing" "$rel" "pull -q --ff-only"
 has "starts from an empty dist/release" "$rel" "+ rm -rf dist/release"

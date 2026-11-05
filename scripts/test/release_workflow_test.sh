@@ -40,7 +40,8 @@ want "verify needs the published check" "needs: published"
 want "verify skips a published release" "if: needs\.published\.outputs\.exists != 'true'"
 want "published check reads the release" 'gh release view "\$\{GITHUB_REF_NAME\}"'
 want "only 'not found' means unpublished" '"[$]err" == \*"release not found"\*'
-want "publish needs build"             "needs: build"
+want "publish needs the build and both images" "needs: \[build, image, macos-image\]"
+want "publish downloads only the tarballs" "pattern: toolu-\*"
 # --- verify: the version check only ---
 want "asserts tag == Cargo version"    "assert-version\.sh"
 # --- Rust build cache (#110): the tag-only build matrix does not restore one
@@ -154,7 +155,8 @@ assert set(jobs) == {"published", "verify", "build", "publish", "finalize", "hom
 assert jobs["verify"]["needs"] == "published", jobs["verify"].get("needs")
 assert jobs["verify"]["if"] == "needs.published.outputs.exists != 'true'", jobs["verify"].get("if")
 assert jobs["build"]["needs"] == "verify", jobs["build"].get("needs")
-assert jobs["publish"]["needs"] == "build", jobs["publish"].get("needs")
+assert jobs["publish"]["needs"] == ["build", "image", "macos-image"], jobs["publish"].get("needs")
+assert "if" not in jobs["publish"], "publish must keep the default success() gate on its needs"
 inc = jobs["build"]["strategy"]["matrix"]["include"]
 got = {(m["os"], m["arch"]) for m in inc}
 exp = {("darwin","arm64"),("darwin","amd64"),("linux","amd64"),("linux","arm64")}
@@ -178,7 +180,7 @@ assert set(hb_secrets) == {"HOMEBREW_APP_ID", "HOMEBREW_APP_PRIVATE_KEY"}, (
 # finalize needs no secret at all: github.token is granted to callees automatically.
 assert "secrets" not in jobs["finalize"], "finalize needs no secrets"
 # The image workflows (#121): after `build` (its tarballs are their input),
-# not after `publish` — they never read the GitHub Release. packages: write is
+# before `publish` — a release exists only once its images pushed. packages: write is
 # granted here because a callee can only narrow the caller's token, never
 # widen it. github.token is all they use, so no secrets cross.
 for j, wf_file in (("image", "release-image.yml"), ("macos-image", "release-macos-image.yml")):
