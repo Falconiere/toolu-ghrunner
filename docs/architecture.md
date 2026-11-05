@@ -1,6 +1,6 @@
 # toolu-runner Architecture
 
-**Reviewed:** 2026-10-27 · **Scope:** current workspace (v0.14.0)
+**Last full review:** 2026-10-27, at v0.14.0
 
 This document is the architectural reference for `toolu-runner`. It
 mirrors the layout of the source tree and explains how the ten
