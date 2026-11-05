@@ -136,8 +136,11 @@ got="$(env -i "HOME=$h" PATH=/usr/bin:/bin TERM=dumb "$BASH_UNDER_TEST" -lc 'com
 [[ "$got" == "$h/.local/bin/toolu-runner" ]] || fail "a login shell should find the binary, got '$got'"
 
 echo "setup options: unattended setup exits 2; a setup command gets them"
-run "$h" real --source github --org acme
+# --repo, not --org: setup checks an org on the live GitHub API, which runners
+# on a shared IP get rate limited on. This refusal comes before any request.
+run "$h" real --source github --repo acme/web
 [[ "$RC" -eq 2 ]] || fail "setup options unattended should exit 2 (rc=$RC): $OUT"
+echo "$OUT" | grep -q 'needs a browser' || fail "setup should refuse unattended: $OUT"
 run "$h" setup --source github --org "acme corp" -- --yes
 [[ "$RC" -eq 0 ]] || fail "setup handoff should exit 0 (rc=$RC): $OUT"
 [[ "$(tr '\n' '|' <"$h/setup.log")" == "--source|github|--org|acme corp|--yes|" ]] \

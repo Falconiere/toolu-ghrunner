@@ -844,8 +844,11 @@ fi
 if want S8; then
   echo "S8: setup flags exec the real setup, which refuses unattended"
   h="$(new_home s8)"
-  run_install notty "$h" real --install-dir "$h/.local/bin" --source github --org acme
+  # --repo, not --org: setup checks an org on the live GitHub API, which runners
+  # on a shared IP get rate limited on. This refusal comes before any request.
+  run_install notty "$h" real --install-dir "$h/.local/bin" --source github --repo acme/web
   [[ "$RC" -eq 2 ]] || fail "S8 should exit 2 (rc=$RC): $OUT"
+  echo "$OUT" | grep -q 'needs a browser' || fail "S8 should refuse unattended: $OUT"
   if echo "$OUT" | grep -q "has no setup command"; then fail "S8 the binary has setup now: $OUT"; fi
   echo "$OUT" | grep -q "setup: machine" || fail "S8 should show setup's machine check: $OUT"
   [[ -x "$h/.local/bin/toolu-runner" ]] || fail "S8 the binary should stay installed"
