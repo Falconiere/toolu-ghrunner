@@ -226,7 +226,9 @@ on a native runner (`ubuntu-24.04` / `ubuntu-24.04-arm`, no QEMU), pushes
 every leg by digest, and merges each variant's two legs
 into its own manifest at `ghcr.io/<owner>/toolu-ghrunner:<version>` and
 `…:<version>-docker` (plus `:latest` / `:vN` and their `-docker`
-counterparts for stable tags). Each manifest job prints its
+counterparts for stable tags). The GitHub Release is cut only after the image
+jobs succeed; a failed push leaves no release (images already pushed stay).
+Each manifest job prints its
 **manifest-list digest** in the log and job summary:
 
 ```

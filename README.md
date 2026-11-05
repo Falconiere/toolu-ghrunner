@@ -125,7 +125,7 @@ warning; use `toolu-runner install-service` instead (it writes the machine
 service for the binary's real path, and replaces those static units when
 they run nothing — see *Running as a service*).
 
-Prebuilt for **macOS** (arm64, x86_64) and **Linux** (x86_64, arm64). The
+Prebuilt for **macOS** (arm64 only) and **Linux** (x86_64, arm64). The
 Linux binaries are built on Debian 12 (glibc 2.36), so any Debian 12 / Ubuntu
 24.04 or newer host runs them; today's builds reference nothing past glibc
 2.34, which covers Ubuntu 22.04 too.
