@@ -44,7 +44,8 @@ Follows [toolu-conventions](https://github.com/Falconiere/toolu-conventions)
   nextest run --partition slice:k/N`, `docker-replay`, `scripts` — behind
   the aggregator jobs `ci` / `ci-macos` that branch protection requires;
   `scripts/test/ci_workflow_test.sh` pins the layout (every layer present,
-  shard-gated steps name a real shard). **CI runs on pull requests only**:
+  shard-gated steps name a real shard). **CI runs on pull requests only**, and
+  the same-repo `release-pr` skips all of it (skipped jobs satisfy protection):
   a merge to main just refreshes the release PR (`release-pr.yml`); merging
   that PR tags main, and the tag builds, pushes the images, then publishes the
   GitHub Release only if every image pushed, with no gate of its own

@@ -6,10 +6,12 @@ on:
     branches: [main]
 
 # A newer push to a PR supersedes the older run, and nothing runs after a merge
-# — the same rules as ci.yml. This workflow's three checks,
-# `host (ubuntu-24.04)`, `host (macos-15)` and `container`, are required
-# contexts on main like `ci` and `ci-macos`, so their names are pinned by
-# scripts/test/shell_templates_workflow_test.sh.
+# — the same rules as ci.yml. The checks `shell-templates` and `container` are
+# required contexts on main like `ci` and `ci-macos`, so their names are pinned
+# by scripts/test/shell_templates_workflow_test.sh. `shell-templates` aggregates
+# the `host` matrix, because a job skipped by `if` runs no matrix and so could
+# never report `host (ubuntu-24.04)` or `host (macos-15)`. The release PR runs
+# nothing, for the reasons in ci.yml.
 #
 # The first steps of each job probe the OFFICIAL runner's shell semantics
 # with no Rust at all; the last step of each job then compiles and runs the
@@ -27,6 +29,7 @@ permissions:
 
 jobs:
   host:
+    if: ${{ github.head_ref != 'release-pr' || github.event.pull_request.head.repo.full_name != github.repository }}
     strategy:
       fail-fast: false
       matrix:
@@ -86,7 +89,24 @@ jobs:
           TMPDIR="$RUNNER_TEMP/shell 80 scripts" cargo test -p execution --test integration -- shell_templates_test:: --include-ignored
           cargo test -p execution --test integration -- shell_templates_replay_test::
 
+  # The required context over the `host` matrix, aggregated the way ci.yml does.
+  shell-templates:
+    needs: [host]
+    if: ${{ always() && (github.head_ref != 'release-pr' || github.event.pull_request.head.repo.full_name != github.repository) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every host leg succeeded
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          for result in $RESULTS; do
+            [[ "$result" == success ]] || exit 1
+          done
+
   container:
+    if: ${{ github.head_ref != 'release-pr' || github.event.pull_request.head.repo.full_name != github.repository }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
