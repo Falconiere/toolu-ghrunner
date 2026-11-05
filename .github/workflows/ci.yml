@@ -1,15 +1,15 @@
 name: ci
+# Pull requests only. Nothing re-runs after a merge: branch protection requires
+# these checks on a branch that is up to date with main, so the PR run already
+# covered what lands. Merging only refreshes the release PR (release-pr.yml).
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
 
-# A newer push to a PR supersedes the older run; pushes to main are never
-# cancelled (cancel-in-progress is false for push events).
+# A newer push to a PR supersedes the older run.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 # The gate is ONE serial command locally (./tools/check.sh all). CI runs the
 # same layers, but spread over parallel jobs and sharded test runs, because the
@@ -34,10 +34,10 @@ concurrency:
 # always()`, failing on any non-success result). A matrix job's checks are
 # named `test (1)`, `test (2)`…, which a required context cannot match.
 #
-# Every Swatinem/rust-cache step saves only from main: a PR run restores the
-# main cache (same Cargo.lock → full hit) and a per-PR copy of the same key
-# was what pushed this repository over the 10 GB cache limit, evicting the
-# caches that were still useful.
+# Swatinem/rust-cache saves from the PR run itself, since nothing runs on main
+# to save a shared cache. GitHub scopes a PR's cache to that PR, so its first
+# push compiles cold and later pushes hit. Old PR caches are evicted past the
+# 10 GB limit, which costs nothing now that no shared cache sits beside them.
 jobs:
   # Format, lints and the structure guardrails: everything the gate checks
   # without running a test. OS-independent, so the ubuntu leg alone runs it.
@@ -50,8 +50,6 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Clippy
@@ -124,8 +122,6 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.94.1
       - uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install cargo-nextest
         uses: taiki-e/install-action@v2
         with:
@@ -160,8 +156,6 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.94.1
       - uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Docker action runtime and production replay
         env:
           DOCKER_HOST: unix:///var/run/docker.sock
@@ -255,8 +249,6 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install cargo-nextest
         uses: taiki-e/install-action@v2
         with:

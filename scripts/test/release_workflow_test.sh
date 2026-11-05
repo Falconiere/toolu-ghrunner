@@ -2,8 +2,8 @@
 # release_workflow_test.sh — static validation of .github/workflows/release.yml.
 #
 # A real tag push can't be exercised offline, so this asserts the invariants the
-# release contract depends on: trigger, job graph, the 4-target matrix, the
-# gate, --locked builds, packaging + checksums, prerelease handling, and least-
+# release contract depends on: trigger, job graph, the 4-target matrix, no
+# re-run gate, --locked builds, packaging + checksums, prerelease handling, and least-
 # privilege permissions. Uses grep (dependency-free, runs on every runner); if
 # PyYAML is importable it additionally asserts the file parses and the job DAG.
 set -uo pipefail
@@ -41,13 +41,10 @@ want "verify skips a published release" "if: needs\.published\.outputs\.exists !
 want "published check reads the release" 'gh release view "\$\{GITHUB_REF_NAME\}"'
 want "only 'not found' means unpublished" '"[$]err" == \*"release not found"\*'
 want "publish needs build"             "needs: build"
-# --- gate (verify) ---
+# --- verify: the version check only ---
 want "asserts tag == Cargo version"    "assert-version\.sh"
-want "runs cargo fmt check"            "cargo fmt --all -- --check"
-want "runs clippy -D warnings"         "cargo clippy --workspace --all-targets -- -D warnings"
-want "runs cargo test"                 "cargo test --workspace"
-# --- Rust build cache (#110): the gate job restores it after the toolchain; the
-# tag-only build matrix does not (low hit rate, a cold tag build is the norm).
+# --- Rust build cache (#110): the tag-only build matrix does not restore one
+# (low hit rate, a cold tag build is the norm).
 job_body() {
   awk -v key="  $1:" '
     $0 == key                                  { injob = 1; print; next }
@@ -57,14 +54,13 @@ job_body() {
 }
 VERIFY_JOB=$(job_body verify)
 BUILD_JOB=$(job_body build)
-if printf '%s\n' "$VERIFY_JOB" | awk '
-    /dtolnay\/rust-toolchain@/ { tc = 1 }
-    /Swatinem\/rust-cache@v[0-9]+/ { if (tc) ok = 1 }
-    END { exit !ok }'; then
-  echo "ok: verify restores a Rust cache after the toolchain"
-else
-  echo "FAIL: verify needs a Swatinem/rust-cache step after dtolnay/rust-toolchain" >&2
+# A merge never re-runs lint or tests: the release PR passed them, and the
+# release build is the only compile a tag does.
+if printf '%s\n' "$VERIFY_JOB" | grep -Eq -- "cargo |rust-toolchain|rust-cache"; then
+  echo "FAIL: verify only asserts the version; the release PR already ran the gate" >&2
   fail=1
+else
+  echo "ok: verify runs no lint, tests or build"
 fi
 if printf '%s\n' "$BUILD_JOB" | grep -Eq -- "Swatinem/rust-cache"; then
   echo "FAIL: the release build matrix must not use rust-cache (tag-only, low hit rate)" >&2
@@ -106,7 +102,7 @@ want "one release per tag"             "^concurrency:"
 want "never cancels a release"         "cancel-in-progress: false"
 want "chains finalize off publish"     "uses: \./\.github/workflows/release-finalize\.yml"
 want "chains homebrew off publish"     "uses: \./\.github/workflows/release-homebrew\.yml"
-# --- the image workflows are chained too (#121): one gate per tag, and they
+# --- the image workflows are chained too (#121): they
 # pack the binaries `build` already produced instead of compiling again ---
 want "chains the Linux image off build"  "uses: \./\.github/workflows/release-image\.yml"
 want "chains the macOS image off build"  "uses: \./\.github/workflows/release-macos-image\.yml"

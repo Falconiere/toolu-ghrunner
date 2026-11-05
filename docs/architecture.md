@@ -1456,6 +1456,17 @@ work into a version bump; the **back half**
 binaries. The version is no longer hand-edited — git-cliff authors it,
 and the only write it makes to `main` is a pull request a human merges.
 
+| Event | What runs |
+| --- | --- |
+| Pull request to `main` | Format, lint and tests: `ci.yml`, `shell-templates-80.yml` (plus `code-review.yml`) |
+| Merge to `main` | `release-pr.yml` only: opens or refreshes the release PR. No lint, tests or build |
+| Merge of the release PR | `release-pr.yml` tags main; the tag runs `release.yml`: build, images, GitHub Release, Homebrew |
+
+Nothing re-runs after a merge because branch protection requires the checks on
+a branch that is up to date with `main`, so the PR run covered what lands. An
+admin merge bypasses that. There is no development environment; a prerelease is
+a `vX.Y.Z-rc.N` tag through the same path.
+
 The front half was originally release-plz; it was replaced by git-cliff
 because release-plz's `git_only` mode runs `cargo package` on every
 workspace member, which cannot handle this unpublished workspace's
@@ -1535,8 +1546,7 @@ published (ubuntu)   a release for the tag already exists (scripts/deploy.sh
       │              published it from a Mac) → skip every job below.
       ▼
 verify (ubuntu)      scripts/assert-version.sh — tag must equal the
-      │              [workspace.package] version, else fail fast; then
-      │              cargo fmt / clippy / nextest / doctests.
+      │              [workspace.package] version, else fail fast.
       ▼
 build (matrix ×4)    native runners, no cross: darwin/arm64 (macos-15),
       │              darwin/amd64 (macos-15-intel), linux/amd64
@@ -1554,8 +1564,8 @@ build (matrix ×4)    native runners, no cross: darwin/arm64 (macos-15),
       │              image + macos-image   `uses:` release-image.yml /
       │                                    release-macos-image.yml on
       │                                    `needs: build` with
-      │                                    prebuilt_binaries: true — no
-      │                                    gate of their own; they pack the
+      │                                    prebuilt_binaries: true — they
+      │                                    pack the
       │                                    tarballs' binaries into the GHCR
       │                                    images (byte-identical, checked).
       ▼

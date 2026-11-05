@@ -8,8 +8,8 @@
 # a retired runner image would leave the required context pending on every PR
 # and block merging, and a deleted job reports nothing rather than failing, so
 # the names are asserted from outside. The run-shape rules the workflow shares
-# with ci.yml (superseded PR runs cancelled, main never cancelled, a timeout on
-# every job, a Rust cache saved from main only) are pinned here for the same
+# with ci.yml (superseded PR runs cancelled, nothing run after a merge, a timeout
+# on every job, a Rust cache saved from the PR run) are pinned here for the same
 # reason ci_workflow_test.sh pins them there.
 set -uo pipefail
 
@@ -34,9 +34,14 @@ want() {
   fi
 }
 
-# --- triggers: every PR and every push to main ---
+# --- triggers: every PR, nothing after a merge ---
 want "runs on pull_request"  "^  pull_request:"
-want "runs on push"          "^  push:"
+if grep -Eq -- "^  push:" "$WF"; then
+  echo "FAIL: must not run on push; a merge only refreshes the release PR" >&2
+  fail=1
+else
+  echo "ok: does not run on push"
+fi
 
 # --- the required contexts ---
 want "a 'host' job exists"      "^  host:"
@@ -50,8 +55,13 @@ want "host runs on ubuntu-24.04 and a supported macOS image" \
 want "groups runs per ref" '^  group: shell-templates-80-\$\{\{ github\.ref \}\}$'
 want "cancels superseded runs only for pull_request" \
   "^  cancel-in-progress: \\$\\{\\{ github\\.event_name == 'pull_request' \\}\\}$"
-want "saves the Rust cache from main only" \
-  "^          save-if: \\$\\{\\{ github\\.ref == 'refs/heads/main' \\}\\}$"
+# Nothing runs on main, so a save limited to main would never save.
+if grep -Eq -- "save-if:" "$WF"; then
+  echo "FAIL: a save-if on main never saves now that this runs on PRs only" >&2
+  fail=1
+else
+  echo "ok: no job limits its Rust cache save"
+fi
 
 # A timeout on every job, and the toolchain before the cache in every job
 # (rust-cache keys on rustc -vV), checked job by job.
@@ -105,7 +115,8 @@ if [[ -z "${SHELL_TEMPLATES_WORKFLOW_FILE:-}" ]]; then
     's/^  container:$/  containers:/'
     's/macos-15/macos-14/'
     's/^  cancel-in-progress: .*/  cancel-in-progress: false/'
-    "s/^          save-if: .*/          save-if: 'true'/"
+    's/^      - uses: Swatinem.rust-cache@v2$/&\n        with:\n          save-if: false/'
+    's/^  pull_request:$/  push:\n    branches: [main]\n&/'
     '/^    timeout-minutes: 20$/d'
   )
   for m in "${mutations[@]}"; do

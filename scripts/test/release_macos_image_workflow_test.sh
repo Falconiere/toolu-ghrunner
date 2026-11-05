@@ -73,9 +73,9 @@ want_in "$IMAGE_JOB" "the pack consumes the macOS artifact"  "name: toolu-runner
 # may pin; the gate is the expression, not the reviewer.
 want_in "$IMAGE_JOB" "pushes on release.yml's tag call only" "push: \\\$\{\{ inputs\.prebuilt_binaries == true && github\.ref_type == 'tag' \}\}"
 # Login and the digest print too: a dispatch with a tag selected has a tag ref
-# but never ran release.yml's gate.
+# but is not release.yml's call.
 # `== true` is part of the required form: `&&` yields its first falsy OPERAND,
-# so a bare null input (every PR) would render the push flag as an empty string.
+# so a bare null input (every dispatch) would render the push flag as an empty string.
 bare="$(grep -n "ref_type == 'tag'" "$WF" | grep -v "inputs\.prebuilt_binaries == true && github\.ref_type == 'tag'" || true)"
 if [[ -n "$bare" ]]; then
   echo "FAIL: a publish condition checks the tag ref without release.yml's call: $bare" >&2
@@ -130,12 +130,12 @@ if "push" in on:
 inp = ((on.get("workflow_call") or {}).get("inputs") or {}).get("prebuilt_binaries") or {}
 if inp.get("type") != "boolean" or inp.get("default") is not False:
     fail("workflow_call takes prebuilt_binaries (boolean, default false)")
-if "paths" not in (on.get("pull_request") or {}):
-    fail("PRs touching the macOS image inputs still build")
+if "pull_request" in on:
+    fail("no PR trigger: pull requests run only lint, format and tests")
 if "workflow_dispatch" not in on:
     fail("workflow_dispatch still builds on demand")
 if "verify" in jobs:
-    fail("no verify job: release.yml's gate is the only one per tag")
+    fail("no verify job: the PR checks are the only gate")
 if "needs" in jobs.get("build", {}):
     fail("build needs nothing inside this workflow")
 PY
@@ -147,7 +147,7 @@ if python3 -c 'import yaml' >/dev/null 2>&1; then
     echo "$out" >&2
     fail=1
   else
-    echo "ok: reached by workflow_call(prebuilt_binaries) + PR + dispatch; no tag trigger, no verify"
+    echo "ok: reached by workflow_call(prebuilt_binaries) + dispatch; no tag or PR trigger, no verify"
   fi
   mut="$(mktemp)"
   mutate_yaml() {
@@ -165,8 +165,10 @@ if python3 -c 'import yaml' >/dev/null 2>&1; then
   }
   mutate_yaml "no push trigger: a tag reaches this workflow only through release.yml" \
     "s#^  workflow_dispatch:\$#  workflow_dispatch:\n  push:\n    tags: ['v*']#"
-  mutate_yaml "no verify job: release.yml's gate is the only one per tag" \
+  mutate_yaml "no verify job: the PR checks are the only gate" \
     's#^jobs:$#jobs:\n  verify:\n    runs-on: ubuntu-24.04\n    steps:\n      - run: cargo test --workspace#'
+  mutate_yaml "no PR trigger: pull requests run only lint, format and tests" \
+    's#^  workflow_dispatch:$#  workflow_dispatch:\n  pull_request:#'
   mutate_yaml "build needs nothing inside this workflow" \
     's#^    runs-on: macos-15$#    needs: verify\n&#'
   mutate_yaml "workflow_call takes prebuilt_binaries (boolean, default false)" \
@@ -279,12 +281,11 @@ $IMG:v1"
 # Prereleases get the exact version ONLY — a followed tag must never move onto
 # an unreleased build.
 expect v0.8.0-rc.1 tag "$IMG:0.8.0-rc.1"
-# Non-tag builds (PR, workflow_dispatch on a branch) must produce a local tag
+# Non-tag builds (workflow_dispatch on a branch) must produce a local tag
 # and nothing that looks like a publishable ref. `github.ref_name` there is a
-# branch or `NN/merge`, which the tag rule would happily mangle into
+# branch, which the tag rule would happily mangle into
 # `ghcr.io/...:main`.
 expect main branch "toolu-ghrunner-macos:pr"
-expect 42/merge pull_request "toolu-ghrunner-macos:pr"
 
 if [[ "$fail" -ne 0 ]]; then
   echo "release_macos_image_workflow_test: FAILED" >&2

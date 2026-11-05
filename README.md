@@ -7,7 +7,6 @@
 One native binary. No .NET. No orchestrator service. No daemon you
 didn't ask for.
 
-[![ci](https://github.com/Falconiere/toolu-ghrunner/actions/workflows/ci.yml/badge.svg)](https://github.com/Falconiere/toolu-ghrunner/actions/workflows/ci.yml)
 [![live](https://github.com/Falconiere/toolu-ghrunner/actions/workflows/live.yml/badge.svg)](https://github.com/Falconiere/toolu-ghrunner/actions/workflows/live.yml)
 [![rust 1.94.1](https://img.shields.io/badge/rust-1.94.1-b7410e.svg)](rust-toolchain.toml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)

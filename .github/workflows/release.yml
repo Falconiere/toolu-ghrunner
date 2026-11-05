@@ -1,7 +1,7 @@
 name: release
 
-# Tag-driven release: push vX.Y.Z -> verify tag==Cargo version -> gate ->
-# build 4 native targets -> package tarballs (install.sh layout) + SHA256SUMS
+# Tag-driven release: merging the release PR tags main (release-pr.yml), and the
+# tag runs this: verify tag==Cargo version -> build 4 native targets -> package tarballs (install.sh layout) + SHA256SUMS
 # -> publish a GitHub Release with CHANGELOG-derived notes -> smoke-test the
 # published assets and push the Homebrew formula. The workflow reads the repo,
 # never writes to it. See docs/toolu/specs/2026-07-08-release-automation-design.md
@@ -12,8 +12,9 @@ name: release
 # event-triggered versions of them could never fire.
 #
 # The container images are chained here too (#121) — release-image.yml and
-# release-macos-image.yml have no tag trigger of their own. So a tag runs the
-# fmt/clippy/test gate exactly once (`verify` below), and the images pack the
+# release-macos-image.yml have no tag trigger of their own. No fmt/clippy/test
+# here: the release PR passed them on a branch up to date with main (branch
+# protection), and that is the commit this tag names. The images pack the
 # binaries `build` produced instead of compiling them again: a called
 # workflow's jobs run inside THIS run, so they can download its artifacts.
 # They follow `build`, not `publish`: they read the tarball artifacts, never
@@ -68,23 +69,6 @@ jobs:
       - uses: actions/checkout@v7
       - name: Assert tag matches Cargo version
         run: bash scripts/assert-version.sh "${GITHUB_REF_NAME}"
-      - uses: dtolnay/rust-toolchain@1.94.1
-        with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-nextest
-      - name: Format
-        run: cargo fmt --all -- --check
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: Test
-        run: cargo nextest run --workspace
-      # nextest does not run doctests.
-      - name: Doctests
-        run: cargo test --workspace --doc
 
   build:
     needs: verify

@@ -1,7 +1,7 @@
 name: release-macos-image
 
 # Tag-driven publish of the macOS runner payload: push vX.Y.Z -> release.yml
-# gates + builds the darwin/arm64 release tarball on a real Mac, then calls
+# builds the darwin/arm64 release tarball on a real Mac, then calls
 # this workflow -> pack that tarball's binary into a `scratch` OCI carrier ->
 # push to ghcr.io/<owner>/toolu-ghrunner-macos -> print the digest-pinned ref.
 #
@@ -23,15 +23,15 @@ name: release-macos-image
 #
 # A tag reaches this workflow ONLY through release.yml (`workflow_call`,
 # `needs: build`) — the same chaining, and for the same reasons, as
-# release-image.yml (#121): one gate per tag, and the darwin/arm64 binary is
+# release-image.yml (#121): the darwin/arm64 binary is
 # the one release.yml's macos-15 leg already built and packaged. With
 # `prebuilt_binaries: true` the `build` job is skipped and `image` packs the
 # `toolu-runner` out of that release tarball, so the carrier holds the
 # tarball's binary byte for byte (checked before the push).
 #
-# PRs touching the image inputs and workflow_dispatch have no release
-# artifacts: they compile on macos-15 in `build` and pack without pushing.
-# Neither repeats the gate, because neither publishes. Login, push and the
+# workflow_dispatch has no release artifacts: it compiles on macos-15 in `build`
+# and packs without pushing. Run it by hand when changing the image inputs,
+# since pull requests no longer build images. Login, push and the
 # digest print all require BOTH a tag ref AND release.yml's call
 # (`inputs.prebuilt_binaries == true` — compared, never bare: `&&` returns its
 # first falsy operand, so a bare null input renders `push:` empty, which
@@ -44,12 +44,6 @@ on:
         description: Pack the toolu-runner-darwin-arm64 release tarball this run's caller uploaded, instead of compiling on macos-15.
         type: boolean
         default: false
-  pull_request:
-    paths:
-      - Dockerfile.macos
-      - Dockerfile.macos.dockerignore
-      - scripts/macos-entrypoint.sh
-      - .github/workflows/release-macos-image.yml
   workflow_dispatch:
 
 # One image per ref; never cancel a tag publish mid-flight.
@@ -150,7 +144,7 @@ jobs:
         # Same tag rule as release-image.yml (see docs/container-image.md):
         # `latest` and the `vN` compat line track stable tags only, and `vN`
         # follows the semver compatibility boundary — the MINOR while the
-        # major is 0, the MAJOR from 1.0 on. Non-tag builds (PR, dispatch)
+        # major is 0, the MAJOR from 1.0 on. Non-tag builds (dispatch)
         # get a local-only tag; they never push.
         run: |
           image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${IMAGE_BASENAME}"

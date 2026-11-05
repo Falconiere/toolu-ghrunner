@@ -219,9 +219,9 @@ docker run --rm \
 
 Publishing is tag-driven. Pushing `vX.Y.Z` runs
 [`release.yml`](../.github/workflows/release.yml), the one workflow a tag
-triggers. It runs the fmt/clippy/test gate once, builds the release tarballs,
+triggers. It builds the release tarballs,
 and then calls [`release-image.yml`](../.github/workflows/release-image.yml).
-That workflow has no gate of its own. It builds **each variant on each arch**
+That workflow builds **each variant on each arch**
 on a native runner (`ubuntu-24.04` / `ubuntu-24.04-arm`, no QEMU), pushes
 every leg by digest, and merges each variant's two legs
 into its own manifest at `ghcr.io/<owner>/toolu-ghrunner:<version>` and
@@ -237,16 +237,17 @@ The default variant's digest-pinned ref is what toolu.sh operators set
 as `NAMESPACE_RUNNER_IMAGE` / `FLY_RUNNER_IMAGE`; the `-docker` one
 goes in a VPS host's `image_ref`. Always pin the digest, never a
 mutable tag — this container runs customer build code holding a live
-GitHub credential. PRs touching `Dockerfile`, `.dockerignore`,
-`scripts/docker-entrypoint.sh` or the workflow build both variants
-without pushing; `workflow_dispatch` does the same on demand.
+GitHub credential. `workflow_dispatch` builds both variants without
+pushing; run it by hand when changing `Dockerfile`, `.dockerignore`,
+`scripts/docker-entrypoint.sh` or the workflow, since pull requests do not
+build images.
 
 The image does not compile its own binary on a tag. Each leg extracts
 `toolu-runner` from the release tarball for its arch and builds with
 `--build-arg RUNNER_BINARY=prebuilt`, which `COPY`s
 `dist/toolu-runner-linux-<arch>` into the image. The published image therefore
 carries the tarball's binary byte for byte. The build checks this with
-`RUNNER_SHA256` and prints both checksums in the job summary. PR, dispatch and
+`RUNNER_SHA256` and prints both checksums in the job summary. Dispatch and
 local builds have no tarball, so they use the default `RUNNER_BINARY=build`
 and compile in the `builder` stage.
 

@@ -6,8 +6,8 @@
 # When main's [workspace.package] version has no matching vX.Y.Z tag yet —
 # i.e. the release PR just merged — create the annotated tag and push it.
 # The pushed tag (under the RELEASE_PLZ_TOKEN PAT, never the default token)
-# fires .github/workflows/release.yml (verify -> build -> GitHub Release ->
-# Homebrew). Exits 0 without tagging when the version is already tagged.
+# fires .github/workflows/release.yml (build -> images -> GitHub Release
+# -> Homebrew). Exits 0 without tagging when the version is already tagged.
 #
 # Env:
 #   DRY_RUN=1  create the local tag but skip `git push` — lets
