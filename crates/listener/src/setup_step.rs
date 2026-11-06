@@ -65,6 +65,9 @@ fn metadata_lines(msg: &AgentJobRequestMessage) -> Vec<String> {
       available(variable(msg, "system.runnerGroupName"))
     ),
   ];
+  if let Some(mode) = variable(msg, "actions_cache_mode") {
+    lines.push(format!("Cache mode: {mode}"));
+  }
   if let Some(raw) = variable(msg, "system.github.token.permissions") {
     match serde_json::from_str::<BTreeMap<String, String>>(raw) {
       Ok(permissions) => {

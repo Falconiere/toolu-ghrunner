@@ -81,6 +81,7 @@ pub(super) fn build_step_env(
 ) -> Result<HashMap<String, String>, RunnerError> {
   let temp_dir = runner_temp_dir(&params.config.data_dir);
   let mut env = ctx.build_step_env(&HashMap::new());
+  ctx.apply_script_service_env(&mut env);
   // Container jobs use PATH and HOME from their image. Host values may name
   // paths that do not exist inside the container, so only host steps inherit
   // the runner process environment.

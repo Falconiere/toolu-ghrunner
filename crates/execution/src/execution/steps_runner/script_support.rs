@@ -77,6 +77,7 @@ pub(super) async fn build_step_env_and_file_commands(
   job: &JobCtx<'_>,
 ) -> Result<(HashMap<String, String>, FileCommandManager), RunnerError> {
   let mut env = ctx.build_step_env(&HashMap::new());
+  ctx.apply_script_service_env(&mut env);
   let tmp_dir = job.config.data_dir.join("tmp");
   create_file_command_dir(&tmp_dir).await?;
   let (file_cmds, file_cmd_env) = FileCommandManager::create(&tmp_dir).await?;

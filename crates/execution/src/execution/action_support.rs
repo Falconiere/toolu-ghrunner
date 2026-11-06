@@ -36,6 +36,7 @@ pub(super) fn build_node_env(
   }
 
   Ok(build_resolved_action_env(
+    ActionKind::Node,
     (step, &step_inputs),
     ctx,
     manifest,
@@ -45,8 +46,18 @@ pub(super) fn build_node_env(
   ))
 }
 
+/// Which service-var set an action handler receives (official handlers differ).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum ActionKind {
+  /// Node action: includes the cache-v2 flag.
+  Node,
+  /// Container action: no cache-v2 flag.
+  Container,
+}
+
 /// Build action process environment using inputs resolved at invocation time.
 pub(super) fn build_resolved_action_env(
+  kind: ActionKind,
   invocation: (&ActionStep, &HashMap<String, String>),
   ctx: &ExecutionContext,
   manifest: &ActionDefinition,
@@ -59,6 +70,7 @@ pub(super) fn build_resolved_action_env(
   // pre/main/post stages (keyed by step id), so post can read what main saved.
   let state = ctx.step_state(&step.id);
   let mut env = ctx.build_step_env(&HashMap::new());
+  ctx.apply_action_service_env(&mut env, kind == ActionKind::Node);
   env.extend(build_action_env(
     manifest,
     step_inputs,

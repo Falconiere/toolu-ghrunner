@@ -80,6 +80,8 @@ pub struct ExecutionContext {
   /// Host-step network export (`network::step_env(..).host`, #94): layered
   /// over the inherited process env, under every workflow-level value.
   network_env: Vec<(String, String)>,
+  /// Per-step-type `ACTIONS_*` service vars (never on the job-wide env).
+  service_env: super::service_endpoints::ServiceEnv,
 }
 
 impl ExecutionContext {
@@ -137,6 +139,7 @@ impl ExecutionContext {
       next_step_number: None,
       node_migration: crate::node::migration::NodeMigrationState::default(),
       network_env: Vec::new(),
+      service_env: super::service_endpoints::ServiceEnv::default(),
     }
   }
 
