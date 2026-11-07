@@ -618,7 +618,7 @@ async fn shell_traffic_follows_the_exported_proxy_and_bypass() -> FixtureResult<
 /// action opting in does, then `GET` over it with Node's default trust.
 fn node_tunnel(port: u16) -> String {
   format!(
-    r#"const http = require('http'), https = require('https'), tls = require('tls');
+    r"const http = require('http'), https = require('https'), tls = require('tls');
 const report = value => console.log('NET94|tunnel|status|' + value);
 const proxy = new URL(process.env.HTTPS_PROXY);
 const auth = decodeURIComponent(proxy.username) + ':' + decodeURIComponent(proxy.password);
@@ -640,7 +640,7 @@ http.request({{
     r.on('end', () => socket.destroy());
   }}).on('error', e => {{ report(e.code); socket.destroy(); }});
 }}).on('error', e => report(e.code)).end();
-"#
+"
   )
 }
 

@@ -1271,6 +1271,10 @@ ca_bundle = "~/certs/corp-root.pem"               # extra trusted CA(s), PEM
 | `no_proxy` | Used only with `proxy`. |
 | `ca_bundle` | Works with or without `proxy`. **Adds** trust anchors; never removes the OS or Mozilla roots. Must be absolute after `~` expansion, a readable file, and contain at least one well-formed PEM certificate — anything else is an error naming the path, and `run` / `check` exit `2` before polling. |
 
+A server certificate that is untrusted, expired or wrong-host fails the request
+during the TLS handshake, before anything reaches the server. `ca_bundle` only
+adds anchors, so it cannot excuse an expired or wrong-host certificate.
+
 `run` re-reads `[network]` at the start of each poll cycle, so an edit made
 while the runner waits takes effect after the job it is waiting for (or on
 restart); an edit that breaks it stops the runner (exit `2`) instead of
