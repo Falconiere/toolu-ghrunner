@@ -29,6 +29,7 @@ use tokio_util::sync::CancellationToken;
 use super::idle::{IdleDecision, handle_idle_outcome};
 use super::{POLL_BACKOFF_START, poll_once};
 use crate::broker_message::PollOutcome;
+use crate::broker_refresh::REFRESH_RETRY_BUDGET;
 use crate::handler::{RefreshAuth, SessionCtx};
 use shared::{ListenerEvent, RunnerConfig, RunnerError, SecretMasker};
 
@@ -289,11 +290,22 @@ async fn a_transient_failure_is_retried_and_the_success_publishes() -> TestResul
   Ok(())
 }
 
-/// #77 77-S3: a peer that only ever fails keeps retrying inside the budget
-/// and publishes nothing — it neither gives up on the first failure nor
-/// hammers the endpoint.
+/// #77 77-S3: a peer that only ever fails is retried with backoff until the
+/// 30s retry-sleep budget is spent, and then gives up as a `Network` failure
+/// with the spent bearer still in place — it neither abandons the refresh on
+/// the first failure nor hammers the endpoint.
+///
+/// `retry_transient` returns a failure only once `elapsed >= budget`, so the
+/// measured duration is the exhaustion itself; no strict total is asserted
+/// (per #235), only the floor the budget guarantees. The doubling backoff
+/// (1s, 2s, 4s, …, each jittered into `[b/2, b)`) is what keeps the attempts
+/// to a handful across those 30s.
+///
+/// This costs the suite about 30s of real time. `REFRESH_RETRY_BUDGET` is a
+/// production constant, and shortening it for the test would leave the bound
+/// untested — which is what the earlier five-second window did.
 #[tokio::test]
-async fn persistent_transient_failures_retry_inside_the_budget_without_publishing() -> TestResult {
+async fn persistent_transient_failures_exhaust_the_budget_without_publishing() -> TestResult {
   let peer = Peer::start(
     vec![(
       StatusCode::SERVICE_UNAVAILABLE,
@@ -303,19 +315,28 @@ async fn persistent_transient_failures_retry_inside_the_budget_without_publishin
   )
   .await?;
   let mut ctx = session(&peer)?;
-  // Observe a slice of the 30s budget rather than waiting it out.
-  let outcome = tokio::time::timeout(Duration::from_secs(5), refresh(&mut ctx)).await;
-  if let Ok(finished) = outcome {
-    assert!(
-      matches!(finished, Err(RunnerError::Network(_))),
-      "exhaustion must stay a Network failure"
-    );
-  }
+  let started = std::time::Instant::now();
+  // Generous guard: the test fails rather than hangs if the budget stops
+  // bounding the loop. Exhaustion is expected to end the call well inside it.
+  let finished = tokio::time::timeout(Duration::from_secs(90), refresh(&mut ctx)).await?;
+  let elapsed = started.elapsed();
+
+  let Err(error) = finished else {
+    return Err("a peer that only ever fails must not produce a decision".into());
+  };
+  assert!(
+    matches!(error, RunnerError::Network(_)),
+    "exhaustion must stay a Network failure, got {error}"
+  );
   assert_eq!(ctx.token, OLD_TOKEN, "a failed refresh published a token");
+  assert!(
+    elapsed >= REFRESH_RETRY_BUDGET,
+    "{elapsed:?} is short of the {REFRESH_RETRY_BUDGET:?} retry-sleep budget, so it was never exhausted"
+  );
   let attempts = peer.seen("/oauth2/token").len();
   assert!(
-    (2..=5).contains(&attempts),
-    "{attempts} attempts in 5s is not a backed-off retry of a 30s budget"
+    (4..=10).contains(&attempts),
+    "{attempts} attempts across the budget is not a doubling backoff"
   );
   Ok(())
 }
@@ -329,13 +350,9 @@ async fn a_stalled_token_endpoint_is_abandoned_at_its_deadline() -> TestResult {
   let peer = Peer::start(vec![(StatusCode::OK, granted(NEW_TOKEN))], true).await?;
   let mut ctx = session(&peer)?;
   let started = std::time::Instant::now();
-  let outcome = tokio::time::timeout(Duration::from_secs(13), refresh(&mut ctx)).await;
-  if let Ok(finished) = outcome {
-    assert!(
-      matches!(finished, Err(RunnerError::Network(_))),
-      "a stalled peer must surface as a bounded Network failure"
-    );
-  }
+  // The stall never ends, so this guard is expected to fire: it is here to
+  // keep the test bounded, and the evidence is what the peer saw meanwhile.
+  let _ = tokio::time::timeout(Duration::from_secs(13), refresh(&mut ctx)).await;
   // The retry only reaches the peer once the first request is abandoned, so
   // the gap between the two arrivals is the 10s request deadline plus the
   // first retry sleep — `jittered_backoff(1s)`, which is 0.5s to 1.0s. That

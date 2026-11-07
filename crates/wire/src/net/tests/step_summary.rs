@@ -344,9 +344,8 @@ async fn step_summary_soft_size_limit_is_inclusive_and_fails_before_the_put() ->
     error,
     "reporting error: summary exceeds Results Service soft size limit"
   );
-  // The peer keeps accepting, so a stray PUT after the guard would be
-  // recorded here rather than refused by a closed listener.
-  tokio::time::sleep(Duration::from_millis(200)).await;
+  // The peer records a request before it replies and the upload awaits the
+  // PUT inline, so a stray PUT would already be in here.
   let after_refusal = recorded(&peer);
   assert_eq!(
     after_refusal.len(),
