@@ -19,6 +19,10 @@
 //!    the sender is dropped *inside* the spawned task, which then continues
 //!    straight into `finish()` without yielding, so any such assertion is a
 //!    race the test would lose as often as win.
+//!
+//! The temp-cleanup cases pin the opposite order on purpose: `_temp` and `tmp`
+//! are empty before the channel closes, because closing it lets the next job
+//! start in the same `data_dir`.
 
 use std::error::Error;
 use std::path::{Path, PathBuf};
@@ -30,10 +34,14 @@ use execution::Runner;
 use execution::execution::job_runner::run_job;
 use filetime::FileTime;
 use shared::{
-  ActionStep, AgentJobRequestMessage, RunnerConfig, RunnerEvent, SecretMasker, ServicesMode,
+  ActionStep, AgentJobRequestMessage, Conclusion, RunnerConfig, RunnerEvent, SecretMasker,
+  ServicesMode,
 };
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
+
+use crate::gh_compat_node_action_file_commands::{seed_node, system_node};
+use crate::run_service_classify_test::EventCapture;
 
 const JOB_MESSAGE: &str = include_str!("fixtures/job_message.json");
 
@@ -284,4 +292,363 @@ async fn execute_job_closes_channel_then_runs_teardown() -> TestResult {
   .await?;
   assert_workspaces_swept(&fx);
   Ok(())
+}
+
+/// What one job reported by the time its event channel closed.
+struct Finished {
+  conclusion: Option<Conclusion>,
+  log: String,
+}
+
+/// Collect a job's stream until its channel closes.
+async fn drain_job(rx: &mut mpsc::Receiver<RunnerEvent>) -> Finished {
+  let mut finished = Finished {
+    conclusion: None,
+    log: String::new(),
+  };
+  while let Some(event) = rx.recv().await {
+    if let RunnerEvent::JobCompleted { conclusion, .. } = event {
+      finished.conclusion = Some(conclusion);
+    } else if let RunnerEvent::Log { line, .. } = event {
+      finished.log.push_str(&line);
+    }
+  }
+  finished
+}
+
+/// Run `steps` through the production entrypoint until the channel closes.
+async fn run_steps(fx: &Harness, steps: Vec<ActionStep>, cancel: CancellationToken) -> Finished {
+  let msg = AgentJobRequestMessage {
+    steps,
+    ..fx.msg.clone()
+  };
+  let runner = Runner::new(fx.config.clone(), Arc::new(Mutex::new(SecretMasker::new())));
+  drain_job(&mut runner.execute_job(msg, cancel)).await
+}
+
+fn temp_root(config: &RunnerConfig) -> PathBuf {
+  config.data_dir.join("_temp")
+}
+
+/// Assert `_temp` and `tmp` hold nothing. A root replaced by a step may be gone.
+fn assert_temp_empty(config: &RunnerConfig) -> TestResult {
+  for root in [temp_root(config), config.data_dir.join("tmp")] {
+    if root.exists() {
+      let left: Vec<_> = std::fs::read_dir(&root)?
+        .map(|entry| entry.map(|e| e.file_name()))
+        .collect::<Result<_, _>>()?;
+      assert!(left.is_empty(), "{} still holds {left:?}", root.display());
+    }
+  }
+  Ok(())
+}
+
+/// A later step reads files earlier steps wrote, and only then are they gone.
+#[tokio::test]
+async fn temp_is_empty_at_channel_close_after_success_and_steps_read_it_first() -> TestResult {
+  let fx = setup().await?;
+  let steps = vec![
+    ActionStep::script(
+      "one",
+      "echo temp-payload > \"$RUNNER_TEMP/payload\"\necho marker=kept >> \"$GITHUB_OUTPUT\"",
+      "",
+    ),
+    ActionStep::script(
+      "two",
+      "cat \"$RUNNER_TEMP/payload\"\necho saw=${{ steps.one.outputs.marker }}",
+      "",
+    ),
+  ];
+  let job = run_steps(&fx, steps, CancellationToken::new()).await;
+  assert_eq!(job.conclusion, Some(Conclusion::Success), "{}", job.log);
+  assert!(job.log.contains("temp-payload"), "{}", job.log);
+  assert!(job.log.contains("saw=kept"), "{}", job.log);
+  assert_temp_empty(&fx.config)
+}
+
+#[tokio::test]
+async fn temp_is_empty_at_channel_close_after_failure() -> TestResult {
+  let fx = setup().await?;
+  let step = ActionStep::script("fail", "touch \"$RUNNER_TEMP/written\"\nexit 1", "");
+  let job = run_steps(&fx, vec![step], CancellationToken::new()).await;
+  assert_eq!(job.conclusion, Some(Conclusion::Failure), "{}", job.log);
+  assert_temp_empty(&fx.config)
+}
+
+#[tokio::test]
+async fn temp_is_empty_at_channel_close_after_cancel() -> TestResult {
+  let fx = setup().await?;
+  let step = ActionStep::script("wait", "touch \"$RUNNER_TEMP/running\"\nsleep 300", "");
+  let cancel = CancellationToken::new();
+  let msg = AgentJobRequestMessage {
+    steps: vec![step],
+    ..fx.msg.clone()
+  };
+  let runner = Runner::new(fx.config.clone(), Arc::new(Mutex::new(SecretMasker::new())));
+  let mut rx = runner.execute_job(msg, cancel.clone());
+  let running = temp_root(&fx.config).join("running");
+  wait_until("the step to start", || Ok(running.exists())).await?;
+  cancel.cancel();
+  let job = drain_job(&mut rx).await;
+  assert_eq!(job.conclusion, Some(Conclusion::Cancelled), "{}", job.log);
+  assert_temp_empty(&fx.config)
+}
+
+/// `run_job` returning `Err` reports a failed job, so it cleans up too. A
+/// read-only root makes the start cleanup leave `leftover`; building the job
+/// context restores the root, so only the end cleanup can remove it.
+#[cfg(unix)]
+#[tokio::test]
+async fn temp_is_empty_at_channel_close_after_setup_error() -> TestResult {
+  use std::os::unix::fs::PermissionsExt;
+  let mut fx = setup().await?;
+  let temp = temp_root(&fx.config);
+  std::fs::create_dir_all(&temp)?;
+  std::fs::write(temp.join("leftover"), "x")?;
+  std::fs::set_permissions(&temp, std::fs::Permissions::from_mode(0o500))?;
+  // Directory creation fails under a regular file, after the job context is built.
+  let blocked = fx.config.data_dir.join("not-a-directory");
+  std::fs::write(&blocked, "x")?;
+  fx.config.workspace_root = blocked;
+  let job = run_steps(
+    &fx,
+    vec![ActionStep::script("noop", "true", "")],
+    CancellationToken::new(),
+  )
+  .await;
+  assert_eq!(job.conclusion, Some(Conclusion::Failure), "{}", job.log);
+  assert_temp_empty(&fx.config)
+}
+
+/// The channel closing frees the next job, so `run_job` holds it open until temp
+/// is empty even when the caller gave it the only sender.
+#[tokio::test]
+async fn run_job_keeps_the_channel_open_until_temp_is_empty() -> TestResult {
+  let fx = setup().await?;
+  let msg = AgentJobRequestMessage {
+    steps: vec![ActionStep::script(
+      "write",
+      "touch \"$RUNNER_TEMP/written\"",
+      "",
+    )],
+    ..fx.msg.clone()
+  };
+  let (tx, mut rx) = mpsc::channel::<RunnerEvent>(1024);
+  let masker = Arc::new(Mutex::new(SecretMasker::new()));
+  let (result, at_close) = tokio::join!(
+    run_job(msg, &fx.config, CancellationToken::new(), tx, masker),
+    async {
+      drain_job(&mut rx).await;
+      assert_temp_empty(&fx.config).map_err(|error| error.to_string())
+    }
+  );
+  result?.finish(&fx.config).await;
+  at_close?;
+  Ok(())
+}
+
+/// The next job may start as soon as the channel closes, so `finish` must never
+/// delete what it writes, however long cache GC takes.
+#[tokio::test]
+async fn finish_never_touches_files_of_the_next_job() -> TestResult {
+  let fx = setup().await?;
+  let (tx, mut rx) = mpsc::channel::<RunnerEvent>(1024);
+  let masker = Arc::new(Mutex::new(SecretMasker::new()));
+  let teardown = run_job(
+    fx.msg.clone(),
+    &fx.config,
+    CancellationToken::new(),
+    tx,
+    masker,
+  )
+  .await?;
+  drain_job(&mut rx).await;
+  assert_temp_empty(&fx.config)?;
+
+  let next_job_file = temp_root(&fx.config).join("next-job");
+  std::fs::write(&next_job_file, "live")?;
+  teardown.finish(&fx.config).await;
+  assert!(next_job_file.exists(), "finish deleted a live file");
+  Ok(())
+}
+
+/// Only `_temp` and `tmp` are emptied: the tool cache is kept for later jobs, and
+/// the `_logs` spools planned in #240 stay out of reach.
+#[tokio::test]
+async fn cleanup_never_touches_logs_or_tool() -> TestResult {
+  let fx = setup().await?;
+  let kept = [
+    fx.config.data_dir.join("_logs/combined.spool"),
+    fx.config.data_dir.join("_logs/steps/one.spool"),
+    fx.config.data_dir.join("_tool/go/1.24/bin/go"),
+  ];
+  for file in &kept {
+    std::fs::create_dir_all(file.parent().ok_or("kept file has no parent")?)?;
+    std::fs::write(file, "kept")?;
+  }
+  let (tx, mut rx) = mpsc::channel::<RunnerEvent>(1024);
+  let masker = Arc::new(Mutex::new(SecretMasker::new()));
+  let teardown = run_job(
+    fx.msg.clone(),
+    &fx.config,
+    CancellationToken::new(),
+    tx,
+    masker,
+  )
+  .await?;
+  drain_job(&mut rx).await;
+  teardown.finish(&fx.config).await;
+
+  assert_temp_empty(&fx.config)?;
+  for file in &kept {
+    assert_eq!(std::fs::read_to_string(file)?, "kept", "{}", file.display());
+  }
+  Ok(())
+}
+
+/// A post step runs after every main step and can still read `$RUNNER_TEMP`.
+#[tokio::test]
+async fn post_step_reads_temp_before_it_is_emptied() -> TestResult {
+  let node = system_node().ok_or("this test needs a real `node` on PATH")?;
+  let fx = setup().await?;
+  seed_node(&fx.config.data_dir, &node)?;
+  let copied = fx.config.data_dir.join("post-copied");
+  let action = fx.job_workspace.join("post-reader");
+  std::fs::create_dir_all(&action)?;
+  std::fs::write(
+    action.join("action.yml"),
+    "name: post-reader\ndescription: d\nruns:\n  using: node20\n  main: main.js\n  post: post.js\n",
+  )?;
+  let payload = r#"require("path").join(process.env.RUNNER_TEMP, "from-main")"#;
+  std::fs::write(
+    action.join("main.js"),
+    format!(r#"require("fs").writeFileSync({payload}, "from-main");"#),
+  )?;
+  std::fs::write(
+    action.join("post.js"),
+    format!(
+      r#"require("fs").copyFileSync({payload}, {:?});"#,
+      copied.display().to_string()
+    ),
+  )?;
+  let mut step = ActionStep::with_ref_type("reader", "repository");
+  step.reference.name = Some("./post-reader".to_owned());
+
+  let job = run_steps(&fx, vec![step], CancellationToken::new()).await;
+  assert_eq!(job.conclusion, Some(Conclusion::Success), "{}", job.log);
+  assert_eq!(std::fs::read_to_string(&copied)?, "from-main");
+  assert_temp_empty(&fx.config)
+}
+
+/// Links are removed and never followed, at any depth or as a root itself.
+#[tokio::test]
+async fn symlinks_are_removed_and_their_targets_are_kept() -> TestResult {
+  let fx = setup().await?;
+  let outside = fx.config.data_dir.join("outside");
+  std::fs::create_dir_all(outside.join("dir"))?;
+  std::fs::write(outside.join("file"), "keep")?;
+  std::fs::write(outside.join("dir/inner"), "keep")?;
+  let out = outside.display();
+  let links = format!(
+    "ln -s {out}/file \"$RUNNER_TEMP/file-link\"\nln -s {out}/dir \"$RUNNER_TEMP/dir-link\"\n\
+     mkdir \"$RUNNER_TEMP/sub\"\nln -s {out}/dir \"$RUNNER_TEMP/sub/link\"\n"
+  );
+  let job = run_steps(
+    &fx,
+    vec![ActionStep::script("links", &links, "")],
+    CancellationToken::new(),
+  )
+  .await;
+  assert_eq!(job.conclusion, Some(Conclusion::Success), "{}", job.log);
+  assert_temp_empty(&fx.config)?;
+
+  let swap = format!("rm -rf \"$RUNNER_TEMP\"\nln -s {out}/dir \"$RUNNER_TEMP\"\n");
+  let job = run_steps(
+    &fx,
+    vec![ActionStep::script("swap", &swap, "")],
+    CancellationToken::new(),
+  )
+  .await;
+  assert_eq!(job.conclusion, Some(Conclusion::Success), "{}", job.log);
+  assert!(
+    std::fs::symlink_metadata(temp_root(&fx.config)).is_err(),
+    "the replaced root must be unlinked"
+  );
+  assert_eq!(std::fs::read_to_string(outside.join("file"))?, "keep");
+  assert_eq!(std::fs::read_to_string(outside.join("dir/inner"))?, "keep");
+  Ok(())
+}
+
+/// A tree a step left read-only (Go's module cache does) does not stay forever.
+#[tokio::test]
+async fn read_only_trees_are_removed() -> TestResult {
+  let fx = setup().await?;
+  let script = "mkdir -p \"$RUNNER_TEMP/ro/sub\"\ntouch \"$RUNNER_TEMP/ro/sub/file\"\n\
+                chmod -R a-w \"$RUNNER_TEMP/ro\"";
+  let job = run_steps(
+    &fx,
+    vec![ActionStep::script("ro", script, "")],
+    CancellationToken::new(),
+  )
+  .await;
+  assert_eq!(job.conclusion, Some(Conclusion::Success), "{}", job.log);
+  assert_temp_empty(&fx.config)
+}
+
+/// An undeletable file warns, spares nothing else, keeps the job's conclusion,
+/// and does not stop the next job, which clears it once it can.
+#[cfg(unix)]
+#[tokio::test]
+async fn undeletable_file_warns_and_never_changes_the_result() -> TestResult {
+  use std::os::unix::fs::PermissionsExt;
+  let fx = setup().await?;
+  // Root ignores mode bits; probe and skip in that case.
+  let probe = fx.config.data_dir.join("probe");
+  std::fs::create_dir(&probe)?;
+  std::fs::set_permissions(&probe, std::fs::Permissions::from_mode(0o500))?;
+  if std::fs::write(probe.join("file"), "x").is_ok() {
+    eprintln!("skipping: running as root, cannot make a directory unwritable");
+    return Ok(());
+  }
+
+  // The root itself is the one directory cleanup never makes writable.
+  let script = "mkdir \"$RUNNER_TEMP/sub\"\ntouch \"$RUNNER_TEMP/sub/ok\" \"$RUNNER_TEMP/stuck\"\n\
+                chmod 500 \"$RUNNER_TEMP\"";
+  let msg = AgentJobRequestMessage {
+    steps: vec![ActionStep::script("lock", script, "")],
+    ..fx.msg.clone()
+  };
+  let capture = EventCapture::default();
+  let (tx, mut rx) = mpsc::channel::<RunnerEvent>(1024);
+  let masker = Arc::new(Mutex::new(SecretMasker::new()));
+  let result = {
+    let _guard = tracing::subscriber::set_default(capture.clone());
+    run_job(msg, &fx.config, CancellationToken::new(), tx, masker).await
+  };
+  let job = drain_job(&mut rx).await;
+  result?.finish(&fx.config).await;
+
+  let temp = temp_root(&fx.config);
+  assert_eq!(job.conclusion, Some(Conclusion::Success), "{}", job.log);
+  assert!(capture.saw(
+    tracing::Level::WARN,
+    "could not empty runner temp directory"
+  ));
+  assert!(
+    temp.join("stuck").exists(),
+    "the fixture must really be undeletable"
+  );
+  assert!(
+    !temp.join("sub/ok").exists(),
+    "other files must still be removed"
+  );
+
+  let next = run_steps(
+    &fx,
+    vec![ActionStep::script("next", "true", "")],
+    CancellationToken::new(),
+  )
+  .await;
+  assert_eq!(next.conclusion, Some(Conclusion::Success), "{}", next.log);
+  assert_temp_empty(&fx.config)
 }

@@ -293,21 +293,18 @@ async fn job_default_directory_expression_is_evaluated() -> TestResult {
   set_step_input(
     step,
     "script",
-    "test \"$(pwd -P)\" = \"$(cd \"$RUNNER_TEMP/defaults-71-absolute\" && pwd -P)\"; printf job > job.marker",
+    "test \"$(pwd -P)\" = \"$(cd \"$RUNNER_TEMP/defaults-71-absolute\" && pwd -P)\"; printf job > job.marker; cp job.marker \"${GITHUB_WORKSPACE}/job-copy.marker\"",
   )?;
   let ids = message
     .steps
     .iter()
     .map(|step| step.id.clone())
     .collect::<Vec<_>>();
-  let (dir, _workspace, events) = replay(message, false).await?;
+  let (_dir, workspace, events) = replay(message, false).await?;
   assert_success(&events, &ids);
+  // Copied out by the step, since `_temp` is emptied when the job ends.
   assert_eq!(
-    std::fs::read_to_string(
-      dir
-        .path()
-        .join("data/_temp/defaults-71-absolute/job.marker")
-    )?,
+    std::fs::read_to_string(workspace.join("job-copy.marker"))?,
     "job"
   );
   Ok(())

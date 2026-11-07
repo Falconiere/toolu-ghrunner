@@ -31,9 +31,13 @@ the `TOOLU_RUNNER_LIVE_TOKEN` secret; its test repository is the
   caching with upstream artifact/OIDC access.
 - **S3 tier:** `[cache.l2]` is parsed and preserved, but production jobs do not
   construct an `L2Tier`. Enabling the section does not provide remote storage.
-- **Host storage:** workspace GC does not prune the registration's `_temp`,
-  `_tool` or file-command `tmp` directories. Monitor disk use on long-lived
-  hosts; the job-end process sweep is not disk cleanup.
+- **Host storage:** `_temp` and the file-command `tmp` directory are emptied at
+  job start and end, as the official runner does, but `_tool` is never pruned:
+  monitor its disk use on long-lived hosts and clean it by hand. A file the
+  runner cannot delete, such as a root-owned file left by a container, stays
+  with a `WARN` on each cleanup and never changes the job result. Registrations
+  must not share a `data_dir`, because cleanup assumes one job at a time there.
+  The job-end process sweep is not disk cleanup.
 - **Job log memory:** the listener keeps every masked log line of a job in
   memory (`execution_loop` `all_job_lines`) for the combined log upload, so a
   long, verbose job grows the runner's memory until it completes.

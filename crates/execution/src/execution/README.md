@@ -47,7 +47,7 @@ orchestrator: GitHub expands workflows and sends the engine a single job.
 | `job_context.rs` | Job context construction | Extracts message variables/context and materializes the event payload. |
 | `job_cancellation.rs` | `JobCancellation` | Separate graceful job cancellation from shutdown; share one cleanup deadline and re-evaluate running conditions. |
 | `job_environment.rs` | `apply_job_environment` | Evaluates acquired workflow/job env mappings in order, before container setup, using one snapshot per layer. |
-| `job_runner.rs` | `run_job` | The job entry point: prepares dirs, starts local services per `ServicesMode`, seeds job env, wraps the prepared job body in optional container lifecycle, and returns a `JobTeardown`; `job_runner/` contains the prepared body. |
+| `job_runner.rs` | `run_job` | The job entry point: prepares dirs, starts local services per `ServicesMode`, seeds job env, wraps the prepared job body in optional container lifecycle, and returns a `JobTeardown`; `run_job_with_shutdown` empties `_temp` and `tmp` after `entry::run` returns, success or error, while it still holds the event channel open; `job_runner/` contains the prepared body. |
 | `job_spec.rs` | `JobSpec` | Acquired `jobOutputs` token plus ordered `defaults.run` mappings (later run mappings replace earlier ones); `evaluate_acquired_outputs` resolves outputs after posts. |
 | `job_teardown.rs` | `JobTeardown` | Deferred post-completion work returned by `run_job`: cache staging sweep + GC pass, and joining the workspace-sweep task, run only after the event sender is dropped. |
 | `node_stage.rs` | `run_node_stage` | Runs one Node.js action entrypoint (`pre`/`main`/`post`), rebuilding env per stage and dispatching its stdout workflow commands. |
@@ -69,6 +69,7 @@ orchestrator: GitHub expands workflows and sends the engine a single job.
 | `step_state.rs` | `StepState` | Per-step recorded outputs/state/outcome/conclusion, and `build_steps_context` for the `steps.*` expression context. |
 | `step_summary.rs` | `collect` | Bounded, masked summary snapshots; refuses non-regular summary files; non-fatal error annotations. |
 | `step_timeout.rs` | `wait_bounded` | Bounded child-process wait shared by the script and node handlers: races `timeout-minutes` against the job `CancellationToken`. |
+| `temp_cleanup.rs` | `empty_temp_dirs` | Empties `_temp` and `tmp` at job start and before the event channel closes: contents only, never following symlinks, continuing past delete errors with one `WARN` per root. Never touches `_tool`. |
 | `steps_runner.rs` | `run_steps` | The per-job step loop: condition evaluation, dispatch to action/script execution, continue-on-error, and post-step draining. |
 | `workspace_gc.rs` | `gc_workspaces`, `GcPolicy` | Prunes this registration's unleased workspaces: stable ones unused for `stable_gc_hours` (default never) and fresh `<job_id>` ones older than `gc_after_hours`; pre-#90 lease-less dirs use mtime only; never the running job's. |
 | `workspace_layout.rs` | `prepare_workspace`, `PreparedWorkspace`, `Repository` | Allocates the job workspace (#90): stable `<work>/<repo>/<repo>` with upstream `workspace.clean`, or fresh `<work>/<job_id>`; holds the lease until dropped. |

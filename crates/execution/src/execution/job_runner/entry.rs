@@ -8,7 +8,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use super::{
-  ContainerStart, ContainerStartParams, JobOutcome, JobResult, LocalServices,
+  ContainerStart, ContainerStartParams, JobOutcome, JobResult, LocalServices, PreparedWorkspace,
   build_job_context_async, claim_job_workspace, finish_job, prepare_job_workspace, prepared,
   start_job_container, start_job_services, stop_local_services,
 };
@@ -19,6 +19,7 @@ use crate::execution::job_cancellation::JobCancellation;
 use crate::execution::job_environment::apply_job_environment;
 use crate::execution::job_teardown::JobTeardown;
 use crate::execution::orphan_cleanup::{ProcessTracking, sweep};
+use crate::execution::temp_cleanup::empty_temp_dirs;
 
 /// Initialize, execute, and tear down one acquired job.
 /// The job child observes caller cancellation without propagating it to its parent.
@@ -33,15 +34,11 @@ pub(super) async fn run(
   shutdown: CancellationToken,
 ) -> Result<JobTeardown, RunnerError> {
   let cancel = cancel.child_token();
-  // Claimed before the context (which needs its paths); held until this
-  // function returns, so no other job may enter the workspace before every
-  // step, post step, container and orphan sweep has finished.
-  let claimed = claim_job_workspace(config, &msg).await?;
-  let (msg, mut ctx) = build_job_context_async(msg, config, masker, &claimed).await?;
-  ctx.cancellation = Some(JobCancellation::new(cancel.clone(), shutdown));
-  ctx.set_process_tracking(ProcessTracking::for_job(&msg.variables));
-  ctx.node_migration = crate::node::migration::NodeMigrationState::for_job(&msg.variables);
-  apply_job_environment(&msg.environment_variables, &mut ctx)?;
+  // The claim is held until this function returns, so no other job may enter
+  // the workspace before every step, post step, container and orphan sweep has
+  // finished.
+  let cancellation = JobCancellation::new(cancel.clone(), shutdown);
+  let (claimed, msg, mut ctx) = claim_and_build_context(msg, config, masker, cancellation).await?;
   let mut container_spec = evaluate_container(&msg, config, &ctx)?;
   let mut service_specs = evaluate_services(msg.job_service_containers.as_ref(), &ctx)?;
   super::job_http::add_container_network_env(config, container_spec.as_mut(), &mut service_specs);
@@ -75,6 +72,24 @@ pub(super) async fn run(
   };
   let body_result = Box::pin(prepared::execute(inputs, &mut ctx)).await;
   finish_execution(&ctx, msg.job_id, body_result, local, &events, workspace_gc).await
+}
+
+/// Claim the workspace (the context needs its paths), empty the temp directories
+/// of what a crashed job left, then build the job's configured context.
+async fn claim_and_build_context(
+  msg: AgentJobRequestMessage,
+  config: &RunnerConfig,
+  masker: Arc<Mutex<SecretMasker>>,
+  cancellation: Arc<JobCancellation>,
+) -> Result<(PreparedWorkspace, AgentJobRequestMessage, ExecutionContext), RunnerError> {
+  let claimed = claim_job_workspace(config, &msg).await?;
+  empty_temp_dirs(config).await;
+  let (msg, mut ctx) = build_job_context_async(msg, config, masker, &claimed).await?;
+  ctx.cancellation = Some(cancellation);
+  ctx.set_process_tracking(ProcessTracking::for_job(&msg.variables));
+  ctx.node_migration = crate::node::migration::NodeMigrationState::for_job(&msg.variables);
+  apply_job_environment(&msg.environment_variables, &mut ctx)?;
+  Ok((claimed, msg, ctx))
 }
 
 /// Remove containers, sweep tracked orphan processes, and stop local services
