@@ -195,6 +195,7 @@ class RejectionTest(unittest.TestCase):
 
     def test_reference_lane_takes_only_paired_runs_and_reports(self):
         for evidence in ("pr:https://github.com/Falconiere/toolu-ghrunner/pull/1",
+                         "run:https://github.com/Falconiere/toolu-ghrunner/pull/1",
                          "doc:docs/compatibility-evidence.md"):
             m = copy.deepcopy(MATRIX)
             row(m, "103/R-cache")["lanes"]["reference"] = {"status": "passed", "evidence": evidence}

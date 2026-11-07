@@ -124,7 +124,8 @@ def acknowledged_by_run(row, evidence, context):
 
 def check_evidence(row, lane, evidence, tests, context, errors):
     where = f"{row['id']} [{lane}]"
-    if lane == "reference" and evidence.startswith(("pr:", "doc:")):
+    if lane == "reference" and (evidence.startswith(("pr:", "doc:")) or
+                                (evidence.startswith("run:") and "/actions/runs/" not in evidence)):
         errors.append(f"{where}: evidence must be a paired run: or report:")
         return
     in_ci = [t for t in tests if t[0] == "py" and t[3] in context["ci"]]
