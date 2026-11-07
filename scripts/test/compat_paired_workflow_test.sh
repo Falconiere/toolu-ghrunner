@@ -1,0 +1,226 @@
+#!/usr/bin/env bash
+# compat_paired_workflow_test.sh — static validation of
+# .github/workflows/compat-paired.yml (#236).
+#
+# The workflow cannot run before it is on main and it needs a secret that may not
+# exist, so its safety properties are pinned from outside: dispatch only, the three
+# VMs, the secret guard, per-run labels, verified archives, unregister on every
+# exit, and the job names reference_compare.py pairs on.
+set -uo pipefail
+
+cd "$(dirname "$0")/../.." || exit 1 # repo root
+
+# COMPAT_PAIRED_WORKFLOW_FILE lets the negative checks point at a mutated copy.
+WF="${COMPAT_PAIRED_WORKFLOW_FILE:-.github/workflows/compat-paired.yml}"
+HOST=scripts/test/compat_paired_host.sh
+PROBE=.github/workflows/compat-reference-103-probe.yml
+fail=0
+
+if [[ ! -f "$WF" ]]; then
+  echo "FAIL: $WF not found" >&2
+  exit 1
+fi
+
+want() {
+  local desc="$1" pat="$2" file="${3:-$WF}"
+  if grep -Eq -- "$pat" "$file"; then
+    echo "ok: $desc"
+  else
+    echo "FAIL: $desc — pattern not found in $file: $pat" >&2
+    fail=1
+  fi
+}
+
+reject() {
+  local desc="$1" pat="$2"
+  if grep -Eq -- "$pat" "$WF"; then
+    echo "FAIL: $desc — forbidden pattern in $WF: $pat" >&2
+    fail=1
+  else
+    echo "ok: $desc"
+  fi
+}
+
+# --- triggers: dispatch only ---
+want "stays dispatchable" '^  workflow_dispatch:'
+for trigger in pull_request pull_request_target push schedule workflow_run; do
+  reject "has no $trigger trigger" "^  $trigger:"
+done
+
+# --- the three VMs, each with its pinned official archive ---
+for vm in ubuntu-latest ubuntu-24.04-arm macos-15; do
+  want "a host runs on $vm" "^            vm: $vm$"
+done
+for archive in linux-x64 linux-arm64 osx-arm64; do
+  want "pins the $archive archive" "^            archive: actions-runner-$archive-2\.338\.2\.tar\.gz$"
+done
+digests=$(grep -Ec '^            sha256: [0-9a-f]{64}$' "$WF")
+if [[ "$digests" == 3 ]]; then
+  echo "ok: pins three archive digests"
+else
+  echo "FAIL: expected 3 archive digests, found $digests" >&2
+  fail=1
+fi
+want "checks the archive digest" 'shasum -a 256 --check --strict'
+want "downloads v2.338.2 from upstream" 'github\.com/actions/runner/releases/download/v2\.338\.2/'
+
+# --- the secret guard fails as UNVERIFIED, and nothing queues behind it ---
+want "guard job exists" '^  guard:'
+want "guard keeps only a boolean at job level" "^      HAVE_LIVE_TOKEN: \\$\\{\\{ secrets\\.TOOLU_RUNNER_LIVE_TOKEN != '' \\}\\}$"
+want "guard step reads the boolean" "if: \\$\\{\\{ env\\.HAVE_LIVE_TOKEN != 'true' \\}\\}"
+want "guard fails UNVERIFIED" '::error::UNVERIFIED: TOOLU_RUNNER_LIVE_TOKEN'
+reject "never exposes the secret at job level" '^      (TOOLU_RUNNER_[A-Z_]*|GH_TOKEN): \$\{\{ secrets\.'
+needs_guard=$(grep -Ec '^    needs: guard$' "$WF")
+if [[ "$needs_guard" == 3 ]]; then
+  echo "ok: host, probe and negative all need the guard"
+else
+  echo "FAIL: expected 3 jobs needing the guard, found $needs_guard" >&2
+  fail=1
+fi
+
+# --- per-run labels: no run can pick up another run's jobs ---
+want "host labels are per run" '^      LABEL_PREFIX: compat-paired-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}-\$\{\{ matrix\.platform \}\}$'
+callers=$(grep -Ec '^      runner_label: compat-paired-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}-\$\{\{ matrix\.platform \}\}-\$\{\{ matrix\.lane \}\}$' "$WF")
+if [[ "$callers" == 2 ]]; then
+  echo "ok: both probe callers use per-run labels"
+else
+  echo "FAIL: expected 2 per-run runner_label lines, found $callers" >&2
+  fail=1
+fi
+reject "no runner label is fixed" 'runner_label: toolu-103-'
+
+# --- unregister on every exit ---
+if grep -E -A1 '^      - name: Unregister both lanes$' "$WF" | grep -Eq '^        if: always\(\)$'; then
+  echo "ok: unregister runs under if: always()"
+else
+  echo "FAIL: the unregister step must carry if: always()" >&2
+  fail=1
+fi
+want "unregister calls the host script" "bash $HOST unregister"
+want "a dead host cannot leave probes queued" "needs\\.host\\.result != 'success'"
+
+# --- names and artifacts reference_compare.py reads ---
+want "probe caller names carry the platform" '^    name: probe-\$\{\{ matrix\.platform \}\}-\$\{\{ matrix\.lane \}\}$'
+want "negative caller names carry the platform" '^    name: negative-\$\{\{ matrix\.platform \}\}-\$\{\{ matrix\.lane \}\}$'
+want "probe artifacts stay unique per platform" '^      lane: \$\{\{ matrix\.platform \}\}-\$\{\{ matrix\.lane \}\}$'
+want "the VM's containers are uploaded" 'name: compat-paired-\$\{\{ matrix\.platform \}\}-containers'
+want "macOS skips the Docker job" "run_docker: \\$\\{\\{ matrix\\.platform != 'macOS-ARM64' \\}\\}"
+
+# --- the probe keeps its Docker gate and its default ---
+want "the probe gates its docker job" '^    if: inputs\.run_docker$' "$PROBE"
+want "the probe defaults to running Docker" '^        default: true$' "$PROBE"
+
+# --- the host script ---
+if bash -n "$HOST"; then
+  echo "ok: $HOST parses"
+else
+  echo "FAIL: $HOST does not parse" >&2
+  fail=1
+fi
+want "lanes do not inherit the VM's job env" 'clean_env=\(env -i ' "$HOST"
+want "the JIT config is masked" '::add-mask::\$jit' "$HOST"
+
+# --- negative checks: the assertions above must be able to fail ---
+if [[ -z "${COMPAT_PAIRED_WORKFLOW_FILE:-}" ]]; then
+  # The host script's control flow, with GitHub and both runners stood in for:
+  # nothing else can exercise it before the first dispatch.
+  tmp=$(mktemp -d)
+  trap 'rm -rf "$tmp"' EXIT
+  mkdir -p "$tmp/tools" "$tmp/official/bin"
+  cat >"$tmp/tools/gh" <<'GH'
+#!/usr/bin/env bash
+case "$*" in
+  *generate-jitconfig*) echo fake-jit ;;
+  *--method\ DELETE*) exit 1 ;;
+  */jobs*) cat "$FAKE_JOBS" ;;
+  */runners*) cat "$FAKE_RUNNERS" ;;
+esac
+GH
+  printf '#!/usr/bin/env bash\n"$PWD/bin/Runner.Listener"\n' >"$tmp/official/run.sh"
+  printf '#!/usr/bin/env bash\nwhile :; do sleep 1; done\n' >"$tmp/official/bin/Runner.Listener"
+  cat >"$tmp/tools/toolu" <<'TOOLU'
+#!/usr/bin/env bash
+[[ "$1" == run ]] && while :; do sleep 1; done
+exit 0
+TOOLU
+  # The lanes run under `env -i`, so a dying toolu is a binary of its own.
+  printf '#!/usr/bin/env bash\n[[ "$1" == run ]] && exit 2\nexit 0\n' >"$tmp/tools/toolu-dies"
+  chmod +x "$tmp/tools/gh" "$tmp/tools/toolu" "$tmp/tools/toolu-dies" "$tmp/official/run.sh" \
+    "$tmp/official/bin/Runner.Listener"
+  printf 'completed\ncompleted\n' >"$tmp/jobs"
+  : >"$tmp/none"
+  echo 4242 >"$tmp/survivor"
+  host() {
+    (
+      export FAKE_JOBS="$tmp/jobs" GH_TOKEN=fake GITHUB_REPOSITORY=o/r GITHUB_RUN_ID=1 RUNNER_TEMP="$tmp"
+      export PLATFORM=Linux-X64 LABEL_PREFIX=compat-paired-1-1-Linux-X64 POLL_SECONDS=0
+      export OFFICIAL_DIR="$tmp/official" TOOLU_BIN="${FAKE_TOOLU:-$tmp/tools/toolu}" MIN_JOBS=2
+      PATH="$tmp/tools:$PATH" timeout_guard bash "$HOST" "$@"
+    )
+  }
+  timeout_guard() { # Bounded so a lane that never stops fails here, not in CI's timeout.
+    "$@" &
+    local pid=$! waited=0
+    while kill -0 "$pid" 2>/dev/null && ((waited < 300)); do
+      sleep 0.1
+      waited=$((waited + 1))
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+      kill "$pid"
+      return 124
+    fi
+    wait "$pid"
+  }
+  expect() { # expect <desc> <wanted exit> <actual exit>
+    if [[ "$2" == "$3" ]]; then
+      echo "ok: $1"
+    else
+      echo "FAIL: $1 — exit $3, wanted $2" >&2
+      fail=1
+    fi
+  }
+  FAKE_RUNNERS="$tmp/none" host run >/dev/null 2>&1
+  expect "lanes stop once the probes completed" 0 $?
+  printf 'completed\n' >"$tmp/jobs"
+  FAKE_RUNNERS="$tmp/none" FAKE_TOOLU="$tmp/tools/toolu-dies" host run >/dev/null 2>&1
+  expect "a dead toolu lane fails the step while jobs are unlisted" 1 $?
+  FAKE_RUNNERS="$tmp/none" host unregister >/dev/null 2>&1
+  expect "unregister passes with no runner left" 0 $?
+  out=$(FAKE_RUNNERS="$tmp/survivor" host unregister 2>&1)
+  expect "unregister fails while a runner survives" 1 $?
+  [[ "$out" == *"::error::runners still registered"*4242* ]] && echo "ok: the survivor is named" || {
+    echo "FAIL: survivor not named: $out" >&2
+    fail=1
+  }
+
+  mutate() {
+    local desc="$1" sedexpr="$2" copy
+    copy=$(mktemp)
+    sed -E "$sedexpr" "$WF" >"$copy"
+    if cmp -s "$WF" "$copy"; then
+      echo "FAIL: mutation '$desc' changed nothing" >&2
+      fail=1
+    elif COMPAT_PAIRED_WORKFLOW_FILE="$copy" bash "$0" >/dev/null 2>&1; then
+      echo "FAIL: mutation '$desc' was not detected" >&2
+      fail=1
+    else
+      echo "ok: detects $desc"
+    fi
+    rm -f "$copy"
+  }
+  mutate "a pull_request trigger" 's/^  workflow_dispatch:/  workflow_dispatch:\n  pull_request:/'
+  mutate "a dropped VM" '/vm: ubuntu-24.04-arm/d'
+  mutate "a dropped digest" '/sha256: 670adb/d'
+  mutate "a skipped digest check" '/shasum -a 256/d'
+  mutate "a removed secret guard" '/UNVERIFIED/d'
+  mutate "a fixed host label" 's/^      LABEL_PREFIX: .*/      LABEL_PREFIX: compat-paired/'
+  mutate "a fixed probe label" 's/^      runner_label: .*/      runner_label: toolu-103-toolu/'
+  mutate "an unregister that can be skipped" '/- name: Unregister both lanes/{n;s/if: always\(\)/if: success()/;}'
+  mutate "a platform-less caller name" 's/^    name: probe-.*/    name: probe-${{ matrix.lane }}/'
+fi
+
+if [[ "$fail" -ne 0 ]]; then
+  echo "compat_paired_workflow_test FAILED" >&2
+  exit 1
+fi
+echo "compat_paired_workflow_test passed"

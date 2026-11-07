@@ -5,9 +5,10 @@ name: compat-reference-103
 # both self-hosted on one Linux host and one Docker daemon, selected by the
 # dedicated labels toolu-103-toolu / toolu-103-official. `probe` must succeed;
 # `negative` passes an empty `who` and must fail at the same steps on both
-# lanes. scripts/test/reference_compare.py <run_id> compares the lanes; see
-# docs/compatibility-evidence.md. Dispatch-only; the recorded run came from a
-# since-removed branch push trigger (workflow_dispatch needs the file on main).
+# lanes. Kept for the recorded run in docs/compat-reference-103.json; new
+# comparisons use compat-paired.yml, the only layout reference_compare.py reads.
+# Dispatch-only; the recorded run came from a since-removed branch push trigger
+# (workflow_dispatch needs the file on main).
 
 on:
   workflow_dispatch:

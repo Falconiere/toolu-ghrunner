@@ -155,6 +155,12 @@ jobs:
       - name: Doctests
         if: matrix.shard == 2
         run: cargo test --workspace --doc
+      # The `live` feature compiles out of the suite above, and live.yml runs only
+      # ignored tests, so nothing else would run the harness's own checks.
+      - name: Live harness self-checks
+        if: matrix.shard == 2
+        run: |
+          cargo test -p toolu-runner --features live --test integration -- live_harness_test::
 
   # The #[ignore]d real-container tests: the Linux Docker lane the compat
   # matrix (#103) cites as `ci-docker` evidence. Serial by design (one Docker
@@ -197,7 +203,7 @@ jobs:
         # fails here exactly as it does in a clean sandbox today — a gap for
         # a later step to close, not this one.
         run: |
-          for t in assert_version changelog_extract package_release release_workflow release_finalize_workflow generate_homebrew_formula release_homebrew_workflow release_image_workflow release_macos_image_workflow macos_entrypoint docker_entrypoint dockerfile release_profile release_pr_workflow release_pr_script code_review_workflow ci_workflow shell_templates_workflow gitleaks_ignore check_script deploy release_scripts daemon_live_workflow daemon_systemd live_lane; do
+          for t in assert_version changelog_extract package_release release_workflow release_finalize_workflow generate_homebrew_formula release_homebrew_workflow release_image_workflow release_macos_image_workflow macos_entrypoint docker_entrypoint dockerfile release_profile release_pr_workflow release_pr_script code_review_workflow ci_workflow shell_templates_workflow gitleaks_ignore check_script deploy release_scripts daemon_live_workflow daemon_systemd live_lane compat_paired_workflow; do
             bash "scripts/test/${t}_test.sh"
           done
       # Committed #88 captures stay sanitized and hash-pinned, and the #88

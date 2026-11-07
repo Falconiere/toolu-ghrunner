@@ -8,6 +8,7 @@ name: compat-reference-103-probe
 # outputs only exist inside Alpine. `services` exercises the real cache,
 # artifact and OIDC backends; `consumer` checks job outputs, cache restore and
 # artifact bytes across jobs, then uploads toJSON(needs) for lane comparison.
+# `run_docker` is false on macOS, which has no Docker jobs to compare.
 
 on:
   workflow_call:
@@ -33,6 +34,10 @@ on:
       expect_oidc:
         type: boolean
         required: true
+      run_docker:
+        type: boolean
+        required: false
+        default: true
 
 env:
   WORKFLOW_LEVEL: workflow-103
@@ -88,6 +93,7 @@ jobs:
           printf 'who=%s\n' '${{ inputs.who }}' >> "$GITHUB_OUTPUT"
 
   docker:
+    if: inputs.run_docker
     runs-on: [self-hosted, "${{ inputs.runner_label }}"]
     timeout-minutes: 10
     outputs:
@@ -175,7 +181,9 @@ jobs:
           test "$(cat artifact-103.txt)" = 'artifact-103-${{ github.run_id }}'
           test '${{ needs.contexts.outputs.marker }}' = contexts-103
           test '${{ needs.contexts.outputs.who }}' = world
-          test '${{ needs.docker.outputs.release }}' = 3.20.10
+          if [ '${{ inputs.run_docker }}' = true ]; then
+            test '${{ needs.docker.outputs.release }}' = 3.20.10
+          fi
       - name: Record observations
         if: always()
         env:
