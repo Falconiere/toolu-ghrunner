@@ -34,6 +34,10 @@ CONSUMER_JOBS=4
 LIFECYCLE_JOBS=0
 [[ "${EXTENDED_LANES:-}" == true ]] && LIFECYCLE_JOBS=3
 UNREGISTER_ATTEMPTS="${UNREGISTER_ATTEMPTS:-6}"
+# How long the ephemeral lane may be gone while GitHub still lists its job as
+# not completed (completion is reported before the process exits).
+EPHEMERAL_GRACE_SECONDS="${EPHEMERAL_GRACE_SECONDS:-60}"
+ephemeral_done=0
 RUNNERS_API="repos/$GITHUB_REPOSITORY/actions/runners"
 
 # The VM's own job variables (GITHUB_*, RUNNER_*, ACTIONS_*) must not reach
@@ -67,6 +71,7 @@ probes_done() {
     --jq ".jobs[] | select(.name | test(\"^(probe|negative|lifecycle)-$PLATFORM-\")) | \"\\(.status) \\(.name)\"") || return 1
   consumers=$(printf '%s' "$jobs" | grep -c ' / consumer$' || true)
   lifecycle=$(printf '%s' "$jobs" | grep -c "^completed lifecycle-$PLATFORM-" || true)
+  ephemeral_done=$(printf '%s' "$jobs" | grep -c "^completed lifecycle-$PLATFORM-toolu-ephemeral$" || true)
   pending=$(printf '%s' "$jobs" | grep -vc '^completed ' || true)
   echo "$PLATFORM: $consumers of $CONSUMER_JOBS consumer jobs listed, $lifecycle of $LIFECYCLE_JOBS lifecycle jobs completed, $pending jobs not completed"
   [[ "$consumers" -ge "$CONSUMER_JOBS" && "$lifecycle" -ge "$LIFECYCLE_JOBS" && "$pending" -eq 0 ]]
@@ -157,6 +162,15 @@ extra_lanes_alive() {
   done
 }
 
+# True once the ephemeral lane has been gone for the grace period while its
+# job is still not completed: that job would wait for a runner forever.
+ephemeral_stalled() {
+  [[ -n "$ephemeral_pid" && "$ephemeral_done" -eq 0 ]] || return 1
+  kill -0 "$ephemeral_pid" 2>/dev/null && return 1
+  ephemeral_gone_at="${ephemeral_gone_at:-$SECONDS}"
+  ((SECONDS - ephemeral_gone_at >= EPHEMERAL_GRACE_SECONDS))
+}
+
 # The ephemeral lane takes one job, unregisters and exits; record how it ended.
 await_ephemeral() {
   local waited=0 code
@@ -206,7 +220,7 @@ accelerated_alive() {
 
 run_lanes() {
   local i
-  official_pid="" toolu_pid="" accelerated="" ephemeral_pid=""
+  official_pid="" toolu_pid="" accelerated="" ephemeral_pid="" ephemeral_gone_at=""
   extra_pids=() extra_logs=()
   # Job control: every lane started with `&` leads its own process group.
   set -m
@@ -231,6 +245,10 @@ run_lanes() {
       echo "::error::a lane exited before the $PLATFORM probes finished" >&2
       exit 1
     }
+    if ephemeral_stalled; then
+      echo "::error::the ephemeral lane exited before its job completed" >&2
+      exit 1
+    fi
     sleep "$POLL_SECONDS"
   done
   [[ -z "$ephemeral_pid" ]] || await_ephemeral

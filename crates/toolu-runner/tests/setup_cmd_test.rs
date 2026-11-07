@@ -179,6 +179,7 @@ fn home() -> Result<(tempfile::TempDir, String), Box<dyn std::error::Error>> {
 /// never start a real browser, and `shim-opener/opened.log` shows any attempt
 /// (the production opener resolves its launcher through PATH). Kept under a
 /// `shim`-prefixed dir, which the home snapshots leave out like other shims.
+#[cfg(unix)]
 pub(crate) fn opener_trap(
   home: &Path,
   path_env: &str,

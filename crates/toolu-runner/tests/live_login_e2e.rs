@@ -138,7 +138,8 @@ async fn register_bad_stored_token_maps_to_login_hint() {
 ///   -- live_login_e2e::device_flow_login_stores_token --ignored --nocapture
 /// ```
 ///
-/// then open the printed URL, enter the code, and approve. On return the
+/// then open the printed URL yourself, enter the code, and approve (the
+/// opener `login` would start is a recorder here, never a real browser). On return the
 /// token must be readable from the store. (`LiveHarness::new` still needs
 /// TOOLU_RUNNER_LIVE_TOKEN/REPO set to build the binary, even though the
 /// login flow itself uses neither.)
@@ -148,12 +149,19 @@ async fn device_flow_login_stores_token() {
   harness::require_live_env();
   let harness = LiveHarness::new().await.expect("harness init");
 
-  // Drive the real `login` command: prints a code, opens the browser,
-  // polls until the user approves, then persists the token. `login` lost
-  // its `--config` flag — the store is pinned to the runner home, so the
-  // harness dir is passed as TOOLU_RUNNER_HOME instead.
+  // Drive the real `login` command: prints a code, polls until the user
+  // approves, then persists the token. Its browser launch goes to the
+  // recording opener first on PATH, so the test never opens a browser.
+  // `login` lost its `--config` flag — the store is pinned to the runner
+  // home, so the harness dir is passed as TOOLU_RUNNER_HOME instead.
+  let path_env = std::env::var("PATH").unwrap_or_default();
+  // The supported hosts (Linux, macOS) are unix, where the trap's shims run.
+  #[cfg(unix)]
+  let (path_env, _) =
+    crate::setup_cmd_test::opener_trap(harness.config_dir.path(), &path_env).expect("opener trap");
   let status = Command::new(&harness.binary_path)
     .env("TOOLU_RUNNER_HOME", harness.config_dir.path())
+    .env("PATH", path_env)
     .args(["login", "github.com"])
     .status()
     .await

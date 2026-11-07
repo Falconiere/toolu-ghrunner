@@ -231,7 +231,12 @@ async fn run_embedded_posts(
     prior_metadata.restore(ctx);
     match result {
       Err(RunnerError::Cancelled) => return Err(RunnerError::Cancelled),
-      Ok(Conclusion::Failure) | Err(_) => conclusion = Conclusion::Failure,
+      Err(error) => {
+        // The row's log says why, as a top-level post's error would.
+        log_post_error(events, report.id, &error).await;
+        conclusion = Conclusion::Failure;
+      },
+      Ok(Conclusion::Failure) => conclusion = Conclusion::Failure,
       Ok(_) => {},
     }
   }

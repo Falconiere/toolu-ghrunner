@@ -9,6 +9,8 @@ counts. `toolu_only` assertions measure toolu alone and are never reference
 evidence. Nothing here trusts a stored `passed` flag.
 """
 
+import json
+
 # id -> rows it backs, jobs (scoped per variant), and extra predicates by name.
 ASSERTIONS = {
     "X-1": {"rows": ["67/X-1"], "jobs": {"probe": ["contexts", "consumer"],
@@ -77,9 +79,14 @@ def lanes_of(report, platform):
     return ((report.get("host") or {}).get(platform) or {}).get("lanes") or {}
 
 
+def same(left, right):
+    """JSON equality, as reference_compare.same: `true` is not `1`, `1` is not `1.0`."""
+    return json.dumps(left, sort_keys=True) == json.dumps(right, sort_keys=True)
+
+
 def check_results(report, _platforms):
     return [f"observations differ in {key}" for key, r in (report.get("results") or {}).items()
-            if r.get("toolu") != r.get("official") or not r.get("toolu")]
+            if not same(r.get("toolu"), r.get("official")) or not r.get("toolu")]
 
 
 def check_containers(report, _platforms):

@@ -18,9 +18,10 @@ name: compat-reference-103-probe
 # `services` checks OIDC claims in memory and `consumer` checks outputs and
 # artifact digests. No token or claim value is written anywhere.
 #
-# #251 (`extended`, passed by the paired toolu/official callers): `composite`
-# (X-2), `stack` (X-3, Linux; also in the negative variant, where its job
-# container image is missing), `failure`/`orphans`/`timeout`/`cancel`
+# #251: `stack` (X-3) runs wherever `run_docker` is set, in both variants (the
+# negative one's job-container image is missing). The rest need `extended`,
+# which only the paired toolu/official probe callers pass: `composite`
+# (X-2), `failure`/`orphans`/`timeout`/`cancel`
 # (X-4, R-cancellation; `cancel` ends by job timeout, which GitHub delivers as a
 # JobCancellation), `long` (R-renew), `pool-a`/`pool-b` (X-6: two runners per
 # lane at once). `contexts` leaves `_temp`, `_tool` and workspace markers that

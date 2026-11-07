@@ -103,6 +103,13 @@ class AssertionTest(unittest.TestCase):
         self.report["host"]["Linux-X64"]["toolu_only"]["ephemeral"]["runner_removed"] = 1
         self.assertEqual(failing(self.report), ["X-6-toolu"])
 
+    def test_a_json_type_difference_in_observations_fails(self):
+        scope = self.report["results"]["probe-Linux-X64"]
+        scope["toolu"] = {**scope["official"], "typed": True}
+        scope["official"] = {**scope["official"], "typed": 1}
+        self.assertIn("X-1", failing(self.report))
+        self.assertIn("R-command-files", failing(self.report))
+
     def test_one_renewal_fails_renew_only(self):
         self.report["host"]["Linux-X64"]["lanes"]["official"]["renewals_max"] = 1
         self.assertEqual(failing(self.report), ["R-renew"])
