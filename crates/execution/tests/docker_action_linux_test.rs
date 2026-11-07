@@ -231,6 +231,67 @@ async fn pull_alpine(docker: &bollard::Docker) -> TestResult {
 
 #[tokio::test]
 #[ignore = "requires Linux, real Docker, and a daemon-shared test root"]
+async fn container_action_receives_forwarded_service_env_without_node_v2_flag() -> TestResult {
+  let root = linux_root()?;
+  let config = config_for(root.path());
+  let mut job = captured_job()?;
+  job.variables.insert(
+    "actions_uses_cache_service_v2".to_owned(),
+    shared::VariableValue {
+      value: "true".to_owned(),
+      is_secret: false,
+    },
+  );
+  job.variables.insert(
+    "actions_cache_mode".to_owned(),
+    shared::VariableValue {
+      value: "write".to_owned(),
+      is_secret: false,
+    },
+  );
+  let endpoint = job
+    .resources
+    .endpoints
+    .first_mut()
+    .ok_or("captured job has no service endpoint")?;
+  endpoint.data.insert(
+    "GenerateIdTokenUrl".to_owned(),
+    "https://actions.example.invalid/idtoken".to_owned(),
+  );
+  job.steps = vec![registry_step(
+    "service_env",
+    "/bin/sh",
+    "-c 'env | sort > /github/workspace/container-service-env'",
+  )];
+  let workspace = config.workspace_root.join(&job.job_id);
+  let events = collect_job(config, job, CancellationToken::new()).await?;
+  assert_eq!(
+    job_conclusion(&events),
+    Some(Conclusion::Success),
+    "{events:#?}"
+  );
+  let output = tokio::fs::read_to_string(workspace.join("container-service-env")).await?;
+  let actual = output
+    .lines()
+    .filter(|line| line.starts_with("ACTIONS_"))
+    .collect::<Vec<_>>();
+  assert_eq!(
+    actual,
+    [
+      "ACTIONS_CACHE_MODE=write",
+      "ACTIONS_CACHE_URL=https://actions.example.invalid/CacheServerUrl",
+      "ACTIONS_ID_TOKEN_REQUEST_TOKEN=REDACTED_CAPTURE_SECRET",
+      "ACTIONS_ID_TOKEN_REQUEST_URL=https://actions.example.invalid/idtoken",
+      "ACTIONS_RESULTS_URL=https://actions.example.invalid/ResultsServiceUrl",
+      "ACTIONS_RUNTIME_TOKEN=REDACTED_CAPTURE_SECRET",
+      "ACTIONS_RUNTIME_URL=https://actions.example.invalid/PipelinesServiceUrl",
+    ]
+  );
+  Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires Linux, real Docker, and a daemon-shared test root"]
 async fn local_actions_preserve_argv_env_commands_state_and_lifo_posts() -> TestResult {
   let root = linux_root()?;
   let config = config_for(root.path());

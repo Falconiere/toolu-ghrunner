@@ -22,9 +22,7 @@ impl ExecutionContext {
 
   /// Replace the per-step-type service env, masking every `*_TOKEN` value.
   pub fn set_service_env(&mut self, env: ServiceEnv) {
-    for token in env.tokens() {
-      self.add_mask(token);
-    }
+    self.add_masks(env.tokens());
     self.service_env = env;
   }
 
