@@ -49,6 +49,7 @@ mod job_container_capture_replay;
 mod job_container_ci_test;
 mod job_container_composite_test;
 mod job_container_linux_test;
+mod job_container_steps_test;
 mod job_container_test;
 mod job_message_run_defaults_test;
 mod job_outputs_test;

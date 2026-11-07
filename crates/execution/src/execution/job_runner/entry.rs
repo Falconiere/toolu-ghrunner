@@ -8,9 +8,9 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use super::{
-  ContainerStart, ContainerStartParams, JobOutcome, JobResult, LocalServices, PreparedWorkspace,
-  build_job_context_async, claim_job_workspace, finish_job, prepare_job_workspace, prepared,
-  start_job_container, start_job_services, stop_local_services,
+  JobOutcome, JobResult, LocalServices, PreparedWorkspace, build_job_context_async,
+  claim_job_workspace, finish_job, prepare_job_workspace, prepared, start_job_services,
+  stop_local_services,
 };
 use crate::docker::service_spec::evaluate_services;
 use crate::execution::container_job::{evaluate_container, finish_container};
@@ -45,23 +45,6 @@ pub(super) async fn run(
   let (prepared, workspace_gc) = prepare_job_workspace(config, claimed).await?;
   let workspace = prepared.workspace.clone();
   let (http, local) = start_job_services(config, &msg, &mut ctx).await?;
-  let (local, workspace_gc) = match Box::pin(start_job_container(ContainerStartParams {
-    spec: container_spec.as_ref(),
-    services: &service_specs,
-    config,
-    workspace: &workspace,
-    ctx: &mut ctx,
-    cancel: &cancel,
-    local,
-    events: &events,
-    job_id: &msg.job_id,
-    workspace_gc,
-  }))
-  .await?
-  {
-    ContainerStart::Continue(local, workspace_gc) => (local, workspace_gc),
-    ContainerStart::Finished(teardown) => return Ok(teardown),
-  };
   let inputs = prepared::Inputs {
     msg: &msg,
     config,
@@ -69,6 +52,7 @@ pub(super) async fn run(
     events: &events,
     workspace: &workspace,
     http: &http,
+    containers: (container_spec.as_ref(), &service_specs),
   };
   let body_result = Box::pin(prepared::execute(inputs, &mut ctx)).await;
   finish_execution(&ctx, msg.job_id, body_result, local, &events, workspace_gc).await

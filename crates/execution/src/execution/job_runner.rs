@@ -9,7 +9,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use super::actions::prefetch::ActionFetcher;
-use super::container_job::start_container;
+use super::container_job::stop_containers;
 use super::context::ExecutionContext;
 pub use super::job_context::build_context;
 use super::job_context::{event_json, write_event_json};
@@ -20,8 +20,6 @@ use super::service_endpoints::{ServiceEnv, ServiceUrls, extract_service_urls, fo
 use super::shadow::ShadowObserver;
 use super::steps_runner::{JobRun, run_steps};
 use super::workspace_layout::{PreparedWorkspace, prepare_workspace};
-use crate::docker::container_spec::ContainerSpec;
-use crate::docker::service_spec::ServiceSpec;
 use cache::accelerated::{AcceleratedInputs, accelerated_app};
 use cache::blob::BlobRegistry;
 use cache::cas::{CacheIndex, CasStore, LeaseSet};
@@ -128,24 +126,6 @@ async fn build_job_context_async(
   .map_err(|error| RunnerError::StepExecution(format!("build job context: {error}")))
 }
 
-enum ContainerStart {
-  Continue(LocalServices, Option<tokio::task::JoinHandle<()>>),
-  Finished(JobTeardown),
-}
-
-struct ContainerStartParams<'a> {
-  spec: Option<&'a ContainerSpec>,
-  services: &'a [ServiceSpec],
-  config: &'a RunnerConfig,
-  workspace: &'a std::path::Path,
-  ctx: &'a mut ExecutionContext,
-  cancel: &'a CancellationToken,
-  local: LocalServices,
-  events: &'a mpsc::Sender<RunnerEvent>,
-  job_id: &'a str,
-  workspace_gc: Option<tokio::task::JoinHandle<()>>,
-}
-
 /// Claim the job's workspace (stable or fresh, issue #90) before its context
 /// is built: paths, the stable lease and tracking file, no directories yet.
 async fn claim_job_workspace(
@@ -195,49 +175,6 @@ async fn start_job_services(
     return Err(error);
   }
   Ok((http, local))
-}
-
-async fn start_job_container(
-  params: ContainerStartParams<'_>,
-) -> Result<ContainerStart, RunnerError> {
-  let ContainerStartParams {
-    spec,
-    services,
-    config,
-    workspace,
-    ctx,
-    cancel,
-    local,
-    events,
-    job_id,
-    workspace_gc,
-  } = params;
-  match start_container((spec, services), config, workspace, ctx, cancel, events).await {
-    Ok(true) => Ok(ContainerStart::Continue(local, workspace_gc)),
-    Ok(false) => {
-      let outcome = JobOutcome {
-        job_id: job_id.to_owned(),
-        conclusion: if ctx
-          .cancellation
-          .as_ref()
-          .is_some_and(|signal| signal.shutdown.is_cancelled())
-        {
-          Conclusion::Failure
-        } else {
-          Conclusion::Cancelled
-        },
-        outputs: HashMap::new(),
-        environment_url: None,
-      };
-      Ok(ContainerStart::Finished(
-        finish_job(local, events, outcome, workspace_gc).await,
-      ))
-    },
-    Err(error) => {
-      stop_local_services(local).await;
-      Err(error)
-    },
-  }
 }
 
 /// Build the shadow-mode step observer (approach C): records would-hit /
@@ -433,7 +370,15 @@ async fn run_job_body(
     http,
     fetcher,
   };
-  let conclusion = run_steps(&msg.steps, ctx, events, cancel.clone(), &run).await?;
+  let mut conclusion = run_steps(&msg.steps, ctx, events, cancel.clone(), &run).await?;
+  // Upstream's "Stop containers" is the first registered post step, so it runs
+  // after every other post and before "Complete job".
+  let fallback = 2u32.saturating_add(ctx.docker_setup_count);
+  if stop_containers(ctx, events, fallback).await == Some(Conclusion::Failure)
+    && conclusion == Conclusion::Success
+  {
+    conclusion = Conclusion::Failure;
+  }
 
   // "Complete job" evaluates outputs and the URL after main + post steps.
   let result = run_complete_step(spec, msg, ctx, events, conclusion).await?;

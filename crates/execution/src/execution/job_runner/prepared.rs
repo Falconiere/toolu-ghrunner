@@ -12,8 +12,11 @@ use super::{
   JobBody, JobResult, build_shadow_observer, emit_job_started, run_completed_hook_best_effort,
   run_job_body,
 };
+use crate::docker::container_spec::ContainerSpec;
+use crate::docker::service_spec::ServiceSpec;
 use crate::execution::action_support::emit_log;
 use crate::execution::actions::prefetch::{ActionFetcher, spawn_prefetch};
+use crate::execution::container_job::{initialize_containers, stop_containers};
 use crate::execution::context::ExecutionContext;
 use crate::execution::docker_prepare;
 use crate::execution::job_hooks::{JobHookStage, run_job_hook};
@@ -33,6 +36,9 @@ pub(super) struct Inputs<'a> {
   pub(super) workspace: &'a Path,
   /// Reused job HTTP client.
   pub(super) http: &'a reqwest::Client,
+  /// Evaluated job container and service declarations, started after the
+  /// Docker Pull/Build rows as upstream's "Initialize containers".
+  pub(super) containers: (Option<&'a ContainerSpec>, &'a [ServiceSpec]),
 }
 
 pub(super) async fn execute(
@@ -46,6 +52,7 @@ pub(super) async fn execute(
     events,
     workspace,
     http,
+    containers,
   } = inputs;
   let fetcher = fetcher_for(msg, config, ctx, events)?;
   // A failed prefetch never fails the job; step-time resolution can retry.
@@ -76,7 +83,11 @@ pub(super) async fn execute(
   };
   let result = match prepare_before_steps(&body, ctx).await {
     Ok(Some(early)) => Ok(early),
-    Ok(None) => run_job_body(&body, ctx).await,
+    Ok(None) => match start_containers(&body, containers, ctx).await {
+      Ok(Some(early)) => Ok(early),
+      Ok(None) => run_job_body(&body, ctx).await,
+      Err(error) => Err(error),
+    },
     Err(error) => Err(error),
   };
   // The fetch task may still be extracting into a private staging directory.
@@ -135,6 +146,44 @@ async fn prepare_before_steps(
   .await;
   let Err(error) = result else { return Ok(None) };
   Ok(Some(finish_preparation_error(body, ctx, error).await))
+}
+
+/// Run "Initialize containers"; a failed or cancelled start ends the job like
+/// a failed Docker setup row: no workflow step runs, "Stop containers" still
+/// does.
+async fn start_containers(
+  body: &JobBody<'_>,
+  specs: (Option<&ContainerSpec>, &[ServiceSpec]),
+  ctx: &mut ExecutionContext,
+) -> Result<Option<JobResult>, RunnerError> {
+  let started = initialize_containers(
+    specs,
+    body.config,
+    body.workspace,
+    ctx,
+    body.cancel,
+    body.events,
+  )
+  .await?;
+  let conclusion = match started {
+    None | Some(Conclusion::Success) => return Ok(None),
+    Some(Conclusion::Cancelled) => {
+      ctx.record_job_cancelled();
+      Conclusion::Cancelled
+    },
+    Some(_) => {
+      ctx.record_step_failure();
+      Conclusion::Failure
+    },
+  };
+  let next = 2u32.saturating_add(ctx.docker_setup_count);
+  stop_containers(ctx, body.events, next).await;
+  run_completed_hook_best_effort(ctx, body.events, body.workspace, body.cancel).await;
+  Ok(Some(JobResult {
+    conclusion,
+    outputs: HashMap::new(),
+    environment_url: None,
+  }))
 }
 
 async fn finish_preparation_error(

@@ -185,6 +185,7 @@ jobs:
           cargo test -p execution --test integration -- node_container_test:: --ignored --test-threads=1
           cargo test -p execution --test integration -- compat_probe_replay_test:: --ignored --test-threads=1
           cargo test -p execution --test integration -- network_container_env_test:: --ignored --test-threads=1
+          cargo test -p execution --test integration -- job_container_steps_test:: --ignored --test-threads=1
 
   # The shell and Python checks over the repo's own files: no toolchain, no
   # build, so they never wait on a compile.
