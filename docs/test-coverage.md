@@ -162,8 +162,12 @@ Linux execution, GitHub.com/GHES UI/backend uploads and comparison with the
 pinned official runner are **unverified**. Registration is backend-independent;
 these local buffers do not prove remote UI behavior. Diagnostics here exercise
 the actual writer/redactor directly, not global subscriber initialization.
-Nested composite shell workflow-command routing is a separate observed gap;
-the nested probe tests ordinary stdout/stderr, and the notice runs top-level.
+Nested composite shell workflow-command routing is no longer a gap (#235): the
+probe registers every multiline `::add-mask::` from inside the nested
+composite, and the top-level notice that follows it is redacted. The same
+nested registration suppresses a later job output and deployment URL
+(`job_outputs_test::nested_composite_mask_suppresses_a_later_job_output`,
+`environment_url_test::nested_composite_mask_suppresses_the_environment_url`).
 
 ## Incoming contexts acceptance (#68)
 

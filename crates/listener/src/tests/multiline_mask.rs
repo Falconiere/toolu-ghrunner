@@ -36,13 +36,13 @@ fn fixture(config: &RunnerConfig) -> TestResult<AgentJobRequestMessage> {
     workspace.join("outer/action.yml"),
     "name: outer\ndescription: masking probe\nruns:\n  using: composite\n  steps:\n    - uses: ./inner\n",
   )?;
+  // The masks are registered INSIDE the nested composite, by the step before
+  // the one that prints them: #86 only ever proved top-level registration.
   std::fs::write(
     workspace.join("inner/action.yml"),
-    "name: inner\ndescription: masking probe\nruns:\n  using: composite\n  steps:\n    - shell: bash\n      run: bash probe.sh\n",
+    "name: inner\ndescription: masking probe\nruns:\n  using: composite\n  steps:\n    - shell: bash\n      run: bash probe.sh register\n    - shell: bash\n      run: bash probe.sh\n",
   )?;
   // Keep the captured wire step UUID/contextName distinction and token shapes.
-  let mut register = msg.steps.first().ok_or("fixture missing script")?.clone();
-  register.inputs = ActionStep::script("unused", "bash probe.sh register", "").inputs;
   let mut nested = msg.steps.get(1).ok_or("fixture missing action")?.clone();
   nested.reference.name = Some("./outer".to_owned());
   nested.reference.git_ref = None;
@@ -53,7 +53,7 @@ fn fixture(config: &RunnerConfig) -> TestResult<AgentJobRequestMessage> {
     "printf '%s\\n' '::notice::annotation=[Q|RS|TUV]'",
     "",
   );
-  msg.steps = vec![register, nested, annotation];
+  msg.steps = vec![nested, annotation];
   Ok(msg)
 }
 

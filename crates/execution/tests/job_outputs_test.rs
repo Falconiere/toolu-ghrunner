@@ -415,3 +415,71 @@ async fn cancelled_job_evaluates_output_written_before_cleanup() -> TestResult {
   );
   Ok(())
 }
+
+/// #86/#88: a `::add-mask::` registered inside a NESTED composite reaches the
+/// job-level masker, so a later top-level step's matching job output and step
+/// summary are redacted while a non-secret output survives.
+#[tokio::test]
+async fn nested_composite_mask_suppresses_a_later_job_output() -> TestResult {
+  const NESTED_SECRET: &str = "nested-mask-probe-235";
+  let dir = tempfile::tempdir()?;
+  let config = RunnerConfig {
+    data_dir: dir.path().join("data"),
+    workspace_root: dir.path().join("work"),
+    workspace: shared::WorkspaceConfig {
+      mode: shared::WorkspaceMode::Fresh,
+      stable_gc_hours: 0,
+    },
+    ..RunnerConfig::default()
+  };
+  let mut message = captured()?;
+  let workspace = config.workspace_root.join(&message.job_id);
+  std::fs::create_dir_all(&workspace)?;
+  crate::nested_mask::write_actions(&workspace, NESTED_SECRET)?;
+  set_script(
+    &mut message,
+    &format!(
+      "printf 'leaked={NESTED_SECRET}\\nsafe=clear\\n' >> \"$GITHUB_OUTPUT\"; \
+       printf 'summary={NESTED_SECRET}\\n' >> \"$GITHUB_STEP_SUMMARY\""
+    ),
+  )?;
+  add_output(&mut message, "leaked", "steps.produce.outputs.leaked")?;
+  add_output(&mut message, "safe", "steps.produce.outputs.safe")?;
+  let producer = message
+    .steps
+    .first()
+    .ok_or("captured step missing")?
+    .clone();
+  message.steps = vec![
+    crate::nested_mask::outer_step("22222222-aaaa-4bbb-8ccc-000000000001"),
+    producer,
+  ];
+
+  let events = run_with_config(message, config, CancellationToken::new()).await?;
+  let (conclusion, outputs) = completed(&events)?;
+  assert_eq!(conclusion, Conclusion::Success, "{events:?}");
+  assert_eq!(outputs.get("safe").map(String::as_str), Some("clear"));
+  assert!(
+    !outputs.contains_key("leaked"),
+    "a nested-composite mask did not suppress the output: {outputs:?}"
+  );
+  assert!(
+    events.iter().any(|event| matches!(
+      event,
+      RunnerEvent::Annotation { level: AnnotationLevel::Warning, message, .. }
+        if message.contains("secret")
+    )),
+    "the dropped output came with no warning: {events:?}"
+  );
+  let summary = events
+    .iter()
+    .find_map(|event| match event {
+      RunnerEvent::StepSummary { content, .. } => Some(content.clone()),
+      _ => None,
+    })
+    .ok_or("no step summary was emitted")?;
+  // The engine's event stream is unmasked by contract (each sink masks its
+  // own line), so only the summary document itself must already be redacted.
+  assert_eq!(summary, "summary=***\n");
+  Ok(())
+}
