@@ -28,7 +28,7 @@ pub(super) async fn run_pre_phase(
     if job.cancellation.is_forced() {
       return worst;
     }
-    let number = 2u32.saturating_add(ctx.docker_setup_count);
+    let number = 2u32.saturating_add(ctx.pre_job_rows);
     let timeout = resolve_timeout(&step.id, step.timeout_in_minutes.as_ref(), ctx, events).await;
     let bounds = StepBounds::nested(job.cancellation.deadline(), timeout, job.cancel.clone());
     let run = ActionRun {
@@ -46,7 +46,7 @@ pub(super) async fn run_pre_phase(
     if let Some(post) = post {
       job_state.posts.register(post);
     }
-    ctx.docker_setup_count = ctx.docker_setup_count.saturating_add(1);
+    ctx.pre_job_rows = ctx.pre_job_rows.saturating_add(1);
     if conclusion == Conclusion::Failure {
       ctx.record_step_failure();
       if worst == Conclusion::Success {

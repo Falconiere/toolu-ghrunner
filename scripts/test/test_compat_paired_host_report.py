@@ -5,11 +5,14 @@ import subprocess
 import sys
 import tempfile
 import unittest
+
+import yaml
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import compat_paired_host_report as host  # noqa: E402
 
+ROOT = Path(__file__).resolve().parents[2]
 RUN, PLATFORM = "4242", "Linux-X64"
 
 
@@ -34,10 +37,17 @@ class HostReportTest(unittest.TestCase):
         return json.loads(out.read_text())
 
     def test_disposable_matches_the_probe_derivation(self):
-        # The `leaks` job: printf 'compat-251-%s-%s-%s' RUN LANE VARIANT | shasum -a 256 | cut -c1-32
-        shell = subprocess.run(
-            ["sh", "-c", f"printf 'compat-251-%s-%s-%s' {RUN} {PLATFORM}-toolu probe | shasum -a 256 | cut -c1-32"],
-            check=True, capture_output=True, text=True).stdout.strip()
+        # The `leaks` job's own command line, run with this test's values, so
+        # a change in the probe's derivation cannot leave the scan blind.
+        probe = yaml.safe_load((ROOT / ".github/workflows/compat-reference-103-probe.yml").read_text())
+        script = probe["jobs"]["leaks"]["steps"][0]["run"]
+        line = next(l.strip() for l in script.splitlines() if l.strip().startswith("value=$("))
+        for expr, value in (("${{ github.run_id }}", RUN), ("${{ inputs.lane }}", f"{PLATFORM}-toolu"),
+                            ("${{ inputs.variant }}", "probe")):
+            self.assertIn(expr, line)
+            line = line.replace(expr, value)
+        shell = subprocess.run(["sh", "-c", f'{line}; printf %s "$value"'],
+                               check=True, capture_output=True, text=True).stdout
         self.assertEqual(self.toolu_value, shell)
         self.assertNotEqual(self.toolu_value, self.official_value)
 

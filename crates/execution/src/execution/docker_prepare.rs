@@ -91,7 +91,7 @@ async fn run_plan(
   cancel: &CancellationToken,
 ) -> Result<(), RunnerError> {
   let count = plan.pulls.len().saturating_add(plan.builds.len());
-  ctx.docker_setup_count = u32::try_from(count)
+  ctx.pre_job_rows = u32::try_from(count)
     .map_err(|error| RunnerError::StepExecution(format!("too many Docker setup tasks: {error}")))?;
   for (index, image) in plan.pulls.iter().enumerate() {
     let prepared = run_task(SetupTask::Pull(image), index, ctx, events, cancel).await?;

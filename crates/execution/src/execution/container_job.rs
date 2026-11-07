@@ -98,9 +98,9 @@ pub(super) async fn initialize_containers(
     return Ok(None);
   }
   let number = 2u32
-    .checked_add(ctx.docker_setup_count)
+    .checked_add(ctx.pre_job_rows)
     .ok_or_else(|| RunnerError::StepExecution("container setup step number overflow".to_owned()))?;
-  ctx.docker_setup_count = ctx.docker_setup_count.saturating_add(1);
+  ctx.pre_job_rows = ctx.pre_job_rows.saturating_add(1);
   // Upstream registers "Stop containers" before it starts anything.
   ctx.stop_containers_pending = true;
   let id = uuid::Uuid::new_v4().to_string();

@@ -373,7 +373,7 @@ async fn run_job_body(
   let mut conclusion = run_steps(&msg.steps, ctx, events, cancel.clone(), &run).await?;
   // Upstream's "Stop containers" is the first registered post step, so it runs
   // after every other post and before "Complete job".
-  let fallback = 2u32.saturating_add(ctx.docker_setup_count);
+  let fallback = 2u32.saturating_add(ctx.pre_job_rows);
   if stop_containers(ctx, events, fallback).await == Some(Conclusion::Failure)
     && conclusion == Conclusion::Success
   {

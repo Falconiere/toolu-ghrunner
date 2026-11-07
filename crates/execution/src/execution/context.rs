@@ -75,9 +75,10 @@ pub struct ExecutionContext {
   step_displays: HashMap<String, super::step_display::StepDisplay>,
   /// Number for the "Complete job" row: one past the last main/post row.
   pub(crate) next_step_number: Option<u32>,
-  /// Pre-job rows (Docker Pull/Build, "Initialize containers") inserted
-  /// between "Set up job" and the workflow steps.
-  pub(crate) docker_setup_count: u32,
+  /// Pre-job rows between "Set up job" and the workflow steps: Docker
+  /// Pull/Build, "Initialize containers" and each action's "Pre" row. They
+  /// number from 2, and shift the workflow and post rows after them.
+  pub(crate) pre_job_rows: u32,
   /// "Initialize containers" ran, so "Stop containers" is owed (upstream
   /// registers it before starting anything).
   pub(crate) stop_containers_pending: bool,
@@ -159,7 +160,7 @@ impl ExecutionContext {
       file_table: Vec::new(),
       step_displays: HashMap::new(),
       next_step_number: None,
-      docker_setup_count: 0,
+      pre_job_rows: 0,
       stop_containers_pending: false,
       container_setup: None,
       job_container_missing: false,

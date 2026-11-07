@@ -112,7 +112,7 @@ pub async fn run_steps(
     shadow: run.shadow,
     http: run.http,
     fetcher: run.fetcher,
-    first_post_number: post_number(2u32.saturating_add(ctx.docker_setup_count), steps.len()),
+    first_post_number: post_number(2u32.saturating_add(ctx.pre_job_rows), steps.len()),
   };
 
   let mut job_state = JobState {
@@ -125,7 +125,7 @@ pub async fn run_steps(
   let pre = pre_phase::run_pre_phase(steps, ctx, events, &job, &mut job_state).await;
   // Pre rows shift the workflow steps and therefore the first post row.
   let job = JobCtx {
-    first_post_number: post_number(2u32.saturating_add(ctx.docker_setup_count), steps.len()),
+    first_post_number: post_number(2u32.saturating_add(ctx.pre_job_rows), steps.len()),
     ..job
   };
   let main = run_main_and_posts(steps, ctx, events, &cancel, &job, &mut job_state).await?;
@@ -199,7 +199,7 @@ async fn run_main_steps(
     }
 
     // Step 1 is "Set up job" (reported by setup_step.rs). Workflow steps start at 2.
-    let step_number = post_number(2u32.saturating_add(ctx.docker_setup_count), index);
+    let step_number = post_number(2u32.saturating_add(ctx.pre_job_rows), index);
     let prior = super::action_metadata::ActionMetadata::capture(ctx);
     super::action_metadata::set_name(ctx, step);
     super::action_metadata::clear_repository(ctx);
