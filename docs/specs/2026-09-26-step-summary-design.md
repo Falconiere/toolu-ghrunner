@@ -97,7 +97,8 @@ probe substitutions. Assert event content/order, annotations and conclusions;
 real shell writes limit-sized UTF-8 files. `cargo test -p execution step_summary`.
 AC-3–4: wire/listener sibling tests exercise production upload construction and
 controlled transport failures without fabricated success; inspect journal byte
-metadata. `cargo test -p wire step_summary`; `cargo test -p listener step_summary`.
+metadata. (Update, #235: a loopback Results Service later replays the successful
+three-call upload from `wire` and from a real job; see `docs/test-coverage.md`.) `cargo test -p wire step_summary`; `cargo test -p listener step_summary`.
 AC-4: `.github/workflows/step-summary-83.yml` runs committed probes on Linux/macOS
 and equivalent toolu/pinned-reference hosts. Record real GitHub.com run/job/UI
 links and observed conclusions, including oversize, failure and cancellation.
