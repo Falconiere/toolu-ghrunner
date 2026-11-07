@@ -2,8 +2,8 @@
   "schema": 1,
   "epic": 67,
   "official_runner": {
-    "version": "2.337.0",
-    "commit": "cab9d1c3901e45c7705889c4f88284fdd93f4ae5"
+    "version": "2.338.2",
+    "commit": "d1eb12d4b115c301201de27d667284e1a80f2ab5"
   },
   "baseline": {
     "commit": "d480753f8b3b2b9babffd490a63c6cacf2266c4f",
@@ -6111,7 +6111,7 @@
         "docs/runner-version-evidence.json",
         ".github/workflows/noop-live.yml"
       ],
-      "expected": "Real outgoing HTTP requests from one build carry session agent.version=2.337.0 and poll/ack runnerVersion=2.337.0 (poll cursors 0 and 99, disableUpdate=true) while product version is separate. The loopback recorder closes the connection; all four calls error and no GitHub success is fabricated.",
+      "expected": "Real outgoing HTTP requests from one build carry session agent.version=2.338.2 (plus brokerSession=true) and poll/ack runnerVersion=2.338.2 (poll cursors 0 and 99, disableUpdate=true) while product version is separate; DELETE /session carries sessionId as a query parameter. The loopback recorder closes the connection; all four calls error and no GitHub success is fabricated.",
       "production_path": "protocol::runner_version::COMPATIBILITY_VERSION; protocol::build_session_request; wire::net::{create_session,poll_message,acknowledge_message}",
       "tests": [
         [
@@ -6168,7 +6168,7 @@
         "docs/runner-version-evidence.json",
         ".github/workflows/noop-live.yml"
       ],
-      "expected": "The 2.337.0 string is asserted on the wire; rationale (official release 397b032, epic snapshot cab9d1c, separate product version) is in docs/runner-updates.md and checked only by scripts/test/runner_version_evidence_check.py, which the CI gate does not run.",
+      "expected": "The 2.338.2 string is asserted on the wire; rationale (official release d1eb12d, delta from 2.337.0 / 397b032 / cab9d1c, separate product version) is in docs/runner-updates.md and checked only by scripts/test/runner_version_evidence_check.py, which the CI gate does not run.",
       "production_path": "protocol::runner_version; docs/runner-updates.md",
       "tests": [
         [
@@ -6416,7 +6416,7 @@
         "docs/runner-version-evidence.json",
         ".github/workflows/noop-live.yml"
       ],
-      "expected": "Session agent.version and poll/ack runnerVersion are all 2.337.0 in recorded HTTP requests; startup logs product 0.9.2 and compatibility 2.337.0; the live toolu run showed no acknowledgement-failure warning.",
+      "expected": "Session agent.version and poll/ack runnerVersion are all one value in recorded HTTP requests (hermetic test now asserts 2.338.2; the recorded live toolu run below was made at the earlier 2.337.0 pin, startup logs product 0.9.2 and compatibility 2.337.0, and showed no acknowledgement-failure warning; the live repeat at 2.338.2 is #251).",
       "production_path": "protocol::runner_version; wire::net",
       "tests": [
         [
@@ -6570,7 +6570,7 @@
       "input": [
         "docs/runner-updates.md"
       ],
-      "expected": "docs/runner-updates.md assigns maintenance ownership, states the 2.337.0 baseline and the update/revalidation procedure, and says a clock simulation cannot prove service policy. Documentation criterion; no executable Rust test.",
+      "expected": "docs/runner-updates.md assigns maintenance ownership, states the 2.338.2 baseline (2.337.0 as its predecessor, with the v2.337.0 to v2.338.2 delta table) and the update/revalidation procedure, and says a clock simulation cannot prove service policy. Documentation criterion; no executable Rust test.",
       "production_path": "docs/runner-updates.md",
       "tests": [],
       "command": "python3 scripts/test/runner_version_evidence_check.py",
@@ -15131,7 +15131,7 @@
         "crates/execution/tests/job_outputs_message.json",
         ".github/actions/node-runtime-95/action.yml"
       ],
-      "expected": "All 27 NodeUtilL0 rows select the same version/warning; live requirenode24=true runs a node20 action on node/24.21.0 with the exact Complete job warning; opt-out stays node20 with the deprecation text; same-source conflict warns.",
+      "expected": "All 27 NodeUtilL0 rows select the same version/warning; live requirenode24=true runs a node20 action on node/24.22.1 with the exact Complete job warning; opt-out stays node20 with the deprecation text; same-source conflict warns.",
       "production_path": "crates/execution/src/node/migration.rs; crates/execution/src/execution/job_runner/complete_step.rs; crates/execution/src/execution/node_stage.rs",
       "tests": [
         [
@@ -15297,7 +15297,7 @@
         "crates/toolu-runner/tests/fixtures/job_container_message.json",
         ".github/actions/node-runtime-95/action.yml"
       ],
-      "expected": "Production Runner::execute_job replay of the captured github.com message runs the node probe on node/24.21.0 with the exact upstream annotation; real host node and a local HTTP server back runtime tests; real alpine/ubuntu containers back the container replays.",
+      "expected": "Production Runner::execute_job replay of the captured github.com message runs the node probe on node/24.22.1 with the exact upstream annotation; real host node and a local HTTP server back runtime tests; real alpine/ubuntu containers back the container replays.",
       "production_path": "crates/execution/src/execution/node_stage.rs; crates/execution/src/node/runtime.rs",
       "tests": [
         [
@@ -15711,7 +15711,7 @@
         "crates/execution/tests/job_outputs_message.json",
         ".github/actions/node-runtime-95/action.yml"
       ],
-      "expected": "Host replay runs the probe on node/24.21.0; real alpine container runs v24 with no glibc from /github/node/24.21.0-alpine/bin/node, ubuntu runs glibc v24; the official runner picks node24_alpine for Alpine too.",
+      "expected": "Host replay runs the probe on node/24.22.1; real alpine container runs v24 with no glibc from /github/node/24.22.1-alpine/bin/node, ubuntu runs glibc v24; the official runner picks node24_alpine for Alpine too.",
       "production_path": "crates/execution/src/node/platform.rs; crates/execution/src/docker/container_os.rs; crates/execution/src/execution/node_stage.rs",
       "tests": [
         [

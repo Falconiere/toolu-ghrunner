@@ -77,6 +77,7 @@ fn full_urls() -> ServiceUrls {
     cache_mode: None,
     id_token_request_url: Some("https://idtoken.example/".to_owned()),
     runtime_token: FIX_TOKEN.to_owned(),
+    orchestration_id: None,
   }
 }
 
@@ -181,9 +182,10 @@ fn per_step_type_sets_match_official_handlers() -> TestResult<()> {
     script_keys,
     [
       "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
-      "ACTIONS_ID_TOKEN_REQUEST_URL"
+      "ACTIONS_ID_TOKEN_REQUEST_URL",
+      "ACTIONS_ORCHESTRATION_ID"
     ],
-    "run: steps get only the OIDC pair"
+    "run: steps get the OIDC pair and the orchestration id (flag on in this fixture)"
   );
   Ok(())
 }
@@ -746,4 +748,40 @@ async fn composite_run_step_gets_only_the_oidc_pair() -> TestResult<()> {
     "{line}"
   );
   Ok(())
+}
+
+#[test]
+fn orchestration_id_reaches_run_steps_only_when_flag_true() -> TestResult<()> {
+  let on = forward_env(&extract_service_urls(&compat_job_message(None, None)?));
+  let id = on_id_from_fixture()?;
+  assert!(
+    on.script
+      .iter()
+      .any(|(k, v)| k == "ACTIONS_ORCHESTRATION_ID" && *v == id)
+  );
+  assert!(on.node.iter().all(|(k, _)| k != "ACTIONS_ORCHESTRATION_ID"));
+  let mut msg = compat_job_message(None, None)?;
+  msg
+    .variables
+    .retain(|k, _| !k.eq_ignore_ascii_case("actions_set_orchestration_id_env_for_actions"));
+  let off = forward_env(&extract_service_urls(&msg));
+  assert!(
+    off
+      .script
+      .iter()
+      .all(|(k, _)| k != "ACTIONS_ORCHESTRATION_ID")
+  );
+  Ok(())
+}
+
+/// The fixture's own `system.orchestrationId`, so the test pins what the job carries.
+fn on_id_from_fixture() -> TestResult<String> {
+  let msg = compat_job_message(None, None)?;
+  Ok(
+    msg
+      .variables
+      .get("system.orchestrationId")
+      .map(|v| v.value.clone())
+      .ok_or("fixture lacks system.orchestrationId")?,
+  )
 }

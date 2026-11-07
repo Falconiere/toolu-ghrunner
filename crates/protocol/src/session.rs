@@ -16,6 +16,9 @@ pub struct CreateSessionRequest {
   pub owner_name: String,
   /// The `agent` info describing this runner.
   pub agent: AgentInfo,
+  /// The `brokerSession` flag — always `true` (upstream v2.338.0 sets it on
+  /// broker-created sessions so delete can address the owned session).
+  pub broker_session: bool,
 }
 
 /// Agent information sent in session creation.
@@ -88,6 +91,7 @@ pub fn build_session_request(agent_id: i64, agent_name: &str) -> CreateSessionRe
       os_description: get_os_description(),
       ephemeral: true,
     },
+    broker_session: true,
   }
 }
 

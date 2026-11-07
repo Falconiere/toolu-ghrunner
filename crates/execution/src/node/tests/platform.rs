@@ -179,8 +179,8 @@ fn target_names_follow_upstream_externals_and_cache_layout() {
   };
   assert_eq!(glibc.externals_name(20), "node20");
   assert_eq!(musl.externals_name(24), "node24_alpine");
-  assert_eq!(glibc.cache_name("24.21.0"), "24.21.0");
-  assert_eq!(musl.cache_name("24.21.0"), "24.21.0-alpine");
+  assert_eq!(glibc.cache_name("24.22.1"), "24.22.1");
+  assert_eq!(musl.cache_name("24.22.1"), "24.22.1-alpine");
   assert_eq!(musl.to_string(), "linux-x64 (musl)");
   let darwin = NodeTarget {
     os: NodeOs::Darwin,

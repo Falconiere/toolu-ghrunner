@@ -86,6 +86,11 @@ pub struct ExecutionContext {
   network_env: Vec<(String, String)>,
   /// Per-step-type `ACTIONS_*` service vars (never on the job-wide env).
   service_env: super::service_endpoints::ServiceEnv,
+  /// Job variable `actions_self_repository` is true: `$/` references resolve.
+  self_repository_enabled: bool,
+  /// Workflow `(repository, sha)` that `$/` falls back to when the enclosing
+  /// action is local (from the `job` context).
+  workflow_identity: Option<(String, String)>,
 }
 
 impl ExecutionContext {
@@ -146,6 +151,8 @@ impl ExecutionContext {
       node_migration: crate::node::migration::NodeMigrationState::default(),
       network_env: Vec::new(),
       service_env: super::service_endpoints::ServiceEnv::default(),
+      self_repository_enabled: false,
+      workflow_identity: None,
     }
   }
 
@@ -261,6 +268,40 @@ impl ExecutionContext {
 
 /// Populate server and runner context values.
 impl ExecutionContext {
+  /// Enable `$/` resolution (`actions_self_repository`), recording the workflow
+  /// repository and SHA used when the enclosing action is local.
+  pub fn enable_self_repository(&mut self, workflow: Option<(String, String)>) {
+    self.self_repository_enabled = true;
+    self.workflow_identity = workflow;
+  }
+
+  /// The workflow repository and SHA, when the job context supplied them.
+  pub fn workflow_identity(&self) -> Option<(&str, &str)> {
+    self
+      .workflow_identity
+      .as_ref()
+      .map(|(r, s)| (r.as_str(), s.as_str()))
+  }
+
+  /// Resolve a `$/[path]` reference against the enclosing remote action
+  /// (`action_repository`@`action_ref`), else the workflow identity. `Ok(None)`
+  /// for any other `uses:`; an error when `$/` is used without the flag.
+  ///
+  /// # Errors
+  ///
+  /// `RunnerError::ActionResolution` as [`super::actions::resolver::resolve_self_reference`].
+  pub fn resolve_self_uses(&self, uses: &str) -> Result<Option<String>, shared::RunnerError> {
+    if !self.self_repository_enabled {
+      return super::actions::resolver::resolve_self_reference(uses, None);
+    }
+    let enclosing = self
+      .github_context("action_repository")
+      .zip(self.github_context("action_ref"))
+      .filter(|(r, g)| !r.is_empty() && !g.is_empty());
+    let parent = enclosing.or(self.workflow_identity());
+    super::actions::resolver::resolve_self_reference(uses, parent)
+  }
+
   /// Set a string value in the github context.
   pub fn set_github_context(&mut self, key: &str, value: &str) {
     self

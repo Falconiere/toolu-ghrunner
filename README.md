@@ -749,8 +749,8 @@ and GHES acceptance are **unverified**; see the
 
 `runs.using: node12 | node16 | node20 | node24` (case-insensitive) is accepted;
 `node12`/`node16` run as node20 and any other `node*` fails with the official
-runner's message. Pinned releases match actions/runner v2.337.0: node20 →
-`20.20.2`, node24 → `24.21.0`.
+runner's message. Pinned releases match actions/runner v2.338.2: node20 →
+`20.20.2`, node24 → `24.22.1`.
 
 **node20 → node24 migration.** A node20 action's runtime follows the official
 runner exactly. GitHub sends the phase as job variables
@@ -784,7 +784,7 @@ files there rather than symlinks that point outside it.
 
 **Upgrading.** The pins moved from 20.18.3 / 24.0.2, so the cache directory
 names changed: the first Node action after the upgrade downloads
-`node/20.20.2` or `node/24.21.0` (github.com's current flags select 24 for
+`node/20.20.2` or `node/24.22.1` (github.com's current flags select 24 for
 node20 actions). Airgapped hosts that hand-seeded `data_dir/node/<version>`
 must reseed those two versions (or switch to `TOOLU_RUNNER_NODE_DIR`); the old
 `20.18.3` / `24.0.2` directories are no longer used and can be deleted.
@@ -1517,8 +1517,10 @@ MIT — see [LICENSE](LICENSE).
 
 ## Runner version and updates
 
-Toolu reports the pinned GitHub compatibility baseline `2.337.0` consistently
-for session, poll and acknowledgement; `toolu-runner --version` reports the
+Toolu reports the pinned GitHub compatibility baseline `2.338.2` consistently
+for session, poll and acknowledgement (session creation also sends
+`brokerSession: true` and session deletion addresses `?sessionId=<id>`, as that
+release does); `toolu-runner --version` reports the
 separate toolu product release. Updates are operator-managed. Refresh messages
 warn and continue; operators must track GitHub's 30-day update requirement and
 critical security updates. See [runner updates](docs/runner-updates.md) for

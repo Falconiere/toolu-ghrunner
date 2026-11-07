@@ -13,7 +13,7 @@ under) lives in `execution::actions`.
 
 | File | Primary item | Purpose |
 | --- | --- | --- |
-| `runtime.rs` | `ensure_node_runtime` | Pinned versions (upstream `externals.sh`: 20.20.2 / 24.21.0), per-target cache layout, the authoritative `TOOLU_RUNNER_NODE_DIR` preseed (upstream `externals/` naming), and the preseed → cache → download order. |
+| `runtime.rs` | `ensure_node_runtime` | Pinned versions (upstream `externals.sh`: 20.20.2 / 24.22.1), per-target cache layout, the authoritative `TOOLU_RUNNER_NODE_DIR` preseed (upstream `externals/` naming), and the preseed → cache → download order. |
 | `download.rs` | `install_runtime` | Streams a runtime tarball (nodejs.org or `actions/alpine_nodejs`), extracts into a staging dir, start-checks host-runnable runtimes, and commits with one rename. Retries transient transport failures (connection, 408/429/5xx, body cut mid-stream) up to 3 attempts. |
 | `validate.rs` | `validate_runtime` | `<node> --version` must run and report the requested major. |
 | `platform.rs` | `NodeTarget` | Host / job-container OS, CPU and libc (dynamic-loader and `/etc/*release` probes) and the unsupported-platform errors. |

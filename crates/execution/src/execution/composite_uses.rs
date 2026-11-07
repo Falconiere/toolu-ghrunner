@@ -180,6 +180,8 @@ fn build_nested_step(
     .clone()
     .unwrap_or_else(|| format!("__composite_uses_{idx}"));
 
+  let resolved_self = ctx.resolve_self_uses(uses)?;
+  let uses = resolved_self.as_deref().unwrap_or(uses);
   let (name, git_ref) = if uses.starts_with("docker://") {
     (uses.to_owned(), None)
   } else {

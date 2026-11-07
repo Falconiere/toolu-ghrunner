@@ -53,7 +53,8 @@ pub async fn create_session(
     .map_err(|e| RunnerError::Protocol(format!("session response parse failed: {e}")))
 }
 
-/// Delete a broker session (cleanup on exit).
+/// Delete a broker session (cleanup on exit): `DELETE /session?sessionId=<id>`
+/// (upstream v2.338.0 sends the owned session id).
 ///
 /// Status codes other than 2xx are logged but treated as success —
 /// the broker may already have forgotten about JIT runners.
@@ -68,10 +69,11 @@ pub async fn delete_session(
   session_id: &str,
 ) -> Result<(), RunnerError> {
   let base = server_url.trim_end_matches('/');
-  let url = format!("{base}/session/{session_id}");
+  let url = format!("{base}/session");
 
   let response = client
     .delete(&url)
+    .query(&[("sessionId", session_id)])
     .bearer_auth(token)
     .send()
     .await

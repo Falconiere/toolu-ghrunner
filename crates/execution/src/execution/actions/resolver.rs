@@ -186,6 +186,46 @@ fn local_action_ref(uses: &str) -> ActionRef {
   }
 }
 
+/// Resolve a self-repository reference (`$/` or `$/path`) found in an action
+/// manifest to `owner/repo[/path]@ref` (upstream v2.338.0, `actions_self_repository`).
+///
+/// `parent` is the `(owner/repo, ref)` of the enclosing action, or the
+/// workflow repository and SHA when the enclosing action is local. Returns
+/// `Ok(None)` when `uses` is not a self-repository reference.
+///
+/// # Errors
+///
+/// `RunnerError::ActionResolution` for an `@ref` suffix (upstream's message)
+/// or when no parent identity is available.
+pub fn resolve_self_reference(
+  uses: &str,
+  parent: Option<(&str, &str)>,
+) -> Result<Option<String>, RunnerError> {
+  let Some(rest) = uses.strip_prefix("$/") else {
+    return Ok(None);
+  };
+  let path = rest.trim_start_matches('/');
+  if path.contains('@') {
+    return Err(RunnerError::ActionResolution(format!(
+      "Self-repository references do not support an '@ref' suffix. Actual '{uses}'"
+    )));
+  }
+  let Some((repo, git_ref)) = parent.filter(|(r, g)| !r.is_empty() && !g.is_empty()) else {
+    return Err(RunnerError::ActionResolution(
+      "Unable to resolve self-reference '$/'. This can occur when the server does not support \
+       this syntax, the feature flag is disabled, or the workflow context (repository/SHA) is \
+       unavailable."
+        .to_owned(),
+    ));
+  };
+  let path = path.trim_end_matches('/');
+  Ok(Some(if path.is_empty() {
+    format!("{repo}@{git_ref}")
+  } else {
+    format!("{repo}/{path}@{git_ref}")
+  }))
+}
+
 /// Resolve a batch of `uses:` references.
 ///
 /// Deduplicates remote refs and skips local refs.

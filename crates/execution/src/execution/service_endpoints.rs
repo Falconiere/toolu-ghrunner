@@ -35,6 +35,10 @@ pub struct ServiceUrls {
   /// Forwarded runtime token (the OAuth `AccessToken`), reused for the
   /// id-token request token.
   pub runtime_token: String,
+  /// `system.orchestrationId`, set only when job variable
+  /// `actions_set_orchestration_id_env_for_actions` is true; exported as
+  /// `ACTIONS_ORCHESTRATION_ID` to `run:` steps (upstream `ScriptHandler`).
+  pub orchestration_id: Option<String>,
 }
 
 /// Extract the service URLs + runtime token from the `SystemVssConnection`
@@ -78,6 +82,13 @@ pub fn extract_service_urls(msg: &AgentJobRequestMessage) -> ServiceUrls {
     .filter(|v| !v.is_empty())
     .map(str::to_owned);
 
+  let orchestration_id = variable("actions_set_orchestration_id_env_for_actions")
+    .is_some_and(is_true)
+    .then(|| variable("system.orchestrationId"))
+    .flatten()
+    .filter(|v| !v.is_empty())
+    .map(str::to_owned);
+
   ServiceUrls {
     results_url: data_value("ResultsServiceUrl"),
     runtime_url: data_value("PipelinesServiceUrl"),
@@ -86,6 +97,7 @@ pub fn extract_service_urls(msg: &AgentJobRequestMessage) -> ServiceUrls {
     cache_mode,
     id_token_request_url: data_value("GenerateIdTokenUrl"),
     runtime_token,
+    orchestration_id,
   }
 }
 
@@ -137,6 +149,16 @@ impl ServiceEnv {
 /// URL. A missing service URL logs a `WARN` and is skipped — the dependent
 /// action fails itself with GitHub's own error rather than failing the job.
 pub fn forward_env(u: &ServiceUrls) -> ServiceEnv {
+  let mut env = forward_service_env(u);
+  if let Some(id) = &u.orchestration_id {
+    env
+      .script
+      .push(("ACTIONS_ORCHESTRATION_ID".to_owned(), id.clone()));
+  }
+  env
+}
+
+fn forward_service_env(u: &ServiceUrls) -> ServiceEnv {
   // Without the runtime token, every forwarded service URL is uncredentialed:
   // emitting the `ACTIONS_*_URL` vars but not the token leaves actions in a
   // URLs-without-creds half-state that fails with an opaque 401/403. Omit the

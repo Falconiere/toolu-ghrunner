@@ -92,19 +92,26 @@ async fn one_build_emits_one_compatibility_identity_on_all_broker_requests() {
   let session_request = requests.first().expect("session request");
   assert_eq!(session_request.target, "/session");
   let body: serde_json::Value = serde_json::from_slice(&session_request.body).expect("JSON");
-  // Independently pinned to actions/runner cab9d1c / src/runnerversion.
+  // Independently pinned to actions/runner v2.338.2 / src/runnerversion.
   assert_eq!(
     body
       .pointer("/agent/version")
       .and_then(serde_json::Value::as_str),
-    Some("2.337.0")
+    Some("2.338.2")
+  );
+  assert_eq!(
+    body
+      .get("brokerSession")
+      .and_then(serde_json::Value::as_bool),
+    Some(true),
+    "v2.338.0 marks broker-created sessions"
   );
   for (request, cursor) in requests.iter().skip(1).take(2).zip(["0", "99"]) {
     assert!(request.target.starts_with("/message?"));
     let params = query(request);
     assert_eq!(
       params.get("runnerVersion").map(String::as_str),
-      Some("2.337.0")
+      Some("2.338.2")
     );
     assert_eq!(
       params.get("disableUpdate").map(String::as_str),
@@ -119,10 +126,22 @@ async fn one_build_emits_one_compatibility_identity_on_all_broker_requests() {
   assert!(ack.target.starts_with("/acknowledge?"));
   assert_eq!(
     query(ack).get("runnerVersion").map(String::as_str),
-    Some("2.337.0")
+    Some("2.338.2")
   );
   assert_eq!(
     query(ack).get("runnerRequestId").map(String::as_str),
     Some("version-probe")
   );
+}
+
+#[tokio::test]
+async fn delete_session_sends_owned_session_id_as_query() {
+  let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+  let base = format!("http://{}", listener.local_addr().expect("address"));
+  let recorder = tokio::spawn(async move { capture(&listener).await });
+  let client = reqwest::Client::new();
+  // The recorder closes without replying; only the outgoing request matters.
+  let _ = wire::net::delete_session(&client, &base, "token", "sess-1").await;
+  let request = recorder.await.expect("recorder task");
+  assert_eq!(request.target, "/session?sessionId=sess-1");
 }

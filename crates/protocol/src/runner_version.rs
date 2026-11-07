@@ -2,8 +2,7 @@
 
 /// Official runner baseline advertised in session, poll and acknowledgement.
 ///
-/// Release v2.337.0 is `397b032cbf865e9c3ddfab89d533ec19325e1273`.
-/// The epic's later source snapshot `cab9d1c` retains that version in
-/// `src/runnerversion`. Bump only with compatibility revalidation; see
+/// Release v2.338.2 is `d1eb12d4b115c301201de27d667284e1a80f2ab5`.
+/// Delta from v2.337.0 reviewed in `docs/runner-updates.md`. Bump only with compatibility revalidation; see
 /// `docs/runner-updates.md`. This does not guarantee GitHub queue eligibility.
-pub const COMPATIBILITY_VERSION: &str = "2.337.0";
+pub const COMPATIBILITY_VERSION: &str = "2.338.2";

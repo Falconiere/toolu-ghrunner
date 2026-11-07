@@ -106,7 +106,7 @@ async fn removing_one_of_two_registrations_stops_only_its_loop() -> TestResult<(
   );
   assert_eq!(count(&a, "DELETE", &unregister_path("a")).await?, 1);
   assert_eq!(
-    count(&a, "DELETE", "/session/").await?,
+    count(&a, "DELETE", "/session").await?,
     1,
     "the drained loop ended its session"
   );

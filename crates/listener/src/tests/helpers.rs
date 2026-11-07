@@ -212,7 +212,7 @@ async fn cleanup_session_has_no_sleep_and_issues_exactly_one_delete() {
     "expected a DELETE request line, got: {request}"
   );
   assert!(
-    request.contains("/session/sess-1"),
+    request.contains("/session?sessionId=sess-1"),
     "expected the session URL in the request line, got: {request}"
   );
 }

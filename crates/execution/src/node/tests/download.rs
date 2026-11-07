@@ -282,8 +282,8 @@ async fn serve_flaky(
 fn sizeable_tarball() -> Vec<u8> {
   let filler = vec![b'x'; 256 * 1024];
   build_tarball(&[
-    ("node-v24.21.0-linux-x64/bin/node", b"#!fake-node", 0o755),
-    ("node-v24.21.0-linux-x64/filler", &filler, 0o644),
+    ("node-v24.22.1-linux-x64/bin/node", b"#!fake-node", 0o755),
+    ("node-v24.22.1-linux-x64/filler", &filler, 0o644),
   ])
 }
 

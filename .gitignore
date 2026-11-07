@@ -22,3 +22,4 @@ _diag/
 
 # Staged darwin/arm64 binary for the macOS carrier image (Dockerfile.macos).
 dist/
+__pycache__/

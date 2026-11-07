@@ -1,11 +1,13 @@
 # Runner versions and updates
 
-Toolu advertises **2.337.0** as its GitHub protocol compatibility target in
+Toolu advertises **2.338.2** as its GitHub protocol compatibility target in
 session creation, idle and busy broker polls, and job acknowledgement. The source
 is `protocol::runner_version::COMPATIBILITY_VERSION`, pinned to the
-[official v2.337.0 release](https://github.com/actions/runner/tree/397b032cbf865e9c3ddfab89d533ec19325e1273).
-The epic's later [source-inspection snapshot](https://github.com/actions/runner/blob/cab9d1c3901e45c7705889c4f88284fdd93f4ae5/src/runnerversion)
-still reports the same version; it is distinct from the release commit.
+[official v2.338.2 release](https://github.com/actions/runner/tree/v2.338.2)
+(`d1eb12d4b115c301201de27d667284e1a80f2ab5`). The earlier 2.337.0 baseline
+([release](https://github.com/actions/runner/tree/v2.337.0),
+inspection snapshot `cab9d1c`) is an ancestor; `docs/compat-reference-103.json`
+stays attributed to 2.337.0, the version its paired run used.
 This replaces the invented `3.0.0` identity and the inconsistent acknowledgement
 version. It is a compatibility target, not a claim that toolu implements every
 feature of that runner or that GitHub guarantees queue eligibility.
@@ -83,3 +85,19 @@ the affected fleet, deploy a validated toolu release and run the canary again.
 If no validated toolu release is available, route work to a supported, updated
 official runner while the release maintainer resolves compatibility. Repeated
 reminting or raising the compatibility number is not evidence of recovery.
+
+## Delta table: v2.337.0 to v2.338.2 (#241)
+
+Source: `gh api repos/actions/runner/compare/v2.337.0...v2.338.2` (41 commits,
+44 files). Dependency, Docker/Buildx, CodeQL and CI bumps change no runner
+behavior and are omitted. Live pairing at this pin is #251.
+
+| Upstream change | Toolu status | Evidence |
+| --- | --- | --- |
+| [#4669](https://github.com/actions/runner/pull/4669) `$/` self-repository refs in action manifests (flag `actions_self_repository`) | Fixed for nested composite `uses:`; a top-level `$/` step is listed in [known bugs](known-bugs.md) | `cargo test -p execution --test integration -- self_repository_test::`; `cargo test -p execution --test integration -- composite_self_repository_test::` |
+| [#4743](https://github.com/actions/runner/pull/4743) owned session id on broker session delete | Fixed: create sends `brokerSession: true`; delete is `DELETE /session?sessionId=<id>` | `cargo test -p wire --test integration -- runner_version::` (`delete_session_sends_owned_session_id_as_query`, `one_build_emits_one_compatibility_identity_on_all_broker_requests`) |
+| [#4753](https://github.com/actions/runner/pull/4753) broker WebSocket probes | Not applicable: temporary telemetry, only when the job sets `system.runner.brokerwebsocketprobeurl`; never changes a job result | Source review |
+| [#4752](https://github.com/actions/runner/pull/4752) node24 for internal operations | Not applicable: the official listener's own bundled Node; toolu runs no internal Node | Source review |
+| [#4685](https://github.com/actions/runner/pull/4685) Node 20 removal date | Already `September 23rd, 2026` (`node/migration.rs`) | `cargo test -p execution --test integration -- node_migration_test::` |
+| `ACTIONS_ORCHESTRATION_ID` (`ScriptHandler`) | Fixed: `run:` steps get `system.orchestrationId` when `actions_set_orchestration_id_env_for_actions` is true | `cargo test -p toolu-runner --test integration -- gh_compat_forwarder::orchestration_id` |
+| 2.338.0 to 2.338.2 release commits | Version files only | Source review |
