@@ -14,18 +14,15 @@ use crate::gh_compat_node_action_file_commands::{seed_node, system_node};
 ///
 /// The action writes `KEY=VALUE` lines for every `ACTIONS_*` variable to `dump`
 /// (via rename, so a reader never sees a partial file), then — when `sentinel`
-/// is given — blocks until that file exists. `None` means no system `node`.
+/// is given — blocks until that file exists.
 pub fn install(
   workspace_root: &Path,
   data_dir: &Path,
   job_id: &str,
   dump: &Path,
   sentinel: Option<&Path>,
-) -> Result<Option<ActionStep>, Box<dyn Error>> {
-  let Some(node) = system_node() else {
-    eprintln!("SKIP: no system `node` on PATH; this test needs a real node runtime");
-    return Ok(None);
-  };
+) -> Result<ActionStep, Box<dyn Error>> {
+  let node = system_node().ok_or("this test needs a real `node` runtime on PATH")?;
   seed_node(data_dir, &node)?;
   let dir = workspace_root
     .join(shared::paths::sanitize_job_id(job_id))
@@ -44,5 +41,5 @@ pub fn install(
   std::fs::write(dir.join("main.js"), main)?;
   let mut step = ActionStep::with_ref_type("node-probe", "repository");
   step.reference.name = Some("./node-probe".to_owned());
-  Ok(Some(step))
+  Ok(step)
 }

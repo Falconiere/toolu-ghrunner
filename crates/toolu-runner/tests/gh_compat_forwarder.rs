@@ -353,7 +353,12 @@ async fn probe_node_action(env: ServiceEnv) -> TestResult<Option<EnvMap>> {
     let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
       .join("tests/fixtures/service_env_action")
       .join(name);
-    std::fs::copy(src, action_dir.join(name))?;
+    // Unfilled markers would make the probe write a stray file and wait for a
+    // sentinel, so blank them (no dump file, no hold).
+    let body = std::fs::read_to_string(src)?
+      .replace("__DUMP__", "")
+      .replace("__SENTINEL__", "");
+    std::fs::write(action_dir.join(name), body)?;
   }
   seed_node(&data_dir, &node)?;
   let config = RunnerConfig {
@@ -598,6 +603,75 @@ async fn node_action_saves_and_restores_exact_bytes_over_v2_with_no_v1_request()
   assert!(
     !paths.iter().any(|p| p.contains("_apis/artifactcache")),
     "no v1 request allowed: {paths:?}"
+  );
+  Ok(())
+}
+
+#[tokio::test]
+async fn composite_run_step_gets_only_the_oidc_pair() -> TestResult<()> {
+  use execution::execution::actions::prefetch::ActionFetcher;
+  use execution::execution::context::ExecutionContext;
+  use execution::execution::steps_runner::{JobRun, run_steps};
+
+  let dir = tempfile::tempdir()?;
+  let (workspace, data_dir) = (dir.path().join("work"), dir.path().join("data"));
+  let action_dir = workspace.join("comp");
+  std::fs::create_dir_all(&action_dir)?;
+  std::fs::create_dir_all(&data_dir)?;
+  std::fs::write(
+    action_dir.join("action.yml"),
+    "name: comp\ndescription: probe\nruns:\n  using: composite\n  steps:\n    - shell: bash\n      run: echo \"COMP oidc=$ACTIONS_ID_TOKEN_REQUEST_URL token=[$ACTIONS_RUNTIME_TOKEN] results=[$ACTIONS_RESULTS_URL]\"\n",
+  )?;
+  let msg = compat_job(None, None)?;
+  let mut ctx = ExecutionContext::with_masker(Arc::new(Mutex::new(SecretMasker::new())));
+  ctx.set_service_env(forward_env(&extract_service_urls(&msg)));
+  let (tx, mut rx) = mpsc::channel::<RunnerEvent>(1024);
+  let collector = tokio::spawn(async move {
+    let mut lines = Vec::new();
+    while let Some(ev) = rx.recv().await {
+      if let RunnerEvent::Log { line, .. } = ev {
+        lines.push(line);
+      }
+    }
+    lines
+  });
+  let mut step = ActionStep::with_ref_type("comp", "repository");
+  step.reference.name = Some("./comp".to_owned());
+  let config = RunnerConfig {
+    data_dir,
+    workspace_root: workspace.clone(),
+    cgroup_path: None,
+    ..RunnerConfig::default()
+  };
+  let spec = execution::execution::job_spec::JobSpec::default();
+  let http = reqwest::Client::new();
+  let fetcher = ActionFetcher::new(&shared::NetworkConfig::default())?;
+  let conclusion = run_steps(
+    &[step],
+    &mut ctx,
+    &tx,
+    CancellationToken::new(),
+    &JobRun {
+      workspace: &workspace,
+      config: &config,
+      spec: &spec,
+      shadow: None,
+      http: &http,
+      fetcher: &fetcher,
+    },
+  )
+  .await?;
+  drop(tx);
+  let lines = collector.await?;
+  assert_eq!(conclusion, shared::Conclusion::Success, "log: {lines:?}");
+  let line = lines
+    .iter()
+    .find(|l| l.starts_with("COMP "))
+    .ok_or("composite line missing")?;
+  assert!(line.contains("oidc=https://"), "{line}");
+  assert!(
+    line.contains("token=[]") && line.contains("results=[]"),
+    "{line}"
   );
   Ok(())
 }
