@@ -16,7 +16,9 @@ pub mod node;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use shared::{AgentJobRequestMessage, Conclusion, LogStream, RunnerConfig, RunnerEvent};
+use shared::{
+  AgentJobRequestMessage, Conclusion, LogStream, RunnerConfig, RunnerError, RunnerEvent,
+};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -83,36 +85,7 @@ impl Runner {
         Ok(teardown) => teardown,
         Err(err) => {
           tracing::error!(error = %err, "job execution failed");
-          // Surface the failure in the GitHub job log too — `tracing::error!`
-          // above only reaches the local diag log — before the completion
-          // event, and report the real job id so the run/step actually
-          // resolves out of "in_progress" on GitHub's side.
-          // These are the last-resort diagnostics for a dead job, so a
-          // closed channel is worth a warn rather than the crate's usual
-          // silent best-effort send.
-          if err_tx
-            .send(RunnerEvent::Log {
-              step_id: String::new(),
-              line: format!("##[error]{err}"),
-              stream: LogStream::Stdout,
-            })
-            .await
-            .is_err()
-          {
-            tracing::warn!("event channel closed; job-failure log line was dropped");
-          }
-          if err_tx
-            .send(RunnerEvent::JobCompleted {
-              job_id,
-              conclusion: Conclusion::Failure,
-              outputs: HashMap::new(),
-              environment_url: None,
-            })
-            .await
-            .is_err()
-          {
-            tracing::warn!("event channel closed; job-failure completion event was dropped");
-          }
+          report_job_failure(&err_tx, job_id, &err).await;
           return;
         },
       };
@@ -134,5 +107,33 @@ impl Runner {
   /// Borrow the shared secret masker.
   pub fn masker(&self) -> &Arc<Mutex<shared::SecretMasker>> {
     &self.masker
+  }
+}
+
+/// Surface an engine error in the job stream so the remote job can finish.
+async fn report_job_failure(tx: &mpsc::Sender<RunnerEvent>, job_id: String, err: &RunnerError) {
+  // These are last-resort diagnostics, so a closed channel merits a warning.
+  if tx
+    .send(RunnerEvent::Log {
+      step_id: String::new(),
+      line: format!("##[error]{err}"),
+      stream: LogStream::Stdout,
+    })
+    .await
+    .is_err()
+  {
+    tracing::warn!("event channel closed; job-failure log line was dropped");
+  }
+  if tx
+    .send(RunnerEvent::JobCompleted {
+      job_id,
+      conclusion: Conclusion::Failure,
+      outputs: HashMap::new(),
+      environment_url: None,
+    })
+    .await
+    .is_err()
+  {
+    tracing::warn!("event channel closed; job-failure completion event was dropped");
   }
 }

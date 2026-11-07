@@ -94,19 +94,33 @@ pub(super) async fn execute_with_renewal(
   let mut cfg = build_fwd_config(ctx, rs_token, plan_id, job_msg, setup_lines, live_log_tx);
   cfg.setup_id = Some(setup_id);
 
+  let outcome = run_forwarded_job(ctx, job_msg, &collector, cfg, job_cancel).await;
+  renewal_cancel.cancel();
+  let _ = renewal_handle.await;
+
+  build_job_execution(
+    outcome,
+    &collector,
+    outage_tripped.load(Ordering::SeqCst),
+    live_log_handle,
+  )
+  .await
+}
+
+async fn build_job_execution(
+  outcome: ForwarderOutcome,
+  collector: &StepCollector,
+  outage_tripped: bool,
+  live_log_handle: Option<tokio::task::JoinHandle<()>>,
+) -> JobExecution {
   let ForwarderOutcome {
     conclusion,
     outputs,
     environment_url,
     job_log_upload,
-  } = run_forwarded_job(ctx, job_msg, &collector, cfg, job_cancel).await;
-  renewal_cancel.cancel();
-  let _ = renewal_handle.await;
-
-  let (conclusion, annotations) = super::outage_override::apply_outage_override(
-    conclusion,
-    outage_tripped.load(Ordering::SeqCst),
-  );
+  } = outcome;
+  let (conclusion, annotations) =
+    super::outage_override::apply_outage_override(conclusion, outage_tripped);
   let steps = collector.collected_results().await;
   JobExecution {
     conclusion,
@@ -439,63 +453,76 @@ fn spawn_event_forwarder(
     let setup_lines = std::mem::take(&mut cfg.setup_lines);
     let mut state = ForwarderState::new(&cfg, job_log);
     setup_forwarding::start(&mut state, &cfg, &fwd_collector, &fwd_tx, setup_lines).await;
-    while let Some(mut event) = events_rx.recv().await {
-      setup_forwarding::before_event(&mut state, &cfg, &fwd_collector, &fwd_tx, &mut event).await;
-      if let RunnerEvent::JobCompleted {
-        conclusion: c,
-        outputs,
-        environment_url,
-        ..
-      } = &event
-      {
-        state.conclusion = Some(*c);
-        state.outputs = outputs.clone();
-        state.environment_url.clone_from(environment_url);
-      }
-      if let RunnerEvent::InfrastructureError { message, .. } = &mut event {
-        *message = mask_line(&cfg.masker, message);
-      }
-      fwd_collector.record(&event).await;
-      handle_event_arm(&mut state, &cfg, &event).await;
-      report_step(&mut state, &event);
-      if fwd_tx.send(ListenerEvent::Runner(event)).await.is_err() {
-        break;
-      }
-    }
-    setup_forwarding::finish(
-      &mut state,
-      &cfg,
-      &fwd_collector,
-      &fwd_tx,
-      Conclusion::Failure,
-    )
-    .await;
-    // Ordering is load-bearing: the per-step drain backfills the log URLs
-    // `report_completion` ships, so it MUST finish first; the combined
-    // job-log upload feeds nothing in that payload, so it only gets spawned.
-    drain_step_uploads(&mut state, &fwd_collector).await;
-    let job_log_upload = spawn_job_log_upload(&mut state, &cfg);
-    if let Some(queue) = state.summary_queue.take() {
-      queue.drain().await;
-    }
-    // Close the queue and wait (bounded) for its final flush BEFORE the
-    // conclusion is sent — otherwise `complete_job` could race a step's
-    // last-known status still sitting in the queue.
-    if let Some(queue) = state.step_queue.take() {
-      queue.drain().await;
-    }
-    if outcome_tx
-      .send(ForwarderOutcome {
-        conclusion: final_conclusion(&state),
-        outputs: state.outputs,
-        environment_url: state.environment_url,
-        job_log_upload,
-      })
-      .is_err()
-    {
-      tracing::warn!("event forwarder conclusion receiver dropped before delivery");
-    }
+    forward_events(&mut events_rx, &mut state, &cfg, &fwd_collector, &fwd_tx).await;
+    finish_forwarder(state, &cfg, &fwd_collector, &fwd_tx, outcome_tx).await;
   })
+}
+
+async fn forward_events(
+  events_rx: &mut mpsc::Receiver<RunnerEvent>,
+  state: &mut ForwarderState,
+  cfg: &FwdConfig,
+  collector: &StepCollector,
+  tx: &mpsc::Sender<ListenerEvent>,
+) {
+  while let Some(mut event) = events_rx.recv().await {
+    setup_forwarding::before_event(state, cfg, collector, tx, &mut event).await;
+    if let RunnerEvent::JobCompleted {
+      conclusion: c,
+      outputs,
+      environment_url,
+      ..
+    } = &event
+    {
+      state.conclusion = Some(*c);
+      state.outputs.clone_from(outputs);
+      state.environment_url.clone_from(environment_url);
+    }
+    if let RunnerEvent::InfrastructureError { message, .. } = &mut event {
+      *message = mask_line(&cfg.masker, message);
+    }
+    collector.record(&event).await;
+    handle_event_arm(state, cfg, &event).await;
+    report_step(state, &event);
+    if tx.send(ListenerEvent::Runner(event)).await.is_err() {
+      break;
+    }
+  }
+}
+
+async fn finish_forwarder(
+  mut state: ForwarderState,
+  cfg: &FwdConfig,
+  collector: &StepCollector,
+  tx: &mpsc::Sender<ListenerEvent>,
+  outcome_tx: oneshot::Sender<ForwarderOutcome>,
+) {
+  setup_forwarding::finish(&mut state, cfg, collector, tx, Conclusion::Failure).await;
+  // Ordering is load-bearing: the per-step drain backfills the log URLs
+  // `report_completion` ships, so it MUST finish first; the combined
+  // job-log upload feeds nothing in that payload, so it only gets spawned.
+  drain_step_uploads(&mut state, collector).await;
+  let job_log_upload = spawn_job_log_upload(&mut state, cfg);
+  if let Some(queue) = state.summary_queue.take() {
+    queue.drain().await;
+  }
+  // Close the queue and wait (bounded) for its final flush BEFORE the
+  // conclusion is sent — otherwise `complete_job` could race a step's
+  // last-known status still sitting in the queue.
+  if let Some(queue) = state.step_queue.take() {
+    queue.drain().await;
+  }
+  if outcome_tx
+    .send(ForwarderOutcome {
+      conclusion: final_conclusion(&state),
+      outputs: state.outputs,
+      environment_url: state.environment_url,
+      job_log_upload,
+    })
+    .is_err()
+  {
+    tracing::warn!("event forwarder conclusion receiver dropped before delivery");
+  }
 }
 
 /// Dispatch the per-event side effects: spawn a step uploader on

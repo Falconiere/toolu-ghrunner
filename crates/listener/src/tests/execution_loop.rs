@@ -53,7 +53,7 @@ fn finished_lines(state: &mut ForwarderState) -> Vec<String> {
 /// AC-5 production-path guard: calls the REAL `forward_log_line` — the
 /// exact fn `handle_event_arm` invokes on every `RunnerEvent::Log` —
 /// and proves a registered secret never reaches either sink it fans
-/// out to: the combined job log (`state.all_job_lines`, sink 1) and the
+/// out to: the combined job spool (`state.job_log`, sink 1) and the
 /// per-step upload channel (`state.uploaders`, sink 2, the same channel
 /// `spawn_step_uploader` would hand to the log streamer). Deleting the
 /// `mask_line` call inside `forward_log_line` must fail this test —
