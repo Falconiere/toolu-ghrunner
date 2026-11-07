@@ -23,6 +23,7 @@ use super::step_timeout::{StepBounds, step_timeout_message, with_timeout_message
 use expressions::evaluator::EvalContext;
 
 #[path = "step_errors.rs"]
+/// Reports unrecoverable step errors while preserving their timeline identity.
 pub(crate) mod step_errors;
 use step_errors::report_step_error;
 mod script_support;
@@ -110,7 +111,7 @@ pub async fn run_steps(
     shadow: run.shadow,
     http: run.http,
     fetcher: run.fetcher,
-    first_post_number: post_number(2, steps.len()),
+    first_post_number: post_number(2u32.saturating_add(ctx.docker_setup_count), steps.len()),
   };
 
   let mut job_state = JobState {
@@ -186,7 +187,7 @@ async fn run_main_steps(
     }
 
     // Step 1 is "Set up job" (reported by setup_step.rs). Workflow steps start at 2.
-    let step_number = u32::try_from(index + 2).unwrap_or(0);
+    let step_number = post_number(2u32.saturating_add(ctx.docker_setup_count), index);
     let prior = super::action_metadata::ActionMetadata::capture(ctx);
     super::action_metadata::set_name(ctx, step);
     super::action_metadata::clear_repository(ctx);
@@ -249,7 +250,17 @@ async fn run_single_step(
     return Ok(Conclusion::Success);
   }
   start_step(step, &name, step_number, events).await;
+  execute_started_step(step, &name, ctx, events, job, job_state).await
+}
 
+async fn execute_started_step(
+  step: &ActionStep,
+  name: &StepName,
+  ctx: &mut ExecutionContext,
+  events: &mpsc::Sender<RunnerEvent>,
+  job: &JobCtx<'_>,
+  job_state: &mut JobState,
+) -> Result<Conclusion, RunnerError> {
   let watch = job.cancellation.watch_step(
     ctx.eval_context(),
     step.condition.as_deref().unwrap_or("success()"),
@@ -329,42 +340,65 @@ async fn execute_step(
 ) -> Result<(Conclusion, HashMap<String, String>), RunnerError> {
   let is_run = step.is_run_step();
   tracing::info!(step_id = step.id.as_str(), is_run, "executing step");
-
-  if !is_run {
-    let run = ActionRun {
-      events,
-      workspace: job.workspace,
-      config: job.config,
-      bounds,
-      http: job.http,
-      fetcher: job.fetcher,
-      log_step_id: &step.id,
-    };
-    let action_result = execute_action(step, ctx, &run, &mut job_state.depth).await;
-    for nested_post in ctx.take_nested_posts() {
-      job_state.posts.register(nested_post);
-    }
-    let ActionOutcome {
-      conclusion,
-      post,
-      outputs,
-    } = match action_result {
-      Err(RunnerError::Cancelled) => return Ok((Conclusion::Cancelled, HashMap::new())),
-      other => other?,
-    };
-    if let Some(name) = step.expression_name() {
-      for (key, value) in &outputs {
-        ctx.set_step_output(name, key, value);
-      }
-    }
-    // Register the action's `post` entrypoint to drain LIFO at job end.
-    if let Some(post_step) = post {
-      job_state.posts.register(post_step);
-    }
-    return Ok((conclusion, outputs));
+  if is_run {
+    run_script_step(step, ctx, events, job, bounds).await
+  } else {
+    run_action_step(step, ctx, events, job, job_state, bounds).await
   }
+}
 
-  run_script_step(step, ctx, events, job, bounds).await
+async fn run_action_step(
+  step: &ActionStep,
+  ctx: &mut ExecutionContext,
+  events: &mpsc::Sender<RunnerEvent>,
+  job: &JobCtx<'_>,
+  job_state: &mut JobState,
+  bounds: &StepBounds,
+) -> Result<(Conclusion, HashMap<String, String>), RunnerError> {
+  let run = ActionRun {
+    events,
+    workspace: job.workspace,
+    config: job.config,
+    bounds,
+    http: job.http,
+    fetcher: job.fetcher,
+    log_step_id: &step.id,
+  };
+  let action_result = execute_action(step, ctx, &run, &mut job_state.depth).await;
+  for nested_post in ctx.take_nested_posts() {
+    job_state.posts.register(nested_post);
+  }
+  let ActionOutcome {
+    conclusion,
+    post,
+    outputs,
+  } = match action_result {
+    Err(RunnerError::Cancelled) => return Ok((Conclusion::Cancelled, HashMap::new())),
+    other => other?,
+  };
+  Ok(save_action_result(
+    step, ctx, job_state, conclusion, post, outputs,
+  ))
+}
+
+fn save_action_result(
+  step: &ActionStep,
+  ctx: &mut ExecutionContext,
+  job_state: &mut JobState,
+  conclusion: Conclusion,
+  post: Option<PostStep>,
+  outputs: HashMap<String, String>,
+) -> (Conclusion, HashMap<String, String>) {
+  if let Some(name) = step.expression_name() {
+    for (key, value) in &outputs {
+      ctx.set_step_output(name, key, value);
+    }
+  }
+  // Register the action's `post` entrypoint to drain LIFO at job end.
+  if let Some(post_step) = post {
+    job_state.posts.register(post_step);
+  }
+  (conclusion, outputs)
 }
 
 /// A `run:` step's inputs, all resolved against ONE per-step `EvalContext`
@@ -426,8 +460,8 @@ async fn render_scoped_script_step(
   })
 }
 
-/// Run a `run:` step: build env + file commands, execute the shell, dispatch
-/// stdout workflow commands, and merge step outputs.
+/// Run a `run:` step: build env/files, execute the shell, dispatch output,
+/// collect summaries and shadow observations, then merge step outputs.
 async fn run_script_step(
   step: &ActionStep,
   ctx: &mut ExecutionContext,
@@ -443,13 +477,7 @@ async fn run_script_step(
     working_dir,
   } = render_script_step(step, ctx, job).await?;
 
-  emit_log(
-    events,
-    &step.id,
-    &format!("##[group]Run {}", interpolated.trim()),
-  )
-  .await;
-  emit_log(events, &step.id, "##[endgroup]").await;
+  emit_script_header(events, &step.id, &interpolated).await;
   // Own the cgroup path so `params` doesn't borrow `ctx` — the concurrent
   // dispatcher needs `&mut ctx` while the child runs.
   let cgroup = ctx.cgroup_path().map(Path::to_path_buf);
@@ -471,9 +499,6 @@ async fn run_script_step(
     cancel: &bounds.cancel,
   };
 
-  // Shadow observation brackets the step: fingerprint the workspace before it
-  // runs and record a would-hit / false-hit after. Observation only — it never
-  // changes execution and never serves a cached result.
   let pre = shadow_pre(job)?;
   let execution = run_and_dispatch_script(&job.handler, &params, step, ctx, events).await;
   super::step_summary::collect(&file_cmds.summary_path, &step.id, &step.id, ctx, events).await;
@@ -483,6 +508,11 @@ async fn run_script_step(
   emit_status(events, &step.id, result).await;
   let (outputs, failed) = merge_step_outputs(step, stdout_outputs, &file_cmds, ctx, events).await;
   Ok((merge_command_result(result, failed), outputs))
+}
+
+async fn emit_script_header(events: &mpsc::Sender<RunnerEvent>, id: &str, script: &str) {
+  emit_log(events, id, &format!("##[group]Run {}", script.trim())).await;
+  emit_log(events, id, "##[endgroup]").await;
 }
 
 /// Emit the C#-runner-style "Process completed with exit code N." trailer.

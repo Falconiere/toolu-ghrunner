@@ -34,6 +34,7 @@ pub(crate) mod context_build;
 /// Tracks composite-action nesting depth against `MAX_COMPOSITE_DEPTH`.
 pub mod depth_tracker;
 mod docker_action;
+mod docker_prepare;
 mod docker_stage;
 mod environment_url;
 /// Parses the `GITHUB_ENV` / `GITHUB_PATH` / `GITHUB_OUTPUT` / `GITHUB_STATE` file commands.
@@ -54,6 +55,7 @@ pub mod job_teardown;
 mod node_stage;
 /// OIDC token service for runner execution.
 pub mod oidc;
+/// Sweeps tracked orphan processes before the job completion event.
 pub(crate) mod orphan_cleanup;
 mod post_drain;
 /// Bearer-token validation shared across the local OIDC/artifact/cache services.

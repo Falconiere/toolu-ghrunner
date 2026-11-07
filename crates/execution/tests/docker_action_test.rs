@@ -375,3 +375,62 @@ async fn docker_registry_action_rejects_non_linux_without_running_host_code() ->
   );
   Ok(())
 }
+
+#[cfg(not(target_os = "linux"))]
+#[tokio::test]
+async fn captured_docker_job_skips_setup_on_non_linux_and_fails_docker_step() -> TestResult {
+  let root = tempfile::tempdir()?;
+  let config = RunnerConfig {
+    data_dir: root.path().join("runner data"),
+    workspace_root: root.path().join("work root"),
+    workspace_gc_hours: 0,
+    workspace: shared::WorkspaceConfig {
+      mode: shared::WorkspaceMode::Fresh,
+      stable_gc_hours: 0,
+    },
+    ..RunnerConfig::default()
+  };
+  let mut job: AgentJobRequestMessage =
+    serde_json::from_str(include_str!("compat_103_docker_message.json"))?;
+  job.job_container = None;
+  let docker_id = job
+    .steps
+    .get(1)
+    .ok_or("captured Docker step missing")?
+    .id
+    .clone();
+  let runner = Runner::new(config, Arc::new(Mutex::new(SecretMasker::new())));
+  let mut receiver = runner.execute_job(job, CancellationToken::new());
+  let mut events = Vec::new();
+  while let Some(event) = receiver.recv().await {
+    events.push(event);
+  }
+
+  assert!(
+    events
+      .iter()
+      .any(|event| matches!(event, RunnerEvent::Log { line, .. }
+    if line == "Container action is only supported on Linux, skip pull and build docker images.")),
+    "{events:#?}"
+  );
+  assert!(
+    !events.iter().any(
+      |event| matches!(event, RunnerEvent::StepStarted { step_name, .. }
+    if step_name.starts_with("Pull ") || step_name.starts_with("Build "))
+    ),
+    "{events:#?}"
+  );
+  assert!(events.iter().any(|event| matches!(event, RunnerEvent::StepCompleted { step_id, conclusion: Conclusion::Failure, .. }
+    if step_id == &docker_id)), "{events:#?}");
+  assert!(
+    events.iter().any(|event| matches!(
+      event,
+      RunnerEvent::JobCompleted {
+        conclusion: Conclusion::Failure,
+        ..
+      }
+    )),
+    "{events:#?}"
+  );
+  Ok(())
+}

@@ -252,3 +252,38 @@ async fn step_report_queue_drain_returns_within_its_deadline_when_the_endpoint_i
     .await
     .expect("drain() must return on its own — it must not hang the caller");
 }
+
+#[test]
+fn step_report_terminal_failure_and_cancellation_keep_setup_metadata() {
+  for (conclusion, expected) in [
+    (
+      Conclusion::Failure,
+      wire::reporting::ReportConclusion::Failure,
+    ),
+    (
+      Conclusion::Cancelled,
+      wire::reporting::ReportConclusion::Cancelled,
+    ),
+  ] {
+    let mut meta = StepMetaMap::new();
+    let started = RunnerEvent::StepStarted {
+      step_id: "pull".to_owned(),
+      step_name: "Pull image".to_owned(),
+      step_number: 2,
+    };
+    let start = build_step_entry(&started, &mut meta).expect("started entry");
+    let completed = RunnerEvent::StepCompleted {
+      step_id: "pull".to_owned(),
+      conclusion,
+      outputs: StdHashMap::new(),
+    };
+    let end = build_step_entry(&completed, &mut meta).expect("completed entry");
+    assert_eq!(end.external_id, start.external_id);
+    assert_eq!(end.name, start.name);
+    assert_eq!(end.number, start.number);
+    assert_eq!(end.started_at, start.started_at);
+    assert_eq!(end.status, Status::Completed);
+    assert_eq!(end.conclusion, Some(expected));
+    assert!(end.completed_at.is_some());
+  }
+}

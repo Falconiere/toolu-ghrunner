@@ -976,7 +976,9 @@ These substitutions exercise production dispatch; they are not a new acquisition
 | Service-only host job: main/output and post reach nginx by alias; service/container network removed afterward | `docker_action_joins_service_only_network_through_main_and_post` | Production Linux replay across #74/#75 |
 | Invalid entrypoint, failed-main post, observed-start cancellation, owned-resource cleanup and unrelated-container survival | `entrypoint_failure_and_cancellation_fail_visibly_without_leaking_containers` | Production Linux replay |
 | Remote downloader, image reuse, pre/main/post state and cleanup after failed pre | `remote_repository_action_runs_pre_main_post_and_reuses_image` | Explicit post-push remote replay |
-| Non-Linux rejection | `execution/tests/docker_action_test.rs` platform-specific test | Default macOS suite |
+| Non-Linux rejection and setup skip message | `execution/tests/docker_action_test.rs` platform-specific tests, including captured #103 job | Default macOS suite |
+| Setup Pull/Build rows, duplicate images, outputs, local timing, failures and cancellation | `docker_action_linux_test` Docker setup replay tests | CI Docker replay; real Linux daemon |
+| Captured registry Pull row forwarding and terminal status | `listener` `setup_forwarding` and `step_report_queue` tests | Default suite |
 
 Run `bash scripts/test/docker_actions_linux.sh all` with a local Linux Docker
 daemon whose bind mounts can access `TOOLU_DOCKER_ACTIONS_LINUX_ROOT`. The carrier

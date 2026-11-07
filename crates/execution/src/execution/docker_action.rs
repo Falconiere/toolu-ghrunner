@@ -105,10 +105,20 @@ async fn prepare(
     .bounds
     .resolve_within_bounds(ActionContainer::connect(Arc::clone(ctx.masker())))
     .await?;
-  let image = s
-    .bounds
-    .resolve_within_bounds(runtime.prepare_image(image, s.action_dir, cache_key, &s.bounds.cancel))
-    .await?;
+  let image = if let Some(prepared) = super::docker_prepare::image_key(image, cache_key)
+    .and_then(|key| ctx.prepared_docker_images.get(&key))
+  {
+    prepared.clone()
+  } else {
+    s.bounds
+      .resolve_within_bounds(runtime.prepare_image(
+        image,
+        s.action_dir,
+        cache_key,
+        &s.bounds.cancel,
+      ))
+      .await?
+  };
   Ok((runtime, image))
 }
 

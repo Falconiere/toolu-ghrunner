@@ -10,7 +10,9 @@ const ARCHIVE: &[u8] = include_bytes!("../../../../tests/setup_action.tar.gz");
 const REVISION: &str = include_str!("../../../../tests/setup_action_commit.json");
 const SHA: &str = "8bcd8e1af3c095561f1043123848fc8b2db0f189";
 
-async fn archive_server() -> TestResult<(String, Arc<AtomicUsize>, tokio::task::JoinHandle<()>)> {
+async fn archive_server(
+  archive: &'static [u8],
+) -> TestResult<(String, Arc<AtomicUsize>, tokio::task::JoinHandle<()>)> {
   let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
   let url = format!("http://{}", listener.local_addr()?);
   let requests = Arc::new(AtomicUsize::new(0));
@@ -19,7 +21,7 @@ async fn archive_server() -> TestResult<(String, Arc<AtomicUsize>, tokio::task::
     &format!("/repos/actions/hello-world-docker-action/tarball/{SHA}"),
     axum::routing::get(move || {
       count.fetch_add(1, Ordering::SeqCst);
-      async { ARCHIVE }
+      async move { archive }
     }),
   );
   let router = router.route(
@@ -70,7 +72,7 @@ fn fetcher(
 
 #[tokio::test]
 async fn setup_action_real_archive_cold_warm_dedup_and_subpath() -> TestResult {
-  let (url, requests, server) = archive_server().await?;
+  let (url, requests, server) = archive_server(ARCHIVE).await?;
   let msg = captured_job(&url)?;
   let temp = tempfile::tempdir()?;
   let (tx, mut rx) = mpsc::channel(16);
@@ -143,7 +145,10 @@ async fn setup_action_failed_download_has_no_success_identity() -> TestResult {
 
 #[tokio::test]
 async fn setup_action_production_prefetch_emits_resolved_sha() -> TestResult {
-  let (api, requests, server) = archive_server().await?;
+  let (api, requests, server) = archive_server(include_bytes!(
+    "../../../../tests/setup_prefetch_action.tar.gz"
+  ))
+  .await?;
   let mut msg = captured_job(&api)?;
   let temp = tempfile::tempdir()?;
   let config = shared::RunnerConfig {

@@ -75,6 +75,10 @@ pub struct ExecutionContext {
   step_displays: HashMap<String, super::step_display::StepDisplay>,
   /// Number for the "Complete job" row: one past the last main/post row.
   pub(crate) next_step_number: Option<u32>,
+  /// Docker setup rows inserted between "Set up job" and workflow steps.
+  pub(crate) docker_setup_count: u32,
+  /// Images prepared before workflow steps, keyed by registry image or action directory.
+  pub(crate) prepared_docker_images: HashMap<String, String>,
   /// node20 → node24 migration flags and the actions each end-of-job warning lists.
   pub(crate) node_migration: crate::node::migration::NodeMigrationState,
   /// Host-step network export (`network::step_env(..).host`, #94): layered
@@ -137,6 +141,8 @@ impl ExecutionContext {
       file_table: Vec::new(),
       step_displays: HashMap::new(),
       next_step_number: None,
+      docker_setup_count: 0,
+      prepared_docker_images: HashMap::new(),
       node_migration: crate::node::migration::NodeMigrationState::default(),
       network_env: Vec::new(),
       service_env: super::service_endpoints::ServiceEnv::default(),

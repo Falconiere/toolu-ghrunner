@@ -396,13 +396,10 @@ struct JobBody<'a> {
   fetcher: &'a ActionFetcher,
 }
 
-/// Run the job-started hook, the step loop, the "Complete job" step (job
-/// outputs and environment URL), and the job-completed hook.
+/// Run the step loop, the "Complete job" step, and the job-completed hook.
 ///
-/// The job-started hook is a hard gate (its failure short-circuits to a failed
-/// job before any step); the job-completed hook is best-effort and never
-/// overrides the conclusion. Job `outputs:` are evaluated after main + post
-/// steps so step outputs are fully recorded.
+/// The job-started hook and Docker prepass have already succeeded. The
+/// job-completed hook is best-effort and never overrides the conclusion.
 async fn run_job_body(
   body: &JobBody<'_>,
   ctx: &mut ExecutionContext,
@@ -418,18 +415,6 @@ async fn run_job_body(
     http,
     fetcher,
   } = *body;
-
-  // Job-started hook is a hard gate: its failure fails the job before any step.
-  let started = run_job_hook(JobHookStage::Started, ctx, events, workspace, cancel).await?;
-  // A failed job-started hook concludes "Set up job" and ends the job there,
-  // before any row ("Complete job" included) starts.
-  if matches!(started, Some(Conclusion::Failure | Conclusion::Cancelled)) {
-    return Ok(JobResult {
-      conclusion: started.unwrap_or(Conclusion::Failure),
-      outputs: HashMap::new(),
-      environment_url: None,
-    });
-  }
 
   let run = JobRun {
     workspace,

@@ -1,15 +1,22 @@
 //! Runs an initialized job with one action fetcher and its acquired defaults.
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use shared::{AgentJobRequestMessage, RunnerConfig, RunnerError, RunnerEvent};
+use shared::{AgentJobRequestMessage, Conclusion, RunnerConfig, RunnerError, RunnerEvent};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use super::{JobBody, JobResult, build_shadow_observer, emit_job_started, run_job_body};
+use super::{
+  JobBody, JobResult, build_shadow_observer, emit_job_started, run_completed_hook_best_effort,
+  run_job_body,
+};
+use crate::execution::action_support::emit_log;
 use crate::execution::actions::prefetch::{ActionFetcher, spawn_prefetch};
 use crate::execution::context::ExecutionContext;
+use crate::execution::docker_prepare;
+use crate::execution::job_hooks::{JobHookStage, run_job_hook};
 use crate::execution::job_spec::JobSpec;
 
 /// Inputs already prepared by the job entry point.
@@ -40,18 +47,7 @@ pub(super) async fn execute(
     workspace,
     http,
   } = inputs;
-  let fetcher = Arc::new(
-    ActionFetcher::for_job(
-      msg,
-      Arc::clone(ctx.masker()),
-      ctx
-        .cancellation
-        .as_ref()
-        .map_or_else(CancellationToken::new, |signal| signal.force.clone()),
-      &config.network,
-    )?
-    .with_events(events.clone()),
-  );
+  let fetcher = fetcher_for(msg, config, ctx, events)?;
   // A failed prefetch never fails the job; step-time resolution can retry.
   let prefetch_handle = spawn_prefetch(
     &msg.steps,
@@ -78,9 +74,93 @@ pub(super) async fn execute(
     http,
     fetcher: fetcher.as_ref(),
   };
-  let result = run_job_body(&body, ctx).await;
+  let result = match prepare_before_steps(&body, ctx).await {
+    Ok(Some(early)) => Ok(early),
+    Ok(None) => run_job_body(&body, ctx).await,
+    Err(error) => Err(error),
+  };
   // The fetch task may still be extracting into a private staging directory.
   // Aborting only stops future fetches; its atomic rename remains safe.
   prefetch_handle.abort();
   result
+}
+
+fn fetcher_for(
+  msg: &AgentJobRequestMessage,
+  config: &RunnerConfig,
+  ctx: &ExecutionContext,
+  events: &mpsc::Sender<RunnerEvent>,
+) -> Result<Arc<ActionFetcher>, RunnerError> {
+  let force = ctx
+    .cancellation
+    .as_ref()
+    .map_or_else(CancellationToken::new, |signal| signal.force.clone());
+  Ok(Arc::new(
+    ActionFetcher::for_job(msg, Arc::clone(ctx.masker()), force, &config.network)?
+      .with_events(events.clone()),
+  ))
+}
+
+/// Keep job-started hooks and image setup ahead of every workflow step.
+async fn prepare_before_steps(
+  body: &JobBody<'_>,
+  ctx: &mut ExecutionContext,
+) -> Result<Option<JobResult>, RunnerError> {
+  let started = run_job_hook(
+    JobHookStage::Started,
+    ctx,
+    body.events,
+    body.workspace,
+    body.cancel,
+  )
+  .await?;
+  if matches!(started, Some(Conclusion::Failure | Conclusion::Cancelled)) {
+    return Ok(Some(JobResult {
+      conclusion: started.unwrap_or(Conclusion::Failure),
+      outputs: HashMap::new(),
+      environment_url: None,
+    }));
+  }
+  let result = docker_prepare::prepare(
+    &body.msg.steps,
+    docker_prepare::Discovery {
+      fetcher: body.fetcher,
+      client: body.http,
+      data_dir: &body.config.data_dir,
+    },
+    ctx,
+    body.events,
+    body.cancel,
+  )
+  .await;
+  let Err(error) = result else { return Ok(None) };
+  Ok(Some(finish_preparation_error(body, ctx, error).await))
+}
+
+async fn finish_preparation_error(
+  body: &JobBody<'_>,
+  ctx: &mut ExecutionContext,
+  error: RunnerError,
+) -> JobResult {
+  let conclusion = if matches!(error, RunnerError::Cancelled) || body.cancel.is_cancelled() {
+    ctx.record_job_cancelled();
+    Conclusion::Cancelled
+  } else {
+    ctx.record_step_failure();
+    Conclusion::Failure
+  };
+  if conclusion != Conclusion::Cancelled {
+    emit_log(
+      body.events,
+      shared::SETUP_STEP_ID,
+      &format!("##[error]{error}"),
+    )
+    .await;
+  }
+  run_completed_hook_best_effort(ctx, body.events, body.workspace, body.cancel).await;
+  JobResult {
+    conclusion,
+    outputs: HashMap::new(),
+    environment_url: None,
+  }
 }
