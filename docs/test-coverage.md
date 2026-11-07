@@ -342,7 +342,7 @@ classifier. They do not claim an unknown control was captured from GitHub.
 | --- | --- | --- |
 | 77-S1 | `message_types`, `broker_poll_parser`, and `broker_control` preserve a future type's original envelope and choose the unknown route without decrypting an opaque body. | An actual unknown broker response, subsequent live poll cursor, and following job acquisition remain unverified. |
 | 77-S2 | `broker_control` checks repeated/older IDs against the listener cursor rule. Existing `early_ack` coverage retains job-only acknowledgement. | Broker redelivery and acknowledgement failure against GitHub remain unverified. |
-| 77-S3 | Production refresh signs a JIT assertion, bounds transient exchange attempts, and publishes only a nonempty successful token. `cargo check -p listener --lib --tests` verifies code integration. | No real `ForceTokenRefresh` message or OAuth fault sequence is available; live rotation, retry and cancellation remain unverified. |
+| 77-S3 | Production refresh signs a JIT assertion against a loopback OAuth peer and publishes the new token, which the next broker poll carries (`broker_control_refresh.rs`, #235). A transient failure is retried and the retry's success publishes; persistent failures keep retrying inside the 30 s budget without publishing; a peer that never answers is abandoned at the 10 s per-request deadline after exactly two attempts; a rejection, an empty grant and a cancellation mid-exchange all publish nothing and log no token. | No real `ForceTokenRefresh` message or OAuth fault sequence is available; live rotation, retry and cancellation remain unverified. |
 | 77-S4 | Capture-derived type variants distinguish `RunnerRefresh`, `AgentRefresh`, `RunnerRefreshConfig`, `HostedRunnerShutdown`, and future names. | Live control-message injection and the pinned reference-runner comparison remain unverified. |
 
 The full gate is `./tools/check.sh all`. On this macOS host, test binaries
@@ -412,12 +412,17 @@ provenance and hash are in `crates/execution/tests/defaults_run_evidence.json`.
 
 | Scenario | Current evidence | Evidence still needed |
 | --- | --- | --- |
-| 76-S1 | The captured `actions/checkout@v4` job selects its exact Launch path and sends `{action,version}`. Production prefetch and step execution share the acquired-job resolver and a revision-qualified cache. | A sanitized real Launch response and public/private/internal SHA, tag, branch, subpath, and local-action live runs. |
+| 76-S1 | The captured `actions/checkout@v4` job selects its exact Launch path and sends `{action,version}`. Production prefetch and step execution share the acquired-job resolver and a revision-qualified cache. A loopback Launch peer serving a real `resolution.url` + scoped token has its URL fetched with that token's Basic credential and its tarball extracted and run (#235, `action_infrastructure_test::launch_success_uses_the_served_url_token_and_runs_the_action`); the peer records two identical resolutions, one from the setup prefetch and one from the step that joins it. | Public/private/internal SHA, tag, branch, subpath, and local-action live runs. |
 | 76-S2 | A capture-derived host variant selects its GHES API URL; legacy discovery uses the action-download resource from connection data. | A real GHES and GitHub Connect job, including the returned cross-host archive URL, plus an older-server fallback run. |
-| 76-S3 | Local HTTP failure and redirect probes check 401/403 propagation, Basic archive auth on the source origin, and no auth at a different origin. | Live token expiry, rate limiting, transient failure, retry, and durable log redaction observations. |
+| 76-S3 | Local HTTP failure and redirect probes check 401/403 propagation, Basic archive auth on the source origin, and no auth at a different origin. Every archive status the issue names — 401, 403, 404, 429 and 500 — plus a body cut mid-stream and a corrupt tarball fail the job with a bounded number of archive requests (at most two, or four when the status is retried as an auth refresh) and leave no cache entry behind (#235, `action_infrastructure_test::archive_failure_statuses_are_bounded_and_leave_no_cache_entry`). | Live token expiry, rate limiting and durable log redaction observations. |
 | 76-S4 | Existing downloader tests cover streaming extraction, corrupt archive cleanup and concurrent staging; the new parser rejects traversal and the fetcher keys by resolved SHA. | Live moved-ref, cancellation, and same-revision concurrent execution observations. |
 
-Run `cargo test -p execution --test integration -- action_downloads_test::` and
+The scoped archive credential the Launch peer returns is registered with the
+`SecretMasker` and never reaches a log line in raw or Basic-encoded form
+(#235, `action_infrastructure_test::launch_scoped_token_is_masked_and_never_logged`),
+which is the hermetic half of 76/AC-4.
+
+Run `cargo test -p execution --test integration -- action_downloads_test:: action_infrastructure_test::` and
 `./tools/check.sh all`. Local newly built test binaries on the development
 macOS host have stalled in `_dyld_start` before Rust code executes. The
 GitHub Linux `ci` and `ci-macos` PR checks are the authorized gate evidence
@@ -1154,11 +1159,18 @@ and architecture come from the host, not hosted-runner image metadata.
   later failure and cancellation, distinct document IDs (83-S1–S4); a BOM-only
   file contributes nothing, a symlink at the summary path is rejected without
   uploading the file it points at, and a FIFO there is rejected without blocking.
-- `cargo test -p listener step_summary`: failed HTTP uploads still drain later
-  queued documents. This is failure-path coverage, not successful-service proof.
+- `cargo test -p listener step_summary`: a real two-step job registers a mask and
+  writes `$GITHUB_STEP_SUMMARY`; the document reaches a recording Results Service
+  through all three calls, carrying the job's backend identities, the masked
+  bytes and their byte count, in signing/PUT/metadata order (#235). A peer that
+  rejects the signing call writes no blob and leaves the conclusion `Success`;
+  seventeen documents against a stalled peer apply backpressure past the queue's
+  sixteen slots and still drain; a failed upload does not strand later ones.
 - `cargo test -p wire step_summary`: local TCP stubs cover a failed RPC, a
   malformed reply that never exposes values, and blob 503 retries without
-  leaking the signed URL. The successful three-call upload is not exercised.
+  leaking the signed URL, plus the successful three-call upload and the
+  inclusive `soft_size_limit` boundary, which refuses an oversized document
+  before any blob PUT (#235).
 - `cargo test -p observability step_summary`: journal includes only summary ID
   and byte count, never document text.
 - `.github/workflows/step-summary-83.yml`: opt-in GitHub.com live toolu/reference

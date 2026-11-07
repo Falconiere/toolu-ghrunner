@@ -26,6 +26,14 @@ conclusion or preventing later documents from being attempted. Bodies and signed
 URLs are excluded from summary diagnostics; the journal records only IDs and
 masked byte sizes. A missing Results Service endpoint skips uploads.
 
+The queue holds sixteen documents; a seventeenth blocks its producer rather
+than being dropped, and the pre-conclusion drain still uploads every one. A
+stalled Results Service therefore delays job completion by one `wire` request
+deadline per queued document: 30 s each, so about 8.5 minutes for seventeen
+documents stalling at the signed-URL or metadata RPC, and up to roughly 54
+minutes if the stall is in the blob PUT, which retries four times with up to
+12 s of backoff. Nothing in that window changes the job's conclusion.
+
 ## Verification and applicability
 
 The `execution::step_summary_tests` tests replay the sanitized GitHub acquisition

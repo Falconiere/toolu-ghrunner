@@ -5037,17 +5037,21 @@
         [
           "crates/execution/tests/action_downloads_test.rs",
           "denied_launch_resolution_does_not_fall_back_to_an_archive_api"
+        ],
+        [
+          "crates/execution/tests/action_infrastructure_test.rs",
+          "launch_success_uses_the_served_url_token_and_runs_the_action"
         ]
       ],
-      "command": "cargo test -p execution --test integration -- action_downloads_test::; cargo test -p execution --lib actions::",
+      "command": "cargo test -p execution --test integration -- action_downloads_test:: action_infrastructure_test::; cargo test -p execution --lib actions::",
       "lanes": {
         "hermetic": {
-          "status": "unverified",
-          "reason": "only Launch request selection and error propagation are tested; no test replays a successful Launch download-info response, so returned URL/token use is unverified"
+          "status": "passed",
+          "evidence": "gate"
         },
         "macos": {
-          "status": "unverified",
-          "reason": "same as the hermetic lane: Launch success response is never replayed"
+          "status": "passed",
+          "evidence": "gate"
         },
         "docker": {
           "status": "not-applicable",
@@ -5213,17 +5217,21 @@
         [
           "crates/execution/src/execution/actions/tests/setup_actions.rs",
           "setup_action_real_archive_cold_warm_dedup_and_subpath"
+        ],
+        [
+          "crates/execution/tests/action_infrastructure_test.rs",
+          "launch_scoped_token_is_masked_and_never_logged"
         ]
       ],
-      "command": "cargo test -p execution --test integration -- action_downloads_test::; cargo test -p execution --lib actions::",
+      "command": "cargo test -p execution --test integration -- action_downloads_test:: action_infrastructure_test::; cargo test -p execution --lib actions::",
       "lanes": {
         "hermetic": {
-          "status": "unverified",
-          "reason": "tests assert credentials are absent from error text and URLs absent from setup logs, but none asserts the SecretMasker masks the raw and Basic-encoded token in emitted logs"
+          "status": "passed",
+          "evidence": "gate"
         },
         "macos": {
-          "status": "unverified",
-          "reason": "same as the hermetic lane"
+          "status": "passed",
+          "evidence": "gate"
         },
         "docker": {
           "status": "not-applicable",
@@ -5398,17 +5406,21 @@
         [
           "crates/toolu-runner/tests/actions_resolver_test.rs",
           "parses_local_action"
+        ],
+        [
+          "crates/execution/tests/action_infrastructure_test.rs",
+          "launch_success_uses_the_served_url_token_and_runs_the_action"
         ]
       ],
-      "command": "cargo test -p execution --test integration -- action_downloads_test::; cargo test -p execution --lib actions::; cargo test -p toolu-runner --test integration -- actions_resolver_test::",
+      "command": "cargo test -p execution --test integration -- action_downloads_test:: action_infrastructure_test::; cargo test -p execution --lib actions::; cargo test -p toolu-runner --test integration -- actions_resolver_test::",
       "lanes": {
         "hermetic": {
-          "status": "unverified",
-          "reason": "public archive by branch/subdirectory and ref parsing are tested; private/internal actions, a successful Launch response and local-action-without-download are not"
+          "status": "passed",
+          "evidence": "gate"
         },
         "macos": {
-          "status": "unverified",
-          "reason": "same as the hermetic lane"
+          "status": "passed",
+          "evidence": "gate"
         },
         "docker": {
           "status": "not-applicable",
@@ -5518,17 +5530,21 @@
         [
           "crates/execution/src/execution/actions/tests/downloader.rs",
           "archive_redirect_validation_rejects_downgrades_and_embedded_credentials"
+        ],
+        [
+          "crates/execution/tests/action_infrastructure_test.rs",
+          "archive_failure_statuses_are_bounded_and_leave_no_cache_entry"
         ]
       ],
-      "command": "cargo test -p execution --test integration -- action_downloads_test::; cargo test -p execution --lib actions::",
+      "command": "cargo test -p execution --test integration -- action_downloads_test:: action_infrastructure_test::; cargo test -p execution --lib actions::",
       "lanes": {
         "hermetic": {
-          "status": "unverified",
-          "reason": "redirect-auth, 401/403 propagation and fail-closed redirects are tested; 404/429/5xx, retry guidance and live token expiry are not"
+          "status": "passed",
+          "evidence": "gate"
         },
         "macos": {
-          "status": "unverified",
-          "reason": "same as the hermetic lane"
+          "status": "passed",
+          "evidence": "gate"
         },
         "docker": {
           "status": "not-applicable",
@@ -5696,17 +5712,21 @@
         [
           "crates/listener/src/tests/broker_control.rs",
           "forced_refresh_is_distinct_from_future_types"
+        ],
+        [
+          "crates/listener/src/tests/broker_control_refresh.rs",
+          "forced_refresh_makes_the_next_broker_poll_use_the_new_token"
         ]
       ],
       "command": "cargo test -p listener --lib broker_control",
       "lanes": {
         "hermetic": {
-          "status": "unverified",
-          "reason": "only the classification route is tested; the token re-exchange itself (retry, timeout, cancellation, publication) has no executed test"
+          "status": "passed",
+          "evidence": "gate"
         },
         "macos": {
-          "status": "unverified",
-          "reason": "same as hermetic: re-exchange not exercised by any test"
+          "status": "passed",
+          "evidence": "gate"
         },
         "docker": {
           "status": "not-applicable",
@@ -6011,17 +6031,41 @@
         [
           "crates/listener/src/tests/broker_control.rs",
           "forced_refresh_is_distinct_from_future_types"
+        ],
+        [
+          "crates/listener/src/tests/broker_control_refresh.rs",
+          "forced_refresh_makes_the_next_broker_poll_use_the_new_token"
+        ],
+        [
+          "crates/listener/src/tests/broker_control_refresh.rs",
+          "a_transient_failure_is_retried_and_the_success_publishes"
+        ],
+        [
+          "crates/listener/src/tests/broker_control_refresh.rs",
+          "persistent_transient_failures_retry_inside_the_budget_without_publishing"
+        ],
+        [
+          "crates/listener/src/tests/broker_control_refresh.rs",
+          "a_stalled_token_endpoint_is_abandoned_at_its_deadline"
+        ],
+        [
+          "crates/listener/src/tests/broker_control_refresh.rs",
+          "rejection_and_an_empty_grant_never_publish_or_leak"
+        ],
+        [
+          "crates/listener/src/tests/broker_control_refresh.rs",
+          "cancellation_mid_exchange_exits_without_publishing"
         ]
       ],
       "command": "cargo test -p listener --lib broker_control",
       "lanes": {
         "hermetic": {
-          "status": "unverified",
-          "reason": "refresh success/fault/cancel sequences are not tested; only the route is"
+          "status": "passed",
+          "evidence": "gate"
         },
         "macos": {
-          "status": "unverified",
-          "reason": "same as hermetic: refresh behavior not exercised by any test"
+          "status": "passed",
+          "evidence": "gate"
         },
         "docker": {
           "status": "not-applicable",
@@ -8889,17 +8933,37 @@
         [
           "crates/listener/src/tests/step_summary.rs",
           "step_summary_failure_drains_later_documents"
+        ],
+        [
+          "crates/wire/src/net/tests/step_summary.rs",
+          "step_summary_success_signs_puts_and_publishes_metadata"
+        ],
+        [
+          "crates/wire/src/net/tests/step_summary.rs",
+          "step_summary_soft_size_limit_is_inclusive_and_fails_before_the_put"
+        ],
+        [
+          "crates/listener/src/tests/step_summary_job.rs",
+          "step_summary_real_job_document_is_uploaded_masked"
+        ],
+        [
+          "crates/listener/src/tests/step_summary_job.rs",
+          "step_summary_upload_failure_never_changes_the_job_result"
+        ],
+        [
+          "crates/listener/src/tests/step_summary.rs",
+          "step_summary_queue_drains_more_documents_than_its_slots"
         ]
       ],
       "command": "cargo test -p execution --lib step_summary && cargo test -p wire -p listener -p observability step_summary",
       "lanes": {
         "hermetic": {
-          "status": "unverified",
-          "reason": "masking and failure paths are covered, but no test drives a successful Results Service upload (wire/listener tests cover failures only)"
+          "status": "passed",
+          "evidence": "gate"
         },
         "macos": {
-          "status": "unverified",
-          "reason": "same suite as hermetic; successful upload path has no test"
+          "status": "passed",
+          "evidence": "gate"
         },
         "docker": {
           "status": "not-applicable",
@@ -10605,17 +10669,25 @@
         [
           "crates/listener/src/tests/multiline_mask.rs",
           "multiline_mask_real_job_reaches_every_local_sink"
+        ],
+        [
+          "crates/execution/tests/job_outputs_test.rs",
+          "nested_composite_mask_suppresses_a_later_job_output"
+        ],
+        [
+          "crates/execution/tests/environment_url_test.rs",
+          "nested_composite_mask_suppresses_the_environment_url"
         ]
       ],
-      "command": "cargo nextest run -p listener -E 'test(multiline_mask)' (or cargo test -p listener multiline_mask)",
+      "command": "cargo test -p listener --lib multiline_mask; cargo test -p execution --test integration -- job_outputs_test:: environment_url_test::",
       "lanes": {
         "hermetic": {
-          "status": "unverified",
-          "reason": "only the annotation sink is covered; summary, job-output and deployment-URL integration with newly masked lines is unverified (docs/test-coverage.md #86)"
+          "status": "passed",
+          "evidence": "gate"
         },
         "macos": {
-          "status": "unverified",
-          "reason": "same suite as hermetic; summary, job-output and deployment-URL sinks have no multiline-mask test"
+          "status": "passed",
+          "evidence": "gate"
         },
         "docker": {
           "status": "not-applicable",
@@ -12034,8 +12106,8 @@
       "command": "manual review of the documents listed in input",
       "lanes": {
         "hermetic": {
-          "status": "unverified",
-          "reason": "documentation criterion; the text exists but no automated check asserts it"
+          "status": "passed",
+          "evidence": "doc:docs/test-coverage.md#issue-89--orphan-process-cleanup"
         },
         "macos": {
           "status": "not-applicable",
