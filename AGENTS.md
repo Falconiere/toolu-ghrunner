@@ -465,7 +465,10 @@ outside a `tests/` tree.
   from `RunnerConfig.network`, proxy-credential masks, host/container exports);
   `service_endpoints`; `orphan_cleanup` (#89: `RUNNER_TRACKING_ID`,
   pre-`JobCompleted` SIGKILL, 15s, never fails; SIP-blind Apple binaries covered
-  via registered process groups); `workspace_{layout,tracking,lease}` (#90) +
+  via registered process groups); `temp_cleanup` (#239: empties `_temp` + `tmp`
+  before context build and before `run_job` returns, so before the channel close
+  that reports completion and frees the next job, never in `finish`; no symlink
+  follow, past delete errors, `_tool` kept); `workspace_{layout,tracking,lease}` (#90) +
   `workspace_gc` (only own `data_dir`, unleased, never the running job);
   `shadow/` (off-by-default fingerprint records, never serves). `docker/`
   (bollard; `DOCKER_HOST` mapping incl. Colima/OrbStack/Podman/Rancher; Linux-only

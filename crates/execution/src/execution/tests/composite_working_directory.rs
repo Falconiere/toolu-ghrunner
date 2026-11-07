@@ -161,7 +161,12 @@ async fn literal_expression_absolute_spaces_and_empty_directories() -> TestResul
   ] {
     assert_pwd(&replay.workspace.join(directory), file)?;
   }
-  assert_pwd(&replay.runner_temp, "absolute.pwd")?;
+  // Copied out by the step, since `_temp` is emptied when the job ends.
+  let absolute = std::fs::read_to_string(replay.workspace.join("absolute-copy.pwd"))?;
+  assert_eq!(
+    Path::new(absolute.trim_end()),
+    replay.runner_temp.canonicalize()?
+  );
   assert!(!replay.workspace.join("literal.pwd").exists());
   assert!(!replay.workspace.join("absolute.pwd").exists());
   Ok(())

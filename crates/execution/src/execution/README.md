@@ -69,6 +69,7 @@ orchestrator: GitHub expands workflows and sends the engine a single job.
 | `step_state.rs` | `StepState` | Per-step recorded outputs/state/outcome/conclusion, and `build_steps_context` for the `steps.*` expression context. |
 | `step_summary.rs` | `collect` | Bounded, masked summary snapshots; refuses non-regular summary files; non-fatal error annotations. |
 | `step_timeout.rs` | `wait_bounded` | Bounded child-process wait shared by the script and node handlers: races `timeout-minutes` against the job `CancellationToken`. |
+| `temp_cleanup.rs` | `empty_temp_dirs` | Empties `_temp` and `tmp` at job start and before the event channel closes: contents only, never following symlinks, continuing past delete errors with one `WARN` per root. Never touches `_tool`. |
 | `steps_runner.rs` | `run_steps` | The per-job step loop: condition evaluation, dispatch to action/script execution, continue-on-error, and post-step draining. |
 | `workspace_gc.rs` | `gc_workspaces`, `GcPolicy` | Prunes this registration's unleased workspaces: stable ones unused for `stable_gc_hours` (default never) and fresh `<job_id>` ones older than `gc_after_hours`; pre-#90 lease-less dirs use mtime only; never the running job's. |
 | `workspace_layout.rs` | `prepare_workspace`, `PreparedWorkspace`, `Repository` | Allocates the job workspace (#90): stable `<work>/<repo>/<repo>` with upstream `workspace.clean`, or fresh `<work>/<job_id>`; holds the lease until dropped. |

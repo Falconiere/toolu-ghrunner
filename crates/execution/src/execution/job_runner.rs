@@ -100,7 +100,13 @@ pub async fn run_job_with_shutdown(
 ) -> Result<JobTeardown, RunnerError> {
   // Keep the setup/execution state machine off callers' stack frames. The
   // compatibility entry point and listener otherwise inline it repeatedly.
-  Box::pin(entry::run(msg, config, cancel, events, masker, shutdown)).await
+  let result = Box::pin(entry::run(msg, config, cancel, events, masker, shutdown)).await;
+  // Not in `JobTeardown::finish`: that runs after the caller closes the event
+  // channel, which reports completion and lets the next job start in this
+  // `data_dir`, so it could delete the next job's files. Upstream also cleans
+  // before reporting. Every step, post step and container has finished here.
+  super::temp_cleanup::empty_temp_dirs(config).await;
+  result
 }
 
 async fn build_job_context_async(

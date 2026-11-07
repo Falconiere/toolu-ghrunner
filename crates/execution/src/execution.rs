@@ -79,6 +79,7 @@ mod step_state;
 pub mod step_timeout;
 /// Runs the per-job step loop.
 pub mod steps_runner;
+mod temp_cleanup;
 /// Ownership- and lease-aware garbage collection of job workspaces.
 pub mod workspace_gc;
 /// Stable per-repository / fresh per-job workspace allocation (issue #90).

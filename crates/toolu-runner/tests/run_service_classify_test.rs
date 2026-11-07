@@ -312,7 +312,7 @@ impl Drop for TruncatedServer {
 /// with the plain `tracing` dep. `Visit`'s other `record_*` methods default
 /// to forwarding into `record_debug`, so integer fields land here too.
 #[derive(Clone)]
-struct EventCapture {
+pub(crate) struct EventCapture {
   events: std::sync::Arc<std::sync::Mutex<Vec<(tracing::Level, String, String)>>>,
   next_span_id: std::sync::Arc<std::sync::atomic::AtomicU64>,
 }
@@ -341,7 +341,7 @@ impl EventCapture {
   }
 
   /// Whether any value recorded at `level` contains `needle`.
-  fn saw(&self, level: tracing::Level, needle: &str) -> bool {
+  pub(crate) fn saw(&self, level: tracing::Level, needle: &str) -> bool {
     let Ok(events) = self.events.lock() else {
       return false;
     };

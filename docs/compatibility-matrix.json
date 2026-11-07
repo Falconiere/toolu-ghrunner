@@ -20823,6 +20823,75 @@
       }
     },
     {
+      "id": "103/R-temp-cleanup",
+      "issue": 103,
+      "criterion": "Regression: runner temp directories are emptied at job start and end, keeping _tool",
+      "input": [],
+      "expected": "Crash leftovers are gone before the first step; _temp and tmp are empty when the event channel closes after success, failure, cancel or a setup error; post steps read their files first; symlinks are unlinked with targets intact; an undeletable file warns without changing the conclusion; _tool is kept.",
+      "production_path": "execution::execution::temp_cleanup::empty_temp_dirs",
+      "tests": [
+        [
+          "crates/execution/tests/runner_paths_test.rs",
+          "crashed_job_leftovers_are_gone_before_first_step_and_tool_is_kept"
+        ],
+        [
+          "crates/toolu-runner/tests/job_teardown_order_test.rs",
+          "temp_is_empty_at_channel_close_after_success_and_steps_read_it_first"
+        ],
+        [
+          "crates/toolu-runner/tests/job_teardown_order_test.rs",
+          "temp_is_empty_at_channel_close_after_failure"
+        ],
+        [
+          "crates/toolu-runner/tests/job_teardown_order_test.rs",
+          "temp_is_empty_at_channel_close_after_cancel"
+        ],
+        [
+          "crates/toolu-runner/tests/job_teardown_order_test.rs",
+          "post_step_reads_temp_before_it_is_emptied"
+        ],
+        [
+          "crates/toolu-runner/tests/job_teardown_order_test.rs",
+          "symlinks_are_removed_and_their_targets_are_kept"
+        ],
+        [
+          "crates/toolu-runner/tests/job_teardown_order_test.rs",
+          "undeletable_file_warns_and_never_changes_the_result"
+        ]
+      ],
+      "command": "cargo test -p toolu-runner --test integration -- job_teardown_order_test::",
+      "lanes": {
+        "hermetic": {
+          "status": "passed",
+          "evidence": "gate"
+        },
+        "macos": {
+          "status": "passed",
+          "evidence": "gate"
+        },
+        "docker": {
+          "status": "not-applicable",
+          "reason": "not a Docker surface; root-owned container files are represented by a read-only root"
+        },
+        "github-com": {
+          "status": "unverified",
+          "reason": "no live run in this PR; temp contents are not observable through GitHub"
+        },
+        "reference": {
+          "status": "unverified",
+          "reason": "no paired run in this PR; upstream behavior read from TempDirectoryManager.cs at v2.338.2"
+        },
+        "ghes": {
+          "status": "unverified",
+          "reason": "no GHES instance available; GHES behavior not exercised"
+        },
+        "ui-service": {
+          "status": "not-applicable",
+          "reason": "no UI or service surface"
+        }
+      }
+    },
+    {
       "id": "67/X-1",
       "issue": 67,
       "criterion": "Matrix/typed dispatch or reusable-workflow inputs -> workflow/job/step env -> defaults -> named step outputs -> job outputs -> downstream needs, with exact assertions at each boundary",

@@ -19,6 +19,7 @@ use crate::execution::job_cancellation::JobCancellation;
 use crate::execution::job_environment::apply_job_environment;
 use crate::execution::job_teardown::JobTeardown;
 use crate::execution::orphan_cleanup::{ProcessTracking, sweep};
+use crate::execution::temp_cleanup::empty_temp_dirs;
 
 /// Initialize, execute, and tear down one acquired job.
 /// The job child observes caller cancellation without propagating it to its parent.
@@ -37,11 +38,14 @@ pub(super) async fn run(
   // function returns, so no other job may enter the workspace before every
   // step, post step, container and orphan sweep has finished.
   let claimed = claim_job_workspace(config, &msg).await?;
+  // Clears what a crashed job left, before anything of this job is written.
+  empty_temp_dirs(config).await;
   let (msg, mut ctx) = build_job_context_async(msg, config, masker, &claimed).await?;
-  ctx.cancellation = Some(JobCancellation::new(cancel.clone(), shutdown));
-  ctx.set_process_tracking(ProcessTracking::for_job(&msg.variables));
-  ctx.node_migration = crate::node::migration::NodeMigrationState::for_job(&msg.variables);
-  apply_job_environment(&msg.environment_variables, &mut ctx)?;
+  configure_context(
+    &msg,
+    &mut ctx,
+    JobCancellation::new(cancel.clone(), shutdown),
+  )?;
   let mut container_spec = evaluate_container(&msg, config, &ctx)?;
   let mut service_specs = evaluate_services(msg.job_service_containers.as_ref(), &ctx)?;
   super::job_http::add_container_network_env(config, container_spec.as_mut(), &mut service_specs);
@@ -75,6 +79,18 @@ pub(super) async fn run(
   };
   let body_result = Box::pin(prepared::execute(inputs, &mut ctx)).await;
   finish_execution(&ctx, msg.job_id, body_result, local, &events, workspace_gc).await
+}
+
+/// Attach the job's cancellation, process tracking, Node policy and environment.
+fn configure_context(
+  msg: &AgentJobRequestMessage,
+  ctx: &mut ExecutionContext,
+  cancellation: Arc<JobCancellation>,
+) -> Result<(), RunnerError> {
+  ctx.cancellation = Some(cancellation);
+  ctx.set_process_tracking(ProcessTracking::for_job(&msg.variables));
+  ctx.node_migration = crate::node::migration::NodeMigrationState::for_job(&msg.variables);
+  apply_job_environment(&msg.environment_variables, ctx)
 }
 
 /// Remove containers, sweep tracked orphan processes, and stop local services
