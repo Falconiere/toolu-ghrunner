@@ -7,13 +7,23 @@
 #
 # Environment: GH_TOKEN (administration:write), GITHUB_REPOSITORY, GITHUB_RUN_ID,
 # RUNNER_TEMP, PLATFORM (Linux-X64, Linux-ARM64, macOS-ARM64), LABEL_PREFIX, and
-# for `run`: OFFICIAL_DIR, TOOLU_BIN. Each lane logs to a file under
+# for `run`: OFFICIAL_DIR, TOOLU_BIN. ACCELERATED_LANE=true adds a third lane (#237):
+# a second toolu registration with `[services] mode = "accelerated"` whose runner
+# process runs inside an ubuntu container, so every job it takes (artifact
+# producer and consumer alike) executes in that container and reaches the local
+# accelerated proxy in its own network namespace. GitHub job containers
+# (`container:`) stay refused in accelerated mode; this is not that. Each lane logs to a file under
 # RUNNER_TEMP, printed on exit, so a lane still alive cannot hold the step's stdout.
 set -euo pipefail
 
 POLL_SECONDS="${POLL_SECONDS:-15}"
+ACCELERATED_IMAGE=ubuntu@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852
+ACCELERATED_CONTAINER="toolu-accelerated-${GITHUB_RUN_ID:-0}"
+
 # One `consumer` per variant and lane. It needs every other probe job, so it ends last.
+# The accelerated lane runs the probe variant only.
 CONSUMER_JOBS=4
+[[ "${ACCELERATED_LANE:-}" == true ]] && CONSUMER_JOBS=5
 UNREGISTER_ATTEMPTS="${UNREGISTER_ATTEMPTS:-6}"
 RUNNERS_API="repos/$GITHUB_REPOSITORY/actions/runners"
 
@@ -54,31 +64,74 @@ probes_done() {
 stop_lanes() {
   local lane
   # The loop first, or it would mint a new runner when the listener dies.
-  kill "$official_pid" "$toolu_pid" 2>/dev/null || true
+  kill ${official_pid:+"$official_pid"} ${toolu_pid:+"$toolu_pid"} 2>/dev/null || true
   pkill -f "$OFFICIAL_DIR" || true
+  if [[ -n "$accelerated" ]]; then
+    docker logs "$ACCELERATED_CONTAINER" >"$RUNNER_TEMP/toolu-accelerated.log" 2>&1 || true
+    docker rm -f "$ACCELERATED_CONTAINER" >/dev/null 2>&1 || true
+  fi
   wait 2>/dev/null || true
-  for lane in toolu official; do
+  for lane in toolu official ${accelerated:+toolu-accelerated}; do
     echo "::group::$lane lane log"
     cat "$RUNNER_TEMP/$lane.log" || true
     echo "::endgroup::"
   done
 }
 
-run_lanes() {
+# Registers the forwarder toolu lane (own home) and starts it in the background;
+# call it directly (not in `$(…)`) so the lane stays this shell's child for `wait`.
+start_toolu() {
   local label="$LABEL_PREFIX-toolu" home="$RUNNER_TEMP/toolu-home"
   local toolu_env=("${clean_env[@]}" "TOOLU_RUNNER_HOME=$home" "TOOLU_RUNNER_TOKEN=$GH_TOKEN")
   mkdir -p "$home"
-
   "${toolu_env[@]}" "$TOOLU_BIN" register --url "https://github.com/$GITHUB_REPOSITORY" \
-    --name "$label" --labels "$label" --config "$home/config.toml" --work "$home/_work"
+    --name "$label" --labels "$label" --config "$home/config.toml" --work "$home/_work" >&2
   "${toolu_env[@]}" "$TOOLU_BIN" run --config "$home/config.toml" >"$RUNNER_TEMP/toolu.log" 2>&1 &
   toolu_pid=$!
+}
+
+# The accelerated lane: register and run inside one ubuntu container. Only its own
+# home is mounted, at the same path, so the registration's paths hold on both
+# sides; the token goes in by name (`-e TOOLU_RUNNER_TOKEN`), never on a command line.
+start_accelerated() {
+  local label="$LABEL_PREFIX-toolu-accelerated" home="$RUNNER_TEMP/toolu-accelerated-home"
+  mkdir -p "$home"
+  TOOLU_RUNNER_TOKEN="$GH_TOKEN" docker run -d --name "$ACCELERATED_CONTAINER" \
+    -v "$home:$home" -v "$TOOLU_BIN:/usr/local/bin/toolu-runner:ro" \
+    -e TOOLU_RUNNER_TOKEN -e "TOOLU_RUNNER_HOME=$home" -e "LANE_LABEL=$label" \
+    -e "LANE_URL=https://github.com/$GITHUB_REPOSITORY" "$ACCELERATED_IMAGE" bash -c '
+      set -eu
+      # The probe steps use curl, jq and shasum (perl); the runner needs CA roots.
+      apt-get update -qq
+      DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+        ca-certificates curl jq perl >/dev/null
+      config="$TOOLU_RUNNER_HOME/config.toml"
+      toolu-runner register --url "$LANE_URL" --name "$LANE_LABEL" --labels "$LANE_LABEL" \
+        --config "$config" --work "$TOOLU_RUNNER_HOME/_work"
+      sed -i "s/^mode = \"forwarder\"\$/mode = \"accelerated\"/" "$config"
+      grep -qx "mode = \"accelerated\"" "$config" || {
+        echo "::error::could not set [services] mode = accelerated for $LANE_LABEL; found: $(grep "^mode = " "$config" || echo "no mode line")"
+        exit 1
+      }
+      exec toolu-runner run --config "$config"' >&2
+}
+
+accelerated_alive() {
+  [[ "$(docker inspect -f '{{.State.Running}}' "$ACCELERATED_CONTAINER" 2>/dev/null)" == true ]]
+}
+
+run_lanes() {
+  official_pid="" toolu_pid="" accelerated=""
+  [[ "${ACCELERATED_LANE:-}" == true ]] && accelerated=true
+  trap stop_lanes EXIT
+  start_toolu
+  [[ -z "$accelerated" ]] || start_accelerated
   official_lane 3>&1 >"$RUNNER_TEMP/official.log" 2>&1 &
   official_pid=$!
-  trap stop_lanes EXIT
 
   until probes_done; do
-    { kill -0 "$toolu_pid" && kill -0 "$official_pid"; } 2>/dev/null || {
+    { kill -0 "$toolu_pid" && kill -0 "$official_pid" &&
+      { [[ -z "$accelerated" ]] || accelerated_alive; }; } 2>/dev/null || {
       echo "::error::a lane exited before the $PLATFORM probes finished" >&2
       exit 1
     }

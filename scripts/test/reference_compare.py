@@ -47,10 +47,15 @@ REPO = "Falconiere/toolu-ghrunner"
 LANES = ("toolu", "official")
 VARIANTS = ("probe", "negative")
 EXPECTED_PLATFORMS = (("Linux", "X64"), ("Linux", "ARM64"), ("macOS", "ARM64"))
-EXPECTED_JOBS = {"Linux": ("contexts", "docker", "services", "consumer"),
-                 "macOS": ("contexts", "services", "consumer")}
-# The 2.337.0 run in docs/compat-reference-103.json: one Linux host, no platform fields.
+# annotations/secrets/deploy/container are the #237 surface probes; the
+# `surfaces` job of compat-paired.yml reads their GitHub records back.
+EXPECTED_JOBS = {"Linux": ("contexts", "docker", "services", "consumer",
+                           "annotations", "secrets", "deploy", "container"),
+                 "macOS": ("contexts", "services", "consumer", "annotations", "secrets", "deploy")}
+# The 2.337.0 run in docs/compat-reference-103.json: one Linux host, no platform
+# fields, and only the jobs the probe had before #237.
 LEGACY_RUN_ID = 38301583727
+LEGACY_JOBS = ("contexts", "docker", "services", "consumer")
 RUN_FIELDS = ("id", "url", "head_sha", "workflow", "conclusion")
 REQUIRED_LISTS = ("jobs", "unpaired", "payload_errors", "leftover_containers")
 JOB_NAME = re.compile(r"^(?P<variant>[a-z]+)(?:-(?P<os>Linux|macOS)-(?P<arch>X64|ARM64))?"
@@ -273,8 +278,8 @@ def coverage_problems(report):
     for os_name, arch in platforms:
         for variant in VARIANTS:
             key = scope(variant, os_name, arch)
-            problems += [(key, job, "missing job")
-                         for job in EXPECTED_JOBS[os_name or "Linux"] if (key, job) not in seen]
+            jobs = LEGACY_JOBS if os_name is None else EXPECTED_JOBS[os_name]
+            problems += [(key, job, "missing job") for job in jobs if (key, job) not in seen]
             problems += [(key, None, f"{lane} observations missing or empty")
                          for lane in LANES if not (results.get(key) or {}).get(lane)]
     return problems

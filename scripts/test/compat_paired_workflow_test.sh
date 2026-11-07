@@ -72,12 +72,41 @@ want "guard step reads the boolean" "if: \\$\\{\\{ env\\.HAVE_LIVE_TOKEN != 'tru
 want "guard fails UNVERIFIED" '::error::UNVERIFIED: TOOLU_RUNNER_LIVE_TOKEN'
 reject "never exposes the secret at job level" '^      (TOOLU_RUNNER_[A-Z_]*|GH_TOKEN): \$\{\{ secrets\.'
 needs_guard=$(grep -Ec '^    needs: guard$' "$WF")
-if [[ "$needs_guard" == 3 ]]; then
-  echo "ok: host, probe and negative all need the guard"
+if [[ "$needs_guard" == 4 ]]; then
+  echo "ok: host, probe, negative and accelerated all need the guard"
 else
-  echo "FAIL: expected 3 jobs needing the guard, found $needs_guard" >&2
+  echo "FAIL: expected 4 jobs needing the guard, found $needs_guard" >&2
   fail=1
 fi
+
+want "guard proves the credential, not just its presence" '::error::credential check failed: HTTP \$status'
+want "the credential check calls the API with the secret" "status=\\\$\\(curl .*'%\\{http_code\\}' -H \"Authorization: Bearer \\\$GH_TOKEN\""
+want "the credential check names runner administration" '"actions/runners\?per_page=1"'
+want "the credential check names job reads" '"actions/runs/\$GITHUB_RUN_ID/jobs\?per_page=1"'
+
+# --- #237: accelerated lane and the hosted API observation ---
+accel=$(grep -Ec '^            accelerated: true$' "$WF")
+if [[ "$accel" == 1 ]]; then
+  echo "ok: exactly one host serves the accelerated lane"
+else
+  echo "FAIL: expected 1 accelerated host, found $accel" >&2
+  fail=1
+fi
+want "the host learns about the accelerated lane" '^      ACCELERATED_LANE: \$\{\{ matrix\.accelerated \}\}$'
+want "accelerated caller is named so the comparator ignores it" '^    name: probe-Linux-X64-toolu-accelerated$'
+want "accelerated caller uses a per-run label" '^      runner_label: compat-paired-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}-Linux-X64-toolu-accelerated$'
+want "surfaces waits for every caller" '^    needs: \[guard, probe, negative, accelerated\]$'
+want "surfaces runs once the guard passed" "^    if: \\$\\{\\{ always\(\) && needs\.guard\.result == 'success' \\}\\}$"
+want "surfaces reads check runs" '^      checks: read$'
+want "surfaces reads deployments" '^      deployments: read$'
+want "surfaces runs the checker" 'python3 scripts/test/compat_surfaces_check.py --run'
+want "surfaces uploads its report" 'name: compat-237-surfaces$'
+for job in annotations secrets deploy container; do
+  want "the probe has the $job job" "^  $job:$" "$PROBE"
+done
+want "the container job pins its image" '^    container: ubuntu@sha256:[0-9a-f]{64}$' "$PROBE"
+want "the consumer waits for the #237 producers" '^    needs: \[contexts, docker, services, secrets, container\]$' "$PROBE"
+want "the secret URL comes from a masked step output" '^      url: \$\{\{ steps\.emit\.outputs\.url \}\}$' "$PROBE"
 
 # --- per-run labels: no run can pick up another run's jobs ---
 want "host labels are per run" '^      LABEL_PREFIX: compat-paired-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}-\$\{\{ matrix\.platform \}\}$'
@@ -148,10 +177,25 @@ GH
 [[ "$1" == run ]] && while :; do sleep 1; done
 exit 0
 TOOLU
+  # The accelerated lane's container: `run` records its arguments and whether the
+  # token arrived through the environment; FAKE_DOCKER_DEAD stops it.
+  cat >"$tmp/tools/docker" <<'DOCKER'
+#!/usr/bin/env bash
+case "$1" in
+  run)
+    printf '%s\n' "$@" >"$FAKE_DOCKER_RUN"
+    [[ "${TOOLU_RUNNER_TOKEN:-}" == fake ]] && echo token-in-env >>"$FAKE_DOCKER_RUN"
+    echo container-id
+    ;;
+  inspect) [[ -n "${FAKE_DOCKER_DEAD:-}" ]] && echo false || echo true ;;
+  logs) echo "accelerated runner output" ;;
+esac
+exit 0
+DOCKER
   # The lanes run under `env -i`, so a dying toolu is a binary of its own.
   printf '#!/usr/bin/env bash\n[[ "$1" == run ]] && exit 2\nexit 0\n' >"$tmp/tools/toolu-dies"
   printf '#!/usr/bin/env bash\nexit 3\n' >"$tmp/official-dies/run.sh"
-  chmod +x "$tmp/tools/gh" "$tmp/tools/toolu" "$tmp/tools/toolu-dies" "$tmp/official/run.sh" "$tmp/official-dies/run.sh" \
+  chmod +x "$tmp/tools/gh" "$tmp/tools/toolu" "$tmp/tools/docker" "$tmp/tools/toolu-dies" "$tmp/official/run.sh" "$tmp/official-dies/run.sh" \
     "$tmp/official/bin/Runner.Listener"
   for caller in probe-Linux-X64-toolu probe-Linux-X64-official negative-Linux-X64-toolu negative-Linux-X64-official; do
     printf 'completed %s / contexts (alpha, 7, true)\ncompleted %s / consumer\n' "$caller" "$caller"
@@ -162,6 +206,8 @@ TOOLU
     (
       export FAKE_JOBS="$tmp/jobs" FAKE_NO_JIT="${FAKE_NO_JIT:-}" GH_TOKEN=fake GITHUB_REPOSITORY=o/r GITHUB_RUN_ID=1 RUNNER_TEMP="$tmp"
       export PLATFORM=Linux-X64 LABEL_PREFIX="compat-paired-$GITHUB_RUN_ID-Linux-X64" POLL_SECONDS=0
+      export ACCELERATED_LANE="${FAKE_ACCELERATED:-}" FAKE_DOCKER_RUN="$tmp/docker-run"
+      export FAKE_DOCKER_DEAD="${FAKE_DOCKER_DEAD:-}"
       export OFFICIAL_DIR="${FAKE_OFFICIAL:-$tmp/official}" TOOLU_BIN="${FAKE_TOOLU:-$tmp/tools/toolu}"
       PATH="$tmp/tools:$PATH" timeout_guard bash "$HOST" "$@"
     )
@@ -213,6 +259,35 @@ TOOLU
     echo "FAIL: the JIT config reached a lane log" >&2
     fail=1
   }
+  # The accelerated lane adds a fifth consumer: with only the four forwarder and
+  # official consumers done, the host keeps polling, so a stopped container fails it.
+  for caller in probe-Linux-X64-toolu probe-Linux-X64-official negative-Linux-X64-toolu negative-Linux-X64-official; do
+    printf 'completed %s / consumer\n' "$caller"
+  done >"$tmp/jobs"
+  FAKE_RUNNERS="$tmp/none" FAKE_ACCELERATED=true FAKE_DOCKER_DEAD=1 host run >/dev/null 2>&1
+  expect "four consumers do not finish an accelerated host" 1 $?
+  printf 'completed probe-Linux-X64-toolu-accelerated / consumer\n' >>"$tmp/jobs"
+  out=$(FAKE_RUNNERS="$tmp/none" FAKE_ACCELERATED=true host run 2>&1)
+  expect "an accelerated host stops once its five consumers completed" 0 $?
+  args=$(cat "$tmp/docker-run")
+  [[ "$args" == *ubuntu@sha256:* && "$args" == *$'\n-e\nTOOLU_RUNNER_TOKEN\n'* && "$args" == *token-in-env* &&
+    "$args" != *TOOLU_RUNNER_TOKEN=* ]] &&
+    echo "ok: the accelerated runner runs in a pinned container and gets the token by name only" || {
+    echo "FAIL: accelerated container arguments wrong: $args" >&2
+    fail=1
+  }
+  # The rewrite itself, then its check, then the run: each must be present in order.
+  [[ "$args" == *'sed -i "s/^mode = \"forwarder\"\$/mode = \"accelerated\"/"'*'grep -qx "mode = \"accelerated\""'*"exec toolu-runner run"* ]] &&
+    echo "ok: the containerized lane switches [services] mode before it runs" || {
+    echo "FAIL: accelerated mode switch missing: $args" >&2
+    fail=1
+  }
+  [[ "$out" == *"toolu-accelerated lane log"*"accelerated runner output"* ]] &&
+    echo "ok: the accelerated lane log is printed" || {
+    echo "FAIL: accelerated lane log missing: $out" >&2
+    fail=1
+  }
+
   FAKE_RUNNERS="$tmp/none" host unregister >/dev/null 2>&1
   expect "unregister passes with no runner left" 0 $?
   cp "$tmp/survivor" "$tmp/deletable"
@@ -245,6 +320,10 @@ TOOLU
   mutate "a dropped digest" '/sha256: 670adb/d'
   mutate "a skipped digest check" '/shasum -a 256/d'
   mutate "a removed secret guard" '/UNVERIFIED/d'
+  mutate "a presence-only credential check" '/credential check failed/d'
+  mutate "a credential check that never calls the API" '/status=\$\(curl/d'
+  mutate "a surfaces job without check reads" '/^      checks: read$/d'
+  mutate "a second accelerated host" 's/^            sha256: 670adb.*/&\n            accelerated: true/'
   mutate "a fixed host label" 's/^      LABEL_PREFIX: .*/      LABEL_PREFIX: compat-paired/'
   mutate "a fixed probe label" 's/^      runner_label: .*/      runner_label: toolu-103-toolu/'
   mutate "an unregister that can be skipped" '/- name: Unregister both lanes/{n;s/if: always\(\)/if: success()/;}'

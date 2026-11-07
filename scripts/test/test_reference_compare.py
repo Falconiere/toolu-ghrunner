@@ -29,11 +29,14 @@ def paired_report():
     report.update(issue=230, acknowledged=[], jobs=[], results={})
     report["run"]["id"] = 1
     for os_name, arch in reference_compare.EXPECTED_PLATFORMS:
-        for row in REPORT["jobs"]:
-            if row["job"] in reference_compare.EXPECTED_JOBS[os_name]:
-                official = row["official"]
-                report["jobs"].append({**copy.deepcopy(row), "os": os_name, "arch": arch,
-                                       "toolu": copy.deepcopy(official), "equal": True, "diff": []})
+        for name in reference_compare.EXPECTED_JOBS[os_name]:
+            # The recorded run predates the #237 jobs: they borrow the services row.
+            for row in REPORT["jobs"]:
+                if row["job"] == (name if name in reference_compare.LEGACY_JOBS else "services"):
+                    official = row["official"]
+                    report["jobs"].append({**copy.deepcopy(row), "job": name, "os": os_name,
+                                           "arch": arch, "toolu": copy.deepcopy(official),
+                                           "equal": True, "diff": []})
         for variant in reference_compare.VARIANTS:
             observed = REPORT["results"][variant]["official"]
             report["results"][reference_compare.scope(variant, os_name, arch)] = {
@@ -228,6 +231,22 @@ class PerPlatformJobsTest(unittest.TestCase):
         self.assertEqual(reference_compare.verify(report)[0], [])
         report["jobs"].remove(platform_row(report, "probe", "docker", "Linux", "X64"))
         self.assertIn("probe-Linux-X64/docker: missing job", reference_compare.verify(report)[0])
+
+    def test_surface_probe_jobs_are_required_per_platform(self):
+        report = paired_report()
+        report["jobs"].remove(platform_row(report, "negative", "container", "Linux", "ARM64"))
+        report["jobs"].remove(platform_row(report, "probe", "annotations", "macOS", "ARM64"))
+        problems = reference_compare.verify(report)[0]
+        self.assertIn("negative-Linux-ARM64/container: missing job", problems)
+        self.assertIn("probe-macOS-ARM64/annotations: missing job", problems)
+
+    def test_container_job_that_ran_on_macos_fails(self):
+        report = paired_report()
+        ran = copy.deepcopy(platform_row(report, "probe", "container", "Linux", "X64"))
+        ran.update(os="macOS", arch="ARM64")
+        report["jobs"].append(ran)
+        problems, _ = reference_compare.verify(report)
+        self.assertTrue(any("unexpected job container" in p for p in problems), problems)
 
     def test_docker_job_that_ran_on_macos_fails(self):
         report = paired_report()

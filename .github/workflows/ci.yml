@@ -216,7 +216,8 @@ jobs:
       # #103: the epic-wide acceptance matrix stays consistent with the code
       # (every mapped test is a real test fn, every status carries evidence or
       # a reason, the Markdown view is current), the recorded reference-lane
-      # report re-verifies against its pinned captures, and the evidence
+      # report re-verifies against its pinned captures, the #237 surfaces
+      # capture re-evaluates offline, and the evidence
       # tooling's own tests pass. Live lanes are recorded, never re-run here.
       - name: Compatibility evidence (#103)
         env:
@@ -224,7 +225,8 @@ jobs:
         run: |
           python3 scripts/test/compat_matrix_check.py --check
           python3 scripts/test/reference_compare.py --verify docs/compat-reference-103.json
-          python3 -m unittest scripts/test/test_compat_matrix_check.py scripts/test/test_sanitize_capture.py scripts/test/test_reference_compare.py scripts/test/test_orphan_limits_docs.py
+          python3 scripts/test/compat_surfaces_check.py --verify docs/compat-surfaces-237.json
+          python3 -m unittest scripts/test/test_compat_matrix_check.py scripts/test/test_sanitize_capture.py scripts/test/test_reference_compare.py scripts/test/test_orphan_limits_docs.py scripts/test/test_compat_surfaces_check.py
 
   # The required `ci` context: green only when every Linux job above is. A
   # skipped or cancelled dependency fails it too — `always()` makes it run in

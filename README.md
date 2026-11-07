@@ -895,6 +895,12 @@ for real-Docker replay and the separately recorded live/reference limitations.
   reverse-proxying everything else — artifacts included — to real
   GitHub. See [Cache acceleration](#cache-acceleration).
 
+A job with `container:` needs `forwarder` mode: under `offline` or
+`accelerated` it fails at "Set up job", because the local service URLs are
+loopback addresses the container cannot reach
+([known bugs](docs/known-bugs.md#current-limitations)). Running the toolu
+runner itself inside a container is fine in `accelerated` mode.
+
 ## Cache acceleration
 
 In `accelerated` mode the runner hosts its own GitHub Actions cache. It

@@ -9,6 +9,14 @@ name: compat-reference-103-probe
 # artifact and OIDC backends; `consumer` checks job outputs, cache restore and
 # artifact bytes across jobs, then uploads toJSON(needs) for lane comparison.
 # `run_docker` is false on macOS, which has no Docker jobs to compare.
+#
+# #237 surface probes: `annotations` (three workflow commands after a control
+# step), `secrets` (a dynamically masked job output and environment URL),
+# `deploy` (a safe environment URL) and `container` (an artifact uploaded from
+# inside a job container). Their GitHub records are read back through the API by
+# the `surfaces` job of compat-paired.yml (scripts/test/compat_surfaces_check.py);
+# `services` checks OIDC claims in memory and `consumer` checks outputs and
+# artifact digests. No token or claim value is written anywhere.
 
 on:
   workflow_call:
@@ -127,11 +135,14 @@ jobs:
     timeout-minutes: 10
     outputs:
       claims: ${{ steps.oidc.outputs.claims }}
+      artifact_sha: ${{ steps.payloads.outputs.artifact_sha }}
     steps:
       - name: Write payloads
+        id: payloads
         run: |
           printf 'cache-103-%s\n' '${{ github.run_id }}' > cache-103.txt
           printf 'artifact-103-%s\n' '${{ github.run_id }}' > artifact-103.txt
+          printf 'artifact_sha=%s\n' "$(shasum -a 256 artifact-103.txt | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       - name: Save cache
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
@@ -143,24 +154,116 @@ jobs:
           name: compat-103-${{ inputs.lane }}-${{ inputs.variant }}-payload
           path: artifact-103.txt
           if-no-files-found: error
+      # The tokens stay in shell variables: only booleans and claim key names are
+      # printed or written.
       - name: OIDC allowed
         id: oidc
         if: inputs.expect_oidc
+        env:
+          OWNER_AUDIENCE: https://github.com/${{ github.repository_owner }}
+          WANT_SUB: repo:${{ github.repository }}:ref:${{ github.ref }}
         run: |
           test -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
-          response=$(curl -fsS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=compat-103")
-          payload=$(printf '%s' "$response" | jq -r .value | cut -d. -f2 | tr '_-' '/+')
-          while [ $(( ${#payload} % 4 )) -ne 0 ]; do payload="$payload="; done
-          claims=$(printf '%s' "$payload" | base64 -d)
-          printf '%s' "$claims" | jq -e '.aud == "compat-103" and .repository == "Falconiere/toolu-ghrunner" and (.job_workflow_ref | contains("compat-reference-103-probe.yml"))'
-          printf 'claims=%s\n' "$(printf '%s' "$claims" | jq -c 'keys')" >> "$GITHUB_OUTPUT"
+          test -n "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}"
+          claims_for() {
+            local response payload
+            response=$(curl -fsS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+              "$ACTIONS_ID_TOKEN_REQUEST_URL$1")
+            payload=$(printf '%s' "$response" | jq -r .value | cut -d. -f2 | tr '_-' '/+')
+            while [ $(( ${#payload} % 4 )) -ne 0 ]; do payload="$payload="; done
+            printf '%s' "$payload" | base64 -d
+          }
+          check_claims() {
+            local verdict
+            verdict=$(printf '%s' "$1" | jq -c --arg aud "$2" --arg sub "$WANT_SUB" --argjson now "$(date +%s)" '{
+              aud: (.aud == $aud),
+              iss: (.iss == "https://token.actions.githubusercontent.com"),
+              sub: (.sub == $sub),
+              repository: (.repository == "Falconiere/toolu-ghrunner"),
+              job_workflow_ref: (.job_workflow_ref | contains("compat-reference-103-probe.yml")),
+              not_before: (.nbf <= $now + 60 and .iat <= $now + 60),
+              not_expired: (.exp > $now and .exp > .iat)}')
+            echo "audience $2: $verdict"
+            printf '%s' "$verdict" | jq -e 'all(.[]; .)' >/dev/null
+          }
+          custom=$(claims_for '&audience=compat-103')
+          check_claims "$custom" compat-103
+          default=$(claims_for '')
+          check_claims "$default" "$OWNER_AUDIENCE"
+          printf 'claims=%s\n' "$(printf '%s' "$custom" | jq -c 'keys')" >> "$GITHUB_OUTPUT"
       - name: OIDC denied without id-token permission
         if: ${{ !inputs.expect_oidc }}
-        run: test -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
+        run: |
+          test -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
+          test -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}"
+
+  annotations:
+    runs-on: [self-hosted, "${{ inputs.runner_label }}"]
+    timeout-minutes: 10
+    steps:
+      - name: Control step
+        run: echo "compat-237 control line, not a workflow command"
+      - name: Emit annotations
+        run: |
+          echo "::error file=compat-237/annotated.txt,line=3,endLine=3,col=2,endColumn=9,title=compat-237 error::compat-237 error marker"
+          echo "::warning file=compat-237/annotated.txt,line=5,title=compat-237 warning::compat-237 warning marker"
+          echo "::notice file=compat-237/annotated.txt,line=7,title=compat-237 notice::compat-237 notice marker"
+
+  secrets:
+    runs-on: [self-hosted, "${{ inputs.runner_label }}"]
+    timeout-minutes: 10
+    environment:
+      name: compat-237-secret
+      url: ${{ steps.emit.outputs.url }}
+    outputs:
+      safe: ${{ steps.emit.outputs.safe }}
+      masked: ${{ steps.emit.outputs.masked }}
+    steps:
+      - name: Emit a safe and a masked value
+        id: emit
+        run: |
+          token="compat237-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+          echo "::add-mask::$token"
+          printf 'safe=compat-237-safe-output\n' >> "$GITHUB_OUTPUT"
+          printf 'masked=%s\n' "$token" >> "$GITHUB_OUTPUT"
+          printf 'url=https://example.com/compat-237/%s\n' "$token" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    runs-on: [self-hosted, "${{ inputs.runner_label }}"]
+    timeout-minutes: 10
+    environment:
+      name: compat-237-safe
+      url: ${{ steps.url.outputs.url }}
+    steps:
+      - name: Choose the deployment URL
+        id: url
+        run: printf 'url=https://example.com/compat-237/%s-%s/%s\n' '${{ inputs.lane }}' '${{ inputs.variant }}' '${{ github.run_id }}' >> "$GITHUB_OUTPUT"
+
+  container:
+    if: inputs.run_docker
+    runs-on: [self-hosted, "${{ inputs.runner_label }}"]
+    timeout-minutes: 15
+    container: ubuntu@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852
+    outputs:
+      sha: ${{ steps.payload.outputs.sha }}
+    steps:
+      # Written outside the workspace: the container runs as root, and a root-owned
+      # file in the workspace later jobs share would block their extraction.
+      - name: Write payload in the container
+        id: payload
+        run: |
+          grep -q '^ID=ubuntu$' /etc/os-release
+          printf 'container-237-%s\n' '${{ github.run_id }}' > /tmp/container-237.txt
+          printf 'sha=%s\n' "$(sha256sum /tmp/container-237.txt | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - name: Upload from the container
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: compat-237-${{ inputs.lane }}-${{ inputs.variant }}-container
+          path: /tmp/container-237.txt
+          if-no-files-found: error
 
   consumer:
-    needs: [contexts, docker, services]
+    needs: [contexts, docker, services, secrets, container]
     if: always()
     runs-on: [self-hosted, "${{ inputs.runner_label }}"]
     timeout-minutes: 10
@@ -175,6 +278,20 @@ jobs:
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: compat-103-${{ inputs.lane }}-${{ inputs.variant }}-payload
+      - name: Download container artifact
+        if: inputs.run_docker
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: compat-237-${{ inputs.lane }}-${{ inputs.variant }}-container
+          path: container-237-download
+      - name: Verify outputs and artifact digests
+        run: |
+          test '${{ needs.secrets.outputs.safe }}' = compat-237-safe-output
+          test -z '${{ needs.secrets.outputs.masked }}'
+          test "$(shasum -a 256 artifact-103.txt | cut -d' ' -f1)" = '${{ needs.services.outputs.artifact_sha }}'
+          if [ '${{ inputs.run_docker }}' = true ]; then
+            test "$(shasum -a 256 container-237-download/container-237.txt | cut -d' ' -f1)" = '${{ needs.container.outputs.sha }}'
+          fi
       - name: Verify cross-job values
         run: |
           test "$(cat cache-103.txt)" = 'cache-103-${{ github.run_id }}'

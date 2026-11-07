@@ -181,14 +181,18 @@ merge.
 ### Paired workflow
 
 [`compat-paired.yml`](../.github/workflows/compat-paired.yml) is the way to run a
-new comparison. It is dispatch-only and has not been dispatched yet, so two
-runners side by side on a hosted VM remains unproven.
+new comparison. It is dispatch-only. #237 dispatched it twice (runs
+[42388230585](https://github.com/Falconiere/toolu-ghrunner/actions/runs/42388230585)
+and [42389172867](https://github.com/Falconiere/toolu-ghrunner/actions/runs/42389172867)):
+both runners served their probes side by side on all three hosted VMs. No
+toolu/official comparison report has been recorded from it yet; that is #251.
 
 Each of `ubuntu-latest`, `ubuntu-24.04-arm` and `macos-15` verifies the official
 v2.338.2 archive digest, builds toolu, registers both runners by JIT under
 per-run labels, and serves them until that platform's probe jobs complete.
 Runners are unregistered on every exit. A missing `TOOLU_RUNNER_LIVE_TOKEN` fails
-the run as `UNVERIFIED`.
+the run as `UNVERIFIED`; a token that cannot list runners or read the run's jobs
+fails it with the HTTP status (the secret itself is never printed).
 
 `negative` is meant to fail, so a good run still concludes `failure`. Compare with:
 
@@ -205,18 +209,58 @@ stays for the record; the comparator no longer reads runs in its job layout.
 
 **Not covered:**
 
-- macOS and ARM64 pairs: the recorded run has no host for them.
-  `compat-paired.yml` covers them but has not been dispatched, so they stay
-  `unverified`.
+- macOS and ARM64 pairs on the reference lane: the recorded report has no host
+  for them. `compat-paired.yml` ran them, but no comparison report is recorded
+  yet (#251), so reference cells stay `unverified`.
 - GHES: out of scope and a matrix exclusion. The V1 code exists but has never run
   on a real server, and `live-ghes.yml` cannot test it (its harness registers at
   github.com; see [known bugs](known-bugs.md#verification-limits)).
-- Accelerated services mode.
+- Accelerated services mode with GitHub job containers: refused by design
+  ([known bugs](known-bugs.md#current-limitations)). The accelerated lane below
+  runs the runner itself in a container instead.
 - Live fault injection on the control plane (outage, cancel races, duplicate
   delivery).
-- Live UI probes for annotations, summaries and deployment URLs.
+- Step summaries on GitHub (no public API) and any web-UI rendering.
 
 These remain `unverified` in the matrix.
+
+### Surface probes (#237)
+
+The reusable probe adds four jobs on every lane and variant: `annotations`
+(a control step, then `::error`/`::warning`/`::notice` with file, line and
+title), `secrets` (a job output and an environment URL carrying an `::add-mask::`
+value), `deploy` (a safe environment URL) and, on Linux, `container` (an
+artifact uploaded from inside a pinned ubuntu job container). `services` asserts
+OIDC claims for the default and a custom audience in memory, or the absence of
+both request variables without `id-token: write`; `consumer` checks the outputs
+and every artifact's sha256 against its producer.
+
+A third toolu lane on the Linux-X64 VM runs the same probe in
+`[services] mode = "accelerated"`, with the runner process inside a pinned
+ubuntu container, so the producer and consumer jobs both run in that container
+and reach the local accelerated proxy. It runs no Docker jobs.
+
+The hosted `surfaces` job reads the GitHub records back with the run's own
+token: annotations from each job's `check_run_url`, deployment statuses whose
+`log_url` names the job. `scripts/test/compat_surfaces_check.py` evaluates them;
+only toolu lanes fail it, official lanes are recorded. Its capture of run
+42389172867 is committed as `docs/compat-surfaces-237.json` and re-verified in CI.
+It keeps job and check-run IDs and splits environment URLs into their
+`/`-separated parts, rather than storing URLs. It holds no token, claim value or
+signed URL: on any such match the checker writes nothing and reports only the
+count, never the value. Re-verify it with:
+
+```sh
+python3 scripts/test/compat_surfaces_check.py --verify docs/compat-surfaces-237.json
+```
+
+Every scope passed in run 42389172867, on toolu and official alike. Run
+42388230585 found that GitHub job containers are refused in accelerated mode and
+that a root-owned payload in the shared workspace blocked a later download on
+both runners; the probe now writes that payload under the container's `/tmp`.
+The toolu lanes also logged `message poll returned status 404` warnings while a
+job ran, which the official lane did not; no job result changed (#251 compares
+the lanes).
 
 ## Recorded differences
 
