@@ -174,10 +174,45 @@ class RejectionTest(unittest.TestCase):
                 (check.ROOT / "docs/compat-reference-103.json").read_text())["acknowledged"]
                 for rid in ack["matrix_rows"]})
             row(m, "103/R-cache")["lanes"]["reference"] = {"status": "passed",
-                                                           "evidence": f"report:{path}"}
+                                                           "evidence": f"report:{path}#R-cache"}
             self.assertEqual(errors_for(m), [])
         finally:
             Path(fresh.name).unlink()
+
+    def cite(self, report, rid, evidence_suffix):
+        """Errors for `rid`'s reference lane citing `report` (written under docs/)."""
+        with tempfile.NamedTemporaryFile("w", suffix=".json", dir=check.ROOT / "docs",
+                                         delete=False) as fresh:
+            json.dump(report, fresh)
+        try:
+            path = str(Path(fresh.name).relative_to(check.ROOT))
+            m = copy.deepcopy(MATRIX)
+            m["reports"].append(path)
+            row(m, rid)["lanes"]["reference"] = {"status": "passed",
+                                                 "evidence": f"report:{path}{evidence_suffix}"}
+            return errors_for(m)
+        finally:
+            Path(fresh.name).unlink()
+
+    def test_a_251_report_must_be_cited_through_an_assertion(self):
+        errors = self.cite(report_fixtures.paired_report(), "103/R-cache", "")
+        self.assertTrue(any("cite one of the report's assertions" in e for e in errors), errors)
+
+    def test_an_assertion_for_another_row_or_unknown_is_rejected(self):
+        report = report_fixtures.paired_report()
+        self.assertTrue(any("does not cover this row" in e
+                            for e in self.cite(report, "103/R-cache", "#R-oidc")))
+        self.assertTrue(any("has no assertion X-9" in e for e in self.cite(report, "67/X-1", "#X-9")))
+
+    def test_a_toolu_only_assertion_never_backs_the_reference_lane(self):
+        errors = self.cite(report_fixtures.paired_report(), "67/X-6", "#X-6-toolu")
+        self.assertTrue(any("measures toolu alone" in e for e in errors), errors)
+
+    def test_a_failing_assertion_is_rejected_even_if_stored_as_passed(self):
+        report = report_fixtures.paired_report()
+        report["host"]["Linux-X64"]["lanes"]["toolu"]["renewals_max"] = 0
+        errors = self.cite(report, "103/R-renew", "#R-renew")
+        self.assertTrue(any("assertion R-renew does not pass" in e for e in errors), errors)
 
     def test_row_citing_the_run_of_the_report_that_acknowledges_it_cannot_pass(self):
         m = copy.deepcopy(MATRIX)

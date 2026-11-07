@@ -14,6 +14,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 reference_compare = importlib.import_module("reference_compare")
+compat_assertions = importlib.import_module("compat_assertions")
 
 ROOT = Path(__file__).resolve().parents[2]
 REPORT = json.loads((ROOT / "docs/compat-reference-103.json").read_text())
@@ -23,25 +24,53 @@ def job(report, variant, name):
     return next(r for r in report["jobs"] if r["variant"] == variant and r["job"] == name)
 
 
+def expected_view(variant, name, recorded):
+    """A lane view meeting `name`'s expectation; recorded #103 views where they already do."""
+    conclusion, failed = reference_compare.expected(variant, name)
+    if name in reference_compare.LEGACY_JOBS or (conclusion == "success" and not failed):
+        return recorded
+    steps = [["Set up job", "success"]] + [[step, "failure"] for step in failed]
+    if conclusion == "skipped":
+        steps = []
+    return {**recorded, "conclusion": conclusion or "failure", "steps": steps}
+
+
 def paired_report():
     """The recorded official lane cloned onto both lanes of every platform: a clean report."""
     report = copy.deepcopy(REPORT)
-    report.update(issue=230, acknowledged=[], jobs=[], results={})
+    report.update(issue=230, acknowledged=[], jobs=[], results={}, host={}, leaks={}, toolu_only={})
     report["run"]["id"] = 1
     for os_name, arch in reference_compare.EXPECTED_PLATFORMS:
         for name in reference_compare.EXPECTED_JOBS[os_name]:
             # The recorded run predates the #237 jobs: they borrow the services row.
             for row in REPORT["jobs"]:
                 if row["job"] == (name if name in reference_compare.LEGACY_JOBS else "services"):
-                    official = row["official"]
+                    official = expected_view(row["variant"], name, row["official"])
                     report["jobs"].append({**copy.deepcopy(row), "job": name, "os": os_name,
                                            "arch": arch, "toolu": copy.deepcopy(official),
+                                           "official": copy.deepcopy(official),
                                            "equal": True, "diff": []})
         for variant in reference_compare.VARIANTS:
             observed = REPORT["results"][variant]["official"]
             report["results"][reference_compare.scope(variant, os_name, arch)] = {
                 "equal": True, "toolu": copy.deepcopy(observed), "official": copy.deepcopy(observed)}
+        platform = f"{os_name}-{arch}"
+        report["host"][platform] = clean_host()
+        report["leaks"][platform] = {lane: {"logs": 0, "annotations": 0, "unreadable": 0}
+                                     for lane in reference_compare.LANES}
+        report["toolu_only"][platform] = {job: "success" for job in ("fresh-1", "fresh-2", "ephemeral")}
+    for platform, lanes in report["leaks"].items():
+        for lane, scan in lanes.items():
+            scan["jobs_scanned"] = compat_assertions.eligible_jobs(report, platform, lane)
+    report["assertions"] = reference_compare.assertions(report)
     return report
+
+
+def clean_host():
+    """One VM's host-251.json with nothing wrong in it."""
+    lane = {"disposable_hits": 0, "renewals_max": 2, "poll_failures": 0}
+    return {"provenance": {}, "lanes": {"toolu": dict(lane), "official": dict(lane)},
+            "toolu_only": {"ephemeral": {"exit_code": 0, "state_removed": True, "runner_removed": True}}}
 
 
 def platform_row(report, variant, name, os_name, arch):

@@ -158,15 +158,38 @@ def check_evidence(row, lane, evidence, tests, context, errors):
         if not file.is_file() or (anchor and anchor not in anchors(file)):
             errors.append(f"{where}: {evidence!r} does not resolve to a document heading")
     elif evidence.startswith("report:"):
-        report = context["reports"].get(evidence[7:])
+        path, _, ident = evidence[7:].partition("#")
+        report = context["reports"].get(path)
         if lane != "reference":
             errors.append(f"{where}: 'report:' evidence only backs the reference lane")
         elif report is None:
-            errors.append(f"{where}: report {evidence[7:]} is missing")
+            errors.append(f"{where}: report {path} is missing")
         elif row["id"] in report["unverified_rows"]:
             errors.append(f"{where}: the report acknowledges a difference for this row")
+        else:
+            check_assertion(row["id"], where, report, ident, errors)
     else:
         errors.append(f"{where}: unknown evidence kind {evidence!r}")
+
+
+def check_assertion(rid, where, report, ident, errors):
+    """A #251-style report backs a row only through a named, recomputed assertion
+    that lists the row, passes, and is not toolu-only."""
+    if not report["assertions"]:
+        if ident:
+            errors.append(f"{where}: report has no assertions to cite (#{ident})")
+        return
+    assertion = report["assertions"].get(ident)
+    if not ident:
+        errors.append(f"{where}: cite one of the report's assertions as report:<path>#<id>")
+    elif assertion is None:
+        errors.append(f"{where}: the report has no assertion {ident}")
+    elif assertion["toolu_only"]:
+        errors.append(f"{where}: assertion {ident} measures toolu alone and is not reference evidence")
+    elif rid not in assertion["rows"]:
+        errors.append(f"{where}: assertion {ident} does not cover this row")
+    elif not assertion["passed"]:
+        errors.append(f"{where}: assertion {ident} does not pass: {'; '.join(assertion['problems'][:3])}")
 
 
 def check_row(row, issues, context, errors):
@@ -243,7 +266,9 @@ def load_reports(matrix, errors):
             errors.append(f"listed report {path} is not valid JSON: {error}")
             continue
         rows = {r for ack in data.get("acknowledged", []) for r in ack.get("matrix_rows", [])}
-        reports[path] = {"data": data, "unverified_rows": rows}
+        # Recomputed, never the stored flags; {} for the legacy #103 report.
+        reports[path] = {"data": data, "unverified_rows": rows,
+                         "assertions": reference_compare.assertions(data)}
     return reports
 
 
