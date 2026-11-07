@@ -98,10 +98,10 @@ pub async fn run_job_with_shutdown(
   masker: Arc<Mutex<SecretMasker>>,
   shutdown: CancellationToken,
 ) -> Result<JobTeardown, RunnerError> {
-  // Keep the setup/execution state machine off callers' stack frames. The
-  // compatibility entry point and listener otherwise inline it repeatedly.
   // Holds the channel open through the cleanup, whoever else has a sender.
   let channel_open = events.clone();
+  // Keep the setup/execution state machine off callers' stack frames. The
+  // compatibility entry point and listener otherwise inline it repeatedly.
   let result = Box::pin(entry::run(msg, config, cancel, events, masker, shutdown)).await;
   // Not in `JobTeardown::finish`: that runs after the event channel closes,
   // which reports completion and lets the next job start in this `data_dir`,
