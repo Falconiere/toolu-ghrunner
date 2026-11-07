@@ -153,7 +153,7 @@ are deliberately non-credential text. The behavior oracle is
 | 86-S1 | Encoded LF/CRLF/CR, blank lines, whitespace, repeated/overlapping values, 1–3 byte values and Unicode; whole value and each trimmed line become `***`; a plain space stays unchanged. `%250A` is decoded only once. | Real shell → dispatcher → shared masker. |
 | 86-S2 | Seven stdout and seven stderr records become `stdout=[***]` / `stderr=[***]`, with `control remains visible` unchanged. | Actual event forwarder writes the combined-job disk spool and produces byte-identical step-upload and live-log lines; real journal writer persists matching JSONL lines; production `RedactingWriter` with `MaskerRedactor` yields identical diagnostic lines. No HTTP service or upload acknowledgment is mocked. |
 | 86-S3 | Nested local composite invokes background shell writers after registration; repeated/overlapping values merge without residual text. | Sorted probe records match exactly; stream identities, counts and successful job completion are asserted. Concurrent registration is serialized by the existing shared mutex. |
-| 86-S4 | The masks are registered inside a nested composite; a later top-level notice containing three newly registered short lines becomes `annotation=[***|***|***]`, a later step summary becomes `summary=***`, a later job output carrying the value is dropped with the secret warning while a clear output survives, and a later deployment URL is suppressed with upstream's warning (#235). | The summary, job-output and deployment-URL sinks are exercised with a single-line mask; a mask whose value spans lines is still exercised only for the stdout, stderr, annotation, journal and live-log sinks. Otherwise covered locally against real sinks. GitHub.com and GHES UI/backend observation of the same job remains **unverified**. |
+| 86-S4 | The masks are registered inside a nested composite; a later top-level notice containing three newly registered short lines becomes `annotation=[***|***|***]`. The nested composite registers two multiline masks, one LF and one CRLF, and a later step summary redacts the whole multiline span as a single `***`, one of its lines, and the CRLF value's line, while a non-secret control line survives; two later job outputs carrying lines of the same mask are dropped with the secret warning while a clear output survives; a later deployment URL carrying a line is suppressed with upstream's warning (#235). | The whole-value span is LF because `step_summary` normalizes CRLF to LF before masking, so a CR-bearing span is unreachable at that sink by design; CRLF splitting is proven instead through that mask's lines. Otherwise covered locally against real sinks. GitHub.com and GHES UI/backend observation of the same job remains **unverified**. |
 
 Verification status: the pre-fix test reproduced cleartext
 `annotation=[Q|RS|TUV]` on macOS. The post-fix production-replay test passes
@@ -165,11 +165,15 @@ these local buffers do not prove remote UI behavior. Diagnostics here exercise
 the actual writer/redactor directly, not global subscriber initialization.
 Nested composite shell workflow-command routing is no longer a gap (#235): the
 probe registers every multiline `::add-mask::` from inside the nested
-composite, and the top-level notice that follows it is redacted. A single-line
-mask registered the same way from a nested composite also suppresses a later job
-output and deployment URL
+composite, and the top-level notice that follows it is redacted. Multiline masks
+registered the same way from a nested composite also redact a later step summary
+and suppress later job outputs and a deployment URL
 (`job_outputs_test::nested_composite_mask_suppresses_a_later_job_output`,
 `environment_url_test::nested_composite_mask_suppresses_the_environment_url`).
+Both pattern families `SecretMasker::add_mask` registers are asserted: the whole
+multiline span collapses to one `***` in the summary, and individual lines are
+masked wherever they appear alone, which is what reaches the job-output and
+deployment-URL sinks since those carry single-line values.
 
 ## Incoming contexts acceptance (#68)
 
