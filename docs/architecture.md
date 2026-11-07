@@ -1740,10 +1740,11 @@ live GitHub are not covered there.
 
 ## Verification and scope limits
 
-- **GHES:** the dispatch-only `live-ghes.yml` harness fails as `UNVERIFIED`
-  without `TOOLU_RUNNER_LIVE_GHES_*` credentials. The compatibility matrix
-  records which scenarios have evidence; GitHub.com results do not establish
-  GHES parity.
+- **GHES:** implemented over V1 but never tested on a real server; out of scope
+  for the compatibility claim. The dispatch-only `live-ghes.yml` harness cannot
+  test it (its shared harness registers at github.com and never reads
+  `TOOLU_RUNNER_LIVE_GHES_*`; see [known bugs](known-bugs.md#verification-limits)).
+  GitHub.com results do not establish GHES parity.
 - **macOS distribution:** release scripts do not sign or notarize the binary.
 - **Telemetry:** diagnostics use `tracing-subscriber` and the local journal.
   OpenTelemetry is not part of the current runtime.

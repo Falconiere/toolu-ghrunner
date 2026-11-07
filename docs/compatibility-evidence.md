@@ -26,7 +26,7 @@ Every matrix row records all seven lanes:
 | `docker` | A real Linux Docker daemon | `ci-docker` (a mapped test run by `ci.yml`'s Docker step), a recorded explicit run (`doc:` or a `pr:` whose body records it), or a live run (`run:`) |
 | `github-com` | A real job acquired from GitHub.com and executed by toolu | `run:<actions run URL>` or `pr:<PR URL>` whose body records the observation |
 | `reference` | The same workflow/action revisions compared against the official runner | `run:` (paired run) or `report:docs/compat-reference-103.json` |
-| `ghes` | GitHub Enterprise Server | none recorded; no GHES instance has been available |
+| `ghes` | GitHub Enterprise Server | none recorded; no GHES instance has been available; out of scope (excluded) |
 | `ui-service` | A GitHub-owned UI or backend result: annotations, summaries, the cache/artifact/OIDC backends, recorded job/step results | `run:` / `pr:` |
 
 Statuses:
@@ -208,7 +208,9 @@ stays for the record; the comparator no longer reads runs in its job layout.
 - macOS and ARM64 pairs: the recorded run has no host for them.
   `compat-paired.yml` covers them but has not been dispatched, so they stay
   `unverified`.
-- GHES.
+- GHES: out of scope and a matrix exclusion. The V1 code exists but has never run
+  on a real server, and `live-ghes.yml` cannot test it (its harness registers at
+  github.com; see [known bugs](known-bugs.md#verification-limits)).
 - Accelerated services mode.
 - Live fault injection on the control plane (outage, cancel races, duplicate
   delivery).

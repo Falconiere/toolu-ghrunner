@@ -22,6 +22,7 @@
     "snapshot: (GitHub-hosted only)",
     "attestation artifact file commands",
     "runner telemetry",
+    "GHES (implemented, never tested on a real server; out of scope)",
     "AuthMigration"
   ],
   "issues": {
