@@ -99,5 +99,11 @@ fn build_context_resolves_self_references_only_with_the_flag() {
   let mut off = build(&msg);
   off.set_github_context("action_repository", "octo/tools");
   off.set_github_context("action_ref", "v9");
-  assert!(off.resolve_self_uses("$/").is_err(), "flag off refuses $/");
+  let err = off
+    .resolve_self_uses("$/")
+    .expect_err("flag off refuses $/");
+  assert!(
+    err.to_string().contains("Unable to resolve self-reference"),
+    "got {err}"
+  );
 }

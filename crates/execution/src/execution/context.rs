@@ -291,15 +291,14 @@ impl ExecutionContext {
   ///
   /// `RunnerError::ActionResolution` as [`super::actions::resolver::resolve_self_reference`].
   pub fn resolve_self_uses(&self, uses: &str) -> Result<Option<String>, shared::RunnerError> {
+    if !self.self_repository_enabled {
+      return super::actions::resolver::resolve_self_reference(uses, None);
+    }
     let enclosing = self
       .github_context("action_repository")
       .zip(self.github_context("action_ref"))
       .filter(|(r, g)| !r.is_empty() && !g.is_empty());
-    let parent = if self.self_repository_enabled {
-      enclosing.or(self.workflow_identity())
-    } else {
-      None
-    };
+    let parent = enclosing.or(self.workflow_identity());
     super::actions::resolver::resolve_self_reference(uses, parent)
   }
 

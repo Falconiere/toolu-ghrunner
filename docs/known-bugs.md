@@ -21,8 +21,9 @@ the `TOOLU_RUNNER_LIVE_TOKEN` secret; its test repository is the
 
 - **Top-level `$/` steps (#241):** only `$/` inside an action manifest's
   composite steps is resolved. A workflow step `uses: $/…` is rewritten by the
-  service before delivery; how it arrives (`repositoryType: self` without a
-  `./` path) is unverified, so it is not resolved. Live check: #251.
+  service before delivery; the delivered form (`repositoryType: self` without a
+  `./` path) has not been observed, so it is intentionally not resolved until a
+  live job shows it. Live check: #251.
 - **Outage reporting:** the watchdog counts only network-class renewal
   failures (transport errors, 429 and 5xx). Definitive auth/protocol failures
   warn without tripping it. Completion retries network failures for up to ten

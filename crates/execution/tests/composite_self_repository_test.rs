@@ -72,6 +72,7 @@ async fn run(enabled: bool) -> Result<(String, Vec<String>), Box<dyn std::error:
   // after resolution fails immediately and nothing reaches the network.
   let http = reqwest::Client::builder()
     .proxy(reqwest::Proxy::all("http://127.0.0.1:1")?)
+    .timeout(std::time::Duration::from_secs(5))
     .build()?;
   let fetcher = ActionFetcher::new(&shared::NetworkConfig::default())?;
   let params = CompositeParams {
@@ -111,8 +112,10 @@ async fn flag_on_resolves_to_the_workflow_repository_and_sha()
   let (error, lines) = run(true).await?;
   let resolved = format!("octo/workflow-repo/actions/child@{SHA}");
   assert!(
-    lines.iter().any(|l| l.contains(&resolved)) || error.contains(&resolved),
-    "expected {resolved} in logs {lines:?} or error {error:?}"
+    lines
+      .iter()
+      .any(|l| l.contains(&format!("Resolving {resolved}"))),
+    "expected the action header log `Resolving {resolved}` (emitted only after resolution) in {lines:?}; error {error:?}"
   );
   Ok(())
 }
