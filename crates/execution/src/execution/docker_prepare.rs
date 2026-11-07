@@ -163,11 +163,12 @@ async fn discover_remote(
       let repository = format!("{}/{}", action_ref.owner, action_ref.repo);
       queue.extend(manifest.runs.steps.into_iter().filter_map(|step| {
         step.uses.map(|uses| {
-          let uses = ctx
-            .resolve_self_uses_for_parent(&uses, (&repository, &action_ref.git_ref))
-            .ok()
-            .flatten()
-            .unwrap_or(uses);
+          // The prepass defers invalid refs to step-time resolution and its diagnostics.
+          let uses =
+            match ctx.resolve_self_uses_for_parent(&uses, (&repository, &action_ref.git_ref)) {
+              Ok(Some(resolved)) => resolved,
+              Ok(None) | Err(_) => uses,
+            };
           (uses, depth.saturating_add(1))
         })
       }));

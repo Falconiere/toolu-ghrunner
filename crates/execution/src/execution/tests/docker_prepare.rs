@@ -272,6 +272,7 @@ async fn graceful_cancel_interrupts_inflight_archive_discovery()
   tokio::time::timeout(std::time::Duration::from_secs(5), arrived_rx.recv())
     .await?
     .ok_or("archive request did not arrive")?;
+  // The archive response stays held until discovery returns after cancellation.
   cancel.cancel();
   let result = tokio::time::timeout(std::time::Duration::from_secs(2), discovery).await??;
   release.notify_waiters();
@@ -370,17 +371,11 @@ async fn nested_self_reference_prepares_remote_docker() -> Result<(), Box<dyn st
     ),
   ])?;
   let (api, server) = follow_up_server(body, None).await?;
-  let mut job = follow_up_job(&api, vec![follow_up_step("outer")])?;
-  job.variables.insert(
-    "actions_self_repository".to_owned(),
-    shared::VariableValue {
-      value: "true".to_owned(),
-      is_secret: false,
-    },
-  );
+  let job = follow_up_job(&api, vec![follow_up_step("outer")])?;
   let fetcher = follow_up_fetcher(&job)?;
   let dir = tempfile::tempdir()?;
   let mut enabled = ExecutionContext::new_for_test();
+  // A wrong workflow identity proves nested `$/` uses the enclosing remote action.
   enabled.enable_self_repository(Some(("workflow/other".to_owned(), "wrong-sha".to_owned())));
   let plan = discover(
     &job.steps,
