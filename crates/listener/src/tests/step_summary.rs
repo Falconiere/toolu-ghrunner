@@ -55,14 +55,15 @@ fn upload_routes(base: &str, hold: Gate) -> HashMap<(Method, String), RouteRespo
 /// in flight, so the eighteenth applies backpressure rather than being
 /// dropped, and the drain still uploads every one.
 ///
-/// The peer is stalled while the queue fills, which is also the ceiling a
-/// stalled Results Service can impose on job completion: uploads are serial
-/// and every document costs at most one 30s `wire` request deadline, so 18
-/// held documents can delay completion by about 9 minutes (about 38 minutes
-/// if the stall is in the blob PUT: four 30s attempts plus 5.6s of backoff
-/// per document, and up to about 90 minutes when `Retry-After` replaces the
-/// backoff). Recorded in docs/step-summaries.md; the test releases the stall
-/// instead of waiting it out.
+/// The peer is stalled while the queue fills, which is also what a stalled
+/// Results Service costs at job completion: uploads are serial and nothing
+/// is dropped, so the delay is one 30s `wire` request deadline per document
+/// — or about 126s when the stall is in the blob PUT (four 30s attempts plus
+/// 5.6s of backoff), up to 300s when `Retry-After` replaces the backoff. It
+/// scales with how many summaries the job wrote, not with the seventeen the
+/// queue holds at once: these eighteen are about 9 minutes of stalled RPCs.
+/// Recorded in docs/step-summaries.md; the test releases the stall instead
+/// of waiting it out.
 #[tokio::test]
 async fn step_summary_queue_drains_more_documents_than_its_slots()
 -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
