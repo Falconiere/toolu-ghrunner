@@ -475,7 +475,7 @@
     },
     "94": {
       "title": "Explicit proxy and custom CA configuration",
-      "state": "open",
+      "state": "closed",
       "ids": [
         "AC-1",
         "AC-2",
@@ -487,8 +487,8 @@
         "94-S3",
         "94-S4"
       ],
-      "pr": null,
-      "coverage": null
+      "pr": "https://github.com/Falconiere/toolu-ghrunner/pull/171",
+      "coverage": "docs/test-coverage.md#proxy-and-custom-ca-94"
     },
     "95": {
       "title": "Node runtime: musl/Alpine builds and node24 migration flags",
@@ -14320,39 +14320,68 @@
       "id": "94/AC-1",
       "issue": 94,
       "criterion": "Current env-based behaviour is documented",
-      "input": [],
-      "expected": "Defined by the issue; not implemented on main yet.",
-      "production_path": "not on main yet (explicit proxy and custom CA configuration, https://github.com/Falconiere/toolu-ghrunner/issues/94)",
-      "tests": [],
-      "command": "n/a until https://github.com/Falconiere/toolu-ghrunner/issues/94 merges",
+      "input": [
+        "README.md",
+        "crates/network/tests/helpers/proxy_fixtures.rs",
+        "crates/network/tests/helpers/tls_fixtures.rs"
+      ],
+      "expected": "README 'Proxy and custom CA' states environment mode: upper case before lower case, unparseable scheme variable falls back to ALL_PROXY, REQUEST_METHOD disables all, NO_PROXY bypasses. Real clients behave that way against a recording proxy.",
+      "production_path": "crates/network/src/proxy_env.rs; crates/network/src/client.rs",
+      "tests": [
+        [
+          "crates/network/tests/client_proxy_test.rs",
+          "env_mode_keeps_the_env_proxy"
+        ],
+        [
+          "crates/network/tests/proxy_env_test.rs",
+          "effective_proxy_prefers_the_scheme_variable_then_all_proxy"
+        ],
+        [
+          "crates/network/tests/proxy_env_test.rs",
+          "set_but_empty_upper_case_disables_the_pair_everywhere"
+        ],
+        [
+          "crates/network/tests/proxy_env_test.rs",
+          "request_method_disables_the_env_proxy_everywhere"
+        ],
+        [
+          "crates/network/tests/proxy_env_test.rs",
+          "unparseable_scheme_variable_falls_back_to_all_proxy_everywhere"
+        ],
+        [
+          "crates/toolu-runner/tests/check_cmd_test.rs",
+          "no_proxy_bypasses_the_proxy"
+        ]
+      ],
+      "command": "cargo test -p network --test integration; cargo test -p toolu-runner --test integration -- check_cmd_test::no_proxy_bypasses_the_proxy",
       "lanes": {
         "hermetic": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "passed",
+          "evidence": "gate"
         },
         "macos": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "passed",
+          "evidence": "gate"
         },
         "docker": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "not-applicable",
+          "reason": "no container or Docker action involved; the container export is recorded on AC-3 and 94-S4"
         },
         "github-com": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no live GitHub.com job has run through a proxy or custom CA; generated-CA loopback peers prove local wiring only"
         },
         "reference": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no official-runner comparison through a proxy; the by-design differences are listed in docs/test-coverage.md under Proxy and custom CA (#94)"
         },
         "ghes": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no GHES instance available; a GHES-shaped loopback target proves local wiring only"
         },
         "ui-service": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "not-applicable",
+          "reason": "runner-side network settings; no GitHub-owned UI or backend result"
         }
       }
     },
@@ -14360,39 +14389,96 @@
       "id": "94/AC-2",
       "issue": 94,
       "criterion": "Optional config for proxy URL, bypass list and extra CA bundle, applied to every HTTP client",
-      "input": [],
-      "expected": "Defined by the issue; not implemented on main yet.",
-      "production_path": "not on main yet (explicit proxy and custom CA configuration, https://github.com/Falconiere/toolu-ghrunner/issues/94)",
-      "tests": [],
-      "command": "n/a until https://github.com/Falconiere/toolu-ghrunner/issues/94 merges",
+      "input": [
+        "README.md",
+        "crates/network/tests/helpers/proxy_fixtures.rs",
+        "crates/network/tests/helpers/tls_fixtures.rs"
+      ],
+      "expected": "Config proxy, bypass list and bundle reach the runner, job, archive, accelerated-upstream, live-log and S3-tier (not production-wired) clients: each sends CONNECT with Basic auth through a recording proxy and trusts the generated CA. No production source builds a reqwest client outside crates/network.",
+      "production_path": "crates/network/src/client.rs; crates/execution/src/execution/job_runner/job_http.rs; crates/wire/src/reporting/live_log.rs; crates/toolu-runner/src/network_setup.rs",
+      "tests": [
+        [
+          "crates/network/tests/client_proxy_test.rs",
+          "config_proxy_tunnels_with_decoded_basic_auth"
+        ],
+        [
+          "crates/network/tests/client_proxy_test.rs",
+          "no_proxy_destination_goes_direct"
+        ],
+        [
+          "crates/network/tests/client_tls_test.rs",
+          "bundle_makes_the_generated_ca_trusted"
+        ],
+        [
+          "crates/execution/tests/network_job_clients_test.rs",
+          "archive_download_uses_the_proxy_and_the_bundle"
+        ],
+        [
+          "crates/execution/tests/network_job_clients_test.rs",
+          "fetcher_is_built_from_the_configured_network_and_fails_closed"
+        ],
+        [
+          "crates/execution/src/execution/job_runner/tests/job_http.rs",
+          "job_client_goes_through_the_configured_proxy_and_ca"
+        ],
+        [
+          "crates/execution/src/execution/job_runner/tests/job_http.rs",
+          "accelerated_upstream_client_goes_through_the_configured_proxy_and_ca"
+        ],
+        [
+          "crates/wire/tests/live_log_proxy_test.rs",
+          "live_log_tunnels_through_the_proxy_with_the_custom_ca"
+        ],
+        [
+          "crates/cache/tests/l2_network_test.rs",
+          "l2_put_goes_through_the_configured_proxy_and_ca"
+        ],
+        [
+          "crates/toolu-runner/tests/network_cli_test.rs",
+          "check_probes_through_the_configured_proxy_and_reports_it_redacted"
+        ],
+        [
+          "crates/toolu-runner/tests/register_replace_network_test.rs",
+          "replace_mints_through_the_existing_network_section"
+        ],
+        [
+          "crates/config/tests/network_section_test.rs",
+          "configured_section_round_trips"
+        ],
+        [
+          "crates/toolu-runner/tests/network_client_inventory_test.rs",
+          "no_production_source_builds_a_reqwest_client_directly"
+        ]
+      ],
+      "command": "cargo test -p config --test integration -- network_section_test::; cargo test -p network --test integration; cargo test -p execution --test integration -- network_job_clients_test::; cargo test -p execution --lib job_http; cargo test -p wire --test integration -- live_log_proxy_test::; cargo test -p cache --test l2_network_test; cargo test -p toolu-runner --test integration -- network_cli_test:: network_client_inventory_test:: register_replace_network_test::",
       "lanes": {
         "hermetic": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "passed",
+          "evidence": "gate"
         },
         "macos": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "passed",
+          "evidence": "gate"
         },
         "docker": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "not-applicable",
+          "reason": "the Docker socket never goes through the HTTP proxy; the container export is recorded on AC-3 and 94-S4"
         },
         "github-com": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no live GitHub.com job has run through a proxy or custom CA; generated-CA loopback peers prove local wiring only"
         },
         "reference": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no official-runner comparison through a proxy; the by-design differences are listed in docs/test-coverage.md under Proxy and custom CA (#94)"
         },
         "ghes": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no GHES instance available; a GHES-shaped loopback target proves local wiring only"
         },
         "ui-service": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "not-applicable",
+          "reason": "runner-side network settings; no GitHub-owned UI or backend result"
         }
       }
     },
@@ -14400,39 +14486,82 @@
       "id": "94/AC-3",
       "issue": 94,
       "criterion": "Proxy and CA settings are exported to steps (`HTTPS_PROXY`, `NO_PROXY`, `NODE_EXTRA_CA_CERTS`)",
-      "input": [],
-      "expected": "Defined by the issue; not implemented on main yet.",
-      "production_path": "not on main yet (explicit proxy and custom CA configuration, https://github.com/Falconiere/toolu-ghrunner/issues/94)",
-      "tests": [],
-      "command": "n/a until https://github.com/Falconiere/toolu-ghrunner/issues/94 merges",
+      "input": [
+        "crates/execution/tests/incoming_contexts_matrix_0.json",
+        "crates/toolu-runner/tests/fixtures/job_container_message.json",
+        "crates/network/tests/helpers/proxy_fixtures.rs",
+        "crates/network/tests/helpers/tls_fixtures.rs"
+      ],
+      "expected": "Real traffic: a run: step's curl reaches a proxy-only host through the exported proxy, trusts the exported bundle and goes direct for the exported no_proxy; a Node action tunnels with the exported proxy and CA. Real job container, service and Docker actions see the proxy variables in both casings and never NODE_EXTRA_CA_CERTS, a host path.",
+      "production_path": "crates/network/src/step_env.rs; crates/execution/src/execution/context_env.rs; crates/execution/src/execution/job_runner/job_http.rs",
+      "tests": [
+        [
+          "crates/execution/tests/network_step_env_test.rs",
+          "shell_traffic_follows_the_exported_proxy_and_bypass"
+        ],
+        [
+          "crates/execution/tests/network_step_env_test.rs",
+          "node_action_traffic_uses_the_exported_proxy_and_ca"
+        ],
+        [
+          "crates/execution/tests/network_step_env_test.rs",
+          "host_steps_and_hooks_get_the_config_export_over_the_runner_env"
+        ],
+        [
+          "crates/execution/tests/network_step_env_test.rs",
+          "composite_action_sees_the_same_export_as_a_run_step"
+        ],
+        [
+          "crates/execution/tests/network_step_env_test.rs",
+          "node_action_main_and_post_see_the_export"
+        ],
+        [
+          "crates/network/tests/step_env_test.rs",
+          "config_mode_exports_both_casings_loopback_and_node_ca"
+        ],
+        [
+          "crates/network/tests/step_env_test.rs",
+          "bundle_alone_exports_only_node_extra_ca_certs"
+        ],
+        [
+          "crates/execution/src/execution/job_runner/tests/job_http.rs",
+          "container_env_keeps_explicit_values_and_never_gets_the_host_ca_path"
+        ],
+        [
+          "crates/execution/tests/network_container_env_test.rs",
+          "containers_receive_the_proxy_export_unless_they_set_it"
+        ]
+      ],
+      "command": "cargo test -p network --test integration -- step_env_test::; cargo test -p execution --lib job_http; cargo test -p execution --test process_env -- network_step_env_test:: --test-threads=1; cargo test -p execution --test integration -- network_container_env_test:: --ignored --test-threads=1",
       "lanes": {
         "hermetic": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "passed",
+          "evidence": "gate"
         },
         "macos": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "passed",
+          "evidence": "gate",
+          "note": "Host tests only: the container test is Linux-only and does not run on this lane."
         },
         "docker": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "passed",
+          "evidence": "ci-docker"
         },
         "github-com": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no live GitHub.com job has run through a proxy or custom CA; generated-CA loopback peers prove local wiring only"
         },
         "reference": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no official-runner comparison through a proxy; the by-design differences are listed in docs/test-coverage.md under Proxy and custom CA (#94)"
         },
         "ghes": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no GHES instance available; a GHES-shaped loopback target proves local wiring only"
         },
         "ui-service": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "not-applicable",
+          "reason": "runner-side network settings; no GitHub-owned UI or backend result"
         }
       }
     },
@@ -14440,39 +14569,66 @@
       "id": "94/AC-4",
       "issue": 94,
       "criterion": "Covered by a real-data test (captured job message / real tool output, no mocks) in the crate's sibling `tests/` folder",
-      "input": [],
-      "expected": "Defined by the issue; not implemented on main yet.",
-      "production_path": "not on main yet (explicit proxy and custom CA configuration, https://github.com/Falconiere/toolu-ghrunner/issues/94)",
-      "tests": [],
-      "command": "n/a until https://github.com/Falconiere/toolu-ghrunner/issues/94 merges",
+      "input": [
+        "crates/execution/tests/incoming_contexts_matrix_0.json",
+        "crates/toolu-runner/tests/fixtures/job_container_message.json",
+        "crates/network/tests/helpers/proxy_fixtures.rs",
+        "crates/network/tests/helpers/tls_fixtures.rs"
+      ],
+      "expected": "Sibling tests/ folders hold real-data tests: a captured job through Runner::execute_job, real bash, curl, Node and Docker, a generated rcgen CA, tokio-rustls servers and a recording CONNECT proxy. Nothing is mocked.",
+      "production_path": "crates/network/src/client.rs; crates/network/src/step_env.rs",
+      "tests": [
+        [
+          "crates/network/tests/client_proxy_test.rs",
+          "config_proxy_tunnels_with_decoded_basic_auth"
+        ],
+        [
+          "crates/network/tests/client_tls_test.rs",
+          "expired_and_wrong_host_leaves_fail_even_with_the_bundle"
+        ],
+        [
+          "crates/execution/tests/network_step_env_test.rs",
+          "shell_traffic_follows_the_exported_proxy_and_bypass"
+        ],
+        [
+          "crates/execution/tests/network_step_env_test.rs",
+          "node_action_traffic_uses_the_exported_proxy_and_ca"
+        ],
+        [
+          "crates/execution/tests/network_container_env_test.rs",
+          "containers_receive_the_proxy_export_unless_they_set_it"
+        ]
+      ],
+      "command": "cargo test -p network --test integration; cargo test -p execution --test process_env -- network_step_env_test:: --test-threads=1; cargo test -p execution --test integration -- network_container_env_test:: --ignored --test-threads=1",
       "lanes": {
         "hermetic": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "passed",
+          "evidence": "gate"
         },
         "macos": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "passed",
+          "evidence": "gate",
+          "note": "Host tests only: the container test is Linux-only and does not run on this lane."
         },
         "docker": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "passed",
+          "evidence": "ci-docker"
         },
         "github-com": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "not-applicable",
+          "reason": "test-layout criterion; no live job is claimed"
         },
         "reference": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "not-applicable",
+          "reason": "test-layout criterion; no paired run is claimed"
         },
         "ghes": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no GHES instance available; a GHES-shaped loopback target proves local wiring only"
         },
         "ui-service": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "not-applicable",
+          "reason": "runner-side network settings; no GitHub-owned UI or backend result"
         }
       }
     },
@@ -14480,39 +14636,50 @@
       "id": "94/AC-5",
       "issue": 94,
       "criterion": "`./tools/check.sh all` green",
-      "input": [],
-      "expected": "Defined by the issue; not implemented on main yet.",
-      "production_path": "not on main yet (explicit proxy and custom CA configuration, https://github.com/Falconiere/toolu-ghrunner/issues/94)",
-      "tests": [],
-      "command": "n/a until https://github.com/Falconiere/toolu-ghrunner/issues/94 merges",
+      "input": [
+        "tools/check.sh"
+      ],
+      "expected": "The repository gate passes at the delivered revision, with the #94 tests in it.",
+      "production_path": "tools/check.sh all",
+      "tests": [
+        [
+          "crates/network/tests/client_proxy_test.rs",
+          "config_proxy_tunnels_with_decoded_basic_auth"
+        ],
+        [
+          "crates/execution/tests/network_step_env_test.rs",
+          "shell_traffic_follows_the_exported_proxy_and_bypass"
+        ]
+      ],
+      "command": "./tools/check.sh all",
       "lanes": {
         "hermetic": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "passed",
+          "evidence": "gate"
         },
         "macos": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "passed",
+          "evidence": "gate"
         },
         "docker": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "not-applicable",
+          "reason": "repository gate criterion; not a behavior to observe on this lane"
         },
         "github-com": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "not-applicable",
+          "reason": "repository gate criterion; not a behavior to observe on this lane"
         },
         "reference": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "not-applicable",
+          "reason": "repository gate criterion; not a behavior to observe on this lane"
         },
         "ghes": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no GHES instance available; the repository gate does not exercise GHES"
         },
         "ui-service": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "not-applicable",
+          "reason": "repository gate criterion; not a behavior to observe on this lane"
         }
       }
     },
@@ -14520,39 +14687,99 @@
       "id": "94/94-S1",
       "issue": 94,
       "criterion": "Environment-only configuration, config-only settings and conflicting sources",
-      "input": [],
-      "expected": "Document/test precedence for all HTTP clients plus exported step settings; preserve supported bypass semantics.",
-      "production_path": "not on main yet (explicit proxy and custom CA configuration, https://github.com/Falconiere/toolu-ghrunner/issues/94)",
-      "tests": [],
-      "command": "n/a until https://github.com/Falconiere/toolu-ghrunner/issues/94 merges",
+      "input": [
+        "crates/execution/tests/incoming_contexts_matrix_0.json",
+        "crates/toolu-runner/tests/fixtures/job_container_message.json",
+        "README.md",
+        "crates/network/tests/helpers/proxy_fixtures.rs",
+        "crates/network/tests/helpers/tls_fixtures.rs"
+      ],
+      "expected": "Config proxy replaces env proxy and env NO_PROXY; config no_proxy goes direct past a dead env proxy; loopback always bypasses; without config the env proxy carries the request. Exported values sit below workflow, job, GITHUB_ENV and step env; a container's own env wins.",
+      "production_path": "crates/network/src/client.rs; crates/network/src/proxy_env.rs; crates/network/src/step_env.rs; crates/execution/src/execution/context_env.rs",
+      "tests": [
+        [
+          "crates/network/tests/client_proxy_test.rs",
+          "config_proxy_replaces_env_proxy_and_env_no_proxy"
+        ],
+        [
+          "crates/network/tests/client_proxy_test.rs",
+          "config_no_proxy_is_direct_even_with_a_dead_env_proxy"
+        ],
+        [
+          "crates/network/tests/client_proxy_test.rs",
+          "env_mode_keeps_the_env_proxy"
+        ],
+        [
+          "crates/network/tests/client_proxy_test.rs",
+          "loopback_bypasses_a_configured_proxy"
+        ],
+        [
+          "crates/network/tests/client_proxy_test.rs",
+          "blank_proxy_is_env_mode"
+        ],
+        [
+          "crates/network/tests/proxy_env_test.rs",
+          "request_method_disables_the_env_proxy_everywhere"
+        ],
+        [
+          "crates/network/tests/proxy_env_test.rs",
+          "unparseable_scheme_variable_falls_back_to_all_proxy_everywhere"
+        ],
+        [
+          "crates/network/tests/step_env_test.rs",
+          "env_mode_reexports_the_first_set_value_in_both_casings"
+        ],
+        [
+          "crates/execution/tests/network_step_env_test.rs",
+          "a_step_env_value_beats_the_export"
+        ],
+        [
+          "crates/execution/tests/network_step_env_test.rs",
+          "a_github_env_value_beats_the_export"
+        ],
+        [
+          "crates/execution/tests/network_step_env_test.rs",
+          "node_action_sees_the_workflow_env_over_the_export"
+        ],
+        [
+          "crates/execution/tests/network_step_env_test.rs",
+          "env_mode_reexports_the_runner_proxy_in_both_casings"
+        ],
+        [
+          "crates/execution/tests/network_container_env_test.rs",
+          "containers_receive_the_proxy_export_unless_they_set_it"
+        ]
+      ],
+      "command": "cargo test -p network --test integration; cargo test -p execution --test process_env -- network_step_env_test:: --test-threads=1; cargo test -p execution --test integration -- network_container_env_test:: --ignored --test-threads=1",
       "lanes": {
         "hermetic": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "passed",
+          "evidence": "gate"
         },
         "macos": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "passed",
+          "evidence": "gate",
+          "note": "Host tests only: the container test is Linux-only and does not run on this lane."
         },
         "docker": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "passed",
+          "evidence": "ci-docker"
         },
         "github-com": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no live GitHub.com job has run through a proxy or custom CA; generated-CA loopback peers prove local wiring only"
         },
         "reference": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no official-runner comparison through a proxy; the by-design differences are listed in docs/test-coverage.md under Proxy and custom CA (#94)"
         },
         "ghes": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no GHES instance available; a GHES-shaped loopback target proves local wiring only"
         },
         "ui-service": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "not-applicable",
+          "reason": "runner-side network settings; no GitHub-owned UI or backend result"
         }
       }
     },
@@ -14560,39 +14787,96 @@
       "id": "94/94-S2",
       "issue": 94,
       "criterion": "Authenticated proxy with allowed destination and NO_PROXY destination",
-      "input": [],
-      "expected": "Observe which real server receives each request; credentials never appear in logs, errors or diagnostics.",
-      "production_path": "not on main yet (explicit proxy and custom CA configuration, https://github.com/Falconiere/toolu-ghrunner/issues/94)",
-      "tests": [],
-      "command": "n/a until https://github.com/Falconiere/toolu-ghrunner/issues/94 merges",
+      "input": [
+        "crates/execution/tests/incoming_contexts_matrix_0.json",
+        "crates/network/tests/helpers/proxy_fixtures.rs",
+        "crates/network/tests/helpers/tls_fixtures.rs"
+      ],
+      "expected": "An authenticating recording proxy sees CONNECT with decoded Basic auth for the allowed host and nothing for the bypass host, which its own server receives directly. A missing credential gets 407. A malformed proxy URL is a redacted config error. Passwords never reach logs, errors, Debug output or the journal.",
+      "production_path": "crates/network/src/client.rs; crates/network/src/secrets.rs; crates/toolu-runner/src/network_setup.rs",
+      "tests": [
+        [
+          "crates/network/tests/client_proxy_test.rs",
+          "config_proxy_tunnels_with_decoded_basic_auth"
+        ],
+        [
+          "crates/network/tests/client_proxy_test.rs",
+          "no_proxy_destination_goes_direct"
+        ],
+        [
+          "crates/network/tests/client_proxy_test.rs",
+          "plain_http_destination_is_sent_in_absolute_form_with_auth"
+        ],
+        [
+          "crates/network/tests/client_proxy_test.rs",
+          "plain_http_destination_without_credentials_is_rejected_with_407"
+        ],
+        [
+          "crates/network/tests/client_proxy_test.rs",
+          "empty_username_with_a_password_still_sends_basic_auth"
+        ],
+        [
+          "crates/network/tests/client_proxy_test.rs",
+          "invalid_proxy_values_fail_closed_with_the_credential_redacted"
+        ],
+        [
+          "crates/network/tests/client_proxy_test.rs",
+          "reserved_characters_in_a_password_are_rejected_without_leaking_it"
+        ],
+        [
+          "crates/network/tests/secrets_test.rs",
+          "config_proxy_password_raw_decoded_and_basic_credential"
+        ],
+        [
+          "crates/execution/tests/network_step_env_test.rs",
+          "shell_traffic_follows_the_exported_proxy_and_bypass"
+        ],
+        [
+          "crates/execution/tests/network_step_env_test.rs",
+          "an_echoed_proxy_password_is_masked"
+        ],
+        [
+          "crates/toolu-runner/tests/network_journal_mask_test.rs",
+          "proxy_credentials_never_reach_the_journal"
+        ],
+        [
+          "crates/shared/tests/network_config_debug_test.rs",
+          "debug_of_network_config_shows_only_that_a_proxy_is_set"
+        ],
+        [
+          "crates/wire/tests/live_log_proxy_test.rs",
+          "live_log_tunnels_through_the_proxy_with_the_custom_ca"
+        ]
+      ],
+      "command": "cargo test -p wire --test integration -- live_log_proxy_test::; cargo test -p network --test integration; cargo test -p execution --test process_env -- network_step_env_test:: --test-threads=1; cargo test -p toolu-runner --test integration -- network_journal_mask_test::; cargo test -p shared --test integration -- network_config_debug_test::",
       "lanes": {
         "hermetic": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "passed",
+          "evidence": "gate"
         },
         "macos": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "passed",
+          "evidence": "gate"
         },
         "docker": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "not-applicable",
+          "reason": "no container or Docker action involved; the container export is recorded on AC-3 and 94-S4"
         },
         "github-com": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no live GitHub.com job has run through a proxy or custom CA; generated-CA loopback peers prove local wiring only"
         },
         "reference": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no official-runner comparison through a proxy; the by-design differences are listed in docs/test-coverage.md under Proxy and custom CA (#94)"
         },
         "ghes": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no GHES instance available; a GHES-shaped loopback target proves local wiring only"
         },
         "ui-service": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "not-applicable",
+          "reason": "runner-side network settings; no GitHub-owned UI or backend result"
         }
       }
     },
@@ -14600,39 +14884,84 @@
       "id": "94/94-S3",
       "issue": 94,
       "criterion": "Extra trusted CA, untrusted/wrong-host/expired certificate, absent/bad bundle",
-      "input": [],
-      "expected": "Valid configured trust works; invalid trust fails closed with clear diagnostics; no global TLS-verification bypass.",
-      "production_path": "not on main yet (explicit proxy and custom CA configuration, https://github.com/Falconiere/toolu-ghrunner/issues/94)",
-      "tests": [],
-      "command": "n/a until https://github.com/Falconiere/toolu-ghrunner/issues/94 merges",
+      "input": [
+        "crates/execution/tests/incoming_contexts_matrix_0.json",
+        "crates/network/tests/helpers/proxy_fixtures.rs",
+        "crates/network/tests/helpers/tls_fixtures.rs"
+      ],
+      "expected": "A generated CA in ca_bundle is trusted; without it the request fails UnknownIssuer; expired and wrong-host leaves fail even with it; none reach the server. A missing, relative, directory, empty, text, key-only or partly malformed bundle fails closed naming the path, and check and run exit 2. No TLS-bypass setting exists.",
+      "production_path": "crates/network/src/client.rs; crates/toolu-runner/src/network_setup.rs",
+      "tests": [
+        [
+          "crates/network/tests/client_tls_test.rs",
+          "bundle_makes_the_generated_ca_trusted"
+        ],
+        [
+          "crates/network/tests/client_tls_test.rs",
+          "expired_and_wrong_host_leaves_fail_even_with_the_bundle"
+        ],
+        [
+          "crates/network/tests/client_tls_test.rs",
+          "bad_bundles_fail_closed_naming_the_path"
+        ],
+        [
+          "crates/network/tests/client_tls_test.rs",
+          "a_bundle_with_several_certificates_is_accepted"
+        ],
+        [
+          "crates/execution/tests/network_step_env_test.rs",
+          "node_trusts_the_ca_bundle_only_when_configured"
+        ],
+        [
+          "crates/execution/tests/network_job_clients_test.rs",
+          "archive_download_uses_the_proxy_and_the_bundle"
+        ],
+        [
+          "crates/wire/tests/live_log_proxy_test.rs",
+          "live_log_refuses_an_untrusted_server"
+        ],
+        [
+          "crates/wire/tests/live_log_proxy_test.rs",
+          "live_log_client_fails_closed_on_a_missing_ca_bundle"
+        ],
+        [
+          "crates/toolu-runner/tests/network_cli_test.rs",
+          "check_and_run_refuse_an_unusable_ca_bundle_with_exit_2"
+        ],
+        [
+          "crates/toolu-runner/tests/network_cli_test.rs",
+          "check_refuses_an_unusable_proxy_url_with_exit_2"
+        ]
+      ],
+      "command": "cargo test -p network --test integration; cargo test -p execution --test process_env -- network_step_env_test:: --test-threads=1; cargo test -p execution --test integration -- network_job_clients_test::; cargo test -p wire --test integration -- live_log_proxy_test::; cargo test -p toolu-runner --test integration -- network_cli_test::",
       "lanes": {
         "hermetic": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "passed",
+          "evidence": "gate"
         },
         "macos": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "passed",
+          "evidence": "gate"
         },
         "docker": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "not-applicable",
+          "reason": "no container or Docker action involved; the container export is recorded on AC-3 and 94-S4"
         },
         "github-com": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no live GitHub.com job has run through a proxy or custom CA; generated-CA loopback peers prove local wiring only"
         },
         "reference": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no official-runner comparison through a proxy; the by-design differences are listed in docs/test-coverage.md under Proxy and custom CA (#94)"
         },
         "ghes": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no GHES instance available; a GHES-shaped loopback target proves local wiring only"
         },
         "ui-service": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "not-applicable",
+          "reason": "runner-side network settings; no GitHub-owned UI or backend result"
         }
       }
     },
@@ -14640,39 +14969,75 @@
       "id": "94/94-S4",
       "issue": 94,
       "criterion": "Script, Node, container/service downloads and GHES path",
-      "input": [],
-      "expected": "Verify each transport and step tool scope claimed supported; document Docker daemon/proxy and language-tool CA limits instead of assuming env vars configure every tool.",
-      "production_path": "not on main yet (explicit proxy and custom CA configuration, https://github.com/Falconiere/toolu-ghrunner/issues/94)",
-      "tests": [],
-      "command": "n/a until https://github.com/Falconiere/toolu-ghrunner/issues/94 merges",
+      "input": [
+        "crates/execution/tests/incoming_contexts_matrix_0.json",
+        "crates/toolu-runner/tests/fixtures/job_container_message.json",
+        "README.md",
+        "crates/network/tests/helpers/proxy_fixtures.rs",
+        "crates/network/tests/helpers/tls_fixtures.rs"
+      ],
+      "expected": "Script and Node traffic follow the export; action archives download through the proxy and bundle; a GHES-shaped check target passes through the proxy. Job, service and Docker-action containers see the proxy variables. Image pulls run in dockerd under its own settings: a documented limit, like language-tool CA trust, and not claimed here.",
+      "production_path": "crates/network/src/step_env.rs; crates/execution/src/execution/job_runner/job_http.rs; crates/execution/src/execution/context_env.rs",
+      "tests": [
+        [
+          "crates/execution/tests/network_step_env_test.rs",
+          "shell_traffic_follows_the_exported_proxy_and_bypass"
+        ],
+        [
+          "crates/execution/tests/network_step_env_test.rs",
+          "node_action_traffic_uses_the_exported_proxy_and_ca"
+        ],
+        [
+          "crates/execution/tests/network_step_env_test.rs",
+          "node_trusts_the_ca_bundle_only_when_configured"
+        ],
+        [
+          "crates/execution/tests/network_job_clients_test.rs",
+          "archive_download_uses_the_proxy_and_the_bundle"
+        ],
+        [
+          "crates/execution/src/execution/job_runner/tests/job_http.rs",
+          "job_client_goes_through_the_configured_proxy_and_ca"
+        ],
+        [
+          "crates/toolu-runner/tests/network_cli_test.rs",
+          "check_probes_through_the_configured_proxy_and_reports_it_redacted"
+        ],
+        [
+          "crates/execution/tests/network_container_env_test.rs",
+          "containers_receive_the_proxy_export_unless_they_set_it"
+        ]
+      ],
+      "command": "cargo test -p execution --lib job_http; cargo test -p execution --test process_env -- network_step_env_test:: --test-threads=1; cargo test -p execution --test integration -- network_job_clients_test::; cargo test -p execution --test integration -- network_container_env_test:: --ignored --test-threads=1; cargo test -p toolu-runner --test integration -- network_cli_test::",
       "lanes": {
         "hermetic": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "passed",
+          "evidence": "gate"
         },
         "macos": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "passed",
+          "evidence": "gate",
+          "note": "Host tests only: the container test is Linux-only and does not run on this lane."
         },
         "docker": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "passed",
+          "evidence": "ci-docker"
         },
         "github-com": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no live GitHub.com job has run through a proxy or custom CA; generated-CA loopback peers prove local wiring only"
         },
         "reference": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no official-runner comparison through a proxy; the by-design differences are listed in docs/test-coverage.md under Proxy and custom CA (#94)"
         },
         "ghes": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no GHES instance available; a GHES-shaped loopback target proves local wiring only"
         },
         "ui-service": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/94 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "not-applicable",
+          "reason": "runner-side network settings; no GitHub-owned UI or backend result"
         }
       }
     },

@@ -7,6 +7,8 @@
 //! own callers, and the other `execution` tests run jobs, spawn steps and build
 //! env-mode HTTP clients without it, so this file runs in its own process.
 
+#[path = "../../network/tests/helpers/proxy_fixtures.rs"]
+mod proxy_fixtures;
 #[path = "../../network/tests/helpers/tls_fixtures.rs"]
 mod tls_fixtures;
 

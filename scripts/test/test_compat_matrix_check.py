@@ -151,6 +151,7 @@ class RejectionTest(unittest.TestCase):
 
     def test_open_issue_row_must_stay_pending(self):
         m = copy.deepcopy(MATRIX)
+        m["issues"]["94"]["state"] = "open"
         row(m, "94/AC-1")["lanes"]["hermetic"] = {"status": "passed", "evidence": "gate"}
         self.assert_rejected(m, "open issue rows must be pending with the issue link")
 

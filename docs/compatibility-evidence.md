@@ -36,7 +36,7 @@ Statuses:
   runners, skipped or ignored tests, and recorded differences all land here.
 - `not-applicable` needs a reason explaining why the lane cannot apply.
 - `pending` needs a reason. It is used only for child issues whose evidence is
-  not recorded yet (#94, #97) and must link the issue.
+  not recorded yet (#97) and must link the issue.
 
 The checker enforces the mechanical parts:
 
@@ -244,9 +244,10 @@ These are the epic's exclusions. They are not evidenced and not claimed:
 - Runner telemetry.
 - AuthMigration.
 
-Two children have merged (#94 in PR #171, #97 in PR #173) but the matrix still
-tracks them as `pending` until their rows are filled in with evidence:
+#94 merged in PR #171, and its rows record what tests prove at the delivered
+revision; its live, paired and GHES lanes stay `unverified`. #97 merged in PR #173,
+but the matrix still tracks it as `pending` until its rows are filled in with
+evidence:
 
-- [#94](https://github.com/Falconiere/toolu-ghrunner/issues/94) — proxy/CA.
 - [#97](https://github.com/Falconiere/toolu-ghrunner/issues/97) — dead code and
   doc drift.
