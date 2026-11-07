@@ -540,3 +540,195 @@ mod lifecycle;
 
 #[path = "../src/execution/tests/action_metadata_docker.rs"]
 mod action_metadata;
+
+fn setup_rows(events: &[RunnerEvent], prefix: &str) -> Vec<(String, String, u32)> {
+  events
+    .iter()
+    .filter_map(|event| match event {
+      RunnerEvent::StepStarted {
+        step_id,
+        step_name,
+        step_number,
+      } if step_name.starts_with(prefix) => {
+        Some((step_id.clone(), step_name.clone(), *step_number))
+      },
+      _ => None,
+    })
+    .collect()
+}
+
+#[tokio::test]
+#[ignore = "requires Linux, real Docker, and a daemon-shared test root"]
+async fn duplicate_registry_actions_share_pull_and_preserve_outputs() -> TestResult {
+  let root = linux_root()?;
+  let config = config_for(root.path());
+  let mut job = captured_job()?;
+  job.steps = vec![
+    registry_step(
+      "first",
+      "/bin/sh",
+      "-c 'echo value=first >> \"$GITHUB_OUTPUT\"'",
+    ),
+    registry_step(
+      "second",
+      "/bin/sh",
+      "-c 'echo value=second >> \"$GITHUB_OUTPUT\"'",
+    ),
+    ActionStep::script(
+      "verify",
+      "test '${{ steps.first.outputs.value }}' = first && test '${{ steps.second.outputs.value }}' = second",
+      "",
+    ),
+  ];
+  let events = collect_job(config, job, CancellationToken::new()).await?;
+  assert_eq!(
+    job_conclusion(&events),
+    Some(Conclusion::Success),
+    "{events:#?}"
+  );
+  let pulls = setup_rows(&events, "Pull ");
+  assert_eq!(pulls.len(), 1, "{events:#?}");
+  let pull = pulls.first().ok_or("missing pull")?;
+  assert_eq!(pull.1, format!("Pull {ALPINE}"));
+  for (id, value) in [("first", "first"), ("second", "second")] {
+    assert!(events.iter().any(|event| matches!(event, RunnerEvent::StepCompleted { step_id, conclusion: Conclusion::Success, outputs } if step_id == id && outputs.get("value").map(String::as_str) == Some(value))), "{events:#?}");
+    assert!(events.iter().any(|event| matches!(event, RunnerEvent::StepStarted { step_id, step_number, .. } if step_id == id && *step_number > pull.2)), "{events:#?}");
+  }
+  assert!(events.iter().any(|event| matches!(event, RunnerEvent::StepCompleted { step_id, conclusion: Conclusion::Success, .. } if step_id == &pull.0)), "{events:#?}");
+  Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires Linux, real Docker, and a daemon-shared test root"]
+async fn failed_pull_finishes_setup_and_prevents_all_user_steps() -> TestResult {
+  let docker = bollard::Docker::connect_with_local_defaults()?;
+  pull_alpine(&docker).await?;
+  let existing_image = docker.inspect_image(ALPINE).await?.id;
+  let root = linux_root()?;
+  let config = config_for(root.path());
+  let mut job = captured_job()?;
+  let mut bad = registry_step("bad", "/bin/sh", "");
+  bad.reference.image = Some("docker://127.0.0.1:1/missing:never".to_owned());
+  job.steps = vec![ActionStep::script("before", "echo forbidden", ""), bad];
+  let events = collect_job(config, job, CancellationToken::new()).await?;
+  assert_eq!(docker.inspect_image(ALPINE).await?.id, existing_image);
+  let pulls = setup_rows(&events, "Pull ");
+  assert_eq!(pulls.len(), 1, "{events:#?}");
+  let pull = pulls.first().ok_or("missing pull")?;
+  assert!(events.iter().any(|event| matches!(event, RunnerEvent::StepCompleted { step_id, conclusion: Conclusion::Failure, .. } if step_id == &pull.0)), "{events:#?}");
+  assert!(!events.iter().any(|event| matches!(event, RunnerEvent::StepStarted { step_id, .. } if step_id == "before" || step_id == "bad")), "{events:#?}");
+  assert_eq!(
+    job_conclusion(&events),
+    Some(Conclusion::Failure),
+    "{events:#?}"
+  );
+  Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires Linux, real Docker, and a daemon-shared test root"]
+async fn remote_dockerfile_has_build_row_on_cold_and_warm_runs() -> TestResult {
+  const SHA: &str = "8bcd8e1af3c095561f1043123848fc8b2db0f189";
+  let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+  let api = format!("http://{}", listener.local_addr()?);
+  let router = axum::Router::new()
+    .route(
+      &format!("/repos/actions/hello-world-docker-action/tarball/{SHA}"),
+      axum::routing::get(|| async { include_bytes!("setup_action.tar.gz").as_slice() }),
+    )
+    .route(
+      "/repos/actions/hello-world-docker-action/commits/main",
+      axum::routing::get(|| async { include_str!("setup_action_commit.json") }),
+    );
+  let server = tokio::spawn(async move {
+    let _ = axum::serve(listener, router).await;
+  });
+  let mut raw: serde_json::Value = serde_json::from_str(CAPTURE)?;
+  let github = raw
+    .get_mut("contextData")
+    .and_then(|v| v.get_mut("github"))
+    .and_then(|v| v.get_mut("d"))
+    .and_then(serde_json::Value::as_array_mut)
+    .ok_or("github context")?;
+  let api_entry = github
+    .iter_mut()
+    .find(|entry| entry.get("k").and_then(serde_json::Value::as_str) == Some("api_url"))
+    .ok_or("api_url context")?;
+  *api_entry.get_mut("v").ok_or("api_url value")? = api.into();
+  let mut job: AgentJobRequestMessage = serde_json::from_value(raw)?;
+  job.job_container = None;
+  job.variables.remove("system.github.launch_endpoint");
+  let mut remote = ActionStep::with_ref_type("remote", "repository");
+  remote.reference.name = Some("actions/hello-world-docker-action".to_owned());
+  remote.reference.git_ref = Some("main".to_owned());
+  remote.reference.repository_type = Some("GitHub".to_owned());
+  remote.inputs = token_map(&[("who-to-greet", "world")]);
+  job.steps = vec![remote];
+  let root = linux_root()?;
+  let config = config_for(root.path());
+  for _ in 0..2 {
+    let events = collect_job(config.clone(), job.clone(), CancellationToken::new()).await?;
+    assert_eq!(
+      job_conclusion(&events),
+      Some(Conclusion::Success),
+      "{events:#?}"
+    );
+    let builds = setup_rows(&events, "Build ");
+    assert_eq!(builds.len(), 1, "{events:#?}");
+    assert_eq!(
+      builds.first().map(|row| row.1.as_str()),
+      Some("Build actions/hello-world-docker-action")
+    );
+    assert!(setup_rows(&events, "Pull ").is_empty(), "{events:#?}");
+    let build = builds.first().ok_or("missing build")?;
+    assert!(events.iter().any(|event| matches!(event, RunnerEvent::StepCompleted { step_id, conclusion: Conclusion::Success, .. } if step_id == &build.0)), "{events:#?}");
+  }
+  server.abort();
+  Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires Linux, real Docker, and a daemon-shared test root"]
+async fn cancelling_in_progress_pull_closes_setup_and_prevents_user_steps() -> TestResult {
+  let registry = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+  let address = registry.local_addr()?;
+  let (accepted_tx, accepted_rx) = tokio::sync::oneshot::channel();
+  let peer = tokio::spawn(async move {
+    if let Ok((connection, _)) = registry.accept().await {
+      let _ = accepted_tx.send(());
+      std::future::pending::<()>().await;
+      drop(connection);
+    }
+  });
+  let root = linux_root()?;
+  let config = config_for(root.path());
+  let mut job = captured_job()?;
+  let mut step = registry_step("cancelled_action", "/bin/sh", "");
+  step.reference.image = Some(format!("docker://{address}/blocked:latest"));
+  job.steps = vec![ActionStep::script("before", "echo forbidden", ""), step];
+  let runner = Runner::new(config, Arc::new(Mutex::new(SecretMasker::new())));
+  let cancel = CancellationToken::new();
+  let mut receiver = runner.execute_job(job, cancel.clone());
+  tokio::time::timeout(Duration::from_secs(60), accepted_rx).await??;
+  cancel.cancel();
+  let events = tokio::time::timeout(Duration::from_secs(60), async {
+    let mut events = Vec::new();
+    while let Some(event) = receiver.recv().await {
+      events.push(event);
+    }
+    events
+  })
+  .await?;
+  peer.abort();
+  let pulls = setup_rows(&events, "Pull ");
+  assert_eq!(pulls.len(), 1, "{events:#?}");
+  let pull = pulls.first().ok_or("missing pull")?;
+  assert!(events.iter().any(|event| matches!(event, RunnerEvent::StepCompleted { step_id, conclusion: Conclusion::Cancelled, .. } if step_id == &pull.0)), "{events:#?}");
+  assert!(!events.iter().any(|event| matches!(event, RunnerEvent::StepStarted { step_id, .. } if step_id == "before" || step_id == "cancelled_action")), "{events:#?}");
+  assert_eq!(
+    job_conclusion(&events),
+    Some(Conclusion::Cancelled),
+    "{events:#?}"
+  );
+  Ok(())
+}
