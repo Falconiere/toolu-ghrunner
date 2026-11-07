@@ -1533,7 +1533,7 @@ binary).** `toolu-runner check --url https://github.com` → exit 0:
 | results | `https://results-receiver.actions.githubusercontent.com/health` | 200 |
 | node-dist (optional) | `https://nodejs.org/dist/` | 200 |
 
-git 2.53.0, docker 29.1.3 (CLI and daemon), node v24.22.1 all `OK`; 122
+git 2.53.0, docker 29.1.3 (CLI and daemon), node v24.21.0 all `OK`; 122
 platform trust anchors. Before the User-Agent fix `api` answered 403.
 
 **Finding: trust cannot be narrowed.** Re-running with `SSL_CERT_FILE` set

@@ -55,10 +55,11 @@ fn missing_parent_identity_is_an_error() {
 }
 
 /// Caller level: `build_context` on a real acquired job enables `$/` from the
-/// `actions_self_repository` variable and the `job` context identity, and
-/// stays off when the variable is absent.
+/// `actions_self_repository` variable, takes the workflow identity from the
+/// `job` context, prefers the enclosing remote action, and refuses `$/` when
+/// the variable is absent.
 #[test]
-fn build_context_enables_self_repository_only_with_the_flag() {
+fn build_context_resolves_self_references_only_with_the_flag() {
   use std::sync::{Arc, Mutex};
 
   let mut msg: shared::AgentJobRequestMessage =
@@ -70,11 +71,33 @@ fn build_context_enables_self_repository_only_with_the_flag() {
       Arc::new(Mutex::new(shared::SecretMasker::new())),
     )
   };
-  let on = build(&msg);
-  let (repo, sha) = on.self_repository().expect("flag on, job identity present");
-  assert!(repo.contains('/') && !sha.is_empty(), "got {repo}@{sha}");
+  let mut on = build(&msg);
+  assert_eq!(
+    on.workflow_identity(),
+    Some((
+      "Falconiere/toolu-ghrunner",
+      "e607a7aae26e113aa3d8ecf1c26c62e0d74192eb"
+    ))
+  );
+  // Enclosing action is local: fall back to the workflow identity.
+  assert_eq!(
+    on.resolve_self_uses("$/x").expect("ok").as_deref(),
+    Some("Falconiere/toolu-ghrunner/x@e607a7aae26e113aa3d8ecf1c26c62e0d74192eb")
+  );
+  // Enclosing action is remote: its repository and ref win.
+  on.set_github_context("action_repository", "octo/tools");
+  on.set_github_context("action_ref", "v9");
+  assert_eq!(
+    on.resolve_self_uses("$/").expect("ok").as_deref(),
+    Some("octo/tools@v9")
+  );
+  assert_eq!(on.resolve_self_uses("octo/a@v1").expect("ok"), None);
+
   msg
     .variables
     .retain(|k, _| !k.eq_ignore_ascii_case("actions_self_repository"));
-  assert_eq!(build(&msg).self_repository(), None);
+  let mut off = build(&msg);
+  off.set_github_context("action_repository", "octo/tools");
+  off.set_github_context("action_ref", "v9");
+  assert!(off.resolve_self_uses("$/").is_err(), "flag off refuses $/");
 }

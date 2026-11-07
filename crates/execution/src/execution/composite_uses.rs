@@ -180,7 +180,7 @@ fn build_nested_step(
     .clone()
     .unwrap_or_else(|| format!("__composite_uses_{idx}"));
 
-  let resolved_self = resolve_self_uses(uses, ctx)?;
+  let resolved_self = ctx.resolve_self_uses(uses)?;
   let uses = resolved_self.as_deref().unwrap_or(uses);
   let (name, git_ref) = if uses.starts_with("docker://") {
     (uses.to_owned(), None)
@@ -217,22 +217,6 @@ fn build_nested_step(
     inputs: inputs_token?,
     environment: None,
   })
-}
-
-/// Resolve `$/[path]` against the enclosing remote action, else the workflow
-/// repository/SHA. A `$/` reference without the job's `actions_self_repository`
-/// flag is an error, as upstream.
-fn resolve_self_uses(uses: &str, ctx: &ExecutionContext) -> Result<Option<String>, RunnerError> {
-  let enclosing = ctx
-    .github_context("action_repository")
-    .zip(ctx.github_context("action_ref"))
-    .filter(|(r, g)| !r.is_empty() && !g.is_empty());
-  let parent = if ctx.self_repository().is_some() {
-    enclosing.or(ctx.self_repository())
-  } else {
-    None
-  };
-  super::actions::resolver::resolve_self_reference(uses, parent)
 }
 
 /// Reconstruct the `(name, git_ref)` for the synthetic step's reference so the

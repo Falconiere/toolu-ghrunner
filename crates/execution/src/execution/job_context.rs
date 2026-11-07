@@ -68,10 +68,8 @@ fn enable_self_repository(ctx: &mut ExecutionContext, msg: &AgentJobRequestMessa
       .filter(|v| !v.is_empty())
   };
   if on {
-    let (repo, sha) = (job_value("workflow_repository"), job_value("workflow_sha"));
-    if let (Some(repo), Some(sha)) = (repo, sha) {
-      ctx.set_self_repository(&repo, &sha);
-    }
+    let workflow = job_value("workflow_repository").zip(job_value("workflow_sha"));
+    ctx.enable_self_repository(workflow);
   }
 }
 
