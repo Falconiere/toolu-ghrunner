@@ -53,7 +53,7 @@ enum LocalServices {
   /// Accelerated: a local cache server + the real service URLs to forward +
   /// teardown handles. The runtime token needs no separate field — it rides in
   /// `ServiceUrls` and `setup_job_env` forwards it verbatim.
-  Accelerated(CacheServer, ServiceUrls, CacheMaintenance),
+  Accelerated(CacheServer, Box<ServiceUrls>, CacheMaintenance),
 }
 
 /// Execute a complete job from an `AgentJobRequestMessage`.
@@ -317,7 +317,11 @@ async fn start_local_services(
         url = service.base_url(),
         "accelerated cache service started"
       );
-      Ok(LocalServices::Accelerated(service, urls, maintenance))
+      Ok(LocalServices::Accelerated(
+        service,
+        Box::new(urls),
+        maintenance,
+      ))
     },
     ServicesMode::Forwarder => Ok(LocalServices::None),
   }

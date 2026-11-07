@@ -117,8 +117,7 @@ fn stage_values(
   inputs: &HashMap<String, String>,
 ) -> Result<StageValues, RunnerError> {
   let mut env = build_resolved_action_env(
-    ActionKind::Container,
-    (s.step, inputs),
+    (ActionKind::Container, s.step, inputs),
     ctx,
     s.manifest,
     s.action_dir,
