@@ -173,7 +173,11 @@ and suppress later job outputs and a deployment URL
 Both pattern families `SecretMasker::add_mask` registers are asserted: the whole
 multiline span collapses to one `***` in the summary, and individual lines are
 masked wherever they appear alone, which is what reaches the job-output and
-deployment-URL sinks since those carry single-line values.
+deployment-URL sinks since those carry single-line values. Each probe payload is
+its own line, none a substring of another, and the stem they share is not itself
+a mask, so a payload is redacted only by its own registration; deleting only the
+CRLF `::add-mask::` fails the job-output test (checked by mutation, not a
+standing test).
 
 ## Incoming contexts acceptance (#68)
 
