@@ -619,7 +619,7 @@ async fn composite_run_step_gets_only_the_oidc_pair() -> TestResult<()> {
   std::fs::create_dir_all(&data_dir)?;
   std::fs::write(
     action_dir.join("action.yml"),
-    "name: comp\ndescription: probe\nruns:\n  using: composite\n  steps:\n    - shell: bash\n      run: echo \"COMP oidc=$ACTIONS_ID_TOKEN_REQUEST_URL token=[$ACTIONS_RUNTIME_TOKEN] results=[$ACTIONS_RESULTS_URL]\"\n",
+    "name: comp\ndescription: probe\nruns:\n  using: composite\n  steps:\n    - shell: bash\n      env:\n        ACTIONS_ID_TOKEN_REQUEST_URL: spoofed\n      run: echo \"COMP oidc=$ACTIONS_ID_TOKEN_REQUEST_URL token=[$ACTIONS_RUNTIME_TOKEN] results=[$ACTIONS_RESULTS_URL]\"\n",
   )?;
   let msg = compat_job(None, None)?;
   let mut ctx = ExecutionContext::with_masker(Arc::new(Mutex::new(SecretMasker::new())));
