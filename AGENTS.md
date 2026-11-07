@@ -163,7 +163,12 @@ outside a `tests/` tree.
 - **Handler dispatch**: no plugin layer, no local orchestrator (removed #97).
   `steps_runner` splits `run:` vs `uses:`; `action_exec` matches
   `runs.using` — node → composite → docker. Unsupported `runs.using` fails at
-  manifest parse (`actions/manifest.rs`). `$/[path]` self-repository refs
+  manifest parse (`actions/manifest.rs`). A `repositoryType: self` action
+  (`uses: ./path`, top-level or nested) runs no `pre` and warns, as upstream
+  (#251). A job container starts as the numbered "Initialize containers" row
+  after the Docker Pull/Build rows and is removed as "Stop containers", the
+  last row before "Complete job"; after a failed start the step loop still
+  runs, and a step that runs fails before dispatch (never on the host). `$/[path]` self-repository refs
   (#241, job variable `actions_self_repository`) resolve only in a composite
   manifest's nested `uses:` (`composite_uses` →
   `ExecutionContext::resolve_self_uses` → `actions::resolver::resolve_self_reference`:
@@ -489,7 +494,8 @@ outside a `tests/` tree.
   `docker_prepare` (#232) discovers remote Docker actions, including those nested
   in remote composites, before user steps: case-insensitive registry Pull rows
   precede Build rows (one per `owner/repo[/path]@ref`, as upstream), prepared images are reused, and setup
-  failure/cancellation stops user steps. Discovery visits each remote ref once,
+  failure/cancellation stops user steps (a failed job-container start does not:
+  see Handler dispatch). Discovery visits each remote ref once,
   keeps the depth limit, resolves enabled nested `$/` against the enclosing remote
   action, and can be cancelled during a fetch. Local actions prepare at step time;
   non-Linux skips pull/build setup.
@@ -501,7 +507,8 @@ outside a `tests/` tree.
   RSA→JWT→OAuth2 → `retry_session_conflict` (409 = ~3min post-session ghost;
   re-auth + retry 30s×8, cancel→`Ok(None)`) → `poll_and_execute` (idle poll
   in `job_lifecycle/idle.rs`, where `with_drain` ends an idle loop with
-  `Ok(None)` but never an acquired job; 1s→60s backoff, `acquire_job`, early broker ack (`acknowledge_message` — death
+  `Ok(None)` but never an acquired job; polls `status=Online` idle and
+  `status=Busy` in the mid-job cancel watcher, as upstream (#251); 1s→60s backoff, `acquire_job`, early broker ack (`acknowledge_message` — death
   mid-job trades redelivery for no cancel-watcher re-see) — run,
   single-attempt WARN-only `acknowledge` demotion,
   `retry_transient`-wrapped `complete_job` for `Network` only, 1s→60s jitter,
@@ -571,6 +578,8 @@ outside a `tests/` tree.
   `poll_loop`/`poll_job` (#206 toolu.sh machine loop, see Runtime
   contracts; `poll_loop_test`, fixtures `toolu_fixtures`).
   `run_cmd::RunLoop::drive` (`BACKOFF_START`→`BACKOFF_MAX` cancel-aware sleep;
+  broker/lifecycle client timeout `BROKER_CLIENT_TIMEOUT` 100 s for `run` and
+  `boot`, upstream's VssUtil default, above the broker's ~60 s idle hold;
   conflict exits 5 via downcast `CodedExit`, all else 2;
   `TOOLU_RUNNER_SESSION_CONFLICT_INTERVAL_MS` overrides 30s wait for
   `run`+`boot`; missing/rejected re-mint bearer fatal via
