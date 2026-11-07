@@ -162,3 +162,182 @@ async fn step_summary_blob_failure_retries_three_times_without_leaking_url() -> 
   assert!(!error.contains(&response.summary_url));
   Ok(())
 }
+
+/// The masked document the success cases upload: `***` is what the engine's
+/// masker leaves behind, so these are the exact bytes production would send.
+const MASKED: &[u8] = b"# Step summary\n\nthe token is *** and stays masked\n";
+
+/// Serve one complete three-call upload against a loopback peer, recording
+/// every request. `limit` is the `soft_size_limit` the signed-URL RPC
+/// advertises.
+async fn success_peer(
+  limit: u64,
+  calls: usize,
+) -> TestResult<(
+  String,
+  tokio::task::JoinHandle<TestResult<Vec<(String, Vec<u8>)>>>,
+)> {
+  let listener = TcpListener::bind("127.0.0.1:0").await?;
+  let address = listener.local_addr()?;
+  let base = format!("http://{address}");
+  let signed = format!("{base}/blob/summary?sig=private");
+  let server = tokio::spawn(async move {
+    let mut seen = Vec::new();
+    for _ in 0..calls {
+      let (mut socket, _) = listener.accept().await?;
+      let (head, body) = read_request(&mut socket).await?;
+      let start = head.lines().next().unwrap_or_default().to_owned();
+      let reply = if start.contains("GetStepSummarySignedBlobURL") {
+        serde_json::json!({
+          "summary_url": signed,
+          "blob_storage_type": "BLOB_STORAGE_TYPE_AZURE",
+          "soft_size_limit": limit.to_string(),
+        })
+        .to_string()
+      } else if start.starts_with("PUT ") {
+        String::new()
+      } else {
+        serde_json::json!({"ok": true}).to_string()
+      };
+      socket
+        .write_all(
+          format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\
+             Connection: close\r\n\r\n{reply}",
+            reply.len()
+          )
+          .as_bytes(),
+        )
+        .await?;
+      socket.flush().await?;
+      seen.push((head, body));
+    }
+    Ok::<_, Box<dyn std::error::Error + Send + Sync>>(seen)
+  });
+  Ok((base, server))
+}
+
+fn summary<'a>(content: &'a [u8]) -> super::StepSummary<'a> {
+  super::StepSummary {
+    run_backend_id: "workflow-run",
+    job_backend_id: "workflow-job",
+    step_backend_id: "step",
+    content,
+  }
+}
+
+/// #83 AC-1: the successful upload is exactly the signed-URL RPC, the blob
+/// PUT of the masked bytes, and the metadata RPC — in that order, each
+/// carrying the three backend identities and the real byte count.
+#[tokio::test]
+async fn step_summary_success_signs_puts_and_publishes_metadata() -> TestResult {
+  let (base, server) = success_peer(1_048_576, 3).await?;
+  super::upload_step_summary(
+    &reqwest::Client::new(),
+    &base,
+    "runtime-token",
+    &summary(MASKED),
+  )
+  .await?;
+  let seen = tokio::time::timeout(Duration::from_secs(5), server).await???;
+  let [signing, put, metadata] = seen.as_slice() else {
+    return Err(format!("expected three calls, saw {}", seen.len()).into());
+  };
+
+  assert_summary_rpc(&signing.0, &signing.1)?;
+
+  assert_eq!(
+    put.0.lines().next(),
+    Some("PUT /blob/summary?sig=private HTTP/1.1")
+  );
+  assert!(put.0.lines().any(|line| line == "content-type: text/plain"));
+  assert!(
+    put
+      .0
+      .lines()
+      .any(|line| line == "x-ms-blob-type: BlockBlob")
+  );
+  assert_eq!(put.1, MASKED, "the blob is not the masked document");
+
+  assert_eq!(
+    metadata.0.lines().next(),
+    Some("POST /twirp/results.services.receiver.Receiver/CreateStepSummaryMetadata HTTP/1.1")
+  );
+  assert!(
+    metadata
+      .0
+      .lines()
+      .any(|line| line == "authorization: Bearer runtime-token")
+  );
+  let published: serde_json::Value = serde_json::from_slice(&metadata.1)?;
+  assert_eq!(
+    published.get("workflow_run_backend_id"),
+    Some(&serde_json::json!("workflow-run"))
+  );
+  assert_eq!(
+    published.get("workflow_job_run_backend_id"),
+    Some(&serde_json::json!("workflow-job"))
+  );
+  assert_eq!(
+    published.get("step_backend_id"),
+    Some(&serde_json::json!("step"))
+  );
+  assert_eq!(
+    published.get("size"),
+    Some(&serde_json::json!(MASKED.len())),
+    "metadata size must be the uploaded byte count"
+  );
+  assert!(
+    published
+      .get("uploaded_at")
+      .and_then(serde_json::Value::as_str)
+      .is_some_and(|at| at.contains('T')),
+    "metadata carries no RFC3339 timestamp: {published}"
+  );
+  Ok(())
+}
+
+/// #83 AC-1 boundary: a document exactly at the server's soft size limit is
+/// uploaded; one byte over is refused before anything is written.
+#[tokio::test]
+async fn step_summary_soft_size_limit_is_inclusive_and_fails_before_the_put() -> TestResult {
+  let limit = u64::try_from(MASKED.len())?;
+  let (base, server) = success_peer(limit, 3).await?;
+  super::upload_step_summary(
+    &reqwest::Client::new(),
+    &base,
+    "runtime-token",
+    &summary(MASKED),
+  )
+  .await?;
+  assert_eq!(
+    tokio::time::timeout(Duration::from_secs(5), server)
+      .await???
+      .len(),
+    3,
+    "a document at the limit must still upload"
+  );
+
+  let (base, server) = success_peer(limit - 1, 1).await?;
+  let error = super::upload_step_summary(
+    &reqwest::Client::new(),
+    &base,
+    "runtime-token",
+    &summary(MASKED),
+  )
+  .await
+  .unwrap_err()
+  .to_string();
+  assert_eq!(
+    error,
+    "reporting error: summary exceeds Results Service soft size limit"
+  );
+  assert_eq!(
+    tokio::time::timeout(Duration::from_secs(5), server)
+      .await???
+      .len(),
+    1,
+    "an oversized document must never reach the blob PUT"
+  );
+  Ok(())
+}

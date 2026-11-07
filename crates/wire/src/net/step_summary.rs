@@ -95,7 +95,10 @@ pub async fn upload_step_summary(
   let size = u64::try_from(summary.content.len())
     .map_err(|error| RunnerError::Reporting(format!("summary size conversion: {error}")))?;
   if size > signed.soft_size_limit {
-    return Err(failure("summary exceeds Results Service soft size limit"));
+    // Already a complete sentence; `failure` would append a second "failed".
+    return Err(RunnerError::Reporting(
+      "summary exceeds Results Service soft size limit".to_owned(),
+    ));
   }
   put_blob(client, &signed, summary.content).await?;
   let metadata = Metadata {
