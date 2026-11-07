@@ -557,8 +557,8 @@ returns an error. Only the contents are removed; a symlink is unlinked, never
 followed, even when it replaces a root; read-only subdirectories are made
 writable first. A delete error is a single `WARN` per root and never changes the
 job's conclusion. Nothing else under `data_dir` is touched: `_tool` (the tool
-cache) is kept for later jobs, and the `_logs` spools planned in #240 stay out of
-its reach. Registrations must not share a `data_dir`.
+cache) is kept for later jobs, and the `_logs` spools introduced in #240 stay out
+of its reach. Registrations must not share a `data_dir`.
 
 The expression engine (`expressions/`) is a complete `${{ }}`
 evaluator: lexer → parser (AST + precedence + primary) → evaluator

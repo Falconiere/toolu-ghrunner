@@ -78,8 +78,8 @@ pub async fn acquire_job(
 /// is never `is_decode`. Everything else (connection refused, DNS failure,
 /// a timeout — including one landing mid-`.json()` under a blackhole, which
 /// reports `is_timeout`) is transient and maps to `RunnerError::Network`.
-/// Load-bearing for the outage watchdog: it feeds only on `Network`-class
-/// renewal failures, so a mid-body-read blackhole must not go unclassified.
+/// Completion retries only `Network` errors; the renewal watchdog counts every
+/// error, including a mid-body-read timeout or malformed response.
 fn classify_transport_error(what: &str, err: &reqwest::Error) -> RunnerError {
   if err.is_decode() {
     return RunnerError::Protocol(format!("{what} response was not valid JSON: {err}"));
