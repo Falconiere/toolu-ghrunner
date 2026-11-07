@@ -467,7 +467,7 @@ async fn nested_composite_mask_suppresses_a_later_job_output() -> TestResult {
     events.iter().any(|event| matches!(
       event,
       RunnerEvent::Annotation { level: AnnotationLevel::Warning, message, .. }
-        if message.contains("secret")
+        if message == "Skip output 'leaked' since it may contain secret."
     )),
     "the dropped output came with no warning: {events:?}"
   );
