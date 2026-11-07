@@ -10667,7 +10667,7 @@
         "crates/toolu-runner/tests/fixtures/job_message.json",
         "crates/listener/tests/multiline_mask.sh"
       ],
-      "expected": "A later top-level notice with three newly registered short lines becomes 'annotation=[***|***|***]'. A mask registered inside a nested composite also redacts a later step summary ('summary=***') and drops a later job output with a secret warning while a clear output survives, and suppresses a later deployment URL (#235).",
+      "expected": "A later top-level notice with three newly registered short lines becomes 'annotation=[***|***|***]'. A mask registered inside a nested composite also redacts a later step summary ('summary=***') and drops a later job output with a secret warning while a clear output survives, and suppresses a later deployment URL (#235). Those three sinks are exercised with a single-line mask; a mask whose value spans lines is still only covered for the stdout, stderr, journal and live-log sinks.",
       "production_path": "shared::SecretMasker::add_mask + execution::command_dispatch::apply_add_mask; sinks in listener::execution_loop forwarder, observability journal writer, shared::startup RedactingWriter",
       "tests": [
         [
