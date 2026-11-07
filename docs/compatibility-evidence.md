@@ -46,7 +46,9 @@ The checker enforces the mechanical parts:
 - `run:`/`pr:` URLs belong to this repository.
 - `doc:` anchors resolve.
 - A row cannot pass the `reference` lane by citing a report that acknowledges a
-  difference for it. A fresh report can back it while the old one stays unedited.
+  difference for it, or that report's run. A fresh report can back it while the
+  old one stays unedited.
+- The `reference` lane takes only `run:` and `report:` evidence.
 - A row whose issue is not in the matrix `issues` is rejected, except epic `67/`
   rows.
 - Each issue has exactly one row per AC/scenario id.
@@ -195,7 +197,8 @@ python3 scripts/test/reference_compare.py <run_id> --out docs/<report>.json \
   --provenance <file> --capture <fixture> [--acknowledge <file>]
 ```
 
-`--out` is required, so a comparison cannot overwrite a recorded report.
+`--out` is required and must not exist, so a comparison cannot overwrite a
+recorded report.
 Acknowledgements name platform scopes such as `probe-Linux-X64`, so one platform's
 acknowledgement cannot excuse another's difference. `compat-reference-103.yml`
 stays for the record; the comparator no longer reads runs in its job layout.

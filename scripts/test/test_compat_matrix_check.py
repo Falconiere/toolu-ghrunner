@@ -179,6 +179,27 @@ class RejectionTest(unittest.TestCase):
         finally:
             Path(fresh.name).unlink()
 
+    def test_row_citing_the_run_of_the_report_that_acknowledges_it_cannot_pass(self):
+        m = copy.deepcopy(MATRIX)
+        row(m, "103/R-cache")["lanes"]["reference"] = {
+            "status": "passed",
+            "evidence": "run:https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727"}
+        self.assert_rejected(m, "103/R-cache [reference]: the report of this run acknowledges")
+
+    def test_longer_run_id_is_not_the_acknowledging_run(self):
+        m = copy.deepcopy(MATRIX)
+        row(m, "103/R-cache")["lanes"]["reference"] = {
+            "status": "passed",
+            "evidence": "run:https://github.com/Falconiere/toolu-ghrunner/actions/runs/383015837270"}
+        self.assertEqual(errors_for(m), [])
+
+    def test_reference_lane_takes_only_paired_runs_and_reports(self):
+        for evidence in ("pr:https://github.com/Falconiere/toolu-ghrunner/pull/1",
+                         "doc:docs/compatibility-evidence.md"):
+            m = copy.deepcopy(MATRIX)
+            row(m, "103/R-cache")["lanes"]["reference"] = {"status": "passed", "evidence": evidence}
+            self.assert_rejected(m, "103/R-cache [reference]: evidence must be a paired run: or report:")
+
     def test_report_naming_an_unknown_row_is_rejected(self):
         m = copy.deepcopy(MATRIX)
         m["rows"] = [r for r in m["rows"] if r["id"] != "75/75-S1"]

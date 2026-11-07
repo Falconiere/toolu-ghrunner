@@ -7,11 +7,13 @@
 #
 # Environment: GH_TOKEN (administration:write), GITHUB_REPOSITORY, GITHUB_RUN_ID,
 # RUNNER_TEMP, PLATFORM (Linux-X64, Linux-ARM64, macOS-ARM64), LABEL_PREFIX, and
-# for `run`: OFFICIAL_DIR, TOOLU_BIN, MIN_JOBS. Each lane logs to a file under
+# for `run`: OFFICIAL_DIR, TOOLU_BIN. Each lane logs to a file under
 # RUNNER_TEMP, printed on exit, so a lane still alive cannot hold the step's stdout.
 set -euo pipefail
 
 POLL_SECONDS="${POLL_SECONDS:-15}"
+# One `consumer` per variant and lane. It needs every other probe job, so it ends last.
+CONSUMER_JOBS=4
 UNREGISTER_ATTEMPTS=6
 RUNNERS_API="repos/$GITHUB_REPOSITORY/actions/runners"
 
@@ -37,13 +39,13 @@ official_lane() {
 }
 
 probes_done() {
-  local statuses total pending
-  statuses=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" \
-    --jq ".jobs[] | select(.name | test(\"^(probe|negative)-$PLATFORM-\")) | .status") || return 1
-  total=$(printf '%s' "$statuses" | grep -c '' || true)
-  pending=$(printf '%s' "$statuses" | grep -vc '^completed$' || true)
-  echo "$PLATFORM: $total probe jobs listed, $pending not completed"
-  [[ "$total" -ge "$MIN_JOBS" && "$pending" -eq 0 ]]
+  local jobs consumers pending
+  jobs=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" \
+    --jq ".jobs[] | select(.name | test(\"^(probe|negative)-$PLATFORM-\")) | \"\\(.status) \\(.name)\"") || return 1
+  consumers=$(printf '%s' "$jobs" | grep -c ' / consumer$' || true)
+  pending=$(printf '%s' "$jobs" | grep -vc '^completed ' || true)
+  echo "$PLATFORM: $consumers of $CONSUMER_JOBS consumer jobs listed, $pending jobs not completed"
+  [[ "$consumers" -ge "$CONSUMER_JOBS" && "$pending" -eq 0 ]]
 }
 
 stop_lanes() {
@@ -73,8 +75,8 @@ run_lanes() {
   trap stop_lanes EXIT
 
   until probes_done; do
-    kill -0 "$toolu_pid" 2>/dev/null || {
-      echo "::error::toolu runner exited before the $PLATFORM probes finished" >&2
+    { kill -0 "$toolu_pid" && kill -0 "$official_pid"; } 2>/dev/null || {
+      echo "::error::a lane exited before the $PLATFORM probes finished" >&2
       exit 1
     }
     sleep "$POLL_SECONDS"

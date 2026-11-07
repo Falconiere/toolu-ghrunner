@@ -113,8 +113,20 @@ def check_tests(row, errors):
     return found
 
 
+def acknowledged_by_run(row, evidence, context):
+    """True when `evidence` cites the run of a report that acknowledges a difference for `row`."""
+    for report in context["reports"].values():
+        run_id = (report["data"].get("run") or {}).get("id")
+        if row["id"] in report["unverified_rows"] and re.search(rf"/actions/runs/{run_id}(/|$)", evidence):
+            return True
+    return False
+
+
 def check_evidence(row, lane, evidence, tests, context, errors):
     where = f"{row['id']} [{lane}]"
+    if lane == "reference" and evidence.startswith(("pr:", "doc:")):
+        errors.append(f"{where}: evidence must be a paired run: or report:")
+        return
     in_ci = [t for t in tests if t[0] == "py" and t[3] in context["ci"]]
     runnable = [t for t in tests if t[0] == "rs" and not t[1]] + in_ci
     if evidence == "gate":
@@ -137,6 +149,8 @@ def check_evidence(row, lane, evidence, tests, context, errors):
     elif evidence.startswith(("run:", "pr:")):
         if not RUN_URL.match(evidence.split(":", 1)[1]):
             errors.append(f"{where}: evidence URL {evidence!r} is not a run/PR of {REPO}")
+        elif lane == "reference" and acknowledged_by_run(row, evidence, context):
+            errors.append(f"{where}: the report of this run acknowledges a difference for this row")
     elif evidence.startswith("doc:"):
         path, _, anchor = evidence[4:].partition("#")
         file = ROOT / path

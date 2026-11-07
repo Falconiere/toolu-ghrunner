@@ -350,7 +350,7 @@ def verify(report):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("run_id", nargs="?", type=int)
-    parser.add_argument("--out", type=Path, help="report to write; required in live mode")
+    parser.add_argument("--out", type=Path, help="new report to write; required in live mode")
     parser.add_argument("--provenance", type=Path, help="JSON with runner/image provenance")
     parser.add_argument("--capture", action="append", default=[],
                         help="repo-relative sanitized capture fixture to pin (repeatable)")
@@ -370,7 +370,9 @@ def main(argv=None):
     if args.run_id is None:
         parser.error("RUN_ID is required unless --verify is given")
     if args.out is None:
-        parser.error("--out is required in live mode; recorded reports are never overwritten")
+        parser.error("--out is required in live mode")
+    if args.out.exists():
+        parser.error(f"{args.out} exists; recorded reports are never overwritten")
     provenance = json.loads(args.provenance.read_text()) if args.provenance else {}
     acknowledged = json.loads(args.acknowledge.read_text()) if args.acknowledge else []
     report = build_report(args.run_id, provenance, args.capture, acknowledged)

@@ -130,7 +130,7 @@ if [[ -z "${COMPAT_PAIRED_WORKFLOW_FILE:-}" ]]; then
   cat >"$tmp/tools/gh" <<'GH'
 #!/usr/bin/env bash
 case "$*" in
-  *generate-jitconfig*) echo fake-jit ;;
+  *generate-jitconfig*) [[ -z "${FAKE_NO_JIT:-}" ]] && echo fake-jit ;;
   *--method\ DELETE*) exit 1 ;;
   */jobs*) cat "$FAKE_JOBS" ;;
   */runners*) cat "$FAKE_RUNNERS" ;;
@@ -147,14 +147,16 @@ TOOLU
   printf '#!/usr/bin/env bash\n[[ "$1" == run ]] && exit 2\nexit 0\n' >"$tmp/tools/toolu-dies"
   chmod +x "$tmp/tools/gh" "$tmp/tools/toolu" "$tmp/tools/toolu-dies" "$tmp/official/run.sh" \
     "$tmp/official/bin/Runner.Listener"
-  printf 'completed\ncompleted\n' >"$tmp/jobs"
+  for caller in probe-Linux-X64-toolu probe-Linux-X64-official negative-Linux-X64-toolu negative-Linux-X64-official; do
+    printf 'completed %s / contexts (alpha, 7, true)\ncompleted %s / consumer\n' "$caller" "$caller"
+  done >"$tmp/jobs"
   : >"$tmp/none"
   echo 4242 >"$tmp/survivor"
   host() {
     (
-      export FAKE_JOBS="$tmp/jobs" GH_TOKEN=fake GITHUB_REPOSITORY=o/r GITHUB_RUN_ID=1 RUNNER_TEMP="$tmp"
+      export FAKE_JOBS="$tmp/jobs" FAKE_NO_JIT="${FAKE_NO_JIT:-}" GH_TOKEN=fake GITHUB_REPOSITORY=o/r GITHUB_RUN_ID=1 RUNNER_TEMP="$tmp"
       export PLATFORM=Linux-X64 LABEL_PREFIX=compat-paired-1-1-Linux-X64 POLL_SECONDS=0
-      export OFFICIAL_DIR="$tmp/official" TOOLU_BIN="${FAKE_TOOLU:-$tmp/tools/toolu}" MIN_JOBS=2
+      export OFFICIAL_DIR="$tmp/official" TOOLU_BIN="${FAKE_TOOLU:-$tmp/tools/toolu}"
       PATH="$tmp/tools:$PATH" timeout_guard bash "$HOST" "$@"
     )
   }
@@ -181,9 +183,12 @@ TOOLU
   }
   FAKE_RUNNERS="$tmp/none" host run >/dev/null 2>&1
   expect "lanes stop once the probes completed" 0 $?
-  printf 'completed\n' >"$tmp/jobs"
+  # Completed jobs alone are not done: the last consumer may not be listed yet.
+  sed -i.bak '$d' "$tmp/jobs"
   FAKE_RUNNERS="$tmp/none" FAKE_TOOLU="$tmp/tools/toolu-dies" host run >/dev/null 2>&1
-  expect "a dead toolu lane fails the step while jobs are unlisted" 1 $?
+  expect "a dead toolu lane fails the step while a consumer is unlisted" 1 $?
+  FAKE_RUNNERS="$tmp/none" FAKE_NO_JIT=1 host run >/dev/null 2>&1
+  expect "a dead official lane fails the step while a consumer is unlisted" 1 $?
   FAKE_RUNNERS="$tmp/none" host unregister >/dev/null 2>&1
   expect "unregister passes with no runner left" 0 $?
   out=$(FAKE_RUNNERS="$tmp/survivor" host unregister 2>&1)

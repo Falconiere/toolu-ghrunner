@@ -336,6 +336,14 @@ class CommandLineTest(unittest.TestCase):
             reference_compare.main(["123"])
         self.assertEqual(stopped.exception.code, 2)
 
+    def test_live_mode_refuses_to_overwrite_a_report(self):
+        report = ROOT / "docs/compat-reference-103.json"
+        before = report.read_bytes()
+        with mock.patch("sys.stderr"), self.assertRaises(SystemExit) as stopped:
+            reference_compare.main(["123", "--out", str(report)])
+        self.assertEqual(stopped.exception.code, 2)
+        self.assertEqual(report.read_bytes(), before)
+
 
 if __name__ == "__main__":
     unittest.main()

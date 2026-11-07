@@ -39,23 +39,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # min_jobs: 2 variants x 2 lanes x 4 probe jobs, or 3 where Docker is skipped.
         include:
           - platform: Linux-X64
             vm: ubuntu-latest
             archive: actions-runner-linux-x64-2.338.2.tar.gz
             sha256: baebf204307bac6193480852732f0aba2ae97b6c5597c244f4d5558390147c40
-            min_jobs: 16
           - platform: Linux-ARM64
             vm: ubuntu-24.04-arm
             archive: actions-runner-linux-arm64-2.338.2.tar.gz
             sha256: 670adb2f268fe21dcbb58b3db0e0aa9d5b3bddfe2c651481336e561ff86de945
-            min_jobs: 16
           - platform: macOS-ARM64
             vm: macos-15
             archive: actions-runner-osx-arm64-2.338.2.tar.gz
             sha256: 25a065af409ffa317ab4d5a3b614dd15fc9c40f2172bc1b35a1b1258e919a388
-            min_jobs: 12
     env:
       PLATFORM: ${{ matrix.platform }}
       LABEL_PREFIX: compat-paired-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.platform }}
@@ -79,7 +75,6 @@ jobs:
         timeout-minutes: 75
         env:
           GH_TOKEN: ${{ secrets.TOOLU_RUNNER_LIVE_TOKEN }}
-          MIN_JOBS: ${{ matrix.min_jobs }}
           TOOLU_BIN: ${{ github.workspace }}/target/debug/toolu-runner
         run: |
           OFFICIAL_DIR="$RUNNER_TEMP/official" bash scripts/test/compat_paired_host.sh run
