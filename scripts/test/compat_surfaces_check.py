@@ -34,7 +34,8 @@ REPO = "Falconiere/toolu-ghrunner"
 API = "https://api.github.com/"
 PLATFORMS = ("Linux-X64", "Linux-ARM64", "macOS-ARM64")
 TOOLU_LANES = ("toolu", "toolu-accelerated")
-SAFE_ENV, SECRET_ENV = "compat-237-safe", "compat-237-secret"
+SAFE_ENV = "compat-237-safe"
+MASKED_ENV = "compat-237-secret"  # the environment whose URL carries a masked value
 JOB_NAME = re.compile(r"^(?P<variant>probe|negative)-(?P<platform>(?:Linux|macOS)-(?:X64|ARM64))"
                       r"-(?P<lane>toolu-accelerated|toolu|official) / (?P<job>[^(]+?)(?: \(.*\))?$")
 ANNOTATED = "compat-237/annotated.txt"
@@ -45,7 +46,7 @@ EXPECTED_ANNOTATIONS = sorted([
 ], key=str)
 SECRET_WARNINGS = sorted([
     "Skip output 'masked' since it may contain secret.",
-    f"Skip setting environment url as environment '{SECRET_ENV}' may contain secret.",
+    f"Skip setting environment url as environment '{MASKED_ENV}' may contain secret.",
 ])
 # A JWT (header.payload.) or a signed blob URL must never be captured.
 LEAKS = re.compile(r"eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.|[?&]sig=")
@@ -94,7 +95,7 @@ def fetch(run_id, attempt):
                 {k: a.get(k) for k in ("path", "start_line", "end_line", "start_column",
                                        "end_column", "annotation_level", "title", "message")}
                 for a in items]
-    for env in (SAFE_ENV, SECRET_ENV):
+    for env in (SAFE_ENV, MASKED_ENV):
         capture["deployments"][env] = [
             {"id": d["id"], "statuses": [
                 {"state": s["state"], "environment_url": url_parts(s.get("environment_url")),
@@ -191,7 +192,7 @@ def check_annotations(jobs, capture, observed):
 def check_deployments(scope, jobs, capture, observed):
     problems = []
     if "secrets" in jobs:
-        observed["secret_url"] = deployed_url(capture, SECRET_ENV, jobs["secrets"])
+        observed["secret_url"] = deployed_url(capture, MASKED_ENV, jobs["secrets"])
         if observed["secret_url"] != "":
             problems.append(f"secrets: deployment environment_url {observed['secret_url']!r}, wanted ''")
     if "deploy" in jobs:

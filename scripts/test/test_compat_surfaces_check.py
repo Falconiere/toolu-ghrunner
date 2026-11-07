@@ -84,7 +84,7 @@ class MismatchTest(unittest.TestCase):
         self.assertFails(f"{TOOLU}: secrets: warnings")
 
     def test_secret_url_reaching_the_deployment_fails(self):
-        status(self.capture, check.SECRET_ENV, TOOLU, "secrets")["environment_url"] = ["https:", "", "example.com", "x"]
+        status(self.capture, check.MASKED_ENV, TOOLU, "secrets")["environment_url"] = ["https:", "", "example.com", "x"]
         self.assertFails(f"{TOOLU}: secrets: deployment environment_url")
 
     def test_wrong_safe_url_fails(self):
