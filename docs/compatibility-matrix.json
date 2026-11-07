@@ -1813,7 +1813,7 @@
         },
         "github-com": {
           "status": "unverified",
-          "reason": "live paired run 36184896428 checked only that the dynamically masked output was absent downstream; the warning and the message-secret and post-registered-mask cases have no live comparison"
+          "reason": "run 42389172867 (#237): an output carrying an ::add-mask:: value is empty downstream and the job's annotations carry \"Skip output 'masked' since it may contain secret.\" on every toolu lane; a registered (message) secret was not probed"
         },
         "reference": {
           "status": "unverified",
@@ -1825,7 +1825,7 @@
         },
         "ui-service": {
           "status": "unverified",
-          "reason": "live downstream absence of the dynamically masked output was observed, but warning text and message-secret handling were not"
+          "reason": "run 42389172867 (#237): an output carrying an ::add-mask:: value is empty downstream and the job's annotations carry \"Skip output 'masked' since it may contain secret.\" on every toolu lane (backend record); a registered (message) secret was not probed; web-UI rendering is not observed"
         }
       }
     },
@@ -2092,7 +2092,7 @@
         },
         "github-com": {
           "status": "unverified",
-          "reason": "live run 36184896428 checked downstream absence of the dynamically masked output only; log masking, the warning and the message-secret and post-registered-mask cases have no live comparison"
+          "reason": "run 42389172867 (#237): the ::add-mask:: output is omitted downstream with the upstream warning annotation; the message-secret case and log/completion-payload absence were not observed live"
         },
         "reference": {
           "status": "unverified",
@@ -2104,7 +2104,7 @@
         },
         "ui-service": {
           "status": "unverified",
-          "reason": "completion-payload and log absence were not separately observed in the GitHub UI/backend"
+          "reason": "run 42389172867 (#237): the ::add-mask:: output is omitted downstream with the upstream warning annotation; the message-secret case and log/completion-payload absence were not observed live; web-UI rendering is not observed"
         }
       }
     },
@@ -8519,7 +8519,7 @@
         },
         "github-com": {
           "status": "unverified",
-          "reason": "no real GitHub.com job executed by toolu was recorded for this criterion; live Checks comparison not run: a 2026-09-25 repository API check found zero registered runners; annotation-82-live.yml is gated on TOOLU_ANNOTATION_82_LIVE and no paired runners were provisioned"
+          "reason": "run 42389172867 (#237) observed through the check-run annotations API that ::error/::warning/::notice arrive with GitHub levels failure/warning/notice and the sent title/path/lines/columns, on every toolu lane; the serialized field names are not visible through the API, so the payload contract stays hermetic"
         },
         "reference": {
           "status": "unverified",
@@ -8531,7 +8531,7 @@
         },
         "ui-service": {
           "status": "unverified",
-          "reason": "Checks UI placement and step association never observed; annotation-82-live.yml unrun"
+          "reason": "run 42389172867 (#237) observed through the check-run annotations API that ::error/::warning/::notice arrive with GitHub levels failure/warning/notice and the sent title/path/lines/columns, on every toolu lane (backend record); the serialized field names are not visible through the API, so the payload contract stays hermetic; web-UI rendering is not observed"
         }
       }
     },
@@ -8571,7 +8571,7 @@
         },
         "github-com": {
           "status": "unverified",
-          "reason": "no real GitHub.com job executed by toolu was recorded for this criterion; live Checks comparison not run: a 2026-09-25 repository API check found zero registered runners; annotation-82-live.yml is gated on TOOLU_ANNOTATION_82_LIVE and no paired runners were provisioned"
+          "reason": "run 42389172867 (#237) observed through the check-run annotations API that title, start/end line and start/end column are forwarded; stepNumber (step association) is not exposed by the API"
         },
         "reference": {
           "status": "unverified",
@@ -8583,7 +8583,7 @@
         },
         "ui-service": {
           "status": "unverified",
-          "reason": "Checks UI placement and step association never observed; annotation-82-live.yml unrun"
+          "reason": "run 42389172867 (#237) observed through the check-run annotations API that title, start/end line and start/end column are forwarded; stepNumber (step association) is not exposed by the API; web-UI rendering is not observed"
         }
       }
     },
@@ -8623,7 +8623,7 @@
         },
         "github-com": {
           "status": "unverified",
-          "reason": "no real GitHub.com job executed by toolu was recorded for this criterion; live Checks comparison not run: a 2026-09-25 repository API check found zero registered runners; annotation-82-live.yml is gated on TOOLU_ANNOTATION_82_LIVE and no paired runners were provisioned"
+          "reason": "run 42389172867 (#237) observed through the check-run annotations API the right severity and location on every toolu lane, identical to the official lane; placement in the Checks UI is web-UI only"
         },
         "reference": {
           "status": "unverified",
@@ -8635,7 +8635,7 @@
         },
         "ui-service": {
           "status": "unverified",
-          "reason": "Checks UI placement and step association never observed; annotation-82-live.yml unrun"
+          "reason": "run 42389172867 (#237) observed through the check-run annotations API the right severity and location on every toolu lane (backend record), identical to the official lane; placement in the Checks UI is web-UI only; web-UI rendering is not observed"
         }
       }
     },
@@ -8784,7 +8784,7 @@
         },
         "github-com": {
           "status": "unverified",
-          "reason": "no real GitHub.com job executed by toolu was recorded for this criterion; live Checks comparison not run: a 2026-09-25 repository API check found zero registered runners; annotation-82-live.yml is gated on TOOLU_ANNOTATION_82_LIVE and no paired runners were provisioned"
+          "reason": "run 42389172867 (#237) observed through the check-run annotations API plain error/warning/notice with title, file and ranges; escaped properties, masked messages and step association were not probed"
         },
         "reference": {
           "status": "unverified",
@@ -8796,7 +8796,7 @@
         },
         "ui-service": {
           "status": "unverified",
-          "reason": "Checks UI placement and step association never observed; annotation-82-live.yml unrun"
+          "reason": "run 42389172867 (#237) observed through the check-run annotations API plain error/warning/notice with title, file and ranges; escaped properties, masked messages and step association were not probed; web-UI rendering is not observed"
         }
       }
     },
@@ -20230,7 +20230,7 @@
         ".github/workflows/compat-reference-103-probe.yml",
         "docs/compat-reference-103.json"
       ],
-      "expected": "Artifact upload (v7, exact bytes read back via the API) and OIDC (claims aud/repository/job_workflow_ref; no request URL without id-token) match the official lane in forwarder mode; cache save/restore did not in the recorded pre-#231 run, and download-artifact v8 therefore never ran on toolu. Accelerated mode was not run live; offline differences are documented.",
+      "expected": "Live (#237, run 42389172867), forwarder and accelerated toolu lanes (accelerated: runner inside an ubuntu container, Linux-X64): cache save/restore and artifact upload/download with matching sha256 across jobs; OIDC with id-token: write issues tokens for the default and a custom audience whose aud/iss/sub/repository/job_workflow_ref/time claims are asserted in memory, and without it both request variables are absent. GitHub job containers stay refused in accelerated mode (docs/known-bugs.md). Offline differences are documented. The pre-#231 reference run 38301583727 failed cache save/restore.",
       "production_path": "execution::execution::service_endpoints (forwarder mode)",
       "tests": [
         [
@@ -20265,8 +20265,8 @@
           "reason": "backend services, not Docker"
         },
         "github-com": {
-          "status": "unverified",
-          "reason": "acknowledged difference forwarder-cache-service-v2 in docs/compat-reference-103.json (https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727): the recorded pre-#231 toolu run did not set ACTIONS_CACHE_SERVICE_V2/ACTIONS_CACHE_MODE from actions_uses_cache_service_v2/actions_cache_mode, so actions/cache uses the retired v1 host; save silently fails and restore gets 400; OIDC passed (103/R-oidc); artifact upload verified, download skipped on toolu (103/R-artifacts); accelerated mode not run live"
+          "status": "passed",
+          "evidence": "run:https://github.com/Falconiere/toolu-ghrunner/actions/runs/42389172867"
         },
         "reference": {
           "status": "unverified",
@@ -20277,8 +20277,8 @@
           "reason": "no GHES instance available; GHES behavior not exercised"
         },
         "ui-service": {
-          "status": "unverified",
-          "reason": "acknowledged difference forwarder-cache-service-v2 in docs/compat-reference-103.json (https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727): the recorded pre-#231 toolu run did not set ACTIONS_CACHE_SERVICE_V2/ACTIONS_CACHE_MODE from actions_uses_cache_service_v2/actions_cache_mode, so actions/cache uses the retired v1 host; save silently fails and restore gets 400"
+          "status": "passed",
+          "evidence": "run:https://github.com/Falconiere/toolu-ghrunner/actions/runs/42389172867"
         }
       }
     },
@@ -20384,7 +20384,7 @@
         },
         "github-com": {
           "status": "unverified",
-          "reason": "this PR ran no annotation/summary/deployment-URL probe live; per-issue live evidence is in rows 82/*, 83/*, 86/*, 88/*"
+          "reason": "run 42389172867 (#237) observed annotations, the skipped secret output and both deployment URLs (safe recorded, masked one empty) through the API; step summaries have no public API (#235 proves the upload hermetically)"
         },
         "reference": {
           "status": "unverified",
@@ -20396,7 +20396,7 @@
         },
         "ui-service": {
           "status": "unverified",
-          "reason": "no UI/API observation recorded by this PR; see rows 82/*, 83/*, 88/*"
+          "reason": "run 42389172867 (#237) observed annotations, the skipped secret output and both deployment URLs (safe recorded, masked one empty) through the API; step summaries have no public API (#235 proves the upload hermetically); web-UI rendering is not observed"
         }
       }
     },
@@ -20461,7 +20461,7 @@
       "issue": 103,
       "criterion": "Regression: actions cache save/restore (forwarder: GitHub backend; accelerated: local CAS)",
       "input": [],
-      "expected": "Accelerated-mode Twirp v2 round trip saves and restores locally; forwarder env carries the backend URLs. The recorded pre-#231 live forwarder save/restore failed; no post-fix live run has verified it.",
+      "expected": "Accelerated-mode Twirp v2 round trip saves and restores locally; forwarder env carries the backend URLs. Live (#237, run 42389172867): save then fail-on-cache-miss restore in a later job succeeds on every toolu forwarder lane (GitHub backend) and on the accelerated lane, whose runner runs inside an ubuntu container. The pre-#231 reference run 38301583727 failed forwarder save/restore.",
       "production_path": "cache crate (accelerated); execution::execution::service_endpoints (forwarder)",
       "tests": [
         [
@@ -20488,8 +20488,8 @@
           "reason": "not a Docker surface"
         },
         "github-com": {
-          "status": "unverified",
-          "reason": "acknowledged difference forwarder-cache-service-v2 in docs/compat-reference-103.json (https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727): the recorded pre-#231 toolu run did not set ACTIONS_CACHE_SERVICE_V2/ACTIONS_CACHE_MODE from actions_uses_cache_service_v2/actions_cache_mode, so actions/cache uses the retired v1 host; save silently fails and restore gets 400"
+          "status": "passed",
+          "evidence": "run:https://github.com/Falconiere/toolu-ghrunner/actions/runs/42389172867"
         },
         "reference": {
           "status": "unverified",
@@ -20500,8 +20500,8 @@
           "reason": "no GHES instance available; GHES behavior not exercised"
         },
         "ui-service": {
-          "status": "unverified",
-          "reason": "acknowledged difference forwarder-cache-service-v2 in docs/compat-reference-103.json (https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727): the recorded pre-#231 toolu run did not set ACTIONS_CACHE_SERVICE_V2/ACTIONS_CACHE_MODE from actions_uses_cache_service_v2/actions_cache_mode, so actions/cache uses the retired v1 host; save silently fails and restore gets 400; GitHub's cache API lists only the official lane's keys"
+          "status": "passed",
+          "evidence": "run:https://github.com/Falconiere/toolu-ghrunner/actions/runs/42389172867"
         }
       }
     },
@@ -20510,7 +20510,7 @@
       "issue": 103,
       "criterion": "Regression: artifact upload/download through the real GitHub artifact backend",
       "input": [],
-      "expected": "Live: upload-artifact v7 bytes artifact-103-<run_id>\\n verified via the API on both lanes; download-artifact v8 ran only on the official lane (toolu skipped it after the cache failure). The local artifact service implementation (not started by offline mode) rejects path traversal.",
+      "expected": "Live (#237, run 42389172867): on every toolu lane (forwarder on Linux-X64, Linux-ARM64 and macOS-ARM64; accelerated with the runner inside an ubuntu container on Linux-X64) upload-artifact stores the payload and download-artifact in a later job fetches it with a sha256 equal to the producer's; on Linux a job-container upload does the same. The 2.337.0 reference run 38301583727 skipped the toolu download after the cache failure. The local artifact service implementation (not started by offline mode) rejects path traversal.",
       "production_path": "forwarder env (ACTIONS_RESULTS_URL/ACTIONS_RUNTIME_TOKEN); execution::execution::artifacts (local implementation, not started by the job runner)",
       "tests": [
         [
@@ -20537,8 +20537,8 @@
           "reason": "not a Docker surface"
         },
         "github-com": {
-          "status": "unverified",
-          "reason": "upload-artifact v7 ran on toolu and its bytes were read back through the GitHub API (https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727), but download-artifact v8 was skipped on toolu because the preceding cache restore failed (forwarder-cache-service-v2); the download half is not observed on toolu"
+          "status": "passed",
+          "evidence": "run:https://github.com/Falconiere/toolu-ghrunner/actions/runs/42389172867"
         },
         "reference": {
           "status": "unverified",
@@ -20549,8 +20549,8 @@
           "reason": "no GHES instance available; GHES behavior not exercised"
         },
         "ui-service": {
-          "status": "unverified",
-          "reason": "upload-artifact v7 ran on toolu and its bytes were read back through the GitHub API (https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727), but download-artifact v8 was skipped on toolu because the preceding cache restore failed (forwarder-cache-service-v2); the download half is not observed on toolu"
+          "status": "passed",
+          "evidence": "run:https://github.com/Falconiere/toolu-ghrunner/actions/runs/42389172867"
         }
       }
     },

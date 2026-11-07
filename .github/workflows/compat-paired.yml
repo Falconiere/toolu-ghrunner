@@ -11,8 +11,8 @@ name: compat-paired
 # on the Linux-X64 VM whose runner runs in a container (`accelerated`, compared
 # with nothing) and the hosted
 # `surfaces` job, which reads annotations and deployment statuses back from the
-# GitHub API (scripts/test/compat_surfaces_check.py). Two runners side by side on a hosted VM stays
-# unproven until the first dispatch (#251).
+# GitHub API (scripts/test/compat_surfaces_check.py). Two runners side by side
+# on each hosted VM were first proven by #237's runs 42388230585 and 42389172867.
 
 on:
   workflow_dispatch:
