@@ -53,3 +53,28 @@ fn missing_parent_identity_is_an_error() {
     );
   }
 }
+
+/// Caller level: `build_context` on a real acquired job enables `$/` from the
+/// `actions_self_repository` variable and the `job` context identity, and
+/// stays off when the variable is absent.
+#[test]
+fn build_context_enables_self_repository_only_with_the_flag() {
+  use std::sync::{Arc, Mutex};
+
+  let mut msg: shared::AgentJobRequestMessage =
+    serde_json::from_str(include_str!("incoming_contexts_call.json")).expect("captured job");
+  let build = |m: &shared::AgentJobRequestMessage| {
+    execution::execution::job_runner::build_context(
+      m,
+      &shared::RunnerConfig::default(),
+      Arc::new(Mutex::new(shared::SecretMasker::new())),
+    )
+  };
+  let on = build(&msg);
+  let (repo, sha) = on.self_repository().expect("flag on, job identity present");
+  assert!(repo.contains('/') && !sha.is_empty(), "got {repo}@{sha}");
+  msg
+    .variables
+    .retain(|k, _| !k.eq_ignore_ascii_case("actions_self_repository"));
+  assert_eq!(build(&msg).self_repository(), None);
+}

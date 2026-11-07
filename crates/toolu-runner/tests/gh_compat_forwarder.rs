@@ -182,9 +182,10 @@ fn per_step_type_sets_match_official_handlers() -> TestResult<()> {
     script_keys,
     [
       "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
-      "ACTIONS_ID_TOKEN_REQUEST_URL"
+      "ACTIONS_ID_TOKEN_REQUEST_URL",
+      "ACTIONS_ORCHESTRATION_ID"
     ],
-    "run: steps get only the OIDC pair"
+    "run: steps get the OIDC pair and the orchestration id (flag on in this fixture)"
   );
   Ok(())
 }
