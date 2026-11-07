@@ -1,8 +1,10 @@
 //! #94 AC-5 / AC-6 / AC-9: the job's `[network]` export reaches real host
 //! steps through the production engine (`Runner::execute_job`) — `run:`
 //! steps, a job hook, a local Node action's main and post stages, and Node's
-//! TLS trust — under workflow env, with the proxy password masked.
+//! TLS trust — under workflow env, with the proxy password masked. #233: a
+//! shell tool and a Node action send real traffic with the exported values.
 
+use crate::proxy_fixtures;
 use crate::tls_fixtures;
 
 use std::path::{Path, PathBuf};
@@ -11,9 +13,10 @@ use std::time::Duration;
 
 use execution::Runner;
 use execution::node::runtime::{node_binary_path, node_cache_dir, node_version_for};
+use proxy_fixtures::RecordingProxy;
 use shared::{
-  AgentJobRequestMessage, Conclusion, DictEntry, NetworkConfig, RunnerConfig, RunnerEvent,
-  SecretMasker, TemplateToken, VariableValue,
+  ActionStep, AgentJobRequestMessage, Conclusion, DictEntry, NetworkConfig, RunnerConfig,
+  RunnerEvent, SecretMasker, TemplateToken, VariableValue,
 };
 use tls_fixtures::{FixtureResult, Leaf, Pki, TlsTarget};
 use tokio_util::sync::CancellationToken;
@@ -157,6 +160,22 @@ impl Harness {
         ),
       )?;
     }
+    Ok(())
+  }
+
+  /// Install the local Node action whose only stage runs `main`.
+  fn install_node_main(&self, job: &AgentJobRequestMessage, main: &str) -> FixtureResult<()> {
+    let dir = self
+      .config
+      .workspace_root
+      .join(&job.job_id)
+      .join(".github/actions/net-94");
+    std::fs::create_dir_all(&dir)?;
+    std::fs::write(
+      dir.join("action.yml"),
+      "name: net-94\ndescription: sends traffic with the export\nruns:\n  using: node20\n  main: main.js\n",
+    )?;
+    std::fs::write(dir.join("main.js"), main)?;
     Ok(())
   }
 
@@ -499,5 +518,165 @@ async fn node_action_sees_the_workflow_env_over_the_export() -> FixtureResult<()
       "{stage}: {lines:?}"
     );
   }
+  Ok(())
+}
+
+#[tokio::test]
+async fn a_github_env_value_beats_the_export() -> FixtureResult<()> {
+  let h = Harness::new(NetworkConfig {
+    proxy: Some(PROXY.to_owned()),
+    ..NetworkConfig::default()
+  })
+  .await?;
+  let mut job = job("true", false)?;
+  job.steps = vec![
+    ActionStep::script(
+      "write_env",
+      "echo HTTPS_PROXY=http://github-env.test:1 >> \"$GITHUB_ENV\"",
+      "success()",
+    ),
+    ActionStep::script("read_env", &probe("run"), "success()"),
+  ];
+  let (conclusion, lines) = h.run(job, &[]).await?;
+  assert_eq!(conclusion, Some(Conclusion::Success), "{lines:?}");
+  assert_eq!(
+    reported(&lines, "run", "HTTPS_PROXY"),
+    Some("http://github-env.test:1"),
+    "{lines:?}"
+  );
+  assert_eq!(reported(&lines, "run", "https_proxy"), Some(PROXY));
+  Ok(())
+}
+
+/// A `curl` call reporting its HTTP status under `tag`; trusts only the
+/// exported bundle.
+fn curl(tag: &str, url: &str) -> String {
+  format!(
+    "curl -sS --cacert \"$NODE_EXTRA_CA_CERTS\" -o /dev/null -w 'NET94|curl|{tag}|%{{http_code}}\\n' {url}"
+  )
+}
+
+#[tokio::test]
+async fn shell_traffic_follows_the_exported_proxy_and_bypass() -> FixtureResult<()> {
+  let pki = Pki::new()?;
+  let dir = tempfile::tempdir()?;
+  let proxied = TlsTarget::serve(
+    pki.server_config(&["target.test"], Leaf::Valid)?,
+    b"ok".to_vec(),
+  )
+  .await?;
+  let bypassed = TlsTarget::serve(
+    pki.server_config(&["127.0.0.1"], Leaf::Valid)?,
+    b"ok".to_vec(),
+  )
+  .await?;
+  let proxy = RecordingProxy::start(Some(("u", "s3cr3tpw"))).await?;
+  let h = Harness::new(NetworkConfig {
+    proxy: Some(proxy.url(Some("u:s3cr3tpw"))),
+    ca_bundle: Some(pki.write_bundle(dir.path())?),
+    ..NetworkConfig::default()
+  })
+  .await?;
+  let script = format!(
+    "{}\n{}",
+    // `target.test` has no DNS: only the proxy can reach it.
+    curl(
+      "proxied",
+      &format!("https://target.test:{}/", proxied.port())
+    ),
+    curl(
+      "bypassed",
+      &format!("https://127.0.0.1:{}/", bypassed.port())
+    ),
+  );
+  let (conclusion, lines) = h.run(job(&script, false)?, &[]).await?;
+  assert_eq!(conclusion, Some(Conclusion::Success), "{lines:?}");
+  assert_eq!(
+    reported(&lines, "curl", "proxied"),
+    Some("200"),
+    "{lines:?}"
+  );
+  assert_eq!(
+    reported(&lines, "curl", "bypassed"),
+    Some("200"),
+    "{lines:?}"
+  );
+  // The proxy requires Basic auth, so a tunnel at all proves the credentials.
+  let hits = proxy.hits();
+  let seen: Vec<_> = hits
+    .iter()
+    .map(|hit| (hit.line.as_str(), hit.auth.is_some()))
+    .collect();
+  let connect = format!("CONNECT target.test:{} HTTP/1.1", proxied.port());
+  assert_eq!(seen, vec![(connect.as_str(), true)], "{lines:?}");
+  assert_eq!(proxied.requests().len(), 1, "{lines:?}");
+  assert_eq!(bypassed.requests().len(), 1, "{lines:?}");
+  Ok(())
+}
+
+/// A Node action's `main`: open a `CONNECT` tunnel from `HTTPS_PROXY`, as an
+/// action opting in does, then `GET` over it with Node's default trust.
+fn node_tunnel(port: u16) -> String {
+  format!(
+    r#"const http = require('http'), https = require('https'), tls = require('tls');
+const report = value => console.log('NET94|tunnel|status|' + value);
+const proxy = new URL(process.env.HTTPS_PROXY);
+const auth = decodeURIComponent(proxy.username) + ':' + decodeURIComponent(proxy.password);
+http.request({{
+  host: proxy.hostname,
+  port: proxy.port,
+  method: 'CONNECT',
+  path: 'target.test:{port}',
+  headers: {{ 'Proxy-Authorization': 'Basic ' + Buffer.from(auth).toString('base64') }},
+}}).on('connect', (res, socket) => {{
+  if (res.statusCode !== 200) {{ report(res.statusCode); return socket.destroy(); }}
+  https.get({{
+    host: 'target.test',
+    port: {port},
+    createConnection: () => tls.connect({{ socket, servername: 'target.test' }}),
+  }}, r => {{
+    report(r.statusCode);
+    r.resume();
+    r.on('end', () => socket.destroy());
+  }}).on('error', e => {{ report(e.code); socket.destroy(); }});
+}}).on('error', e => report(e.code)).end();
+"#
+  )
+}
+
+#[tokio::test]
+async fn node_action_traffic_uses_the_exported_proxy_and_ca() -> FixtureResult<()> {
+  let pki = Pki::new()?;
+  let dir = tempfile::tempdir()?;
+  let target = TlsTarget::serve(
+    pki.server_config(&["target.test"], Leaf::Valid)?,
+    b"ok".to_vec(),
+  )
+  .await?;
+  let proxy = RecordingProxy::start(Some(("u", "s3cr3tpw"))).await?;
+  let h = Harness::new(NetworkConfig {
+    proxy: Some(proxy.url(Some("u:s3cr3tpw"))),
+    ca_bundle: Some(pki.write_bundle(dir.path())?),
+    ..NetworkConfig::default()
+  })
+  .await?;
+  let job = job("true", true)?;
+  h.install_node_main(&job, &node_tunnel(target.port()))?;
+  let (conclusion, lines) = h.run(job, &[]).await?;
+  assert_eq!(conclusion, Some(Conclusion::Success), "{lines:?}");
+  // The generated CA is trusted only through the exported NODE_EXTRA_CA_CERTS.
+  assert_eq!(
+    reported(&lines, "tunnel", "status"),
+    Some("200"),
+    "{lines:?}"
+  );
+  let hits = proxy.hits();
+  let seen: Vec<_> = hits
+    .iter()
+    .map(|hit| (hit.line.as_str(), hit.auth.is_some()))
+    .collect();
+  let connect = format!("CONNECT target.test:{} HTTP/1.1", target.port());
+  assert_eq!(seen, vec![(connect.as_str(), true)], "{lines:?}");
+  assert_eq!(target.requests().len(), 1, "{lines:?}");
   Ok(())
 }
