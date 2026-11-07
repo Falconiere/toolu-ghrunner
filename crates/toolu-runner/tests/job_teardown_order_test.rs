@@ -40,7 +40,7 @@ use shared::{
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::gh_compat_prepost::{seed_node, system_node};
+use crate::gh_compat_node_action_file_commands::{seed_node, system_node};
 use crate::run_service_classify_test::EventCapture;
 
 const JOB_MESSAGE: &str = include_str!("fixtures/job_message.json");

@@ -20,7 +20,7 @@ runs:
       working-directory: ${{ runner.temp }}
       run: |
         pwd -P > absolute.pwd
-        cp absolute.pwd "$GITHUB_WORKSPACE/absolute-copy.pwd"
+        cp absolute.pwd "${GITHUB_WORKSPACE}/absolute-copy.pwd"
     - id: select
       shell: bash
       run: |

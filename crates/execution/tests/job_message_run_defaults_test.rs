@@ -293,7 +293,7 @@ async fn job_default_directory_expression_is_evaluated() -> TestResult {
   set_step_input(
     step,
     "script",
-    "test \"$(pwd -P)\" = \"$(cd \"$RUNNER_TEMP/defaults-71-absolute\" && pwd -P)\"; printf job > job.marker; cp job.marker \"$GITHUB_WORKSPACE/job-copy.marker\"",
+    "test \"$(pwd -P)\" = \"$(cd \"$RUNNER_TEMP/defaults-71-absolute\" && pwd -P)\"; printf job > job.marker; cp job.marker \"${GITHUB_WORKSPACE}/job-copy.marker\"",
   )?;
   let ids = message
     .steps

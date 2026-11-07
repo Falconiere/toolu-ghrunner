@@ -32,7 +32,7 @@ const FIXTURE_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/p
 
 /// Locate a real `node` binary, resolving shims via `process.execPath`.
 /// `None` => skip (no real node runtime available).
-pub(crate) fn system_node() -> Option<PathBuf> {
+fn system_node() -> Option<PathBuf> {
   let out = std::process::Command::new("node")
     .args(["-e", "process.stdout.write(process.execPath)"])
     .output()
@@ -50,7 +50,7 @@ pub(crate) fn system_node() -> Option<PathBuf> {
 /// Seed the real node binary into the runner's node cache for both node pins (node20 and node24) so
 /// `ensure_node_runtime` resolves it from disk instead of downloading. Uses a
 /// symlink (preserving the install's sibling files), falling back to a copy.
-pub(crate) fn seed_node(data_dir: &Path, node: &Path) -> TestResult<()> {
+fn seed_node(data_dir: &Path, node: &Path) -> TestResult<()> {
   for major in [20, 24] {
     let version = node_version_for(major);
     let cache_dir = node_cache_dir(data_dir, version);
