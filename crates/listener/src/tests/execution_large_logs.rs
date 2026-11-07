@@ -22,14 +22,11 @@ async fn receive(State(state): State<ServerState>, request: Request<Body>) -> Re
   let path = request.uri().path().to_owned();
   if path.starts_with("/step/") || path == "/job" {
     let filename = path.trim_start_matches('/').replace('/', "-");
-    let mut file = match std::fs::File::create(state.dir.join(filename)) {
-      Ok(file) => file,
-      Err(_) => {
-        return Response::builder()
-          .status(500)
-          .body(Body::empty())
-          .unwrap_or_default();
-      },
+    let Ok(mut file) = std::fs::File::create(state.dir.join(filename)) else {
+      return Response::builder()
+        .status(500)
+        .body(Body::empty())
+        .unwrap_or_default();
     };
     let mut body = request.into_body().into_data_stream();
     while let Some(chunk) = body.next().await {
@@ -87,8 +84,8 @@ fn make_input(path: &Path) -> TestResult<()> {
   }
   writeln!(out, "{SECRET}")?;
   let mut seed = 0x1234_5678_u32;
-  for _ in 0..(195 * MIB / 65536 + 1) {
-    let mut line = format!("{SECRET}");
+  for _ in 0..=(195 * MIB / 65536) {
+    let mut line = SECRET.to_owned();
     for _ in 0..65536 {
       seed ^= seed << 13;
       seed ^= seed >> 17;
@@ -105,16 +102,18 @@ fn make_input(path: &Path) -> TestResult<()> {
 fn assert_gzip_matches(path: &Path, expected: &Path) -> TestResult<()> {
   let mut actual = BufReader::new(flate2::read::GzDecoder::new(std::fs::File::open(path)?));
   let mut expected = BufReader::new(std::fs::File::open(expected)?);
-  let mut left = [0; 65536];
-  let mut right = [0; 65536];
+  let mut left = vec![0; 65536];
+  let mut right = vec![0; 65536];
   loop {
     let a = actual.read(&mut left)?;
     if a == 0 {
       assert_eq!(expected.read(&mut right)?, 0);
       break;
     }
-    expected.read_exact(&mut right[..a])?;
-    assert_eq!(&left[..a], &right[..a]);
+    let left_part = left.get(..a).ok_or("actual read length")?;
+    let right_part = right.get_mut(..a).ok_or("expected read length")?;
+    expected.read_exact(right_part)?;
+    assert_eq!(left_part, right_part);
   }
   Ok(())
 }
@@ -148,6 +147,38 @@ fn rss_bytes() -> TestResult<u64> {
   Ok(std::str::from_utf8(&output.stdout)?.trim().parse::<u64>()? * 1024)
 }
 
+fn script_message(script: &str) -> TestResult<(AgentJobRequestMessage, String)> {
+  let mut raw: serde_json::Value = serde_json::from_str(include_str!(
+    "../../../execution/tests/incoming_contexts_matrix_0.json"
+  ))?;
+  let steps = raw
+    .get_mut("steps")
+    .and_then(serde_json::Value::as_array_mut)
+    .ok_or("steps")?;
+  let mut step = steps
+    .iter()
+    .find(|s| {
+      s.get("reference")
+        .and_then(|r| r.get("type"))
+        .and_then(serde_json::Value::as_str)
+        == Some("script")
+    })
+    .ok_or("script step")?
+    .clone();
+  let step_id = step
+    .get("id")
+    .and_then(serde_json::Value::as_str)
+    .ok_or("step id")?
+    .to_owned();
+  *step.get_mut("inputs").ok_or("inputs")? = serde_json::json!({"type":2,"map":[{"Key":{"type":0,"lit":"script"},"Value":{"type":0,"lit":script}}]});
+  *step.get_mut("condition").ok_or("condition")? = serde_json::json!("success()");
+  *steps = vec![step];
+  let mut msg: AgentJobRequestMessage = serde_json::from_value(raw)?;
+  msg.defaults.clear();
+  msg.job_outputs = None;
+  Ok((msg, step_id))
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn real_child_large_logs_remain_bounded_and_upload_in_order() -> TestResult<()> {
   let temp = tempfile::tempdir()?;
@@ -170,26 +201,8 @@ async fn real_child_large_logs_remain_bounded_and_upload_in_order() -> TestResul
     .into_future(),
   );
 
-  let mut raw: serde_json::Value = serde_json::from_str(include_str!(
-    "../../../execution/tests/incoming_contexts_matrix_0.json"
-  ))?;
-  let steps = raw
-    .get_mut("steps")
-    .and_then(serde_json::Value::as_array_mut)
-    .ok_or("steps")?;
-  let mut step = steps
-    .iter()
-    .find(|s| s["reference"]["type"] == "script")
-    .ok_or("script step")?
-    .clone();
-  let step_id = step["id"].as_str().ok_or("step id")?.to_owned();
   let script = format!("cat '{}'", input.display());
-  step["inputs"] = serde_json::json!({"type":2,"map":[{"Key":{"type":0,"lit":"script"},"Value":{"type":0,"lit":script}}]});
-  step["condition"] = serde_json::json!("success()");
-  *steps = vec![step];
-  let mut msg: AgentJobRequestMessage = serde_json::from_value(raw)?;
-  msg.defaults.clear();
-  msg.job_outputs = None;
+  let (msg, step_id) = script_message(&script)?;
   let config = shared::RunnerConfig {
     data_dir: temp.path().join("data"),
     workspace_root: temp.path().join("work"),
@@ -197,7 +210,10 @@ async fn real_child_large_logs_remain_bounded_and_upload_in_order() -> TestResul
     ..shared::RunnerConfig::default()
   };
   let masker = Arc::new(Mutex::new(SecretMasker::new()));
-  masker.lock().map_err(|_| "masker")?.add_secret(SECRET);
+  masker
+    .lock()
+    .map_err(|error| format!("masker: {error}"))?
+    .add_secret(SECRET);
   let baseline = rss_bytes()?;
   let runner = Runner::new(config.clone(), Arc::clone(&masker));
   let cancel = CancellationToken::new();
@@ -342,25 +358,7 @@ async fn cancelled_real_child_uploads_logs_and_removes_spools() -> TestResult<()
     )
     .into_future(),
   );
-  let mut raw: serde_json::Value = serde_json::from_str(include_str!(
-    "../../../execution/tests/incoming_contexts_matrix_0.json"
-  ))?;
-  let steps = raw
-    .get_mut("steps")
-    .and_then(serde_json::Value::as_array_mut)
-    .ok_or("steps")?;
-  let mut step = steps
-    .iter()
-    .find(|s| s["reference"]["type"] == "script")
-    .ok_or("script step")?
-    .clone();
-  let step_id = step["id"].as_str().ok_or("step id")?.to_owned();
-  step["inputs"] = serde_json::json!({"type":2,"map":[{"Key":{"type":0,"lit":"script"},"Value":{"type":0,"lit":"while :; do printf 'cancel-probe-240\\n'; done"}}]});
-  step["condition"] = serde_json::json!("success()");
-  *steps = vec![step];
-  let mut msg: AgentJobRequestMessage = serde_json::from_value(raw)?;
-  msg.defaults.clear();
-  msg.job_outputs = None;
+  let (msg, step_id) = script_message("while :; do printf 'cancel-probe-240\\n'; done")?;
   let config = shared::RunnerConfig {
     data_dir: temp.path().join("data"),
     workspace_root: temp.path().join("work"),
