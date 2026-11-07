@@ -414,6 +414,8 @@ async fn nested_self_reference_prepares_remote_docker() -> Result<(), Box<dyn st
 
   let mut top_level = ActionStep::with_ref_type("self", "repository");
   top_level.reference.name = Some("$/docker".to_owned());
+  let mut servable = ExecutionContext::new_for_test();
+  servable.enable_self_repository(Some(("acme/probe".to_owned(), "main".to_owned())));
   let top_level = discover(
     &[top_level],
     &Discovery {
@@ -421,7 +423,7 @@ async fn nested_self_reference_prepares_remote_docker() -> Result<(), Box<dyn st
       client: &reqwest::Client::new(),
       data_dir: dir.path(),
     },
-    &enabled,
+    &servable,
     &CancellationToken::new(),
   )
   .await?;
