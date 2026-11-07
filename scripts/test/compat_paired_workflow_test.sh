@@ -136,12 +136,13 @@ case "$*" in
     [[ -n "${FAKE_DELETE_WORKS:-}" ]] || exit 1
     : >"$FAKE_RUNNERS"
     ;;
-  */jobs*) cat "$FAKE_JOBS" ;;
+  # Jobs finish only once the listener is up, so stopping the lanes has one to stop.
+  */jobs*) [[ -f "$OFFICIAL_DIR/listening" ]] && cat "$FAKE_JOBS" ;;
   */runners*) cat "$FAKE_RUNNERS" ;;
 esac
 GH
   printf '#!/usr/bin/env bash\n"$PWD/bin/Runner.Listener"\n' >"$tmp/official/run.sh"
-  printf '#!/usr/bin/env bash\nwhile :; do sleep 1; done\n' >"$tmp/official/bin/Runner.Listener"
+  printf '#!/usr/bin/env bash\ntouch "$PWD/listening"\nwhile :; do sleep 1; done\n' >"$tmp/official/bin/Runner.Listener"
   cat >"$tmp/tools/toolu" <<'TOOLU'
 #!/usr/bin/env bash
 [[ "$1" == run ]] && while :; do sleep 1; done
@@ -188,6 +189,12 @@ TOOLU
   }
   FAKE_RUNNERS="$tmp/none" host run >/dev/null 2>&1
   expect "lanes stop once the probes completed" 0 $?
+  [[ -f "$tmp/official/listening" ]] && ! pgrep -f "$tmp/official/bin/Runner.Listener" >/dev/null &&
+    echo "ok: the official listener does not outlive the lanes" || {
+    echo "FAIL: the official listener was not stopped" >&2
+    pkill -f "$tmp/official/bin/Runner.Listener"
+    fail=1
+  }
   # Completed jobs alone are not done: the last consumer may not be listed yet.
   sed -i.bak '$d' "$tmp/jobs"
   FAKE_RUNNERS="$tmp/none" FAKE_TOOLU="$tmp/tools/toolu-dies" host run >/dev/null 2>&1
