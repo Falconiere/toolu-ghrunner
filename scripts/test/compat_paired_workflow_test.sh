@@ -258,13 +258,14 @@ DOCKER
     echo "FAIL: the JIT config reached a lane log" >&2
     fail=1
   }
-  # The accelerated lane adds a fifth consumer; four are not enough.
-  out=$(FAKE_RUNNERS="$tmp/none" FAKE_ACCELERATED=true FAKE_TOOLU="$tmp/tools/toolu-dies" host run 2>&1)
-  expect "an accelerated host waits for its fifth consumer" 1 $?
-  for caller in probe-Linux-X64-toolu probe-Linux-X64-official negative-Linux-X64-toolu negative-Linux-X64-official \
-    probe-Linux-X64-toolu-accelerated; do
+  # The accelerated lane adds a fifth consumer: with only the four forwarder and
+  # official consumers done, the host keeps polling, so a stopped container fails it.
+  for caller in probe-Linux-X64-toolu probe-Linux-X64-official negative-Linux-X64-toolu negative-Linux-X64-official; do
     printf 'completed %s / consumer\n' "$caller"
   done >"$tmp/jobs"
+  FAKE_RUNNERS="$tmp/none" FAKE_ACCELERATED=true FAKE_DOCKER_DEAD=1 host run >/dev/null 2>&1
+  expect "four consumers do not finish an accelerated host" 1 $?
+  printf 'completed probe-Linux-X64-toolu-accelerated / consumer\n' >>"$tmp/jobs"
   out=$(FAKE_RUNNERS="$tmp/none" FAKE_ACCELERATED=true host run 2>&1)
   expect "an accelerated host stops once its five consumers completed" 0 $?
   args=$(cat "$tmp/docker-run")
@@ -284,9 +285,6 @@ DOCKER
     echo "FAIL: accelerated lane log missing: $out" >&2
     fail=1
   }
-  sed -i.bak '$d' "$tmp/jobs"
-  FAKE_RUNNERS="$tmp/none" FAKE_ACCELERATED=true FAKE_DOCKER_DEAD=1 host run >/dev/null 2>&1
-  expect "a stopped accelerated container fails the step while a consumer is unlisted" 1 $?
 
   FAKE_RUNNERS="$tmp/none" host unregister >/dev/null 2>&1
   expect "unregister passes with no runner left" 0 $?

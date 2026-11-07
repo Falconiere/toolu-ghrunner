@@ -78,7 +78,8 @@ stop_lanes() {
   done
 }
 
-# Registers the forwarder toolu lane (own home) and starts it; prints the pid.
+# Registers the forwarder toolu lane (own home) and starts it in the background;
+# call it directly (not in `$(…)`) so the lane stays this shell's child for `wait`.
 start_toolu() {
   local label="$LABEL_PREFIX-toolu" home="$RUNNER_TEMP/toolu-home"
   local toolu_env=("${clean_env[@]}" "TOOLU_RUNNER_HOME=$home" "TOOLU_RUNNER_TOKEN=$GH_TOKEN")
@@ -86,7 +87,7 @@ start_toolu() {
   "${toolu_env[@]}" "$TOOLU_BIN" register --url "https://github.com/$GITHUB_REPOSITORY" \
     --name "$label" --labels "$label" --config "$home/config.toml" --work "$home/_work" >&2
   "${toolu_env[@]}" "$TOOLU_BIN" run --config "$home/config.toml" >"$RUNNER_TEMP/toolu.log" 2>&1 &
-  echo $!
+  toolu_pid=$!
 }
 
 # The accelerated lane: register and run inside one ubuntu container. RUNNER_TEMP
@@ -123,7 +124,7 @@ run_lanes() {
   official_pid="" toolu_pid="" accelerated=""
   [[ "${ACCELERATED_LANE:-}" == true ]] && accelerated=true
   trap stop_lanes EXIT
-  toolu_pid=$(start_toolu)
+  start_toolu
   [[ -z "$accelerated" ]] || start_accelerated
   official_lane 3>&1 >"$RUNNER_TEMP/official.log" 2>&1 &
   official_pid=$!

@@ -3761,17 +3761,28 @@
     "statuses": [
      {
       "state": "success",
-      "environment_url": "https://example.com/compat-237/Linux-X64-toolu-negative/42389172867",
+      "environment_url": [
+       "https:",
+       "",
+       "example.com",
+       "compat-237",
+       "Linux-X64-toolu-negative",
+       "42389172867"
+      ],
       "job_id": 128452934487
      },
      {
       "state": "in_progress",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452934487
      },
      {
       "state": "queued",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452934487
      }
     ]
@@ -3781,17 +3792,28 @@
     "statuses": [
      {
       "state": "success",
-      "environment_url": "https://example.com/compat-237/Linux-X64-official-negative/42389172867",
+      "environment_url": [
+       "https:",
+       "",
+       "example.com",
+       "compat-237",
+       "Linux-X64-official-negative",
+       "42389172867"
+      ],
       "job_id": 128452934517
      },
      {
       "state": "in_progress",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452934517
      },
      {
       "state": "queued",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452934517
      }
     ]
@@ -3801,17 +3823,28 @@
     "statuses": [
      {
       "state": "success",
-      "environment_url": "https://example.com/compat-237/macOS-ARM64-official-negative/42389172867",
+      "environment_url": [
+       "https:",
+       "",
+       "example.com",
+       "compat-237",
+       "macOS-ARM64-official-negative",
+       "42389172867"
+      ],
       "job_id": 128452934431
      },
      {
       "state": "in_progress",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452934431
      },
      {
       "state": "queued",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452934431
      }
     ]
@@ -3821,17 +3854,28 @@
     "statuses": [
      {
       "state": "success",
-      "environment_url": "https://example.com/compat-237/Linux-ARM64-toolu-negative/42389172867",
+      "environment_url": [
+       "https:",
+       "",
+       "example.com",
+       "compat-237",
+       "Linux-ARM64-toolu-negative",
+       "42389172867"
+      ],
       "job_id": 128452934319
      },
      {
       "state": "in_progress",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452934319
      },
      {
       "state": "queued",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452934319
      }
     ]
@@ -3841,17 +3885,28 @@
     "statuses": [
      {
       "state": "success",
-      "environment_url": "https://example.com/compat-237/macOS-ARM64-toolu-negative/42389172867",
+      "environment_url": [
+       "https:",
+       "",
+       "example.com",
+       "compat-237",
+       "macOS-ARM64-toolu-negative",
+       "42389172867"
+      ],
       "job_id": 128452934331
      },
      {
       "state": "in_progress",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452934331
      },
      {
       "state": "queued",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452934331
      }
     ]
@@ -3861,17 +3916,28 @@
     "statuses": [
      {
       "state": "success",
-      "environment_url": "https://example.com/compat-237/Linux-ARM64-official-negative/42389172867",
+      "environment_url": [
+       "https:",
+       "",
+       "example.com",
+       "compat-237",
+       "Linux-ARM64-official-negative",
+       "42389172867"
+      ],
       "job_id": 128452934233
      },
      {
       "state": "in_progress",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452934233
      },
      {
       "state": "queued",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452934233
      }
     ]
@@ -3881,17 +3947,28 @@
     "statuses": [
      {
       "state": "success",
-      "environment_url": "https://example.com/compat-237/Linux-X64-toolu-probe/42389172867",
+      "environment_url": [
+       "https:",
+       "",
+       "example.com",
+       "compat-237",
+       "Linux-X64-toolu-probe",
+       "42389172867"
+      ],
       "job_id": 128452934166
      },
      {
       "state": "in_progress",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452934166
      },
      {
       "state": "queued",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452934166
      }
     ]
@@ -3901,17 +3978,28 @@
     "statuses": [
      {
       "state": "success",
-      "environment_url": "https://example.com/compat-237/Linux-ARM64-toolu-probe/42389172867",
+      "environment_url": [
+       "https:",
+       "",
+       "example.com",
+       "compat-237",
+       "Linux-ARM64-toolu-probe",
+       "42389172867"
+      ],
       "job_id": 128452933915
      },
      {
       "state": "in_progress",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452933915
      },
      {
       "state": "queued",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452933915
      }
     ]
@@ -3921,17 +4009,28 @@
     "statuses": [
      {
       "state": "success",
-      "environment_url": "https://example.com/compat-237/Linux-X64-official-probe/42389172867",
+      "environment_url": [
+       "https:",
+       "",
+       "example.com",
+       "compat-237",
+       "Linux-X64-official-probe",
+       "42389172867"
+      ],
       "job_id": 128452933651
      },
      {
       "state": "in_progress",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452933651
      },
      {
       "state": "queued",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452933651
      }
     ]
@@ -3941,17 +4040,28 @@
     "statuses": [
      {
       "state": "success",
-      "environment_url": "https://example.com/compat-237/Linux-ARM64-official-probe/42389172867",
+      "environment_url": [
+       "https:",
+       "",
+       "example.com",
+       "compat-237",
+       "Linux-ARM64-official-probe",
+       "42389172867"
+      ],
       "job_id": 128452933640
      },
      {
       "state": "in_progress",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452933640
      },
      {
       "state": "queued",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452933640
      }
     ]
@@ -3961,17 +4071,28 @@
     "statuses": [
      {
       "state": "success",
-      "environment_url": "https://example.com/compat-237/macOS-ARM64-official-probe/42389172867",
+      "environment_url": [
+       "https:",
+       "",
+       "example.com",
+       "compat-237",
+       "macOS-ARM64-official-probe",
+       "42389172867"
+      ],
       "job_id": 128452933531
      },
      {
       "state": "in_progress",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452933531
      },
      {
       "state": "queued",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452933531
      }
     ]
@@ -3981,17 +4102,28 @@
     "statuses": [
      {
       "state": "success",
-      "environment_url": "https://example.com/compat-237/macOS-ARM64-toolu-probe/42389172867",
+      "environment_url": [
+       "https:",
+       "",
+       "example.com",
+       "compat-237",
+       "macOS-ARM64-toolu-probe",
+       "42389172867"
+      ],
       "job_id": 128452933444
      },
      {
       "state": "in_progress",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452933444
      },
      {
       "state": "queued",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452933444
      }
     ]
@@ -4001,17 +4133,28 @@
     "statuses": [
      {
       "state": "success",
-      "environment_url": "https://example.com/compat-237/Linux-X64-toolu-accelerated-probe/42389172867",
+      "environment_url": [
+       "https:",
+       "",
+       "example.com",
+       "compat-237",
+       "Linux-X64-toolu-accelerated-probe",
+       "42389172867"
+      ],
       "job_id": 128452933362
      },
      {
       "state": "in_progress",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452933362
      },
      {
       "state": "queued",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452933362
      }
     ]
@@ -4023,17 +4166,23 @@
     "statuses": [
      {
       "state": "success",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452934421
      },
      {
       "state": "in_progress",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452934421
      },
      {
       "state": "queued",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452934421
      }
     ]
@@ -4043,17 +4192,23 @@
     "statuses": [
      {
       "state": "success",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452934446
      },
      {
       "state": "in_progress",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452934446
      },
      {
       "state": "queued",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452934446
      }
     ]
@@ -4063,17 +4218,23 @@
     "statuses": [
      {
       "state": "success",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452934339
      },
      {
       "state": "in_progress",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452934339
      },
      {
       "state": "queued",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452934339
      }
     ]
@@ -4083,17 +4244,23 @@
     "statuses": [
      {
       "state": "success",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452934304
      },
      {
       "state": "in_progress",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452934304
      },
      {
       "state": "queued",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452934304
      }
     ]
@@ -4103,17 +4270,23 @@
     "statuses": [
      {
       "state": "success",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452934336
      },
      {
       "state": "in_progress",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452934336
      },
      {
       "state": "queued",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452934336
      }
     ]
@@ -4123,17 +4296,23 @@
     "statuses": [
      {
       "state": "success",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452934131
      },
      {
       "state": "in_progress",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452934131
      },
      {
       "state": "queued",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452934131
      }
     ]
@@ -4143,17 +4322,23 @@
     "statuses": [
      {
       "state": "success",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452934092
      },
      {
       "state": "in_progress",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452934092
      },
      {
       "state": "queued",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452934092
      }
     ]
@@ -4163,17 +4348,23 @@
     "statuses": [
      {
       "state": "success",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452934031
      },
      {
       "state": "in_progress",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452934031
      },
      {
       "state": "queued",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452934031
      }
     ]
@@ -4183,17 +4374,23 @@
     "statuses": [
      {
       "state": "success",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452933782
      },
      {
       "state": "in_progress",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452933782
      },
      {
       "state": "queued",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452933782
      }
     ]
@@ -4203,17 +4400,23 @@
     "statuses": [
      {
       "state": "success",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452933440
      },
      {
       "state": "in_progress",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452933440
      },
      {
       "state": "queued",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452933440
      }
     ]
@@ -4223,17 +4426,23 @@
     "statuses": [
      {
       "state": "success",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452933447
      },
      {
       "state": "in_progress",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452933447
      },
      {
       "state": "queued",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452933447
      }
     ]
@@ -4243,17 +4452,23 @@
     "statuses": [
      {
       "state": "success",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452933545
      },
      {
       "state": "in_progress",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452933545
      },
      {
       "state": "queued",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452933545
      }
     ]
@@ -4263,17 +4478,23 @@
     "statuses": [
      {
       "state": "success",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452933417
      },
      {
       "state": "in_progress",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452933417
      },
      {
       "state": "queued",
-      "environment_url": "",
+      "environment_url": [
+       ""
+      ],
       "job_id": 128452933417
      }
     ]

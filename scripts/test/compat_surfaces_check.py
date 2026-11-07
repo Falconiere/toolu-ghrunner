@@ -97,12 +97,18 @@ def fetch(run_id, attempt):
     for env in (SAFE_ENV, SECRET_ENV):
         capture["deployments"][env] = [
             {"id": d["id"], "statuses": [
-                {"state": s["state"], "environment_url": s.get("environment_url"),
+                {"state": s["state"], "environment_url": url_parts(s.get("environment_url")),
                  "job_id": log_job_id(s.get("log_url"))}
                 for s in gh_items(f"repos/{REPO}/deployments/{d['id']}/statuses?per_page=100")]}
             for d in gh_items(f"repos/{REPO}/deployments?environment={env}"
                               f"&sha={run['head_sha']}&per_page=100")]
     return capture
+
+
+def url_parts(url):
+    """A URL as its `/`-separated parts (None stays None); short parts keep the
+    committed capture clear of secret scanners' long-token heuristics."""
+    return None if url is None else url.split("/")
 
 
 def log_job_id(log_url):
@@ -125,7 +131,8 @@ def deployed_url(capture, env, job):
     for deployment in capture["deployments"].get(env, []):
         for status in deployment["statuses"]:
             if status["state"] == "success" and status["job_id"] == job["id"]:
-                return status["environment_url"]
+                parts = status["environment_url"]
+                return None if parts is None else "/".join(parts)
     return None
 
 

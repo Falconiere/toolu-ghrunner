@@ -84,11 +84,11 @@ class MismatchTest(unittest.TestCase):
         self.assertFails(f"{TOOLU}: secrets: warnings")
 
     def test_secret_url_reaching_the_deployment_fails(self):
-        status(self.capture, check.SECRET_ENV, TOOLU, "secrets")["environment_url"] = "https://example.com/x"
+        status(self.capture, check.SECRET_ENV, TOOLU, "secrets")["environment_url"] = ["https:", "", "example.com", "x"]
         self.assertFails(f"{TOOLU}: secrets: deployment environment_url")
 
     def test_wrong_safe_url_fails(self):
-        status(self.capture, check.SAFE_ENV, TOOLU, "deploy")["environment_url"] = ""
+        status(self.capture, check.SAFE_ENV, TOOLU, "deploy")["environment_url"] = [""]
         self.assertFails(f"{TOOLU}: deploy: deployment environment_url")
 
     def test_failed_oidc_step_fails(self):
@@ -114,7 +114,7 @@ class MismatchTest(unittest.TestCase):
 
     def test_leaked_jwt_fails_without_quoting_it(self):
         jwt = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJyZXBvIn0.x"
-        status(self.capture, check.SAFE_ENV, TOOLU, "deploy")["environment_url"] = jwt
+        status(self.capture, check.SAFE_ENV, TOOLU, "deploy")["environment_url"] = [jwt]
         found = failures(self.capture)
         self.assertTrue(any("leak in capture" in f for f in found), found)
         self.assertFalse(any("eyJ" in f for f in found), found)
