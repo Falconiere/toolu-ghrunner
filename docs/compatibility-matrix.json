@@ -5415,12 +5415,12 @@
       "command": "cargo test -p execution --test integration -- action_downloads_test:: action_infrastructure_test::; cargo test -p execution --lib actions::; cargo test -p toolu-runner --test integration -- actions_resolver_test::",
       "lanes": {
         "hermetic": {
-          "status": "passed",
-          "evidence": "gate"
+          "status": "unverified",
+          "reason": "the Launch success path (server-resolved URL + scoped token, extracted content) is now replayed, but no test uses an actually-private or internal action, and none asserts that a local ./action step performs no remote download"
         },
         "macos": {
-          "status": "passed",
-          "evidence": "gate"
+          "status": "unverified",
+          "reason": "same as the hermetic lane"
         },
         "docker": {
           "status": "not-applicable",

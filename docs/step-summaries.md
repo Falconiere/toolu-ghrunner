@@ -27,12 +27,17 @@ URLs are excluded from summary diagnostics; the journal records only IDs and
 masked byte sizes. A missing Results Service endpoint skips uploads.
 
 The queue holds sixteen documents; a seventeenth blocks its producer rather
-than being dropped, and the pre-conclusion drain still uploads every one. A
-stalled Results Service therefore delays job completion by one `wire` request
-deadline per queued document: 30 s each, so about 8.5 minutes for seventeen
-documents stalling at the signed-URL or metadata RPC, and up to roughly 54
-minutes if the stall is in the blob PUT, which retries four times with up to
-12 s of backoff. Nothing in that window changes the job's conclusion.
+than being dropped, and the pre-conclusion drain still uploads every one. Backpressure
+and the full drain are observed by
+`listener::step_summary::step_summary_queue_drains_more_documents_than_its_slots`.
+
+The ceiling a stalled Results Service puts on job completion is **derived from
+the production constants, not waited out in a test**: uploads are serial and
+each `wire` request carries a 30 s deadline, so seventeen documents stalling at
+the signed-URL or metadata RPC hold completion for about 8.5 minutes, and up to
+roughly 54 minutes if the stall is in the blob PUT, which retries four times
+with up to 12 s of backoff. Nothing in that window changes the job's
+conclusion.
 
 ## Verification and applicability
 
