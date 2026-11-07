@@ -12,7 +12,7 @@ fetches them for every lane with the run's own token, keeps a sanitized capture
 - `secrets`: the upstream skip-output and skip-environment-URL warnings, and an
   empty `environment_url` on its deployment status.
 - `deploy`: the safe URL on its deployment status (matched by the status
-  `log_url`, which names the job).
+  `log_url`, which names the job; the capture keeps that job id).
 - job conclusions for the in-job checks: OIDC in `services`, outputs and
   artifact digests in `consumer`, the job-container upload in `container`
   (toolu and official Linux lanes; the accelerated lane's runner itself runs in
@@ -75,20 +75,21 @@ def fetch(run_id, attempt):
     jobs = [json.loads(line) for line in gh_lines(
         f"repos/{REPO}/actions/runs/{run_id}/attempts/{attempt}/jobs?per_page=100",
         "--jq", ".jobs[] | tojson")]
+    # IDs, not URLs: the capture is committed, and long URLs read as secrets to scanners.
     capture = {
         "run": {"id": run["id"], "attempt": attempt, "head_sha": run["head_sha"],
-                "head_branch": run["head_branch"], "url": run["html_url"], "path": run["path"]},
+                "head_branch": run["head_branch"], "path": run["path"]},
         "jobs": [{"id": j["id"], "name": j["name"], "conclusion": j["conclusion"],
-                  "html_url": j["html_url"], "check_run_url": j["check_run_url"],
-                  "runner_name": j.get("runner_name"),
+                  "check_run_id": int(j["check_run_url"].rsplit("/", 1)[1]),
                   "steps": [{"name": s["name"], "conclusion": s["conclusion"]}
                             for s in j.get("steps", [])]} for j in jobs],
         "annotations": {}, "deployments": {},
     }
+    check_runs = {j["id"]: j["check_run_url"] for j in jobs}
     for job in capture["jobs"]:
         parsed = JOB_NAME.match(job["name"])
         if parsed and parsed["job"] in ("annotations", "secrets"):
-            items = gh_items(job["check_run_url"].removeprefix(API) + "/annotations?per_page=100")
+            items = gh_items(check_runs[job["id"]].removeprefix(API) + "/annotations?per_page=100")
             capture["annotations"][str(job["id"])] = [
                 {k: a.get(k) for k in ("path", "start_line", "end_line", "start_column",
                                        "end_column", "annotation_level", "title", "message")}
@@ -96,11 +97,18 @@ def fetch(run_id, attempt):
     for env in (SAFE_ENV, SECRET_ENV):
         capture["deployments"][env] = [
             {"id": d["id"], "statuses": [
-                {k: s.get(k) for k in ("state", "environment_url", "log_url")}
+                {"state": s["state"], "environment_url": s.get("environment_url"),
+                 "job_id": log_job_id(s.get("log_url"))}
                 for s in gh_items(f"repos/{REPO}/deployments/{d['id']}/statuses?per_page=100")]}
             for d in gh_items(f"repos/{REPO}/deployments?environment={env}"
                               f"&sha={run['head_sha']}&per_page=100")]
     return capture
+
+
+def log_job_id(log_url):
+    """The job id a deployment status's `log_url` (`…/job/<id>`) names; None otherwise."""
+    tail = (log_url or "").rsplit("/job/", 1)
+    return int(tail[1]) if len(tail) == 2 and tail[1].isdigit() else None
 
 
 def leaks(capture):
@@ -116,7 +124,7 @@ def deployed_url(capture, env, job):
     """environment_url of the success status that names `job`; None when absent."""
     for deployment in capture["deployments"].get(env, []):
         for status in deployment["statuses"]:
-            if status["state"] == "success" and (status["log_url"] or "").endswith(f"/job/{job['id']}"):
+            if status["state"] == "success" and status["job_id"] == job["id"]:
                 return status["environment_url"]
     return None
 
@@ -210,7 +218,11 @@ def evaluate(capture):
     guard = next((j["conclusion"] for j in capture["jobs"] if j["name"] == "guard"), None)
     report = {"run": capture["run"], "guard": guard,
               "scopes": {s: evaluate_scope(s, by_scope.get(s, {}), capture) for s in expected_scopes()}}
-    failures = [f"leak in capture: {m[:12]}…" for m in leaks(capture)]
+    leaked = len(leaks(capture))
+    if leaked:
+        # Problems quote captured values, so a leak reports its count and nothing else.
+        return report, [f"leak in capture: {leaked} token- or signed-URL-shaped value(s)"]
+    failures = []
     if guard != "success":
         failures.append(f"guard concluded {guard}")
     for scope, observed in report["scopes"].items():
@@ -245,6 +257,10 @@ def main():
             Path(args.out).write_text(json.dumps(report, indent=1) + "\n")
     else:
         parser.error("give --run or --verify")
+    if leaks(capture):
+        # Scope diagnostics quote captured values; print nothing that could hold the leak.
+        print(f"FAIL: {failures[0]}; nothing written or printed", file=sys.stderr)
+        return 1
     for failure in failures:
         print(f"FAIL: {failure}", file=sys.stderr)
     for scope, observed in report["scopes"].items():

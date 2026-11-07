@@ -31,9 +31,9 @@ def annotations(capture, scope, name):
 
 
 def status(capture, env, scope, name):
-    suffix = f"/job/{job(capture, scope, name)['id']}"
+    job_id = job(capture, scope, name)["id"]
     return next(s for d in capture["deployments"][env] for s in d["statuses"]
-                if s["state"] == "success" and s["log_url"].endswith(suffix))
+                if s["state"] == "success" and s["job_id"] == job_id)
 
 
 class RecordedCaptureTest(unittest.TestCase):
@@ -112,9 +112,20 @@ class MismatchTest(unittest.TestCase):
         self.capture["jobs"].remove(gone)
         self.assertFails("probe-Linux-ARM64-toolu: container: job missing")
 
-    def test_leaked_jwt_fails(self):
-        job(self.capture, TOOLU, "deploy")["runner_name"] = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJyZXBvIn0.x"
+    def test_leaked_jwt_fails_without_quoting_it(self):
+        jwt = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJyZXBvIn0.x"
+        status(self.capture, check.SAFE_ENV, TOOLU, "deploy")["environment_url"] = jwt
+        found = failures(self.capture)
+        self.assertTrue(any("leak in capture" in f for f in found), found)
+        self.assertFalse(any("eyJ" in f for f in found), found)
+
+    def test_signed_url_fails(self):
+        annotations(self.capture, TOOLU, "secrets")[0]["message"] = "https://blob.example/x?sv=1&sig=abc"
         self.assertFails("leak in capture")
+
+    def test_deployment_status_of_another_job_does_not_count(self):
+        status(self.capture, check.SAFE_ENV, TOOLU, "deploy")["job_id"] = 1
+        self.assertFails(f"{TOOLU}: deploy: deployment environment_url None")
 
     def test_failed_guard_fails(self):
         next(j for j in self.capture["jobs"] if j["name"] == "guard")["conclusion"] = "failure"
