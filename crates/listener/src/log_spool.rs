@@ -1,16 +1,17 @@
 //! Private disk spool for masked step and combined job logs.
 
 use std::fs::{File, OpenOptions};
-use std::io::{self, BufReader, BufWriter, Write};
+use std::io::{self, BufReader};
 use std::path::{Path, PathBuf};
 
 use flate2::Compression;
 use flate2::write::GzEncoder;
+use tokio::io::{AsyncWriteExt, BufWriter};
 
 /// A private, line-ordered spool. Callers mask each line before appending it.
 pub(crate) struct LogSpool {
   path: PathBuf,
-  writer: Option<BufWriter<File>>,
+  writer: Option<BufWriter<tokio::fs::File>>,
   line_count: u64,
 }
 
@@ -26,12 +27,13 @@ impl LogSpool {
   }
 
   /// Start one step log in the same private directory.
-  pub(crate) fn for_step(dir: &Path) -> io::Result<Self> {
+  pub(crate) fn for_step(data_dir: &Path) -> io::Result<Self> {
+    let dir = private_logs_dir(data_dir)?;
     Self::new(dir.join(format!("step-{}.log", uuid::Uuid::new_v4())))
   }
 
   fn new(path: PathBuf) -> io::Result<Self> {
-    let writer = BufWriter::new(create_private(&path)?);
+    let writer = BufWriter::new(tokio::fs::File::from_std(create_private(&path)?));
     Ok(Self {
       path,
       writer: Some(writer),
@@ -39,27 +41,22 @@ impl LogSpool {
     })
   }
 
-  /// Return the still-open spool path.
-  pub(crate) fn path(&self) -> &Path {
-    &self.path
-  }
-
   /// Append one already-masked line, preserving its bytes and position.
-  pub(crate) fn append(&mut self, line: &str) -> io::Result<()> {
+  pub(crate) async fn append(&mut self, line: &str) -> io::Result<()> {
     let writer = self
       .writer
       .as_mut()
       .ok_or_else(|| io::Error::other("log spool closed"))?;
-    writer.write_all(line.as_bytes())?;
-    writer.write_all(b"\n")?;
+    writer.write_all(line.as_bytes()).await?;
+    writer.write_all(b"\n").await?;
     self.line_count += 1;
     Ok(())
   }
 
   /// Flush and hand the file to the upload task.
-  pub(crate) fn finish(mut self) -> io::Result<(PathBuf, u64)> {
+  pub(crate) async fn finish(mut self) -> io::Result<(PathBuf, u64)> {
     if let Some(mut writer) = self.writer.take() {
-      writer.flush()?;
+      writer.flush().await?;
     }
     let path = std::mem::take(&mut self.path);
     Ok((path, self.line_count))
@@ -69,7 +66,10 @@ impl LogSpool {
 impl Drop for LogSpool {
   fn drop(&mut self) {
     if !self.path.as_os_str().is_empty() {
-      let _ = std::fs::remove_file(&self.path);
+      self.writer.take();
+      if let Err(error) = remove_if_present(&self.path) {
+        tracing::warn!(error = %error, path = %self.path.display(), "could not remove log spool");
+      }
     }
   }
 }

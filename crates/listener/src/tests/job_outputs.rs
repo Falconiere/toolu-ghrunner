@@ -20,6 +20,7 @@ async fn forwarder_keeps_real_job_outputs_for_completion() -> TestResult {
   let engine_rx = runner.execute_job(message, CancellationToken::new());
   let cfg = FwdConfig {
     setup_cancel: CancellationToken::new(),
+    data_dir: dir.path().join("data"),
     setup_id: None,
     results_url: None,
     results_client: reqwest::Client::new(),

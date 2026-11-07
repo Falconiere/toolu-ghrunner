@@ -15,6 +15,7 @@
 | `early_ack.rs` | Broker acknowledgment ordering (its job fixture is shared with `drain.rs`). |
 | `execution_loop.rs` | Forwarder masking into the combined disk spool, step-upload channel and live feed. |
 | `execution_large_logs.rs` | Real child emits over 200 MiB, including a 10 MiB line: bounded RSS growth, exact masked gzip uploads, private/stale spool handling and cancellation cleanup. |
+| `execution_large_logs_failure.rs` | Combined-spool creation failure leaves per-step uploads working through the production forwarder. |
 | `finalize_split.rs` | Completion and teardown ordering. |
 | `helpers.rs` | Listener helper behavior. |
 | `job_outputs.rs` | The event forwarder keeps job outputs from a real acquired engine run for completion. |
@@ -25,9 +26,10 @@
 | `step_report_queue_unit.rs` | Report queue deadline, batching and Docker setup terminal conclusions. |
 | `step_context_identity.rs` | Report serialization of a skipped step with the wire ID and conclusion from the sanitized acquired job. |
 | `support.rs` | Recording endpoint and shared test support. |
+| `watchdog_missing_job.rs` | Immediate missing-job cancellation reports job-lock loss without claiming a timed outage. |
 | `watchdog_override.rs` | Pure conclusion fold: untripped conclusions stay unchanged; tripped success stays successful; tripped non-success becomes failure with the exact annotation. |
 | `watchdog_retry.rs` | Watchdog retry behavior. |
-| `watchdog_trip.rs` | Renewal 404 cancels immediately; persistent 401, malformed success and transient errors trip the watchdog; successful renewal resets its window and completion survives reconnect. |
+| `watchdog_trip.rs` | Persistent 401, malformed success and transient errors trip the watchdog; successful renewal resets its window and completion survives reconnect. |
 | `runner_update_policy.rs` | Idle/busy refresh warning, safe opaque bodies, cancellation and cursor continuity. |
 | `session_conflict.rs` | Live-captured 409 replayed through `create_session`: bounded retry, recovery, exact attempt count, unrelated failures and cancellation. |
 | `setup_step.rs` | Captured permissions, identity and secret-source diagnostics. |

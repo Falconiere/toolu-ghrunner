@@ -7,10 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-- *(listener)* cancel immediately when GitHub no longer recognizes a job, and count all other renewal failures toward the five-minute watchdog (#240).
-- *(listener)* spool masked job and step logs to private files and stream compressed uploads, keeping memory bounded as job output grows (#240).
-
 ## [0.15.0] - 2026-11-05
 
 ### Added

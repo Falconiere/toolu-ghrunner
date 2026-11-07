@@ -37,7 +37,7 @@ They are an index, not a fixed test count or a claim that every live lane passed
 | 9 | Cache | `crates/toolu-runner/tests/cache_v1_test.rs`, `cache_twirp_test.rs`, `cache_blob_test.rs`, `cache_accelerated_test.rs`, `cache_proxy_test.rs`; live tests remain separate | default + live |
 | 10 | Reusable workflows | GitHub expands workflow calls before sending the job; incoming-context and #103 evidence cover the acquired result | server-side + recorded evidence |
 | 11 | Composites | `crates/toolu-runner/tests/composite_action_test.rs` and the execution crate's composite replay tests; #102 below | default |
-| 12 | Reconnect and outages | `crates/toolu-runner/tests/net_test.rs`, `run_service_classify_test.rs`; `crates/wire/tests/renew_job_wire_test.rs`; `crates/listener/src/tests/watchdog_trip.rs`, `watchdog_retry.rs`, `watchdog_override.rs`. Live outage limits: [known-bugs.md](known-bugs.md). | default; live outage separate |
+| 12 | Reconnect and outages | `crates/toolu-runner/tests/net_test.rs`, `run_service_classify_test.rs`; `crates/wire/tests/renew_job_wire_test.rs`; `crates/listener/src/tests/watchdog_trip.rs`, `watchdog_retry.rs`, `watchdog_override.rs`, `watchdog_missing_job.rs`. Live outage limits: [known-bugs.md](known-bugs.md). | default; live outage separate |
 | 13 | Registration locks | `crates/toolu-runner/tests/failure_modes_test.rs`, `crates/config/tests/lockfile_multi_test.rs`; `live_e2e.rs::concurrent_single_job` | default + live |
 | 14 | GitHub cancellation | `crates/toolu-runner/tests/live_e2e.rs::cancel_by_github`; conditional cleanup replay is mapped under #100 below | default + live |
 | 15 | GHES V1 | `crates/toolu-runner/tests/ghes_v1_test.rs` exercises captured-shape discovery/timeline responses; `.github/workflows/live-ghes.yml` is the separate credentialed lane | default + live-ghes |
@@ -60,7 +60,9 @@ intervals; production remains 60-second renewal, a strict 300-second threshold
 and a separate 600-second completion retry budget.
 `watchdog_override.rs` covers the pure conclusion fold: an untripped flag keeps
 all conclusions; a tripped successful job stays successful without an annotation;
-a tripped non-success becomes failure with the exact lost-connection annotation.
+a timed-out non-success becomes failure with the exact lost-connection annotation.
+The missing-job path uses a separate job-lock-loss annotation without claiming
+that five minutes elapsed; `watchdog_missing_job.rs` covers that distinction.
 
 `crates/listener/src/tests/execution_large_logs.rs` sends over 200 MiB from a
 real child, including a 10 MiB line, with Results Service enabled against a
@@ -71,7 +73,9 @@ cancellation uploads captured output and removes owned spools. These are local
 resource and transport checks, not a live GitHub UI or official-runner comparison.
 `crates/listener/src/log_uploader/tests/upload.rs` also checks gzip headers,
 line-count metadata, byte-identical PUT retries and cleanup after failure or
-upload-task abort.
+upload-task abort. `execution_large_logs_failure.rs` obstructs only the combined
+spool path with a directory, then verifies that a real child's per-step gzip
+upload still contains its output and owned step spools are removed.
 
 Run `cargo nextest run -p listener -E 'test(watchdog) | test(execution_large_logs) | test(log_uploader)'`
 and `cargo test -p wire --test integration -- renew_job_wire_test::`.

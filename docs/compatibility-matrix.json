@@ -20672,7 +20672,7 @@
       "issue": 103,
       "criterion": "Regression: job lock renewal and mid-job outage handling",
       "input": [],
-      "expected": "Renewal 404 cancels immediately; every other renewal failure, including persistent 401 and malformed success, feeds the strict 300 s watchdog and reports failure. A successful renewal resets the failure window; completion survives reconnect.",
+      "expected": "Renewal 404 cancels immediately with a job-lock-loss annotation; every other renewal failure, including persistent 401 and malformed success, feeds the strict 300 s watchdog and reports failure with a timed lost-connection annotation. A successful renewal resets the failure window; completion survives reconnect.",
       "production_path": "listener::helpers::spawn_renewal; listener::outage::OutageWatchdog",
       "tests": [
         [
@@ -20680,7 +20680,7 @@
           "ac2_outage_trips_kills_job_reports_failure"
         ],
         [
-          "crates/listener/src/tests/watchdog_trip.rs",
+          "crates/listener/src/tests/watchdog_missing_job.rs",
           "missing_job_cancels_immediately"
         ],
         [

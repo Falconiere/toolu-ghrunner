@@ -509,12 +509,14 @@ outside a `tests/` tree.
   `execute_with_renewal`: 60s renewal task (also
   hosts the 300s-latch `OutageWatchdog`: every renewal error feeds it,
   success resets it, and a missing job (404) cancels immediately; trip cancels token and
-  `outage_override` flips non-`Success` to `Failure` + `LOST_CONNECTION_MESSAGE`),
+  `outage_override` flips non-`Success` to `Failure`, with
+  `JOB_NOT_FOUND_MESSAGE` for 404 or `LOST_CONNECTION_MESSAGE` for a timed outage),
   `tokio::join!` live-log + `setup_step::report_setup_step` ("Set up job" =
   step 1, `change_order` 0 vs queue-seeded 1) before engine start; forwarder masks each `Log` once
-  across upload/live-log/combined sinks; `log_spool` writes private
-  `data_dir/_logs` files (0700 dir / 0600 files on Unix), gzip-compresses on
-  disk and streams Results Service uploads; owned spools are removed on
+  across upload/live-log/combined sinks; with Results Service enabled,
+  `log_spool` asynchronously writes/flushes private `data_dir/_logs` files
+  (0700 dir / 0600 files on Unix), gzip-compresses on disk and streams uploads;
+  step spools start independently if the combined spool fails; owned spools are removed on
   completion/error/abort, and same-job stale combined files are replaced;
   engine event queue 64, step-log queue 4; journal re-masks end-to-end
   (`secret_sink_coverage_test`); `StepReportQueue` batches
@@ -522,7 +524,7 @@ outside a `tests/` tree.
   `drain()` pre-conclusion;
   finalize-split (per-step drain before conclusion, combined upload overlaps
   `complete_job`; handles joined in `cleanup_session` on Ok+Err). Integration
-  tests in `src/tests/{watchdog_retry,watchdog_trip,watchdog_override,execution_large_logs}.rs`. `capture::write_acquired`
+  tests in `src/tests/{watchdog_retry,watchdog_trip,watchdog_override,watchdog_missing_job,execution_large_logs,execution_large_logs_failure}.rs`. `capture::write_acquired`
   (#103: 0600/0700 under `_diag/captures/`, WARN-never-fail, compiled always
   but called only under `capture` cargo feature; sanitize with
   `scripts/test/sanitize_capture.py`).

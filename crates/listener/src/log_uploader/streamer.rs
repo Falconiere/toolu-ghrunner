@@ -30,8 +30,8 @@ pub struct StreamerConfig {
   pub step_backend_id: String,
   /// The step's display name.
   pub step_name: String,
-  /// Private directory containing this job's log spools.
-  pub spool_dir: PathBuf,
+  /// Job data directory; the private step spool lives under `_logs`.
+  pub data_dir: PathBuf,
 }
 
 /// Spawn a `StepLogStreamer` actor. Returns the sender for log lines and a
@@ -68,17 +68,17 @@ impl StepLogStreamer {
   async fn run_loop(&mut self) -> std::io::Result<()> {
     while let Some(line) = self.lines_rx.recv().await {
       if self.spool.is_none() {
-        self.spool = Some(LogSpool::for_step(&self.cfg.spool_dir)?);
+        self.spool = Some(LogSpool::for_step(&self.cfg.data_dir)?);
       }
       if let Some(spool) = self.spool.as_mut() {
-        spool.append(&line)?;
+        spool.append(&line).await?;
       }
     }
     Ok(())
   }
 
   async fn finalize(mut self) -> Option<(String, u64)> {
-    let (path, count) = match self.spool.take()?.finish() {
+    let (path, count) = match self.spool.take()?.finish().await {
       Ok(finished) => finished,
       Err(error) => {
         tracing::warn!(error = %error, "step log spool flush failed");

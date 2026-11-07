@@ -22,6 +22,7 @@ fn test_fwd_config(masker: Arc<Mutex<SecretMasker>>) -> FwdConfig {
     // `setup_cancel` and `setup_id` are unused by the paths under test; setup
     // routing is covered in `tests/setup_forwarding.rs`.
     setup_cancel: CancellationToken::new(),
+    data_dir: std::env::temp_dir(),
     setup_id: None,
     results_url: None,
     results_client: reqwest::Client::new(),
@@ -40,9 +41,9 @@ fn state_with_log(cfg: &FwdConfig) -> (tempfile::TempDir, ForwarderState) {
   (temp, ForwarderState::new(cfg, Some(spool)))
 }
 
-fn finished_lines(state: &mut ForwarderState) -> Vec<String> {
+async fn finished_lines(state: &mut ForwarderState) -> Vec<String> {
   let spool = state.job_log.take().expect("job spool");
-  let (path, _) = spool.finish().expect("flush job spool");
+  let (path, _) = spool.finish().await.expect("flush job spool");
   std::fs::read_to_string(path)
     .expect("read job spool")
     .lines()
@@ -72,7 +73,7 @@ async fn forward_log_line_masks_both_the_job_log_and_the_step_upload_channel() {
   let raw_line = format!("leaking {SECRET} now");
   forward_log_line(&mut state, &cfg, step_id, &raw_line).await;
 
-  let job_log_lines = finished_lines(&mut state);
+  let job_log_lines = finished_lines(&mut state).await;
   let job_log_line = job_log_lines
     .last()
     .expect("forward_log_line should have pushed exactly one line");
@@ -116,7 +117,7 @@ async fn forward_log_line_reuses_one_mask_pass_across_all_three_sinks() {
   let raw_line = format!("triple leak {SECRET} here");
   forward_log_line(&mut state, &cfg, step_id, &raw_line).await;
 
-  let job_log_lines = finished_lines(&mut state);
+  let job_log_lines = finished_lines(&mut state).await;
   let job_log_line = job_log_lines
     .last()
     .expect("forward_log_line should have pushed exactly one line");
@@ -165,7 +166,7 @@ async fn a_dispatcher_echoed_command_line_is_masked_like_any_other_log() {
   };
   handle_event_arm(&mut state, &cfg, &event).await;
 
-  let job_log_lines = finished_lines(&mut state);
+  let job_log_lines = finished_lines(&mut state).await;
   let job_log_line = job_log_lines
     .last()
     .expect("the Log arm should have pushed exactly one line");

@@ -15,7 +15,7 @@ Per-step result aggregation (status/conclusion, not logs) is
 
 | File | Primary item | Purpose |
 | --- | --- | --- |
-| `streamer.rs` | `StreamerConfig` / `spawn` | Spawns a per-step tokio actor with a four-line channel, writes already-masked lines to a private disk spool and uploads on finalize. |
+| `streamer.rs` | `StreamerConfig` / `spawn` | Spawns a per-step tokio actor with a four-line channel, asynchronously writes already-masked lines to its own private disk spool and uploads on finalize; creation is independent of the combined job spool. |
 | `upload.rs` | `upload_step_logs` / `upload_job_logs` | Gzip-compresses spools on disk, streams the file PUT with one retry, finalizes metadata and removes plain/compressed files on success, failure or task abort. |
 
 When you add a file here, add its row above so the index stays current. No

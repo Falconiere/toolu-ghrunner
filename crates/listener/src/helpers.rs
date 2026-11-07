@@ -1,7 +1,7 @@
 //! Shared helpers for the listener lifecycle.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::{Duration, Instant};
 
 use tokio::sync::mpsc;
@@ -9,6 +9,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::SessionCtx;
 use crate::outage::OutageWatchdog;
+use crate::outage_override::RenewalLoss;
 use shared::{AgentJobRequestMessage, Conclusion, ListenerEvent};
 use wire::net::delete_session;
 use wire::reporting::ReportConclusion;
@@ -83,11 +84,9 @@ pub(super) struct RenewalParams {
   /// cancelled on an outage trip so the engine tears the running step
   /// down via `step_timeout::wait_bounded`.
   pub(super) job_cancel: CancellationToken,
-  /// Write-once trip flag: set exactly once by the watchdog latch and
-  /// never cleared afterward — even a later successful renewal must not
-  /// un-trip it, since the job was already cancelled and the "lost
-  /// connection" annotation (applied downstream) must survive.
-  pub(super) outage_tripped: Arc<AtomicBool>,
+  /// Write-once reason for a lost job lock; the final conclusion uses it
+  /// after the renewal task exits.
+  pub(super) renewal_loss: Arc<AtomicU8>,
   /// `OutageWatchdog` threshold: prod `outage::OUTAGE_THRESHOLD` (5 min),
   /// tests inject milliseconds.
   pub(super) outage_threshold: Duration,
@@ -120,7 +119,7 @@ pub(super) fn spawn_renewal(
               watchdog.record_ok(Instant::now());
             },
             Ok(None) => {
-              params.outage_tripped.store(true, Ordering::SeqCst);
+              params.renewal_loss.store(RenewalLoss::JobNotFound as u8, Ordering::SeqCst);
               params.job_cancel.cancel();
               tracing::error!("GitHub no longer recognizes this job — job cancelled");
               break;
@@ -128,7 +127,7 @@ pub(super) fn spawn_renewal(
             Err(e) => {
               tracing::warn!(error = %e, "lock renewal failed");
               if watchdog.record_err(Instant::now()) {
-                params.outage_tripped.store(true, Ordering::SeqCst);
+                params.renewal_loss.store(RenewalLoss::TimedOut as u8, Ordering::SeqCst);
                 params.job_cancel.cancel();
                 let outage_secs = params.outage_threshold.as_secs();
                 tracing::error!(

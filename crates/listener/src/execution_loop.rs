@@ -1,5 +1,6 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tokio::sync::mpsc;
@@ -15,6 +16,7 @@ use logs::{forward_log_line, spawn_job_log_upload, spawn_step_uploader};
 use super::SessionCtx;
 use super::helpers::{RenewalParams, resolve_backend_ids, spawn_renewal};
 use super::log_spool::LogSpool;
+use super::outage_override::RenewalLoss;
 use super::setup_step::report_setup_step;
 use super::step_report_queue::{
   self, DRAIN_DEADLINE, StepMetaMap, StepReportQueue, StepReportQueueConfig,
@@ -76,14 +78,14 @@ pub(super) async fn execute_with_renewal(
     rs_token, plan_id, ..
   } = *route;
   let renewal_cancel = CancellationToken::new();
-  let outage_tripped = Arc::new(AtomicBool::new(false));
+  let renewal_loss = Arc::new(AtomicU8::new(RenewalLoss::None as u8));
   let renewal_handle = start_renewal(
     ctx,
     route,
     job_msg,
     &renewal_cancel,
     job_cancel,
-    Arc::clone(&outage_tripped),
+    Arc::clone(&renewal_loss),
   );
 
   // The helper boxes both concurrent legs to bound this timeout-wrapped future.
@@ -101,7 +103,7 @@ pub(super) async fn execute_with_renewal(
   build_job_execution(
     outcome,
     &collector,
-    outage_tripped.load(Ordering::SeqCst),
+    RenewalLoss::from_raw(renewal_loss.load(Ordering::SeqCst)),
     live_log_handle,
   )
   .await
@@ -110,7 +112,7 @@ pub(super) async fn execute_with_renewal(
 async fn build_job_execution(
   outcome: ForwarderOutcome,
   collector: &StepCollector,
-  outage_tripped: bool,
+  renewal_loss: RenewalLoss,
   live_log_handle: Option<tokio::task::JoinHandle<()>>,
 ) -> JobExecution {
   let ForwarderOutcome {
@@ -120,7 +122,7 @@ async fn build_job_execution(
     job_log_upload,
   } = outcome;
   let (conclusion, annotations) =
-    super::outage_override::apply_outage_override(conclusion, outage_tripped);
+    super::outage_override::apply_outage_override(conclusion, renewal_loss);
   let steps = collector.collected_results().await;
   JobExecution {
     conclusion,
@@ -217,6 +219,7 @@ fn build_fwd_config(
   let (run_backend_id, job_backend_id) = resolve_backend_ids(job_msg, plan_id);
   FwdConfig {
     setup_cancel: CancellationToken::new(),
+    data_dir: ctx.config.data_dir.clone(),
     results_url,
     results_client: ctx.client.clone(),
     results_token: rs_token.to_owned(),
@@ -257,12 +260,16 @@ async fn run_forwarded_job(
   job_cancel: &CancellationToken,
 ) -> ForwarderOutcome {
   cfg.setup_cancel = job_cancel.clone();
-  let job_log = match LogSpool::for_job(&ctx.config.data_dir, &job_msg.job_id) {
-    Ok(spool) => Some(spool),
-    Err(error) => {
-      tracing::warn!(error = %error, "job log spool unavailable");
-      None
-    },
+  let job_log = if cfg.results_url.is_some() {
+    match LogSpool::for_job(&ctx.config.data_dir, &job_msg.job_id) {
+      Ok(spool) => Some(spool),
+      Err(error) => {
+        tracing::warn!(error = %error, "job log spool unavailable");
+        None
+      },
+    }
+  } else {
+    None
   };
   let runner = Runner::new(ctx.config.clone(), Arc::clone(&ctx.masker));
   let engine_rx = runner
@@ -305,7 +312,7 @@ fn start_renewal(
   job_msg: &AgentJobRequestMessage,
   cancel: &CancellationToken,
   job_cancel: &CancellationToken,
-  outage_tripped: Arc<AtomicBool>,
+  renewal_loss: Arc<AtomicU8>,
 ) -> tokio::task::JoinHandle<()> {
   let params = RenewalParams {
     client: ctx.client.clone(),
@@ -315,7 +322,7 @@ fn start_renewal(
     job_id: job_msg.job_id.clone(),
     tx: ctx.tx.clone(),
     job_cancel: job_cancel.clone(),
-    outage_tripped,
+    renewal_loss,
     outage_threshold: ctx.watchdog.outage_threshold,
     renew_interval: ctx.watchdog.renew_interval,
   };
@@ -327,6 +334,7 @@ struct FwdConfig {
   /// the per-job token before the forwarder starts, so setup concludes as
   /// cancelled when the job was cancelled before its first step started.
   setup_cancel: CancellationToken,
+  data_dir: PathBuf,
   /// `None` from `build_fwd_config`; the caller sets it to the reported
   /// "Set up job" step id once setup has been reported.
   setup_id: Option<String>,
@@ -502,7 +510,7 @@ async fn finish_forwarder(
   // `report_completion` ships, so it MUST finish first; the combined
   // job-log upload feeds nothing in that payload, so it only gets spawned.
   drain_step_uploads(&mut state, collector).await;
-  let job_log_upload = spawn_job_log_upload(&mut state, cfg);
+  let job_log_upload = spawn_job_log_upload(&mut state, cfg).await;
   if let Some(queue) = state.summary_queue.take() {
     queue.drain().await;
   }

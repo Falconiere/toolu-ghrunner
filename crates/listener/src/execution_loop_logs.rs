@@ -16,13 +16,6 @@ pub(super) fn spawn_step_uploader(
   let Some(ref url) = cfg.results_url else {
     return;
   };
-  let Some(spool_dir) = state
-    .job_log
-    .as_ref()
-    .and_then(|spool| spool.path().parent())
-  else {
-    return;
-  };
   let (tx, handle) = crate::log_uploader::spawn(StreamerConfig {
     client: cfg.results_client.clone(),
     results_url: url.clone(),
@@ -31,7 +24,7 @@ pub(super) fn spawn_step_uploader(
     job_backend_id: cfg.job_backend_id.clone(),
     step_backend_id: step_id.to_owned(),
     step_name: step_name.to_owned(),
-    spool_dir: spool_dir.to_path_buf(),
+    data_dir: cfg.data_dir.clone(),
   });
   state.uploaders.insert(step_id.to_owned(), tx);
   let sid = step_id.to_owned();
@@ -62,7 +55,7 @@ pub(super) async fn forward_log_line(
   // registration that put this secret into the masker is visible here.
   let masked = mask_line(&cfg.masker, line);
   if let Some(spool) = state.job_log.as_mut()
-    && let Err(error) = spool.append(&masked)
+    && let Err(error) = spool.append(&masked).await
   {
     tracing::warn!(error = %error, "job log spool write failed");
     state.job_log = None;
@@ -70,6 +63,10 @@ pub(super) async fn forward_log_line(
   if let Some(tx) = state.uploaders.get(step_id) {
     let _ = tx.send(masked.clone()).await;
   }
+  forward_live_line(state, cfg, step_id, masked);
+}
+
+fn forward_live_line(state: &mut ForwarderState, cfg: &FwdConfig, step_id: &str, masked: String) {
   if let Some(ref live_tx) = cfg.live_log_tx
     && !state.live_log_closed
   {
@@ -89,13 +86,13 @@ pub(super) async fn forward_log_line(
 /// Spawn the combined job-log upload without delaying `complete_job`.
 /// Session cleanup joins this handle on success and error paths. The task
 /// owns no listener sender, so it cannot keep the journal channel open.
-pub(super) fn spawn_job_log_upload(
+pub(super) async fn spawn_job_log_upload(
   state: &mut ForwarderState,
   cfg: &FwdConfig,
 ) -> Option<tokio::task::JoinHandle<()>> {
   let spool = state.job_log.take()?;
   let results_url = cfg.results_url.clone()?;
-  let (path, line_count) = match spool.finish() {
+  let (path, line_count) = match spool.finish().await {
     Ok(finished) => finished,
     Err(error) => {
       tracing::warn!(error = %error, "job log spool flush failed");

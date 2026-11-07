@@ -227,6 +227,7 @@ async fn setup_deferred_action_log_retains_upload_and_live_identity() -> Result<
   let cfg = FwdConfig {
     setup_id: Some(id.clone()),
     setup_cancel: CancellationToken::new(),
+    data_dir: std::env::temp_dir(),
     setup_lines: Vec::new(),
     results_url: None,
     results_client: reqwest::Client::new(),
@@ -287,7 +288,7 @@ async fn setup_deferred_action_log_retains_upload_and_live_identity() -> Result<
   setup_forwarding::before_event(&mut state, &cfg, &collector, &journal_tx, &mut event).await;
   handle_event_arm(&mut state, &cfg, &event).await;
   assert_eq!(upload_rx.try_recv()?, line);
-  let (spool_path, _) = state.job_log.take().ok_or("job spool")?.finish()?;
+  let (spool_path, _) = state.job_log.take().ok_or("job spool")?.finish().await?;
   let contents = std::fs::read_to_string(spool_path)?;
   assert_eq!(contents.lines().last(), Some(line.as_str()));
   let mut last = None;
@@ -371,6 +372,7 @@ async fn setup_forwarding_captured_pull_reaches_results_before_user_step()
   let cfg = FwdConfig {
     setup_id: Some(setup_id.clone()),
     setup_cancel: CancellationToken::new(),
+    data_dir: std::env::temp_dir(),
     setup_lines: Vec::new(),
     results_url: Some(server.uri()),
     results_client: client,

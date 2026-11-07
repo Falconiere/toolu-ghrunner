@@ -60,6 +60,7 @@ fn fixture(config: &RunnerConfig) -> TestResult<AgentJobRequestMessage> {
 fn forwarder(masker: Arc<Mutex<SecretMasker>>, live_tx: mpsc::Sender<LiveLogLine>) -> FwdConfig {
   FwdConfig {
     setup_cancel: CancellationToken::new(),
+    data_dir: std::env::temp_dir(),
     setup_id: None,
     results_url: None,
     results_client: reqwest::Client::new(),
@@ -172,7 +173,7 @@ async fn multiline_mask_real_job_reaches_every_local_sink() -> TestResult {
     (stdout, stderr, annotations),
     (PROBES.len(), PROBES.len(), 1)
   );
-  let (spool_path, _) = state.job_log.take().ok_or("job spool")?.finish()?;
+  let (spool_path, _) = state.job_log.take().ok_or("job spool")?.finish().await?;
   let job_log_lines: Vec<String> = std::fs::read_to_string(spool_path)?
     .lines()
     .map(str::to_owned)

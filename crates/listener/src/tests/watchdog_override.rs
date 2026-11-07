@@ -2,7 +2,7 @@
 
 use shared::Conclusion;
 
-use crate::outage_override::{LOST_CONNECTION_MESSAGE, apply_outage_override};
+use crate::outage_override::{LOST_CONNECTION_MESSAGE, RenewalLoss, apply_outage_override};
 
 /// (a) An untripped flag leaves the conclusion unchanged and adds no
 /// annotations, whatever the conclusion was.
@@ -14,7 +14,7 @@ fn untripped_leaves_conclusion_and_annotations_unchanged() {
     Conclusion::Cancelled,
     Conclusion::Skipped,
   ] {
-    let (out, annotations) = apply_outage_override(conclusion, false);
+    let (out, annotations) = apply_outage_override(conclusion, RenewalLoss::None);
     assert_eq!(out, conclusion, "untripped must not change the conclusion");
     assert!(annotations.is_empty(), "untripped must add no annotations");
   }
@@ -25,7 +25,7 @@ fn untripped_leaves_conclusion_and_annotations_unchanged() {
 /// landed) — it stays `Success`, with no annotation.
 #[test]
 fn tripped_success_stays_success_with_no_annotation() {
-  let (conclusion, annotations) = apply_outage_override(Conclusion::Success, true);
+  let (conclusion, annotations) = apply_outage_override(Conclusion::Success, RenewalLoss::TimedOut);
   assert_eq!(conclusion, Conclusion::Success);
   assert!(annotations.is_empty());
 }
@@ -41,7 +41,7 @@ fn tripped_non_success_overrides_to_failure_with_error_annotation() {
     Conclusion::Cancelled,
     Conclusion::Skipped,
   ] {
-    let (conclusion, annotations) = apply_outage_override(original, true);
+    let (conclusion, annotations) = apply_outage_override(original, RenewalLoss::TimedOut);
     assert_eq!(conclusion, Conclusion::Failure);
     assert_eq!(annotations.len(), 1);
     let annotation = annotations.first().expect("checked len() == 1 above");

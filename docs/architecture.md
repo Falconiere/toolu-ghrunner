@@ -430,8 +430,12 @@ per-job `CancellationToken` when a `JobCancellation` arrives mid-job
 handing the refreshed broker token back to the session when the job
 ends.
 
-The forwarder masks each line before appending it to a combined job spool and
-sending it to the per-step spool actor. `listener::log_spool` owns files under
+With a Results Service URL, the forwarder masks each line before asynchronously
+appending it to a combined job spool and sending it to the per-step spool actor.
+Both append and final flush use Tokio file I/O. Without a Results Service URL,
+neither spool is created. Each step actor creates its spool from `data_dir`
+independently, so a combined-spool creation or write failure does not disable
+step uploads. `listener::log_spool` owns files under
 `data_dir/_logs` (Unix directory `0700`, plain and gzip files `0600`). Both
 uploads gzip-compress on disk and stream the compressed file, preserving line
 order without keeping the whole log in memory. The engine event channel holds
@@ -1310,15 +1314,15 @@ prolonged mid-job reporting outage: it seeds `last_ok` at spawn and, on
 every renewal, either resets the window (`record_ok`) or accumulates
 toward a 300-second (5-minute) threshold (`record_err`).
 A renewal 404 returns `Ok(None)`: GitHub no longer recognizes the job, so
-`spawn_renewal` immediately sets the trip flag, cancels the job and stops
+`spawn_renewal` immediately records `RenewalLoss::JobNotFound`, cancels the job and stops
 renewing. Every other renewal error feeds the watchdog, including persistent
 401/other HTTP errors and malformed success replies. Error classifications
 remain available to callers: transport/429/5xx are `Network`, other HTTP
 failures are `Protocol`; these variants do not filter watchdog input.
 `record_err` returns `true` only once per outage window (the
 watchdog latches until a `record_ok` resets it); on that first `true`,
-`spawn_renewal` sets a shared trip flag that is write-once (a later
-successful renewal cannot un-trip it), cancels the job's
+`spawn_renewal` records `RenewalLoss::TimedOut` in shared state (a later
+successful renewal does not clear cancellation), cancels the job's
 `CancellationToken` (the engine SIGKILLs the running step via
 `step_timeout::wait_bounded`, yielding `Conclusion::Cancelled`), and
 logs one ERROR. With the first tick consumed by the interval and the
@@ -1339,7 +1343,7 @@ Run Service              toolu-runner               in-flight step
  │<──────────────────────────┤                           │
  │ renewal still failing     │                           │
  ├──────────────────────────>│ watchdog trips (latched)   │
- │                           │ outage_tripped = true      │
+ │                           │ loss = TimedOut            │
  │                           │ job_cancel.cancel() ──────>│ SIGKILL via
  │                           │ tracing::error! (once)     │ wait_bounded
  │                           │                           │ Cancelled
@@ -1357,17 +1361,19 @@ Run Service              toolu-runner               in-flight step
 ```
 
 `execute_with_renewal` cancels and **joins** the renewal task before
-reading the trip flag (no teardown race), then folds it into the
+reading the loss reason (no teardown race), then folds it into the
 engine's own verdict (`outage_override::apply_outage_override`): a
-tripped flag with a non-`Success` conclusion overrides the report to
+recorded loss with a non-`Success` conclusion overrides the report to
 `Conclusion::Failure` and attaches a job-level `FAILURE` annotation
-(`level` 3 on the wire) whose text is
-`outage_override::LOST_CONNECTION_MESSAGE` — the single `const` the
-`watchdog_trip` assertions also read, currently "Runner lost connection
+(`level` 3 on the wire). For timed loss, its text is
+`outage_override::LOST_CONNECTION_MESSAGE`, which the `watchdog_trip`
+assertions also read, currently "Runner lost connection
 to GitHub for more than 5 minutes; job was cancelled (lost connection)."
-Treat the `const` as authoritative if this prose ever drifts. The immediate 404 path uses this same override and annotation, so its
-message still says "more than 5 minutes" even when cancellation was immediate. A
-tripped flag alongside a `Success` conclusion (the job finished before
+This message applies only to `RenewalLoss::TimedOut`. The immediate 404 path
+uses `outage_override::JOB_NOT_FOUND_MESSAGE`: "GitHub no longer recognizes this
+job; job was cancelled (job lock lost)." It makes no timed-outage claim. Treat
+these constants as authoritative if this prose ever drifts. A
+recorded loss alongside a `Success` conclusion (the job finished before
 the cancel landed — a trip-during-teardown race) is left as `Success`
 with a one-time WARN; rewriting a successful job's history would be
 dishonest.
@@ -1719,7 +1725,7 @@ registration failure stops only that loop and writes its `.stopped` marker.
 | 8 | `run` started with network down at startup                    | The token exchange fails as `RunnerError::Network`, which the run loop treats as transient: jittered exponential backoff, 1s → 60s cap, retrying the same config (once polling, the poll loop backs off the same way). |
 | 9 | `run` mid-job, network drops < 5 min                          | In-flight step keeps running locally; lock renewal retries on its fixed 60 s tick; a step-status batch that fails to flush is WARN-dropped (not replayed); the completion report is retried on reconnect (`retry_transient`, up to 10 min). |
 | 10 | `run` mid-job, network drops > 5 min                         | The renewal-heartbeat `OutageWatchdog` (strict 300 s threshold, every renewal error) cancels the job; a non-success report is overridden to `failure` with a "lost connection" annotation and retried on reconnect for up to 10 minutes. Resolved: [known-bugs.md](known-bugs.md) B-001; see "Sequence: reconnect". |
-| 10a | Renewal returns 404, or repeatedly returns 401/malformed success | A 404 cancels immediately; other errors cancel after the watchdog threshold. Non-success becomes failure with the shared lost-connection annotation. Successful renewal resets the failure window. |
+| 10a | Renewal returns 404, or repeatedly returns 401/malformed success | A 404 cancels immediately; other errors cancel after the watchdog threshold. Non-success becomes failure: 404 uses the job-lock-loss annotation, while a timed outage uses the lost-connection annotation. Successful renewal resets the failure window. |
 | 11 | Disk full mid-job                                            | Current step fails with `RunnerError::Io`; step marked `failure`; job completes `failure`; `run` stays alive for next job. |
 | 12 | `remove` with no registration                                 | Exit 0 with "no registration found." |
 | 13 | Session create returns 409 (another live session)             | Retry every 30 s, 8 attempts; still conflicting → exit 5 (`run`, `--once`, `boot`). Per-registration systemd units do not restart it; `run --all` stops only that registration. See "Session-create conflicts (#91)". |
