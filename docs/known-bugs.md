@@ -1,7 +1,7 @@
 # Known limitations and resolved bugs
 
-This page tracks current limitations and keeps the B-001–B-005 identifiers
-used by tests and release history. All five original bugs are resolved; their
+This page tracks current limitations and keeps the B-001–B-006 identifiers
+used by tests and release history. All six tracked bugs are resolved; their
 old reproduction steps do not describe the current implementation.
 
 ## Verification limits
