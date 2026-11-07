@@ -54,6 +54,12 @@ fn map(pairs: Vec<(String, String)>) -> EnvMap {
   pairs.into_iter().collect()
 }
 
+/// One shared client for every probe invocation in this file.
+fn shared_client() -> &'static reqwest::Client {
+  static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+  CLIENT.get_or_init(reqwest::Client::new)
+}
+
 /// Build a `ServiceUrls` with all fields present (for selector coverage).
 fn full_urls() -> ServiceUrls {
   ServiceUrls {
@@ -381,7 +387,7 @@ async fn probe_node_action(env: ServiceEnv) -> TestResult<EnvMap> {
   let mut step = ActionStep::with_ref_type("probe", "repository");
   step.reference.name = Some("./service-env-probe".to_owned());
   let spec = execution::execution::job_spec::JobSpec::default();
-  let http = reqwest::Client::new();
+  let http = shared_client().clone();
   let fetcher = ActionFetcher::new(&shared::NetworkConfig::default())?;
   let conclusion = run_steps(
     &[step],
@@ -544,7 +550,7 @@ async fn node_action_saves_and_restores_exact_bytes_over_v2_with_no_v1_request()
     ..RunnerConfig::default()
   };
   let spec = execution::execution::job_spec::JobSpec::default();
-  let http = reqwest::Client::new();
+  let http = shared_client().clone();
   let fetcher = ActionFetcher::new(&shared::NetworkConfig::default())?;
   // Save, wipe the file, then restore — separate Node processes.
   let save = run_steps(
@@ -643,7 +649,7 @@ async fn composite_run_step_gets_only_the_oidc_pair() -> TestResult<()> {
     ..RunnerConfig::default()
   };
   let spec = execution::execution::job_spec::JobSpec::default();
-  let http = reqwest::Client::new();
+  let http = shared_client().clone();
   let fetcher = ActionFetcher::new(&shared::NetworkConfig::default())?;
   let conclusion = run_steps(
     &[step],
