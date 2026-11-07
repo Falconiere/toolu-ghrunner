@@ -467,6 +467,11 @@ local workflow orchestrator; GitHub orchestrates jobs (#97).
   `actions/checkout@v4`). Node.js comes from
   `node::runtime::ensure_node_runtime` (preseed, cache, then download —
   see `docker/`, `node/` below).
+- `docker_prepare` — Discovers remote Docker actions, including those nested in
+  remote composites, before user steps. It reports case-insensitive deduplicated
+  registry Pull rows followed by per-repository Dockerfile Build rows, retains
+  images for step reuse, and stops user steps on setup failure or cancellation.
+  Local actions remain step-time; non-Linux hosts skip pull/build setup.
 - `docker_action` / `docker_stage` — Linux container action preparation,
   pre/main/post dispatch and normal file/workflow commands. Registry references
   bypass repository resolution; remote Dockerfiles use revision-qualified image

@@ -828,6 +828,10 @@ On Linux, `uses: docker://image:tag` pulls and executes the image. Repository
 and local actions with `runs.using: docker` may use `image: Dockerfile` or a
 `docker://` image. Successful builds from immutable resolved remote revisions
 are reused while their images exist; local actions build against current files.
+Before user steps, the runner reports one `Pull <image>` per case-insensitive
+registry image, followed by one `Build <owner/repo>` per remote repository with
+Dockerfiles, including remote actions nested in composites. Prepared images are
+reused by their steps; local actions are prepared when reached.
 
 Manifest `args` preserves argument boundaries and empty values. When absent,
 `with.args` supplies shell-quoted arguments without executing a host shell.
@@ -843,9 +847,10 @@ Actions mount `/github/workspace`, `/github/home`, `/github/workflow`,
 job or service-only network when one exists. File commands and stdout workflow commands use the
 normal runner handlers; command paths are translated across mounts. Each stage's
 container and its anonymous volumes are removed after success, failure, timeout
-or cancellation. A missing
-image, failed build or invalid entrypoint fails the step. macOS and Windows
-reject Docker actions explicitly.
+or cancellation. A remote image pull or Dockerfile build failure fails setup
+before user steps run; a local image/build failure or invalid entrypoint fails
+the action step. On non-Linux hosts, pull/build setup is skipped and Docker
+actions fail explicitly when reached.
 
 See the [#75 evidence map](docs/test-coverage.md#docker-container-actions-75)
 for real-Docker replay and the separately recorded live/reference limitations.

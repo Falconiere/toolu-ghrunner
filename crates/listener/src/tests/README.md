@@ -20,7 +20,7 @@
 | `post_results.rs` | Captured job replay through `StepCollector` and `CompleteJobRequest` serialization. |
 | `startup_overlap.rs` | Startup reporting overlap. |
 | `step_report_queue.rs` | Queued reporting against a broker endpoint. |
-| `step_report_queue_unit.rs` | Report queue deadline and batching behavior. |
+| `step_report_queue_unit.rs` | Report queue deadline, batching and Docker setup terminal conclusions. |
 | `step_context_identity.rs` | Report serialization of a skipped step with the wire ID and conclusion from the sanitized acquired job. |
 | `support.rs` | Recording endpoint and shared test support. |
 | `watchdog_retry.rs` | Watchdog retry behavior. |
@@ -28,5 +28,5 @@
 | `runner_update_policy.rs` | Idle/busy refresh warning, safe opaque bodies, cancellation and cursor continuity. |
 | `session_conflict.rs` | Live-captured 409 replayed through `create_session`: bounded retry, recovery, exact attempt count, unrelated failures and cancellation. |
 | `setup_step.rs` | Captured permissions, identity and secret-source diagnostics. |
-| `setup_forwarding.rs` | Production replay, masked setup logs, early failure and cancellation. |
+| `setup_forwarding.rs` | Production replay, masked setup logs, early failure and cancellation; capture-derived Docker Pull row forwarding and order. |
 | `step_summary.rs` | Failed summary uploads still drain later queued documents. |
