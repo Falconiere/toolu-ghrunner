@@ -7,7 +7,10 @@ name: compat-paired
 # <run_id> --out <report> compares the lanes; see docs/compatibility-evidence.md.
 #
 # Dispatch-only. `negative` is meant to fail, so a good run still concludes
-# failure; the comparator decides. Two runners side by side on a hosted VM stays
+# failure; the comparator decides. #237 adds a third, accelerated-mode toolu lane
+# on the Linux-X64 VM (`accelerated`, compared with nothing) and the hosted
+# `surfaces` job, which reads annotations and deployment statuses back from the
+# GitHub API (scripts/test/compat_surfaces_check.py). Two runners side by side on a hosted VM stays
 # unproven until the first dispatch (#251).
 
 on:
@@ -30,6 +33,21 @@ jobs:
         run: |
           echo "::error::UNVERIFIED: TOOLU_RUNNER_LIVE_TOKEN is not set, so the paired lanes did not run; this is not coverage"
           exit 1
+      # Present is not valid: the hosts need runner administration and job reads.
+      # Only the HTTP status is printed.
+      - name: Check the live credential
+        env:
+          GH_TOKEN: ${{ secrets.TOOLU_RUNNER_LIVE_TOKEN }}
+        run: |
+          for path in "actions/runners?per_page=1" "actions/runs/$GITHUB_RUN_ID/jobs?per_page=1"; do
+            status=$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'Accept: application/vnd.github+json' "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/$path")
+            if [ "$status" != 200 ]; then
+              echo "::error::credential check failed: HTTP $status for repos/$GITHUB_REPOSITORY/${path%%\?*}"
+              exit 1
+            fi
+            echo "repos/$GITHUB_REPOSITORY/${path%%\?*}: HTTP $status"
+          done
 
   host:
     name: host ${{ matrix.platform }}
@@ -44,6 +62,7 @@ jobs:
             vm: ubuntu-latest
             archive: actions-runner-linux-x64-2.338.2.tar.gz
             sha256: baebf204307bac6193480852732f0aba2ae97b6c5597c244f4d5558390147c40
+            accelerated: true
           - platform: Linux-ARM64
             vm: ubuntu-24.04-arm
             archive: actions-runner-linux-arm64-2.338.2.tar.gz
@@ -54,6 +73,7 @@ jobs:
             sha256: 25a065af409ffa317ab4d5a3b614dd15fc9c40f2172bc1b35a1b1258e919a388
     env:
       PLATFORM: ${{ matrix.platform }}
+      ACCELERATED_LANE: ${{ matrix.accelerated }}
       LABEL_PREFIX: compat-paired-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v7
@@ -153,3 +173,52 @@ jobs:
       enabled: false
       expect_oidc: false
       run_docker: ${{ matrix.platform != 'macOS-ARM64' }}
+
+  # #237: forwarder is the `toolu` lane above; this is the same probe on a toolu
+  # registration with `[services] mode = "accelerated"` (Linux-X64 host only).
+  accelerated:
+    name: probe-Linux-X64-toolu-accelerated
+    needs: guard
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/compat-reference-103-probe.yml
+    with:
+      runner_label: compat-paired-${{ github.run_id }}-${{ github.run_attempt }}-Linux-X64-toolu-accelerated
+      lane: Linux-X64-toolu-accelerated
+      variant: probe
+      who: world
+      count: 3
+      enabled: false
+      expect_oidc: true
+      run_docker: true
+
+  # Observation runs on a hosted VM: a self-hosted job after the last consumer
+  # could be left queued once the hosts stop their lanes.
+  surfaces:
+    needs: [guard, probe, negative, accelerated]
+    if: ${{ always() && needs.guard.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+      deployments: read
+    steps:
+      - uses: actions/checkout@v7
+      - name: Read annotations and deployments back from GitHub
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/test/compat_surfaces_check.py --run "$GITHUB_RUN_ID" \
+            --attempt "$GITHUB_RUN_ATTEMPT" --out compat-237-surfaces.json --captures captures
+      - name: Upload the surfaces report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: compat-237-surfaces
+          path: |
+            compat-237-surfaces.json
+            captures
+          if-no-files-found: error

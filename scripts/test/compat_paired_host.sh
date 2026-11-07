@@ -7,13 +7,16 @@
 #
 # Environment: GH_TOKEN (administration:write), GITHUB_REPOSITORY, GITHUB_RUN_ID,
 # RUNNER_TEMP, PLATFORM (Linux-X64, Linux-ARM64, macOS-ARM64), LABEL_PREFIX, and
-# for `run`: OFFICIAL_DIR, TOOLU_BIN. Each lane logs to a file under
+# for `run`: OFFICIAL_DIR, TOOLU_BIN. ACCELERATED_LANE=true adds a third lane (#237):
+# a second toolu registration with `[services] mode = "accelerated"`. Each lane logs to a file under
 # RUNNER_TEMP, printed on exit, so a lane still alive cannot hold the step's stdout.
 set -euo pipefail
 
 POLL_SECONDS="${POLL_SECONDS:-15}"
 # One `consumer` per variant and lane. It needs every other probe job, so it ends last.
+# The accelerated lane runs the probe variant only.
 CONSUMER_JOBS=4
+[[ "${ACCELERATED_LANE:-}" == true ]] && CONSUMER_JOBS=5
 UNREGISTER_ATTEMPTS="${UNREGISTER_ATTEMPTS:-6}"
 RUNNERS_API="repos/$GITHUB_REPOSITORY/actions/runners"
 
@@ -54,31 +57,48 @@ probes_done() {
 stop_lanes() {
   local lane
   # The loop first, or it would mint a new runner when the listener dies.
-  kill "$official_pid" "$toolu_pid" 2>/dev/null || true
+  kill ${official_pid:+"$official_pid"} ${toolu_pid:+"$toolu_pid"} ${accelerated_pid:+"$accelerated_pid"} 2>/dev/null || true
   pkill -f "$OFFICIAL_DIR" || true
   wait 2>/dev/null || true
-  for lane in toolu official; do
+  for lane in toolu official ${accelerated_pid:+toolu-accelerated}; do
     echo "::group::$lane lane log"
     cat "$RUNNER_TEMP/$lane.log" || true
     echo "::endgroup::"
   done
 }
 
-run_lanes() {
-  local label="$LABEL_PREFIX-toolu" home="$RUNNER_TEMP/toolu-home"
+# Registers toolu lane <name> (own home) and starts it; prints the pid.
+# <mode> rewrites the `[services]` mode `register` wrote.
+start_toolu() {
+  local name="$1" mode="$2" label="$LABEL_PREFIX-$1" home="$RUNNER_TEMP/$1-home"
   local toolu_env=("${clean_env[@]}" "TOOLU_RUNNER_HOME=$home" "TOOLU_RUNNER_TOKEN=$GH_TOKEN")
   mkdir -p "$home"
-
   "${toolu_env[@]}" "$TOOLU_BIN" register --url "https://github.com/$GITHUB_REPOSITORY" \
-    --name "$label" --labels "$label" --config "$home/config.toml" --work "$home/_work"
-  "${toolu_env[@]}" "$TOOLU_BIN" run --config "$home/config.toml" >"$RUNNER_TEMP/toolu.log" 2>&1 &
-  toolu_pid=$!
+    --name "$label" --labels "$label" --config "$home/config.toml" --work "$home/_work" >&2
+  if [[ "$mode" != forwarder ]]; then
+    sed -i.bak "s/^mode = \"forwarder\"\$/mode = \"$mode\"/" "$home/config.toml"
+    grep -qx "mode = \"$mode\"" "$home/config.toml" || {
+      echo "::error::could not set [services] mode = $mode for $label" >&2
+      return 1
+    }
+  fi
+  "${toolu_env[@]}" "$TOOLU_BIN" run --config "$home/config.toml" >"$RUNNER_TEMP/$name.log" 2>&1 &
+  echo $!
+}
+
+run_lanes() {
+  official_pid="" toolu_pid="" accelerated_pid=""
+  trap stop_lanes EXIT
+  toolu_pid=$(start_toolu toolu forwarder)
+  if [[ "${ACCELERATED_LANE:-}" == true ]]; then
+    accelerated_pid=$(start_toolu toolu-accelerated accelerated)
+  fi
   official_lane 3>&1 >"$RUNNER_TEMP/official.log" 2>&1 &
   official_pid=$!
-  trap stop_lanes EXIT
 
   until probes_done; do
-    { kill -0 "$toolu_pid" && kill -0 "$official_pid"; } 2>/dev/null || {
+    { kill -0 "$toolu_pid" && kill -0 "$official_pid" &&
+      { [[ -z "$accelerated_pid" ]] || kill -0 "$accelerated_pid"; }; } 2>/dev/null || {
       echo "::error::a lane exited before the $PLATFORM probes finished" >&2
       exit 1
     }
