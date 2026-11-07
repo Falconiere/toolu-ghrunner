@@ -525,7 +525,7 @@ async fn assert_renewal_trip(status: u16, threshold: Duration, cap: Duration) ->
     )),
   )
   .await
-  .map_err(|_| "renewal trip did not finish within the test guard")??;
+  .map_err(|error| format!("renewal trip did not finish within the test guard: {error}"))??;
   assert_reported(outcome.result, Conclusion::Failure)?;
   assert_elapsed_under(outcome.elapsed, cap, "renewal cancellation")?;
   assert_request_count(&outcome.complete_requests, 1, "completejob")?;
@@ -555,20 +555,20 @@ async fn missing_job_cancels_immediately() -> TestResult<()> {
 #[tokio::test]
 async fn successful_renewal_resets_the_failure_window() -> TestResult<()> {
   let outcome = tokio::time::timeout(
-    Duration::from_secs(10),
+    Duration::from_secs(15),
     run_scenario(Scenario {
       recover_once: true,
       ..Scenario::new(
         "job-recovery",
-        "sleep 2.5",
+        "sleep 8",
         401,
-        Duration::from_secs(2),
-        Duration::from_millis(200),
+        Duration::from_secs(6),
+        Duration::from_secs(1),
       )
     }),
   )
   .await
-  .map_err(|_| "recovery scenario timed out")??;
+  .map_err(|error| format!("recovery scenario timed out: {error}"))??;
   assert_reported(outcome.result, Conclusion::Success)?;
   if outcome.renew_requests.len() < 8 {
     return Err(

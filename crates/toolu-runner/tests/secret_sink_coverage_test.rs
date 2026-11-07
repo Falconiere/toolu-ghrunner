@@ -5,7 +5,7 @@
 //! reaches any of the four durable sinks named in the design's AC-5:
 //!
 //! 1. the combined job log,
-//! 2. the per-step upload buffer,
+//! 2. the per-step log upload,
 //! 3. the journal JSONL under `_diag/jobs/`,
 //! 4. `_diag/runner.log`.
 //!
@@ -20,18 +20,18 @@
 //! `observability::journal::writer::spawn`, which does its OWN internal
 //! masking — nothing about the masking step is reimplemented here.
 //!
-//! Sinks 1 and 2 (the combined job log and the per-step upload buffer) are
+//! Sinks 1 and 2 (the combined job log and the per-step log) are
 //! assembled by `listener::execution_loop::forward_log_line` /
 //! `ForwarderState`, both `pub(super)` to the `listener` crate and therefore
 //! unreachable from an external `toolu-runner` integration test. What IS
 //! reachable — and genuinely exercised here — is the real, `pub`
-//! `listener::log_uploader::{upload_job_logs, upload_compressed_step_logs}`,
-//! the actual functions that gzip-encode and HTTP-PUT those two sinks to the
+//! `listener::log_uploader::{upload_job_logs, upload_step_logs}`,
+//! the actual functions that gzip and stream those two disk spools to the
 //! Results Service. This test masks each `Log` line through the SAME shared
 //! masker, mirroring (not calling) `forward_log_line`'s masking step, then
-//! feeds the result into those real upload functions against a real local
+//! writes the result to private temp files and feeds those files into the upload functions against a local
 //! `wiremock` server, and inspects the ACTUAL bytes PUT to that server. So
-//! the private event-to-buffer glue is mirrored here; the sink-writing code
+//! the private event-to-spool glue is mirrored here; the sink-writing code
 //! is not.
 //!
 //! That mirror does NOT prove `forward_log_line` itself calls the masker —
@@ -42,7 +42,7 @@
 //! which calls the REAL `forward_log_line` directly (it is `pub(super)`,
 //! so — like `helpers.rs`'s existing inline tests — it has to live inside
 //! `listener/src/execution_loop.rs`, not here) and asserts both
-//! `state.all_job_lines` and the per-step upload channel come out masked.
+//! the combined spool and per-step upload channel come out masked.
 //! So today: sinks 3 and 4 are driven end-to-end by THIS file against real
 //! production code; sinks 1 and 2 are driven end-to-end by the real
 //! `forward_log_line` in the in-crate `listener` test, while this file
@@ -73,12 +73,12 @@
 
 use std::collections::HashMap;
 use std::error::Error;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 
 use execution::execution::job_runner::run_job;
 use listener::helpers::ResultsCtx;
-use listener::log_uploader::{upload_compressed_step_logs, upload_job_logs};
+use listener::log_uploader::{upload_job_logs, upload_step_logs};
 use observability::journal::writer;
 use serde_json::json;
 use shared::startup::SecretRedactor;
@@ -371,6 +371,7 @@ async fn upload_and_capture_blobs(
   all_job_lines: &[String],
   per_step: &HashMap<String, Vec<String>>,
 ) -> TestResult<Vec<Vec<u8>>> {
+  let dir = tempfile::tempdir()?;
   let server = MockServer::start().await;
   mount_results_service(&server).await;
   let client = reqwest::Client::new();
@@ -382,19 +383,32 @@ async fn upload_and_capture_blobs(
     job_backend_id: "job-1",
   };
 
-  let job_upload = upload_job_logs(&rctx, all_job_lines).await;
+  let job_path = dir.path().join("job.log");
+  write_spool(&job_path, all_job_lines)?;
+  let job_upload = upload_job_logs(&rctx, job_path, all_job_lines.len() as u64).await;
   assert!(
     job_upload.is_some(),
     "combined job log upload did not complete against the mock Results Service"
   );
-  for (step_id, lines) in per_step {
-    let step_upload = upload_compressed_step_logs(&rctx, step_id, lines).await;
+  for (index, (step_id, lines)) in per_step.iter().enumerate() {
+    let step_path = dir.path().join(format!("step-{index}.log"));
+    write_spool(&step_path, lines)?;
+    let step_upload = upload_step_logs(&rctx, step_id, step_path, lines.len() as u64).await;
     assert!(
       step_upload.is_some(),
       "per-step log upload did not complete for step {step_id}"
     );
   }
   captured_blob_bodies(&server).await
+}
+
+fn write_spool(path: &std::path::Path, lines: &[String]) -> TestResult {
+  let mut file = std::io::BufWriter::new(std::fs::File::create(path)?);
+  for line in lines {
+    writeln!(file, "{line}")?;
+  }
+  file.flush()?;
+  Ok(())
 }
 
 /// Decompress every captured blob and assert none carries the raw secret,

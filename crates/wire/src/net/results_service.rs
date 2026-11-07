@@ -5,6 +5,8 @@
 //! and keep the auth/header wiring in one place.
 
 use serde::Serialize;
+use std::path::Path;
+use tokio_util::io::ReaderStream;
 
 use shared::RunnerError;
 
@@ -145,37 +147,30 @@ pub async fn create_job_logs_metadata(
   Ok(())
 }
 
-/// Upload a log file to a SAS URL (Azure Blob Storage or compatible).
-/// Uses `BlockBlob` (single-shot upload). Matches actions/runner `UploadBlockFileAsync`.
-/// When `compressed` is true, sets `Content-Type: application/gzip` and
-/// `Content-Encoding: gzip`; otherwise uses `Content-Type: text/plain`.
+/// Stream a gzipped log file to a signed URL with its exact content length.
 ///
 /// # Errors
 ///
-/// Returns `RunnerError::Protocol` on HTTP failures.
-pub async fn upload_log_blob(
+/// Returns an IO error for the file and a protocol error for the HTTP upload.
+pub async fn upload_log_file(
   client: &reqwest::Client,
   sas_url: &str,
   blob_storage_type: &str,
-  content: Vec<u8>,
-  compressed: bool,
+  path: &Path,
 ) -> Result<(), RunnerError> {
-  let content_type = if compressed {
-    "application/gzip"
-  } else {
-    "text/plain"
-  };
+  let file = tokio::fs::File::open(path).await?;
+  let length = file.metadata().await?.len();
+  let body = reqwest::Body::wrap_stream(ReaderStream::new(file));
   let mut req = client
     .put(sas_url)
-    .header(reqwest::header::CONTENT_TYPE, content_type);
-  if compressed {
-    req = req.header("Content-Encoding", "gzip");
-  }
+    .header(reqwest::header::CONTENT_TYPE, "application/gzip")
+    .header("Content-Encoding", "gzip")
+    .header(reqwest::header::CONTENT_LENGTH, length);
   if blob_storage_type == BLOB_STORAGE_AZURE {
     req = req.header("x-ms-blob-type", "BlockBlob");
   }
   let response = req
-    .body(content)
+    .body(body)
     .send()
     .await
     .map_err(|e| RunnerError::Protocol(format!("log blob upload failed: {e}")))?;

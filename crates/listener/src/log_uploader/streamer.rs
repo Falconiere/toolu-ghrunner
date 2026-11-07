@@ -3,14 +3,16 @@
 //! Spawns a tokio task that receives log lines via an mpsc channel
 //! and uploads a gzip-compressed blob via Results Service on finalize.
 
+use std::path::PathBuf;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use super::upload::upload_compressed_step_logs;
+use super::upload::upload_step_logs;
 use crate::helpers::ResultsCtx;
+use crate::log_spool::LogSpool;
 
 /// Channel capacity for log lines sent to the streamer actor.
-pub const CHANNEL_CAPACITY: usize = 4096;
+pub const CHANNEL_CAPACITY: usize = 4;
 
 /// Configuration for spawning a `StepLogStreamer` actor.
 pub struct StreamerConfig {
@@ -28,6 +30,8 @@ pub struct StreamerConfig {
   pub step_backend_id: String,
   /// The step's display name.
   pub step_name: String,
+  /// Private directory containing this job's log spools.
+  pub spool_dir: PathBuf,
 }
 
 /// Spawn a `StepLogStreamer` actor. Returns the sender for log lines and a
@@ -41,7 +45,7 @@ pub fn spawn(cfg: StreamerConfig) -> (mpsc::Sender<String>, JoinHandle<Option<(S
 struct StepLogStreamer {
   cfg: StreamerConfig,
   lines_rx: mpsc::Receiver<String>,
-  all_lines: Vec<String>,
+  spool: Option<LogSpool>,
 }
 
 impl StepLogStreamer {
@@ -49,22 +53,38 @@ impl StepLogStreamer {
     Self {
       cfg,
       lines_rx,
-      all_lines: Vec::new(),
+      spool: None,
     }
   }
 
   async fn run(mut self) -> Option<(String, u64)> {
-    self.run_loop().await;
+    if let Err(error) = self.run_loop().await {
+      tracing::warn!(error = %error, "step log spool failed");
+      return None;
+    }
     self.finalize().await
   }
 
-  async fn run_loop(&mut self) {
+  async fn run_loop(&mut self) -> std::io::Result<()> {
     while let Some(line) = self.lines_rx.recv().await {
-      self.all_lines.push(line);
+      if self.spool.is_none() {
+        self.spool = Some(LogSpool::for_step(&self.cfg.spool_dir)?);
+      }
+      if let Some(spool) = self.spool.as_mut() {
+        spool.append(&line)?;
+      }
     }
+    Ok(())
   }
 
-  async fn finalize(&self) -> Option<(String, u64)> {
+  async fn finalize(mut self) -> Option<(String, u64)> {
+    let (path, count) = match self.spool.take()?.finish() {
+      Ok(finished) => finished,
+      Err(error) => {
+        tracing::warn!(error = %error, "step log spool flush failed");
+        return None;
+      },
+    };
     let rctx = ResultsCtx {
       client: &self.cfg.client,
       results_url: &self.cfg.results_url,
@@ -72,6 +92,6 @@ impl StepLogStreamer {
       run_backend_id: &self.cfg.run_backend_id,
       job_backend_id: &self.cfg.job_backend_id,
     };
-    upload_compressed_step_logs(&rctx, &self.cfg.step_backend_id, &self.all_lines).await
+    upload_step_logs(&rctx, &self.cfg.step_backend_id, path, count).await
   }
 }

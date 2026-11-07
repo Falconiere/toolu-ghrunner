@@ -5,87 +5,135 @@
 //! 2. PUT gzipped blob to the signed URL (with one retry)
 //! 3. `Create*LogsMetadata` — finalize the upload
 
-use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
-use flate2::Compression;
-use flate2::write::GzEncoder;
 use tracing::warn;
 
 use crate::helpers::ResultsCtx;
+use crate::log_spool::gzip_file;
 use wire::reporting::results_service::{
   CreateJobLogsMetadataRequest, CreateStepLogsMetadataRequest, GetJobLogsSignedBlobUrlRequest,
   GetStepLogsSignedBlobUrlRequest, create_job_logs_metadata, create_step_logs_metadata,
-  get_job_logs_signed_blob_url, get_step_logs_signed_blob_url, upload_log_blob,
+  get_job_logs_signed_blob_url, get_step_logs_signed_blob_url, upload_log_file,
 };
 
-/// Upload compressed step logs: get signed URL, PUT gzipped blob, finalize
-/// metadata. Shared by the streamer actor's finalize path and `setup_step`.
-pub async fn upload_compressed_step_logs<'a>(
-  rctx: &ResultsCtx<'a>,
-  step_backend_id: &'a str,
-  lines: &'a [String],
+/// Upload a spooled step log, then remove its plain and compressed files.
+pub async fn upload_step_logs(
+  rctx: &ResultsCtx<'_>,
+  step_backend_id: &str,
+  spool: PathBuf,
+  line_count: u64,
 ) -> Option<(String, u64)> {
-  if lines.is_empty() {
+  let cleanup = Arc::new(SpoolCleanup::new(spool));
+  upload_step_logs_inner(rctx, step_backend_id, &cleanup, line_count).await
+}
+
+async fn upload_step_logs_inner(
+  rctx: &ResultsCtx<'_>,
+  step_backend_id: &str,
+  cleanup: &Arc<SpoolCleanup>,
+  line_count: u64,
+) -> Option<(String, u64)> {
+  if line_count == 0 {
     return None;
   }
-  let line_count = lines.len() as u64;
-  let blob = gzip_lines(lines);
-
   let signed = fetch_step_signed_url(rctx, step_backend_id).await?;
   let logs_url = signed.logs_url.clone();
-
-  if !upload_blob_with_retry(
+  let compressed = compress_spool(cleanup).await?;
+  let uploaded = upload_file_with_retry(
     rctx.client,
     &signed.logs_url,
     &signed.blob_storage_type,
-    blob,
+    &compressed,
   )
-  .await
-  {
+  .await;
+  if !uploaded {
     return None;
   }
-
   finalize_step_metadata(rctx, step_backend_id, line_count).await;
   Some((logs_url, line_count))
 }
 
-/// Upload combined job-level logs: get signed URL, PUT gzipped blob, finalize
-/// metadata. Called after all step uploads complete.
-pub async fn upload_job_logs(rctx: &ResultsCtx<'_>, lines: &[String]) -> Option<u64> {
-  if lines.is_empty() {
+/// Upload a spooled combined job log, then remove its plain and compressed files.
+pub async fn upload_job_logs(
+  rctx: &ResultsCtx<'_>,
+  spool: PathBuf,
+  line_count: u64,
+) -> Option<u64> {
+  let cleanup = Arc::new(SpoolCleanup::new(spool));
+  upload_job_logs_inner(rctx, &cleanup, line_count).await
+}
+
+async fn upload_job_logs_inner(
+  rctx: &ResultsCtx<'_>,
+  cleanup: &Arc<SpoolCleanup>,
+  line_count: u64,
+) -> Option<u64> {
+  if line_count == 0 {
     return None;
   }
-  let line_count = lines.len() as u64;
-  let blob = gzip_lines(lines);
-
   let signed = fetch_job_signed_url(rctx).await?;
-
-  if !upload_blob_with_retry(
+  let compressed = compress_spool(cleanup).await?;
+  let uploaded = upload_file_with_retry(
     rctx.client,
     &signed.logs_url,
     &signed.blob_storage_type,
-    blob,
+    &compressed,
   )
-  .await
-  {
+  .await;
+  if !uploaded {
     return None;
   }
-
   finalize_job_metadata(rctx, line_count).await;
   Some(line_count)
 }
 
-/// Gzip-compress log lines using fast compression.
-fn gzip_lines(lines: &[String]) -> Vec<u8> {
-  let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
-  for line in lines {
-    let _ = writeln!(encoder, "{line}");
+async fn compress_spool(cleanup: &Arc<SpoolCleanup>) -> Option<PathBuf> {
+  let keep_alive = Arc::clone(cleanup);
+  match tokio::task::spawn_blocking(move || gzip_file(&keep_alive.plain)).await {
+    Ok(Ok(compressed)) => Some(compressed),
+    Ok(Err(error)) => {
+      warn!(error = %error, "log compression failed");
+      None
+    },
+    Err(error) => {
+      warn!(error = %error, "log compression task failed");
+      None
+    },
   }
-  encoder.finish().unwrap_or_else(|e| {
-    warn!(error = %e, "gzip encoder finish failed");
-    Vec::new()
-  })
+}
+
+struct SpoolCleanup {
+  plain: PathBuf,
+  compressed: PathBuf,
+}
+
+impl SpoolCleanup {
+  fn new(plain: PathBuf) -> Self {
+    let mut name = plain.as_os_str().to_os_string();
+    name.push(".gz");
+    Self {
+      plain,
+      compressed: PathBuf::from(name),
+    }
+  }
+}
+
+impl Drop for SpoolCleanup {
+  fn drop(&mut self) {
+    remove_spool_file(&self.plain);
+    remove_spool_file(&self.compressed);
+  }
+}
+
+fn remove_spool_file(path: &Path) {
+  if let Err(error) = std::fs::remove_file(path)
+    && error.kind() != std::io::ErrorKind::NotFound
+  {
+    warn!(error = %error, "could not remove log spool file");
+  }
 }
 
 async fn fetch_step_signed_url(
@@ -151,13 +199,13 @@ async fn finalize_job_metadata(rctx: &ResultsCtx<'_>, line_count: u64) {
   }
 }
 
-async fn upload_blob_with_retry(
+async fn upload_file_with_retry(
   client: &reqwest::Client,
   sas_url: &str,
   blob_storage_type: &str,
-  blob: Vec<u8>,
+  path: &Path,
 ) -> bool {
-  if upload_log_blob(client, sas_url, blob_storage_type, blob.clone(), true)
+  if upload_log_file(client, sas_url, blob_storage_type, path)
     .await
     .is_ok()
   {
@@ -165,7 +213,7 @@ async fn upload_blob_with_retry(
   }
   warn!("log blob upload failed, retrying in 2s");
   tokio::time::sleep(Duration::from_secs(2)).await;
-  match upload_log_blob(client, sas_url, blob_storage_type, blob, true).await {
+  match upload_log_file(client, sas_url, blob_storage_type, path).await {
     Ok(()) => true,
     Err(e) => {
       warn!(error = %e, "log blob upload retry failed");

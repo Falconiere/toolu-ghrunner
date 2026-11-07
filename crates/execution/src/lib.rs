@@ -64,7 +64,8 @@ impl Runner {
     cancel: CancellationToken,
     shutdown: CancellationToken,
   ) -> mpsc::Receiver<RunnerEvent> {
-    let (tx, rx) = mpsc::channel(1024);
+    // Log lines may be many MiB each; keep queued events bounded in bytes too.
+    let (tx, rx) = mpsc::channel(64);
     let config = self.config.clone();
     let masker = Arc::clone(&self.masker);
 

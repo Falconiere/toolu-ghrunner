@@ -176,5 +176,14 @@ async fn mount_job(
     .mount(server)
     .await;
 
+  // Long-running boot tests must retain their job lease until TOOLU_DEADLINE.
+  Mock::given(method("POST"))
+    .and(path("/renewjob"))
+    .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+      "lockedUntil": "2030-01-01T00:00:00Z"
+    })))
+    .mount(server)
+    .await;
+
   Ok(())
 }

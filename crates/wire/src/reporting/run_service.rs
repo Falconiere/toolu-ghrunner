@@ -124,17 +124,17 @@ pub async fn acquire_job(
   crate::net::acquire_job(client, run_service_url, token, request).await
 }
 
-/// Renew a job lock. Call every 60 seconds.
+/// Renew a job lock; `None` means the job was not found (HTTP 404).
 ///
 /// # Errors
 ///
-/// Returns `RunnerError::Protocol` on HTTP failures.
+/// Returns a classified network or protocol error for other failures.
 pub async fn renew_job(
   client: &reqwest::Client,
   run_service_url: &str,
   token: &str,
   request: &RenewJobRequest,
-) -> Result<RenewJobResponse, RunnerError> {
+) -> Result<Option<RenewJobResponse>, RunnerError> {
   crate::net::renew_job(client, run_service_url, token, request).await
 }
 

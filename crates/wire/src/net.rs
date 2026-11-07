@@ -1,34 +1,27 @@
-//! Async network layer for the GitHub Actions JIT protocol.
-//!
-//! This module owns every I/O call the runner makes: token exchange,
-//! session lifecycle, broker long-poll, job acquire/renew/complete,
-//! log upload, results service Twirp RPCs, and V1 service discovery.
-//!
-//! The boundary with [`protocol`] is one-way: every `pub async fn` here
-//! takes a [`reqwest::Client`] plus request types from `protocol`, and
-//! returns either `protocol` response types or `shared::RunnerError`.
-//! `protocol` itself is sync-only and never depends on this crate —
-//! that invariant is enforced by `protocol/Cargo.toml`'s dep set.
-//!
-//! The split exists so we can unit-test the JWT/RSA/AES crypto in
-//! `protocol` without spinning up an HTTP client, and so the listener
-//! can compose [`crate::reporting`] domain logic on top of these thin
-//! transport wrappers.
+//! Async transport for the GitHub Actions JIT protocol and Results Service.
+//! Pure builders and parsers live in the sync-only `protocol` crate.
 
 /// GitHub App manifest onboarding: loopback callback server + code exchange.
 pub mod app_manifest;
+/// Broker authentication and token exchange.
 pub mod auth;
 /// GitHub OAuth device-flow login: request code, poll for token.
 pub mod device_auth;
 /// GitHub App installation lookup + installation-token minting (#201).
 pub mod github_app;
+/// Legacy and block-blob log upload requests.
 pub mod log_upload;
+/// Broker message poll and acknowledgement.
 pub mod messages;
+/// JIT registration and runner removal.
 pub mod register;
+/// Results Service transport, including streamed log uploads.
 pub mod results_service;
+/// Run Service acquire, renew, and completion requests.
 pub mod run_service;
 /// Organization runner-group listing and name resolution (#201).
 pub mod runner_groups;
+/// Broker session create and delete requests.
 pub mod session;
 /// Bounded Results Service step-summary upload.
 pub mod step_summary;
@@ -36,6 +29,7 @@ pub mod step_summary;
 pub mod toolu_jobs;
 /// toolu.sh pairing and enrollment calls of a box becoming a machine (#207).
 pub mod toolu_pair;
+/// GHES V1 service discovery and timeline transport.
 pub mod v1;
 
 pub use app_manifest::{CallbackServer, convert_manifest_code};
@@ -55,7 +49,7 @@ pub use register::{
 };
 pub use results_service::{
   create_job_logs_metadata, create_step_logs_metadata, get_job_logs_signed_blob_url,
-  get_step_logs_signed_blob_url, update_workflow_steps, upload_log_blob,
+  get_step_logs_signed_blob_url, update_workflow_steps, upload_log_file,
 };
 pub use run_service::{acquire_job, complete_job, renew_job};
 pub use session::{create_session, delete_session};

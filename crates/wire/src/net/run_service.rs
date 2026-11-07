@@ -87,20 +87,8 @@ fn classify_transport_error(what: &str, err: &reqwest::Error) -> RunnerError {
   RunnerError::Network(format!("{what} failed: {err}"))
 }
 
-/// Classify a non-2xx run-service response.
-///
-/// 429 and 5xx are transient (rate-limited or a server hiccup — retrying
-/// can succeed); every other non-2xx is definitive. Mirrors the *pattern*
-/// of `net/register.rs::mint_failure`, NOT its variants: a definitive
-/// failure here is `Protocol`, not `Auth` — a stuck job report is not an
-/// auth problem.
-///
-/// The body is deliberately absent from the message: these errors are
-/// `Display`ed at WARN into the durable `_diag/runner.log`, and
-/// `SecretMasker` only redacts registered `secrets.*` — server text has no
-/// redaction guarantee. It stays on [`log_error_body`]'s `debug!` line,
-/// which `shared::startup` filters out entirely unless an operator opts in
-/// with `TOOLU_RUNNER_ALLOW_VERBOSE=1`.
+/// Treat 429/5xx as transient and other statuses as protocol errors.
+/// Response bodies stay out of display errors because they may contain secrets.
 fn classify_status(what: &str, status: reqwest::StatusCode) -> RunnerError {
   if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
     return RunnerError::Network(format!(
@@ -161,16 +149,14 @@ async fn log_error_body(what: &str, status: reqwest::StatusCode, mut response: r
 ///
 /// # Errors
 ///
-/// Returns `RunnerError::Network` on a transport failure, HTTP 429, or any
-/// 5xx (transient — GitHub is unreachable or unhealthy; retrying can
-/// succeed). Returns `RunnerError::Protocol` on any other non-2xx status or
-/// a malformed success body (definitive — retrying cannot help).
+/// Returns `Ok(None)` when GitHub no longer recognizes the job (HTTP 404).
+/// Other transport, HTTP, and parse errors keep their existing classification.
 pub async fn renew_job(
   client: &reqwest::Client,
   run_service_url: &str,
   token: &str,
   request: &RenewJobRequest,
-) -> Result<RenewJobResponse, RunnerError> {
+) -> Result<Option<RenewJobResponse>, RunnerError> {
   let url = format!("{run_service_url}/renewjob");
 
   let response = client
@@ -182,6 +168,9 @@ pub async fn renew_job(
     .map_err(|e| classify_transport_error("renew job", &e))?;
 
   let status = response.status();
+  if status == reqwest::StatusCode::NOT_FOUND {
+    return Ok(None);
+  }
   if !status.is_success() {
     log_error_body("renew job", status, response).await;
     return Err(classify_status("renew job", status));
@@ -190,6 +179,7 @@ pub async fn renew_job(
   response
     .json::<RenewJobResponse>()
     .await
+    .map(Some)
     .map_err(|e| classify_transport_error("renew job", &e))
 }
 

@@ -32,7 +32,14 @@ async fn forwarder_keeps_real_job_outputs_for_completion() -> TestResult {
   };
   let (fwd_tx, mut fwd_rx) = mpsc::channel(128);
   let (outcome_tx, outcome_rx) = oneshot::channel();
-  let handle = spawn_event_forwarder(engine_rx, StepCollector::new(), fwd_tx, cfg, outcome_tx);
+  let handle = spawn_event_forwarder(
+    engine_rx,
+    StepCollector::new(),
+    fwd_tx,
+    cfg,
+    outcome_tx,
+    None,
+  );
   let outcome = tokio::time::timeout(std::time::Duration::from_secs(30), outcome_rx).await??;
   handle.await?;
   assert_eq!(outcome.conclusion, Conclusion::Success);

@@ -236,7 +236,9 @@ async fn setup_deferred_action_log_retains_upload_and_live_identity() -> Result<
     live_log_tx: Some(live_tx),
     masker: Arc::new(Mutex::new(SecretMasker::new())),
   };
-  let mut state = ForwarderState::new(Vec::new(), &cfg);
+  let spool_temp = tempfile::tempdir()?;
+  let spool = LogSpool::for_job(spool_temp.path(), "setup-test")?;
+  let mut state = ForwarderState::new(&cfg, Some(spool));
   let collector = StepCollector::new();
   let (journal_tx, _journal_rx) = mpsc::channel(64);
   setup_forwarding::start(&mut state, &cfg, &collector, &journal_tx, lines).await;
@@ -285,7 +287,9 @@ async fn setup_deferred_action_log_retains_upload_and_live_identity() -> Result<
   setup_forwarding::before_event(&mut state, &cfg, &collector, &journal_tx, &mut event).await;
   handle_event_arm(&mut state, &cfg, &event).await;
   assert_eq!(upload_rx.try_recv()?, line);
-  assert_eq!(state.all_job_lines.last(), Some(&line));
+  let (spool_path, _) = state.job_log.take().ok_or("job spool")?.finish()?;
+  let contents = std::fs::read_to_string(spool_path)?;
+  assert_eq!(contents.lines().last(), Some(line.as_str()));
   let mut last = None;
   while let Ok(item) = live_rx.try_recv() {
     last = Some(item);
@@ -379,7 +383,14 @@ async fn setup_forwarding_captured_pull_reaches_results_before_user_step()
   let (event_tx, event_rx) = mpsc::channel(16);
   let (journal_tx, _journal_rx) = mpsc::channel(32);
   let (outcome_tx, outcome_rx) = oneshot::channel();
-  let handle = spawn_event_forwarder(event_rx, StepCollector::new(), journal_tx, cfg, outcome_tx);
+  let handle = spawn_event_forwarder(
+    event_rx,
+    StepCollector::new(),
+    journal_tx,
+    cfg,
+    outcome_tx,
+    None,
+  );
   for event in [
     RunnerEvent::StepStarted {
       step_id: pull_id.clone(),
