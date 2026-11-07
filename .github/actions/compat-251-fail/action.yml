@@ -1,0 +1,16 @@
+name: compat-251 fail
+description: "#251 X-2 probe: an inner exit 1 followed by always() cleanup and a success() step that must not run."
+runs:
+  using: composite
+  steps:
+    - name: Inner failure
+      shell: bash
+      run: exit 1
+    - name: Not run after the failure
+      if: success()
+      shell: bash
+      run: printf 'ran\n' > "$GITHUB_WORKSPACE/compat-251-not-run.txt"
+    - name: Cleanup after the failure
+      if: always()
+      shell: bash
+      run: printf 'done\n' > "$GITHUB_WORKSPACE/compat-251-cleanup.txt"

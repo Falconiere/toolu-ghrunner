@@ -1,0 +1,8 @@
+name: compat-251 docker
+description: "#251 X-3 probe: a Dockerfile action referenced remotely, so both runners report a Build row."
+outputs:
+  release:
+    description: The Alpine release inside the built image.
+runs:
+  using: docker
+  image: Dockerfile

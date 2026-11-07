@@ -1,0 +1,26 @@
+name: compat-251 inner
+description: "#251 X-2 probe: scoped inputs and outputs of a repeated nested composite, from a changed working directory."
+inputs:
+  label:
+    description: Which call this is.
+    required: true
+  value:
+    description: The value this call joins to its label.
+    required: true
+outputs:
+  combined:
+    description: "<label>:<value>"
+    value: ${{ steps.emit.outputs.combined }}
+runs:
+  using: composite
+  steps:
+    - name: Create the working directory
+      shell: bash
+      run: mkdir -p compat-251-wd
+    - name: Emit from the working directory
+      id: emit
+      shell: bash
+      working-directory: compat-251-wd
+      run: |
+        test "$(basename "$PWD")" = compat-251-wd
+        printf 'combined=%s\n' '${{ format('{0}:{1}', inputs.label, inputs.value) }}' >> "$GITHUB_OUTPUT"

@@ -1,0 +1,37 @@
+name: compat-251 outer
+description: "#251 X-2 probe: calls the inner composite twice with distinct inputs and joins their outputs."
+inputs:
+  who:
+    description: The typed input forwarded from the workflow.
+    required: true
+outputs:
+  summary:
+    description: JSON object built from both inner outputs.
+    value: ${{ steps.join.outputs.summary }}
+  first:
+    description: The first inner output.
+    value: ${{ steps.first.outputs.combined }}
+runs:
+  using: composite
+  steps:
+    - name: First inner call
+      id: first
+      uses: ./.github/actions/compat-251-inner
+      with:
+        label: first
+        value: ${{ inputs.who }}
+    - name: Second inner call
+      id: second
+      uses: ./.github/actions/compat-251-inner
+      with:
+        label: second
+        value: ${{ fromJSON('{"n":3}').n }}
+    - name: Join the inner outputs
+      id: join
+      shell: bash
+      run: |
+        test '${{ steps.first.outputs.combined }}' = 'first:${{ inputs.who }}'
+        test '${{ steps.second.outputs.combined }}' = second:3
+        test '${{ contains(steps.second.outputs.combined, ':3') && !contains(steps.first.outputs.combined, ':3') }}' = true
+        printf 'summary=%s\n' '${{ toJSON(fromJSON(format('{{"first":"{0}","second":"{1}","n":{2}}}', steps.first.outputs.combined, steps.second.outputs.combined, 3))) }}' | tr -d '\n ' >> "$GITHUB_OUTPUT"
+        printf '\n' >> "$GITHUB_OUTPUT"
