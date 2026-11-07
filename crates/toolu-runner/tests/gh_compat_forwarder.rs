@@ -413,7 +413,11 @@ async fn node_action_receives_the_forwarded_set_with_v2_flag_and_mode() -> TestR
   )?;
   let expected = map(forward_env(&extract_service_urls(&msg)).node);
   let seen = probe_node_action(forward_env(&extract_service_urls(&msg))).await?;
-  assert_eq!(seen, expected);
+  // The host process (e.g. a CI job) may carry its own ACTIONS_* vars, so check
+  // every forwarded pair arrived with its exact value rather than map equality.
+  for (key, value) in &expected {
+    assert_eq!(seen.get(key), Some(value), "{key}");
+  }
   assert_eq!(
     seen.get("ACTIONS_CACHE_SERVICE_V2").map(String::as_str),
     Some("True")
