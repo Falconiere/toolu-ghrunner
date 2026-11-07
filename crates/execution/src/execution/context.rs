@@ -86,6 +86,10 @@ pub struct ExecutionContext {
   pub(crate) container_setup: Option<shared::Conclusion>,
   /// The job declared a container that never started: a step that runs fails.
   pub(crate) job_container_missing: bool,
+  /// Top-level steps whose `pre` the pre-job phase already handled.
+  pub(crate) pre_handled: std::collections::HashSet<String>,
+  /// Top-level steps whose post the pre-job phase already registered.
+  pub(crate) post_registered: std::collections::HashSet<String>,
   /// Images prepared before workflow steps, keyed by registry image or action directory.
   pub(crate) prepared_docker_images: HashMap<String, String>,
   /// node20 → node24 migration flags and the actions each end-of-job warning lists.
@@ -159,6 +163,8 @@ impl ExecutionContext {
       stop_containers_pending: false,
       container_setup: None,
       job_container_missing: false,
+      pre_handled: std::collections::HashSet::new(),
+      post_registered: std::collections::HashSet::new(),
       prepared_docker_images: HashMap::new(),
       node_migration: crate::node::migration::NodeMigrationState::default(),
       network_env: Vec::new(),

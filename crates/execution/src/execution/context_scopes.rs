@@ -58,6 +58,17 @@ impl ExecutionContext {
     self.nested_posts.push(post);
   }
 
+  /// How many nested posts are registered so far (a composite's start mark).
+  pub(in crate::execution) fn nested_post_count(&self) -> usize {
+    self.nested_posts.len()
+  }
+
+  /// Transfer the nested posts registered since `mark` (one composite's own).
+  pub(in crate::execution) fn take_nested_posts_since(&mut self, mark: usize) -> Vec<PostStep> {
+    let mark = mark.min(self.nested_posts.len());
+    self.nested_posts.split_off(mark)
+  }
+
   /// Transfer all nested posts registered by the current top-level step.
   pub(in crate::execution) fn take_nested_posts(&mut self) -> Vec<PostStep> {
     std::mem::take(&mut self.nested_posts)

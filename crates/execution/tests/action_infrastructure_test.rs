@@ -477,11 +477,12 @@ async fn launch_success_uses_the_served_url_token_and_runs_the_action() -> TestR
   let checkout = message.steps.first().ok_or("checkout missing")?.id.clone();
   let (dir, _masker, observed) = run_observed(message).await?;
 
-  // Measured: the action is resolved three times — the setup prefetch, the
-  // #255 Docker-prepare manifest scan and the step that uses it. All three
-  // requests are identical and idempotent, and they share one archive fetch.
+  // Measured: the action is resolved four times — the setup prefetch, the
+  // #255 Docker-prepare manifest scan, the #251 pre-job phase's manifest scan
+  // and the step that uses it. All are identical and idempotent, and they
+  // share one archive fetch.
   let resolutions = peer.seen(&launch_path);
-  assert_eq!(resolutions.len(), 3, "{resolutions:?}");
+  assert_eq!(resolutions.len(), 4, "{resolutions:?}");
   for resolution in &resolutions {
     assert_eq!(
       resolution.authorization.as_deref(),
@@ -595,8 +596,9 @@ async fn launch_scoped_token_is_masked_and_never_logged() -> TestResult {
 /// Basic-encoded form reaches a log line or an infrastructure error, and no
 /// usable or half-written cache entry survives.
 ///
-/// The bound, not an exact count, is the contract: the three resolvers (setup
-/// prefetch, the #255 Docker-prepare manifest scan and the step itself) share
+/// The bound, not an exact count, is the contract: the four resolvers (setup
+/// prefetch, the #255 Docker-prepare manifest scan, the #251 pre-job phase and
+/// the step itself) share
 /// one in-flight download, so whether a later one re-requests the archive or
 /// joins the first depends on which finishes first.
 #[tokio::test]
@@ -609,12 +611,12 @@ async fn archive_failure_statuses_are_bounded_and_leave_no_cache_entry() -> Test
   // as an auth refresh, so they must hit the archive more than once, while
   // the rest must not exceed one request per resolver.
   for (status, least, most) in [
-    (StatusCode::NOT_FOUND, 1, 3),
-    (StatusCode::TOO_MANY_REQUESTS, 1, 3),
-    (StatusCode::INTERNAL_SERVER_ERROR, 1, 3),
-    (StatusCode::SERVICE_UNAVAILABLE, 1, 3),
-    (StatusCode::UNAUTHORIZED, 2, 6),
-    (StatusCode::FORBIDDEN, 2, 6),
+    (StatusCode::NOT_FOUND, 1, 4),
+    (StatusCode::TOO_MANY_REQUESTS, 1, 4),
+    (StatusCode::INTERNAL_SERVER_ERROR, 1, 4),
+    (StatusCode::SERVICE_UNAVAILABLE, 1, 4),
+    (StatusCode::UNAUTHORIZED, 2, 8),
+    (StatusCode::FORBIDDEN, 2, 8),
   ] {
     let peer = serve(Launch::Resolve(Archive::Status(status))).await?;
     let message = job(&peer.base)?;

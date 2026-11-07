@@ -137,6 +137,7 @@ fn register_post(
       docker_image: Some(image.to_owned()),
       docker_inputs: Some(inputs.clone()),
       condition: s.manifest.runs.post_if.clone(),
+      nested: Vec::new(),
     });
   }
 }

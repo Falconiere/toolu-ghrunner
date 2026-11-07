@@ -16,6 +16,7 @@ orchestrator: GitHub expands workflows and sends the engine a single job.
 | File | Primary item | Purpose |
 | --- | --- | --- |
 | `action_exec.rs` | `execute_action` | End-to-end `uses:` step execution: resolve → download → parse manifest → run `pre` (if any) → run `main`, returning the outcome plus any `post` to register. |
+| `action_pre.rs` | `run_phase_pre` | One step's pre-job-phase `pre` (Node, repository actions only): quiet resolve, numbered `Pre` row, post registered first as upstream; a job whose container never started runs nothing on the host. |
 | `action_metadata.rs` | `ActionMetadata` | Captures/restores runtime action identity and repository/ref, and exports authoritative metadata to child processes. |
 | `action_support.rs` | `build_node_env` | Shared action-resolution helpers: node-stage env building, composite input merging, manifest reading, and action-header/log emission. |
 | `actions.rs` | (mod decl) | Declares the `actions` sub-module (resolver, downloader, manifest). |

@@ -300,10 +300,12 @@ async fn dispatch_scoped_action(
   match resolved.manifest.runs.using {
     RunsUsing::Node { major } => run_resolved_node(step, ctx, env, resolved, major).await,
     RunsUsing::Composite => {
+      let mark = ctx.nested_post_count();
       let result = run_composite_action(step, ctx, env, resolved, depth).await?;
+      let nested = ctx.take_nested_posts_since(mark);
       Ok(ActionOutcome {
         conclusion: result.conclusion,
-        post: None,
+        post: composite_post(step, ctx, resolved, nested),
         outputs: result.outputs,
       })
     },
@@ -327,6 +329,36 @@ async fn dispatch_scoped_action(
       .await
     },
   }
+}
+
+/// Upstream gives a composite one "Post" row when it has embedded posts, and
+/// assumes a nested local `uses: ./path` has one (`ActionManager`, v2.338.2).
+fn composite_post(
+  step: &ActionStep,
+  ctx: &ExecutionContext,
+  resolved: &ResolvedStep,
+  nested: Vec<PostStep>,
+) -> Option<PostStep> {
+  let local = resolved
+    .manifest
+    .runs
+    .steps
+    .iter()
+    .any(|s| s.uses.as_deref().is_some_and(|u| u.starts_with("./")));
+  (local || !nested.is_empty()).then(|| PostStep {
+    step: step.clone(),
+    action_name: ctx.github_context("action").unwrap_or_default().to_owned(),
+    step_env: ctx.snapshot_step_env(),
+    report_id: uuid::Uuid::new_v4().to_string(),
+    scope_path: ctx.scope_path(),
+    action_dir: resolved.action_dir.clone(),
+    manifest: resolved.manifest.clone(),
+    major: 0,
+    docker_image: None,
+    docker_inputs: None,
+    condition: None,
+    nested,
+  })
 }
 
 async fn run_resolved_node(
@@ -421,20 +453,20 @@ async fn run_composite_inner(
 }
 
 /// Inputs for running a Node.js action's `pre`/`main` stages.
-struct NodeActionCtx<'a> {
-  step: &'a ActionStep,
-  ctx: &'a mut ExecutionContext,
-  events: &'a mpsc::Sender<RunnerEvent>,
-  workspace: &'a Path,
-  config: &'a RunnerConfig,
-  client: &'a reqwest::Client,
-  action_dir: &'a Path,
-  manifest: &'a ActionDefinition,
-  major: u8,
-  bounds: &'a StepBounds,
+pub(super) struct NodeActionCtx<'a> {
+  pub(super) step: &'a ActionStep,
+  pub(super) ctx: &'a mut ExecutionContext,
+  pub(super) events: &'a mpsc::Sender<RunnerEvent>,
+  pub(super) workspace: &'a Path,
+  pub(super) config: &'a RunnerConfig,
+  pub(super) client: &'a reqwest::Client,
+  pub(super) action_dir: &'a Path,
+  pub(super) manifest: &'a ActionDefinition,
+  pub(super) major: u8,
+  pub(super) bounds: &'a StepBounds,
   /// The step id this stage's `Log`/header/stdout/stderr events carry (see
   /// [`ActionRun::log_step_id`]); `step.id` stays the context/output key.
-  log_step_id: &'a str,
+  pub(super) log_step_id: &'a str,
 }
 
 /// Run a Node.js action: `pre` (if defined and `pre-if` holds) then `main`,
@@ -460,7 +492,11 @@ async fn run_node_action(mut c: NodeActionCtx<'_>) -> Result<ActionOutcome, Runn
   main.bounds = &main_bounds;
   let (conclusion, outputs) = run_node_stage(main).await?;
 
-  let post = build_post_step(&c);
+  let post = if c.ctx.post_registered.contains(&c.step.id) {
+    None
+  } else {
+    build_post_step(&c)
+  };
   Ok(ActionOutcome {
     conclusion,
     post,
@@ -474,7 +510,10 @@ async fn run_node_action(mut c: NodeActionCtx<'_>) -> Result<ActionOutcome, Runn
 /// runs unconditionally unless an explicit `pre-if` is given). `Success` when
 /// no `pre` runs.
 async fn run_node_pre_if_present(c: &mut NodeActionCtx<'_>) -> Result<Conclusion, RunnerError> {
-  if c.manifest.runs.pre.is_none() || skip_local_pre(c.events, c.log_step_id, c.step).await {
+  if c.manifest.runs.pre.is_none()
+    || c.ctx.pre_handled.contains(&c.step.id)
+    || skip_local_pre(c.events, c.log_step_id, c.step).await
+  {
     return Ok(Conclusion::Success);
   }
   let condition = c.manifest.runs.pre_if.as_deref().unwrap_or("always()");
@@ -482,13 +521,16 @@ async fn run_node_pre_if_present(c: &mut NodeActionCtx<'_>) -> Result<Conclusion
     return Ok(Conclusion::Success);
   }
 
-  report_pre_stage(c).await
+  report_pre_stage(c, 0).await
 }
 
 /// Run `pre` as its own reported step with a fresh `timeout-minutes` budget,
 /// applying the step's `continue-on-error` to a failure like upstream's
 /// separate pre step.
-async fn report_pre_stage(c: &mut NodeActionCtx<'_>) -> Result<Conclusion, RunnerError> {
+pub(super) async fn report_pre_stage(
+  c: &mut NodeActionCtx<'_>,
+  number: u32,
+) -> Result<Conclusion, RunnerError> {
   let report_id = uuid::Uuid::new_v4().to_string();
   let pre_name = format!("Pre {}", display_for(c.step, c.ctx).initial);
   let message = step_timeout_message(&pre_name, c.bounds.own_timeout);
@@ -497,7 +539,7 @@ async fn report_pre_stage(c: &mut NodeActionCtx<'_>) -> Result<Conclusion, Runne
     .send(RunnerEvent::StepStarted {
       step_id: report_id.clone(),
       step_name: pre_name,
-      step_number: 0,
+      step_number: number,
     })
     .await;
   let using = RunsUsing::Node { major: c.major };
@@ -508,7 +550,18 @@ async fn report_pre_stage(c: &mut NodeActionCtx<'_>) -> Result<Conclusion, Runne
   let mut stage = c.stage("pre");
   stage.log_step_id = &report_id;
   stage.bounds = &pre_bounds;
-  let result = with_timeout_message(message, Box::pin(run_node_stage(stage))).await;
+  // A job whose declared container never started runs nothing on the host.
+  let result = if stage.ctx.job_container_missing {
+    emit_log(
+      c.events,
+      &report_id,
+      "##[error]the job container is not running",
+    )
+    .await;
+    Ok((Conclusion::Failure, std::collections::HashMap::new()))
+  } else {
+    with_timeout_message(message, Box::pin(run_node_stage(stage))).await
+  };
   let mut conclusion = match &result {
     Ok((conclusion, _)) => *conclusion,
     Err(RunnerError::Cancelled) => Conclusion::Cancelled,
@@ -533,7 +586,7 @@ async fn report_pre_stage(c: &mut NodeActionCtx<'_>) -> Result<Conclusion, Runne
 }
 
 /// Build the post-step registration for a node action that defines `runs.post`.
-fn build_post_step(c: &NodeActionCtx<'_>) -> Option<PostStep> {
+pub(super) fn build_post_step(c: &NodeActionCtx<'_>) -> Option<PostStep> {
   c.manifest.runs.post.as_ref()?;
   Some(PostStep {
     step: c.step.clone(),
@@ -551,6 +604,7 @@ fn build_post_step(c: &NodeActionCtx<'_>) -> Option<PostStep> {
     docker_image: None,
     docker_inputs: None,
     condition: c.manifest.runs.post_if.clone(),
+    nested: Vec::new(),
   })
 }
 

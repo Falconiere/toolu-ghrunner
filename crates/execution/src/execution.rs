@@ -5,6 +5,7 @@
 /// Downloads and executes `uses:` actions.
 pub mod action_exec;
 mod action_metadata;
+mod action_pre;
 mod action_support;
 /// Resolves and downloads `uses:` actions (`resolver`, `downloader`, `manifest`).
 pub mod actions;

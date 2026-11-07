@@ -30,6 +30,7 @@ mod script_support;
 use script_support::{
   build_step_env_and_file_commands, merge_step_outputs, run_and_dispatch_script,
 };
+mod pre_phase;
 mod step_reports;
 use step_reports::{
   StepName, complete_step, record_condition_failure, report_skipped_step, start_step,
@@ -121,7 +122,18 @@ pub async fn run_steps(
     depth: DepthTracker::new(),
   };
   name_at_job_start(steps, ctx, events).await;
-  run_main_and_posts(steps, ctx, events, &cancel, &job, &mut job_state).await
+  let pre = pre_phase::run_pre_phase(steps, ctx, events, &job, &mut job_state).await;
+  // Pre rows shift the workflow steps and therefore the first post row.
+  let job = JobCtx {
+    first_post_number: post_number(2u32.saturating_add(ctx.docker_setup_count), steps.len()),
+    ..job
+  };
+  let main = run_main_and_posts(steps, ctx, events, &cancel, &job, &mut job_state).await?;
+  Ok(match (pre, main) {
+    (_, Conclusion::Cancelled) | (Conclusion::Cancelled, _) => Conclusion::Cancelled,
+    (Conclusion::Failure, _) => Conclusion::Failure,
+    _ => main,
+  })
 }
 
 /// Run main steps, then every registered cleanup stage before merging status.

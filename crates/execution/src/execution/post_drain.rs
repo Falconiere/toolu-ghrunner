@@ -185,15 +185,57 @@ async fn execute_post(
   job: &JobCtx<'_>,
   bounds: &StepBounds,
 ) -> Result<Conclusion, RunnerError> {
+  // A job whose declared container never started runs no post on the host.
+  if ctx.job_container_missing {
+    return Err(RunnerError::Docker(
+      "the job container is not running".to_owned(),
+    ));
+  }
   Ok(match post.manifest.runs.using {
     RunsUsing::Node { .. } => run_post_node_stage(post, report, ctx, events, job, bounds).await?,
     RunsUsing::Docker => run_post_docker_stage(post, report, ctx, events, job, bounds).await?,
-    RunsUsing::Composite => {
-      return Err(RunnerError::ActionManifest(
-        "composite action cannot register its own post".to_owned(),
-      ));
-    },
+    RunsUsing::Composite => run_embedded_posts(post, report, ctx, events, job, bounds).await?,
   })
+}
+
+/// A composite's "Post" row runs its embedded posts last-in first-out, each in
+/// its own scope and under its own `post-if` (upstream `CompositeActionHandler`
+/// stage Post); any failure fails the row.
+async fn run_embedded_posts(
+  post: &PostStep,
+  report: &PostReport<'_>,
+  ctx: &mut ExecutionContext,
+  events: &mpsc::Sender<RunnerEvent>,
+  job: &JobCtx<'_>,
+  bounds: &StepBounds,
+) -> Result<Conclusion, RunnerError> {
+  let mut conclusion = Conclusion::Success;
+  for nested in post.nested.iter().rev() {
+    let prior_scope = ctx.scope_path();
+    let prior_metadata = super::action_metadata::ActionMetadata::capture(ctx);
+    ctx.set_github_context("action", &nested.action_name);
+    super::action_metadata::set_reference(ctx, &nested.step.reference);
+    ctx.restore_step_scope(nested.scope_path.clone());
+    ctx.push_step_env(nested.step_env.clone());
+    let mut eval = ctx.eval_context();
+    eval.job_status = ctx.job_status();
+    let result = match ctx.evaluate_with(&eval, nested.effective_condition()) {
+      Ok(value) if value.is_truthy() => {
+        Box::pin(execute_post(nested, report, ctx, events, job, bounds)).await
+      },
+      Ok(_) => Ok(Conclusion::Skipped),
+      Err(error) => Err(error),
+    };
+    ctx.pop_step_env();
+    ctx.restore_step_scope(prior_scope);
+    prior_metadata.restore(ctx);
+    match result {
+      Err(RunnerError::Cancelled) => return Err(RunnerError::Cancelled),
+      Ok(Conclusion::Failure) | Err(_) => conclusion = Conclusion::Failure,
+      Ok(_) => {},
+    }
+  }
+  Ok(conclusion)
 }
 
 async fn report_post_error(events: &mpsc::Sender<RunnerEvent>, step_id: &str, error: &RunnerError) {

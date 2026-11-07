@@ -252,6 +252,58 @@ async fn local_action_runs_no_pre_and_warns() -> TestResult<()> {
   Ok(())
 }
 
+/// #251 D7: upstream runs every repository action's `pre` after "Set up job"
+/// and before the first main step, as numbered rows in step order, and
+/// registers the post then (paired run 42407955591: official `Pre` rows #2-#3
+/// ran before `actions/checkout` #4). A `run:` step before both runs after them.
+#[tokio::test]
+async fn pre_stages_run_before_every_main_step_in_numbered_rows() -> TestResult<()> {
+  let run = ActionStep::script("between", "echo run >> \"$MARKER_FILE\"", "success()");
+  let steps = vec![run, action_step("a", "act-a"), action_step("b", "act-b")];
+  let repos = [("act-a", "A"), ("act-b", "B")];
+  let Some((lines, events)) = run_with_markers(steps, &repos).await? else {
+    return Ok(());
+  };
+  let want = [
+    "A:pre",
+    "B:pre",
+    "run",
+    "A:main",
+    "B:main",
+    "B:post:STATE_k=B-state",
+    "A:post:STATE_k=A-state",
+  ];
+  assert_eq!(lines, want.map(ToOwned::to_owned));
+  let rows: Vec<(u32, String)> = events
+    .iter()
+    .filter_map(|event| {
+      if let RunnerEvent::StepStarted {
+        step_name,
+        step_number,
+        ..
+      } = event
+      {
+        Some((*step_number, step_name.clone()))
+      } else {
+        None
+      }
+    })
+    .collect();
+  let pre_rows: Vec<u32> = rows
+    .iter()
+    .filter(|(_, n)| n.starts_with("Pre "))
+    .map(|(i, _)| *i)
+    .collect();
+  assert_eq!(pre_rows, [2, 3], "pre rows follow Set up job: {rows:?}");
+  let main_rows: Vec<u32> = rows
+    .iter()
+    .filter(|(_, n)| !n.starts_with("Pre ") && !n.starts_with("Post "))
+    .map(|(i, _)| *i)
+    .collect();
+  assert_eq!(main_rows, [4, 5, 6], "{rows:?}");
+  Ok(())
+}
+
 /// 2: two action steps register posts; posts drain in REVERSE (LIFO) order.
 #[tokio::test]
 async fn two_posts_drain_in_reverse_lifo_order() -> TestResult<()> {
@@ -261,13 +313,14 @@ async fn two_posts_drain_in_reverse_lifo_order() -> TestResult<()> {
     return Ok(());
   };
 
-  // Mains run forward (A then B); posts drain LIFO (B then A).
+  // Every pre runs first (upstream's pre-job phase, #251), mains run forward
+  // (A then B), posts drain LIFO (B then A).
   assert_eq!(
     lines,
     vec![
       "A:pre".to_owned(),
-      "A:main".to_owned(),
       "B:pre".to_owned(),
+      "A:main".to_owned(),
       "B:main".to_owned(),
       "B:post:STATE_k=B-state".to_owned(),
       "A:post:STATE_k=A-state".to_owned(),
@@ -441,9 +494,9 @@ async fn failing_pre_honors_continue_on_error() -> TestResult<()> {
       ran_main,
       "{markers:?}"
     );
-    assert_eq!(
+    // Upstream registers the post before running `pre`, so it runs either way.
+    assert!(
       markers.iter().any(|m| m.starts_with("A:post:")),
-      ran_main,
       "{markers:?}"
     );
   }
@@ -495,9 +548,10 @@ async fn pre_timeout_reports_the_pre_step() -> TestResult<()> {
   assert_eq!(conclusion, shared::Conclusion::Failure, "{markers:?}");
   let pre = "Pre Deferred ${{ steps.prior.outputs.label }}";
   assert_eq!(reported(&events, pre), Some(shared::Conclusion::Failure));
-  assert_eq!(
+  // The failed pre fails the job, so the `success()` main is skipped (#251).
+  assert_ne!(
     reported(&events, "Deferred "),
-    Some(shared::Conclusion::Failure)
+    Some(shared::Conclusion::Success)
   );
   let timeouts: Vec<&str> = events
     .iter()

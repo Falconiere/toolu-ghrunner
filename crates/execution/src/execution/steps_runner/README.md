@@ -9,5 +9,6 @@ those stay in `steps_runner.rs`.
 
 | File | Primary item | Purpose |
 | --- | --- | --- |
+| `pre_phase.rs` | `run_pre_phase` | Upstream's pre-job phase: every top-level repository action's `pre` as a numbered row after the setup rows and before the first main step; its worst conclusion joins the job's. |
 | `script_support.rs` | script-step support functions | Builds script-step environment and file-command paths, dispatches stdout workflow commands, and merges step outputs. |
 | `step_reports.rs` | `StepName` / `start_step` | Step lifecycle events (start with any display-name warning, skip, pre-handler failure, completion). |
