@@ -516,7 +516,10 @@ async fn node_action_saves_and_restores_exact_bytes_over_v2_with_no_v1_request()
     std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Cargo.lock"))?;
   let file = dir.path().join("payload.bin");
   std::fs::write(&file, &payload)?;
-  let steps = cache_client_steps(&workspace, &file)?;
+  let mut steps = cache_client_steps(&workspace, &file)?.into_iter();
+  let (Some(save_step), Some(restore_step)) = (steps.next(), steps.next()) else {
+    return Err("save and restore steps".into());
+  };
 
   let mut ctx = ExecutionContext::with_masker(Arc::new(Mutex::new(SecretMasker::new())));
   ctx.set_service_env(env);
@@ -541,7 +544,7 @@ async fn node_action_saves_and_restores_exact_bytes_over_v2_with_no_v1_request()
   let fetcher = ActionFetcher::new(&shared::NetworkConfig::default())?;
   // Save, wipe the file, then restore — separate Node processes.
   let save = run_steps(
-    &steps[..1],
+    std::slice::from_ref(&save_step),
     &mut ctx,
     &tx,
     CancellationToken::new(),
@@ -557,7 +560,7 @@ async fn node_action_saves_and_restores_exact_bytes_over_v2_with_no_v1_request()
   .await?;
   std::fs::remove_file(&file)?;
   let restore = run_steps(
-    &steps[1..],
+    std::slice::from_ref(&restore_step),
     &mut ctx,
     &tx,
     CancellationToken::new(),
