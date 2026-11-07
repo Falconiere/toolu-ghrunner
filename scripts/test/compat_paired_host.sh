@@ -247,14 +247,22 @@ capture() {
   raw=$(python3 - "$RUNNER_TEMP/toolu-home/_diag/captures" <<'PY'
 import json, sys
 from pathlib import Path
+# The container image is sent unevaluated (an expression naming both digests),
+# so the variant comes from the message's `inputs` context, not its text.
+seen = []
 for path in sorted(Path(sys.argv[1]).glob("*.json")):
-    text = path.read_text()
-    message = json.loads(text)
-    # Only `stack` has a job container and services; the negative variant's
-    # image is the missing one.
-    if message.get("jobContainer") and message.get("jobServiceContainers") and "0000000000000251" not in text:
+    message = json.loads(path.read_text())
+    inputs = {e.get("k"): e.get("v")
+              for e in ((message.get("contextData") or {}).get("inputs") or {}).get("d") or []}
+    flags = (bool(message.get("jobContainer")), bool(message.get("jobServiceContainers")),
+             inputs.get("variant") == "probe")
+    if all(flags):
         print(path)
         break
+    seen.append(flags)
+else:
+    # Booleans only: no message content leaves the VM through this log.
+    print(f"{len(seen)} captures; (container, services, probe) = {sorted(set(seen))}", file=sys.stderr)
 PY
   )
   [[ -n "$raw" ]] || {

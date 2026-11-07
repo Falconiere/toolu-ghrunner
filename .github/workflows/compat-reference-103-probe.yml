@@ -298,14 +298,17 @@ jobs:
           value=$(printf 'compat-251-%s-%s-%s' '${{ github.run_id }}' '${{ inputs.lane }}' '${{ inputs.variant }}' | shasum -a 256 | cut -c1-32)
           echo "::add-mask::$value"
           echo "stdout $value"
-          echo "stderr $value" >&2
           echo "::warning title=compat-251 disposable::warning $value"
           printf 'COMPAT_251_DISPOSABLE=%s\n' "$value" >> "$GITHUB_ENV"
           printf '### compat-251 %s\n' "$value" >> "$GITHUB_STEP_SUMMARY"
+      # stderr only after the mask is registered: in the step that registers it,
+      # the official runner can log a stderr line before it processes the
+      # stdout `::add-mask::` (run 42407955591; separate stream readers).
       - name: Read the disposable value from the environment
         run: |
           test "${#COMPAT_251_DISPOSABLE}" = 32
           echo "env $COMPAT_251_DISPOSABLE"
+          echo "stderr $COMPAT_251_DISPOSABLE" >&2
 
   # #251 X-2: checkout, a nested composite called twice, a failing composite
   # with cleanup, and two Node actions whose posts run last-in, first-out.

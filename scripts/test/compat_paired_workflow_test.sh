@@ -390,12 +390,15 @@ DOCKER
   # image is the real one; only its sanitized copy is written.
   caps="$tmp/toolu-home/_diag/captures"
   mkdir -p "$caps"
-  echo '{"jobDisplayName":"probe / contexts","jobContainer":null,"jobServiceContainers":null}' >"$caps/1.json"
-  echo '{"jobContainer":{"lit":"ubuntu@sha256:0000000000000000000000000000000000000000000000000000000000000251"},"jobServiceContainers":{"type":2}}' >"$caps/2.json"
-  echo '{"jobContainer":{"lit":"ubuntu@sha256:fe81"},"jobServiceContainers":{"type":2}}' >"$caps/3.json"
+  # As GitHub sends them: the container is one unevaluated expression naming
+  # both images, so only the `inputs` context tells the variants apart.
+  expr='{"type":3,"expr":"inputs.who == '"'"'world'"'"' && '"'"'ubuntu@sha256:fe81'"'"' || '"'"'ubuntu@sha256:0000000000000000000000000000000000000000000000000000000000000251'"'"'"}'
+  echo '{"jobContainer":null,"jobServiceContainers":null,"contextData":{"inputs":{"t":2,"d":[{"k":"variant","v":"probe"}]}}}' >"$caps/1.json"
+  echo '{"jobContainer":'"$expr"',"jobServiceContainers":{"type":2},"contextData":{"inputs":{"t":2,"d":[{"k":"variant","v":"negative"}]}}}' >"$caps/2.json"
+  echo '{"jobContainer":'"$expr"',"jobServiceContainers":{"type":2},"contextData":{"inputs":{"t":2,"d":[{"k":"variant","v":"probe"}]}}}' >"$caps/3.json"
   host capture "$tmp/stack.json" >/dev/null 2>&1
   expect "the stack capture is found and sanitized" 0 $?
-  grep -q 'ubuntu@sha256:fe81' "$tmp/stack.json" 2>/dev/null &&
+  grep -q '"v": "probe"' "$tmp/stack.json" 2>/dev/null &&
     echo "ok: the probe variant's stack message is the one captured" || {
     echo "FAIL: wrong or missing stack capture" >&2
     fail=1
