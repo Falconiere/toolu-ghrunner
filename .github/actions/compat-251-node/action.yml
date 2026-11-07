@@ -2,8 +2,14 @@ name: compat-251 node
 description: "#251 X-2/X-4 probe: Node pre/main/post that check their own state and that posts run last-in, first-out."
 inputs:
   tag:
-    description: Distinguishes the two uses of this action in one job.
+    description: Distinguishes the uses of this action in one job.
     required: true
+  expect-pre:
+    description: "'false' for a local use (uses: ./…), which runs no pre on either runner."
+    default: 'true'
+  posts-before:
+    description: Tags of the posts that must already have run, joined by '|'.
+    default: ''
 runs:
   using: node24
   pre: pre.js

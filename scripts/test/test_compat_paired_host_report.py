@@ -68,7 +68,7 @@ class HostReportTest(unittest.TestCase):
         self.assertEqual(lanes["official"]["renewals_max"], 4)
 
     def test_poll_failures_are_counted_per_lane(self):
-        (self.temp / "toolu.log").write_text("WARN message poll returned status 404\n" * 5)
+        (self.temp / "toolu.log").write_text("WARN poll failed — retrying after backoff error=message poll returned status 404\n" * 5)
         (self.official / "_diag/Runner_1.log").write_text("Catch exception during get next message\n")
         lanes = self.run_report()["lanes"]
         self.assertEqual(lanes["toolu"]["poll_failures"], 5)

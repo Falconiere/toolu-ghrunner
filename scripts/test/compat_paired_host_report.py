@@ -14,7 +14,8 @@ Counts and booleans only; no log line, token or path content leaves the VM.
 - `renewals_max`: the most lock renewals one job recorded: toolu journal
   `lock_renewed` events per job file; official `Successfully renew job` lines
   per `Runner_*.log` (one listener process per JIT job).
-- `poll_failures`: toolu `message poll returned status` WARNs; official
+- `poll_failures`: toolu `poll failed` WARNs (status or transport, every toolu
+  lane's log); official
   `Catch exception during get next message` traces.
 - `toolu_only.ephemeral`: the ephemeral registration's `run` exit code, whether
   its local state is gone, and whether GitHub no longer lists its runner.
@@ -83,7 +84,9 @@ def observations(args):
     lanes["official"]["renewals_max"] = count_lines(
         [p for p in diag_files(paths["official"], ".log") if p.name.startswith("Runner_")],
         "Successfully renew job", per_file=True)
-    lanes["toolu"]["poll_failures"] = count_lines([temp / "toolu.log"], "message poll returned status")
+    # Every broker poll failure (status or transport) on every toolu lane log.
+    lanes["toolu"]["poll_failures"] = count_lines(
+        [p for p in paths["toolu"] if p.suffix == ".log"], "poll failed")
     lanes["official"]["poll_failures"] = count_lines(
         [p for p in diag_files(paths["official"], ".log") if p.name.startswith("Runner_")],
         "Catch exception during get next message")
