@@ -205,7 +205,9 @@ stays for the record; the comparator no longer reads runs in its job layout.
 
 **Not covered:**
 
-- macOS and ARM64 pairs (no host).
+- macOS and ARM64 pairs: the recorded run has no host for them.
+  `compat-paired.yml` covers them but has not been dispatched, so they stay
+  `unverified`.
 - GHES.
 - Accelerated services mode.
 - Live fault injection on the control plane (outage, cancel races, duplicate
