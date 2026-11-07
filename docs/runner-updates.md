@@ -94,7 +94,7 @@ behavior and are omitted. Live pairing at this pin is #251.
 
 | Upstream change | Toolu status | Evidence |
 | --- | --- | --- |
-| [#4669](https://github.com/actions/runner/pull/4669) `$/` self-repository refs in action manifests (flag `actions_self_repository`) | Fixed for nested composite `uses:`; a top-level `$/` step is listed in [known bugs](known-bugs.md) | `cargo test -p execution --test integration -- self_repository_test::` |
+| [#4669](https://github.com/actions/runner/pull/4669) `$/` self-repository refs in action manifests (flag `actions_self_repository`) | Fixed for nested composite `uses:`; a top-level `$/` step is listed in [known bugs](known-bugs.md) | `cargo test -p execution --test integration -- self_repository_test:: composite_self_repository_test::` |
 | [#4743](https://github.com/actions/runner/pull/4743) owned session id on broker session delete | Fixed: create sends `brokerSession: true`; delete is `DELETE /session?sessionId=<id>` | `cargo test -p wire --test integration -- runner_version::` |
 | [#4753](https://github.com/actions/runner/pull/4753) broker WebSocket probes | Not applicable: temporary telemetry, only when the job sets `system.runner.brokerwebsocketprobeurl`; never changes a job result | Source review |
 | [#4752](https://github.com/actions/runner/pull/4752) node24 for internal operations | Not applicable: the official listener's own bundled Node; toolu runs no internal Node | Source review |

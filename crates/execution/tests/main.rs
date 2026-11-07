@@ -29,6 +29,7 @@ mod compat_probe_replay_test;
 mod composite_bounds_test;
 mod composite_runner_context_test;
 mod composite_runner_temp_test;
+mod composite_self_repository_test;
 mod composite_semantics_test;
 mod conditional_cleanup_test;
 mod context_secret_batch_test;
