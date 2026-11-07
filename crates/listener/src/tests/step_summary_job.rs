@@ -128,7 +128,7 @@ async fn step_summary_real_job_document_is_uploaded_masked() -> TestResult {
   assert_eq!(
     sign.authorization.as_deref(),
     Some("Bearer runtime-token"),
-    "the Results Service call is unauthenticated"
+    "the Results Service call did not carry the runtime token"
   );
   let ids: serde_json::Value = serde_json::from_slice(&sign.body)?;
   assert_eq!(
