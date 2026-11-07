@@ -60,29 +60,36 @@ fn dispatch_branch() -> String {
   std::env::var("TOOLU_RUNNER_LIVE_BRANCH").unwrap_or_else(|_| "main".to_owned())
 }
 
-/// Workspace root — `cargo build` runs from here.
-fn workspace_root() -> PathBuf {
-  let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-  // `cargo` always sets CARGO_MANIFEST_DIR to a path that has at
-  // least one parent (the workspace root). Fall back to "." for
-  // hand-rolled `cargo run` invocations.
-  match manifest.parent() {
-    Some(p) => p.to_path_buf(),
-    None => PathBuf::from("."),
-  }
+/// Workspace root — `cargo build` runs from here. `CARGO_MANIFEST_DIR` is
+/// `<root>/crates/toolu-runner`, so the root is two levels up.
+pub fn workspace_root() -> PathBuf {
+  Path::new(env!("CARGO_MANIFEST_DIR"))
+    .ancestors()
+    .nth(2)
+    .map_or_else(|| PathBuf::from("."), Path::to_path_buf)
 }
 
-/// Resolved path to the `toolu-runner` binary after `cargo build`.
-fn binary_path() -> PathBuf {
-  let target = std::env::var("CARGO_TARGET_DIR")
-    .map_or_else(|_| workspace_root().join("target"), PathBuf::from);
-  target.join("debug").join("toolu-runner")
+/// The debug binary under `target_dir`, or under the workspace's `target/`.
+pub fn binary_path_for(target_dir: Option<PathBuf>) -> PathBuf {
+  target_dir
+    .unwrap_or_else(|| workspace_root().join("target"))
+    .join("debug")
+    .join("toolu-runner")
+}
+
+/// Labels a live registration advertises, naming the host it runs on.
+pub fn live_labels() -> String {
+  format!(
+    "self-hosted,toolu-runner-v1,{},{}",
+    shared::platform::runner_os(),
+    shared::platform::runner_arch()
+  )
 }
 
 /// Build the `toolu-runner` binary with the `live` feature. Returns
 /// the resolved path on success.
 async fn build_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
-  let path = binary_path();
+  let path = binary_path_for(std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from));
   let status = Command::new("cargo")
     .args([
       "build",
@@ -130,15 +137,20 @@ impl LiveHarness {
       .map_err(|e| format!("TOOLU_RUNNER_LIVE_TOKEN: {e}"))?;
     let repo = std::env::var("TOOLU_RUNNER_LIVE_REPO")
       .map_err(|e| format!("TOOLU_RUNNER_LIVE_REPO: {e}"))?;
-    let branch = dispatch_branch();
+    Self::for_binary(build_binary().await?, repo, token)
+  }
 
+  /// Allocate a temp config dir around an already-resolved binary.
+  pub fn for_binary(
+    binary_path: PathBuf,
+    repo: String,
+    token: String,
+  ) -> Result<Self, Box<dyn std::error::Error>> {
     let config_dir = tempfile::Builder::new()
       .prefix("toolu-runner-live-")
       .tempdir()?;
     let work_dir = config_dir.path().join("_work");
     std::fs::create_dir_all(&work_dir)?;
-
-    let binary_path = build_binary().await?;
 
     Ok(Self {
       binary_path,
@@ -146,7 +158,7 @@ impl LiveHarness {
       work_dir,
       repo,
       token,
-      branch,
+      branch: dispatch_branch(),
     })
   }
 
@@ -202,6 +214,7 @@ impl LiveHarness {
       .ok_or("config path utf-8")?
       .to_owned();
     let work_path = self.work_dir.to_str().ok_or("work dir utf-8")?.to_owned();
+    let labels = live_labels();
     let status = Command::new(&self.binary_path)
       .args([
         "register",
@@ -212,7 +225,7 @@ impl LiveHarness {
         "--name",
         &runner_name,
         "--labels",
-        "self-hosted,toolu-runner-v1,linux,x64",
+        &labels,
         "--config",
         &config_path,
         "--work",
@@ -272,11 +285,25 @@ impl LiveHarness {
   /// files. Called by tests as the final step so subsequent runs
   /// start from a clean GH state. Workflow file list is passed in
   /// because the test knows which files it pushed.
+  ///
+  /// Attempts every step, then returns all failures. Each is also printed,
+  /// because most callers tidy up before a test and do not read the `Result`.
   pub async fn cleanup(&self, workflows: &[&str]) -> Result<(), Box<dyn std::error::Error>> {
-    let _ = self.remove().await;
-    for name in workflows {
-      let _ = self.delete_workflow(name).await;
+    let mut failures = Vec::new();
+    if let Err(error) = self.remove().await {
+      failures.push(format!("remove: {error}"));
     }
-    Ok(())
+    for name in workflows {
+      if let Err(error) = self.delete_workflow(name).await {
+        failures.push(format!("delete_workflow {name}: {error}"));
+      }
+    }
+    if failures.is_empty() {
+      return Ok(());
+    }
+    for failure in &failures {
+      eprintln!("live cleanup failed: {failure}");
+    }
+    Err(failures.join("; ").into())
   }
 }

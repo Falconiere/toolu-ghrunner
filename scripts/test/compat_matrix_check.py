@@ -194,6 +194,10 @@ def check_coverage(matrix, errors):
         if row.get("id") in seen:
             errors.append(f"duplicate row id {row.get('id')}")
         seen[row.get("id")] = row
+        # A row outside `issues` would escape every per-issue check below.
+        for number in {str(row.get("id")).split("/")[0], str(row.get("issue"))}:
+            if number != str(EPIC) and number not in issues:
+                errors.append(f"{row.get('id')}: issue {number} is not in the matrix issues")
     for number, issue in issues.items():
         expected = {f"{number}/{i}" for i in issue.get("ids", [])}
         if not expected:
@@ -291,13 +295,11 @@ def validate(matrix, markdown, evidence_doc):
         problems, _ = reference_compare.verify(report["data"])
         errors += [f"report {path}: {p}" for p in problems]
     seen = check_coverage(matrix, errors)
+    # A difference only blocks rows citing that report (check_evidence), so a fresh
+    # report can back a fixed row while the old one stays unedited.
     for path, report in context["reports"].items():
-        for rid in sorted(report["unverified_rows"]):
-            lane = seen.get(rid, {}).get("lanes", {}).get("reference", {})
-            if lane.get("status") == "passed":
-                errors.append(f"{rid}: {path} records an unfixed difference; reference cannot pass")
-            if rid not in seen:
-                errors.append(f"{path} names unknown matrix row {rid}")
+        errors += [f"{path} names unknown matrix row {rid}"
+                   for rid in sorted(report["unverified_rows"]) if rid not in seen]
     for row in matrix.get("rows", []):
         check_row(row, matrix.get("issues", {}), context, errors)
     doc_anchors = {heading_anchor(line.lstrip("#")) for line in evidence_doc.splitlines()
