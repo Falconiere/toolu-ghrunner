@@ -753,11 +753,11 @@ async fn composite_run_step_gets_only_the_oidc_pair() -> TestResult<()> {
 #[test]
 fn orchestration_id_reaches_run_steps_only_when_flag_true() -> TestResult<()> {
   let on = forward_env(&extract_service_urls(&compat_job_message(None, None)?));
-  let id = "d85f33ea-0f34-50e1-aea0-68b4d4f8b993.probe.toolu.contexts.alpha_7_true";
+  let id = on_id_from_fixture()?;
   assert!(
     on.script
       .iter()
-      .any(|(k, v)| k == "ACTIONS_ORCHESTRATION_ID" && v == id)
+      .any(|(k, v)| k == "ACTIONS_ORCHESTRATION_ID" && *v == id)
   );
   assert!(on.node.iter().all(|(k, _)| k != "ACTIONS_ORCHESTRATION_ID"));
   let mut msg = compat_job_message(None, None)?;
@@ -772,4 +772,16 @@ fn orchestration_id_reaches_run_steps_only_when_flag_true() -> TestResult<()> {
       .all(|(k, _)| k != "ACTIONS_ORCHESTRATION_ID")
   );
   Ok(())
+}
+
+/// The fixture's own `system.orchestrationId`, so the test pins what the job carries.
+fn on_id_from_fixture() -> TestResult<String> {
+  let msg = compat_job_message(None, None)?;
+  Ok(
+    msg
+      .variables
+      .get("system.orchestrationId")
+      .map(|v| v.value.clone())
+      .ok_or("fixture lacks system.orchestrationId")?,
+  )
 }

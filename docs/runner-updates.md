@@ -3,9 +3,9 @@
 Toolu advertises **2.338.2** as its GitHub protocol compatibility target in
 session creation, idle and busy broker polls, and job acknowledgement. The source
 is `protocol::runner_version::COMPATIBILITY_VERSION`, pinned to the
-[official v2.338.2 release](https://github.com/actions/runner/tree/d1eb12d4b115c301201de27d667284e1a80f2ab5)
+[official v2.338.2 release](https://github.com/actions/runner/tree/v2.338.2)
 (`d1eb12d4b115c301201de27d667284e1a80f2ab5`). The earlier 2.337.0 baseline
-([release](https://github.com/actions/runner/tree/397b032cbf865e9c3ddfab89d533ec19325e1273),
+([release](https://github.com/actions/runner/tree/v2.337.0),
 inspection snapshot `cab9d1c`) is an ancestor; `docs/compat-reference-103.json`
 stays attributed to 2.337.0, the version its paired run used.
 This replaces the invented `3.0.0` identity and the inconsistent acknowledgement
