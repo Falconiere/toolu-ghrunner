@@ -156,9 +156,13 @@ async fn phase_pre_stage(
       if post.is_some() {
         c.ctx.post_registered.insert(step.id.clone());
       }
-      let conclusion = report_pre_stage(&mut c, number)
-        .await
-        .unwrap_or(Conclusion::Failure);
+      // The stage has closed its row (with any error logged on it); keep a
+      // cancellation a cancellation.
+      let conclusion = match report_pre_stage(&mut c, number).await {
+        Ok(conclusion) => conclusion,
+        Err(RunnerError::Cancelled) => Conclusion::Cancelled,
+        Err(_) => Conclusion::Failure,
+      };
       (conclusion, post)
     },
   }

@@ -84,9 +84,12 @@ pub(super) async fn run_phase_pre(
   if post.is_some() {
     ctx.post_registered.insert(s.step.id.clone());
   }
-  let conclusion = run_pre(&s, ctx, &runtime, &image, number)
-    .await
-    .unwrap_or(Conclusion::Failure);
+  // `run_pre` has closed its row either way; keep a cancellation a cancellation.
+  let conclusion = match run_pre(&s, ctx, &runtime, &image, number).await {
+    Ok(conclusion) => conclusion,
+    Err(RunnerError::Cancelled) => Conclusion::Cancelled,
+    Err(_) => Conclusion::Failure,
+  };
   Ok((conclusion, post))
 }
 
@@ -223,6 +226,13 @@ async fn run_pre(
     && super::step_attrs::resolve_continue_on_error(&id, token, ctx, s.events).await
   {
     conclusion = Conclusion::Success;
+  }
+  // A hard error is reported on this row, through the masked log sink,
+  // before it closes; the caller maps it to the row's conclusion.
+  if let Err(error) = &result
+    && !matches!(error, RunnerError::Cancelled)
+  {
+    emit_log(s.events, &id, &format!("##[error]{error}")).await;
   }
   emit_pre_event(
     s.events,

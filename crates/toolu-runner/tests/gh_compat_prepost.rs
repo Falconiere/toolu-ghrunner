@@ -287,6 +287,143 @@ async fn a_step_without_pre_reports_its_timeout_error_once_at_main() -> TestResu
   Ok(())
 }
 
+/// One `act-a` step through the pre-job phase with `node_bin` written over the
+/// seeded runtime (`None` keeps the real one), cancelling after `cancel_after`.
+async fn run_pre_phase_case(
+  pre_js: &str,
+  broken_node: bool,
+  cancel_after: Option<std::time::Duration>,
+) -> TestResult<Option<(shared::Conclusion, Vec<RunnerEvent>)>> {
+  let Some(node) = system_node() else {
+    eprintln!("SKIP: no system `node` on PATH; pre/post test needs a real node runtime");
+    return Ok(None);
+  };
+  let dir = tempfile::tempdir()?;
+  let (workspace, data_dir) = (dir.path().join("work"), dir.path().join("data"));
+  std::fs::create_dir_all(&workspace)?;
+  std::fs::create_dir_all(&data_dir)?;
+  let config = RunnerConfig {
+    data_dir: data_dir.clone(),
+    workspace_root: workspace.clone(),
+    ..RunnerConfig::default()
+  };
+  seed_node(&data_dir, &node)?;
+  if broken_node {
+    // A runtime that cannot be executed: the stage fails hard, not by exit code.
+    for major in [20, 24] {
+      let binary = node_binary_path(&node_cache_dir(&data_dir, node_version_for(major)));
+      std::fs::remove_file(&binary)?;
+      std::fs::write(&binary, "not an executable")?;
+    }
+  }
+  install_action(&workspace, "act-a", "A")?;
+  std::fs::write(workspace.join("act-a").join("pre.js"), pre_js)?;
+  let marker_file = data_dir.join("markers.txt");
+  std::fs::write(&marker_file, "")?;
+  let cancel = CancellationToken::new();
+  if let Some(after) = cancel_after {
+    let token = cancel.clone();
+    tokio::spawn(async move {
+      tokio::time::sleep(after).await;
+      token.cancel();
+    });
+  }
+  let (conclusion, events) = drive_with_cancel(
+    &[action_step("a", "act-a")],
+    &workspace,
+    &config,
+    &marker_file,
+    cancel,
+  )
+  .await?;
+  Ok(Some((conclusion, events)))
+}
+
+/// The id of the reported `Pre` row.
+fn pre_row(events: &[RunnerEvent]) -> Option<String> {
+  events.iter().find_map(|event| {
+    if let RunnerEvent::StepStarted {
+      step_id, step_name, ..
+    } = event
+      && step_name.starts_with("Pre ")
+    {
+      Some(step_id.clone())
+    } else {
+      None
+    }
+  })
+}
+
+/// #251 review cr-0c03427611c3940e: a hard `pre` error (an unusable runtime)
+/// is logged on the Pre row before that row closes as failed, and no second
+/// failed row appears.
+#[tokio::test]
+async fn a_hard_pre_error_is_logged_on_its_own_row() -> TestResult<()> {
+  let Some((conclusion, events)) = run_pre_phase_case("", true, None).await? else {
+    return Ok(());
+  };
+  assert_eq!(conclusion, shared::Conclusion::Failure);
+  let pre = pre_row(&events).ok_or("no Pre row")?;
+  let completed = events
+    .iter()
+    .position(
+      |event| matches!(event, RunnerEvent::StepCompleted { step_id, .. } if step_id == &pre),
+    )
+    .ok_or("Pre row never closed")?;
+  assert!(
+    events.iter().take(completed).any(|event| matches!(event,
+      RunnerEvent::Log { step_id, line, .. } if step_id == &pre && line.starts_with("##[error]"))),
+    "{events:?}"
+  );
+  assert_eq!(
+    reported(&events, "Pre Run ./act-a"),
+    Some(shared::Conclusion::Failure)
+  );
+  let pre_rows = events
+    .iter()
+    .filter(|event| matches!(event, RunnerEvent::StepStarted { step_name, .. } if step_name.starts_with("Pre ")))
+    .count();
+  assert_eq!(pre_rows, 1, "{events:?}");
+  Ok(())
+}
+
+/// #251 review cr-0c03427611c3940e: a `pre` cancelled while it runs, or before
+/// it starts, closes its row as cancelled (not failed), and the job ends
+/// cancelled. Real cancellation coverage; it also passed before the fix.
+#[tokio::test]
+async fn a_cancelled_pre_stays_cancelled() -> TestResult<()> {
+  let Some((conclusion, events)) = run_pre_phase_case(
+    "setTimeout(() => {}, 60000);\n",
+    false,
+    Some(std::time::Duration::from_secs(2)),
+  )
+  .await?
+  else {
+    return Ok(());
+  };
+  assert_eq!(
+    reported(&events, "Pre Run ./act-a"),
+    Some(shared::Conclusion::Cancelled),
+    "{events:?}"
+  );
+  assert_eq!(conclusion, shared::Conclusion::Cancelled);
+  // Cancelled before the stage starts: the row must not read as failed. (This
+  // pins observed behavior; it does not reach the stage's cancellation-error
+  // path, whose Cancelled mapping is verified by inspection only.)
+  let Some((conclusion, events)) =
+    run_pre_phase_case("", false, Some(std::time::Duration::ZERO)).await?
+  else {
+    return Ok(());
+  };
+  assert_ne!(
+    reported(&events, "Pre Run ./act-a"),
+    Some(shared::Conclusion::Failure),
+    "{events:?}"
+  );
+  assert_eq!(conclusion, shared::Conclusion::Cancelled);
+  Ok(())
+}
+
 /// #251 review cr-3272e06767da1856: with a `pre`, an unevaluable
 /// `timeout-minutes` is reported on the Pre row once it has started and on
 /// the main row once that has started, never on a row before its start.

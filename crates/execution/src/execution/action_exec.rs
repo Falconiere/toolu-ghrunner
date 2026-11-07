@@ -579,6 +579,13 @@ pub(super) async fn report_pre_stage(
   {
     conclusion = Conclusion::Success;
   }
+  // A hard error is reported on this row, through the masked log sink,
+  // before it closes; the caller maps it to the row's conclusion.
+  if let Err(error) = &result
+    && !matches!(error, RunnerError::Cancelled)
+  {
+    emit_log(c.events, &report_id, &format!("##[error]{error}")).await;
+  }
   let _ = c
     .events
     .send(RunnerEvent::StepCompleted {
