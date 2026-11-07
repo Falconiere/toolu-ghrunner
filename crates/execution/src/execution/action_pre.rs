@@ -19,12 +19,17 @@ use super::step_naming::PostStep;
 /// top-level repository Node action's `pre` as its own row `number`, before
 /// any main step, registering its post first as upstream does. `None` when
 /// the step has no such `pre` (local, image, unresolvable: the main reports).
-pub(crate) async fn run_phase_pre(
-  step: &ActionStep,
-  ctx: &mut ExecutionContext,
-  run: &ActionRun<'_>,
-  number: u32,
-) -> Option<(Conclusion, Option<PostStep>)> {
+/// A step whose `pre` belongs in the pre-job phase: its action directory,
+/// manifest and Node major. Resolved quietly; `None` leaves the step alone.
+pub(crate) struct PreTarget {
+  action_dir: std::path::PathBuf,
+  manifest: super::actions::manifest::ActionDefinition,
+  major: u8,
+}
+
+/// The step's pre-job-phase target, if it is a repository Node action with a
+/// `pre`. Evaluates nothing of the step, so a step without one is untouched.
+pub(crate) async fn phase_pre_target(step: &ActionStep, run: &ActionRun<'_>) -> Option<PreTarget> {
   let uses = build_uses_ref(&step.reference);
   let local = step
     .reference
@@ -50,11 +55,31 @@ pub(crate) async fn run_phase_pre(
     return None;
   };
   manifest.runs.pre.as_ref()?;
+  Some(PreTarget {
+    action_dir,
+    manifest,
+    major,
+  })
+}
+
+/// Run `target`'s `pre` as row `number` (see [`phase_pre_target`]).
+pub(crate) async fn run_phase_pre(
+  step: &ActionStep,
+  ctx: &mut ExecutionContext,
+  run: &ActionRun<'_>,
+  number: u32,
+  target: PreTarget,
+) -> (Conclusion, Option<PostStep>) {
+  let PreTarget {
+    action_dir,
+    manifest,
+    major,
+  } = target;
   ctx.pre_handled.insert(step.id.clone());
   let name = format!("Pre {}", display_for(step, ctx).initial);
   let step_env = match resolve_step_env(step, ctx, &ctx.eval_context()) {
     Ok(env) => env,
-    Err(error) => return Some((failed_row(run, &name, number, &error).await, None)),
+    Err(error) => return (failed_row(run, &name, number, &error).await, None),
   };
   ctx.push_step_env(step_env);
   let prior = super::action_metadata::ActionMetadata::capture(ctx);
@@ -75,7 +100,7 @@ pub(crate) async fn run_phase_pre(
   let result = phase_pre_stage(&mut c, &name, number, run).await;
   prior.restore(ctx);
   ctx.pop_step_env();
-  Some(result)
+  result
 }
 
 /// Run the row: skipped when `pre-if` is false, failed when it cannot be

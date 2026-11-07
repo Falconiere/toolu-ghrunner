@@ -8,7 +8,7 @@ use tokio::sync::mpsc;
 
 use super::{JobCtx, JobState};
 use crate::execution::action_exec::ActionRun;
-use crate::execution::action_pre::run_phase_pre;
+use crate::execution::action_pre::{phase_pre_target, run_phase_pre};
 use crate::execution::context::ExecutionContext;
 use crate::execution::step_attrs::resolve_timeout;
 use crate::execution::step_timeout::StepBounds;
@@ -29,20 +29,25 @@ pub(super) async fn run_pre_phase(
       return worst;
     }
     let number = 2u32.saturating_add(ctx.pre_job_rows);
-    let timeout = resolve_timeout(&step.id, step.timeout_in_minutes.as_ref(), ctx, events).await;
-    let bounds = StepBounds::nested(job.cancellation.deadline(), timeout, job.cancel.clone());
-    let run = ActionRun {
+    let unbounded = StepBounds::nested(job.cancellation.deadline(), None, job.cancel.clone());
+    let mut run = ActionRun {
       events,
       workspace: job.workspace,
       config: job.config,
-      bounds: &bounds,
+      bounds: &unbounded,
       http: job.http,
       fetcher: job.fetcher,
       log_step_id: &step.id,
     };
-    let Some((conclusion, post)) = run_phase_pre(step, ctx, &run, number).await else {
+    let Some(target) = phase_pre_target(step, &run).await else {
       continue;
     };
+    // Only a confirmed pre evaluates the step's timeout here; every other
+    // step's is evaluated once, at its main step.
+    let timeout = resolve_timeout(&step.id, step.timeout_in_minutes.as_ref(), ctx, events).await;
+    let bounds = StepBounds::nested(job.cancellation.deadline(), timeout, job.cancel.clone());
+    run.bounds = &bounds;
+    let (conclusion, post) = run_phase_pre(step, ctx, &run, number, target).await;
     if let Some(post) = post {
       job_state.posts.register(post);
     }

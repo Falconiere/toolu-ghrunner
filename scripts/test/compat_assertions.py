@@ -76,8 +76,21 @@ def job_problems(pairs, problems, only=None):
             if (key, job) in wanted and (only is None or message.startswith(only))]
 
 
-def lanes_of(report, platform):
-    return ((report.get("host") or {}).get(platform) or {}).get("lanes") or {}
+def obj(value):
+    """`value` when it is a JSON object, else an empty one: a malformed nested
+    section reads as missing data (and fails the check), never as a crash."""
+    return value if isinstance(value, dict) else {}
+
+
+def dig(value, *keys):
+    """`value[k1][k2]…` through objects only."""
+    for key in keys:
+        value = obj(value).get(key)
+    return value
+
+
+def lane_of(report, platform, lane):
+    return obj(dig(report.get("host"), platform, "lanes", lane))
 
 
 def same(left, right):
@@ -128,7 +141,7 @@ def check_leaks(report, platforms):
     found = []
     for platform in platforms:
         for lane in LANES:
-            scan = ((report.get("leaks") or {}).get(platform) or {}).get(lane)
+            scan = dig(report.get("leaks"), platform, lane)
             if not isinstance(scan, dict):
                 found.append(f"{platform}: no {lane} leak scan")
                 continue
@@ -138,7 +151,7 @@ def check_leaks(report, platforms):
             if count(scan.get("jobs_scanned")) != eligible_jobs(report, platform, lane):
                 found.append(f"{platform}: {lane} scanned {scan.get('jobs_scanned')!r} of "
                              f"{eligible_jobs(report, platform, lane)} jobs")
-            if count(lanes_of(report, platform).get(lane, {}).get("disposable_hits")) != 0:
+            if count(lane_of(report, platform, lane).get("disposable_hits")) != 0:
                 found.append(f"{platform}: {lane} VM logs or _diag hit count is not 0")
     return found
 
@@ -146,27 +159,27 @@ def check_leaks(report, platforms):
 def check_renewals(report, platforms):
     return [f"{platform}: {lane} renewals_max is not an integer of at least 2"
             for platform in platforms for lane in LANES
-            if (count(lanes_of(report, platform).get(lane, {}).get("renewals_max")) or 0) < 2]
+            if (count(lane_of(report, platform, lane).get("renewals_max")) or 0) < 2]
 
 
 def check_polls(report, platforms):
     return [f"{platform}: toolu poll_failures is not 0" for platform in platforms
-            if count(lanes_of(report, platform).get("toolu", {}).get("poll_failures")) != 0]
+            if count(lane_of(report, platform, "toolu").get("poll_failures")) != 0]
 
 
 def check_runners(report, _platforms):
-    return [f"{r['variant']}-{r.get('os')}-{r.get('arch')}/{r['job']}: no {lane} runner"
-            for r in report.get("jobs") or [] for lane in LANES
-            if r[lane]["conclusion"] != "skipped" and not r[lane].get("runner_name")]
+    rows = report.get("jobs") if isinstance(report.get("jobs"), list) else []
+    return [f"{dig(r, 'variant')}-{dig(r, 'os')}-{dig(r, 'arch')}/{dig(r, 'job')}: no {lane} runner"
+            for r in rows for lane in LANES
+            if dig(r, lane, "conclusion") != "skipped" and not dig(r, lane, "runner_name")]
 
 
 def check_lifecycle(report, platforms):
     found = []
     for platform in platforms:
-        jobs = (report.get("toolu_only") or {}).get(platform) or {}
+        jobs = obj(dig(report.get("toolu_only"), platform))
         found += [f"{platform}: {job} {jobs.get(job)}" for job in LIFECYCLE if jobs.get(job) != "success"]
-        ephemeral = (((report.get("host") or {}).get(platform) or {}).get("toolu_only") or {}).get("ephemeral")
-        ephemeral = ephemeral if isinstance(ephemeral, dict) else {}
+        ephemeral = obj(dig(report.get("host"), platform, "toolu_only", "ephemeral"))
         # Identity, not equality: `False == 0` and `1 == True` in Python.
         if not (count(ephemeral.get("exit_code")) == 0 and ephemeral.get("state_removed") is True
                 and ephemeral.get("runner_removed") is True):
@@ -197,7 +210,14 @@ def evaluate(report, problems, fatal, platforms, expected_jobs):
 
 def stored_disagreements(report, computed):
     """Assertions whose stored `passed` flag or rows differ from the recomputation."""
-    stored = report.get("assertions") or {}
-    return [f"assertion {i}: stored {stored.get(i, {}).get('passed')} != recomputed {c['passed']}"
-            for i, c in computed.items()
-            if stored.get(i, {}).get("passed") != c["passed"] or stored.get(i, {}).get("rows") != c["rows"]]
+    stored = obj(report.get("assertions"))
+    found = []
+    for ident, recomputed in computed.items():
+        entry = obj(stored.get(ident))
+        if entry.get("passed") != recomputed["passed"]:
+            found.append(f"assertion {ident}: stored passed {entry.get('passed')} != recomputed "
+                         f"{recomputed['passed']}")
+        if entry.get("rows") != recomputed["rows"]:
+            found.append(f"assertion {ident}: stored rows {entry.get('rows')} != recomputed "
+                         f"{recomputed['rows']}")
+    return found

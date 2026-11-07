@@ -252,6 +252,41 @@ async fn local_action_runs_no_pre_and_warns() -> TestResult<()> {
   Ok(())
 }
 
+/// #251 review cr-3272e06767da1856: the pre-job phase evaluates
+/// `timeout-minutes` only for a step that has a `pre`; an action without one
+/// gets its timeout diagnostic once, at its main step, never before it.
+#[tokio::test]
+async fn a_step_without_pre_reports_its_timeout_error_once_at_main() -> TestResult<()> {
+  let manifest = std::fs::read_to_string(Path::new(FIXTURE_DIR).join("action.yml"))?
+    .replace("  pre: 'pre.js'\n", "");
+  let mut step = action_step("a", "act-a");
+  step.timeout_in_minutes = Some(shared::TemplateToken::expression("fromJSON('not json')"));
+  let Some((_, events, markers)) = run_patched(step, &[("action.yml", &manifest)]).await? else {
+    return Ok(());
+  };
+  assert!(!markers.iter().any(|m| m == "A:pre"), "{markers:?}");
+  let mut started = false;
+  let mut errors = Vec::new();
+  for event in &events {
+    if let RunnerEvent::StepStarted { step_id, .. } = event
+      && step_id == "a"
+    {
+      started = true;
+    } else if let RunnerEvent::Log { step_id, line, .. } = event
+      && step_id == "a"
+      && line.contains("determine the step timeout")
+    {
+      errors.push((started, line.clone()));
+    }
+  }
+  assert_eq!(errors.len(), 1, "{errors:?}");
+  assert!(
+    errors.iter().all(|(after_start, _)| *after_start),
+    "{errors:?}"
+  );
+  Ok(())
+}
+
 /// #251 review cr-f19c86978f0c20db: a `pre-if` that cannot be evaluated is a
 /// visible failed `Pre` row with its error in the log, at the next number (no
 /// hole before the workflow steps), and no stage runs.

@@ -140,6 +140,37 @@ class AssertionTest(unittest.TestCase):
         problems, _ = reference_compare.verify(self.report)
         self.assertTrue(any("unexpected platform" in p for p in problems), problems)
 
+    def test_each_wired_check_fails_only_its_assertion(self):
+        cases = [
+            (lambda r: r.update(leftover_containers=["Linux-X64: abc alpine"]), ["X-3"]),
+            (lambda r: r.update(payload_errors=["Linux-X64-toolu-probe: payload bytes"]), ["R-artifacts"]),
+            (lambda r: row(r, "probe", "contexts")["toolu"].update(runner_name=""), ["R-acquire"]),
+        ]
+        for mutate, wanted in cases:
+            with self.subTest(wanted=wanted):
+                report = fixtures.paired_report()
+                mutate(report)
+                self.assertEqual(failing(report), wanted)
+
+    def test_acquire_judges_presence_not_equality(self):
+        row(self.report, "probe", "long")["toolu"]["steps"] = [["Set up job", "success"]]
+        self.assertIn("R-complete", failing(self.report))
+        self.assertNotIn("R-acquire", failing(self.report))
+        del self.report["jobs"][self.report["jobs"].index(row(self.report, "probe", "long"))]
+        self.assertIn("R-acquire", failing(self.report))
+
+    def test_malformed_nested_host_data_fails_without_crashing(self):
+        self.report["host"]["Linux-X64"]["lanes"]["toolu"] = None
+        self.report["host"]["macOS-ARM64"] = [1]
+        failed = failing(self.report)
+        for ident in ("R-masking", "X-5", "R-renew", "R-cancellation", "X-6-toolu"):
+            self.assertIn(ident, failed)
+
+    def test_a_stored_rows_mismatch_names_the_rows(self):
+        self.report["assertions"]["R-oidc"]["rows"] = ["103/R-cache"]
+        problems, _ = reference_compare.verify(self.report)
+        self.assertTrue(any("R-oidc: stored rows" in p for p in problems), problems)
+
     def test_one_renewal_fails_renew_only(self):
         self.report["host"]["Linux-X64"]["lanes"]["official"]["renewals_max"] = 1
         self.assertEqual(failing(self.report), ["R-renew"])
@@ -173,7 +204,7 @@ class AssertionTest(unittest.TestCase):
     def test_a_stored_flag_that_disagrees_fails_verify(self):
         self.report["host"]["Linux-X64"]["lanes"]["toolu"]["renewals_max"] = 0
         problems, _ = reference_compare.verify(self.report)
-        self.assertIn("assertion R-renew: stored True != recomputed False", problems)
+        self.assertIn("assertion R-renew: stored passed True != recomputed False", problems)
 
     def test_a_missing_section_fails_verify(self):
         del self.report["host"]
