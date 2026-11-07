@@ -21,6 +21,7 @@ use crate::broker_message::{PollOutcome, log_skipped_control};
 use crate::broker_refresh::refresh_access_token;
 use protocol::messages::BrokerMessage;
 use shared::RunnerError;
+use wire::net::STATUS_ONLINE;
 
 /// Poll until a job message arrives (`Some`), or until the lifecycle should
 /// end without one (`None`): cancellation, a broker shutdown or
@@ -39,7 +40,11 @@ pub(super) async fn poll_until_job(
     if drain.is_cancelled() {
       return Ok(drained());
     }
-    let Some(result) = unless_drained(drain, poll_once(ctx, &ctx.token, last_message_id)).await
+    let Some(result) = unless_drained(
+      drain,
+      poll_once(ctx, &ctx.token, last_message_id, STATUS_ONLINE),
+    )
+    .await
     else {
       return Ok(drained());
     };
