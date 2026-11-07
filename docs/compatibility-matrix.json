@@ -6025,7 +6025,7 @@
       "input": [
         "crates/toolu-runner/tests/fixtures/broker_message_job_request.json"
       ],
-      "expected": "ForceTokenRefresh classifies to PollOutcome::RefreshToken. Against a loopback OAuth peer: a transient 500 is retried once and the success publishes; persistent 503s are retried with a doubling backoff until the 30 s retry-sleep budget is exhausted, which ends the refresh as a Network failure with the spent bearer still in place; a peer that never answers is abandoned at the 10 s per-request deadline (the retry reaches the peer 10.4-12 s after the first request, the deadline plus the first jittered sleep) without publishing; a 401 is fatal and not retried; an empty grant is refused; cancellation mid-exchange exits the idle loop without publishing; the 401 and empty-grant errors echo neither the old nor the new token. The budget is waited out for real rather than sampled through a window, so the measured duration is the exhaustion; only its floor is asserted, never a strict total. The two lines the path writes \u2014 the retry WARN in retry_transient and the publication INFO \u2014 are captured from a real tracing subscriber on the retry-then-success path and carry neither token, unmasked; log lines on the exhaustion, rejection and cancellation paths are not captured. Only the idle-loop seam is driven; the mid-job watcher is not exercised.",
+      "expected": "ForceTokenRefresh classifies to PollOutcome::RefreshToken. Against a loopback OAuth peer: a transient 500 is retried once and the success publishes; persistent 503s are retried with a doubling backoff until the 30 s retry-sleep budget is exhausted, which ends the refresh as a Network failure with the spent bearer still in place; a peer that never answers is abandoned at the 10 s per-request deadline (the retry reaches the peer 10.4-12 s after the first request, the deadline plus the first jittered sleep) without publishing; a 401 is fatal and not retried; an empty grant is refused; cancellation mid-exchange exits the idle loop without publishing; the 401 and empty-grant errors echo neither the old nor the new token. The budget is waited out for real rather than sampled through a window, so the measured duration is the exhaustion; only its floor is asserted, never a strict total. The two lines the path writes — the retry WARN in retry_transient and the publication INFO — are captured from a real tracing subscriber on the retry-then-success path and carry neither token, unmasked; log lines on the exhaustion, rejection and cancellation paths are not captured. Only the idle-loop seam is driven; the mid-job watcher is not exercised.",
       "production_path": "listener::broker_refresh::refresh_access_token; wire::net::exchange_token",
       "tests": [
         [
@@ -9216,7 +9216,7 @@
         ".github/actions/step-summary-83-composite/action.yml",
         "docs/step-summaries.md"
       ],
-      "expected": "524287x'\u00e9'+'!\\n' (exactly 1 MiB) is emitted; 524288x'\u00e9'+'!' (1 MiB + 1) is rejected with an Error-level annotation and the job concludes Success.",
+      "expected": "524287x'é'+'!\\n' (exactly 1 MiB) is emitted; 524288x'é'+'!' (1 MiB + 1) is rejected with an Error-level annotation and the job concludes Success.",
       "production_path": "execution::step_summary + file_commands (collect/mask/limit), listener::step_summary (serial upload queue), wire::net::step_summary (Results Service RPCs)",
       "tests": [
         [
@@ -10667,7 +10667,7 @@
         "crates/toolu-runner/tests/fixtures/job_message.json",
         "crates/listener/tests/multiline_mask.sh"
       ],
-      "expected": "A later top-level notice with three newly registered short lines becomes 'annotation=[***|***|***]'. The nested composite registers two multiline masks (one LF, one CRLF), and a later step summary redacts the whole multiline span as a single '***', an individual line of it, and the CRLF value's line, while a non-secret control line survives; two later job outputs carrying lines of the same mask are dropped with upstream's secret warning while a clear output survives; a later deployment URL carrying a line is suppressed with upstream's warning (#235). The whole-value span is LF because step_summary normalizes CRLF to LF before masking, which is why a CR-bearing span is unreachable at that sink by design, not for want of a test.",
+      "expected": "A later top-level notice with three newly registered short lines becomes 'annotation=[***|***|***]'. The nested composite registers two multiline masks (one LF, one CRLF), and a later step summary redacts the whole multiline span as a single '***', an individual line of it, and the CRLF value's line, while a non-secret control line survives; three later job outputs carrying lines of those masks, including the CRLF value's line, are dropped with upstream's secret warning while a clear output survives; a later deployment URL carrying a line is suppressed with upstream's warning (#235). The whole-value span is LF because step_summary normalizes CRLF to the platform newline (LF on macOS and Linux, the hosts the suite runs on) before masking, which is why a CR-bearing whole span is unreachable at that sink on those hosts by design, not for want of a test.",
       "production_path": "shared::SecretMasker::add_mask + execution::command_dispatch::apply_add_mask; sinks in listener::execution_loop forwarder, observability journal writer, shared::startup RedactingWriter",
       "tests": [
         [
@@ -16041,7 +16041,7 @@
         "crates/toolu-runner/tests/fixtures/local_actions/composite-96-output/action.yml",
         ".github/workflows/file-commands-96.yml"
       ],
-      "expected": "Hex-compared bytes: EMPTY='', EQ='b=c', MIXED='x<<y', U='h\u00e9llo \u2713', CR='1\\r' (CR kept), DUP='2'; outputs multi='l1\\nl2', out='b=c'.",
+      "expected": "Hex-compared bytes: EMPTY='', EQ='b=c', MIXED='x<<y', U='héllo ✓', CR='1\\r' (CR kept), DUP='2'; outputs multi='l1\\nl2', out='b=c'.",
       "production_path": "crates/execution/src/execution/file_commands.rs (parse_kv_file / parse_kv_command / read_command_file)",
       "tests": [
         [
@@ -19748,7 +19748,7 @@
           "writes_one_private_file_equal_to_the_acquire_body"
         ]
       ],
-      "command": "cargo test -p execution --test integration -- replay_mutation_test::; TOOLU_CONTAINER_TEST_ROOT=\u2026 cargo test -p execution --test integration -- compat_probe_replay_test:: --ignored",
+      "command": "cargo test -p execution --test integration -- replay_mutation_test::; TOOLU_CONTAINER_TEST_ROOT=… cargo test -p execution --test integration -- compat_probe_replay_test:: --ignored",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -20007,7 +20007,7 @@
         },
         "github-com": {
           "status": "unverified",
-          "reason": "per-surface; cache fails live and renew/cancel/masking were not exercised live \u2014 see 103/R-*"
+          "reason": "per-surface; cache fails live and renew/cancel/masking were not exercised live — see 103/R-*"
         },
         "reference": {
           "status": "unverified",
@@ -20026,7 +20026,7 @@
     {
       "id": "103/S1",
       "issue": 103,
-      "criterion": "Intentionally drop inputs/matrix/env/defaults/outputs during message setup \u2192 Relevant production replay/live assertion fails; independent helper success cannot keep the acceptance scenario green.",
+      "criterion": "Intentionally drop inputs/matrix/env/defaults/outputs during message setup → Relevant production replay/live assertion fails; independent helper success cannot keep the acceptance scenario green.",
       "input": [
         "crates/execution/tests/compat_103_contexts_message.json",
         "crates/execution/tests/job_outputs_message.json"
@@ -20094,7 +20094,7 @@
     {
       "id": "103/S2",
       "issue": 103,
-      "criterion": "Real Docker action writes marker/output and input workflow checks supplied value \u2192 Removing Docker execution or replacing input with empty value fails the scenario in both committed and generated workflows.",
+      "criterion": "Real Docker action writes marker/output and input workflow checks supplied value → Removing Docker execution or replacing input with empty value fails the scenario in both committed and generated workflows.",
       "input": [
         "crates/execution/tests/compat_103_docker_message.json",
         ".github/workflows/compat-reference-103.yml",
@@ -20157,7 +20157,7 @@
     {
       "id": "103/S3",
       "issue": 103,
-      "criterion": "Same workflow on official/toolu Linux and macOS; Linux-only containers and supported architectures \u2192 Compare step outcomes/conclusions, output values, artifacts, cleanup and reporting; explicitly mark unsupported combinations not applicable.",
+      "criterion": "Same workflow on official/toolu Linux and macOS; Linux-only containers and supported architectures → Compare step outcomes/conclusions, output values, artifacts, cleanup and reporting; explicitly mark unsupported combinations not applicable.",
       "input": [
         ".github/workflows/compat-reference-103.yml",
         ".github/workflows/compat-reference-103-probe.yml",
@@ -20210,7 +20210,7 @@
     {
       "id": "103/S4",
       "issue": 103,
-      "criterion": "Real cache save/restore, artifact upload/download and OIDC allowed/denied request \u2192 Backend-visible behavior and content/claims match supported contracts; include forwarder and accelerated modes where compatibility is claimed; document intentional offline differences.",
+      "criterion": "Real cache save/restore, artifact upload/download and OIDC allowed/denied request → Backend-visible behavior and content/claims match supported contracts; include forwarder and accelerated modes where compatibility is claimed; document intentional offline differences.",
       "input": [
         ".github/workflows/compat-reference-103.yml",
         ".github/workflows/compat-reference-103-probe.yml",
@@ -20271,7 +20271,7 @@
     {
       "id": "103/S5",
       "issue": 103,
-      "criterion": "Acquire/renew/complete transient outage, cancellation races, unknown broker message and duplicate delivery \u2192 Existing control-plane claims receive explicit recovery/result checks, bounded waits and no duplicate execution.",
+      "criterion": "Acquire/renew/complete transient outage, cancellation races, unknown broker message and duplicate delivery → Existing control-plane claims receive explicit recovery/result checks, bounded waits and no duplicate execution.",
       "input": [],
       "expected": "Hermetic: transient Run Service failures retry within budget, renewal outage trips at 300 s with a lost-connection failure, cancel mid-backoff returns promptly, unknown/redelivered broker messages never execute twice, a failed ack never gates completion.",
       "production_path": "listener::job_lifecycle, listener::retry, listener::outage, listener::message_route",
@@ -20336,7 +20336,7 @@
     {
       "id": "103/S6",
       "issue": 103,
-      "criterion": "Annotation/summary/deployment URL workflow with disposable secret probes \u2192 Payload and real UI evidence validate correct location/content and masking; screenshots/logs alone do not replace assertions where APIs exist.",
+      "criterion": "Annotation/summary/deployment URL workflow with disposable secret probes → Payload and real UI evidence validate correct location/content and masking; screenshots/logs alone do not replace assertions where APIs exist.",
       "input": [],
       "expected": "Hermetic: secrets never reach the four durable sinks; a secret-bearing environment URL is suppressed from CompleteJob and masked sinks.",
       "production_path": "listener execution_loop/completion; observability journal; shared::SecretMasker",
@@ -20389,12 +20389,12 @@
     {
       "id": "103/S7",
       "issue": 103,
-      "criterion": "Missing token/Docker/Node/GHES/matching reference runner \u2192 Matrix status is unverified/blocked with reason; never count a skipped test or successful early return as coverage.",
+      "criterion": "Missing token/Docker/Node/GHES/matching reference runner → Matrix status is unverified/blocked with reason; never count a skipped test or successful early return as coverage.",
       "input": [
         ".github/workflows/live.yml",
         "docs/compatibility-matrix.json"
       ],
-      "expected": "Missing prerequisites produce unverified/blocked statuses with reasons; live tests panic 'UNVERIFIED: \u2026' and live.yml fails without its secret; ignored tests cannot back the gate.",
+      "expected": "Missing prerequisites produce unverified/blocked statuses with reasons; live tests panic 'UNVERIFIED: …' and live.yml fails without its secret; ignored tests cannot back the gate.",
       "production_path": "crates/toolu-runner/tests/helpers/live_harness.rs::require_live_env; scripts/test/compat_matrix_check.py",
       "tests": [
         [
@@ -20545,7 +20545,7 @@
       "issue": 103,
       "criterion": "Regression: OIDC token request allowed with id-token: write and denied without it",
       "input": [],
-      "expected": "With id-token: write the token's aud/repository/job_workflow_ref claims match; without it ACTIONS_ID_TOKEN_REQUEST_URL is absent \u2014 identical on both lanes. The local OIDC server implementation (not started by the job runner) mints/validates locally.",
+      "expected": "With id-token: write the token's aud/repository/job_workflow_ref claims match; without it ACTIONS_ID_TOKEN_REQUEST_URL is absent — identical on both lanes. The local OIDC server implementation (not started by the job runner) mints/validates locally.",
       "production_path": "execution::execution::service_endpoints; execution::oidc (local implementation, not started by the job runner)",
       "tests": [
         [
@@ -21306,7 +21306,7 @@
         },
         "github-com": {
           "status": "unverified",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727 covered consecutive jobs on one registration (run loop re-mint) only; concurrent registrations, boot and daemon paths not run live here \u2014 see rows 90/*, 92/*"
+          "reason": "https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727 covered consecutive jobs on one registration (run loop re-mint) only; concurrent registrations, boot and daemon paths not run live here — see rows 90/*, 92/*"
         },
         "reference": {
           "status": "unverified",

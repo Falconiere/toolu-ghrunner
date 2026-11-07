@@ -12,8 +12,9 @@ use shared::{ActionStep, ActionStepDefinitionReference, TemplateToken};
 /// `SecretMasker::add_mask` registers this whole value *and* each trimmed
 /// line, and the two families catch different wrong implementations, so
 /// #235's AC is only met when both are asserted at a sink. The breaks are
-/// LF so the span stays matchable verbatim: `step_summary` normalizes CRLF
-/// to LF before masking, which would make a CR-bearing span unreachable.
+/// LF so the span stays matchable verbatim: `step_summary` re-joins the
+/// document with the platform newline before masking — LF on the hosts this
+/// suite runs — which would make a CR-bearing span unreachable.
 /// It starts at `value` because a leading space would put `: ` in the
 /// composite's YAML plain scalar, which YAML reads as a mapping.
 pub fn whole_value(value: &str) -> String {

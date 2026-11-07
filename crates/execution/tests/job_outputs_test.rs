@@ -436,9 +436,9 @@ async fn nested_composite_mask_suppresses_a_later_job_output() -> TestResult {
   let workspace = config.workspace_root.join(&message.job_id);
   std::fs::create_dir_all(&workspace)?;
   crate::nested_mask::write_actions(&workspace, NESTED_SECRET)?;
-  // `leaked` carries the CRLF-split middle line and `leaked_tail` the last
-  // one; the summary carries the whole multiline value as well. Masking only
-  // the whole value, or only its lines, fails one of these.
+  // `leaked` and `leaked_tail` carry lines of the LF value, `leaked_cr` a
+  // line of the CRLF one; the summary carries the whole LF span as well.
+  // Masking only the whole value, or only its lines, fails one of these.
   // `printf` re-expands the breaks, so the summary carries the registered
   // value byte for byte — embedding them raw would split the script instead.
   let whole = crate::nested_mask::whole_value(NESTED_SECRET).replace('\n', "\\n");
@@ -446,7 +446,7 @@ async fn nested_composite_mask_suppresses_a_later_job_output() -> TestResult {
   set_script(
     &mut message,
     &format!(
-      "printf 'leaked={NESTED_SECRET}\\nleaked_tail={NESTED_SECRET}-tail\\nsafe=clear\\n' >> \"$GITHUB_OUTPUT\"; \
+      "printf 'leaked={NESTED_SECRET}\\nleaked_tail={NESTED_SECRET}-tail\\nleaked_cr={cr}\\nsafe=clear\\n' >> \"$GITHUB_OUTPUT\"; \
        printf 'summary-whole={whole}\\nsummary-line={NESTED_SECRET}-head\\nsummary-cr={cr}\\nsummary-clear=control\\n' >> \"$GITHUB_STEP_SUMMARY\""
     ),
   )?;
@@ -456,6 +456,7 @@ async fn nested_composite_mask_suppresses_a_later_job_output() -> TestResult {
     "leaked_tail",
     "steps.produce.outputs.leaked_tail",
   )?;
+  add_output(&mut message, "leaked_cr", "steps.produce.outputs.leaked_cr")?;
   add_output(&mut message, "safe", "steps.produce.outputs.safe")?;
   let producer = message
     .steps
@@ -471,7 +472,7 @@ async fn nested_composite_mask_suppresses_a_later_job_output() -> TestResult {
   let (conclusion, outputs) = completed(&events)?;
   assert_eq!(conclusion, Conclusion::Success, "{events:?}");
   assert_eq!(outputs.get("safe").map(String::as_str), Some("clear"));
-  for dropped in ["leaked", "leaked_tail"] {
+  for dropped in ["leaked", "leaked_tail", "leaked_cr"] {
     assert!(
       !outputs.contains_key(dropped),
       "a nested-composite multiline mask did not suppress {dropped}: {outputs:?}"
