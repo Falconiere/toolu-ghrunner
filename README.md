@@ -849,8 +849,10 @@ and local actions with `runs.using: docker` may use `image: Dockerfile` or a
 are reused while their images exist; local actions build against current files.
 Before user steps, the runner reports one `Pull <image>` per case-insensitive
 registry image, followed by one `Build <owner/repo>` per remote repository with
-Dockerfiles, including remote actions nested in composites. Prepared images are
-reused by their steps; local actions are prepared when reached.
+Dockerfiles, including remote actions nested in composites. When enabled, nested
+`$/` references resolve against the enclosing remote action for this discovery.
+Prepared images are reused by their steps; local actions are prepared when reached.
+Cancellation interrupts discovery, including an in-flight remote archive fetch.
 
 Manifest `args` preserves argument boundaries and empty values. When absent,
 `with.args` supplies shell-quoted arguments without executing a host shell.

@@ -489,7 +489,9 @@ outside a `tests/` tree.
   `docker_prepare` (#232) discovers remote Docker actions, including those nested
   in remote composites, before user steps: case-insensitive registry Pull rows
   precede per-repository Build rows, prepared images are reused, and setup
-  failure/cancellation stops user steps. Local actions prepare at step time;
+  failure/cancellation stops user steps. Discovery visits each remote ref once,
+  keeps the depth limit, resolves enabled nested `$/` against the enclosing remote
+  action, and can be cancelled during a fetch. Local actions prepare at step time;
   non-Linux skips pull/build setup.
   `node/` (#95: upstream `HandlerFactory`/`NodeUtil` node20→24 `migration`,
   glibc/musl + container `/etc/*release` `platform` probe,
