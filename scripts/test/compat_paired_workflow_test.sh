@@ -275,7 +275,8 @@ DOCKER
     echo "FAIL: accelerated container arguments wrong: $args" >&2
     fail=1
   }
-  [[ "$args" == *'mode = \"accelerated\"'* && "$args" == *"exec toolu-runner run"* ]] &&
+  # The rewrite itself, then its check, then the run: each must be present in order.
+  [[ "$args" == *'sed -i "s/^mode = \"forwarder\"\$/mode = \"accelerated\"/"'*'grep -qx "mode = \"accelerated\""'*"exec toolu-runner run"* ]] &&
     echo "ok: the containerized lane switches [services] mode before it runs" || {
     echo "FAIL: accelerated mode switch missing: $args" >&2
     fail=1
