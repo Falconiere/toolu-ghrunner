@@ -216,7 +216,10 @@ fn forward_env_omits_none_fields_never_empty() {
 fn missing_runtime_token_omits_every_service_var() {
   let mut urls = full_urls();
   urls.runtime_token = String::new();
-  assert_eq!(forward_env(&urls), ServiceEnv::default());
+  let env = forward_env(&urls);
+  assert!(env.node.is_empty());
+  assert!(env.container.is_empty());
+  assert!(env.script.is_empty());
 }
 
 /// Run a single echo step through the full `run_job` path and return the

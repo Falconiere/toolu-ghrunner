@@ -20060,7 +20060,7 @@
         ],
         [
           "crates/toolu-runner/tests/gh_compat_forwarder.rs",
-          "forward_env_emits_all_vars_with_fixture_values"
+          "per_step_type_sets_match_official_handlers"
         ],
         [
           "scripts/test/test_reference_compare.py",
@@ -20287,7 +20287,7 @@
         ],
         [
           "crates/toolu-runner/tests/gh_compat_forwarder.rs",
-          "forward_env_emits_all_vars_with_fixture_values"
+          "per_step_type_sets_match_official_handlers"
         ]
       ],
       "command": "cargo test -p toolu-runner --test integration -- cache_twirp_test:: gh_compat_forwarder::",
