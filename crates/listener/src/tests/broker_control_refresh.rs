@@ -49,6 +49,9 @@ const MESSAGE_ID: i64 = 99;
 #[derive(Clone, Debug)]
 struct Recorded {
   path: String,
+  /// When the request reached the peer, for measuring the caller's own
+  /// per-request deadline from the outside.
+  arrived_at: std::time::Instant,
   authorization: Option<String>,
   body: String,
 }
@@ -124,6 +127,15 @@ impl Peer {
       .cloned()
       .collect()
   }
+
+  /// Arrival instants for `path`, oldest first.
+  fn arrivals(&self, path: &str) -> Vec<std::time::Instant> {
+    self
+      .seen(path)
+      .iter()
+      .map(|request| request.arrived_at)
+      .collect()
+  }
 }
 
 fn record(seen: &Mutex<Vec<Recorded>>, path: &str, headers: &axum::http::HeaderMap, body: String) {
@@ -132,6 +144,7 @@ fn record(seen: &Mutex<Vec<Recorded>>, path: &str, headers: &axum::http::HeaderM
     .unwrap_or_else(std::sync::PoisonError::into_inner)
     .push(Recorded {
       path: path.to_owned(),
+      arrived_at: std::time::Instant::now(),
       authorization: headers
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
@@ -323,15 +336,25 @@ async fn a_stalled_token_endpoint_is_abandoned_at_its_deadline() -> TestResult {
       "a stalled peer must surface as a bounded Network failure"
     );
   }
-  let attempts = peer.seen("/oauth2/token").len();
-  assert_eq!(
-    attempts, 2,
-    "the first stalled request was not abandoned at its 10s deadline"
-  );
+  // The retry only reaches the peer once the first request is abandoned, so
+  // the gap between the two arrivals IS the per-request deadline — measured
+  // at the peer, independent of this test's own 13s guard.
+  let arrivals = peer.arrivals("/oauth2/token");
+  let [first, second] = arrivals.as_slice() else {
+    return Err(
+      format!(
+        "expected exactly two attempts, saw {}",
+        peer.seen("/oauth2/token").len()
+      )
+      .into(),
+    );
+  };
+  let deadline = second.duration_since(*first);
   assert!(
-    started.elapsed() >= Duration::from_secs(10),
-    "the deadline fired early"
+    (Duration::from_millis(9_500)..Duration::from_millis(11_500)).contains(&deadline),
+    "the stalled request was abandoned after {deadline:?}, not at its 10s deadline"
   );
+  assert!(started.elapsed() >= Duration::from_secs(10));
   assert_eq!(
     ctx.token, OLD_TOKEN,
     "a timed-out refresh published a token"

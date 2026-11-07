@@ -1,5 +1,7 @@
-//! Failure handling for Results Service step-summary uploads.
+//! Results Service step-summary uploads: the successful three-call sequence
+//! and its size bound, plus the failure handling around them.
 
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -170,22 +172,24 @@ const MASKED: &[u8] = b"# Step summary\n\nthe token is *** and stays masked\n";
 /// Serve one complete three-call upload against a loopback peer, recording
 /// every request. `limit` is the `soft_size_limit` the signed-URL RPC
 /// advertises.
-async fn success_peer(
-  limit: u64,
-  calls: usize,
-) -> TestResult<(
-  String,
-  tokio::task::JoinHandle<TestResult<Vec<(String, Vec<u8>)>>>,
-)> {
+async fn success_peer(limit: u64) -> TestResult<(String, Arc<Mutex<Vec<(String, Vec<u8>)>>>)> {
   let listener = TcpListener::bind("127.0.0.1:0").await?;
   let address = listener.local_addr()?;
   let base = format!("http://{address}");
   let signed = format!("{base}/blob/summary?sig=private");
-  let server = tokio::spawn(async move {
-    let mut seen = Vec::new();
-    for _ in 0..calls {
-      let (mut socket, _) = listener.accept().await?;
-      let (head, body) = read_request(&mut socket).await?;
+  // Accepts for as long as the test lives, so an unexpected extra call (a
+  // blob PUT the size guard should have prevented) is recorded, not refused
+  // by a closed listener.
+  let seen = Arc::new(Mutex::new(Vec::new()));
+  let recorder = Arc::clone(&seen);
+  tokio::spawn(async move {
+    loop {
+      let Ok((mut socket, _)) = listener.accept().await else {
+        return;
+      };
+      let Ok((head, body)) = read_request(&mut socket).await else {
+        continue;
+      };
       let start = head.lines().next().unwrap_or_default().to_owned();
       let reply = if start.contains("GetStepSummarySignedBlobURL") {
         serde_json::json!({
@@ -199,7 +203,11 @@ async fn success_peer(
       } else {
         serde_json::json!({"ok": true}).to_string()
       };
-      socket
+      recorder
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .push((head, body));
+      let _ = socket
         .write_all(
           format!(
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\
@@ -208,13 +216,19 @@ async fn success_peer(
           )
           .as_bytes(),
         )
-        .await?;
-      socket.flush().await?;
-      seen.push((head, body));
+        .await;
+      let _ = socket.flush().await;
     }
-    Ok::<_, Box<dyn std::error::Error + Send + Sync>>(seen)
   });
-  Ok((base, server))
+  Ok((base, seen))
+}
+
+/// Every request the peer recorded so far, oldest first.
+fn recorded(seen: &Mutex<Vec<(String, Vec<u8>)>>) -> Vec<(String, Vec<u8>)> {
+  seen
+    .lock()
+    .unwrap_or_else(std::sync::PoisonError::into_inner)
+    .clone()
 }
 
 fn summary(content: &[u8]) -> super::StepSummary<'_> {
@@ -231,7 +245,7 @@ fn summary(content: &[u8]) -> super::StepSummary<'_> {
 /// carrying the three backend identities and the real byte count.
 #[tokio::test]
 async fn step_summary_success_signs_puts_and_publishes_metadata() -> TestResult {
-  let (base, server) = success_peer(1_048_576, 3).await?;
+  let (base, peer) = success_peer(1_048_576).await?;
   super::upload_step_summary(
     &reqwest::Client::new(),
     &base,
@@ -239,7 +253,7 @@ async fn step_summary_success_signs_puts_and_publishes_metadata() -> TestResult 
     &summary(MASKED),
   )
   .await?;
-  let seen = tokio::time::timeout(Duration::from_secs(5), server).await???;
+  let seen = recorded(&peer);
   let [signing, put, metadata] = seen.as_slice() else {
     return Err(format!("expected three calls, saw {}", seen.len()).into());
   };
@@ -302,7 +316,7 @@ async fn step_summary_success_signs_puts_and_publishes_metadata() -> TestResult 
 #[tokio::test]
 async fn step_summary_soft_size_limit_is_inclusive_and_fails_before_the_put() -> TestResult {
   let limit = u64::try_from(MASKED.len())?;
-  let (base, server) = success_peer(limit, 3).await?;
+  let (base, peer) = success_peer(limit).await?;
   super::upload_step_summary(
     &reqwest::Client::new(),
     &base,
@@ -311,14 +325,12 @@ async fn step_summary_soft_size_limit_is_inclusive_and_fails_before_the_put() ->
   )
   .await?;
   assert_eq!(
-    tokio::time::timeout(Duration::from_secs(5), server)
-      .await???
-      .len(),
+    recorded(&peer).len(),
     3,
     "a document at the limit must still upload"
   );
 
-  let (base, server) = success_peer(limit - 1, 1).await?;
+  let (base, peer) = success_peer(limit - 1).await?;
   let error = super::upload_step_summary(
     &reqwest::Client::new(),
     &base,
@@ -332,12 +344,18 @@ async fn step_summary_soft_size_limit_is_inclusive_and_fails_before_the_put() ->
     error,
     "reporting error: summary exceeds Results Service soft size limit"
   );
+  // The peer keeps accepting, so a stray PUT after the guard would be
+  // recorded here rather than refused by a closed listener.
+  tokio::time::sleep(Duration::from_millis(200)).await;
+  let after_refusal = recorded(&peer);
   assert_eq!(
-    tokio::time::timeout(Duration::from_secs(5), server)
-      .await???
-      .len(),
+    after_refusal.len(),
     1,
-    "an oversized document must never reach the blob PUT"
+    "an oversized document must never reach the blob PUT: {:?}",
+    after_refusal
+      .iter()
+      .map(|(head, _)| head.lines().next().unwrap_or_default())
+      .collect::<Vec<_>>()
   );
   Ok(())
 }
