@@ -1,7 +1,7 @@
 //! `uses: $/x` inside a composite action goes through the real nested-step
 //! path (`execute_composite_action` -> `run_nested_uses_step`): with the
 //! `actions_self_repository` flag it resolves against the workflow repository
-//! and SHA (the fetch afterwards needs the network and is allowed to fail);
+//! and SHA (the fetch afterwards is pointed at a closed loopback proxy and fails);
 //! without the flag it is refused with upstream's message.
 
 use std::collections::HashMap;
@@ -68,7 +68,11 @@ async fn run(enabled: bool) -> Result<(String, Vec<String>), Box<dyn std::error:
   let manifest = manifest();
   let inputs = HashMap::new();
   let cancel = CancellationToken::new();
-  let http = reqwest::Client::new();
+  // Hermetic: every request goes to a closed loopback port, so the fetch
+  // after resolution fails immediately and nothing reaches the network.
+  let http = reqwest::Client::builder()
+    .proxy(reqwest::Proxy::all("http://127.0.0.1:1")?)
+    .build()?;
   let fetcher = ActionFetcher::new(&shared::NetworkConfig::default())?;
   let params = CompositeParams {
     manifest: &manifest,
