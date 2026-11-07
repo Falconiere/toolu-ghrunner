@@ -10,13 +10,15 @@ evidence. Nothing here trusts a stored `passed` flag.
 """
 
 import json
+import re
 
 # id -> rows it backs, jobs (scoped per variant), and extra predicates by name.
 ASSERTIONS = {
     "X-1": {"rows": ["67/X-1"], "jobs": {"probe": ["contexts", "consumer"],
                                           "negative": ["contexts", "consumer"]},
             "checks": ["results"]},
-    "X-2": {"rows": ["67/X-2"], "jobs": {"probe": ["composite", "consumer"]}, "checks": ["results"]},
+    "X-2": {"rows": ["67/X-2"], "jobs": {"probe": ["composite", "docker-pre", "consumer"]},
+            "checks": ["results"]},
     "X-3": {"rows": ["67/X-3"], "jobs": {"probe": ["stack", "container", "cancel-container", "consumer"],
                                           "negative": ["stack", "container"]},
             "checks": ["results", "containers"], "os": "Linux"},
@@ -148,6 +150,10 @@ def check_leaks(report, platforms):
             for kind in ("logs", "annotations", "unreadable"):
                 if count(scan.get(kind)) != 0:
                     found.append(f"{platform}: {lane} {kind} count is not 0")
+            reasons = {k: v for k, v in obj(scan.get("reasons")).items()
+                       if isinstance(k, str) and re.fullmatch(r"http-\d{3}|error", k)}
+            if reasons:
+                found.append(f"{platform}: {lane} unreadable because {sorted(reasons.items())}")
             if count(scan.get("jobs_scanned")) != eligible_jobs(report, platform, lane):
                 found.append(f"{platform}: {lane} scanned {scan.get('jobs_scanned')!r} of "
                              f"{eligible_jobs(report, platform, lane)} jobs")

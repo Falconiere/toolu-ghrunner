@@ -57,9 +57,9 @@ EXPECTED_PLATFORMS = (("Linux", "X64"), ("Linux", "ARM64"), ("macOS", "ARM64"))
 # annotations/secrets/deploy/container are the #237 surface probes; the
 # `surfaces` job of compat-paired.yml reads their GitHub records back. The rest
 # of the second block is #251's (`extended` jobs run in the probe variant only).
-LINUX_ONLY = ("docker", "container", "stack", "cancel-container")
+LINUX_ONLY = ("docker", "container", "stack", "cancel-container", "docker-pre")
 EXTENDED = ("leaks", "composite", "failure", "orphans", "timeout", "cancel", "cancel-container",
-            "long", "pool-a", "pool-b")
+            "long", "pool-a", "pool-b", "docker-pre")
 EXPECTED_JOBS = {"Linux": ("contexts", "docker", "services", "consumer",
                            "annotations", "secrets", "deploy", "container",
                            "stack") + EXTENDED,
@@ -269,11 +269,24 @@ def lifecycle(jobs):
     return found
 
 
-def fetch(path):
-    """`gh api path` text, or None when GitHub has nothing to return. Job logs
-    carry ANSI colour codes, which `gh` refuses to print without the flag."""
+def failure_category(stderr):
+    """A bounded label for a failed `gh api` read: `http-<status>` or `error`.
+    Never stderr itself, which can carry signed URLs or tokens."""
+    match = re.search(r"\(HTTP (\d{3})\)", stderr or "")
+    return f"http-{match.group(1)}" if match else "error"
+
+
+def fetch(path, reasons=None):
+    """`gh api path` text, or None when GitHub has nothing to return; the
+    failure's category is counted in `reasons`. Job logs carry ANSI colour
+    codes, which `gh` refuses to print without the flag."""
     out = subprocess.run(["gh", "api", "--allow-escape-sequences", path], capture_output=True, text=True)
-    return out.stdout if out.returncode == 0 else None
+    if out.returncode == 0:
+        return out.stdout
+    if reasons is not None:
+        category = failure_category(out.stderr)
+        reasons[category] = reasons.get(category, 0) + 1
+    return None
 
 
 def leak_counts(run_id, jobs):
@@ -289,9 +302,10 @@ def leak_counts(run_id, jobs):
         platform = f"{os_name}-{arch}"
         value = disposable(run_id, platform, lane)
         counts = found.setdefault(platform, {}).setdefault(
-            lane, {"logs": 0, "annotations": 0, "jobs_scanned": 0, "unreadable": 0})
-        log = fetch(f"repos/{REPO}/actions/jobs/{job['id']}/logs")
-        notes = fetch(job["check_run_url"].split("api.github.com/", 1)[-1] + "/annotations?per_page=100")
+            lane, {"logs": 0, "annotations": 0, "jobs_scanned": 0, "unreadable": 0, "reasons": {}})
+        log = fetch(f"repos/{REPO}/actions/jobs/{job['id']}/logs", counts["reasons"])
+        notes = fetch(job["check_run_url"].split("api.github.com/", 1)[-1] + "/annotations?per_page=100",
+                      counts["reasons"])
         if log is None or notes is None:
             counts["unreadable"] += 1
             continue

@@ -542,6 +542,11 @@ pub(super) async fn report_pre_stage(
       step_number: number,
     })
     .await;
+  if number > 0 {
+    // A pre-job-phase row reports its own timeout error, as upstream's runner does.
+    let token = c.step.timeout_in_minutes.as_ref();
+    super::step_attrs::resolve_timeout(&report_id, token, c.ctx, c.events).await;
+  }
   let using = RunsUsing::Node { major: c.major };
   super::step_metadata::emit_action_metadata(c.events, &report_id, &c.step.reference, &using).await;
   emit_log(c.events, &report_id, "##[group]Pre Run").await;

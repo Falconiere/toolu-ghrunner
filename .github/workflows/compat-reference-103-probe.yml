@@ -20,8 +20,8 @@ name: compat-reference-103-probe
 #
 # #251: `stack` (X-3) runs wherever `run_docker` is set, in both variants (the
 # negative one's job-container image is missing). The rest need `extended`,
-# which only the paired toolu/official probe callers pass: `composite`
-# (X-2), `failure`/`orphans`/`timeout`/`cancel`
+# which only the paired toolu/official probe callers pass: `composite` and,
+# on Linux, `docker-pre` (X-2, pre-job phase), `failure`/`orphans`/`timeout`/`cancel`
 # (X-4, R-cancellation; `cancel` ends by job timeout, which GitHub delivers as a
 # JobCancellation), `long` (R-renew), `pool-a`/`pool-b` (X-6: two runners per
 # lane at once). `contexts` leaves `_temp`, `_tool` and workspace markers that
@@ -428,6 +428,26 @@ jobs:
       - name: Return workspace ownership
         if: always()
         run: chown -R "$(stat -c %u:%g "$GITHUB_WORKSPACE")" "$GITHUB_WORKSPACE"
+
+  # #251 D7: a remote Docker action's pre-entrypoint runs in the pre-job phase,
+  # so the first (run) step already sees both uses' pre markers; main and post
+  # keep their inputs and pre state, and posts run last-in, first-out.
+  docker-pre:
+    if: inputs.extended && inputs.run_docker
+    runs-on: [self-hosted, "${{ inputs.runner_label }}"]
+    timeout-minutes: 15
+    steps:
+      - name: Both pres ran before the first main step
+        run: test "$(tr '\n' ' ' < compat-251-pre-ran)" = 'first second '
+      - name: Docker first
+        uses: Falconiere/toolu-ghrunner/.github/actions/compat-251-docker-pre@4147edf4fa792245f1f6b493e0292e3a9aa37f86
+        with:
+          who: first
+          before: second|
+      - name: Docker second
+        uses: Falconiere/toolu-ghrunner/.github/actions/compat-251-docker-pre@4147edf4fa792245f1f6b493e0292e3a9aa37f86
+        with:
+          who: second
 
   # #251 X-4: a main failure with conditional cleanup and Node posts, leaving a
   # background process the job-end sweep must kill (checked by `orphans`).

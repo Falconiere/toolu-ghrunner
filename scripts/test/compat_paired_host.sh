@@ -9,7 +9,8 @@
 #
 # Environment: GH_TOKEN (administration:write), GITHUB_REPOSITORY, GITHUB_RUN_ID,
 # RUNNER_TEMP, PLATFORM (Linux-X64, Linux-ARM64, macOS-ARM64), LABEL_PREFIX, and
-# for `run`: OFFICIAL_DIR, TOOLU_BIN. ACCELERATED_LANE=true adds a third lane (#237):
+# for `run`: OFFICIAL_DIR, TOOLU_BIN; for `report`: OFFICIAL_DIR (TOOLU_BIN, ARCHIVE
+# and SHA256 only feed its provenance). ACCELERATED_LANE=true adds a third lane (#237):
 # a second toolu registration with `[services] mode = "accelerated"` whose runner
 # process runs inside an ubuntu container, so every job it takes (artifact
 # producer and consumer alike) executes in that container and reaches the local

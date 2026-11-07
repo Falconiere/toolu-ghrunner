@@ -287,6 +287,53 @@ async fn a_step_without_pre_reports_its_timeout_error_once_at_main() -> TestResu
   Ok(())
 }
 
+/// #251 review cr-3272e06767da1856: with a `pre`, an unevaluable
+/// `timeout-minutes` is reported on the Pre row once it has started and on
+/// the main row once that has started, never on a row before its start.
+#[tokio::test]
+async fn a_pre_reports_its_timeout_error_on_its_own_row() -> TestResult<()> {
+  let mut step = action_step("a", "act-a");
+  step.timeout_in_minutes = Some(shared::TemplateToken::expression("fromJSON('not json')"));
+  let Some((_, events, _)) = run_patched(step, &[]).await? else {
+    return Ok(());
+  };
+  let mut started = std::collections::HashSet::new();
+  let mut rows = Vec::new();
+  for event in &events {
+    if let RunnerEvent::StepStarted {
+      step_id, step_name, ..
+    } = event
+    {
+      started.insert(step_id.clone());
+      rows.push((step_id.clone(), step_name.clone()));
+    } else if let RunnerEvent::Log { step_id, line, .. } = event
+      && line.contains("determine the step timeout")
+    {
+      assert!(
+        started.contains(step_id),
+        "diagnostic before its row started: {step_id}"
+      );
+    }
+  }
+  let lines_for = |name_prefix: &str| -> usize {
+    let ids: Vec<&str> = rows
+      .iter()
+      .filter(|(_, n)| n.starts_with(name_prefix))
+      .map(|(i, _)| i.as_str())
+      .collect();
+    events
+      .iter()
+      .filter(|event| {
+        matches!(event, RunnerEvent::Log { step_id, line, .. }
+      if ids.contains(&step_id.as_str()) && line.contains("determine the step timeout"))
+      })
+      .count()
+  };
+  assert_eq!(lines_for("Pre "), 1, "{rows:?}");
+  assert_eq!(lines_for("Run ./act-a"), 1, "{rows:?}");
+  Ok(())
+}
+
 /// #251 review cr-f19c86978f0c20db: a `pre-if` that cannot be evaluated is a
 /// visible failed `Pre` row with its error in the log, at the next number (no
 /// hole before the workflow steps), and no stage runs.

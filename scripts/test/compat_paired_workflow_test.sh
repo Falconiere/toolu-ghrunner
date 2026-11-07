@@ -108,7 +108,7 @@ want "the container job pins its image" '^    container: ubuntu@sha256:[0-9a-f]{
 want "the consumer waits for the #237 and #251 producers" '^    needs: \[contexts, docker, services, secrets, container, composite, stack\]$' "$PROBE"
 
 # --- #251: extended probe jobs, pools, lifecycle lanes, host observations ---
-for job in leaks composite stack failure orphans timeout cancel cancel-container long pool-a pool-b; do
+for job in leaks composite stack docker-pre failure orphans timeout cancel cancel-container long pool-a pool-b; do
   want "the probe has the $job job" "^  $job:$" "$PROBE"
 done
 want "the probe callers turn the extended jobs on" '^      extended: true$'
@@ -116,6 +116,7 @@ want "extended defaults off for the accelerated and negative callers" '^      ex
 want "pool jobs run on the per-lane pool label" '^    runs-on: \[self-hosted, "\$\{\{ inputs\.runner_label \}\}-pool"\]$' "$PROBE"
 want "cancel ends by the GitHub job timeout" '^    timeout-minutes: 1$' "$PROBE"
 want "the built action is pinned to a commit" 'uses: Falconiere/toolu-ghrunner/\.github/actions/compat-251-docker@[0-9a-f]{40}$' "$PROBE"
+want "the Docker pre action is pinned to a commit" 'uses: Falconiere/toolu-ghrunner/\.github/actions/compat-251-docker-pre@[0-9a-f]{40}$' "$PROBE"
 want "the stack image is missing in the negative variant" "inputs\.who == 'world' && 'ubuntu@sha256:[0-9a-f]{64}' \|\| 'ubuntu@sha256:0+251'" "$PROBE"
 want "the container hands the workspace back" 'chown -R "\$\(stat -c %u:%g "\$GITHUB_WORKSPACE"\)" "\$GITHUB_WORKSPACE"' "$PROBE"
 want "hosts start the #251 lanes" '^      EXTENDED_LANES: true$'

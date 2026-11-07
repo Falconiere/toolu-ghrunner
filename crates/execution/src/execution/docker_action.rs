@@ -38,7 +38,9 @@ pub(super) async fn run_docker_action(
     inputs: Some(&inputs),
     ..s
   };
-  register_post(&s, ctx, &image, &inputs);
+  if !ctx.post_registered.contains(&s.step.id) {
+    register_post(&s, ctx, &image, &inputs);
+  }
   let pre = run_applicable_pre(&s, ctx, &runtime, &image, cache_key.is_some()).await?;
   if pre != Conclusion::Success {
     return Ok(ActionOutcome {
@@ -61,6 +63,33 @@ pub(super) async fn run_docker_action(
   })
 }
 
+/// The pre-job phase's Docker `pre` (`action_pre`): prepare the image, register
+/// the post before the stage as upstream does, then run `pre-entrypoint` as
+/// row `number`. The main step later skips both.
+pub(super) async fn run_phase_pre(
+  s: DockerStage<'_>,
+  ctx: &mut ExecutionContext,
+  cache_key: &str,
+  number: u32,
+) -> Result<(Conclusion, Option<PostStep>), RunnerError> {
+  let (runtime, image) = prepare(&s, ctx, Some(cache_key)).await?;
+  let inputs = super::action_support::build_composite_inputs(s.step, s.manifest, ctx)?;
+  let s = DockerStage {
+    inputs: Some(&inputs),
+    ..s
+  };
+  let mark = ctx.nested_post_count();
+  register_post(&s, ctx, &image, &inputs);
+  let post = ctx.take_nested_posts_since(mark).pop();
+  if post.is_some() {
+    ctx.post_registered.insert(s.step.id.clone());
+  }
+  let conclusion = run_pre(&s, ctx, &runtime, &image, number)
+    .await
+    .unwrap_or(Conclusion::Failure);
+  Ok((conclusion, post))
+}
+
 async fn run_applicable_pre(
   s: &DockerStage<'_>,
   ctx: &mut ExecutionContext,
@@ -68,7 +97,7 @@ async fn run_applicable_pre(
   image: &str,
   remote: bool,
 ) -> Result<Conclusion, RunnerError> {
-  if s.manifest.runs.pre_entrypoint.is_none() {
+  if s.manifest.runs.pre_entrypoint.is_none() || ctx.pre_handled.contains(&s.step.id) {
     return Ok(Conclusion::Success);
   }
   if !remote {
@@ -81,7 +110,7 @@ async fn run_applicable_pre(
   {
     return Ok(Conclusion::Success);
   }
-  run_pre(s, ctx, runtime, image).await
+  run_pre(s, ctx, runtime, image, 0).await
 }
 
 async fn prepare(
@@ -147,6 +176,7 @@ async fn run_pre(
   ctx: &mut ExecutionContext,
   runtime: &ActionContainer,
   image: &str,
+  number: u32,
 ) -> Result<Conclusion, RunnerError> {
   let id = uuid::Uuid::new_v4().to_string();
   let pre_name = format!("Pre {}", display_for(s.step, ctx).initial);
@@ -156,10 +186,15 @@ async fn run_pre(
     RunnerEvent::StepStarted {
       step_id: id.clone(),
       step_name: pre_name,
-      step_number: 0,
+      step_number: number,
     },
   )
   .await;
+  if number > 0 {
+    // A pre-job-phase row reports its own timeout error, as upstream's runner does.
+    let token = s.step.timeout_in_minutes.as_ref();
+    super::step_attrs::resolve_timeout(&id, token, ctx, s.events).await;
+  }
   let docker = super::actions::manifest::RunsUsing::Docker;
   super::step_metadata::emit_action_metadata(s.events, &id, &s.step.reference, &docker).await;
   let pre_bounds = s.bounds.restarted();
@@ -169,8 +204,14 @@ async fn run_pre(
     bounds: &pre_bounds,
     ..*s
   };
-  let stage = Box::pin(run_docker_stage(&pre, ctx, runtime, image));
-  let result = with_timeout_message(message, stage).await;
+  // A job whose declared container never started runs no stage at all.
+  let result = if ctx.job_container_missing {
+    emit_log(s.events, &id, "##[error]the job container is not running").await;
+    Ok((Conclusion::Failure, HashMap::new()))
+  } else {
+    let stage = Box::pin(run_docker_stage(&pre, ctx, runtime, image));
+    with_timeout_message(message, stage).await
+  };
   let mut conclusion = match &result {
     Ok((conclusion, _)) => *conclusion,
     Err(RunnerError::Cancelled) => Conclusion::Cancelled,

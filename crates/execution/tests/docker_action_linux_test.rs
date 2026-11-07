@@ -833,3 +833,136 @@ async fn failing_remote_dockerfile_closes_build_before_user_steps() -> TestResul
   );
   Ok(())
 }
+
+/// A remote Dockerfile action with pre/main/post entrypoints, as a tarball.
+fn pre_action_tarball() -> TestResult<Vec<u8>> {
+  use std::io::Write;
+  let mut archive = tar::Builder::new(flate2::write::GzEncoder::new(
+    Vec::new(),
+    flate2::Compression::default(),
+  ));
+  for (path, content, mode) in [
+    (
+      "probe/action.yml",
+      "name: pre-probe\ninputs:\n  who:\n    required: true\n  before:\n    default: ''\nruns:\n  using: docker\n  image: Dockerfile\n  pre-entrypoint: /pre.sh\n  entrypoint: /main.sh\n  post-entrypoint: /post.sh\n",
+      0o644,
+    ),
+    (
+      "probe/Dockerfile",
+      "FROM alpine@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc\nCOPY pre.sh main.sh post.sh /\n",
+      0o644,
+    ),
+    // pre: sees its input, leaves state for post and a marker for every step.
+    (
+      "probe/pre.sh",
+      "#!/bin/sh\nset -eu\ntest -n \"$INPUT_WHO\"\nprintf 'from_pre=%s\\n' \"$INPUT_WHO\" >> \"$GITHUB_STATE\"\nprintf '%s\\n' \"$INPUT_WHO\" >> /github/workspace/pre-ran\n",
+      0o755,
+    ),
+    (
+      "probe/main.sh",
+      "#!/bin/sh\nset -eu\ngrep -qx \"$INPUT_WHO\" /github/workspace/pre-ran\nprintf '%s\\n' \"$INPUT_WHO\" >> /github/workspace/main-ran\n",
+      0o755,
+    ),
+    // post: its own input and pre state survive, its main ran, and exactly the
+    // `before` posts ran first (last-in, first-out).
+    (
+      "probe/post.sh",
+      "#!/bin/sh\nset -eu\ntest \"$STATE_from_pre\" = \"$INPUT_WHO\"\ngrep -qx \"$INPUT_WHO\" /github/workspace/main-ran\nseen=$(cat /github/workspace/posts 2>/dev/null | tr '\\n' '|')\ntest \"$seen\" = \"$INPUT_BEFORE\"\nprintf '%s\\n' \"$INPUT_WHO\" >> /github/workspace/posts\n",
+      0o755,
+    ),
+  ] {
+    let mut header = tar::Header::new_gnu();
+    header.set_size(u64::try_from(content.len())?);
+    header.set_mode(mode);
+    header.set_cksum();
+    archive.append_data(&mut header, path, content.as_bytes())?;
+  }
+  let mut encoder = archive.into_inner()?;
+  encoder.flush()?;
+  Ok(encoder.finish()?)
+}
+
+/// #251: a remote Docker action's `pre-entrypoint` runs in the pre-job phase,
+/// before every main step (paired run 42407955591 showed the official runner
+/// does this for repository actions), as a numbered row after its Build row,
+/// and its post is registered then.
+#[tokio::test]
+#[ignore = "requires Linux, real Docker, and a daemon-shared test root"]
+async fn remote_docker_pre_runs_before_every_main_step() -> TestResult {
+  const SHA: &str = "8bcd8e1af3c095561f1043123848fc8b2db0f189";
+  let body = pre_action_tarball()?;
+  let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+  let api = format!("http://{}", listener.local_addr()?);
+  let router = axum::Router::new()
+    .route(
+      &format!("/repos/acme/probe/tarball/{SHA}"),
+      axum::routing::get(move || {
+        let body = body.clone();
+        async move { body }
+      }),
+    )
+    .route(
+      "/repos/acme/probe/commits/main",
+      axum::routing::get(|| async { include_str!("setup_action_commit.json") }),
+    );
+  let server = tokio::spawn(async move {
+    let _ = axum::serve(listener, router).await;
+  });
+  let mut raw: serde_json::Value = serde_json::from_str(CAPTURE)?;
+  let github = raw
+    .get_mut("contextData")
+    .and_then(|v| v.get_mut("github"))
+    .and_then(|v| v.get_mut("d"))
+    .and_then(serde_json::Value::as_array_mut)
+    .ok_or("github context")?;
+  let api_entry = github
+    .iter_mut()
+    .find(|entry| entry.get("k").and_then(serde_json::Value::as_str) == Some("api_url"))
+    .ok_or("api_url context")?;
+  *api_entry.get_mut("v").ok_or("api_url value")? = api.into();
+  let mut job: AgentJobRequestMessage = serde_json::from_value(raw)?;
+  job.job_container = None;
+  job.variables.remove("system.github.launch_endpoint");
+  let remote = |id: &str, who: &str, before: &str| {
+    let mut step = ActionStep::with_ref_type(id, "repository");
+    step.reference.name = Some("acme/probe".to_owned());
+    step.reference.git_ref = Some("main".to_owned());
+    step.reference.repository_type = Some("GitHub".to_owned());
+    step.inputs = token_map(&[("who", who), ("before", before)]);
+    step
+  };
+  // Both pres ran before this first main step.
+  let before = ActionStep::script(
+    "before",
+    "test \"$(tr '\\n' ' ' < \"$GITHUB_WORKSPACE/pre-ran\")\" = 'first second '",
+    "success()",
+  );
+  job.steps = vec![
+    before,
+    remote("first", "first", "second|"),
+    remote("second", "second", ""),
+  ];
+  let root = linux_root()?;
+  let events = collect_job(config_for(root.path()), job, CancellationToken::new()).await?;
+  server.abort();
+  assert_eq!(
+    job_conclusion(&events),
+    Some(Conclusion::Success),
+    "{events:#?}"
+  );
+  // One prepared image serves both uses; both Pre rows follow it, in order.
+  let numbers = |prefix: &str| {
+    setup_rows(&events, prefix)
+      .iter()
+      .map(|row| row.2)
+      .collect::<Vec<_>>()
+  };
+  assert_eq!(numbers("Build "), [2], "{events:#?}");
+  assert_eq!(numbers("Pre "), [3, 4], "{events:#?}");
+  let posts = setup_rows(&events, "Post ");
+  assert_eq!(posts.len(), 2, "{events:#?}");
+  for post in &posts {
+    assert!(events.iter().any(|event| matches!(event, RunnerEvent::StepCompleted { step_id, conclusion: Conclusion::Success, .. } if step_id == &post.0)), "{events:#?}");
+  }
+  Ok(())
+}

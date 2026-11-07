@@ -84,6 +84,17 @@ def api_job(name, conclusion="success", steps=(("Run", "success"),)):
             "runner_name": "r", "steps": [{"name": n, "conclusion": c} for n, c in steps]}
 
 
+class FetchFailureCategoryTest(unittest.TestCase):
+    def test_only_a_bounded_label_survives_a_failed_read(self):
+        stderr = ("gh: Forbidden (HTTP 403)\nhttps://results.example/logs?sig=SECRETSIG&se=1 "
+                  "token ghs_EXAMPLEtokenEXAMPLEtoken")
+        label = reference_compare.failure_category(stderr)
+        self.assertEqual(label, "http-403")
+        self.assertEqual(reference_compare.failure_category("connection reset by peer"), "error")
+        for secret in ("SECRETSIG", "ghs_", "https://"):
+            self.assertNotIn(secret, label)
+
+
 class VerifyRecordedReportTest(unittest.TestCase):
     def test_recorded_report_has_no_unacknowledged_difference(self):
         problems, notes = reference_compare.verify(REPORT)
