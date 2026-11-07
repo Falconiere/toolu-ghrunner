@@ -217,7 +217,7 @@ async fn success_peer(
   Ok((base, server))
 }
 
-fn summary<'a>(content: &'a [u8]) -> super::StepSummary<'a> {
+fn summary(content: &[u8]) -> super::StepSummary<'_> {
   super::StepSummary {
     run_backend_id: "workflow-run",
     job_backend_id: "workflow-job",

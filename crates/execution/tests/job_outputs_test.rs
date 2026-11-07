@@ -475,7 +475,16 @@ async fn nested_composite_mask_suppresses_a_later_job_output() -> TestResult {
     .iter()
     .find_map(|event| match event {
       RunnerEvent::StepSummary { content, .. } => Some(content.clone()),
-      _ => None,
+      RunnerEvent::JobStarted { .. }
+      | RunnerEvent::StepStarted { .. }
+      | RunnerEvent::StepCompleted { .. }
+      | RunnerEvent::StepSkipped { .. }
+      | RunnerEvent::Log { .. }
+      | RunnerEvent::LogGroup { .. }
+      | RunnerEvent::Annotation { .. }
+      | RunnerEvent::JobCompleted { .. }
+      | RunnerEvent::StepMetadata { .. }
+      | RunnerEvent::InfrastructureError { .. } => None,
     })
     .ok_or("no step summary was emitted")?;
   // The engine's event stream is unmasked by contract (each sink masks its
