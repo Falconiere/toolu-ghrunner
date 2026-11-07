@@ -166,9 +166,11 @@ outside a `tests/` tree.
   manifest parse (`actions/manifest.rs`). `$/[path]` self-repository refs
   (#241, job variable `actions_self_repository`) resolve only in a composite
   manifest's nested `uses:` (`composite_uses` →
-  `actions::resolver::resolve_self_reference`: enclosing remote action, else
-  the `job` context `workflow_repository`@`workflow_sha`); a top-level `$/`
-  workflow step is unresolved (`docs/known-bugs.md`).
+  `ExecutionContext::resolve_self_uses` → `actions::resolver::resolve_self_reference`:
+  enclosing remote action, else the `job` context
+  `workflow_repository`@`workflow_sha`; `$/` without the flag is refused with
+  upstream's message); a top-level `$/` workflow step is unresolved
+  (`docs/known-bugs.md`).
 - **Service mode** (`[services] mode`, `ServicesMode` in `shared`):
   `forwarder` (default) injects the REAL GitHub service URLs + runtime token
   from the job message `SystemVssConnection` per step type (official v2.338.2
