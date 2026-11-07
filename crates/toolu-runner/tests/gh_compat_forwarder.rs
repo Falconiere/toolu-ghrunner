@@ -335,15 +335,12 @@ async fn offline_run_step_does_not_see_local_cache_vars() -> TestResult<()> {
 
 /// Run the probe Node action through the real step loop with `env` installed
 /// and return the `ACTIONS_*` variables it printed.
-async fn probe_node_action(env: ServiceEnv) -> TestResult<Option<EnvMap>> {
+async fn probe_node_action(env: ServiceEnv) -> TestResult<EnvMap> {
   use crate::gh_compat_node_action_file_commands::{seed_node, system_node};
   use execution::execution::actions::prefetch::ActionFetcher;
   use execution::execution::context::ExecutionContext;
   use execution::execution::steps_runner::{JobRun, run_steps};
-  let Some(node) = system_node() else {
-    eprintln!("SKIP: no system `node` on PATH");
-    return Ok(None);
-  };
+  let node = system_node().ok_or("this test needs a real `node` runtime on PATH")?;
   let dir = tempfile::tempdir()?;
   let (workspace, data_dir) = (dir.path().join("work"), dir.path().join("data"));
   let action_dir = workspace.join("service-env-probe");
@@ -406,7 +403,7 @@ async fn probe_node_action(env: ServiceEnv) -> TestResult<Option<EnvMap>> {
     .iter()
     .find_map(|line| line.strip_prefix("PROBE "))
     .ok_or("probe line missing")?;
-  Ok(Some(serde_json::from_str(json)?))
+  Ok(serde_json::from_str(json)?)
 }
 
 #[tokio::test]
@@ -416,9 +413,7 @@ async fn node_action_receives_the_forwarded_set_with_v2_flag_and_mode() -> TestR
     Some("write"),
   )?;
   let expected = map(forward_env(&extract_service_urls(&msg)).node);
-  let Some(seen) = probe_node_action(forward_env(&extract_service_urls(&msg))).await? else {
-    return Ok(());
-  };
+  let seen = probe_node_action(forward_env(&extract_service_urls(&msg))).await?;
   assert_eq!(seen, expected);
   assert_eq!(
     seen.get("ACTIONS_CACHE_SERVICE_V2").map(String::as_str),
@@ -466,10 +461,8 @@ async fn node_action_saves_and_restores_exact_bytes_over_v2_with_no_v1_request()
   use execution::execution::context::ExecutionContext;
   use execution::execution::steps_runner::{JobRun, run_steps};
 
-  let Some(node) = crate::gh_compat_node_action_file_commands::system_node() else {
-    eprintln!("SKIP: no system `node` on PATH");
-    return Ok(());
-  };
+  let node = crate::gh_compat_node_action_file_commands::system_node()
+    .ok_or("this test needs a real `node` runtime on PATH")?;
   let dir = tempfile::tempdir()?;
   let (workspace, data_dir) = (dir.path().join("work"), dir.path().join("data"));
   let cas_root = dir.path().join("cas");
