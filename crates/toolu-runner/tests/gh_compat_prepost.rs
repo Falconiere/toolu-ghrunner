@@ -227,6 +227,31 @@ async fn post_runs_at_job_end_and_sees_main_state() -> TestResult<()> {
   Ok(())
 }
 
+/// #251 D3: an action from the workflow's own repository (`repositoryType:
+/// self`, as GitHub delivers `uses: ./path`) runs no `pre`; its main step
+/// warns with upstream's message and annotation (v2.338.2 `ActionRunner`).
+/// Paired run 42403405937 recorded no `Pre` row on the official runner.
+#[tokio::test]
+async fn local_action_runs_no_pre_and_warns() -> TestResult<()> {
+  let mut step = action_step("a", "act-a");
+  step.reference.name = None;
+  step.reference.repository_type = Some("self".to_owned());
+  step.reference.path = Some("./act-a".to_owned());
+  let Some((lines, events)) = run_with_markers(vec![step], &[("act-a", "A")]).await? else {
+    return Ok(());
+  };
+  assert_eq!(
+    lines,
+    vec!["A:main".to_owned(), "A:post:STATE_k=A-state".to_owned()]
+  );
+  let message = "`pre` execution is not supported for local action from './act-a'";
+  assert!(events.iter().any(|event| matches!(event,
+    RunnerEvent::Annotation { level: shared::AnnotationLevel::Warning, message: m, .. } if m == message)));
+  assert!(!events.iter().any(|event| matches!(event,
+    RunnerEvent::StepStarted { step_name, .. } if step_name.starts_with("Pre "))));
+  Ok(())
+}
+
 /// 2: two action steps register posts; posts drain in REVERSE (LIFO) order.
 #[tokio::test]
 async fn two_posts_drain_in_reverse_lifo_order() -> TestResult<()> {

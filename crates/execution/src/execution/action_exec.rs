@@ -20,7 +20,7 @@ use super::actions::resolver::{ActionRefKind, parse_action_ref};
 use super::composite_exec::{CompositeParams, CompositeResult, execute_composite_action};
 use super::context::ExecutionContext;
 use super::depth_tracker::DepthTracker;
-use super::node_stage::{NodeStage, emit_stage_endgroup, run_node_stage};
+use super::node_stage::{NodeStage, emit_stage_endgroup, run_node_stage, skip_local_pre};
 use super::step_display::display_for;
 use super::step_env::resolve_step_env;
 use super::step_naming::PostStep;
@@ -474,7 +474,7 @@ async fn run_node_action(mut c: NodeActionCtx<'_>) -> Result<ActionOutcome, Runn
 /// runs unconditionally unless an explicit `pre-if` is given). `Success` when
 /// no `pre` runs.
 async fn run_node_pre_if_present(c: &mut NodeActionCtx<'_>) -> Result<Conclusion, RunnerError> {
-  if c.manifest.runs.pre.is_none() {
+  if c.manifest.runs.pre.is_none() || skip_local_pre(c.events, c.log_step_id, c.step).await {
     return Ok(Conclusion::Success);
   }
   let condition = c.manifest.runs.pre_if.as_deref().unwrap_or("always()");

@@ -2558,7 +2558,7 @@
         "crates/toolu-runner/tests/fixtures/local_actions/ci-72-node/action.yml",
         "crates/toolu-runner/tests/fixtures/local_actions/ci-72-parent/action.yml"
       ],
-      "expected": "Child processes print GITHUB_ACTIONS=true for script steps, Node pre/main/post and nested composite shells even when job/step env tries to set it false. Container steps are not part of this row (see 72-S3).",
+      "expected": "Child processes print GITHUB_ACTIONS=true for script steps, Node main/post (local actions run no pre, as upstream) and nested composite shells even when job/step env tries to set it false. Container steps are not part of this row (see 72-S3).",
       "production_path": "execution::execution::step_process_env::apply (GITHUB_ACTIONS forced, CI defaulted) at every shell/Node/composite/container process boundary",
       "tests": [
         [
@@ -2567,7 +2567,7 @@
         ],
         [
           "crates/execution/tests/step_process_ci_test.rs",
-          "node_pre_main_post_keep_originating_empty_step_ci"
+          "node_main_post_keep_originating_empty_step_ci"
         ],
         [
           "crates/execution/tests/step_process_ci_test.rs",
@@ -2665,7 +2665,7 @@
         "crates/execution/tests/incoming_contexts_matrix_0.json",
         "crates/toolu-runner/tests/fixtures/job_container_message.json"
       ],
-      "expected": "Replays of the sanitized #68 GitHub.com acquisition execute real Bash, Node pre/main/post and nested composite shells through Runner::execute_job; the child's stdout is the oracle. Container replay uses the captured #73 Linux job-container message.",
+      "expected": "Replays of the sanitized #68 GitHub.com acquisition execute real Bash, Node main/post and nested composite shells through Runner::execute_job; the child's stdout is the oracle. Container replay uses the captured #73 Linux job-container message.",
       "production_path": "execution::execution::step_process_env::apply (GITHUB_ACTIONS forced, CI defaulted) at every shell/Node/composite/container process boundary",
       "tests": [
         [
@@ -2674,7 +2674,7 @@
         ],
         [
           "crates/execution/tests/step_process_ci_test.rs",
-          "node_pre_main_post_keep_originating_empty_step_ci"
+          "node_main_post_keep_originating_empty_step_ci"
         ],
         [
           "crates/execution/tests/step_process_ci_test.rs",
@@ -2729,7 +2729,7 @@
         ],
         [
           "crates/execution/tests/step_process_ci_test.rs",
-          "node_pre_main_post_keep_originating_empty_step_ci"
+          "node_main_post_keep_originating_empty_step_ci"
         ]
       ],
       "command": "./tools/check.sh all",
@@ -2877,12 +2877,12 @@
         "crates/toolu-runner/tests/fixtures/local_actions/ci-72-node/action.yml",
         "crates/toolu-runner/tests/fixtures/local_actions/ci-72-parent/action.yml"
       ],
-      "expected": "Node pre/main/post each print empty CI and true; post keeps its originating step CI after a later GITHUB_ENV write; nested composite and nested Node posts keep their own or inherited step CI; a malformed CI expression fails before the action starts. container half (job_container_ci_test.rs, two Linux-only #[ignore]d tests) is run by bash scripts/test/step_process_ci_linux.sh; Docker-action processes are unsupported here (#75).",
+      "expected": "Node main/post (a local action runs no pre, as upstream) each print empty CI and true; post keeps its originating step CI after a later GITHUB_ENV write; nested composite and nested Node posts keep their own or inherited step CI; a malformed CI expression fails before the action starts. container half (job_container_ci_test.rs, two Linux-only #[ignore]d tests) is run by bash scripts/test/step_process_ci_linux.sh; Docker-action processes are unsupported here (#75).",
       "production_path": "execution::execution::step_process_env::apply (GITHUB_ACTIONS forced, CI defaulted) at every shell/Node/composite/container process boundary",
       "tests": [
         [
           "crates/execution/tests/step_process_ci_test.rs",
-          "node_pre_main_post_keep_originating_empty_step_ci"
+          "node_main_post_keep_originating_empty_step_ci"
         ],
         [
           "crates/execution/tests/step_process_ci_test.rs",

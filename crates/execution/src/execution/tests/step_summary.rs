@@ -342,12 +342,11 @@ async fn step_summary_real_node_and_composite_keep_distinct_documents() -> Resul
   let docs = summaries(&events);
   assert_eq!(
     docs.iter().map(|(_, text)| *text).collect::<Vec<_>>(),
+    // Local actions run no `pre`, top-level or nested (upstream ActionRunner, #251).
     [
-      "# Node pre\n",
       "# Node main\n***\n",
       "# Composite first\nappended\n",
       "# Composite second\n",
-      "# Node pre\n",
       "# Node main\n***\n",
       "# Node post\n",
       "# Node post\n",

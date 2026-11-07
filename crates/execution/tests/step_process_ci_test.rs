@@ -213,18 +213,18 @@ async fn host_script_defaults_and_preserves_ci_precedence() -> TestResult {
 }
 
 #[tokio::test]
-async fn node_pre_main_post_keep_originating_empty_step_ci() -> TestResult {
+async fn node_main_post_keep_originating_empty_step_ci() -> TestResult {
   let lines = replay_action(
     "ci-72-node",
     Some("printf 'CI=later\\n' >> \"$GITHUB_ENV\""),
   )
   .await?;
-  assert_eq!(lines.len(), 3,);
-  for (line, expected) in lines.iter().zip([
-    "CI72|node-pre||true|",
-    "CI72|node-main||true|",
-    "CI72|node-post||true|",
-  ]) {
+  // A local action runs no `pre` (upstream ActionRunner, #251).
+  assert_eq!(lines.len(), 2);
+  for (line, expected) in lines
+    .iter()
+    .zip(["CI72|node-main||true|", "CI72|node-post||true|"])
+  {
     assert!(line.starts_with(expected), "{line}");
     assert!(
       line.len() > expected.len(),
@@ -258,12 +258,12 @@ async fn nested_node_post_keeps_its_composite_step_ci() -> TestResult {
     Some("printf 'CI=later\\n' >> \"$GITHUB_ENV\""),
   )
   .await?;
-  assert_eq!(lines.len(), 3);
-  for (line, expected) in lines.iter().zip([
-    "CI72|node-pre||true|",
-    "CI72|node-main||true|",
-    "CI72|node-post||true|",
-  ]) {
+  // A nested local action runs no `pre` either (upstream ActionRunner, #251).
+  assert_eq!(lines.len(), 2);
+  for (line, expected) in lines
+    .iter()
+    .zip(["CI72|node-main||true|", "CI72|node-post||true|"])
+  {
     assert!(line.starts_with(expected), "{line}");
     assert!(
       line.len() > expected.len(),
@@ -280,12 +280,12 @@ async fn nested_node_post_keeps_inherited_parent_step_ci() -> TestResult {
     Some("printf 'CI=later\\n' >> \"$GITHUB_ENV\""),
   )
   .await?;
-  assert_eq!(lines.len(), 3);
-  for (line, expected) in lines.iter().zip([
-    "CI72|node-pre||true|",
-    "CI72|node-main||true|",
-    "CI72|node-post||true|",
-  ]) {
+  // A nested local action runs no `pre` either (upstream ActionRunner, #251).
+  assert_eq!(lines.len(), 2);
+  for (line, expected) in lines
+    .iter()
+    .zip(["CI72|node-main||true|", "CI72|node-post||true|"])
+  {
     assert!(line.starts_with(expected), "{line}");
     assert!(
       line.len() > expected.len(),

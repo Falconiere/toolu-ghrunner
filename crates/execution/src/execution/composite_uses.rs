@@ -182,20 +182,24 @@ fn build_nested_step(
 
   let resolved_self = ctx.resolve_self_uses(uses)?;
   let uses = resolved_self.as_deref().unwrap_or(uses);
-  let (name, git_ref) = if uses.starts_with("docker://") {
-    (uses.to_owned(), None)
+  let (name, git_ref, local) = if uses.starts_with("docker://") {
+    (uses.to_owned(), None, false)
   } else {
     let action_ref = super::actions::resolver::parse_action_ref(uses)?;
-    nested_ref_parts(&action_ref)
+    let (name, git_ref) = nested_ref_parts(&action_ref);
+    let local = action_ref.kind == super::actions::resolver::ActionRefKind::Local;
+    (name, git_ref, local)
   };
 
+  // A nested `./path` is the workflow repository's own action, as upstream's
+  // RepositoryPathReference with RepositoryType `self` (so it runs no `pre`).
   let reference = ActionStepDefinitionReference {
     ref_type: Some("repository".to_owned()),
     image: None,
+    path: local.then(|| name.clone()),
     name: Some(name),
     git_ref,
-    repository_type: None,
-    path: None,
+    repository_type: local.then(|| "self".to_owned()),
   };
   // ActionRunner installs its own repository/ref before evaluating with inputs.
   // Step env remains evaluated in the enclosing context by the caller.

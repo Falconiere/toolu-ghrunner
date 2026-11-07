@@ -72,12 +72,7 @@ async fn run_applicable_pre(
     return Ok(Conclusion::Success);
   }
   if !remote {
-    emit_log(
-      s.events,
-      s.log_step_id,
-      "##[warning]Pre execution is not supported for local actions.",
-    )
-    .await;
+    super::node_stage::skip_local_pre(s.events, s.log_step_id, s.step).await;
     return Ok(Conclusion::Success);
   }
   if !ctx
