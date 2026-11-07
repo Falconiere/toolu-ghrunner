@@ -14,7 +14,7 @@ set -euo pipefail
 POLL_SECONDS="${POLL_SECONDS:-15}"
 # One `consumer` per variant and lane. It needs every other probe job, so it ends last.
 CONSUMER_JOBS=4
-UNREGISTER_ATTEMPTS=6
+UNREGISTER_ATTEMPTS="${UNREGISTER_ATTEMPTS:-6}"
 RUNNERS_API="repos/$GITHUB_REPOSITORY/actions/runners"
 
 # The VM's own job variables (GITHUB_*, RUNNER_*, ACTIONS_*) must not reach
@@ -22,7 +22,8 @@ RUNNERS_API="repos/$GITHUB_REPOSITORY/actions/runners"
 clean_env=(env -i "HOME=$HOME" "PATH=$PATH" "USER=$(id -un)" "LANG=${LANG:-C.UTF-8}" "TMPDIR=${TMPDIR:-/tmp}")
 
 # A JIT runner takes exactly one job, so the official lane mints one per job.
-# toolu's `run` does the same on its own.
+# toolu's `run` does the same on its own. Fd 3 is the step's stdout: the mask
+# command must reach it without the credential landing in the lane's log file.
 official_lane() {
   local label="$LABEL_PREFIX-official" serial=0 jit
   while :; do
@@ -31,9 +32,9 @@ official_lane() {
       -f "name=$label-$serial" -F runner_group_id=1 -f work_folder=_work \
       -f 'labels[]=self-hosted' -f "labels[]=${PLATFORM%-*}" -f "labels[]=${PLATFORM#*-}" \
       -f "labels[]=$label" --jq .encoded_jit_config)
-    echo "::add-mask::$jit"
+    echo "::add-mask::$jit" >&3
     # A job's own failure still exits 0, so non-zero means the runner is broken.
-    (cd "$OFFICIAL_DIR" && "${clean_env[@]}" ./run.sh --jitconfig "$jit") || {
+    (cd "$OFFICIAL_DIR" && "${clean_env[@]}" ./run.sh --jitconfig "$jit") 3>&- || {
       echo "::error::official runner $label-$serial exited non-zero"
       return 1
     }
@@ -72,7 +73,7 @@ run_lanes() {
     --name "$label" --labels "$label" --config "$home/config.toml" --work "$home/_work"
   "${toolu_env[@]}" "$TOOLU_BIN" run --config "$home/config.toml" >"$RUNNER_TEMP/toolu.log" 2>&1 &
   toolu_pid=$!
-  official_lane >"$RUNNER_TEMP/official.log" 2>&1 &
+  official_lane 3>&1 >"$RUNNER_TEMP/official.log" 2>&1 &
   official_pid=$!
   trap stop_lanes EXIT
 
@@ -90,12 +91,13 @@ run_lanes() {
 unregister() {
   local ids id attempt
   local filter=".runners[] | select(any(.labels[]; .name | startswith(\"$LABEL_PREFIX-\"))) | .id"
-  for ((attempt = 1; attempt <= UNREGISTER_ATTEMPTS; attempt++)); do
+  for ((attempt = 0; ; attempt++)); do
     ids=$(gh api --paginate "$RUNNERS_API?per_page=100" --jq "$filter") || ids="unknown"
     if [[ -z "$ids" ]]; then
       echo "$PLATFORM: no runner left under $LABEL_PREFIX"
       return 0
     fi
+    ((attempt < UNREGISTER_ATTEMPTS)) || break
     for id in $ids; do
       [[ "$id" == unknown ]] || gh api --method DELETE "$RUNNERS_API/$id" ||
         echo "::warning::could not delete runner $id yet"

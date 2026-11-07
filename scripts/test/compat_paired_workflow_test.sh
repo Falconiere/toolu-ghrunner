@@ -132,7 +132,10 @@ if [[ -z "${COMPAT_PAIRED_WORKFLOW_FILE:-}" ]]; then
 #!/usr/bin/env bash
 case "$*" in
   *generate-jitconfig*) [[ -z "${FAKE_NO_JIT:-}" ]] && echo fake-jit ;;
-  *--method\ DELETE*) exit 1 ;;
+  *--method\ DELETE*)
+    [[ -n "${FAKE_DELETE_WORKS:-}" ]] || exit 1
+    : >"$FAKE_RUNNERS"
+    ;;
   */jobs*) cat "$FAKE_JOBS" ;;
   */runners*) cat "$FAKE_RUNNERS" ;;
 esac
@@ -193,8 +196,16 @@ TOOLU
   expect "a dead official lane fails the step while a consumer is unlisted" 1 $?
   FAKE_RUNNERS="$tmp/none" FAKE_OFFICIAL="$tmp/official-dies" host run >/dev/null 2>&1
   expect "an official runner that cannot start fails the step" 1 $?
+  logged=$(cat "$tmp/official.log" "$tmp/toolu.log" 2>/dev/null)
+  [[ "$logged" != *fake-jit* ]] && echo "ok: the JIT config stays out of the lane logs" || {
+    echo "FAIL: the JIT config reached a lane log" >&2
+    fail=1
+  }
   FAKE_RUNNERS="$tmp/none" host unregister >/dev/null 2>&1
   expect "unregister passes with no runner left" 0 $?
+  cp "$tmp/survivor" "$tmp/deletable"
+  FAKE_RUNNERS="$tmp/deletable" FAKE_DELETE_WORKS=1 UNREGISTER_ATTEMPTS=1 host unregister >/dev/null 2>&1
+  expect "unregister passes when the last attempt's delete worked" 0 $?
   out=$(FAKE_RUNNERS="$tmp/survivor" host unregister 2>&1)
   expect "unregister fails while a runner survives" 1 $?
   [[ "$out" == *"::error::runners still registered"*4242* ]] && echo "ok: the survivor is named" || {
