@@ -51,17 +51,18 @@ fn upload_routes(base: &str, hold: Gate) -> HashMap<(Method, String), RouteRespo
   routes
 }
 
-/// #83 AC-1: the queue holds 16 slots, so a seventeenth document applies
-/// backpressure rather than being dropped, and the drain still completes.
+/// #83 AC-1: the queue buffers 16 documents and the uploader holds one more
+/// in flight, so the eighteenth applies backpressure rather than being
+/// dropped, and the drain still uploads every one.
 ///
 /// The peer is stalled while the queue fills, which is also the ceiling a
-/// stalled Results Service can impose on job completion: every document
-/// costs at most one 30s `wire` request deadline, so 17 held documents can
-/// delay completion by about 8.5 minutes (about 36 minutes if the stall is in
-/// the blob PUT: four 30s attempts plus 5.6s of backoff per document, and up
-/// to about 85 minutes when `Retry-After` replaces the backoff). Recorded in
-/// docs/step-summaries.md; the test releases the stall instead of waiting it
-/// out.
+/// stalled Results Service can impose on job completion: uploads are serial
+/// and every document costs at most one 30s `wire` request deadline, so 18
+/// held documents can delay completion by about 9 minutes (about 38 minutes
+/// if the stall is in the blob PUT: four 30s attempts plus 5.6s of backoff
+/// per document, and up to about 90 minutes when `Retry-After` replaces the
+/// backoff). Recorded in docs/step-summaries.md; the test releases the stall
+/// instead of waiting it out.
 #[tokio::test]
 async fn step_summary_queue_drains_more_documents_than_its_slots()
 -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -75,24 +76,36 @@ async fn step_summary_queue_drains_more_documents_than_its_slots()
     run_backend_id: "workflow-run".to_owned(),
     job_backend_id: "workflow-job".to_owned(),
   });
-  let releaser = tokio::spawn(async move {
-    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-    gate.release();
+  let queue = std::sync::Arc::new(queue);
+  let filler = tokio::spawn({
+    let queue = std::sync::Arc::clone(&queue);
+    async move {
+      for index in 0..18 {
+        queue
+          .enqueue(&format!("step-{index}"), format!("document {index}\n"))
+          .await;
+      }
+    }
   });
-  for index in 0..17 {
-    queue
-      .enqueue(&format!("step-{index}"), format!("document {index}\n"))
-      .await;
-  }
+  // With the peer held, the uploader cannot drain: 16 documents fit the
+  // channel and a seventeenth is in flight, so the eighteenth must still be
+  // waiting for a slot. An unbounded queue would have finished here.
+  tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+  assert!(
+    !filler.is_finished(),
+    "the queue accepted 18 documents while no upload could complete"
+  );
+  gate.release();
+  filler.await?;
+  let queue = std::sync::Arc::into_inner(queue).ok_or("the filler task still holds the queue")?;
   tokio::time::timeout(std::time::Duration::from_secs(60), queue.drain()).await?;
-  releaser.await?;
   assert_eq!(
     peer.requests_for(SIGN).len(),
-    17,
+    18,
     "the drain dropped documents"
   );
-  assert_eq!(peer.requests_for(BLOB).len(), 17);
-  assert_eq!(peer.requests_for(PUBLISH).len(), 17);
+  assert_eq!(peer.requests_for(BLOB).len(), 18);
+  assert_eq!(peer.requests_for(PUBLISH).len(), 18);
   Ok(())
 }
 

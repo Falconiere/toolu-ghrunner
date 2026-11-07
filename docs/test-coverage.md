@@ -152,7 +152,7 @@ are deliberately non-credential text. The behavior oracle is
 | 86-S1 | Encoded LF/CRLF/CR, blank lines, whitespace, repeated/overlapping values, 1–3 byte values and Unicode; whole value and each trimmed line become `***`; a plain space stays unchanged. `%250A` is decoded only once. | Real shell → dispatcher → shared masker. |
 | 86-S2 | Seven stdout and seven stderr records become `stdout=[***]` / `stderr=[***]`, with `control remains visible` unchanged. | Actual event forwarder writes the combined-job disk spool and produces byte-identical step-upload and live-log lines; real journal writer persists matching JSONL lines; production `RedactingWriter` with `MaskerRedactor` yields identical diagnostic lines. No HTTP service or upload acknowledgment is mocked. |
 | 86-S3 | Nested local composite invokes background shell writers after registration; repeated/overlapping values merge without residual text. | Sorted probe records match exactly; stream identities, counts and successful job completion are asserted. Concurrent registration is serialized by the existing shared mutex. |
-| 86-S4 | A later top-level notice containing three newly registered short lines becomes `annotation=[***|***|***]`. | Annotation producer covered locally. Summary, job output and deployment-URL integration with #70/#82/#83/#88 remains **unverified**. |
+| 86-S4 | The masks are registered inside a nested composite; a later top-level notice containing three newly registered short lines becomes `annotation=[***|***|***]`, a later step summary becomes `summary=***`, a later job output carrying the value is dropped with the secret warning while a clear output survives, and a later deployment URL is suppressed with upstream's warning (#235). | Covered locally against real sinks. GitHub.com and GHES UI/backend observation of the same job remains **unverified**. |
 
 Verification status: the pre-fix test reproduced cleartext
 `annotation=[Q|RS|TUV]` on macOS. The post-fix production-replay test passes
@@ -414,7 +414,7 @@ provenance and hash are in `crates/execution/tests/defaults_run_evidence.json`.
 | --- | --- | --- |
 | 76-S1 | The captured `actions/checkout@v4` job selects its exact Launch path and sends `{action,version}`. Production prefetch and step execution share the acquired-job resolver and a revision-qualified cache. A loopback Launch peer serving a real `resolution.url` + scoped token has its URL fetched with that token's Basic credential and its tarball extracted and run (#235, `action_infrastructure_test::launch_success_uses_the_served_url_token_and_runs_the_action`); the peer records two identical resolutions, one from the setup prefetch and one from the step that joins it. | An actually-private or internal action, a local-action step proven to download nothing, and public/private/internal SHA, tag, branch, subpath and local-action live runs. This row stays **unverified**: the Launch success path alone does not cover those clauses. |
 | 76-S2 | A capture-derived host variant selects its GHES API URL; legacy discovery uses the action-download resource from connection data. | A real GHES and GitHub Connect job, including the returned cross-host archive URL, plus an older-server fallback run. |
-| 76-S3 | Local HTTP failure and redirect probes check 401/403 propagation, Basic archive auth on the source origin, and no auth at a different origin. Every archive status the issue names — 401, 403, 404, 429 and 500 — plus a body cut mid-stream and a corrupt tarball fail the job with a bounded number of archive requests (at most two, or four when the status is retried as an auth refresh) and leave no cache entry behind (#235, `action_infrastructure_test::archive_failure_statuses_are_bounded_and_leave_no_cache_entry`). | Live token expiry, rate limiting and durable log redaction observations. |
+| 76-S3 | Local HTTP failure and redirect probes check 401/403 propagation, Basic archive auth on the source origin, and no auth at a different origin. Every archive status the issue names — 401, 403, 404, 429 and 500 — plus a body cut mid-stream and a corrupt tarball fail the job with a bounded number of archive requests (at most two, or four when the status is retried as an auth refresh) and leave no cache entry behind (#235, `action_infrastructure_test::archive_failure_statuses_are_bounded_and_leave_no_cache_entry`). | An expired scoped token, the downloader's handling of server retry guidance such as `Retry-After`, rate limiting and durable log redaction. This row stays **unverified**: bounded failure alone does not cover those clauses. |
 | 76-S4 | Existing downloader tests cover streaming extraction, corrupt archive cleanup and concurrent staging; the new parser rejects traversal and the fetcher keys by resolved SHA. | Live moved-ref, cancellation, and same-revision concurrent execution observations. |
 
 The scoped archive credential the Launch peer returns is registered with the
@@ -1164,8 +1164,9 @@ and architecture come from the host, not hosted-runner image metadata.
   through all three calls, carrying the job's backend identities, the masked
   bytes and their byte count, in signing/PUT/metadata order (#235). A peer that
   rejects the signing call writes no blob and leaves the conclusion `Success`;
-  seventeen documents against a stalled peer apply backpressure past the queue's
-  sixteen slots and still drain; a failed upload does not strand later ones.
+  eighteen documents against a stalled peer apply backpressure past the queue's
+  sixteen buffered slots plus the one in flight, and still drain; a failed
+  upload does not strand later ones.
 - `cargo test -p wire step_summary`: local TCP stubs cover a failed RPC, a
   malformed reply that never exposes values, and blob 503 retries without
   leaking the signed URL, plus the successful three-call upload and the
