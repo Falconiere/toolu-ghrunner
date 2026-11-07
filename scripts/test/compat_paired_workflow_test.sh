@@ -377,7 +377,8 @@ DOCKER
     fail=1
   }
   # Lifecycle jobs still queued behind a dead pool lane must not hang the host.
-  head -n 4 "$tmp/jobs" >"$tmp/jobs.partial" && mv "$tmp/jobs.partial" "$tmp/jobs"
+  # The ephemeral job stays completed so only the pool liveness check can fail it.
+  grep -v 'toolu-fresh-' "$tmp/jobs" >"$tmp/jobs.partial" && mv "$tmp/jobs.partial" "$tmp/jobs"
   mkdir -p "$tmp/toolu-pool-1" && touch "$tmp/toolu-pool-1/die"
   FAKE_RUNNERS="$tmp/none" FAKE_EXTENDED=true host run >/dev/null 2>&1
   expect "a dead pool lane fails the host instead of waiting" 1 $?

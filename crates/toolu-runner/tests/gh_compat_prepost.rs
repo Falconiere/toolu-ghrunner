@@ -287,8 +287,8 @@ async fn a_step_without_pre_reports_its_timeout_error_once_at_main() -> TestResu
   Ok(())
 }
 
-/// One `act-a` step through the pre-job phase with `node_bin` written over the
-/// seeded runtime (`None` keeps the real one), cancelling after `cancel_after`.
+/// One `act-a` step (its `pre.js` set to `pre_js`) through the pre-job phase,
+/// with an unexecutable node runtime when `broken_node`, cancelling after `cancel_after`.
 async fn run_pre_phase_case(
   pre_js: &str,
   broken_node: bool,
