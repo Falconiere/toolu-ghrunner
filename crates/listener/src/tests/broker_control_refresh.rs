@@ -354,9 +354,15 @@ async fn a_stalled_token_endpoint_is_abandoned_at_its_deadline() -> TestResult {
   let peer = Peer::start(vec![(StatusCode::OK, granted(NEW_TOKEN))], true).await?;
   let mut ctx = session(&peer)?;
   let started = std::time::Instant::now();
-  // The stall never ends, so this guard is expected to fire: it is here to
-  // keep the test bounded, and the evidence is what the peer saw meanwhile.
-  let _ = tokio::time::timeout(Duration::from_secs(13), refresh(&mut ctx)).await;
+  // The stall never ends, so the guard must fire: asserting that it did is
+  // what rules out `refresh` returning early for some unrelated reason after
+  // the second arrival, which the peer timings below cannot see.
+  let outcome = tokio::time::timeout(Duration::from_secs(13), refresh(&mut ctx)).await;
+  assert!(
+    outcome.is_err(),
+    "refresh returned against a peer that never answers: {:?}",
+    outcome.map(|result| result.map(|_| ()))
+  );
   // The retry only reaches the peer once the first request is abandoned, so
   // the gap between the two arrivals is the 10s request deadline plus the
   // first retry sleep — `jittered_backoff(1s)`, which is 0.5s to 1.0s. That
