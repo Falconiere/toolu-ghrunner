@@ -244,9 +244,11 @@ The hosted `surfaces` job reads the GitHub records back with the run's own
 token: annotations from each job's `check_run_url`, deployment statuses whose
 `log_url` names the job. `scripts/test/compat_surfaces_check.py` evaluates them;
 only toolu lanes fail it, official lanes are recorded. Its capture of run
-42389172867 is committed as `docs/compat-surfaces-237.json` (no token, claim value
-or signed URL; the checker refuses to write one that holds any) and re-verified in
-CI:
+42389172867 is committed as `docs/compat-surfaces-237.json` and re-verified in CI.
+It keeps job and check-run IDs and splits environment URLs into their
+`/`-separated parts, rather than storing URLs. It holds no token, claim value or
+signed URL: on any such match the checker writes nothing and reports only the
+count, never the value. Re-verify it with:
 
 ```sh
 python3 scripts/test/compat_surfaces_check.py --verify docs/compat-surfaces-237.json
