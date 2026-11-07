@@ -1,11 +1,14 @@
 //! Issue #77: the broker's `ForceTokenRefresh` re-exchange itself, not just
 //! its classification (`tests/broker_control.rs` owns that).
 //!
-//! Every case drives production `handle_idle_outcome` — the only code that
-//! publishes a refreshed token — against a real loopback OAuth endpoint, with
-//! a real PS256 assertion signed by the committed PKCS#1 test key. Nothing is
+//! Every case drives production `handle_idle_outcome` — the idle loop's
+//! publication seam — against a real loopback OAuth endpoint, with a real
+//! PS256 assertion signed by the committed PKCS#1 test key. Nothing is
 //! mocked: the peer answers HTTP, `wire::net::exchange_token` parses it, and
 //! the following broker poll shows which bearer the runner now presents.
+//! The mid-job seam (`job_lifecycle::refresh_watcher_token`, which also
+//! feeds the renewal watcher) shares `refresh_access_token` but is not
+//! driven here.
 //!
 //! The clock stays real: a paused clock auto-advances whenever the runtime
 //! waits on a socket, which trips the very timeouts under test. The two
@@ -18,7 +21,6 @@
 //! is asserted — only the floor the budget guarantees.
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -76,15 +78,13 @@ impl Peer {
     let base = format!("http://{}", listener.local_addr()?);
     let seen: Arc<Mutex<Vec<Recorded>>> = Arc::new(Mutex::new(Vec::new()));
     let queue = Arc::new(Mutex::new(VecDeque::from(replies)));
-    let stalled = Arc::new(AtomicBool::new(stall));
     let token_seen = Arc::clone(&seen);
     let token = move |headers: axum::http::HeaderMap, body: String| {
       let queue = Arc::clone(&queue);
       let seen = Arc::clone(&token_seen);
-      let stalled = Arc::clone(&stalled);
       async move {
         record(&seen, "/oauth2/token", &headers, body);
-        if stalled.load(Ordering::SeqCst) {
+        if stall {
           // Never answers, so the caller's own 10 s request deadline is
           // what ends the attempt.
           std::future::pending::<()>().await;
