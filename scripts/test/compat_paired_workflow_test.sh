@@ -11,9 +11,10 @@ set -uo pipefail
 cd "$(dirname "$0")/../.." || exit 1 # repo root
 
 # COMPAT_PAIRED_WORKFLOW_FILE lets the negative checks point at a mutated copy.
-WF="${COMPAT_PAIRED_WORKFLOW_FILE:-.github/workflows/compat-paired.yml}"
+WORKFLOWS=.github/workflows
+WF="${COMPAT_PAIRED_WORKFLOW_FILE:-$WORKFLOWS/compat-paired.yml}"
 HOST=scripts/test/compat_paired_host.sh
-PROBE=.github/workflows/compat-reference-103-probe.yml
+PROBE="$WORKFLOWS/compat-reference-103-probe.yml"
 fail=0
 
 if [[ ! -f "$WF" ]]; then
@@ -155,7 +156,7 @@ TOOLU
   host() {
     (
       export FAKE_JOBS="$tmp/jobs" FAKE_NO_JIT="${FAKE_NO_JIT:-}" GH_TOKEN=fake GITHUB_REPOSITORY=o/r GITHUB_RUN_ID=1 RUNNER_TEMP="$tmp"
-      export PLATFORM=Linux-X64 LABEL_PREFIX=compat-paired-1-1-Linux-X64 POLL_SECONDS=0
+      export PLATFORM=Linux-X64 LABEL_PREFIX="compat-paired-$GITHUB_RUN_ID-Linux-X64" POLL_SECONDS=0
       export OFFICIAL_DIR="$tmp/official" TOOLU_BIN="${FAKE_TOOLU:-$tmp/tools/toolu}"
       PATH="$tmp/tools:$PATH" timeout_guard bash "$HOST" "$@"
     )
