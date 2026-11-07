@@ -44,7 +44,7 @@ fn fixture_job() -> TestResult<AgentJobRequestMessage> {
 /// The env is dumped to a file rather than stdout precisely so the runtime
 /// token is observed unredacted: the `SecretMasker` rewrites `Log` events, not
 /// a node action's own file writes.
-async fn accelerated_env() -> TestResult<HashMap<String, String>> {
+async fn accelerated_env() -> TestResult<Option<HashMap<String, String>>> {
   let dir = tempfile::tempdir()?;
   let workspace_root = dir.path().join("work");
   let data_dir = dir.path().join("data");
@@ -65,13 +65,17 @@ async fn accelerated_env() -> TestResult<HashMap<String, String>> {
   };
 
   let mut msg = fixture_job()?;
-  let step = crate::node_probe::install(
+  let Some(step) = crate::node_probe::install(
     &config.workspace_root,
     &config.data_dir,
     &msg.job_id,
     &dump,
     None,
-  )?;
+    "accelerated_redirects_cache_vars_and_keeps_real_token",
+  )?
+  else {
+    return Ok(None);
+  };
   msg.steps = vec![step];
 
   let masker = Arc::new(Mutex::new(SecretMasker::new()));
@@ -84,7 +88,7 @@ async fn accelerated_env() -> TestResult<HashMap<String, String>> {
   teardown.finish(&config).await;
 
   let text = std::fs::read_to_string(&dump)?;
-  Ok(parse_env(&text))
+  Ok(Some(parse_env(&text)))
 }
 
 /// Parse `KEY=VALUE` lines into a map (the first `=` splits key from value).
@@ -98,7 +102,9 @@ fn parse_env(text: &str) -> HashMap<String, String> {
 
 #[tokio::test]
 async fn accelerated_redirects_cache_vars_and_keeps_real_token() -> TestResult<()> {
-  let env = accelerated_env().await?;
+  let Some(env) = accelerated_env().await? else {
+    return Ok(());
+  };
 
   // Cache traffic is redirected at the local server (loopback), not real GitHub.
   assert!(

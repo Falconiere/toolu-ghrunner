@@ -12,6 +12,9 @@ use crate::gh_compat_node_action_file_commands::{seed_node, system_node};
 /// Install the probe at `<workspace_root>/<job_id>/node-probe` (the
 /// `WorkspaceMode::Fresh` layout) and return its `uses: ./node-probe` step.
 ///
+/// Returns `Ok(None)` — after printing a `SKIP` line naming `test_name` —
+/// when no system `node` is on PATH, so the caller can skip instead of fail.
+///
 /// The action writes `KEY=VALUE` lines for every `ACTIONS_*` variable to `dump`
 /// (via rename, so a reader never sees a partial file), then — when `sentinel`
 /// is given — blocks until that file exists.
@@ -21,8 +24,12 @@ pub fn install(
   job_id: &str,
   dump: &Path,
   sentinel: Option<&Path>,
-) -> Result<ActionStep, Box<dyn Error>> {
-  let node = system_node().ok_or("this test needs a real `node` runtime on PATH")?;
+  test_name: &str,
+) -> Result<Option<ActionStep>, Box<dyn Error>> {
+  let Some(node) = system_node() else {
+    eprintln!("SKIP: no system `node` on PATH; {test_name} needs a real node runtime");
+    return Ok(None);
+  };
   seed_node(data_dir, &node)?;
   let dir = workspace_root
     .join(shared::paths::sanitize_job_id(job_id))
@@ -41,5 +48,5 @@ pub fn install(
   std::fs::write(dir.join("main.js"), main)?;
   let mut step = ActionStep::with_ref_type("node-probe", "repository");
   step.reference.name = Some("./node-probe".to_owned());
-  Ok(step)
+  Ok(Some(step))
 }

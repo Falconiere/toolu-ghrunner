@@ -43,22 +43,26 @@ type TestResult<T = ()> = Result<T, Box<dyn Error>>;
 
 /// The fixture job with a single Node-action step that publishes the offline
 /// service env and then blocks until `sentinel` appears, keeping the cache
-/// server up.
+/// server up. `Ok(None)` means the probe skipped (no system `node`).
 fn fixture_job(
   config: &RunnerConfig,
   dump: &Path,
   sentinel: &Path,
-) -> TestResult<AgentJobRequestMessage> {
+) -> TestResult<Option<AgentJobRequestMessage>> {
   let mut msg: AgentJobRequestMessage = serde_json::from_str(JOB_MESSAGE)?;
-  let step = crate::node_probe::install(
+  let Some(step) = crate::node_probe::install(
     &config.workspace_root,
     &config.data_dir,
     &msg.job_id,
     dump,
     Some(sentinel),
-  )?;
+    "offline_job_with_fsync_chunks_round_trips_a_real_entry",
+  )?
+  else {
+    return Ok(None);
+  };
   msg.steps = vec![step];
-  Ok(msg)
+  Ok(Some(msg))
 }
 
 /// Poll `dump` until the step has written both lines; returns `(base_url, bearer)`.
@@ -279,7 +283,9 @@ async fn offline_job_with_fsync_chunks_round_trips_a_real_entry() -> TestResult 
   let sentinel = dir.path().join("release");
 
   let config = fsync_config(data_dir.clone(), workspace_root);
-  let msg = fixture_job(&config, &dump, &sentinel)?;
+  let Some(msg) = fixture_job(&config, &dump, &sentinel)? else {
+    return Ok(());
+  };
   let live = spawn_offline_job(&config, msg);
 
   // The job is live: talk to the cache server it stood up over the
