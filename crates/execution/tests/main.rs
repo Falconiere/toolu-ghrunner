@@ -27,6 +27,7 @@ mod action_infrastructure_test;
 mod action_ref_traversal_test;
 mod command_annotation_test;
 mod command_dispatch_guard_test;
+mod compat_251_capture_test;
 mod compat_probe_replay_test;
 mod composite_bounds_test;
 mod composite_runner_context_test;
