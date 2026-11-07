@@ -6,7 +6,7 @@ use std::path::Path;
 use shared::{ActionStep, Conclusion, RunnerConfig, RunnerError, RunnerEvent};
 use tokio::sync::mpsc;
 
-use super::action_support::{build_composite_inputs, build_resolved_action_env};
+use super::action_support::{ActionKind, build_composite_inputs, build_resolved_action_env};
 use super::actions::manifest::ActionDefinition;
 use super::command_dispatch::stream_dispatch_stdout;
 use super::context::ExecutionContext;
@@ -117,7 +117,7 @@ fn stage_values(
   inputs: &HashMap<String, String>,
 ) -> Result<StageValues, RunnerError> {
   let mut env = build_resolved_action_env(
-    (s.step, inputs),
+    (ActionKind::Container, s.step, inputs),
     ctx,
     s.manifest,
     s.action_dir,

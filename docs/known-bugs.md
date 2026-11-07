@@ -1,7 +1,7 @@
 # Known limitations and resolved bugs
 
-This page tracks current limitations and keeps the B-001–B-005 identifiers
-used by tests and release history. All five original bugs are resolved; their
+This page tracks current limitations and keeps the B-001–B-006 identifiers
+used by tests and release history. All six tracked bugs are resolved; their
 old reproduction steps do not describe the current implementation.
 
 ## Verification limits
@@ -19,13 +19,8 @@ the `TOOLU_RUNNER_LIVE_TOKEN` secret; its test repository is the
 
 ## Current limitations
 
-- **Forwarder cache:** the job-variable lookup does not recognize GitHub's
-  `actions_uses_cache_service_v2`, and `ACTIONS_CACHE_MODE` is not exported.
-  The [paired run](compatibility-evidence.md#recorded-differences) recorded
-  a fallback to retired v1 endpoints: saves warned without creating an entry
-  and restores failed. A successful cache-save step alone does not prove a hit.
 - **Docker reporting:** `docker://` actions do not emit the official runner's
-  separate `Pull <image>` setup step. The same paired run found matching shared
+  separate `Pull <image>` setup step. The [paired run](compatibility-evidence.md#recorded-differences) found matching shared
   step conclusions and container outputs, but not identical setup reporting.
 - **Outage reporting:** the watchdog counts only network-class renewal
   failures (transport errors, 429 and 5xx). Definitive auth/protocol failures
@@ -59,3 +54,4 @@ the `TOOLU_RUNNER_LIVE_TOKEN` secret; its test repository is the
 | B-003 | Registration wrote placeholder credentials | `register_jit` calls GitHub's `generate-jitconfig` endpoint and persists the returned JIT blob and runner ID. Covered by `crates/toolu-runner/tests/gh_compat_register.rs`; live end-to-end verification is a separate lane. |
 | B-004 | Shell, Node and composite temp/tool-cache paths diverged | Shared `runner_temp_dir` / `runner_tool_cache_dir` helpers supply `_temp` / `_tool`. Covered by `crates/execution/tests/runner_paths_test.rs` and `composite_runner_temp_test.rs`. |
 | B-005 | Composite expressions lost populated `runner.*` fields | Composites use the full expression engine over the invocation's context snapshot. Covered by `crates/execution/tests/composite_runner_context_test.rs`. |
+| B-006 | Forwarder cache fell back to retired v1 | `execution::service_endpoints` reads `actions_uses_cache_service_v2` (case-insensitive name, on only for boolean true) and `actions_cache_mode`, and hands each step type its official `ACTIONS_*` set: Node gets the v2 flag (`True`) and mode, container actions the same without the flag, `run:` steps only the OIDC pair. The setup log prints `Cache mode: <mode>`. Covered by `crates/toolu-runner/tests/gh_compat_forwarder.rs` and `crates/listener/src/tests/setup_step.rs`. |

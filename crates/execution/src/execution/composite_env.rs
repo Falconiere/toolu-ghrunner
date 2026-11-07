@@ -91,6 +91,7 @@ pub(super) fn build_step_env(
   add_composite_inputs(&mut env, params.step_inputs);
   add_composite_action_path(&mut env, params);
   interpolate_step_env(&mut env, params.step_inputs, &step.env, ctx)?;
+  ctx.apply_script_service_env(&mut env);
   prepend_path_additions(&mut env, path_additions);
   add_runner_paths(&mut env, params.workspace, &temp_dir);
   super::action_metadata::export(ctx, &mut env);

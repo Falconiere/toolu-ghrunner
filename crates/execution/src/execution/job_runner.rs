@@ -16,7 +16,7 @@ use super::job_context::{event_json, write_event_json};
 use super::job_hooks::{JobHookStage, run_job_hook};
 use super::job_spec::JobSpec;
 use super::job_teardown::{CacheMaintenance, JobTeardown};
-use super::service_endpoints::{ServiceUrls, extract_service_urls, forward_env};
+use super::service_endpoints::{ServiceEnv, ServiceUrls, extract_service_urls, forward_env};
 use super::shadow::ShadowObserver;
 use super::steps_runner::{JobRun, run_steps};
 use super::workspace_layout::{PreparedWorkspace, prepare_workspace};
@@ -53,7 +53,7 @@ enum LocalServices {
   /// Accelerated: a local cache server + the real service URLs to forward +
   /// teardown handles. The runtime token needs no separate field — it rides in
   /// `ServiceUrls` and `setup_job_env` forwards it verbatim.
-  Accelerated(CacheServer, ServiceUrls, CacheMaintenance),
+  Accelerated(CacheServer, Box<ServiceUrls>, CacheMaintenance),
 }
 
 /// Execute a complete job from an `AgentJobRequestMessage`.
@@ -317,7 +317,11 @@ async fn start_local_services(
         url = service.base_url(),
         "accelerated cache service started"
       );
-      Ok(LocalServices::Accelerated(service, urls, maintenance))
+      Ok(LocalServices::Accelerated(
+        service,
+        Box::new(urls),
+        maintenance,
+      ))
     },
     ServicesMode::Forwarder => Ok(LocalServices::None),
   }
@@ -481,7 +485,7 @@ async fn setup_job_env(
   match local {
     LocalServices::Offline(service, token, _) => setup_offline_env(ctx, service, token),
     LocalServices::Accelerated(service, urls, _) => setup_accelerated_env(ctx, service, urls),
-    LocalServices::None => apply_forwarded_env(ctx, &extract_service_urls(msg)),
+    LocalServices::None => ctx.set_service_env(forward_env(&extract_service_urls(msg))),
   }
 
   // Serialize first so a serialization error propagates before the blocking
@@ -507,42 +511,29 @@ async fn setup_job_env(
   Ok(())
 }
 
-/// Offline env: point the toolkit at the local cache service + local token.
+/// Offline env: point the toolkit at the local cache service + local token
+/// (Node and container actions; offline has no OIDC service).
 fn setup_offline_env(ctx: &mut ExecutionContext, service: &CacheServer, token: &str) {
-  // Register the mask before the token is placed anywhere.
-  ctx.add_mask(token);
-  ctx.set_env("ACTIONS_CACHE_URL", service.base_url());
-  ctx.set_env("ACTIONS_RUNTIME_TOKEN", token);
+  let mut env = ServiceEnv::default();
+  env.set_action("ACTIONS_CACHE_URL", service.base_url());
+  env.set_action("ACTIONS_RUNTIME_TOKEN", token);
+  ctx.set_service_env(env);
 }
 
-/// Accelerated env: forward the real non-cache vars (URLs + token), then
-/// override exactly the three cache vars at the local server.
+/// Accelerated env: the forwarded per-step-type set, with the results and
+/// cache URLs overridden at the local server and the v2 flag forced on for
+/// Node actions.
 ///
 /// `ACTIONS_RUNTIME_TOKEN` is deliberately left as the real GitHub token — the
 /// local server's bearer equals it and the reverse proxy forwards it upstream
 /// for artifacts. Only cache traffic is redirected local.
 fn setup_accelerated_env(ctx: &mut ExecutionContext, service: &CacheServer, urls: &ServiceUrls) {
-  apply_forwarded_env(ctx, urls);
+  let mut env = forward_env(urls);
   let base = service.base_url().to_owned();
-  ctx.set_env("ACTIONS_RESULTS_URL", &base);
-  ctx.set_env("ACTIONS_CACHE_URL", &base);
-  ctx.set_env("ACTIONS_CACHE_SERVICE_V2", "true");
-}
-
-/// Forwarder env: copy the real GitHub service URLs + runtime token from the
-/// message into step env, masking every `*_TOKEN` credential first.
-///
-/// A `None` URL is omitted (WARN); never an empty var. Any `*_TOKEN` var (the
-/// runtime token, the id-token request token, and any future one) is registered
-/// with the masker before it reaches the env, so it never leaks to the diag log
-/// or journal.
-fn apply_forwarded_env(ctx: &mut ExecutionContext, urls: &ServiceUrls) {
-  for (key, value) in forward_env(urls) {
-    if key.ends_with("_TOKEN") {
-      ctx.add_mask(&value);
-    }
-    ctx.set_env(&key, &value);
-  }
+  env.set_action("ACTIONS_RESULTS_URL", &base);
+  env.set_action("ACTIONS_CACHE_URL", &base);
+  env.set_node("ACTIONS_CACHE_SERVICE_V2", "True");
+  ctx.set_service_env(env);
 }
 
 async fn emit_job_started(events: &mpsc::Sender<RunnerEvent>, job_id: &str, job_name: &str) {

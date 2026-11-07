@@ -24,8 +24,8 @@ use execution::execution::job_runner::run_job;
 use execution::execution::job_teardown::JobTeardown;
 use serde_json::{Value, json};
 use shared::{
-  ActionStep, AgentJobRequestMessage, CacheConfig, RunnerConfig, RunnerError, RunnerEvent,
-  SecretMasker, ServicesMode,
+  AgentJobRequestMessage, CacheConfig, RunnerConfig, RunnerError, RunnerEvent, SecretMasker,
+  ServicesMode,
 };
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -41,19 +41,28 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
 
 type TestResult<T = ()> = Result<T, Box<dyn Error>>;
 
-/// The fixture job with a single step that publishes the offline service env
-/// and then blocks until `sentinel` appears, keeping the cache server up.
-fn fixture_job(dump: &Path, sentinel: &Path) -> TestResult<AgentJobRequestMessage> {
-  let script = format!(
-    "printf '%s\\n%s\\n' \"$ACTIONS_CACHE_URL\" \"$ACTIONS_RUNTIME_TOKEN\" > '{dump}'\n\
-     n=0\n\
-     while [ ! -f '{sentinel}' ] && [ \"$n\" -lt 600 ]; do sleep 0.1; n=$((n+1)); done\n",
-    dump = dump.display(),
-    sentinel = sentinel.display()
-  );
+/// The fixture job with a single Node-action step that publishes the offline
+/// service env and then blocks until `sentinel` appears, keeping the cache
+/// server up. `Ok(None)` means the probe skipped (no system `node`).
+fn fixture_job(
+  config: &RunnerConfig,
+  dump: &Path,
+  sentinel: &Path,
+) -> TestResult<Option<AgentJobRequestMessage>> {
   let mut msg: AgentJobRequestMessage = serde_json::from_str(JOB_MESSAGE)?;
-  msg.steps = vec![ActionStep::script("hold-open", &script, "")];
-  Ok(msg)
+  let Some(step) = crate::node_probe::install(
+    &config.workspace_root,
+    &config.data_dir,
+    &msg.job_id,
+    dump,
+    Some(sentinel),
+    "offline_job_with_fsync_chunks_round_trips_a_real_entry",
+  )?
+  else {
+    return Ok(None);
+  };
+  msg.steps = vec![step];
+  Ok(Some(msg))
 }
 
 /// Poll `dump` until the step has written both lines; returns `(base_url, bearer)`.
@@ -63,9 +72,14 @@ async fn await_service_env(dump: &Path) -> TestResult<(String, String)> {
     .ok_or("deadline overflow")?;
   loop {
     if let Ok(text) = std::fs::read_to_string(dump) {
-      let mut lines = text.lines().filter(|l| !l.is_empty());
-      if let (Some(url), Some(token)) = (lines.next(), lines.next()) {
-        return Ok((url.to_owned(), token.to_owned()));
+      let find = |key: &str| {
+        text
+          .lines()
+          .find_map(|l| l.strip_prefix(key).and_then(|v| v.strip_prefix('=')))
+          .map(str::to_owned)
+      };
+      if let (Some(url), Some(token)) = (find("ACTIONS_CACHE_URL"), find("ACTIONS_RUNTIME_TOKEN")) {
+        return Ok((url, token));
       }
     }
     if SystemTime::now() >= deadline {
@@ -172,6 +186,10 @@ fn fsync_config(data_dir: PathBuf, workspace_root: PathBuf) -> RunnerConfig {
     workspace_root,
     cgroup_path: None,
     services_mode: ServicesMode::Offline,
+    workspace: shared::WorkspaceConfig {
+      mode: shared::WorkspaceMode::Fresh,
+      stable_gc_hours: 0,
+    },
     cache: CacheConfig {
       fsync_chunks: true,
       ..CacheConfig::default()
@@ -265,7 +283,10 @@ async fn offline_job_with_fsync_chunks_round_trips_a_real_entry() -> TestResult 
   let sentinel = dir.path().join("release");
 
   let config = fsync_config(data_dir.clone(), workspace_root);
-  let live = spawn_offline_job(&config, fixture_job(&dump, &sentinel)?);
+  let Some(msg) = fixture_job(&config, &dump, &sentinel)? else {
+    return Ok(());
+  };
+  let live = spawn_offline_job(&config, msg);
 
   // The job is live: talk to the cache server it stood up over the
   // fsync-configured CAS.

@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use super::super::service_endpoints::ServiceEnv;
 use super::ExecutionContext;
 
 impl ExecutionContext {
@@ -17,6 +18,28 @@ impl ExecutionContext {
   /// `NODE_EXTRA_CA_CERTS`) from `network::step_env(..).host` (#94).
   pub(crate) fn set_network_env(&mut self, env: Vec<(String, String)>) {
     self.network_env = env;
+  }
+
+  /// Replace the per-step-type service env, masking every `*_TOKEN` value.
+  pub fn set_service_env(&mut self, env: ServiceEnv) {
+    self.add_masks(env.tokens());
+    self.service_env = env;
+  }
+
+  /// Fold the Node/container action service vars into `env` (they win over
+  /// workflow env, as the official handler sets them last).
+  pub(crate) fn apply_action_service_env(&self, env: &mut HashMap<String, String>, node: bool) {
+    let set = if node {
+      &self.service_env.node
+    } else {
+      &self.service_env.container
+    };
+    env.extend(set.iter().cloned());
+  }
+
+  /// Fold the `run:` step service vars (OIDC only) into `env`.
+  pub(crate) fn apply_script_service_env(&self, env: &mut HashMap<String, String>) {
+    env.extend(self.service_env.script.iter().cloned());
   }
 
   /// The env a HOST child inherits: the runner process env without its

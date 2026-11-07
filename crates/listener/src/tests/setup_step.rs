@@ -131,3 +131,34 @@ fn setup_empty_permissions_are_explicitly_optional() {
     Some("##[endgroup]")
   );
 }
+
+#[test]
+fn setup_cache_mode_line_only_when_non_empty() {
+  let mut msg: AgentJobRequestMessage = serde_json::from_str(include_str!(
+    "../../../execution/tests/incoming_contexts_matrix_0.json"
+  ))
+  .expect("capture");
+  let mode = msg
+    .variables
+    .get_mut("actions_cache_mode")
+    .expect("fixture carries actions_cache_mode");
+  mode.value = "write".to_owned();
+  assert!(metadata_lines(&msg).contains(&"Cache mode: write".to_owned()));
+  msg
+    .variables
+    .get_mut("actions_cache_mode")
+    .expect("mode")
+    .value
+    .clear();
+  assert!(
+    !metadata_lines(&msg)
+      .iter()
+      .any(|line| line.starts_with("Cache mode"))
+  );
+  msg.variables.remove("actions_cache_mode");
+  assert!(
+    !metadata_lines(&msg)
+      .iter()
+      .any(|line| line.starts_with("Cache mode"))
+  );
+}

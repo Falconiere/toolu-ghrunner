@@ -1,12 +1,13 @@
 //! S12 — accelerated services mode env injection, driven through the real
 //! `run_job` assembly path against the committed real-data `job_message.json`.
 //!
-//! Real-data only, no mocks. A single script step dumps its `ACTIONS_*` env to
-//! a file (not stdout, so the secret masker — which rewrites only log lines —
+//! Real-data only, no mocks. A single Node action (`helpers/node_probe.rs`;
+//! `run:` steps no longer receive these vars) dumps its `ACTIONS_*` env to a
+//! file (not stdout, so the secret masker — which rewrites only log lines —
 //! never redacts the runtime token). The test then asserts:
 //!   - cache traffic is redirected local: `ACTIONS_RESULTS_URL` and
 //!     `ACTIONS_CACHE_URL` both point at `http://127.0.0.1:<port>`, NOT the
-//!     fixture's real results URL, and `ACTIONS_CACHE_SERVICE_V2=true`;
+//!     fixture's real results URL, and `ACTIONS_CACHE_SERVICE_V2=True`;
 //!   - non-cache vars are still forwarded to real GitHub: `ACTIONS_RUNTIME_URL`
 //!     is the fixture's pipelines URL and `ACTIONS_RUNTIME_TOKEN` is the real,
 //!     unchanged fixture token (the proxy forwards it upstream for artifacts).
@@ -17,7 +18,7 @@ use std::sync::{Arc, Mutex};
 
 use execution::execution::job_runner::run_job;
 use shared::SecretMasker;
-use shared::{ActionStep, AgentJobRequestMessage, RunnerConfig, RunnerEvent, ServicesMode};
+use shared::{AgentJobRequestMessage, RunnerConfig, RunnerEvent, ServicesMode};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -42,8 +43,8 @@ fn fixture_job() -> TestResult<AgentJobRequestMessage> {
 ///
 /// The env is dumped to a file rather than stdout precisely so the runtime
 /// token is observed unredacted: the `SecretMasker` rewrites `Log` events, not
-/// a step's own file writes.
-async fn accelerated_env() -> TestResult<HashMap<String, String>> {
+/// a node action's own file writes.
+async fn accelerated_env() -> TestResult<Option<HashMap<String, String>>> {
   let dir = tempfile::tempdir()?;
   let workspace_root = dir.path().join("work");
   let data_dir = dir.path().join("data");
@@ -56,16 +57,26 @@ async fn accelerated_env() -> TestResult<HashMap<String, String>> {
     workspace_root,
     cgroup_path: None,
     services_mode: ServicesMode::Accelerated,
+    workspace: shared::WorkspaceConfig {
+      mode: shared::WorkspaceMode::Fresh,
+      stable_gc_hours: 0,
+    },
     ..RunnerConfig::default()
   };
 
-  let script = format!(
-    "printf 'ACTIONS_RESULTS_URL=%s\\nACTIONS_CACHE_URL=%s\\nACTIONS_CACHE_SERVICE_V2=%s\\nACTIONS_RUNTIME_TOKEN=%s\\nACTIONS_RUNTIME_URL=%s\\n' \"$ACTIONS_RESULTS_URL\" \"$ACTIONS_CACHE_URL\" \"$ACTIONS_CACHE_SERVICE_V2\" \"$ACTIONS_RUNTIME_TOKEN\" \"$ACTIONS_RUNTIME_URL\" > '{}'",
-    dump.display()
-  );
-
   let mut msg = fixture_job()?;
-  msg.steps = vec![ActionStep::script("dump-env", &script, "")];
+  let Some(step) = crate::node_probe::install(
+    &config.workspace_root,
+    &config.data_dir,
+    &msg.job_id,
+    &dump,
+    None,
+    "accelerated_redirects_cache_vars_and_keeps_real_token",
+  )?
+  else {
+    return Ok(None);
+  };
+  msg.steps = vec![step];
 
   let masker = Arc::new(Mutex::new(SecretMasker::new()));
   let (tx, mut rx) = mpsc::channel::<RunnerEvent>(1024);
@@ -77,7 +88,7 @@ async fn accelerated_env() -> TestResult<HashMap<String, String>> {
   teardown.finish(&config).await;
 
   let text = std::fs::read_to_string(&dump)?;
-  Ok(parse_env(&text))
+  Ok(Some(parse_env(&text)))
 }
 
 /// Parse `KEY=VALUE` lines into a map (the first `=` splits key from value).
@@ -91,7 +102,9 @@ fn parse_env(text: &str) -> HashMap<String, String> {
 
 #[tokio::test]
 async fn accelerated_redirects_cache_vars_and_keeps_real_token() -> TestResult<()> {
-  let env = accelerated_env().await?;
+  let Some(env) = accelerated_env().await? else {
+    return Ok(());
+  };
 
   // Cache traffic is redirected at the local server (loopback), not real GitHub.
   assert!(
@@ -115,7 +128,7 @@ async fn accelerated_redirects_cache_vars_and_keeps_real_token() -> TestResult<(
   );
   assert_eq!(
     env.get("ACTIONS_CACHE_SERVICE_V2").map(String::as_str),
-    Some("true"),
+    Some("True"),
     "ACTIONS_CACHE_SERVICE_V2 must be set so modern clients prefer v2"
   );
 

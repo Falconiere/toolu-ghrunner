@@ -63,6 +63,13 @@ async fn replay(
     .ok_or("group")?
     .value
     .clone_from(&secret);
+  msg.variables.insert(
+    "actions_cache_mode".to_owned(),
+    shared::VariableValue {
+      value: secret.clone(),
+      is_secret: false,
+    },
+  );
   let temp = tempfile::tempdir()?;
   let config = shared::RunnerConfig {
     data_dir: temp.path().join("data"),
@@ -151,6 +158,7 @@ async fn setup_production_replay_streams_metadata_and_completes_before_shell()
     .map(|line| line.line.as_str())
     .collect();
   assert!(lines.contains(&"Runner group name: '***'"));
+  assert!(lines.contains(&"Cache mode: ***"));
   assert!(lines.contains(&"##[group]GITHUB_TOKEN Permissions"));
   assert!(lines.contains(&"Contents: read"));
   assert!(lines.contains(&"Secret source: Actions"));

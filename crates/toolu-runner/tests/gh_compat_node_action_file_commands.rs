@@ -51,7 +51,7 @@ const FIXTURE_DIR: &str = concat!(
 
 /// Locate a real `node` binary, resolving shims via `process.execPath`.
 /// `None` => skip (no real node runtime available).
-fn system_node() -> Option<PathBuf> {
+pub(crate) fn system_node() -> Option<PathBuf> {
   let out = std::process::Command::new("node")
     .args(["-e", "process.stdout.write(process.execPath)"])
     .output()
@@ -68,7 +68,7 @@ fn system_node() -> Option<PathBuf> {
 
 /// Seed the real node binary into the runner's node cache for both node pins (node20 and node24) so
 /// `ensure_node_runtime` resolves it from disk instead of downloading.
-fn seed_node(data_dir: &Path, node: &Path) -> TestResult<()> {
+pub(crate) fn seed_node(data_dir: &Path, node: &Path) -> TestResult<()> {
   for major in [20, 24] {
     let version = node_version_for(major);
     let cache_dir = node_cache_dir(data_dir, version);

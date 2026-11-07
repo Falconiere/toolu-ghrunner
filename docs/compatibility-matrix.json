@@ -19842,7 +19842,7 @@
         },
         "reference": {
           "status": "unverified",
-          "reason": "per-surface; see 103/R-* (acknowledged difference forwarder-cache-service-v2 in docs/compat-reference-103.json (https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727): toolu never sets ACTIONS_CACHE_SERVICE_V2/ACTIONS_CACHE_MODE from actions_uses_cache_service_v2/actions_cache_mode, so actions/cache uses the retired v1 host; save silently fails and restore gets 400)"
+          "reason": "per-surface; see 103/R-* (acknowledged difference forwarder-cache-service-v2 in docs/compat-reference-103.json (https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727): the recorded pre-#231 toolu run did not set ACTIONS_CACHE_SERVICE_V2/ACTIONS_CACHE_MODE from actions_uses_cache_service_v2/actions_cache_mode, so actions/cache uses the retired v1 host; save silently fails and restore gets 400)"
         },
         "ghes": {
           "status": "unverified",
@@ -20026,7 +20026,7 @@
         },
         "reference": {
           "status": "unverified",
-          "reason": "acknowledged difference docker-pull-step-reporting in docs/compat-reference-103.json (https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727): the official runner reports a 'Pull <image>' setup step that toolu does not; plus acknowledged difference forwarder-cache-service-v2 in docs/compat-reference-103.json (https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727): toolu never sets ACTIONS_CACHE_SERVICE_V2/ACTIONS_CACHE_MODE from actions_uses_cache_service_v2/actions_cache_mode, so actions/cache uses the retired v1 host; save silently fails and restore gets 400; macOS/ARM64 pairs not run"
+          "reason": "acknowledged difference docker-pull-step-reporting in docs/compat-reference-103.json (https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727): the official runner reports a 'Pull <image>' setup step that toolu does not; plus acknowledged difference forwarder-cache-service-v2 in docs/compat-reference-103.json (https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727): the recorded pre-#231 toolu run did not set ACTIONS_CACHE_SERVICE_V2/ACTIONS_CACHE_MODE from actions_uses_cache_service_v2/actions_cache_mode, so actions/cache uses the retired v1 host; save silently fails and restore gets 400; macOS/ARM64 pairs not run"
         },
         "ghes": {
           "status": "unverified",
@@ -20047,7 +20047,7 @@
         ".github/workflows/compat-reference-103-probe.yml",
         "docs/compat-reference-103.json"
       ],
-      "expected": "Artifact upload (v7, exact bytes read back via the API) and OIDC (claims aud/repository/job_workflow_ref; no request URL without id-token) match the official lane in forwarder mode; cache save/restore does not, and download-artifact v8 therefore never ran on toolu. Accelerated mode was not run live; offline differences are documented.",
+      "expected": "Artifact upload (v7, exact bytes read back via the API) and OIDC (claims aud/repository/job_workflow_ref; no request URL without id-token) match the official lane in forwarder mode; cache save/restore did not in the recorded pre-#231 run, and download-artifact v8 therefore never ran on toolu. Accelerated mode was not run live; offline differences are documented.",
       "production_path": "execution::execution::service_endpoints (forwarder mode)",
       "tests": [
         [
@@ -20060,7 +20060,7 @@
         ],
         [
           "crates/toolu-runner/tests/gh_compat_forwarder.rs",
-          "forward_env_emits_all_vars_with_fixture_values"
+          "per_step_type_sets_match_official_handlers"
         ],
         [
           "scripts/test/test_reference_compare.py",
@@ -20083,11 +20083,11 @@
         },
         "github-com": {
           "status": "unverified",
-          "reason": "acknowledged difference forwarder-cache-service-v2 in docs/compat-reference-103.json (https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727): toolu never sets ACTIONS_CACHE_SERVICE_V2/ACTIONS_CACHE_MODE from actions_uses_cache_service_v2/actions_cache_mode, so actions/cache uses the retired v1 host; save silently fails and restore gets 400; OIDC passed (103/R-oidc); artifact upload verified, download skipped on toolu (103/R-artifacts); accelerated mode not run live"
+          "reason": "acknowledged difference forwarder-cache-service-v2 in docs/compat-reference-103.json (https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727): the recorded pre-#231 toolu run did not set ACTIONS_CACHE_SERVICE_V2/ACTIONS_CACHE_MODE from actions_uses_cache_service_v2/actions_cache_mode, so actions/cache uses the retired v1 host; save silently fails and restore gets 400; OIDC passed (103/R-oidc); artifact upload verified, download skipped on toolu (103/R-artifacts); accelerated mode not run live"
         },
         "reference": {
           "status": "unverified",
-          "reason": "acknowledged difference forwarder-cache-service-v2 in docs/compat-reference-103.json (https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727): toolu never sets ACTIONS_CACHE_SERVICE_V2/ACTIONS_CACHE_MODE from actions_uses_cache_service_v2/actions_cache_mode, so actions/cache uses the retired v1 host; save silently fails and restore gets 400"
+          "reason": "acknowledged difference forwarder-cache-service-v2 in docs/compat-reference-103.json (https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727): the recorded pre-#231 toolu run did not set ACTIONS_CACHE_SERVICE_V2/ACTIONS_CACHE_MODE from actions_uses_cache_service_v2/actions_cache_mode, so actions/cache uses the retired v1 host; save silently fails and restore gets 400"
         },
         "ghes": {
           "status": "unverified",
@@ -20095,7 +20095,7 @@
         },
         "ui-service": {
           "status": "unverified",
-          "reason": "acknowledged difference forwarder-cache-service-v2 in docs/compat-reference-103.json (https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727): toolu never sets ACTIONS_CACHE_SERVICE_V2/ACTIONS_CACHE_MODE from actions_uses_cache_service_v2/actions_cache_mode, so actions/cache uses the retired v1 host; save silently fails and restore gets 400"
+          "reason": "acknowledged difference forwarder-cache-service-v2 in docs/compat-reference-103.json (https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727): the recorded pre-#231 toolu run did not set ACTIONS_CACHE_SERVICE_V2/ACTIONS_CACHE_MODE from actions_uses_cache_service_v2/actions_cache_mode, so actions/cache uses the retired v1 host; save silently fails and restore gets 400"
         }
       }
     },
@@ -20278,7 +20278,7 @@
       "issue": 103,
       "criterion": "Regression: actions cache save/restore (forwarder: GitHub backend; accelerated: local CAS)",
       "input": [],
-      "expected": "Accelerated-mode Twirp v2 round trip saves and restores locally; forwarder env carries the backend URLs. Live forwarder save/restore currently fails.",
+      "expected": "Accelerated-mode Twirp v2 round trip saves and restores locally; forwarder env carries the backend URLs. The recorded pre-#231 live forwarder save/restore failed; no post-fix live run has verified it.",
       "production_path": "cache crate (accelerated); execution::execution::service_endpoints (forwarder)",
       "tests": [
         [
@@ -20287,7 +20287,7 @@
         ],
         [
           "crates/toolu-runner/tests/gh_compat_forwarder.rs",
-          "forward_env_emits_all_vars_with_fixture_values"
+          "per_step_type_sets_match_official_handlers"
         ]
       ],
       "command": "cargo test -p toolu-runner --test integration -- cache_twirp_test:: gh_compat_forwarder::",
@@ -20306,11 +20306,11 @@
         },
         "github-com": {
           "status": "unverified",
-          "reason": "acknowledged difference forwarder-cache-service-v2 in docs/compat-reference-103.json (https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727): toolu never sets ACTIONS_CACHE_SERVICE_V2/ACTIONS_CACHE_MODE from actions_uses_cache_service_v2/actions_cache_mode, so actions/cache uses the retired v1 host; save silently fails and restore gets 400"
+          "reason": "acknowledged difference forwarder-cache-service-v2 in docs/compat-reference-103.json (https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727): the recorded pre-#231 toolu run did not set ACTIONS_CACHE_SERVICE_V2/ACTIONS_CACHE_MODE from actions_uses_cache_service_v2/actions_cache_mode, so actions/cache uses the retired v1 host; save silently fails and restore gets 400"
         },
         "reference": {
           "status": "unverified",
-          "reason": "acknowledged difference forwarder-cache-service-v2 in docs/compat-reference-103.json (https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727): toolu never sets ACTIONS_CACHE_SERVICE_V2/ACTIONS_CACHE_MODE from actions_uses_cache_service_v2/actions_cache_mode, so actions/cache uses the retired v1 host; save silently fails and restore gets 400"
+          "reason": "acknowledged difference forwarder-cache-service-v2 in docs/compat-reference-103.json (https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727): the recorded pre-#231 toolu run did not set ACTIONS_CACHE_SERVICE_V2/ACTIONS_CACHE_MODE from actions_uses_cache_service_v2/actions_cache_mode, so actions/cache uses the retired v1 host; save silently fails and restore gets 400"
         },
         "ghes": {
           "status": "unverified",
@@ -20318,7 +20318,7 @@
         },
         "ui-service": {
           "status": "unverified",
-          "reason": "acknowledged difference forwarder-cache-service-v2 in docs/compat-reference-103.json (https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727): toolu never sets ACTIONS_CACHE_SERVICE_V2/ACTIONS_CACHE_MODE from actions_uses_cache_service_v2/actions_cache_mode, so actions/cache uses the retired v1 host; save silently fails and restore gets 400; GitHub's cache API lists only the official lane's keys"
+          "reason": "acknowledged difference forwarder-cache-service-v2 in docs/compat-reference-103.json (https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727): the recorded pre-#231 toolu run did not set ACTIONS_CACHE_SERVICE_V2/ACTIONS_CACHE_MODE from actions_uses_cache_service_v2/actions_cache_mode, so actions/cache uses the retired v1 host; save silently fails and restore gets 400; GitHub's cache API lists only the official lane's keys"
         }
       }
     },
@@ -20877,7 +20877,7 @@
         },
         "github-com": {
           "status": "unverified",
-          "reason": "no combined container+services+Docker-action workflow ran live; acknowledged difference forwarder-cache-service-v2 in docs/compat-reference-103.json (https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727): toolu never sets ACTIONS_CACHE_SERVICE_V2/ACTIONS_CACHE_MODE from actions_uses_cache_service_v2/actions_cache_mode, so actions/cache uses the retired v1 host; save silently fails and restore gets 400"
+          "reason": "no combined container+services+Docker-action workflow ran live; acknowledged difference forwarder-cache-service-v2 in docs/compat-reference-103.json (https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727): the recorded pre-#231 toolu run did not set ACTIONS_CACHE_SERVICE_V2/ACTIONS_CACHE_MODE from actions_uses_cache_service_v2/actions_cache_mode, so actions/cache uses the retired v1 host; save silently fails and restore gets 400"
         },
         "reference": {
           "status": "unverified",
@@ -20889,7 +20889,7 @@
         },
         "ui-service": {
           "status": "unverified",
-          "reason": "acknowledged difference forwarder-cache-service-v2 in docs/compat-reference-103.json (https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727): toolu never sets ACTIONS_CACHE_SERVICE_V2/ACTIONS_CACHE_MODE from actions_uses_cache_service_v2/actions_cache_mode, so actions/cache uses the retired v1 host; save silently fails and restore gets 400"
+          "reason": "acknowledged difference forwarder-cache-service-v2 in docs/compat-reference-103.json (https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727): the recorded pre-#231 toolu run did not set ACTIONS_CACHE_SERVICE_V2/ACTIONS_CACHE_MODE from actions_uses_cache_service_v2/actions_cache_mode, so actions/cache uses the retired v1 host; save silently fails and restore gets 400"
         }
       }
     },

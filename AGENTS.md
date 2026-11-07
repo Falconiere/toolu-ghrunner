@@ -166,9 +166,15 @@ outside a `tests/` tree.
   manifest parse (`actions/manifest.rs`).
 - **Service mode** (`[services] mode`, `ServicesMode` in `shared`):
   `forwarder` (default) injects the REAL GitHub service URLs + runtime token
-  from the job message `SystemVssConnection` into step env
-  (`ACTIONS_RESULTS_URL`, `ACTIONS_RUNTIME_URL`(+`_TOKEN`), `ACTIONS_CACHE_URL`,
-  `ACTIONS_CACHE_SERVICE_V2`, `ACTIONS_ID_TOKEN_REQUEST_URL`(+`_TOKEN`));
+  from the job message `SystemVssConnection` per step type (official v2.338.2
+  mapping, held on `ExecutionContext::service_env`, never the job env): Node
+  actions get `ACTIONS_RESULTS_URL`, `ACTIONS_RUNTIME_URL`(+`_TOKEN`),
+  `ACTIONS_CACHE_URL`, `ACTIONS_ID_TOKEN_REQUEST_URL`(+`_TOKEN`, only with the
+  URL), `ACTIONS_CACHE_MODE` (job variable `actions_cache_mode`, when
+  non-empty) and `ACTIONS_CACHE_SERVICE_V2=True` (job variable
+  `actions_uses_cache_service_v2`, case-insensitive name, on only if it parses
+  as boolean true); container actions the same without the v2 flag; `run:`
+  steps only the OIDC pair. The setup log prints `Cache mode: <mode>`;
   `offline` starts only the local v1 cache (no artifact/OIDC startup or
   GitHub service forwarding); `Accelerated` serves both cache
   protocols (v2 Twirp via `RESULTS_URL`, v1 REST via `CACHE_URL`) from local
