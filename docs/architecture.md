@@ -520,6 +520,20 @@ event channel closes, which is what lets the listener report the
 job's completion to GitHub. GC therefore overlaps that completion
 round-trip instead of sitting between "job done" and "GitHub told".
 
+**Runner temp directories (#239).** `data_dir/_temp` (`RUNNER_TEMP`) and
+`data_dir/tmp` (file commands) are emptied twice per job by
+`execution/temp_cleanup.rs`: at job start in `job_runner/entry.rs`, before the
+job context is built, which clears what a crashed job left, and at job end in
+`run_job_with_shutdown`, after every step, post step and container has finished
+and while the event channel is still open. The end cleanup is deliberately not
+in `JobTeardown::finish`: `finish` runs after the channel closes, which lets the
+next job start in the same `data_dir`, and it does not run at all when `run_job`
+returns an error. Only the contents are removed; a symlink is unlinked, never
+followed, even when it replaces a root; read-only subdirectories are made
+writable first. A delete error is a single `WARN` per root and never changes the
+job's conclusion. `_tool` (the tool cache) is never touched, and registrations
+must not share a `data_dir`.
+
 The expression engine (`expressions/`) is a complete `${{ }}`
 evaluator: lexer → parser (AST + precedence + primary) → evaluator
 → template. Function library: built-ins (`contains`, `startsWith`,

@@ -1070,6 +1070,13 @@ Process diagnostics always use `~/.toolu-runner/_diag/`, even when
 `TOOLU_RUNNER_HOME` changes the state root. Per-job journals use the
 registration's `runtime.data_dir`.
 
+That `data_dir` also holds `_temp/` (`RUNNER_TEMP`), `tmp/` (file commands) and
+`_tool/` (tool cache). `_temp` and `tmp` are emptied at the start and the end of
+every job, as the official runner does, so they hold only the running job's
+files; `_tool` is never pruned. A file the runner cannot delete is logged as a
+warning and does not change the job result. Registrations must not share a
+`data_dir`.
+
 `remove` deletes a registration's `config.toml`, `credentials.json`,
 `.lock`, `.pending_remove` and `.stopped`; `_diag/` is kept, so job history
 survives unregistration. Removing the last registration also deactivates and

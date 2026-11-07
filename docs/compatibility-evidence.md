@@ -62,8 +62,8 @@ Run `compat_matrix_check.py --extract-ids` to print them, and `--remote` to
 re-compare ids, issue states and run links with GitHub.
 
 The `103/R-*` rows cover the cross-feature regression surfaces: cache,
-artifacts, OIDC, command files, masking, acquire, renew, complete and
-cancellation. The `67/X-*` rows cover the epic's six cross-feature workflows.
+artifacts, OIDC, command files, masking, acquire, renew, complete,
+cancellation and temp cleanup. The `67/X-*` rows cover the epic's six cross-feature workflows.
 
 ## Capture and sanitization
 
