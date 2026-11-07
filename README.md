@@ -610,7 +610,8 @@ Other renewal failures, including `401` and malformed success replies, cancel
 it after more than 300 seconds without a successful renewal, checked on the
 60-second renewal cadence. Completion reporting keeps its separate ten-minute
 retry budget. A missing job reports a job-lock-loss annotation; only the timed
-outage reports more than five minutes without a connection. See
+outage reports more than five minutes without a connection. The first terminal
+cause determines the annotation, even if a later 404 arrives during teardown. See
 [reconnect behavior](docs/architecture.md#sequence-reconnect).
 
 With a Results Service endpoint, job and step logs are masked before being

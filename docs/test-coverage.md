@@ -63,6 +63,11 @@ all conclusions; a tripped successful job stays successful without an annotation
 a timed-out non-success becomes failure with the exact lost-connection annotation.
 The missing-job path uses a separate job-lock-loss annotation without claiming
 that five minutes elapsed; `watchdog_missing_job.rs` covers that distinction.
+`watchdog_sticky_reason.rs` returns loopback 503 responses until failures span
+the injected threshold and a real Results Service blob PUT is active; only then
+can it return 404 while that delayed upload holds teardown. It checks the
+failure window and request ordering, then asserts that the single completion
+retains the original timed-loss annotation. The number of 503 replies is not fixed.
 
 `crates/listener/src/tests/execution_large_logs.rs` sends over 200 MiB from a
 real child, including a 10 MiB line, with Results Service enabled against a

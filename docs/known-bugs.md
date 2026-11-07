@@ -29,7 +29,9 @@ the `TOOLU_RUNNER_LIVE_TOKEN` secret; its test repository is the
   auth/protocol errors and malformed success replies. Completion still retries
   only network-class failures for up to ten minutes; an expired reporting token
   or a permanent 4xx can prevent delivery. A live six-minute network-outage
-  test remains a separate, credentialed verification step.
+  test remains a separate, credentialed verification step. The first terminal
+  renewal cause determines the annotation; a later 404 during teardown does not
+  replace an already recorded timed outage.
 - **Offline services:** `offline` mode starts the legacy v1 cache only. The
   artifact and OIDC service implementations are not started by the production
   job runner. Use `forwarder` for GitHub services or `accelerated` for local

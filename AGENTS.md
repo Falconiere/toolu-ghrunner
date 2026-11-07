@@ -510,7 +510,8 @@ outside a `tests/` tree.
   hosts the 300s-latch `OutageWatchdog`: every renewal error feeds it,
   success resets it, and a missing job (404) cancels immediately; trip cancels token and
   `outage_override` flips non-`Success` to `Failure`, with
-  `JOB_NOT_FOUND_MESSAGE` for 404 or `LOST_CONNECTION_MESSAGE` for a timed outage),
+  `JOB_NOT_FOUND_MESSAGE` for 404 or `LOST_CONNECTION_MESSAGE` for a timed outage;
+  the first terminal cause is sticky through teardown, including a later 404),
   `tokio::join!` live-log + `setup_step::report_setup_step` ("Set up job" =
   step 1, `change_order` 0 vs queue-seeded 1) before engine start; forwarder masks each `Log` once
   across upload/live-log/combined sinks; with Results Service enabled,
@@ -524,7 +525,7 @@ outside a `tests/` tree.
   `drain()` pre-conclusion;
   finalize-split (per-step drain before conclusion, combined upload overlaps
   `complete_job`; handles joined in `cleanup_session` on Ok+Err). Integration
-  tests in `src/tests/{watchdog_retry,watchdog_trip,watchdog_override,watchdog_missing_job,execution_large_logs,execution_large_logs_failure}.rs`. `capture::write_acquired`
+  tests in `src/tests/{watchdog_retry,watchdog_trip,watchdog_override,watchdog_missing_job,watchdog_sticky_reason,execution_large_logs,execution_large_logs_failure}.rs`. `capture::write_acquired`
   (#103: 0600/0700 under `_diag/captures/`, WARN-never-fail, compiled always
   but called only under `capture` cargo feature; sanitize with
   `scripts/test/sanitize_capture.py`).

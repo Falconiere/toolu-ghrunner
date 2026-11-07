@@ -29,6 +29,7 @@
 | `watchdog_missing_job.rs` | Immediate missing-job cancellation reports job-lock loss without claiming a timed outage. |
 | `watchdog_override.rs` | Pure conclusion fold: untripped conclusions stay unchanged; tripped success stays successful; tripped non-success becomes failure with the exact annotation. |
 | `watchdog_retry.rs` | Watchdog retry behavior. |
+| `watchdog_sticky_reason.rs` | Loopback 503s span the threshold; 404 is gated on an active delayed Results PUT, and completion retains the first timed-loss annotation. |
 | `watchdog_trip.rs` | Persistent 401, malformed success and transient errors trip the watchdog; successful renewal resets its window and completion survives reconnect. |
 | `runner_update_policy.rs` | Idle/busy refresh warning, safe opaque bodies, cancellation and cursor continuity. |
 | `session_conflict.rs` | Live-captured 409 replayed through `create_session`: bounded retry, recovery, exact attempt count, unrelated failures and cancellation. |

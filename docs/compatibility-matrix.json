@@ -20672,7 +20672,7 @@
       "issue": 103,
       "criterion": "Regression: job lock renewal and mid-job outage handling",
       "input": [],
-      "expected": "Renewal 404 cancels immediately with a job-lock-loss annotation; every other renewal failure, including persistent 401 and malformed success, feeds the strict 300 s watchdog and reports failure with a timed lost-connection annotation. A successful renewal resets the failure window; completion survives reconnect.",
+      "expected": "Renewal 404 cancels immediately with a job-lock-loss annotation; every other renewal failure, including persistent 401 and malformed success, feeds the strict 300 s watchdog and reports failure with a timed lost-connection annotation. A successful renewal resets the failure window; the first terminal renewal cause and annotation survive later responses during teardown. The loopback regression allows 404 only after 503 failures span the injected threshold and a real delayed blob PUT is active; completion survives reconnect.",
       "production_path": "listener::helpers::spawn_renewal; listener::outage::OutageWatchdog",
       "tests": [
         [
@@ -20698,6 +20698,10 @@
         [
           "crates/listener/tests/outage_test.rs",
           "boundary_is_strict_and_latches"
+        ],
+        [
+          "crates/listener/src/tests/watchdog_sticky_reason.rs",
+          "timed_out_reason_survives_404_during_teardown"
         ]
       ],
       "command": "cargo test -p listener --lib watchdog_trip; cargo test -p listener --test integration -- outage_test::",

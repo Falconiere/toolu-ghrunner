@@ -119,7 +119,7 @@ pub(super) fn spawn_renewal(
               watchdog.record_ok(Instant::now());
             },
             Ok(None) => {
-              params.renewal_loss.store(RenewalLoss::JobNotFound as u8, Ordering::SeqCst);
+              record_renewal_loss_once(&params.renewal_loss, RenewalLoss::JobNotFound);
               params.job_cancel.cancel();
               tracing::error!("GitHub no longer recognizes this job — job cancelled");
               break;
@@ -127,7 +127,7 @@ pub(super) fn spawn_renewal(
             Err(e) => {
               tracing::warn!(error = %e, "lock renewal failed");
               if watchdog.record_err(Instant::now()) {
-                params.renewal_loss.store(RenewalLoss::TimedOut as u8, Ordering::SeqCst);
+                record_renewal_loss_once(&params.renewal_loss, RenewalLoss::TimedOut);
                 params.job_cancel.cancel();
                 let outage_secs = params.outage_threshold.as_secs();
                 tracing::error!(
@@ -141,6 +141,15 @@ pub(super) fn spawn_renewal(
       }
     }
   })
+}
+
+fn record_renewal_loss_once(loss: &AtomicU8, reason: RenewalLoss) {
+  let _ = loss.compare_exchange(
+    RenewalLoss::None as u8,
+    reason as u8,
+    Ordering::SeqCst,
+    Ordering::SeqCst,
+  );
 }
 
 /// Map an engine conclusion to its reporting value.

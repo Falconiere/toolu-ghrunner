@@ -1314,8 +1314,10 @@ prolonged mid-job reporting outage: it seeds `last_ok` at spawn and, on
 every renewal, either resets the window (`record_ok`) or accumulates
 toward a 300-second (5-minute) threshold (`record_err`).
 A renewal 404 returns `Ok(None)`: GitHub no longer recognizes the job, so
-`spawn_renewal` immediately records `RenewalLoss::JobNotFound`, cancels the job and stops
-renewing. Every other renewal error feeds the watchdog, including persistent
+`spawn_renewal` immediately records `RenewalLoss::JobNotFound` if no terminal
+reason is set, cancels the job and stops renewing. The first terminal loss reason is retained: a 404 received after a
+timed trip during teardown cannot replace `TimedOut` or its annotation. Every
+other renewal error feeds the watchdog, including persistent
 401/other HTTP errors and malformed success replies. Error classifications
 remain available to callers: transport/429/5xx are `Network`, other HTTP
 failures are `Protocol`; these variants do not filter watchdog input.
