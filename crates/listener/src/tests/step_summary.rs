@@ -57,8 +57,9 @@ fn upload_routes(base: &str, hold: Gate) -> HashMap<(Method, String), RouteRespo
 /// The peer is stalled while the queue fills, which is also the ceiling a
 /// stalled Results Service can impose on job completion: every document
 /// costs at most one 30s `wire` request deadline, so 17 held documents can
-/// delay completion by about 8.5 minutes (and up to ~54 minutes if the stall
-/// is in the blob PUT, which retries four times). Recorded in
+/// delay completion by about 8.5 minutes (about 36 minutes if the stall is in
+/// the blob PUT: four 30s attempts plus 5.6s of backoff per document, and up
+/// to about 85 minutes when `Retry-After` replaces the backoff). Recorded in
 /// docs/step-summaries.md; the test releases the stall instead of waiting it
 /// out.
 #[tokio::test]

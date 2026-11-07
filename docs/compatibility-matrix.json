@@ -5023,7 +5023,7 @@
         "crates/execution/tests/defaults_run_job.json",
         "crates/execution/tests/defaults_run_evidence.json"
       ],
-      "expected": "From the captured GitHub.com job the Launch URL (runnerresolve/actions) and request body {actions:[{action,version}]} are selected exactly, an unsafe launch credential target is rejected, and a denied (403) Launch response does not fall back to a tarball API. Request selection and failure propagation only: no test consumes a successful Launch response, so use of the returned URL and token on the Launch path is not covered.",
+      "expected": "From the captured GitHub.com job the Launch URL (runnerresolve/actions) and request body {actions:[{action,version}]} are selected exactly, an unsafe launch credential target is rejected, and a denied (403) Launch response does not fall back to a tarball API. A loopback Launch peer serving a successful resolution has its resolution.url fetched with the scoped token as Basic credentials, the served tarball extracted under a cache path keyed by the resolved SHA, and the action it carries run; the peer sees the identical resolution twice (setup prefetch and the step that joins it).",
       "production_path": "execution::actions::download_info::ActionDownloadContext (resolve_launch, launch_request, resolve_info)",
       "tests": [
         [
@@ -5207,7 +5207,7 @@
         "crates/execution/tests/defaults_run_job.json",
         "crates/execution/tests/defaults_run_evidence.json"
       ],
-      "expected": "Failure paths from a real HTTP peer carry no archive/job token: the terminal 403 error after a redirect does not contain the token and the preparation log lines do not contain the archive URL. Registration of the raw and Basic-encoded token with the SecretMasker is code-only; no test asserts the masker output.",
+      "expected": "Failure paths from a real HTTP peer carry no archive/job token: the terminal 403 error after a redirect does not contain the token and the preparation log lines do not contain the archive URL. On a successful Launch resolution the raw and Basic-encoded scoped token both mask to '***' in the job masker, and neither form nor the archive URL appears in any emitted log line or infrastructure error.",
       "production_path": "execution::actions::download_info (masker.add_secret/add_secrets), execution::actions::downloader",
       "tests": [
         [
@@ -5380,7 +5380,7 @@
         "crates/execution/tests/setup_action.tar.gz",
         "crates/execution/tests/setup_action_commit.json"
       ],
-      "expected": "Captured job selects its Launch path and body; ref parsing covers tag, branch+subpath, full SHA and local ./ actions; a pinned public archive fetched by branch and subdirectory is extracted once, reused warm and logged with its resolved SHA. Private/internal actions, a successful Launch response and a no-download local action are not covered.",
+      "expected": "Captured job selects its Launch path and body; ref parsing covers tag, branch+subpath, full SHA and local ./ actions; a pinned public archive fetched by branch and subdirectory is extracted once, reused warm and logged with its resolved SHA; and a loopback Launch peer's server-resolved URL and scoped token are used to download, extract and run the action (#235). Private/internal actions and a local action proven to download nothing are not covered, so the row stays unverified.",
       "production_path": "execution::actions::resolver::parse_action_ref, actions::prefetch::ActionFetcher",
       "tests": [
         [
@@ -5508,7 +5508,7 @@
         "crates/execution/tests/defaults_run_job.json",
         "crates/execution/tests/defaults_run_evidence.json"
       ],
-      "expected": "Local HTTP peers show: Basic archive auth sent to the source origin and dropped on a cross-origin redirect; redirect loops, missing Location and downgrades fail closed without a cache dir; 401 and 403 propagate and a denied Launch does not fall back; the token is absent from errors. 404/429/5xx handling, retry guidance and expired-token behavior are not covered.",
+      "expected": "Local HTTP peers show: Basic archive auth sent to the source origin and dropped on a cross-origin redirect; redirect loops, missing Location and downgrades fail closed without a cache dir; 401 and 403 propagate and a denied Launch does not fall back; the token is absent from errors. Archive statuses 401, 403, 404, 429, 500 and 503 each fail the job with a bounded number of archive requests (at most two; four for 401/403, which earn a credential-refresh retry), no credential in the failure text, and no cache entry or staging directory left behind. Live token expiry is not covered.",
       "production_path": "execution::actions::downloader (redirect handling), execution::actions::download_info (status mapping)",
       "tests": [
         [
@@ -5706,7 +5706,7 @@
       "input": [
         "crates/toolu-runner/tests/fixtures/broker_message_job_request.json"
       ],
-      "expected": "ForceTokenRefresh classifies to PollOutcome::RefreshToken{message_id:99}, distinct from future types. Only the route is tested; the JIT re-sign/exchange, bounded retry and token publication in broker_refresh::refresh_access_token have no test (verified by cargo check only).",
+      "expected": "ForceTokenRefresh classifies to PollOutcome::RefreshToken{message_id:99}, distinct from future types. Driving the production idle handler against a loopback OAuth peer, the re-exchange signs a client-credentials JWS assertion, publishes the granted token, and the next broker poll presents it instead of the spent one.",
       "production_path": "listener::broker_message::classify_message; listener::broker_refresh::refresh_access_token",
       "tests": [
         [
@@ -6025,7 +6025,7 @@
       "input": [
         "crates/toolu-runner/tests/fixtures/broker_message_job_request.json"
       ],
-      "expected": "Only classification of ForceTokenRefresh to PollOutcome::RefreshToken is tested. Success, transient-failure, cancellation and secret-log behavior of refresh_access_token are not covered by any test (cargo check -p listener verifies integration only).",
+      "expected": "ForceTokenRefresh classifies to PollOutcome::RefreshToken. Against a loopback OAuth peer: a transient 500 is retried once and the success publishes; persistent 503s keep retrying with backoff inside the 30 s budget without publishing; a peer that never answers is abandoned at the 10 s per-request deadline (a second attempt exists) without publishing; a 401 is fatal and not retried; an empty grant is refused; cancellation mid-exchange exits the idle loop without publishing; no error text echoes the old or new token. The 30 s budget is observed through a short window, not waited out.",
       "production_path": "listener::broker_refresh::refresh_access_token; wire::net::exchange_token",
       "tests": [
         [
@@ -8911,7 +8911,7 @@
         ".github/actions/step-summary-83-composite/action.yml",
         "docs/step-summaries.md"
       ],
-      "expected": "Summary text is masked (registered and dynamic secrets become '***') before it enters the event stream; wire tests cover failed RPC, malformed reply and blob 503 retry without leaking the signed URL; journal records only id and byte size. The successful three-call upload is never exercised.",
+      "expected": "Summary text is masked (registered and dynamic secrets become '***') before it enters the event stream; wire tests cover failed RPC, malformed reply and blob 503 retry without leaking the signed URL; journal records only id and byte size. The successful upload runs through all three Results Service calls (sign, blob PUT, metadata) carrying the job's backend identities and the masked bytes, from the wire layer and from a real two-step job through the listener queue; the inclusive soft size limit refuses an oversized document before the PUT; a rejected signing call leaves the conclusion Success; seventeen documents drain past the queue's sixteen slots.",
       "production_path": "execution::step_summary + file_commands (collect/mask/limit), listener::step_summary (serial upload queue), wire::net::step_summary (Results Service RPCs)",
       "tests": [
         [
@@ -10663,7 +10663,7 @@
         "crates/toolu-runner/tests/fixtures/job_message.json",
         "crates/listener/tests/multiline_mask.sh"
       ],
-      "expected": "Only the annotation sink is asserted: a later top-level notice with three newly registered short lines becomes 'annotation=[***|***|***]'. Summary, job output and deployment-URL integration with multiline masks remains unverified.",
+      "expected": "A later top-level notice with three newly registered short lines becomes 'annotation=[***|***|***]'. A mask registered inside a nested composite also redacts a later step summary ('summary=***') and drops a later job output with a secret warning while a clear output survives, and suppresses a later deployment URL (#235).",
       "production_path": "shared::SecretMasker::add_mask + execution::command_dispatch::apply_add_mask; sinks in listener::execution_loop forwarder, observability journal writer, shared::startup RedactingWriter",
       "tests": [
         [

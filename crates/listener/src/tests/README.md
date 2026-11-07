@@ -11,7 +11,7 @@
 | `completejob.rs` | Captured issue-88 jobs through `run_acquired_job` → `report_completion`: environment URL, secret suppression, billing owner, upstream `StepResult` keys and identity, infrastructure category latch, retry and cancellation. |
 | `annotation_reporting.rs` | Captured-job shell/composite annotations through a recorded Run Service POST. |
 | `broker_control.rs` | Committed V2 envelope shapes through the production message classifier: future types skipped with the original cursor, forced refresh vs known update messages, hosted shutdown, redelivered control messages. |
-| `broker_control_refresh.rs` | #77 `ForceTokenRefresh` re-exchange against a loopback OAuth peer: the published token reaches the next broker poll; transient retry, a stalled endpoint abandoned at its deadline, rejection, an empty grant and cancellation publish nothing and leak nothing. Declared from `job_lifecycle.rs` (the publication seam is private to that module). |
+| `broker_control_refresh.rs` | #77 `ForceTokenRefresh` re-exchange against a loopback OAuth peer: the published token reaches the next broker poll; transient retry, a stalled endpoint abandoned at its deadline, rejection, an empty grant and cancellation publish nothing, and no error text echoes a token. Declared from `job_lifecycle.rs` (the publication seam is private to that module). |
 | `drain.rs` | #208 drain: an idle poll loop ends with no job, a pre-fired drain takes none, a drain after the acquire lets the real job finish and report `succeeded`. |
 | `early_ack.rs` | Broker acknowledgment ordering (its job fixture is shared with `drain.rs`). |
 | `execution_loop.rs` | Forwarder masking into the combined disk spool, step-upload channel and live feed. |
@@ -20,7 +20,7 @@
 | `finalize_split.rs` | Completion and teardown ordering. |
 | `helpers.rs` | Listener helper behavior. |
 | `job_outputs.rs` | The event forwarder keeps job outputs from a real acquired engine run for completion. |
-| `multiline_mask.rs` | Real job masking through listener sinks. |
+| `multiline_mask.rs` | Real job masking through listener sinks; the masks are registered inside a nested composite (#235). |
 | `post_results.rs` | Captured job replay through `StepCollector` and `CompleteJobRequest` serialization. |
 | `startup_overlap.rs` | Startup reporting overlap. |
 | `step_report_queue.rs` | Queued reporting against a broker endpoint. |

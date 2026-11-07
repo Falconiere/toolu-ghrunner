@@ -80,8 +80,8 @@ impl Peer {
       async move {
         record(&seen, "/oauth2/token", &headers, body);
         if stalled.load(Ordering::SeqCst) {
-          // Never answers. Under a paused clock the request timeout fires
-          // the moment the runtime has nothing else to do.
+          // Never answers, so the caller's own 10 s request deadline is
+          // what ends the attempt.
           std::future::pending::<()>().await;
         }
         let mut queue = queue
@@ -387,7 +387,9 @@ async fn cancellation_mid_exchange_exits_without_publishing() -> TestResult {
     tokio::time::sleep(Duration::from_millis(50)).await;
     cancel.cancel();
   });
-  let decision = refresh(&mut ctx).await?;
+  // Bounded well under the 10 s request deadline: cancellation must end
+  // the exchange, not the timeout.
+  let decision = tokio::time::timeout(Duration::from_secs(5), refresh(&mut ctx)).await??;
   assert!(
     matches!(decision, IdleDecision::Exit),
     "a cancelled refresh must end the idle loop"

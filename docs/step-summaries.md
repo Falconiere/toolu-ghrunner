@@ -33,10 +33,13 @@ and the full drain are observed by
 
 The ceiling a stalled Results Service puts on job completion is **derived from
 the production constants, not waited out in a test**: uploads are serial and
-each `wire` request carries a 30 s deadline, so seventeen documents stalling at
-the signed-URL or metadata RPC hold completion for about 8.5 minutes, and up to
-roughly 54 minutes if the stall is in the blob PUT, which retries four times
-with up to 12 s of backoff. Nothing in that window changes the job's
+each `wire` request carries a 30 s deadline, so a document stalling at the
+signed-URL or metadata RPC costs at most 30 s and seventeen of them hold
+completion for about 8.5 minutes. A stall in the blob PUT costs more: four
+attempts of 30 s plus the 0.8 s, 1.6 s and 3.2 s backoffs between them, about
+126 s per document or about 36 minutes for seventeen (a `Retry-After` header
+replaces each backoff with up to 60 s, so the worst case is 300 s per document,
+about 85 minutes for seventeen). Nothing in that window changes the job's
 conclusion.
 
 ## Verification and applicability

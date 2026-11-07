@@ -4,10 +4,12 @@
 //!
 //! The job is the sanitized github.com acquisition of `completejob-88.yml`'s
 //! `steps-toolu` job (run 38098611227) with its captured `actions/checkout@v4`
-//! step. Its launch endpoint is pointed at local **fault-injection** HTTP
-//! servers standing in for GitHub: the injected statuses and cut streams are
-//! the faults under test, never a fabricated successful service. Archives are
-//! real gzip tarballs built here (or deliberately corrupt bytes).
+//! step. Its launch endpoint is pointed at local HTTP servers standing in for
+//! GitHub. Most serve **injected faults** — the statuses and cut streams under
+//! test; the #235 success cases serve a real Launch resolution and a real
+//! archive instead, so the resolved URL, the scoped token and the extracted
+//! action are observed rather than assumed. Archives are real gzip tarballs
+//! built here (or deliberately corrupt bytes).
 
 use std::collections::HashMap;
 use std::error::Error;
