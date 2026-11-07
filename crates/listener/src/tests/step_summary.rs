@@ -1,6 +1,99 @@
-//! Queue transport failure regression; successful service parity is a live lane.
+//! Issue #83: the summary upload queue's own behaviour — saturation past
+//! its slot count and a transport failure that must not strand later
+//! documents. The job-level upload path lives in `step_summary_job.rs`.
 use super::*;
+use std::collections::HashMap;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+use axum::http::{Method, StatusCode};
+
+use crate::support::{Gate, RecordingServer, RouteResponse};
+
+/// Results Service receiver routes, as `wire::net::step_summary` builds them.
+const SIGN: &str = "/twirp/results.services.receiver.Receiver/GetStepSummarySignedBlobURL";
+const PUBLISH: &str = "/twirp/results.services.receiver.Receiver/CreateStepSummaryMetadata";
+/// Where the peer's signed URL points.
+const BLOB: &str = "/blob/summary";
+/// Routes for a peer that answers a complete upload, with `hold` gating the
+/// signed-URL reply so the test can stall it.
+fn upload_routes(base: &str, hold: Gate) -> HashMap<(Method, String), RouteResponse> {
+  let mut routes = HashMap::new();
+  routes.insert(
+    (Method::POST, SIGN.to_owned()),
+    RouteResponse {
+      status: StatusCode::OK,
+      body: serde_json::json!({
+        "summary_url": format!("{base}{BLOB}"),
+        "blob_storage_type": "BLOB_STORAGE_TYPE_AZURE",
+        "soft_size_limit": "1048576",
+      })
+      .to_string()
+      .into_bytes(),
+      hold: Some(hold),
+    },
+  );
+  routes.insert(
+    (Method::PUT, BLOB.to_owned()),
+    RouteResponse {
+      status: StatusCode::CREATED,
+      body: Vec::new(),
+      hold: None,
+    },
+  );
+  routes.insert(
+    (Method::POST, PUBLISH.to_owned()),
+    RouteResponse {
+      status: StatusCode::OK,
+      body: serde_json::json!({"ok": true}).to_string().into_bytes(),
+      hold: None,
+    },
+  );
+  routes
+}
+
+/// #83 AC-1: the queue holds 16 slots, so a seventeenth document applies
+/// backpressure rather than being dropped, and the drain still completes.
+///
+/// The peer is stalled while the queue fills, which is also the ceiling a
+/// stalled Results Service can impose on job completion: every document
+/// costs at most one 30s `wire` request deadline, so 17 held documents can
+/// delay completion by about 8.5 minutes (and up to ~54 minutes if the stall
+/// is in the blob PUT, which retries four times). Recorded in
+/// docs/step-summaries.md; the test releases the stall instead of waiting it
+/// out.
+#[tokio::test]
+async fn step_summary_queue_drains_more_documents_than_its_slots()
+-> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+  let gate = Gate::new();
+  let held = gate.clone();
+  let peer = RecordingServer::start(move |base| upload_routes(base, held)).await;
+  let queue = StepSummaryQueue::spawn(StepReportQueueConfig {
+    client: reqwest::Client::new(),
+    results_url: peer.base_url(),
+    token: "runtime-token".to_owned(),
+    run_backend_id: "workflow-run".to_owned(),
+    job_backend_id: "workflow-job".to_owned(),
+  });
+  let releaser = tokio::spawn(async move {
+    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    gate.release();
+  });
+  for index in 0..17 {
+    queue
+      .enqueue(&format!("step-{index}"), format!("document {index}\n"))
+      .await;
+  }
+  tokio::time::timeout(std::time::Duration::from_secs(60), queue.drain()).await?;
+  releaser.await?;
+  assert_eq!(
+    peer.requests_for(SIGN).len(),
+    17,
+    "the drain dropped documents"
+  );
+  assert_eq!(peer.requests_for(BLOB).len(), 17);
+  assert_eq!(peer.requests_for(PUBLISH).len(), 17);
+  Ok(())
+}
 
 #[tokio::test]
 async fn step_summary_failure_drains_later_documents() -> Result<(), Box<dyn std::error::Error>> {

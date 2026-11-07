@@ -641,6 +641,10 @@ mod tests;
 mod multiline_mask;
 
 #[cfg(test)]
+#[path = "tests/step_summary_job.rs"]
+mod step_summary_job;
+
+#[cfg(test)]
 #[path = "tests/job_outputs.rs"]
 mod job_outputs;
 

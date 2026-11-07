@@ -36,4 +36,5 @@
 | `session_conflict.rs` | Live-captured 409 replayed through `create_session`: bounded retry, recovery, exact attempt count, unrelated failures and cancellation. |
 | `setup_step.rs` | Captured permissions, identity and secret-source diagnostics. |
 | `setup_forwarding.rs` | Production replay, masked setup logs, early failure and cancellation; capture-derived Docker Pull row forwarding and order. |
-| `step_summary.rs` | Failed summary uploads still drain later queued documents. |
+| `step_summary.rs` | The summary queue drains past its slot count and still drains after a failed upload. |
+| `step_summary_job.rs` | A real job's `$GITHUB_STEP_SUMMARY` document uploads masked, and a rejected upload never changes the job's result. |
