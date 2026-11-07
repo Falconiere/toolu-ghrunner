@@ -579,8 +579,8 @@ async fn launch_scoped_token_is_masked_and_never_logged() -> TestResult {
     assert!(!line.contains(&basic), "Basic credential logged: {line}");
     assert!(!line.contains(&archive_url), "archive URL logged: {line}");
   }
-  // Errors carry their own leak check in the failure test above; a successful
-  // download must raise none at all.
+  // `archive_failure_statuses_are_bounded_and_leave_no_cache_entry` carries
+  // the leak check for errors; a successful download must raise none at all.
   assert!(
     observed.infrastructure.is_empty(),
     "{:?}",
