@@ -175,8 +175,8 @@ async fn step_summary_real_job_document_is_uploaded_masked() -> TestResult {
   Ok(())
 }
 
-/// #83 AC-1: a Results Service that rejects the upload changes neither the
-/// job's conclusion nor what it wrote.
+/// #83 AC-1: a Results Service that rejects the signed-URL call leaves the
+/// job's conclusion alone and never reaches the blob PUT.
 #[tokio::test]
 async fn step_summary_upload_failure_never_changes_the_job_result() -> TestResult {
   let peer =

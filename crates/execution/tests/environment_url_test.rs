@@ -504,7 +504,8 @@ async fn runner_shutdown_is_the_conclusion_complete_job_logs() -> TestResult {
 
 /// #86/#88 AC-9: a `::add-mask::` registered inside a NESTED composite
 /// suppresses the job's `actionsEnvironment.url` when the "Complete job" row
-/// evaluates it, with upstream's warning and no trace of the URL.
+/// evaluates it, with upstream's warning and no trace of the URL in the
+/// completion log lines.
 #[tokio::test]
 async fn nested_composite_mask_suppresses_the_environment_url() -> TestResult {
   const NESTED_HOST: &str = "nested-mask-235.example";

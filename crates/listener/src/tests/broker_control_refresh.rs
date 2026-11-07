@@ -265,8 +265,8 @@ async fn forced_refresh_makes_the_next_broker_poll_use_the_new_token() -> TestRe
   Ok(())
 }
 
-/// #77 77-S3: a transient 500 is retried, and the success behind it publishes
-/// the new token exactly once.
+/// #77 77-S3: a transient 500 is retried, and the success behind it
+/// publishes the new token after exactly two exchanges.
 #[tokio::test]
 async fn a_transient_failure_is_retried_and_the_success_publishes() -> TestResult {
   let peer = Peer::start(
@@ -336,7 +336,10 @@ async fn persistent_transient_failures_exhaust_the_budget_without_publishing() -
   );
   let attempts = peer.seen("/oauth2/token").len();
   assert!(
-    (4..=10).contains(&attempts),
+    // Six or seven by construction: the five sleeps before the budget runs
+    // out sum to 15.5s..31s, and the sixth is clamped to what remains. Ten
+    // would mean the backoff stopped doubling.
+    (5..=8).contains(&attempts),
     "{attempts} attempts across the budget is not a doubling backoff"
   );
   Ok(())
@@ -428,8 +431,18 @@ async fn cancellation_mid_exchange_exits_without_publishing() -> TestResult {
   let peer = Peer::start(vec![(StatusCode::OK, granted(NEW_TOKEN))], true).await?;
   let mut ctx = session(&peer)?;
   let cancel = ctx.cancel.clone();
+  let arrived = Arc::clone(&peer.seen);
+  // Cancel only once the exchange is demonstrably in flight. A fixed sleep
+  // would also pass if signing were slow enough that nothing had been sent,
+  // which is the one thing "mid-exchange" has to rule out.
   tokio::spawn(async move {
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    while arrived
+      .lock()
+      .unwrap_or_else(std::sync::PoisonError::into_inner)
+      .is_empty()
+    {
+      tokio::time::sleep(Duration::from_millis(10)).await;
+    }
     cancel.cancel();
   });
   // Bounded well under the 10 s request deadline: cancellation must end

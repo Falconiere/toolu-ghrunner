@@ -604,13 +604,16 @@ async fn archive_failure_statuses_are_bounded_and_leave_no_cache_entry() -> Test
     &base64::engine::general_purpose::STANDARD,
     format!("x-access-token:{ARCHIVE_TOKEN}"),
   );
-  for (status, most) in [
-    (StatusCode::NOT_FOUND, 2),
-    (StatusCode::TOO_MANY_REQUESTS, 2),
-    (StatusCode::INTERNAL_SERVER_ERROR, 2),
-    (StatusCode::SERVICE_UNAVAILABLE, 2),
-    (StatusCode::UNAUTHORIZED, 4),
-    (StatusCode::FORBIDDEN, 4),
+  // `least` is what separates the two groups: only 401 and 403 are retried
+  // as an auth refresh, so they must hit the archive more than once, while
+  // the rest must not exceed the two resolvers.
+  for (status, least, most) in [
+    (StatusCode::NOT_FOUND, 1, 2),
+    (StatusCode::TOO_MANY_REQUESTS, 1, 2),
+    (StatusCode::INTERNAL_SERVER_ERROR, 1, 2),
+    (StatusCode::SERVICE_UNAVAILABLE, 1, 2),
+    (StatusCode::UNAUTHORIZED, 2, 4),
+    (StatusCode::FORBIDDEN, 2, 4),
   ] {
     let peer = serve(Launch::Resolve(Archive::Status(status))).await?;
     let message = job(&peer.base)?;
@@ -618,14 +621,21 @@ async fn archive_failure_statuses_are_bounded_and_leave_no_cache_entry() -> Test
     assert_eq!(observed.conclusion, Some(Conclusion::Failure), "{status}");
     let attempts = peer.seen("/archive").len();
     assert!(
-      (1..=most).contains(&attempts),
-      "{status}: {attempts} archive requests is outside the bound of {most}"
+      (least..=most).contains(&attempts),
+      "{status}: {attempts} archive requests is outside the bound of {least}..={most}"
     );
-    // Not a vacuous scan: a failed download always narrates itself, so there
-    // is real text here for a credential to have leaked into.
+    // Not a vacuous scan: the download's own error line is where a
+    // credential would most plausibly ride in, so require it to be among the
+    // text being checked. (403 raises no infrastructure error at all — that
+    // is `user_fetch_failures_and_recovered_auth_carry_no_category`'s
+    // subject — so the log side is what has to carry this guard.)
     assert!(
-      !observed.logs.is_empty(),
-      "{status}: the failed download emitted no log line to check"
+      observed
+        .logs
+        .iter()
+        .any(|line| line.starts_with("##[error]action download failed")),
+      "{status}: the failure was never narrated, so there is nothing to scan: {:?}",
+      observed.logs
     );
     for text in observed
       .infrastructure

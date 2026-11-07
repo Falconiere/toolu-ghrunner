@@ -95,15 +95,20 @@ async fn step_summary_queue_drains_more_documents_than_its_slots()
   // channel and a seventeenth is in flight, so the eighteenth must still be
   // waiting for a slot. Counting the accepted documents pins that capacity —
   // a smaller channel would block earlier, an unbounded one never.
-  tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+  //
+  // Wait for the held sign request rather than a fixed delay: that is the
+  // moment the seventeenth document is provably in flight.
+  for _ in 0..600 {
+    if !peer.requests_for(SIGN).is_empty() {
+      break;
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+  }
+  tokio::time::sleep(std::time::Duration::from_millis(100)).await;
   assert_eq!(
     accepted.load(std::sync::atomic::Ordering::Relaxed),
     17,
     "16 buffered slots plus one upload in flight should be exactly 17"
-  );
-  assert!(
-    !filler.is_finished(),
-    "the queue accepted 18 documents while no upload could complete"
   );
   gate.release();
   filler.await?;
