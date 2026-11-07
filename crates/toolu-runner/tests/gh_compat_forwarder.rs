@@ -23,7 +23,9 @@ use std::error::Error;
 use std::sync::{Arc, Mutex};
 
 use execution::execution::job_runner::run_job;
-use execution::execution::service_endpoints::{ServiceUrls, extract_service_urls, forward_env};
+use execution::execution::service_endpoints::{
+  ServiceEnv, ServiceUrls, extract_service_urls, forward_env,
+};
 use shared::SecretMasker;
 use shared::{
   ActionStep, AgentJobRequestMessage, LogStream, RunnerConfig, RunnerEvent, ServicesMode,
@@ -47,16 +49,50 @@ fn fixture_job() -> TestResult<AgentJobRequestMessage> {
   Ok(serde_json::from_str(JOB_MESSAGE)?)
 }
 
-/// Build a `ServiceUrls` with all fields present (for `forward_env` coverage).
+type EnvMap = std::collections::HashMap<String, String>;
+
+fn map(pairs: Vec<(String, String)>) -> EnvMap {
+  pairs.into_iter().collect()
+}
+
+/// Build a `ServiceUrls` with all fields present (for selector coverage).
 fn full_urls() -> ServiceUrls {
   ServiceUrls {
     results_url: Some(FIX_RESULTS.to_owned()),
     runtime_url: Some(FIX_PIPELINES.to_owned()),
     cache_url: Some(FIX_CACHE.to_owned()),
     cache_service_v2: false,
+    cache_mode: None,
     id_token_request_url: Some("https://idtoken.example/".to_owned()),
     runtime_token: FIX_TOKEN.to_owned(),
   }
+}
+
+/// The #103 acquired message, with the cache variables replaced.
+fn compat_job(
+  flag: Option<(&str, &str)>,
+  mode: Option<&str>,
+) -> TestResult<AgentJobRequestMessage> {
+  let mut msg: AgentJobRequestMessage = serde_json::from_str(include_str!(
+    "../../execution/tests/compat_103_contexts_message.json"
+  ))?;
+  msg.variables.retain(|key, _| {
+    !key.eq_ignore_ascii_case("actions_uses_cache_service_v2")
+      && !key.eq_ignore_ascii_case("actions_cache_mode")
+  });
+  let var = |value: &str| shared::VariableValue {
+    value: value.to_owned(),
+    is_secret: false,
+  };
+  if let Some((key, value)) = flag {
+    msg.variables.insert(key.to_owned(), var(value));
+  }
+  if let Some(mode) = mode {
+    msg
+      .variables
+      .insert("actions_cache_mode".to_owned(), var(mode));
+  }
+  Ok(msg)
 }
 
 #[test]
@@ -76,44 +112,85 @@ fn extract_reads_system_connection_urls_and_token() -> TestResult<()> {
     urls.id_token_request_url
   );
   assert_eq!(urls.runtime_token, FIX_TOKEN);
-  // The fixture carries no ACTIONS_CACHE_SERVICE_V2 variable → false.
   assert!(!urls.cache_service_v2);
+  assert_eq!(urls.cache_mode, None);
   Ok(())
 }
 
 #[test]
-fn forward_env_emits_all_vars_with_fixture_values() -> TestResult<()> {
-  let env: std::collections::HashMap<String, String> =
-    forward_env(&extract_service_urls(&fixture_job()?))
-      .into_iter()
-      .collect();
+fn per_step_type_sets_match_official_handlers() -> TestResult<()> {
+  let env = forward_env(&extract_service_urls(&compat_job(
+    Some(("actions_uses_cache_service_v2", "true")),
+    Some("write"),
+  )?));
+  let node = map(env.node);
+  let container = map(env.container);
+  let script = map(env.script);
 
+  for key in [
+    "ACTIONS_RESULTS_URL",
+    "ACTIONS_RUNTIME_URL",
+    "ACTIONS_CACHE_URL",
+    "ACTIONS_RUNTIME_TOKEN",
+    "ACTIONS_ID_TOKEN_REQUEST_URL",
+    "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+    "ACTIONS_CACHE_MODE",
+  ] {
+    assert!(node.contains_key(key), "node missing {key}");
+    assert!(container.contains_key(key), "container missing {key}");
+  }
   assert_eq!(
-    env.get("ACTIONS_RESULTS_URL").map(String::as_str),
-    Some(FIX_RESULTS)
+    node.get("ACTIONS_CACHE_SERVICE_V2").map(String::as_str),
+    Some("True")
   );
+  assert!(!container.contains_key("ACTIONS_CACHE_SERVICE_V2"));
   assert_eq!(
-    env.get("ACTIONS_CACHE_URL").map(String::as_str),
-    Some(FIX_CACHE)
+    node.get("ACTIONS_CACHE_MODE").map(String::as_str),
+    Some("write")
   );
+  let mut script_keys: Vec<_> = script.keys().map(String::as_str).collect();
+  script_keys.sort_unstable();
   assert_eq!(
-    env.get("ACTIONS_RUNTIME_URL").map(String::as_str),
-    Some(FIX_PIPELINES)
+    script_keys,
+    [
+      "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+      "ACTIONS_ID_TOKEN_REQUEST_URL"
+    ],
+    "run: steps get only the OIDC pair"
   );
-  assert_eq!(
-    env.get("ACTIONS_RUNTIME_TOKEN").map(String::as_str),
-    Some(FIX_TOKEN)
-  );
-  // The runtime token is reused for the id-token request token.
-  assert_eq!(
-    env
-      .get("ACTIONS_ID_TOKEN_REQUEST_TOKEN")
-      .map(String::as_str),
-    Some(FIX_TOKEN)
-  );
-  assert!(env.contains_key("ACTIONS_ID_TOKEN_REQUEST_URL"));
-  // cache_service_v2 is false in the fixture → the var is omitted.
-  assert!(!env.contains_key("ACTIONS_CACHE_SERVICE_V2"));
+  Ok(())
+}
+
+#[test]
+fn cache_v2_flag_parses_as_boolean_case_insensitively() -> TestResult<()> {
+  let cases = [
+    (Some(("actions_uses_cache_service_v2", "true")), true),
+    (Some(("actions_uses_cache_service_v2", "True")), true),
+    (Some(("ACTIONS_USES_CACHE_SERVICE_V2", "TRUE")), true),
+    (Some(("Actions_Uses_Cache_Service_V2", "true")), true),
+    (Some(("actions_uses_cache_service_v2", "false")), false),
+    (Some(("actions_uses_cache_service_v2", "1")), false),
+    (Some(("actions_uses_cache_service_v2", "")), false),
+    (Some(("ACTIONS_CACHE_SERVICE_V2", "true")), false),
+    (None, false),
+  ];
+  for (flag, expected) in cases {
+    for mode in [None, Some(""), Some("write")] {
+      let env = forward_env(&extract_service_urls(&compat_job(flag, mode)?));
+      let node = map(env.node);
+      assert_eq!(
+        node.get("ACTIONS_CACHE_SERVICE_V2").map(String::as_str),
+        expected.then_some("True"),
+        "flag {flag:?}"
+      );
+      // The mode is independent of the flag and exported unchanged.
+      assert_eq!(
+        node.get("ACTIONS_CACHE_MODE").map(String::as_str),
+        mode.filter(|m| !m.is_empty()),
+        "mode {mode:?} with flag {flag:?}"
+      );
+    }
+  }
   Ok(())
 }
 
@@ -123,30 +200,24 @@ fn forward_env_omits_none_fields_never_empty() {
   urls.cache_url = None;
   urls.id_token_request_url = None;
 
-  let env: std::collections::HashMap<String, String> = forward_env(&urls).into_iter().collect();
+  let env = forward_env(&urls);
+  let node = map(env.node);
 
-  // Present fields are emitted; absent fields are OMITTED (not empty strings).
-  assert!(env.contains_key("ACTIONS_RESULTS_URL"));
-  assert!(env.contains_key("ACTIONS_RUNTIME_URL"));
-  assert!(!env.contains_key("ACTIONS_CACHE_URL"));
-  assert!(!env.contains_key("ACTIONS_ID_TOKEN_REQUEST_URL"));
-  // No emitted var is ever an empty value.
-  assert!(env.values().all(|v| !v.is_empty()));
+  assert!(node.contains_key("ACTIONS_RESULTS_URL"));
+  assert!(node.contains_key("ACTIONS_RUNTIME_URL"));
+  assert!(!node.contains_key("ACTIONS_CACHE_URL"));
+  assert!(!node.contains_key("ACTIONS_ID_TOKEN_REQUEST_URL"));
+  // The OIDC token is only set together with its URL.
+  assert!(!node.contains_key("ACTIONS_ID_TOKEN_REQUEST_TOKEN"));
+  assert!(env.script.is_empty());
+  assert!(node.values().all(|v| !v.is_empty()));
 }
 
 #[test]
-fn forward_env_cache_v2_only_when_true() {
+fn missing_runtime_token_omits_every_service_var() {
   let mut urls = full_urls();
-
-  let off: std::collections::HashMap<String, String> = forward_env(&urls).into_iter().collect();
-  assert!(!off.contains_key("ACTIONS_CACHE_SERVICE_V2"));
-
-  urls.cache_service_v2 = true;
-  let on: std::collections::HashMap<String, String> = forward_env(&urls).into_iter().collect();
-  assert_eq!(
-    on.get("ACTIONS_CACHE_SERVICE_V2").map(String::as_str),
-    Some("true")
-  );
+  urls.runtime_token = String::new();
+  assert_eq!(forward_env(&urls), ServiceEnv::default());
 }
 
 /// Run a single echo step through the full `run_job` path and return the
@@ -233,37 +304,297 @@ async fn runtime_token_registered_in_masker() -> TestResult<()> {
 }
 
 #[tokio::test]
-async fn forwarder_injects_results_url_into_step_env() -> TestResult<()> {
-  // Default forwarder mode: the step inherits ACTIONS_RESULTS_URL from the
-  // message via the real assembly path (run_job → setup_job_env → step env).
+async fn run_step_sees_only_the_oidc_pair() -> TestResult<()> {
+  // Real assembly path (run_job → setup_job_env → step env): a `run:` step
+  // gets the OIDC pair and can no longer read the runtime token or URLs.
   let out = run_echo_job(
-    "printf 'RESULTS=%s\\n' \"$ACTIONS_RESULTS_URL\"",
+    "printf 'OIDC=%s\\nRESULTS=%s\\nRUNTIME=%s\\nCACHE=%s\\n' \"$ACTIONS_ID_TOKEN_REQUEST_URL\" \"$ACTIONS_RESULTS_URL\" \"$ACTIONS_RUNTIME_TOKEN\" \"$ACTIONS_CACHE_URL\"",
     ServicesMode::Forwarder,
   )
   .await?;
-  assert!(
-    out.contains(&format!("RESULTS={FIX_RESULTS}")),
-    "forwarder step env missing ACTIONS_RESULTS_URL; got:\n{out}"
-  );
+  assert!(out.contains("OIDC=https://"), "got:\n{out}");
+  assert!(out.contains("RESULTS=\n"), "got:\n{out}");
+  assert!(out.contains("RUNTIME=\n"), "got:\n{out}");
+  assert!(out.contains("CACHE=\n"), "got:\n{out}");
   Ok(())
 }
 
 #[tokio::test]
-async fn offline_points_cache_url_at_local_service() -> TestResult<()> {
-  // AC-13: offline mode hosts the local cache service and wires the step's
-  // ACTIONS_CACHE_URL at it (a loopback address), not the message URL.
+async fn offline_run_step_does_not_see_local_cache_vars() -> TestResult<()> {
   let out = run_echo_job(
-    "printf 'CACHE=%s\\n' \"$ACTIONS_CACHE_URL\"",
+    "printf 'CACHE=%s\\nTOKEN=%s\\n' \"$ACTIONS_CACHE_URL\" \"$ACTIONS_RUNTIME_TOKEN\"",
     ServicesMode::Offline,
   )
   .await?;
   assert!(
-    out.contains("CACHE=http://127.0.0.1:"),
-    "offline step env should point ACTIONS_CACHE_URL at the local service; got:\n{out}"
+    out.contains("CACHE=\n") && out.contains("TOKEN=\n"),
+    "got:\n{out}"
+  );
+  Ok(())
+}
+
+/// Run the probe Node action through the real step loop with `env` installed
+/// and return the `ACTIONS_*` variables it printed.
+async fn probe_node_action(env: ServiceEnv) -> TestResult<Option<EnvMap>> {
+  use crate::gh_compat_node_action_file_commands::{seed_node, system_node};
+  use execution::execution::actions::prefetch::ActionFetcher;
+  use execution::execution::context::ExecutionContext;
+  use execution::execution::steps_runner::{JobRun, run_steps};
+  let Some(node) = system_node() else {
+    eprintln!("SKIP: no system `node` on PATH");
+    return Ok(None);
+  };
+  let dir = tempfile::tempdir()?;
+  let (workspace, data_dir) = (dir.path().join("work"), dir.path().join("data"));
+  let action_dir = workspace.join("service-env-probe");
+  std::fs::create_dir_all(&action_dir)?;
+  std::fs::create_dir_all(&data_dir)?;
+  for name in ["action.yml", "main.js"] {
+    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+      .join("tests/fixtures/service_env_action")
+      .join(name);
+    std::fs::copy(src, action_dir.join(name))?;
+  }
+  seed_node(&data_dir, &node)?;
+  let config = RunnerConfig {
+    data_dir,
+    workspace_root: workspace.clone(),
+    cgroup_path: None,
+    ..RunnerConfig::default()
+  };
+  let mut ctx = ExecutionContext::with_masker(Arc::new(Mutex::new(SecretMasker::new())));
+  ctx.set_service_env(env);
+  let (tx, mut rx) = mpsc::channel::<RunnerEvent>(1024);
+  let collector = tokio::spawn(async move {
+    let mut lines = Vec::new();
+    while let Some(event) = rx.recv().await {
+      if let RunnerEvent::Log { line, .. } = event {
+        lines.push(line);
+      }
+    }
+    lines
+  });
+  let mut step = ActionStep::with_ref_type("probe", "repository");
+  step.reference.name = Some("./service-env-probe".to_owned());
+  let spec = execution::execution::job_spec::JobSpec::default();
+  let http = reqwest::Client::new();
+  let fetcher = ActionFetcher::new(&shared::NetworkConfig::default())?;
+  let conclusion = run_steps(
+    &[step],
+    &mut ctx,
+    &tx,
+    CancellationToken::new(),
+    &JobRun {
+      workspace: &workspace,
+      config: &config,
+      spec: &spec,
+      shadow: None,
+      http: &http,
+      fetcher: &fetcher,
+    },
+  )
+  .await?;
+  drop(tx);
+  let lines = collector.await?;
+  assert_eq!(conclusion, shared::Conclusion::Success, "log: {lines:?}");
+  let json = lines
+    .iter()
+    .find_map(|line| line.strip_prefix("PROBE "))
+    .ok_or("probe line missing")?;
+  Ok(Some(serde_json::from_str(json)?))
+}
+
+#[tokio::test]
+async fn node_action_receives_the_forwarded_set_with_v2_flag_and_mode() -> TestResult<()> {
+  let msg = compat_job(
+    Some(("actions_uses_cache_service_v2", "true")),
+    Some("write"),
+  )?;
+  let expected = map(forward_env(&extract_service_urls(&msg)).node);
+  let Some(seen) = probe_node_action(forward_env(&extract_service_urls(&msg))).await? else {
+    return Ok(());
+  };
+  assert_eq!(seen, expected);
+  assert_eq!(
+    seen.get("ACTIONS_CACHE_SERVICE_V2").map(String::as_str),
+    Some("True")
+  );
+  assert_eq!(
+    seen.get("ACTIONS_CACHE_MODE").map(String::as_str),
+    Some("write")
+  );
+  Ok(())
+}
+
+/// Install the cache-client action twice (`save` / `restore`) in `workspace`
+/// and return its two `uses:` steps.
+fn cache_client_steps(
+  workspace: &std::path::Path,
+  file: &std::path::Path,
+) -> TestResult<Vec<ActionStep>> {
+  let fixture =
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/cache_client_action");
+  let mut steps = Vec::new();
+  for mode in ["save", "restore"] {
+    let dir = workspace.join(format!("cache-{mode}"));
+    std::fs::create_dir_all(&dir)?;
+    std::fs::copy(fixture.join("action.yml"), dir.join("action.yml"))?;
+    let main = std::fs::read_to_string(fixture.join("main.js"))?
+      .replace("__MODE__", mode)
+      .replace("__FILE__", &file.to_string_lossy());
+    std::fs::write(dir.join("main.js"), main)?;
+    let mut step = ActionStep::with_ref_type(mode, "repository");
+    step.reference.name = Some(format!("./cache-{mode}"));
+    steps.push(step);
+  }
+  Ok(steps)
+}
+
+#[tokio::test]
+async fn node_action_saves_and_restores_exact_bytes_over_v2_with_no_v1_request() -> TestResult<()> {
+  use cache::blob::BlobRegistry;
+  use cache::cas::{CacheIndex, CasStore, LeaseSet};
+  use cache::scope::CacheScopes;
+  use cache::trust::TrustLevel;
+  use cache::twirp::{TwirpState, cache_router};
+  use execution::execution::actions::prefetch::ActionFetcher;
+  use execution::execution::context::ExecutionContext;
+  use execution::execution::steps_runner::{JobRun, run_steps};
+
+  let Some(node) = crate::gh_compat_node_action_file_commands::system_node() else {
+    eprintln!("SKIP: no system `node` on PATH");
+    return Ok(());
+  };
+  let dir = tempfile::tempdir()?;
+  let (workspace, data_dir) = (dir.path().join("work"), dir.path().join("data"));
+  let cas_root = dir.path().join("cas");
+  std::fs::create_dir_all(&workspace)?;
+  std::fs::create_dir_all(&data_dir)?;
+  std::fs::create_dir_all(cas_root.join("staging"))?;
+  crate::gh_compat_node_action_file_commands::seed_node(&data_dir, &node)?;
+
+  // Loopback v2 peer: the real cache router, recording every request path.
+  let bearer = "peer-token".to_owned();
+  let state = TwirpState {
+    store: CasStore::new(cas_root.clone(), 16384, 1 << 30),
+    index: CacheIndex::new(cas_root.clone()),
+    registry: BlobRegistry::new(),
+    leases: LeaseSet::new(),
+    scopes: CacheScopes {
+      write: "refs/heads/main".to_owned(),
+      read_ladder: vec!["refs/heads/main".to_owned()],
+    },
+    trust: TrustLevel::Trusted,
+    protected: Vec::new(),
+    bearer: bearer.clone(),
+    staging_root: cas_root.join("staging"),
+    upload_ttl: std::time::Duration::from_secs(300),
+    download_ttl: std::time::Duration::from_secs(300),
+  };
+  let seen: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+  let log = Arc::clone(&seen);
+  let app = cache_router(state).layer(axum::middleware::from_fn(
+    move |req: axum::extract::Request, next: axum::middleware::Next| {
+      let log = Arc::clone(&log);
+      async move {
+        if let Ok(mut paths) = log.lock() {
+          paths.push(req.uri().path().to_owned());
+        }
+        next.run(req).await
+      }
+    },
+  ));
+  let server = cache::server::CacheServer::start(app, "127.0.0.1:0").await?;
+
+  let msg = compat_job(Some(("actions_uses_cache_service_v2", "true")), None)?;
+  let mut env = forward_env(&extract_service_urls(&msg));
+  env.set_action("ACTIONS_RESULTS_URL", server.base_url());
+  env.set_action("ACTIONS_CACHE_URL", server.base_url());
+  env.set_action("ACTIONS_RUNTIME_TOKEN", &bearer);
+
+  let payload =
+    std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Cargo.lock"))?;
+  let file = dir.path().join("payload.bin");
+  std::fs::write(&file, &payload)?;
+  let steps = cache_client_steps(&workspace, &file)?;
+
+  let mut ctx = ExecutionContext::with_masker(Arc::new(Mutex::new(SecretMasker::new())));
+  ctx.set_service_env(env);
+  let (tx, mut rx) = mpsc::channel::<RunnerEvent>(1024);
+  let collector = tokio::spawn(async move {
+    let mut lines = Vec::new();
+    while let Some(ev) = rx.recv().await {
+      if let RunnerEvent::Log { line, .. } = ev {
+        lines.push(line);
+      }
+    }
+    lines
+  });
+  let config = RunnerConfig {
+    data_dir,
+    workspace_root: workspace.clone(),
+    cgroup_path: None,
+    ..RunnerConfig::default()
+  };
+  let spec = execution::execution::job_spec::JobSpec::default();
+  let http = reqwest::Client::new();
+  let fetcher = ActionFetcher::new(&shared::NetworkConfig::default())?;
+  // Save, wipe the file, then restore — separate Node processes.
+  let save = run_steps(
+    &steps[..1],
+    &mut ctx,
+    &tx,
+    CancellationToken::new(),
+    &JobRun {
+      workspace: &workspace,
+      config: &config,
+      spec: &spec,
+      shadow: None,
+      http: &http,
+      fetcher: &fetcher,
+    },
+  )
+  .await?;
+  std::fs::remove_file(&file)?;
+  let restore = run_steps(
+    &steps[1..],
+    &mut ctx,
+    &tx,
+    CancellationToken::new(),
+    &JobRun {
+      workspace: &workspace,
+      config: &config,
+      spec: &spec,
+      shadow: None,
+      http: &http,
+      fetcher: &fetcher,
+    },
+  )
+  .await?;
+  drop(tx);
+  let lines = collector.await?;
+  assert_eq!(save, shared::Conclusion::Success, "save log: {lines:?}");
+  assert_eq!(
+    restore,
+    shared::Conclusion::Success,
+    "restore log: {lines:?}"
+  );
+  assert_eq!(std::fs::read(&file)?, payload, "restored bytes differ");
+
+  let paths = seen.lock().map_err(|e| format!("poisoned: {e}"))?.clone();
+  assert!(
+    paths.iter().any(|p| p.ends_with("/CreateCacheEntry")),
+    "{paths:?}"
   );
   assert!(
-    !out.contains(FIX_CACHE),
-    "offline mode must NOT forward the real cache URL; got:\n{out}"
+    paths
+      .iter()
+      .any(|p| p.ends_with("/GetCacheEntryDownloadURL")),
+    "{paths:?}"
+  );
+  assert!(
+    !paths.iter().any(|p| p.contains("_apis/artifactcache")),
+    "no v1 request allowed: {paths:?}"
   );
   Ok(())
 }

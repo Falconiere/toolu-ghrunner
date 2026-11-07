@@ -21,7 +21,7 @@ impl ExecutionContext {
   }
 
   /// Replace the per-step-type service env, masking every `*_TOKEN` value.
-  pub(crate) fn set_service_env(&mut self, env: ServiceEnv) {
+  pub fn set_service_env(&mut self, env: ServiceEnv) {
     for token in env.tokens() {
       self.add_mask(token);
     }

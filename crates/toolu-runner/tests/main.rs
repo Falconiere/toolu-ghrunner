@@ -26,6 +26,8 @@ mod github_app_fixtures;
 #[cfg(feature = "live")]
 #[path = "helpers/live_harness.rs"]
 mod harness;
+#[path = "helpers/node_probe.rs"]
+mod node_probe;
 #[path = "../../network/tests/helpers/proxy_fixtures.rs"]
 mod proxy_fixtures;
 #[path = "helpers/supervisor_fixtures.rs"]

@@ -54,7 +54,7 @@ orchestrator: GitHub expands workflows and sends the engine a single job.
 | `oidc.rs` | (mod decl) | Declares the `oidc` sub-module and re-exports `OidcClaims`/`OidcServer`/etc. |
 | `post_drain.rs` | `drain_post_steps` | Drains registered posts LIFO, gives each a distinct report ID, keeps draining after errors, and shares the cancellation deadline while reusing the originating action's state. |
 | `service_auth.rs` | `validate_bearer` | Bearer-token validation (constant-time compare) shared by the local OIDC/artifact/cache axum services. |
-| `service_endpoints.rs` | `extract_service_urls` / `forward_env` | Extracts real GitHub service URLs + runtime token from the job message and builds the `ACTIONS_*` env vars for forwarder mode. |
+| `service_endpoints.rs` | `extract_service_urls` / `forward_env` / `ServiceEnv` | Extracts real GitHub service URLs, runtime token, cache-v2 flag and cache mode from the job message and builds the per-step-type (Node / container / `run:`) `ACTIONS_*` env for forwarder mode. |
 | `service_lifecycle.rs` | `ServiceHandle` | Generic start/shutdown lifecycle for a local axum HTTP service, plus shared 401/500 JSON responses and `Content-Range` parsing. |
 | `shadow.rs` | (mod decl) | Declares the `shadow` sub-module; see its own README. |
 | `step_attrs.rs` | `evaluate_timeout` / `evaluate_continue_on_error` | Evaluates step `timeout-minutes` / `continue-on-error` tokens at execution time with upstream's number/boolean-only validation and positioned `The template is not valid.` diagnostics. |

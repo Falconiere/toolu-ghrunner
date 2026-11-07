@@ -1,0 +1,5 @@
+name: 'cache-client-probe'
+description: 'Minimal @actions/cache-style client: saves or restores one entry, v2 or v1 by ACTIONS_CACHE_SERVICE_V2.'
+runs:
+  using: 'node20'
+  main: 'main.js'

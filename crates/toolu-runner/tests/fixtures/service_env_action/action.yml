@@ -1,0 +1,5 @@
+name: 'service-env-probe'
+description: 'Prints every ACTIONS_* variable the runner gave this Node action.'
+runs:
+  using: 'node20'
+  main: 'main.js'
