@@ -524,7 +524,7 @@
     },
     "97": {
       "title": "Remove or wire dead execution code and fix CLAUDE.md drift",
-      "state": "open",
+      "state": "closed",
       "ids": [
         "AC-1",
         "AC-2",
@@ -535,8 +535,8 @@
         "97-S3",
         "97-S4"
       ],
-      "pr": null,
-      "coverage": null
+      "pr": "https://github.com/Falconiere/toolu-ghrunner/pull/173",
+      "coverage": "docs/test-coverage.md#cleanup-of-dead-execution-code-97"
     },
     "98": {
       "title": "Use contextName for steps expressions and record skipped outcomes",
@@ -16207,39 +16207,52 @@
       "id": "97/AC-1",
       "issue": 97,
       "criterion": "Each item is either deleted or wired (linked to the issue that wires it)",
-      "input": [],
-      "expected": "Defined by the issue; not implemented on main yet.",
-      "production_path": "not on main yet (dead-code removal and doc-drift cleanup, https://github.com/Falconiere/toolu-ghrunner/issues/97)",
-      "tests": [],
-      "command": "n/a until https://github.com/Falconiere/toolu-ghrunner/issues/97 merges",
+      "input": [
+        "crates/execution/src",
+        "crates/execution/src/docker/action_mounts.rs",
+        "crates/execution/src/execution/container_job.rs"
+      ],
+      "expected": "No structural match for PluginRegistry, resolve_handler or an execution/workflow module (renames checked with ast-grep); PathTranslator is called at docker/action_mounts.rs:71 and docker/container_mounts.rs:35, ServiceContainers::start at execution/container_job.rs:57. Mount translation runs against a real preseed directory.",
+      "production_path": "crates/execution/src/docker/path_translator.rs; crates/execution/src/docker/services.rs; crates/execution/src/execution/action_exec.rs",
+      "tests": [
+        [
+          "crates/execution/src/docker/tests/container_mounts.rs",
+          "preseed_dir_is_mounted_read_only_and_translates_its_runtimes"
+        ],
+        [
+          "crates/execution/src/docker/tests/container_mounts.rs",
+          "an_unresolvable_mount_source_names_the_path_in_the_error"
+        ]
+      ],
+      "command": "ast-grep run -l rust -p 'PluginRegistry' crates; ast-grep run -l rust -p 'resolve_handler' crates; cargo test -p execution --lib docker::tests::container_mounts",
       "lanes": {
         "hermetic": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "passed",
+          "evidence": "gate"
         },
         "macos": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "passed",
+          "evidence": "gate"
         },
         "docker": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "Docker paths of the retained PathTranslator and ServiceContainers are covered only by #[ignore]d tests that ci.yml docker-replay does not run"
         },
         "github-com": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no live GitHub.com job was run for the cleanup; PR #173 is provenance, not lane evidence"
         },
         "reference": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no official-runner comparison of the cleanup (behavior-neutral removal)"
         },
         "ghes": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no GHES instance available"
         },
         "ui-service": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "not-applicable",
+          "reason": "runner-side cleanup; no GitHub-owned UI or backend result"
         }
       }
     },
@@ -16247,39 +16260,44 @@
       "id": "97/AC-2",
       "issue": 97,
       "criterion": "CLAUDE.md matches the code (crate count, dispatch order, job-spec wiring)",
-      "input": [],
-      "expected": "Defined by the issue; not implemented on main yet.",
-      "production_path": "not on main yet (dead-code removal and doc-drift cleanup, https://github.com/Falconiere/toolu-ghrunner/issues/97)",
+      "input": [
+        "AGENTS.md",
+        "docs/architecture.md",
+        "docs/test-coverage.md",
+        ".github/workflows/ci.yml"
+      ],
+      "expected": "Twelve crates under crates/; dispatch reads node -> composite -> docker, matching the RunsUsing match in action_exec.rs; test-lane text says ignored Docker and live tests are separate runs.",
+      "production_path": "crates/execution/src/execution/action_exec.rs; .github/workflows/ci.yml",
       "tests": [],
-      "command": "n/a until https://github.com/Falconiere/toolu-ghrunner/issues/97 merges",
+      "command": "ls crates | wc -l; read AGENTS.md and docs/architecture.md against action_exec.rs and ci.yml",
       "lanes": {
         "hermetic": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "not-applicable",
+          "reason": "documentation or inventory criterion; verified by reading against crates/, action_exec.rs and ci.yml, no executable test"
         },
         "macos": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "not-applicable",
+          "reason": "documentation or inventory criterion; verified by reading against crates/, action_exec.rs and ci.yml, no executable test"
         },
         "docker": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "not-applicable",
+          "reason": "documentation criterion; no container involved"
         },
         "github-com": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no live GitHub.com job was run for the cleanup; PR #173 is provenance, not lane evidence"
         },
         "reference": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no official-runner comparison of the cleanup (behavior-neutral removal)"
         },
         "ghes": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no GHES instance available"
         },
         "ui-service": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "not-applicable",
+          "reason": "runner-side cleanup; no GitHub-owned UI or backend result"
         }
       }
     },
@@ -16287,39 +16305,60 @@
       "id": "97/AC-3",
       "issue": 97,
       "criterion": "Covered by a real-data test (captured job message / real tool output, no mocks) in the crate's sibling `tests/` folder",
-      "input": [],
-      "expected": "Defined by the issue; not implemented on main yet.",
-      "production_path": "not on main yet (dead-code removal and doc-drift cleanup, https://github.com/Falconiere/toolu-ghrunner/issues/97)",
-      "tests": [],
-      "command": "n/a until https://github.com/Falconiere/toolu-ghrunner/issues/97 merges",
+      "input": [
+        "crates/execution/tests/job_message_run_defaults_test.rs",
+        "crates/execution/tests/job_outputs_message.json",
+        "crates/execution/tests/step_context_identity_test.rs"
+      ],
+      "expected": "Captured job messages run through Runner::execute_job with real shells: acquired defaults.run applies, acquired outputs evaluate after a real GITHUB_OUTPUT step, composite and named-step identity hold after the removal.",
+      "production_path": "crates/execution/src/execution/job_spec.rs; crates/execution/src/execution/job_runner/outputs.rs",
+      "tests": [
+        [
+          "crates/execution/tests/job_message_run_defaults_test.rs",
+          "job_defaults_override_workflow"
+        ],
+        [
+          "crates/execution/tests/job_outputs_test.rs",
+          "captured_output_is_evaluated_after_real_github_output_step"
+        ],
+        [
+          "crates/execution/tests/step_context_identity_test.rs",
+          "named_output_uses_context_name_while_reporting_uses_wire_uuid"
+        ],
+        [
+          "crates/execution/tests/composite_semantics_test.rs",
+          "expressions_render_functions_brackets_conditions_and_outputs"
+        ]
+      ],
+      "command": "cargo test -p execution --test integration -- job_message_run_defaults_test:: job_outputs_test:: step_context_identity_test:: composite_semantics_test::",
       "lanes": {
         "hermetic": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "passed",
+          "evidence": "gate"
         },
         "macos": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "passed",
+          "evidence": "gate"
         },
         "docker": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "not-applicable",
+          "reason": "host-shell replay; no container involved"
         },
         "github-com": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no live GitHub.com job was run for the cleanup; PR #173 is provenance, not lane evidence"
         },
         "reference": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no official-runner comparison of the cleanup (behavior-neutral removal)"
         },
         "ghes": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no GHES instance available"
         },
         "ui-service": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "not-applicable",
+          "reason": "runner-side cleanup; no GitHub-owned UI or backend result"
         }
       }
     },
@@ -16328,38 +16367,47 @@
       "issue": 97,
       "criterion": "`./tools/check.sh all` green",
       "input": [],
-      "expected": "Defined by the issue; not implemented on main yet.",
-      "production_path": "not on main yet (dead-code removal and doc-drift cleanup, https://github.com/Falconiere/toolu-ghrunner/issues/97)",
-      "tests": [],
-      "command": "n/a until https://github.com/Falconiere/toolu-ghrunner/issues/97 merges",
+      "expected": "fmt, clippy -D warnings, #[allow] ban, guardrails, nextest and doctests pass on the #234 branch; representative mapped tests run in the default gate.",
+      "production_path": "tools/check.sh; .github/workflows/ci.yml",
+      "tests": [
+        [
+          "crates/execution/tests/job_message_run_defaults_test.rs",
+          "job_defaults_override_workflow"
+        ],
+        [
+          "crates/execution/tests/job_outputs_test.rs",
+          "captured_output_is_evaluated_after_real_github_output_step"
+        ]
+      ],
+      "command": "./tools/check.sh all",
       "lanes": {
         "hermetic": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "passed",
+          "evidence": "gate"
         },
         "macos": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "passed",
+          "evidence": "gate"
         },
         "docker": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "not-applicable",
+          "reason": "gate criterion; Docker lane recorded on 97-S1"
         },
         "github-com": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no live GitHub.com job was run for the cleanup; PR #173 is provenance, not lane evidence"
         },
         "reference": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no official-runner comparison of the cleanup (behavior-neutral removal)"
         },
         "ghes": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no GHES instance available"
         },
         "ui-service": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "not-applicable",
+          "reason": "runner-side cleanup; no GitHub-owned UI or backend result"
         }
       }
     },
@@ -16367,39 +16415,54 @@
       "id": "97/97-S1",
       "issue": 97,
       "criterion": "Inventory each cited dead module and all live callers after dependent fixes",
-      "input": [],
-      "expected": "Each item has an explicit delete-or-wire decision and linked owning issue; no cleanup accidentally deletes a newly wired path.",
-      "production_path": "not on main yet (dead-code removal and doc-drift cleanup, https://github.com/Falconiere/toolu-ghrunner/issues/97)",
-      "tests": [],
-      "command": "n/a until https://github.com/Falconiere/toolu-ghrunner/issues/97 merges",
+      "input": [
+        "crates/execution/src"
+      ],
+      "expected": "Per item: PluginRegistry, resolve_handler, execution/workflow/* removed (zero ast-grep matches, no rename); PathTranslator and docker/services.rs retained with production callers named on 97/AC-1. No path wired by #70/#71/#72/#98 was deleted: their rows still pass.",
+      "production_path": "crates/execution/src/docker/path_translator.rs; crates/execution/src/docker/services.rs",
+      "tests": [
+        [
+          "crates/execution/src/docker/tests/container_mounts.rs",
+          "preseed_dir_is_mounted_read_only_and_translates_its_runtimes"
+        ],
+        [
+          "crates/execution/tests/job_message_run_defaults_test.rs",
+          "job_defaults_override_workflow"
+        ],
+        [
+          "crates/execution/tests/job_outputs_test.rs",
+          "captured_output_is_evaluated_after_real_github_output_step"
+        ]
+      ],
+      "command": "ast-grep run -l rust -p 'PluginRegistry' crates; cargo test -p execution --lib docker::tests::container_mounts",
       "lanes": {
         "hermetic": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "passed",
+          "evidence": "gate"
         },
         "macos": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "passed",
+          "evidence": "gate"
         },
         "docker": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "Docker paths of the retained PathTranslator and ServiceContainers are covered only by #[ignore]d tests that ci.yml docker-replay does not run"
         },
         "github-com": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no live GitHub.com job was run for the cleanup; PR #173 is provenance, not lane evidence"
         },
         "reference": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no official-runner comparison of the cleanup (behavior-neutral removal)"
         },
         "ghes": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no GHES instance available"
         },
         "ui-service": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "not-applicable",
+          "reason": "runner-side cleanup; no GitHub-owned UI or backend result"
         }
       }
     },
@@ -16407,39 +16470,55 @@
       "id": "97/97-S2",
       "issue": 97,
       "criterion": "Tests previously used workflow parser or manually populated JobSpec/context",
-      "input": [],
-      "expected": "Retain useful unit tests but add production message -> run_job -> reporting evidence; helper success cannot establish live wiring.",
-      "production_path": "not on main yet (dead-code removal and doc-drift cleanup, https://github.com/Falconiere/toolu-ghrunner/issues/97)",
-      "tests": [],
-      "command": "n/a until https://github.com/Falconiere/toolu-ghrunner/issues/97 merges",
+      "input": [
+        "crates/execution/tests/job_outputs_message.json",
+        "crates/execution/tests/defaults_run_job.json"
+      ],
+      "expected": "Captured acquirejob bodies execute through Runner::execute_job (production run_job) and report StepCompleted/JobCompleted with the evaluated outputs and defaults; no workflow parser or hand-built JobSpec involved.",
+      "production_path": "crates/execution/src/execution/job_runner/entry.rs; crates/execution/src/execution/job_spec.rs",
+      "tests": [
+        [
+          "crates/execution/tests/job_outputs_test.rs",
+          "captured_output_is_evaluated_after_real_github_output_step"
+        ],
+        [
+          "crates/execution/tests/job_message_run_defaults_test.rs",
+          "job_defaults_override_workflow"
+        ],
+        [
+          "crates/execution/tests/job_message_run_defaults_test.rs",
+          "nonexistent_default_directory_fails_its_step_with_path"
+        ]
+      ],
+      "command": "cargo test -p execution --test integration -- job_outputs_test:: job_message_run_defaults_test::",
       "lanes": {
         "hermetic": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "passed",
+          "evidence": "gate"
         },
         "macos": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "passed",
+          "evidence": "gate"
         },
         "docker": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "not-applicable",
+          "reason": "host-shell replay; no container involved"
         },
         "github-com": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no live GitHub.com job was run for the cleanup; PR #173 is provenance, not lane evidence"
         },
         "reference": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no official-runner comparison of the cleanup (behavior-neutral removal)"
         },
         "ghes": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no GHES instance available"
         },
         "ui-service": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "not-applicable",
+          "reason": "runner-side cleanup; no GitHub-owned UI or backend result"
         }
       }
     },
@@ -16447,39 +16526,43 @@
       "id": "97/97-S3",
       "issue": 97,
       "criterion": "CLAUDE.md, architecture and test-coverage map checked against final tree",
-      "input": [],
-      "expected": "Crate count, dispatch, defaults/outputs wiring and test lane descriptions are accurate; remove the false Docker live-coverage claim.",
-      "production_path": "not on main yet (dead-code removal and doc-drift cleanup, https://github.com/Falconiere/toolu-ghrunner/issues/97)",
+      "input": [
+        "AGENTS.md",
+        "docs/architecture.md",
+        "docs/test-coverage.md"
+      ],
+      "expected": "Crate count 12, dispatch node -> composite -> docker, job outputs/defaults.run wiring text and lane descriptions match the tree; docs/test-coverage.md states ignored Docker/live tests are unverified, not passed.",
+      "production_path": "AGENTS.md; docs/architecture.md; docs/test-coverage.md",
       "tests": [],
-      "command": "n/a until https://github.com/Falconiere/toolu-ghrunner/issues/97 merges",
+      "command": "ls crates | wc -l; read the three docs against action_exec.rs and ci.yml",
       "lanes": {
         "hermetic": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "not-applicable",
+          "reason": "documentation or inventory criterion; verified by reading against crates/, action_exec.rs and ci.yml, no executable test"
         },
         "macos": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "not-applicable",
+          "reason": "documentation or inventory criterion; verified by reading against crates/, action_exec.rs and ci.yml, no executable test"
         },
         "docker": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "not-applicable",
+          "reason": "documentation criterion; no container involved"
         },
         "github-com": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no live GitHub.com job was run for the cleanup; PR #173 is provenance, not lane evidence"
         },
         "reference": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no official-runner comparison of the cleanup (behavior-neutral removal)"
         },
         "ghes": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no GHES instance available"
         },
         "ui-service": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "not-applicable",
+          "reason": "runner-side cleanup; no GitHub-owned UI or backend result"
         }
       }
     },
@@ -16488,38 +16571,47 @@
       "issue": 97,
       "criterion": "Required gate and compatibility scenarios after removal/wiring",
       "input": [],
-      "expected": "No stale exports/docs/tests; all applicable gate checks pass without suppressions; actual live evidence remains separately recorded.",
-      "production_path": "not on main yet (dead-code removal and doc-drift cleanup, https://github.com/Falconiere/toolu-ghrunner/issues/97)",
-      "tests": [],
-      "command": "n/a until https://github.com/Falconiere/toolu-ghrunner/issues/97 merges",
+      "expected": "Gate green without suppressions on the #234 branch; no stale export or doc references the removed symbols; Docker and live evidence stay separately recorded (97/AC-1 docker unverified).",
+      "production_path": "tools/check.sh",
+      "tests": [
+        [
+          "crates/execution/tests/job_message_run_defaults_test.rs",
+          "job_defaults_override_workflow"
+        ],
+        [
+          "crates/execution/tests/job_outputs_test.rs",
+          "captured_output_is_evaluated_after_real_github_output_step"
+        ]
+      ],
+      "command": "./tools/check.sh all",
       "lanes": {
         "hermetic": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "passed",
+          "evidence": "gate"
         },
         "macos": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "passed",
+          "evidence": "gate"
         },
         "docker": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "Docker paths of the retained PathTranslator and ServiceContainers are covered only by #[ignore]d tests that ci.yml docker-replay does not run"
         },
         "github-com": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no live GitHub.com job was run for the cleanup; PR #173 is provenance, not lane evidence"
         },
         "reference": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no official-runner comparison of the cleanup (behavior-neutral removal)"
         },
         "ghes": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "unverified",
+          "reason": "no GHES instance available"
         },
         "ui-service": {
-          "status": "pending",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/issues/97 is open and not merged into main; no implementation or evidence exists yet"
+          "status": "not-applicable",
+          "reason": "runner-side cleanup; no GitHub-owned UI or backend result"
         }
       }
     },

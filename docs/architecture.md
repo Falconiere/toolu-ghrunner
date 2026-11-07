@@ -457,7 +457,7 @@ StepStarted → dispatch on run:/runs.using → handler → StepCompleted
 
 Dispatch: `steps_runner` splits `run:` (script) from `uses:`; for a
 `uses:` action `action_exec` matches the resolved manifest's `runs.using` —
-**node → docker → composite**. An unsupported `runs.using` is rejected at
+**node → composite → docker**. An unsupported `runs.using` is rejected at
 manifest parse. There is no plugin layer or
 local workflow orchestrator; GitHub orchestrates jobs (#97).
 

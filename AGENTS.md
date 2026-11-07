@@ -162,7 +162,7 @@ outside a `tests/` tree.
   `wire` `feature_detection` handles the shape diff.
 - **Handler dispatch**: no plugin layer, no local orchestrator (removed #97).
   `steps_runner` splits `run:` vs `uses:`; `action_exec` matches
-  `runs.using` — node → docker → composite. Unsupported `runs.using` fails at
+  `runs.using` — node → composite → docker. Unsupported `runs.using` fails at
   manifest parse (`actions/manifest.rs`).
 - **Service mode** (`[services] mode`, `ServicesMode` in `shared`):
   `forwarder` (default) injects the REAL GitHub service URLs + runtime token

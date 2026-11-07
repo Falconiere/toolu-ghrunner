@@ -1759,6 +1759,24 @@ merging it; upstream reads lower-case variables first, reqwest (and so env
 mode here) upper case first; `NODE_EXTRA_CA_CERTS` is new (upstream exports
 no CA).
 
+## Cleanup of dead execution code (#97)
+
+PR #173 (`fe578a24`) removed `execution/workflow/*`, `PluginRegistry`
+(`plugin/`) and `resolve_handler`. At the base of #234 `ast-grep run -l rust -p
+'PluginRegistry' crates` and the same for `resolve_handler` match nothing, and
+`crates/execution/src/execution/workflow*` does not exist (no rename found).
+Retained with a production caller: `PathTranslator`
+(`docker/action_mounts.rs`, `docker/container_mounts.rs`) and
+`docker/services.rs::ServiceContainers` (`execution/container_job.rs`).
+Job `outputs:` and `defaults.run` reach the engine from the acquired message
+through `job_spec.rs`; their production-path tests are mapped under #70 and #71.
+
+| Lane | Status |
+| --- | --- |
+| Default gate | Mapped tests in `compatibility-matrix.md` (`97/*`) run in the ubuntu and macOS legs. |
+| Docker | `docker/services.rs` and `PathTranslator` Docker paths are covered only by `#[ignore]`d tests that `docker-replay` in `ci.yml` does not run (`service_containers_test`, `service_containers_resources`); **unverified**, not passed. |
+| github-com / reference / GHES | No new live run; **unverified**. |
+
 ## GitHub App registration (#201)
 
 `register --app` mints the JIT config with a GitHub App installation token and
