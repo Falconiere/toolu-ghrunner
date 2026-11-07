@@ -125,10 +125,63 @@ async fn container_rows_bracket_the_workflow_steps() -> TestResult {
   Ok(())
 }
 
+/// The captured shell step reshaped: display `name`, `condition`, and a script
+/// that creates `sentinel` on whatever filesystem it runs against.
+fn sentinel_step(
+  template: &shared::ActionStep,
+  name: &str,
+  condition: &str,
+  sentinel: &std::path::Path,
+) -> TestResult<shared::ActionStep> {
+  let mut step = template.clone();
+  step.id = format!("sentinel-{name}");
+  step.context_name = None;
+  step.condition = Some(condition.to_owned());
+  step.display_name_token = Some(literal(name));
+  let script = step
+    .inputs
+    .d
+    .as_mut()
+    .and_then(|entries| {
+      entries
+        .iter_mut()
+        .find(|entry| entry.key.to_string_value() == Some("script"))
+    })
+    .ok_or("captured script input absent")?;
+  script.value = literal(&format!("touch '{}'", sentinel.display()));
+  Ok(step)
+}
+
+fn literal(value: &str) -> shared::TemplateToken {
+  shared::TemplateToken {
+    token_type: 0,
+    lit: Some(value.to_owned()),
+    ..shared::TemplateToken::default()
+  }
+}
+
+/// Live paired run 42403405937: after a failed "Initialize containers" the
+/// official runner still walked the steps (a `success()` step skipped, an
+/// `always()` step attempted and failed without its container), then "Stop
+/// containers" and "Complete job". A step that runs must never fall back to
+/// the host: the sentinels it would create there must not exist.
 #[tokio::test]
 #[ignore = "requires a Linux runner and real Docker daemon"]
-async fn a_failed_container_start_fails_its_row_and_still_stops() -> TestResult {
-  let (rows, conclusion) = rows(container_job(Some(MISSING_IMAGE))?).await?;
+async fn a_failed_container_start_walks_the_steps_without_touching_the_host() -> TestResult {
+  let mut job = container_job(Some(MISSING_IMAGE))?;
+  let template = job
+    .steps
+    .first()
+    .ok_or("captured shell step absent")?
+    .clone();
+  let sentinels = tempfile::tempdir()?;
+  let path = |tag: &str| sentinels.path().join(format!("ran-on-host-{tag}"));
+  job.steps = vec![
+    sentinel_step(&template, "Default", "success()", &path("success"))?,
+    sentinel_step(&template, "On failure", "failure()", &path("failure"))?,
+    sentinel_step(&template, "Always", "always()", &path("always"))?,
+  ];
+  let (rows, conclusion) = rows(job).await?;
   let shape: Vec<_> = rows
     .iter()
     .map(|(number, name, result)| (*number, name.as_str(), *result))
@@ -137,10 +190,16 @@ async fn a_failed_container_start_fails_its_row_and_still_stops() -> TestResult 
     shape,
     [
       (2, "Initialize containers", Some(Conclusion::Failure)),
-      (3, "Stop containers", Some(Conclusion::Success)),
-    ],
-    "no workflow step may run after a failed container start"
+      (3, "Default", None),
+      (4, "On failure", Some(Conclusion::Failure)),
+      (5, "Always", Some(Conclusion::Failure)),
+      (6, "Stop containers", Some(Conclusion::Success)),
+      (7, "Complete job", Some(Conclusion::Success)),
+    ]
   );
   assert_eq!(conclusion, Some(Conclusion::Failure));
+  for tag in ["success", "failure", "always"] {
+    assert!(!path(tag).exists(), "the {tag} step ran on the host");
+  }
   Ok(())
 }

@@ -268,13 +268,20 @@ async fn execute_started_step(
   let timeout = resolve_timeout(&step.id, step.timeout_in_minutes.as_ref(), ctx, events).await;
   let bounds = StepBounds::nested(job.cancellation.deadline(), timeout, watch.cancel.clone());
   let message = step_timeout_message(&name.name, timeout);
-  let execution = Box::pin(execute_step(step, ctx, events, job, job_state, &bounds));
-  let (outcome, outputs) = match with_timeout_message(message, execution).await {
-    Ok(result) => result,
-    Err(err) => {
-      report_step_error(events, &step.id, &err).await;
-      (Conclusion::Failure, HashMap::new())
-    },
+  let (outcome, outputs) = if ctx.job_container_missing {
+    // Upstream runs the step against the container that never started, and fails.
+    let err = RunnerError::Docker("the job container is not running".to_owned());
+    report_step_error(events, &step.id, &err).await;
+    (Conclusion::Failure, HashMap::new())
+  } else {
+    let execution = Box::pin(execute_step(step, ctx, events, job, job_state, &bounds));
+    match with_timeout_message(message, execution).await {
+      Ok(result) => result,
+      Err(err) => {
+        report_step_error(events, &step.id, &err).await;
+        (Conclusion::Failure, HashMap::new())
+      },
+    }
   };
   let conclusion = record_step_result(step, outcome, ctx, events).await;
   complete_step(step, conclusion, outputs, events).await;

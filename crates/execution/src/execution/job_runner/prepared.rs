@@ -16,7 +16,7 @@ use crate::docker::container_spec::ContainerSpec;
 use crate::docker::service_spec::ServiceSpec;
 use crate::execution::action_support::emit_log;
 use crate::execution::actions::prefetch::{ActionFetcher, spawn_prefetch};
-use crate::execution::container_job::{initialize_containers, stop_containers};
+use crate::execution::container_job::initialize_containers;
 use crate::execution::context::ExecutionContext;
 use crate::execution::docker_prepare;
 use crate::execution::job_hooks::{JobHookStage, run_job_hook};
@@ -84,8 +84,7 @@ pub(super) async fn execute(
   let result = match prepare_before_steps(&body, ctx).await {
     Ok(Some(early)) => Ok(early),
     Ok(None) => match start_containers(&body, containers, ctx).await {
-      Ok(Some(early)) => Ok(early),
-      Ok(None) => run_job_body(&body, ctx).await,
+      Ok(()) => run_job_body(&body, ctx).await,
       Err(error) => Err(error),
     },
     Err(error) => Err(error),
@@ -148,14 +147,15 @@ async fn prepare_before_steps(
   Ok(Some(finish_preparation_error(body, ctx, error).await))
 }
 
-/// Run "Initialize containers"; a failed or cancelled start ends the job like
-/// a failed Docker setup row: no workflow step runs, "Stop containers" still
-/// does.
+/// Run "Initialize containers". A failed or cancelled start does not end the
+/// job: as upstream, the step loop still runs (conditions skip `success()`
+/// steps), a step that runs fails without its container, then "Stop
+/// containers" and "Complete job".
 async fn start_containers(
   body: &JobBody<'_>,
   specs: (Option<&ContainerSpec>, &[ServiceSpec]),
   ctx: &mut ExecutionContext,
-) -> Result<Option<JobResult>, RunnerError> {
+) -> Result<(), RunnerError> {
   let started = initialize_containers(
     specs,
     body.config,
@@ -165,25 +165,19 @@ async fn start_containers(
     body.events,
   )
   .await?;
-  let conclusion = match started {
-    None | Some(Conclusion::Success) => return Ok(None),
-    Some(Conclusion::Cancelled) => {
-      ctx.record_job_cancelled();
-      Conclusion::Cancelled
+  match started {
+    None | Some(Conclusion::Success) => {},
+    Some(conclusion) => {
+      if conclusion == Conclusion::Cancelled {
+        ctx.record_job_cancelled();
+      } else {
+        ctx.record_step_failure();
+      }
+      ctx.container_setup = Some(conclusion);
+      ctx.job_container_missing = specs.0.is_some();
     },
-    Some(_) => {
-      ctx.record_step_failure();
-      Conclusion::Failure
-    },
-  };
-  let next = 2u32.saturating_add(ctx.docker_setup_count);
-  stop_containers(ctx, body.events, next).await;
-  run_completed_hook_best_effort(ctx, body.events, body.workspace, body.cancel).await;
-  Ok(Some(JobResult {
-    conclusion,
-    outputs: HashMap::new(),
-    environment_url: None,
-  }))
+  }
+  Ok(())
 }
 
 async fn finish_preparation_error(

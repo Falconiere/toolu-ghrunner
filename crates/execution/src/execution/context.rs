@@ -81,6 +81,11 @@ pub struct ExecutionContext {
   /// "Initialize containers" ran, so "Stop containers" is owed (upstream
   /// registers it before starting anything).
   pub(crate) stop_containers_pending: bool,
+  /// A failed or cancelled "Initialize containers": the job still walks its
+  /// steps (conditions decide) and ends with this conclusion at worst.
+  pub(crate) container_setup: Option<shared::Conclusion>,
+  /// The job declared a container that never started: a step that runs fails.
+  pub(crate) job_container_missing: bool,
   /// Images prepared before workflow steps, keyed by registry image or action directory.
   pub(crate) prepared_docker_images: HashMap<String, String>,
   /// node20 → node24 migration flags and the actions each end-of-job warning lists.
@@ -152,6 +157,8 @@ impl ExecutionContext {
       next_step_number: None,
       docker_setup_count: 0,
       stop_containers_pending: false,
+      container_setup: None,
+      job_container_missing: false,
       prepared_docker_images: HashMap::new(),
       node_migration: crate::node::migration::NodeMigrationState::default(),
       network_env: Vec::new(),

@@ -379,6 +379,12 @@ async fn run_job_body(
   {
     conclusion = Conclusion::Failure;
   }
+  // A failed or cancelled "Initialize containers" outranks steps that passed.
+  match (ctx.container_setup, conclusion) {
+    (Some(Conclusion::Cancelled), _) => conclusion = Conclusion::Cancelled,
+    (Some(Conclusion::Failure), Conclusion::Success) => conclusion = Conclusion::Failure,
+    _ => {},
+  }
 
   // "Complete job" evaluates outputs and the URL after main + post steps.
   let result = run_complete_step(spec, msg, ctx, events, conclusion).await?;
