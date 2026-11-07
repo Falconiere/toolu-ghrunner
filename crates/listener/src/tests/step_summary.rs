@@ -77,20 +77,29 @@ async fn step_summary_queue_drains_more_documents_than_its_slots()
     job_backend_id: "workflow-job".to_owned(),
   });
   let queue = std::sync::Arc::new(queue);
+  let accepted = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
   let filler = tokio::spawn({
     let queue = std::sync::Arc::clone(&queue);
+    let accepted = std::sync::Arc::clone(&accepted);
     async move {
       for index in 0..18 {
         queue
           .enqueue(&format!("step-{index}"), format!("document {index}\n"))
           .await;
+        accepted.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
       }
     }
   });
   // With the peer held, the uploader cannot drain: 16 documents fit the
   // channel and a seventeenth is in flight, so the eighteenth must still be
-  // waiting for a slot. An unbounded queue would have finished here.
+  // waiting for a slot. Counting the accepted documents pins that capacity —
+  // a smaller channel would block earlier, an unbounded one never.
   tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+  assert_eq!(
+    accepted.load(std::sync::atomic::Ordering::Relaxed),
+    17,
+    "16 buffered slots plus one upload in flight should be exactly 17"
+  );
   assert!(
     !filler.is_finished(),
     "the queue accepted 18 documents while no upload could complete"

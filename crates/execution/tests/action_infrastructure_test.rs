@@ -569,21 +569,23 @@ async fn launch_scoped_token_is_masked_and_never_logged() -> TestResult {
   );
   drop(guard);
 
+  assert!(
+    observed.logs.iter().any(|line| line == "fetched"),
+    "the downloaded action never ran, so there is nothing to scan: {:?}",
+    observed.logs
+  );
   for line in &observed.logs {
     assert!(!line.contains(ARCHIVE_TOKEN), "raw token logged: {line}");
     assert!(!line.contains(&basic), "Basic credential logged: {line}");
     assert!(!line.contains(&archive_url), "archive URL logged: {line}");
   }
-  for (_, _, message) in &observed.infrastructure {
-    assert!(
-      !message.contains(ARCHIVE_TOKEN),
-      "raw token in error: {message}"
-    );
-    assert!(
-      !message.contains(&basic),
-      "Basic credential in error: {message}"
-    );
-  }
+  // Errors carry their own leak check in the failure test above; a successful
+  // download must raise none at all.
+  assert!(
+    observed.infrastructure.is_empty(),
+    "{:?}",
+    observed.infrastructure
+  );
   Ok(())
 }
 
