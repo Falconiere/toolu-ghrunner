@@ -12101,10 +12101,11 @@
       "input": [
         "README.md",
         "AGENTS.md",
+        "crates/execution/src/execution/README.md",
         "docs/test-coverage.md",
         "docs/specs/2026-10-10-orphan-process-cleanup-design.md"
       ],
-      "expected": "README.md, AGENTS.md, execution README and docs/test-coverage.md each state the exec-time environment limit (Linux /proc/<pid>/environ and macOS KERN_PROCARGS2 snapshots, SIP-hidden Apple binaries covered only through the step's process group); README.md and docs/test-coverage.md also state that sudo, other users' processes and processes that leave the step's group while dropping the id escape, that Docker containers are never tagged, and that a runner crash or the boot watchdog's hard exit skips the sweep. The test reads those committed documents and fails if any one fact goes missing; it asserts the prose, never the behavior, which 89/AC-1 and 89/AC-2 own.",
+      "expected": "The test reads the four committed documents themselves, not a fixture. README.md, AGENTS.md, the execution README and docs/test-coverage.md each state four facts of the exec-time environment limit: a Linux /proc read (README.md and docs/test-coverage.md spell out /proc/<pid>/environ, the other two say /proc), macOS KERN_PROCARGS2, SIP, and the registered step process group that covers the binaries SIP hides. README.md and docs/test-coverage.md additionally state five escapes: sudo, another user's processes, a process that left the step's group (setsid/setpgid), containers never being tagged, and a crash skipping the sweep. Each fact is a regex over the prose, because the documents word it differently. A negative control deletes each of the nine facts from README.md in turn and requires both that the deletion removed text and that the fact is then reported missing, so a green run means the prose is there rather than the patterns matching anything. Only the prose is asserted, never the behavior, which 89/AC-1 and 89/AC-2 own.",
       "production_path": "docs: README.md, AGENTS.md, crates/execution/src/execution/README.md, docs/test-coverage.md#issue-89--orphan-process-cleanup",
       "tests": [
         [
