@@ -11,6 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 check = importlib.import_module("compat_matrix_check")
+report_fixtures = importlib.import_module("test_reference_compare")
 
 MATRIX = json.loads(check.MATRIX.read_text())
 MARKDOWN = check.MARKDOWN.read_text()
@@ -155,11 +156,69 @@ class RejectionTest(unittest.TestCase):
         row(m, "94/AC-1")["lanes"]["hermetic"] = {"status": "passed", "evidence": "gate"}
         self.assert_rejected(m, "open issue rows must be pending with the issue link")
 
-    def test_acknowledged_reference_difference_cannot_pass(self):
+    def test_row_citing_the_report_that_acknowledges_it_cannot_pass(self):
         m = copy.deepcopy(MATRIX)
         row(m, "103/R-cache")["lanes"]["reference"] = {
             "status": "passed", "evidence": "report:docs/compat-reference-103.json"}
-        self.assert_rejected(m, "records an unfixed difference; reference cannot pass")
+        self.assert_rejected(m, "103/R-cache [reference]: the report acknowledges a difference")
+
+    def test_row_citing_a_fresh_report_passes_while_the_old_report_lists_it(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".json", dir=check.ROOT / "docs",
+                                         delete=False) as fresh:
+            json.dump(report_fixtures.paired_report(), fresh)
+        try:
+            path = str(Path(fresh.name).relative_to(check.ROOT))
+            m = copy.deepcopy(MATRIX)
+            m["reports"].append(path)
+            self.assertIn("103/R-cache", {rid for ack in json.loads(
+                (check.ROOT / "docs/compat-reference-103.json").read_text())["acknowledged"]
+                for rid in ack["matrix_rows"]})
+            row(m, "103/R-cache")["lanes"]["reference"] = {"status": "passed",
+                                                           "evidence": f"report:{path}"}
+            self.assertEqual(errors_for(m), [])
+        finally:
+            Path(fresh.name).unlink()
+
+    def test_row_citing_the_run_of_the_report_that_acknowledges_it_cannot_pass(self):
+        m = copy.deepcopy(MATRIX)
+        row(m, "103/R-cache")["lanes"]["reference"] = {
+            "status": "passed",
+            "evidence": "run:https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727"}
+        self.assert_rejected(m, "103/R-cache [reference]: the report of this run acknowledges")
+
+    def test_longer_run_id_is_not_the_acknowledging_run(self):
+        m = copy.deepcopy(MATRIX)
+        row(m, "103/R-cache")["lanes"]["reference"] = {
+            "status": "passed",
+            "evidence": "run:https://github.com/Falconiere/toolu-ghrunner/actions/runs/383015837270"}
+        self.assertEqual(errors_for(m), [])
+
+    def test_reference_lane_takes_only_paired_runs_and_reports(self):
+        for evidence in ("pr:https://github.com/Falconiere/toolu-ghrunner/pull/1",
+                         "run:https://github.com/Falconiere/toolu-ghrunner/pull/1",
+                         "doc:docs/compatibility-evidence.md"):
+            m = copy.deepcopy(MATRIX)
+            row(m, "103/R-cache")["lanes"]["reference"] = {"status": "passed", "evidence": evidence}
+            self.assert_rejected(m, "103/R-cache [reference]: evidence must be a paired run: or report:")
+
+    def test_report_naming_an_unknown_row_is_rejected(self):
+        m = copy.deepcopy(MATRIX)
+        m["rows"] = [r for r in m["rows"] if r["id"] != "75/75-S1"]
+        self.assert_rejected(m, "names unknown matrix row 75/75-S1")
+
+    def test_row_of_an_unknown_issue_is_rejected(self):
+        m = copy.deepcopy(MATRIX)
+        m["rows"].append({**copy.deepcopy(gate_row(m)), "id": "999/AC-1", "issue": 999})
+        self.assert_rejected(m, "999/AC-1: issue 999 is not in the matrix issues")
+
+    def test_row_whose_issue_field_is_unknown_is_rejected(self):
+        m = copy.deepcopy(MATRIX)
+        gate_row(m)["issue"] = 999
+        self.assert_rejected(m, "issue 999 is not in the matrix issues")
+
+    def test_epic_rows_stay_allowed(self):
+        self.assertTrue([r for r in MATRIX["rows"] if r["id"].startswith("67/")])
+        self.assertFalse([e for e in errors_for(copy.deepcopy(MATRIX)) if "67/" in e])
 
     def test_missing_evidence_doc_section(self):
         doc = EVIDENCE_DOC.replace("## Recorded differences", "## Something else")

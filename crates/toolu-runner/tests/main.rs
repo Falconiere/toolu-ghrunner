@@ -106,6 +106,7 @@ mod journal_types_test;
 mod journal_writer_test;
 mod listener_smoke_test;
 mod live_e2e;
+mod live_harness_test;
 mod live_login_e2e;
 mod log_upload_mode_test;
 mod machine_service_test;

@@ -1697,6 +1697,9 @@ lists the #103 test surfaces.
 | --- | --- | --- |
 | Matrix integrity (ids, lanes, evidence, Markdown view) | `python3 scripts/test/compat_matrix_check.py --check`; `scripts/test/test_compat_matrix_check.py` mutates the real matrix for every rejection rule | CI "Compatibility evidence (#103)" |
 | Paired toolu / official v2.337.0 run | [run 38301583727](https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727) → `docs/compat-reference-103.json`; `reference_compare.py --verify` + `test_reference_compare.py` | recorded live; re-verified in CI |
+| Comparator pairing and strictness (per OS and arch, JSON types, required sections) | `scripts/test/test_reference_compare.py`, from the recorded report's rows cloned per platform | CI "Compatibility evidence (#103)" |
+| Paired workflow shape and host script control flow | `scripts/test/compat_paired_workflow_test.sh` (mutated copies; GitHub and both runners stood in for) | CI (static); first dispatch is #251 |
+| Live harness paths, labels and cleanup reporting | `crates/toolu-runner/tests/live_harness_test.rs` | CI `test` shard 2, `--features live` |
 | S1 — dropped message sections fail the production replay | `crates/execution/tests/replay_mutation_test.rs` (captured `compat_103_contexts_message.json` + #70 capture) | default gate (ubuntu + macOS) |
 | S2 — real container action and exact input | `crates/execution/tests/compat_probe_replay_test.rs` (captured `compat_103_docker_message.json`, real Docker; echo-instead-of-container and empty `who` fail) | CI Docker step |
 | Capture hook | `crates/listener/src/tests/capture.rs` (exact body, 0600/0700, contained name, unwritable dir) | default gate |

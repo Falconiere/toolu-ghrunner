@@ -190,6 +190,8 @@ want_scripts "scripts runs this test"                     "ci_workflow"
 want_scripts "scripts runs the shell-templates workflow test" "shell_templates_workflow"
 want_scripts "scripts runs the .gitleaksignore pin test"       "gitleaks_ignore"
 want_scripts "scripts runs the live-lane honesty test"    "live_lane"
+want_scripts "scripts runs the paired-workflow test"      "compat_paired_workflow"
+want_test "test runs the live harness self-checks"        "--features live --test integration -- live_harness_test::"
 want_scripts "scripts checks the #103 compatibility matrix" "compat_matrix_check\.py --check"
 want_scripts "scripts re-verifies the #103 reference report" \
   "reference_compare\.py --verify docs/compat-reference-103\.json"
@@ -277,7 +279,7 @@ assert covered == real, f"jobs behind no aggregator: {sorted(real - covered)}"
 # and the steps that must run once per leg must be gated (not run N times,
 # not dropped).
 once_per_leg = {
-    "test": {"Doctests", "Install zsh and fish for the install.sh tests", "install.sh login-shell tests"},
+    "test": {"Doctests", "Install zsh and fish for the install.sh tests", "Live harness self-checks", "install.sh login-shell tests"},
     "test-macos": {"Clippy", "Doctests", "install.sh under macOS /bin/bash 3.2", "Validate the launchd plist"},
 }
 for leg, names in once_per_leg.items():

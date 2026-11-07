@@ -45,8 +45,12 @@ The checker enforces the mechanical parts:
 - An ignored test never backs `gate`.
 - `run:`/`pr:` URLs belong to this repository.
 - `doc:` anchors resolve.
-- A row named by an acknowledged reference difference cannot pass the
-  `reference` lane.
+- A row cannot pass the `reference` lane by citing a report that acknowledges a
+  difference for it, or that report's run. A fresh report can back it while the
+  old one stays unedited.
+- The `reference` lane takes only `run:` and `report:` evidence.
+- A row whose issue is not in the matrix `issues` is rejected, except epic `67/`
+  rows.
 - Each issue has exactly one row per AC/scenario id.
 
 IDs are extracted deterministically from the issue bodies:
@@ -154,32 +158,56 @@ Pins:
 - `actions/download-artifact` `9000827ccba6bdab643e8b6fd33ac0654aef8333`
   (v8.0.2).
 
-`scripts/test/reference_compare.py <run_id>` normalizes only the lane token in
-job names. It compares:
+`scripts/test/reference_compare.py` pairs jobs by variant, job, OS and arch,
+normalizing only the lane token in job names. It compares:
 
 - job conclusions and the ordered step (name, conclusion) list;
-- each lane's uploaded `toJSON(needs)` observations;
+- each lane's uploaded `toJSON(needs)` observations, including JSON types, so
+  `true` differs from `1` and a missing key from `null`;
 - exact payload artifact bytes, read back through the GitHub API (this checks the upload; the in-job `download-artifact` step is compared only through the step lists);
 - each variant's expected outcome;
-- leftover probe containers on the daemon.
+- leftover probe containers on each Linux VM, from the listing its host job uploads.
 
-Its report is [compat-reference-103.json](compat-reference-103.json). CI
+A duplicate job, or missing or empty `run`, `provenance` or `results`, is an
+error. Every report must cover Linux X64, Linux ARM64 and macOS ARM64; macOS has
+no Docker jobs, and one that ran there is rejected.
+
+This run's report is [compat-reference-103.json](compat-reference-103.json). CI
 re-verifies it offline with `--verify`, which also re-hashes the committed
-captures.
-
-To re-run the lane:
-
-1. Register an official runner and a toolu runner on one host with the two
-   labels above.
-2. Dispatch `compat-reference-103` (on `main`) or push a temporary trigger.
-3. Run `reference_compare.py <run_id> --capture … --acknowledge …`.
-
+captures. It is the one report allowed to name no platform, pinned by run id.
 The recorded run came from a temporary branch `push` trigger, removed before
 merge.
 
+### Paired workflow
+
+[`compat-paired.yml`](../.github/workflows/compat-paired.yml) is the way to run a
+new comparison. It is dispatch-only and has not been dispatched yet, so two
+runners side by side on a hosted VM remains unproven.
+
+Each of `ubuntu-latest`, `ubuntu-24.04-arm` and `macos-15` verifies the official
+v2.338.2 archive digest, builds toolu, registers both runners by JIT under
+per-run labels, and serves them until that platform's probe jobs complete.
+Runners are unregistered on every exit. A missing `TOOLU_RUNNER_LIVE_TOKEN` fails
+the run as `UNVERIFIED`.
+
+`negative` is meant to fail, so a good run still concludes `failure`. Compare with:
+
+```sh
+python3 scripts/test/reference_compare.py <run_id> --out docs/<report>.json \
+  --provenance <file> --capture <fixture> [--acknowledge <file>]
+```
+
+`--out` is required and must not exist, so a comparison cannot overwrite a
+recorded report.
+Acknowledgements name platform scopes such as `probe-Linux-X64`, so one platform's
+acknowledgement cannot excuse another's difference. `compat-reference-103.yml`
+stays for the record; the comparator no longer reads runs in its job layout.
+
 **Not covered:**
 
-- macOS and ARM64 pairs (no host).
+- macOS and ARM64 pairs: the recorded run has no host for them.
+  `compat-paired.yml` covers them but has not been dispatched, so they stay
+  `unverified`.
 - GHES.
 - Accelerated services mode.
 - Live fault injection on the control plane (outage, cancel races, duplicate

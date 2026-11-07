@@ -1,0 +1,155 @@
+name: compat-paired
+
+# Epic #230 paired comparison: the SAME reusable probe
+# (compat-reference-103-probe.yml) runs on toolu and on an unmodified official
+# actions/runner v2.338.2, both registered by JIT on one temporary GitHub-hosted
+# VM per platform under per-run labels. scripts/test/reference_compare.py
+# <run_id> --out <report> compares the lanes; see docs/compatibility-evidence.md.
+#
+# Dispatch-only. `negative` is meant to fail, so a good run still concludes
+# failure; the comparator decides. Two runners side by side on a hosted VM stays
+# unproven until the first dispatch (#251).
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # A live lane that did not run is UNVERIFIED, not green (#103). Host and probe
+  # jobs need this one, so a missing secret leaves no self-hosted job queued.
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      HAVE_LIVE_TOKEN: ${{ secrets.TOOLU_RUNNER_LIVE_TOKEN != '' }}
+    steps:
+      - name: Require live credentials
+        if: ${{ env.HAVE_LIVE_TOKEN != 'true' }}
+        run: |
+          echo "::error::UNVERIFIED: TOOLU_RUNNER_LIVE_TOKEN is not set, so the paired lanes did not run; this is not coverage"
+          exit 1
+
+  host:
+    name: host ${{ matrix.platform }}
+    needs: guard
+    runs-on: ${{ matrix.vm }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: Linux-X64
+            vm: ubuntu-latest
+            archive: actions-runner-linux-x64-2.338.2.tar.gz
+            sha256: baebf204307bac6193480852732f0aba2ae97b6c5597c244f4d5558390147c40
+          - platform: Linux-ARM64
+            vm: ubuntu-24.04-arm
+            archive: actions-runner-linux-arm64-2.338.2.tar.gz
+            sha256: 670adb2f268fe21dcbb58b3db0e0aa9d5b3bddfe2c651481336e561ff86de945
+          - platform: macOS-ARM64
+            vm: macos-15
+            archive: actions-runner-osx-arm64-2.338.2.tar.gz
+            sha256: 25a065af409ffa317ab4d5a3b614dd15fc9c40f2172bc1b35a1b1258e919a388
+    env:
+      PLATFORM: ${{ matrix.platform }}
+      LABEL_PREFIX: compat-paired-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.94.1
+      - name: Verify the official runner archive
+        env:
+          ARCHIVE: ${{ matrix.archive }}
+          SHA256: ${{ matrix.sha256 }}
+        run: |
+          curl --fail --silent --show-error --location --retry 3 -o "$RUNNER_TEMP/$ARCHIVE" \
+            "https://github.com/actions/runner/releases/download/v2.338.2/$ARCHIVE"
+          echo "$SHA256  $RUNNER_TEMP/$ARCHIVE" | shasum -a 256 --check --strict
+          mkdir "$RUNNER_TEMP/official"
+          tar -xzf "$RUNNER_TEMP/$ARCHIVE" -C "$RUNNER_TEMP/official"
+      - name: Build toolu
+        run: cargo build -p toolu-runner --bin toolu-runner
+      # A failure here leaves the probes queued; stop-queued-probes ends the run.
+      - name: Serve both lanes until this platform's probes finish
+        timeout-minutes: 75
+        env:
+          GH_TOKEN: ${{ secrets.TOOLU_RUNNER_LIVE_TOKEN }}
+          TOOLU_BIN: ${{ github.workspace }}/target/debug/toolu-runner
+        run: |
+          OFFICIAL_DIR="$RUNNER_TEMP/official" bash scripts/test/compat_paired_host.sh run
+      # The VM is gone by the time the comparator runs, so this is the only
+      # place the containers can be seen. No artifact fails the comparison.
+      - name: Record containers left on this VM
+        if: runner.os == 'Linux'
+        run: docker ps -a --format '{{.ID}} {{.Image}}' > containers.txt
+      - name: Upload the container listing
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: compat-paired-${{ matrix.platform }}-containers
+          path: containers.txt
+          if-no-files-found: error
+      - name: Unregister both lanes
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.TOOLU_RUNNER_LIVE_TOKEN }}
+        run: bash scripts/test/compat_paired_host.sh unregister
+
+  # Self-hosted jobs wait up to 24 hours for a runner, so a dead host would leave
+  # its probes queued for that long.
+  stop-queued-probes:
+    needs: [guard, host]
+    if: ${{ always() && needs.guard.result == 'success' && needs.host.result != 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Cancel this run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run cancel "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY"
+
+  probe:
+    name: probe-${{ matrix.platform }}-${{ matrix.lane }}
+    needs: guard
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [Linux-X64, Linux-ARM64, macOS-ARM64]
+        lane: [toolu, official]
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/compat-reference-103-probe.yml
+    with:
+      runner_label: compat-paired-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.platform }}-${{ matrix.lane }}
+      lane: ${{ matrix.platform }}-${{ matrix.lane }}
+      variant: probe
+      who: world
+      count: 3
+      enabled: false
+      expect_oidc: true
+      run_docker: ${{ matrix.platform != 'macOS-ARM64' }}
+
+  negative:
+    name: negative-${{ matrix.platform }}-${{ matrix.lane }}
+    needs: guard
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [Linux-X64, Linux-ARM64, macOS-ARM64]
+        lane: [toolu, official]
+    permissions:
+      contents: read
+    uses: ./.github/workflows/compat-reference-103-probe.yml
+    with:
+      runner_label: compat-paired-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.platform }}-${{ matrix.lane }}
+      lane: ${{ matrix.platform }}-${{ matrix.lane }}
+      variant: negative
+      who: ''
+      count: 3
+      enabled: false
+      expect_oidc: false
+      run_docker: ${{ matrix.platform != 'macOS-ARM64' }}
