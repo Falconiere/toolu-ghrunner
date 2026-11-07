@@ -475,8 +475,8 @@ async fn refresh_log_lines_carry_neither_the_old_nor_the_new_token() -> TestResu
   let subscriber = tracing_subscriber::fmt()
     .with_ansi(false)
     .without_time()
-    // Every level: a sibling test's subscriber can leave a lower maximum
-    // cached at these callsites when the whole lib target shares a process.
+    // Every level, so the capture never depends on what the default filter
+    // would have admitted at these callsites.
     .with_max_level(tracing::Level::TRACE)
     .with_writer(Arc::new(log.reopen()?))
     .finish();
@@ -492,6 +492,12 @@ async fn refresh_log_lines_carry_neither_the_old_nor_the_new_token() -> TestResu
   {
     // Thread-local default: a current-thread test runtime polls the refresh
     // on this very thread, so both production log calls land in the file.
+    //
+    // This needs one test per process, which is what the gate's `cargo
+    // nextest run` gives. Under `cargo test --lib` several tests share a
+    // process and `tracing`'s per-callsite interest cache is global, so a
+    // concurrent test without a subscriber can leave the publication
+    // callsite disabled for this thread too; `--test-threads=1` also passes.
     let _guard = tracing::subscriber::set_default(subscriber);
     assert!(matches!(refresh(&mut ctx).await?, IdleDecision::Continue));
   }
