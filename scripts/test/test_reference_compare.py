@@ -2,12 +2,15 @@
 """reference_compare.verify against the recorded #103 paired run and mutations of it."""
 
 import copy
+import http.server
 import importlib
 import json
 import os
+import shutil
 import stat
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -389,6 +392,74 @@ class LeftoverContainersTest(unittest.TestCase):
                 with self.assertRaises(SystemExit) as stopped:
                     reference_compare.leftover_containers(1, tmp)
         self.assertIn("no valid artifacts", str(stopped.exception.code))
+
+
+class AnnotationPaginationTest(unittest.TestCase):
+    """leak_counts through the real installed `gh` against a loopback recorder.
+    `GH_HOST=github.localhost` makes gh speak plain HTTP to `api.github.localhost`,
+    which `HTTP_PROXY` routes to the recorder; the token is synthetic."""
+
+    JOB = {"id": 9, "name": "probe-Linux-X64-toolu / leaks", "conclusion": "success",
+           "check_run_url": "https://api.github.com/repos/o/r/check-runs/7"}
+    NOTES = "/repos/o/r/check-runs/7/annotations?per_page=100"
+
+    def serve(self, page2_status):
+        value = reference_compare.disposable(1, "Linux-X64", "toolu")
+        requested = []
+        notes = self.NOTES
+
+        class Recorder(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                path = self.path.split("api.github.localhost", 1)[-1]
+                requested.append(path)
+                status, headers, body = 404, {}, b"{}"
+                if path == f"/repos/{reference_compare.REPO}/actions/jobs/9/logs":
+                    status, body = 200, b"a clean log line\n"
+                elif path == notes:
+                    status, body = 200, b'[{"message": "clean"}]'
+                    headers["Link"] = f'<http://api.github.localhost{notes}&page=2>; rel="next"'
+                elif path == notes + "&page=2":
+                    status = page2_status
+                    body = json.dumps([{"message": value}]).encode() if status == 200 else b'{"message": "x"}'
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                for key, val in headers.items():
+                    self.send_header(key, val)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Recorder)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return server.server_address[1], requested
+
+    def counts(self, page2_status):
+        gh = shutil.which("gh")
+        self.assertIsNotNone(gh, "prerequisite missing: the real `gh` CLI is not on PATH")
+        port, requested = self.serve(page2_status)
+        with tempfile.TemporaryDirectory() as home:
+            env = {"PATH": f"{Path(gh).parent}:/usr/bin:/bin", "HOME": home, "GH_CONFIG_DIR": home,
+                   "GH_HOST": "github.localhost", "GH_ENTERPRISE_TOKEN": "synthetic-not-a-token",
+                   "GH_NO_UPDATE_NOTIFIER": "1", "HTTP_PROXY": f"http://127.0.0.1:{port}"}
+            with mock.patch.dict(os.environ, env, clear=True):
+                found = reference_compare.leak_counts(1, [self.JOB])
+        return found["Linux-X64"]["toolu"], requested
+
+    def test_a_value_only_on_the_second_page_is_counted(self):
+        counts, requested = self.counts(200)
+        self.assertIn(self.NOTES + "&page=2", requested)
+        self.assertEqual((counts["annotations"], counts["jobs_scanned"], counts["unreadable"]), (1, 1, 0))
+
+    def test_a_failed_second_page_leaves_the_job_unread(self):
+        counts, requested = self.counts(500)
+        self.assertIn(self.NOTES + "&page=2", requested)
+        self.assertEqual((counts["jobs_scanned"], counts["unreadable"]), (0, 1))
+        self.assertEqual(counts["reasons"], {"http-500": 1})
 
 
 class CommandLineTest(unittest.TestCase):

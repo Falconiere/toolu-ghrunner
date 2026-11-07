@@ -276,11 +276,13 @@ def failure_category(stderr):
     return f"http-{match.group(1)}" if match else "error"
 
 
-def fetch(path, reasons=None):
+def fetch(path, reasons=None, paginate=False):
     """`gh api path` text, or None when GitHub has nothing to return; the
     failure's category is counted in `reasons`. Job logs carry ANSI colour
-    codes, which `gh` refuses to print without the flag."""
-    out = subprocess.run(["gh", "api", "--allow-escape-sequences", path], capture_output=True, text=True)
+    codes, which `gh` refuses to print without the flag. `paginate` follows
+    every `Link: next` page (one JSON array per page); any failed page is None."""
+    cmd = ["gh", "api", "--allow-escape-sequences"] + (["--paginate"] if paginate else []) + [path]
+    out = subprocess.run(cmd, capture_output=True, text=True)
     if out.returncode == 0:
         return out.stdout
     if reasons is not None:
@@ -305,7 +307,7 @@ def leak_counts(run_id, jobs):
             lane, {"logs": 0, "annotations": 0, "jobs_scanned": 0, "unreadable": 0, "reasons": {}})
         log = fetch(f"repos/{REPO}/actions/jobs/{job['id']}/logs", counts["reasons"])
         notes = fetch(job["check_run_url"].split("api.github.com/", 1)[-1] + "/annotations?per_page=100",
-                      counts["reasons"])
+                      counts["reasons"], paginate=True)
         if log is None or notes is None:
             counts["unreadable"] += 1
             continue

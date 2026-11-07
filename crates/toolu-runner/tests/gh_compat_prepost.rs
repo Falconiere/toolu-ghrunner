@@ -289,15 +289,13 @@ async fn a_step_without_pre_reports_its_timeout_error_once_at_main() -> TestResu
 
 /// One `act-a` step (its `pre.js` set to `pre_js`) through the pre-job phase,
 /// with an unexecutable node runtime when `broken_node`, cancelling after `cancel_after`.
+/// A missing system `node` fails the test: it is a prerequisite, not a skip.
 async fn run_pre_phase_case(
   pre_js: &str,
   broken_node: bool,
   cancel_after: Option<std::time::Duration>,
-) -> TestResult<Option<(shared::Conclusion, Vec<RunnerEvent>)>> {
-  let Some(node) = system_node() else {
-    eprintln!("SKIP: no system `node` on PATH; pre/post test needs a real node runtime");
-    return Ok(None);
-  };
+) -> TestResult<(shared::Conclusion, Vec<RunnerEvent>)> {
+  let node = system_node().ok_or("prerequisite missing: no system `node` on PATH")?;
   let dir = tempfile::tempdir()?;
   let (workspace, data_dir) = (dir.path().join("work"), dir.path().join("data"));
   std::fs::create_dir_all(&workspace)?;
@@ -336,7 +334,7 @@ async fn run_pre_phase_case(
     cancel,
   )
   .await?;
-  Ok(Some((conclusion, events)))
+  Ok((conclusion, events))
 }
 
 /// The id of the reported `Pre` row.
@@ -359,9 +357,7 @@ fn pre_row(events: &[RunnerEvent]) -> Option<String> {
 /// failed row appears.
 #[tokio::test]
 async fn a_hard_pre_error_is_logged_on_its_own_row() -> TestResult<()> {
-  let Some((conclusion, events)) = run_pre_phase_case("", true, None).await? else {
-    return Ok(());
-  };
+  let (conclusion, events) = run_pre_phase_case("", true, None).await?;
   assert_eq!(conclusion, shared::Conclusion::Failure);
   let pre = pre_row(&events).ok_or("no Pre row")?;
   let completed = events
@@ -392,15 +388,12 @@ async fn a_hard_pre_error_is_logged_on_its_own_row() -> TestResult<()> {
 /// cancelled. Real cancellation coverage; it also passed before the fix.
 #[tokio::test]
 async fn a_cancelled_pre_stays_cancelled() -> TestResult<()> {
-  let Some((conclusion, events)) = run_pre_phase_case(
+  let (conclusion, events) = run_pre_phase_case(
     "setTimeout(() => {}, 60000);\n",
     false,
     Some(std::time::Duration::from_secs(2)),
   )
-  .await?
-  else {
-    return Ok(());
-  };
+  .await?;
   assert_eq!(
     reported(&events, "Pre Run ./act-a"),
     Some(shared::Conclusion::Cancelled),
@@ -410,11 +403,7 @@ async fn a_cancelled_pre_stays_cancelled() -> TestResult<()> {
   // Cancelled before the stage starts: the row must not read as failed. (This
   // pins observed behavior; it does not reach the stage's cancellation-error
   // path, whose Cancelled mapping is verified by inspection only.)
-  let Some((conclusion, events)) =
-    run_pre_phase_case("", false, Some(std::time::Duration::ZERO)).await?
-  else {
-    return Ok(());
-  };
+  let (conclusion, events) = run_pre_phase_case("", false, Some(std::time::Duration::ZERO)).await?;
   assert_ne!(
     reported(&events, "Pre Run ./act-a"),
     Some(shared::Conclusion::Failure),
