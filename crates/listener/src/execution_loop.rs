@@ -678,3 +678,7 @@ mod job_outputs;
 #[cfg(test)]
 #[path = "tests/setup_forwarding.rs"]
 mod setup_tests;
+
+#[cfg(test)]
+#[path = "tests/execution_large_logs.rs"]
+mod execution_large_logs;
