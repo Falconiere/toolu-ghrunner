@@ -544,15 +544,18 @@ mod action_metadata;
 fn setup_rows(events: &[RunnerEvent], prefix: &str) -> Vec<(String, String, u32)> {
   events
     .iter()
-    .filter_map(|event| match event {
-      RunnerEvent::StepStarted {
+    .filter_map(|event| {
+      let RunnerEvent::StepStarted {
         step_id,
         step_name,
         step_number,
-      } if step_name.starts_with(prefix) => {
-        Some((step_id.clone(), step_name.clone(), *step_number))
-      },
-      _ => None,
+      } = event
+      else {
+        return None;
+      };
+      step_name
+        .starts_with(prefix)
+        .then(|| (step_id.clone(), step_name.clone(), *step_number))
     })
     .collect()
 }

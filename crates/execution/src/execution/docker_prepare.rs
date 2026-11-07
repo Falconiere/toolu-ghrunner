@@ -89,7 +89,8 @@ async fn run_plan(
   cancel: &CancellationToken,
 ) -> Result<(), RunnerError> {
   let count = plan.pulls.len().saturating_add(plan.builds.len());
-  ctx.docker_setup_count = u32::try_from(count).unwrap_or(u32::MAX);
+  ctx.docker_setup_count = u32::try_from(count)
+    .map_err(|error| RunnerError::StepExecution(format!("too many Docker setup tasks: {error}")))?;
   for (index, image) in plan.pulls.iter().enumerate() {
     let prepared = run_task(SetupTask::Pull(image), index, ctx, events, cancel).await?;
     ctx.prepared_docker_images.extend(prepared);
@@ -240,8 +241,9 @@ async fn run_task(
   events: &mpsc::Sender<RunnerEvent>,
   cancel: &CancellationToken,
 ) -> Result<Vec<(String, String)>, RunnerError> {
+  let number = setup_step_number(index)?;
   let id = uuid::Uuid::new_v4().to_string();
-  start_task(task, index, &id, events).await;
+  start_task(task, number, &id, events).await;
   let result = prepare_task(task, ctx, cancel).await;
   if let Err(error) = &result
     && !matches!(error, RunnerError::Cancelled)
@@ -267,7 +269,7 @@ async fn run_task(
 
 async fn start_task(
   task: SetupTask<'_>,
-  index: usize,
+  number: u32,
   id: &str,
   events: &mpsc::Sender<RunnerEvent>,
 ) {
@@ -275,7 +277,6 @@ async fn start_task(
     SetupTask::Pull(image) => (format!("Pull {image}"), "pull_action_image"),
     SetupTask::Build(group) => (format!("Build {}", group.repository), "build_action_image"),
   };
-  let number = u32::try_from(index).unwrap_or(u32::MAX).saturating_add(2);
   send(
     events,
     RunnerEvent::StepStarted {
@@ -298,6 +299,13 @@ async fn start_task(
   emit_log(events, id, &name).await;
 }
 
+fn setup_step_number(index: usize) -> Result<u32, RunnerError> {
+  u32::try_from(index)
+    .ok()
+    .and_then(|index| index.checked_add(2))
+    .ok_or_else(|| RunnerError::StepExecution("Docker setup step number overflow".to_owned()))
+}
+
 async fn prepare_task(
   task: SetupTask<'_>,
   ctx: &ExecutionContext,
@@ -310,8 +318,7 @@ async fn prepare_task(
       let tag = runtime
         .prepare_image(&full, Path::new(""), None, cancel)
         .await?;
-      let key = image_key(&full, None)
-        .ok_or_else(|| RunnerError::Docker("missing registry key".to_owned()))?;
+      let key = format!("pull:{}", image.to_ascii_lowercase());
       Ok(vec![(key, tag)])
     },
     SetupTask::Build(group) => {
@@ -325,8 +332,7 @@ async fn prepare_task(
             cancel,
           )
           .await?;
-        let key = image_key(&action.image, Some(&action.cache_key))
-          .ok_or_else(|| RunnerError::Docker("missing action key".to_owned()))?;
+        let key = format!("build:{}", action.cache_key);
         prepared.push((key, tag));
       }
       Ok(prepared)
