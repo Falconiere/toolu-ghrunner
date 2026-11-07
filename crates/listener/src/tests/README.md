@@ -6,6 +6,7 @@
 
 | File | Purpose |
 | --- | --- |
+| `compat_103_docker_message.json` | Symlink to the tracked execution capture used to verify Docker Pull reporting through the listener. |
 | `capture.rs` | Real acquire body through `capture::write_acquired`: exact JSON, 0600/0700 modes, contained file name, unwritable data dir. |
 | `completejob.rs` | Captured issue-88 jobs through `run_acquired_job` → `report_completion`: environment URL, secret suppression, billing owner, upstream `StepResult` keys and identity, infrastructure category latch, retry and cancellation. |
 | `annotation_reporting.rs` | Captured-job shell/composite annotations through a recorded Run Service POST. |

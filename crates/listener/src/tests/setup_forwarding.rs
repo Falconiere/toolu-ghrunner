@@ -326,9 +326,8 @@ async fn setup_forwarding_captured_pull_reaches_results_before_user_step()
 
   const PATH: &str =
     "/twirp/github.actions.results.api.v1.WorkflowStepUpdateService/WorkflowStepsUpdate";
-  let raw: serde_json::Value = serde_json::from_str(include_str!(
-    "../../../execution/tests/compat_103_docker_message.json"
-  ))?;
+  let raw: serde_json::Value =
+    serde_json::from_str(include_str!("compat_103_docker_message.json"))?;
   let steps = raw
     .get("steps")
     .and_then(serde_json::Value::as_array)
@@ -347,9 +346,7 @@ async fn setup_forwarding_captured_pull_reaches_results_before_user_step()
     .and_then(serde_json::Value::as_str)
     .ok_or("user id")?;
   let pull_id = uuid::Uuid::new_v4().to_string();
-  let setup_id = uuid::Uuid::new_v4().to_string();
   assert_ne!(pull_id, user_id);
-  assert_ne!(pull_id, setup_id);
 
   let server = MockServer::start().await;
   Mock::given(method("POST"))
@@ -357,12 +354,22 @@ async fn setup_forwarding_captured_pull_reaches_results_before_user_step()
     .respond_with(ResponseTemplate::new(200))
     .mount(&server)
     .await;
+  let mut msg: AgentJobRequestMessage = serde_json::from_value(raw.clone())?;
+  msg
+    .variables
+    .get_mut("system.github.results_endpoint")
+    .ok_or("results endpoint")?
+    .value = server.uri();
+  let client = reqwest::Client::builder().build()?;
+  let (setup_id, _) =
+    crate::setup_step::report_setup_step("", &msg.plan.plan_id, &msg, &client).await;
+  assert_ne!(pull_id, setup_id);
   let cfg = FwdConfig {
-    setup_id: Some(setup_id),
+    setup_id: Some(setup_id.clone()),
     setup_cancel: CancellationToken::new(),
     setup_lines: Vec::new(),
     results_url: Some(server.uri()),
-    results_client: reqwest::Client::new(),
+    results_client: client,
     results_token: String::new(),
     run_backend_id: String::new(),
     job_backend_id: String::new(),
@@ -416,6 +423,15 @@ async fn setup_forwarding_captured_pull_reaches_results_before_user_step()
         .cloned(),
     );
   }
+  let setup_start = entries
+    .iter()
+    .position(|entry| {
+      entry.get("external_id").and_then(serde_json::Value::as_str) == Some(&setup_id)
+    })
+    .ok_or("setup start")?;
+  let setup = entries.get(setup_start).ok_or("setup entry")?;
+  assert_eq!(setup["name"], "Set up job");
+  assert_eq!(setup["number"], 1);
   let pull: Vec<_> = entries
     .iter()
     .filter(|entry| entry.get("external_id").and_then(serde_json::Value::as_str) == Some(&pull_id))
@@ -433,6 +449,11 @@ async fn setup_forwarding_captured_pull_reaches_results_before_user_step()
     .iter()
     .position(|entry| entry == *pull_complete)
     .ok_or("pull end")?;
+  let pull_start = entries
+    .iter()
+    .position(|entry| entry == *pull_start)
+    .ok_or("pull start")?;
+  assert!(setup_start < pull_start);
   let user_start = entries
     .iter()
     .position(|entry| entry.get("external_id").and_then(serde_json::Value::as_str) == Some(user_id))
