@@ -158,7 +158,7 @@ outside a `tests/` tree.
 - **Cancellation**: `run` bridges SIGINT/SIGTERM to one
   `tokio_util::sync::CancellationToken` shared by poll loop, renewal task and
   job across re-mints; `--once` opts out to single-job.
-- **JIT protocol**: `v2` github.com, `v1` GHES, auto-selected at `register`;
+- **JIT protocol**: `v2` github.com, `v1` GHES (implemented, never tested, out of scope), auto-selected at `register`;
   `wire` `feature_detection` handles the shape diff.
 - **Handler dispatch**: no plugin layer, no local orchestrator (removed #97).
   `steps_runner` splits `run:` vs `uses:`; `action_exec` matches

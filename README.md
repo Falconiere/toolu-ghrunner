@@ -219,7 +219,8 @@ lock is per registration.
 ### Headless / GHES
 
 Everything can also be explicit — for scripts, org-level runners, and
-GitHub Enterprise:
+GitHub Enterprise (GHES is implemented but has never been tested on a real
+server and is out of scope for the compatibility claim):
 
 ```sh
 # explicit repo or org URL (org runners always need --url)

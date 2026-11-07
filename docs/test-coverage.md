@@ -19,7 +19,7 @@ They are an index, not a fixed test count or a claim that every live lane passed
 - **scripts** — shell/Python checks run by `.github/workflows/ci.yml` in
   addition to the Rust gate.
 - **Docker** — the `#[ignore]`d real-container tests in CI's `docker-replay` job.
-- **live-ghes** — the dispatch-only `.github/workflows/live-ghes.yml` lane.
+- **live-ghes** — the dispatch-only `.github/workflows/live-ghes.yml` lane. It cannot test GHES (its harness registers at github.com); GHES is out of scope, see [known bugs](known-bugs.md#verification-limits).
 - **recorded** — evidence captured from past runs and kept in the
   compatibility matrix, not re-run here.
 
@@ -40,7 +40,7 @@ They are an index, not a fixed test count or a claim that every live lane passed
 | 12 | Reconnect and outages | `crates/toolu-runner/tests/net_test.rs`, `run_service_classify_test.rs`; `crates/wire/tests/renew_job_wire_test.rs`; `crates/listener/src/tests/watchdog_trip.rs`, `watchdog_retry.rs`, `watchdog_override.rs`, `watchdog_missing_job.rs`, `watchdog_sticky_reason.rs`. Live outage limits: [known-bugs.md](known-bugs.md). | default; live outage separate |
 | 13 | Registration locks | `crates/toolu-runner/tests/failure_modes_test.rs`, `crates/config/tests/lockfile_multi_test.rs`; `live_e2e.rs::concurrent_single_job` | default + live |
 | 14 | GitHub cancellation | `crates/toolu-runner/tests/live_e2e.rs::cancel_by_github`; conditional cleanup replay is mapped under #100 below | default + live |
-| 15 | GHES V1 | `crates/toolu-runner/tests/ghes_v1_test.rs` exercises captured-shape discovery/timeline responses; `.github/workflows/live-ghes.yml` is the separate credentialed lane | default + live-ghes |
+| 15 | GHES V1 | `crates/toolu-runner/tests/ghes_v1_test.rs` exercises captured-shape discovery/timeline responses; `.github/workflows/live-ghes.yml` is a dispatch-only lane that cannot reach a GHES server (github.com harness); GHES is out of scope | default + live-ghes |
 | 16 | launchd/systemd service install | `crates/config/tests/service_unit_test.rs`, `crates/toolu-runner/tests/install_service_test.rs`, `machine_service_test.rs`, `headless_service_test.rs`; live logout/reboot evidence below | default + scripts; live host separate |
 | 17 | Installer | `tests/install_sh_test.sh`, `tests/install_sh_bash32_test.sh` (macOS Bash 3.2) | scripts |
 | 19 | Quality gate | `./tools/check.sh all`: fmt, clippy, allow/expect ban, guardrails, nextest and doctests; CI adds script and Docker lanes | default + scripts + Docker |
