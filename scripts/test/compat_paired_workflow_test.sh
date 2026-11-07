@@ -194,8 +194,13 @@ TOOLU
   expect "a dead toolu lane fails the step while a consumer is unlisted" 1 $?
   FAKE_RUNNERS="$tmp/none" FAKE_NO_JIT=1 host run >/dev/null 2>&1
   expect "a dead official lane fails the step while a consumer is unlisted" 1 $?
-  FAKE_RUNNERS="$tmp/none" FAKE_OFFICIAL="$tmp/official-dies" host run >/dev/null 2>&1
+  # This lane always mints before it dies, so both checks below see a real JIT.
+  out=$(FAKE_RUNNERS="$tmp/none" FAKE_OFFICIAL="$tmp/official-dies" host run 2>&1)
   expect "an official runner that cannot start fails the step" 1 $?
+  [[ "$out" == *"::add-mask::fake-jit"* ]] && echo "ok: the JIT config is masked on the step's stdout" || {
+    echo "FAIL: the mask command did not reach the step's stdout: $out" >&2
+    fail=1
+  }
   logged=$(cat "$tmp/official.log" "$tmp/toolu.log" 2>/dev/null)
   [[ "$logged" != *fake-jit* ]] && echo "ok: the JIT config stays out of the lane logs" || {
     echo "FAIL: the JIT config reached a lane log" >&2

@@ -290,10 +290,12 @@ class StrictReportTest(unittest.TestCase):
             self.assertTrue(any(field in p for p in problems), field)
 
     def test_recorded_report_with_erased_sections_fails(self):
-        for field in ("results", "run", "provenance"):
+        for field, needle in (("results", "observations missing or empty"), ("run", "run lacks"),
+                              ("provenance", "provenance is missing or empty")):
             report = copy.deepcopy(REPORT)
             report[field] = {}
-            self.assertTrue(reference_compare.verify(report)[0], field)
+            problems, _ = reference_compare.verify(report)
+            self.assertTrue(any(needle in p for p in problems), problems)
 
     def observations_differ(self, toolu, official):
         report = paired_report()

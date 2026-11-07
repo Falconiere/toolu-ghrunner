@@ -71,7 +71,11 @@ async fn cleanup_reports_a_remove_the_real_binary_rejects() {
     .cleanup(&[])
     .await
     .expect_err("a rejected remove must be reported");
-  assert!(error.to_string().contains("remove failed"), "{error}");
+  // Not the spawn failure above: the binary ran and exited non-zero.
+  assert!(
+    error.to_string().starts_with("remove: remove failed: "),
+    "{error}"
+  );
 }
 
 #[tokio::test]
