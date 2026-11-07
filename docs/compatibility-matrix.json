@@ -5508,7 +5508,7 @@
         "crates/execution/tests/defaults_run_job.json",
         "crates/execution/tests/defaults_run_evidence.json"
       ],
-      "expected": "Local HTTP peers show: Basic archive auth sent to the source origin and dropped on a cross-origin redirect; redirect loops, missing Location and downgrades fail closed without a cache dir; 401 and 403 propagate and a denied Launch does not fall back; the token is absent from errors. Archive statuses 401, 403, 404, 429, 500 and 503 each fail the job with a bounded number of archive requests (at most two; four for 401/403, which earn a credential-refresh retry), no credential in the failure text, and no cache entry or staging directory left behind. Live token expiry and the downloader's handling of server retry guidance are not covered, so the row stays unverified.",
+      "expected": "Local HTTP peers show: Basic archive auth sent to the source origin and dropped on a cross-origin redirect; redirect loops, missing Location and downgrades fail closed without a cache dir; 401 and 403 propagate and a denied Launch does not fall back; the token is absent from errors. Archive statuses 401, 403, 404, 429, 500 and 503 each fail the job with a bounded number of archive requests (at most two; four for 401/403, which earn a credential-refresh retry), neither the raw scoped token nor its Basic-encoded form in any log line or infrastructure error, and no cache entry or staging directory left behind. Live token expiry and the downloader's handling of server retry guidance are not covered, so the row stays unverified.",
       "production_path": "execution::actions::downloader (redirect handling), execution::actions::download_info (status mapping)",
       "tests": [
         [

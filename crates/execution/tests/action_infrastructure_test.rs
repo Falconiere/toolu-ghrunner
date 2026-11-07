@@ -588,7 +588,8 @@ async fn launch_scoped_token_is_masked_and_never_logged() -> TestResult {
 }
 
 /// #76 76-S3: every archive failure status is bounded — only 401 and 403 earn
-/// a credential-refresh retry — the failure text carries no credential, and no
+/// a credential-refresh retry — neither the raw scoped token nor its
+/// Basic-encoded form reaches a log line or an infrastructure error, and no
 /// usable or half-written cache entry survives.
 ///
 /// The bound, not an exact count, is the contract: the two resolvers (setup
@@ -597,6 +598,10 @@ async fn launch_scoped_token_is_masked_and_never_logged() -> TestResult {
 /// finishes first.
 #[tokio::test]
 async fn archive_failure_statuses_are_bounded_and_leave_no_cache_entry() -> TestResult {
+  let basic = base64::Engine::encode(
+    &base64::engine::general_purpose::STANDARD,
+    format!("x-access-token:{ARCHIVE_TOKEN}"),
+  );
   for (status, most) in [
     (StatusCode::NOT_FOUND, 2),
     (StatusCode::TOO_MANY_REQUESTS, 2),
@@ -614,8 +619,20 @@ async fn archive_failure_statuses_are_bounded_and_leave_no_cache_entry() -> Test
       (1..=most).contains(&attempts),
       "{status}: {attempts} archive requests is outside the bound of {most}"
     );
-    for (_, _, message) in &observed.infrastructure {
-      assert!(!message.contains(ARCHIVE_TOKEN), "{status}: {message}");
+    for text in observed
+      .infrastructure
+      .iter()
+      .map(|(_, _, message)| message)
+      .chain(observed.logs.iter())
+    {
+      assert!(
+        !text.contains(ARCHIVE_TOKEN),
+        "{status}: raw token in {text}"
+      );
+      assert!(
+        !text.contains(&basic),
+        "{status}: Basic credential in {text}"
+      );
     }
     assert!(
       extracted_manifests(&dir.path().join("data"))?.is_empty(),
