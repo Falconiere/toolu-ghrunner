@@ -509,7 +509,10 @@ async fn runner_shutdown_is_the_conclusion_complete_job_logs() -> TestResult {
 #[tokio::test]
 async fn nested_composite_mask_suppresses_the_environment_url() -> TestResult {
   const NESTED_HOST: &str = "nested-mask-235.example";
-  let mut message = with_url(literal(&format!("https://{NESTED_HOST}/deploy")))?;
+  // A line of the registered multiline mask, not the stem it is built from:
+  // the stem alone is no mask, so suppression can only come from this line.
+  let [host, _, _] = crate::nested_mask::lf_lines(NESTED_HOST);
+  let mut message = with_url(literal(&format!("https://{host}/deploy")))?;
   let name = message
     .actions_environment
     .as_ref()
@@ -537,9 +540,6 @@ async fn nested_composite_mask_suppresses_the_environment_url() -> TestResult {
     [(AnnotationLevel::Warning, warning.as_str())]
   );
   let logs = job.complete_logs();
-  assert!(
-    !logs.iter().any(|line| line.contains(NESTED_HOST)),
-    "{logs:?}"
-  );
+  assert!(!logs.iter().any(|line| line.contains(&host)), "{logs:?}");
   Ok(())
 }

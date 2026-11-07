@@ -7,6 +7,20 @@ use std::path::Path;
 
 use shared::{ActionStep, ActionStepDefinitionReference, TemplateToken};
 
+/// The trimmed lines of [`whole_value`], in order.
+///
+/// Every probe payload is one of these rather than `value` itself, and none
+/// is a substring of another, so a payload is redacted only because its own
+/// line was registered. Deriving them from a shared stem would make each
+/// assertion pass on the stem alone and prove nothing.
+pub fn lf_lines(value: &str) -> [String; 3] {
+  [
+    format!("{value}-one"),
+    format!("{value}-two"),
+    format!("{value}-three"),
+  ]
+}
+
 /// The whole multiline value [`write_actions`] registers around `value`.
 ///
 /// `SecretMasker::add_mask` registers this whole value *and* each trimmed
@@ -15,18 +29,20 @@ use shared::{ActionStep, ActionStepDefinitionReference, TemplateToken};
 /// LF so the span stays matchable verbatim: `step_summary` re-joins the
 /// document with the platform newline before masking — LF on the hosts this
 /// suite runs — which would make a CR-bearing span unreachable.
-/// It starts at `value` because a leading space would put `: ` in the
+/// It starts at a line because a leading space would put `: ` in the
 /// composite's YAML plain scalar, which YAML reads as a mapping.
 pub fn whole_value(value: &str) -> String {
-  format!("{value}-head \n{value}\n {value}-tail ")
+  let [one, two, three] = lf_lines(value);
+  format!("{one} \n{two}\n {three} ")
 }
 
-/// A second multiline value [`write_actions`] registers, broken by CRLF.
+/// The trimmed lines of a second value [`write_actions`] registers, which is
+/// broken by CRLF.
 ///
-/// Its lines are masks only if the split handled `\r\n`, which is what a real
+/// These are masks only if the split handled `\r\n`, which is what a real
 /// action's `%0D%0A` payload produces.
-pub fn crlf_line(value: &str) -> String {
-  format!("{value}-cr")
+pub fn crlf_lines(value: &str) -> [String; 2] {
+  [format!("{value}-four"), format!("{value}-five")]
 }
 
 /// Write `outer/` (which `uses: ./inner`) and `inner/` (which registers
@@ -42,7 +58,8 @@ pub fn write_actions(workspace: &Path, value: &str) -> std::io::Result<()> {
   // Each value travels percent-encoded on one command line, and reaches the
   // masker through the production unescape, exactly as a real action sends it.
   let encoded = whole_value(value).replace('\n', "%0A");
-  let crlf = format!("{}%0D%0A{value}-lf", crlf_line(value));
+  let [four, five] = crlf_lines(value);
+  let crlf = format!("{four}%0D%0A{five}");
   std::fs::write(
     workspace.join("inner/action.yml"),
     format!(

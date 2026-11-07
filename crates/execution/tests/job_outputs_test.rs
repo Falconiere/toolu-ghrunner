@@ -438,16 +438,18 @@ async fn nested_composite_mask_suppresses_a_later_job_output() -> TestResult {
   crate::nested_mask::write_actions(&workspace, NESTED_SECRET)?;
   // `leaked` and `leaked_tail` carry lines of the LF value, `leaked_cr` a
   // line of the CRLF one; the summary carries the whole LF span as well.
-  // Masking only the whole value, or only its lines, fails one of these.
+  // Masking only the whole value, or only its lines, fails one of these,
+  // and no payload is a substring of another, so none passes on the stem.
   // `printf` re-expands the breaks, so the summary carries the registered
   // value byte for byte — embedding them raw would split the script instead.
+  let [one, two, three] = crate::nested_mask::lf_lines(NESTED_SECRET);
+  let [four, five] = crate::nested_mask::crlf_lines(NESTED_SECRET);
   let whole = crate::nested_mask::whole_value(NESTED_SECRET).replace('\n', "\\n");
-  let cr = crate::nested_mask::crlf_line(NESTED_SECRET);
   set_script(
     &mut message,
     &format!(
-      "printf 'leaked={NESTED_SECRET}\\nleaked_tail={NESTED_SECRET}-tail\\nleaked_cr={cr}\\nsafe=clear\\n' >> \"$GITHUB_OUTPUT\"; \
-       printf 'summary-whole={whole}\\nsummary-line={NESTED_SECRET}-head\\nsummary-cr={cr}\\nsummary-clear=control\\n' >> \"$GITHUB_STEP_SUMMARY\""
+      "printf 'leaked={two}\\nleaked_tail={three}\\nleaked_cr={four}\\nsafe=clear\\n' >> \"$GITHUB_OUTPUT\"; \
+       printf 'summary-whole={whole}\\nsummary-line={one}\\nsummary-cr={five}\\nsummary-clear=control\\n' >> \"$GITHUB_STEP_SUMMARY\""
     ),
   )?;
   add_output(&mut message, "leaked", "steps.produce.outputs.leaked")?;
