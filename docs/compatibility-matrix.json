@@ -6025,7 +6025,7 @@
       "input": [
         "crates/toolu-runner/tests/fixtures/broker_message_job_request.json"
       ],
-      "expected": "ForceTokenRefresh classifies to PollOutcome::RefreshToken. Against a loopback OAuth peer: a transient 500 is retried once and the success publishes; persistent 503s keep retrying with backoff inside the 30 s budget without publishing; a peer that never answers is abandoned at the 10 s per-request deadline (a second attempt exists) without publishing; a 401 is fatal and not retried; an empty grant is refused; cancellation mid-exchange exits the idle loop without publishing; no error text echoes the old or new token. The 30 s budget is observed through a short window, not waited out.",
+      "expected": "ForceTokenRefresh classifies to PollOutcome::RefreshToken. Against a loopback OAuth peer: a transient 500 is retried once and the success publishes; persistent 503s keep retrying with backoff inside the 30 s budget without publishing; a peer that never answers is abandoned at the 10 s per-request deadline (a second attempt exists) without publishing; a 401 is fatal and not retried; an empty grant is refused; cancellation mid-exchange exits the idle loop without publishing; no error text echoes the old or new token. The 30 s budget is observed through a short window, not waited out. Masked WARN log content is still not asserted; the leak check covers returned error text only.",
       "production_path": "listener::broker_refresh::refresh_access_token; wire::net::exchange_token",
       "tests": [
         [
