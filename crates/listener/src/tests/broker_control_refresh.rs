@@ -469,8 +469,49 @@ async fn cancellation_mid_exchange_exits_without_publishing() -> TestResult {
 /// installs would see them. The assertion is therefore the stronger one:
 /// the refresh path never formats a token at all, rather than relying on
 /// masking to hide one it did.
+///
+/// Runs in a child process. Only `set_default` is usable while tests share a
+/// process, and it is thread-local, while `tracing`'s callsite interest is
+/// global — a concurrent test without a subscriber can leave the publication
+/// callsite disabled for this thread too. Isolating the one capture keeps
+/// `cargo test -p listener --lib broker_control` working without serializing
+/// the suite.
+#[test]
+fn refresh_log_lines_carry_neither_the_old_nor_the_new_token() -> TestResult {
+  let output = std::process::Command::new(std::env::current_exe()?)
+    .args(["--exact", CAPTURE_CHILD, "--nocapture"])
+    .env(CAPTURE_PROBE, "1")
+    .output()?;
+  let stdout = String::from_utf8_lossy(&output.stdout);
+  assert!(
+    output.status.success(),
+    "capture child failed: {stdout}{}",
+    String::from_utf8_lossy(&output.stderr)
+  );
+  // A filter that matches nothing still exits 0, so the child says so itself.
+  assert!(
+    stdout.contains(CAPTURE_RAN),
+    "the child never ran the capture: {stdout}"
+  );
+  Ok(())
+}
+
+/// Env marker that tells the child process it is the capture run.
+const CAPTURE_PROBE: &str = "TOOLU_TEST_REFRESH_LOG_CAPTURE";
+/// Module-qualified name of the child test, as `--exact` expects it.
+const CAPTURE_CHILD: &str =
+  "job_lifecycle::broker_control_refresh::refresh_log_capture_child_probe";
+/// Printed by the child once the assertions have run.
+const CAPTURE_RAN: &str = "refresh log capture ran";
+
+/// The body of [`refresh_log_lines_carry_neither_the_old_nor_the_new_token`],
+/// run alone in a child process. Without the marker it is a no-op, so the
+/// ordinary suite never pays for it twice.
 #[tokio::test]
-async fn refresh_log_lines_carry_neither_the_old_nor_the_new_token() -> TestResult {
+async fn refresh_log_capture_child_probe() -> TestResult {
+  if std::env::var_os(CAPTURE_PROBE).is_none() {
+    return Ok(());
+  }
   let log = tempfile::NamedTempFile::new()?;
   let subscriber = tracing_subscriber::fmt()
     .with_ansi(false)
@@ -492,12 +533,6 @@ async fn refresh_log_lines_carry_neither_the_old_nor_the_new_token() -> TestResu
   {
     // Thread-local default: a current-thread test runtime polls the refresh
     // on this very thread, so both production log calls land in the file.
-    //
-    // This needs one test per process, which is what the gate's `cargo
-    // nextest run` gives. Under `cargo test --lib` several tests share a
-    // process and `tracing`'s per-callsite interest cache is global, so a
-    // concurrent test without a subscriber can leave the publication
-    // callsite disabled for this thread too; `--test-threads=1` also passes.
     let _guard = tracing::subscriber::set_default(subscriber);
     assert!(matches!(refresh(&mut ctx).await?, IdleDecision::Continue));
   }
@@ -523,5 +558,6 @@ async fn refresh_log_lines_carry_neither_the_old_nor_the_new_token() -> TestResu
     !written.contains(OLD_TOKEN),
     "a log line carried the spent token: {written}"
   );
+  println!("{CAPTURE_RAN}");
   Ok(())
 }
