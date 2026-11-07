@@ -9,8 +9,9 @@ runs:
     - name: Not run after the failure
       if: success()
       shell: bash
-      run: printf 'ran\n' > "$GITHUB_WORKSPACE/compat-251-not-run.txt"
+      # Composite run steps start in the workspace.
+      run: printf 'ran\n' > compat-251-not-run.txt
     - name: Cleanup after the failure
       if: always()
       shell: bash
-      run: printf 'done\n' > "$GITHUB_WORKSPACE/compat-251-cleanup.txt"
+      run: printf 'done\n' > compat-251-cleanup.txt

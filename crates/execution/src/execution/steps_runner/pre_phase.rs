@@ -40,19 +40,12 @@ pub(super) async fn run_pre_phase(
       fetcher: job.fetcher,
       log_step_id: &step.id,
     };
-    let conclusion = match run_phase_pre(step, ctx, &run, number).await {
-      Ok(None) => continue,
-      Ok(Some((conclusion, post))) => {
-        if let Some(post) = post {
-          job_state.posts.register(post);
-        }
-        conclusion
-      },
-      Err(error) => {
-        tracing::warn!(step_id = step.id.as_str(), %error, "pre stage could not start");
-        Conclusion::Failure
-      },
+    let Some((conclusion, post)) = run_phase_pre(step, ctx, &run, number).await else {
+      continue;
     };
+    if let Some(post) = post {
+      job_state.posts.register(post);
+    }
     ctx.docker_setup_count = ctx.docker_setup_count.saturating_add(1);
     if conclusion == Conclusion::Failure {
       ctx.record_step_failure();

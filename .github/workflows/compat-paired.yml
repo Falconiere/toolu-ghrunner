@@ -251,7 +251,7 @@ jobs:
       - name: Start in an empty workspace and record it
         run: |
           test -z "$(ls -A "$GITHUB_WORKSPACE")"
-          printf 'fresh-1\n' > "$GITHUB_WORKSPACE/compat-251-fresh"
+          printf 'fresh-1\n' > compat-251-fresh
           printf '%s\n' "$GITHUB_WORKSPACE" > "/tmp/compat-251-fresh-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.platform }}"
 
   fresh-2:

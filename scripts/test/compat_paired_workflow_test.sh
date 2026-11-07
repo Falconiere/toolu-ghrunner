@@ -189,7 +189,7 @@ case "$*" in
     ;;
   # Jobs finish only once the listener is up, so stopping the lanes has one to stop.
   */jobs*) [[ -f "$OFFICIAL_DIR/listening" ]] && cat "$FAKE_JOBS" ;;
-  */runners*) cat "$FAKE_RUNNERS" ;;
+  */runners*) [[ -z "${FAKE_RUNNERS_FAIL:-}" ]] && cat "$FAKE_RUNNERS" ;;
 esac
 GH
   printf '#!/usr/bin/env bash\n"$PWD/bin/Runner.Listener"\n' >"$tmp/official/run.sh"
@@ -205,6 +205,9 @@ if [[ "$1" == register ]]; then
 fi
 # The ephemeral lane takes its one job, removes its state and exits.
 [[ "$1" == run && "$config" == *ephemeral* ]] && { rm -f "$config"; exit 0; }
+# A `die` file in the lane's home makes its runner exit at once (the lanes run
+# under `env -i`, so no variable reaches this script).
+[[ "$1" == run && -e "${config%/*}/die" ]] && exit 3
 [[ "$1" == run ]] && while :; do sleep 1; done
 exit 0
 TOOLU
@@ -238,7 +241,7 @@ DOCKER
       export FAKE_JOBS="$tmp/jobs" FAKE_NO_JIT="${FAKE_NO_JIT:-}" GH_TOKEN=fake GITHUB_REPOSITORY=o/r GITHUB_RUN_ID=1 RUNNER_TEMP="$tmp"
       export PLATFORM=Linux-X64 LABEL_PREFIX="compat-paired-$GITHUB_RUN_ID-Linux-X64" POLL_SECONDS=0
       export ACCELERATED_LANE="${FAKE_ACCELERATED:-}" FAKE_DOCKER_RUN="$tmp/docker-run"
-      export EXTENDED_LANES="${FAKE_EXTENDED:-}"
+      export EXTENDED_LANES="${FAKE_EXTENDED:-}" FAKE_RUNNERS_FAIL="${FAKE_RUNNERS_FAIL:-}"
       export FAKE_DOCKER_DEAD="${FAKE_DOCKER_DEAD:-}"
       export OFFICIAL_DIR="${FAKE_OFFICIAL:-$tmp/official}" TOOLU_BIN="${FAKE_TOOLU:-$tmp/tools/toolu}"
       PATH="$tmp/tools:$PATH" timeout_guard bash "$HOST" "$@"
@@ -372,6 +375,16 @@ DOCKER
     echo "FAIL: extended lane logs missing" >&2
     fail=1
   }
+  # Lifecycle jobs still queued behind a dead pool lane must not hang the host.
+  head -n 4 "$tmp/jobs" >"$tmp/jobs.partial" && mv "$tmp/jobs.partial" "$tmp/jobs"
+  mkdir -p "$tmp/toolu-pool-1" && touch "$tmp/toolu-pool-1/die"
+  FAKE_RUNNERS="$tmp/none" FAKE_EXTENDED=true host run >/dev/null 2>&1
+  expect "a dead pool lane fails the host instead of waiting" 1 $?
+  rm -f "$tmp/toolu-pool-1/die"
+  no_survivors "a dead pool lane fails the host instead of waiting"
+  for job in fresh-1 fresh-2 ephemeral; do printf 'completed lifecycle-Linux-X64-toolu-%s\n' "$job"; done >>"$tmp/jobs"
+  FAKE_RUNNERS="$tmp/none" FAKE_RUNNERS_FAIL=1 host report >/dev/null 2>&1
+  expect "a failed runner listing fails the report rather than claim removal" 1 $?
   printf 'compat-paired-1-Linux-X64-toolu-ephemeral\n' >"$tmp/ephemeral-left"
   FAKE_RUNNERS="$tmp/ephemeral-left" host report >/dev/null 2>&1
   [[ "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["toolu_only"]["ephemeral"]["runner_removed"])' "$tmp/host-251.json")" == False ]] &&

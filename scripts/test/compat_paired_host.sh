@@ -123,7 +123,8 @@ run_toolu() {
 # ephemeral toolu registration. Their pids join extra_pids (killed on exit),
 # except the ephemeral one, which must exit by itself after its one job.
 start_extended() {
-  local pool="$LABEL_PREFIX-toolu-pool" config="$RUNNER_TEMP/toolu-fresh/config.toml" i
+  local pool="$LABEL_PREFIX-toolu-pool" fresh="$RUNNER_TEMP/toolu-fresh" config i
+  config="$fresh/config.toml"
   for i in 1 2; do
     register_toolu "toolu-pool-$i" "$pool-$i" "$pool" "$RUNNER_TEMP/toolu-pool-work"
     run_toolu "toolu-pool-$i" "toolu-pool-$i"
@@ -146,6 +147,14 @@ start_extended() {
   run_toolu toolu-ephemeral toolu-ephemeral
   ephemeral_pid=$!
   extra_logs+=(toolu-fresh toolu-ephemeral)
+}
+
+# The pool and fresh lanes must outlive the probes, or their jobs stay queued.
+extra_lanes_alive() {
+  local pid
+  for pid in ${extra_pids[@]+"${extra_pids[@]}"}; do
+    kill -0 "$pid" 2>/dev/null || return 1
+  done
 }
 
 # The ephemeral lane takes one job, unregisters and exits; record how it ended.
@@ -218,7 +227,7 @@ run_lanes() {
 
   until probes_done; do
     { kill -0 "$toolu_pid" && kill -0 "$official_pid" &&
-      { [[ -z "$accelerated" ]] || accelerated_alive; }; } 2>/dev/null || {
+      { [[ -z "$accelerated" ]] || accelerated_alive; } && extra_lanes_alive; } 2>/dev/null || {
       echo "::error::a lane exited before the $PLATFORM probes finished" >&2
       exit 1
     }
@@ -230,9 +239,13 @@ run_lanes() {
 # Counts and booleans for the comparator; GitHub must no longer list the
 # ephemeral runner by the time its job completed and its process exited.
 report() {
-  local gone=true
-  if gh api --paginate "$RUNNERS_API?per_page=100" --jq '.runners[].name' |
-    grep -qx "$LABEL_PREFIX-toolu-ephemeral"; then
+  local gone=true names
+  # A failed listing is not "gone": stop rather than report the runner removed.
+  names=$(gh api --paginate "$RUNNERS_API?per_page=100" --jq '.runners[].name') || {
+    echo "::error::could not list runners to check the ephemeral lane" >&2
+    return 1
+  }
+  if grep -qx "$LABEL_PREFIX-toolu-ephemeral" <<<"$names"; then
     gone=false
   fi
   python3 "$(dirname "$0")/compat_paired_host_report.py" --out "$RUNNER_TEMP/host-251.json" \
@@ -244,7 +257,8 @@ report() {
 # real one), sanitized on this VM; the raw capture never leaves it.
 capture() {
   local out="$1" raw
-  raw=$(python3 - "$RUNNER_TEMP/toolu-home/_diag/captures" <<'PY'
+  local home="$RUNNER_TEMP/toolu-home"
+  raw=$(python3 - "$home/_diag/captures" <<'PY'
 import json, sys
 from pathlib import Path
 # The container image is sent unevaluated (an expression naming both digests),

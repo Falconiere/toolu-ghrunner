@@ -252,6 +252,65 @@ async fn local_action_runs_no_pre_and_warns() -> TestResult<()> {
   Ok(())
 }
 
+/// #251 review cr-f19c86978f0c20db: a `pre-if` that cannot be evaluated is a
+/// visible failed `Pre` row with its error in the log, at the next number (no
+/// hole before the workflow steps), and no stage runs.
+#[tokio::test]
+async fn an_unevaluable_pre_if_is_a_failed_pre_row() -> TestResult<()> {
+  let manifest = std::fs::read_to_string(Path::new(FIXTURE_DIR).join("action.yml"))?.replace(
+    "  pre: 'pre.js'",
+    "  pre: 'pre.js'\n  pre-if: 'success( &&'",
+  );
+  let Some((conclusion, events, markers)) =
+    run_patched(action_step("a", "act-a"), &[("action.yml", &manifest)]).await?
+  else {
+    return Ok(());
+  };
+  assert_eq!(conclusion, shared::Conclusion::Failure);
+  assert!(
+    !markers.iter().any(|m| m == "A:pre" || m == "A:main"),
+    "{markers:?}"
+  );
+  let pre_id = events.iter().find_map(|event| {
+    if let RunnerEvent::StepStarted {
+      step_id,
+      step_name,
+      step_number,
+    } = event
+      && step_name.starts_with("Pre ")
+    {
+      assert_eq!(*step_number, 2, "the Pre row follows Set up job");
+      Some(step_id.clone())
+    } else {
+      None
+    }
+  });
+  let pre_id = pre_id.ok_or("no Pre row was reported")?;
+  assert_eq!(
+    reported(&events, "Pre Run ./act-a"),
+    Some(shared::Conclusion::Failure)
+  );
+  assert!(
+    events.iter().any(|event| matches!(event,
+    RunnerEvent::Log { step_id, line, .. } if step_id == &pre_id && line.starts_with("##[error]")))
+  );
+  let main_number = events.iter().find_map(|event| {
+    if let RunnerEvent::StepStarted {
+      step_name,
+      step_number,
+      ..
+    } = event
+      && step_name == "Run ./act-a"
+    {
+      Some(*step_number)
+    } else {
+      None
+    }
+  });
+  assert_eq!(main_number, Some(3), "the main row follows the Pre row");
+  Ok(())
+}
+
 /// #251 D7: upstream runs every repository action's `pre` after "Set up job"
 /// and before the first main step, as numbered rows in step order, and
 /// registers the post then (paired run 42407955591: official `Pre` rows #2-#3
@@ -549,9 +608,9 @@ async fn pre_timeout_reports_the_pre_step() -> TestResult<()> {
   let pre = "Pre Deferred ${{ steps.prior.outputs.label }}";
   assert_eq!(reported(&events, pre), Some(shared::Conclusion::Failure));
   // The failed pre fails the job, so the `success()` main is skipped (#251).
-  assert_ne!(
+  assert_eq!(
     reported(&events, "Deferred "),
-    Some(shared::Conclusion::Success)
+    Some(shared::Conclusion::Skipped)
   );
   let timeouts: Vec<&str> = events
     .iter()
