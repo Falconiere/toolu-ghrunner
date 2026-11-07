@@ -369,10 +369,11 @@ async fn setup_forwarding_captured_pull_reaches_results_before_user_step()
   let (setup_id, _) =
     crate::setup_step::report_setup_step("", &msg.plan.plan_id, &msg, &client).await;
   assert_ne!(pull_id, setup_id);
+  let spool_temp = tempfile::tempdir()?;
   let cfg = FwdConfig {
     setup_id: Some(setup_id.clone()),
     setup_cancel: CancellationToken::new(),
-    data_dir: std::env::temp_dir(),
+    data_dir: spool_temp.path().join("data"),
     setup_lines: Vec::new(),
     results_url: Some(server.uri()),
     results_client: client,

@@ -41,6 +41,12 @@ async fn missing_job_cancels_immediately() -> TestResult<()> {
   assert!(
     messages
       .iter()
+      .any(|message| message.contains("no longer recognizes this job")),
+    "missing job-not-found explanation: {body}"
+  );
+  assert!(
+    messages
+      .iter()
       .all(|message| !message.to_ascii_lowercase().contains("5 minutes")),
     "404 falsely reports a five-minute outage: {body}"
   );

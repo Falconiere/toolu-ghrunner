@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -260,17 +260,12 @@ async fn run_forwarded_job(
   job_cancel: &CancellationToken,
 ) -> ForwarderOutcome {
   cfg.setup_cancel = job_cancel.clone();
-  let job_log = if cfg.results_url.is_some() {
-    match LogSpool::for_job(&ctx.config.data_dir, &job_msg.job_id) {
-      Ok(spool) => Some(spool),
-      Err(error) => {
-        tracing::warn!(error = %error, "job log spool unavailable");
-        None
-      },
-    }
-  } else {
-    None
-  };
+  let job_log = prepare_job_log(
+    &ctx.config.data_dir,
+    &job_msg.job_id,
+    cfg.results_url.is_some(),
+  )
+  .await;
   let runner = Runner::new(ctx.config.clone(), Arc::clone(&ctx.masker));
   let engine_rx = runner
     // The per-job token (child of the session token) so a mid-job
@@ -300,6 +295,25 @@ async fn run_forwarded_job(
   };
   let _ = fwd_handle.await;
   outcome
+}
+
+async fn prepare_job_log(data_dir: &Path, job_id: &str, enabled: bool) -> Option<LogSpool> {
+  if !enabled {
+    return None;
+  }
+  let data_dir = data_dir.to_owned();
+  let job_id = job_id.to_owned();
+  match tokio::task::spawn_blocking(move || LogSpool::for_job(&data_dir, &job_id)).await {
+    Ok(Ok(spool)) => Some(spool),
+    Ok(Err(error)) => {
+      tracing::warn!(error = %error, "job log spool unavailable");
+      None
+    },
+    Err(error) => {
+      tracing::warn!(error = %error, "job log spool task failed");
+      None
+    },
+  }
 }
 
 /// Spawn the lock-renewal task, routing through `route` instead of three

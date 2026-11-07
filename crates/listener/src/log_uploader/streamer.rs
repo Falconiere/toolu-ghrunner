@@ -68,7 +68,12 @@ impl StepLogStreamer {
   async fn run_loop(&mut self) -> std::io::Result<()> {
     while let Some(line) = self.lines_rx.recv().await {
       if self.spool.is_none() {
-        self.spool = Some(LogSpool::for_step(&self.cfg.data_dir)?);
+        let data_dir = self.cfg.data_dir.clone();
+        self.spool = Some(
+          tokio::task::spawn_blocking(move || LogSpool::for_step(&data_dir))
+            .await
+            .map_err(std::io::Error::other)??,
+        );
       }
       if let Some(spool) = self.spool.as_mut() {
         spool.append(&line).await?;
