@@ -732,3 +732,101 @@ async fn cancelling_in_progress_pull_closes_setup_and_prevents_user_steps() -> T
   );
   Ok(())
 }
+
+#[tokio::test]
+#[ignore = "requires Linux, real Docker, and a daemon-shared test root"]
+async fn local_action_created_by_earlier_step_builds_when_reached() -> TestResult {
+  let root = linux_root()?;
+  let config = config_for(root.path());
+  let mut job = captured_job()?;
+  let create = format!(
+    r#"
+mkdir -p .github/actions/generated
+cat > .github/actions/generated/action.yml <<'YAML'
+name: generated
+runs:
+  using: docker
+  image: Dockerfile
+YAML
+cat > .github/actions/generated/Dockerfile <<'DOCKERFILE'
+FROM {ALPINE}
+CMD ["/bin/sh", "-c", "echo generated > /github/workspace/generated-result"]
+DOCKERFILE
+"#
+  );
+  job.steps = vec![
+    ActionStep::script("checkout", &create, ""),
+    local_step("generated", "./.github/actions/generated", &[]),
+    ActionStep::script("verify", "test \"$(cat generated-result)\" = generated", ""),
+  ];
+  let events = collect_job(config, job, CancellationToken::new()).await?;
+  assert_eq!(
+    job_conclusion(&events),
+    Some(Conclusion::Success),
+    "{events:#?}"
+  );
+  assert!(setup_rows(&events, "Pull ").is_empty(), "{events:#?}");
+  assert!(setup_rows(&events, "Build ").is_empty(), "{events:#?}");
+  for id in ["checkout", "generated", "verify"] {
+    assert!(events.iter().any(|event| matches!(event, RunnerEvent::StepCompleted { step_id, conclusion: Conclusion::Success, .. } if step_id == id)), "{events:#?}");
+  }
+  Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires Linux, real Docker, and a daemon-shared test root"]
+async fn failing_remote_dockerfile_closes_build_before_user_steps() -> TestResult {
+  const SHA: &str = "8bcd8e1af3c095561f1043123848fc8b2db0f189";
+  let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+  let api = format!("http://{}", listener.local_addr()?);
+  let router = axum::Router::new()
+    .route(
+      &format!("/repos/actions/hello-world-docker-action/tarball/{SHA}"),
+      axum::routing::get(|| async {
+        include_bytes!("fixtures/docker-failing-action.tar.gz").as_slice()
+      }),
+    )
+    .route(
+      "/repos/actions/hello-world-docker-action/commits/main",
+      axum::routing::get(|| async { include_str!("setup_action_commit.json") }),
+    );
+  let server = tokio::spawn(async move {
+    let _ = axum::serve(listener, router).await;
+  });
+  let mut raw: serde_json::Value = serde_json::from_str(CAPTURE)?;
+  let github = raw
+    .get_mut("contextData")
+    .and_then(|v| v.get_mut("github"))
+    .and_then(|v| v.get_mut("d"))
+    .and_then(serde_json::Value::as_array_mut)
+    .ok_or("github context")?;
+  let entry = github
+    .iter_mut()
+    .find(|entry| entry.get("k").and_then(serde_json::Value::as_str) == Some("api_url"))
+    .ok_or("api_url context")?;
+  *entry.get_mut("v").ok_or("api_url value")? = api.into();
+  let mut job: AgentJobRequestMessage = serde_json::from_value(raw)?;
+  job.job_container = None;
+  job.variables.remove("system.github.launch_endpoint");
+  let mut remote = ActionStep::with_ref_type("remote", "repository");
+  remote.reference.name = Some("actions/hello-world-docker-action".to_owned());
+  remote.reference.git_ref = Some("main".to_owned());
+  remote.reference.repository_type = Some("GitHub".to_owned());
+  job.steps = vec![ActionStep::script("before", "echo forbidden", ""), remote];
+  let root = linux_root()?;
+  let events = collect_job(config_for(root.path()), job, CancellationToken::new()).await?;
+  server.abort();
+  let builds = setup_rows(&events, "Build ");
+  assert_eq!(builds.len(), 1, "{events:#?}");
+  let build = builds.first().ok_or("missing build")?;
+  assert_eq!(build.1, "Build actions/hello-world-docker-action");
+  assert!(events.iter().any(|event| matches!(event, RunnerEvent::StepCompleted { step_id, conclusion: Conclusion::Failure, .. } if step_id == &build.0)), "{events:#?}");
+  assert!(setup_rows(&events, "Pull ").is_empty(), "{events:#?}");
+  assert!(!events.iter().any(|event| matches!(event, RunnerEvent::StepStarted { step_id, .. } if step_id == "before" || step_id == "remote")), "{events:#?}");
+  assert_eq!(
+    job_conclusion(&events),
+    Some(Conclusion::Failure),
+    "{events:#?}"
+  );
+  Ok(())
+}
