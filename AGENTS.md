@@ -470,10 +470,11 @@ outside a `tests/` tree.
   `shadow/` (off-by-default fingerprint records, never serves). `docker/`
   (bollard; `DOCKER_HOST` mapping incl. Colima/OrbStack/Podman/Rancher; Linux-only
   actions, remote-pre-failure keeps eligible posts; `Dockerfile` image reuse).
-  `docker_prepare` (#232) discovers remote and nested composite actions before
-  user steps: case-insensitive registry Pull rows precede per-repository Build
-  rows, prepared images are reused, and setup failure/cancellation stops user
-  steps. Local actions prepare at step time; non-Linux skips pull/build setup.
+  `docker_prepare` (#232) discovers remote Docker actions, including those nested
+  in remote composites, before user steps: case-insensitive registry Pull rows
+  precede per-repository Build rows, prepared images are reused, and setup
+  failure/cancellation stops user steps. Local actions prepare at step time;
+  non-Linux skips pull/build setup.
   `node/` (#95: upstream `HandlerFactory`/`NodeUtil` node20→24 `migration`,
   glibc/musl + container `/etc/*release` `platform` probe,
   `ensure_node_runtime`: `TOOLU_RUNNER_NODE_DIR` preseed (upstream `externals/`
