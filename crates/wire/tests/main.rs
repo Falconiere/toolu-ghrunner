@@ -22,6 +22,7 @@ mod github_app_test;
 mod job_outputs_test;
 mod live_log_proxy_test;
 mod oauth_invalid_client;
+mod renew_job_wire_test;
 mod runner_version;
 mod session_conflict;
 mod toolu_jobs_wire_test;
