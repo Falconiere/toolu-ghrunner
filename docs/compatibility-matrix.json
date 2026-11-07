@@ -20827,7 +20827,7 @@
       "issue": 103,
       "criterion": "Regression: runner temp directories are emptied at job start and end, keeping _tool",
       "input": [],
-      "expected": "Crash leftovers are gone before the first step; _temp and tmp are empty when the event channel closes after success, failure, cancel or a setup error; post steps read their files first; symlinks are unlinked with targets intact; an undeletable file warns without changing the conclusion; _tool is kept.",
+      "expected": "Crash leftovers are gone before the first step; _temp and tmp are empty when the event channel closes after success, failure, cancel or a setup error; post steps read their files first; files of the next job survive teardown; symlinks are unlinked with targets intact; read-only trees are removed; an undeletable file warns without changing the conclusion; _tool is kept.",
       "production_path": "execution::execution::temp_cleanup::empty_temp_dirs",
       "tests": [
         [
@@ -20857,6 +20857,22 @@
         [
           "crates/toolu-runner/tests/job_teardown_order_test.rs",
           "undeletable_file_warns_and_never_changes_the_result"
+        ],
+        [
+          "crates/toolu-runner/tests/job_teardown_order_test.rs",
+          "temp_is_empty_at_channel_close_after_setup_error"
+        ],
+        [
+          "crates/toolu-runner/tests/job_teardown_order_test.rs",
+          "read_only_trees_are_removed"
+        ],
+        [
+          "crates/toolu-runner/tests/job_teardown_order_test.rs",
+          "finish_never_touches_files_of_the_next_job"
+        ],
+        [
+          "crates/toolu-runner/tests/job_teardown_order_test.rs",
+          "run_job_keeps_the_channel_open_until_temp_is_empty"
         ]
       ],
       "command": "cargo test -p toolu-runner --test integration -- job_teardown_order_test::",

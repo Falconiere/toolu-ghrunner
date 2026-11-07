@@ -1790,8 +1790,8 @@ temporary `data_dir`.
 | --- | --- | --- |
 | Crash leftovers | Files and directories planted in `_temp`, `tmp` and `_tool` before the job: gone from the first two before the first step, `_tool` intact | `cargo test -p execution --test integration -- runner_paths_test::crashed_job_leftovers_are_gone_before_first_step_and_tool_is_kept` |
 | Empty at channel close | A step writes into `$RUNNER_TEMP`; both roots are empty when the event channel closes after success, failure, cancel and a setup error; a later step reads its own files first | `cargo test -p toolu-runner --test integration -- job_teardown_order_test::temp_is_empty` |
-| Post step | A real Node post step reads a file the main step wrote in `_temp` before it is emptied (skipped without a system `node`) | `job_teardown_order_test::post_step_reads_temp_before_it_is_emptied` |
-| Next job | `finish` never deletes files the next job wrote | `job_teardown_order_test::finish_never_touches_files_of_the_next_job` |
+| Post step | A real Node post step reads a file the main step wrote in `_temp` before it is emptied (fails without a system `node`) | `job_teardown_order_test::post_step_reads_temp_before_it_is_emptied` |
+| Next job | `finish` never deletes files the next job wrote, and `run_job` holds the channel open until temp is empty | `job_teardown_order_test::finish_never_touches_files_of_the_next_job`, `job_teardown_order_test::run_job_keeps_the_channel_open_until_temp_is_empty` |
 | Symlinks, read-only trees | Links to a file or directory, at any depth and in place of the `_temp` root itself, are unlinked and their targets kept; a `chmod -R a-w` tree is removed | `job_teardown_order_test::symlinks_are_removed_and_their_targets_are_kept`, `job_teardown_order_test::read_only_trees_are_removed` |
 | Delete error | A file that cannot be deleted leaves one `WARN`, other files are removed, the conclusion stays `Success` (skipped when run as root) | `job_teardown_order_test::undeletable_file_warns_and_never_changes_the_result` |
 

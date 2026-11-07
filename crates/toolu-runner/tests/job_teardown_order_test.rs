@@ -394,12 +394,18 @@ async fn temp_is_empty_at_channel_close_after_cancel() -> TestResult {
   assert_temp_empty(&fx.config)
 }
 
-/// `run_job` returning `Err` reports a failed job, so it cleans up too.
+/// `run_job` returning `Err` reports a failed job, so it cleans up too. A
+/// read-only root makes the start cleanup leave `leftover`; building the job
+/// context restores the root, so only the end cleanup can remove it.
+#[cfg(unix)]
 #[tokio::test]
 async fn temp_is_empty_at_channel_close_after_setup_error() -> TestResult {
+  use std::os::unix::fs::PermissionsExt;
   let mut fx = setup().await?;
-  std::fs::create_dir_all(temp_root(&fx.config))?;
-  std::fs::write(temp_root(&fx.config).join("leftover"), "x")?;
+  let temp = temp_root(&fx.config);
+  std::fs::create_dir_all(&temp)?;
+  std::fs::write(temp.join("leftover"), "x")?;
+  std::fs::set_permissions(&temp, std::fs::Permissions::from_mode(0o500))?;
   // Directory creation fails under a regular file, after the job context is built.
   let blocked = fx.config.data_dir.join("not-a-directory");
   std::fs::write(&blocked, "x")?;
@@ -412,6 +418,33 @@ async fn temp_is_empty_at_channel_close_after_setup_error() -> TestResult {
   .await;
   assert_eq!(job.conclusion, Some(Conclusion::Failure), "{}", job.log);
   assert_temp_empty(&fx.config)
+}
+
+/// The channel closing frees the next job, so `run_job` holds it open until temp
+/// is empty even when the caller gave it the only sender.
+#[tokio::test]
+async fn run_job_keeps_the_channel_open_until_temp_is_empty() -> TestResult {
+  let fx = setup().await?;
+  let msg = AgentJobRequestMessage {
+    steps: vec![ActionStep::script(
+      "write",
+      "touch \"$RUNNER_TEMP/written\"",
+      "",
+    )],
+    ..fx.msg.clone()
+  };
+  let (tx, mut rx) = mpsc::channel::<RunnerEvent>(1024);
+  let masker = Arc::new(Mutex::new(SecretMasker::new()));
+  let (result, at_close) = tokio::join!(
+    run_job(msg, &fx.config, CancellationToken::new(), tx, masker),
+    async {
+      drain_job(&mut rx).await;
+      assert_temp_empty(&fx.config).map_err(|error| error.to_string())
+    }
+  );
+  result?.finish(&fx.config).await;
+  at_close?;
+  Ok(())
 }
 
 /// The next job may start as soon as the channel closes, so `finish` must never
@@ -442,10 +475,7 @@ async fn finish_never_touches_files_of_the_next_job() -> TestResult {
 /// A post step runs after every main step and can still read `$RUNNER_TEMP`.
 #[tokio::test]
 async fn post_step_reads_temp_before_it_is_emptied() -> TestResult {
-  let Some(node) = system_node() else {
-    eprintln!("SKIP: no system `node` on PATH; post-step test needs a real node runtime");
-    return Ok(());
-  };
+  let node = system_node().ok_or("this test needs a real `node` on PATH")?;
   let fx = setup().await?;
   seed_node(&fx.config.data_dir, &node)?;
   let copied = fx.config.data_dir.join("post-copied");
@@ -533,6 +563,7 @@ async fn read_only_trees_are_removed() -> TestResult {
 
 /// An undeletable file warns, spares nothing else, keeps the job's conclusion,
 /// and does not stop the next job, which clears it once it can.
+#[cfg(unix)]
 #[tokio::test]
 async fn undeletable_file_warns_and_never_changes_the_result() -> TestResult {
   use std::os::unix::fs::PermissionsExt;
