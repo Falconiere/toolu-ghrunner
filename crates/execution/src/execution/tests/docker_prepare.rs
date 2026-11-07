@@ -26,6 +26,7 @@ async fn duplicate_captured_registry_image_needs_one_pull() -> Result<(), Box<dy
       client: &reqwest::Client::new(),
       data_dir: Path::new(""),
     },
+    &ExecutionContext::new_for_test(),
     &CancellationToken::new(),
   )
   .await?;
@@ -125,6 +126,7 @@ async fn nested_remote_composites_discover_deduplicated_pulls_before_builds()
       client: &reqwest::Client::new(),
       data_dir: dir.path(),
     },
+    &ExecutionContext::new_for_test(),
     &CancellationToken::new(),
   )
   .await?;
@@ -262,6 +264,7 @@ async fn graceful_cancel_interrupts_inflight_archive_discovery()
         client: &reqwest::Client::new(),
         data_dir: dir.path(),
       },
+      &ExecutionContext::new_for_test(),
       &signal,
     )
     .await
@@ -301,6 +304,7 @@ async fn repeated_composites_are_visited_once() -> Result<(), Box<dyn std::error
       client: &reqwest::Client::new(),
       data_dir: dir.path(),
     },
+    &ExecutionContext::new_for_test(),
     &CancellationToken::new(),
   )
   .await?;
@@ -338,6 +342,7 @@ async fn distinct_composite_chain_keeps_depth_limit() -> Result<(), Box<dyn std:
       client: &reqwest::Client::new(),
       data_dir: dir.path(),
     },
+    &ExecutionContext::new_for_test(),
     &CancellationToken::new(),
   )
   .await;
@@ -345,5 +350,82 @@ async fn distinct_composite_chain_keeps_depth_limit() -> Result<(), Box<dyn std:
   assert!(
     matches!(result, Err(RunnerError::StepExecution(message)) if message.contains("composite action depth limit exceeded"))
   );
+  Ok(())
+}
+
+#[tokio::test]
+async fn nested_self_reference_prepares_remote_docker() -> Result<(), Box<dyn std::error::Error>> {
+  let body = follow_up_archive(&[
+    (
+      "probe/outer/action.yml".to_owned(),
+      "name: outer\nruns:\n  using: composite\n  steps:\n    - uses: $/docker\n".to_owned(),
+    ),
+    (
+      "probe/docker/action.yml".to_owned(),
+      "name: docker\nruns:\n  using: docker\n  image: Dockerfile\n".to_owned(),
+    ),
+    (
+      "probe/docker/Dockerfile".to_owned(),
+      "FROM scratch\n".to_owned(),
+    ),
+  ])?;
+  let (api, server) = follow_up_server(body, None).await?;
+  let mut job = follow_up_job(&api, vec![follow_up_step("outer")])?;
+  job.variables.insert(
+    "actions_self_repository".to_owned(),
+    shared::VariableValue {
+      value: "true".to_owned(),
+      is_secret: false,
+    },
+  );
+  let fetcher = follow_up_fetcher(&job)?;
+  let dir = tempfile::tempdir()?;
+  let mut enabled = ExecutionContext::new_for_test();
+  enabled.enable_self_repository(Some(("workflow/other".to_owned(), "wrong-sha".to_owned())));
+  let plan = discover(
+    &job.steps,
+    &Discovery {
+      fetcher: &fetcher,
+      client: &reqwest::Client::new(),
+      data_dir: dir.path(),
+    },
+    &enabled,
+    &CancellationToken::new(),
+  )
+  .await?;
+  assert_eq!(plan.builds.len(), 1, "nested $/docker must prepare early");
+  assert_eq!(
+    plan.builds.first().ok_or("build missing")?.repository,
+    "acme/probe"
+  );
+
+  let disabled = discover(
+    &job.steps,
+    &Discovery {
+      fetcher: &fetcher,
+      client: &reqwest::Client::new(),
+      data_dir: dir.path(),
+    },
+    &ExecutionContext::new_for_test(),
+    &CancellationToken::new(),
+  )
+  .await?;
+  assert!(disabled.builds.is_empty());
+
+  let mut top_level = ActionStep::with_ref_type("self", "repository");
+  top_level.reference.name = Some("$/docker".to_owned());
+  let top_level = discover(
+    &[top_level],
+    &Discovery {
+      fetcher: &fetcher,
+      client: &reqwest::Client::new(),
+      data_dir: dir.path(),
+    },
+    &enabled,
+    &CancellationToken::new(),
+  )
+  .await?;
+  assert!(top_level.builds.is_empty());
+  server.abort();
   Ok(())
 }
