@@ -24,6 +24,8 @@ registers against github.com, so the `TOOLU_RUNNER_LIVE_GHES_*` values are never
 consumed. GHES is out of scope: implemented, never run on a real server. No
 GHES result exists to cite.
 
+`live-ghes.yml` is dispatch-only and has never been dispatched (no runs exist).
+
 ## Current limitations
 
 - **Top-level `$/` steps (#241):** only `$/` inside an action manifest's
