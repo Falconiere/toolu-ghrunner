@@ -175,7 +175,9 @@ if [[ -z "${COMPAT_PAIRED_WORKFLOW_FILE:-}" ]]; then
   # The host script's control flow, with GitHub and both runners stood in for:
   # nothing else can exercise it before the first dispatch.
   tmp=$(mktemp -d)
-  trap 'rm -rf "$tmp"' EXIT
+  # Last resort only: no_survivors below fails the test first. Without this a
+  # leaked fake listener would hold the caller's output open (#251 S3 hang).
+  trap 'pkill -f "$tmp/" 2>/dev/null; rm -rf "$tmp"' EXIT
   mkdir -p "$tmp/tools" "$tmp/official/bin" "$tmp/official-dies"
   cat >"$tmp/tools/gh" <<'GH'
 #!/usr/bin/env bash
@@ -255,6 +257,20 @@ DOCKER
     fi
     wait "$pid"
   }
+  no_survivors() { # no_survivors <desc>: no process under $tmp outlives a host run
+    local waited=0 left
+    while left=$(pgrep -fl "$tmp/") && ((waited < 50)); do
+      sleep 0.1
+      waited=$((waited + 1))
+    done
+    if [[ -n "$left" ]]; then
+      echo "FAIL: $1 left processes behind: $left" >&2
+      pkill -f "$tmp/"
+      fail=1
+    else
+      echo "ok: $1 leaves no process behind"
+    fi
+  }
   expect() { # expect <desc> <wanted exit> <actual exit>
     if [[ "$2" == "$3" ]]; then
       echo "ok: $1"
@@ -265,6 +281,7 @@ DOCKER
   }
   FAKE_RUNNERS="$tmp/none" host run >/dev/null 2>&1
   expect "lanes stop once the probes completed" 0 $?
+  no_survivors "lanes stop once the probes completed"
   [[ -f "$tmp/official/listening" ]] && ! pgrep -f "$tmp/official/bin/Runner.Listener" >/dev/null &&
     echo "ok: the official listener does not outlive the lanes" || {
     echo "FAIL: the official listener was not stopped" >&2
@@ -275,11 +292,14 @@ DOCKER
   sed -i.bak '$d' "$tmp/jobs"
   FAKE_RUNNERS="$tmp/none" FAKE_TOOLU="$tmp/tools/toolu-dies" host run >/dev/null 2>&1
   expect "a dead toolu lane fails the step while a consumer is unlisted" 1 $?
+  no_survivors "a dead toolu lane fails the step while a consumer is unlisted"
   FAKE_RUNNERS="$tmp/none" FAKE_NO_JIT=1 host run >/dev/null 2>&1
   expect "a dead official lane fails the step while a consumer is unlisted" 1 $?
+  no_survivors "a dead official lane fails the step while a consumer is unlisted"
   # This lane always mints before it dies, so both checks below see a real JIT.
   out=$(FAKE_RUNNERS="$tmp/none" FAKE_OFFICIAL="$tmp/official-dies" host run 2>&1)
   expect "an official runner that cannot start fails the step" 1 $?
+  no_survivors "an official runner that cannot start fails the step"
   [[ "$out" == *"::add-mask::fake-jit"* ]] && echo "ok: the JIT config is masked on the step's stdout" || {
     echo "FAIL: the mask command did not reach the step's stdout: $out" >&2
     fail=1
@@ -296,9 +316,11 @@ DOCKER
   done >"$tmp/jobs"
   FAKE_RUNNERS="$tmp/none" FAKE_ACCELERATED=true FAKE_DOCKER_DEAD=1 host run >/dev/null 2>&1
   expect "four consumers do not finish an accelerated host" 1 $?
+  no_survivors "four consumers do not finish an accelerated host"
   printf 'completed probe-Linux-X64-toolu-accelerated / consumer\n' >>"$tmp/jobs"
   out=$(FAKE_RUNNERS="$tmp/none" FAKE_ACCELERATED=true host run 2>&1)
   expect "an accelerated host stops once its five consumers completed" 0 $?
+  no_survivors "an accelerated host stops once its five consumers completed"
   args=$(cat "$tmp/docker-run")
   [[ "$args" == *ubuntu@sha256:* && "$args" == *$'\n-e\nTOOLU_RUNNER_TOKEN\n'* && "$args" == *token-in-env* &&
     "$args" != *TOOLU_RUNNER_TOKEN=* ]] &&
@@ -325,9 +347,11 @@ DOCKER
   done >"$tmp/jobs"
   FAKE_RUNNERS="$tmp/none" FAKE_EXTENDED=true FAKE_NO_JIT=1 host run >/dev/null 2>&1
   expect "consumers alone do not finish an extended host" 1 $?
+  no_survivors "consumers alone do not finish an extended host"
   for job in fresh-1 fresh-2 ephemeral; do printf 'completed lifecycle-Linux-X64-toolu-%s\n' "$job"; done >>"$tmp/jobs"
   out=$(FAKE_RUNNERS="$tmp/none" FAKE_EXTENDED=true host run 2>&1)
   expect "an extended host stops once the lifecycle jobs completed" 0 $?
+  no_survivors "an extended host stops once the lifecycle jobs completed"
   [[ -x "$tmp/official-pool-1/run.sh" && -x "$tmp/official-pool-2/run.sh" ]] &&
     echo "ok: two pool copies of the official runner exist" || {
     echo "FAIL: official pool copies missing" >&2

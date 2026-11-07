@@ -73,9 +73,13 @@ probes_done() {
 }
 
 stop_lanes() {
-  local lane
-  # The loop first, or it would mint a new runner when the listener dies.
-  kill ${official_pid:+"$official_pid"} ${toolu_pid:+"$toolu_pid"} ${extra_pids[@]+"${extra_pids[@]}"} 2>/dev/null || true
+  local lane pid
+  # Each lane is its own process group (`set -m` in run_lanes): signal the whole
+  # group, so a minting loop cannot start one more listener after its parent died.
+  for pid in ${official_pid:+"$official_pid"} ${toolu_pid:+"$toolu_pid"} ${ephemeral_pid:+"$ephemeral_pid"} \
+    ${extra_pids[@]+"${extra_pids[@]}"}; do
+    kill -TERM -- "-$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
+  done
   pkill -f "$OFFICIAL_DIR" || true
   pkill -f "$RUNNER_TEMP/official-pool-" || true
   if [[ -n "$accelerated" ]]; then
@@ -192,8 +196,11 @@ accelerated_alive() {
 }
 
 run_lanes() {
+  local i
   official_pid="" toolu_pid="" accelerated="" ephemeral_pid=""
   extra_pids=() extra_logs=()
+  # Job control: every lane started with `&` leads its own process group.
+  set -m
   [[ "${ACCELERATED_LANE:-}" == true ]] && accelerated=true
   trap stop_lanes EXIT
   # Copied before the main official lane writes its _diag, so no log is counted twice.
