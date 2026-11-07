@@ -122,6 +122,14 @@ def acknowledged_by_run(row, evidence, context):
     return False
 
 
+def asserted_run(evidence, context):
+    """True when `evidence` names the run of a listed report that carries
+    assertions: its cells must cite an assertion, not the bare run."""
+    return any(report["assertions"] and re.search(
+        rf"/actions/runs/{(report['data'].get('run') or {}).get('id')}(/|$)", evidence)
+        for report in context["reports"].values())
+
+
 def check_evidence(row, lane, evidence, tests, context, errors):
     where = f"{row['id']} [{lane}]"
     if lane == "reference" and (evidence.startswith(("pr:", "doc:")) or
@@ -152,6 +160,8 @@ def check_evidence(row, lane, evidence, tests, context, errors):
             errors.append(f"{where}: evidence URL {evidence!r} is not a run/PR of {REPO}")
         elif lane == "reference" and acknowledged_by_run(row, evidence, context):
             errors.append(f"{where}: the report of this run acknowledges a difference for this row")
+        elif lane == "reference" and asserted_run(evidence, context):
+            errors.append(f"{where}: cite that run's report as report:<path>#<assertion>")
     elif evidence.startswith("doc:"):
         path, _, anchor = evidence[4:].partition("#")
         file = ROOT / path
@@ -172,12 +182,18 @@ def check_evidence(row, lane, evidence, tests, context, errors):
         errors.append(f"{where}: unknown evidence kind {evidence!r}")
 
 
+LEGACY_REPORT = "docs/compat-reference-103.json"
+
+
 def check_assertion(rid, where, report, ident, errors):
     """A #251-style report backs a row only through a named, recomputed assertion
-    that lists the row, passes, and is not toolu-only."""
+    that lists the row, passes, and is not toolu-only. Only the recorded #103
+    report, at its committed path, may be cited without one."""
     if not report["assertions"]:
         if ident:
             errors.append(f"{where}: report has no assertions to cite (#{ident})")
+        elif not (report["path"] == LEGACY_REPORT and reference_compare.is_legacy(report["data"])):
+            errors.append(f"{where}: report {report['path']} carries no assertions")
         return
     assertion = report["assertions"].get(ident)
     if not ident:
@@ -267,7 +283,7 @@ def load_reports(matrix, errors):
             continue
         rows = {r for ack in data.get("acknowledged", []) for r in ack.get("matrix_rows", [])}
         # Recomputed, never the stored flags; {} for the legacy #103 report.
-        reports[path] = {"data": data, "unverified_rows": rows,
+        reports[path] = {"data": data, "unverified_rows": rows, "path": path,
                          "assertions": reference_compare.assertions(data)}
     return reports
 

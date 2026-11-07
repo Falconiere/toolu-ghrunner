@@ -204,6 +204,34 @@ class RejectionTest(unittest.TestCase):
                             for e in self.cite(report, "103/R-cache", "#R-oidc")))
         self.assertTrue(any("has no assertion X-9" in e for e in self.cite(report, "67/X-1", "#X-9")))
 
+    def test_a_bare_run_citation_cannot_bypass_the_reports_assertions(self):
+        report = report_fixtures.paired_report()
+        report["host"]["Linux-X64"]["lanes"]["toolu"]["renewals_max"] = 0
+        run = report["run"]["id"]
+        errors = self.cite_run(report, "103/R-renew",
+                               f"run:https://github.com/Falconiere/toolu-ghrunner/actions/runs/{run}")
+        self.assertTrue(any("cite that run's report" in e for e in errors), errors)
+
+    def test_only_the_recorded_report_may_be_cited_without_an_assertion(self):
+        report = report_fixtures.paired_report()
+        report.update(issue=103)
+        report["run"]["id"] = check.reference_compare.LEGACY_RUN_ID
+        errors = self.cite(report, "103/R-oidc", "")
+        self.assertTrue(any("carries no assertions" in e for e in errors), errors)
+
+    def cite_run(self, report, rid, evidence):
+        """Errors for `rid`'s reference lane citing `evidence` while `report` is listed."""
+        with tempfile.NamedTemporaryFile("w", suffix=".json", dir=check.ROOT / "docs",
+                                         delete=False) as fresh:
+            json.dump(report, fresh)
+        try:
+            m = copy.deepcopy(MATRIX)
+            m["reports"].append(str(Path(fresh.name).relative_to(check.ROOT)))
+            row(m, rid)["lanes"]["reference"] = {"status": "passed", "evidence": evidence}
+            return errors_for(m)
+        finally:
+            Path(fresh.name).unlink()
+
     def test_a_toolu_only_assertion_never_backs_the_reference_lane(self):
         errors = self.cite(report_fixtures.paired_report(), "67/X-6", "#X-6-toolu")
         self.assertTrue(any("measures toolu alone" in e for e in errors), errors)

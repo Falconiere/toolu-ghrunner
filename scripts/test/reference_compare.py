@@ -337,10 +337,15 @@ def build_report(run_id, provenance, captures, acknowledged):
 
 def assertions(report):
     """The named assertions recomputed from the stored data; {} for the legacy run."""
-    if expected_platforms(report) != EXPECTED_PLATFORMS:
+    if is_legacy(report):
         return {}
+    # Fail closed: a malformed section or a missing observation scope fails
+    # every assertion, whatever jobs it names.
     fatal = [m for key, job, m in shape_problems(report)]
     fatal += [f"unpaired job {u}" for u in report.get("unpaired") or []]
+    fatal += [f"{field} is not an object" for field in ("results", "host", "leaks", "toolu_only")
+              if not isinstance(report.get(field), dict)]
+    fatal += [f"{key}: {m}" for key, job, m in coverage_problems(report) if job is None]
     return compat_assertions.evaluate(report, keyed_problems(report), fatal, EXPECTED_PLATFORMS,
                                       EXPECTED_JOBS)
 
@@ -349,8 +354,14 @@ def sha256(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def is_legacy(report):
+    """The recorded #103 report: its run id AND its issue. A current report that
+    borrows the run id still needs every platform and every #251 section."""
+    return (report.get("run") or {}).get("id") == LEGACY_RUN_ID and report.get("issue") == 103
+
+
 def expected_platforms(report):
-    return ((None, None),) if (report.get("run") or {}).get("id") == LEGACY_RUN_ID else EXPECTED_PLATFORMS
+    return ((None, None),) if is_legacy(report) else EXPECTED_PLATFORMS
 
 
 def shape_problems(report):
@@ -449,7 +460,7 @@ def verify(report):
             problems.append(f"stale acknowledgement {ack.get('finding')}: no matching difference")
     if not report.get("captures"):
         problems.append("no capture recorded")
-    if expected_platforms(report) == EXPECTED_PLATFORMS:
+    if not is_legacy(report):
         problems += [f"{field} is missing" for field in ("host", "leaks", "toolu_only", "assertions")
                      if not isinstance(report.get(field), dict)]
         problems += compat_assertions.stored_disagreements(report, assertions(report))

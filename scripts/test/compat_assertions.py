@@ -51,6 +51,7 @@ ASSERTIONS = {
                        "checks": []},
 }
 LANES = ("toolu", "official")
+VARIANTS = ("probe", "negative")
 LIFECYCLE = ("fresh-1", "fresh-2", "ephemeral")
 
 
@@ -84,9 +85,20 @@ def same(left, right):
     return json.dumps(left, sort_keys=True) == json.dumps(right, sort_keys=True)
 
 
-def check_results(report, _platforms):
-    return [f"observations differ in {key}" for key, r in (report.get("results") or {}).items()
-            if not same(r.get("toolu"), r.get("official")) or not r.get("toolu")]
+def check_results(report, platforms):
+    """Every required scope present, both lanes non-empty objects, JSON-equal."""
+    results = report.get("results")
+    if not isinstance(results, dict):
+        return ["results is not an object"]
+    found = []
+    for key in [f"{variant}-{platform}" for platform in platforms for variant in VARIANTS]:
+        scope = results.get(key)
+        lanes = [scope.get(lane) if isinstance(scope, dict) else None for lane in LANES]
+        if not all(isinstance(lane, dict) and lane for lane in lanes):
+            found.append(f"observations missing or malformed in {key}")
+        elif not same(*lanes):
+            found.append(f"observations differ in {key}")
+    return found
 
 
 def check_containers(report, _platforms):

@@ -110,6 +110,36 @@ class AssertionTest(unittest.TestCase):
         self.assertIn("X-1", failing(self.report))
         self.assertIn("R-command-files", failing(self.report))
 
+    def all_fail(self, mutate):
+        mutate(self.report)
+        self.assertEqual(failing(self.report), sorted(compat_assertions.ASSERTIONS))
+        problems, _ = reference_compare.verify(self.report)
+        self.assertTrue(problems)
+
+    def test_empty_results_fail_every_assertion(self):
+        self.all_fail(lambda r: r.update(results={}))
+
+    def test_a_missing_result_scope_fails_every_assertion(self):
+        self.all_fail(lambda r: r["results"].pop("probe-Linux-X64"))
+
+    def test_a_result_scope_without_its_official_lane_fails_every_assertion(self):
+        self.all_fail(lambda r: r["results"]["negative-macOS-ARM64"].pop("official"))
+
+    def test_a_malformed_section_fails_every_assertion(self):
+        for field in ("results", "host", "leaks", "toolu_only"):
+            with self.subTest(field=field):
+                self.report = fixtures.paired_report()
+                self.all_fail(lambda r, f=field: r.update({f: []}))
+
+    def test_a_current_report_cannot_borrow_the_legacy_identity(self):
+        self.report["run"]["id"] = reference_compare.LEGACY_RUN_ID
+        self.assertFalse(reference_compare.is_legacy(self.report))
+        self.assertEqual(failing(self.report), [])
+        self.report["issue"] = 103
+        self.assertTrue(reference_compare.is_legacy(self.report))
+        problems, _ = reference_compare.verify(self.report)
+        self.assertTrue(any("unexpected platform" in p for p in problems), problems)
+
     def test_one_renewal_fails_renew_only(self):
         self.report["host"]["Linux-X64"]["lanes"]["official"]["renewals_max"] = 1
         self.assertEqual(failing(self.report), ["R-renew"])
