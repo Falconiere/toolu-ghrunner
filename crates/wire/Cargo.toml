@@ -19,12 +19,13 @@ protocol = { path = "../protocol" }
 network = { path = "../network" }
 
 # Async runtime
-tokio = { version = "1", features = ["rt", "macros", "sync", "time", "net", "io-util"] }
+tokio = { version = "1", features = ["rt", "macros", "sync", "time", "net", "io-util", "fs"] }
+tokio-util = { version = "0.7", features = ["io"] }
 futures-util = "0.3"
 
 # HTTP transport
 bytes = "1"
-reqwest = { version = "0.12", default-features = false, features = ["http2", "json", "rustls-tls-native-roots"] }
+reqwest = { version = "0.12", default-features = false, features = ["http2", "json", "rustls-tls-native-roots", "stream"] }
 
 # WebSocket for the live-log streamer
 # Framing only: the handshake runs over a `reqwest` upgrade (#94), so TLS and

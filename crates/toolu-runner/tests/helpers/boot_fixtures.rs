@@ -133,25 +133,7 @@ async fn mount_job(
   script_command: &str,
   times: Option<u64>,
 ) -> Result<(), String> {
-  let job_body = json!({
-    "runner_request_id": "22222222-3333-4444-5555-666677778888",
-    "run_service_url": server.uri(),
-    "billing_owner_id": "owner-boot-e2e-test",
-  })
-  .to_string();
-
-  let message = Mock::given(method("GET"))
-    .and(path("/message"))
-    .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-      "messageId": 1,
-      "messageType": "RunnerJobRequest",
-      "body": job_body,
-      "iv": null,
-    })));
-  match times {
-    Some(n) => message.up_to_n_times(n).mount(server).await,
-    None => message.mount(server).await,
-  }
+  mount_job_message(server, times).await;
 
   Mock::given(method("POST"))
     .and(path("/acknowledge"))
@@ -176,5 +158,36 @@ async fn mount_job(
     .mount(server)
     .await;
 
+  // Long-running boot tests must retain their job lease until TOOLU_DEADLINE.
+  Mock::given(method("POST"))
+    .and(path("/renewjob"))
+    .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+      "lockedUntil": "2030-01-01T00:00:00Z"
+    })))
+    .mount(server)
+    .await;
+
   Ok(())
+}
+
+async fn mount_job_message(server: &MockServer, times: Option<u64>) {
+  let job_body = json!({
+    "runner_request_id": "22222222-3333-4444-5555-666677778888",
+    "run_service_url": server.uri(),
+    "billing_owner_id": "owner-boot-e2e-test",
+  })
+  .to_string();
+
+  let message = Mock::given(method("GET"))
+    .and(path("/message"))
+    .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+      "messageId": 1,
+      "messageType": "RunnerJobRequest",
+      "body": job_body,
+      "iv": null,
+    })));
+  match times {
+    Some(n) => message.up_to_n_times(n).mount(server).await,
+    None => message.mount(server).await,
+  }
 }

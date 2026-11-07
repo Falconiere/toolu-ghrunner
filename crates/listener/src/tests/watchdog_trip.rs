@@ -5,8 +5,8 @@
 //! points at the same server the broker calls use, matching the real
 //! github.com JIT wire shape where both addresses come from the mint.
 //! Covers AC-2 (trip → kill → report `failure`), AC-9 (trip +
-//! report-on-reconnect), AC-10 (a persistent definitive renewal error must
-//! never trip), plus the best-effort-ack contract (a failing `/acknowledge`
+//! report-on-reconnect), persistent renewal failures and missing jobs, plus
+//! the best-effort-ack contract (a failing `/acknowledge`
 //! must not block the completion report). Filtered by the s6 ledger check
 //! `test(/^watchdog_trip::/)` — the module was
 //! `watchdog_tests::trip` before the tests moved into `tests/`.
@@ -157,8 +157,7 @@ async fn mount_acknowledge(server: &MockServer, status: u16) {
 }
 
 /// `/renewjob`: always answers `status` — 503 classifies as
-/// `RunnerError::Network` (feeds the watchdog; AC-2/AC-9), 401 classifies
-/// as `RunnerError::Protocol` (definitive, never feeds it; AC-10).
+/// `RunnerError::Network`; 401 classifies as `RunnerError::Protocol`.
 async fn mount_renew_job_always(server: &MockServer, status: u16) {
   Mock::given(method("POST"))
     .and(path("/renewjob"))
@@ -245,6 +244,7 @@ struct Scenario {
   job_id: &'static str,
   script: &'static str,
   renew_status: u16,
+  recover_once: bool,
   ack_status: u16,
   complete_fail_times: u64,
   outage_threshold: Duration,
@@ -265,6 +265,7 @@ impl Scenario {
       job_id,
       script,
       renew_status,
+      recover_once: false,
       ack_status: 200,
       complete_fail_times: 0,
       outage_threshold,
@@ -279,6 +280,7 @@ struct TripOutcome {
   elapsed: Duration,
   complete_requests: Vec<wiremock::Request>,
   acknowledge_requests: Vec<wiremock::Request>,
+  renew_requests: Vec<wiremock::Request>,
 }
 
 /// Wire up the fixture end to end and drive one real `poll_and_execute`
@@ -292,6 +294,22 @@ async fn run_scenario(scenario: Scenario) -> TestResult<TripOutcome> {
   mount_message_poll(&server, &format!("rr-{}", scenario.job_id), &server_uri).await;
   mount_acquire_job(&server, "plan-1", &msg).await?;
   mount_acknowledge(&server, scenario.ack_status).await;
+  if scenario.recover_once {
+    Mock::given(method("POST"))
+      .and(path("/renewjob"))
+      .respond_with(ResponseTemplate::new(401))
+      .up_to_n_times(4)
+      .mount(&server)
+      .await;
+    Mock::given(method("POST"))
+      .and(path("/renewjob"))
+      .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+        "lockedUntil": "2026-11-07T00:00:00Z"
+      })))
+      .up_to_n_times(1)
+      .mount(&server)
+      .await;
+  }
   mount_renew_job_always(&server, scenario.renew_status).await;
   mount_complete_job(&server, scenario.complete_fail_times).await;
 
@@ -322,6 +340,7 @@ async fn run_scenario(scenario: Scenario) -> TestResult<TripOutcome> {
     elapsed,
     complete_requests: by_path("/completejob"),
     acknowledge_requests: by_path("/acknowledge"),
+    renew_requests: by_path("/renewjob"),
   })
 }
 
@@ -351,13 +370,6 @@ fn assert_reported(
 fn assert_elapsed_under(elapsed: Duration, cap: Duration, context: &str) -> TestResult<()> {
   if elapsed >= cap {
     return Err(format!("{context}: elapsed {elapsed:?} >= cap {cap:?}").into());
-  }
-  Ok(())
-}
-
-fn assert_elapsed_at_least(elapsed: Duration, floor: Duration, context: &str) -> TestResult<()> {
-  if elapsed < floor {
-    return Err(format!("{context}: elapsed {elapsed:?} < floor {floor:?}").into());
   }
   Ok(())
 }
@@ -412,11 +424,8 @@ fn body_conclusion(body: &serde_json::Value) -> TestResult<&str> {
 /// failure level 3.
 fn assert_failure_with_lost_connection(body: &serde_json::Value) -> TestResult<()> {
   let conclusion = body_conclusion(body)?;
-  let expected = "failed";
-  if conclusion != expected {
-    return Err(
-      format!("expected conclusion {expected} (Failure), got {conclusion}: {body}").into(),
-    );
+  if conclusion != "failed" {
+    return Err(format!("expected conclusion failed (Failure), got {conclusion}: {body}").into());
   }
   let annotation = find_lost_connection_annotation(body)?
     .ok_or_else(|| format!("no annotation with the exact lost-connection message: {body}"))?;
@@ -500,50 +509,76 @@ async fn ac9_report_survives_reconnect() -> TestResult<()> {
   assert_failure_with_lost_connection(&body)
 }
 
-/// AC-10: a renewal endpoint that answers 401 (definitive — `Protocol`,
-/// not `Network`) for longer than the injected threshold must never trip
-/// the watchdog — the short `bash sleep 1` step runs to normal completion
-/// (`conclusion: success`, no "lost connection" annotation), and the job's
-/// wall-clock sits near the step's own 1s sleep rather than the ~200ms
-/// threshold — evidence it was not cancelled early.
-#[tokio::test]
-async fn ac10_definitive_renew_error_never_trips() -> TestResult<()> {
+/// Persistent renewal errors cancel the real running step and report failure.
+async fn assert_renewal_trip(status: u16, threshold: Duration, cap: Duration) -> TestResult<()> {
   let outcome = tokio::time::timeout(
-    Duration::from_secs(60),
+    Duration::from_secs(25),
     run_scenario(Scenario::new(
-      "job-ac10",
-      "sleep 1",
-      401,
-      Duration::from_millis(200),
-      Duration::from_millis(50),
+      "job-renewal-trip",
+      "sleep 30",
+      status,
+      threshold,
+      Duration::from_millis(100),
     )),
   )
   .await
-  .map_err(|_elapsed| "AC-10 scenario did not complete within the 60s test guard")??;
-
-  assert_reported(outcome.result, Conclusion::Success)?;
-  assert_elapsed_at_least(
-    outcome.elapsed,
-    Duration::from_millis(900),
-    "AC-10 not-cancelled-early",
-  )?;
+  .map_err(|error| format!("renewal trip did not finish within the test guard: {error}"))??;
+  assert_reported(outcome.result, Conclusion::Failure)?;
+  assert_elapsed_under(outcome.elapsed, cap, "renewal cancellation")?;
   assert_request_count(&outcome.complete_requests, 1, "completejob")?;
-  let first = outcome
+  let body = outcome
     .complete_requests
     .first()
-    .ok_or("no completejob requests recorded")?;
-  let body = first.body_json::<serde_json::Value>()?;
-  let conclusion = body_conclusion(&body)?;
-  let expected = "succeeded";
-  if conclusion != expected {
+    .ok_or("missing completion")?
+    .body_json::<serde_json::Value>()?;
+  assert_failure_with_lost_connection(&body)
+}
+
+#[tokio::test]
+async fn unauthorized_past_threshold_cancels_and_reports_failure() -> TestResult<()> {
+  assert_renewal_trip(401, Duration::from_millis(300), Duration::from_secs(20)).await
+}
+
+#[tokio::test]
+async fn malformed_success_past_threshold_cancels_and_reports_failure() -> TestResult<()> {
+  assert_renewal_trip(200, Duration::from_millis(300), Duration::from_secs(20)).await
+}
+
+#[tokio::test]
+async fn successful_renewal_resets_the_failure_window() -> TestResult<()> {
+  let outcome = tokio::time::timeout(
+    Duration::from_secs(15),
+    run_scenario(Scenario {
+      recover_once: true,
+      ..Scenario::new(
+        "job-recovery",
+        "sleep 8",
+        401,
+        Duration::from_secs(6),
+        Duration::from_secs(1),
+      )
+    }),
+  )
+  .await
+  .map_err(|error| format!("recovery scenario timed out: {error}"))??;
+  assert_reported(outcome.result, Conclusion::Success)?;
+  if outcome.renew_requests.len() < 8 {
     return Err(
-      format!("expected conclusion {expected} (Success), got {conclusion}: {body}").into(),
+      format!(
+        "expected at least 8 renewals, got {}",
+        outcome.renew_requests.len()
+      )
+      .into(),
     );
   }
-  if find_lost_connection_annotation(&body)?.is_some() {
-    return Err(
-      format!("unexpected 'lost connection' annotation on a non-tripped job: {body}").into(),
-    );
+  assert_request_count(&outcome.complete_requests, 1, "completejob")?;
+  let body = outcome
+    .complete_requests
+    .first()
+    .ok_or("missing completion")?
+    .body_json::<serde_json::Value>()?;
+  if body_conclusion(&body)? != "succeeded" || find_lost_connection_annotation(&body)?.is_some() {
+    return Err(format!("expected success without lost-connection annotation: {body}").into());
   }
   Ok(())
 }
@@ -592,61 +627,11 @@ async fn ack_failure_does_not_block_completion() -> TestResult<()> {
   Ok(())
 }
 
-/// Pure unit tests for `outage_override::apply_outage_override` — the
-/// non-network fold of the watchdog's trip flag into the job's final
-/// conclusion (no wiremock: plain values in, plain values out). Filtered
-/// by the s6 ledger check `test(/^watchdog_trip::override_rules/)`.
-mod override_rules {
-  use shared::Conclusion;
+#[path = "watchdog_override.rs"]
+mod override_rules;
 
-  use crate::outage_override::{LOST_CONNECTION_MESSAGE, apply_outage_override};
+#[path = "watchdog_missing_job.rs"]
+mod missing_job;
 
-  /// (a) An untripped flag leaves the conclusion unchanged and adds no
-  /// annotations, whatever the conclusion was.
-  #[test]
-  fn untripped_leaves_conclusion_and_annotations_unchanged() {
-    for conclusion in [
-      Conclusion::Success,
-      Conclusion::Failure,
-      Conclusion::Cancelled,
-      Conclusion::Skipped,
-    ] {
-      let (out, annotations) = apply_outage_override(conclusion, false);
-      assert_eq!(out, conclusion, "untripped must not change the conclusion");
-      assert!(annotations.is_empty(), "untripped must add no annotations");
-    }
-  }
-
-  /// (b) A tripped flag alongside a `Success` conclusion is the
-  /// trip-during-teardown race (the job finished before the cancel
-  /// landed) — it stays `Success`, with no annotation.
-  #[test]
-  fn tripped_success_stays_success_with_no_annotation() {
-    let (conclusion, annotations) = apply_outage_override(Conclusion::Success, true);
-    assert_eq!(conclusion, Conclusion::Success);
-    assert!(annotations.is_empty());
-  }
-
-  /// (c) A tripped flag alongside a non-`Success` conclusion (e.g. a
-  /// GH-initiated `Cancelled` racing the trip) overrides to `Failure` with
-  /// exactly one failure-level annotation carrying the exact
-  /// production message.
-  #[test]
-  fn tripped_non_success_overrides_to_failure_with_error_annotation() {
-    for original in [
-      Conclusion::Failure,
-      Conclusion::Cancelled,
-      Conclusion::Skipped,
-    ] {
-      let (conclusion, annotations) = apply_outage_override(original, true);
-      assert_eq!(conclusion, Conclusion::Failure);
-      assert_eq!(annotations.len(), 1);
-      let annotation = annotations.first().expect("checked len() == 1 above");
-      assert_eq!(
-        annotation.level,
-        wire::reporting::ReportAnnotationLevel::Failure
-      );
-      assert_eq!(annotation.message, LOST_CONNECTION_MESSAGE);
-    }
-  }
-}
+#[path = "watchdog_sticky_reason.rs"]
+mod sticky_reason;

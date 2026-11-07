@@ -60,6 +60,7 @@ fn fixture(config: &RunnerConfig) -> TestResult<AgentJobRequestMessage> {
 fn forwarder(masker: Arc<Mutex<SecretMasker>>, live_tx: mpsc::Sender<LiveLogLine>) -> FwdConfig {
   FwdConfig {
     setup_cancel: CancellationToken::new(),
+    data_dir: std::env::temp_dir(),
     setup_id: None,
     results_url: None,
     results_client: reqwest::Client::new(),
@@ -103,7 +104,8 @@ async fn multiline_mask_real_job_reaches_every_local_sink() -> TestResult {
   let masker = Arc::new(Mutex::new(SecretMasker::new()));
   let (live_tx, mut live_rx) = mpsc::channel(512);
   let cfg = forwarder(Arc::clone(&masker), live_tx);
-  let mut state = ForwarderState::new(Vec::new(), &cfg);
+  let spool = LogSpool::for_job(&config.data_dir, &job_id)?;
+  let mut state = ForwarderState::new(&cfg, Some(spool));
   let (step_tx, mut step_rx) = mpsc::channel(512);
   let (journal_tx, journal_rx) = mpsc::channel(512);
   let jobs_dir = temp.path().join("journal");
@@ -171,7 +173,12 @@ async fn multiline_mask_real_job_reaches_every_local_sink() -> TestResult {
     (stdout, stderr, annotations),
     (PROBES.len(), PROBES.len(), 1)
   );
-  assert_probe_lines(&state.all_job_lines);
+  let (spool_path, _) = state.job_log.take().ok_or("job spool")?.finish().await?;
+  let job_log_lines: Vec<String> = std::fs::read_to_string(spool_path)?
+    .lines()
+    .map(str::to_owned)
+    .collect();
+  assert_probe_lines(&job_log_lines);
   let mut step_lines = Vec::new();
   while let Ok(line) = step_rx.try_recv() {
     step_lines.push(line);
@@ -180,13 +187,13 @@ async fn multiline_mask_real_job_reaches_every_local_sink() -> TestResult {
   while let Ok(line) = live_rx.try_recv() {
     live_lines.push(line.line);
   }
-  assert_eq!(step_lines, state.all_job_lines);
-  assert_eq!(live_lines, state.all_job_lines);
+  assert_eq!(step_lines, job_log_lines);
+  assert_eq!(live_lines, job_log_lines);
   let diagnostic_lines: Vec<_> = String::from_utf8(diag)?
     .lines()
     .map(str::to_owned)
     .collect();
-  assert_eq!(diagnostic_lines, state.all_job_lines);
+  assert_eq!(diagnostic_lines, job_log_lines);
   let mut journal_lines = Vec::new();
   for entry in std::fs::read_dir(jobs_dir)? {
     let text = std::fs::read_to_string(entry?.path())?;
@@ -197,7 +204,7 @@ async fn multiline_mask_real_job_reaches_every_local_sink() -> TestResult {
       }
     }
   }
-  assert_eq!(journal_lines, state.all_job_lines);
+  assert_eq!(journal_lines, job_log_lines);
   let guard = masker.lock().map_err(|e| e.to_string())?;
   assert_eq!(guard.mask(WHOLE), "***", "preserve the exact whole value");
   assert_eq!(

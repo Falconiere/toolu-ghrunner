@@ -1,7 +1,7 @@
 //! Shared helpers for the listener lifecycle.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::{Duration, Instant};
 
 use tokio::sync::mpsc;
@@ -9,7 +9,8 @@ use tokio_util::sync::CancellationToken;
 
 use super::SessionCtx;
 use crate::outage::OutageWatchdog;
-use shared::{AgentJobRequestMessage, Conclusion, ListenerEvent, RunnerError};
+use crate::outage_override::RenewalLoss;
+use shared::{AgentJobRequestMessage, Conclusion, ListenerEvent};
 use wire::net::delete_session;
 use wire::reporting::ReportConclusion;
 use wire::reporting::run_service::{RenewJobRequest, renew_job};
@@ -83,11 +84,9 @@ pub(super) struct RenewalParams {
   /// cancelled on an outage trip so the engine tears the running step
   /// down via `step_timeout::wait_bounded`.
   pub(super) job_cancel: CancellationToken,
-  /// Write-once trip flag: set exactly once by the watchdog latch and
-  /// never cleared afterward — even a later successful renewal must not
-  /// un-trip it, since the job was already cancelled and the "lost
-  /// connection" annotation (applied downstream) must survive.
-  pub(super) outage_tripped: Arc<AtomicBool>,
+  /// Write-once reason for a lost job lock; the final conclusion uses it
+  /// after the renewal task exits.
+  pub(super) renewal_loss: Arc<AtomicU8>,
   /// `OutageWatchdog` threshold: prod `outage::OUTAGE_THRESHOLD` (5 min),
   /// tests inject milliseconds.
   pub(super) outage_threshold: Duration,
@@ -96,6 +95,7 @@ pub(super) struct RenewalParams {
   pub(super) renew_interval: Duration,
 }
 
+/// Renew the job lock and cancel the job when it is lost.
 pub(super) fn spawn_renewal(
   params: RenewalParams,
   cancel: CancellationToken,
@@ -114,19 +114,20 @@ pub(super) fn spawn_renewal(
         () = cancel.cancelled() => break,
         _ = interval.tick() => {
           match renew_job(&params.client, &params.run_service_url, &params.token, &req).await {
-            Ok(resp) => {
+            Ok(Some(resp)) => {
               let _ = params.tx.send(ListenerEvent::LockRenewed { locked_until: resp.locked_until }).await;
               watchdog.record_ok(Instant::now());
             },
+            Ok(None) => {
+              record_renewal_loss_once(&params.renewal_loss, RenewalLoss::JobNotFound);
+              params.job_cancel.cancel();
+              tracing::error!("GitHub no longer recognizes this job — job cancelled");
+              break;
+            },
             Err(e) => {
               tracing::warn!(error = %e, "lock renewal failed");
-              // Feed rule: only Network-class renewal failures (transport /
-              // 429 / 5xx — GitHub unreachable) count toward the outage
-              // window. A persistent Protocol/Auth error (definitive, e.g.
-              // a stale 401/404) must never manufacture a false "lost
-              // connection" trip.
-              if matches!(e, RunnerError::Network(_)) && watchdog.record_err(Instant::now()) {
-                params.outage_tripped.store(true, Ordering::SeqCst);
+              if watchdog.record_err(Instant::now()) {
+                record_renewal_loss_once(&params.renewal_loss, RenewalLoss::TimedOut);
                 params.job_cancel.cancel();
                 let outage_secs = params.outage_threshold.as_secs();
                 tracing::error!(
@@ -142,6 +143,16 @@ pub(super) fn spawn_renewal(
   })
 }
 
+fn record_renewal_loss_once(loss: &AtomicU8, reason: RenewalLoss) {
+  let _ = loss.compare_exchange(
+    RenewalLoss::None as u8,
+    reason as u8,
+    Ordering::SeqCst,
+    Ordering::SeqCst,
+  );
+}
+
+/// Map an engine conclusion to its reporting value.
 pub(super) fn map_conclusion(c: Conclusion) -> ReportConclusion {
   match c {
     Conclusion::Success => ReportConclusion::Success,
@@ -177,30 +188,8 @@ pub(super) fn system_vss_access_token(job_msg: &AgentJobRequestMessage) -> Optio
     })
 }
 
-/// Delete the broker session, join the live-log flush, and join the
-/// combined job-log upload — all three concurrently.
-///
-/// No artificial delay: `delete_session` already treats any non-2xx as
-/// expected (the broker may already have forgotten about JIT runners), and
-/// the live-log wrapper task (stashed on `ctx.live_log` by
-/// `job_lifecycle::poll_and_execute`) is joined with a bounded 2s timeout
-/// instead of the fixed 5s sleep this replaces. An elapsed timeout is
-/// WARN-and-continue: the join handle is simply dropped, which does **not**
-/// abort the spawned task — a genuinely stuck streamer can still be cut
-/// short if the process exits (e.g. `--once`) before it finishes, the same
-/// exposure the old sleep had, now bounded and logged here instead of paid
-/// on every job.
-///
-/// The job-log upload (`ctx.job_log_upload`, spawned by
-/// `execution_loop::spawn_job_log_upload` so it overlaps
-/// `report_completion`) is joined WITHOUT a timeout: before the finalize
-/// split it ran inline and unbounded on the completion path, and bounding it
-/// here would newly abandon a slow-but-healthy upload — the very durable log
-/// the split exists to preserve. Its own HTTP calls are already bounded by
-/// the client timeout. This join is what keeps "the listener never returns
-/// before the combined log is uploaded" true on both the `Ok` and the `Err`
-/// path of `poll_and_execute`, which is why it lives here rather than at the
-/// one non-fallible call site.
+/// Delete the broker session while joining live and combined log uploads.
+/// The live flush has a 2s limit; the durable combined upload joins without one.
 pub(super) async fn cleanup_session(ctx: &mut SessionCtx) {
   // Take the handles out before building the futures: each `.await`
   // consumes its `JoinHandle`, and `del` only needs the other `ctx.*`

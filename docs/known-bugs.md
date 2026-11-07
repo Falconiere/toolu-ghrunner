@@ -24,12 +24,14 @@ the `TOOLU_RUNNER_LIVE_TOKEN` secret; its test repository is the
   service before delivery; the delivered form (`repositoryType: self` without a
   `./` path) has not been observed, so it is intentionally not resolved until a
   live job shows it. Live check: #251.
-- **Outage reporting:** the watchdog counts only network-class renewal
-  failures (transport errors, 429 and 5xx). Definitive auth/protocol failures
-  warn without tripping it. Completion retries network failures for up to ten
-  minutes; an expired reporting token or a permanent 4xx can still prevent
-  delivery. A live six-minute network-outage test remains a separate,
-  credentialed verification step.
+- **Outage reporting:** a missing job (renewal HTTP 404) cancels immediately;
+  every other renewal failure counts toward the 300-second watchdog, including
+  auth/protocol errors and malformed success replies. Completion still retries
+  only network-class failures for up to ten minutes; an expired reporting token
+  or a permanent 4xx can prevent delivery. A live six-minute network-outage
+  test remains a separate, credentialed verification step. The first terminal
+  renewal cause determines the annotation; a later 404 during teardown does not
+  replace an already recorded timed outage.
 - **Offline services:** `offline` mode starts the legacy v1 cache only. The
   artifact and OIDC service implementations are not started by the production
   job runner. Use `forwarder` for GitHub services or `accelerated` for local
@@ -43,9 +45,16 @@ the `TOOLU_RUNNER_LIVE_TOKEN` secret; its test repository is the
   with a `WARN` on each cleanup and never changes the job result. Registrations
   must not share a `data_dir`, because cleanup assumes one job at a time there.
   The job-end process sweep is not disk cleanup.
-- **Job log memory:** the listener keeps every masked log line of a job in
-  memory (`execution_loop` `all_job_lines`) for the combined log upload, so a
-  long, verbose job grows the runner's memory until it completes.
+- **Job log storage:** with a Results Service endpoint, masked job and step logs
+  are asynchronously spooled under `data_dir/_logs`, gzip-compressed on disk and
+  streamed to the service; without one, spools are skipped. Step spools are
+  independent, so a failed combined spool does not disable their uploads.
+  Total job output no longer accumulates in memory, but requires space for plain
+  and compressed files. Upload success, failure and task cancellation remove
+  owned files; a process crash can leave spools behind. Starting the same job ID
+  replaces its stale combined `.log` and `.log.gz`, not unrelated step files.
+  A spool I/O failure warns and can leave durable logs incomplete without
+  changing the job conclusion.
 - **Removal during a job:** normal removal drains a supervised registration
   for up to 30 seconds and keeps its state if still busy. `remove --force`
   removes local state while retaining the held lock; it neither cancels the
@@ -55,7 +64,7 @@ the `TOOLU_RUNNER_LIVE_TOKEN` secret; its test repository is the
 
 | ID | Original problem | Current behavior and regression coverage |
 | --- | --- | --- |
-| B-001 | No prolonged-outage watchdog | `listener::outage::OutageWatchdog` cancels after 300 seconds of network-class renewal failures, observed on the 60-second renewal cadence. A non-success result becomes failure with a lost-connection annotation; success during teardown stays success. Covered by `crates/listener/src/tests/watchdog_trip.rs` and `watchdog_retry.rs`. |
+| B-001 | No prolonged-outage watchdog | `listener::outage::OutageWatchdog` cancels after more than 300 seconds without a successful renewal on any renewal error, observed on the 60-second cadence; renewal 404 cancels immediately. A non-success result becomes failure, with a job-lock-loss annotation for 404 or a lost-connection annotation for a timed outage; success during teardown stays success. Covered by `crates/listener/src/tests/watchdog_trip.rs`, `watchdog_retry.rs` and `watchdog_missing_job.rs`. |
 | B-002 | Local removal left a GitHub registration behind | `wire::net::register::unregister_runner` unregisters repo/org runners before local deletion, confirming absence after a 404. Failure preserves retryable state. Covered by `crates/toolu-runner/tests/remove_unregister_test.rs`. |
 | B-003 | Registration wrote placeholder credentials | `register_jit` calls GitHub's `generate-jitconfig` endpoint and persists the returned JIT blob and runner ID. Covered by `crates/toolu-runner/tests/gh_compat_register.rs`; live end-to-end verification is a separate lane. |
 | B-004 | Shell, Node and composite temp/tool-cache paths diverged | Shared `runner_temp_dir` / `runner_tool_cache_dir` helpers supply `_temp` / `_tool`. Covered by `crates/execution/tests/runner_paths_test.rs` and `composite_runner_temp_test.rs`. |

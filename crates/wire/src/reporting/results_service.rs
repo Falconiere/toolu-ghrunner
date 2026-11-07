@@ -1,4 +1,5 @@
 use shared::RunnerError;
+use std::path::Path;
 
 // Re-export Twirp request/response types so callers don't need to change imports.
 pub use super::results_types::{
@@ -80,20 +81,16 @@ pub async fn create_job_logs_metadata(
   crate::net::create_job_logs_metadata(client, results_url, token, request).await
 }
 
-/// Upload a log file to a SAS URL (Azure Blob Storage or compatible).
-/// Uses `BlockBlob` (single-shot upload). Matches actions/runner `UploadBlockFileAsync`.
-/// When `compressed` is true, sets `Content-Type: application/gzip` and
-/// `Content-Encoding: gzip`; otherwise uses `Content-Type: text/plain`.
+/// Stream a gzipped log file to a signed blob URL.
 ///
 /// # Errors
 ///
-/// Returns `RunnerError::Protocol` on HTTP failures.
-pub async fn upload_log_blob(
+/// Returns an IO error for the file or a protocol error for the upload.
+pub async fn upload_log_file(
   client: &reqwest::Client,
   sas_url: &str,
   blob_storage_type: &str,
-  content: Vec<u8>,
-  compressed: bool,
+  path: &Path,
 ) -> Result<(), RunnerError> {
-  crate::net::upload_log_blob(client, sas_url, blob_storage_type, content, compressed).await
+  crate::net::upload_log_file(client, sas_url, blob_storage_type, path).await
 }

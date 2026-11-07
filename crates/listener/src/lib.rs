@@ -28,6 +28,7 @@ mod handler;
 pub mod helpers;
 /// Job acquisition, execution, and completion lifecycle.
 pub(crate) mod job_lifecycle;
+mod log_spool;
 /// Per-step and combined job log upload streams.
 pub mod log_uploader;
 /// Decision policy for the persistent registration loop.

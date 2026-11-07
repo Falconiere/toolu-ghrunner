@@ -10498,7 +10498,7 @@
         "crates/toolu-runner/tests/fixtures/job_message.json",
         "crates/listener/tests/multiline_mask.sh"
       ],
-      "expected": "Seven stdout and seven stderr records become 'stdout=[***]' / 'stderr=[***]' with 'control remains visible' unchanged; combined-job, step-upload and live-log buffers are identical, the journal writer persists matching JSONL, and the production RedactingWriter+MaskerRedactor yields identical diagnostic lines. No HTTP upload or acknowledgment is exercised.",
+      "expected": "Seven stdout and seven stderr records become 'stdout=[***]' / 'stderr=[***]' with 'control remains visible' unchanged; the combined-job disk spool and step-upload/live-log lines are byte-identical, the journal writer persists matching JSONL, and the production RedactingWriter+MaskerRedactor yields identical diagnostic lines. No HTTP upload or acknowledgment is exercised.",
       "production_path": "shared::SecretMasker::add_mask + execution::command_dispatch::apply_add_mask; sinks in listener::execution_loop forwarder, observability journal writer, shared::startup RedactingWriter",
       "tests": [
         [
@@ -20672,7 +20672,7 @@
       "issue": 103,
       "criterion": "Regression: job lock renewal and mid-job outage handling",
       "input": [],
-      "expected": "A renewal outage past 300 s trips the watchdog and reports failure; a definitive renew error never trips; the report survives reconnect.",
+      "expected": "Renewal 404 cancels immediately with a job-lock-loss annotation; every other renewal failure, including persistent 401 and malformed success, feeds the strict 300 s watchdog and reports failure with a timed lost-connection annotation. A successful renewal resets the failure window; the first terminal renewal cause and annotation survive later responses during teardown. The loopback regression allows 404 only after 503 failures span the injected threshold and a real delayed blob PUT is active; completion survives reconnect.",
       "production_path": "listener::helpers::spawn_renewal; listener::outage::OutageWatchdog",
       "tests": [
         [
@@ -20680,12 +20680,28 @@
           "ac2_outage_trips_kills_job_reports_failure"
         ],
         [
+          "crates/listener/src/tests/watchdog_missing_job.rs",
+          "missing_job_cancels_immediately"
+        ],
+        [
           "crates/listener/src/tests/watchdog_trip.rs",
-          "ac10_definitive_renew_error_never_trips"
+          "unauthorized_past_threshold_cancels_and_reports_failure"
+        ],
+        [
+          "crates/listener/src/tests/watchdog_trip.rs",
+          "malformed_success_past_threshold_cancels_and_reports_failure"
+        ],
+        [
+          "crates/listener/src/tests/watchdog_trip.rs",
+          "successful_renewal_resets_the_failure_window"
         ],
         [
           "crates/listener/tests/outage_test.rs",
           "boundary_is_strict_and_latches"
+        ],
+        [
+          "crates/listener/src/tests/watchdog_sticky_reason.rs",
+          "timed_out_reason_survives_404_during_teardown"
         ]
       ],
       "command": "cargo test -p listener --lib watchdog_trip; cargo test -p listener --test integration -- outage_test::",

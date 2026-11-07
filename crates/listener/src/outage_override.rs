@@ -1,5 +1,5 @@
 //! Folds the mid-job outage watchdog's trip flag into the reported job
-//! conclusion and its "lost connection" annotation.
+//! conclusion and a truthful lock-loss annotation.
 
 use shared::Conclusion;
 
@@ -8,24 +8,43 @@ use shared::Conclusion;
 /// message actually reported to GitHub.
 pub(crate) const LOST_CONNECTION_MESSAGE: &str =
   "Runner lost connection to GitHub for more than 5 minutes; job was cancelled (lost connection).";
+/// Report immediate renewal 404 without claiming a timed outage.
+pub(crate) const JOB_NOT_FOUND_MESSAGE: &str =
+  "GitHub no longer recognizes this job; job was cancelled (job lock lost).";
 
-/// Fold the outage watchdog's trip flag into the engine's conclusion.
+/// Why the renewal task could no longer keep this job's lock.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RenewalLoss {
+  /// No renewal loss occurred.
+  None = 0,
+  /// GitHub returned 404 for this job.
+  JobNotFound = 1,
+  /// Renewal failures persisted beyond the outage threshold.
+  TimedOut = 2,
+}
+
+impl RenewalLoss {
+  /// Decode the atomic state written by the renewal task.
+  pub(crate) fn from_raw(value: u8) -> Self {
+    match value {
+      1 => Self::JobNotFound,
+      2 => Self::TimedOut,
+      _ => Self::None,
+    }
+  }
+}
+
+/// Fold the renewal-loss reason into the engine's conclusion.
 ///
-/// Called only after the renewal task's `JoinHandle` has been awaited, so
-/// there is no race between "the watchdog is still writing the flag" and
-/// "we are reading it". A tripped flag overrides a non-`Success`
-/// conclusion to `Failure` plus the "lost connection" annotation (an
-/// honest verdict either way: a genuinely-failed step, or a GH-initiated
-/// cancel racing the trip, both happened during a real outage). A tripped
-/// flag alongside a `Success` conclusion can only be a
-/// trip-during-teardown race — the job finished before the cancel
-/// landed — so it is left as `Success`, WARN-logged once, with no
-/// annotation; rewriting a successful job's history would be dishonest.
+/// Called after the renewal task is joined, so its reason is final. A lost
+/// lock overrides a non-`Success` conclusion to `Failure` with the matching
+/// annotation. A `Success` alongside a loss is a teardown race: the job
+/// finished before cancellation landed, so its result remains `Success`.
 pub(crate) fn apply_outage_override(
   conclusion: Conclusion,
-  outage_tripped: bool,
+  loss: RenewalLoss,
 ) -> (Conclusion, Vec<wire::reporting::Annotation>) {
-  if !outage_tripped {
+  if loss == RenewalLoss::None {
     return (conclusion, Vec::new());
   }
   if conclusion == Conclusion::Success {
@@ -37,7 +56,12 @@ pub(crate) fn apply_outage_override(
   }
   let annotation = wire::reporting::Annotation {
     level: wire::reporting::ReportAnnotationLevel::Failure,
-    message: LOST_CONNECTION_MESSAGE.to_owned(),
+    message: match loss {
+      RenewalLoss::JobNotFound => JOB_NOT_FOUND_MESSAGE,
+      RenewalLoss::TimedOut => LOST_CONNECTION_MESSAGE,
+      RenewalLoss::None => return (conclusion, Vec::new()),
+    }
+    .to_owned(),
     title: None,
     raw_details: None,
     path: None,
