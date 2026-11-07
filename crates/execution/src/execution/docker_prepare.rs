@@ -65,7 +65,7 @@ pub(super) async fn prepare(
   events: &mpsc::Sender<RunnerEvent>,
   cancel: &CancellationToken,
 ) -> Result<(), RunnerError> {
-  let plan = discover(steps, &source, cancel).await?;
+  let plan = discover(steps, &source, ctx, cancel).await?;
   let count = plan.pulls.len().saturating_add(plan.builds.len());
   if count == 0 {
     return Ok(());
@@ -112,9 +112,11 @@ async fn run_plan(
 async fn discover(
   steps: &[ActionStep],
   source: &Discovery<'_>,
+  ctx: &ExecutionContext,
   cancel: &CancellationToken,
 ) -> Result<ImagePlan, RunnerError> {
   let mut plan = ImagePlan::default();
+  let mut visited = HashSet::new();
   let mut queue: VecDeque<_> = steps
     .iter()
     .filter(|step| !step.is_run_step())
@@ -133,7 +135,14 @@ async fn discover(
       plan.add_pull(image)?;
       continue;
     }
-    discover_remote(&uses, depth, &mut plan, &mut queue, source).await?;
+    if !visited.insert(uses.clone()) {
+      continue;
+    }
+    tokio::select! {
+      biased;
+      () = cancel.cancelled() => return Err(RunnerError::Cancelled),
+      result = discover_remote(&uses, depth, &mut plan, &mut queue, source, ctx) => result?,
+    }
   }
   Ok(plan)
 }
@@ -144,6 +153,7 @@ async fn discover_remote(
   plan: &mut ImagePlan,
   queue: &mut VecDeque<(String, u32)>,
   source: &Discovery<'_>,
+  ctx: &ExecutionContext,
 ) -> Result<(), RunnerError> {
   let Some((action_ref, action_dir, manifest)) = load_remote(uses, source).await else {
     return Ok(());
@@ -151,13 +161,18 @@ async fn discover_remote(
   match manifest.runs.using {
     RunsUsing::Node { .. } => {},
     RunsUsing::Composite => {
-      queue.extend(
-        manifest
-          .runs
-          .steps
-          .into_iter()
-          .filter_map(|step| step.uses.map(|uses| (uses, depth.saturating_add(1)))),
-      );
+      let repository = format!("{}/{}", action_ref.owner, action_ref.repo);
+      queue.extend(manifest.runs.steps.into_iter().filter_map(|step| {
+        step.uses.map(|uses| {
+          // The prepass defers invalid refs to step-time resolution and its diagnostics.
+          let uses =
+            match ctx.resolve_self_uses_for_parent(&uses, (&repository, &action_ref.git_ref)) {
+              Ok(Some(resolved)) => resolved,
+              Ok(None) | Err(_) => uses,
+            };
+          (uses, depth.saturating_add(1))
+        })
+      }));
     },
     RunsUsing::Docker => {
       let Some(image) = manifest.runs.image.as_deref() else {

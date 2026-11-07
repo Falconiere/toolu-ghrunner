@@ -1036,6 +1036,7 @@ These substitutions exercise production dispatch; they are not a new acquisition
 | Remote downloader, image reuse, pre/main/post state and cleanup after failed pre | `remote_repository_action_runs_pre_main_post_and_reuses_image` | Explicit post-push remote replay |
 | Non-Linux rejection and setup skip message | `execution/tests/docker_action_test.rs` platform-specific tests, including captured #103 job | Default macOS suite |
 | Setup Pull/Build rows, duplicate images, outputs, local timing, failures and cancellation | `docker_action_linux_test` Docker setup replay tests | CI Docker replay; real Linux daemon |
+| Discovery cancellation during an in-flight archive, repeated/cyclic composites, depth limit and nested `$/` refs | `execution::docker_prepare::tests` in `crates/execution/src/execution/tests/docker_prepare.rs` | Default suite; loopback archive server, no live GitHub run |
 | Captured registry Pull row forwarding and terminal status | `listener` `setup_forwarding` and `step_report_queue` tests | Default suite |
 
 Run `bash scripts/test/docker_actions_linux.sh all` with a local Linux Docker
@@ -1362,9 +1363,11 @@ Known differences from the reference:
   `Job conclusion: <conclusion>` line so it always has a log. A failed
   job-started hook, or an internal runner error that aborts the step loop,
   still ends the job without a "Complete job" row.
-- The reference lane has a `Pull alpine:3.20` row (upstream pre-pulls registry
-  images) and the Node 20 deprecation and `Process completed with exit code`
-  annotations; toolu emits neither.
+- The reference lane had a `Pull alpine:3.20` row that the toolu lane lacked.
+  Since then, #232 added Pull rows, covered by local and CI Docker evidence above;
+  there has been no fresh paired run. The reference lane also had Node 20
+  deprecation and `Process completed with exit code` annotations that toolu
+  did not emit.
 - `infrastructureFailureCategory` `debugger_tunnel_failure` is never produced:
   toolu has no step debugger.
 - GHES: toolu completes GHES jobs through the same Run Service call. The V1

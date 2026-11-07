@@ -500,7 +500,10 @@ local workflow orchestrator; GitHub orchestrates jobs (#97).
   remote composites, before user steps. It reports case-insensitive deduplicated
   registry Pull rows followed by per-repository Dockerfile Build rows, retains
   images for step reuse, and stops user steps on setup failure or cancellation.
-  Local actions remain step-time; non-Linux hosts skip pull/build setup.
+  Discovery visits each remote reference once, retains the composite depth limit,
+  resolves enabled nested `$/` references against the enclosing remote action,
+  and can be cancelled during a fetch. Local actions remain step-time; non-Linux
+  hosts skip pull/build setup.
 - `docker_action` / `docker_stage` — Linux container action preparation,
   pre/main/post dispatch and normal file/workflow commands. Registry references
   bypass repository resolution; remote Dockerfiles use revision-qualified image
