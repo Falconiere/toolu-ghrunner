@@ -270,8 +270,9 @@ def lifecycle(jobs):
 
 
 def fetch(path):
-    """`gh api path` text, or None when GitHub has nothing to return."""
-    out = subprocess.run(["gh", "api", path], capture_output=True, text=True)
+    """`gh api path` text, or None when GitHub has nothing to return. Job logs
+    carry ANSI colour codes, which `gh` refuses to print without the flag."""
+    out = subprocess.run(["gh", "api", "--allow-escape-sequences", path], capture_output=True, text=True)
     return out.stdout if out.returncode == 0 else None
 
 
