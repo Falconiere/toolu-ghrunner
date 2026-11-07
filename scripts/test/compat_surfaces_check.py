@@ -226,16 +226,17 @@ def evaluate(capture):
     guard = next((j["conclusion"] for j in capture["jobs"] if j["name"] == "guard"), None)
     report = {"run": capture["run"], "guard": guard,
               "scopes": {s: evaluate_scope(s, by_scope.get(s, {}), capture) for s in expected_scopes()}}
-    leaked = len(leaks(capture))
-    if leaked:
-        # Problems quote captured values, so a leak reports its count and nothing else.
-        return report, [f"leak in capture: {leaked} token- or signed-URL-shaped value(s)"]
     failures = []
     if guard != "success":
         failures.append(f"guard concluded {guard}")
     for scope, observed in report["scopes"].items():
         if SCOPE.match(scope)["lane"] in TOOLU_LANES:
             failures += [f"{scope}: {p}" for p in observed["problems"]]
+    leaked = len(leaks(capture))
+    if leaked:
+        # Problems quote captured values, so a leak reports counts and no text.
+        return report, [f"leak in capture: {leaked} token- or signed-URL-shaped value(s); "
+                        f"{len(failures)} other failure(s) withheld"]
     return report, failures
 
 

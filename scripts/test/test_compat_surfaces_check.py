@@ -118,8 +118,11 @@ class MismatchTest(unittest.TestCase):
         jwt = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJyZXBvIn0.x"
         status(self.capture, check.SAFE_ENV, TOOLU, "deploy")["environment_url"] = [jwt]
         found = failures(self.capture)
-        self.assertTrue(any("leak in capture" in f for f in found), found)
-        self.assertFalse(any("eyJ" in f for f in found), found)
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("leak in capture: 1 ", found[0])
+        # The leaked URL also breaks the deploy check; that failure is counted, not quoted.
+        self.assertIn("; 1 other failure(s) withheld", found[0])
+        self.assertNotIn("eyJ", found[0])
 
     def test_leaked_value_never_reaches_the_script_output(self):
         jwt = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJyZXBvIn0.x"
