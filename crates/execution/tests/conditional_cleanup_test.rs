@@ -456,17 +456,22 @@ async fn cancellation_during_real_action_resolution_runs_later_cleanup() -> Test
   });
   let mut msg = probe_message("exit", false)?;
   let captured: AgentJobRequestMessage = serde_json::from_str(CAPTURE)?;
-  msg.steps.first_mut().ok_or("first")?.reference = captured
-    .steps
-    .first()
-    .ok_or("captured remote")?
-    .reference
-    .clone();
+  let remote = captured.steps.first().ok_or("captured remote")?;
+  let remote_uses = execution::execution::action_exec::build_uses_ref(&remote.reference);
+  msg.steps.first_mut().ok_or("first")?.reference = serde_json::from_value(json!({
+    "type": "repository", "repositoryType": "self", "path": "./.github/actions/nested-fetch"
+  }))?;
   msg.variables.insert(
     "system.github.launch_endpoint".to_owned(),
     serde_json::from_value(json!({"value":url,"isSecret":false}))?,
   );
-  let (_temp, _workspace, runner) = runner_for(&msg)?;
+  let (_temp, workspace, runner) = runner_for(&msg)?;
+  let action = workspace.join(".github/actions/nested-fetch");
+  std::fs::create_dir_all(&action)?;
+  std::fs::write(
+    action.join("action.yml"),
+    format!("name: nested-fetch\nruns:\n  using: composite\n  steps:\n    - uses: {remote_uses}\n"),
+  )?;
   let cancel = CancellationToken::new();
   let mut rx = runner.execute_job(msg.clone(), cancel.clone());
   let first_event = tokio::time::timeout(Duration::from_secs(5), async {

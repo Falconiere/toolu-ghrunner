@@ -421,15 +421,17 @@ async fn setup_forwarding_captured_pull_reaches_results_before_user_step()
     .filter(|entry| entry.get("external_id").and_then(serde_json::Value::as_str) == Some(&pull_id))
     .collect();
   assert_eq!(pull.len(), 2);
-  assert_eq!(pull[0]["name"], format!("Pull {image}"));
-  assert_eq!(pull[0]["number"], 2);
-  assert_eq!(pull[1]["name"], pull[0]["name"]);
-  assert_eq!(pull[1]["number"], 2);
-  assert_eq!(pull[1]["status"], 6);
-  assert_eq!(pull[1]["conclusion"], 2);
+  let pull_start = pull.first().ok_or("pull start")?;
+  let pull_complete = pull.get(1).ok_or("pull completion")?;
+  assert_eq!(pull_start["name"], format!("Pull {image}"));
+  assert_eq!(pull_start["number"], 2);
+  assert_eq!(pull_complete["name"], pull_start["name"]);
+  assert_eq!(pull_complete["number"], 2);
+  assert_eq!(pull_complete["status"], 6);
+  assert_eq!(pull_complete["conclusion"], 2);
   let pull_end = entries
     .iter()
-    .position(|entry| entry == pull[1])
+    .position(|entry| entry == *pull_complete)
     .ok_or("pull end")?;
   let user_start = entries
     .iter()
