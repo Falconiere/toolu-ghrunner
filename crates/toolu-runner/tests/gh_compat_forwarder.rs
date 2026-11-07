@@ -14,9 +14,9 @@
 //!      the v2 flag as `True`, the cache mode), container (no v2 flag) and
 //!      `run:` (OIDC pair only); a `None` URL omits its var; the flag parses
 //!      case-insensitively as boolean true.
-//!   3. Through the real `run_job` path a `run:` step sees only the OIDC pair,
-//!      and offline mode gives it no cache vars; a Node action sees the full
-//!      set and saves/restores real bytes over the v2 service.
+//!   3. Through `run_job`, a `run:` step sees only the OIDC pair, and offline
+//!      mode gives it no cache vars. Through `run_steps` with service env
+//!      installed, a Node action sees the full set and saves/restores real bytes.
 
 use std::error::Error;
 use std::sync::{Arc, Mutex};
