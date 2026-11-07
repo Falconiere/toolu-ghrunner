@@ -94,6 +94,7 @@ async fn run_against(peer: &RecordingServer) -> Result<Conclusion, Box<dyn Error
   let engine_rx = runner.execute_job(summary_job()?, CancellationToken::new());
   let cfg = FwdConfig {
     setup_cancel: CancellationToken::new(),
+    data_dir: dir.path().join("data"),
     setup_id: None,
     results_url: Some(peer.base_url()),
     results_client: reqwest::Client::new(),
@@ -106,7 +107,14 @@ async fn run_against(peer: &RecordingServer) -> Result<Conclusion, Box<dyn Error
   };
   let (fwd_tx, mut fwd_rx) = mpsc::channel(128);
   let (outcome_tx, outcome_rx) = oneshot::channel();
-  let handle = spawn_event_forwarder(engine_rx, StepCollector::new(), fwd_tx, cfg, outcome_tx);
+  let handle = spawn_event_forwarder(
+    engine_rx,
+    StepCollector::new(),
+    fwd_tx,
+    cfg,
+    outcome_tx,
+    None,
+  );
   let outcome = tokio::time::timeout(std::time::Duration::from_secs(60), outcome_rx).await??;
   handle.await?;
   while fwd_rx.recv().await.is_some() {}
