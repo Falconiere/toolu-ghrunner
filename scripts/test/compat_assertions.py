@@ -133,8 +133,10 @@ def count(value):
 def eligible_jobs(report, platform, lane):
     """Paired jobs of `lane` on `platform` that ran, so have a log to scan."""
     os_name, arch = platform.split("-")
-    return sum(1 for r in report.get("jobs") or []
-               if (r.get("os"), r.get("arch")) == (os_name, arch) and r[lane]["conclusion"] != "skipped")
+    rows = report.get("jobs") if isinstance(report.get("jobs"), list) else []
+    return sum(1 for r in rows
+               if (dig(r, "os"), dig(r, "arch")) == (os_name, arch)
+               and dig(r, lane, "conclusion") not in (None, "skipped"))
 
 
 def check_leaks(report, platforms):

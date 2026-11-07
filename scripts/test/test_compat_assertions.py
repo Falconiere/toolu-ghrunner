@@ -166,6 +166,16 @@ class AssertionTest(unittest.TestCase):
         for ident in ("R-masking", "X-5", "R-renew", "R-cancellation", "X-6-toolu"):
             self.assertIn(ident, failed)
 
+    def test_malformed_job_rows_fail_closed_everywhere(self):
+        # A null lane view or a non-list `jobs` cannot crash the recomputation
+        # or verify, nor leave a zero-scan leak count looking complete.
+        for mutate in (lambda r: row(r, "probe", "leaks").update(official=None),
+                       lambda r: r.update(jobs={"not": "a list"}),
+                       lambda r: r["jobs"].append("not a row")):
+            with self.subTest():
+                self.report = fixtures.paired_report()
+                self.all_fail(mutate)
+
     def test_a_stored_rows_mismatch_names_the_rows(self):
         self.report["assertions"]["R-oidc"]["rows"] = ["103/R-cache"]
         problems, _ = reference_compare.verify(self.report)

@@ -1,6 +1,7 @@
 //! Upstream pre-job phase for one step (v2.338.2 `JobExtension.InitializeJob`
-//! and `ActionRunner`): a top-level repository Node action's `pre` runs as
-//! its own numbered row before any main step and registers the post first.
+//! and `ActionRunner`): a top-level repository Node action's `pre`, or a
+//! remote Docker action's `pre-entrypoint` on Linux, runs as its own numbered
+//! row before any main step and registers the post first.
 
 use shared::{ActionStep, Conclusion, RunnerError, RunnerEvent};
 
@@ -15,10 +16,6 @@ use super::step_display::display_for;
 use super::step_env::resolve_step_env;
 use super::step_naming::PostStep;
 
-/// Upstream pre-job phase (v2.338.2 `JobExtension`/`ActionRunner`): run a
-/// top-level repository Node action's `pre` as its own row `number`, before
-/// any main step, registering its post first as upstream does. `None` when
-/// the step has no such `pre` (local, image, unresolvable: the main reports).
 /// A step whose `pre` belongs in the pre-job phase: its action directory and
 /// manifest, and how it runs. Resolved quietly; `None` leaves the step alone.
 pub(crate) struct PreTarget {

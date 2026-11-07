@@ -934,7 +934,7 @@ async fn remote_docker_pre_runs_before_every_main_step() -> TestResult {
   // Both pres ran before this first main step.
   let before = ActionStep::script(
     "before",
-    "test \"$(tr '\\n' ' ' < \"$GITHUB_WORKSPACE/pre-ran\")\" = 'first second '",
+    "test \"$(paste -sd ' ' pre-ran)\" = 'first second'",
     "success()",
   );
   job.steps = vec![

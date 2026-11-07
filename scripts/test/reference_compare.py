@@ -378,6 +378,21 @@ def expected_platforms(report):
     return ((None, None),) if is_legacy(report) else EXPECTED_PLATFORMS
 
 
+def well_formed(row):
+    """A job row the comparison can read: variant and job names, and each lane a
+    view with a conclusion and a step list."""
+    return (isinstance(row, dict) and isinstance(row.get("variant"), str)
+            and isinstance(row.get("job"), str)
+            and all(isinstance(row.get(lane), dict) and isinstance(row[lane].get("steps"), list)
+                    for lane in LANES))
+
+
+def job_rows(report):
+    """The report's well-formed job rows; shape_problems names the rest."""
+    jobs = report.get("jobs")
+    return [row for row in jobs if well_formed(row)] if isinstance(jobs, list) else []
+
+
 def shape_problems(report):
     """Sections a report must carry. Job None: no acknowledgement can excuse these."""
     run = report.get("run") or {}
@@ -386,12 +401,16 @@ def shape_problems(report):
         problems.append((None, None, "provenance is missing or empty"))
     problems += [(None, None, f"{field} is missing") for field in REQUIRED_LISTS
                  if not isinstance(report.get(field), list)]
+    if isinstance(report.get("jobs"), list):
+        bad = len(report["jobs"]) - len(job_rows(report))
+        if bad:
+            problems.append((None, None, f"{bad} malformed job row(s)"))
     return problems
 
 
 def coverage_problems(report):
     """Every expected job and observation per platform, and nothing that must not exist."""
-    rows, problems, seen = report.get("jobs") or [], [], set()
+    rows, problems, seen = job_rows(report), [], set()
     platforms = expected_platforms(report)
     for row in rows:
         key, platform = (row_scope(row), row["job"]), (row.get("os"), row.get("arch"))
@@ -417,7 +436,7 @@ def keyed_problems(report):
     """(scope, job, message); recomputed from the stored lane views, never from
     the stored `equal` / `expectation_failures` flags, so editing a flag cannot
     hide a difference."""
-    rows = report.get("jobs") or []
+    rows = job_rows(report)
     problems = shape_problems(report) + coverage_problems(report)
     for row in rows:
         diff = lane_diff(row["toolu"], row["official"])
@@ -435,7 +454,7 @@ def keyed_problems(report):
 
 def observed(report, key, job):
     """The recorded step lists of one job on both lanes in one scope, or None."""
-    row = next((r for r in report.get("jobs") or [] if row_scope(r) == key and r["job"] == job), None)
+    row = next((r for r in job_rows(report) if row_scope(r) == key and r["job"] == job), None)
     return None if row is None else {lane: row[lane]["steps"] for lane in LANES}
 
 

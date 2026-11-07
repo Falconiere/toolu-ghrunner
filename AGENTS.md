@@ -165,7 +165,11 @@ outside a `tests/` tree.
   `runs.using` — node → composite → docker. Unsupported `runs.using` fails at
   manifest parse (`actions/manifest.rs`). A `repositoryType: self` action
   (`uses: ./path`, top-level or nested) runs no `pre` and warns, as upstream
-  (#251). A job container starts as the numbered "Initialize containers" row
+  (#251). Every top-level repository Node action's `pre`, and on Linux a
+  remote Docker action's `pre-entrypoint`, runs in a pre-job phase right after
+  the setup rows as numbered `Pre` rows, registering its post first; a
+  composite gets one `Post` row that runs its embedded posts last-in first-out.
+  A job container starts as the numbered "Initialize containers" row
   after the Docker Pull/Build rows and is removed as "Stop containers", the
   last row before "Complete job"; after a failed start the step loop still
   runs, and a step that runs fails before dispatch (never on the host). `$/[path]` self-repository refs
@@ -493,7 +497,8 @@ outside a `tests/` tree.
   actions, remote-pre-failure keeps eligible posts; `Dockerfile` image reuse).
   `docker_prepare` (#232) discovers remote Docker actions, including those nested
   in remote composites, before user steps: case-insensitive registry Pull rows
-  precede Build rows (one per `owner/repo[/path]@ref`, as upstream), prepared images are reused, and setup
+  precede Build rows, one per action reference `owner/repo[/path]@ref`
+  (case-insensitive, upstream's `ActionRepository`), prepared images are reused, and setup
   failure/cancellation stops user steps (a failed job-container start does not:
   see Handler dispatch). Discovery visits each remote ref once,
   keeps the depth limit, resolves enabled nested `$/` against the enclosing remote

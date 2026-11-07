@@ -498,7 +498,8 @@ local workflow orchestrator; GitHub orchestrates jobs (#97).
   see `docker/`, `node/` below).
 - `docker_prepare` — Discovers remote Docker actions, including those nested in
   remote composites, before user steps. It reports case-insensitive deduplicated
-  registry Pull rows followed by Dockerfile Build rows, one per `owner/repo[/path]@ref` as upstream, retains
+  registry Pull rows followed by Dockerfile Build rows, one per action reference
+  `owner/repo[/path]@ref` (case-insensitive) as upstream, retains
   images for step reuse, and stops user steps on setup failure or cancellation.
   Discovery visits each remote reference once, retains the composite depth limit,
   resolves enabled nested `$/` references against the enclosing remote action,
