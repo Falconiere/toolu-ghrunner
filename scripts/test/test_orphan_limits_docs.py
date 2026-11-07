@@ -68,20 +68,23 @@ class OrphanLimitsDocsTest(unittest.TestCase):
                 text = (ROOT / name).read_text(encoding="utf-8")
                 self.assertEqual(absent(text, ESCAPES), [])
 
-    def test_a_document_missing_one_limit_is_reported(self):
-        """Dropping one real sentence must fail the check, one fact at a time,
-        so a passing run above means the prose is there and not that the
-        patterns match anything."""
+    def test_each_fact_is_present_and_its_pattern_matches_only_itself(self):
+        """Removing one fact from README must remove text and leave the other
+        eight findable.
+
+        The removal count is what proves the fact is in the prose at all. The
+        exact-list comparison is what proves the pattern is specific to it: a
+        pattern loose enough to match arbitrary prose would strip the document
+        and report several facts missing, which would otherwise let both tests
+        above pass without the documents saying anything.
+        """
         text = (ROOT / "README.md").read_text(encoding="utf-8")
         facts = {**ENVIRONMENT_LIMIT, **ESCAPES}
         for name, pattern in facts.items():
             with self.subTest(removed=name):
-                # Without the removal count this would pass on a fact README
-                # never stated: the substitution would be a no-op and the fact
-                # would be reported missing for the wrong reason.
                 stripped, removed = re.subn(pattern, "", text)
                 self.assertTrue(removed, "the pattern matched nothing to remove")
-                self.assertIn(name, absent(stripped, facts))
+                self.assertEqual(absent(stripped, facts), [name])
 
 
 if __name__ == "__main__":
