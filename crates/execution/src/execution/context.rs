@@ -302,6 +302,22 @@ impl ExecutionContext {
     super::actions::resolver::resolve_self_reference(uses, parent)
   }
 
+  /// Resolve a nested `$/` reference against the enclosing remote action during setup discovery.
+  ///
+  /// # Errors
+  ///
+  /// `RunnerError::ActionResolution` when the feature is disabled or the reference is malformed.
+  pub(crate) fn resolve_self_uses_for_parent(
+    &self,
+    uses: &str,
+    parent: (&str, &str),
+  ) -> Result<Option<String>, shared::RunnerError> {
+    super::actions::resolver::resolve_self_reference(
+      uses,
+      self.self_repository_enabled.then_some(parent),
+    )
+  }
+
   /// Set a string value in the github context.
   pub fn set_github_context(&mut self, key: &str, value: &str) {
     self
