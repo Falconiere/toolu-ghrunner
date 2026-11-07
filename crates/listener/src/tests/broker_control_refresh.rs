@@ -337,8 +337,11 @@ async fn a_stalled_token_endpoint_is_abandoned_at_its_deadline() -> TestResult {
     );
   }
   // The retry only reaches the peer once the first request is abandoned, so
-  // the gap between the two arrivals IS the per-request deadline — measured
-  // at the peer, independent of this test's own 13s guard.
+  // the gap between the two arrivals is the 10s request deadline plus the
+  // first retry sleep — `jittered_backoff(1s)`, which is 0.5s to 1.0s. That
+  // puts the gap in 10.5s..11.0s; the window below adds scheduling slack but
+  // still excludes a deadline of 9s or less. Measured at the peer, so it is
+  // independent of this test's own 13s guard.
   let arrivals = peer.arrivals("/oauth2/token");
   let [first, second] = arrivals.as_slice() else {
     return Err(
@@ -351,8 +354,9 @@ async fn a_stalled_token_endpoint_is_abandoned_at_its_deadline() -> TestResult {
   };
   let deadline = second.duration_since(*first);
   assert!(
-    (Duration::from_millis(9_500)..Duration::from_millis(11_500)).contains(&deadline),
-    "the stalled request was abandoned after {deadline:?}, not at its 10s deadline"
+    (Duration::from_millis(10_400)..Duration::from_millis(12_000)).contains(&deadline),
+    "the stalled request was abandoned after {deadline:?} (deadline + first \
+     retry sleep), which is not the 10s deadline plus a 0.5s-1.0s sleep"
   );
   assert!(started.elapsed() >= Duration::from_secs(10));
   assert_eq!(
