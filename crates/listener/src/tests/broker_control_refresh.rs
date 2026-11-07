@@ -427,3 +427,64 @@ async fn cancellation_mid_exchange_exits_without_publishing() -> TestResult {
   );
   Ok(())
 }
+
+/// #77 77-S3 ("secrets not logged"): the two lines this path writes — the
+/// retry WARN in `retry::retry_transient` and the publication INFO in
+/// `idle::refresh_idle_token` — carry neither the spent nor the granted
+/// token.
+///
+/// The capture is a plain `fmt` subscriber, so these are the raw lines as
+/// production formats them, before the `SecretMasker` redactor a real run
+/// installs would see them. The assertion is therefore the stronger one:
+/// the refresh path never formats a token at all, rather than relying on
+/// masking to hide one it did.
+#[tokio::test]
+async fn refresh_log_lines_carry_neither_the_old_nor_the_new_token() -> TestResult {
+  let log = tempfile::NamedTempFile::new()?;
+  let subscriber = tracing_subscriber::fmt()
+    .with_ansi(false)
+    .without_time()
+    // Every level: a sibling test's subscriber can leave a lower maximum
+    // cached at these callsites when the whole lib target shares a process.
+    .with_max_level(tracing::Level::TRACE)
+    .with_writer(Arc::new(log.reopen()?))
+    .finish();
+  let peer = Peer::start(
+    vec![
+      (StatusCode::SERVICE_UNAVAILABLE, String::new()),
+      (StatusCode::OK, granted(NEW_TOKEN)),
+    ],
+    false,
+  )
+  .await?;
+  let mut ctx = session(&peer)?;
+  {
+    // Thread-local default: a current-thread test runtime polls the refresh
+    // on this very thread, so both production log calls land in the file.
+    let _guard = tracing::subscriber::set_default(subscriber);
+    assert!(matches!(refresh(&mut ctx).await?, IdleDecision::Continue));
+  }
+  assert_eq!(
+    ctx.token, NEW_TOKEN,
+    "the refreshed token was not published"
+  );
+
+  let written = std::fs::read_to_string(log.path())?;
+  assert!(
+    written.contains("retrying transient reporting failure"),
+    "the retry WARN never reached the capture, so there is nothing to scan: {written:?}"
+  );
+  assert!(
+    written.contains("broker token refreshed"),
+    "the publication INFO never reached the capture: {written:?}"
+  );
+  assert!(
+    !written.contains(NEW_TOKEN),
+    "a log line carried the granted token: {written}"
+  );
+  assert!(
+    !written.contains(OLD_TOKEN),
+    "a log line carried the spent token: {written}"
+  );
+  Ok(())
+}
