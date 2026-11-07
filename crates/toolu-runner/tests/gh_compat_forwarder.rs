@@ -124,10 +124,19 @@ fn extract_reads_system_connection_urls_and_token() -> TestResult<()> {
 
 #[test]
 fn per_step_type_sets_match_official_handlers() -> TestResult<()> {
-  let env = forward_env(&extract_service_urls(&compat_job(
+  let msg = compat_job(
     Some(("actions_uses_cache_service_v2", "true")),
     Some("write"),
-  )?));
+  )?;
+  assert_eq!(
+    msg
+      .variables
+      .get("actions_uses_cache_service_v2")
+      .map(|v| v.value.as_str()),
+    Some("true"),
+    "raw job message must carry actions_uses_cache_service_v2 before extraction"
+  );
+  let env = forward_env(&extract_service_urls(&msg));
   let node = map(env.node);
   let container = map(env.container);
   let script = map(env.script);
@@ -183,6 +192,8 @@ fn cache_v2_flag_parses_as_boolean_case_insensitively() -> TestResult<()> {
     for mode in [None, Some(""), Some("write")] {
       let env = forward_env(&extract_service_urls(&compat_job(flag, mode)?));
       let node = map(env.node);
+      let container = map(env.container);
+      let script = map(env.script);
       assert_eq!(
         node.get("ACTIONS_CACHE_SERVICE_V2").map(String::as_str),
         expected.then_some("True"),
@@ -193,6 +204,29 @@ fn cache_v2_flag_parses_as_boolean_case_insensitively() -> TestResult<()> {
         node.get("ACTIONS_CACHE_MODE").map(String::as_str),
         mode.filter(|m| !m.is_empty()),
         "mode {mode:?} with flag {flag:?}"
+      );
+      // Container gets the mode but never the v2 flag; `run:` gets neither.
+      assert_eq!(
+        container
+          .get("ACTIONS_CACHE_SERVICE_V2")
+          .map(String::as_str),
+        None,
+        "container flag {flag:?}"
+      );
+      assert_eq!(
+        container.get("ACTIONS_CACHE_MODE").map(String::as_str),
+        mode.filter(|m| !m.is_empty()),
+        "container mode {mode:?} with flag {flag:?}"
+      );
+      assert_eq!(
+        script.get("ACTIONS_CACHE_SERVICE_V2").map(String::as_str),
+        None,
+        "script flag {flag:?}"
+      );
+      assert_eq!(
+        script.get("ACTIONS_CACHE_MODE").map(String::as_str),
+        None,
+        "script mode {mode:?} with flag {flag:?}"
       );
     }
   }
@@ -420,8 +454,11 @@ async fn node_action_receives_the_forwarded_set_with_v2_flag_and_mode() -> TestR
     Some(("actions_uses_cache_service_v2", "true")),
     Some("write"),
   )?;
-  let expected = map(forward_env(&extract_service_urls(&msg)).node);
-  let seen = probe_node_action(forward_env(&extract_service_urls(&msg))).await?;
+  let env = forward_env(&extract_service_urls(&msg));
+  let expected = map(env.node.clone());
+  let seen = tokio::time::timeout(std::time::Duration::from_secs(300), probe_node_action(env))
+    .await
+    .map_err(|_| "probe_node_action timed out after 5 minutes")??;
   // The host process (e.g. a CI job) may carry its own ACTIONS_* vars, so check
   // every forwarded pair arrived with its exact value rather than map equality.
   for (key, value) in &expected {
@@ -464,6 +501,16 @@ fn cache_client_steps(
 
 #[tokio::test]
 async fn node_action_saves_and_restores_exact_bytes_over_v2_with_no_v1_request() -> TestResult<()> {
+  tokio::time::timeout(
+    std::time::Duration::from_secs(300),
+    node_action_saves_and_restores_inner(),
+  )
+  .await
+  .map_err(|_| "cache v2 save/restore timed out after 5 minutes")??;
+  Ok(())
+}
+
+async fn node_action_saves_and_restores_inner() -> TestResult<()> {
   use cache::blob::BlobRegistry;
   use cache::cas::{CacheIndex, CasStore, LeaseSet};
   use cache::scope::CacheScopes;
