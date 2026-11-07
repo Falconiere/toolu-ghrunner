@@ -4,7 +4,9 @@
 import copy
 import importlib
 import json
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -118,6 +120,22 @@ class MismatchTest(unittest.TestCase):
         found = failures(self.capture)
         self.assertTrue(any("leak in capture" in f for f in found), found)
         self.assertFalse(any("eyJ" in f for f in found), found)
+
+    def test_leaked_value_never_reaches_the_script_output(self):
+        jwt = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJyZXBvIn0.x"
+        status(self.capture, check.SAFE_ENV, TOOLU, "deploy")["environment_url"] = [jwt]
+        with tempfile.NamedTemporaryFile("w", suffix=".json") as capture:
+            json.dump(self.capture, capture)
+            capture.flush()
+            run = subprocess.run([sys.executable, str(ROOT / "scripts/test/compat_surfaces_check.py"),
+                                  "--verify", capture.name], capture_output=True, text=True, check=False)
+        self.assertEqual(run.returncode, 1)
+        self.assertIn("leak in capture", run.stderr)
+        self.assertNotIn("eyJ", run.stdout + run.stderr)
+
+    def test_aws_signed_url_fails(self):
+        annotations(self.capture, TOOLU, "secrets")[0]["message"] = "https://s3.example/x?X-Amz-Signature=abc"
+        self.assertFails("leak in capture")
 
     def test_signed_url_fails(self):
         annotations(self.capture, TOOLU, "secrets")[0]["message"] = "https://blob.example/x?sv=1&sig=abc"

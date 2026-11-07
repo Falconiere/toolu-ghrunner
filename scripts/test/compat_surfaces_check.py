@@ -48,8 +48,8 @@ SECRET_WARNINGS = sorted([
     "Skip output 'masked' since it may contain secret.",
     f"Skip setting environment url as environment '{MASKED_ENV}' may contain secret.",
 ])
-# A JWT (header.payload.) or a signed blob URL must never be captured.
-LEAKS = re.compile(r"eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.|[?&]sig=")
+# A JWT (header.payload.) or a signed URL (Azure SAS, AWS SigV4, generic) must never be captured.
+LEAKS = re.compile(r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.|[?&](?:sig|Signature|X-Amz-Signature)=")
 
 
 def expected_scopes():

@@ -80,6 +80,7 @@ else
 fi
 
 want "guard proves the credential, not just its presence" '::error::credential check failed: HTTP \$status'
+want "the credential check calls the API with the secret" "status=\\\$\\(curl .*'%\\{http_code\\}' -H \"Authorization: Bearer \\\$GH_TOKEN\""
 want "the credential check names runner administration" '"actions/runners\?per_page=1"'
 want "the credential check names job reads" '"actions/runs/\$GITHUB_RUN_ID/jobs\?per_page=1"'
 
@@ -320,6 +321,7 @@ DOCKER
   mutate "a skipped digest check" '/shasum -a 256/d'
   mutate "a removed secret guard" '/UNVERIFIED/d'
   mutate "a presence-only credential check" '/credential check failed/d'
+  mutate "a credential check that never calls the API" '/status=\$\(curl/d'
   mutate "a surfaces job without check reads" '/^      checks: read$/d'
   mutate "a second accelerated host" 's/^            sha256: 670adb.*/&\n            accelerated: true/'
   mutate "a fixed host label" 's/^      LABEL_PREFIX: .*/      LABEL_PREFIX: compat-paired/'

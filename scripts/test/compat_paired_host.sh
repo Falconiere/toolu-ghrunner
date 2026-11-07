@@ -90,14 +90,14 @@ start_toolu() {
   toolu_pid=$!
 }
 
-# The accelerated lane: register and run inside one ubuntu container. RUNNER_TEMP
-# is mounted at the same path so the registration's paths hold on both sides; the
-# token goes in by name (`-e TOOLU_RUNNER_TOKEN`), never on a command line.
+# The accelerated lane: register and run inside one ubuntu container. Only its own
+# home is mounted, at the same path, so the registration's paths hold on both
+# sides; the token goes in by name (`-e TOOLU_RUNNER_TOKEN`), never on a command line.
 start_accelerated() {
   local label="$LABEL_PREFIX-toolu-accelerated" home="$RUNNER_TEMP/toolu-accelerated-home"
   mkdir -p "$home"
   TOOLU_RUNNER_TOKEN="$GH_TOKEN" docker run -d --name "$ACCELERATED_CONTAINER" \
-    -v "$RUNNER_TEMP:$RUNNER_TEMP" -v "$TOOLU_BIN:/usr/local/bin/toolu-runner:ro" \
+    -v "$home:$home" -v "$TOOLU_BIN:/usr/local/bin/toolu-runner:ro" \
     -e TOOLU_RUNNER_TOKEN -e "TOOLU_RUNNER_HOME=$home" -e "LANE_LABEL=$label" \
     -e "LANE_URL=https://github.com/$GITHUB_REPOSITORY" "$ACCELERATED_IMAGE" bash -c '
       set -eu
@@ -110,7 +110,7 @@ start_accelerated() {
         --config "$config" --work "$TOOLU_RUNNER_HOME/_work"
       sed -i "s/^mode = \"forwarder\"\$/mode = \"accelerated\"/" "$config"
       grep -qx "mode = \"accelerated\"" "$config" || {
-        echo "::error::could not set [services] mode = accelerated for $LANE_LABEL"
+        echo "::error::could not set [services] mode = accelerated for $LANE_LABEL; found: $(grep "^mode = " "$config" || echo "no mode line")"
         exit 1
       }
       exec toolu-runner run --config "$config"' >&2
