@@ -1,0 +1,15 @@
+name: compat-251 docker pre
+description: "#251 D7 probe: a remote Dockerfile action with pre, main and post entrypoints."
+inputs:
+  who:
+    description: Distinguishes the two uses of this action in one job.
+    required: true
+  before:
+    description: The uses whose posts must already have run, each followed by '|'.
+    default: ''
+runs:
+  using: docker
+  image: Dockerfile
+  pre-entrypoint: /pre.sh
+  entrypoint: /main.sh
+  post-entrypoint: /post.sh
