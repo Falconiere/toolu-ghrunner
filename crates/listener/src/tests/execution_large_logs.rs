@@ -20,8 +20,9 @@ struct ServerState {
 
 async fn receive(State(state): State<ServerState>, request: Request<Body>) -> Response<Body> {
   let path = request.uri().path().to_owned();
-  if path == "/step" || path == "/job" {
-    let mut file = match std::fs::File::create(state.dir.join(&path[1..])) {
+  if path.starts_with("/step/") || path == "/job" {
+    let filename = path.trim_start_matches('/').replace('/', "-");
+    let mut file = match std::fs::File::create(state.dir.join(filename)) {
       Ok(file) => file,
       Err(_) => {
         return Response::builder()
@@ -45,9 +46,30 @@ async fn receive(State(state): State<ServerState>, request: Request<Body>) -> Re
     return Response::new(Body::empty());
   }
   let blob = if path.ends_with("GetStepLogsSignedBlobURL") {
-    Some("step")
+    let Ok(bytes) = axum::body::to_bytes(request.into_body(), 65536).await else {
+      return Response::builder()
+        .status(400)
+        .body(Body::empty())
+        .unwrap_or_default();
+    };
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+      return Response::builder()
+        .status(400)
+        .body(Body::empty())
+        .unwrap_or_default();
+    };
+    let Some(id) = value
+      .get("step_backend_id")
+      .and_then(serde_json::Value::as_str)
+    else {
+      return Response::builder()
+        .status(400)
+        .body(Body::empty())
+        .unwrap_or_default();
+    };
+    Some(format!("step/{id}"))
   } else if path.ends_with("GetJobLogsSignedBlobURL") {
-    Some("job")
+    Some("job".to_owned())
   } else {
     None
   };
@@ -65,16 +87,15 @@ fn make_input(path: &Path) -> TestResult<()> {
   }
   writeln!(out, "{SECRET}")?;
   let mut seed = 0x1234_5678_u32;
-  let mut line = format!("{SECRET}");
-  for _ in 0..65536 {
-    seed ^= seed << 13;
-    seed ^= seed >> 17;
-    seed ^= seed << 5;
-    line.push(char::from(b'!' + u8::try_from(seed % 90)?));
-  }
-  line.push('\n');
-  for _ in 0..(195 * MIB / line.len() + 1) {
-    out.write_all(line.as_bytes())?;
+  for _ in 0..(195 * MIB / 65536 + 1) {
+    let mut line = format!("{SECRET}");
+    for _ in 0..65536 {
+      seed ^= seed << 13;
+      seed ^= seed >> 17;
+      seed ^= seed << 5;
+      line.push(char::from(b'!' + u8::try_from(seed % 90)?));
+    }
+    writeln!(out, "{line}")?;
   }
   out.flush()?;
   assert!(std::fs::metadata(path)?.len() >= 200 * MIB as u64);
@@ -200,6 +221,7 @@ async fn real_child_large_logs_remain_bounded_and_upload_in_order() -> TestResul
   let expected_step = temp.path().join("expected-step");
   let job_file = expected_job.clone();
   let step_file = expected_step.clone();
+  let captured_step_id = step_id.clone();
   let capture = tokio::spawn(async move {
     let mut job = std::io::BufWriter::new(std::fs::File::create(job_file)?);
     let mut step = std::io::BufWriter::new(std::fs::File::create(step_file)?);
@@ -210,7 +232,7 @@ async fn real_child_large_logs_remain_bounded_and_upload_in_order() -> TestResul
       {
         let line = line.replace(SECRET, "***");
         writeln!(job, "{line}")?;
-        if id == step_id {
+        if id == captured_step_id {
           writeln!(step, "{line}")?;
         }
       }
@@ -261,7 +283,7 @@ async fn real_child_large_logs_remain_bounded_and_upload_in_order() -> TestResul
     peak.saturating_sub(baseline)
   );
   assert!(std::fs::metadata(&expected_step)?.len() >= 200 * MIB as u64);
-  assert_gzip_matches(&server_dir.join("step"), &expected_step)?;
+  assert_gzip_matches(&server_dir.join(format!("step-{step_id}")), &expected_step)?;
   assert_gzip_matches(&server_dir.join("job"), &expected_job)?;
   assert!(!spool_path.exists(), "combined spool was not removed");
   let mut gzip_name = spool_path.as_os_str().to_os_string();
@@ -272,5 +294,31 @@ async fn real_child_large_logs_remain_bounded_and_upload_in_order() -> TestResul
   );
   assert_no_spools(&config.data_dir.join("_logs"))?;
   server.abort();
+  Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn spool_is_private_and_replaces_stale_files() -> TestResult<()> {
+  use std::os::unix::fs::PermissionsExt;
+
+  let temp = tempfile::tempdir()?;
+  let first = crate::log_spool::LogSpool::for_job(temp.path(), "stale-job")?;
+  let path = first.path().to_owned();
+  let dir = path.parent().ok_or("spool directory")?.to_owned();
+  assert_eq!(std::fs::metadata(&dir)?.permissions().mode() & 0o777, 0o700);
+  assert_eq!(
+    std::fs::metadata(&path)?.permissions().mode() & 0o777,
+    0o600
+  );
+  drop(first);
+  std::fs::write(&path, b"stale")?;
+  let mut gz_name = path.as_os_str().to_os_string();
+  gz_name.push(".gz");
+  let gz_path = PathBuf::from(gz_name);
+  std::fs::write(&gz_path, b"stale gzip")?;
+  let fresh = crate::log_spool::LogSpool::for_job(temp.path(), "stale-job")?;
+  assert_eq!(std::fs::metadata(fresh.path())?.len(), 0);
+  assert!(!gz_path.exists());
   Ok(())
 }
