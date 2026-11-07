@@ -746,9 +746,9 @@ async fn failing_post_honors_continue_on_error() -> TestResult<()> {
 }
 
 /// 3c: a failing `pre` applies the step's `continue-on-error` as its own
-/// step. Without it the failure becomes the step's conclusion: `main` does
-/// not run and no `post` registers. With it, `pre` concludes `success` and
-/// `main`/`post` run normally.
+/// step. Without it the failure becomes the step's conclusion and `main`
+/// does not run; with it, `pre` concludes `success` and `main` runs. Either
+/// way the `post` runs, as upstream registers it before running `pre`.
 #[tokio::test]
 async fn failing_pre_honors_continue_on_error() -> TestResult<()> {
   for (continue_on_error, expected, ran_main) in [

@@ -174,7 +174,6 @@ fn home() -> Result<(tempfile::TempDir, String), Box<dyn std::error::Error>> {
   Ok((home, path_env))
 }
 
-/// Run `setup` unattended against `server`.
 /// Recording `open` and `xdg-open` first on PATH: a browser-capable test can
 /// never start a real browser, and `shim-opener/opened.log` shows any attempt
 /// (the production opener resolves its launcher through PATH). Kept under a
@@ -194,6 +193,7 @@ pub(crate) fn opener_trap(
   Ok((format!("{}:{path_env}", bin.display()), log))
 }
 
+/// Run `setup` unattended against `server`.
 fn run_setup(
   home: &Path,
   path_env: &str,

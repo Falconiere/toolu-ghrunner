@@ -112,7 +112,12 @@ for job in leaks composite stack docker-pre failure orphans timeout cancel cance
   want "the probe has the $job job" "^  $job:$" "$PROBE"
 done
 want "the probe callers turn the extended jobs on" '^      extended: true$'
-want "extended defaults off for the accelerated and negative callers" '^      extended:$' "$PROBE"
+# The pool and docker-pre jobs rely on this: only the probe-variant caller sets it.
+grep -A3 '^      extended:$' "$PROBE" | grep -qx '        default: false' &&
+  echo "ok: extended defaults off for the accelerated and negative callers" || {
+  echo "FAIL: the probe's extended input must default to false" >&2
+  fail=1
+}
 want "pool jobs run on the per-lane pool label" '^    runs-on: \[self-hosted, "\$\{\{ inputs\.runner_label \}\}-pool"\]$' "$PROBE"
 want "cancel ends by the GitHub job timeout" '^    timeout-minutes: 1$' "$PROBE"
 want "the built action is pinned to a commit" 'uses: Falconiere/toolu-ghrunner/\.github/actions/compat-251-docker@[0-9a-f]{40}$' "$PROBE"
