@@ -247,17 +247,19 @@ jobs:
     outputs:
       sha: ${{ steps.payload.outputs.sha }}
     steps:
+      # Written outside the workspace: the container runs as root, and a root-owned
+      # file in the workspace later jobs share would block their extraction.
       - name: Write payload in the container
         id: payload
         run: |
           grep -q '^ID=ubuntu$' /etc/os-release
-          printf 'container-237-%s\n' '${{ github.run_id }}' > container-237.txt
-          printf 'sha=%s\n' "$(sha256sum container-237.txt | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          printf 'container-237-%s\n' '${{ github.run_id }}' > /tmp/container-237.txt
+          printf 'sha=%s\n' "$(sha256sum /tmp/container-237.txt | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       - name: Upload from the container
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: compat-237-${{ inputs.lane }}-${{ inputs.variant }}-container
-          path: container-237.txt
+          path: /tmp/container-237.txt
           if-no-files-found: error
 
   consumer:
@@ -281,13 +283,14 @@ jobs:
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: compat-237-${{ inputs.lane }}-${{ inputs.variant }}-container
+          path: container-237-download
       - name: Verify outputs and artifact digests
         run: |
           test '${{ needs.secrets.outputs.safe }}' = compat-237-safe-output
           test -z '${{ needs.secrets.outputs.masked }}'
           test "$(shasum -a 256 artifact-103.txt | cut -d' ' -f1)" = '${{ needs.services.outputs.artifact_sha }}'
           if [ '${{ inputs.run_docker }}' = true ]; then
-            test "$(shasum -a 256 container-237.txt | cut -d' ' -f1)" = '${{ needs.container.outputs.sha }}'
+            test "$(shasum -a 256 container-237-download/container-237.txt | cut -d' ' -f1)" = '${{ needs.container.outputs.sha }}'
           fi
       - name: Verify cross-job values
         run: |

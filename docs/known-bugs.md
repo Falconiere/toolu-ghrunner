@@ -62,6 +62,21 @@ GHES result exists to cite.
   replaces its stale combined `.log` and `.log.gz`, not unrelated step files.
   A spool I/O failure warns and can leave durable logs incomplete without
   changing the job conclusion.
+- **Job containers in accelerated mode:** a job with `container:` fails at
+  "Set up job" under `[services] mode = "accelerated"` (or `offline`) with
+  "job containers require forwarder services mode", because the local service
+  URLs are loopback addresses the container cannot reach. Use `forwarder` for
+  container jobs. Running the toolu runner itself inside a container is
+  supported in accelerated mode; the #237 live probe runs it that way.
+- **Secret-bearing environment URL (deliberate deviation):** when a job's
+  `environment.url` evaluates to a value the masker would change, toolu sends
+  no URL. The official runner (v2.338.2 `JobExtension.FinalizeJob`) logs the
+  same "Skip setting environment url as environment '<name>' may contain
+  secret." warning but keeps the original template; for a secret in a
+  literal environment URL that template is the secret-bearing string, which it
+  then reports. toolu suppresses both forms, so a registered secret never
+  reaches `completejob` (`crates/execution/src/execution/environment_url.rs`).
+  A URL built from a masked step output ends empty on both runners (#237).
 - **Removal during a job:** normal removal drains a supervised registration
   for up to 30 seconds and keeps its state if still busy. `remove --force`
   removes local state while retaining the held lock; it neither cancels the

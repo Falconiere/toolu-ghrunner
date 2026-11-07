@@ -14,7 +14,9 @@ fetches them for every lane with the run's own token, keeps a sanitized capture
 - `deploy`: the safe URL on its deployment status (matched by the status
   `log_url`, which names the job).
 - job conclusions for the in-job checks: OIDC in `services`, outputs and
-  artifact digests in `consumer`, the container upload in `container`.
+  artifact digests in `consumer`, the job-container upload in `container`
+  (toolu and official Linux lanes; the accelerated lane's runner itself runs in
+  a container, which has no Docker daemon).
 
 Only toolu lanes (`toolu`, `toolu-accelerated`) fail the check; official lanes
 are recorded for #251. `--verify <capture>` re-evaluates a committed capture
@@ -131,7 +133,8 @@ def check_jobs(scope, jobs):
     """(seen, problems) for the jobs a scope must run and their in-job checks."""
     parsed = SCOPE.match(scope)
     wanted = ["annotations", "secrets", "deploy", "services", "consumer"]
-    wanted += ["container"] if parsed["os"] == "Linux" else []
+    # The accelerated lane's runner runs in a container with no Docker daemon.
+    wanted += ["container"] if parsed["os"] == "Linux" and parsed["lane"] != "toolu-accelerated" else []
     seen, problems = {}, []
     for name in wanted:
         job = jobs.get(name)
