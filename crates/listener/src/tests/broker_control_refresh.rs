@@ -10,11 +10,12 @@
 //! The clock stays real: a paused clock auto-advances whenever the runtime
 //! waits on a socket, which trips the very timeouts under test. The two
 //! bounds (`broker_refresh.rs`: 10s per request, 30s of retry sleep) are
-//! therefore observed through what the peer sees inside a short window — a
-//! second attempt can only exist if the first was abandoned at its deadline
-//! — rather than by waiting a bound out. Per the issue, no strict total
-//! duration is asserted; `tests/watchdog_retry.rs` owns full budget
-//! exhaustion for `retry_transient` itself.
+//! therefore measured at the peer: the 10s request deadline shows up as the
+//! gap between two arrivals, since the retry can only reach the peer once
+//! the first request was abandoned. The 30s retry-sleep budget is the one
+//! bound waited out for real, because exhausting it is the only way to see
+//! the terminal failure it produces. Per the issue, no strict total duration
+//! is asserted — only the floor the budget guarantees.
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
