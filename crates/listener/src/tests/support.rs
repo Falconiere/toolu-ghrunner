@@ -65,7 +65,8 @@ impl Gate {
 }
 
 /// One recorded HTTP request: arrival time (for ordering/overlap
-/// assertions), method, path, and raw body — recorded BEFORE any
+/// assertions), method, path, bearer credential and raw body — recorded
+/// BEFORE any
 /// configured hold is applied, so `arrived_at` reflects when the request
 /// reached the server, not when it was answered.
 #[derive(Debug, Clone)]
@@ -76,6 +77,8 @@ pub(crate) struct RecordedRequest {
   pub(crate) method: Method,
   /// The request path (no scheme/host/query).
   pub(crate) path: String,
+  /// The `Authorization` header value, when the client sent one.
+  pub(crate) authorization: Option<String>,
   /// The raw request body.
   pub(crate) body: Vec<u8>,
 }
@@ -135,6 +138,7 @@ async fn catch_all(
   State(state): State<RecorderState>,
   method: Method,
   uri: Uri,
+  headers: axum::http::HeaderMap,
   body: axum::body::Bytes,
 ) -> impl IntoResponse {
   let arrived_at = Instant::now();
@@ -145,6 +149,10 @@ async fn catch_all(
       arrived_at,
       method: method.clone(),
       path: path.clone(),
+      authorization: headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned),
       body: body.to_vec(),
     },
   );

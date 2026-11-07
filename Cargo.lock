@@ -1675,6 +1675,7 @@ name = "listener"
 version = "0.15.0"
 dependencies = [
  "axum",
+ "base64 0.22.1",
  "chrono",
  "execution",
  "fastrand",
