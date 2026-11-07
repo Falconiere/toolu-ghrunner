@@ -130,7 +130,7 @@ fn assert_no_spools(dir: &Path) -> TestResult<()> {
     } else {
       let name = path.file_name().ok_or("file name")?.to_string_lossy();
       assert!(
-        !name.ends_with(".log") && !name.ends_with(".log.gz"),
+        !name.ends_with(".log") && !name.ends_with(".gz"),
         "spool remains: {path:?}"
       );
     }
@@ -320,5 +320,112 @@ fn spool_is_private_and_replaces_stale_files() -> TestResult<()> {
   let fresh = crate::log_spool::LogSpool::for_job(temp.path(), "stale-job")?;
   assert_eq!(std::fs::metadata(fresh.path())?.len(), 0);
   assert!(!gz_path.exists());
+  Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn cancelled_real_child_uploads_logs_and_removes_spools() -> TestResult<()> {
+  let temp = tempfile::tempdir()?;
+  let server_dir = temp.path().join("received");
+  std::fs::create_dir(&server_dir)?;
+  let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+  let base = format!("http://{}", listener.local_addr()?);
+  let server = tokio::spawn(
+    axum::serve(
+      listener,
+      Router::new()
+        .fallback(any(receive))
+        .with_state(ServerState {
+          base: base.clone(),
+          dir: server_dir.clone(),
+        }),
+    )
+    .into_future(),
+  );
+  let mut raw: serde_json::Value = serde_json::from_str(include_str!(
+    "../../../execution/tests/incoming_contexts_matrix_0.json"
+  ))?;
+  let steps = raw
+    .get_mut("steps")
+    .and_then(serde_json::Value::as_array_mut)
+    .ok_or("steps")?;
+  let mut step = steps
+    .iter()
+    .find(|s| s["reference"]["type"] == "script")
+    .ok_or("script step")?
+    .clone();
+  let step_id = step["id"].as_str().ok_or("step id")?.to_owned();
+  step["inputs"] = serde_json::json!({"type":2,"map":[{"Key":{"type":0,"lit":"script"},"Value":{"type":0,"lit":"while :; do printf 'cancel-probe-240\\n'; done"}}]});
+  step["condition"] = serde_json::json!("success()");
+  *steps = vec![step];
+  let mut msg: AgentJobRequestMessage = serde_json::from_value(raw)?;
+  msg.defaults.clear();
+  msg.job_outputs = None;
+  let config = shared::RunnerConfig {
+    data_dir: temp.path().join("data"),
+    workspace_root: temp.path().join("work"),
+    workspace_gc_hours: 0,
+    ..shared::RunnerConfig::default()
+  };
+  let masker = Arc::new(Mutex::new(SecretMasker::new()));
+  let runner = Runner::new(config.clone(), Arc::clone(&masker));
+  let cancel = CancellationToken::new();
+  let cfg = FwdConfig {
+    setup_cancel: cancel.clone(),
+    results_url: Some(base),
+    results_client: reqwest::Client::new(),
+    results_token: "token".into(),
+    run_backend_id: "run".into(),
+    job_backend_id: "job".into(),
+    setup_lines: Vec::new(),
+    setup_id: None,
+    live_log_tx: None,
+    masker,
+  };
+  let spool = crate::log_spool::LogSpool::for_job(&config.data_dir, &msg.job_id)?;
+  let (tx, mut rx) = mpsc::channel(8);
+  let (outcome_tx, outcome_rx) = oneshot::channel();
+  let observer_cancel = cancel.clone();
+  let observer = tokio::spawn(async move {
+    let mut seen = 0;
+    while let Some(event) = rx.recv().await {
+      if matches!(event, ListenerEvent::Runner(RunnerEvent::Log { ref line, .. }) if line == "cancel-probe-240")
+      {
+        seen += 1;
+        if seen == 16 {
+          observer_cancel.cancel();
+        }
+      }
+    }
+    seen
+  });
+  let events = runner.execute_job_with_shutdown(msg, cancel, CancellationToken::new());
+  let handle = spawn_event_forwarder(
+    events,
+    StepCollector::new(),
+    tx,
+    cfg,
+    outcome_tx,
+    Some(spool),
+  );
+  let outcome = tokio::time::timeout(Duration::from_secs(30), outcome_rx).await??;
+  assert_eq!(outcome.conclusion, Conclusion::Cancelled);
+  let upload = outcome.job_log_upload.ok_or("missing combined upload")?;
+  tokio::time::timeout(Duration::from_secs(30), upload).await??;
+  handle.await?;
+  assert!(
+    observer.await? >= 16,
+    "child did not emit enough logs before cancellation"
+  );
+  for path in [
+    server_dir.join(format!("step-{step_id}")),
+    server_dir.join("job"),
+  ] {
+    let mut decoded = String::new();
+    flate2::read::GzDecoder::new(std::fs::File::open(path)?).read_to_string(&mut decoded)?;
+    assert!(decoded.contains("cancel-probe-240\n"));
+  }
+  assert_no_spools(&config.data_dir.join("_logs"))?;
+  server.abort();
   Ok(())
 }
