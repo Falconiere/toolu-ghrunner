@@ -1072,10 +1072,9 @@ registration's `runtime.data_dir`.
 
 That `data_dir` also holds `_temp/` (`RUNNER_TEMP`), `tmp/` (file commands) and
 `_tool/` (tool cache). `_temp` and `tmp` are emptied at the start and the end of
-every job, as the official runner does, so they hold only the running job's
-files; `_tool` is never pruned. A file the runner cannot delete is logged as a
-warning and does not change the job result. Registrations must not share a
-`data_dir`.
+every job, as the official runner does; `_tool` is never pruned. A file the
+runner cannot delete stays, so a later job can see it, and is logged as a warning
+without changing the job result. Registrations must not share a `data_dir`.
 
 `remove` deletes a registration's `config.toml`, `credentials.json`,
 `.lock`, `.pending_remove` and `.stopped`; `_diag/` is kept, so job history

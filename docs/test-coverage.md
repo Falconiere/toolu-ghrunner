@@ -1796,8 +1796,9 @@ temporary `data_dir`.
 | Delete error | A file that cannot be deleted leaves one `WARN`, other files are removed, the conclusion stays `Success` (skipped when run as root) | `job_teardown_order_test::undeletable_file_warns_and_never_changes_the_result` |
 
 Matrix row `103/R-temp-cleanup`. The macOS and hermetic lanes run these in the
-default gate; github-com, reference and GHES are **unverified**, and Docker and
-ui-service are not applicable.
+default gate; Docker (a root-owned container file is represented by a read-only
+root), github-com, reference and GHES are **unverified**, and ui-service is not
+applicable.
 
 ## GitHub App registration (#201)
 

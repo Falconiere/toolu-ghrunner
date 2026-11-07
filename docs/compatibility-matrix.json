@@ -20875,7 +20875,7 @@
           "run_job_keeps_the_channel_open_until_temp_is_empty"
         ]
       ],
-      "command": "cargo test -p toolu-runner --test integration -- job_teardown_order_test::",
+      "command": "cargo test -p execution --test integration -- runner_paths_test:: && cargo test -p toolu-runner --test integration -- job_teardown_order_test::",
       "lanes": {
         "hermetic": {
           "status": "passed",
@@ -20886,8 +20886,8 @@
           "evidence": "gate"
         },
         "docker": {
-          "status": "not-applicable",
-          "reason": "not a Docker surface; root-owned container files are represented by a read-only root"
+          "status": "unverified",
+          "reason": "no container leaves a root-owned file in this PR's tests; a read-only root represents the delete failure"
         },
         "github-com": {
           "status": "unverified",
