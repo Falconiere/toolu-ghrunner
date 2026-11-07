@@ -26,7 +26,7 @@ toolu-ghrunner/                            workspace root
     │   ├── messages.rs                    BrokerMessage + AES-256-CBC decrypt
     │   ├── rsa_oaep.rs                    RSA-OAEP unwrap of the session AES key
     │   ├── runner_version.rs              COMPATIBILITY_VERSION (pinned official-runner identity)
-    │   ├── session.rs                     CreateSessionRequest/Response builders
+    │   ├── session.rs                     CreateSessionRequest/Response builders (brokerSession: true)
     │   ├── types.rs                       RunnerSettings, CredentialData, RsaKeyParams
     │   └── v1/                            GHES V1 types + resolve_service_url
     ├── shared/                            cross-cutting types + tracing init (no deps)
@@ -318,7 +318,9 @@ call the listener makes flows through this module.
   `client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer`,
   parse `AccessToken`.
 - `session::create_session` / `session::delete_session` —
-  `POST {server_url_v2}/session` and `DELETE …`. Status non-2xx on
+  `POST {server_url_v2}/session` (body carries `agent.version` =
+  `COMPATIBILITY_VERSION` and `brokerSession: true`, as official v2.338.0+)
+  and `DELETE {server_url_v2}/session?sessionId=<id>`. Status non-2xx on
   delete is logged but treated as success (broker may have already
   expired the session).
 - `messages::poll_message` / `messages::acknowledge_message` — long
@@ -1127,7 +1129,7 @@ SIGINT/SIGTERM        toolu-runner run             GH broker         Run Service
  │                          │ │ POST /completejob        │                  │
  │                          │ ├───────────────────────────────────────────>│
  │                          │ │<──── ack ─────────────────────────────────┤
- │                          │ │ DELETE /session         │                  │
+ │                          │ │ DELETE /session?sessionId=<id>             │
  │                          │ ├───────────────────────>│                  │
  │                          │ └─ listener returns Ok — JIT config spent ─┤
  │                          │                          │                  │
@@ -1142,7 +1144,7 @@ SIGINT/SIGTERM        toolu-runner run             GH broker         Run Service
  │                          │                          │                  │
  │ ────────────────────────>│ cancel token (or .pending_remove seen      │
  │                          │  between jobs)          │                  │
- │                          │  DELETE /session        │                  │
+ │                          │  DELETE /session?sessionId=<id>            │
  │                          ├───────────────────────>│                  │
  │                          │ release .lock; exit 0   │                  │
 ```

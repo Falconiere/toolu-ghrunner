@@ -163,7 +163,12 @@ outside a `tests/` tree.
 - **Handler dispatch**: no plugin layer, no local orchestrator (removed #97).
   `steps_runner` splits `run:` vs `uses:`; `action_exec` matches
   `runs.using` — node → composite → docker. Unsupported `runs.using` fails at
-  manifest parse (`actions/manifest.rs`).
+  manifest parse (`actions/manifest.rs`). `$/[path]` self-repository refs
+  (#241, job variable `actions_self_repository`) resolve only in a composite
+  manifest's nested `uses:` (`composite_uses` →
+  `actions::resolver::resolve_self_reference`: enclosing remote action, else
+  the `job` context `workflow_repository`@`workflow_sha`); a top-level `$/`
+  workflow step is unresolved (`docs/known-bugs.md`).
 - **Service mode** (`[services] mode`, `ServicesMode` in `shared`):
   `forwarder` (default) injects the REAL GitHub service URLs + runtime token
   from the job message `SystemVssConnection` per step type (official v2.338.2
@@ -174,7 +179,9 @@ outside a `tests/` tree.
   non-empty) and `ACTIONS_CACHE_SERVICE_V2=True` (job variable
   `actions_uses_cache_service_v2`, case-insensitive name, on only if it parses
   as boolean true); container actions the same without the v2 flag; `run:`
-  steps only the OIDC pair. The setup log prints `Cache mode: <mode>`;
+  steps the OIDC pair plus `ACTIONS_ORCHESTRATION_ID` (= `system.orchestrationId`,
+  only when job variable `actions_set_orchestration_id_env_for_actions` is
+  true; `ServiceUrls::orchestration_id`, upstream `ScriptHandler`, #241). The setup log prints `Cache mode: <mode>`;
   `offline` starts only the local v1 cache (no artifact/OIDC startup or
   GitHub service forwarding); `Accelerated` serves both cache
   protocols (v2 Twirp via `RESULTS_URL`, v1 REST via `CACHE_URL`) from local
@@ -296,8 +303,9 @@ outside a `tests/` tree.
   sub/iss=clientId, aud=url, jti, nbf/iat −30s, exp +4m30s; `parse_rsa_private_key`,
   `build_jwt`, `AccessToken`), `jit_config`
   (3-blob base64 envelope), `runner_version::COMPATIBILITY_VERSION` (pinned
-  official-runner identity; product version separate, see
-  `docs/runner-updates.md`), `session` (ephemeral `00000000-…` request:
+  official-runner identity, v2.338.2; product version separate, see
+  `docs/runner-updates.md`), `session` (ephemeral `00000000-…` request,
+  `brokerSession: true` since v2.338.0:
   `CreateSessionRequest`/`Response`, `AgentInfo`, `EncryptionKey`,
   `TaskAgentSession`, `build_session_request`),
   `messages` (`decrypt_message_body` AES-256-CBC + `strip_bom`;
@@ -411,7 +419,8 @@ outside a `tests/` tree.
 - **`wire/`**: `net/` async transport — `auth` (deleted-registration 4xx
   `invalid_client`, live capture `oauth_invalid_client_400.json`, is `Auth`
   not retried `Protocol`), `device_auth` (host-relative device flow backs
-  `login`), `session` (create/delete; 409 → `SessionConflict`), `messages`
+  `login`), `session` (create/delete — delete is `DELETE /session?sessionId=<id>`; 409 →
+  `SessionConflict`), `messages`
   (poll+ack), `run_service` (acquire/renew/complete), `results_service` (Twirp
   step/log RPCs + signed blob URLs), `log_upload` (append-blob),
   `v1` (GHES discovery + timeline), `register` (`generate-jitconfig` + runner

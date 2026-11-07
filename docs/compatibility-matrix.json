@@ -6111,7 +6111,7 @@
         "docs/runner-version-evidence.json",
         ".github/workflows/noop-live.yml"
       ],
-      "expected": "Real outgoing HTTP requests from one build carry session agent.version=2.337.0 and poll/ack runnerVersion=2.337.0 (poll cursors 0 and 99, disableUpdate=true) while product version is separate. The loopback recorder closes the connection; all four calls error and no GitHub success is fabricated.",
+      "expected": "Real outgoing HTTP requests from one build carry session agent.version=2.338.2 (plus brokerSession=true) and poll/ack runnerVersion=2.338.2 (poll cursors 0 and 99, disableUpdate=true) while product version is separate; DELETE /session carries sessionId as a query parameter. The loopback recorder closes the connection; all four calls error and no GitHub success is fabricated.",
       "production_path": "protocol::runner_version::COMPATIBILITY_VERSION; protocol::build_session_request; wire::net::{create_session,poll_message,acknowledge_message}",
       "tests": [
         [
@@ -6168,7 +6168,7 @@
         "docs/runner-version-evidence.json",
         ".github/workflows/noop-live.yml"
       ],
-      "expected": "The 2.337.0 string is asserted on the wire; rationale (official release 397b032, epic snapshot cab9d1c, separate product version) is in docs/runner-updates.md and checked only by scripts/test/runner_version_evidence_check.py, which the CI gate does not run.",
+      "expected": "The 2.338.2 string is asserted on the wire; rationale (official release d1eb12d, delta from 2.337.0 / 397b032 / cab9d1c, separate product version) is in docs/runner-updates.md and checked only by scripts/test/runner_version_evidence_check.py, which the CI gate does not run.",
       "production_path": "protocol::runner_version; docs/runner-updates.md",
       "tests": [
         [
@@ -6416,7 +6416,7 @@
         "docs/runner-version-evidence.json",
         ".github/workflows/noop-live.yml"
       ],
-      "expected": "Session agent.version and poll/ack runnerVersion are all 2.337.0 in recorded HTTP requests; startup logs product 0.9.2 and compatibility 2.337.0; the live toolu run showed no acknowledgement-failure warning.",
+      "expected": "Session agent.version and poll/ack runnerVersion are all one value in recorded HTTP requests (hermetic test now asserts 2.338.2; the recorded live toolu run below was made at the earlier 2.337.0 pin, startup logs product 0.9.2 and compatibility 2.337.0, and showed no acknowledgement-failure warning; the live repeat at 2.338.2 is #251).",
       "production_path": "protocol::runner_version; wire::net",
       "tests": [
         [
@@ -6570,7 +6570,7 @@
       "input": [
         "docs/runner-updates.md"
       ],
-      "expected": "docs/runner-updates.md assigns maintenance ownership, states the 2.337.0 baseline and the update/revalidation procedure, and says a clock simulation cannot prove service policy. Documentation criterion; no executable Rust test.",
+      "expected": "docs/runner-updates.md assigns maintenance ownership, states the 2.338.2 baseline (2.337.0 as its predecessor, with the v2.337.0 to v2.338.2 delta table) and the update/revalidation procedure, and says a clock simulation cannot prove service policy. Documentation criterion; no executable Rust test.",
       "production_path": "docs/runner-updates.md",
       "tests": [],
       "command": "python3 scripts/test/runner_version_evidence_check.py",
