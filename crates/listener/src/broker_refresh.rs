@@ -7,7 +7,10 @@ use shared::RunnerError;
 use crate::SessionCtx;
 
 /// Maximum time spent sleeping between transient exchange attempts.
-const REFRESH_RETRY_BUDGET: Duration = Duration::from_secs(30);
+///
+/// `pub(crate)` so the #77 exhaustion test asserts against the bound itself
+/// rather than a copy that could drift from it.
+pub(crate) const REFRESH_RETRY_BUDGET: Duration = Duration::from_secs(30);
 /// Maximum duration of one exchange request.
 const REFRESH_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 

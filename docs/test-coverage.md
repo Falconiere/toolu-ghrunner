@@ -140,9 +140,10 @@ The real-tool regression is
 `crates/listener/src/tests/multiline_mask.rs::multiline_mask_real_job_reaches_every_local_sink`,
 run with `cargo nextest run -p listener -E 'test(multiline_mask)'`. It replays
 the committed sanitized `crates/toolu-runner/tests/fixtures/job_message.json` envelope through
-`run_job`, preserving the first two step UUID/contextName identities and
-replacing their inputs with the disposable shell probe
-`crates/listener/tests/multiline_mask.sh` and local composite actions. This is
+`run_job`, keeping the captured action step's UUID/contextName identity but
+re-pointing it at a local composite that nests the disposable shell probe
+`crates/listener/tests/multiline_mask.sh` (one inner step registers the masks,
+the next prints them), followed by a synthetic notice step. This is
 local production replay, not a newly captured live GitHub job. Probe values
 are deliberately non-credential text. The behavior oracle is
 [actions/runner cab9d1c, ActionCommandManager](https://github.com/actions/runner/blob/cab9d1c3901e45c7705889c4f88284fdd93f4ae5/src/Runner.Worker/ActionCommandManager.cs#L444).
@@ -152,7 +153,7 @@ are deliberately non-credential text. The behavior oracle is
 | 86-S1 | Encoded LF/CRLF/CR, blank lines, whitespace, repeated/overlapping values, 1–3 byte values and Unicode; whole value and each trimmed line become `***`; a plain space stays unchanged. `%250A` is decoded only once. | Real shell → dispatcher → shared masker. |
 | 86-S2 | Seven stdout and seven stderr records become `stdout=[***]` / `stderr=[***]`, with `control remains visible` unchanged. | Actual event forwarder writes the combined-job disk spool and produces byte-identical step-upload and live-log lines; real journal writer persists matching JSONL lines; production `RedactingWriter` with `MaskerRedactor` yields identical diagnostic lines. No HTTP service or upload acknowledgment is mocked. |
 | 86-S3 | Nested local composite invokes background shell writers after registration; repeated/overlapping values merge without residual text. | Sorted probe records match exactly; stream identities, counts and successful job completion are asserted. Concurrent registration is serialized by the existing shared mutex. |
-| 86-S4 | A later top-level notice containing three newly registered short lines becomes `annotation=[***|***|***]`. | Annotation producer covered locally. Summary, job output and deployment-URL integration with #70/#82/#83/#88 remains **unverified**. |
+| 86-S4 | The masks are registered inside a nested composite; a later top-level notice containing three newly registered short lines becomes `annotation=[***|***|***]`. The nested composite registers two multiline masks, one LF and one CRLF, and a later step summary redacts the whole multiline span as a single `***`, one of its lines, and the CRLF value's line, while a non-secret control line survives; three later job outputs carrying lines of those masks, including the CRLF value's line, are dropped with the secret warning while a clear output survives; a later deployment URL carrying a line is suppressed with upstream's warning (#235). | The whole-value span is LF because `step_summary` normalizes CRLF to the platform newline (LF on macOS and Linux, the hosts the suite runs on) before masking, so a CR-bearing whole span is unreachable at that sink on those hosts by design, not for want of a test; CRLF splitting is proven instead through that mask's lines. Otherwise covered locally against real sinks. GitHub.com and GHES UI/backend observation of the same job remains **unverified**. |
 
 Verification status: the pre-fix test reproduced cleartext
 `annotation=[Q|RS|TUV]` on macOS. The post-fix production-replay test passes
@@ -162,8 +163,21 @@ Linux execution, GitHub.com/GHES UI/backend uploads and comparison with the
 pinned official runner are **unverified**. Registration is backend-independent;
 these local buffers do not prove remote UI behavior. Diagnostics here exercise
 the actual writer/redactor directly, not global subscriber initialization.
-Nested composite shell workflow-command routing is a separate observed gap;
-the nested probe tests ordinary stdout/stderr, and the notice runs top-level.
+Nested composite shell workflow-command routing is no longer a gap (#235): the
+probe registers every multiline `::add-mask::` from inside the nested
+composite, and the top-level notice that follows it is redacted. Multiline masks
+registered the same way from a nested composite also redact a later step summary
+and suppress later job outputs and a deployment URL
+(`job_outputs_test::nested_composite_mask_suppresses_a_later_job_output`,
+`environment_url_test::nested_composite_mask_suppresses_the_environment_url`).
+Both pattern families `SecretMasker::add_mask` registers are asserted: the whole
+multiline span collapses to one `***` in the summary, and individual lines are
+masked wherever they appear alone, which is what reaches the job-output and
+deployment-URL sinks since those carry single-line values. Each probe payload is
+its own line, none a substring of another, and the stem they share is not itself
+a mask, so a payload is redacted only by its own registration; deleting only the
+CRLF `::add-mask::` fails the job-output test (checked by mutation, not a
+standing test).
 
 ## Incoming contexts acceptance (#68)
 
@@ -338,7 +352,7 @@ classifier. They do not claim an unknown control was captured from GitHub.
 | --- | --- | --- |
 | 77-S1 | `message_types`, `broker_poll_parser`, and `broker_control` preserve a future type's original envelope and choose the unknown route without decrypting an opaque body. | An actual unknown broker response, subsequent live poll cursor, and following job acquisition remain unverified. |
 | 77-S2 | `broker_control` checks repeated/older IDs against the listener cursor rule. Existing `early_ack` coverage retains job-only acknowledgement. | Broker redelivery and acknowledgement failure against GitHub remain unverified. |
-| 77-S3 | Production refresh signs a JIT assertion, bounds transient exchange attempts, and publishes only a nonempty successful token. `cargo check -p listener --lib --tests` verifies code integration. | No real `ForceTokenRefresh` message or OAuth fault sequence is available; live rotation, retry and cancellation remain unverified. |
+| 77-S3 | Production refresh signs a JIT assertion against a loopback OAuth peer and publishes the new token, which the next broker poll carries (`broker_control_refresh.rs`, #235). A transient failure is retried and the retry's success publishes; persistent failures are retried with a doubling backoff until the 30 s retry-sleep budget is exhausted, which ends the refresh as a `Network` failure with the spent bearer still in place (the test waits the real budget out, since shortening the production constant would leave the bound untested); a peer that never answers is abandoned at the 10 s per-request deadline (the retry reaches the peer 10.4–12 s after the first request, the deadline plus the first jittered sleep); a rejection (fatal, never retried), an empty grant and a cancellation mid-exchange all publish nothing, and the rejection and empty-grant error text echoes neither token. A real `tracing` subscriber captures the two lines this path writes — `retry_transient`'s retry WARN and the publication INFO — and both are free of the spent and the granted token before any masking, so the retry-then-success path never formats one (log lines on the exhaustion, rejection and cancellation paths are not captured). Only the idle-loop publication seam is driven; the mid-job watcher (`job_lifecycle::refresh_watcher_token`) shares `refresh_access_token` but is not exercised. | No real `ForceTokenRefresh` message or OAuth fault sequence is available; live rotation, retry and cancellation remain unverified. |
 | 77-S4 | Capture-derived type variants distinguish `RunnerRefresh`, `AgentRefresh`, `RunnerRefreshConfig`, `HostedRunnerShutdown`, and future names. | Live control-message injection and the pinned reference-runner comparison remain unverified. |
 
 The full gate is `./tools/check.sh all`. On this macOS host, test binaries
@@ -408,12 +422,17 @@ provenance and hash are in `crates/execution/tests/defaults_run_evidence.json`.
 
 | Scenario | Current evidence | Evidence still needed |
 | --- | --- | --- |
-| 76-S1 | The captured `actions/checkout@v4` job selects its exact Launch path and sends `{action,version}`. Production prefetch and step execution share the acquired-job resolver and a revision-qualified cache. | A sanitized real Launch response and public/private/internal SHA, tag, branch, subpath, and local-action live runs. |
+| 76-S1 | The captured `actions/checkout@v4` job selects its exact Launch path and sends `{action,version}`. Production prefetch and step execution share the acquired-job resolver and a revision-qualified cache. A loopback Launch peer serving a `tar_url` + scoped token has its URL fetched with that token's Basic credential and its tarball extracted and run (#235, `action_infrastructure_test::launch_success_uses_the_served_url_token_and_runs_the_action`); the peer records three identical resolutions — the setup prefetch, the #255 Docker-prepare manifest scan and the step — that share one archive fetch. | An actually-private or internal action, a local-action step proven to download nothing, and public/private/internal SHA, tag, branch, subpath and local-action live runs. This row stays **unverified**: the Launch success path alone does not cover those clauses. |
 | 76-S2 | A capture-derived host variant selects its GHES API URL; legacy discovery uses the action-download resource from connection data. | A real GHES and GitHub Connect job, including the returned cross-host archive URL, plus an older-server fallback run. |
-| 76-S3 | Local HTTP failure and redirect probes check 401/403 propagation, Basic archive auth on the source origin, and no auth at a different origin. | Live token expiry, rate limiting, transient failure, retry, and durable log redaction observations. |
+| 76-S3 | Local HTTP failure and redirect probes check 401/403 propagation, Basic archive auth on the source origin, and no auth at a different origin. Every archive status the issue names — 401, 403, 404, 429, 500 and 503 — fails the job with a bounded number of archive requests (at most one per resolver, so at most three — and 401 and 403 at least two and at most six, since only those are retried as an auth refresh) and leaves behind neither a cache entry, nor staging, nor the scoped token in any log line or error, in raw or Basic-encoded form (#235, `action_infrastructure_test::archive_failure_statuses_are_bounded_and_leave_no_cache_entry`); a body cut mid-stream and a corrupt tarball are covered for conclusion and error category only. | Request bounds and cache state for a cut body and a corrupt tarball, an expired scoped token, the downloader's handling of server retry guidance such as `Retry-After`, rate limiting and durable log redaction. This row stays **unverified**: bounded failure alone does not cover those clauses. |
 | 76-S4 | Existing downloader tests cover streaming extraction, corrupt archive cleanup and concurrent staging; the new parser rejects traversal and the fetcher keys by resolved SHA. | Live moved-ref, cancellation, and same-revision concurrent execution observations. |
 
-Run `cargo test -p execution --test integration -- action_downloads_test::` and
+The scoped archive credential the Launch peer returns is registered with the
+`SecretMasker` and never reaches a log line in raw or Basic-encoded form
+(#235, `action_infrastructure_test::launch_scoped_token_is_masked_and_never_logged`),
+which is the hermetic half of 76/AC-4.
+
+Run `cargo test -p execution --test integration -- action_downloads_test:: action_infrastructure_test::` and
 `./tools/check.sh all`. Local newly built test binaries on the development
 macOS host have stalled in `_dyld_start` before Rust code executes. The
 GitHub Linux `ci` and `ci-macos` PR checks are the authorized gate evidence
@@ -1150,11 +1169,19 @@ and architecture come from the host, not hosted-runner image metadata.
   later failure and cancellation, distinct document IDs (83-S1–S4); a BOM-only
   file contributes nothing, a symlink at the summary path is rejected without
   uploading the file it points at, and a FIFO there is rejected without blocking.
-- `cargo test -p listener step_summary`: failed HTTP uploads still drain later
-  queued documents. This is failure-path coverage, not successful-service proof.
+- `cargo test -p listener step_summary`: a real two-step job registers a mask and
+  writes `$GITHUB_STEP_SUMMARY`; the document reaches a recording Results Service
+  through all three calls, carrying the job's backend identities, the masked
+  bytes and their byte count, in signing/PUT/metadata order (#235). A peer that
+  rejects the signing call writes no blob and leaves the conclusion `Success`;
+  eighteen documents against a stalled peer apply backpressure past the queue's
+  sixteen buffered slots plus the one in flight, and still drain; a failed
+  upload does not strand later ones.
 - `cargo test -p wire step_summary`: local TCP stubs cover a failed RPC, a
   malformed reply that never exposes values, and blob 503 retries without
-  leaking the signed URL. The successful three-call upload is not exercised.
+  leaking the signed URL, plus the successful three-call upload and the
+  inclusive `soft_size_limit` boundary, which refuses an oversized document
+  before any blob PUT (#235).
 - `cargo test -p observability step_summary`: journal includes only summary ID
   and byte count, never document text.
 - `.github/workflows/step-summary-83.yml`: opt-in GitHub.com live toolu/reference
@@ -1256,6 +1283,9 @@ re-signed `sleep` / `bash` copies only where SIP hides the environment) were
 run locally on a SIP-enabled macOS 27.0.1 host. macOS real-process behavior is verified by
 the CI `macos-14` test run and, for SIP-hidden environments, by that local
 macOS 27.0.1 run; a macOS toolu live lane is **unverified**.
+Processes inside Docker containers are never tagged (container teardown owns
+them), and a runner crash or the `boot` deadline watchdog's hard exit skips the
+sweep.
 The toolu self-hosted workflow lane (`run_toolu`) is **unverified** (no
 registered runner). GHES is **unverified** (no server); the process rule does
 not depend on the server.

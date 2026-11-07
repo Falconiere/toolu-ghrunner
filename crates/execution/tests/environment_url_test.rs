@@ -76,7 +76,7 @@ fn set_script(message: &mut AgentJobRequestMessage, index: usize, script: &str) 
 }
 
 async fn run(message: AgentJobRequestMessage, cancel_on: Option<&str>) -> TestResult<Job> {
-  run_signalled(message, cancel_on, None).await
+  run_signalled(message, cancel_on, None, |_| Ok(())).await
 }
 
 /// [`run`], also shutting the runner down when `shutdown_on` starts.
@@ -84,14 +84,24 @@ async fn run_signalled(
   message: AgentJobRequestMessage,
   cancel_on: Option<&str>,
   shutdown_on: Option<&str>,
+  prepare: impl FnOnce(&std::path::Path) -> TestResult,
 ) -> TestResult<Job> {
   let dir = tempfile::tempdir()?;
   let config = RunnerConfig {
     data_dir: dir.path().join("data"),
     workspace_root: dir.path().join("work"),
     workspace_gc_hours: 0,
+    workspace: shared::WorkspaceConfig {
+      mode: shared::WorkspaceMode::Fresh,
+      stable_gc_hours: 0,
+    },
     ..RunnerConfig::default()
   };
+  // `prepare` populates the job's workspace before the engine starts, for
+  // the local composite actions a `uses: ./...` step resolves there.
+  let workspace = config.workspace_root.join(&message.job_id);
+  std::fs::create_dir_all(&workspace)?;
+  prepare(&workspace)?;
   let (cancel, shutdown) = (CancellationToken::new(), CancellationToken::new());
   let runner = Runner::new(config, Arc::new(Mutex::new(SecretMasker::new())));
   let mut stream = runner.execute_job_with_shutdown(message, cancel.clone(), shutdown.clone());
@@ -481,7 +491,7 @@ async fn runner_shutdown_is_the_conclusion_complete_job_logs() -> TestResult {
     .ok_or("captured step missing")?
     .id
     .clone();
-  let job = run_signalled(message, None, Some(&after_deploy)).await?;
+  let job = run_signalled(message, None, Some(&after_deploy), |_| Ok(())).await?;
   // A shutdown fails the job, so the row must not claim another verdict.
   assert_eq!(job.conclusion, Conclusion::Failure);
   assert!(
@@ -489,5 +499,47 @@ async fn runner_shutdown_is_the_conclusion_complete_job_logs() -> TestResult {
     "{:?}",
     job.complete_logs()
   );
+  Ok(())
+}
+
+/// #86/#88 AC-9: a `::add-mask::` registered inside a NESTED composite
+/// suppresses the job's `actionsEnvironment.url` when the "Complete job" row
+/// evaluates it, with upstream's warning and no trace of the URL in the
+/// completion log lines.
+#[tokio::test]
+async fn nested_composite_mask_suppresses_the_environment_url() -> TestResult {
+  const NESTED_HOST: &str = "nested-mask-235.example";
+  // A line of the registered multiline mask, not the stem it is built from:
+  // the stem alone is no mask, so suppression can only come from this line.
+  let [host, _, _] = crate::nested_mask::lf_lines(NESTED_HOST);
+  let mut message = with_url(literal(&format!("https://{host}/deploy")))?;
+  let name = message
+    .actions_environment
+    .as_ref()
+    .and_then(|environment| environment.name.clone())
+    .ok_or("captured environment name missing")?;
+  let steps = std::mem::take(&mut message.steps);
+  message.steps = std::iter::once(crate::nested_mask::outer_step(
+    "22222222-aaaa-4bbb-8ccc-000000000002",
+  ))
+  .chain(steps)
+  .collect();
+  let job = run_signalled(message, None, None, |workspace| {
+    Ok(crate::nested_mask::write_actions(workspace, NESTED_HOST)?)
+  })
+  .await?;
+
+  assert_eq!(job.conclusion, Conclusion::Success);
+  assert_eq!(
+    job.environment_url, None,
+    "a nested-composite mask did not suppress the url"
+  );
+  let warning = format!("Skip setting environment url as environment '{name}' may contain secret.");
+  assert_eq!(
+    job.complete_annotations(),
+    [(AnnotationLevel::Warning, warning.as_str())]
+  );
+  let logs = job.complete_logs();
+  assert!(!logs.iter().any(|line| line.contains(&host)), "{logs:?}");
   Ok(())
 }

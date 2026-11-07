@@ -522,6 +522,13 @@ fn extract_system_token(job_msg: &AgentJobRequestMessage) -> Option<String> {
   token
 }
 
+// Declared here, not at the crate root, because the refresh publication seam
+// it drives (`idle::handle_idle_outcome`, `poll_once`) is private to this
+// module. The name keeps it under the `broker_control` test filter #77 names.
+#[cfg(test)]
+#[path = "tests/broker_control_refresh.rs"]
+mod broker_control_refresh;
+
 #[cfg(test)]
 #[path = "tests/runner_update_policy.rs"]
 mod runner_update_policy;

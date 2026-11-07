@@ -475,8 +475,10 @@ outside a `tests/` tree.
   job outputs (#88, below) included. `job_http` (#94: job + accelerated clients
   from `RunnerConfig.network`, proxy-credential masks, host/container exports);
   `service_endpoints`; `orphan_cleanup` (#89: `RUNNER_TRACKING_ID`,
-  pre-`JobCompleted` SIGKILL, 15s, never fails; SIP-blind Apple binaries covered
-  via registered process groups); `temp_cleanup` (#239: empties `_temp` + `tmp`
+  pre-`JobCompleted` SIGKILL, 15s, never fails; matches exec-time `/proc` /
+  `KERN_PROCARGS2` environment snapshots, SIP-blind Apple binaries covered via
+  registered process groups; `sudo`/other users/group leavers, containers and a
+  crash escape — limits in README); `temp_cleanup` (#239: empties `_temp` + `tmp`
   before context build and before `run_job` returns, so before the channel close
   that reports completion and frees the next job, never in `finish`; no symlink
   follow, past delete errors, `_tool` kept); `workspace_{layout,tracking,lease}` (#90) +
@@ -656,8 +658,10 @@ outside a `tests/` tree.
 `RunnerEvent::StepSummary` = immutable masked doc + backend UUID; listener
 re-masks and uploads only when a Results endpoint exists (serial queue drained
 pre-completion), else skips. Bodies never touch diagnostic sinks (journal keeps
-ID + size only); read/size/upload errors never change the conclusion. Scope in
-`docs/step-summaries.md`.
+ID + size only); read/size/upload errors never change the conclusion. The queue
+holds 16 documents plus one in flight and never drops one (the 18th producer
+blocks), so a stalled Results Service delays completion per document written
+(figures in `docs/step-summaries.md`).
 
 ### CompleteJob / StepResult (#88)
 

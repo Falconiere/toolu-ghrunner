@@ -11,6 +11,7 @@
 | `completejob.rs` | Captured issue-88 jobs through `run_acquired_job` → `report_completion`: environment URL, secret suppression, billing owner, upstream `StepResult` keys and identity, infrastructure category latch, retry and cancellation. |
 | `annotation_reporting.rs` | Captured-job shell/composite annotations through a recorded Run Service POST. |
 | `broker_control.rs` | Committed V2 envelope shapes through the production message classifier: future types skipped with the original cursor, forced refresh vs known update messages, hosted shutdown, redelivered control messages. |
+| `broker_control_refresh.rs` | #77 `ForceTokenRefresh` re-exchange against a loopback OAuth peer: the published token reaches the next broker poll; a transient failure is retried, persistent failures run out the real 30 s retry budget as a `Network` error, a stalled endpoint is abandoned at its request deadline, rejection, an empty grant and cancellation publish nothing, rejection/empty-grant errors echo no token, and the retry WARN and publication INFO lines carry none — that last one in a child process, since a thread-local subscriber races `tracing`'s global callsite interest when a process runs tests in parallel. Drives the idle publication seam only (the mid-job watcher is not exercised). Declared from `job_lifecycle.rs` (the seam is private to that module). |
 | `drain.rs` | #208 drain: an idle poll loop ends with no job, a pre-fired drain takes none, a drain after the acquire lets the real job finish and report `succeeded`. |
 | `early_ack.rs` | Broker acknowledgment ordering (its job fixture is shared with `drain.rs`). |
 | `execution_loop.rs` | Forwarder masking into the combined disk spool, step-upload channel and live feed. |
@@ -19,13 +20,13 @@
 | `finalize_split.rs` | Completion and teardown ordering. |
 | `helpers.rs` | Listener helper behavior. |
 | `job_outputs.rs` | The event forwarder keeps job outputs from a real acquired engine run for completion. |
-| `multiline_mask.rs` | Real job masking through listener sinks. |
+| `multiline_mask.rs` | Real job masking through listener sinks; the masks are registered inside a nested composite (#235). |
 | `post_results.rs` | Captured job replay through `StepCollector` and `CompleteJobRequest` serialization. |
 | `startup_overlap.rs` | Startup reporting overlap. |
 | `step_report_queue.rs` | Queued reporting against a broker endpoint. |
 | `step_report_queue_unit.rs` | Report queue deadline, batching and Docker setup terminal conclusions. |
 | `step_context_identity.rs` | Report serialization of a skipped step with the wire ID and conclusion from the sanitized acquired job. |
-| `support.rs` | Recording endpoint and shared test support. |
+| `support.rs` | Recording endpoint (records method, path, bearer credential and body per request) and shared test support. |
 | `watchdog_missing_job.rs` | Immediate missing-job cancellation reports job-lock loss without claiming a timed outage. |
 | `watchdog_override.rs` | Pure conclusion fold: untripped conclusions stay unchanged; tripped success stays successful; tripped non-success becomes failure with the exact annotation. |
 | `watchdog_retry.rs` | Watchdog retry behavior. |
@@ -35,4 +36,5 @@
 | `session_conflict.rs` | Live-captured 409 replayed through `create_session`: bounded retry, recovery, exact attempt count, unrelated failures and cancellation. |
 | `setup_step.rs` | Captured permissions, identity and secret-source diagnostics. |
 | `setup_forwarding.rs` | Production replay, masked setup logs, early failure and cancellation; capture-derived Docker Pull row forwarding and order. |
-| `step_summary.rs` | Failed summary uploads still drain later queued documents. |
+| `step_summary.rs` | The summary queue drains past its slot count and still drains after a failed upload. |
+| `step_summary_job.rs` | A real job's `$GITHUB_STEP_SUMMARY` document uploads masked through all three Results Service calls, and a rejected upload never changes the job's result. Declared from `execution_loop.rs` (the forwarder harness lives there). |

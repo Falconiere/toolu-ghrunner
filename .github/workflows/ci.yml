@@ -224,7 +224,7 @@ jobs:
         run: |
           python3 scripts/test/compat_matrix_check.py --check
           python3 scripts/test/reference_compare.py --verify docs/compat-reference-103.json
-          python3 -m unittest scripts/test/test_compat_matrix_check.py scripts/test/test_sanitize_capture.py scripts/test/test_reference_compare.py
+          python3 -m unittest scripts/test/test_compat_matrix_check.py scripts/test/test_sanitize_capture.py scripts/test/test_reference_compare.py scripts/test/test_orphan_limits_docs.py
 
   # The required `ci` context: green only when every Linux job above is. A
   # skipped or cancelled dependency fails it too — `always()` makes it run in

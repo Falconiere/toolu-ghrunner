@@ -26,6 +26,25 @@ conclusion or preventing later documents from being attempted. Bodies and signed
 URLs are excluded from summary diagnostics; the journal records only IDs and
 masked byte sizes. A missing Results Service endpoint skips uploads.
 
+The queue buffers sixteen documents and the uploader holds one more in flight;
+an eighteenth blocks its producer rather than being dropped, and the
+pre-conclusion drain still uploads every one. Backpressure
+and the full drain are observed by
+`listener::step_summary::tests::step_summary_queue_drains_more_documents_than_its_slots`.
+
+The ceiling a stalled Results Service puts on job completion is **derived from
+the production constants, not waited out in a test**: uploads are serial and
+each `wire` request carries a 30 s deadline, so a document stalling at the
+signed-URL or metadata RPC costs at most 30 s. A stall in the blob PUT costs
+more: four attempts of 30 s plus the 0.8 s, 1.6 s and 3.2 s backoffs between
+them, about 126 s per document, or at most 300 s when slow replies carry a
+`Retry-After` that replaces each backoff with 60 s. The cost is per document and the queue never
+drops one, so the total scales with how many summaries the job writes, not with
+the seventeen it can hold at once: eighteen documents are about 9 minutes of
+stalled RPCs, or about 38 minutes — 90 minutes with `Retry-After` — of stalled
+blob PUTs, and a job writing twice as many waits twice as long. Nothing in that
+window changes the job's conclusion.
+
 ## Verification and applicability
 
 The `execution::step_summary_tests` tests replay the sanitized GitHub acquisition

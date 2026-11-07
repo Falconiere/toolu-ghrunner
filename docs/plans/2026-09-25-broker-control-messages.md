@@ -67,4 +67,4 @@ The parser red test failed on the closed enum before the implementation. The wir
 
 ## Deviations
 
-The issue orchestrator required real-data-only tests and prohibited mocks. The earlier approved plan's local HTTP/OAuth replay was removed. Consequently the live token refresh and redelivery paths have compile-time and code-review evidence, not a passing local service interaction; this limitation must remain explicit at issue closure.
+The issue orchestrator required real-data-only tests and prohibited mocks. The earlier approved plan's local HTTP/OAuth replay was removed. Consequently the live token refresh and redelivery paths have compile-time and code-review evidence, not a passing local service interaction; this limitation must remain explicit at issue closure. (Update, #235: `crates/listener/src/tests/broker_control_refresh.rs` later added a loopback OAuth replay of the idle-loop refresh; the live GitHub.com/GHES lanes stay unverified.)

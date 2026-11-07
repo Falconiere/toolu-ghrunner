@@ -13,6 +13,8 @@
 //! `use crate::<helper>;`. `proxy_fixtures` / `tls_fixtures` come from
 //! `../../network/tests/helpers/`, shared with that crate's tests.
 
+#[path = "helpers/nested_mask.rs"]
+mod nested_mask;
 #[path = "helpers/orphan_replay.rs"]
 mod orphan_replay;
 #[path = "../../network/tests/helpers/proxy_fixtures.rs"]
