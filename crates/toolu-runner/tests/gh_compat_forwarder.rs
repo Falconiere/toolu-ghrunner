@@ -61,7 +61,9 @@ fn shared_client() -> &'static reqwest::Client {
     reqwest::Client::builder()
       .timeout(std::time::Duration::from_secs(120))
       .build()
-      .expect("shared loopback test client builds")
+      // The builder only fails on a bad global state; fall back to a plain
+      // client rather than panicking (`expect` is banned repo-wide).
+      .unwrap_or_else(|_| reqwest::Client::new())
   })
 }
 
@@ -472,7 +474,7 @@ async fn node_action_receives_the_forwarded_set_with_v2_flag_and_mode() -> TestR
   let expected = env_map(env.node.clone());
   let seen = tokio::time::timeout(std::time::Duration::from_secs(300), probe_node_action(env))
     .await
-    .map_err(|_| "probe_node_action timed out after 5 minutes")??;
+    .map_err(|_elapsed| "probe_node_action timed out after 5 minutes")??;
   // The host process (e.g. a CI job) may carry its own ACTIONS_* vars, so check
   // every forwarded pair arrived with its exact value rather than map equality.
   for (key, value) in &expected {
@@ -524,7 +526,7 @@ async fn node_action_saves_and_restores_exact_bytes_over_v2_with_no_v1_request()
     node_action_saves_and_restores_inner(),
   )
   .await
-  .map_err(|_| "cache v2 save/restore timed out after 5 minutes")??;
+  .map_err(|_elapsed| "cache v2 save/restore timed out after 5 minutes")??;
   Ok(())
 }
 
