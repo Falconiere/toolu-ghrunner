@@ -1,4 +1,9 @@
 //! Opt-in Linux production dispatch through real shell, Node, composite and post stages.
+//! The Node probe is the pinned remote action the live workflow uses: a local
+//! `./` action runs no `pre` (as upstream), and the probe's main and post read
+//! the state its `pre` saves. A loopback API serves that pin's commit and a
+//! real tarball of the probe files (byte-identical at the pin), so the
+//! production download, extraction and pre/main/post dispatch all run.
 #![cfg(target_os = "linux")]
 
 use std::path::Path;
@@ -17,12 +22,16 @@ type TestResult = Result<(), Box<dyn std::error::Error>>;
 const IMAGE: &str =
   "ubuntu@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3";
 
-async fn write_actions(workspace: &Path) -> TestResult {
-  let node = workspace.join("node action");
-  let composite = workspace.join("composite action");
-  tokio::fs::create_dir_all(&node).await?;
-  tokio::fs::create_dir_all(&composite).await?;
-  for (name, source) in [
+/// The live workflow's pinned Node probe (`multistep-live.yml`).
+const NODE_PROBE_REF: &str = "dec29e817264994f7e8e1f49824647f739c7c063";
+
+/// A GitHub-shaped tarball of the probe at its repository path.
+fn node_probe_tarball() -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+  let mut archive = tar::Builder::new(flate2::write::GzEncoder::new(
+    Vec::new(),
+    flate2::Compression::default(),
+  ));
+  for (name, content) in [
     (
       "action.yml",
       include_str!("../../../.github/actions/container-node-probe/action.yml"),
@@ -40,8 +49,47 @@ async fn write_actions(workspace: &Path) -> TestResult {
       include_str!("../../../.github/actions/container-node-probe/post.js"),
     ),
   ] {
-    tokio::fs::write(node.join(name), source).await?;
+    let mut header = tar::Header::new_gnu();
+    header.set_size(u64::try_from(content.len())?);
+    header.set_mode(0o644);
+    header.set_cksum();
+    archive.append_data(
+      &mut header,
+      format!("Falconiere-toolu-ghrunner-dec29e8/.github/actions/container-node-probe/{name}"),
+      content.as_bytes(),
+    )?;
   }
+  Ok(archive.into_inner()?.finish()?)
+}
+
+/// Serves the pin's commit and tarball; returns the API base URL.
+async fn serve_node_probe()
+-> Result<(String, tokio::task::JoinHandle<()>), Box<dyn std::error::Error>> {
+  let body = node_probe_tarball()?;
+  let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+  let api = format!("http://{}", listener.local_addr()?);
+  let base = "/repos/Falconiere/toolu-ghrunner";
+  let router = axum::Router::new()
+    .route(
+      &format!("{base}/commits/{NODE_PROBE_REF}"),
+      axum::routing::get(|| async { axum::Json(serde_json::json!({ "sha": NODE_PROBE_REF })) }),
+    )
+    .route(
+      &format!("{base}/tarball/{NODE_PROBE_REF}"),
+      axum::routing::get(move || {
+        let body = body.clone();
+        async move { body }
+      }),
+    );
+  let server = tokio::spawn(async move {
+    let _ = axum::serve(listener, router).await;
+  });
+  Ok((api, server))
+}
+
+async fn write_actions(workspace: &Path) -> TestResult {
+  let composite = workspace.join("composite action");
+  tokio::fs::create_dir_all(&composite).await?;
   tokio::fs::write(
     composite.join("action.yml"),
     include_str!("../../../.github/actions/container-composite-probe/action.yml"),
@@ -52,8 +100,10 @@ async fn write_actions(workspace: &Path) -> TestResult {
 
 fn steps() -> Vec<ActionStep> {
   let mut node = ActionStep::with_ref_type("node_probe", "repository");
-  node.reference.path = Some("./node action".to_owned());
-  node.reference.repository_type = Some("self".to_owned());
+  node.reference.name = Some("Falconiere/toolu-ghrunner".to_owned());
+  node.reference.path = Some(".github/actions/container-node-probe".to_owned());
+  node.reference.git_ref = Some(NODE_PROBE_REF.to_owned());
+  node.reference.repository_type = Some("GitHub".to_owned());
   let mut composite = ActionStep::with_ref_type("composite_probe", "repository");
   composite.reference.path = Some("./composite action".to_owned());
   composite.reference.repository_type = Some("self".to_owned());
@@ -115,9 +165,22 @@ async fn job_container_real_production_shell_node_composite_and_posts() -> TestR
     },
     ..RunnerConfig::default()
   };
-  let mut job: AgentJobRequestMessage = serde_json::from_str(include_str!(
+  let (api, server) = serve_node_probe().await?;
+  let mut raw: serde_json::Value = serde_json::from_str(include_str!(
     "../../toolu-runner/tests/fixtures/job_message.json"
   ))?;
+  let github = raw
+    .get_mut("contextData")
+    .and_then(|v| v.get_mut("github"))
+    .and_then(|v| v.get_mut("d"))
+    .and_then(serde_json::Value::as_array_mut)
+    .ok_or("github context")?;
+  let api_entry = github
+    .iter_mut()
+    .find(|entry| entry.get("k").and_then(serde_json::Value::as_str) == Some("api_url"))
+    .ok_or("api_url context")?;
+  *api_entry.get_mut("v").ok_or("api_url value")? = api.into();
+  let mut job: AgentJobRequestMessage = serde_json::from_value(raw)?;
   job.job_container = Some(serde_json::from_value::<TemplateToken>(
     serde_json::json!({
       "type": 2,
@@ -154,7 +217,18 @@ async fn job_container_real_production_shell_node_composite_and_posts() -> TestR
       | RunnerEvent::InfrastructureError { .. } => {},
     }
   }
+  server.abort();
   assert_eq!(conclusion, Some(Conclusion::Success), "{logs:#?}");
+  for stage in [
+    "CONTAINER_73_NODE_PRE_OK",
+    "CONTAINER_73_NODE_MAIN_OK",
+    "CONTAINER_73_NODE_POST_OK",
+  ] {
+    assert!(
+      logs.iter().any(|line| line.trim() == stage),
+      "{stage}: {logs:#?}"
+    );
+  }
   assert_eq!(
     tokio::fs::read_to_string(workspace.join("post-marker")).await?,
     "post-value"
