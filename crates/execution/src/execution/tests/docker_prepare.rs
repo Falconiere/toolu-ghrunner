@@ -336,6 +336,18 @@ async fn distinct_composite_chain_keeps_depth_limit() -> Result<(), Box<dyn std:
   let job = follow_up_job(&api, vec![follow_up_step("level0")])?;
   let fetcher = follow_up_fetcher(&job)?;
   let dir = tempfile::tempdir()?;
+  let boundary = discover(
+    &[follow_up_step("level2")],
+    &Discovery {
+      fetcher: &fetcher,
+      client: &reqwest::Client::new(),
+      data_dir: dir.path(),
+    },
+    &ExecutionContext::new_for_test(),
+    &CancellationToken::new(),
+  )
+  .await?;
+  assert_eq!(boundary.pulls, ["alpine:3.21"]);
   let result = discover(
     &job.steps,
     &Discovery {

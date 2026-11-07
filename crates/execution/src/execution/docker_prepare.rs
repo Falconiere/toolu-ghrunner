@@ -139,6 +139,7 @@ async fn discover(
       continue;
     }
     tokio::select! {
+      biased;
       () = cancel.cancelled() => return Err(RunnerError::Cancelled),
       result = discover_remote(&uses, depth, &mut plan, &mut queue, source, ctx) => result?,
     }
