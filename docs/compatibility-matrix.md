@@ -6,13 +6,13 @@ Epic #67 children, one row per acceptance criterion or scenario. Status semantic
 
 | Lane | passed | unverified | not-applicable | pending |
 | --- | --- | --- | --- | --- |
-| hermetic | 294 | 47 | 2 | 8 |
-| macos | 294 | 16 | 33 | 8 |
-| docker | 57 | 13 | 273 | 8 |
-| github-com | 57 | 218 | 68 | 8 |
-| reference | 47 | 229 | 67 | 8 |
-| ghes | 0 | 292 | 51 | 8 |
-| ui-service | 16 | 89 | 238 | 8 |
+| hermetic | 300 | 47 | 4 | 0 |
+| macos | 300 | 16 | 35 | 0 |
+| docker | 57 | 16 | 278 | 0 |
+| github-com | 57 | 226 | 68 | 0 |
+| reference | 47 | 237 | 67 | 0 |
+| ghes | 0 | 300 | 51 | 0 |
+| ui-service | 16 | 89 | 246 | 0 |
 
 ## #67 — Epic cross-feature workflows
 
@@ -497,18 +497,18 @@ State: closed · PR: https://github.com/Falconiere/toolu-ghrunner/pull/169
 
 ## #97 — Remove or wire dead execution code and fix CLAUDE.md drift
 
-State: open
+State: closed · PR: https://github.com/Falconiere/toolu-ghrunner/pull/173
 
 | ID | Criterion | Expected | Tests / command | hermetic | macos | docker | github-com | reference | ghes | ui-service |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 97/AC-1 | Each item is either deleted or wired (linked to the issue that wires it) | Defined by the issue; not implemented on main yet. | `n/a until https://github.com/Falconiere/toolu-ghrunner/issues/97 merges` | ⏳ pending | ⏳ pending | ⏳ pending | ⏳ pending | ⏳ pending | ⏳ pending | ⏳ pending |
-| 97/AC-2 | CLAUDE.md matches the code (crate count, dispatch order, job-spec wiring) | Defined by the issue; not implemented on main yet. | `n/a until https://github.com/Falconiere/toolu-ghrunner/issues/97 merges` | ⏳ pending | ⏳ pending | ⏳ pending | ⏳ pending | ⏳ pending | ⏳ pending | ⏳ pending |
-| 97/AC-3 | Covered by a real-data test (captured job message / real tool output, no mocks) in the crate's sibling `tests/` folder | Defined by the issue; not implemented on main yet. | `n/a until https://github.com/Falconiere/toolu-ghrunner/issues/97 merges` | ⏳ pending | ⏳ pending | ⏳ pending | ⏳ pending | ⏳ pending | ⏳ pending | ⏳ pending |
-| 97/AC-4 | `./tools/check.sh all` green | Defined by the issue; not implemented on main yet. | `n/a until https://github.com/Falconiere/toolu-ghrunner/issues/97 merges` | ⏳ pending | ⏳ pending | ⏳ pending | ⏳ pending | ⏳ pending | ⏳ pending | ⏳ pending |
-| 97/97-S1 | Inventory each cited dead module and all live callers after dependent fixes | Each item has an explicit delete-or-wire decision and linked owning issue; no cleanup accidentally deletes a newly wired path. | `n/a until https://github.com/Falconiere/toolu-ghrunner/issues/97 merges` | ⏳ pending | ⏳ pending | ⏳ pending | ⏳ pending | ⏳ pending | ⏳ pending | ⏳ pending |
-| 97/97-S2 | Tests previously used workflow parser or manually populated JobSpec/context | Retain useful unit tests but add production message -> run_job -> reporting evidence; helper success cannot establish live wiring. | `n/a until https://github.com/Falconiere/toolu-ghrunner/issues/97 merges` | ⏳ pending | ⏳ pending | ⏳ pending | ⏳ pending | ⏳ pending | ⏳ pending | ⏳ pending |
-| 97/97-S3 | CLAUDE.md, architecture and test-coverage map checked against final tree | Crate count, dispatch, defaults/outputs wiring and test lane descriptions are accurate; remove the false Docker live-coverage claim. | `n/a until https://github.com/Falconiere/toolu-ghrunner/issues/97 merges` | ⏳ pending | ⏳ pending | ⏳ pending | ⏳ pending | ⏳ pending | ⏳ pending | ⏳ pending |
-| 97/97-S4 | Required gate and compatibility scenarios after removal/wiring | No stale exports/docs/tests; all applicable gate checks pass without suppressions; actual live evidence remains separately recorded. | `n/a until https://github.com/Falconiere/toolu-ghrunner/issues/97 merges` | ⏳ pending | ⏳ pending | ⏳ pending | ⏳ pending | ⏳ pending | ⏳ pending | ⏳ pending |
+| 97/AC-1 | Each item is either deleted or wired (linked to the issue that wires it) | No structural match for PluginRegistry, resolve_handler or an execution/workflow module (renames checked with ast-grep); PathTranslator is called at docker/action_mounts.rs:71 and docker/container_mounts.rs:35, ServiceContainers::start at execution/container_job.rs:57. Mount translation runs against a real preseed directory. | `container_mounts.rs::preseed_dir_is_mounted_read_only_and_translates_its_runtimes`<br>`container_mounts.rs::an_unresolvable_mount_source_names_the_path_in_the_error` | ✅ passed | ✅ passed | ⚠️ unverified | ⚠️ unverified | ⚠️ unverified | ⚠️ unverified | ➖ not-applicable |
+| 97/AC-2 | CLAUDE.md matches the code (crate count, dispatch order, job-spec wiring) | Twelve crates under crates/; dispatch reads node -> composite -> docker, matching the RunsUsing match in action_exec.rs; test-lane text says ignored Docker and live tests are separate runs. | `ls crates \| wc -l; read AGENTS.md and docs/architecture.md against action_exec.rs and ci.yml` | ➖ not-applicable | ➖ not-applicable | ➖ not-applicable | ⚠️ unverified | ⚠️ unverified | ⚠️ unverified | ➖ not-applicable |
+| 97/AC-3 | Covered by a real-data test (captured job message / real tool output, no mocks) in the crate's sibling `tests/` folder | Captured job messages run through Runner::execute_job with real shells: acquired defaults.run applies, acquired outputs evaluate after a real GITHUB_OUTPUT step, composite and named-step identity hold after the removal. | `job_message_run_defaults_test.rs::job_defaults_override_workflow`<br>`job_outputs_test.rs::captured_output_is_evaluated_after_real_github_output_step`<br>`step_context_identity_test.rs::named_output_uses_context_name_while_reporting_uses_wire_uuid`<br>`composite_semantics_test.rs::expressions_render_functions_brackets_conditions_and_outputs` | ✅ passed | ✅ passed | ➖ not-applicable | ⚠️ unverified | ⚠️ unverified | ⚠️ unverified | ➖ not-applicable |
+| 97/AC-4 | `./tools/check.sh all` green | fmt, clippy -D warnings, #[allow] ban, guardrails, nextest and doctests pass on the #234 branch; representative mapped tests run in the default gate. | `job_message_run_defaults_test.rs::job_defaults_override_workflow`<br>`job_outputs_test.rs::captured_output_is_evaluated_after_real_github_output_step` | ✅ passed | ✅ passed | ➖ not-applicable | ⚠️ unverified | ⚠️ unverified | ⚠️ unverified | ➖ not-applicable |
+| 97/97-S1 | Inventory each cited dead module and all live callers after dependent fixes | Per item: PluginRegistry, resolve_handler, execution/workflow/* removed (zero ast-grep matches, no rename); PathTranslator and docker/services.rs retained with production callers named on 97/AC-1. No path wired by #70/#71/#72/#98 was deleted: their rows still pass. | `container_mounts.rs::preseed_dir_is_mounted_read_only_and_translates_its_runtimes`<br>`job_message_run_defaults_test.rs::job_defaults_override_workflow`<br>`job_outputs_test.rs::captured_output_is_evaluated_after_real_github_output_step` | ✅ passed | ✅ passed | ⚠️ unverified | ⚠️ unverified | ⚠️ unverified | ⚠️ unverified | ➖ not-applicable |
+| 97/97-S2 | Tests previously used workflow parser or manually populated JobSpec/context | Captured acquirejob bodies execute through Runner::execute_job (production run_job) and report StepCompleted/JobCompleted with the evaluated outputs and defaults; no workflow parser or hand-built JobSpec involved. | `job_outputs_test.rs::captured_output_is_evaluated_after_real_github_output_step`<br>`job_message_run_defaults_test.rs::job_defaults_override_workflow`<br>`job_message_run_defaults_test.rs::nonexistent_default_directory_fails_its_step_with_path` | ✅ passed | ✅ passed | ➖ not-applicable | ⚠️ unverified | ⚠️ unverified | ⚠️ unverified | ➖ not-applicable |
+| 97/97-S3 | CLAUDE.md, architecture and test-coverage map checked against final tree | Crate count 12, dispatch node -> composite -> docker, job outputs/defaults.run wiring text and lane descriptions match the tree; docs/test-coverage.md states ignored Docker/live tests are unverified, not passed. | `ls crates \| wc -l; read the three docs against action_exec.rs and ci.yml` | ➖ not-applicable | ➖ not-applicable | ➖ not-applicable | ⚠️ unverified | ⚠️ unverified | ⚠️ unverified | ➖ not-applicable |
+| 97/97-S4 | Required gate and compatibility scenarios after removal/wiring | Gate green without suppressions on the #234 branch; no stale export or doc references the removed symbols; Docker and live evidence stay separately recorded (97/AC-1 docker unverified). | `job_message_run_defaults_test.rs::job_defaults_override_workflow`<br>`job_outputs_test.rs::captured_output_is_evaluated_after_real_github_output_step` | ✅ passed | ✅ passed | ⚠️ unverified | ⚠️ unverified | ⚠️ unverified | ⚠️ unverified | ➖ not-applicable |
 
 ## #98 — Use contextName for steps expressions and record skipped outcomes
 
