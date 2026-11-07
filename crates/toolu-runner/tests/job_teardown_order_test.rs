@@ -473,7 +473,7 @@ async fn finish_never_touches_files_of_the_next_job() -> TestResult {
 }
 
 /// Only `_temp` and `tmp` are emptied: the tool cache is kept for later jobs, and
-/// the listener owns the `_logs` spools, which can outlive `finish`.
+/// the `_logs` spools planned in #240 stay out of reach.
 #[tokio::test]
 async fn cleanup_never_touches_logs_or_tool() -> TestResult {
   let fx = setup().await?;
