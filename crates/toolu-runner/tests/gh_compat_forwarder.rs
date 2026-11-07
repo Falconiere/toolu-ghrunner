@@ -50,14 +50,19 @@ fn fixture_job() -> TestResult<AgentJobRequestMessage> {
 
 type EnvMap = std::collections::HashMap<String, String>;
 
-fn map(pairs: Vec<(String, String)>) -> EnvMap {
+fn env_map(pairs: Vec<(String, String)>) -> EnvMap {
   pairs.into_iter().collect()
 }
 
 /// One shared client for every probe invocation in this file.
 fn shared_client() -> &'static reqwest::Client {
   static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
-  CLIENT.get_or_init(reqwest::Client::new)
+  CLIENT.get_or_init(|| {
+    reqwest::Client::builder()
+      .timeout(std::time::Duration::from_secs(120))
+      .build()
+      .expect("shared loopback test client builds")
+  })
 }
 
 /// Build a `ServiceUrls` with all fields present (for selector coverage).
@@ -73,8 +78,14 @@ fn full_urls() -> ServiceUrls {
   }
 }
 
-/// The #103 acquired message, with the cache variables replaced.
-fn compat_job(
+/// Loads the #103 acquired compatibility message fixture from the execution
+/// crate. `flag` replaces the `actions_uses_cache_service_v2` variable and
+/// `mode` replaces `actions_cache_mode`. The `retain` stays load-bearing:
+/// the fixture itself carries lowercase `actions_uses_cache_service_v2` /
+/// `actions_cache_mode` keys, so without it a `None` override would leak the
+/// fixture's values and a mixed-case test key would sit beside the
+/// fixture's lowercase one; `insert` then sets the requested value.
+fn compat_job_message(
   flag: Option<(&str, &str)>,
   mode: Option<&str>,
 ) -> TestResult<AgentJobRequestMessage> {
@@ -124,7 +135,7 @@ fn extract_reads_system_connection_urls_and_token() -> TestResult<()> {
 
 #[test]
 fn per_step_type_sets_match_official_handlers() -> TestResult<()> {
-  let msg = compat_job(
+  let msg = compat_job_message(
     Some(("actions_uses_cache_service_v2", "true")),
     Some("write"),
   )?;
@@ -137,9 +148,9 @@ fn per_step_type_sets_match_official_handlers() -> TestResult<()> {
     "raw job message must carry actions_uses_cache_service_v2 before extraction"
   );
   let env = forward_env(&extract_service_urls(&msg));
-  let node = map(env.node);
-  let container = map(env.container);
-  let script = map(env.script);
+  let node = env_map(env.node);
+  let container = env_map(env.container);
+  let script = env_map(env.script);
 
   for key in [
     "ACTIONS_RESULTS_URL",
@@ -175,6 +186,9 @@ fn per_step_type_sets_match_official_handlers() -> TestResult<()> {
   Ok(())
 }
 
+/// The v2 flag is on only for a case-insensitive `actions_uses_cache_service_v2`
+/// key with a case-insensitive `"true"` value; any other value, a differently
+/// named key (e.g. `ACTIONS_CACHE_SERVICE_V2`), or its absence means off.
 #[test]
 fn cache_v2_flag_parses_as_boolean_case_insensitively() -> TestResult<()> {
   let cases = [
@@ -190,10 +204,10 @@ fn cache_v2_flag_parses_as_boolean_case_insensitively() -> TestResult<()> {
   ];
   for (flag, expected) in cases {
     for mode in [None, Some(""), Some("write")] {
-      let env = forward_env(&extract_service_urls(&compat_job(flag, mode)?));
-      let node = map(env.node);
-      let container = map(env.container);
-      let script = map(env.script);
+      let env = forward_env(&extract_service_urls(&compat_job_message(flag, mode)?));
+      let node = env_map(env.node);
+      let container = env_map(env.container);
+      let script = env_map(env.script);
       assert_eq!(
         node.get("ACTIONS_CACHE_SERVICE_V2").map(String::as_str),
         expected.then_some("True"),
@@ -240,7 +254,7 @@ fn forward_env_omits_none_fields_never_empty() {
   urls.id_token_request_url = None;
 
   let env = forward_env(&urls);
-  let node = map(env.node);
+  let node = env_map(env.node);
 
   assert!(node.contains_key("ACTIONS_RESULTS_URL"));
   assert!(node.contains_key("ACTIONS_RUNTIME_URL"));
@@ -450,12 +464,12 @@ async fn probe_node_action(env: ServiceEnv) -> TestResult<EnvMap> {
 
 #[tokio::test]
 async fn node_action_receives_the_forwarded_set_with_v2_flag_and_mode() -> TestResult<()> {
-  let msg = compat_job(
+  let msg = compat_job_message(
     Some(("actions_uses_cache_service_v2", "true")),
     Some("write"),
   )?;
   let env = forward_env(&extract_service_urls(&msg));
-  let expected = map(env.node.clone());
+  let expected = env_map(env.node.clone());
   let seen = tokio::time::timeout(std::time::Duration::from_secs(300), probe_node_action(env))
     .await
     .map_err(|_| "probe_node_action timed out after 5 minutes")??;
@@ -499,6 +513,10 @@ fn cache_client_steps(
   Ok(steps)
 }
 
+/// Save, wipe, then restore a real file through two Node cache-client action
+/// runs against a loopback v2 cache router: the loopback server records every
+/// request path (proving v2 RPCs ran and no v1 `_apis/artifactcache` request
+/// fired) and the real Node process proves end-to-end byte fidelity.
 #[tokio::test]
 async fn node_action_saves_and_restores_exact_bytes_over_v2_with_no_v1_request() -> TestResult<()> {
   tokio::time::timeout(
@@ -563,7 +581,7 @@ async fn node_action_saves_and_restores_inner() -> TestResult<()> {
   ));
   let server = cache::server::CacheServer::start(app, "127.0.0.1:0").await?;
 
-  let msg = compat_job(Some(("actions_uses_cache_service_v2", "true")), None)?;
+  let msg = compat_job_message(Some(("actions_uses_cache_service_v2", "true")), None)?;
   let mut env = forward_env(&extract_service_urls(&msg));
   env.set_action("ACTIONS_RESULTS_URL", server.base_url());
   env.set_action("ACTIONS_CACHE_URL", server.base_url());
@@ -674,7 +692,7 @@ async fn composite_run_step_gets_only_the_oidc_pair() -> TestResult<()> {
     action_dir.join("action.yml"),
     "name: comp\ndescription: probe\nruns:\n  using: composite\n  steps:\n    - shell: bash\n      env:\n        ACTIONS_ID_TOKEN_REQUEST_URL: spoofed\n      run: echo \"COMP oidc=$ACTIONS_ID_TOKEN_REQUEST_URL token=[$ACTIONS_RUNTIME_TOKEN] results=[$ACTIONS_RESULTS_URL]\"\n",
   )?;
-  let msg = compat_job(None, None)?;
+  let msg = compat_job_message(None, None)?;
   let mut ctx = ExecutionContext::with_masker(Arc::new(Mutex::new(SecretMasker::new())));
   ctx.set_service_env(forward_env(&extract_service_urls(&msg)));
   let (tx, mut rx) = mpsc::channel::<RunnerEvent>(1024);
