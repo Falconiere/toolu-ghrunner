@@ -619,6 +619,12 @@ async fn archive_failure_statuses_are_bounded_and_leave_no_cache_entry() -> Test
       (1..=most).contains(&attempts),
       "{status}: {attempts} archive requests is outside the bound of {most}"
     );
+    // Not a vacuous scan: a failed download always narrates itself, so there
+    // is real text here for a credential to have leaked into.
+    assert!(
+      !observed.logs.is_empty(),
+      "{status}: the failed download emitted no log line to check"
+    );
     for text in observed
       .infrastructure
       .iter()
