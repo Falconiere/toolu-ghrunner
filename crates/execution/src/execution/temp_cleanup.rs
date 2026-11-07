@@ -1,6 +1,8 @@
 //! Empties the runner's temp directories around every job, as the official
-//! runner's `TempDirectoryManager` does: contents only, past delete errors,
-//! never `_tool`. A failure is a `WARN` and never changes the job's result.
+//! runner's `TempDirectoryManager` does: contents only, past delete errors.
+//! Nothing else under `data_dir` is touched: `_tool` is kept for later jobs, and
+//! the listener owns the `_logs` spools. A failure is a `WARN` and never changes
+//! the job's result.
 //!
 //! `std::fs::remove_dir_all` is not used because it stops at the first error.
 

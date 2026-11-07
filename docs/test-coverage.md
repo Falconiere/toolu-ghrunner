@@ -1793,6 +1793,7 @@ temporary `data_dir`.
 | Post step | A real Node post step reads a file the main step wrote in `_temp` before it is emptied (fails without a system `node`) | `job_teardown_order_test::post_step_reads_temp_before_it_is_emptied` |
 | Next job | `finish` never deletes files the next job wrote, and `run_job` holds the channel open until temp is empty | `job_teardown_order_test::finish_never_touches_files_of_the_next_job`, `job_teardown_order_test::run_job_keeps_the_channel_open_until_temp_is_empty` |
 | Symlinks, read-only trees | Links to a file or directory, at any depth and in place of the `_temp` root itself, are unlinked and their targets kept; a `chmod -R a-w` tree is removed | `job_teardown_order_test::symlinks_are_removed_and_their_targets_are_kept`, `job_teardown_order_test::read_only_trees_are_removed` |
+| Boundary | Files planted in `_logs` and `_tool` survive the job and `finish`, while `_temp` and `tmp` are emptied | `job_teardown_order_test::cleanup_never_touches_logs_or_tool` |
 | Delete error | A file that cannot be deleted leaves one `WARN`, other files are removed, the conclusion stays `Success` (skipped when run as root) | `job_teardown_order_test::undeletable_file_warns_and_never_changes_the_result` |
 
 Matrix row `103/R-temp-cleanup`. The macOS and hermetic lanes run these in the

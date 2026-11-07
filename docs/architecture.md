@@ -531,8 +531,10 @@ next job start in the same `data_dir`, and it does not run at all when `run_job`
 returns an error. Only the contents are removed; a symlink is unlinked, never
 followed, even when it replaces a root; read-only subdirectories are made
 writable first. A delete error is a single `WARN` per root and never changes the
-job's conclusion. `_tool` (the tool cache) is never touched, and registrations
-must not share a `data_dir`.
+job's conclusion. Nothing else under `data_dir` is touched: `_tool` (the tool
+cache) is kept for later jobs, and the listener owns the `_logs` spools and their
+cleanup, since they can outlive `JobTeardown::finish`. Registrations must not
+share a `data_dir`.
 
 The expression engine (`expressions/`) is a complete `${{ }}`
 evaluator: lexer → parser (AST + precedence + primary) → evaluator
