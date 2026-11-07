@@ -173,3 +173,7 @@ async fn upload_blob_with_retry(
     },
   }
 }
+
+#[cfg(test)]
+#[path = "tests/upload.rs"]
+mod tests;
