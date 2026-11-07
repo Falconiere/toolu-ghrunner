@@ -233,7 +233,8 @@ TOOLU_RUNNER_TOKEN=<pat> toolu-runner register
 # no personal token at registration or at any later re-mint
 toolu-runner register --app --url https://github.com/acme --runner-group mobile-ci
 
-# GHES: register an OAuth App on the instance, log in against it,
+# GHES (implemented, untested - these steps have never been run against a
+# real server): register an OAuth App on the instance, log in against it,
 # then register with an explicit --url (inference is github.com-only)
 toolu-runner login ghes.example.com --client-id <id>
 toolu-runner register --url https://ghes.example.com/owner/repo
@@ -1011,9 +1012,11 @@ clock, a socket, or tokio.
 **Deliberately not ported:** OpenTelemetry, and any coupling to the
 `yamless` orchestrator this code was extracted from.
 
-**GHES** is supported over the V1 protocol (`connectionData` discovery,
-timeline records); protocol version is auto-selected from the `--url`
-host at `register` time.
+**GHES** is implemented over the V1 protocol (`connectionData` discovery,
+timeline records; protocol version is auto-selected from the `--url` host at
+`register` time) but has **never been tested** on a real server, and it is out
+of scope for the drop-in compatibility claim. No instance, credential or run
+exists; treat GHES as unverified.
 
 ## Configuration
 

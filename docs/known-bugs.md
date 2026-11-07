@@ -17,6 +17,13 @@ the `TOOLU_RUNNER_LIVE_TOKEN` secret; its test repository is the
 `TOOLU_RUNNER_LIVE_GHES_*` configuration. Missing credentials fail the lane as
 `UNVERIFIED`; a test being present is not evidence that the live lane passed.
 
+`live-ghes.yml` cannot prove GHES even with those credentials. The shared
+harness reads only `TOOLU_RUNNER_LIVE_TOKEN` and `TOOLU_RUNNER_LIVE_REPO`
+(`crates/toolu-runner/tests/helpers/live_harness.rs`, `require_live_env`) and
+registers against github.com, so the `TOOLU_RUNNER_LIVE_GHES_*` values are never
+consumed. GHES is out of scope: implemented, never run on a real server. No
+GHES result exists to cite.
+
 ## Current limitations
 
 - **Top-level `$/` steps (#241):** only `$/` inside an action manifest's
