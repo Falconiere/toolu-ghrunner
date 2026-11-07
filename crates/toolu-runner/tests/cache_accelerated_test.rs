@@ -1,12 +1,13 @@
 //! S12 — accelerated services mode env injection, driven through the real
 //! `run_job` assembly path against the committed real-data `job_message.json`.
 //!
-//! Real-data only, no mocks. A single script step dumps its `ACTIONS_*` env to
-//! a file (not stdout, so the secret masker — which rewrites only log lines —
+//! Real-data only, no mocks. A single Node action (`helpers/node_probe.rs`;
+//! `run:` steps no longer receive these vars) dumps its `ACTIONS_*` env to a
+//! file (not stdout, so the secret masker — which rewrites only log lines —
 //! never redacts the runtime token). The test then asserts:
 //!   - cache traffic is redirected local: `ACTIONS_RESULTS_URL` and
 //!     `ACTIONS_CACHE_URL` both point at `http://127.0.0.1:<port>`, NOT the
-//!     fixture's real results URL, and `ACTIONS_CACHE_SERVICE_V2=true`;
+//!     fixture's real results URL, and `ACTIONS_CACHE_SERVICE_V2=True`;
 //!   - non-cache vars are still forwarded to real GitHub: `ACTIONS_RUNTIME_URL`
 //!     is the fixture's pipelines URL and `ACTIONS_RUNTIME_TOKEN` is the real,
 //!     unchanged fixture token (the proxy forwards it upstream for artifacts).

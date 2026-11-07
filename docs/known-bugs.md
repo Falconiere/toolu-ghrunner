@@ -20,7 +20,7 @@ the `TOOLU_RUNNER_LIVE_TOKEN` secret; its test repository is the
 ## Current limitations
 
 - **Docker reporting:** `docker://` actions do not emit the official runner's
-  separate `Pull <image>` setup step. The same paired run found matching shared
+  separate `Pull <image>` setup step. The [paired run](compatibility-evidence.md#recorded-differences) found matching shared
   step conclusions and container outputs, but not identical setup reporting.
 - **Outage reporting:** the watchdog counts only network-class renewal
   failures (transport errors, 429 and 5xx). Definitive auth/protocol failures

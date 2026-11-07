@@ -10,14 +10,13 @@
 //! Asserts:
 //!   1. `extract_service_urls(fixture)` returns the fixture's
 //!      Results/Cache/Pipelines/IdToken URLs + the OAuth `AccessToken`.
-//!   2. `forward_env` emits all six `ACTIONS_*` vars with the fixture values;
-//!      a `None` URL field OMITS its var; `cache_service_v2=false` omits
-//!      `ACTIONS_CACHE_SERVICE_V2`, `true` emits it.
-//!   3. Forwarder mode: a step's env (built through the real path) carries
-//!      `ACTIONS_RESULTS_URL` from the message — the hermetic portion of
-//!      AC-10/11/12 (the live `@v4` round-trip is S16).
-//!   4. AC-13 offline mode: a step's `ACTIONS_CACHE_URL` points at the local
-//!      cache service (`http://127.0.0.1:…`), not the message URL.
+//!   2. `forward_env` hands each step type its official set: Node (all vars,
+//!      the v2 flag as `True`, the cache mode), container (no v2 flag) and
+//!      `run:` (OIDC pair only); a `None` URL omits its var; the flag parses
+//!      case-insensitively as boolean true.
+//!   3. Through the real `run_job` path a `run:` step sees only the OIDC pair,
+//!      and offline mode gives it no cache vars; a Node action sees the full
+//!      set and saves/restores real bytes over the v2 service.
 
 use std::error::Error;
 use std::sync::{Arc, Mutex};
@@ -306,7 +305,7 @@ async fn runtime_token_registered_in_masker() -> TestResult<()> {
 #[tokio::test]
 async fn run_step_sees_only_the_oidc_pair() -> TestResult<()> {
   // Real assembly path (run_job → setup_job_env → step env): a `run:` step
-  // gets the OIDC pair and can no longer read the runtime token or URLs.
+  // gets the OIDC pair and no longer receives `ACTIONS_RUNTIME_TOKEN` or the service URLs.
   let out = run_echo_job(
     "printf 'OIDC=%s\\nRESULTS=%s\\nRUNTIME=%s\\nCACHE=%s\\n' \"$ACTIONS_ID_TOKEN_REQUEST_URL\" \"$ACTIONS_RESULTS_URL\" \"$ACTIONS_RUNTIME_TOKEN\" \"$ACTIONS_CACHE_URL\"",
     ServicesMode::Forwarder,

@@ -92,7 +92,7 @@ pub fn extract_service_urls(msg: &AgentJobRequestMessage) -> ServiceUrls {
 /// The `ACTIONS_*` pairs each step type receives (official v2.338.2 mapping).
 ///
 /// Held on the execution context, never on the job-wide env, so a `run:` step
-/// cannot read the runtime token.
+/// does not receive `ACTIONS_RUNTIME_TOKEN` (it gets only the OIDC pair).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ServiceEnv {
   /// Node actions: runtime, results, cache and OIDC vars, v2 flag, cache mode.
