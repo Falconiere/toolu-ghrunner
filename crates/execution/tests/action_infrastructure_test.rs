@@ -338,12 +338,12 @@ fn seed_nested_composite(workspace: &std::path::Path) -> TestResult {
   Ok(())
 }
 
-async fn category_for(launch: Launch) -> TestResult<(Peer, Observed, String)> {
+async fn category_for(launch: Launch) -> TestResult<(Observed, String)> {
   let peer = serve(launch).await?;
   let message = job(&peer.base)?;
   let checkout = message.steps.first().ok_or("checkout missing")?.id.clone();
   let observed = run(message).await?;
-  Ok((peer, observed, checkout))
+  Ok((observed, checkout))
 }
 
 #[tokio::test]
@@ -375,7 +375,7 @@ async fn runner_side_fetch_failures_carry_upstream_categories() -> TestResult {
     ),
     (Launch::Resolve(Archive::Corrupt), "invalid_action_download"),
   ] {
-    let (_peer, observed, checkout) = category_for(launch).await?;
+    let (observed, checkout) = category_for(launch).await?;
     assert_eq!(observed.conclusion, Some(Conclusion::Failure), "{category}");
     assert_eq!(observed.steps.get(&checkout), Some(&Conclusion::Failure));
     let [(step, found, message)] = observed.infrastructure.as_slice() else {
@@ -409,7 +409,7 @@ async fn user_fetch_failures_and_recovered_auth_carry_no_category() -> TestResul
       Conclusion::Success,
     ),
   ] {
-    let (_peer, observed, _) = category_for(launch).await?;
+    let (observed, _) = category_for(launch).await?;
     assert_eq!(observed.conclusion, Some(conclusion));
     assert!(
       observed.infrastructure.is_empty(),
