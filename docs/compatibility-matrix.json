@@ -12104,14 +12104,27 @@
         "docs/test-coverage.md",
         "docs/specs/2026-10-10-orphan-process-cleanup-design.md"
       ],
-      "expected": "README.md, AGENTS.md, execution README and docs/test-coverage.md each state the exec-time environment limit (Linux /proc/<pid>/environ and macOS KERN_PROCARGS2 snapshots, SIP-hidden Apple binaries covered only through the step's process group); README.md and docs/test-coverage.md also state that sudo, other users' processes and processes that leave the step's group while dropping the id escape, that Docker containers are never tagged, and that a runner crash or the boot watchdog's hard exit skips the sweep. Documentation only: no automated test asserts the text.",
+      "expected": "README.md, AGENTS.md, execution README and docs/test-coverage.md each state the exec-time environment limit (Linux /proc/<pid>/environ and macOS KERN_PROCARGS2 snapshots, SIP-hidden Apple binaries covered only through the step's process group); README.md and docs/test-coverage.md also state that sudo, other users' processes and processes that leave the step's group while dropping the id escape, that Docker containers are never tagged, and that a runner crash or the boot watchdog's hard exit skips the sweep. The test reads those committed documents and fails if any one fact goes missing; it asserts the prose, never the behavior, which 89/AC-1 and 89/AC-2 own.",
       "production_path": "docs: README.md, AGENTS.md, crates/execution/src/execution/README.md, docs/test-coverage.md#issue-89--orphan-process-cleanup",
-      "tests": [],
-      "command": "manual review of the documents listed in input",
+      "tests": [
+        [
+          "scripts/test/test_orphan_limits_docs.py",
+          "test_every_document_states_the_exec_time_environment_limit"
+        ],
+        [
+          "scripts/test/test_orphan_limits_docs.py",
+          "test_the_user_facing_documents_state_every_escape"
+        ],
+        [
+          "scripts/test/test_orphan_limits_docs.py",
+          "test_a_document_missing_one_limit_is_reported"
+        ]
+      ],
+      "command": "python3 -m unittest scripts/test/test_orphan_limits_docs.py",
       "lanes": {
         "hermetic": {
           "status": "passed",
-          "evidence": "doc:docs/test-coverage.md#issue-89--orphan-process-cleanup"
+          "evidence": "gate"
         },
         "macos": {
           "status": "not-applicable",
