@@ -680,7 +680,7 @@ async fn remote_dockerfile_has_build_row_on_cold_and_warm_runs() -> TestResult {
     assert_eq!(builds.len(), 1, "{events:#?}");
     assert_eq!(
       builds.first().map(|row| row.1.as_str()),
-      Some("Build actions/hello-world-docker-action")
+      Some("Build actions/hello-world-docker-action@main")
     );
     assert!(setup_rows(&events, "Pull ").is_empty(), "{events:#?}");
     let build = builds.first().ok_or("missing build")?;
@@ -822,7 +822,7 @@ async fn failing_remote_dockerfile_closes_build_before_user_steps() -> TestResul
   let builds = setup_rows(&events, "Build ");
   assert_eq!(builds.len(), 1, "{events:#?}");
   let build = builds.first().ok_or("missing build")?;
-  assert_eq!(build.1, "Build actions/hello-world-docker-action");
+  assert_eq!(build.1, "Build actions/hello-world-docker-action@main");
   assert!(events.iter().any(|event| matches!(event, RunnerEvent::StepCompleted { step_id, conclusion: Conclusion::Failure, .. } if step_id == &build.0)), "{events:#?}");
   assert!(setup_rows(&events, "Pull ").is_empty(), "{events:#?}");
   assert!(!events.iter().any(|event| matches!(event, RunnerEvent::StepStarted { step_id, .. } if step_id == "before" || step_id == "remote")), "{events:#?}");

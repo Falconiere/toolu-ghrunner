@@ -24,7 +24,9 @@ struct BuildAction {
 }
 
 struct BuildGroup {
-  repository: String,
+  /// Upstream `ActionContainer.ActionRepository`: `owner/repo[/path]@ref`,
+  /// the key of one "Build" row (compared case-insensitively, as upstream).
+  action_repository: String,
   actions: Vec<BuildAction>,
 }
 
@@ -181,11 +183,7 @@ async fn discover_remote(
       if let Some(registry) = image.strip_prefix("docker://") {
         plan.add_pull(registry)?;
       } else {
-        plan.add_build(
-          format!("{}/{}", action_ref.owner, action_ref.repo),
-          image,
-          action_dir,
-        );
+        plan.add_build(action_repository(&action_ref), image, action_dir);
       }
     },
   }
@@ -211,6 +209,20 @@ async fn load_remote(
   Some((action_ref, action_dir, manifest))
 }
 
+/// `owner/repo[/path]@ref`, as upstream names a Build row (`ActionManager`).
+fn action_repository(action_ref: &ActionRef) -> String {
+  match &action_ref.subpath {
+    Some(path) => format!(
+      "{}/{}/{path}@{}",
+      action_ref.owner, action_ref.repo, action_ref.git_ref
+    ),
+    None => format!(
+      "{}/{}@{}",
+      action_ref.owner, action_ref.repo, action_ref.git_ref
+    ),
+  }
+}
+
 impl ImagePlan {
   fn add_pull(&mut self, image: &str) -> Result<(), RunnerError> {
     if image.trim().is_empty() {
@@ -224,7 +236,7 @@ impl ImagePlan {
     Ok(())
   }
 
-  fn add_build(&mut self, repository: String, image: &str, action_dir: PathBuf) {
+  fn add_build(&mut self, action_repository: String, image: &str, action_dir: PathBuf) {
     let cache_key = action_dir.to_string_lossy().into_owned();
     if !self.build_keys.insert(cache_key.clone()) {
       return;
@@ -234,15 +246,15 @@ impl ImagePlan {
       action_dir,
       cache_key,
     };
-    if let Some(group) = self
-      .builds
-      .iter_mut()
-      .find(|group| group.repository.eq_ignore_ascii_case(&repository))
-    {
+    if let Some(group) = self.builds.iter_mut().find(|group| {
+      group
+        .action_repository
+        .eq_ignore_ascii_case(&action_repository)
+    }) {
       group.actions.push(action);
     } else {
       self.builds.push(BuildGroup {
-        repository,
+        action_repository,
         actions: vec![action],
       });
     }
@@ -290,7 +302,10 @@ async fn start_task(
 ) {
   let (name, action) = match task {
     SetupTask::Pull(image) => (format!("Pull {image}"), "pull_action_image"),
-    SetupTask::Build(group) => (format!("Build {}", group.repository), "build_action_image"),
+    SetupTask::Build(group) => (
+      format!("Build {}", group.action_repository),
+      "build_action_image",
+    ),
   };
   send(
     events,

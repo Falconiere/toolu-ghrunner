@@ -488,7 +488,7 @@ outside a `tests/` tree.
   actions, remote-pre-failure keeps eligible posts; `Dockerfile` image reuse).
   `docker_prepare` (#232) discovers remote Docker actions, including those nested
   in remote composites, before user steps: case-insensitive registry Pull rows
-  precede per-repository Build rows, prepared images are reused, and setup
+  precede Build rows (one per `owner/repo[/path]@ref`, as upstream), prepared images are reused, and setup
   failure/cancellation stops user steps. Discovery visits each remote ref once,
   keeps the depth limit, resolves enabled nested `$/` against the enclosing remote
   action, and can be cancelled during a fetch. Local actions prepare at step time;
