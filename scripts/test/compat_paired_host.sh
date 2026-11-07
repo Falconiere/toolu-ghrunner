@@ -32,9 +32,11 @@ official_lane() {
       -f 'labels[]=self-hosted' -f "labels[]=${PLATFORM%-*}" -f "labels[]=${PLATFORM#*-}" \
       -f "labels[]=$label" --jq .encoded_jit_config)
     echo "::add-mask::$jit"
-    (cd "$OFFICIAL_DIR" && "${clean_env[@]}" ./run.sh --jitconfig "$jit") ||
-      echo "::warning::official runner $label-$serial exited non-zero"
-    sleep 1
+    # A job's own failure still exits 0, so non-zero means the runner is broken.
+    (cd "$OFFICIAL_DIR" && "${clean_env[@]}" ./run.sh --jitconfig "$jit") || {
+      echo "::error::official runner $label-$serial exited non-zero"
+      return 1
+    }
   done
 }
 

@@ -127,7 +127,7 @@ if [[ -z "${COMPAT_PAIRED_WORKFLOW_FILE:-}" ]]; then
   # nothing else can exercise it before the first dispatch.
   tmp=$(mktemp -d)
   trap 'rm -rf "$tmp"' EXIT
-  mkdir -p "$tmp/tools" "$tmp/official/bin"
+  mkdir -p "$tmp/tools" "$tmp/official/bin" "$tmp/official-dies"
   cat >"$tmp/tools/gh" <<'GH'
 #!/usr/bin/env bash
 case "$*" in
@@ -146,7 +146,8 @@ exit 0
 TOOLU
   # The lanes run under `env -i`, so a dying toolu is a binary of its own.
   printf '#!/usr/bin/env bash\n[[ "$1" == run ]] && exit 2\nexit 0\n' >"$tmp/tools/toolu-dies"
-  chmod +x "$tmp/tools/gh" "$tmp/tools/toolu" "$tmp/tools/toolu-dies" "$tmp/official/run.sh" \
+  printf '#!/usr/bin/env bash\nexit 3\n' >"$tmp/official-dies/run.sh"
+  chmod +x "$tmp/tools/gh" "$tmp/tools/toolu" "$tmp/tools/toolu-dies" "$tmp/official/run.sh" "$tmp/official-dies/run.sh" \
     "$tmp/official/bin/Runner.Listener"
   for caller in probe-Linux-X64-toolu probe-Linux-X64-official negative-Linux-X64-toolu negative-Linux-X64-official; do
     printf 'completed %s / contexts (alpha, 7, true)\ncompleted %s / consumer\n' "$caller" "$caller"
@@ -157,7 +158,7 @@ TOOLU
     (
       export FAKE_JOBS="$tmp/jobs" FAKE_NO_JIT="${FAKE_NO_JIT:-}" GH_TOKEN=fake GITHUB_REPOSITORY=o/r GITHUB_RUN_ID=1 RUNNER_TEMP="$tmp"
       export PLATFORM=Linux-X64 LABEL_PREFIX="compat-paired-$GITHUB_RUN_ID-Linux-X64" POLL_SECONDS=0
-      export OFFICIAL_DIR="$tmp/official" TOOLU_BIN="${FAKE_TOOLU:-$tmp/tools/toolu}"
+      export OFFICIAL_DIR="${FAKE_OFFICIAL:-$tmp/official}" TOOLU_BIN="${FAKE_TOOLU:-$tmp/tools/toolu}"
       PATH="$tmp/tools:$PATH" timeout_guard bash "$HOST" "$@"
     )
   }
@@ -190,6 +191,8 @@ TOOLU
   expect "a dead toolu lane fails the step while a consumer is unlisted" 1 $?
   FAKE_RUNNERS="$tmp/none" FAKE_NO_JIT=1 host run >/dev/null 2>&1
   expect "a dead official lane fails the step while a consumer is unlisted" 1 $?
+  FAKE_RUNNERS="$tmp/none" FAKE_OFFICIAL="$tmp/official-dies" host run >/dev/null 2>&1
+  expect "an official runner that cannot start fails the step" 1 $?
   FAKE_RUNNERS="$tmp/none" host unregister >/dev/null 2>&1
   expect "unregister passes with no runner left" 0 $?
   out=$(FAKE_RUNNERS="$tmp/survivor" host unregister 2>&1)
