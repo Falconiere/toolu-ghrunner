@@ -318,14 +318,22 @@ jobs:
       first: ${{ steps.outer.outputs.first }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      # Remote, so both runners run pre; a local use runs none (upstream).
       - name: Node first
-        uses: ./.github/actions/compat-251-node
+        uses: Falconiere/toolu-ghrunner/.github/actions/compat-251-node@133d045da16d039a0567100a6966703fd15fe1d0
         with:
           tag: first
+          posts-before: local|second
       - name: Node second
-        uses: ./.github/actions/compat-251-node
+        uses: Falconiere/toolu-ghrunner/.github/actions/compat-251-node@133d045da16d039a0567100a6966703fd15fe1d0
         with:
           tag: second
+          posts-before: local
+      - name: Node local
+        uses: ./.github/actions/compat-251-node
+        with:
+          tag: local
+          expect-pre: 'false'
       - name: Nested composites
         id: outer
         uses: ./.github/actions/compat-251-outer
@@ -387,6 +395,10 @@ jobs:
       - name: Built container action
         id: built
         uses: Falconiere/toolu-ghrunner/.github/actions/compat-251-docker@fd0192158b9f966705feed24efb1d912bbf20fab
+      # actions/cache compresses with zstd when the job has it: without it here
+      # the container's entry is gzip and the host's restore misses it.
+      - name: Install zstd in the container
+        run: apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq zstd >/dev/null
       - name: Write payloads
         id: payloads
         run: |
@@ -422,11 +434,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Node first
-        uses: ./.github/actions/compat-251-node
+        uses: Falconiere/toolu-ghrunner/.github/actions/compat-251-node@133d045da16d039a0567100a6966703fd15fe1d0
         with:
           tag: first
+          posts-before: second
       - name: Node second
-        uses: ./.github/actions/compat-251-node
+        uses: Falconiere/toolu-ghrunner/.github/actions/compat-251-node@133d045da16d039a0567100a6966703fd15fe1d0
         with:
           tag: second
       - name: Leave a background process

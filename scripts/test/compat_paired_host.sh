@@ -250,7 +250,9 @@ from pathlib import Path
 for path in sorted(Path(sys.argv[1]).glob("*.json")):
     text = path.read_text()
     message = json.loads(text)
-    if message.get("jobDisplayName") == "stack" and "0000000000000251" not in text:
+    # Only `stack` has a job container and services; the negative variant's
+    # image is the missing one.
+    if message.get("jobContainer") and message.get("jobServiceContainers") and "0000000000000251" not in text:
         print(path)
         break
 PY

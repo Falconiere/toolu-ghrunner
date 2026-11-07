@@ -386,6 +386,24 @@ DOCKER
     fail=1
   }
 
+  # The stack probe message is the one with a job container and services whose
+  # image is the real one; only its sanitized copy is written.
+  caps="$tmp/toolu-home/_diag/captures"
+  mkdir -p "$caps"
+  echo '{"jobDisplayName":"probe / contexts","jobContainer":null,"jobServiceContainers":null}' >"$caps/1.json"
+  echo '{"jobContainer":{"lit":"ubuntu@sha256:0000000000000000000000000000000000000000000000000000000000000251"},"jobServiceContainers":{"type":2}}' >"$caps/2.json"
+  echo '{"jobContainer":{"lit":"ubuntu@sha256:fe81"},"jobServiceContainers":{"type":2}}' >"$caps/3.json"
+  host capture "$tmp/stack.json" >/dev/null 2>&1
+  expect "the stack capture is found and sanitized" 0 $?
+  grep -q 'ubuntu@sha256:fe81' "$tmp/stack.json" 2>/dev/null &&
+    echo "ok: the probe variant's stack message is the one captured" || {
+    echo "FAIL: wrong or missing stack capture" >&2
+    fail=1
+  }
+  rm -f "$caps/3.json"
+  host capture "$tmp/none.json" >/dev/null 2>&1
+  expect "no stack probe message fails the capture" 1 $?
+
   FAKE_RUNNERS="$tmp/none" host unregister >/dev/null 2>&1
   expect "unregister passes with no runner left" 0 $?
   cp "$tmp/survivor" "$tmp/deletable"

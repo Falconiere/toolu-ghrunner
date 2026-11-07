@@ -80,11 +80,13 @@ NEGATIVE_FAILURES = {
     "contexts": "Assert typed inputs",
     "docker": "Verify container effects",
     "consumer": "Verify cross-job values",
-    "stack": "Initialize containers",
 }
 # (variant, job) -> (job conclusion, failed step names) for the probe jobs that
 # are meant to end badly. The cancel/timeout outcomes are the official lane's.
 EXPECTATIONS = {
+    # The missing job-container image fails setup; the always() step is still
+    # attempted and fails without its container (official, run 42403405937).
+    ("negative", "stack"): ("failure", ["Initialize containers", "Return workspace ownership"]),
     ("probe", "failure"): ("failure", ["Main failure"]),
     ("probe", "timeout"): ("failure", ["Step timeout"]),
     ("probe", "cancel"): ("cancelled", []),
