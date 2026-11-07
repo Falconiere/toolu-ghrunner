@@ -73,10 +73,15 @@ class OrphanLimitsDocsTest(unittest.TestCase):
         so a passing run above means the prose is there and not that the
         patterns match anything."""
         text = (ROOT / "README.md").read_text(encoding="utf-8")
-        for name, pattern in {**ENVIRONMENT_LIMIT, **ESCAPES}.items():
+        facts = {**ENVIRONMENT_LIMIT, **ESCAPES}
+        for name, pattern in facts.items():
             with self.subTest(removed=name):
-                stripped = re.sub(pattern, "", text)
-                self.assertIn(name, absent(stripped, {**ENVIRONMENT_LIMIT, **ESCAPES}))
+                # Without the removal count this would pass on a fact README
+                # never stated: the substitution would be a no-op and the fact
+                # would be reported missing for the wrong reason.
+                stripped, removed = re.subn(pattern, "", text)
+                self.assertTrue(removed, "the pattern matched nothing to remove")
+                self.assertIn(name, absent(stripped, facts))
 
 
 if __name__ == "__main__":
