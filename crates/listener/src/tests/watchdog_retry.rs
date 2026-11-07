@@ -24,6 +24,11 @@ use crate::retry::{REPORT_RETRY_MAX, retry_transient};
 /// (`clippy.toml: allow-expect-in-tests`), not their helpers.
 type TestResult<T> = Result<T, Box<dyn std::error::Error>>;
 
+#[test]
+fn reporting_retry_budget_is_ten_minutes() {
+  assert_eq!(REPORT_RETRY_MAX, Duration::from_secs(600));
+}
+
 fn complete_request() -> CompleteJobRequest {
   CompleteJobRequest {
     plan_id: "plan-1".to_owned(),
