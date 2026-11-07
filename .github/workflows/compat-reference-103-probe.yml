@@ -17,6 +17,16 @@ name: compat-reference-103-probe
 # the `surfaces` job of compat-paired.yml (scripts/test/compat_surfaces_check.py);
 # `services` checks OIDC claims in memory and `consumer` checks outputs and
 # artifact digests. No token or claim value is written anywhere.
+#
+# #251 (`extended`, passed by the paired toolu/official callers): `composite`
+# (X-2), `stack` (X-3, Linux; also in the negative variant, where its job
+# container image is missing), `failure`/`orphans`/`timeout`/`cancel`
+# (X-4, R-cancellation; `cancel` ends by job timeout, which GitHub delivers as a
+# JobCancellation), `long` (R-renew), `pool-a`/`pool-b` (X-6: two runners per
+# lane at once). `contexts` leaves `_temp`, `_tool` and workspace markers that
+# `consumer` checks (R-temp-cleanup, X-6 stable workspace). `secrets` registers
+# a disposable value (job `leaks`) derived from the run, lane and variant, which
+# reference_compare.py and the host look for in every log they read.
 
 on:
   workflow_call:
@@ -46,6 +56,10 @@ on:
         type: boolean
         required: false
         default: true
+      extended:
+        type: boolean
+        required: false
+        default: false
 
 env:
   WORKFLOW_LEVEL: workflow-103
@@ -72,9 +86,16 @@ jobs:
       marker: ${{ steps.emit.outputs.marker }}
       who: ${{ steps.emit.outputs.who }}
     steps:
+      # #251: `_temp` is emptied between jobs, `_tool` is kept, and the
+      # workspace path is the same for the next job on this lane.
       - name: Prepare working directory
         working-directory: .
-        run: mkdir -p probe-dir
+        run: |
+          mkdir -p probe-dir "$RUNNER_TOOL_CACHE"
+          marker='compat-251-${{ inputs.lane }}-${{ inputs.variant }}'
+          printf '%s\n' '${{ github.run_id }}' > "$RUNNER_TEMP/$marker"
+          printf '%s\n' '${{ github.run_id }}' > "$RUNNER_TOOL_CACHE/$marker"
+          printf '%s\n' "$GITHUB_WORKSPACE" > "$GITHUB_WORKSPACE/../$marker.workspace"
       - name: Assert typed inputs
         env:
           INPUTS: ${{ toJSON(inputs) }}
@@ -136,6 +157,7 @@ jobs:
     outputs:
       claims: ${{ steps.oidc.outputs.claims }}
       artifact_sha: ${{ steps.payloads.outputs.artifact_sha }}
+      cache_sha: ${{ steps.payloads.outputs.cache_sha }}
     steps:
       - name: Write payloads
         id: payloads
@@ -143,6 +165,7 @@ jobs:
           printf 'cache-103-%s\n' '${{ github.run_id }}' > cache-103.txt
           printf 'artifact-103-%s\n' '${{ github.run_id }}' > artifact-103.txt
           printf 'artifact_sha=%s\n' "$(shasum -a 256 artifact-103.txt | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          printf 'cache_sha=%s\n' "$(shasum -a 256 cache-103.txt | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       - name: Save cache
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
@@ -262,8 +285,277 @@ jobs:
           path: /tmp/container-237.txt
           if-no-files-found: error
 
+  # #251 X-5 / R-masking: a registered disposable value through stdout, stderr,
+  # GITHUB_ENV, a warning annotation and the step summary. It guards nothing;
+  # reference_compare.py and the host recompute it and count it in every log.
+  leaks:
+    if: inputs.extended
+    runs-on: [self-hosted, "${{ inputs.runner_label }}"]
+    timeout-minutes: 10
+    steps:
+      - name: Echo a registered disposable value
+        run: |
+          value=$(printf 'compat-251-%s-%s-%s' '${{ github.run_id }}' '${{ inputs.lane }}' '${{ inputs.variant }}' | shasum -a 256 | cut -c1-32)
+          echo "::add-mask::$value"
+          echo "stdout $value"
+          echo "stderr $value" >&2
+          echo "::warning title=compat-251 disposable::warning $value"
+          printf 'COMPAT_251_DISPOSABLE=%s\n' "$value" >> "$GITHUB_ENV"
+          printf '### compat-251 %s\n' "$value" >> "$GITHUB_STEP_SUMMARY"
+      - name: Read the disposable value from the environment
+        run: |
+          test "${#COMPAT_251_DISPOSABLE}" = 32
+          echo "env $COMPAT_251_DISPOSABLE"
+
+  # #251 X-2: checkout, a nested composite called twice, a failing composite
+  # with cleanup, and two Node actions whose posts run last-in, first-out.
+  composite:
+    if: inputs.extended
+    runs-on: [self-hosted, "${{ inputs.runner_label }}"]
+    timeout-minutes: 10
+    outputs:
+      summary: ${{ steps.outer.outputs.summary }}
+      first: ${{ steps.outer.outputs.first }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Node first
+        uses: ./.github/actions/compat-251-node
+        with:
+          tag: first
+      - name: Node second
+        uses: ./.github/actions/compat-251-node
+        with:
+          tag: second
+      - name: Nested composites
+        id: outer
+        uses: ./.github/actions/compat-251-outer
+        with:
+          who: ${{ inputs.who }}
+      - name: Failing composite
+        id: fail
+        continue-on-error: true
+        uses: ./.github/actions/compat-251-fail
+      - name: Verify composite results
+        run: |
+          test '${{ steps.fail.outcome }}' = failure
+          test '${{ steps.fail.conclusion }}' = success
+          test "$(cat compat-251-cleanup.txt)" = done
+          test ! -e compat-251-not-run.txt
+          test '${{ steps.outer.outputs.first }}' = first:world
+          test '${{ fromJSON(steps.outer.outputs.summary).n }}' = 3
+          test '${{ fromJSON(steps.outer.outputs.summary).second }}' = second:3
+
+  # #251 X-3: a job container with two services, a pulled and a built container
+  # action, checkout, file commands, cache and artifact. Its image is missing in
+  # the negative variant, so that variant fails at "Initialize containers".
+  stack:
+    if: inputs.run_docker
+    runs-on: [self-hosted, "${{ inputs.runner_label }}"]
+    timeout-minutes: 15
+    container: ${{ inputs.who == 'world' && 'ubuntu@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852' || 'ubuntu@sha256:0000000000000000000000000000000000000000000000000000000000000251' }}
+    services:
+      redis:
+        image: redis@sha256:c5d34a98396a4775e223c74e929162c35c5a2182901ba26b50ade939941ce14b
+      nginx:
+        image: nginx@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
+    outputs:
+      release: ${{ steps.pulled.outputs.release }}
+      built: ${{ steps.built.outputs.release }}
+      cache_sha: ${{ steps.payloads.outputs.cache_sha }}
+      artifact_sha: ${{ steps.payloads.outputs.artifact_sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Reach both services by name
+        shell: bash
+        run: |
+          exec 3<>/dev/tcp/redis/6379
+          printf 'PING\r\n' >&3
+          read -r -t 10 reply <&3
+          test "${reply%$'\r'}" = +PONG
+          exec 4<>/dev/tcp/nginx/80
+          printf 'GET / HTTP/1.0\r\nHost: nginx\r\n\r\n' >&4
+          read -r -t 10 status <&4
+          case "$status" in "HTTP/1.1 200"*) ;; *) echo "nginx answered: $status"; exit 1 ;; esac
+      - name: Write the pulled action's script
+        run: printf '%s\n' 'printf "release=%s\n" "$(cat /etc/alpine-release)" >> "$GITHUB_OUTPUT"' > stack-251.sh
+      - name: Pulled container action
+        id: pulled
+        uses: docker://alpine@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
+        with:
+          entrypoint: /bin/sh
+          args: stack-251.sh
+      - name: Built container action
+        id: built
+        uses: Falconiere/toolu-ghrunner/.github/actions/compat-251-docker@fd0192158b9f966705feed24efb1d912bbf20fab
+      - name: Write payloads
+        id: payloads
+        run: |
+          test '${{ steps.pulled.outputs.release }}' = 3.20.10
+          test '${{ steps.built.outputs.release }}' = 3.20.10
+          printf 'stack-cache-251-%s\n' '${{ github.run_id }}' > stack-cache-251.txt
+          printf 'stack-artifact-251-%s\n' '${{ github.run_id }}' > /tmp/stack-artifact-251.txt
+          printf 'cache_sha=%s\n' "$(sha256sum stack-cache-251.txt | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          printf 'artifact_sha=%s\n' "$(sha256sum /tmp/stack-artifact-251.txt | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - name: Save cache from the container
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: stack-cache-251.txt
+          key: compat-251-stack-${{ inputs.lane }}-${{ inputs.variant }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Upload from the container
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: compat-251-${{ inputs.lane }}-${{ inputs.variant }}-stack
+          path: /tmp/stack-artifact-251.txt
+          if-no-files-found: error
+      # The container runs as root: hand the checkout back to the host user, or
+      # a later host job on this lane could not clean the shared workspace.
+      - name: Return workspace ownership
+        if: always()
+        run: chown -R "$(stat -c %u:%g "$GITHUB_WORKSPACE")" "$GITHUB_WORKSPACE"
+
+  # #251 X-4: a main failure with conditional cleanup and Node posts, leaving a
+  # background process the job-end sweep must kill (checked by `orphans`).
+  failure:
+    if: inputs.extended
+    runs-on: [self-hosted, "${{ inputs.runner_label }}"]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Node first
+        uses: ./.github/actions/compat-251-node
+        with:
+          tag: first
+      - name: Node second
+        uses: ./.github/actions/compat-251-node
+        with:
+          tag: second
+      - name: Leave a background process
+        run: nohup perl -e 'sleep 900' 'compat-251-orphan-${{ inputs.lane }}-${{ github.run_id }}' >/dev/null 2>&1 &
+      - name: Main failure
+        run: exit 3
+      - name: Skipped after the failure
+        run: exit 1
+      - name: Cleanup on failure
+        if: failure()
+        run: echo compat-251 failure cleanup
+      - name: Cleanup always
+        if: always()
+        run: echo compat-251 always cleanup
+
+  orphans:
+    needs: failure
+    if: always() && inputs.extended
+    runs-on: [self-hosted, "${{ inputs.runner_label }}"]
+    timeout-minutes: 10
+    steps:
+      - name: The failed job's background process is gone
+        run: |
+          if pgrep -f 'compat-251-orphan-${{ inputs.lane }}-${{ github.run_id }}'; then
+            echo "::error::the background process outlived its job"
+            exit 1
+          fi
+
+  # #251 X-4: a step that exceeds its own timeout, then cleanup.
+  timeout:
+    if: inputs.extended
+    runs-on: [self-hosted, "${{ inputs.runner_label }}"]
+    timeout-minutes: 10
+    steps:
+      - name: Step timeout
+        timeout-minutes: 1
+        run: sleep 120
+      - name: Cleanup after the timeout
+        if: always()
+        run: echo compat-251 timeout cleanup
+
+  # #251 X-4 / R-cancellation: the job timeout is enforced by GitHub, which sends
+  # the runner a JobCancellation while the step sleeps.
+  cancel:
+    if: inputs.extended
+    runs-on: [self-hosted, "${{ inputs.runner_label }}"]
+    timeout-minutes: 1
+    steps:
+      - name: Wait for cancellation
+        run: sleep 300
+      - name: Cleanup after cancel
+        if: always()
+        run: echo compat-251 cancel cleanup
+      - name: Only when cancelled
+        if: cancelled()
+        run: echo compat-251 cancelled
+
+  # #251 X-3: the same GitHub-side cancellation inside a job container.
+  cancel-container:
+    if: inputs.extended && inputs.run_docker
+    runs-on: [self-hosted, "${{ inputs.runner_label }}"]
+    timeout-minutes: 1
+    container: ubuntu@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852
+    steps:
+      - name: Wait for cancellation
+        run: sleep 300
+      - name: Cleanup after cancel
+        if: always()
+        run: echo compat-251 cancel cleanup
+
+  # #251 R-renew: outlives two 60-second lock renewals.
+  long:
+    if: inputs.extended
+    runs-on: [self-hosted, "${{ inputs.runner_label }}"]
+    timeout-minutes: 10
+    steps:
+      - name: Outlive two renewals
+        run: sleep 150
+
+  # #251 X-6: two runners serve the `-pool` label at once on each lane. Each job
+  # waits for the other to start, then proves their workspaces are distinct.
+  pool-a:
+    if: inputs.extended
+    runs-on: [self-hosted, "${{ inputs.runner_label }}-pool"]
+    timeout-minutes: 10
+    env:
+      ME: pool-a
+      OTHER: pool-b
+      POOL: /tmp/compat-251-pool-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.lane }}
+    steps:
+      - name: Wait for the other pool job
+        run: |
+          mkdir -p "$POOL"
+          printf '%s\n' "$GITHUB_WORKSPACE" > "$POOL/$ME"
+          for _ in $(seq 180); do [ -s "$POOL/$OTHER" ] && break; sleep 1; done
+          test -s "$POOL/$OTHER"
+          test "$(cat "$POOL/$OTHER")" != "$GITHUB_WORKSPACE"
+      - name: Check workspace isolation
+        run: |
+          printf '%s\n' "$ME" > "compat-251-$ME"
+          sleep 5
+          test ! -e "compat-251-$OTHER"
+          test "$(cat "compat-251-$ME")" = "$ME"
+
+  pool-b:
+    if: inputs.extended
+    runs-on: [self-hosted, "${{ inputs.runner_label }}-pool"]
+    timeout-minutes: 10
+    env:
+      ME: pool-b
+      OTHER: pool-a
+      POOL: /tmp/compat-251-pool-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.lane }}
+    steps:
+      - name: Wait for the other pool job
+        run: |
+          mkdir -p "$POOL"
+          printf '%s\n' "$GITHUB_WORKSPACE" > "$POOL/$ME"
+          for _ in $(seq 180); do [ -s "$POOL/$OTHER" ] && break; sleep 1; done
+          test -s "$POOL/$OTHER"
+          test "$(cat "$POOL/$OTHER")" != "$GITHUB_WORKSPACE"
+      - name: Check workspace isolation
+        run: |
+          printf '%s\n' "$ME" > "compat-251-$ME"
+          sleep 5
+          test ! -e "compat-251-$OTHER"
+          test "$(cat "compat-251-$ME")" = "$ME"
+
   consumer:
-    needs: [contexts, docker, services, secrets, container]
+    needs: [contexts, docker, services, secrets, container, composite, stack]
     if: always()
     runs-on: [self-hosted, "${{ inputs.runner_label }}"]
     timeout-minutes: 10
@@ -278,6 +570,19 @@ jobs:
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: compat-103-${{ inputs.lane }}-${{ inputs.variant }}-payload
+      - name: Restore the container's cache
+        if: inputs.run_docker && inputs.variant == 'probe'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: stack-cache-251.txt
+          key: compat-251-stack-${{ inputs.lane }}-${{ inputs.variant }}-${{ github.run_id }}-${{ github.run_attempt }}
+          fail-on-cache-miss: true
+      - name: Download the container's artifact
+        if: inputs.run_docker && inputs.variant == 'probe'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: compat-251-${{ inputs.lane }}-${{ inputs.variant }}-stack
+          path: stack-251-download
       - name: Download container artifact
         if: inputs.run_docker
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
@@ -289,6 +594,25 @@ jobs:
           test '${{ needs.secrets.outputs.safe }}' = compat-237-safe-output
           test -z '${{ needs.secrets.outputs.masked }}'
           test "$(shasum -a 256 artifact-103.txt | cut -d' ' -f1)" = '${{ needs.services.outputs.artifact_sha }}'
+          test "$(shasum -a 256 cache-103.txt | cut -d' ' -f1)" = '${{ needs.services.outputs.cache_sha }}'
+          if [ '${{ inputs.run_docker && inputs.variant == 'probe' }}' = true ]; then
+            test "$(shasum -a 256 stack-cache-251.txt | cut -d' ' -f1)" = '${{ needs.stack.outputs.cache_sha }}'
+            test "$(shasum -a 256 stack-251-download/stack-artifact-251.txt | cut -d' ' -f1)" = '${{ needs.stack.outputs.artifact_sha }}'
+            test '${{ needs.stack.outputs.release }}' = 3.20.10
+            test '${{ needs.stack.outputs.built }}' = 3.20.10
+          fi
+          if [ '${{ inputs.extended }}' = true ]; then
+            test '${{ needs.composite.outputs.first }}' = first:world
+            test '${{ fromJSON(needs.composite.outputs.summary || '{}').n }}' = 3
+          fi
+      # #251 R-temp-cleanup and X-6: `_temp` emptied, `_tool` kept, and the same
+      # workspace path as `contexts` on this lane.
+      - name: Verify runner directories
+        run: |
+          marker='compat-251-${{ inputs.lane }}-${{ inputs.variant }}'
+          test ! -e "$RUNNER_TEMP/$marker"
+          test "$(cat "$RUNNER_TOOL_CACHE/$marker")" = '${{ github.run_id }}'
+          test "$(cat "$GITHUB_WORKSPACE/../$marker.workspace")" = "$GITHUB_WORKSPACE"
           if [ '${{ inputs.run_docker }}' = true ]; then
             test "$(shasum -a 256 container-237-download/container-237.txt | cut -d' ' -f1)" = '${{ needs.container.outputs.sha }}'
           fi

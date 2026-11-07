@@ -13,6 +13,13 @@ name: compat-paired
 # `surfaces` job, which reads annotations and deployment statuses back from the
 # GitHub API (scripts/test/compat_surfaces_check.py). Two runners side by side
 # on each hosted VM were first proven by #237's runs 42388230585 and 42389172867.
+#
+# #251 adds the `extended` probe jobs, a second runner per lane for concurrent
+# jobs (`-pool` labels), toolu-only `lifecycle` jobs on a fresh-workspace and an
+# ephemeral registration, and per-VM observations (`compat-251-<platform>-host`:
+# provenance, disposable-value hits in each lane's own logs, lock renewals, poll
+# failures, ephemeral state) plus a sanitized capture of the toolu `stack`
+# message from the Linux-X64 VM. The comparator writes docs/compat-reference-230.json.
 
 on:
   workflow_dispatch:
@@ -76,6 +83,9 @@ jobs:
       PLATFORM: ${{ matrix.platform }}
       ACCELERATED_LANE: ${{ matrix.accelerated }}
       LABEL_PREFIX: compat-paired-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.platform }}
+      EXTENDED_LANES: true
+      OFFICIAL_DIR: ${{ github.workspace }}/../official-251
+      TOOLU_BIN: ${{ github.workspace }}/target/debug/toolu-runner
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.94.1
@@ -87,18 +97,18 @@ jobs:
           curl --fail --silent --show-error --location --retry 3 -o "$RUNNER_TEMP/$ARCHIVE" \
             "https://github.com/actions/runner/releases/download/v2.338.2/$ARCHIVE"
           echo "$SHA256  $RUNNER_TEMP/$ARCHIVE" | shasum -a 256 --check --strict
-          mkdir "$RUNNER_TEMP/official"
-          tar -xzf "$RUNNER_TEMP/$ARCHIVE" -C "$RUNNER_TEMP/official"
+          mkdir "$OFFICIAL_DIR"
+          tar -xzf "$RUNNER_TEMP/$ARCHIVE" -C "$OFFICIAL_DIR"
+      # `capture` writes each acquired message under the lane's _diag (0600);
+      # only the sanitized `stack` message leaves the VM.
       - name: Build toolu
-        run: cargo build -p toolu-runner --bin toolu-runner
+        run: cargo build -p toolu-runner --bin toolu-runner --features capture
       # A failure here leaves the probes queued; stop-queued-probes ends the run.
       - name: Serve both lanes until this platform's probes finish
         timeout-minutes: 75
         env:
           GH_TOKEN: ${{ secrets.TOOLU_RUNNER_LIVE_TOKEN }}
-          TOOLU_BIN: ${{ github.workspace }}/target/debug/toolu-runner
-        run: |
-          OFFICIAL_DIR="$RUNNER_TEMP/official" bash scripts/test/compat_paired_host.sh run
+        run: bash scripts/test/compat_paired_host.sh run
       # The VM is gone by the time the comparator runs, so this is the only
       # place the containers can be seen. No artifact fails the comparison.
       - name: Record containers left on this VM
@@ -110,6 +120,31 @@ jobs:
         with:
           name: compat-paired-${{ matrix.platform }}-containers
           path: containers.txt
+          if-no-files-found: error
+      # Before unregistering: the ephemeral runner must already be gone.
+      - name: Record the #251 host observations
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.TOOLU_RUNNER_LIVE_TOKEN }}
+          ARCHIVE: ${{ matrix.archive }}
+          SHA256: ${{ matrix.sha256 }}
+        run: bash scripts/test/compat_paired_host.sh report
+      - name: Upload the #251 host observations
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: compat-251-${{ matrix.platform }}-host
+          path: ${{ runner.temp }}/host-251.json
+          if-no-files-found: error
+      - name: Sanitize the toolu stack capture
+        if: matrix.platform == 'Linux-X64'
+        run: bash scripts/test/compat_paired_host.sh capture "$RUNNER_TEMP/compat_251_stack_message.json"
+      - name: Upload the sanitized stack capture
+        if: matrix.platform == 'Linux-X64'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: compat-251-stack-capture
+          path: ${{ runner.temp }}/compat_251_stack_message.json
           if-no-files-found: error
       - name: Unregister both lanes
         if: always()
@@ -153,6 +188,7 @@ jobs:
       enabled: false
       expect_oidc: true
       run_docker: ${{ matrix.platform != 'macOS-ARM64' }}
+      extended: true
 
   negative:
     name: negative-${{ matrix.platform }}-${{ matrix.lane }}
@@ -196,6 +232,55 @@ jobs:
       enabled: false
       expect_oidc: true
       run_docker: false
+
+  # #251 X-6, toolu-only (the official runner has no fresh mode, and every
+  # official JIT runner is already single-use): consecutive jobs on a
+  # `[workspace] mode = "fresh"` registration get distinct, empty workspaces, and
+  # an ephemeral registration takes one job (the host checks it then exits,
+  # deletes its state and is gone from GitHub). Never reference evidence.
+  fresh-1:
+    name: lifecycle-${{ matrix.platform }}-toolu-fresh-1
+    needs: guard
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [Linux-X64, Linux-ARM64, macOS-ARM64]
+    runs-on: [self-hosted, "compat-paired-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.platform }}-toolu-fresh"]
+    timeout-minutes: 10
+    steps:
+      - name: Start in an empty workspace and record it
+        run: |
+          test -z "$(ls -A "$GITHUB_WORKSPACE")"
+          printf 'fresh-1\n' > "$GITHUB_WORKSPACE/compat-251-fresh"
+          printf '%s\n' "$GITHUB_WORKSPACE" > "/tmp/compat-251-fresh-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.platform }}"
+
+  fresh-2:
+    name: lifecycle-${{ matrix.platform }}-toolu-fresh-2
+    needs: fresh-1
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [Linux-X64, Linux-ARM64, macOS-ARM64]
+    runs-on: [self-hosted, "compat-paired-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.platform }}-toolu-fresh"]
+    timeout-minutes: 10
+    steps:
+      - name: Start in another empty workspace
+        run: |
+          test -z "$(ls -A "$GITHUB_WORKSPACE")"
+          test "$(cat "/tmp/compat-251-fresh-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.platform }}")" != "$GITHUB_WORKSPACE"
+
+  ephemeral:
+    name: lifecycle-${{ matrix.platform }}-toolu-ephemeral
+    needs: guard
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [Linux-X64, Linux-ARM64, macOS-ARM64]
+    runs-on: [self-hosted, "compat-paired-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.platform }}-toolu-ephemeral"]
+    timeout-minutes: 10
+    steps:
+      - name: Run once on the ephemeral registration
+        run: echo "compat-251 ephemeral job on $RUNNER_NAME"
 
   # Observation runs on a hosted VM: a self-hosted job after the last consumer
   # could be left queued once the hosts stop their lanes.
