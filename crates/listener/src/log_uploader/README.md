@@ -15,8 +15,8 @@ Per-step result aggregation (status/conclusion, not logs) is
 
 | File | Primary item | Purpose |
 | --- | --- | --- |
-| `streamer.rs` | `StreamerConfig` / `spawn` | Spawns a per-step tokio actor that receives log lines over an mpsc channel and gzip-uploads the accumulated blob on finalize. |
-| `upload.rs` | `upload_compressed_step_logs` / `upload_job_logs` | Shared 3-phase upload helpers (get signed URL, PUT gzipped blob with one retry, finalize metadata) for both step-level and combined job-level logs. |
+| `streamer.rs` | `StreamerConfig` / `spawn` | Spawns a per-step tokio actor with a four-line channel, writes already-masked lines to a private disk spool and uploads on finalize. |
+| `upload.rs` | `upload_step_logs` / `upload_job_logs` | Gzip-compresses spools on disk, streams the file PUT with one retry, finalizes metadata and removes plain/compressed files on success, failure or task abort. |
 
 When you add a file here, add its row above so the index stays current. No
 `mod.rs` barrel — declare submodules from the parent file (`src/foo.rs`

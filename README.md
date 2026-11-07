@@ -605,6 +605,19 @@ unit (`install-service --config`) does not restart on it; under `run --all` it
 stops only that registration's loop. `TOOLU_RUNNER_SESSION_CONFLICT_INTERVAL_MS`
 overrides the 30 s wait for `run` and `boot`.
 
+GitHub returning `404` to a job-lock renewal cancels that job immediately.
+Other renewal failures, including `401` and malformed success replies, cancel
+it after more than 300 seconds without a successful renewal, checked on the
+60-second renewal cadence. Completion reporting keeps its separate ten-minute
+retry budget. See [reconnect behavior](docs/architecture.md#sequence-reconnect).
+
+Job and step logs are masked before being spooled under the registration's
+`data_dir/_logs`, then gzip-compressed on disk and streamed to the Results
+Service. On Unix the directory is `0700` and files are `0600`. Upload completion,
+failure and cancellation remove owned spool files; an interrupted process can
+leave files behind. Keep disk space available for both plain and compressed
+logs. Log memory no longer grows with total job output.
+
 ### What runs
 
 | | |
