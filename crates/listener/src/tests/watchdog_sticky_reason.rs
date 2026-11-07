@@ -2,6 +2,13 @@
 
 use super::*;
 
+#[derive(Default)]
+struct Sequence {
+  first_renewal: Option<Instant>,
+  upload_started: Option<Instant>,
+  responses: Vec<(u16, Instant)>,
+}
+
 #[tokio::test]
 async fn timed_out_reason_survives_404_during_teardown() -> TestResult<()> {
   let dir = tempfile::tempdir()?;
@@ -18,13 +25,32 @@ async fn timed_out_reason_survives_404_during_teardown() -> TestResult<()> {
   mount_message_poll(&server, "rr-sticky", &uri).await;
   mount_acquire_job(&server, "plan-1", &msg).await?;
   mount_acknowledge(&server, 200).await;
+  let sequence = Arc::new(Mutex::new(Sequence::default()));
+  let renewal_sequence = Arc::clone(&sequence);
   Mock::given(method("POST"))
     .and(path("/renewjob"))
-    .respond_with(ResponseTemplate::new(503))
-    .up_to_n_times(5)
+    .respond_with(move |_: &wiremock::Request| {
+      let now = Instant::now();
+      let mut state = renewal_sequence
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+      let first = *state.first_renewal.get_or_insert(now);
+      let timed_failure = state.responses.iter().any(|(status, time)| {
+        *status == 503 && time.duration_since(first) >= Duration::from_millis(400)
+      });
+      let upload_active = state
+        .upload_started
+        .is_some_and(|started| now.duration_since(started) < Duration::from_secs(2));
+      let status = if timed_failure && upload_active {
+        404
+      } else {
+        503
+      };
+      state.responses.push((status, now));
+      ResponseTemplate::new(status)
+    })
     .mount(&server)
     .await;
-  mount_renew_job_always(&server, 404).await;
   mount_complete_job(&server, 0).await;
   for method_name in ["GetStepLogsSignedBlobURL", "GetJobLogsSignedBlobURL"] {
     Mock::given(method("POST"))
@@ -37,9 +63,16 @@ async fn timed_out_reason_survives_404_during_teardown() -> TestResult<()> {
       .mount(&server)
       .await;
   }
+  let upload_sequence = Arc::clone(&sequence);
   Mock::given(method("PUT"))
     .and(path("/blob"))
-    .respond_with(ResponseTemplate::new(201).set_delay(Duration::from_secs(2)))
+    .respond_with(move |_: &wiremock::Request| {
+      upload_sequence
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .upload_started = Some(Instant::now());
+      ResponseTemplate::new(201).set_delay(Duration::from_secs(2))
+    })
     .mount(&server)
     .await;
   for method_name in ["CreateStepLogsMetadata", "CreateJobLogsMetadata"] {
@@ -78,20 +111,37 @@ async fn timed_out_reason_survives_404_during_teardown() -> TestResult<()> {
     .enumerate()
     .filter(|(_, r)| r.url.path() == "/renewjob")
     .collect();
+  let state = sequence
+    .lock()
+    .map_err(|error| format!("sequence: {error}"))?;
+  let first = state.first_renewal.ok_or("no renewal")?;
+  let missing_index = state
+    .responses
+    .iter()
+    .position(|(status, _)| *status == 404)
+    .ok_or("no 404 response")?;
+  let previous = state
+    .responses
+    .get(missing_index.checked_sub(1).ok_or("404 was first")?)
+    .ok_or("missing prior response")?;
+  assert_eq!(previous.0, 503);
   assert!(
-    renewals.len() >= 6,
-    "expected five 503s followed by 404, got {} renewals",
-    renewals.len()
+    previous.1.duration_since(first) >= Duration::from_millis(400),
+    "503 failures did not span the outage threshold"
   );
-  let sixth = renewals.get(5).ok_or("missing 404 renewal")?.0;
+  let not_found = renewals
+    .get(missing_index)
+    .ok_or("missing 404 renewal request")?
+    .0;
   let blob = requests
     .iter()
     .position(|r| r.url.path() == "/blob")
     .ok_or("missing delayed blob upload")?;
   assert!(
-    blob < sixth,
+    blob < not_found,
     "404 must arrive while the delayed upload is active"
   );
+  drop(state);
   let complete: Vec<_> = requests
     .iter()
     .filter(|r| r.url.path() == "/completejob")
