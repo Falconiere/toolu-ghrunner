@@ -58,7 +58,7 @@ impl NodeTarget {
     }
   }
 
-  /// Cache directory name under `{data_dir}/node`: `24.21.0` or `24.21.0-alpine`.
+  /// Cache directory name under `{data_dir}/node`: `24.22.1` or `24.22.1-alpine`.
   pub fn cache_name(self, version: &str) -> String {
     match self.libc {
       Libc::Glibc => version.to_owned(),

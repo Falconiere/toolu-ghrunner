@@ -113,7 +113,7 @@ async fn alpine_job_container_runs_node20_action_on_musl_node24() -> TestResult 
   assert_eq!(conclusion, Some(Conclusion::Success), "{logs:#?}");
   assert!(observed.version.starts_with("v24."), "{}", observed.version);
   assert_eq!(observed.glibc, None, "musl runtime has no glibc");
-  assert_eq!(observed.exec_path, "/github/node/24.21.0-alpine/bin/node");
+  assert_eq!(observed.exec_path, "/github/node/24.22.1-alpine/bin/node");
   Ok(())
 }
 
@@ -124,7 +124,7 @@ async fn ubuntu_job_container_runs_node20_action_on_glibc_node24() -> TestResult
   assert_eq!(conclusion, Some(Conclusion::Success), "{logs:#?}");
   assert!(observed.version.starts_with("v24."), "{}", observed.version);
   assert!(observed.glibc.is_some(), "glibc runtime reports its glibc");
-  assert_eq!(observed.exec_path, "/github/node/24.21.0/bin/node");
+  assert_eq!(observed.exec_path, "/github/node/24.22.1/bin/node");
   Ok(())
 }
 

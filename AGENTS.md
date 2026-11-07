@@ -481,7 +481,7 @@ outside a `tests/` tree.
   `node/` (#95: upstream `HandlerFactory`/`NodeUtil` node20→24 `migration`,
   glibc/musl + container `/etc/*release` `platform` probe,
   `ensure_node_runtime`: `TOOLU_RUNNER_NODE_DIR` preseed (upstream `externals/`
-  layout) → `data_dir/node/…` cache → download pins 20.20.2/24.21.0, 3 attempts).
+  layout) → `data_dir/node/…` cache → download pins 20.20.2/24.22.1, 3 attempts).
 - **`listener/`** (JIT lifecycle): `handler::GitHubListener`: parse JIT →
   RSA→JWT→OAuth2 → `retry_session_conflict` (409 = ~3min post-session ghost;
   re-auth + retry 30s×8, cancel→`Ok(None)`) → `poll_and_execute` (idle poll

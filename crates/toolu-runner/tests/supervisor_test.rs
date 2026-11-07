@@ -45,8 +45,8 @@ async fn two_registrations_poll_concurrently_each_under_its_own_lock() -> TestRe
   assert_eq!(count(&b, "POST", "/session").await?, 1);
 
   stop(child, home.path(), "supervisor").await?;
-  assert_eq!(count(&a, "DELETE", "/session/").await?, 1);
-  assert_eq!(count(&b, "DELETE", "/session/").await?, 1);
+  assert_eq!(count(&a, "DELETE", "/session").await?, 1);
+  assert_eq!(count(&b, "DELETE", "/session").await?, 1);
   Ok(())
 }
 
@@ -85,7 +85,7 @@ async fn sighup_starts_a_new_registration_without_disturbing_the_others() -> Tes
       1,
       "kept its session"
     );
-    assert_eq!(count(idle, "DELETE", "/session/").await?, 0);
+    assert_eq!(count(idle, "DELETE", "/session").await?, 0);
   }
   let mut child = child;
   assert!(

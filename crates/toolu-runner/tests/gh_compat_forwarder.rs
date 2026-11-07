@@ -77,6 +77,7 @@ fn full_urls() -> ServiceUrls {
     cache_mode: None,
     id_token_request_url: Some("https://idtoken.example/".to_owned()),
     runtime_token: FIX_TOKEN.to_owned(),
+    orchestration_id: None,
   }
 }
 
@@ -744,6 +745,30 @@ async fn composite_run_step_gets_only_the_oidc_pair() -> TestResult<()> {
   assert!(
     line.contains("token=[]") && line.contains("results=[]"),
     "{line}"
+  );
+  Ok(())
+}
+
+#[test]
+fn orchestration_id_reaches_run_steps_only_when_flag_true() -> TestResult<()> {
+  let on = forward_env(&extract_service_urls(&compat_job_message(None, None)?));
+  let id = "d85f33ea-0f34-50e1-aea0-68b4d4f8b993.probe.toolu.contexts.alpha_7_true";
+  assert!(
+    on.script
+      .iter()
+      .any(|(k, v)| k == "ACTIONS_ORCHESTRATION_ID" && v == id)
+  );
+  assert!(on.node.iter().all(|(k, _)| k != "ACTIONS_ORCHESTRATION_ID"));
+  let mut msg = compat_job_message(None, None)?;
+  msg
+    .variables
+    .retain(|k, _| !k.eq_ignore_ascii_case("actions_set_orchestration_id_env_for_actions"));
+  let off = forward_env(&extract_service_urls(&msg));
+  assert!(
+    off
+      .script
+      .iter()
+      .all(|(k, _)| k != "ACTIONS_ORCHESTRATION_ID")
   );
   Ok(())
 }

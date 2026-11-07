@@ -22,7 +22,7 @@ fn config(data: &Path) -> RunnerConfig {
 }
 
 #[tokio::test]
-#[ignore = "downloads Node.js 24.21.0 from nodejs.org"]
+#[ignore = "downloads Node.js 24.22.1 from nodejs.org"]
 async fn real_nodejs_org_runtime_installs_validated_for_this_host() -> TestResult {
   let data = tempfile::tempdir()?;
   let target = host_target()?;
@@ -30,12 +30,12 @@ async fn real_nodejs_org_runtime_installs_validated_for_this_host() -> TestResul
     ensure_node_runtime(&reqwest::Client::new(), &config(data.path()), 24, target).await?;
   assert_eq!(
     binary,
-    node_binary_path(&node_runtime_dir(data.path(), "24.21.0", target))
+    node_binary_path(&node_runtime_dir(data.path(), "24.22.1", target))
   );
   let output = std::process::Command::new(&binary)
     .arg("--version")
     .output()?;
-  assert_eq!(String::from_utf8(output.stdout)?.trim(), "v24.21.0");
+  assert_eq!(String::from_utf8(output.stdout)?.trim(), "v24.22.1");
   Ok(())
 }
 
@@ -54,7 +54,7 @@ mod linux_x64 {
   };
 
   #[tokio::test]
-  #[ignore = "downloads Node.js 24.21.0 from github.com/actions/alpine_nodejs"]
+  #[ignore = "downloads Node.js 24.22.1 from github.com/actions/alpine_nodejs"]
   async fn real_alpine_runtime_is_start_checked_on_glibc_and_installs_for_containers() -> TestResult
   {
     assert_eq!(
@@ -80,13 +80,13 @@ mod linux_x64 {
       true,
     )
     .await;
-    let committed = node_runtime_dir(host.path(), "24.21.0", MUSL_X64);
+    let committed = node_runtime_dir(host.path(), "24.22.1", MUSL_X64);
     if can_start {
       let binary = host_targeted.map_err(|e| e.to_string())?;
       let output = std::process::Command::new(&binary)
         .arg("--version")
         .output()?;
-      assert_eq!(String::from_utf8(output.stdout)?.trim(), "v24.21.0");
+      assert_eq!(String::from_utf8(output.stdout)?.trim(), "v24.22.1");
     } else {
       let message = host_targeted
         .map_err(|e| e.to_string())
@@ -111,7 +111,7 @@ mod linux_x64 {
     .await?;
     assert_eq!(
       binary,
-      container.path().join("node/24.21.0-alpine/bin/node")
+      container.path().join("node/24.22.1-alpine/bin/node")
     );
     let elf = std::fs::read(&binary)?;
     assert_eq!(elf.get(..4), Some(&b"\x7fELF"[..]), "a real executable");

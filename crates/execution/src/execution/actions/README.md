@@ -20,7 +20,7 @@ that is `execution::action_exec` (top-level dispatch) and
 | `download_info_v1.rs` | `LegacyContext` | Discovers the GHES V1 action-download resource and decodes its response. |
 | `manifest.rs` | `parse_action_manifest` | Parses `action.yml`/`action.yaml` YAML into `ActionDefinition` (inputs, outputs, `runs` — `RunsUsing::Node`/`Composite`/`Docker`, composite `steps:`, Docker args/env and pre/main/post entrypoints). |
 | `prefetch.rs` | `ActionFetcher` | Shares single-flight fetches and emits deduplicated intended ref/resolved SHA setup diagnostics after successful preparation; completed archives use the `<16-character API-host hash>/<owner>/<repo>/<resolved SHA>` cache path. Owns the job's one `ArchiveClient`, built from the `[network]` its constructors take (#94). |
-| `resolver.rs` | `parse_action_ref` | Parses a `uses:` string into an `ActionRef` (remote `owner/repo[/subpath]@ref` or local `./path`), with cache-key/tarball-URL builders and traversal guards. |
+| `resolver.rs` | `parse_action_ref`, `resolve_self_reference` | Resolves `$/` self-repository refs (#241); parses a `uses:` string into an `ActionRef` (remote `owner/repo[/subpath]@ref` or local `./path`), with cache-key/tarball-URL builders and traversal guards. |
 
 When you add a file here, add its row above so the index stays current. No
 `mod.rs` barrel — declare submodules from the parent file (`src/foo.rs`

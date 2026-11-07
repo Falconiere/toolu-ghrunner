@@ -86,6 +86,9 @@ pub struct ExecutionContext {
   network_env: Vec<(String, String)>,
   /// Per-step-type `ACTIONS_*` service vars (never on the job-wide env).
   service_env: super::service_endpoints::ServiceEnv,
+  /// Workflow `(repository, sha)` that `$/` references fall back to; set only
+  /// when job variable `actions_self_repository` is true.
+  self_repository: Option<(String, String)>,
 }
 
 impl ExecutionContext {
@@ -146,6 +149,7 @@ impl ExecutionContext {
       node_migration: crate::node::migration::NodeMigrationState::default(),
       network_env: Vec::new(),
       service_env: super::service_endpoints::ServiceEnv::default(),
+      self_repository: None,
     }
   }
 
@@ -261,6 +265,19 @@ impl ExecutionContext {
 
 /// Populate server and runner context values.
 impl ExecutionContext {
+  /// Enable `$/` resolution against the workflow repository and SHA.
+  pub fn set_self_repository(&mut self, repository: &str, sha: &str) {
+    self.self_repository = Some((repository.to_owned(), sha.to_owned()));
+  }
+
+  /// The workflow repository and SHA when `$/` references are enabled.
+  pub fn self_repository(&self) -> Option<(&str, &str)> {
+    self
+      .self_repository
+      .as_ref()
+      .map(|(r, s)| (r.as_str(), s.as_str()))
+  }
+
   /// Set a string value in the github context.
   pub fn set_github_context(&mut self, key: &str, value: &str) {
     self

@@ -2,8 +2,8 @@
   "schema": 1,
   "epic": 67,
   "official_runner": {
-    "version": "2.337.0",
-    "commit": "cab9d1c3901e45c7705889c4f88284fdd93f4ae5"
+    "version": "2.338.2",
+    "commit": "d1eb12d4b115c301201de27d667284e1a80f2ab5"
   },
   "baseline": {
     "commit": "d480753f8b3b2b9babffd490a63c6cacf2266c4f",
@@ -15131,7 +15131,7 @@
         "crates/execution/tests/job_outputs_message.json",
         ".github/actions/node-runtime-95/action.yml"
       ],
-      "expected": "All 27 NodeUtilL0 rows select the same version/warning; live requirenode24=true runs a node20 action on node/24.21.0 with the exact Complete job warning; opt-out stays node20 with the deprecation text; same-source conflict warns.",
+      "expected": "All 27 NodeUtilL0 rows select the same version/warning; live requirenode24=true runs a node20 action on node/24.22.1 with the exact Complete job warning; opt-out stays node20 with the deprecation text; same-source conflict warns.",
       "production_path": "crates/execution/src/node/migration.rs; crates/execution/src/execution/job_runner/complete_step.rs; crates/execution/src/execution/node_stage.rs",
       "tests": [
         [
@@ -15297,7 +15297,7 @@
         "crates/toolu-runner/tests/fixtures/job_container_message.json",
         ".github/actions/node-runtime-95/action.yml"
       ],
-      "expected": "Production Runner::execute_job replay of the captured github.com message runs the node probe on node/24.21.0 with the exact upstream annotation; real host node and a local HTTP server back runtime tests; real alpine/ubuntu containers back the container replays.",
+      "expected": "Production Runner::execute_job replay of the captured github.com message runs the node probe on node/24.22.1 with the exact upstream annotation; real host node and a local HTTP server back runtime tests; real alpine/ubuntu containers back the container replays.",
       "production_path": "crates/execution/src/execution/node_stage.rs; crates/execution/src/node/runtime.rs",
       "tests": [
         [
@@ -15711,7 +15711,7 @@
         "crates/execution/tests/job_outputs_message.json",
         ".github/actions/node-runtime-95/action.yml"
       ],
-      "expected": "Host replay runs the probe on node/24.21.0; real alpine container runs v24 with no glibc from /github/node/24.21.0-alpine/bin/node, ubuntu runs glibc v24; the official runner picks node24_alpine for Alpine too.",
+      "expected": "Host replay runs the probe on node/24.22.1; real alpine container runs v24 with no glibc from /github/node/24.22.1-alpine/bin/node, ubuntu runs glibc v24; the official runner picks node24_alpine for Alpine too.",
       "production_path": "crates/execution/src/node/platform.rs; crates/execution/src/docker/container_os.rs; crates/execution/src/execution/node_stage.rs",
       "tests": [
         [

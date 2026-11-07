@@ -41,10 +41,38 @@ pub fn build_context(
     tracing::warn!(error = %e, "failed to materialize runner.temp/tool_cache dirs");
   }
 
+  enable_self_repository(&mut ctx, msg);
+
   // Mask hints from the job message, one batch rebuild instead of one per hint.
   ctx.add_masks(msg.mask.iter().map(|hint| hint.value.as_str()));
 
   ctx
+}
+
+/// Enable `$/` references when `actions_self_repository` is true, using the
+/// `job` context's `workflow_repository` / `workflow_sha` (correct for reusable
+/// workflows too).
+fn enable_self_repository(ctx: &mut ExecutionContext, msg: &AgentJobRequestMessage) {
+  let on = msg.variables.iter().any(|(k, v)| {
+    k.eq_ignore_ascii_case("actions_self_repository") && v.value.trim().eq_ignore_ascii_case("true")
+  });
+  let job_value = |name: &str| {
+    msg
+      .context_data
+      .get("job")
+      .and_then(|job| job.d.as_ref())
+      .into_iter()
+      .flatten()
+      .find(|entry| entry.key.s.as_deref() == Some(name))
+      .and_then(|entry| entry.value.s.clone())
+      .filter(|v| !v.is_empty())
+  };
+  if on {
+    let (repo, sha) = (job_value("workflow_repository"), job_value("workflow_sha"));
+    if let (Some(repo), Some(sha)) = (repo, sha) {
+      ctx.set_self_repository(&repo, &sha);
+    }
+  }
 }
 
 /// Register the job message's `variables` and the Actions runtime token into

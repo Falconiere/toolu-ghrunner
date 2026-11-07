@@ -48,7 +48,7 @@ fn poll_url_keeps_required_params() {
   for expected in [
     "/message?sessionId=11111111-1111-1111-1111-111111111111",
     "status=Online",
-    "runnerVersion=2.337.0",
+    "runnerVersion=2.338.2",
     "os=linux",
     "architecture=x64",
     "lastMessageId=5",

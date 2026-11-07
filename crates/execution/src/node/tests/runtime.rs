@@ -173,7 +173,7 @@ fn bases(addr: SocketAddr) -> (String, String) {
 #[test]
 fn pins_match_upstream_externals() {
   assert_eq!(node_version_for(20), "20.20.2");
-  assert_eq!(node_version_for(24), "24.21.0");
+  assert_eq!(node_version_for(24), "24.22.1");
   assert_eq!(node_version_for(99), "20.20.2", "unknown majors fall back");
 }
 
@@ -189,8 +189,8 @@ fn layout_helpers_join_correctly() {
     ..GLIBC_X64
   };
   assert_eq!(
-    node_runtime_dir(data, "24.21.0", musl),
-    Path::new("/data/node/24.21.0-alpine")
+    node_runtime_dir(data, "24.22.1", musl),
+    Path::new("/data/node/24.22.1-alpine")
   );
   assert_eq!(
     preseed_binary_path(Path::new("/opt/externals"), 24, musl),
@@ -200,11 +200,11 @@ fn layout_helpers_join_correctly() {
 
 #[test]
 fn download_urls_follow_each_source_layout() {
-  let (url, strip) = node_download_url(&PRODUCTION_BASES, "24.21.0", GLIBC_X64);
+  let (url, strip) = node_download_url(&PRODUCTION_BASES, "24.22.1", GLIBC_X64);
   assert_eq!(
     (url.as_str(), strip),
     (
-      "https://nodejs.org/dist/v24.21.0/node-v24.21.0-linux-x64.tar.gz",
+      "https://nodejs.org/dist/v24.22.1/node-v24.22.1-linux-x64.tar.gz",
       1
     )
   );
@@ -420,7 +420,7 @@ async fn container_target_alpine_layout_installs_without_a_host_start_check() ->
   };
   let binary =
     ensure_node_runtime_from(&bases, &reqwest::Client::new(), &config, 24, musl, false).await?;
-  assert_eq!(binary, data.path().join("node/24.21.0-alpine/bin/node"));
+  assert_eq!(binary, data.path().join("node/24.22.1-alpine/bin/node"));
   assert!(binary.is_file());
   Ok(())
 }

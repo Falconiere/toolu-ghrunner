@@ -62,6 +62,7 @@ mod post_results_test;
 mod replay_mutation_test;
 mod runner_paths_test;
 mod runner_workspace_translation_test;
+mod self_repository_test;
 mod service_auth_test;
 mod service_containers_test;
 mod shell_templates_container_test;

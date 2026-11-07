@@ -186,7 +186,7 @@ New `execution::node::platform`:
   never commits a runtime that cannot start. Container-only targets (e.g. Alpine runtime on a glibc
   host) are not executed on the host; the container run proves them.
 - **Pins** match upstream `externals.sh`: node20 ⇒ `20.20.2`, node24 ⇒
-  `24.21.0` (`actions/alpine_nodejs` has no `20.18.3`). `Dockerfile` and
+  `24.22.1` (`actions/alpine_nodejs` has no `20.18.3`). `Dockerfile` and
   `Dockerfile.macos` seed versions move in lockstep.
 
 `run_node_stage` order becomes: resolve script → build env → select version
@@ -270,7 +270,7 @@ Env: `TOOLU_RUNNER_NODE_DIR` (bin `config.rs`); `FORCE_JAVASCRIPT_ACTIONS_TO_NOD
 - **AC-2:** Given the committed captured github.com job message
   (`requirenode24 = "true"`) and a real local node20 action, the production
   `Runner::execute_job` path runs the action with the node24 runtime (its
-  `process.execPath` is under `node/24.21.0`) and the "Complete job" row
+  `process.execPath` is under `node/24.22.1`) and the "Complete job" row
   carries upstream's "forced to run on Node.js 24" warning naming the action;
   with the same message's flags set to `usenode24bydefault=true`,
   `requirenode24=false` and step env `ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION:
@@ -306,7 +306,7 @@ Env: `TOOLU_RUNNER_NODE_DIR` (bin `config.rs`); `FORCE_JAVASCRIPT_ACTIONS_TO_NOD
 | AC | Real input | Expected | Check |
 | --- | --- | --- | --- |
 | AC-1 | `crates/execution/tests/node_migration_upstream_l0.json` — upstream `NodeUtilL0.cs` @`cab9d1c` rows verbatim (source path + line per row); captured `job_outputs_message.json` variables | same version + warning presence per row; exact strings |  `cargo test -p execution node::migration` |
-| AC-2 | `crates/execution/tests/job_outputs_message.json` variables (captured github.com) + local node20 action; real host Node copied into the cache dir | execPath under `node/24.21.0`; Complete-job upgrade warning text; flipped flags ⇒ node20 + deprecation warning | `cargo test -p execution --test node_migration_test` |
+| AC-2 | `crates/execution/tests/job_outputs_message.json` variables (captured github.com) + local node20 action; real host Node copied into the cache dir | execPath under `node/24.22.1`; Complete-job upgrade warning text; flipped flags ⇒ node20 + deprecation warning | `cargo test -p execution --test node_migration_test` |
 | AC-3 | `docker export` of pinned `alpine` and `debian` images (+ debian with `musl` pkg) as roots; this Linux host; the `ci-macos` host | Musl / Glibc / Glibc / host Glibc / Darwin Arm64; error strings | `cargo test -p execution node::platform` (both CI legs); ignored Docker lane for the exported roots |
 | AC-4 | Pinned `alpine` and `ubuntu` images, real downloads, captured flags message | action output proves runtime/libc; job Success | `cargo test -p execution --test node_container_test -- --ignored` (CI Docker step) |
 | AC-5 | Real host `node` placed in a temp preseed dir; client pointed at an unroutable base | path returned / missing-path error / validation error | `cargo test -p execution node::runtime` |

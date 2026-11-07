@@ -22,7 +22,7 @@ use super::validate::validate_runtime_once;
 pub fn node_version_for(major: u8) -> &'static str {
   match major {
     20 => "20.20.2",
-    24 => "24.21.0",
+    24 => "24.22.1",
     other => {
       tracing::warn!(major = other, "unknown node major, defaulting to node20");
       "20.20.2"
