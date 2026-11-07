@@ -8,7 +8,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use super::{
-  ContainerStart, ContainerStartParams, JobOutcome, JobResult, LocalServices,
+  ContainerStart, ContainerStartParams, JobOutcome, JobResult, LocalServices, PreparedWorkspace,
   build_job_context_async, claim_job_workspace, finish_job, prepare_job_workspace, prepared,
   start_job_container, start_job_services, stop_local_services,
 };
@@ -34,18 +34,11 @@ pub(super) async fn run(
   shutdown: CancellationToken,
 ) -> Result<JobTeardown, RunnerError> {
   let cancel = cancel.child_token();
-  // Claimed before the context (which needs its paths); held until this
-  // function returns, so no other job may enter the workspace before every
-  // step, post step, container and orphan sweep has finished.
-  let claimed = claim_job_workspace(config, &msg).await?;
-  // Clears what a crashed job left, before anything of this job is written.
-  empty_temp_dirs(config).await;
-  let (msg, mut ctx) = build_job_context_async(msg, config, masker, &claimed).await?;
-  configure_context(
-    &msg,
-    &mut ctx,
-    JobCancellation::new(cancel.clone(), shutdown),
-  )?;
+  // The claim is held until this function returns, so no other job may enter
+  // the workspace before every step, post step, container and orphan sweep has
+  // finished.
+  let cancellation = JobCancellation::new(cancel.clone(), shutdown);
+  let (claimed, msg, mut ctx) = claim_and_build_context(msg, config, masker, cancellation).await?;
   let mut container_spec = evaluate_container(&msg, config, &ctx)?;
   let mut service_specs = evaluate_services(msg.job_service_containers.as_ref(), &ctx)?;
   super::job_http::add_container_network_env(config, container_spec.as_mut(), &mut service_specs);
@@ -81,16 +74,22 @@ pub(super) async fn run(
   finish_execution(&ctx, msg.job_id, body_result, local, &events, workspace_gc).await
 }
 
-/// Attach the job's cancellation, process tracking, Node policy and environment.
-fn configure_context(
-  msg: &AgentJobRequestMessage,
-  ctx: &mut ExecutionContext,
+/// Claim the workspace (the context needs its paths), empty the temp directories
+/// of what a crashed job left, then build the job's configured context.
+async fn claim_and_build_context(
+  msg: AgentJobRequestMessage,
+  config: &RunnerConfig,
+  masker: Arc<Mutex<SecretMasker>>,
   cancellation: Arc<JobCancellation>,
-) -> Result<(), RunnerError> {
+) -> Result<(PreparedWorkspace, AgentJobRequestMessage, ExecutionContext), RunnerError> {
+  let claimed = claim_job_workspace(config, &msg).await?;
+  empty_temp_dirs(config).await;
+  let (msg, mut ctx) = build_job_context_async(msg, config, masker, &claimed).await?;
   ctx.cancellation = Some(cancellation);
   ctx.set_process_tracking(ProcessTracking::for_job(&msg.variables));
   ctx.node_migration = crate::node::migration::NodeMigrationState::for_job(&msg.variables);
-  apply_job_environment(&msg.environment_variables, ctx)
+  apply_job_environment(&msg.environment_variables, &mut ctx)?;
+  Ok((claimed, msg, ctx))
 }
 
 /// Remove containers, sweep tracked orphan processes, and stop local services

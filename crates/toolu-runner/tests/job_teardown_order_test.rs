@@ -472,6 +472,40 @@ async fn finish_never_touches_files_of_the_next_job() -> TestResult {
   Ok(())
 }
 
+/// Only `_temp` and `tmp` are emptied: the tool cache is kept for later jobs, and
+/// the listener owns the `_logs` spools, which can outlive `finish`.
+#[tokio::test]
+async fn cleanup_never_touches_logs_or_tool() -> TestResult {
+  let fx = setup().await?;
+  let kept = [
+    fx.config.data_dir.join("_logs/combined.spool"),
+    fx.config.data_dir.join("_logs/steps/one.spool"),
+    fx.config.data_dir.join("_tool/go/1.24/bin/go"),
+  ];
+  for file in &kept {
+    std::fs::create_dir_all(file.parent().ok_or("kept file has no parent")?)?;
+    std::fs::write(file, "kept")?;
+  }
+  let (tx, mut rx) = mpsc::channel::<RunnerEvent>(1024);
+  let masker = Arc::new(Mutex::new(SecretMasker::new()));
+  let teardown = run_job(
+    fx.msg.clone(),
+    &fx.config,
+    CancellationToken::new(),
+    tx,
+    masker,
+  )
+  .await?;
+  drain_job(&mut rx).await;
+  teardown.finish(&fx.config).await;
+
+  assert_temp_empty(&fx.config)?;
+  for file in &kept {
+    assert_eq!(std::fs::read_to_string(file)?, "kept", "{}", file.display());
+  }
+  Ok(())
+}
+
 /// A post step runs after every main step and can still read `$RUNNER_TEMP`.
 #[tokio::test]
 async fn post_step_reads_temp_before_it_is_emptied() -> TestResult {

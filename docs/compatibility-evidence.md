@@ -36,7 +36,7 @@ Statuses:
   runners, skipped or ignored tests, and recorded differences all land here.
 - `not-applicable` needs a reason explaining why the lane cannot apply.
 - `pending` needs a reason. It is used only for child issues whose evidence is
-  not recorded yet (#97) and must link the issue.
+  not recorded yet and must link the issue. No row uses it today.
 
 The checker enforces the mechanical parts:
 
@@ -255,8 +255,11 @@ difference fails `--verify`, so a fix forces the record to be updated.
    names and conclusions, container outputs and marker bytes match, and no
    container is left behind.
 
-Both need follow-up issues. Until they are fixed, the matrix does not claim
-cache parity or identical Docker step reporting.
+The causes above describe the runner at the time of that run. #253 has since
+mapped the cache variables per step type, and #255 reports Docker `Pull` setup
+steps. The recorded report predates both, so the named rows' `reference` lane
+stays `unverified` until a new paired run compares them, and the matrix does not
+yet claim cache parity or identical Docker step reporting.
 
 ## Approved scope exclusions
 
@@ -272,10 +275,6 @@ These are the epic's exclusions. They are not evidenced and not claimed:
 - Runner telemetry.
 - AuthMigration.
 
-#94 merged in PR #171, and its rows record what tests prove at the delivered
-revision; its live, paired and GHES lanes stay `unverified`. #97 merged in PR #173,
-but the matrix still tracks it as `pending` until its rows are filled in with
-evidence:
-
-- [#97](https://github.com/Falconiere/toolu-ghrunner/issues/97) — dead code and
-  doc drift.
+#94 merged in PR #171 and #97 in PR #173. Their rows record what tests prove at
+the delivered revision; their live, paired and GHES lanes stay `unverified` or
+`not-applicable`.
