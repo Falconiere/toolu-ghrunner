@@ -190,7 +190,7 @@ async fn a_failed_container_start_walks_the_steps_without_touching_the_host() ->
     shape,
     [
       (2, "Initialize containers", Some(Conclusion::Failure)),
-      (3, "Default", None),
+      (3, "Default", Some(Conclusion::Skipped)),
       (4, "On failure", Some(Conclusion::Failure)),
       (5, "Always", Some(Conclusion::Failure)),
       (6, "Stop containers", Some(Conclusion::Success)),
