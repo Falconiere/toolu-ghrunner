@@ -50,7 +50,10 @@ It has no schedule (#120) and fails as `UNVERIFIED` when
 > **Pre-1.0.** The live path is only verified when `live` is dispatched with credentials, and rough edges remain:
 > Container actions require Linux and a local Docker daemon. Acceptance
 > evidence and remaining platform gaps are tracked in
-> [docs/test-coverage.md](docs/test-coverage.md). See [docs/known-bugs.md](docs/known-bugs.md) before
+> [docs/test-coverage.md](docs/test-coverage.md). The latest side-by-side
+> comparison with the official v2.338.2 runner (paired run 42424784091, #251) is
+> recorded in [docs/compat-reference-230.json](docs/compat-reference-230.json), and
+> its remaining differences are in [docs/known-bugs.md](docs/known-bugs.md). See [docs/known-bugs.md](docs/known-bugs.md) before
 > you point this at anything you care about.
 
 ## Install
@@ -743,6 +746,13 @@ before reporting job completion. Cancellation detaches the active exec; eligible
 post steps retain the container, and final removal terminates remaining processes.
 Jobs declaring a container on macOS or Windows fail before any step runs.
 
+The container (and any services) starts as the numbered **Initialize containers**
+row, after the Docker Pull/Build rows, and is removed as **Stop containers**, the
+last row before **Complete job**, as on the official runner. A failed or
+cancelled start does not end the job: the step loop still walks the steps (their
+conditions decide), and a step that does run fails with `the job container is not
+running` and never executes on the host. The job ends failed or cancelled.
+
 Use a local Linux Docker daemon over a Unix socket (`DOCKER_HOST`, or the active
 Docker CLI context) and `forwarder` services mode. The image must provide `tail`
 and the requested shell; the default container shell is `sh`. Node actions use
@@ -848,8 +858,9 @@ and local actions with `runs.using: docker` may use `image: Dockerfile` or a
 `docker://` image. Successful builds from immutable resolved remote revisions
 are reused while their images exist; local actions build against current files.
 Before user steps, the runner reports one `Pull <image>` per case-insensitive
-registry image, followed by one `Build <owner/repo>` per remote repository with
-Dockerfiles, including remote actions nested in composites. When enabled, nested
+registry image, followed by one `Build <owner/repo[/path]@ref>` per remote action
+reference with a Dockerfile (case-insensitive, as upstream), including remote
+actions nested in composites. When enabled, nested
 `$/` references resolve against the enclosing remote action for this discovery.
 Prepared images are reused by their steps; local actions are prepared when reached.
 Cancellation interrupts discovery, including an in-flight remote archive fetch.
@@ -860,8 +871,10 @@ Manifest `entrypoint` wins over `with.entrypoint`; step environment wins over
 `runs.env` defaults. Inputs, GitHub context, runtime service variables and private
 stage state are passed into the container. Conditional `pre-entrypoint` and
 `post-entrypoint` stages use job-context `pre-if`/`post-if` (default `always()`);
-local actions skip pre with a warning, matching the official runner. Posts drain
-in reverse order and their failures affect the job result.
+local actions skip pre with a warning, matching the official runner. A remote
+action's `pre-entrypoint` runs in the pre-job phase (see *Pre-job phase and
+composite posts*), before any workflow step. Posts drain in reverse order and
+their failures affect the job result.
 
 Actions mount `/github/workspace`, `/github/home`, `/github/workflow`,
 `/github/file_commands`, runner temp and `/var/run/docker.sock`. They join the
@@ -1517,6 +1530,28 @@ sibling `tests/` folder, never in the same file as the logic. Every new
 `src/` submodule folder needs a `README.md` and an entry in that crate's
 `guardrails.config.json` `src.requireReadme`. See `AGENTS.md` →
 "Gate & house rules".
+
+### Pre-job phase and composite posts
+
+As on the official runner, a repository action's `pre` does not run at its step.
+After the setup rows (Docker Pull/Build, **Initialize containers**), every
+top-level repository Node action's `pre` and, on Linux, every remote Docker
+action's `pre-entrypoint` runs in step order as its own numbered `Pre <name>` row,
+before the first workflow step, and registers its post then. `pre-if` (default
+`always()`) is evaluated per action; a false one reports a skipped row, and a
+failed `pre` fails the job so later `success()` steps are skipped. Workflow
+rows number after the `Pre` rows. A job whose declared container never started
+fails these rows without running anything on the host.
+
+An action from the workflow's own repository (`repositoryType: self`, delivered
+for `uses: ./path`, top-level or nested in a composite) runs no `pre` at all: its
+main step warns `` `pre` execution is not supported for local action from '<path>' ``
+as the official runner does. A nested remote action's `pre` still runs at its
+own step.
+
+A composite action with embedded posts gets one **Post** row. It runs those posts
+last-in first-out, each under its own scope and `post-if`, and the row fails if
+any of them does. The row is numbered with the other posts, after the main steps.
 
 ### Step failure and cancellation cleanup
 

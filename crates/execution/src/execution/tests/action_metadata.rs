@@ -127,7 +127,8 @@ async fn action_metadata_captured_names_nested_stages_and_restoration() -> TestR
   ];
   for name in ["__self", "__self_2"] {
     for _ in 0..2 {
-      for stage in ["pre", "main", "child"] {
+      // Nested local Node actions run no `pre` (upstream ActionRunner, #251).
+      for stage in ["main", "child"] {
         expected.push(format!("{stage}|{name}|||self-hosted"));
       }
     }
@@ -152,10 +153,9 @@ async fn action_metadata_absent_identity_survives_composite_posts() -> TestResul
   step.name = None;
   step.context_name = None;
   let (actual, _) = replay(msg).await?;
-  let expected = [
-    "pre", "main", "child", "pre", "main", "child", "parent", "post", "post",
-  ]
-  .map(|stage| format!("{stage}||||self-hosted"));
+  // Nested local Node actions run no `pre` (upstream ActionRunner, #251).
+  let expected = ["main", "child", "main", "child", "parent", "post", "post"]
+    .map(|stage| format!("{stage}||||self-hosted"));
   assert_eq!(actual.lines().collect::<Vec<_>>(), expected);
   Ok(())
 }
@@ -280,9 +280,10 @@ async fn action_metadata_remote_dispatch_repeated_refs_and_parent_restore() -> T
       "main|__actions_checkout|actions/checkout|v4|self-hosted\n",
       "pre|__actions_checkout_2|actions/checkout|topic/branch|self-hosted\n",
       "main|__actions_checkout_2|actions/checkout|topic/branch|self-hosted\n",
-      "pre|__actions_checkout_3|||self-hosted\nmain|__actions_checkout_3|||self-hosted\n",
+      // Nested local Node actions run no `pre` (upstream ActionRunner, #251).
+      "main|__actions_checkout_3|||self-hosted\n",
       "child|__actions_checkout_3|||self-hosted\n",
-      "pre|__actions_checkout_3|||self-hosted\nmain|__actions_checkout_3|||self-hosted\n",
+      "main|__actions_checkout_3|||self-hosted\n",
       "child|__actions_checkout_3|||self-hosted\nparent|__actions_checkout_3|||self-hosted\n"
     )
   );

@@ -75,8 +75,22 @@ pub struct ExecutionContext {
   step_displays: HashMap<String, super::step_display::StepDisplay>,
   /// Number for the "Complete job" row: one past the last main/post row.
   pub(crate) next_step_number: Option<u32>,
-  /// Docker setup rows inserted between "Set up job" and workflow steps.
-  pub(crate) docker_setup_count: u32,
+  /// Pre-job rows between "Set up job" and the workflow steps: Docker
+  /// Pull/Build, "Initialize containers" and each action's "Pre" row. They
+  /// number from 2, and shift the workflow and post rows after them.
+  pub(crate) pre_job_rows: u32,
+  /// "Initialize containers" ran, so "Stop containers" is owed (upstream
+  /// registers it before starting anything).
+  pub(crate) stop_containers_pending: bool,
+  /// A failed or cancelled "Initialize containers": the job still walks its
+  /// steps (conditions decide) and ends with this conclusion at worst.
+  pub(crate) container_setup: Option<shared::Conclusion>,
+  /// The job declared a container that never started: a step that runs fails.
+  pub(crate) job_container_missing: bool,
+  /// Top-level steps whose `pre` the pre-job phase already handled.
+  pub(crate) pre_handled: std::collections::HashSet<String>,
+  /// Top-level steps whose post the pre-job phase already registered.
+  pub(crate) post_registered: std::collections::HashSet<String>,
   /// Images prepared before workflow steps, keyed by registry image or action directory.
   pub(crate) prepared_docker_images: HashMap<String, String>,
   /// node20 → node24 migration flags and the actions each end-of-job warning lists.
@@ -146,7 +160,12 @@ impl ExecutionContext {
       file_table: Vec::new(),
       step_displays: HashMap::new(),
       next_step_number: None,
-      docker_setup_count: 0,
+      pre_job_rows: 0,
+      stop_containers_pending: false,
+      container_setup: None,
+      job_container_missing: false,
+      pre_handled: std::collections::HashSet::new(),
+      post_registered: std::collections::HashSet::new(),
       prepared_docker_images: HashMap::new(),
       node_migration: crate::node::migration::NodeMigrationState::default(),
       network_env: Vec::new(),
@@ -229,6 +248,14 @@ impl ExecutionContext {
   /// Service group for explicit teardown.
   pub(crate) fn services(&self) -> Option<&ServiceContainers> {
     self.services.as_deref()
+  }
+
+  /// Hand the job container and service group to "Stop containers", so the
+  /// final teardown does not remove them a second time.
+  pub(crate) fn take_containers(
+    &mut self,
+  ) -> (Option<Arc<JobContainer>>, Option<Box<ServiceContainers>>) {
+    (self.container.take(), self.services.take())
   }
 
   /// Set the per-job cgroup-v2 directory that spawned steps are moved into.

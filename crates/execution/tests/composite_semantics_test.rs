@@ -296,7 +296,9 @@ async fn file_commands_step_env_and_nested_posts_are_scoped() -> TestResult {
     post_lines.iter().map(|(_, line)| *line).collect::<Vec<_>>(),
     ["STATE_POST=two", "STATE_POST=one"]
   );
-  assert_ne!(
+  // Upstream runs a composite's embedded posts LIFO inside one "Post" row
+  // for the composite (#251), not one row per nested action.
+  assert_eq!(
     post_lines.first().map(|line| line.0),
     post_lines.get(1).map(|line| line.0)
   );

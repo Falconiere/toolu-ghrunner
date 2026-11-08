@@ -8,7 +8,7 @@ use super::SessionCtx;
 use super::execution_loop::{JobExecution, execute_with_renewal};
 use protocol::messages::BrokerMessage;
 use shared::{AgentJobRequestMessage, Conclusion, ListenerEvent, RunnerError};
-use wire::net::{PollParams, acknowledge_message, poll_message};
+use wire::net::{PollParams, STATUS_BUSY, acknowledge_message, poll_message};
 use wire::reporting::run_service::{AcquireJobRequest, acquire_job};
 
 use crate::broker_message::{PollOutcome, classify_received_message, log_skipped_control};
@@ -222,7 +222,9 @@ async fn watch_for_gh_cancel(
   let mut backoff = POLL_BACKOFF_START;
   let mut token = ctx.token.clone();
   loop {
-    let outcome = poll_once(ctx, &token, last_message_id).await;
+    // Busy, as upstream reports while its worker runs; an Online poll from a
+    // runner holding a job drew HTTP 404 on every mid-job poll (#251).
+    let outcome = poll_once(ctx, &token, last_message_id, STATUS_BUSY).await;
     if let Some(id) = outcome.message_id() {
       if is_redelivery(last_message_id, &outcome) {
         tracing::warn!(
@@ -454,12 +456,18 @@ async fn backoff_after_poll_error(
   Some(backoff.saturating_mul(2).min(POLL_BACKOFF_MAX))
 }
 
-async fn poll_once(ctx: &SessionCtx, token: &str, last_message_id: i64) -> PollOutcome {
+async fn poll_once(
+  ctx: &SessionCtx,
+  token: &str,
+  last_message_id: i64,
+  status: &str,
+) -> PollOutcome {
   let params = PollParams {
     client: &ctx.client,
     server_url_v2: &ctx.broker_url,
     token,
     session_id: &ctx.session_id,
+    status,
     // Derive os/arch from the same helpers the acknowledge path uses so a
     // single runner advertises one consistent identity on both calls
     // (the raw `std::env::consts` values "linux"/"x86_64" differed from the
@@ -536,3 +544,7 @@ mod runner_update_policy;
 #[cfg(test)]
 #[path = "tests/completejob.rs"]
 mod completejob_tests;
+
+#[cfg(test)]
+#[path = "tests/mid_job_poll_status.rs"]
+mod mid_job_poll_status;

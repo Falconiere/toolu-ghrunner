@@ -163,7 +163,16 @@ outside a `tests/` tree.
 - **Handler dispatch**: no plugin layer, no local orchestrator (removed #97).
   `steps_runner` splits `run:` vs `uses:`; `action_exec` matches
   `runs.using` — node → composite → docker. Unsupported `runs.using` fails at
-  manifest parse (`actions/manifest.rs`). `$/[path]` self-repository refs
+  manifest parse (`actions/manifest.rs`). A `repositoryType: self` action
+  (`uses: ./path`, top-level or nested) runs no `pre` and warns, as upstream
+  (#251). Every top-level repository Node action's `pre`, and on Linux a
+  remote Docker action's `pre-entrypoint`, runs in a pre-job phase right after
+  the setup rows as numbered `Pre` rows, registering its post first; a
+  composite gets one `Post` row that runs its embedded posts last-in first-out.
+  A job container starts as the numbered "Initialize containers" row
+  after the Docker Pull/Build rows and is removed as "Stop containers", the
+  last row before "Complete job"; after a failed start the step loop still
+  runs, and a step that runs fails before dispatch (never on the host). `$/[path]` self-repository refs
   (#241, job variable `actions_self_repository`) resolve only in a composite
   manifest's nested `uses:` (`composite_uses` →
   `ExecutionContext::resolve_self_uses` → `actions::resolver::resolve_self_reference`:
@@ -488,8 +497,10 @@ outside a `tests/` tree.
   actions, remote-pre-failure keeps eligible posts; `Dockerfile` image reuse).
   `docker_prepare` (#232) discovers remote Docker actions, including those nested
   in remote composites, before user steps: case-insensitive registry Pull rows
-  precede per-repository Build rows, prepared images are reused, and setup
-  failure/cancellation stops user steps. Discovery visits each remote ref once,
+  precede Build rows, one per action reference `owner/repo[/path]@ref`
+  (case-insensitive, upstream's `ActionRepository`), prepared images are reused, and setup
+  failure/cancellation stops user steps (a failed job-container start does not:
+  see Handler dispatch). Discovery visits each remote ref once,
   keeps the depth limit, resolves enabled nested `$/` against the enclosing remote
   action, and can be cancelled during a fetch. Local actions prepare at step time;
   non-Linux skips pull/build setup.
@@ -501,7 +512,8 @@ outside a `tests/` tree.
   RSA→JWT→OAuth2 → `retry_session_conflict` (409 = ~3min post-session ghost;
   re-auth + retry 30s×8, cancel→`Ok(None)`) → `poll_and_execute` (idle poll
   in `job_lifecycle/idle.rs`, where `with_drain` ends an idle loop with
-  `Ok(None)` but never an acquired job; 1s→60s backoff, `acquire_job`, early broker ack (`acknowledge_message` — death
+  `Ok(None)` but never an acquired job; polls `status=Online` idle and
+  `status=Busy` in the mid-job cancel watcher, as upstream (#251); 1s→60s backoff, `acquire_job`, early broker ack (`acknowledge_message` — death
   mid-job trades redelivery for no cancel-watcher re-see) — run,
   single-attempt WARN-only `acknowledge` demotion,
   `retry_transient`-wrapped `complete_job` for `Network` only, 1s→60s jitter,
@@ -571,6 +583,8 @@ outside a `tests/` tree.
   `poll_loop`/`poll_job` (#206 toolu.sh machine loop, see Runtime
   contracts; `poll_loop_test`, fixtures `toolu_fixtures`).
   `run_cmd::RunLoop::drive` (`BACKOFF_START`→`BACKOFF_MAX` cancel-aware sleep;
+  broker/lifecycle client timeout `BROKER_CLIENT_TIMEOUT` 100 s for `run` and
+  `boot`, upstream's VssUtil default, above the broker's ~60 s idle hold;
   conflict exits 5 via downcast `CodedExit`, all else 2;
   `TOOLU_RUNNER_SESSION_CONFLICT_INTERVAL_MS` overrides 30s wait for
   `run`+`boot`; missing/rejected re-mint bearer fatal via
@@ -686,6 +700,10 @@ failed step. Lanes in `docs/test-coverage.md` (#88).
 - [docs/compatibility-matrix.md](docs/compatibility-matrix.md) (+
   [docs/compatibility-evidence.md](docs/compatibility-evidence.md)) — epic #67 matrix
   (from `compatibility-matrix.json`, `compat_matrix_check.py --check`); only an
-  evidenced `passed` lane counts.
+  evidenced `passed` lane counts. The #251 paired report is
+  `docs/compat-reference-230.json` (run 42424784091; matrix rows cite it as
+  `report:docs/compat-reference-230.json#<assertion>`; never overwrite
+  `docs/compat-reference-103.json`); its remaining differences are in
+  `docs/known-bugs.md`.
 - `docs/toolu/specs/2026-06-18-*.md` + `docs/toolu/plans/2026-06-18-*.md` — standalone design + build plan (gitignored `docs/toolu/`).
 - `docs/toolu/specs/2026-07-14-always-online-run-loop-design.md` + `plans/…` — run loop + `install-service` spec/plan.

@@ -38,8 +38,13 @@ use crate::register_cmd;
 pub(crate) const BACKOFF_START: Duration = Duration::from_secs(1);
 /// Backoff ceiling: doubling never exceeds this.
 const BACKOFF_MAX: Duration = Duration::from_secs(60);
-/// Request timeout of each lifecycle's listener / re-mint client.
+/// Request timeout of the toolu.sh poll loop's client.
 pub(crate) const LOOP_CLIENT_TIMEOUT: Duration = Duration::from_secs(60);
+/// Request timeout of each GitHub lifecycle's listener / re-mint client:
+/// upstream's broker connection uses the `VssUtil` default, 100 s. The broker
+/// holds an idle long poll for about 60 s, so a 60 s client timed out on every
+/// idle poll and backed off for up to a minute before the next one (#251).
+pub(crate) const BROKER_CLIENT_TIMEOUT: Duration = Duration::from_secs(100);
 
 /// Guidance for the two fatal re-mint token paths (no stored bearer, or a
 /// bearer GitHub rejected): names every way to supply a fresh token, and the
@@ -262,12 +267,12 @@ impl RunLoop {
       let cfg = load_run_config(&self.config_path)?;
       // Rebuilt from the reloaded `[network]` every pass (edits apply next
       // pass); an unusable value is fatal like a corrupt config. Shared by
-      // the listener, the re-mint and an ephemeral unregister. 60 s: the
-      // listener's per-client timeout; `register_jit` sets its own 30 s.
+      // the listener, the re-mint and an ephemeral unregister, with
+      // BROKER_CLIENT_TIMEOUT; `register_jit` sets its own 30 s.
       let client = crate::network_setup::lifecycle_client(
         &cfg.network_config(),
         &self.masker,
-        LOOP_CLIENT_TIMEOUT,
+        BROKER_CLIENT_TIMEOUT,
         &mut network_memo,
       )?;
       // Fatal setup errors (corrupt config, unparseable JIT) deliberately

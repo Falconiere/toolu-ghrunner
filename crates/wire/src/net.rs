@@ -42,7 +42,9 @@ pub use log_upload::{
   append_block_headers, block_blob_headers, create_append_blob_headers, upload_block_blob,
   upload_log,
 };
-pub use messages::{PollParams, acknowledge_message, build_poll_url, poll_message};
+pub use messages::{
+  PollParams, STATUS_BUSY, STATUS_ONLINE, acknowledge_message, build_poll_url, poll_message,
+};
 pub use register::{
   JitRegistration, RegisterParams, RunnerScope, build_request, parse_response, register_jit,
   resolve_target, unregister_runner,

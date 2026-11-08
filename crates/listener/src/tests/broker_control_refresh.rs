@@ -248,7 +248,7 @@ async fn forced_refresh_makes_the_next_broker_poll_use_the_new_token() -> TestRe
     .ok_or("the exchange sent no assertion")?;
   assert_eq!(assertion.split('.').count(), 3, "{assertion} is not a JWS");
 
-  let outcome = poll_once(&ctx, &ctx.token, 0).await;
+  let outcome = poll_once(&ctx, &ctx.token, 0, wire::net::STATUS_ONLINE).await;
   assert!(
     matches!(outcome, PollOutcome::NoWork),
     "the broker poll after a refresh failed"

@@ -227,6 +227,352 @@ async fn post_runs_at_job_end_and_sees_main_state() -> TestResult<()> {
   Ok(())
 }
 
+/// #251 D3: an action from the workflow's own repository (`repositoryType:
+/// self`, as GitHub delivers `uses: ./path`) runs no `pre`; its main step
+/// warns with upstream's message and annotation (v2.338.2 `ActionRunner`).
+/// Paired run 42403405937 recorded no `Pre` row on the official runner.
+#[tokio::test]
+async fn local_action_runs_no_pre_and_warns() -> TestResult<()> {
+  let mut step = action_step("a", "act-a");
+  step.reference.name = None;
+  step.reference.repository_type = Some("self".to_owned());
+  step.reference.path = Some("./act-a".to_owned());
+  let Some((lines, events)) = run_with_markers(vec![step], &[("act-a", "A")]).await? else {
+    return Ok(());
+  };
+  assert_eq!(
+    lines,
+    vec!["A:main".to_owned(), "A:post:STATE_k=A-state".to_owned()]
+  );
+  let message = "`pre` execution is not supported for local action from './act-a'";
+  assert!(events.iter().any(|event| matches!(event,
+    RunnerEvent::Annotation { level: shared::AnnotationLevel::Warning, message: m, .. } if m == message)));
+  assert!(!events.iter().any(|event| matches!(event,
+    RunnerEvent::StepStarted { step_name, .. } if step_name.starts_with("Pre "))));
+  Ok(())
+}
+
+/// #251 review cr-3272e06767da1856: the pre-job phase evaluates
+/// `timeout-minutes` only for a step that has a `pre`; an action without one
+/// gets its timeout diagnostic once, at its main step, never before it.
+#[tokio::test]
+async fn a_step_without_pre_reports_its_timeout_error_once_at_main() -> TestResult<()> {
+  let manifest = std::fs::read_to_string(Path::new(FIXTURE_DIR).join("action.yml"))?
+    .replace("  pre: 'pre.js'\n", "");
+  let mut step = action_step("a", "act-a");
+  step.timeout_in_minutes = Some(shared::TemplateToken::expression("fromJSON('not json')"));
+  let Some((_, events, markers)) = run_patched(step, &[("action.yml", &manifest)]).await? else {
+    return Ok(());
+  };
+  assert!(!markers.iter().any(|m| m == "A:pre"), "{markers:?}");
+  let mut started = false;
+  let mut errors = Vec::new();
+  for event in &events {
+    if let RunnerEvent::StepStarted { step_id, .. } = event
+      && step_id == "a"
+    {
+      started = true;
+    } else if let RunnerEvent::Log { step_id, line, .. } = event
+      && step_id == "a"
+      && line.contains("determine the step timeout")
+    {
+      errors.push((started, line.clone()));
+    }
+  }
+  assert_eq!(errors.len(), 1, "{errors:?}");
+  assert!(
+    errors.iter().all(|(after_start, _)| *after_start),
+    "{errors:?}"
+  );
+  Ok(())
+}
+
+/// One `act-a` step (its `pre.js` set to `pre_js`) through the pre-job phase,
+/// with an unexecutable node runtime when `broken_node`, cancelling after `cancel_after`.
+/// A missing system `node` fails the test: it is a prerequisite, not a skip.
+async fn run_pre_phase_case(
+  pre_js: &str,
+  broken_node: bool,
+  cancel_after: Option<std::time::Duration>,
+) -> TestResult<(shared::Conclusion, Vec<RunnerEvent>)> {
+  let node = system_node().ok_or("prerequisite missing: no system `node` on PATH")?;
+  let dir = tempfile::tempdir()?;
+  let (workspace, data_dir) = (dir.path().join("work"), dir.path().join("data"));
+  std::fs::create_dir_all(&workspace)?;
+  std::fs::create_dir_all(&data_dir)?;
+  let config = RunnerConfig {
+    data_dir: data_dir.clone(),
+    workspace_root: workspace.clone(),
+    ..RunnerConfig::default()
+  };
+  seed_node(&data_dir, &node)?;
+  if broken_node {
+    // A runtime that cannot be executed: the stage fails hard, not by exit code.
+    for major in [20, 24] {
+      let binary = node_binary_path(&node_cache_dir(&data_dir, node_version_for(major)));
+      std::fs::remove_file(&binary)?;
+      std::fs::write(&binary, "not an executable")?;
+    }
+  }
+  install_action(&workspace, "act-a", "A")?;
+  std::fs::write(workspace.join("act-a").join("pre.js"), pre_js)?;
+  let marker_file = data_dir.join("markers.txt");
+  std::fs::write(&marker_file, "")?;
+  let cancel = CancellationToken::new();
+  if let Some(after) = cancel_after {
+    let token = cancel.clone();
+    tokio::spawn(async move {
+      tokio::time::sleep(after).await;
+      token.cancel();
+    });
+  }
+  let (conclusion, events) = drive_with_cancel(
+    &[action_step("a", "act-a")],
+    &workspace,
+    &config,
+    &marker_file,
+    cancel,
+  )
+  .await?;
+  Ok((conclusion, events))
+}
+
+/// The id of the reported `Pre` row.
+fn pre_row(events: &[RunnerEvent]) -> Option<String> {
+  events.iter().find_map(|event| {
+    if let RunnerEvent::StepStarted {
+      step_id, step_name, ..
+    } = event
+      && step_name.starts_with("Pre ")
+    {
+      Some(step_id.clone())
+    } else {
+      None
+    }
+  })
+}
+
+/// #251 review cr-0c03427611c3940e: a hard `pre` error (an unusable runtime)
+/// is logged on the Pre row before that row closes as failed, and no second
+/// failed row appears.
+#[tokio::test]
+async fn a_hard_pre_error_is_logged_on_its_own_row() -> TestResult<()> {
+  let (conclusion, events) = run_pre_phase_case("", true, None).await?;
+  assert_eq!(conclusion, shared::Conclusion::Failure);
+  let pre = pre_row(&events).ok_or("no Pre row")?;
+  let completed = events
+    .iter()
+    .position(
+      |event| matches!(event, RunnerEvent::StepCompleted { step_id, .. } if step_id == &pre),
+    )
+    .ok_or("Pre row never closed")?;
+  assert!(
+    events.iter().take(completed).any(|event| matches!(event,
+      RunnerEvent::Log { step_id, line, .. } if step_id == &pre && line.starts_with("##[error]"))),
+    "{events:?}"
+  );
+  assert_eq!(
+    reported(&events, "Pre Run ./act-a"),
+    Some(shared::Conclusion::Failure)
+  );
+  let pre_rows = events
+    .iter()
+    .filter(|event| matches!(event, RunnerEvent::StepStarted { step_name, .. } if step_name.starts_with("Pre ")))
+    .count();
+  assert_eq!(pre_rows, 1, "{events:?}");
+  Ok(())
+}
+
+/// #251 review cr-0c03427611c3940e: a `pre` cancelled while it runs closes its
+/// row as cancelled (not failed), and the job ends cancelled. With a zero-delay
+/// cancellation the row never reports Failure (it may be absent or Success) and
+/// the job still ends cancelled. Real cancellation coverage; it also passed
+/// before the fix.
+#[tokio::test]
+async fn a_cancelled_pre_stays_cancelled() -> TestResult<()> {
+  let (conclusion, events) = run_pre_phase_case(
+    "setTimeout(() => {}, 60000);\n",
+    false,
+    Some(std::time::Duration::from_secs(2)),
+  )
+  .await?;
+  assert_eq!(
+    reported(&events, "Pre Run ./act-a"),
+    Some(shared::Conclusion::Cancelled),
+    "{events:?}"
+  );
+  assert_eq!(conclusion, shared::Conclusion::Cancelled);
+  // Cancelled before the stage starts: the row must not read as failed. (This
+  // pins observed behavior; it does not reach the stage's cancellation-error
+  // path, whose Cancelled mapping is verified by inspection only.)
+  let (conclusion, events) = run_pre_phase_case("", false, Some(std::time::Duration::ZERO)).await?;
+  assert_ne!(
+    reported(&events, "Pre Run ./act-a"),
+    Some(shared::Conclusion::Failure),
+    "{events:?}"
+  );
+  assert_eq!(conclusion, shared::Conclusion::Cancelled);
+  Ok(())
+}
+
+/// #251 review cr-3272e06767da1856: with a `pre`, an unevaluable
+/// `timeout-minutes` is reported on the Pre row once it has started and on
+/// the main row once that has started, never on a row before its start.
+#[tokio::test]
+async fn a_pre_reports_its_timeout_error_on_its_own_row() -> TestResult<()> {
+  let mut step = action_step("a", "act-a");
+  step.timeout_in_minutes = Some(shared::TemplateToken::expression("fromJSON('not json')"));
+  let Some((_, events, _)) = run_patched(step, &[]).await? else {
+    return Ok(());
+  };
+  let mut started = std::collections::HashSet::new();
+  let mut rows = Vec::new();
+  for event in &events {
+    if let RunnerEvent::StepStarted {
+      step_id, step_name, ..
+    } = event
+    {
+      started.insert(step_id.clone());
+      rows.push((step_id.clone(), step_name.clone()));
+    } else if let RunnerEvent::Log { step_id, line, .. } = event
+      && line.contains("determine the step timeout")
+    {
+      assert!(
+        started.contains(step_id),
+        "diagnostic before its row started: {step_id}"
+      );
+    }
+  }
+  let lines_for = |name_prefix: &str| -> usize {
+    let ids: Vec<&str> = rows
+      .iter()
+      .filter(|(_, n)| n.starts_with(name_prefix))
+      .map(|(i, _)| i.as_str())
+      .collect();
+    events
+      .iter()
+      .filter(|event| {
+        matches!(event, RunnerEvent::Log { step_id, line, .. }
+      if ids.contains(&step_id.as_str()) && line.contains("determine the step timeout"))
+      })
+      .count()
+  };
+  assert_eq!(lines_for("Pre "), 1, "{rows:?}");
+  assert_eq!(lines_for("Run ./act-a"), 1, "{rows:?}");
+  Ok(())
+}
+
+/// #251 review cr-f19c86978f0c20db: a `pre-if` that cannot be evaluated is a
+/// visible failed `Pre` row with its error in the log, at the next number (no
+/// hole before the workflow steps), and no stage runs.
+#[tokio::test]
+async fn an_unevaluable_pre_if_is_a_failed_pre_row() -> TestResult<()> {
+  let manifest = std::fs::read_to_string(Path::new(FIXTURE_DIR).join("action.yml"))?.replace(
+    "  pre: 'pre.js'",
+    "  pre: 'pre.js'\n  pre-if: 'success( &&'",
+  );
+  let Some((conclusion, events, markers)) =
+    run_patched(action_step("a", "act-a"), &[("action.yml", &manifest)]).await?
+  else {
+    return Ok(());
+  };
+  assert_eq!(conclusion, shared::Conclusion::Failure);
+  assert!(
+    !markers.iter().any(|m| m == "A:pre" || m == "A:main"),
+    "{markers:?}"
+  );
+  let pre_id = events.iter().find_map(|event| {
+    if let RunnerEvent::StepStarted {
+      step_id,
+      step_name,
+      step_number,
+    } = event
+      && step_name.starts_with("Pre ")
+    {
+      assert_eq!(*step_number, 2, "the Pre row follows Set up job");
+      Some(step_id.clone())
+    } else {
+      None
+    }
+  });
+  let pre_id = pre_id.ok_or("no Pre row was reported")?;
+  assert_eq!(
+    reported(&events, "Pre Run ./act-a"),
+    Some(shared::Conclusion::Failure)
+  );
+  assert!(
+    events.iter().any(|event| matches!(event,
+    RunnerEvent::Log { step_id, line, .. } if step_id == &pre_id && line.starts_with("##[error]")))
+  );
+  let main_number = events.iter().find_map(|event| {
+    if let RunnerEvent::StepStarted {
+      step_name,
+      step_number,
+      ..
+    } = event
+      && step_name == "Run ./act-a"
+    {
+      Some(*step_number)
+    } else {
+      None
+    }
+  });
+  assert_eq!(main_number, Some(3), "the main row follows the Pre row");
+  Ok(())
+}
+
+/// #251 D7: upstream runs every repository action's `pre` after "Set up job"
+/// and before the first main step, as numbered rows in step order, and
+/// registers the post then (paired run 42407955591: official `Pre` rows #2-#3
+/// ran before `actions/checkout` #4). A `run:` step before both runs after them.
+#[tokio::test]
+async fn pre_stages_run_before_every_main_step_in_numbered_rows() -> TestResult<()> {
+  let run = ActionStep::script("between", "echo run >> \"$MARKER_FILE\"", "success()");
+  let steps = vec![run, action_step("a", "act-a"), action_step("b", "act-b")];
+  let repos = [("act-a", "A"), ("act-b", "B")];
+  let Some((lines, events)) = run_with_markers(steps, &repos).await? else {
+    return Ok(());
+  };
+  let want = [
+    "A:pre",
+    "B:pre",
+    "run",
+    "A:main",
+    "B:main",
+    "B:post:STATE_k=B-state",
+    "A:post:STATE_k=A-state",
+  ];
+  assert_eq!(lines, want.map(ToOwned::to_owned));
+  let rows: Vec<(u32, String)> = events
+    .iter()
+    .filter_map(|event| {
+      if let RunnerEvent::StepStarted {
+        step_name,
+        step_number,
+        ..
+      } = event
+      {
+        Some((*step_number, step_name.clone()))
+      } else {
+        None
+      }
+    })
+    .collect();
+  let pre_rows: Vec<u32> = rows
+    .iter()
+    .filter(|(_, n)| n.starts_with("Pre "))
+    .map(|(i, _)| *i)
+    .collect();
+  assert_eq!(pre_rows, [2, 3], "pre rows follow Set up job: {rows:?}");
+  let main_rows: Vec<u32> = rows
+    .iter()
+    .filter(|(_, n)| !n.starts_with("Pre ") && !n.starts_with("Post "))
+    .map(|(i, _)| *i)
+    .collect();
+  assert_eq!(main_rows, [4, 5, 6], "{rows:?}");
+  Ok(())
+}
+
 /// 2: two action steps register posts; posts drain in REVERSE (LIFO) order.
 #[tokio::test]
 async fn two_posts_drain_in_reverse_lifo_order() -> TestResult<()> {
@@ -236,13 +582,14 @@ async fn two_posts_drain_in_reverse_lifo_order() -> TestResult<()> {
     return Ok(());
   };
 
-  // Mains run forward (A then B); posts drain LIFO (B then A).
+  // Every pre runs first (upstream's pre-job phase, #251), mains run forward
+  // (A then B), posts drain LIFO (B then A).
   assert_eq!(
     lines,
     vec![
       "A:pre".to_owned(),
-      "A:main".to_owned(),
       "B:pre".to_owned(),
+      "A:main".to_owned(),
       "B:main".to_owned(),
       "B:post:STATE_k=B-state".to_owned(),
       "A:post:STATE_k=A-state".to_owned(),
@@ -390,9 +737,9 @@ async fn failing_post_honors_continue_on_error() -> TestResult<()> {
 }
 
 /// 3c: a failing `pre` applies the step's `continue-on-error` as its own
-/// step. Without it the failure becomes the step's conclusion: `main` does
-/// not run and no `post` registers. With it, `pre` concludes `success` and
-/// `main`/`post` run normally.
+/// step. Without it the failure becomes the step's conclusion and `main`
+/// does not run; with it, `pre` concludes `success` and `main` runs. Either
+/// way the `post` runs, as upstream registers it before running `pre`.
 #[tokio::test]
 async fn failing_pre_honors_continue_on_error() -> TestResult<()> {
   for (continue_on_error, expected, ran_main) in [
@@ -416,9 +763,9 @@ async fn failing_pre_honors_continue_on_error() -> TestResult<()> {
       ran_main,
       "{markers:?}"
     );
-    assert_eq!(
+    // Upstream registers the post before running `pre`, so it runs either way.
+    assert!(
       markers.iter().any(|m| m.starts_with("A:post:")),
-      ran_main,
       "{markers:?}"
     );
   }
@@ -470,9 +817,10 @@ async fn pre_timeout_reports_the_pre_step() -> TestResult<()> {
   assert_eq!(conclusion, shared::Conclusion::Failure, "{markers:?}");
   let pre = "Pre Deferred ${{ steps.prior.outputs.label }}";
   assert_eq!(reported(&events, pre), Some(shared::Conclusion::Failure));
+  // The failed pre fails the job, so the `success()` main is skipped (#251).
   assert_eq!(
     reported(&events, "Deferred "),
-    Some(shared::Conclusion::Failure)
+    Some(shared::Conclusion::Skipped)
   );
   let timeouts: Vec<&str> = events
     .iter()

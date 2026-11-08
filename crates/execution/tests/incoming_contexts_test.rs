@@ -229,8 +229,11 @@ fn replay(source: &str, matrix: bool) -> TestResult {
       let mut conclusion = None;
       let mut completed = 0;
       let mut logs = Vec::new();
-      // The trailing "Complete job" row (#88) is not an assertion step.
+      // The trailing "Complete job" row (#88) and composite "Post" rows (#251:
+      // upstream gives a composite with a nested local action one) are not
+      // assertion steps.
       let mut complete_job = None;
+      let mut post_rows = std::collections::HashSet::new();
       while let Some(event) = events.recv().await {
         match event {
           RunnerEvent::Log { line, .. } => logs.push(line),
@@ -239,6 +242,8 @@ fn replay(source: &str, matrix: bool) -> TestResult {
           } => {
             if step_name == "Complete job" {
               complete_job = Some(step_id);
+            } else if step_name.starts_with("Post ") {
+              post_rows.insert(step_id);
             }
           },
           RunnerEvent::StepCompleted {
@@ -247,7 +252,7 @@ fn replay(source: &str, matrix: bool) -> TestResult {
             ..
           } => {
             assert_eq!(conclusion, Conclusion::Success, "{logs:?}");
-            if complete_job.as_deref() != Some(step_id.as_str()) {
+            if complete_job.as_deref() != Some(step_id.as_str()) && !post_rows.contains(&step_id) {
               completed += 1;
             }
           },

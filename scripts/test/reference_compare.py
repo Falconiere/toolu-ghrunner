@@ -18,7 +18,11 @@ docker`), and it compares:
 - the expected outcome of each variant (`probe` green, `negative` red at the
   input assertions);
 - the absence of probe-image containers on each Linux VM's daemon after the run,
-  as recorded by that VM's host job.
+  as recorded by that VM's host job;
+- (#251) each VM's host observations (`compat-251-<platform>-host`), the lane's
+  disposable value counted in every probe job log and annotation of that lane,
+  the toolu-only lifecycle jobs, and the named assertions of compat_assertions.py
+  that matrix rows cite as `report:<path>#<assertion>`.
 
 Every report must cover EXPECTED_PLATFORMS, except the recorded single-host run
 LEGACY_RUN_ID, whose rows name no platform and which stays unedited.
@@ -42,16 +46,25 @@ import sys
 import tempfile
 from pathlib import Path
 
+import compat_assertions
+from compat_paired_host_report import disposable
+
 ROOT = Path(__file__).resolve().parents[2]
 REPO = "Falconiere/toolu-ghrunner"
 LANES = ("toolu", "official")
 VARIANTS = ("probe", "negative")
 EXPECTED_PLATFORMS = (("Linux", "X64"), ("Linux", "ARM64"), ("macOS", "ARM64"))
 # annotations/secrets/deploy/container are the #237 surface probes; the
-# `surfaces` job of compat-paired.yml reads their GitHub records back.
+# `surfaces` job of compat-paired.yml reads their GitHub records back. The rest
+# of the second block is #251's (`extended` jobs run in the probe variant only).
+LINUX_ONLY = ("docker", "container", "stack", "cancel-container", "docker-pre")
+EXTENDED = ("leaks", "composite", "failure", "orphans", "timeout", "cancel", "cancel-container",
+            "long", "pool-a", "pool-b", "docker-pre")
 EXPECTED_JOBS = {"Linux": ("contexts", "docker", "services", "consumer",
-                           "annotations", "secrets", "deploy", "container"),
-                 "macOS": ("contexts", "services", "consumer", "annotations", "secrets", "deploy")}
+                           "annotations", "secrets", "deploy", "container",
+                           "stack") + EXTENDED,
+                 "macOS": ("contexts", "services", "consumer", "annotations", "secrets", "deploy")
+                 + tuple(j for j in EXTENDED if j not in LINUX_ONLY)}
 # The 2.337.0 run in docs/compat-reference-103.json: one Linux host, no platform
 # fields, and only the jobs the probe had before #237.
 LEGACY_RUN_ID = 38301583727
@@ -62,12 +75,24 @@ JOB_NAME = re.compile(r"^(?P<variant>[a-z]+)(?:-(?P<os>Linux|macOS)-(?P<arch>X64
                       r"-(?P<lane>toolu|official) / (?P<job>[^(]+?)(?: \(.*\))?$")
 PROBE_IMAGE = "alpine@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc"
 # Expected failing steps per job for the empty-`who` variant; every other job
-# and every `probe` job must succeed.
+# and every `probe` job must succeed, except EXPECTATIONS.
 NEGATIVE_FAILURES = {
     "contexts": "Assert typed inputs",
     "docker": "Verify container effects",
     "consumer": "Verify cross-job values",
 }
+# (variant, job) -> (job conclusion, failed step names) for the probe jobs that
+# are meant to end badly. The cancel/timeout outcomes are the official lane's.
+EXPECTATIONS = {
+    # The missing job-container image fails setup; the always() step is still
+    # attempted and fails without its container (official, run 42403405937).
+    ("negative", "stack"): ("failure", ["Initialize containers", "Return workspace ownership"]),
+    ("probe", "failure"): ("failure", ["Main failure"]),
+    ("probe", "timeout"): ("failure", ["Step timeout"]),
+    ("probe", "cancel"): ("cancelled", []),
+    ("probe", "cancel-container"): ("cancelled", []),
+}
+LIFECYCLE_JOB = re.compile(r"^lifecycle-(?P<os>Linux|macOS)-(?P<arch>X64|ARM64)-toolu-(?P<job>[a-z0-9-]+)$")
 
 
 def run_tool(args):
@@ -153,19 +178,29 @@ def compare_jobs(jobs):
     return rows, unpaired
 
 
+def expected(variant, job):
+    """(conclusion, failed steps) the official runner gives `job` in `variant`;
+    the conclusion is None where only the failing step is pinned (the #103 rule)."""
+    if (variant, job) in EXPECTATIONS:
+        return EXPECTATIONS[(variant, job)]
+    if variant == "negative" and job in NEGATIVE_FAILURES:
+        return None, [NEGATIVE_FAILURES[job]]
+    if variant == "negative" and job in EXTENDED:
+        return "skipped", []
+    return "success", []
+
+
 def expectation_failures(rows):
     """(scope, job, message) for every job that missed its variant's expectation."""
     failures = []
     for row in rows:
+        conclusion, failed_steps = expected(row["variant"], row["job"])
         for lane in LANES:
             view = row[lane]
-            if row["variant"] == "probe" or row["job"] not in NEGATIVE_FAILURES:
-                if view["conclusion"] != "success":
-                    failures.append((row_scope(row), row["job"],
-                                     f"{lane} concluded {view['conclusion']}"))
-                continue
-            failed = [name for name, conclusion in view["steps"] if conclusion == "failure"]
-            if failed != [NEGATIVE_FAILURES[row["job"]]]:
+            failed = [name for name, result in view["steps"] if result == "failure"]
+            if conclusion is not None and view["conclusion"] != conclusion:
+                failures.append((row_scope(row), row["job"], f"{lane} concluded {view['conclusion']}"))
+            elif failed != failed_steps:
                 failures.append((row_scope(row), row["job"], f"{lane} failed steps {failed}"))
     return failures
 
@@ -213,6 +248,75 @@ def leftover_containers(run_id, tmp):
     return found
 
 
+def host_observations(run_id, tmp):
+    """{platform: host-251.json} from each VM's `compat-251-<platform>-host` artifact."""
+    found = {}
+    for os_name, arch in EXPECTED_PLATFORMS:
+        platform = f"{os_name}-{arch}"
+        dest = Path(tmp, f"{platform}-host")
+        download(run_id, f"compat-251-{platform}-host", dest)
+        found[platform] = json.loads((dest / "host-251.json").read_text())
+    return found
+
+
+def lifecycle(jobs):
+    """{platform: {job: conclusion}} of the toolu-only lifecycle jobs."""
+    found = {}
+    for job in jobs:
+        match = LIFECYCLE_JOB.match(job["name"])
+        if match:
+            found.setdefault(f"{match['os']}-{match['arch']}", {})[match["job"]] = job["conclusion"]
+    return found
+
+
+def failure_category(stderr):
+    """A bounded label for a failed `gh api` read: `http-<status>` or `error`.
+    Never stderr itself, which can carry signed URLs or tokens."""
+    match = re.search(r"\(HTTP (\d{3})\)", stderr or "")
+    return f"http-{match.group(1)}" if match else "error"
+
+
+def fetch(path, reasons=None, paginate=False):
+    """`gh api path` text, or None when GitHub has nothing to return; the
+    failure's category is counted in `reasons`. Job logs carry ANSI colour
+    codes, which `gh` refuses to print without the flag. `paginate` follows
+    every `Link: next` page (one JSON array per page); any failed page is None."""
+    cmd = ["gh", "api", "--allow-escape-sequences"] + (["--paginate"] if paginate else []) + [path]
+    out = subprocess.run(cmd, capture_output=True, text=True)
+    if out.returncode == 0:
+        return out.stdout
+    if reasons is not None:
+        category = failure_category(out.stderr)
+        reasons[category] = reasons.get(category, 0) + 1
+    return None
+
+
+def leak_counts(run_id, jobs):
+    """{platform: {lane: {logs, annotations, jobs_scanned, unreadable}}}: the
+    lane's disposable value (job `leaks`) counted in every job log and check-run
+    annotation of that lane. Counts only; nothing read is kept."""
+    found = {}
+    for job in jobs:
+        parsed = split_job_name(job["name"])
+        if not parsed or job["conclusion"] == "skipped" or not parsed[3]:
+            continue
+        _, lane, _, os_name, arch = parsed
+        platform = f"{os_name}-{arch}"
+        value = disposable(run_id, platform, lane)
+        counts = found.setdefault(platform, {}).setdefault(
+            lane, {"logs": 0, "annotations": 0, "jobs_scanned": 0, "unreadable": 0, "reasons": {}})
+        log = fetch(f"repos/{REPO}/actions/jobs/{job['id']}/logs", counts["reasons"])
+        notes = fetch(job["check_run_url"].split("api.github.com/", 1)[-1] + "/annotations?per_page=100",
+                      counts["reasons"], paginate=True)
+        if log is None or notes is None:
+            counts["unreadable"] += 1
+            continue
+        counts["jobs_scanned"] += 1
+        counts["logs"] += log.count(value)
+        counts["annotations"] += notes.count(value)
+    return found
+
+
 def build_report(run_id, provenance, captures, acknowledged):
     run = gh_json("api", f"repos/{REPO}/actions/runs/{run_id}")
     # `--jq '.jobs[]' -c` prints one compact job object per line across pages.
@@ -223,6 +327,7 @@ def build_report(run_id, provenance, captures, acknowledged):
     with tempfile.TemporaryDirectory() as tmp:
         found, payload_errors = observations(run_id, tmp)
         leftovers = leftover_containers(run_id, tmp)
+        host = host_observations(run_id, tmp)
     results = {key: {"equal": same(lanes["toolu"], lanes["official"]), **lanes}
                for key, lanes in found.items()}
     report = {
@@ -237,17 +342,57 @@ def build_report(run_id, provenance, captures, acknowledged):
         "expectation_failures": [list(f) for f in expectation_failures(rows)],
         "leftover_containers": leftovers,
         "captures": {path: sha256(ROOT / path) for path in captures},
+        "host": host,
+        "leaks": leak_counts(run_id, jobs),
+        "toolu_only": lifecycle(jobs),
     }
     report["acknowledged"] = pin_observations(report, acknowledged)
+    report["assertions"] = assertions(report)
     return report
+
+
+def assertions(report):
+    """The named assertions recomputed from the stored data; {} for the legacy run."""
+    if is_legacy(report):
+        return {}
+    # Fail closed: a malformed section or a missing observation scope fails
+    # every assertion, whatever jobs it names.
+    fatal = [m for key, job, m in shape_problems(report)]
+    fatal += [f"unpaired job {u}" for u in report.get("unpaired") or []]
+    fatal += [f"{field} is not an object" for field in ("results", "host", "leaks", "toolu_only")
+              if not isinstance(report.get(field), dict)]
+    fatal += [f"{key}: {m}" for key, job, m in coverage_problems(report) if job is None]
+    return compat_assertions.evaluate(report, keyed_problems(report), fatal, EXPECTED_PLATFORMS,
+                                      EXPECTED_JOBS)
 
 
 def sha256(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def is_legacy(report):
+    """The recorded #103 report: its run id AND its issue. A current report that
+    borrows the run id still needs every platform and every #251 section."""
+    return (report.get("run") or {}).get("id") == LEGACY_RUN_ID and report.get("issue") == 103
+
+
 def expected_platforms(report):
-    return ((None, None),) if (report.get("run") or {}).get("id") == LEGACY_RUN_ID else EXPECTED_PLATFORMS
+    return ((None, None),) if is_legacy(report) else EXPECTED_PLATFORMS
+
+
+def well_formed(row):
+    """A job row the comparison can read: variant and job names, and each lane a
+    view with a conclusion and a step list."""
+    return (isinstance(row, dict) and isinstance(row.get("variant"), str)
+            and isinstance(row.get("job"), str)
+            and all(isinstance(row.get(lane), dict) and isinstance(row[lane].get("steps"), list)
+                    for lane in LANES))
+
+
+def job_rows(report):
+    """The report's well-formed job rows; shape_problems names the rest."""
+    jobs = report.get("jobs")
+    return [row for row in jobs if well_formed(row)] if isinstance(jobs, list) else []
 
 
 def shape_problems(report):
@@ -258,12 +403,16 @@ def shape_problems(report):
         problems.append((None, None, "provenance is missing or empty"))
     problems += [(None, None, f"{field} is missing") for field in REQUIRED_LISTS
                  if not isinstance(report.get(field), list)]
+    if isinstance(report.get("jobs"), list):
+        bad = len(report["jobs"]) - len(job_rows(report))
+        if bad:
+            problems.append((None, None, f"{bad} malformed job row(s)"))
     return problems
 
 
 def coverage_problems(report):
     """Every expected job and observation per platform, and nothing that must not exist."""
-    rows, problems, seen = report.get("jobs") or [], [], set()
+    rows, problems, seen = job_rows(report), [], set()
     platforms = expected_platforms(report)
     for row in rows:
         key, platform = (row_scope(row), row["job"]), (row.get("os"), row.get("arch"))
@@ -289,7 +438,7 @@ def keyed_problems(report):
     """(scope, job, message); recomputed from the stored lane views, never from
     the stored `equal` / `expectation_failures` flags, so editing a flag cannot
     hide a difference."""
-    rows = report.get("jobs") or []
+    rows = job_rows(report)
     problems = shape_problems(report) + coverage_problems(report)
     for row in rows:
         diff = lane_diff(row["toolu"], row["official"])
@@ -307,7 +456,7 @@ def keyed_problems(report):
 
 def observed(report, key, job):
     """The recorded step lists of one job on both lanes in one scope, or None."""
-    row = next((r for r in report.get("jobs") or [] if row_scope(r) == key and r["job"] == job), None)
+    row = next((r for r in job_rows(report) if row_scope(r) == key and r["job"] == job), None)
     return None if row is None else {lane: row[lane]["steps"] for lane in LANES}
 
 
@@ -346,6 +495,10 @@ def verify(report):
             problems.append(f"stale acknowledgement {ack.get('finding')}: no matching difference")
     if not report.get("captures"):
         problems.append("no capture recorded")
+    if not is_legacy(report):
+        problems += [f"{field} is missing" for field in ("host", "leaks", "toolu_only", "assertions")
+                     if not isinstance(report.get(field), dict)]
+        problems += compat_assertions.stored_disagreements(report, assertions(report))
     for path, digest in report.get("captures", {}).items():
         if sha256(ROOT / path) != digest:
             problems.append(f"{path} changed since the run; re-record")

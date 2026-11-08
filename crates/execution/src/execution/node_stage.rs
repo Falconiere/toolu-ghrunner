@@ -152,6 +152,28 @@ async fn select_stage_node(s: &mut NodeStage<'_>, env: &HashMap<String, String>)
   selection.major
 }
 
+/// Upstream `ActionRunner` (v2.338.2): an action from the workflow's own
+/// repository (`uses: ./path`) never runs `pre`; its main step warns instead.
+/// Returns true when `pre` must be skipped for that reason.
+pub(super) async fn skip_local_pre(
+  events: &mpsc::Sender<RunnerEvent>,
+  step_id: &str,
+  step: &shared::ActionStep,
+) -> bool {
+  let reference = &step.reference;
+  if !reference
+    .repository_type
+    .as_deref()
+    .is_some_and(|kind| kind.eq_ignore_ascii_case("self"))
+  {
+    return false;
+  }
+  let path = reference.path.as_deref().unwrap_or_default();
+  let message = format!("`pre` execution is not supported for local action from '{path}'");
+  emit_warning(events, step_id, &message).await;
+  true
+}
+
 /// A `##[warning]` line plus a warning annotation on `step_id`.
 async fn emit_warning(events: &mpsc::Sender<RunnerEvent>, step_id: &str, message: &str) {
   emit_log(events, step_id, &format!("##[warning]{message}")).await;

@@ -25,7 +25,7 @@ Higher-level domain wrappers and reporting-only types live in
 | `device_auth.rs` | `request_device_code` / `poll_for_token` | GitHub OAuth device-authorization flow: request a device/user code, then poll until an access token or terminal failure. |
 | `github_app.rs` | `find_installation` / `create_installation_token` | GitHub App calls authenticated with the App JWT (`protocol::app_jwt`): the installation covering a repo or org, the App's installation list, and installation-token minting; `reuse_deadline` is the token-cache rule. 429/5xx are `Network`, every other non-2xx `Auth`. |
 | `log_upload.rs` | `upload_block_blob` / `upload_log` | Raw Azure Blob Storage PUT requests (BlockBlob and AppendBlob); the mode decision lives in `crate::reporting::log_upload`. |
-| `messages.rs` | `poll_message` / `acknowledge_message` | HTTP transport for the broker long-poll loop; response decryption lives in `protocol::messages`. |
+| `messages.rs` | `poll_message` / `acknowledge_message` | HTTP transport for the broker long-poll loop (`status` `Online` idle, `Busy` while a job runs, as upstream); response decryption lives in `protocol::messages`. |
 | `register.rs` | `register_jit` / `unregister_runner` | POSTs `generate-jitconfig` to mint a JIT registration, and DELETEs a runner registration — repo- or org-scoped (`RunnerScope`, `resolve_target`). |
 | `runner_groups.rs` | `list_runner_groups` / `pick_group` | Lists an organization's runner groups and resolves a `--runner-group` name to its id. |
 | `results_service.rs` | `update_workflow_steps` / signed-blob-URL + metadata calls / `upload_log_file` | Twirp JSON-over-HTTP POSTs and gzipped file streaming with exact content length to Results Service signed URLs. |

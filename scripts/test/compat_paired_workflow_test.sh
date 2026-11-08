@@ -72,10 +72,10 @@ want "guard step reads the boolean" "if: \\$\\{\\{ env\\.HAVE_LIVE_TOKEN != 'tru
 want "guard fails UNVERIFIED" '::error::UNVERIFIED: TOOLU_RUNNER_LIVE_TOKEN'
 reject "never exposes the secret at job level" '^      (TOOLU_RUNNER_[A-Z_]*|GH_TOKEN): \$\{\{ secrets\.'
 needs_guard=$(grep -Ec '^    needs: guard$' "$WF")
-if [[ "$needs_guard" == 4 ]]; then
-  echo "ok: host, probe, negative and accelerated all need the guard"
+if [[ "$needs_guard" == 6 ]]; then
+  echo "ok: host, probe, negative, accelerated, fresh-1 and ephemeral all need the guard"
 else
-  echo "FAIL: expected 4 jobs needing the guard, found $needs_guard" >&2
+  echo "FAIL: expected 6 jobs needing the guard, found $needs_guard" >&2
   fail=1
 fi
 
@@ -105,7 +105,33 @@ for job in annotations secrets deploy container; do
   want "the probe has the $job job" "^  $job:$" "$PROBE"
 done
 want "the container job pins its image" '^    container: ubuntu@sha256:[0-9a-f]{64}$' "$PROBE"
-want "the consumer waits for the #237 producers" '^    needs: \[contexts, docker, services, secrets, container\]$' "$PROBE"
+want "the consumer waits for the #237 and #251 producers" '^    needs: \[contexts, docker, services, secrets, container, composite, stack\]$' "$PROBE"
+
+# --- #251: extended probe jobs, pools, lifecycle lanes, host observations ---
+for job in leaks composite stack docker-pre failure orphans timeout cancel cancel-container long pool-a pool-b; do
+  want "the probe has the $job job" "^  $job:$" "$PROBE"
+done
+want "the probe callers turn the extended jobs on" '^      extended: true$'
+# The pool and docker-pre jobs rely on this: only the probe-variant caller sets it.
+grep -A3 '^      extended:$' "$PROBE" | grep -qx '        default: false' &&
+  echo "ok: extended defaults off for the accelerated and negative callers" || {
+  echo "FAIL: the probe's extended input must default to false" >&2
+  fail=1
+}
+want "pool jobs run on the per-lane pool label" '^    runs-on: \[self-hosted, "\$\{\{ inputs\.runner_label \}\}-pool"\]$' "$PROBE"
+want "cancel ends by the GitHub job timeout" '^    timeout-minutes: 1$' "$PROBE"
+want "the built action is pinned to a commit" 'uses: Falconiere/toolu-ghrunner/\.github/actions/compat-251-docker@[0-9a-f]{40}$' "$PROBE"
+want "the Docker pre action is pinned to a commit" 'uses: Falconiere/toolu-ghrunner/\.github/actions/compat-251-docker-pre@[0-9a-f]{40}$' "$PROBE"
+want "the stack image is missing in the negative variant" "inputs\.who == 'world' && 'ubuntu@sha256:[0-9a-f]{64}' \|\| 'ubuntu@sha256:0+251'" "$PROBE"
+want "the container hands the workspace back" 'chown -R "\$\(stat -c %u:%g "\$GITHUB_WORKSPACE"\)" "\$GITHUB_WORKSPACE"' "$PROBE"
+want "hosts start the #251 lanes" '^      EXTENDED_LANES: true$'
+want "toolu is built with the capture feature" 'cargo build -p toolu-runner --bin toolu-runner --features capture'
+want "hosts record their observations" 'bash scripts/test/compat_paired_host.sh report$'
+want "host observations are uploaded per platform" 'name: compat-251-\$\{\{ matrix\.platform \}\}-host$'
+want "only a sanitized capture leaves the VM" 'bash scripts/test/compat_paired_host.sh capture '
+for job in fresh-1 fresh-2 ephemeral; do
+  want "lifecycle job $job is named for the host and the comparator" "^    name: lifecycle-\\\$\\{\\{ matrix\\.platform \\}\\}-toolu-$job\$"
+done
 want "the secret URL comes from a masked step output" '^      url: \$\{\{ steps\.emit\.outputs\.url \}\}$' "$PROBE"
 
 # --- per-run labels: no run can pick up another run's jobs ---
@@ -155,7 +181,9 @@ if [[ -z "${COMPAT_PAIRED_WORKFLOW_FILE:-}" ]]; then
   # The host script's control flow, with GitHub and both runners stood in for:
   # nothing else can exercise it before the first dispatch.
   tmp=$(mktemp -d)
-  trap 'rm -rf "$tmp"' EXIT
+  # Last resort only: no_survivors below fails the test first. Without this a
+  # leaked fake listener would hold the caller's output open (#251 S3 hang).
+  trap 'pkill -f "$tmp/" 2>/dev/null; rm -rf "$tmp"' EXIT
   mkdir -p "$tmp/tools" "$tmp/official/bin" "$tmp/official-dies"
   cat >"$tmp/tools/gh" <<'GH'
 #!/usr/bin/env bash
@@ -167,13 +195,25 @@ case "$*" in
     ;;
   # Jobs finish only once the listener is up, so stopping the lanes has one to stop.
   */jobs*) [[ -f "$OFFICIAL_DIR/listening" ]] && cat "$FAKE_JOBS" ;;
-  */runners*) cat "$FAKE_RUNNERS" ;;
+  */runners*) [[ -z "${FAKE_RUNNERS_FAIL:-}" ]] && cat "$FAKE_RUNNERS" ;;
 esac
 GH
   printf '#!/usr/bin/env bash\n"$PWD/bin/Runner.Listener"\n' >"$tmp/official/run.sh"
   printf '#!/usr/bin/env bash\ntouch "$PWD/listening"\nwhile :; do sleep 1; done\n' >"$tmp/official/bin/Runner.Listener"
   cat >"$tmp/tools/toolu" <<'TOOLU'
 #!/usr/bin/env bash
+config=""
+for ((i = 1; i <= $#; i++)); do [[ "${!i}" == --config ]] && { j=$((i + 1)); config="${!j}"; }; done
+if [[ "$1" == register ]]; then
+  printf '[services]\nmode = "forwarder"\n[workspace]\nmode = "stable"\n' >"$config"
+  [[ "$*" == *--ephemeral* ]] && echo ephemeral >>"$config"
+  exit 0
+fi
+# A `die` file in the lane's home makes its runner exit at once (the lanes run
+# under `env -i`, so no variable reaches this script).
+[[ "$1" == run && -e "${config%/*}/die" ]] && exit 3
+# The ephemeral lane takes its one job, removes its state and exits.
+[[ "$1" == run && "$config" == *ephemeral* ]] && { rm -f "$config"; exit 0; }
 [[ "$1" == run ]] && while :; do sleep 1; done
 exit 0
 TOOLU
@@ -207,6 +247,7 @@ DOCKER
       export FAKE_JOBS="$tmp/jobs" FAKE_NO_JIT="${FAKE_NO_JIT:-}" GH_TOKEN=fake GITHUB_REPOSITORY=o/r GITHUB_RUN_ID=1 RUNNER_TEMP="$tmp"
       export PLATFORM=Linux-X64 LABEL_PREFIX="compat-paired-$GITHUB_RUN_ID-Linux-X64" POLL_SECONDS=0
       export ACCELERATED_LANE="${FAKE_ACCELERATED:-}" FAKE_DOCKER_RUN="$tmp/docker-run"
+      export EXTENDED_LANES="${FAKE_EXTENDED:-}" FAKE_RUNNERS_FAIL="${FAKE_RUNNERS_FAIL:-}" EPHEMERAL_GRACE_SECONDS=0
       export FAKE_DOCKER_DEAD="${FAKE_DOCKER_DEAD:-}"
       export OFFICIAL_DIR="${FAKE_OFFICIAL:-$tmp/official}" TOOLU_BIN="${FAKE_TOOLU:-$tmp/tools/toolu}"
       PATH="$tmp/tools:$PATH" timeout_guard bash "$HOST" "$@"
@@ -225,6 +266,20 @@ DOCKER
     fi
     wait "$pid"
   }
+  no_survivors() { # no_survivors <desc>: no process under $tmp outlives a host run
+    local waited=0 left
+    while left=$(pgrep -fl "$tmp/") && ((waited < 50)); do
+      sleep 0.1
+      waited=$((waited + 1))
+    done
+    if [[ -n "$left" ]]; then
+      echo "FAIL: $1 left processes behind: $left" >&2
+      pkill -f "$tmp/"
+      fail=1
+    else
+      echo "ok: $1 leaves no process behind"
+    fi
+  }
   expect() { # expect <desc> <wanted exit> <actual exit>
     if [[ "$2" == "$3" ]]; then
       echo "ok: $1"
@@ -235,6 +290,7 @@ DOCKER
   }
   FAKE_RUNNERS="$tmp/none" host run >/dev/null 2>&1
   expect "lanes stop once the probes completed" 0 $?
+  no_survivors "lanes stop once the probes completed"
   [[ -f "$tmp/official/listening" ]] && ! pgrep -f "$tmp/official/bin/Runner.Listener" >/dev/null &&
     echo "ok: the official listener does not outlive the lanes" || {
     echo "FAIL: the official listener was not stopped" >&2
@@ -245,11 +301,14 @@ DOCKER
   sed -i.bak '$d' "$tmp/jobs"
   FAKE_RUNNERS="$tmp/none" FAKE_TOOLU="$tmp/tools/toolu-dies" host run >/dev/null 2>&1
   expect "a dead toolu lane fails the step while a consumer is unlisted" 1 $?
+  no_survivors "a dead toolu lane fails the step while a consumer is unlisted"
   FAKE_RUNNERS="$tmp/none" FAKE_NO_JIT=1 host run >/dev/null 2>&1
   expect "a dead official lane fails the step while a consumer is unlisted" 1 $?
+  no_survivors "a dead official lane fails the step while a consumer is unlisted"
   # This lane always mints before it dies, so both checks below see a real JIT.
   out=$(FAKE_RUNNERS="$tmp/none" FAKE_OFFICIAL="$tmp/official-dies" host run 2>&1)
   expect "an official runner that cannot start fails the step" 1 $?
+  no_survivors "an official runner that cannot start fails the step"
   [[ "$out" == *"::add-mask::fake-jit"* ]] && echo "ok: the JIT config is masked on the step's stdout" || {
     echo "FAIL: the mask command did not reach the step's stdout: $out" >&2
     fail=1
@@ -266,9 +325,11 @@ DOCKER
   done >"$tmp/jobs"
   FAKE_RUNNERS="$tmp/none" FAKE_ACCELERATED=true FAKE_DOCKER_DEAD=1 host run >/dev/null 2>&1
   expect "four consumers do not finish an accelerated host" 1 $?
+  no_survivors "four consumers do not finish an accelerated host"
   printf 'completed probe-Linux-X64-toolu-accelerated / consumer\n' >>"$tmp/jobs"
   out=$(FAKE_RUNNERS="$tmp/none" FAKE_ACCELERATED=true host run 2>&1)
   expect "an accelerated host stops once its five consumers completed" 0 $?
+  no_survivors "an accelerated host stops once its five consumers completed"
   args=$(cat "$tmp/docker-run")
   [[ "$args" == *ubuntu@sha256:* && "$args" == *$'\n-e\nTOOLU_RUNNER_TOKEN\n'* && "$args" == *token-in-env* &&
     "$args" != *TOOLU_RUNNER_TOKEN=* ]] &&
@@ -287,6 +348,94 @@ DOCKER
     echo "FAIL: accelerated lane log missing: $out" >&2
     fail=1
   }
+
+  # #251: the extended lanes add two lifecycle jobs' worth of waiting, two pool
+  # copies of the official runner, a fresh-mode registration and an ephemeral one.
+  for caller in probe-Linux-X64-toolu probe-Linux-X64-official negative-Linux-X64-toolu negative-Linux-X64-official; do
+    printf 'completed %s / consumer\n' "$caller"
+  done >"$tmp/jobs"
+  FAKE_RUNNERS="$tmp/none" FAKE_EXTENDED=true FAKE_NO_JIT=1 host run >/dev/null 2>&1
+  expect "consumers alone do not finish an extended host" 1 $?
+  no_survivors "consumers alone do not finish an extended host"
+  for job in fresh-1 fresh-2 ephemeral; do printf 'completed lifecycle-Linux-X64-toolu-%s\n' "$job"; done >>"$tmp/jobs"
+  out=$(FAKE_RUNNERS="$tmp/none" FAKE_EXTENDED=true host run 2>&1)
+  expect "an extended host stops once the lifecycle jobs completed" 0 $?
+  no_survivors "an extended host stops once the lifecycle jobs completed"
+  [[ -x "$tmp/official-pool-1/run.sh" && -x "$tmp/official-pool-2/run.sh" ]] &&
+    echo "ok: two pool copies of the official runner exist" || {
+    echo "FAIL: official pool copies missing" >&2
+    fail=1
+  }
+  grep -qx 'mode = "fresh"' "$tmp/toolu-fresh/config.toml" && ! grep -qx 'mode = "stable"' "$tmp/toolu-fresh/config.toml" &&
+    echo "ok: the fresh lane switches [workspace] mode" || {
+    echo "FAIL: fresh lane config: $(cat "$tmp/toolu-fresh/config.toml")" >&2
+    fail=1
+  }
+  [[ "$(cat "$tmp/ephemeral.exit" 2>/dev/null)" == 0 && ! -e "$tmp/toolu-ephemeral/config.toml" ]] &&
+    echo "ok: the ephemeral lane's exit is recorded" || {
+    echo "FAIL: ephemeral exit $(cat "$tmp/ephemeral.exit" 2>/dev/null)" >&2
+    fail=1
+  }
+  [[ "$out" == *"toolu-pool-1 lane log"*"official-pool-2 lane log"*"toolu-ephemeral lane log"* ]] &&
+    echo "ok: the extended lane logs are printed" || {
+    echo "FAIL: extended lane logs missing" >&2
+    fail=1
+  }
+  # Lifecycle jobs still queued behind a dead pool lane must not hang the host.
+  # The ephemeral job stays completed so only the pool liveness check can fail it.
+  grep -v 'toolu-fresh-' "$tmp/jobs" >"$tmp/jobs.partial" && mv "$tmp/jobs.partial" "$tmp/jobs"
+  mkdir -p "$tmp/toolu-pool-1" && touch "$tmp/toolu-pool-1/die"
+  FAKE_RUNNERS="$tmp/none" FAKE_EXTENDED=true host run >/dev/null 2>&1
+  expect "a dead pool lane fails the host instead of waiting" 1 $?
+  rm -f "$tmp/toolu-pool-1/die"
+  no_survivors "a dead pool lane fails the host instead of waiting"
+  for job in fresh-1 fresh-2 ephemeral; do printf 'completed lifecycle-Linux-X64-toolu-%s\n' "$job"; done >>"$tmp/jobs"
+  FAKE_RUNNERS="$tmp/none" FAKE_RUNNERS_FAIL=1 host report >/dev/null 2>&1
+  expect "a failed runner listing fails the report rather than claim removal" 1 $?
+  printf 'compat-paired-1-Linux-X64-toolu-ephemeral\n' >"$tmp/ephemeral-left"
+  FAKE_RUNNERS="$tmp/ephemeral-left" host report >/dev/null 2>&1
+  [[ "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["toolu_only"]["ephemeral"]["runner_removed"])' "$tmp/host-251.json")" == False ]] &&
+    echo "ok: a still-listed ephemeral runner is reported" || {
+    echo "FAIL: report did not see the listed ephemeral runner" >&2
+    fail=1
+  }
+  FAKE_RUNNERS="$tmp/none" host report >/dev/null 2>&1
+  [[ "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["toolu_only"]["ephemeral"])' "$tmp/host-251.json")" == "{'exit_code': 0, 'state_removed': True, 'runner_removed': True}" ]] &&
+    echo "ok: the report records a clean ephemeral exit" || {
+    echo "FAIL: report: $(cat "$tmp/host-251.json")" >&2
+    fail=1
+  }
+
+  # The stack probe message is the one with a job container and services whose
+  # image is the real one; only its sanitized copy is written.
+  caps="$tmp/toolu-home/_diag/captures"
+  mkdir -p "$caps"
+  # As GitHub sends them: the container is one unevaluated expression naming
+  # both images, so only the `inputs` context tells the variants apart.
+  expr='{"type":3,"expr":"inputs.who == '"'"'world'"'"' && '"'"'ubuntu@sha256:fe81'"'"' || '"'"'ubuntu@sha256:0000000000000000000000000000000000000000000000000000000000000251'"'"'"}'
+  echo '{"jobContainer":null,"jobServiceContainers":null,"contextData":{"inputs":{"t":2,"d":[{"k":"variant","v":"probe"}]}}}' >"$caps/1.json"
+  echo '{"jobContainer":'"$expr"',"jobServiceContainers":{"type":2},"contextData":{"inputs":{"t":2,"d":[{"k":"variant","v":"negative"}]}}}' >"$caps/2.json"
+  echo '{"jobContainer":'"$expr"',"jobServiceContainers":{"type":2},"contextData":{"inputs":{"t":2,"d":[{"k":"variant","v":"probe"}]}}}' >"$caps/3.json"
+  host capture "$tmp/stack.json" >/dev/null 2>&1
+  expect "the stack capture is found and sanitized" 0 $?
+  grep -q '"v": "probe"' "$tmp/stack.json" 2>/dev/null &&
+    echo "ok: the probe variant's stack message is the one captured" || {
+    echo "FAIL: wrong or missing stack capture" >&2
+    fail=1
+  }
+  rm -f "$caps/3.json"
+  host capture "$tmp/none.json" >/dev/null 2>&1
+  expect "no stack probe message fails the capture" 1 $?
+
+  # An ephemeral lane that dies before taking its job must not hang the host.
+  mkdir -p "$tmp/toolu-ephemeral" && touch "$tmp/toolu-ephemeral/die"
+  cp "$tmp/jobs" "$tmp/jobs.all"
+  grep -v 'toolu-ephemeral$' "$tmp/jobs.all" >"$tmp/jobs"
+  FAKE_RUNNERS="$tmp/none" FAKE_EXTENDED=true host run >/dev/null 2>&1
+  expect "an ephemeral lane gone before its job fails the host" 1 $?
+  no_survivors "an ephemeral lane gone before its job fails the host"
+  rm -f "$tmp/toolu-ephemeral/die"
+  mv "$tmp/jobs.all" "$tmp/jobs"
 
   FAKE_RUNNERS="$tmp/none" host unregister >/dev/null 2>&1
   expect "unregister passes with no runner left" 0 $?
@@ -328,6 +477,9 @@ DOCKER
   mutate "a fixed probe label" 's/^      runner_label: .*/      runner_label: toolu-103-toolu/'
   mutate "an unregister that can be skipped" '/- name: Unregister both lanes/{n;s/if: always\(\)/if: success()/;}'
   mutate "a platform-less caller name" 's/^    name: probe-.*/    name: probe-${{ matrix.lane }}/'
+  mutate "a probe without the extended jobs" '/^      extended: true$/d'
+  mutate "a host without the #251 lanes" '/^      EXTENDED_LANES: true$/d'
+  mutate "an unsanitized capture upload" '/compat_paired_host.sh capture /d'
 fi
 
 if [[ "$fail" -ne 0 ]]; then

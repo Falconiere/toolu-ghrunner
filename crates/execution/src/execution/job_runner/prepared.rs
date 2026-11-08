@@ -12,8 +12,11 @@ use super::{
   JobBody, JobResult, build_shadow_observer, emit_job_started, run_completed_hook_best_effort,
   run_job_body,
 };
+use crate::docker::container_spec::ContainerSpec;
+use crate::docker::service_spec::ServiceSpec;
 use crate::execution::action_support::emit_log;
 use crate::execution::actions::prefetch::{ActionFetcher, spawn_prefetch};
+use crate::execution::container_job::initialize_containers;
 use crate::execution::context::ExecutionContext;
 use crate::execution::docker_prepare;
 use crate::execution::job_hooks::{JobHookStage, run_job_hook};
@@ -33,6 +36,9 @@ pub(super) struct Inputs<'a> {
   pub(super) workspace: &'a Path,
   /// Reused job HTTP client.
   pub(super) http: &'a reqwest::Client,
+  /// Evaluated job container and service declarations, started after the
+  /// Docker Pull/Build rows as upstream's "Initialize containers".
+  pub(super) containers: (Option<&'a ContainerSpec>, &'a [ServiceSpec]),
 }
 
 pub(super) async fn execute(
@@ -46,6 +52,7 @@ pub(super) async fn execute(
     events,
     workspace,
     http,
+    containers,
   } = inputs;
   let fetcher = fetcher_for(msg, config, ctx, events)?;
   // A failed prefetch never fails the job; step-time resolution can retry.
@@ -76,7 +83,10 @@ pub(super) async fn execute(
   };
   let result = match prepare_before_steps(&body, ctx).await {
     Ok(Some(early)) => Ok(early),
-    Ok(None) => run_job_body(&body, ctx).await,
+    Ok(None) => match start_containers(&body, containers, ctx).await {
+      Ok(()) => run_job_body(&body, ctx).await,
+      Err(error) => Err(error),
+    },
     Err(error) => Err(error),
   };
   // The fetch task may still be extracting into a private staging directory.
@@ -135,6 +145,39 @@ async fn prepare_before_steps(
   .await;
   let Err(error) = result else { return Ok(None) };
   Ok(Some(finish_preparation_error(body, ctx, error).await))
+}
+
+/// Run "Initialize containers". A failed or cancelled start does not end the
+/// job: as upstream, the step loop still runs (conditions skip `success()`
+/// steps), a step that runs fails without its container, then "Stop
+/// containers" and "Complete job".
+async fn start_containers(
+  body: &JobBody<'_>,
+  specs: (Option<&ContainerSpec>, &[ServiceSpec]),
+  ctx: &mut ExecutionContext,
+) -> Result<(), RunnerError> {
+  let started = initialize_containers(
+    specs,
+    body.config,
+    body.workspace,
+    ctx,
+    body.cancel,
+    body.events,
+  )
+  .await?;
+  match started {
+    None | Some(Conclusion::Success) => {},
+    Some(conclusion) => {
+      if conclusion == Conclusion::Cancelled {
+        ctx.record_job_cancelled();
+      } else {
+        ctx.record_step_failure();
+      }
+      ctx.container_setup = Some(conclusion);
+      ctx.job_container_missing = specs.0.is_some();
+    },
+  }
+  Ok(())
 }
 
 async fn finish_preparation_error(

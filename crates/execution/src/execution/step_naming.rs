@@ -36,6 +36,9 @@ pub struct PostStep {
   pub docker_inputs: Option<std::collections::HashMap<String, String>>,
   /// Explicit `post-if`, if any; otherwise the effective default applies.
   pub condition: Option<String>,
+  /// A composite's embedded posts, run last-in first-out inside its own
+  /// "Post" row (upstream `CompositeActionExecutionData.PostSteps`).
+  pub nested: Vec<PostStep>,
 }
 
 impl PostStep {

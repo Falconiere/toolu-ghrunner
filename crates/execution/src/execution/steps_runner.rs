@@ -30,6 +30,7 @@ mod script_support;
 use script_support::{
   build_step_env_and_file_commands, merge_step_outputs, run_and_dispatch_script,
 };
+mod pre_phase;
 mod step_reports;
 use step_reports::{
   StepName, complete_step, record_condition_failure, report_skipped_step, start_step,
@@ -111,7 +112,7 @@ pub async fn run_steps(
     shadow: run.shadow,
     http: run.http,
     fetcher: run.fetcher,
-    first_post_number: post_number(2u32.saturating_add(ctx.docker_setup_count), steps.len()),
+    first_post_number: post_number(2u32.saturating_add(ctx.pre_job_rows), steps.len()),
   };
 
   let mut job_state = JobState {
@@ -121,7 +122,18 @@ pub async fn run_steps(
     depth: DepthTracker::new(),
   };
   name_at_job_start(steps, ctx, events).await;
-  run_main_and_posts(steps, ctx, events, &cancel, &job, &mut job_state).await
+  let pre = pre_phase::run_pre_phase(steps, ctx, events, &job, &mut job_state).await;
+  // Pre rows shift the workflow steps and therefore the first post row.
+  let job = JobCtx {
+    first_post_number: post_number(2u32.saturating_add(ctx.pre_job_rows), steps.len()),
+    ..job
+  };
+  let main = run_main_and_posts(steps, ctx, events, &cancel, &job, &mut job_state).await?;
+  Ok(match (pre, main) {
+    (_, Conclusion::Cancelled) | (Conclusion::Cancelled, _) => Conclusion::Cancelled,
+    (Conclusion::Failure, _) => Conclusion::Failure,
+    _ => main,
+  })
 }
 
 /// Run main steps, then every registered cleanup stage before merging status.
@@ -187,7 +199,7 @@ async fn run_main_steps(
     }
 
     // Step 1 is "Set up job" (reported by setup_step.rs). Workflow steps start at 2.
-    let step_number = post_number(2u32.saturating_add(ctx.docker_setup_count), index);
+    let step_number = post_number(2u32.saturating_add(ctx.pre_job_rows), index);
     let prior = super::action_metadata::ActionMetadata::capture(ctx);
     super::action_metadata::set_name(ctx, step);
     super::action_metadata::clear_repository(ctx);
@@ -268,13 +280,20 @@ async fn execute_started_step(
   let timeout = resolve_timeout(&step.id, step.timeout_in_minutes.as_ref(), ctx, events).await;
   let bounds = StepBounds::nested(job.cancellation.deadline(), timeout, watch.cancel.clone());
   let message = step_timeout_message(&name.name, timeout);
-  let execution = Box::pin(execute_step(step, ctx, events, job, job_state, &bounds));
-  let (outcome, outputs) = match with_timeout_message(message, execution).await {
-    Ok(result) => result,
-    Err(err) => {
-      report_step_error(events, &step.id, &err).await;
-      (Conclusion::Failure, HashMap::new())
-    },
+  let (outcome, outputs) = if ctx.job_container_missing {
+    // Upstream runs the step against the container that never started, and fails.
+    let err = RunnerError::Docker("the job container is not running".to_owned());
+    report_step_error(events, &step.id, &err).await;
+    (Conclusion::Failure, HashMap::new())
+  } else {
+    let execution = Box::pin(execute_step(step, ctx, events, job, job_state, &bounds));
+    match with_timeout_message(message, execution).await {
+      Ok(result) => result,
+      Err(err) => {
+        report_step_error(events, &step.id, &err).await;
+        (Conclusion::Failure, HashMap::new())
+      },
+    }
   };
   let conclusion = record_step_result(step, outcome, ctx, events).await;
   complete_step(step, conclusion, outputs, events).await;

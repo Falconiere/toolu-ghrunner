@@ -42,7 +42,8 @@ fn home() -> TestResult<(TempDir, String)> {
 }
 
 /// The environment every `setup` run here shares: home, peer, stub PATH,
-/// plain output, no SSH / display (headless: no browser), verbose logs.
+/// plain output, verbose logs. Headlessness is never inferred from it: no
+/// DISPLAY means headless only off macOS, so `setup` passes `--headless`.
 fn envs(home: &Path, path_env: &str, api: &str) -> Vec<(&'static str, String)> {
   vec![
     ("HOME", home.display().to_string()),
@@ -65,6 +66,35 @@ fn setup(
   args: &[&str],
   extra: &[(&str, &str)],
 ) -> TestResult<Output> {
+  let explicit = args
+    .iter()
+    .any(|arg| matches!(*arg, "--headless" | "--no-headless" | "--no-relay"));
+  let headless: &[&str] = if explicit { &[] } else { &["--headless"] };
+  let out = setup_session(home, path_env, api, &[args, headless].concat(), extra)?;
+  let opened = home.join("shim-opener").join("opened.log");
+  if !explicit && opened.exists() {
+    return Err(
+      format!(
+        "setup opened a browser: {}",
+        std::fs::read_to_string(&opened)?
+      )
+      .into(),
+    );
+  }
+  Ok(out)
+}
+
+/// [`setup`] without the explicit session flag: the session is guessed, and
+/// any opener it starts is only recorded (`opener_trap`).
+fn setup_session(
+  home: &Path,
+  path_env: &str,
+  api: &str,
+  args: &[&str],
+  extra: &[(&str, &str)],
+) -> TestResult<Output> {
+  let (path_env, _) = crate::setup_cmd_test::opener_trap(home, path_env)?;
+  let path_env = path_env.as_str();
   let mut cmd = Command::new(env!("CARGO_BIN_EXE_toolu-runner"));
   cmd
     .arg("setup")
@@ -515,7 +545,7 @@ async fn pty_source_and_new_code() -> TestResult<()> {
   let (code, output) = crate::setup_cmd_test::run_pty_env(
     home.path(),
     &path_env,
-    &["--no-service"],
+    &["--no-service", "--headless"],
     &[
       ("Where should this runner get jobs from?", b"\x1b[B\r"),
       ("Press enter for a new code", b"\r"),
@@ -546,8 +576,9 @@ async fn pty_source_and_new_code() -> TestResult<()> {
 }
 
 /// AC-14: a desktop session opens the complete verification URI; a
-/// headless (SSH) one never starts a browser.
-#[cfg(target_os = "linux")]
+/// headless (SSH) one never starts a browser. The session is guessed here (no
+/// `--headless`/`--no-headless`), and the opener is the recording trap, so a
+/// desktop guess on macOS is recorded, never a real browser (#251).
 #[tokio::test]
 async fn browser_open() -> TestResult<()> {
   let faults = Faults {
@@ -567,7 +598,7 @@ async fn browser_open() -> TestResult<()> {
     let peer = Peer::start(&[], 600_000, faults.clone(), "true").await?;
     let (home, path_env) = home()?;
     let (bin, _, _) = shim_env(home.path())?;
-    let opened = home.path().join("opened.log");
+    let opened = home.path().join("shim-opener").join("opened.log");
     write_shim(
       &bin,
       "xdg-open",
@@ -576,7 +607,7 @@ async fn browser_open() -> TestResult<()> {
         opened.display()
       ),
     )?;
-    let out = setup(
+    let out = setup_session(
       home.path(),
       &path_env,
       &peer.server.uri(),

@@ -74,6 +74,7 @@ async fn one_build_emits_one_compatibility_identity_on_all_broker_requests() {
       server_url_v2: &base,
       token: "",
       session_id: &session.session_id,
+      status: wire::net::STATUS_ONLINE,
       os: shared::platform::runner_os(),
       architecture: shared::platform::runner_arch(),
       last_message_id,

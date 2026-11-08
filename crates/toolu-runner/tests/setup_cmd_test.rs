@@ -174,6 +174,25 @@ fn home() -> Result<(tempfile::TempDir, String), Box<dyn std::error::Error>> {
   Ok((home, path_env))
 }
 
+/// Recording `open` and `xdg-open` first on PATH: a browser-capable test can
+/// never start a real browser, and `shim-opener/opened.log` shows any attempt
+/// (the production opener resolves its launcher through PATH). Kept under a
+/// `shim`-prefixed dir, which the home snapshots leave out like other shims.
+#[cfg(unix)]
+pub(crate) fn opener_trap(
+  home: &Path,
+  path_env: &str,
+) -> Result<(String, std::path::PathBuf), Box<dyn std::error::Error>> {
+  let bin = home.join("shim-opener");
+  std::fs::create_dir_all(&bin)?;
+  let log = bin.join("opened.log");
+  let body = format!("#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\n", log.display());
+  for name in ["open", "xdg-open"] {
+    crate::install_service_test::write_shim(&bin, name, &body)?;
+  }
+  Ok((format!("{}:{path_env}", bin.display()), log))
+}
+
 /// Run `setup` unattended against `server`.
 fn run_setup(
   home: &Path,
@@ -182,6 +201,8 @@ fn run_setup(
   extra: &[&str],
 ) -> Result<Output, Box<dyn std::error::Error>> {
   let url = server.uri();
+  let (path_env, opened) = opener_trap(home, path_env)?;
+  let path_env = path_env.as_str();
   let output = Command::new(env!("CARGO_BIN_EXE_toolu-runner"))
     .env("HOME", home)
     .env("TOOLU_RUNNER_HOME", home)
@@ -195,6 +216,15 @@ fn run_setup(
     .args(["setup", "--github-url", &url])
     .args(extra)
     .output()?;
+  if opened.exists() {
+    return Err(
+      format!(
+        "setup opened a browser: {}",
+        std::fs::read_to_string(&opened)?
+      )
+      .into(),
+    );
+  }
   Ok(output)
 }
 
@@ -222,7 +252,7 @@ fn snapshot(home: &Path) -> Vec<(String, Vec<u8>)> {
         .unwrap_or(&path)
         .to_string_lossy()
         .into_owned();
-      if rel.split('/').any(|part| part == "_diag") {
+      if rel.split('/').any(|part| part == "_diag") || rel.starts_with("shim-opener") {
         continue;
       }
       if path.is_dir() {
@@ -520,6 +550,8 @@ pub(crate) fn run_pty_env(
 ) -> Result<(Option<i32>, String), Box<dyn std::error::Error>> {
   let answers = home.join("answers.txt");
   std::fs::write(&answers, b"")?;
+  let (path_env, _) = opener_trap(home, path_env)?;
+  let path_env = path_env.as_str();
   let cmdline = format!(
     "{} setup {} < {}",
     env!("CARGO_BIN_EXE_toolu-runner"),

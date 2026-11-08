@@ -126,7 +126,7 @@ async fn run_listener_once(
   let client = match crate::network_setup::lifecycle_client(
     &shared::NetworkConfig::default(),
     &masker,
-    Duration::from_secs(60),
+    crate::run_cmd::BROKER_CLIENT_TIMEOUT,
     &mut crate::network_setup::NetworkMemo::default(),
   ) {
     Ok(c) => c,

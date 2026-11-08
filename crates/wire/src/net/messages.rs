@@ -18,6 +18,10 @@ pub struct PollParams<'a> {
   pub token: &'a str,
   /// The broker session id this poll is scoped to.
   pub session_id: &'a str,
+  /// The runner status the broker sees: [`STATUS_ONLINE`] while idle,
+  /// [`STATUS_BUSY`] while a job runs (upstream `BrokerMessageListener`
+  /// sends the `JobDispatcher.JobStatus` value).
+  pub status: &'a str,
   /// This host's OS label, sent for the broker's `os` query param.
   pub os: &'a str,
   /// This host's architecture label, sent for the broker's `architecture` query param.
@@ -28,17 +32,23 @@ pub struct PollParams<'a> {
   pub last_message_id: i64,
 }
 
+/// Poll status of an idle runner.
+pub const STATUS_ONLINE: &str = "Online";
+/// Poll status of a runner with a job in flight.
+pub const STATUS_BUSY: &str = "Busy";
+
 /// Build the broker long-poll URL, including the `lastMessageId` cursor.
 ///
 /// Extracted so the query contract (notably the redelivery cursor) can be
 /// asserted without issuing a request.
 pub fn build_poll_url(params: &PollParams<'_>) -> String {
   format!(
-    "{}/message?sessionId={}&status=Online\
+    "{}/message?sessionId={}&status={}\
      &runnerVersion={}&os={}&architecture={}\
      &lastMessageId={}&disableUpdate=true",
     params.server_url_v2,
     params.session_id,
+    params.status,
     protocol::runner_version::COMPATIBILITY_VERSION,
     params.os,
     params.architecture,

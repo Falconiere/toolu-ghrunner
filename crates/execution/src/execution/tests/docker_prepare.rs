@@ -138,7 +138,8 @@ async fn nested_remote_composites_discover_deduplicated_pulls_before_builds()
   assert_eq!(plan.pulls, ["alpine:3.21"]);
   assert_eq!(plan.builds.len(), 1);
   let build = plan.builds.first().ok_or("missing build")?;
-  assert_eq!(build.repository, "acme/probe");
+  // Upstream names the row by ActionRepository, `owner/repo/path@ref` (#251).
+  assert_eq!(build.action_repository, "acme/probe/docker@main");
   assert_eq!(build.actions.len(), 1);
   assert_eq!(
     build.actions.first().ok_or("missing action")?.image,
@@ -402,8 +403,12 @@ async fn nested_self_reference_prepares_remote_docker() -> Result<(), Box<dyn st
   .await?;
   assert_eq!(plan.builds.len(), 1, "nested $/docker must prepare early");
   assert_eq!(
-    plan.builds.first().ok_or("build missing")?.repository,
-    "acme/probe"
+    plan
+      .builds
+      .first()
+      .ok_or("build missing")?
+      .action_repository,
+    "acme/probe/docker@main"
   );
 
   let disabled = discover(

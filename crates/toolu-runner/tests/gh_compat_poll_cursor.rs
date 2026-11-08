@@ -7,11 +7,16 @@
 use wire::net::{PollParams, build_poll_url};
 
 fn params(last_message_id: i64) -> PollParams<'static> {
+  params_with(last_message_id, wire::net::STATUS_ONLINE)
+}
+
+fn params_with(last_message_id: i64, status: &'static str) -> PollParams<'static> {
   PollParams {
     client: leaked_client(),
     server_url_v2: "https://broker.example.com/v2",
     token: "tok",
     session_id: "11111111-1111-1111-1111-111111111111",
+    status,
     os: "linux",
     architecture: "x64",
     last_message_id,
@@ -56,4 +61,19 @@ fn poll_url_keeps_required_params() {
   ] {
     assert!(url.contains(expected), "missing `{expected}` in: {url}");
   }
+}
+
+/// #251: upstream reports `Busy` while a job runs; the mid-job poll must not
+/// claim `Online`.
+#[test]
+fn busy_poll_reports_busy_status() {
+  let url = build_poll_url(&params_with(5, wire::net::STATUS_BUSY));
+  assert!(
+    url.contains("status=Busy&"),
+    "mid-job poll must send status=Busy, got: {url}"
+  );
+  assert!(
+    !url.contains("status=Online"),
+    "mid-job poll still claims Online: {url}"
+  );
 }

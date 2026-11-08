@@ -25,7 +25,7 @@ Every matrix row records all seven lanes:
 | `macos` | The same Rust suite on the `ci-macos` job | `gate`: at least one mapped, non-ignored Rust test whose file is not `#![cfg(target_os = "linux")]` |
 | `docker` | A real Linux Docker daemon | `ci-docker` (a mapped test run by `ci.yml`'s Docker step), a recorded explicit run (`doc:` or a `pr:` whose body records it), or a live run (`run:`) |
 | `github-com` | A real job acquired from GitHub.com and executed by toolu | `run:<actions run URL>` or `pr:<PR URL>` whose body records the observation |
-| `reference` | The same workflow/action revisions compared against the official runner | `run:` (paired run) or `report:docs/compat-reference-103.json` |
+| `reference` | The same workflow/action revisions compared against the official runner | `report:<path>#<assertion>` for a #251-style report (see below); `run:` for a paired run whose report carries no assertions; the bare `report:docs/compat-reference-103.json` for the recorded #103 report only |
 | `ghes` | GitHub Enterprise Server | none recorded; no GHES instance has been available; out of scope (excluded) |
 | `ui-service` | A GitHub-owned UI or backend result: annotations, summaries, the cache/artifact/OIDC backends, recorded job/step results | `run:` / `pr:` |
 
@@ -49,6 +49,17 @@ The checker enforces the mechanical parts:
   difference for it, or that report's run. A fresh report can back it while the
   old one stays unedited.
 - The `reference` lane takes only `run:` and `report:` evidence.
+- A report that carries named assertions (a #251-style report) backs a row only
+  as `report:<path>#<assertion>`, and the checker recomputes the assertion from
+  the report's stored data, never from a stored `passed` flag. The assertion
+  must exist, list that row, pass, and not be `toolu_only` (a `toolu_only`
+  assertion measures toolu alone and is never reference evidence). Citing such
+  a report without `#<assertion>`, or (once the matrix lists the report) citing
+  its paired run's URL instead, is rejected.
+- Only the recorded #103 report, at `docs/compat-reference-103.json`, may be
+  cited without an assertion: it carries none, and the checker recognises it by
+  run id and issue. A report with no assertions at any other path cannot back a
+  row, and neither can a report path with a `#<assertion>` it does not have.
 - A row whose issue is not in the matrix `issues` is rejected, except epic `67/`
   rows.
 - Each issue has exactly one row per AC/scenario id.
@@ -166,7 +177,11 @@ normalizing only the lane token in job names. It compares:
   `true` differs from `1` and a missing key from `null`;
 - exact payload artifact bytes, read back through the GitHub API (this checks the upload; the in-job `download-artifact` step is compared only through the step lists);
 - each variant's expected outcome;
-- leftover probe containers on each Linux VM, from the listing its host job uploads.
+- leftover probe containers on each Linux VM, from the listing its host job uploads;
+- (#251) each VM's host observations (`compat-251-<platform>-host`, below), the
+  lane's disposable value counted in every probe job log and every check-run
+  annotation of that lane, the toolu-only lifecycle jobs, and the named
+  assertions that matrix rows cite.
 
 A duplicate job, or missing or empty `run`, `provenance` or `results`, is an
 error. Every report must cover Linux X64, Linux ARM64 and macOS ARM64; macOS has
@@ -178,14 +193,61 @@ captures. It is the one report allowed to name no platform, pinned by run id.
 The recorded run came from a temporary branch `push` trigger, removed before
 merge.
 
+### Extended paired probe (#251)
+
+The comparator and checker above are tooling; this describes what they read.
+Everything below is current behavior of the committed scripts and workflow, not
+a recorded result.
+
+- **Extended jobs.** The `probe` variant's `extended` input adds jobs beyond the
+  surface probes (`leaks`, `composite`, `docker-pre`, `failure`, `orphans`,
+  `timeout`, `cancel`, `cancel-container`, `long`, `pool-a`, `pool-b`);
+  `docker`-style and container jobs are Linux-only. `EXPECTED_JOBS` in
+  `reference_compare.py` lists the set per OS, and a report missing one fails.
+- **`-pool` runners.** With `EXTENDED_LANES=true`, `compat_paired_host.sh` starts
+  two more official runner directories and two more toolu registrations per VM,
+  sharing one `--work` so the stable-workspace lease must keep concurrent jobs
+  apart; they serve `<lane>-pool` for `pool-a`/`pool-b`.
+- **toolu-only lifecycle jobs.** `fresh-1`/`fresh-2` run on a
+  `[workspace] mode = "fresh"` registration and must get distinct empty
+  workspaces; `ephemeral` runs one job on an ephemeral registration. The host
+  then checks that the runner exited 0, deleted its state and is gone from
+  GitHub. The official runner has no fresh mode, so these are `toolu_only` and
+  never reference evidence (`X-6-toolu`).
+- **Host observations.** Each VM's `compat_paired_host.sh report` writes
+  `host-251.json` through `compat_paired_host_report.py`: counts and booleans
+  only, no log line, token or path content. It holds the runner provenance, how
+  many files in each lane's own logs and `_diag` contain that lane's disposable
+  value, the most lock renewals one job recorded, toolu `poll failed` WARNs
+  against the official `Catch exception during get next message` traces, and the
+  ephemeral state.
+- **Leak scan.** The `leaks` job makes a per-lane disposable value
+  (`sha256("compat-251-<run>-<platform>-<lane>-probe")[:32]`). `reference_compare`
+  counts it in every job log and every check-run annotation of the lane; the
+  annotation list is read with `gh api --paginate`, so a value on a later page
+  counts, and a failed page leaves the job unread (never a pass). Only counts are
+  stored.
+- **Sanitized stack capture.** toolu is built with the `capture` feature; only the
+  sanitized `stack` message leaves the Linux-X64 VM
+  (`compat_paired_host.sh capture`).
+- **Assertions.** `compat_assertions.py` defines one assertion per `67/X-*` and
+  `103/R-*` row it can back, each naming the paired jobs it needs (present on both
+  lanes of every platform that runs them, equal in conclusion and ordered steps,
+  and not merely acknowledged) plus its own predicates (equal observations, no
+  leftover containers or payload errors, zero leaks, at least two renewals, zero
+  toolu poll failures, runner names, lifecycle). A malformed section or a missing
+  platform scope fails every assertion.
+
 ### Paired workflow
 
 [`compat-paired.yml`](../.github/workflows/compat-paired.yml) is the way to run a
 new comparison. It is dispatch-only. #237 dispatched it twice (runs
 [42388230585](https://github.com/Falconiere/toolu-ghrunner/actions/runs/42388230585)
 and [42389172867](https://github.com/Falconiere/toolu-ghrunner/actions/runs/42389172867)):
-both runners served their probes side by side on all three hosted VMs. No
-toolu/official comparison report has been recorded from it yet; that is #251.
+both runners served their probes side by side on all three hosted VMs. #251
+dispatched it a third time (run 42424784091) and recorded the comparison as
+[compat-reference-230.json](compat-reference-230.json); see
+[Paired run 42424784091 (#251)](#paired-run-42424784091-251).
 
 Each of `ubuntu-latest`, `ubuntu-24.04-arm` and `macos-15` verifies the official
 v2.338.2 archive digest, builds toolu, registers both runners by JIT under
@@ -209,9 +271,9 @@ stays for the record; the comparator no longer reads runs in its job layout.
 
 **Not covered:**
 
-- macOS and ARM64 pairs on the reference lane: the recorded report has no host
-  for them. `compat-paired.yml` ran them, but no comparison report is recorded
-  yet (#251), so reference cells stay `unverified`.
+- macOS and ARM64 pairs on the reference lane for the #103 report: it has no host
+  for them. Run 42424784091 covers all three platforms, but only through the
+  named assertions listed below; a row no assertion lists stays `unverified`.
 - GHES: out of scope and a matrix exclusion. The V1 code exists but has never run
   on a real server, and `live-ghes.yml` cannot test it (its harness registers at
   github.com; see [known bugs](known-bugs.md#verification-limits)).
@@ -259,8 +321,69 @@ Every scope passed in run 42389172867, on toolu and official alike. Run
 that a root-owned payload in the shared workspace blocked a later download on
 both runners; the probe now writes that payload under the container's `/tmp`.
 The toolu lanes also logged `message poll returned status 404` warnings while a
-job ran, which the official lane did not; no job result changed (#251 compares
-the lanes).
+job ran, which the official lane did not; no job result changed. Run
+42403405937 diagnosed them: toolu polled `status=Online` while a job ran, where
+upstream sends `Busy`. That is fixed, and run 42424784091 recorded no poll failure
+on any lane (see [known bugs](known-bugs.md#observed-differences-from-the-official-runner-251)).
+
+### Paired run 42424784091 (#251)
+
+[Run 42424784091](https://github.com/Falconiere/toolu-ghrunner/actions/runs/42424784091)
+ran `compat-paired.yml` at head `0d23d0e` against the official v2.338.2 runner on
+`ubuntu-latest` (Linux-X64, image `ubuntu26`, x86_64, Docker 29.4.2),
+`ubuntu-24.04-arm` (Linux-ARM64, `ubuntu24-arm64`, aarch64, Docker 28.0.4) and
+`macos-15` (macOS-ARM64, arm64, no Docker). The comparator wrote
+[compat-reference-230.json](compat-reference-230.json), which holds the per-platform
+provenance, archive and toolu binary hashes. The run concludes `failure` because
+`negative` is meant to fail. Everything below is read from that report; it holds
+for this run, these platforms and versions, and nothing wider.
+
+- **Pairing.** 110 paired jobs, all equal in conclusion and ordered step list; 0
+  unpaired jobs, 0 payload errors, 0 leftover containers, 0 expectation failures,
+  and no acknowledged difference. The `results` observations are equal in all six
+  variant/platform scopes.
+- **Leaks.** A registered disposable value appears in no job log and no check-run
+  annotation on any lane (21, 29 and 29 jobs scanned per lane on macOS-ARM64,
+  Linux-X64 and Linux-ARM64, none unreadable), nor in any VM log or `_diag` file
+  (`disposable_hits` 0).
+- **Host observations.** `poll_failures` is 0 on every lane. `renewals_max` on the
+  150 s `long` job is 2 on toolu and 3 on the official runner on all three
+  platforms; both meet the at-least-2 check, and the first-renewal timing
+  difference is recorded in [known bugs](known-bugs.md#observed-differences-from-the-official-runner-251).
+- **toolu-only lifecycle.** `fresh-1`, `fresh-2` and `ephemeral` succeeded on all
+  platforms; the ephemeral run exited 0 and removed its local state and its GitHub
+  runner. These are `X-6-toolu` and never reference evidence.
+- **Assertions.** All pass: `X-1` to `X-6` map to rows `67/X-1` to `67/X-6`;
+  `R-cache`, `R-artifacts`, `R-oidc`, `R-command-files`, `R-masking`, `R-acquire`,
+  `R-complete`, `R-renew`, `R-cancellation` and `R-temp-cleanup` map to the
+  `103/R-*` rows. A passing assertion backs a row's `reference` cell only when it
+  covers what the criterion itself names. The matrix cites
+  `report:docs/compat-reference-230.json#<assertion>` for `67/X-1`, `67/X-2`,
+  `67/X-3`, `103/R-artifacts`, `103/R-command-files`, `103/R-acquire` and
+  `103/R-complete`; `103/R-oidc` keeps its recorded #103 citation. These rows stay `unverified` with the reason recorded in
+  each cell: `67/X-4` (criterion also names UI results and container cleanup),
+  `67/X-5` (proxy diagnostics), `67/X-6` (GC and run/boot/daemon entry paths; the
+  toolu-only `X-6-toolu` lifecycle jobs are never reference evidence),
+  `103/R-cache` (accelerated local CAS has no official counterpart),
+  `103/R-masking` (0 leak hits in logs, annotations and `_diag`, but per-upload-sink
+  and multiline masks were not each observed live), `103/R-cancellation` (the cancel
+  jobs ended cancelled on both lanes, but cancel during retry backoff was not
+  observed live), `103/R-renew` (mid-job outage handling was not injected) and
+  `103/R-temp-cleanup` (temp contents are not observable through GitHub). GHES, `boot`, `daemon` and
+  real-UI-only claims stay `unverified` throughout. `103/S3`, `103/S4`, `75/75-S1`
+  and the other rows no assertion lists stay `unverified` too.
+- **Captured message.** The sanitized toolu `stack` message is
+  `crates/execution/tests/compat_251_stack_message.json`; its hash is under
+  `captures` in the report and `compat_251_capture_test.rs` decodes it in the
+  default gate.
+- **Verification.** `python3 scripts/test/reference_compare.py --verify
+  docs/compat-reference-230.json` re-validates the report offline, as it does for
+  the #103 report; CI runs `--verify` on both reports, and the matrix checker
+  recomputes the 230 assertions on every `--check`.
+
+Remaining differences (renewal timing, error text after a failed container
+start, an official-lane mask race) are in
+[known bugs](known-bugs.md#observed-differences-from-the-official-runner-251).
 
 ## Recorded differences
 
@@ -303,9 +426,11 @@ difference fails `--verify`, so a fix forces the record to be updated.
 
 The causes above describe the runner at the time of that run. #253 has since
 mapped the cache variables per step type, and #255 reports Docker `Pull` setup
-steps. The recorded report predates both, so the named rows' `reference` lane
-stays `unverified` until a new paired run compares them, and the matrix does not
-yet claim cache parity or identical Docker step reporting.
+steps. The recorded report predates both. In run 42424784091 no paired job
+differs, but the rows this section names (`103/S3`, `103/S4`, `75/75-S1`,
+`103/R-cache`) keep their `reference` lane `unverified`: no assertion lists
+`103/S3`, `103/S4` or `75/75-S1`, and `103/R-cache` also names the accelerated
+mode. That is a limit of what the evidence covers, not an observed difference.
 
 ## Approved scope exclusions
 

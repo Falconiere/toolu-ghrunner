@@ -2,18 +2,22 @@
 """reference_compare.verify against the recorded #103 paired run and mutations of it."""
 
 import copy
+import http.server
 import importlib
 import json
 import os
+import shutil
 import stat
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 reference_compare = importlib.import_module("reference_compare")
+compat_assertions = importlib.import_module("compat_assertions")
 
 ROOT = Path(__file__).resolve().parents[2]
 REPORT = json.loads((ROOT / "docs/compat-reference-103.json").read_text())
@@ -23,25 +27,53 @@ def job(report, variant, name):
     return next(r for r in report["jobs"] if r["variant"] == variant and r["job"] == name)
 
 
+def expected_view(variant, name, recorded):
+    """A lane view meeting `name`'s expectation; recorded #103 views where they already do."""
+    conclusion, failed = reference_compare.expected(variant, name)
+    if name in reference_compare.LEGACY_JOBS or (conclusion == "success" and not failed):
+        return recorded
+    steps = [["Set up job", "success"]] + [[step, "failure"] for step in failed]
+    if conclusion == "skipped":
+        steps = []
+    return {**recorded, "conclusion": conclusion or "failure", "steps": steps}
+
+
 def paired_report():
     """The recorded official lane cloned onto both lanes of every platform: a clean report."""
     report = copy.deepcopy(REPORT)
-    report.update(issue=230, acknowledged=[], jobs=[], results={})
+    report.update(issue=230, acknowledged=[], jobs=[], results={}, host={}, leaks={}, toolu_only={})
     report["run"]["id"] = 1
     for os_name, arch in reference_compare.EXPECTED_PLATFORMS:
         for name in reference_compare.EXPECTED_JOBS[os_name]:
             # The recorded run predates the #237 jobs: they borrow the services row.
             for row in REPORT["jobs"]:
                 if row["job"] == (name if name in reference_compare.LEGACY_JOBS else "services"):
-                    official = row["official"]
+                    official = expected_view(row["variant"], name, row["official"])
                     report["jobs"].append({**copy.deepcopy(row), "job": name, "os": os_name,
                                            "arch": arch, "toolu": copy.deepcopy(official),
+                                           "official": copy.deepcopy(official),
                                            "equal": True, "diff": []})
         for variant in reference_compare.VARIANTS:
             observed = REPORT["results"][variant]["official"]
             report["results"][reference_compare.scope(variant, os_name, arch)] = {
                 "equal": True, "toolu": copy.deepcopy(observed), "official": copy.deepcopy(observed)}
+        platform = f"{os_name}-{arch}"
+        report["host"][platform] = clean_host()
+        report["leaks"][platform] = {lane: {"logs": 0, "annotations": 0, "unreadable": 0}
+                                     for lane in reference_compare.LANES}
+        report["toolu_only"][platform] = {job: "success" for job in ("fresh-1", "fresh-2", "ephemeral")}
+    for platform, lanes in report["leaks"].items():
+        for lane, scan in lanes.items():
+            scan["jobs_scanned"] = compat_assertions.eligible_jobs(report, platform, lane)
+    report["assertions"] = reference_compare.assertions(report)
     return report
+
+
+def clean_host():
+    """One VM's host-251.json with nothing wrong in it."""
+    lane = {"disposable_hits": 0, "renewals_max": 2, "poll_failures": 0}
+    return {"provenance": {}, "lanes": {"toolu": dict(lane), "official": dict(lane)},
+            "toolu_only": {"ephemeral": {"exit_code": 0, "state_removed": True, "runner_removed": True}}}
 
 
 def platform_row(report, variant, name, os_name, arch):
@@ -53,6 +85,15 @@ def api_job(name, conclusion="success", steps=(("Run", "success"),)):
     """One job in the shape of GET /repos/{repo}/actions/runs/{id}/jobs."""
     return {"name": name, "conclusion": conclusion, "html_url": f"https://example.invalid/{name}",
             "runner_name": "r", "steps": [{"name": n, "conclusion": c} for n, c in steps]}
+
+
+class FetchFailureCategoryTest(unittest.TestCase):
+    def test_only_a_bounded_label_survives_a_failed_read(self):
+        stderr = ("gh: Forbidden (HTTP 403)\nhttps://results.example/logs?sig=SECRETSIG&se=1 "
+                  "token ghs_EXAMPLEtokenEXAMPLEtoken")
+        label = reference_compare.failure_category(stderr)
+        self.assertEqual(label, "http-403")
+        self.assertEqual(reference_compare.failure_category("connection reset by peer"), "error")
 
 
 class VerifyRecordedReportTest(unittest.TestCase):
@@ -349,6 +390,74 @@ class LeftoverContainersTest(unittest.TestCase):
                 with self.assertRaises(SystemExit) as stopped:
                     reference_compare.leftover_containers(1, tmp)
         self.assertIn("no valid artifacts", str(stopped.exception.code))
+
+
+class AnnotationPaginationTest(unittest.TestCase):
+    """leak_counts through the real installed `gh` against a loopback recorder.
+    `GH_HOST=github.localhost` makes gh speak plain HTTP to `api.github.localhost`,
+    which `HTTP_PROXY` routes to the recorder; the token is synthetic."""
+
+    JOB = {"id": 9, "name": "probe-Linux-X64-toolu / leaks", "conclusion": "success",
+           "check_run_url": "https://api.github.com/repos/o/r/check-runs/7"}
+    NOTES = "/repos/o/r/check-runs/7/annotations?per_page=100"
+
+    def serve(self, page2_status):
+        value = reference_compare.disposable(1, "Linux-X64", "toolu")
+        requested = []
+        notes = self.NOTES
+
+        class Recorder(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                path = self.path.split("api.github.localhost", 1)[-1]
+                requested.append(path)
+                status, headers, body = 404, {}, b"{}"
+                if path == f"/repos/{reference_compare.REPO}/actions/jobs/9/logs":
+                    status, body = 200, b"a clean log line\n"
+                elif path == notes:
+                    status, body = 200, b'[{"message": "clean"}]'
+                    headers["Link"] = f'<http://api.github.localhost{notes}&page=2>; rel="next"'
+                elif path == notes + "&page=2":
+                    status = page2_status
+                    body = json.dumps([{"message": value}]).encode() if status == 200 else b'{"message": "x"}'
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                for key, val in headers.items():
+                    self.send_header(key, val)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Recorder)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return server.server_address[1], requested
+
+    def counts(self, page2_status):
+        gh = shutil.which("gh")
+        self.assertIsNotNone(gh, "prerequisite missing: the real `gh` CLI is not on PATH")
+        port, requested = self.serve(page2_status)
+        with tempfile.TemporaryDirectory() as home:
+            env = {"PATH": f"{Path(gh).parent}:/usr/bin:/bin", "HOME": home, "GH_CONFIG_DIR": home,
+                   "GH_HOST": "github.localhost", "GH_ENTERPRISE_TOKEN": "synthetic-not-a-token",
+                   "GH_NO_UPDATE_NOTIFIER": "1", "HTTP_PROXY": f"http://127.0.0.1:{port}"}
+            with mock.patch.dict(os.environ, env, clear=True):
+                found = reference_compare.leak_counts(1, [self.JOB])
+        return found["Linux-X64"]["toolu"], requested
+
+    def test_a_value_only_on_the_second_page_is_counted(self):
+        counts, requested = self.counts(200)
+        self.assertIn(self.NOTES + "&page=2", requested)
+        self.assertEqual((counts["annotations"], counts["jobs_scanned"], counts["unreadable"]), (1, 1, 0))
+
+    def test_a_failed_second_page_leaves_the_job_unread(self):
+        counts, requested = self.counts(500)
+        self.assertIn(self.NOTES + "&page=2", requested)
+        self.assertEqual((counts["jobs_scanned"], counts["unreadable"]), (0, 1))
+        self.assertEqual(counts["reasons"], {"http-500": 1})
 
 
 class CommandLineTest(unittest.TestCase):
