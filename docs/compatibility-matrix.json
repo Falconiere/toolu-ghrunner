@@ -16831,7 +16831,7 @@
         "crates/toolu-runner/tests/fixtures/prepost_action",
         "crates/toolu-runner/tests/fixtures/local_actions"
       ],
-      "expected": "A local Node pre/main/post action reports distinct IDs, the main output survives the post, post receives private STATE_k, and a skipped post reports skipped without rewriting the main result.",
+      "expected": "A `./` Node pre/main/post action without `repositoryType: self` (so its `pre` runs) reports distinct IDs, the main output survives the post, post receives private STATE_k, and a skipped post reports skipped without rewriting the main result.",
       "production_path": "execution::execution::steps_runner::record_step_result (ActionStep::expression_name -> set_step_outcome/conclusion/outputs) with wire ids kept for events; listener step reporting",
       "tests": [
         [
@@ -17102,7 +17102,7 @@
         "crates/toolu-runner/tests/fixtures/prepost_action",
         "crates/toolu-runner/tests/fixtures/local_actions"
       ],
-      "expected": "A failing Bash step with continue-on-error leaves outcome=failure, conclusion=success; generated __run names stay out of steps; Node pre/main/post keep distinct IDs and the main output; repeated nested composites expose only declared outputs.",
+      "expected": "A failing Bash step with continue-on-error leaves outcome=failure, conclusion=success; generated __run names stay out of steps; a `./` Node pre/main/post action without `repositoryType: self` (so its `pre` runs) keeps distinct IDs and the main output; repeated nested composites expose only declared outputs.",
       "production_path": "execution::execution::steps_runner::record_step_result (ActionStep::expression_name -> set_step_outcome/conclusion/outputs) with wire ids kept for events; listener step reporting",
       "tests": [
         [

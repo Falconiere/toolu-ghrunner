@@ -383,9 +383,11 @@ async fn a_hard_pre_error_is_logged_on_its_own_row() -> TestResult<()> {
   Ok(())
 }
 
-/// #251 review cr-0c03427611c3940e: a `pre` cancelled while it runs, or before
-/// it starts, closes its row as cancelled (not failed), and the job ends
-/// cancelled. Real cancellation coverage; it also passed before the fix.
+/// #251 review cr-0c03427611c3940e: a `pre` cancelled while it runs closes its
+/// row as cancelled (not failed), and the job ends cancelled. With a zero-delay
+/// cancellation the row never reports Failure (it may be absent or Success) and
+/// the job still ends cancelled. Real cancellation coverage; it also passed
+/// before the fix.
 #[tokio::test]
 async fn a_cancelled_pre_stays_cancelled() -> TestResult<()> {
   let (conclusion, events) = run_pre_phase_case(

@@ -94,8 +94,6 @@ class FetchFailureCategoryTest(unittest.TestCase):
         label = reference_compare.failure_category(stderr)
         self.assertEqual(label, "http-403")
         self.assertEqual(reference_compare.failure_category("connection reset by peer"), "error")
-        for secret in ("SECRETSIG", "ghs_", "https://"):
-            self.assertNotIn(secret, label)
 
 
 class VerifyRecordedReportTest(unittest.TestCase):

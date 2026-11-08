@@ -541,9 +541,11 @@ ends failed or cancelled. `container_job::stop_containers` removes it as the
 "Stop containers" row, the last row before "Complete job". Shell, Node and composite execution use attached Docker API exec;
 workflow environment never enters a host Docker client process. Explicit mount
 mappings translate runner path variables and expression paths while preserving
-opaque workflow values. `container_job::finish_container` remains the cleanup for
-the error path and removes the container and network on both body success and
-error before job completion. On exec
+opaque workflow values. `stop_containers` takes the job container and services from the
+context (`ctx.take_containers()`) and removes them;
+`container_job::finish_container`, called from `job_runner::entry` after every
+body outcome and before `JobCompleted`, then removes only what "Stop containers"
+did not, which is what remains after an early error or a cancellation. On exec
 cancellation, remote children can remain until that force-removal boundary.
 Only forwarder service URLs are supported; local loopback cache URLs are rejected.
 
