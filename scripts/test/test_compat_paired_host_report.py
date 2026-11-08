@@ -61,10 +61,13 @@ class HostReportTest(unittest.TestCase):
     def test_a_leak_is_counted_only_for_its_own_lane(self):
         (self.home / ".toolu-runner/_diag/runner.log").write_text(f"x {self.toolu_value} y\n")
         (self.temp / "toolu-home/_diag/jobs/1-job.jsonl").write_text(self.toolu_value)
+        (self.temp / "toolu.log").write_text(f"{self.official_value}\n")
         (self.official / "_diag/Worker_1.log").write_text(f"{self.toolu_value}\n")
+        (self.official / "_diag/Runner_1.log").write_text(f"x {self.official_value} y\n")
+        (self.temp / "official.log").write_text(self.official_value)
         lanes = self.run_report()["lanes"]
         self.assertEqual(lanes["toolu"]["disposable_hits"], 2)
-        self.assertEqual(lanes["official"]["disposable_hits"], 0)
+        self.assertEqual(lanes["official"]["disposable_hits"], 2)
 
     def test_renewals_are_the_most_any_one_job_recorded(self):
         jobs = self.temp / "toolu-home/_diag/jobs"
