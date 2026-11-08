@@ -6,8 +6,9 @@
 
 | File | Purpose |
 | --- | --- |
-| `action_metadata.rs` | Issue 68 captured-job replay with real shell/Node probes: action identity (wire names, nested stages, composite posts, remote dispatch, repeated refs) is exported and restored. |
+| `action_metadata.rs` | Issue 68 captured-job replay with real shell/Node probes: action identity (wire names, nested stages, composite posts, remote dispatch, repeated refs) is exported and restored; local `self` actions run no `pre`, remote ones still do. |
 | `action_metadata_docker.rs` | Real Linux Docker metadata probes on the captured container-job skeleton, included by the opt-in `docker_action_linux_test` integration target. |
+| `pre_phase_guard.rs` | #251 no-host-fallback guard: when the job's declared container never started, a repository action's `Pre` row and its post row fail before dispatch and none of its pre/main/post runs on the host (real Node, marker file). |
 | `job_environment.rs` | Issue 69 captured-envelope replay for environment layers, step precedence, file commands, and job isolation. |
 | `job_environment_actions.rs` | Issue 69 real Node stages and repeated nested composite environment probes. |
 | `step_attrs.rs` | Evaluates captured timeout / continue-on-error tokens and pins the reference runner's diagnostics. |
@@ -26,5 +27,5 @@
 | `problem_matcher_tsc.json`, `problem_matcher_eslint.json` | Pinned setup-node matcher definitions. |
 | `problem_matcher_tsc.txt`, `problem_matcher_eslint.txt` | TypeScript 5.9.3 and ESLint 8.57.1 output captures. |
 | `problem_matcher_provenance.md` | Fixture source revisions, capture commands and normalization. |
-| `step_summary.rs` | Issue 83 captured-job replay with real shell/Node/composite summaries, masking, limits and cancellation. |
+| `step_summary.rs` | Issue 83 captured-job replay with real shell/Node/composite summaries (local actions run no `pre`, so a Node action contributes main and post documents), masking, limits and cancellation. |
 | `file_commands.rs` | Issue #96 upstream `EnvFileKeyValuePairs` grammar over real Bash `printf` bodies: CR kept, heredoc boundaries, upstream error messages, first-error stop, BOM/lossy/missing-file reading. |

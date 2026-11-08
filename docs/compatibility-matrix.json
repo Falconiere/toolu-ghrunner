@@ -11,7 +11,8 @@
     "note": "'gate' evidence = the ubuntu `cargo test --workspace` step and the ci-macos job of this CI run (and of every later CI run of the branch); 'ci-docker' = its explicit Docker step"
   },
   "reports": [
-    "docs/compat-reference-103.json"
+    "docs/compat-reference-103.json",
+    "docs/compat-reference-230.json"
   ],
   "exclusions": [
     "Windows (cmd/powershell, zipball actions)",
@@ -630,7 +631,7 @@
     },
     "103": {
       "title": "Add an evidence-backed compatibility acceptance matrix and reference-runner lane",
-      "state": "open",
+      "state": "closed",
       "ids": [
         "AC-1",
         "AC-2",
@@ -647,8 +648,8 @@
         "S6",
         "S7"
       ],
-      "pr": null,
-      "coverage": null
+      "pr": "https://github.com/Falconiere/toolu-ghrunner/pull/172",
+      "coverage": "docs/test-coverage.md#compatibility-matrix-and-reference-lane-103"
     }
   },
   "rows": [
@@ -3114,7 +3115,7 @@
         ".github/actions/container-node-probe",
         ".github/actions/container-composite-probe"
       ],
-      "expected": "Shell, Node pre/main/post and composite steps run inside the container (cwd /github/workspace, HOME /github/home, shared hostname, Ubuntu os-release); GITHUB_OUTPUT/ENV/PATH/STATE files written through translated paths take effect; the captured replay executes the original shell, pinned Node probe, local composite and verify steps.",
+      "expected": "Shell, Node pre/main/post and composite steps run inside the container (cwd /github/workspace, HOME /github/home, shared hostname, Ubuntu os-release); GITHUB_OUTPUT/ENV/PATH/STATE files written through translated paths take effect; the captured replay executes the original shell, pinned Node probe, local composite and verify steps. In the local Linux test the Node probe is the pinned remote action served from a loopback API (a local ./ action runs no pre, #251), so pre, main and post all run in the container.",
       "production_path": "execution::docker::container_exec, execution::container_job, execution::node_stage",
       "tests": [
         [
@@ -3437,7 +3438,7 @@
         ".github/actions/container-node-probe",
         ".github/actions/container-composite-probe"
       ],
-      "expected": "Locally: Ubuntu os-release, shared hostname across shell/Node/composite/post, cwd /github/workspace and exact marker bytes. Live paired run: container hostname from options, six stage/command markers (shell, Node pre/main/post, composite, command files).",
+      "expected": "Locally: Ubuntu os-release, shared hostname across shell/Node/composite/post (the Node probe is the pinned remote action, served from a loopback API, so its pre runs too), cwd /github/workspace and exact marker bytes. Live paired run: container hostname from options, six stage/command markers (shell, Node pre/main/post, composite, command files).",
       "production_path": "execution::container_job, execution::docker::container_exec",
       "tests": [
         [
@@ -4440,7 +4441,7 @@
         },
         "reference": {
           "status": "unverified",
-          "reason": "the #103 paired run (docs/compat-reference-103.json, run 38301583727) reports an acknowledged difference: the official runner shows an extra 'Pull <image>' setup step that toolu does not (docker-pull-step-reporting); outputs and markers matched but the lane is not a pass"
+          "reason": "the #103 paired run (docs/compat-reference-103.json, run 38301583727) reports an acknowledged difference: the official runner shows an extra 'Pull <image>' setup step that toolu does not (docker-pull-step-reporting); outputs and markers matched but the lane is not a pass Run 42424784091 (docs/compat-reference-230.json) shows no step-list difference on any of its 110 paired jobs, but no named assertion lists this row, so its reference cell stays unverified."
         },
         "ghes": {
           "status": "unverified",
@@ -4604,7 +4605,7 @@
         },
         "reference": {
           "status": "unverified",
-          "reason": "the #103 paired run (docs/compat-reference-103.json, run 38301583727) reports an acknowledged difference: the official runner shows an extra 'Pull <image>' setup step that toolu does not (docker-pull-step-reporting); outputs and markers matched but the lane is not a pass"
+          "reason": "the #103 paired run (docs/compat-reference-103.json, run 38301583727) reports an acknowledged difference: the official runner shows an extra 'Pull <image>' setup step that toolu does not (docker-pull-step-reporting); outputs and markers matched but the lane is not a pass Run 42424784091 (docs/compat-reference-230.json) shows no step-list difference on any of its 110 paired jobs, but no named assertion lists this row, so its reference cell stays unverified."
         },
         "ghes": {
           "status": "unverified",
@@ -4784,7 +4785,7 @@
         },
         "reference": {
           "status": "unverified",
-          "reason": "the #103 paired run (docs/compat-reference-103.json, run 38301583727) reports an acknowledged difference: the official runner shows an extra 'Pull <image>' setup step that toolu does not (docker-pull-step-reporting); outputs and markers matched but the lane is not a pass"
+          "reason": "the #103 paired run (docs/compat-reference-103.json, run 38301583727) reports an acknowledged difference: the official runner shows an extra 'Pull <image>' setup step that toolu does not (docker-pull-step-reporting); outputs and markers matched but the lane is not a pass Run 42424784091 (docs/compat-reference-230.json) shows no step-list difference on any of its 110 paired jobs, but no named assertion lists this row, so its reference cell stays unverified."
         },
         "ghes": {
           "status": "unverified",
@@ -9324,7 +9325,7 @@
         ".github/actions/step-summary-83-composite/action.yml",
         "docs/step-summaries.md"
       ],
-      "expected": "Node pre/main/post and composite steps keep distinct documents; a failed upload still drains later queued documents; RPC/blob failures are safe (no body or signed URL in diagnostics, 3 blob retries). Docker container actions are not collected; successful upload and UI are not exercised.",
+      "expected": "Node main/post (a local action runs no pre, as upstream, #251) and composite steps keep distinct documents; a failed upload still drains later queued documents; RPC/blob failures are safe (no body or signed URL in diagnostics, 3 blob retries). Docker container actions are not collected; successful upload and UI are not exercised.",
       "production_path": "execution::step_summary + file_commands (collect/mask/limit), listener::step_summary (serial upload queue), wire::net::step_summary (Results Service RPCs)",
       "tests": [
         [
@@ -10253,7 +10254,7 @@
         "crates/execution/tests/incoming_contexts_matrix_0.json",
         ".github/actions/action-metadata-probe"
       ],
-      "expected": "Distinct pre/main/post markers, two nested child calls per composite and two composite invocations; posts inherit their originating top-level name in LIFO order; parent output restored after local children and after a missing pre script.",
+      "expected": "Distinct main/child markers for nested local actions (they run no pre, as upstream, #251; remote actions still run pre), two nested child calls per composite and two composite invocations; posts inherit their originating top-level name in LIFO order; parent output restored after local children and after a missing pre script.",
       "production_path": "execution::action_metadata + action_exec (GITHUB_ACTION / _REPOSITORY / _REF scoping), execution::context_build / step_process_env (RUNNER_ENVIRONMENT, runner.environment)",
       "tests": [
         [
@@ -19216,7 +19217,7 @@
         ".github/workflows/composite-semantics-102.yml",
         "crates/toolu-runner/tests/fixtures/local_actions/composite-102-expressions/action.yml"
       ],
-      "expected": "GITHUB_ENV/GITHUB_PATH reach later inner and outer steps, LOCAL_ONLY does not, only declared output result=42 escapes; nested Node posts run STATE_POST=two then one under distinct IDs; observed-start cancel kills Bash and descendant sleep, runs always() cleanup, no late marker; short parent deadline returns Failure; blocked resolution obeys deadline/cancellation. Composite cwd belongs to #81.",
+      "expected": "GITHUB_ENV/GITHUB_PATH reach later inner and outer steps, LOCAL_ONLY does not, only declared output result=42 escapes; nested Node posts run STATE_POST=two then one inside the composite's one shared Post row (#251); observed-start cancel kills Bash and descendant sleep, runs always() cleanup, no late marker; short parent deadline returns Failure; blocked resolution obeys deadline/cancellation. Composite cwd belongs to #81.",
       "production_path": "execution::composite_exec; execution::composite_expr; execution::composite_scope; execution::file_commands; execution::post_drain",
       "tests": [
         [
@@ -19270,7 +19271,7 @@
         ".github/workflows/composite-semantics-102.yml",
         "crates/toolu-runner/tests/fixtures/local_actions/composite-102-expressions/action.yml"
       ],
-      "expected": "Malformed if stops the composite loop; a hard nested error runs failure() cleanup with a parent-scoped ##[error]; malformed run expression fails the step then runs cleanup. GITHUB_ENV/GITHUB_PATH reach later inner and outer steps, LOCAL_ONLY does not, only declared output result=42 escapes; nested Node posts run STATE_POST=two then one under distinct IDs; observed-start cancel kills Bash and descendant sleep, runs always() cleanup, no late marker; short parent deadline returns Failure; blocked resolution obeys deadline/cancellation. Composite cwd belongs to #81.",
+      "expected": "Malformed if stops the composite loop; a hard nested error runs failure() cleanup with a parent-scoped ##[error]; malformed run expression fails the step then runs cleanup. GITHUB_ENV/GITHUB_PATH reach later inner and outer steps, LOCAL_ONLY does not, only declared output result=42 escapes; nested Node posts run STATE_POST=two then one inside the composite's one shared Post row (#251); observed-start cancel kills Bash and descendant sleep, runs always() cleanup, no late marker; short parent deadline returns Failure; blocked resolution obeys deadline/cancellation. Composite cwd belongs to #81.",
       "production_path": "execution::composite_exec; execution::composite_expr; execution::composite_scope; execution::step_timeout; execution::post_drain",
       "tests": [
         [
@@ -19564,7 +19565,7 @@
         ".github/workflows/composite-semantics-102.yml",
         "crates/toolu-runner/tests/fixtures/local_actions/composite-102-expressions/action.yml"
       ],
-      "expected": "GITHUB_ENV/GITHUB_PATH reach later inner and outer steps, LOCAL_ONLY does not, only declared output result=42 escapes; nested Node posts run STATE_POST=two then one under distinct IDs; observed-start cancel kills Bash and descendant sleep, runs always() cleanup, no late marker; short parent deadline returns Failure; blocked resolution obeys deadline/cancellation. Composite cwd belongs to #81.",
+      "expected": "GITHUB_ENV/GITHUB_PATH reach later inner and outer steps, LOCAL_ONLY does not, only declared output result=42 escapes; nested Node posts run STATE_POST=two then one inside the composite's one shared Post row (#251); observed-start cancel kills Bash and descendant sleep, runs always() cleanup, no late marker; short parent deadline returns Failure; blocked resolution obeys deadline/cancellation. Composite cwd belongs to #81.",
       "production_path": "execution::composite_exec; execution::composite_expr; execution::composite_scope; execution::step_timeout; execution::post_drain",
       "tests": [
         [
@@ -20021,11 +20022,11 @@
         },
         "github-com": {
           "status": "unverified",
-          "reason": "per-surface; cache fails live and renew/cancel/masking were not exercised live — see 103/R-*"
+          "reason": "per-surface; see 103/R-*. Forwarder cache and artifacts work live since #253 (run 42389172867). run 42424784091 (docs/compat-reference-230.json) also ran a 150 s job (toolu renewed the lock twice), cancel jobs (both lanes cancelled) and a masking probe (no leak hit); outage and fault injection were not exercised live"
         },
         "reference": {
           "status": "unverified",
-          "reason": "per-surface; see 103/R-* (acknowledged difference forwarder-cache-service-v2 in docs/compat-reference-103.json (https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727): the recorded pre-#231 toolu run did not set ACTIONS_CACHE_SERVICE_V2/ACTIONS_CACHE_MODE from actions_uses_cache_service_v2/actions_cache_mode, so actions/cache uses the retired v1 host; save silently fails and restore gets 400)"
+          "reason": "per-surface; see 103/R-*. Run 42424784091 (docs/compat-reference-230.json) backs R-artifacts, R-command-files, R-acquire and R-complete (and R-oidc keeps its #103 citation); R-cache, R-masking, R-renew, R-cancellation and R-temp-cleanup stay unverified with the reason in each row. No named assertion lists this aggregate row"
         },
         "ghes": {
           "status": "unverified",
@@ -20209,7 +20210,7 @@
         },
         "reference": {
           "status": "unverified",
-          "reason": "acknowledged difference docker-pull-step-reporting in docs/compat-reference-103.json (https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727): the official runner reports a 'Pull <image>' setup step that toolu does not; plus acknowledged difference forwarder-cache-service-v2 in docs/compat-reference-103.json (https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727): the recorded pre-#231 toolu run did not set ACTIONS_CACHE_SERVICE_V2/ACTIONS_CACHE_MODE from actions_uses_cache_service_v2/actions_cache_mode, so actions/cache uses the retired v1 host; save silently fails and restore gets 400; macOS/ARM64 pairs not run"
+          "reason": "acknowledged difference docker-pull-step-reporting in docs/compat-reference-103.json (https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727): the official runner reports a 'Pull <image>' setup step that toolu does not; plus acknowledged difference forwarder-cache-service-v2 in docs/compat-reference-103.json (https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727): the recorded pre-#231 toolu run did not set ACTIONS_CACHE_SERVICE_V2/ACTIONS_CACHE_MODE from actions_uses_cache_service_v2/actions_cache_mode, so actions/cache uses the retired v1 host; save silently fails and restore gets 400; macOS/ARM64 pairs not run Run 42424784091 (docs/compat-reference-230.json) shows no step-list difference on any of its 110 paired jobs, but no named assertion lists this row, so its reference cell stays unverified."
         },
         "ghes": {
           "status": "unverified",
@@ -20270,7 +20271,7 @@
         },
         "reference": {
           "status": "unverified",
-          "reason": "acknowledged difference forwarder-cache-service-v2 in docs/compat-reference-103.json (https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727): the recorded pre-#231 toolu run did not set ACTIONS_CACHE_SERVICE_V2/ACTIONS_CACHE_MODE from actions_uses_cache_service_v2/actions_cache_mode, so actions/cache uses the retired v1 host; save silently fails and restore gets 400"
+          "reason": "acknowledged difference forwarder-cache-service-v2 in docs/compat-reference-103.json (https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727): the recorded pre-#231 toolu run did not set ACTIONS_CACHE_SERVICE_V2/ACTIONS_CACHE_MODE from actions_uses_cache_service_v2/actions_cache_mode, so actions/cache uses the retired v1 host; save silently fails and restore gets 400 Run 42424784091 (docs/compat-reference-230.json) shows no step-list difference on any of its 110 paired jobs, but no named assertion lists this row, so its reference cell stays unverified."
         },
         "ghes": {
           "status": "unverified",
@@ -20461,7 +20462,7 @@
       "issue": 103,
       "criterion": "Regression: actions cache save/restore (forwarder: GitHub backend; accelerated: local CAS)",
       "input": [],
-      "expected": "Accelerated-mode Twirp v2 round trip saves and restores locally; forwarder env carries the backend URLs. Live (#237, run 42389172867): save then fail-on-cache-miss restore in a later job succeeds on every toolu forwarder lane (GitHub backend) and on the accelerated lane, whose runner runs inside an ubuntu container. The pre-#231 reference run 38301583727 failed forwarder save/restore.",
+      "expected": "Accelerated-mode Twirp v2 round trip saves and restores locally; forwarder env carries the backend URLs. Live (#237, run 42389172867): save then fail-on-cache-miss restore in a later job succeeds on every toolu forwarder lane (GitHub backend) and on the accelerated lane, whose runner runs inside an ubuntu container. The pre-#231 reference run 38301583727 failed forwarder save/restore. Paired live (run 42424784091, assertion R-cache in docs/compat-reference-230.json): the services, stack and consumer jobs have equal conclusions and ordered steps and equal observations on both lanes.",
       "production_path": "cache crate (accelerated); execution::execution::service_endpoints (forwarder)",
       "tests": [
         [
@@ -20493,7 +20494,7 @@
         },
         "reference": {
           "status": "unverified",
-          "reason": "acknowledged difference forwarder-cache-service-v2 in docs/compat-reference-103.json (https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727): the recorded pre-#231 toolu run did not set ACTIONS_CACHE_SERVICE_V2/ACTIONS_CACHE_MODE from actions_uses_cache_service_v2/actions_cache_mode, so actions/cache uses the retired v1 host; save silently fails and restore gets 400"
+          "reason": "run 42424784091 (docs/compat-reference-230.json, assertion R-cache) shows forwarder-mode cache save/restore jobs equal on both lanes, but the criterion also names the accelerated local CAS, which has no official-runner counterpart and was observed on toolu alone, so the cell stays unverified"
         },
         "ghes": {
           "status": "unverified",
@@ -20510,7 +20511,7 @@
       "issue": 103,
       "criterion": "Regression: artifact upload/download through the real GitHub artifact backend",
       "input": [],
-      "expected": "Live (#237, run 42389172867): on every toolu lane (forwarder on Linux-X64, Linux-ARM64 and macOS-ARM64; accelerated with the runner inside an ubuntu container on Linux-X64) upload-artifact stores the payload and download-artifact in a later job fetches it with a sha256 equal to the producer's; on Linux a job-container upload does the same. The 2.337.0 reference run 38301583727 skipped the toolu download after the cache failure. The local artifact service implementation (not started by offline mode) rejects path traversal.",
+      "expected": "Live (#237, run 42389172867): on every toolu lane (forwarder on Linux-X64, Linux-ARM64 and macOS-ARM64; accelerated with the runner inside an ubuntu container on Linux-X64) upload-artifact stores the payload and download-artifact in a later job fetches it with a sha256 equal to the producer's; on Linux a job-container upload does the same. The 2.337.0 reference run 38301583727 skipped the toolu download after the cache failure. The local artifact service implementation (not started by offline mode) rejects path traversal. Paired live (run 42424784091, assertion R-artifacts in docs/compat-reference-230.json): the services, container, stack and consumer jobs are equal on both lanes and the uploaded payload bytes read back through the GitHub API match, with no payload error.",
       "production_path": "forwarder env (ACTIONS_RESULTS_URL/ACTIONS_RUNTIME_TOKEN); execution::execution::artifacts (local implementation, not started by the job runner)",
       "tests": [
         [
@@ -20541,8 +20542,8 @@
           "evidence": "run:https://github.com/Falconiere/toolu-ghrunner/actions/runs/42389172867"
         },
         "reference": {
-          "status": "unverified",
-          "reason": "upload-artifact v7 ran on toolu and its bytes were read back through the GitHub API (https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727), but download-artifact v8 was skipped on toolu because the preceding cache restore failed (forwarder-cache-service-v2); the download half is not observed on toolu"
+          "status": "passed",
+          "evidence": "report:docs/compat-reference-230.json#R-artifacts"
         },
         "ghes": {
           "status": "unverified",
@@ -20559,7 +20560,7 @@
       "issue": 103,
       "criterion": "Regression: OIDC token request allowed with id-token: write and denied without it",
       "input": [],
-      "expected": "With id-token: write the token's aud/repository/job_workflow_ref claims match; without it ACTIONS_ID_TOKEN_REQUEST_URL is absent — identical on both lanes. The local OIDC server implementation (not started by the job runner) mints/validates locally.",
+      "expected": "With id-token: write the token's aud/repository/job_workflow_ref claims match; without it ACTIONS_ID_TOKEN_REQUEST_URL is absent — identical on both lanes. The local OIDC server implementation (not started by the job runner) mints/validates locally. The same run's assertion R-oidc (docs/compat-reference-230.json) also passes; this cell keeps its recorded #103 citation.",
       "production_path": "execution::execution::service_endpoints; execution::oidc (local implementation, not started by the job runner)",
       "tests": [
         [
@@ -20608,7 +20609,7 @@
       "issue": 103,
       "criterion": "Regression: file commands (GITHUB_OUTPUT live from shell and container steps; GITHUB_ENV/GITHUB_STATE hermetic)",
       "input": [],
-      "expected": "Live: GITHUB_OUTPUT values marker/who/release identical on both lanes. Hermetic: valid GITHUB_ENV/GITHUB_OUTPUT bodies apply exactly; malformed ones fail the step with upstream issues.",
+      "expected": "Live: GITHUB_OUTPUT values marker/who/release identical on both lanes. Hermetic: valid GITHUB_ENV/GITHUB_OUTPUT bodies apply exactly; malformed ones fail the step with upstream issues. Paired live (run 42424784091, assertion R-command-files in docs/compat-reference-230.json): the contexts, docker and consumer jobs of both variants are equal on both lanes.",
       "production_path": "execution::execution::file_commands",
       "tests": [
         [
@@ -20640,7 +20641,7 @@
         },
         "reference": {
           "status": "passed",
-          "evidence": "run:https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727"
+          "evidence": "report:docs/compat-reference-230.json#R-command-files"
         },
         "ghes": {
           "status": "unverified",
@@ -20657,7 +20658,7 @@
       "issue": 103,
       "criterion": "Regression: secret masking across log/journal/upload sinks",
       "input": [],
-      "expected": "No registered secret reaches the four durable sinks unmasked; one mask pass feeds all three upload sinks; multiline masks reach every local sink.",
+      "expected": "No registered secret reaches the four durable sinks unmasked; one mask pass feeds all three upload sinks; multiline masks reach every local sink. Paired live (run 42424784091, assertion R-masking in docs/compat-reference-230.json): the leaks and secrets jobs are equal on both lanes and no disposable value appears in any job log, annotation or VM log of either lane.",
       "production_path": "shared::SecretMasker; listener::execution_loop; observability journal",
       "tests": [
         [
@@ -20689,11 +20690,11 @@
         },
         "github-com": {
           "status": "unverified",
-          "reason": "this PR's live run carried no secret probe; per-issue live evidence is in rows 86/*"
+          "reason": "run 42424784091 (docs/compat-reference-230.json, assertion R-masking) ran the leaks and secrets jobs live on toolu with 0 disposable-value hits in job logs, check-run annotations and VM logs; this lane is not promoted from it. Per-issue live evidence is in rows 86/*"
         },
         "reference": {
           "status": "unverified",
-          "reason": "no paired masking probe in this PR"
+          "reason": "run 42424784091 (docs/compat-reference-230.json, assertion R-masking) found 0 hits of a registered disposable value across job logs, check-run annotations and VM logs/_diag on both lanes (21, 29 and 29 jobs scanned per lane on macOS-ARM64, Linux-X64 and Linux-ARM64, none unreadable), and the leaks and secrets jobs are equal on both lanes; the per-upload-sink and multiline-mask aspects of the criterion were not each observed live, so the cell stays unverified"
         },
         "ghes": {
           "status": "unverified",
@@ -20710,7 +20711,7 @@
       "issue": 103,
       "criterion": "Regression: job acquisition (live) and early acknowledgement ordering (hermetic)",
       "input": [],
-      "expected": "Live: 8 toolu jobs acquired and executed. Hermetic: job requests route to acquire (also after an unknown type); the ack is sent after acquire and before completion.",
+      "expected": "Live: 8 toolu jobs acquired and executed. Hermetic: job requests route to acquire (also after an unknown type); the ack is sent after acquire and before completion. Paired live (run 42424784091, assertion R-acquire in docs/compat-reference-230.json): every paired job that ran has a named runner on both lanes, and no job is unpaired.",
       "production_path": "listener::job_lifecycle::poll_and_execute; wire::net::run_service::acquire_job",
       "tests": [
         [
@@ -20746,7 +20747,7 @@
         },
         "reference": {
           "status": "passed",
-          "evidence": "run:https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727"
+          "evidence": "report:docs/compat-reference-230.json#R-acquire"
         },
         "ghes": {
           "status": "unverified",
@@ -20763,7 +20764,7 @@
       "issue": 103,
       "criterion": "Regression: job lock renewal and mid-job outage handling",
       "input": [],
-      "expected": "Renewal 404 cancels immediately with a job-lock-loss annotation; every other renewal failure, including persistent 401 and malformed success, feeds the strict 300 s watchdog and reports failure with a timed lost-connection annotation. A successful renewal resets the failure window; the first terminal renewal cause and annotation survive later responses during teardown. The loopback regression allows 404 only after 503 failures span the injected threshold and a real delayed blob PUT is active; completion survives reconnect.",
+      "expected": "Renewal 404 cancels immediately with a job-lock-loss annotation; every other renewal failure, including persistent 401 and malformed success, feeds the strict 300 s watchdog and reports failure with a timed lost-connection annotation. A successful renewal resets the failure window; the first terminal renewal cause and annotation survive later responses during teardown. The loopback regression allows 404 only after 503 failures span the injected threshold and a real delayed blob PUT is active; completion survives reconnect. Paired live (run 42424784091, assertion R-renew in docs/compat-reference-230.json): the 150 s long job renewed the job lock at least twice on both lanes on every platform (toolu 2, official 3; the first-renewal timing difference is recorded in docs/known-bugs.md).",
       "production_path": "listener::helpers::spawn_renewal; listener::outage::OutageWatchdog",
       "tests": [
         [
@@ -20815,7 +20816,7 @@
         },
         "reference": {
           "status": "unverified",
-          "reason": "no paired long-running job in this PR"
+          "reason": "run 42424784091 (docs/compat-reference-230.json, assertion R-renew) shows the 150 s job renewing at least twice on both lanes (toolu 2, official 3; the first-renewal timing difference is in docs/known-bugs.md), but the criterion also names mid-job outage handling, which was not injected against the official runner, so the cell stays unverified"
         },
         "ghes": {
           "status": "unverified",
@@ -20832,7 +20833,7 @@
       "issue": 103,
       "criterion": "Regression: job completion reporting (normal completion live; retry and payload fields hermetic)",
       "input": [],
-      "expected": "Live: GitHub recorded conclusions and step lists for all 8 toolu jobs, including failures. Hermetic: CompleteJob carries env URL, billing owner and step identity; transient failures retry with an identical body.",
+      "expected": "Live: GitHub recorded conclusions and step lists for all 8 toolu jobs, including failures. Hermetic: CompleteJob carries env URL, billing owner and step identity; transient failures retry with an identical body. Paired live (run 42424784091, assertion R-complete in docs/compat-reference-230.json): every paired job has equal conclusions and ordered step lists on both lanes, and the observations are equal.",
       "production_path": "listener::job_lifecycle::report_completion; wire::net::run_service",
       "tests": [
         [
@@ -20867,8 +20868,8 @@
           "evidence": "run:https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727"
         },
         "reference": {
-          "status": "unverified",
-          "reason": "job step lists differ between lanes (docker-pull-step-reporting, forwarder-cache-service-v2); completion retry not exercised live"
+          "status": "passed",
+          "evidence": "report:docs/compat-reference-230.json#R-complete"
         },
         "ghes": {
           "status": "unverified",
@@ -20885,7 +20886,7 @@
       "issue": 103,
       "criterion": "Regression: GitHub-side cancellation and cancel-aware waits",
       "input": [],
-      "expected": "JobCancellation routes to cancel; cancel during retry backoff returns promptly.",
+      "expected": "JobCancellation routes to cancel; cancel during retry backoff returns promptly. Paired live (run 42424784091, assertion R-cancellation in docs/compat-reference-230.json): the cancel and cancel-container jobs are equal on both lanes and toolu recorded no failed message poll on any platform.",
       "production_path": "listener::message_route; listener::retry",
       "tests": [
         [
@@ -20913,11 +20914,11 @@
         },
         "github-com": {
           "status": "unverified",
-          "reason": "no cancellation in this PR's live run; per-issue live evidence is in rows 77/* and 100/*"
+          "reason": "run 42424784091 (docs/compat-reference-230.json, assertion R-cancellation) ran the cancel and cancel-container jobs live on toolu and both ended cancelled, as on the official lane; cancel during retry backoff was not observed live, so this lane is not promoted. Per-issue live evidence is in rows 77/* and 100/*"
         },
         "reference": {
           "status": "unverified",
-          "reason": "no paired cancellation in this PR"
+          "reason": "run 42424784091 (docs/compat-reference-230.json, assertion R-cancellation) shows the cancel and cancel-container jobs ending cancelled with equal step lists on both lanes, and toolu recorded no failed message poll (it now polls as Busy while a job runs, #251); the timeout job ended failure on both lanes. Cancel during retry backoff (the criterion's cancel-aware waits) was not observed live, so the cell stays unverified"
         },
         "ghes": {
           "status": "unverified",
@@ -21006,7 +21007,7 @@
         },
         "reference": {
           "status": "unverified",
-          "reason": "no paired run in this PR; upstream behavior read from TempDirectoryManager.cs at v2.338.2"
+          "reason": "run 42424784091 (docs/compat-reference-230.json) compares the jobs of this row's assertion R-temp-cleanup as equal on both lanes, but temp directory contents are not observable through GitHub, so the comparison does not show the cleanup itself; the cell stays unverified (upstream behavior read from TempDirectoryManager.cs at v2.338.2)"
         },
         "ghes": {
           "status": "unverified",
@@ -21023,7 +21024,7 @@
       "issue": 67,
       "criterion": "Matrix/typed dispatch or reusable-workflow inputs -> workflow/job/step env -> defaults -> named step outputs -> job outputs -> downstream needs, with exact assertions at each boundary",
       "input": [],
-      "expected": "Typed workflow_call inputs, matrix, workflow/job/step env and defaults.run are asserted in the contexts job; step outputs become job outputs; toJSON(needs) observed downstream is identical on both lanes; each dropped section fails the captured replay.",
+      "expected": "Typed workflow_call inputs, matrix, workflow/job/step env and defaults.run are asserted in the contexts job; step outputs become job outputs; toJSON(needs) observed downstream is identical on both lanes; each dropped section fails the captured replay. Paired live (run 42424784091, assertion X-1 in docs/compat-reference-230.json): the contexts and consumer jobs of both variants have equal conclusions and ordered steps, and equal toJSON(needs) observations, on all three platforms.",
       "production_path": "cross-feature (see mapped tests)",
       "tests": [
         [
@@ -21063,7 +21064,7 @@
         },
         "reference": {
           "status": "passed",
-          "evidence": "run:https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727"
+          "evidence": "report:docs/compat-reference-230.json#X-1"
         },
         "ghes": {
           "status": "unverified",
@@ -21080,7 +21081,7 @@
       "issue": 67,
       "criterion": "Repeated nested composites with scoped inputs/outputs, complete expressions, inner failure/always cleanup, Node pre/main/post and working-directory changes",
       "input": [],
-      "expected": "Hermetic: nested repeated composites keep distinct inputs/outputs, failure/always cleanup runs after an inner exit 1, nested posts are scoped. Not exercised as one combined live workflow.",
+      "expected": "Hermetic: nested repeated composites keep distinct inputs/outputs, failure/always cleanup runs after an inner exit 1, nested posts are scoped and run last-in first-out inside the composite's one Post row (#251). Paired live (run 42424784091, assertion X-2 in docs/compat-reference-230.json): the composite, docker-pre (Linux only) and consumer jobs have equal conclusions and ordered steps on toolu and official v2.338.2 on every platform that runs them.",
       "production_path": "cross-feature (see mapped tests)",
       "tests": [
         [
@@ -21112,11 +21113,11 @@
         },
         "github-com": {
           "status": "unverified",
-          "reason": "no combined cross-feature live workflow; per-issue live evidence is in rows 81/*, 99/*, 101/*, 102/*"
+          "reason": "run 42424784091 (docs/compat-reference-230.json, assertion X-2) ran the composite, docker-pre and consumer jobs live on toolu, with results equal to the official runner's; this lane is not promoted from it. Per-issue live evidence is also in rows 81/*, 99/*, 101/*, 102/*"
         },
         "reference": {
-          "status": "unverified",
-          "reason": "no combined paired run; see rows 102/*"
+          "status": "passed",
+          "evidence": "report:docs/compat-reference-230.json#X-2"
         },
         "ghes": {
           "status": "unverified",
@@ -21133,7 +21134,7 @@
       "issue": 67,
       "criterion": "Linux job container + multiple services + Docker action + checkout/file commands/cache/artifact, including setup failure and cancellation",
       "input": [],
-      "expected": "Components are covered separately (job container, services, Docker actions); no single workflow combines them, and live forwarder cache currently fails.",
+      "expected": "Components are covered separately (job container, services, Docker actions) by the Docker lane. Paired live (run 42424784091, assertion X-3 in docs/compat-reference-230.json): on Linux X64 and ARM64 the stack, container and cancel-container jobs and the consumer have equal conclusions and ordered steps on both lanes, equal observations and no leftover containers; the sanitized toolu stack message is pinned in crates/execution/tests/compat_251_stack_message.json.",
       "production_path": "cross-feature (see mapped tests)",
       "tests": [
         [
@@ -21165,11 +21166,11 @@
         },
         "github-com": {
           "status": "unverified",
-          "reason": "no combined container+services+Docker-action workflow ran live; acknowledged difference forwarder-cache-service-v2 in docs/compat-reference-103.json (https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727): the recorded pre-#231 toolu run did not set ACTIONS_CACHE_SERVICE_V2/ACTIONS_CACHE_MODE from actions_uses_cache_service_v2/actions_cache_mode, so actions/cache uses the retired v1 host; save silently fails and restore gets 400"
+          "reason": "run 42424784091 (docs/compat-reference-230.json, assertion X-3) ran the stack job (job container, two services, registry and Dockerfile Docker actions, checkout, cache and artifact steps), container and cancel-container jobs live on toolu on Linux X64 and ARM64, equal to the official lane; this lane is not promoted from it. The forwarder-cache-service-v2 difference in the #103 run was fixed by #253 and does not appear in run 42424784091"
         },
         "reference": {
-          "status": "unverified",
-          "reason": "no combined paired run; see rows 73/*, 74/*, 75/*"
+          "status": "passed",
+          "evidence": "report:docs/compat-reference-230.json#X-3"
         },
         "ghes": {
           "status": "unverified",
@@ -21177,7 +21178,7 @@
         },
         "ui-service": {
           "status": "unverified",
-          "reason": "acknowledged difference forwarder-cache-service-v2 in docs/compat-reference-103.json (https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727): the recorded pre-#231 toolu run did not set ACTIONS_CACHE_SERVICE_V2/ACTIONS_CACHE_MODE from actions_uses_cache_service_v2/actions_cache_mode, so actions/cache uses the retired v1 host; save silently fails and restore gets 400"
+          "reason": "run 42424784091 (docs/compat-reference-230.json, assertion X-3) shows equal recorded conclusions and step lists for these jobs on both lanes, read through the API; the GitHub web UI was not observed"
         }
       }
     },
@@ -21186,7 +21187,7 @@
       "issue": 67,
       "criterion": "Main failure/error/timeout/cancel -> conditional cleanup -> LIFO posts -> process/container cleanup -> correct completion and UI results",
       "input": [],
-      "expected": "Hermetic: errors/timeouts/cancellation run eligible cleanup, posts drain LIFO and report, orphans are killed after failed/cancelled jobs.",
+      "expected": "Hermetic: errors/timeouts/cancellation run eligible cleanup, posts drain LIFO and report, orphans are killed after failed/cancelled jobs. Paired live (run 42424784091, assertion X-4 in docs/compat-reference-230.json): the failure, orphans, timeout and cancel jobs (Linux and macOS jobs as each platform runs them) have equal conclusions and ordered steps on both lanes.",
       "production_path": "cross-feature (see mapped tests)",
       "tests": [
         [
@@ -21218,11 +21219,11 @@
         },
         "github-com": {
           "status": "unverified",
-          "reason": "no combined live workflow in this PR; per-issue live evidence is in rows 89/*, 100/*, 101/*"
+          "reason": "run 42424784091 (docs/compat-reference-230.json, assertion X-4) ran the failure, orphans, timeout and cancel jobs live on toolu with conclusions and step lists equal to the official lane's; this lane is not promoted from it. Per-issue live evidence is also in rows 89/*, 100/*, 101/*"
         },
         "reference": {
           "status": "unverified",
-          "reason": "no combined paired run; see rows 100/*, 101/*"
+          "reason": "run 42424784091 (docs/compat-reference-230.json, assertion X-4) shows the failure, orphans, timeout and cancel jobs equal on both lanes, but the criterion also names the GitHub UI results and container cleanup, which that assertion does not exercise (container cleanup is observed under X-3, the UI is not observed), so the cell stays unverified"
         },
         "ghes": {
           "status": "unverified",
@@ -21230,7 +21231,7 @@
         },
         "ui-service": {
           "status": "unverified",
-          "reason": "no combined UI observation; see rows 100/*, 101/*"
+          "reason": "run 42424784091 (docs/compat-reference-230.json, assertion X-4) shows equal recorded conclusions and step lists for those jobs on both lanes, read through the API; the GitHub web UI was not observed; see rows 100/*, 101/*"
         }
       }
     },
@@ -21239,7 +21240,7 @@
       "issue": 67,
       "criterion": "Disposable secret probes through env/add-mask/stdout/stderr/diagnostics/journal/annotations/summary/job outputs/deployment URL/download/proxy diagnostics, with leak assertions",
       "input": [],
-      "expected": "Hermetic: zero unmasked secrets across durable sinks; secret job outputs and environment URLs are suppressed; malformed file-command secrets are masked. Proxy diagnostics depend on #94.",
+      "expected": "Hermetic: zero unmasked secrets across durable sinks; secret job outputs and environment URLs are suppressed; malformed file-command secrets are masked. Proxy diagnostics depend on #94. Paired live (run 42424784091, assertion X-5 in docs/compat-reference-230.json): the leaks and secrets jobs are equal on both lanes, and a registered disposable value appears in no job log, check-run annotation or VM log of either lane (21, 29 and 29 jobs scanned per lane on macOS-ARM64, Linux-X64 and Linux-ARM64, none unreadable).",
       "production_path": "cross-feature (see mapped tests)",
       "tests": [
         [
@@ -21271,11 +21272,11 @@
         },
         "github-com": {
           "status": "unverified",
-          "reason": "no combined live secret-probe workflow in this PR; proxy diagnostics await https://github.com/Falconiere/toolu-ghrunner/issues/94"
+          "reason": "run 42424784091 (docs/compat-reference-230.json, assertion X-5) ran the leaks and secrets jobs live on toolu with no disposable value in any job log, check-run annotation or VM log; this lane is not promoted from it because proxy diagnostics await https://github.com/Falconiere/toolu-ghrunner/issues/94"
         },
         "reference": {
           "status": "unverified",
-          "reason": "no paired secret probe"
+          "reason": "run 42424784091 (docs/compat-reference-230.json, assertion X-5) shows the leaks and secrets jobs equal on both lanes with no disposable value in any log, annotation or VM log, but the criterion also names proxy diagnostics (they depend on #94) which the probe does not exercise, so the cell stays unverified"
         },
         "ghes": {
           "status": "unverified",
@@ -21283,7 +21284,7 @@
         },
         "ui-service": {
           "status": "unverified",
-          "reason": "no UI masking observation in this PR; see rows 86/*"
+          "reason": "run 42424784091 (docs/compat-reference-230.json) found no disposable value in any job log or check-run annotation of either lane, read through the API; web UI masking was not observed; see rows 86/*"
         }
       }
     },
@@ -21292,7 +21293,7 @@
       "issue": 67,
       "criterion": "Consecutive and concurrent registrations/jobs exercise stable workspace isolation, GC, run/boot/daemon entry paths and ephemeral lifecycle",
       "input": [],
-      "expected": "Hermetic: stable workspaces reuse git per repository and isolate concurrent jobs; ephemeral registrations unregister after one job. Live: one toolu registration ran 8 consecutive jobs through the always-online re-mint loop; concurrency/boot/daemon were not run live here.",
+      "expected": "Hermetic: stable workspaces reuse git per repository and isolate concurrent jobs; ephemeral registrations unregister after one job. Live: one toolu registration ran 8 consecutive jobs through the always-online re-mint loop; boot/daemon were not run live here. Paired live (run 42424784091, assertion X-6 in docs/compat-reference-230.json): the pool-a and pool-b jobs, served by a second runner per lane, have equal conclusions and ordered steps on both lanes. The toolu-only fresh-workspace and ephemeral lifecycle jobs (assertion X-6-toolu, never reference evidence) succeeded on all three platforms; the ephemeral registration exited 0 and removed its local state and its GitHub runner.",
       "production_path": "cross-feature (see mapped tests)",
       "tests": [
         [
@@ -21320,11 +21321,11 @@
         },
         "github-com": {
           "status": "unverified",
-          "reason": "https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727 covered consecutive jobs on one registration (run loop re-mint) only; concurrent registrations, boot and daemon paths not run live here — see rows 90/*, 92/*"
+          "reason": "run 42424784091 (docs/compat-reference-230.json, assertions X-6 and X-6-toolu) ran concurrent pool jobs, fresh-workspace jobs and an ephemeral registration live on toolu (the ephemeral run exited 0 and removed its local state and its GitHub runner); GC, boot and daemon paths were not run live, so this lane is not promoted. https://github.com/Falconiere/toolu-ghrunner/actions/runs/38301583727 covered consecutive jobs on one registration (run loop re-mint); see rows 90/*, 92/*"
         },
         "reference": {
           "status": "unverified",
-          "reason": "no paired lifecycle comparison"
+          "reason": "run 42424784091 (docs/compat-reference-230.json, assertions X-6 and X-6-toolu) exercised concurrent pool jobs (paired) and, toolu-only, fresh-workspace and ephemeral registrations; the criterion also names GC and the run/boot/daemon entry paths, which were not run live, and toolu-only evidence is never reference evidence, so the cell stays unverified"
         },
         "ghes": {
           "status": "unverified",

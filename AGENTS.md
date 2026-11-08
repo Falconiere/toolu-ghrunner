@@ -700,6 +700,10 @@ failed step. Lanes in `docs/test-coverage.md` (#88).
 - [docs/compatibility-matrix.md](docs/compatibility-matrix.md) (+
   [docs/compatibility-evidence.md](docs/compatibility-evidence.md)) — epic #67 matrix
   (from `compatibility-matrix.json`, `compat_matrix_check.py --check`); only an
-  evidenced `passed` lane counts.
+  evidenced `passed` lane counts. The #251 paired report is
+  `docs/compat-reference-230.json` (run 42424784091; matrix rows cite it as
+  `report:docs/compat-reference-230.json#<assertion>`; never overwrite
+  `docs/compat-reference-103.json`); its remaining differences are in
+  `docs/known-bugs.md`.
 - `docs/toolu/specs/2026-06-18-*.md` + `docs/toolu/plans/2026-06-18-*.md` — standalone design + build plan (gitignored `docs/toolu/`).
 - `docs/toolu/specs/2026-07-14-always-online-run-loop-design.md` + `plans/…` — run loop + `install-service` spec/plan.

@@ -426,7 +426,9 @@ tasks in parallel:
 Around all of it, `job_lifecycle::run_job_with_cancel_watch` races the
 job against `watch_for_gh_cancel`, a sidecar broker poll that trips the
 per-job `CancellationToken` when a `JobCancellation` arrives mid-job
-(see "Sequence: cancel"); it also honours a mid-job `ForceTokenRefresh`,
+(see "Sequence: cancel"). That poll reports `status=Busy`, as upstream does for a
+running job, while the idle loop reports `status=Online` (#251); it also honours a
+mid-job `ForceTokenRefresh`,
 handing the refreshed broker token back to the session when the job
 ends.
 
@@ -490,6 +492,16 @@ Dispatch: `steps_runner` splits `run:` (script) from `uses:`; for a
 manifest parse. There is no plugin layer or
 local workflow orchestrator; GitHub orchestrates jobs (#97).
 
+Before the first main step, `steps_runner::pre_phase::run_pre_phase` runs
+upstream's pre-job phase (#251): after the setup rows (Docker Pull/Build,
+"Initialize containers") each top-level repository Node action's `pre`, and on
+Linux each remote Docker action's `pre-entrypoint`, runs in step order as its own
+numbered `Pre` row (`action_pre`) and registers its post first. A
+`repositoryType: self` action (`uses: ./path`, top-level or nested) runs no `pre`
+and warns, as upstream; `ExecutionContext::{pre_handled, post_registered}` make
+the later main step skip what the phase did. Workflow and post rows number after
+the `Pre` rows (`pre_job_rows`).
+
 - `script` — `run: echo hello`-style shell scripts. Streams stdout /
   stderr line-by-line into `RunnerEvent::Log`.
 - `node` / `node_exec` — JavaScript actions (e.g.
@@ -506,7 +518,8 @@ local workflow orchestrator; GitHub orchestrates jobs (#97).
   and can be cancelled during a fetch. Local actions remain step-time; non-Linux
   hosts skip pull/build setup.
 - `docker_action` / `docker_stage` — Linux container action preparation,
-  pre/main/post dispatch and normal file/workflow commands. Registry references
+  pre/main/post dispatch (a remote action's `pre-entrypoint` via the pre-job phase,
+  `docker_action::run_phase_pre`) and normal file/workflow commands. Registry references
   bypass repository resolution; remote Dockerfiles use revision-qualified image
   caching. `docker::action_container` owns each stage container and removes it
   after every result; actions borrow the job network without owning its teardown.
@@ -518,12 +531,19 @@ local workflow orchestrator; GitHub orchestrates jobs (#97).
 
 **Job containers.** `container_job` evaluates the wire `jobContainer` token
 before workspace creation and rejects non-Linux hosts. `docker::JobContainer`
-owns a unique network/container, starts before hooks, and survives all eligible
-post steps. Shell, Node and composite execution use attached Docker API exec;
+owns a unique network/container. It starts after the job-started hook and the
+Docker Pull/Build rows as the numbered "Initialize containers" row
+(`container_job::initialize_containers`, run from `job_runner::prepared`), and
+survives all eligible post steps. A failed or cancelled start does not end the
+job: the step loop still runs (conditions decide), a step that runs fails with
+`the job container is not running` and never falls back to the host, and the job
+ends failed or cancelled. `container_job::stop_containers` removes it as the
+"Stop containers" row, the last row before "Complete job". Shell, Node and composite execution use attached Docker API exec;
 workflow environment never enters a host Docker client process. Explicit mount
 mappings translate runner path variables and expression paths while preserving
-opaque workflow values. `container_job::finish_container` removes the container
-and network on both body success and error before job completion. On exec
+opaque workflow values. `container_job::finish_container` remains the cleanup for
+the error path and removes the container and network on both body success and
+error before job completion. On exec
 cancellation, remote children can remain until that force-removal boundary.
 Only forwarder service URLs are supported; local loopback cache URLs are rejected.
 
@@ -1271,7 +1291,7 @@ cancelled, nothing more is sent, and `run` exits 2 naming
 
 Cancel from the GH UI reaches the runner as a broker `JobCancellation`
 message, picked up by the sidecar poll that runs alongside the job
-(`job_lifecycle::watch_for_gh_cancel`); `renew_job` replies carry only the
+(`job_lifecycle::watch_for_gh_cancel`, which polls as `status=Busy`); `renew_job` replies carry only the
 new lock expiry and never signal a cancel:
 
 ```
@@ -1810,14 +1830,17 @@ expression entry. The local tests and remaining live evidence are tracked in
 
 ## Post-action cleanup results
 
-`steps_runner` registers Node action post stages during main execution and
-drains them LIFO after the main loop, including after a hard step error or
-cancellation. Each post keeps its registered report ID and gets a timeline number. Its
+`steps_runner` registers Node action post stages during main execution (for a
+top-level repository action that has a `pre`, the post is registered earlier, by
+the pre-job phase, before the `pre` runs) and drains them LIFO after the main loop,
+including after a hard step error or cancellation. Each post keeps its registered report ID and gets a timeline number. Its
 `STATE_*`, action inputs, and action metadata still come from the originating
 main step; the separate report ID keeps the main outcome intact in the
 `steps` expression context and creates its own Results Service record/log.
-Nested Node actions register their posts in the same job LIFO queue, retaining
-the nested invocation path. Post conditions use the live global job status even
+A composite with embedded posts registers one `PostStep` whose `nested` list holds
+them: its single "Post" row (`post_drain::run_embedded_posts`) runs them
+last-in first-out, each under its own scope, retaining the nested invocation path,
+and its own `post-if`; any failure fails the row. Post conditions use the live global job status even
 while their action inputs and state come from that saved path.
 
 Each post condition sees the current aggregate status. A failed post marks the

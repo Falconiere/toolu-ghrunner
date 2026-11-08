@@ -30,7 +30,8 @@ GHES result exists to cite.
   composite steps is resolved. A workflow step `uses: $/…` is rewritten by the
   service before delivery; the delivered form (`repositoryType: self` without a
   `./` path) has not been observed, so it is intentionally not resolved until a
-  live job shows it. Live check: #251.
+  live job shows it. The #251 paired probe contains no top-level `$/` step, so
+  it did not observe that form either.
 - **Outage reporting:** a missing job (renewal HTTP 404) cancels immediately;
   every other renewal failure counts toward the 300-second watchdog, including
   auth/protocol errors and malformed success replies. Completion still retries
@@ -81,6 +82,48 @@ GHES result exists to cite.
   for up to 30 seconds and keeps its state if still busy. `remove --force`
   removes local state while retaining the held lock; it neither cancels the
   job nor unregisters its GitHub runner. Remove that runner on GitHub afterward.
+
+## Observed differences from the official runner (#251)
+
+These come from one comparison: paired run
+[42424784091](https://github.com/Falconiere/toolu-ghrunner/actions/runs/42424784091)
+(head `0d23d0e`, official v2.338.2, Linux-X64, Linux-ARM64 and macOS-ARM64),
+recorded in [`compat-reference-230.json`](compat-reference-230.json). In it all 110
+paired jobs had equal conclusions and ordered step lists, with no acknowledged
+difference, so what follows is what that comparison did not make equal, not a
+compatibility guarantee beyond the jobs, platforms and versions it covers. See
+[compatibility-evidence.md](compatibility-evidence.md#paired-run-42424784091-251).
+
+- **First lock renewal (accepted as non-material here).** Upstream's
+  `JobDispatcher.RenewJobRequestAsync` renews immediately after acquire, waits for
+  that first renewal before starting the worker, then renews every 60 s. toolu's
+  `listener::helpers::spawn_renewal` skips the first immediate tick of a 60 s
+  `tokio` interval, so it first renews at 60 s and then every 60 s. On the 150 s
+  `long` job each platform recorded 2 renewals on toolu and 3 on the official
+  runner; both meet the R-renew floor of at least 2, and job results, outputs and
+  stored data were equal. No runtime change was made.
+- **Error text after a failed "Initialize containers".** In the paired `negative`
+  `stack` job (a job image no registry serves) both runners report identical rows:
+  "Initialize containers" fails, every `success()` step is skipped, the `always()`
+  step "Return workspace ownership" fails, then "Stop containers" succeeds and
+  "Complete job" follows, with equal conclusions. Only the log text differs. The
+  official log carries `Docker pull failed with exit code 1` then
+  `Value cannot be null. (Parameter 'ContainerId')`; toolu logs the Docker
+  daemon's pull error then `docker error: the job container is not running`
+  (`steps_runner.rs`, `post_drain.rs`). toolu never runs such a step on the host.
+- **Official-runner stderr/mask race (official lane, not toolu).** In the step that
+  registers a mask with `::add-mask::`, the official runner can log a stderr line
+  before it has processed the stdout command (run 42407955591; the runner reads
+  the two streams separately). The `leaks` probe therefore echoes the value to
+  stderr only in the next step, so the leak count compares like with like. toolu
+  showed no leak in run 42424784091 (0 hits on every lane).
+- **Fixed since earlier runs (no remaining difference observed).** The message-poll
+  HTTP 404 WARNs seen on toolu lanes in runs 42389172867 and 42403405937 came from
+  polling `status=Online` while a job ran; upstream's `BrokerMessageListener` polls
+  with the dispatcher's status, `Busy`, which toolu now sends (D2). Idle long polls
+  also failed about every 61 s because toolu's 60 s client timeout equalled the
+  broker's idle hold; the broker client timeout is now 100 s, upstream's default
+  (D4). Run 42424784091 recorded `poll_failures` 0 on every lane of every platform.
 
 ## Resolved bugs
 
