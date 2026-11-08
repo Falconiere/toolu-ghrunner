@@ -195,6 +195,8 @@ want_test "test runs the live harness self-checks"        "--features live --tes
 want_scripts "scripts checks the #103 compatibility matrix" "compat_matrix_check\.py --check"
 want_scripts "scripts re-verifies the #103 reference report" \
   "reference_compare\.py --verify docs/compat-reference-103\.json"
+want_scripts "scripts re-verifies the #251 paired reference report" \
+  "reference_compare\.py --verify docs/compat-reference-230\.json"
 want_scripts "scripts checks the #88 CompleteJob evidence" "completejob_evidence_check\.py --local"
 
 # --- Rust build cache: after the toolchain, saved from the PR run ---
