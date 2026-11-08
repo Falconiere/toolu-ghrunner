@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-11-08
+
+### Added
+- *(execution)* report Docker action setup steps (#255)
+- *(execution)* empty runner temp directories at job start and end (#258)
+- *(protocol)* move compatibility pin to actions/runner v2.338.2 (#259)
+- *(compat)* run the paired comparison against official runner v2.338.2 (#265)
+
+### Documentation
+- *(compat)* record evidence for merged proxy and CA work (#252)
+- *(compat)* record evidence for merged dead-code cleanup (#97) (#257)
+- *(compat)* mark GHES as unverified and out of scope (#261)
+
+### Fixed
+- *(execution)* map cache-v2 flag and ACTIONS_* env per step type (#253)
+- *(listener)* match renewal failure and bound job logs (#260)
+- *(execution)* bound Docker setup discovery (#263)
+
 ## [0.15.0] - 2026-11-05
 
 ### Added
