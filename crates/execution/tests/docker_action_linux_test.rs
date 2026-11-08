@@ -392,11 +392,24 @@ printf verified > docker-verify
       | RunnerEvent::InfrastructureError { .. } => None,
     })
     .collect();
+  // Upstream (ActionRunner) warns for every local `self` action whose manifest
+  // declares a pre, whatever its pre-if, and then skips that pre.
+  let local_pre = |name: &str| {
+    format!("`pre` execution is not supported for local action from './.github/actions/{name}'")
+  };
+  let (pre_a, pre_b, pre_c) = (
+    local_pre("probe-a"),
+    local_pre("probe-b"),
+    local_pre("probe-c"),
+  );
   assert_eq!(
     annotations,
     [
+      (pre_a.as_str(), None),
       ("annotation-A", Some("Docker probe")),
+      (pre_b.as_str(), None),
       ("annotation-B", Some("Docker probe")),
+      (pre_c.as_str(), None),
       ("annotation-C", Some("Docker probe")),
     ]
   );
